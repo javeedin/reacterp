@@ -330,6 +330,9 @@ const ManageJournals: React.FC = () => {
   const [tabPosting, setTabPosting] = useState<Record<string, boolean>>({});
   const [selectedLinesByTab, setSelectedLinesByTab] = useState<Record<string, number[]>>({});
   const [tabGetUrlCopied, setTabGetUrlCopied] = useState<Record<string, boolean>>({});
+  const [journalApiModalVisible, setJournalApiModalVisible] = useState(false);
+  const [journalApiTabKey, setJournalApiTabKey] = useState<string | null>(null);
+  const [journalApiExecResults, setJournalApiExecResults] = useState<Record<number, { loading: boolean; response: string | null }>>({});
 
   // Lookup data for journal edit dropdowns
   const [journalCategories, setJournalCategories] = useState<string[]>([]);
@@ -681,6 +684,25 @@ const ManageJournals: React.FC = () => {
     } catch (e: any) {
       setPageApiExecResults(prev => ({ ...prev, [index]: { loading: false, response: `Error: ${e.message}` } }));
     }
+  };
+
+  const executeJournalApi = async (index: number, url: string) => {
+    setJournalApiExecResults(prev => ({ ...prev, [index]: { loading: true, response: null } }));
+    try {
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const text = await res.text();
+      let formatted = text;
+      try { formatted = JSON.stringify(JSON.parse(text), null, 2); } catch { /* keep raw */ }
+      setJournalApiExecResults(prev => ({ ...prev, [index]: { loading: false, response: `HTTP ${res.status}\n\n${formatted}` } }));
+    } catch (e: any) {
+      setJournalApiExecResults(prev => ({ ...prev, [index]: { loading: false, response: `Error: ${e.message}` } }));
+    }
+  };
+
+  const openJournalApiModal = (tabKey: string) => {
+    setJournalApiTabKey(tabKey);
+    setJournalApiExecResults({});
+    setJournalApiModalVisible(true);
   };
 
   // Add debug log helper
@@ -2188,33 +2210,16 @@ const ManageJournals: React.FC = () => {
               >
                 {journal.statusMeaning}
               </Tag>
-              {sourceUrl && (
-                <Tooltip
-                  title={
-                    <div style={{ fontFamily: 'monospace', fontSize: 11, maxWidth: 600, wordBreak: 'break-all' }}>
-                      <div style={{ marginBottom: 4, fontWeight: 'bold' }}>GET (Search — returned this journal)</div>
-                      <div>{sourceUrl}</div>
-                      <div style={{ marginTop: 8, color: '#aaa', fontSize: 10 }}>
-                        conversionRate from API: {journal.conversionRate ?? 'undefined (DB fix not yet applied)'}
-                      </div>
-                    </div>
-                  }
-                  overlayStyle={{ maxWidth: 640 }}
-                  placement="bottomLeft"
+              <Tooltip title="View all API calls for this journal">
+                <Button
+                  size="small"
+                  icon={<ApiOutlined />}
+                  style={{ fontSize: 11, color: REDWOOD.info, borderColor: REDWOOD.info }}
+                  onClick={() => openJournalApiModal(tabKey)}
                 >
-                  <ApiOutlined
-                    style={{ fontSize: 13, color: REDWOOD.info, cursor: 'pointer' }}
-                    onClick={() => {
-                      navigator.clipboard.writeText(sourceUrl);
-                      setTabGetUrlCopied(prev => ({ ...prev, [tabKey]: true }));
-                      setTimeout(() => setTabGetUrlCopied(prev => ({ ...prev, [tabKey]: false })), 2000);
-                    }}
-                  />
-                </Tooltip>
-              )}
-              {tabGetUrlCopied[tabKey] && (
-                <CheckOutlined style={{ fontSize: 11, color: REDWOOD.success }} />
-              )}
+                  APIs
+                </Button>
+              </Tooltip>
             </Space>
             <Space size="small">
               {/* Save — only for Manual unposted journals */}
@@ -3956,6 +3961,108 @@ const ManageJournals: React.FC = () => {
           )
         ) : null}
       </Modal>
+
+      {/* Journal APIs Modal — per-journal debug popup */}
+      {(() => {
+        const tab = openJournalTabs.find(t => t.key === journalApiTabKey);
+        if (!tab) return null;
+        const j = tab.journal;
+        const JOURNAL_APIS = [
+          {
+            name: 'Search Journals (loaded this record)',
+            method: 'GET',
+            url: tab.sourceUrl || `${APEX_DB_CONFIG.baseUrl}/gl/journals/headers?ledger_name=${encodeURIComponent(j.ledgerName || '')}`,
+            description: `Returned this journal. conversionRate in response: ${j.conversionRate ?? '⚠ undefined — run 32_fix_search_journals_add_conv_rate.sql'}`,
+          },
+          {
+            name: 'Get Journal Lines',
+            method: 'GET',
+            url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/${j.jeHeaderId}/lines`,
+            description: `Lines for jeHeaderId=${j.jeHeaderId}. Should include conversionRate per line.`,
+          },
+          {
+            name: 'Update Journal (Save)',
+            method: 'PUT',
+            url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/${j.jeHeaderId}`,
+            description: `PUT body: { jeBatchId, batchDescription, journalDescription, conversionRate, lines:[...] }`,
+          },
+          {
+            name: 'Post Journal Batch',
+            method: 'PUT',
+            url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/${j.jeBatchId}/post`,
+            description: `Posts batch jeBatchId=${j.jeBatchId}`,
+          },
+          {
+            name: 'Delete Journal Batch',
+            method: 'DELETE',
+            url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/batches/${j.batchId || j.jeBatchId}`,
+            description: `Cascades: lines → headers → batch. Blocked if status=Posted.`,
+          },
+        ];
+        return (
+          <Modal
+            title={
+              <Space>
+                <ApiOutlined style={{ color: REDWOOD.info }} />
+                <span>Journal APIs</span>
+                <Tag style={{ fontSize: 10 }}>{j.batchName}</Tag>
+                <Tag color={j.statusMeaning === 'Posted' ? 'green' : 'orange'} style={{ fontSize: 10 }}>{j.statusMeaning}</Tag>
+              </Space>
+            }
+            open={journalApiModalVisible}
+            onCancel={() => { setJournalApiModalVisible(false); setJournalApiExecResults({}); }}
+            footer={<Button onClick={() => { setJournalApiModalVisible(false); setJournalApiExecResults({}); }}>Close</Button>}
+            width={780}
+            destroyOnClose
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {JOURNAL_APIS.map((api, index) => (
+                <div key={index} style={{ border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, padding: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <Tag
+                      color={api.method === 'GET' ? 'blue' : api.method === 'PUT' ? 'orange' : 'red'}
+                      style={{ fontSize: 10, margin: 0 }}
+                    >
+                      {api.method}
+                    </Tag>
+                    <Text strong style={{ fontSize: 12 }}>{api.name}</Text>
+                  </div>
+                  <div style={{ background: '#1e1e1e', borderRadius: 4, padding: '6px 10px', marginBottom: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <code style={{ fontSize: 10, color: '#9cdcfe', wordBreak: 'break-all', flex: 1 }}>{api.url}</code>
+                    <CopyOutlined
+                      style={{ color: '#6b6b6b', fontSize: 11, marginLeft: 8, cursor: 'pointer', flexShrink: 0 }}
+                      onClick={() => navigator.clipboard.writeText(api.url)}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <Text type="secondary" style={{ fontSize: 11, flex: 1 }}>{api.description}</Text>
+                    {api.method === 'GET' && (
+                      <Button
+                        size="small"
+                        style={{ fontSize: 11, marginLeft: 12, flexShrink: 0 }}
+                        loading={journalApiExecResults[index]?.loading}
+                        onClick={() => executeJournalApi(index, api.url)}
+                      >
+                        Test
+                      </Button>
+                    )}
+                  </div>
+                  {journalApiExecResults[index]?.response && (
+                    <div style={{ marginTop: 8, background: '#1e1e1e', borderRadius: 4, padding: '8px 10px', maxHeight: 260, overflow: 'auto' }}>
+                      <pre style={{
+                        margin: 0, fontSize: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                        color: journalApiExecResults[index].response!.startsWith('HTTP 2') ? '#4ec9b0' : '#f48771'
+                      }}>
+                        {journalApiExecResults[index].response}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </Modal>
+        );
+      })()}
 
       {/* Page APIs Modal */}
       <Modal
