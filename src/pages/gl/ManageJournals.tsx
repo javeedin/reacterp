@@ -345,6 +345,11 @@ const ManageJournals: React.FC = () => {
   const [apTransactionLinesLoading, setApTransactionLinesLoading] = useState(false);
   const [apLineDescMap, setApLineDescMap] = useState<Record<string, string>>({});
 
+  // Delete batch state
+  const [deleteBatchModalVisible, setDeleteBatchModalVisible] = useState(false);
+  const [deleteBatchTarget, setDeleteBatchTarget] = useState<{ batchId: number; batchName: string } | null>(null);
+  const [deleteBatchLoading, setDeleteBatchLoading] = useState(false);
+
   // Floating panel state
   const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'reports'>('none');
   const [isClosing, setIsClosing] = useState(false);
@@ -1259,6 +1264,41 @@ const ManageJournals: React.FC = () => {
   };
 
   // Open the bulk post modal for the selected journals
+  const promptDeleteBatch = (batchId: number, batchName: string) => {
+    setDeleteBatchTarget({ batchId, batchName });
+    setDeleteBatchModalVisible(true);
+  };
+
+  const handleDeleteBatch = async () => {
+    if (!deleteBatchTarget) return;
+    setDeleteBatchLoading(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/gl/journals/batches/${deleteBatchTarget.batchId}`;
+      const res = await fetch(url, { method: 'DELETE' });
+      const data = await res.json();
+      if (res.ok && data.status === 'SUCCESS') {
+        message.success(`Batch "${deleteBatchTarget.batchName}" deleted (${data.headersDeleted} header(s), ${data.linesDeleted} line(s))`);
+        setDeleteBatchModalVisible(false);
+        setDeleteBatchTarget(null);
+        setSelectedRowKeys([]);
+        // Close any open tab for this batch and refresh list
+        setOpenJournalTabs(prev => prev.filter(t => t.journal.batchId !== deleteBatchTarget.batchId));
+        setActiveTabKey('search');
+        // Refresh search results
+        setTimeout(() => {
+          const searchBtn = document.querySelector<HTMLElement>('.mj-search-btn');
+          if (searchBtn) searchBtn.click();
+        }, 100);
+      } else {
+        message.error(data.message || 'Failed to delete batch');
+      }
+    } catch (e: any) {
+      message.error(`Delete failed: ${e.message}`);
+    } finally {
+      setDeleteBatchLoading(false);
+    }
+  };
+
   const handleOpenBulkPost = () => {
     const selectedJournals = journals.filter(j => selectedRowKeys.includes(j.key));
     const items: BulkPostItem[] = selectedJournals.map(j => ({
@@ -2291,7 +2331,16 @@ const ManageJournals: React.FC = () => {
             </Space>
             <Space size="small">
               <Button size="small" icon={<PlusOutlined />} />
-              <Button size="small" icon={<DeleteOutlined />} />
+              {journal.statusMeaning !== 'Posted' && (
+                <Tooltip title="Delete this batch (lines + headers + batch)">
+                  <Button
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={() => promptDeleteBatch(journal.batchId || journal.jeBatchId, journal.batchName)}
+                  />
+                </Tooltip>
+              )}
               <Dropdown menu={{ items: [{ key: 'copy', label: 'Copy' }, { key: 'reverse', label: 'Reverse' }, { key: 'delete', label: 'Delete' }] }}>
                 <Button size="small" style={{ fontSize: 10 }}>
                   Journal Actions <DownOutlined />
@@ -2782,6 +2831,7 @@ const ManageJournals: React.FC = () => {
                 {/* Action Buttons */}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16, gap: 8 }}>
                   <Button
+                    className="mj-search-btn"
                     icon={<SearchOutlined />}
                     onClick={handleSearch}
                     loading={loading}
@@ -2869,8 +2919,20 @@ const ManageJournals: React.FC = () => {
                     Edit
                   </Button>
                 </Tooltip>
-                <Tooltip title="Delete">
-                  <Button size="small" icon={<DeleteOutlined />} disabled={selectedRowKeys.length === 0} />
+                <Tooltip title="Delete selected batch (only unposted)">
+                  <Button
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                    disabled={
+                      selectedRowKeys.length !== 1 ||
+                      journals.find(j => j.key === selectedRowKeys[0])?.statusMeaning === 'Posted'
+                    }
+                    onClick={() => {
+                      const j = journals.find(x => x.key === selectedRowKeys[0]);
+                      if (j) promptDeleteBatch(j.batchId || j.jeBatchId, j.batchName);
+                    }}
+                  />
                 </Tooltip>
               </Space>
               <Space size="small">
@@ -3562,6 +3624,30 @@ const ManageJournals: React.FC = () => {
           </Modal>
         );
       })()}
+
+      {/* Delete Batch Confirmation Modal */}
+      <Modal
+        title={<Space><DeleteOutlined style={{ color: '#ff4d4f' }} /><span>Delete Journal Batch</span></Space>}
+        open={deleteBatchModalVisible}
+        onCancel={() => { setDeleteBatchModalVisible(false); setDeleteBatchTarget(null); }}
+        footer={
+          <Space>
+            <Button onClick={() => { setDeleteBatchModalVisible(false); setDeleteBatchTarget(null); }}>
+              Cancel
+            </Button>
+            <Button danger type="primary" icon={<DeleteOutlined />} loading={deleteBatchLoading} onClick={handleDeleteBatch}>
+              Delete Batch
+            </Button>
+          </Space>
+        }
+        width={440}
+      >
+        <Typography.Text>
+          Are you sure you want to permanently delete batch{' '}
+          <Typography.Text strong>{deleteBatchTarget?.batchName}</Typography.Text>?
+          This will also delete all journal headers and lines.
+        </Typography.Text>
+      </Modal>
 
       {/* Debug Log Modal */}
       <Modal
