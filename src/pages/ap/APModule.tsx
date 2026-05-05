@@ -191,6 +191,7 @@ const APModule: React.FC = () => {
   const [drillLoading,     setDrillLoading]     = useState(false);
   const [drillRows,        setDrillRows]        = useState<SupplierOutstanding[]>([]);
   const [drillSearch,      setDrillSearch]      = useState('');
+  const [drillApiUrl,      setDrillApiUrl]      = useState('');
 
   const openDrillDown = async () => {
     setDrillModalOpen(true);
@@ -203,6 +204,7 @@ const APModule: React.FC = () => {
       const qs = params.toString();
       // endpoint registered without 'ap/' prefix in this ORDS environment
       const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/outstanding-by-supplier${qs ? '?' + qs : ''}`;
+      setDrillApiUrl(url);
       const res = await fetch(url);
       const text = await res.text();
       if (!text.trim()) throw new Error('Empty response from server');
@@ -639,11 +641,23 @@ const APModule: React.FC = () => {
         open={drillModalOpen}
         onCancel={() => setDrillModalOpen(false)}
         title={
-          <Space>
-            <TableOutlined style={{ color: REDWOOD.info }} />
-            <span>Outstanding Payables by Supplier</span>
-            {selectedBU && <Tag color="blue">{selectedBU}</Tag>}
-          </Space>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 32 }}>
+            <Space>
+              <TableOutlined style={{ color: REDWOOD.info }} />
+              <span>Outstanding Payables by Supplier</span>
+              {selectedBU && <Tag color="blue">{selectedBU}</Tag>}
+            </Space>
+            <Tooltip title={drillApiUrl || 'API URL'} overlayStyle={{ maxWidth: 600 }}>
+              <Button
+                size="small"
+                icon={copiedUrl === drillApiUrl ? <CheckOutlined style={{ color: REDWOOD.success }} /> : <ApiOutlined style={{ color: REDWOOD.info }} />}
+                onClick={() => drillApiUrl && copyUrl(drillApiUrl)}
+                style={{ fontSize: 11 }}
+              >
+                {copiedUrl === drillApiUrl ? 'Copied' : 'API'}
+              </Button>
+            </Tooltip>
+          </div>
         }
         footer={<Button onClick={() => setDrillModalOpen(false)}>Close</Button>}
         width={880}
