@@ -333,6 +333,8 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
   // Category list (from RR_GL_CATEGORIES via API)
   const [glCategories, setGLCategories] = useState<{ jeCategoryName: string; userJeCategoryName: string }[]>([]);
   const [deleteBatchModalVisible, setDeleteBatchModalVisible] = useState(false);
+  const [savedBatchId, setSavedBatchId] = useState<number | null>(null); // JE_BATCH_ID after successful save
+  const [deletingBatch, setDeletingBatch] = useState(false);
 
   // Collapsible states
   const [batchExpanded, setBatchExpanded] = useState(true);
@@ -611,6 +613,7 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
     const freshJournal = createNewJournal('1');
     setJournals([freshJournal]);
     setCurrentJournalIndex(0);
+    setSavedBatchId(null);
     setBatchData({
       batchName: generateBatchName(),
       description: '',
@@ -619,11 +622,34 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
     });
   };
 
-  // Delete entire batch (reset form)
-  const handleDeleteBatch = () => {
-    handleResetForNewJournal();
-    setDeleteBatchModalVisible(false);
-    message.success('Journal batch deleted');
+  // Delete entire batch — calls API if already saved, otherwise just resets the form
+  const handleDeleteBatch = async () => {
+    if (savedBatchId) {
+      const deleteUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/batches/${savedBatchId}`;
+      setDeletingBatch(true);
+      try {
+        const res = await fetch(deleteUrl, { method: 'DELETE' });
+        const text = await res.text();
+        let data: any;
+        try { data = JSON.parse(text); } catch { data = { status: 'ERROR', message: text.substring(0, 200) }; }
+        if (res.ok && data?.status === 'SUCCESS') {
+          message.success(`Batch ${batchData.batchName} deleted successfully`);
+          setDeleteBatchModalVisible(false);
+          handleResetForNewJournal();
+        } else {
+          message.error(`Delete failed: ${data?.message || data?.error || `HTTP ${res.status}`}`);
+        }
+      } catch (e: any) {
+        message.error(`Delete failed: ${e.message}`);
+      } finally {
+        setDeletingBatch(false);
+      }
+    } else {
+      // Batch not yet saved — just reset the form
+      handleResetForNewJournal();
+      setDeleteBatchModalVisible(false);
+      message.success('Journal cleared');
+    }
   };
 
   // Open account selector for a line
@@ -1154,6 +1180,7 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
 
       const result = await response.json();
       setSaveResponse(result);
+      if (result?.batchId) { setSavedBatchId(result.batchId); }
       message.success('Journal saved successfully!');
       // Don't close modal - show the response
     } catch (error: any) {
@@ -2366,18 +2393,35 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
         <Modal
           title={<Space><DeleteOutlined style={{ color: REDWOOD.primary }} /><span>Delete Journal Batch</span></Space>}
           open={deleteBatchModalVisible}
-          onCancel={() => setDeleteBatchModalVisible(false)}
+          onCancel={() => !deletingBatch && setDeleteBatchModalVisible(false)}
           footer={
             <Space>
-              <Button onClick={() => setDeleteBatchModalVisible(false)}>Cancel</Button>
-              <Button danger type="primary" icon={<DeleteOutlined />} onClick={handleDeleteBatch}>
-                Delete Batch
+              <Button onClick={() => setDeleteBatchModalVisible(false)} disabled={deletingBatch}>Cancel</Button>
+              <Button danger type="primary" icon={<DeleteOutlined />} onClick={handleDeleteBatch} loading={deletingBatch}>
+                {savedBatchId ? 'Delete from Database' : 'Clear Batch'}
               </Button>
             </Space>
           }
-          width={420}
+          width={480}
         >
-          <Text>Are you sure you want to delete journal batch <Text strong>{batchData.batchName}</Text>? This will clear all journal entries.</Text>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 6, padding: '10px 14px' }}>
+              <Text strong style={{ color: '#cf1322' }}>
+                {savedBatchId
+                  ? `This batch was saved to the database (ID: ${savedBatchId}). It will be permanently deleted including all journal headers and lines.`
+                  : 'This batch has not been saved yet. All entries will be cleared from the form.'}
+              </Text>
+            </div>
+            <div>
+              <Text>Batch: <Text strong>{batchData.batchName}</Text></Text>
+            </div>
+            {savedBatchId && (
+              <div style={{ background: '#f5f5f5', borderRadius: 4, padding: '8px 12px', fontFamily: 'monospace', fontSize: 12 }}>
+                <Tag color="red" style={{ fontFamily: 'monospace', fontSize: 11 }}>DELETE</Tag>
+                {` ${APEX_DB_CONFIG.baseUrl}/gl/journals/batches/${savedBatchId}`}
+              </div>
+            )}
+          </div>
         </Modal>
 
         {/* Account Selector Modal */}

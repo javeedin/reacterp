@@ -357,8 +357,9 @@ const ManageJournals: React.FC = () => {
 
   // Delete batch state
   const [deleteBatchModalVisible, setDeleteBatchModalVisible] = useState(false);
-  const [deleteBatchTarget, setDeleteBatchTarget] = useState<{ batchId: number; batchName: string } | null>(null);
+  const [deleteBatchTarget, setDeleteBatchTarget] = useState<{ jeBatchId: number; batchId: number; batchName: string; statusMeaning: string } | null>(null);
   const [deleteBatchLoading, setDeleteBatchLoading] = useState(false);
+  const [deleteBatchTestResult, setDeleteBatchTestResult] = useState<{ loading: boolean; status?: number; body?: string; error?: string } | null>(null);
 
   // Floating panel state
   const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'reports'>('none');
@@ -1293,8 +1294,14 @@ const ManageJournals: React.FC = () => {
   };
 
   // Open the bulk post modal for the selected journals
-  const promptDeleteBatch = (batchId: number, batchName: string) => {
-    setDeleteBatchTarget({ batchId, batchName });
+  const promptDeleteBatch = (journal: JournalRecord) => {
+    setDeleteBatchTarget({
+      jeBatchId:    journal.jeBatchId,
+      batchId:      journal.batchId,
+      batchName:    journal.batchName,
+      statusMeaning: journal.statusMeaning,
+    });
+    setDeleteBatchTestResult(null);
     setDeleteBatchModalVisible(true);
   };
 
@@ -1302,24 +1309,26 @@ const ManageJournals: React.FC = () => {
     if (!deleteBatchTarget) return;
     setDeleteBatchLoading(true);
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/gl/journals/batches/${deleteBatchTarget.batchId}`;
+      // Use jeBatchId — the DELETE handler queries by JE_BATCH_ID in RR_GL_JOURNAL_BATCHES
+      const url = `${APEX_DB_CONFIG.baseUrl}/gl/journals/batches/${deleteBatchTarget.jeBatchId}`;
       const res = await fetch(url, { method: 'DELETE' });
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = {};
+      try { data = JSON.parse(text); } catch { data = { status: 'ERROR', message: text.substring(0, 200) }; }
       if (res.ok && data.status === 'SUCCESS') {
         message.success(`Batch "${deleteBatchTarget.batchName}" deleted (${data.headersDeleted} header(s), ${data.linesDeleted} line(s))`);
         setDeleteBatchModalVisible(false);
         setDeleteBatchTarget(null);
+        setDeleteBatchTestResult(null);
         setSelectedRowKeys([]);
-        // Close any open tab for this batch and refresh list
-        setOpenJournalTabs(prev => prev.filter(t => t.journal.batchId !== deleteBatchTarget.batchId));
+        setOpenJournalTabs(prev => prev.filter(t => t.journal.jeBatchId !== deleteBatchTarget.jeBatchId));
         setActiveTabKey('search');
-        // Refresh search results
         setTimeout(() => {
           const searchBtn = document.querySelector<HTMLElement>('.mj-search-btn');
           if (searchBtn) searchBtn.click();
         }, 100);
       } else {
-        message.error(data.message || 'Failed to delete batch');
+        message.error(data.message || data.error || `HTTP ${res.status} — delete failed`);
       }
     } catch (e: any) {
       message.error(`Delete failed: ${e.message}`);
@@ -2378,7 +2387,7 @@ const ManageJournals: React.FC = () => {
                     size="small"
                     danger
                     icon={<DeleteOutlined />}
-                    onClick={() => promptDeleteBatch(journal.batchId || journal.jeBatchId, journal.batchName)}
+                    onClick={() => promptDeleteBatch(journal)}
                   />
                 </Tooltip>
               )}
@@ -2971,7 +2980,7 @@ const ManageJournals: React.FC = () => {
                     }
                     onClick={() => {
                       const j = journals.find(x => x.key === selectedRowKeys[0]);
-                      if (j) promptDeleteBatch(j.batchId || j.jeBatchId, j.batchName);
+                      if (j) promptDeleteBatch(j);
                     }}
                   />
                 </Tooltip>
@@ -3670,24 +3679,147 @@ const ManageJournals: React.FC = () => {
       <Modal
         title={<Space><DeleteOutlined style={{ color: '#ff4d4f' }} /><span>Delete Journal Batch</span></Space>}
         open={deleteBatchModalVisible}
-        onCancel={() => { setDeleteBatchModalVisible(false); setDeleteBatchTarget(null); }}
+        onCancel={() => { setDeleteBatchModalVisible(false); setDeleteBatchTarget(null); setDeleteBatchTestResult(null); }}
         footer={
           <Space>
-            <Button onClick={() => { setDeleteBatchModalVisible(false); setDeleteBatchTarget(null); }}>
+            <Button onClick={() => { setDeleteBatchModalVisible(false); setDeleteBatchTarget(null); setDeleteBatchTestResult(null); }}>
               Cancel
             </Button>
-            <Button danger type="primary" icon={<DeleteOutlined />} loading={deleteBatchLoading} onClick={handleDeleteBatch}>
+            <Button
+              danger
+              type="primary"
+              icon={<DeleteOutlined />}
+              loading={deleteBatchLoading}
+              onClick={handleDeleteBatch}
+            >
               Delete Batch
             </Button>
           </Space>
         }
-        width={440}
+        width={600}
       >
-        <Typography.Text>
-          Are you sure you want to permanently delete batch{' '}
-          <Typography.Text strong>{deleteBatchTarget?.batchName}</Typography.Text>?
-          This will also delete all journal headers and lines.
-        </Typography.Text>
+        {deleteBatchTarget && (() => {
+          const deleteUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/batches/${deleteBatchTarget.jeBatchId}`;
+
+          const runTest = async () => {
+            setDeleteBatchTestResult({ loading: true });
+            try {
+              // Try a DELETE with a dry-run by checking the endpoint exists via a dummy fetch
+              // We send DELETE but catch the response to show what ORDS would return
+              const res = await fetch(deleteUrl, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+              });
+              const text = await res.text();
+              let parsed: any;
+              try { parsed = JSON.parse(text); } catch { parsed = null; }
+              const preview = parsed
+                ? JSON.stringify(parsed, null, 2)
+                : text.substring(0, 400);
+              setDeleteBatchTestResult({ loading: false, status: res.status, body: preview });
+              // If test actually deleted — refresh and close
+              if (res.ok && parsed?.status === 'SUCCESS') {
+                message.success(`Batch "${deleteBatchTarget.batchName}" deleted via test (${parsed.headersDeleted} headers, ${parsed.linesDeleted} lines)`);
+                setDeleteBatchModalVisible(false);
+                setDeleteBatchTarget(null);
+                setDeleteBatchTestResult(null);
+                setSelectedRowKeys([]);
+                setOpenJournalTabs(prev => prev.filter(t => t.journal.jeBatchId !== deleteBatchTarget.jeBatchId));
+                setActiveTabKey('search');
+                setTimeout(() => { const btn = document.querySelector<HTMLElement>('.mj-search-btn'); if (btn) btn.click(); }, 100);
+              }
+            } catch (e: any) {
+              setDeleteBatchTestResult({ loading: false, error: e.message });
+            }
+          };
+
+          return (
+            <div>
+              {/* Warning */}
+              <div style={{ background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 8, padding: '10px 14px', marginBottom: 16 }}>
+                <Typography.Text type="danger" strong>⚠ This action is irreversible. </Typography.Text>
+                <Typography.Text>All journal lines and headers belonging to this batch will be permanently deleted.</Typography.Text>
+              </div>
+
+              {/* Batch details */}
+              <div style={{ background: REDWOOD.surfaceSecondary || '#f7f7f7', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 13 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '4px 8px' }}>
+                  <Typography.Text type="secondary">Batch Name</Typography.Text>
+                  <Typography.Text strong>{deleteBatchTarget.batchName}</Typography.Text>
+                  <Typography.Text type="secondary">JE Batch ID</Typography.Text>
+                  <Typography.Text code>{deleteBatchTarget.jeBatchId}</Typography.Text>
+                  <Typography.Text type="secondary">Batch Sync ID</Typography.Text>
+                  <Typography.Text code>{deleteBatchTarget.batchId}</Typography.Text>
+                  <Typography.Text type="secondary">Status</Typography.Text>
+                  <Typography.Text>{deleteBatchTarget.statusMeaning}</Typography.Text>
+                </div>
+              </div>
+
+              {/* API Endpoint */}
+              <div style={{ marginBottom: 12 }}>
+                <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                  API Endpoint
+                </Typography.Text>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Tag color="red" style={{ fontFamily: 'monospace', fontSize: 11 }}>DELETE</Tag>
+                  <code style={{
+                    flex: 1, fontSize: 11, background: '#f5f5f5', border: '1px solid #d9d9d9',
+                    borderRadius: 4, padding: '4px 8px', wordBreak: 'break-all',
+                  }}>
+                    {deleteUrl}
+                  </code>
+                  <Button
+                    size="small"
+                    icon={<CopyOutlined />}
+                    onClick={() => { navigator.clipboard.writeText(deleteUrl); message.success('URL copied'); }}
+                  />
+                </div>
+                <Typography.Text type="secondary" style={{ fontSize: 11, marginTop: 4, display: 'block' }}>
+                  Cascades: RR_GL_JE_LINES_ALL → RR_GL_JE_HEADERS → RR_GL_JOURNAL_BATCHES (by JE_BATCH_ID = {deleteBatchTarget.jeBatchId})
+                </Typography.Text>
+              </div>
+
+              {/* Test button */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: deleteBatchTestResult ? 10 : 0 }}>
+                <Button
+                  size="small"
+                  icon={<ApiOutlined />}
+                  loading={deleteBatchTestResult?.loading}
+                  onClick={runTest}
+                  style={{ borderRadius: 6 }}
+                >
+                  Test DELETE Endpoint
+                </Button>
+                {deleteBatchTestResult && !deleteBatchTestResult.loading && deleteBatchTestResult.status && (
+                  <Tag color={deleteBatchTestResult.status === 200 ? 'green' : 'red'}>
+                    HTTP {deleteBatchTestResult.status}
+                  </Tag>
+                )}
+                <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                  Sends the actual DELETE request — batch will be removed if successful.
+                </Typography.Text>
+              </div>
+
+              {/* Test result */}
+              {deleteBatchTestResult && !deleteBatchTestResult.loading && (
+                <div style={{ marginTop: 8 }}>
+                  {deleteBatchTestResult.error ? (
+                    <div style={{ background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 6, padding: 8, fontSize: 12 }}>
+                      <Typography.Text type="danger">Error: {deleteBatchTestResult.error}</Typography.Text>
+                    </div>
+                  ) : (
+                    <pre style={{
+                      fontSize: 11, background: '#f6ffed', border: '1px solid #b7eb8f',
+                      borderRadius: 6, padding: 8, maxHeight: 140, overflow: 'auto', margin: 0,
+                    }}>
+                      {deleteBatchTestResult.body}
+                    </pre>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </Modal>
 
       {/* Debug Log Modal */}
