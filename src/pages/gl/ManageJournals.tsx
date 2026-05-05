@@ -1170,6 +1170,45 @@ const ManageJournals: React.FC = () => {
     return `${value.toLocaleString('en-US', { minimumFractionDigits: 2 })} ${currency}`;
   };
 
+  // Helper: column text-search filter dropdown
+  const getColumnSearchProps = (dataIndex: keyof JournalRecord, placeholder = 'Search') => ({
+    filterDropdown: ({ setSelectedKeys, selectedKeys, confirm, clearFilters }: any) => (
+      <div style={{ padding: 8, minWidth: 200 }}>
+        <Input
+          placeholder={placeholder}
+          value={selectedKeys[0] as string}
+          onChange={e => setSelectedKeys(e.target.value ? [e.target.value] : [])}
+          onPressEnter={() => confirm()}
+          style={{ marginBottom: 8, display: 'block' }}
+          autoFocus
+        />
+        <Space>
+          <Button
+            type="primary"
+            onClick={() => confirm()}
+            icon={<SearchOutlined />}
+            size="small"
+            style={{ width: 90 }}
+          >
+            Filter
+          </Button>
+          <Button
+            onClick={() => { clearFilters?.(); confirm(); }}
+            size="small"
+            style={{ width: 70 }}
+          >
+            Reset
+          </Button>
+        </Space>
+      </div>
+    ),
+    filterIcon: (filtered: boolean) => (
+      <SearchOutlined style={{ color: filtered ? REDWOOD.info : undefined }} />
+    ),
+    onFilter: (value: any, record: JournalRecord) =>
+      String(record[dataIndex] ?? '').toLowerCase().includes(String(value).toLowerCase()),
+  });
+
   // Table columns — mirrors the JSON fields exactly
   const columns: ColumnsType<JournalRecord> = [
     {
@@ -1187,6 +1226,7 @@ const ManageJournals: React.FC = () => {
         </Tooltip>
       ),
       sorter: (a, b) => (a.batchName || '').localeCompare(b.batchName || ''),
+      ...getColumnSearchProps('batchName', 'Search batch name'),
     },
     {
       title: 'Batch Description',
@@ -1195,6 +1235,7 @@ const ManageJournals: React.FC = () => {
       width: 240,
       ellipsis: true,
       render: (text) => <Tooltip title={text}><span>{text || '-'}</span></Tooltip>,
+      ...getColumnSearchProps('batchDescription', 'Search batch description'),
     },
     {
       title: 'Journal Name',
@@ -1216,6 +1257,7 @@ const ManageJournals: React.FC = () => {
         )
       ),
       sorter: (a, b) => (a.journalName || '').localeCompare(b.journalName || ''),
+      ...getColumnSearchProps('journalName', 'Search journal name'),
     },
     {
       title: 'Journal Description',
@@ -1224,6 +1266,7 @@ const ManageJournals: React.FC = () => {
       width: 240,
       ellipsis: true,
       render: (text) => <Tooltip title={text}><span>{text || '-'}</span></Tooltip>,
+      ...getColumnSearchProps('journalDescription', 'Search journal description'),
     },
     {
       title: 'Category',
@@ -1231,6 +1274,8 @@ const ManageJournals: React.FC = () => {
       key: 'category',
       width: 140,
       render: (text) => text ? <Tag color="blue" style={{ fontSize: 11 }}>{text}</Tag> : '-',
+      filters: [...new Set(journals.map(j => j.category).filter(Boolean))].map(c => ({ text: c, value: c })),
+      onFilter: (value, record) => record.category === value,
     },
     {
       title: 'Period',
@@ -1238,6 +1283,8 @@ const ManageJournals: React.FC = () => {
       key: 'periodName',
       width: 90,
       sorter: (a, b) => (a.periodName || '').localeCompare(b.periodName || ''),
+      filters: [...new Set(journals.map(j => j.periodName).filter(Boolean))].map(p => ({ text: p, value: p })),
+      onFilter: (value, record) => record.periodName === value,
     },
     {
       title: 'Source',
@@ -1246,6 +1293,8 @@ const ManageJournals: React.FC = () => {
       width: 120,
       ellipsis: true,
       render: (text) => text || '-',
+      filters: [...new Set(journals.map(j => j.source).filter(Boolean))].map(s => ({ text: s, value: s })),
+      onFilter: (value, record) => record.source === value,
     },
     {
       title: 'Status',
