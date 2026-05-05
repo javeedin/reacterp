@@ -202,7 +202,7 @@ const APModule: React.FC = () => {
       if (selectedBU) params.set('P_BUSINESS_UNIT', selectedBU);
       const qs = params.toString();
       // endpoint registered without 'ap/' prefix in this ORDS environment
-      const url = `${APEX_DB_CONFIG.baseUrl}/invoices/outstanding-by-supplier${qs ? '?' + qs : ''}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/outstanding-by-supplier${qs ? '?' + qs : ''}`;
       const res = await fetch(url);
       const text = await res.text();
       if (!text.trim()) throw new Error('Empty response from server');
@@ -253,7 +253,7 @@ const APModule: React.FC = () => {
         const params = new URLSearchParams();
         if (selectedBU) params.set('P_BUSINESS_UNIT', selectedBU);
         const qs = params.toString();
-        const url = `${APEX_DB_CONFIG.baseUrl}/invoices/stats${qs ? '?' + qs : ''}`;
+        const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/stats${qs ? '?' + qs : ''}`;
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const text = await res.text();
@@ -777,7 +777,7 @@ const APModule: React.FC = () => {
           {
             label: 'Invoice Statistics (KPI cards)',
             method: 'GET',
-            url: `${APEX_DB_CONFIG.baseUrl}/invoices/stats`,
+            url: `${APEX_DB_CONFIG.baseUrl}/ap/invoices/stats`,
             params: selectedBU ? `P_BUSINESS_UNIT=${selectedBU}` : '(no filter — all BUs)',
             note: 'Returns pending/approved/payment counts and total outstanding. Deploy database/ap/rr_ap_dashboard_stats.sql to activate.',
           },
