@@ -196,6 +196,8 @@ interface JournalRecord {
   ledgerName: string;
   legalEntityName: string;
   currencyCode: string;
+  conversionRate: number;
+  conversionRateType: string;
   enteredDebit: number;
   enteredCredit: number;
   accountedDebit: number;
@@ -572,8 +574,8 @@ const ManageJournals: React.FC = () => {
           journalDescription: journal.journalDescription || '',
           category: journal.category || '',
           currencyCode: journal.currencyCode || '',
-          conversionRate: 1,
-          conversionRateType: 'User',
+          conversionRate: journal.conversionRate || 1,
+          conversionRateType: journal.conversionRateType || 'User',
         },
       }));
     }
@@ -1414,8 +1416,8 @@ const ManageJournals: React.FC = () => {
       journalDescription: journal.journalDescription || '',
       category: journal.category || '',
       currencyCode: journal.currencyCode || '',
-      conversionRate: 1,
-      conversionRateType: 'User',
+      conversionRate: (journal as any).conversionRate || 1,
+      conversionRateType: (journal as any).conversionRateType || 'User',
     };
     const isSaving = tabSaving[tabKey] || false;
     const isPosting = tabPosting[tabKey] || false;
