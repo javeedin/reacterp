@@ -272,10 +272,10 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
       const closingAmt    = allItems.reduce((s: number, i: any) => s + (i.closing         || 0), 0);
       const entOpeningAmt = allItems.reduce((s: number, i: any) => s + (i.entered_opening || 0), 0);
       const entClosingAmt = allItems.reduce((s: number, i: any) => s + (i.entered_closing || 0), 0);
-      const toDrCr = (amt: number) => ({
-        dr: isDebitNormal && amt > 0 ? amt : (!isDebitNormal && amt < 0 ? Math.abs(amt) : 0),
-        cr: !isDebitNormal && amt > 0 ? amt : (isDebitNormal && amt < 0 ? Math.abs(amt) : 0),
-      });
+      const toDrCr = (amt: number) =>
+        isDebitNormal
+          ? { dr: amt, cr: 0 }
+          : { dr: 0, cr: amt };
       const makeRow = (accAmt: number, entAmt: number, label: string, key: string, isOpen: boolean): JournalLineSegment | null => {
         const eA = isRetainedEarnings && isOpen ? closingAmt    : accAmt;
         const eE = isRetainedEarnings && isOpen ? entClosingAmt : entAmt;
