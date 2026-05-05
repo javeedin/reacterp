@@ -1814,14 +1814,14 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
                         {currencies.length > 0
                           ? currencies.map(c => (
                               <Option key={c.currency_code} value={c.currency_code}>
-                                {c.currency_code}{c.name ? ` ${c.name}` : ''}
+                                {c.currency_code}
                               </Option>
                             ))
                           : (
                             <>
-                              <Option value="AED">AED UAE Dirham</Option>
-                              <Option value="USD">USD US Dollar</Option>
-                              <Option value="INR">INR Indian Rupee</Option>
+                              <Option value="AED">AED</Option>
+                              <Option value="USD">USD</Option>
+                              <Option value="INR">INR</Option>
                             </>
                           )
                         }
