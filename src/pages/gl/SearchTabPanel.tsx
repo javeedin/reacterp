@@ -628,7 +628,7 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
     });
 
     const result: JournalLineSegment[] = [...opening];
-    groups.forEach((rows, acct) => {
+    [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).forEach(([acct, rows]) => {
       const dr = rows.reduce((s, r) => s + (r.accountedDr || 0), 0);
       const cr = rows.reduce((s, r) => s + (r.accountedCr || 0), 0);
       result.push({ ...rows[0], key: `grphdr-${acct}`, isGroupHeader: true, groupCount: rows.length, groupDr: dr, groupCr: cr });
