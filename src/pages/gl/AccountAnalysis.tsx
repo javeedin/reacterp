@@ -95,6 +95,10 @@ interface JournalLineSegment {
   future1: string;
   isOpeningBalance?: boolean;
   isClosingBalance?: boolean;
+  isGroupHeader?: boolean;
+  groupCount?: number;
+  groupDr?: number;
+  groupCr?: number;
   accountType?: string;
   future2: string;
   enteredDr: number;
@@ -316,6 +320,9 @@ const AccountAnalysis: React.FC = () => {
   // Journal drill-down modal state
   const [journalDrillVisible, setJournalDrillVisible] = useState(false);
   const [journalDrillRecord, setJournalDrillRecord] = useState<JournalLineSegment | null>(null);
+
+  // Group-by-account toggle
+  const [groupByAccount, setGroupByAccount] = useState(false);
 
   // Full journal modal (all lines for a specific journal from API)
   const [fullJournalVisible, setFullJournalVisible] = useState(false);
@@ -1709,6 +1716,41 @@ const AccountAnalysis: React.FC = () => {
         : <span style={{ color: REDWOOD.success,  fontWeight: 600 }}>{abs}</span>;
     };
 
+    // Build grouped dataSource when groupByAccount is on
+    const groupedSearchData: JournalLineSegment[] = (() => {
+      if (!groupByAccount) return searchData;
+      // Sort by account combination, preserving opening/closing balance rows at edges
+      const opening = searchData.filter(r => r.isOpeningBalance);
+      const closing = searchData.filter(r => r.isClosingBalance);
+      const normal  = searchData.filter(r => !r.isOpeningBalance && !r.isClosingBalance);
+
+      // Group normal rows by concatenatedSegments
+      const groups: Map<string, JournalLineSegment[]> = new Map();
+      normal.forEach(row => {
+        const key = row.concatenatedSegments || `${row.company}-${row.lob}-${row.department}-${row.account}-${row.subAccount}-${row.analysis}-${row.intercompany}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(row);
+      });
+
+      const result: JournalLineSegment[] = [...opening];
+      groups.forEach((rows, acct) => {
+        const totalDr = rows.reduce((s, r) => s + (r.accountedDr || 0), 0);
+        const totalCr = rows.reduce((s, r) => s + (r.accountedCr || 0), 0);
+        // Group header pseudo-row
+        result.push({
+          ...rows[0],
+          key: `group-${acct}`,
+          isGroupHeader: true,
+          groupCount: rows.length,
+          groupDr: totalDr,
+          groupCr: totalCr,
+        });
+        rows.forEach(r => result.push(r));
+      });
+      result.push(...closing);
+      return result;
+    })();
+
     const searchColumns: ColumnsType<JournalLineSegment> = [
       {
         title: 'Account',
@@ -1717,7 +1759,14 @@ const AccountAnalysis: React.FC = () => {
         width: 240,
         fixed: 'left',
         render: (text: string, record: JournalLineSegment) =>
-          record.isOpeningBalance ? (
+          record.isGroupHeader ? (
+            <Space size={6}>
+              <Text strong style={{ fontSize: 11, color: REDWOOD.neutral900 }}>
+                {text || `${record.company}-${record.lob}-${record.department}-${record.account}-${record.subAccount}-${record.analysis}-${record.intercompany}`}
+              </Text>
+              <Tag style={{ fontSize: 10, lineHeight: '16px', padding: '0 5px' }}>{record.groupCount} lines</Tag>
+            </Space>
+          ) : record.isOpeningBalance ? (
             <Text strong style={{ fontSize: 10, color: REDWOOD.warning }}>
               {record.jeLineDescription}
             </Text>
@@ -1728,7 +1777,7 @@ const AccountAnalysis: React.FC = () => {
           ) : (
             <a
               onClick={() => openAccountTab(record, selectedPeriods)}
-              style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 10 }}
+              style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 10, paddingLeft: groupByAccount ? 16 : 0 }}
             >
               {text || `${record.company}-${record.lob}-${record.department}-${record.account}-${record.subAccount}-${record.analysis}-${record.intercompany}`}
             </a>
@@ -1777,7 +1826,10 @@ const AccountAnalysis: React.FC = () => {
             width: 120,
             align: 'right' as const,
             ...headerStyle(groupBorderLeft),
-            render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span>,
+            render: (v: number, record: JournalLineSegment) =>
+              record.isGroupHeader
+                ? <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(record.groupDr ?? 0)}</Text>
+                : <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span>,
           },
           {
             title: 'Cr',
@@ -1785,7 +1837,10 @@ const AccountAnalysis: React.FC = () => {
             key: 'accountedCr',
             width: 120,
             align: 'right' as const,
-            render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span>,
+            render: (v: number, record: JournalLineSegment) =>
+              record.isGroupHeader
+                ? <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(record.groupCr ?? 0)}</Text>
+                : <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span>,
           },
           {
             title: 'Balance',
@@ -1793,8 +1848,10 @@ const AccountAnalysis: React.FC = () => {
             width: 130,
             align: 'right' as const,
             ...headerStyle(groupBorderRight),
-            render: (_: any, __: JournalLineSegment, index: number) =>
-              fmtBalance(runningBalances[index]?.accounted ?? 0),
+            render: (_: any, record: JournalLineSegment, index: number) =>
+              record.isGroupHeader
+                ? fmtBalance((record.groupDr ?? 0) - (record.groupCr ?? 0))
+                : fmtBalance(runningBalances[index]?.accounted ?? 0),
           },
         ],
       },
@@ -2086,6 +2143,18 @@ const AccountAnalysis: React.FC = () => {
             <Space size={6}>
               <Button
                 size="small"
+                icon={<FilterOutlined />}
+                disabled={searchData.length === 0}
+                onClick={() => setGroupByAccount(g => !g)}
+                style={{
+                  fontSize: 11,
+                  ...(groupByAccount ? { background: REDWOOD.info, borderColor: REDWOOD.info, color: '#fff' } : {}),
+                }}
+              >
+                {groupByAccount ? 'Ungroup' : 'Group by Account'}
+              </Button>
+              <Button
+                size="small"
                 icon={<PieChartOutlined />}
                 onClick={openAllAccountsPivot}
                 disabled={searchData.length === 0}
@@ -2108,14 +2177,21 @@ const AccountAnalysis: React.FC = () => {
           <Spin spinning={loading}>
             <Table
               columns={searchColumns}
-              dataSource={searchData}
+              dataSource={groupedSearchData}
               pagination={{ pageSize: searchPageSize, size: 'small', showSizeChanger: true, pageSizeOptions: ['10','20','50','100','200'], onShowSizeChange: (_current, size) => setSearchPageSize(size), onChange: (_page, size) => size && setSearchPageSize(size), showTotal: (total) => `Total ${total} records` }}
               scroll={{ x: 1800 }}
               size="small"
               className="compact-table aa-grid"
               rowClassName={(record: JournalLineSegment) =>
+                record.isGroupHeader ? 'aa-group-header-row' :
                 record.isOpeningBalance ? 'opening-balance-row' : ''
               }
+              onRow={(record) => record.isGroupHeader ? { style: {
+                background: '#e8f0fe',
+                borderTop: `2px solid ${REDWOOD.info}44`,
+                fontWeight: 600,
+                cursor: 'default',
+              }} : {}}
               locale={{ emptyText: <Empty description="Click Search to load data" /> }}
               summary={() =>
                 searchData.length > 0 ? (
