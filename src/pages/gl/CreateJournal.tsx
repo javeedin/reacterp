@@ -42,6 +42,8 @@ import {
   FilePdfOutlined,
   ApiOutlined,
   CheckSquareOutlined,
+  CopyOutlined,
+  CheckOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -352,6 +354,15 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
   const [jsonPayload, setJsonPayload] = useState<any>(null);
   const [postingJournal, setPostingJournal] = useState(false);
   const [saveResponse, setSaveResponse] = useState<any>(null);
+  const [copiedEndpoint, setCopiedEndpoint] = useState(false);
+
+  const SAVE_ENDPOINT = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/journals/create';
+
+  const copyEndpoint = () => {
+    navigator.clipboard.writeText(SAVE_ENDPOINT);
+    setCopiedEndpoint(true);
+    setTimeout(() => setCopiedEndpoint(false), 2000);
+  };
 
   // Initialize batch name with timestamp
   const [batchData, setBatchData] = useState<BatchData>(() => {
@@ -1071,7 +1082,7 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
     setSaveResponse(null);
     try {
       const response = await fetch(
-        'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/journals/create',
+        SAVE_ENDPOINT,
         {
           method: 'POST',
           headers: {
@@ -2458,15 +2469,28 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
           style={{ top: 20 }}
           footer={
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Space>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  Batch: {jsonPayload?.batch?.batchName} | Lines: {jsonPayload?.lines?.length || 0}
-                </Text>
-                {!isBalanced && !saveResponse && (
-                  <Text type="danger" style={{ fontSize: 12 }}>
-                    (Unbalanced)
+              <Space direction="vertical" size={2} style={{ alignItems: 'flex-start' }}>
+                <Space>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    Batch: {jsonPayload?.batch?.batchName} | Lines: {jsonPayload?.lines?.length || 0}
                   </Text>
-                )}
+                  {!isBalanced && !saveResponse && (
+                    <Text type="danger" style={{ fontSize: 12 }}>
+                      (Unbalanced)
+                    </Text>
+                  )}
+                </Space>
+                <Tooltip title={SAVE_ENDPOINT} placement="topLeft">
+                  <Space size={4} style={{ cursor: 'pointer' }} onClick={copyEndpoint}>
+                    <ApiOutlined style={{ fontSize: 11, color: '#0572CE' }} />
+                    <Text style={{ fontSize: 11, color: '#0572CE', fontFamily: 'monospace' }}>
+                      POST {SAVE_ENDPOINT.replace('https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp', '…/reerp')}
+                    </Text>
+                    {copiedEndpoint
+                      ? <CheckOutlined style={{ fontSize: 11, color: '#1D7B4D' }} />
+                      : <CopyOutlined  style={{ fontSize: 11, color: '#6B6B6B' }} />}
+                  </Space>
+                </Tooltip>
               </Space>
               <Space>
                 {saveResponse ? (
