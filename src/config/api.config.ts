@@ -303,6 +303,83 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
     ],
   },
   {
+    id: 'ar-invoices',
+    name: 'AR Invoices',
+    description: 'Sync AR Receivables Invoice Headers from Oracle Fusion',
+    oracleEndpoint: 'receivablesInvoices',
+    apexEndpoint: 'ar/invoices/bulk',
+    hasChildren: true,
+    childConfig: {
+      lines: {
+        linkName: 'receivablesInvoiceLines',
+        apexEndpoint: 'ar/invoices/{CustomerTransactionId}/lines',
+      },
+    },
+    parameters: [
+      {
+        key: 'BusinessUnit',
+        label: 'Business Unit',
+        type: 'api-select',
+        required: false,
+        apiUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/gl/businessunits',
+        apiLabelKey: 'business_unit_name',
+        apiValueKey: 'business_unit_name',
+        placeholder: 'All business units',
+      },
+      {
+        key: 'BillToCustomerNumber',
+        label: 'Customer Number',
+        type: 'text',
+        required: false,
+        placeholder: 'e.g. G078',
+      },
+      {
+        key: 'TransactionDateFrom',
+        label: 'Transaction Date From',
+        type: 'date',
+        required: false,
+      },
+      {
+        key: 'TransactionDateTo',
+        label: 'Transaction Date To',
+        type: 'date',
+        required: false,
+      },
+      {
+        key: 'InvoiceStatus',
+        label: 'Invoice Status',
+        type: 'select',
+        required: false,
+        options: [
+          { label: 'All', value: '' },
+          { label: 'Complete', value: 'Complete' },
+          { label: 'Incomplete', value: 'Incomplete' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'ar-invoice-lines',
+    name: 'AR Invoice Lines',
+    description: 'Sync AR Receivables Invoice Lines from Oracle Fusion (requires AR Invoices first)',
+    oracleEndpoint: 'receivablesInvoices/{id}/child/receivablesInvoiceLines',
+    apexEndpoint: 'ar/invoices/{id}/lines',
+    parameters: [
+      {
+        key: 'TransactionDateFrom',
+        label: 'Transaction Date From',
+        type: 'date',
+        required: false,
+      },
+      {
+        key: 'TransactionDateTo',
+        label: 'Transaction Date To',
+        type: 'date',
+        required: false,
+      },
+    ],
+  },
+  {
     id: 'gl-accounts',
     name: 'GL Accounts',
     description: 'Sync Chart of Accounts from Oracle Fusion',
