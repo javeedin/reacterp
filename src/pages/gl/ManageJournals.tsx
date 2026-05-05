@@ -274,6 +274,9 @@ const ManageJournals: React.FC = () => {
   const [loadingLedgers, setLoadingLedgers] = useState(false);
   const [loadingPeriods, setLoadingPeriods] = useState(false);
 
+  // GL Categories for search dropdown
+  const [glCategories, setGLCategories] = useState<{ jeCategoryName: string; userJeCategoryName: string }[]>([]);
+
   // Accounting date range filter
   const [acctDatePreset, setAcctDatePreset] = useState<string | null>(null);
   const [acctFromDate, setAcctFromDate] = useState<Dayjs | null>(null);
@@ -391,6 +394,14 @@ const ManageJournals: React.FC = () => {
         console.error('Error restoring search data:', e);
       }
     }
+  }, []);
+
+  // Fetch GL categories on mount for search dropdown
+  useEffect(() => {
+    fetch(`${APEX_DB_CONFIG.baseUrl}/gl/categories`)
+      .then(r => r.json())
+      .then(d => { if (d.items) setGLCategories(d.items); })
+      .catch(() => {});
   }, []);
 
   // Fetch ledgers on component mount
@@ -736,17 +747,26 @@ const ManageJournals: React.FC = () => {
   const buildSearchUrl = (offsetVal = 0, limitVal = 500) => {
     const values = form.getFieldsValue();
     const p = new URLSearchParams();
-    if (values.ledger)           p.append('ledger',        values.ledger);
-    if (values.accountingPeriod) p.append('period',        values.accountingPeriod);
+    if (values.ledger)           p.append('ledger',  values.ledger);
+    if (values.accountingPeriod) p.append('period',  values.accountingPeriod);
     if (values.journalBatch) {
       p.append('batchName', values.journalBatch);
       p.append('batchOp',   opToCode(values.batchOperator || 'Contains'));
+    }
+    if (values.batchDescription) {
+      p.append('batchDesc', values.batchDescription);
+      p.append('batchDescOp', opToCode(values.batchDescOperator || 'Contains'));
+    }
+    if (values.journalName) {
+      p.append('journalName', values.journalName);
+      p.append('journalNameOp', opToCode(values.journalNameOperator || 'Contains'));
     }
     if (values.journalDescription) {
       p.append('journalDesc', values.journalDescription);
       p.append('journalOp',   opToCode(values.journalOperator || 'Contains'));
     }
-    if (values.source)                               p.append('source',        values.source);
+    if (values.category)   p.append('category',     values.category);
+    if (values.source)     p.append('source',        values.source);
     if (values.batchStatus && values.batchStatus !== 'All') p.append('statusMeaning', values.batchStatus);
     const { from: acctFrom, to: acctTo } = getAcctDateRange();
     if (acctFrom) p.append('from_date', acctFrom.format('YYYY-MM-DD'));
@@ -788,13 +808,20 @@ const ManageJournals: React.FC = () => {
         baseParams.append('batchName', values.journalBatch);
         baseParams.append('batchOp', opToCode(values.batchOperator || 'Contains'));
       }
+      if (values.batchDescription) {
+        baseParams.append('batchDesc', values.batchDescription);
+        baseParams.append('batchDescOp', opToCode(values.batchDescOperator || 'Contains'));
+      }
+      if (values.journalName) {
+        baseParams.append('journalName', values.journalName);
+        baseParams.append('journalNameOp', opToCode(values.journalNameOperator || 'Contains'));
+      }
       if (values.journalDescription) {
         baseParams.append('journalDesc', values.journalDescription);
         baseParams.append('journalOp', opToCode(values.journalOperator || 'Contains'));
       }
-      if (values.source) {
-        baseParams.append('source', values.source);
-      }
+      if (values.category)   baseParams.append('category',      values.category);
+      if (values.source)     baseParams.append('source',         values.source);
       if (values.batchStatus && values.batchStatus !== 'All') {
         baseParams.append('statusMeaning', values.batchStatus);
       }
@@ -1143,29 +1170,47 @@ const ManageJournals: React.FC = () => {
     return `${value.toLocaleString('en-US', { minimumFractionDigits: 2 })} ${currency}`;
   };
 
-  // Table columns
+  // Table columns — mirrors the JSON fields exactly
   const columns: ColumnsType<JournalRecord> = [
     {
-      title: 'Journal',
+      title: 'Batch Name',
+      dataIndex: 'batchName',
+      key: 'batchName',
+      width: 200,
+      fixed: 'left',
+      ellipsis: true,
+      render: (text, record) => (
+        <Tooltip title={record.batchDescription || text}>
+          <a style={{ color: REDWOOD.info, fontWeight: 500 }} onClick={() => openJournalTab(record)}>
+            {text || '-'}
+          </a>
+        </Tooltip>
+      ),
+      sorter: (a, b) => (a.batchName || '').localeCompare(b.batchName || ''),
+    },
+    {
+      title: 'Batch Description',
+      dataIndex: 'batchDescription',
+      key: 'batchDescription',
+      width: 240,
+      ellipsis: true,
+      render: (text) => <Tooltip title={text}><span>{text || '-'}</span></Tooltip>,
+    },
+    {
+      title: 'Journal Name',
       dataIndex: 'journalName',
       key: 'journalName',
       width: 200,
-      fixed: 'left',
+      ellipsis: true,
       render: (text, record) => (
         record.statusMeaning === 'Posted' ? (
-          <Tooltip title="Posted — view only">
-            <a
-              style={{ color: REDWOOD.neutral600, fontWeight: 500 }}
-              onClick={() => openJournalTab(record)}
-            >
+          <Tooltip title={`Posted — ${text}`}>
+            <a style={{ color: REDWOOD.neutral600, fontWeight: 500 }} onClick={() => openJournalTab(record)}>
               {text || '-'}
             </a>
           </Tooltip>
         ) : (
-          <a
-            style={{ color: REDWOOD.info, fontWeight: 500 }}
-            onClick={() => openJournalTab(record)}
-          >
+          <a style={{ color: REDWOOD.info, fontWeight: 500 }} onClick={() => openJournalTab(record)}>
             {text || '-'}
           </a>
         )
@@ -1173,28 +1218,25 @@ const ManageJournals: React.FC = () => {
       sorter: (a, b) => (a.journalName || '').localeCompare(b.journalName || ''),
     },
     {
-      title: 'Journal Batch',
-      dataIndex: 'batchName',
-      key: 'batchName',
-      width: 250,
+      title: 'Journal Description',
+      dataIndex: 'journalDescription',
+      key: 'journalDescription',
+      width: 240,
       ellipsis: true,
-      render: (text, record) => {
-        const batchName = text || record.batchDescription || '-';
-        return (
-          <a
-            style={{ color: REDWOOD.info }}
-            onClick={() => openJournalTab(record)}
-          >
-            {batchName}
-          </a>
-        );
-      },
+      render: (text) => <Tooltip title={text}><span>{text || '-'}</span></Tooltip>,
     },
     {
-      title: 'Accounting Period',
+      title: 'Category',
+      dataIndex: 'category',
+      key: 'category',
+      width: 140,
+      render: (text) => text ? <Tag color="blue" style={{ fontSize: 11 }}>{text}</Tag> : '-',
+    },
+    {
+      title: 'Period',
       dataIndex: 'periodName',
       key: 'periodName',
-      width: 130,
+      width: 90,
       sorter: (a, b) => (a.periodName || '').localeCompare(b.periodName || ''),
     },
     {
@@ -1202,90 +1244,70 @@ const ManageJournals: React.FC = () => {
       dataIndex: 'source',
       key: 'source',
       width: 120,
+      ellipsis: true,
       render: (text) => text || '-',
     },
     {
-      title: 'Category',
-      dataIndex: 'category',
-      key: 'category',
-      width: 120,
-      render: (text) => text || '-',
-    },
-    {
-      title: 'Entered Debit',
-      dataIndex: 'enteredDebit',
-      key: 'enteredDebit',
-      width: 150,
-      align: 'right',
-      render: (value, record) => formatCurrency(value, record.currencyCode),
-      sorter: (a, b) => (a.enteredDebit || 0) - (b.enteredDebit || 0),
-    },
-    {
-      title: 'Entered Credit',
-      dataIndex: 'enteredCredit',
-      key: 'enteredCredit',
-      width: 150,
-      align: 'right',
-      render: (value, record) => formatCurrency(value, record.currencyCode),
-      sorter: (a, b) => (a.enteredCredit || 0) - (b.enteredCredit || 0),
-    },
-    {
-      title: 'Batch Status',
+      title: 'Status',
       dataIndex: 'statusMeaning',
       key: 'statusMeaning',
-      width: 120,
+      width: 100,
       render: (status) => getBatchStatusTag(status),
       filters: batchStatuses.filter(s => s !== 'All').map(s => ({ text: s, value: s })),
       onFilter: (value, record) => record.statusMeaning === value,
     },
     {
-      title: 'Currency',
+      title: 'Ccy',
       dataIndex: 'currencyCode',
       key: 'currencyCode',
-      width: 80,
+      width: 60,
       render: (text) => text || '-',
     },
     {
-      title: 'Ledger',
-      dataIndex: 'ledgerName',
-      key: 'ledgerName',
-      width: 150,
-      render: (text) => text || '-',
-    },
-    {
-      title: 'Approval Status',
-      dataIndex: 'approvalStatusMeaning',
-      key: 'approvalStatusMeaning',
+      title: 'Entered Dr',
+      dataIndex: 'enteredDebit',
+      key: 'enteredDebit',
       width: 130,
-      render: (status) => getApprovalStatusTag(status),
+      align: 'right',
+      render: (value, record) => formatCurrency(value, record.currencyCode),
+      sorter: (a, b) => (a.enteredDebit || 0) - (b.enteredDebit || 0),
+    },
+    {
+      title: 'Entered Cr',
+      dataIndex: 'enteredCredit',
+      key: 'enteredCredit',
+      width: 130,
+      align: 'right',
+      render: (value, record) => formatCurrency(value, record.currencyCode),
+      sorter: (a, b) => (a.enteredCredit || 0) - (b.enteredCredit || 0),
+    },
+    {
+      title: 'Acctg Date',
+      dataIndex: 'effectiveDate',
+      key: 'effectiveDate',
+      width: 100,
+      render: (text) => text || '-',
     },
     {
       title: 'Posted Date',
       dataIndex: 'postedDate',
       key: 'postedDate',
-      width: 110,
+      width: 100,
       render: (text) => text || '-',
+    },
+    {
+      title: 'Approval',
+      dataIndex: 'approvalStatusMeaning',
+      key: 'approvalStatusMeaning',
+      width: 110,
+      render: (status) => getApprovalStatusTag(status),
     },
     {
       title: 'JE Batch ID',
       dataIndex: 'jeBatchId',
       key: 'jeBatchId',
-      width: 120,
-      render: (text) => <Text code>{text || '-'}</Text>,
-    },
-    {
-      title: 'Batch ID',
-      dataIndex: 'batchId',
-      key: 'batchId',
-      width: 100,
-      render: (text) => <Text code>{text || '-'}</Text>,
-    },
-    {
-      title: 'Header ID',
-      dataIndex: 'headerId',
-      key: 'headerId',
-      width: 100,
-      render: (text) => <Text code>{text || '-'}</Text>,
+      width: 110,
+      render: (text) => <Text code style={{ fontSize: 11 }}>{text || '-'}</Text>,
     },
   ];
 
@@ -2899,6 +2921,8 @@ const ManageJournals: React.FC = () => {
                 initialValues={{
                   journalOperator: 'Starts with',
                   batchOperator: 'Starts with',
+                  batchDescOperator: 'Contains',
+                  journalNameOperator: 'Starts with',
                 }}
               >
                 <Row gutter={24}>
@@ -2938,8 +2962,8 @@ const ManageJournals: React.FC = () => {
                       </Select>
                     </Form.Item>
 
-                    {/* Journal Batch */}
-                    <Form.Item label="Journal Batch">
+                    {/* Batch Name */}
+                    <Form.Item label="Batch Name">
                       <Space.Compact style={{ width: '100%' }}>
                         <Form.Item name="batchOperator" noStyle>
                           <Select style={{ width: 120 }}>
@@ -2948,6 +2972,20 @@ const ManageJournals: React.FC = () => {
                         </Form.Item>
                         <Form.Item name="journalBatch" noStyle>
                           <Input style={{ flex: 1 }} placeholder="Enter batch name" />
+                        </Form.Item>
+                      </Space.Compact>
+                    </Form.Item>
+
+                    {/* Batch Description */}
+                    <Form.Item label="Batch Desc">
+                      <Space.Compact style={{ width: '100%' }}>
+                        <Form.Item name="batchDescOperator" noStyle>
+                          <Select style={{ width: 120 }}>
+                            {operators.map(op => <Option key={op} value={op}>{op}</Option>)}
+                          </Select>
+                        </Form.Item>
+                        <Form.Item name="batchDescription" noStyle>
+                          <Input style={{ flex: 1 }} placeholder="Enter batch description" />
                         </Form.Item>
                       </Space.Compact>
                     </Form.Item>
@@ -2997,6 +3035,20 @@ const ManageJournals: React.FC = () => {
                   </Col>
 
                   <Col span={12}>
+                    {/* Journal Name */}
+                    <Form.Item label="Journal Name">
+                      <Space.Compact style={{ width: '100%' }}>
+                        <Form.Item name="journalNameOperator" noStyle>
+                          <Select style={{ width: 120 }}>
+                            {operators.map(op => <Option key={op} value={op}>{op}</Option>)}
+                          </Select>
+                        </Form.Item>
+                        <Form.Item name="journalName" noStyle>
+                          <Input style={{ flex: 1 }} placeholder="Enter journal name" />
+                        </Form.Item>
+                      </Space.Compact>
+                    </Form.Item>
+
                     {/* Journal Description */}
                     <Form.Item label="Journal Desc">
                       <Space.Compact style={{ width: '100%' }}>
@@ -3009,6 +3061,15 @@ const ManageJournals: React.FC = () => {
                           <Input style={{ flex: 1 }} placeholder="Enter description" />
                         </Form.Item>
                       </Space.Compact>
+                    </Form.Item>
+
+                    {/* Category */}
+                    <Form.Item label="Category" name="category">
+                      <Select placeholder="Select category" allowClear showSearch optionFilterProp="children">
+                        {glCategories.map(c => (
+                          <Option key={c.jeCategoryName} value={c.jeCategoryName}>{c.userJeCategoryName || c.jeCategoryName}</Option>
+                        ))}
+                      </Select>
                     </Form.Item>
 
                     {/* Source */}
