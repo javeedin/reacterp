@@ -37,7 +37,9 @@ export interface JournalLineSegment {
   account: string; subAccount: string; analysis: string; intercompany: string;
   future1: string; future2: string;
   isOpeningBalance?: boolean; isClosingBalance?: boolean;
-  isGroupHeader?: boolean; groupCount?: number; groupDr?: number; groupCr?: number;
+  isGroupHeader?: boolean; groupCount?: number;
+  groupDr?: number; groupCr?: number;
+  groupEnteredDr?: number; groupEnteredCr?: number;
   accountType?: string;
   enteredDr: number; enteredCr: number; accountedDr: number; accountedCr: number;
   chartOfAccountsName: string; accountingDate?: string; defaultPeriodName: string;
@@ -166,6 +168,7 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
   // Pivot modal
   const [pivotVisible, setPivotVisible] = useState(false);
   const [groupByAccount, setGroupByAccount] = useState(false);
+  const [gridFilter, setGridFilter] = useState('');
   const [pivotSegsBefore, setPivotSegsBefore] = useState<string[]>([]);
   const [pivotSegsAfter,  setPivotSegsAfter]  = useState<string[]>([]);
 
@@ -629,9 +632,16 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
 
     const result: JournalLineSegment[] = [...opening];
     [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).forEach(([acct, rows]) => {
-      const dr = rows.reduce((s, r) => s + (r.accountedDr || 0), 0);
-      const cr = rows.reduce((s, r) => s + (r.accountedCr || 0), 0);
-      result.push({ ...rows[0], key: `grphdr-${acct}`, isGroupHeader: true, groupCount: rows.length, groupDr: dr, groupCr: cr });
+      const accDr  = rows.reduce((s, r) => s + (r.accountedDr || 0), 0);
+      const accCr  = rows.reduce((s, r) => s + (r.accountedCr || 0), 0);
+      const entDr  = rows.reduce((s, r) => s + (r.enteredDr   || 0), 0);
+      const entCr  = rows.reduce((s, r) => s + (r.enteredCr   || 0), 0);
+      result.push({
+        ...rows[0], key: `grphdr-${acct}`, isGroupHeader: true,
+        groupCount: rows.length,
+        groupDr: accDr, groupCr: accCr,
+        groupEnteredDr: entDr, groupEnteredCr: entCr,
+      });
       rows.forEach(r => result.push(r));
     });
     result.push(...closing);
@@ -697,9 +707,12 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
             : <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span> },
         { title: 'Balance', key: 'accountedRunning', width: 130, align: 'right' as const,
           ...headerStyle(groupBorderRight),
-          render: (_: any, r: JournalLineSegment, index: number) => r.isGroupHeader
-            ? fmtBalance((r.groupDr ?? 0) - (r.groupCr ?? 0))
-            : fmtBalance(runningBalances[index]?.accounted ?? 0) },
+          render: (_: any, r: JournalLineSegment, index: number) => {
+            if (r.isGroupHeader) return fmtBalance((r.groupDr ?? 0) - (r.groupCr ?? 0));
+            // Adjust index: subtract the number of group-header rows inserted before this row
+            const adj = groupByAccount ? groupedSearchData.slice(0, index).filter(x => x.isGroupHeader).length : 0;
+            return fmtBalance(runningBalances[index - adj]?.accounted ?? 0);
+          }},
       ],
     },
     {
@@ -708,12 +721,20 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
       children: [
         { title: 'Dr', dataIndex: 'enteredDr', key: 'enteredDr', width: 120, align: 'right' as const,
           ...headerStyle(groupBorderLeft),
-          render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span> },
+          render: (v: number, r: JournalLineSegment) => r.isGroupHeader
+            ? <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(r.groupEnteredDr ?? 0)}</Text>
+            : <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span> },
         { title: 'Cr', dataIndex: 'enteredCr', key: 'enteredCr', width: 120, align: 'right' as const,
-          render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span> },
+          render: (v: number, r: JournalLineSegment) => r.isGroupHeader
+            ? <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(r.groupEnteredCr ?? 0)}</Text>
+            : <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span> },
         { title: 'Balance', key: 'enteredRunning', width: 130, align: 'right' as const,
           ...headerStyle(groupBorderRight),
-          render: (_: any, __: JournalLineSegment, index: number) => fmtBalance(runningBalances[index]?.entered ?? 0) },
+          render: (_: any, r: JournalLineSegment, index: number) => {
+            if (r.isGroupHeader) return fmtBalance((r.groupEnteredDr ?? 0) - (r.groupEnteredCr ?? 0));
+            const adj = groupByAccount ? groupedSearchData.slice(0, index).filter(x => x.isGroupHeader).length : 0;
+            return fmtBalance(runningBalances[index - adj]?.entered ?? 0);
+          }},
       ],
     },
     {
@@ -932,10 +953,89 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
           </Space>
         </div>
 
+        {/* Grid quick-filter */}
+        {searchData.length > 0 && (
+          <div style={{ padding: '6px 12px', borderBottom: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <FilterOutlined style={{ color: REDWOOD.neutral600, fontSize: 11 }} />
+            <Input
+              size="small"
+              allowClear
+              placeholder="Filter grid — account, description, batch, source, category…"
+              prefix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />}
+              value={gridFilter}
+              onChange={e => setGridFilter(e.target.value)}
+              style={{ maxWidth: 480, fontSize: 11 }}
+            />
+            {gridFilter && (
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                {(() => {
+                  const q = gridFilter.toLowerCase();
+                  const count = searchData.filter(r =>
+                    [r.concatenatedSegments, r.accountDescription, r.jeLineDescription,
+                     r.batchName, r.userJeSourceName, r.userJeCategoryName, r.defaultPeriodName, r.currencyCode]
+                    .some(v => (v || '').toLowerCase().includes(q))
+                  ).length;
+                  return `${count} of ${searchData.length} rows`;
+                })()}
+              </Text>
+            )}
+          </div>
+        )}
+
         <Spin spinning={loading}>
           <Table
             columns={searchColumns}
-            dataSource={groupedSearchData}
+            dataSource={(() => {
+              const base = groupedSearchData;
+              if (!gridFilter) return base;
+              const q = gridFilter.toLowerCase();
+              // When filtering: keep group headers whose groups have matching rows,
+              // keep opening/closing balance rows, keep matching detail rows
+              if (groupByAccount) {
+                const result: JournalLineSegment[] = [];
+                let i = 0;
+                while (i < base.length) {
+                  const row = base[i];
+                  if (row.isOpeningBalance || row.isClosingBalance) { result.push(row); i++; continue; }
+                  if (row.isGroupHeader) {
+                    // Collect all detail rows for this group
+                    const details: JournalLineSegment[] = [];
+                    let j = i + 1;
+                    while (j < base.length && !base[j].isGroupHeader && !base[j].isClosingBalance) {
+                      details.push(base[j]); j++;
+                    }
+                    const matchingDetails = details.filter(r =>
+                      [r.concatenatedSegments, r.accountDescription, r.jeLineDescription,
+                       r.batchName, r.userJeSourceName, r.userJeCategoryName, r.defaultPeriodName, r.currencyCode]
+                      .some(v => (v || '').toLowerCase().includes(q))
+                    );
+                    if (matchingDetails.length > 0) {
+                      result.push({ ...row, groupCount: matchingDetails.length,
+                        groupDr: matchingDetails.reduce((s, r) => s + (r.accountedDr || 0), 0),
+                        groupCr: matchingDetails.reduce((s, r) => s + (r.accountedCr || 0), 0),
+                        groupEnteredDr: matchingDetails.reduce((s, r) => s + (r.enteredDr || 0), 0),
+                        groupEnteredCr: matchingDetails.reduce((s, r) => s + (r.enteredCr || 0), 0),
+                      });
+                      matchingDetails.forEach(r => result.push(r));
+                    }
+                    i = j;
+                    continue;
+                  }
+                  const matches = [row.concatenatedSegments, row.accountDescription, row.jeLineDescription,
+                    row.batchName, row.userJeSourceName, row.userJeCategoryName, row.defaultPeriodName, row.currencyCode]
+                    .some(v => (v || '').toLowerCase().includes(q));
+                  if (matches) result.push(row);
+                  i++;
+                }
+                return result;
+              }
+              return base.filter(r =>
+                r.isOpeningBalance || r.isClosingBalance ||
+                [r.concatenatedSegments, r.accountDescription, r.jeLineDescription,
+                 r.batchName, r.userJeSourceName, r.userJeCategoryName, r.defaultPeriodName, r.currencyCode]
+                .some(v => (v || '').toLowerCase().includes(q))
+              );
+            })()}
             pagination={{ pageSize: searchPageSize, size: 'small', showSizeChanger: true,
               pageSizeOptions: ['10','20','50','100','200'],
               onShowSizeChange: (_, size) => setSearchPageSize(size),
