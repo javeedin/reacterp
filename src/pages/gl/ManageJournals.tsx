@@ -236,6 +236,7 @@ const STORAGE_KEY = 'manageJournals_searchData';
 interface OpenJournalTab {
   key: string;
   journal: JournalRecord;
+  sourceUrl?: string;
 }
 
 // Debug log entry
@@ -328,6 +329,7 @@ const ManageJournals: React.FC = () => {
   const [tabSaving, setTabSaving] = useState<Record<string, boolean>>({});
   const [tabPosting, setTabPosting] = useState<Record<string, boolean>>({});
   const [selectedLinesByTab, setSelectedLinesByTab] = useState<Record<string, number[]>>({});
+  const [tabGetUrlCopied, setTabGetUrlCopied] = useState<Record<string, boolean>>({});
 
   // Lookup data for journal edit dropdowns
   const [journalCategories, setJournalCategories] = useState<string[]>([]);
@@ -583,8 +585,8 @@ const ManageJournals: React.FC = () => {
       }));
     }
 
-    // Add new tab
-    setOpenJournalTabs(prev => [...prev, { key: tabKey, journal }]);
+    // Add new tab (store the search URL that produced this journal)
+    setOpenJournalTabs(prev => [...prev, { key: tabKey, journal, sourceUrl: lastSearchUrl || undefined }]);
     setActiveTabKey(tabKey);
   };
 
@@ -1399,7 +1401,7 @@ const ManageJournals: React.FC = () => {
   };
 
   // Render Journal Edit Panel (for tab content)
-  const renderJournalEditPanel = (journal: JournalRecord, tabKey: string) => {
+  const renderJournalEditPanel = (journal: JournalRecord, tabKey: string, sourceUrl?: string) => {
     const formatNumber = (num: number | null | undefined) => {
       if (num === null || num === undefined) return '';
       return num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -2186,6 +2188,33 @@ const ManageJournals: React.FC = () => {
               >
                 {journal.statusMeaning}
               </Tag>
+              {sourceUrl && (
+                <Tooltip
+                  title={
+                    <div style={{ fontFamily: 'monospace', fontSize: 11, maxWidth: 600, wordBreak: 'break-all' }}>
+                      <div style={{ marginBottom: 4, fontWeight: 'bold' }}>GET (Search — returned this journal)</div>
+                      <div>{sourceUrl}</div>
+                      <div style={{ marginTop: 8, color: '#aaa', fontSize: 10 }}>
+                        conversionRate from API: {journal.conversionRate ?? 'undefined (DB fix not yet applied)'}
+                      </div>
+                    </div>
+                  }
+                  overlayStyle={{ maxWidth: 640 }}
+                  placement="bottomLeft"
+                >
+                  <ApiOutlined
+                    style={{ fontSize: 13, color: REDWOOD.info, cursor: 'pointer' }}
+                    onClick={() => {
+                      navigator.clipboard.writeText(sourceUrl);
+                      setTabGetUrlCopied(prev => ({ ...prev, [tabKey]: true }));
+                      setTimeout(() => setTabGetUrlCopied(prev => ({ ...prev, [tabKey]: false })), 2000);
+                    }}
+                  />
+                </Tooltip>
+              )}
+              {tabGetUrlCopied[tabKey] && (
+                <CheckOutlined style={{ fontSize: 11, color: REDWOOD.success }} />
+              )}
             </Space>
             <Space size="small">
               {/* Save — only for Manual unposted journals */}
@@ -3080,7 +3109,7 @@ const ManageJournals: React.FC = () => {
                 </span>
               ),
               closable: true,
-              children: renderJournalEditPanel(tab.journal, tab.key),
+              children: renderJournalEditPanel(tab.journal, tab.key, tab.sourceUrl),
             })),
           ]}
         />
