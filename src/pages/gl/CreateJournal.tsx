@@ -330,6 +330,8 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
 
   // Currency list
   const [currencies, setCurrencies] = useState<Currency[]>([]);
+  // Category list (from RR_GL_CATEGORIES via API)
+  const [glCategories, setGLCategories] = useState<{ jeCategoryName: string; userJeCategoryName: string }[]>([]);
   const [deleteBatchModalVisible, setDeleteBatchModalVisible] = useState(false);
 
   // Collapsible states
@@ -461,6 +463,25 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
       }
     };
     fetchCurrencies();
+  }, []);
+
+  // Fetch GL Categories on mount
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const response = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/categories`);
+        const data = await response.json();
+        if (data.items && data.items.length > 0) {
+          setGLCategories(data.items.map((c: any) => ({
+            jeCategoryName:     c.jeCategoryName,
+            userJeCategoryName: c.userJeCategoryName || c.jeCategoryName,
+          })));
+        }
+      } catch (error) {
+        console.error('Error fetching GL categories:', error);
+      }
+    };
+    fetchCategories();
   }, []);
 
   // Fetch periods when ledger changes
@@ -1716,11 +1737,26 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
                         onChange={(val) => setJournalData({ ...journalData, category: val })}
                         size="small"
                         style={{ width: '100%' }}
-                        placeholder="Select"
+                        placeholder="Select category"
+                        showSearch
+                        filterOption={(input, option) =>
+                          String(option?.children ?? '').toLowerCase().includes(input.toLowerCase())
+                        }
                       >
-                        <Option value="Adjustment">Adjustment</Option>
-                        <Option value="Accrual">Accrual</Option>
-                        <Option value="Other">Other</Option>
+                        {glCategories.length > 0
+                          ? glCategories.map(c => (
+                              <Option key={c.jeCategoryName} value={c.jeCategoryName}>
+                                {c.userJeCategoryName}
+                              </Option>
+                            ))
+                          : (
+                            <>
+                              <Option value="Adjustment">Adjustment</Option>
+                              <Option value="Accrual">Accrual</Option>
+                              <Option value="Other">Other</Option>
+                            </>
+                          )
+                        }
                       </Select>
                     </Col>
 

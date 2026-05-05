@@ -39,6 +39,7 @@ const TrialBalance            = lazy(() => import('./pages/gl/TrialBalance'));
 const GenerateTrialBalance    = lazy(() => import('./pages/gl/GenerateTrialBalance'));
 const IncomeStatementTemplates= lazy(() => import('./pages/gl/IncomeStatementTemplates'));
 const Currencies              = lazy(() => import('./pages/gl/Currencies'));
+const GLManageCategories      = lazy(() => import('./pages/gl/ManageCategories'));
 const JournalReconciliation   = lazy(() => import('./pages/gl/JournalReconciliation'));
 const ManageInvoices          = lazy(() => import('./pages/ap/ManageInvoices'));
 const ManageDistCombinations  = lazy(() => import('./pages/ap/ManageDistCombinations'));
@@ -161,6 +162,7 @@ function App() {
               <Route path="gl/generate-trial-balance" element={<GenerateTrialBalance />} />
               <Route path="gl/income-statement-templates" element={<IncomeStatementTemplates />} />
               <Route path="gl/currencies" element={<Currencies />} />
+              <Route path="gl/categories" element={<GLManageCategories />} />
               <Route path="gl/journal-reconciliation" element={<JournalReconciliation />} />
               {/* Fixed Assets */}
               <Route path="fa"             element={<FAModule />} />
