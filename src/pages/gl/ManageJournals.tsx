@@ -294,6 +294,7 @@ const ManageJournals: React.FC = () => {
   // Debug log state
   const [debugLogs, setDebugLogs] = useState<DebugLogEntry[]>([]);
   const [debugModalVisible, setDebugModalVisible] = useState(false);
+  const [apiTestResult, setApiTestResult] = useState<{ loading: boolean; status?: number; body?: string; error?: string } | null>(null);
 
   // Bulk post state
   const [bulkPostVisible, setBulkPostVisible] = useState(false);
@@ -723,6 +724,38 @@ const ManageJournals: React.FC = () => {
     console.log(`[DEBUG ${type.toUpperCase()}] ${message}`, data || '');
   };
 
+  // Helper: operator label → single-char code used by the API
+  const opToCode = (op: string) => {
+    if (op === 'Starts with') return 'S';
+    if (op === 'Ends with')   return 'E';
+    if (op === 'Equals')      return 'X';
+    return 'C';
+  };
+
+  // Build the full search URL from current form values (no offset/limit)
+  const buildSearchUrl = (offsetVal = 0, limitVal = 500) => {
+    const values = form.getFieldsValue();
+    const p = new URLSearchParams();
+    if (values.ledger)           p.append('ledger',        values.ledger);
+    if (values.accountingPeriod) p.append('period',        values.accountingPeriod);
+    if (values.journalBatch) {
+      p.append('batchName', values.journalBatch);
+      p.append('batchOp',   opToCode(values.batchOperator || 'Contains'));
+    }
+    if (values.journalDescription) {
+      p.append('journalDesc', values.journalDescription);
+      p.append('journalOp',   opToCode(values.journalOperator || 'Contains'));
+    }
+    if (values.source)                               p.append('source',        values.source);
+    if (values.batchStatus && values.batchStatus !== 'All') p.append('statusMeaning', values.batchStatus);
+    const { from: acctFrom, to: acctTo } = getAcctDateRange();
+    if (acctFrom) p.append('from_date', acctFrom.format('YYYY-MM-DD'));
+    if (acctTo)   p.append('to_date',   acctTo.format('YYYY-MM-DD'));
+    p.append('offset', offsetVal.toString());
+    p.append('limit',  limitVal.toString());
+    return `${API_BASE_URL}/headers?${p.toString()}`;
+  };
+
   // Search handler - calls the API with pagination to get ALL records
   const handleSearch = async () => {
     const values = form.getFieldsValue();
@@ -751,12 +784,6 @@ const ManageJournals: React.FC = () => {
       baseParams.append('ledger', values.ledger);
       baseParams.append('period', values.accountingPeriod);
 
-      const opToCode = (op: string) => {
-        if (op === 'Starts with') return 'S';
-        if (op === 'Ends with')   return 'E';
-        if (op === 'Equals')      return 'X';
-        return 'C'; // Contains (default)
-      };
       if (values.journalBatch) {
         baseParams.append('batchName', values.journalBatch);
         baseParams.append('batchOp', opToCode(values.batchOperator || 'Contains'));
@@ -3024,11 +3051,10 @@ const ManageJournals: React.FC = () => {
                     Export Excel {journals.length > 0 ? `(${journals.length})` : ''}
                   </Button>
                   <Button
-                    icon={<BugOutlined />}
-                    onClick={() => setDebugModalVisible(true)}
-                    disabled={debugLogs.length === 0}
+                    icon={<ApiOutlined />}
+                    onClick={() => { setApiTestResult(null); setDebugModalVisible(true); }}
                   >
-                    Debug Log ({debugLogs.length})
+                    Test API
                   </Button>
                 </div>
               </Form>
@@ -3951,85 +3977,190 @@ const ManageJournals: React.FC = () => {
         })()}
       </Modal>
 
-      {/* Debug Log Modal */}
+      {/* Search API Test Modal */}
       <Modal
         title={
           <Space>
-            <BugOutlined style={{ color: REDWOOD.warning }} />
-            <span>Debug Log - API Calls</span>
+            <ApiOutlined style={{ color: REDWOOD.info }} />
+            <span>Search API — Test Endpoint</span>
           </Space>
         }
         open={debugModalVisible}
-        onCancel={() => setDebugModalVisible(false)}
+        onCancel={() => { setDebugModalVisible(false); setApiTestResult(null); }}
         footer={[
-          <Button key="clear" onClick={() => setDebugLogs([])}>
-            Clear Logs
+          <Button key="clear" onClick={() => { setDebugLogs([]); setApiTestResult(null); }}>
+            Clear
           </Button>,
-          <Button key="close" type="primary" onClick={() => setDebugModalVisible(false)}>
+          <Button key="close" type="primary" onClick={() => { setDebugModalVisible(false); setApiTestResult(null); }}>
             Close
           </Button>,
         ]}
-        width={900}
+        width={960}
+        style={{ top: 40 }}
       >
-        <div style={{ maxHeight: 500, overflow: 'auto' }}>
-          {debugLogs.length === 0 ? (
-            <Text type="secondary">No logs yet. Run a search to see API calls.</Text>
-          ) : (
-            debugLogs.map((log, index) => (
-              <div
-                key={index}
-                style={{
-                  padding: '8px 12px',
-                  marginBottom: 8,
-                  borderRadius: 6,
-                  background:
-                    log.type === 'error' ? '#fff2f0' :
-                    log.type === 'request' ? '#e6f7ff' :
-                    log.type === 'response' ? '#f6ffed' :
-                    '#fafafa',
-                  border: `1px solid ${
-                    log.type === 'error' ? '#ffccc7' :
-                    log.type === 'request' ? '#91d5ff' :
-                    log.type === 'response' ? '#b7eb8f' :
-                    '#d9d9d9'
-                  }`,
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <Tag
-                    color={
-                      log.type === 'error' ? 'error' :
-                      log.type === 'request' ? 'processing' :
-                      log.type === 'response' ? 'success' :
-                      'default'
-                    }
-                  >
-                    {log.type.toUpperCase()}
-                  </Tag>
-                  <Text type="secondary" style={{ fontSize: 11 }}>
-                    {new Date(log.timestamp).toLocaleTimeString()}
-                  </Text>
+        {(() => {
+          const testUrl = buildSearchUrl(0, 500);
+          const params = new URLSearchParams(testUrl.split('?')[1] || '');
+          const paramRows: { key: string; value: string }[] = [];
+          params.forEach((v, k) => paramRows.push({ key: k, value: v }));
+
+          const runTest = async () => {
+            setApiTestResult({ loading: true });
+            try {
+              const res = await fetch(testUrl);
+              const text = await res.text();
+              let parsed: any;
+              try { parsed = JSON.parse(text); } catch { parsed = null; }
+              const preview = parsed
+                ? JSON.stringify({ success: parsed.success, totalCount: parsed.totalCount, itemsReturned: (parsed.items || []).length, firstItem: (parsed.items || [])[0] || null, error: parsed.error }, null, 2)
+                : text.substring(0, 800);
+              setApiTestResult({ loading: false, status: res.status, body: preview });
+            } catch (e: any) {
+              setApiTestResult({ loading: false, error: e.message });
+            }
+          };
+
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+              {/* ── Full URL ── */}
+              <div style={{ background: '#f0f5ff', border: '1px solid #adc6ff', borderRadius: 8, padding: '12px 14px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <Space>
+                    <Tag color="blue" style={{ fontFamily: 'monospace', fontWeight: 600 }}>GET</Tag>
+                    <Text strong style={{ fontSize: 13 }}>Search API Endpoint</Text>
+                  </Space>
+                  <Space>
+                    <Button
+                      size="small"
+                      icon={<CopyOutlined />}
+                      onClick={() => { navigator.clipboard.writeText(testUrl); message.success('URL copied'); }}
+                    >
+                      Copy URL
+                    </Button>
+                    <Button
+                      size="small"
+                      type="primary"
+                      icon={<SearchOutlined />}
+                      loading={apiTestResult?.loading}
+                      onClick={runTest}
+                    >
+                      Test
+                    </Button>
+                  </Space>
                 </div>
-                <Text strong style={{ display: 'block', marginBottom: 4 }}>{log.message}</Text>
-                {log.data && (
-                  <pre
-                    style={{
-                      margin: 0,
-                      padding: 8,
-                      background: '#f5f5f5',
-                      borderRadius: 4,
-                      fontSize: 11,
-                      overflow: 'auto',
-                      maxHeight: 200,
-                    }}
-                  >
-                    {typeof log.data === 'string' ? log.data : JSON.stringify(log.data, null, 2)}
-                  </pre>
-                )}
+                <div style={{
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  wordBreak: 'break-all',
+                  background: '#fff',
+                  border: '1px solid #d6e4ff',
+                  borderRadius: 4,
+                  padding: '8px 10px',
+                  userSelect: 'all',
+                }}>
+                  {testUrl}
+                </div>
               </div>
-            ))
-          )}
-        </div>
+
+              {/* ── Parameters table ── */}
+              <div>
+                <Text strong style={{ fontSize: 12, marginBottom: 6, display: 'block' }}>
+                  Query Parameters ({paramRows.length})
+                </Text>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: '#fafafa' }}>
+                      <th style={{ textAlign: 'left', padding: '5px 10px', border: '1px solid #f0f0f0', width: '35%' }}>Parameter</th>
+                      <th style={{ textAlign: 'left', padding: '5px 10px', border: '1px solid #f0f0f0' }}>Value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paramRows.map(({ key, value }) => (
+                      <tr key={key}>
+                        <td style={{ padding: '5px 10px', border: '1px solid #f0f0f0', fontFamily: 'monospace', color: '#0572CE' }}>{key}</td>
+                        <td style={{ padding: '5px 10px', border: '1px solid #f0f0f0', fontFamily: 'monospace' }}>{decodeURIComponent(value)}</td>
+                      </tr>
+                    ))}
+                    {paramRows.length === 0 && (
+                      <tr>
+                        <td colSpan={2} style={{ padding: '8px 10px', color: '#aaa', fontStyle: 'italic' }}>
+                          Fill in the search form fields above, then re-open this dialog to see the parameters.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* ── Test result ── */}
+              {apiTestResult && !apiTestResult.loading && (
+                <div style={{
+                  background: apiTestResult.error || (apiTestResult.status && apiTestResult.status >= 400) ? '#fff2f0' : '#f6ffed',
+                  border: `1px solid ${apiTestResult.error || (apiTestResult.status && apiTestResult.status >= 400) ? '#ffccc7' : '#b7eb8f'}`,
+                  borderRadius: 8,
+                  padding: '12px 14px',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <Space>
+                      <Text strong style={{ fontSize: 13 }}>Test Result</Text>
+                      {apiTestResult.status && (
+                        <Tag color={apiTestResult.status < 300 ? 'success' : 'error'}>
+                          HTTP {apiTestResult.status}
+                        </Tag>
+                      )}
+                    </Space>
+                    {apiTestResult.error && <Tag color="error">Error</Tag>}
+                  </div>
+                  <pre style={{ margin: 0, padding: 8, background: '#fff', borderRadius: 4, fontSize: 11, overflow: 'auto', maxHeight: 300 }}>
+                    {apiTestResult.error || apiTestResult.body}
+                  </pre>
+                </div>
+              )}
+              {apiTestResult?.loading && (
+                <div style={{ textAlign: 'center', padding: 16 }}>
+                  <Spin /> <Text type="secondary" style={{ marginLeft: 8 }}>Calling API…</Text>
+                </div>
+              )}
+
+              {/* ── Debug logs (collapsed, for advanced use) ── */}
+              {debugLogs.length > 0 && (
+                <Collapse ghost size="small">
+                  <Panel header={<Text type="secondary" style={{ fontSize: 12 }}>Raw Debug Logs ({debugLogs.length} entries)</Text>} key="logs">
+                    <div style={{ maxHeight: 300, overflow: 'auto' }}>
+                      {debugLogs.map((log, index) => (
+                        <div
+                          key={index}
+                          style={{
+                            padding: '6px 10px',
+                            marginBottom: 6,
+                            borderRadius: 4,
+                            background: log.type === 'error' ? '#fff2f0' : log.type === 'request' ? '#e6f7ff' : log.type === 'response' ? '#f6ffed' : '#fafafa',
+                            border: `1px solid ${log.type === 'error' ? '#ffccc7' : log.type === 'request' ? '#91d5ff' : log.type === 'response' ? '#b7eb8f' : '#d9d9d9'}`,
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <Tag color={log.type === 'error' ? 'error' : log.type === 'request' ? 'processing' : log.type === 'response' ? 'success' : 'default'} style={{ fontSize: 10 }}>
+                              {log.type.toUpperCase()}
+                            </Tag>
+                            <Text type="secondary" style={{ fontSize: 10 }}>{new Date(log.timestamp).toLocaleTimeString()}</Text>
+                          </div>
+                          <Text strong style={{ display: 'block', marginBottom: 2, fontSize: 12 }}>{log.message}</Text>
+                          {log.data && (
+                            <pre style={{ margin: 0, padding: 6, background: '#f5f5f5', borderRadius: 4, fontSize: 10, overflow: 'auto', maxHeight: 150 }}>
+                              {typeof log.data === 'string' ? log.data : JSON.stringify(log.data, null, 2)}
+                            </pre>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </Panel>
+                </Collapse>
+              )}
+
+            </div>
+          );
+        })()}
       </Modal>
 
       {/* ── GL Journal Entry View Modal ──────────────────────────────────── */}
