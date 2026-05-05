@@ -171,6 +171,9 @@ interface JournalLine {
   accountedDr: number;
   accountedCr: number;
   currency: string;
+  conversionRate?: number;
+  conversionRateType?: string;
+  conversionDate?: string;
   accountDescription?: string;
 }
 
