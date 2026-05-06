@@ -490,40 +490,35 @@ const InvoicesTabContent: React.FC<InvoicesTabContentProps> = ({
           showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} invoices`,
           onChange: (p, s) => { setPage(p); setPageSize(s); },
         }}
+        summary={() => {
+          if (invoicesLoading || filtered.length === 0) return null;
+          const fAmt  = filtered.reduce((s, r) => s + (r.invoiceAmount   || 0), 0);
+          const fPaid = filtered.reduce((s, r) => s + (r.amountPaid      || 0), 0);
+          const fBal  = filtered.reduce((s, r) => s + (r.amountRemaining || 0), 0);
+          const ccy   = filtered[0]?.currency || 'AED';
+          const fmtT  = (n: number) => new Intl.NumberFormat('en-AE', { style: 'currency', currency: ccy, minimumFractionDigits: 2 }).format(n);
+          const label = filtered.length !== invoices.length ? `Filtered (${filtered.length})` : `Total (${filtered.length})`;
+          return (
+            <Table.Summary>
+              <Table.Summary.Row style={{ background: '#fff7e6', fontWeight: 600 }}>
+                <Table.Summary.Cell index={0} colSpan={2}>
+                  <Text strong style={{ color: '#d46b08', fontSize: 12 }}>{label}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={2} align="right">
+                  <Text strong style={{ color: '#d46b08', fontFamily: 'monospace', fontSize: 12 }}>{fmtT(fAmt)}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={3} align="right">
+                  <Text strong style={{ color: REDWOOD.success, fontFamily: 'monospace', fontSize: 12 }}>{fmtT(fPaid)}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={4} align="right">
+                  <Text strong style={{ color: fBal > 0 ? REDWOOD.error : REDWOOD.success, fontFamily: 'monospace', fontSize: 12 }}>{fmtT(fBal)}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={5} colSpan={3} />
+              </Table.Summary.Row>
+            </Table.Summary>
+          );
+        }}
       />
-      {!invoicesLoading && filtered.length > 0 && (() => {
-        const fAmt  = filtered.reduce((s, r) => s + (r.invoiceAmount   || 0), 0);
-        const fPaid = filtered.reduce((s, r) => s + (r.amountPaid      || 0), 0);
-        const fBal  = filtered.reduce((s, r) => s + (r.amountRemaining || 0), 0);
-        const ccy   = filtered[0]?.currency || 'AED';
-        const fmtT  = (n: number) => new Intl.NumberFormat('en-AE', { style: 'currency', currency: ccy, minimumFractionDigits: 2 }).format(n);
-        const isFiltered = filtered.length !== invoices.length;
-        return (
-          <div style={{
-            display: 'flex', alignItems: 'center',
-            borderTop: '2px solid #d46b08',
-            background: '#fff7e6',
-            padding: '7px 12px',
-            borderRadius: '0 0 6px 6px',
-            gap: 8,
-          }}>
-            <Text strong style={{ color: '#d46b08', fontSize: 12, minWidth: 200 }}>
-              {isFiltered ? `Filtered Total (${filtered.length})` : `Grand Total (${filtered.length})`}
-            </Text>
-            <div style={{ display: 'flex', gap: 0, marginLeft: 'auto' }}>
-              <div style={{ width: 130, textAlign: 'right', paddingRight: 12 }}>
-                <Text strong style={{ color: '#d46b08', fontFamily: 'monospace', fontSize: 12 }}>{fmtT(fAmt)}</Text>
-              </div>
-              <div style={{ width: 130, textAlign: 'right', paddingRight: 12 }}>
-                <Text strong style={{ color: REDWOOD.success, fontFamily: 'monospace', fontSize: 12 }}>{fmtT(fPaid)}</Text>
-              </div>
-              <div style={{ width: 130, textAlign: 'right', paddingRight: 72 }}>
-                <Text strong style={{ color: fBal > 0 ? REDWOOD.error : REDWOOD.success, fontFamily: 'monospace', fontSize: 12 }}>{fmtT(fBal)}</Text>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
     </div>
   );
 };
