@@ -771,36 +771,18 @@ const COASegments: React.FC = () => {
                                       {tab.syncLogs.length > 0 ? `Logs (${tab.syncLogs.length})` : 'Logs'}
                                     </Button>
                                   </Tooltip>
-                                  <Tooltip title={
-                                    dataSource === 'apex'
-                                      ? 'Switch to Fusion to enable sync to APEX DB'
-                                      : tab.values.length === 0
-                                      ? 'No values loaded — segment may not exist in Fusion or fetch failed'
-                                      : 'Test sync with 1 item only'
-                                  }>
-                                    <Button size="small" onClick={() => handleSyncToDb(tab, 1)} disabled={tab.syncing || tab.values.length === 0 || dataSource === 'apex'} style={{ borderColor: REDWOOD.success, color: REDWOOD.success }}>
+                                  <Tooltip title={tab.values.length === 0 ? 'No values loaded' : 'Test sync with 1 item only'}>
+                                    <Button size="small" onClick={() => handleSyncToDb(tab, 1)} disabled={tab.syncing || tab.values.length === 0} style={{ borderColor: REDWOOD.success, color: REDWOOD.success }}>
                                       Test (1)
                                     </Button>
                                   </Tooltip>
-                                  <Tooltip title={
-                                    dataSource === 'apex'
-                                      ? 'Switch to Fusion to enable sync to APEX DB'
-                                      : tab.values.length === 0
-                                      ? 'No values loaded — segment may not exist in Fusion or fetch failed'
-                                      : 'Test sync with first 5 items'
-                                  }>
-                                    <Button size="small" onClick={() => handleSyncToDb(tab, 5)} disabled={tab.syncing || tab.values.length === 0 || dataSource === 'apex'} style={{ borderColor: REDWOOD.warning, color: REDWOOD.warning }}>
+                                  <Tooltip title={tab.values.length === 0 ? 'No values loaded' : 'Test sync with first 5 items'}>
+                                    <Button size="small" onClick={() => handleSyncToDb(tab, 5)} disabled={tab.syncing || tab.values.length === 0} style={{ borderColor: REDWOOD.warning, color: REDWOOD.warning }}>
                                       Test (5)
                                     </Button>
                                   </Tooltip>
-                                  <Tooltip title={
-                                    dataSource === 'apex'
-                                      ? 'Switch to Fusion to enable sync to APEX DB'
-                                      : tab.values.length === 0
-                                      ? 'No values loaded — segment may not exist in Fusion or fetch failed'
-                                      : 'Sync all values to APEX DB'
-                                  }>
-                                    <Button type="primary" size="small" icon={tab.syncing ? <SyncOutlined spin /> : <CloudUploadOutlined />} onClick={() => handleSyncToDb(tab, 0)} disabled={tab.syncing || tab.values.length === 0 || dataSource === 'apex'} style={{ background: tab.syncStatus === 'success' ? REDWOOD.success : REDWOOD.info }}>
+                                  <Tooltip title={tab.values.length === 0 ? 'No values loaded' : 'Sync all values to APEX DB'}>
+                                    <Button type="primary" size="small" icon={tab.syncing ? <SyncOutlined spin /> : <CloudUploadOutlined />} onClick={() => handleSyncToDb(tab, 0)} disabled={tab.syncing || tab.values.length === 0} style={{ background: tab.syncStatus === 'success' ? REDWOOD.success : REDWOOD.info }}>
                                       {tab.syncing ? 'Syncing...' : 'Sync to DB'}
                                     </Button>
                                   </Tooltip>
