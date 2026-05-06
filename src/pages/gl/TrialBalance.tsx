@@ -181,6 +181,7 @@ interface TabData {
   segmentsBefore: string[];
   segmentsAfter: string[];
   gridSearch: string;
+  showEntered: boolean;
 }
 
 interface ApiCallInfo {
@@ -470,6 +471,7 @@ const TrialBalance: React.FC = () => {
       segmentsBefore: [],
       segmentsAfter: [],
       gridSearch: '',
+      showEntered: false,
     };
 
     setTabs(prev => [...prev, newTab]);
@@ -533,6 +535,7 @@ const TrialBalance: React.FC = () => {
       segmentsBefore: [],
       segmentsAfter: [],
       gridSearch: '',
+      showEntered: false,
     };
 
     setTabs(prev => [...prev, newTab]);
@@ -618,6 +621,7 @@ const TrialBalance: React.FC = () => {
       segmentsBefore: [],
       segmentsAfter: [],
       gridSearch: '',
+      showEntered: false,
     };
 
     setTabs(prev => [...prev, newTab]);
@@ -669,7 +673,7 @@ const TrialBalance: React.FC = () => {
       data: [], rrData: [], rrGenerating: false, loading: true, error: null,
       companies: [], currencies: [],
       selectedCompany: null, selectedCurrency: null,
-      segmentsBefore: [], segmentsAfter: [], gridSearch: '',
+      segmentsBefore: [], segmentsAfter: [], gridSearch: '', showEntered: false,
     };
     setTabs(prev => [...prev, newTab]);
     setActiveTab(tabKey);
@@ -947,6 +951,10 @@ const TrialBalance: React.FC = () => {
     setTabs(prev => prev.map(t => t.key === tabKey ? { ...t, gridSearch: search } : t));
   }, []);
 
+  const updateTabEntered = useCallback((tabKey: string, show: boolean) => {
+    setTabs(prev => prev.map(t => t.key === tabKey ? { ...t, showEntered: show } : t));
+  }, []);
+
   // Handle segment drop
   const handleSegmentDrop = useCallback((tabKey: string, segment: string, position: 'before' | 'after') => {
     setTabs(prev => prev.map(t => {
@@ -1172,19 +1180,6 @@ const TrialBalance: React.FC = () => {
           </Button>
           <Button
             type="primary"
-            icon={<BarChartOutlined />}
-            size="small"
-            onClick={() => fetchRrTrialBalance(record)}
-            style={{
-              background: REDWOOD.success,
-              borderColor: REDWOOD.success,
-              borderRadius: 6,
-            }}
-          >
-            ReERP TB
-          </Button>
-          <Button
-            type="primary"
             icon={<ThunderboltOutlined />}
             size="small"
             onClick={() => fetchDynamicTB(record)}
@@ -1194,7 +1189,7 @@ const TrialBalance: React.FC = () => {
               borderRadius: 6,
             }}
           >
-            Dynamic TB
+            Dynamic PTD TB
           </Button>
           <Button
             type="primary"
@@ -2627,7 +2622,7 @@ const TrialBalance: React.FC = () => {
           },
         ],
       },
-      {
+      ...(tab.showEntered ? [{
         title: <span style={{ color: '#52c41a' }}>Entered</span>,
         children: [
           {
@@ -2655,15 +2650,10 @@ const TrialBalance: React.FC = () => {
             render: fmtNet,
           },
         ],
-      },
-      {
-        title: 'YTD Net', dataIndex: 'ytd_net', key: 'ytd_net',
-        align: 'right' as const, width: 130,
-        sorter: (a: GroupRow, b: GroupRow) => a.ytd_net - b.ytd_net,
-        render: fmtNet,
-      },
+      }] : []),
     ];
 
+    const entCols = tab.showEntered ? 4 : 0;
     const summaryRow = () => {
       const fmt = (v: number) =>
         new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
@@ -2680,14 +2670,11 @@ const TrialBalance: React.FC = () => {
                 <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#1677ff' }}>{fmt(v)}</Text>
               </Table.Summary.Cell>
             ))}
-            {entValues.map((v, i) => (
+            {tab.showEntered && entValues.map((v, i) => (
               <Table.Summary.Cell key={`ent-${i}`} index={i + 7} align="right">
                 <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#52c41a' }}>{fmt(v)}</Text>
               </Table.Summary.Cell>
             ))}
-            <Table.Summary.Cell index={11} align="right">
-              <Text strong style={{ fontFamily: 'monospace', fontSize: 11 }}>{fmt(totals.ytd_net)}</Text>
-            </Table.Summary.Cell>
           </Table.Summary.Row>
         </Table.Summary>
       );
@@ -2739,6 +2726,13 @@ const TrialBalance: React.FC = () => {
           </Col>
           <Col span={6} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <Tag color="blue" style={{ lineHeight: '30px', fontSize: 12 }}>{tableRows.length} accounts</Tag>
+            <Switch
+              size="small"
+              checked={tab.showEntered}
+              onChange={v => updateTabEntered(tab.key, v)}
+              checkedChildren="Entered ✓"
+              unCheckedChildren="Entered"
+            />
             <Button
               icon={<FileExcelOutlined />}
               size="small"
@@ -2941,7 +2935,7 @@ const TrialBalance: React.FC = () => {
           },
         ],
       },
-      {
+      ...(tab.showEntered ? [{
         title: <span style={{ color: '#52c41a' }}>Entered (YTD)</span>,
         children: [
           {
@@ -2969,7 +2963,7 @@ const TrialBalance: React.FC = () => {
             render: fmtNet,
           },
         ],
-      },
+      }] : []),
     ];
 
     const fmt = (v: number) =>
@@ -2989,7 +2983,7 @@ const TrialBalance: React.FC = () => {
                 <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#1677ff' }}>{fmt(v)}</Text>
               </Table.Summary.Cell>
             ))}
-            {entValues.map((v, i) => (
+            {tab.showEntered && entValues.map((v, i) => (
               <Table.Summary.Cell key={`ent-${i}`} index={i + 7} align="right">
                 <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#52c41a' }}>{fmt(v)}</Text>
               </Table.Summary.Cell>
@@ -3048,6 +3042,13 @@ const TrialBalance: React.FC = () => {
           </Col>
           <Col span={6} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Tag color="blue" style={{ lineHeight: '30px', fontSize: 12 }}>{tableRows.length} accounts</Tag>
+            <Switch
+              size="small"
+              checked={tab.showEntered}
+              onChange={v => updateTabEntered(tab.key, v)}
+              checkedChildren="Entered ✓"
+              unCheckedChildren="Entered"
+            />
           </Col>
         </Row>
 
