@@ -49,7 +49,7 @@ import {
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { SYNC_OBJECTS, PROXY_CONFIG, APEX_DB_CONFIG, ORACLE_FUSION_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
-import { syncGLJournals, syncGLBatchesOnly, syncGLHeadersOnly, syncGLLinesOnly, testGLConnection, fetchGLJournalBatches, processSingleGLBatch, type SyncProgress, type BatchOnlySyncProgress, type HeadersOnlySyncProgress, type LinesOnlySyncProgress, type LogCallback, type BatchPayloadCallback, type SingleBatchResult } from '../../services/gl-sync.service';
+import { syncGLJournals, syncGLBatchesOnly, syncGLHeadersOnly, syncGLLinesOnly, testGLConnection, fetchGLJournalBatches, processSingleGLBatch, debugStep1_FetchBatches, debugStep2_FetchHeaders, debugStep3_FetchLines, debugStep4_InsertBatch, debugStep5_InsertHeaders, debugStep6_InsertLines, type SyncProgress, type BatchOnlySyncProgress, type HeadersOnlySyncProgress, type LinesOnlySyncProgress, type LogCallback, type BatchPayloadCallback, type SingleBatchResult, type DebugBatchInfo, type DebugHeaderInfo } from '../../services/gl-sync.service';
 import { syncAPInvoices, testAPConnection, type APSyncProgress, type InvoicePayloadCallback } from '../../services/ap-sync.service';
 import { syncAPPayments, testAPPaymentsConnection, type APPaymentsSyncProgress, type PaymentPayloadCallback } from '../../services/ap-payments-sync.service';
 import { syncGLCodeCombinations, testGLCodeCombConnection, type CodeCombSyncProgress, type CodeCombPayloadCallback } from '../../services/gl-codecomb-sync.service';
@@ -884,7 +884,21 @@ const SyncData: React.FC = () => {
   const isSyncingRef = useRef(false);
 
   // Batch list modal state (two-phase GL Journal sync)
-  const [glSyncMode,     setGlSyncMode]     = useState<'chain' | 'batch-popup'>('chain');
+  const [glSyncMode,     setGlSyncMode]     = useState<'chain' | 'batch-popup' | 'step-debug'>('chain');
+
+  // Step-debug modal state
+  const [debugModalOpen,      setDebugModalOpen]      = useState(false);
+  const [debugParams,         setDebugParams]         = useState<Record<string, string>>({});
+  const [debugStep,           setDebugStep]           = useState(0);
+  const [debugLoading,        setDebugLoading]        = useState(false);
+  const [debugBatches,        setDebugBatches]        = useState<DebugBatchInfo[]>([]);
+  const [debugSelectedBatch,  setDebugSelectedBatch]  = useState<DebugBatchInfo | null>(null);
+  const [debugHeaders,        setDebugHeaders]        = useState<DebugHeaderInfo[]>([]);
+  const [debugLinesData,      setDebugLinesData]      = useState<{headerId:number;headerName:string;lines:any[];linesHref:string|null}[]>([]);
+  const [debugBatchInsert,    setDebugBatchInsert]    = useState<any>(null);
+  const [debugHeaderInserts,  setDebugHeaderInserts]  = useState<{headerId:number;headerName:string;result:any;ok:boolean}[]>([]);
+  const [debugLineInserts,    setDebugLineInserts]    = useState<{headerId:number;headerName:string;result:any;ok:boolean;count:number}[]>([]);
+  const [debugLogs,           setDebugLogs]           = useState<{type:string;msg:string}[]>([]);
   const [batchListOpen,  setBatchListOpen]  = useState(false);
   const [batchList,      setBatchList]      = useState<BatchListItem[]>([]);
   const [batchSyncing,   setBatchSyncing]   = useState(false);
@@ -1959,6 +1973,76 @@ const SyncData: React.FC = () => {
     });
   }, []);
 
+  // ── Debug modal step runners ──────────────────────────────────────────────
+  const debugLog = useCallback((type: string, msg: string) => {
+    setDebugLogs(prev => [...prev, { type, msg }]);
+  }, []);
+
+  const runDebugStep1 = async () => {
+    setDebugLoading(true);
+    try {
+      const r = await debugStep1_FetchBatches(debugParams, debugLog as LogCallback);
+      setDebugBatches(r.batches);
+      setDebugSelectedBatch(r.batches[0] ?? null);
+      setDebugStep(1);
+    } catch (e) { debugLog('error', String(e)); }
+    setDebugLoading(false);
+  };
+
+  const runDebugStep2 = async () => {
+    if (!debugSelectedBatch) return;
+    setDebugLoading(true);
+    try {
+      const r = await debugStep2_FetchHeaders(debugSelectedBatch, debugLog as LogCallback);
+      setDebugHeaders(r.headers);
+      setDebugStep(2);
+    } catch (e) { debugLog('error', String(e)); }
+    setDebugLoading(false);
+  };
+
+  const runDebugStep3 = async () => {
+    setDebugLoading(true);
+    try {
+      const r = await debugStep3_FetchLines(debugHeaders, debugLog as LogCallback);
+      setDebugLinesData(r);
+      setDebugStep(3);
+    } catch (e) { debugLog('error', String(e)); }
+    setDebugLoading(false);
+  };
+
+  const runDebugStep4 = async () => {
+    if (!debugSelectedBatch) return;
+    setDebugLoading(true);
+    try {
+      const r = await debugStep4_InsertBatch(debugSelectedBatch, debugLog as LogCallback);
+      setDebugBatchInsert(r);
+      setDebugStep(4);
+    } catch (e) { debugLog('error', String(e)); }
+    setDebugLoading(false);
+  };
+
+  const runDebugStep5 = async () => {
+    if (!debugSelectedBatch) return;
+    setDebugLoading(true);
+    try {
+      const r = await debugStep5_InsertHeaders(debugHeaders, debugSelectedBatch.batchId, debugLog as LogCallback);
+      setDebugHeaderInserts(r);
+      setDebugStep(5);
+    } catch (e) { debugLog('error', String(e)); }
+    setDebugLoading(false);
+  };
+
+  const runDebugStep6 = async () => {
+    if (!debugSelectedBatch) return;
+    setDebugLoading(true);
+    try {
+      const r = await debugStep6_InsertLines(debugLinesData, debugSelectedBatch.batchId, debugLog as LogCallback);
+      setDebugLineInserts(r);
+      setDebugStep(6);
+    } catch (e) { debugLog('error', String(e)); }
+    setDebugLoading(false);
+  };
+
   const handleSync = async () => {
     if (!selectedObject) {
       addLog('error', 'Please select a sync object');
@@ -2977,6 +3061,22 @@ const SyncData: React.FC = () => {
       isSyncingRef.current = false;
       return; // Modal takes over from here
 
+    } else if (glSyncMode === 'step-debug') {
+      // GL Journals — Step Debug mode: open the debug modal with button-per-step
+      setDebugParams(parameters);
+      setDebugStep(0);
+      setDebugBatches([]);
+      setDebugSelectedBatch(null);
+      setDebugHeaders([]);
+      setDebugLinesData([]);
+      setDebugBatchInsert(null);
+      setDebugHeaderInserts([]);
+      setDebugLineInserts([]);
+      setDebugLogs([]);
+      setDebugModalOpen(true);
+      isSyncingRef.current = false;
+      return;
+
     } else {
       // GL Journals — Chain mode: auto process everything in sequence
       setProgress({
@@ -3797,11 +3897,22 @@ const SyncData: React.FC = () => {
                           >
                             Batch Popup
                           </Button>
+                          <Button
+                            size="small"
+                            type={glSyncMode === 'step-debug' ? 'primary' : 'default'}
+                            icon={<BugOutlined />}
+                            onClick={() => setGlSyncMode('step-debug')}
+                            style={glSyncMode === 'step-debug' ? { background: '#d46b08', borderColor: '#d46b08' } : {}}
+                          >
+                            Step Debug
+                          </Button>
                         </Space>
                         <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 6 }}>
                           {glSyncMode === 'chain'
                             ? 'Processes all batches automatically in sequence.'
-                            : 'Shows batch list — process one by one, resume after refresh.'}
+                            : glSyncMode === 'batch-popup'
+                            ? 'Shows batch list — process one by one, resume after refresh.'
+                            : 'Run each webservice step manually — inspect Oracle & APEX responses.'}
                         </Text>
                       </div>
                     )}
@@ -7621,6 +7732,253 @@ const SyncData: React.FC = () => {
 
     {/* ── Fixed Assets BIP Reports Modal ────────────────────────────── */}
     <FixedAssetsSync open={faModalOpen} onClose={() => setFaModalOpen(false)} />
+
+    {/* ── GL Journals Step-Debug Modal ──────────────────────────────── */}
+    <Modal
+      open={debugModalOpen}
+      onCancel={() => setDebugModalOpen(false)}
+      footer={null}
+      width={860}
+      title={
+        <Space>
+          <BugOutlined style={{ color: '#d46b08' }} />
+          <span>GL Journal Full Sync — Step Debug</span>
+          <Tag color="orange">
+            {Object.entries(debugParams).filter(([,v])=>v).map(([k,v])=>`${k}=${v}`).join(', ') || 'No filter'}
+          </Tag>
+        </Space>
+      }
+      styles={{ body: { padding: 16, maxHeight: '80vh', overflowY: 'auto' } }}
+    >
+      {(() => {
+        const stepStyle = (n: number): React.CSSProperties => ({
+          border: `1px solid ${debugStep >= n - 1 ? '#d46b08' : '#e5e5e5'}`,
+          borderRadius: 8,
+          padding: 14,
+          marginBottom: 12,
+          background: debugStep >= n ? '#fffbe6' : debugStep === n - 1 ? '#fff7e6' : '#fafafa',
+          opacity: debugStep < n - 1 ? 0.45 : 1,
+        });
+
+        const logColor: Record<string, string> = {
+          step: '#531dab', info: '#1677ff', success: '#237804', error: '#c74634', warning: '#d4a800'
+        };
+
+        const fmtResult = (r: any) => (
+          <pre style={{ fontSize: 11, background: '#1a1a1a', color: '#d4f7d4', padding: 10, borderRadius: 6, margin: 0, maxHeight: 160, overflow: 'auto' }}>
+            {JSON.stringify(r, null, 2)}
+          </pre>
+        );
+
+        return (
+          <div>
+            {/* Step 1 — Fetch Batch */}
+            <div style={stepStyle(1)}>
+              <Space style={{ marginBottom: 8 }}>
+                <Tag color="orange">Step 1</Tag>
+                <Text strong>Fetch Batch from Oracle Fusion</Text>
+                <Tag color="blue">GET journalBatches</Tag>
+              </Space>
+              <div style={{ marginBottom: 8 }}>
+                <Button size="small" type="primary" loading={debugLoading && debugStep === 0}
+                  disabled={debugLoading || debugStep > 0}
+                  style={{ background: '#d46b08', borderColor: '#d46b08' }}
+                  onClick={runDebugStep1}>
+                  ▶ Run Step 1
+                </Button>
+              </div>
+              {debugStep >= 1 && (
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Found {debugBatches.length} batch(es){debugBatches.length === 0 && ' — check your filter parameters'}</Text>
+                  {debugBatches.map((b, i) => (
+                    <div key={i} style={{ marginTop: 6, padding: '6px 10px', background: '#fff', borderRadius: 6, border: '1px solid #e5e5e5', fontSize: 12 }}>
+                      <Space wrap>
+                        <Tag color="blue">ID: {b.batchId}</Tag>
+                        <Text strong>{b.batchName}</Text>
+                        {b.status && <Tag>{b.status}</Tag>}
+                        {b.period && <Tag color="geekblue">{b.period}</Tag>}
+                        {b.ledger && <Text type="secondary">{b.ledger}</Text>}
+                      </Space>
+                      <div style={{ fontSize: 11, marginTop: 4, color: b.headersHref ? '#237804' : '#c74634' }}>
+                        Headers link: {b.headersHref ? '✓ present' : '✗ missing'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Step 2 — Fetch Headers */}
+            <div style={stepStyle(2)}>
+              <Space style={{ marginBottom: 8 }}>
+                <Tag color="orange">Step 2</Tag>
+                <Text strong>Fetch Headers from Oracle Fusion</Text>
+                <Tag color="blue">GET journalHeaders (child link)</Tag>
+              </Space>
+              <div style={{ marginBottom: 8 }}>
+                <Button size="small" type="primary" loading={debugLoading && debugStep === 1}
+                  disabled={debugLoading || debugStep !== 1}
+                  style={{ background: '#d46b08', borderColor: '#d46b08' }}
+                  onClick={runDebugStep2}>
+                  ▶ Run Step 2
+                </Button>
+              </div>
+              {debugStep >= 2 && (
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Found {debugHeaders.length} header(s) for batch {debugSelectedBatch?.batchId}</Text>
+                  {debugHeaders.map((h, i) => (
+                    <div key={i} style={{ marginTop: 6, padding: '6px 10px', background: '#fff', borderRadius: 6, border: '1px solid #e5e5e5', fontSize: 12 }}>
+                      <Space wrap>
+                        <Tag color="purple">ID: {h.headerId}</Tag>
+                        <Text strong>{h.headerName}</Text>
+                        <span style={{ fontSize: 11, color: h.linesHref ? '#237804' : '#c74634' }}>
+                          Lines link: {h.linesHref ? '✓' : '✗ missing'}
+                        </span>
+                      </Space>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Step 3 — Fetch Lines */}
+            <div style={stepStyle(3)}>
+              <Space style={{ marginBottom: 8 }}>
+                <Tag color="orange">Step 3</Tag>
+                <Text strong>Fetch Lines from Oracle Fusion</Text>
+                <Tag color="blue">GET journalLines (per header)</Tag>
+              </Space>
+              <div style={{ marginBottom: 8 }}>
+                <Button size="small" type="primary" loading={debugLoading && debugStep === 2}
+                  disabled={debugLoading || debugStep !== 2}
+                  style={{ background: '#d46b08', borderColor: '#d46b08' }}
+                  onClick={runDebugStep3}>
+                  ▶ Run Step 3
+                </Button>
+              </div>
+              {debugStep >= 3 && (
+                <div>
+                  {debugLinesData.map((ld, i) => (
+                    <div key={i} style={{ marginTop: 6, padding: '6px 10px', background: '#fff', borderRadius: 6, border: '1px solid #e5e5e5', fontSize: 12 }}>
+                      <Space wrap>
+                        <Tag color="purple">Header {ld.headerId}</Tag>
+                        <Text>{ld.headerName}</Text>
+                        <Tag color={ld.lines.length > 0 ? 'green' : 'red'}>{ld.lines.length} line(s)</Tag>
+                      </Space>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Step 4 — Insert Batch to APEX */}
+            <div style={stepStyle(4)}>
+              <Space style={{ marginBottom: 8 }}>
+                <Tag color="volcano">Step 4</Tag>
+                <Text strong>Insert Batch to APEX</Text>
+                <Tag color="volcano">POST gl/journalbatches</Tag>
+              </Space>
+              <div style={{ marginBottom: 8 }}>
+                <Button size="small" type="primary" loading={debugLoading && debugStep === 3}
+                  disabled={debugLoading || debugStep !== 3}
+                  danger
+                  onClick={runDebugStep4}>
+                  ▶ Run Step 4
+                </Button>
+              </div>
+              {debugStep >= 4 && debugBatchInsert && (
+                <div>
+                  <Tag color={debugBatchInsert.success || debugBatchInsert.syncedCount > 0 ? 'green' : 'red'}>
+                    {debugBatchInsert.success || debugBatchInsert.syncedCount > 0 ? 'SUCCESS' : 'FAILED'}
+                  </Tag>
+                  {fmtResult(debugBatchInsert)}
+                </div>
+              )}
+            </div>
+
+            {/* Step 5 — Insert Headers to APEX */}
+            <div style={stepStyle(5)}>
+              <Space style={{ marginBottom: 8 }}>
+                <Tag color="volcano">Step 5</Tag>
+                <Text strong>Insert Headers to APEX</Text>
+                <Tag color="volcano">POST gl/journals/headers</Tag>
+              </Space>
+              <div style={{ marginBottom: 8 }}>
+                <Button size="small" type="primary" loading={debugLoading && debugStep === 4}
+                  disabled={debugLoading || debugStep !== 4}
+                  danger
+                  onClick={runDebugStep5}>
+                  ▶ Run Step 5
+                </Button>
+              </div>
+              {debugStep >= 5 && (
+                <div>
+                  {debugHeaderInserts.map((hi, i) => (
+                    <div key={i} style={{ marginTop: 6, padding: '6px 10px', background: '#fff', borderRadius: 6, border: '1px solid #e5e5e5', fontSize: 12 }}>
+                      <Space wrap>
+                        <Tag color="purple">Header {hi.headerId}</Tag>
+                        <Text>{hi.headerName}</Text>
+                        <Tag color={hi.ok ? 'green' : 'red'}>{hi.ok ? 'OK' : 'FAILED'}</Tag>
+                      </Space>
+                      {fmtResult(hi.result)}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Step 6 — Insert Lines to APEX */}
+            <div style={stepStyle(6)}>
+              <Space style={{ marginBottom: 8 }}>
+                <Tag color="volcano">Step 6</Tag>
+                <Text strong>Insert Lines to APEX</Text>
+                <Tag color="volcano">POST gl/journals/lines</Tag>
+              </Space>
+              <div style={{ marginBottom: 8 }}>
+                <Button size="small" type="primary" loading={debugLoading && debugStep === 5}
+                  disabled={debugLoading || debugStep !== 5}
+                  danger
+                  onClick={runDebugStep6}>
+                  ▶ Run Step 6
+                </Button>
+              </div>
+              {debugStep >= 6 && (
+                <div>
+                  {debugLineInserts.map((li, i) => (
+                    <div key={i} style={{ marginTop: 6, padding: '6px 10px', background: '#fff', borderRadius: 6, border: '1px solid #e5e5e5', fontSize: 12 }}>
+                      <Space wrap>
+                        <Tag color="purple">Header {li.headerId}</Tag>
+                        <Text>{li.headerName}</Text>
+                        <Tag>{li.count} lines</Tag>
+                        <Tag color={li.ok ? 'green' : 'red'}>{li.ok ? 'OK' : 'FAILED'}</Tag>
+                      </Space>
+                      {li.result && fmtResult(li.result)}
+                    </div>
+                  ))}
+                  {debugStep === 6 && debugLineInserts.every(li => li.ok) && (
+                    <Alert type="success" showIcon message="All steps completed successfully!" style={{ marginTop: 12 }} />
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Log Panel */}
+            {debugLogs.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <Text strong style={{ fontSize: 12 }}>Debug Log</Text>
+                <div style={{ marginTop: 6, background: '#141414', borderRadius: 6, padding: 10, maxHeight: 200, overflowY: 'auto', fontFamily: 'monospace', fontSize: 11 }}>
+                  {debugLogs.map((l, i) => (
+                    <div key={i} style={{ color: logColor[l.type] || '#ccc', lineHeight: 1.5 }}>
+                      [{l.type.toUpperCase()}] {l.msg}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+    </Modal>
     </>
   );
 };
