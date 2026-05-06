@@ -457,7 +457,7 @@ const SupplierBalance: React.FC = () => {
             const totalBal  = invoices.reduce((s, r) => s + r.amountRemaining, 0);
             const isAllOnePage = invoices.length === pageData.length;
             return (
-              <Table.Summary fixed>
+              <Table.Summary>
                 {!isAllOnePage && (
                   <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
                     <Table.Summary.Cell index={0} colSpan={2}><Text strong style={{ fontSize: 11 }}>Page Total</Text></Table.Summary.Cell>
