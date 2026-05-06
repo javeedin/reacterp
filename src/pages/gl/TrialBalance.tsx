@@ -2561,7 +2561,24 @@ const TrialBalance: React.FC = () => {
           </Text>
         )},
       { title: 'Book Rate', dataIndex: 'bookRate', key: 'bookRate', align: 'right' as const, width: 100,
-        render: (v: number) => <Text style={{ fontFamily: 'monospace', color: REDWOOD.textSecondary }}>{v ? v.toFixed(5) : '—'}</Text> },
+        render: (v: number, r: CcyRow) => (
+          <Tooltip
+            title={
+              <div style={{ fontSize: 12 }}>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>Book Rate Formula</div>
+                <div style={{ fontFamily: 'monospace' }}>Accounted Closing ÷ Entered Closing</div>
+                <div style={{ marginTop: 6, color: '#ffffffa0' }}>
+                  {r.acctClosing.toFixed(2)} ÷ {r.entClosing.toFixed(2)}
+                </div>
+              </div>
+            }
+            color="#1d3557"
+          >
+            <Text style={{ fontFamily: 'monospace', color: REDWOOD.textSecondary, cursor: 'help', borderBottom: '1px dashed #aaa' }}>
+              {v ? v.toFixed(5) : '—'}
+            </Text>
+          </Tooltip>
+        )},
       { title: 'New Rate', key: 'newRate', align: 'right' as const, width: 120,
         render: (_: any, r: CcyRow) => (
           <Input
@@ -2954,30 +2971,39 @@ const TrialBalance: React.FC = () => {
       },
       ...(tab.showEntered ? [{
         title: <span style={{ color: '#08979c' }}>Entered</span>,
+        onHeaderCell: () => ({ style: { background: '#e6fffb' } }),
         children: [
           {
             title: 'Opening', dataIndex: 'entered_opening', key: 'entered_opening',
             align: 'right' as const, width: 130,
             sorter: (a: GroupRow, b: GroupRow) => a.entered_opening - b.entered_opening,
             render: fmtNet,
+            onHeaderCell: () => ({ style: { background: '#e6fffb' } }),
+            onCell: () => ({ style: { background: '#f0fffe' } }),
           },
           {
             title: 'Debit', dataIndex: 'entered_debit', key: 'entered_debit',
             align: 'right' as const, width: 130,
             sorter: (a: GroupRow, b: GroupRow) => a.entered_debit - b.entered_debit,
             render: fmtDr,
+            onHeaderCell: () => ({ style: { background: '#e6fffb' } }),
+            onCell: () => ({ style: { background: '#f0fffe' } }),
           },
           {
             title: 'Credit', dataIndex: 'entered_credit', key: 'entered_credit',
             align: 'right' as const, width: 130,
             sorter: (a: GroupRow, b: GroupRow) => a.entered_credit - b.entered_credit,
             render: fmtCr,
+            onHeaderCell: () => ({ style: { background: '#e6fffb' } }),
+            onCell: () => ({ style: { background: '#f0fffe' } }),
           },
           {
             title: 'Closing', dataIndex: 'entered_closing', key: 'entered_closing',
             align: 'right' as const, width: 130,
             sorter: (a: GroupRow, b: GroupRow) => a.entered_closing - b.entered_closing,
             render: fmtNet,
+            onHeaderCell: () => ({ style: { background: '#e6fffb' } }),
+            onCell: () => ({ style: { background: '#f0fffe' } }),
           },
         ],
       }] : []),
@@ -3281,30 +3307,39 @@ const TrialBalance: React.FC = () => {
       },
       ...(tab.showEntered ? [{
         title: <span style={{ color: '#08979c' }}>Entered (YTD)</span>,
+        onHeaderCell: () => ({ style: { background: '#e6fffb' } }),
         children: [
           {
             title: 'YTD Opening', dataIndex: 'ytd_entered_opening', key: 'ytd_entered_opening',
             align: 'right' as const, width: 130,
             sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.ytd_entered_opening - b.ytd_entered_opening,
             render: fmtNet,
+            onHeaderCell: () => ({ style: { background: '#e6fffb' } }),
+            onCell: () => ({ style: { background: '#f0fffe' } }),
           },
           {
             title: 'YTD Debit', dataIndex: 'ytd_entered_debit', key: 'ytd_entered_debit',
             align: 'right' as const, width: 130,
             sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.ytd_entered_debit - b.ytd_entered_debit,
             render: fmtDr,
+            onHeaderCell: () => ({ style: { background: '#e6fffb' } }),
+            onCell: () => ({ style: { background: '#f0fffe' } }),
           },
           {
             title: 'YTD Credit', dataIndex: 'ytd_entered_credit', key: 'ytd_entered_credit',
             align: 'right' as const, width: 130,
             sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.ytd_entered_credit - b.ytd_entered_credit,
             render: fmtCr,
+            onHeaderCell: () => ({ style: { background: '#e6fffb' } }),
+            onCell: () => ({ style: { background: '#f0fffe' } }),
           },
           {
             title: 'Closing', dataIndex: 'entered_closing', key: 'entered_closing',
             align: 'right' as const, width: 130,
             sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.entered_closing - b.entered_closing,
             render: fmtNet,
+            onHeaderCell: () => ({ style: { background: '#e6fffb' } }),
+            onCell: () => ({ style: { background: '#f0fffe' } }),
           },
         ],
       }] : []),
