@@ -491,6 +491,39 @@ const InvoicesTabContent: React.FC<InvoicesTabContentProps> = ({
           onChange: (p, s) => { setPage(p); setPageSize(s); },
         }}
       />
+      {!invoicesLoading && filtered.length > 0 && (() => {
+        const fAmt  = filtered.reduce((s, r) => s + (r.invoiceAmount   || 0), 0);
+        const fPaid = filtered.reduce((s, r) => s + (r.amountPaid      || 0), 0);
+        const fBal  = filtered.reduce((s, r) => s + (r.amountRemaining || 0), 0);
+        const ccy   = filtered[0]?.currency || 'AED';
+        const fmtT  = (n: number) => new Intl.NumberFormat('en-AE', { style: 'currency', currency: ccy, minimumFractionDigits: 2 }).format(n);
+        const isFiltered = filtered.length !== invoices.length;
+        return (
+          <div style={{
+            display: 'flex', alignItems: 'center',
+            borderTop: '2px solid #d46b08',
+            background: '#fff7e6',
+            padding: '7px 12px',
+            borderRadius: '0 0 6px 6px',
+            gap: 8,
+          }}>
+            <Text strong style={{ color: '#d46b08', fontSize: 12, minWidth: 200 }}>
+              {isFiltered ? `Filtered Total (${filtered.length})` : `Grand Total (${filtered.length})`}
+            </Text>
+            <div style={{ display: 'flex', gap: 0, marginLeft: 'auto' }}>
+              <div style={{ width: 130, textAlign: 'right', paddingRight: 12 }}>
+                <Text strong style={{ color: '#d46b08', fontFamily: 'monospace', fontSize: 12 }}>{fmtT(fAmt)}</Text>
+              </div>
+              <div style={{ width: 130, textAlign: 'right', paddingRight: 12 }}>
+                <Text strong style={{ color: REDWOOD.success, fontFamily: 'monospace', fontSize: 12 }}>{fmtT(fPaid)}</Text>
+              </div>
+              <div style={{ width: 130, textAlign: 'right', paddingRight: 72 }}>
+                <Text strong style={{ color: fBal > 0 ? REDWOOD.error : REDWOOD.success, fontFamily: 'monospace', fontSize: 12 }}>{fmtT(fBal)}</Text>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };
