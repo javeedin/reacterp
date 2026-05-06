@@ -434,7 +434,12 @@ const SupplierBalance: React.FC = () => {
 
   // ── Invoices tab ───────────────────────────────────────────────────────────
   const invoicesApiUrl = `${INVOICES_URL}?supplier_number=${supplierNumber}&limit=500`;
-  const renderInvoices = () => (
+  const renderInvoices = () => {
+    const totalAmt  = invoices.reduce((s, r) => s + (r.invoiceAmount  || 0), 0);
+    const totalPaid = invoices.reduce((s, r) => s + (r.amountPaid     || 0), 0);
+    const totalBal  = invoices.reduce((s, r) => s + (r.amountRemaining || 0), 0);
+
+    return (
     <div>
       {invoiceError && <Alert type="error" message={invoiceError} style={{ marginBottom: 12 }} closable onClose={() => setInvoiceError('')} />}
       <Card
@@ -448,47 +453,41 @@ const SupplierBalance: React.FC = () => {
         <Table columns={invoiceColumns} dataSource={invoices} loading={invoicesLoading}
           scroll={{ x: 1000 }} size="small"
           pagination={{ pageSize: 15, showSizeChanger: true, showTotal: t => `${t} invoices` }}
-          summary={pageData => {
-            const pageAmt  = pageData.reduce((s, r) => s + r.invoiceAmount, 0);
-            const pagePaid = pageData.reduce((s, r) => s + r.amountPaid, 0);
-            const pageBal  = pageData.reduce((s, r) => s + r.amountRemaining, 0);
-            const totalAmt  = invoices.reduce((s, r) => s + r.invoiceAmount, 0);
-            const totalPaid = invoices.reduce((s, r) => s + r.amountPaid, 0);
-            const totalBal  = invoices.reduce((s, r) => s + r.amountRemaining, 0);
-            const isAllOnePage = invoices.length === pageData.length;
-            return (
-              <Table.Summary>
-                {!isAllOnePage && (
-                  <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-                    <Table.Summary.Cell index={0} colSpan={2}><Text strong style={{ fontSize: 11 }}>Page Total</Text></Table.Summary.Cell>
-                    <Table.Summary.Cell index={1} align="right"><Text strong style={{ fontSize: 11 }}>{formatCurrency(pageAmt)}</Text></Table.Summary.Cell>
-                    <Table.Summary.Cell index={2} align="right"><Text style={{ color: REDWOOD.success, fontSize: 11 }}>{formatCurrency(pagePaid)}</Text></Table.Summary.Cell>
-                    <Table.Summary.Cell index={3} align="right"><Text style={{ color: REDWOOD.error, fontSize: 11 }}>{formatCurrency(pageBal)}</Text></Table.Summary.Cell>
-                    <Table.Summary.Cell index={4} colSpan={2} />
-                  </Table.Summary.Row>
-                )}
-                <Table.Summary.Row style={{ background: '#fff7e6', fontWeight: 700 }}>
-                  <Table.Summary.Cell index={0} colSpan={2}>
-                    <Text strong style={{ color: '#d46b08' }}>Grand Total ({invoices.length})</Text>
-                  </Table.Summary.Cell>
-                  <Table.Summary.Cell index={1} align="right">
-                    <Text strong style={{ color: '#d46b08' }}>{formatCurrency(totalAmt)}</Text>
-                  </Table.Summary.Cell>
-                  <Table.Summary.Cell index={2} align="right">
-                    <Text strong style={{ color: REDWOOD.success }}>{formatCurrency(totalPaid)}</Text>
-                  </Table.Summary.Cell>
-                  <Table.Summary.Cell index={3} align="right">
-                    <Text strong style={{ color: totalBal > 0 ? REDWOOD.error : REDWOOD.success }}>{formatCurrency(totalBal)}</Text>
-                  </Table.Summary.Cell>
-                  <Table.Summary.Cell index={4} colSpan={2} />
-                </Table.Summary.Row>
-              </Table.Summary>
-            );
-          }}
         />
+        {!invoicesLoading && invoices.length > 0 && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 0,
+            borderTop: '2px solid #d46b08',
+            background: '#fff7e6',
+            borderRadius: '0 0 8px 8px',
+            padding: '8px 12px',
+          }}>
+            <div style={{ flex: '0 0 280px' }}>
+              <Text strong style={{ color: '#d46b08', fontSize: 13 }}>
+                Grand Total ({invoices.length} invoices)
+              </Text>
+            </div>
+            <div style={{ flex: '0 0 140px', textAlign: 'right' }}>
+              <Text strong style={{ color: '#d46b08', fontFamily: 'monospace', fontSize: 13 }}>
+                {formatCurrency(totalAmt)}
+              </Text>
+            </div>
+            <div style={{ flex: '0 0 140px', textAlign: 'right' }}>
+              <Text strong style={{ color: REDWOOD.success, fontFamily: 'monospace', fontSize: 13 }}>
+                {formatCurrency(totalPaid)}
+              </Text>
+            </div>
+            <div style={{ flex: '0 0 140px', textAlign: 'right' }}>
+              <Text strong style={{ color: totalBal > 0 ? REDWOOD.error : REDWOOD.success, fontFamily: 'monospace', fontSize: 13 }}>
+                {formatCurrency(totalBal)}
+              </Text>
+            </div>
+          </div>
+        )}
       </Card>
     </div>
-  );
+    );
+  };
 
   // ── Payments tab ───────────────────────────────────────────────────────────
   const paymentsApiUrl = `${PAYMENTS_URL}?supplier_number=${supplierNumber}&limit=500`;
