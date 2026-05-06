@@ -468,7 +468,17 @@ const COASegments: React.FC = () => {
   // testLimit: 0 = all, 1 = first 1, 5 = first 5, etc.
   const handleSyncToDb = async (tab: TabItem, testLimit: number = 0) => {
     if (tab.values.length === 0) {
-      message.warning('No values to sync');
+      // Open log panel and explain why nothing ran
+      setTabs(prev => prev.map(t =>
+        t.key === tab.key ? { ...t, showLogs: true, syncLogs: [
+          `❌ No values loaded for "${tab.key}"`,
+          `Current source: ${dataSource === 'fusion' ? 'Oracle Fusion' : 'APEX Database'}`,
+          dataSource === 'fusion' && !isElectron()
+            ? '⚠ Fusion requires the proxy server — run: node server/proxy.cjs'
+            : `Try clicking the Reload button to re-fetch from ${dataSource === 'fusion' ? 'Fusion' : 'APEX DB'}`,
+        ]} : t
+      ));
+      message.warning('No values loaded — check the Logs panel for details');
       return;
     }
 
@@ -761,6 +771,18 @@ const COASegments: React.FC = () => {
                                   {tab.syncStatus === 'error' && <Text style={{ fontSize: 11, color: REDWOOD.primary }}>{tab.syncMessage}</Text>}
                                 </Space>
                                 <Space>
+                                  <Tooltip title={`Reload from ${dataSource === 'fusion' ? 'Oracle Fusion' : 'APEX DB'}`}>
+                                    <Button size="small" icon={<ReloadOutlined />} loading={tab.loading}
+                                      onClick={async () => {
+                                        valuesCache.current.delete(`${dataSource}_${tab.key}`);
+                                        setTabs(prev => prev.map(t => t.key === tab.key ? { ...t, loading: true } : t));
+                                        const values = await fetchValues(tab.key);
+                                        setTabs(prev => prev.map(t => t.key === tab.key ? { ...t, values, loading: false } : t));
+                                        message.success(`Reloaded ${values.length} values from ${dataSource === 'fusion' ? 'Fusion' : 'APEX DB'}`);
+                                      }}>
+                                      Reload
+                                    </Button>
+                                  </Tooltip>
                                   <Tooltip title={tab.showApiInfo ? 'Hide API Info' : 'Show API Endpoints'}>
                                     <Button size="small" icon={<ApiOutlined />} onClick={() => toggleApiInfo(tab.key)} type={tab.showApiInfo ? 'primary' : 'default'} style={tab.showApiInfo ? { background: REDWOOD.info } : { borderColor: REDWOOD.info, color: REDWOOD.info }}>
                                       API
