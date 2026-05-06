@@ -254,6 +254,23 @@ const TrialBalance: React.FC = () => {
   const [selectedLedger, setSelectedLedger] = useState<string>('BUIMERC LEDGER');
 
   // API panel state
+
+  // Row selection per tab (for revaluation)
+  const [tabSelections, setTabSelections] = useState<Record<string, string[]>>({});
+
+  // Revaluation modal state
+  const [revalVisible,         setRevalVisible]         = useState(false);
+  const [revalTabKey,          setRevalTabKey]          = useState('');
+  const [revalAccount,         setRevalAccount]         = useState('');
+  const [revalRates,           setRevalRates]           = useState<Record<string, string>>({});
+  const [revalGainCombo,       setRevalGainCombo]       = useState('');
+  const [revalLossCombo,       setRevalLossCombo]       = useState('');
+  const [revalComboPickerOpen, setRevalComboPickerOpen] = useState(false);
+  const [revalComboPickerFor,  setRevalComboPickerFor]  = useState<'gain'|'loss'>('gain');
+  const [revalComboSearch,     setRevalComboSearch]     = useState('');
+  const [revalPreviewRows,     setRevalPreviewRows]     = useState<
+    { lineNum: number; combo: string; desc: string; dr: number; cr: number }[]
+  >([]);
   const [apiPanelVisible, setApiPanelVisible] = useState(false);
   const [apiCalls, setApiCalls] = useState<Record<string, ApiCallInfo>>({
     ledgers:      { label: 'GET Ledgers',            url: '', method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
@@ -2444,6 +2461,319 @@ const TrialBalance: React.FC = () => {
   };
 
   // Render a ReERP TB tab — Standard format: Opening / Debit / Credit / Closing (net)
+  // ── Open revaluation modal ───────────────────────────────────
+  const openRevalModal = (tabKey: string, accountKey: string) => {
+    setRevalTabKey(tabKey);
+    setRevalAccount(accountKey);
+    setRevalRates({});
+    setRevalGainCombo('');
+    setRevalLossCombo('');
+    setRevalPreviewRows([]);
+    setRevalVisible(true);
+  };
+
+  // ── Revaluation modal renderer ────────────────────────────────
+  const renderRevalModal = () => {
+    const tab = tabs.find(t => t.key === revalTabKey);
+    if (!tab) return null;
+
+    // All raw rows for this account
+    const rawRows = tab.rrData.filter(r => r.account === revalAccount);
+    const accountType = rawRows[0]?.account_type || 'A';
+    const accountDesc = rawRows[0]?.account_desc || '';
+    const functionalCcy = rawRows[0]?.currency_code || 'AED'; // default
+
+    // Group by entered currency, sum balances
+    const byFxCcy = new Map<string, { entClosing: number; acctClosing: number; combos: string[] }>();
+    rawRows.forEach(r => {
+      const ccy = r.currency_code || '';
+      if (!byFxCcy.has(ccy)) byFxCcy.set(ccy, { entClosing: 0, acctClosing: 0, combos: [] });
+      const g = byFxCcy.get(ccy)!;
+      g.entClosing  += r.entered_closing || 0;
+      g.acctClosing += r.closing        || 0;
+      if (r.account_combination && !g.combos.includes(r.account_combination))
+        g.combos.push(r.account_combination);
+    });
+
+    const fmtN = (n: number) =>
+      new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(n));
+
+    // Build per-currency revaluation rows
+    interface CcyRow {
+      ccy: string; entClosing: number; acctClosing: number;
+      bookRate: number; newRate: number; newAcctValue: number;
+      revalAmt: number; isGain: boolean; combos: string[];
+    }
+    const ccyRows: CcyRow[] = [];
+    byFxCcy.forEach((v, ccy) => {
+      const newRateStr = revalRates[ccy] || '';
+      const newRate    = parseFloat(newRateStr) || 0;
+      const bookRate   = v.entClosing !== 0 ? v.acctClosing / v.entClosing : 0;
+      const newAcctVal = v.entClosing * newRate;
+      const revalAmt   = newAcctVal - v.acctClosing;
+      // Universal rule: revalAmt > 0 → Dr Account, Cr Gain; < 0 → Dr Loss, Cr Account
+      const isGain = revalAmt >= 0;
+      ccyRows.push({ ccy, entClosing: v.entClosing, acctClosing: v.acctClosing,
+        bookRate, newRate, newAcctValue: newAcctVal, revalAmt, isGain, combos: v.combos });
+    });
+
+    const totalGain = ccyRows.filter(r => r.isGain && r.revalAmt !== 0).reduce((s, r) => s + r.revalAmt, 0);
+    const totalLoss = ccyRows.filter(r => !r.isGain).reduce((s, r) => s + Math.abs(r.revalAmt), 0);
+
+    // Build journal preview
+    const buildPreview = () => {
+      const lines: { lineNum: number; combo: string; desc: string; dr: number; cr: number }[] = [];
+      let ln = 1;
+      ccyRows.forEach(r => {
+        if (r.revalAmt === 0 || r.newRate === 0) return;
+        const abs = Math.abs(r.revalAmt);
+        const combo = r.combos[0] || revalAccount;
+        if (r.isGain) {
+          lines.push({ lineNum: ln++, combo, desc: `FX Revaluation ${r.ccy} → ${functionalCcy} (Gain)`, dr: abs, cr: 0 });
+          lines.push({ lineNum: ln++, combo: revalGainCombo || '[Gain Account]', desc: 'Unrealized FX Gain', dr: 0, cr: abs });
+        } else {
+          lines.push({ lineNum: ln++, combo: revalLossCombo || '[Loss Account]', desc: 'Unrealized FX Loss', dr: abs, cr: 0 });
+          lines.push({ lineNum: ln++, combo, desc: `FX Revaluation ${r.ccy} → ${functionalCcy} (Loss)`, dr: 0, cr: abs });
+        }
+      });
+      setRevalPreviewRows(lines);
+    };
+
+    // Account combo picker entries (all unique combos in this tab)
+    const allCombos = [...new Set(tab.rrData.map(r => r.account_combination).filter(Boolean))].sort();
+    const filteredCombos = revalComboSearch
+      ? allCombos.filter(c => c.toLowerCase().includes(revalComboSearch.toLowerCase()))
+      : allCombos;
+
+    const ccyColumns = [
+      { title: 'Currency', dataIndex: 'ccy', key: 'ccy', width: 80,
+        render: (v: string) => <Tag color="blue">{v}</Tag> },
+      { title: 'Entered Balance', dataIndex: 'entClosing', key: 'entClosing', align: 'right' as const, width: 140,
+        render: (v: number, r: CcyRow) => (
+          <Text style={{ fontFamily: 'monospace', color: v >= 0 ? '#237804' : REDWOOD.primary }}>
+            {v >= 0 ? fmtN(v) : `(${fmtN(v)})`}
+          </Text>
+        )},
+      { title: 'Acctd Balance', dataIndex: 'acctClosing', key: 'acctClosing', align: 'right' as const, width: 140,
+        render: (v: number) => (
+          <Text style={{ fontFamily: 'monospace', color: v >= 0 ? '#237804' : REDWOOD.primary }}>
+            {v >= 0 ? fmtN(v) : `(${fmtN(v)})`}
+          </Text>
+        )},
+      { title: 'Book Rate', dataIndex: 'bookRate', key: 'bookRate', align: 'right' as const, width: 100,
+        render: (v: number) => <Text style={{ fontFamily: 'monospace', color: REDWOOD.textSecondary }}>{v ? v.toFixed(5) : '—'}</Text> },
+      { title: 'New Rate', key: 'newRate', align: 'right' as const, width: 120,
+        render: (_: any, r: CcyRow) => (
+          <Input
+            size="small"
+            style={{ width: 100, fontFamily: 'monospace', textAlign: 'right' }}
+            placeholder="e.g. 3.675"
+            value={revalRates[r.ccy] || ''}
+            onChange={e => setRevalRates(prev => ({ ...prev, [r.ccy]: e.target.value }))}
+          />
+        )},
+      { title: 'New Acctd Value', dataIndex: 'newAcctValue', key: 'newAcctValue', align: 'right' as const, width: 140,
+        render: (v: number, r: CcyRow) => r.newRate > 0 ? (
+          <Text style={{ fontFamily: 'monospace', color: REDWOOD.info }}>{v >= 0 ? fmtN(v) : `(${fmtN(v)})`}</Text>
+        ) : <Text style={{ color: REDWOOD.textSecondary }}>—</Text> },
+      { title: 'Adjustment', key: 'revalAmt', align: 'right' as const, width: 130,
+        render: (_: any, r: CcyRow) => r.newRate === 0 ? <Text style={{ color: REDWOOD.textSecondary }}>—</Text> : (
+          <Tag color={r.isGain ? 'green' : 'red'} style={{ fontFamily: 'monospace', fontWeight: 700 }}>
+            {r.isGain ? '+' : '-'}{fmtN(r.revalAmt)} {r.isGain ? '▲ GAIN' : '▼ LOSS'}
+          </Tag>
+        )},
+    ];
+
+    const previewColumns = [
+      { title: '#', dataIndex: 'lineNum', key: 'lineNum', width: 40 },
+      { title: 'Account Combination', dataIndex: 'combo', key: 'combo',
+        render: (v: string) => <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{v}</Text> },
+      { title: 'Description', dataIndex: 'desc', key: 'desc', ellipsis: true },
+      { title: 'Debit', dataIndex: 'dr', key: 'dr', align: 'right' as const, width: 130,
+        render: (v: number) => v ? <Text style={{ fontFamily: 'monospace', color: '#237804', fontWeight: 600 }}>{fmtN(v)}</Text> : null },
+      { title: 'Credit', dataIndex: 'cr', key: 'cr', align: 'right' as const, width: 130,
+        render: (v: number) => v ? <Text style={{ fontFamily: 'monospace', color: REDWOOD.primary, fontWeight: 600 }}>{fmtN(v)}</Text> : null },
+    ];
+
+    return (
+      <>
+        <Modal
+          open={revalVisible}
+          onCancel={() => { setRevalVisible(false); setRevalPreviewRows([]); }}
+          footer={null}
+          width={900}
+          title={
+            <Space>
+              <Tag color={accountType === 'A' ? 'blue' : accountType === 'L' ? 'orange' : 'green'}>
+                {accountType === 'A' ? 'Asset' : accountType === 'L' ? 'Liability' : accountType === 'O' ? 'Equity' : accountType}
+              </Tag>
+              <Text strong style={{ fontFamily: 'monospace' }}>{revalAccount}</Text>
+              <Text style={{ color: REDWOOD.textSecondary }}>{accountDesc}</Text>
+              <Tag color="purple">{tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '')}</Tag>
+            </Space>
+          }
+        >
+          <div style={{ marginBottom: 16 }}>
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              Oracle Fusion revaluation logic: New Acctd Value = Entered Balance × New Rate.
+              Adjustment = New Value − Book Value. Positive → Dr Account / Cr Gain. Negative → Dr Loss / Cr Account.
+            </Text>
+          </div>
+
+          {/* Per-currency balance + rate table */}
+          <Table
+            dataSource={ccyRows}
+            columns={ccyColumns}
+            rowKey="ccy"
+            size="small"
+            pagination={false}
+            style={{ marginBottom: 16 }}
+          />
+
+          {/* Gain / Loss totals */}
+          <Row gutter={16} style={{ marginBottom: 16 }}>
+            <Col span={12}>
+              <div style={{ background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6, padding: '8px 12px' }}>
+                <Text style={{ color: '#389e0d', fontWeight: 700, fontSize: 13 }}>
+                  Total Gain: {fmtN(totalGain)}
+                </Text>
+              </div>
+            </Col>
+            <Col span={12}>
+              <div style={{ background: '#fff2f0', border: '1px solid #ffa39e', borderRadius: 6, padding: '8px 12px' }}>
+                <Text style={{ color: REDWOOD.primary, fontWeight: 700, fontSize: 13 }}>
+                  Total Loss: {fmtN(totalLoss)}
+                </Text>
+              </div>
+            </Col>
+          </Row>
+
+          {/* Gain / Loss GL account selectors */}
+          <Row gutter={12} style={{ marginBottom: 16 }}>
+            <Col span={12}>
+              <div style={{ marginBottom: 4 }}>
+                <Text strong style={{ fontSize: 12, color: '#389e0d' }}>Realised Gain Account</Text>
+              </div>
+              <Space.Compact style={{ width: '100%' }}>
+                <Input
+                  size="small"
+                  placeholder="e.g. 100-000-000-7001000-000-000-000"
+                  value={revalGainCombo}
+                  onChange={e => setRevalGainCombo(e.target.value)}
+                  style={{ fontFamily: 'monospace', fontSize: 11 }}
+                />
+                <Button size="small" icon={<SearchOutlined />}
+                  onClick={() => { setRevalComboPickerFor('gain'); setRevalComboSearch(''); setRevalComboPickerOpen(true); }} />
+              </Space.Compact>
+            </Col>
+            <Col span={12}>
+              <div style={{ marginBottom: 4 }}>
+                <Text strong style={{ fontSize: 12, color: REDWOOD.primary }}>Realised Loss Account</Text>
+              </div>
+              <Space.Compact style={{ width: '100%' }}>
+                <Input
+                  size="small"
+                  placeholder="e.g. 100-000-000-7002000-000-000-000"
+                  value={revalLossCombo}
+                  onChange={e => setRevalLossCombo(e.target.value)}
+                  style={{ fontFamily: 'monospace', fontSize: 11 }}
+                />
+                <Button size="small" icon={<SearchOutlined />}
+                  onClick={() => { setRevalComboPickerFor('loss'); setRevalComboSearch(''); setRevalComboPickerOpen(true); }} />
+              </Space.Compact>
+            </Col>
+          </Row>
+
+          {/* Preview button */}
+          <Button
+            type="primary"
+            icon={<FileTextOutlined />}
+            onClick={buildPreview}
+            disabled={ccyRows.every(r => r.newRate === 0)}
+            style={{ background: REDWOOD.info, borderColor: REDWOOD.info, marginBottom: 16 }}
+          >
+            Preview Journal Entry
+          </Button>
+
+          {/* Journal preview table */}
+          {revalPreviewRows.length > 0 && (
+            <div style={{ border: `1px solid ${REDWOOD.border}`, borderRadius: 8, overflow: 'hidden' }}>
+              <div style={{ background: '#1d1d1d', color: '#fff', padding: '6px 12px', fontSize: 12, fontWeight: 600 }}>
+                Journal Preview — FX Revaluation &nbsp;
+                <Tag color="gold">Preview Only — No journal created</Tag>
+              </div>
+              <Table
+                dataSource={revalPreviewRows}
+                columns={previewColumns}
+                rowKey="lineNum"
+                size="small"
+                pagination={false}
+                summary={() => (
+                  <Table.Summary fixed>
+                    <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 700 }}>
+                      <Table.Summary.Cell index={0} colSpan={3} align="right">
+                        <Text strong>Total</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={3} align="right">
+                        <Text strong style={{ fontFamily: 'monospace', color: '#237804' }}>
+                          {fmtN(revalPreviewRows.reduce((s, r) => s + r.dr, 0))}
+                        </Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={4} align="right">
+                        <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>
+                          {fmtN(revalPreviewRows.reduce((s, r) => s + r.cr, 0))}
+                        </Text>
+                      </Table.Summary.Cell>
+                    </Table.Summary.Row>
+                  </Table.Summary>
+                )}
+              />
+            </div>
+          )}
+        </Modal>
+
+        {/* Account combination picker */}
+        <Modal
+          open={revalComboPickerOpen}
+          onCancel={() => setRevalComboPickerOpen(false)}
+          footer={null}
+          width={600}
+          title={`Select ${revalComboPickerFor === 'gain' ? 'Gain' : 'Loss'} Account Combination`}
+        >
+          <Input.Search
+            placeholder="Search combination…"
+            value={revalComboSearch}
+            onChange={e => setRevalComboSearch(e.target.value)}
+            style={{ marginBottom: 10 }}
+            allowClear
+          />
+          <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+            {filteredCombos.map(combo => (
+              <div
+                key={combo}
+                style={{
+                  padding: '6px 10px', cursor: 'pointer', borderRadius: 4,
+                  fontFamily: 'monospace', fontSize: 12,
+                  borderBottom: `1px solid ${REDWOOD.border}`,
+                  background: (revalComboPickerFor === 'gain' ? revalGainCombo : revalLossCombo) === combo ? '#e6f7ff' : undefined,
+                }}
+                onClick={() => {
+                  if (revalComboPickerFor === 'gain') setRevalGainCombo(combo);
+                  else setRevalLossCombo(combo);
+                  setRevalComboPickerOpen(false);
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = '#f0f5ff')}
+                onMouseLeave={e => (e.currentTarget.style.background = (revalComboPickerFor === 'gain' ? revalGainCombo : revalLossCombo) === combo ? '#e6f7ff' : '')}
+              >
+                {combo}
+              </div>
+            ))}
+          </div>
+        </Modal>
+      </>
+    );
+  };
+
   const renderRrTBTab = (tab: TabData) => {
     if (tab.loading || tab.rrGenerating) {
       return (
@@ -2734,6 +3064,15 @@ const TrialBalance: React.FC = () => {
               unCheckedChildren="Entered"
             />
             <Button
+              size="small"
+              type="primary"
+              disabled={(tabSelections[tab.key] || []).length !== 1}
+              style={{ background: '#d46b08', borderColor: '#d46b08' }}
+              onClick={() => openRevalModal(tab.key, (tabSelections[tab.key] || [])[0])}
+            >
+              Revalue
+            </Button>
+            <Button
               icon={<FileExcelOutlined />}
               size="small"
               onClick={() => handleRrExport(tab, tableRows, totals)}
@@ -2785,6 +3124,11 @@ const TrialBalance: React.FC = () => {
           pagination={false}
           scroll={{ x: 1600 }}
           summary={summaryRow}
+          rowSelection={{
+            type: 'checkbox',
+            selectedRowKeys: tabSelections[tab.key] || [],
+            onChange: keys => setTabSelections(prev => ({ ...prev, [tab.key]: keys as string[] })),
+          }}
           onRow={(r: any) => ({ style: { background: accountTypeColor[r.account_type] || '#fff' } })}
         />
       </div>
@@ -3049,6 +3393,15 @@ const TrialBalance: React.FC = () => {
               checkedChildren="Entered ✓"
               unCheckedChildren="Entered"
             />
+            <Button
+              size="small"
+              type="primary"
+              disabled={(tabSelections[tab.key] || []).length !== 1}
+              style={{ background: '#d46b08', borderColor: '#d46b08' }}
+              onClick={() => openRevalModal(tab.key, (tabSelections[tab.key] || [])[0])}
+            >
+              Revalue
+            </Button>
           </Col>
         </Row>
 
@@ -3070,6 +3423,11 @@ const TrialBalance: React.FC = () => {
           pagination={false}
           scroll={{ x: 1600 }}
           summary={summaryRow}
+          rowSelection={{
+            type: 'checkbox',
+            selectedRowKeys: tabSelections[tab.key] || [],
+            onChange: keys => setTabSelections(prev => ({ ...prev, [tab.key]: keys as string[] })),
+          }}
           onRow={(r: any) => ({ style: { background: accountTypeColor[r.account_type] || '#fff' } })}
         />
       </div>
@@ -3573,6 +3931,7 @@ const TrialBalance: React.FC = () => {
 
         {/* ── TB Drill-down modals ─────────────────────────────────────── */}
         {renderDrillComboModal()}
+        {renderRevalModal()}
         {renderDrillJnlModal()}
 
         {/* ── ReERP ↔ Fusion Reconciliation Modal ──────────────────────── */}
