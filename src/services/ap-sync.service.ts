@@ -1,5 +1,5 @@
 import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../config/api.config';
-import { fetchFromOracle, fetchFromOracleUrl, insertToApex, fetchFromApex } from './sync-http';
+import { fetchFromOracle, fetchFromOracleUrl, fetchAllFromOracleUrl, insertToApex, fetchFromApex } from './sync-http';
 
 // Types
 export interface APInvoice {
@@ -130,7 +130,7 @@ export interface APInvoiceInstallment {
   [key: string]: any;
 }
 
-// Fetch invoice lines from Oracle Fusion
+// Fetch invoice lines from Oracle Fusion (paginated at 500/page to get all lines)
 const fetchInvoiceLinesFromOracle = async (
   invoiceId: number,
   log?: LogCallback,
@@ -141,18 +141,12 @@ const fetchInvoiceLinesFromOracle = async (
       log?.('info', `Fetching lines for Invoice ${invoiceId}...`);
     }
 
-    const data = await fetchFromOracleUrl(
+    const items = await fetchAllFromOracleUrl(
       `${ORACLE_FUSION_CONFIG.baseUrl}/invoices/${invoiceId}/child/invoiceLines`,
       log,
-      verbose
+      verbose,
+      500
     );
-
-    if (verbose) {
-      log?.('step', `──── [GET] Invoice Lines Response for Invoice ${invoiceId} ────`);
-      log?.('info', `GET Response: ${JSON.stringify(data, null, 2)}`);
-    }
-
-    const items = data.items || [];
 
     if (verbose) {
       log?.('success', `Fetched ${items.length} lines for Invoice ${invoiceId}`);
@@ -163,7 +157,7 @@ const fetchInvoiceLinesFromOracle = async (
 
     return {
       success: true,
-      items: Array.isArray(items) ? items : [],
+      items,
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -228,7 +222,7 @@ const insertInvoiceLinesToApex = async (
   }
 };
 
-// Fetch invoice installments from Oracle Fusion
+// Fetch invoice installments from Oracle Fusion (paginated at 500/page)
 const fetchInvoiceInstallmentsFromOracle = async (
   invoiceId: number,
   log?: LogCallback,
@@ -239,18 +233,12 @@ const fetchInvoiceInstallmentsFromOracle = async (
       log?.('info', `Fetching installments for Invoice ${invoiceId}...`);
     }
 
-    const data = await fetchFromOracleUrl(
+    const items = await fetchAllFromOracleUrl(
       `${ORACLE_FUSION_CONFIG.baseUrl}/invoices/${invoiceId}/child/invoiceInstallments`,
       log,
-      verbose
+      verbose,
+      500
     );
-
-    if (verbose) {
-      log?.('step', `──── [GET] Invoice Installments Response for Invoice ${invoiceId} ────`);
-      log?.('info', `GET Response: ${JSON.stringify(data, null, 2)}`);
-    }
-
-    const items = data.items || [];
 
     if (verbose) {
       log?.('success', `Fetched ${items.length} installments for Invoice ${invoiceId}`);
@@ -261,7 +249,7 @@ const fetchInvoiceInstallmentsFromOracle = async (
 
     return {
       success: true,
-      items: Array.isArray(items) ? items : [],
+      items,
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
