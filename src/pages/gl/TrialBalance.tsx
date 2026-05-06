@@ -143,24 +143,32 @@ interface RrTBRecord {
   intercompany: string;
   account_type: string;   // A / L / O / R / E
   currency_code: string;
-  // Standard TB format (from /standard endpoint) — Accounted (functional) currency
+  // PTD columns (from /standard endpoint) — Accounted (functional) currency
   opening: number;
   debit: number;
   credit: number;
   closing: number;
   ytd_net: number;
-  // Entered (transaction) currency
+  // PTD Entered (transaction) currency
   entered_opening: number;
   entered_debit: number;
   entered_credit: number;
   entered_closing: number;
+  // YTD columns — Accounted (functional) currency
+  ytd_opening: number;
+  ytd_debit: number;
+  ytd_credit: number;
+  // YTD Entered currency
+  ytd_entered_opening: number;
+  ytd_entered_debit: number;
+  ytd_entered_credit: number;
 }
 
 interface TabData {
   key: string;
   periodName: string;
   ledgerName: string;
-  tabType: 'fusion' | 'reerp' | 'reerp-dynamic';
+  tabType: 'fusion' | 'reerp' | 'reerp-dynamic' | 'reerp-ytd';
   data: GLBalanceRecord[];
   rrData: RrTBRecord[];
   rrGenerating: boolean;
@@ -641,6 +649,47 @@ const TrialBalance: React.FC = () => {
       ));
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to fetch Dynamic TB';
+      setTabs(prev => prev.map(t =>
+        t.key === tabKey ? { ...t, loading: false, error: msg } : t
+      ));
+    }
+  }, [tabs]);
+
+  // Fetch Dynamic YTD TB — same /standard endpoint, displayed in YTD columns
+  const fetchDynamicYtdTB = useCallback(async (record: PeriodInfo) => {
+    const tabKey = `rr-ytd-${record.period_name_id}`;
+    const existingTab = tabs.find(t => t.key === tabKey);
+    if (existingTab) { setActiveTab(tabKey); return; }
+
+    const newTab: TabData = {
+      key: tabKey,
+      periodName: `YTD: ${record.period_name_id}`,
+      ledgerName: record.ledger_name,
+      tabType: 'reerp-ytd',
+      data: [], rrData: [], rrGenerating: false, loading: true, error: null,
+      companies: [], currencies: [],
+      selectedCompany: null, selectedCurrency: null,
+      segmentsBefore: [], segmentsAfter: [], gridSearch: '',
+    };
+    setTabs(prev => [...prev, newTab]);
+    setActiveTab(tabKey);
+
+    try {
+      const fetchUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceStandard}`
+        + `?ledger_name=${encodeURIComponent(record.ledger_name)}`
+        + `&period_name=${encodeURIComponent(record.period_name_id)}`
+        + `&limit=10000`;
+      const res = await fetch(fetchUrl, { headers: { Accept: 'application/json' } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      const items: RrTBRecord[] = (data.items || []) as RrTBRecord[];
+      const companies = [...new Set(items.map(i => i.company).filter(Boolean))].sort();
+      const currencies = [...new Set(items.map(i => i.currency_code).filter(Boolean))].sort();
+      setTabs(prev => prev.map(t =>
+        t.key === tabKey ? { ...t, rrData: items, loading: false, companies, currencies } : t
+      ));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to fetch YTD TB';
       setTabs(prev => prev.map(t =>
         t.key === tabKey ? { ...t, loading: false, error: msg } : t
       ));
@@ -1146,6 +1195,19 @@ const TrialBalance: React.FC = () => {
             }}
           >
             Dynamic TB
+          </Button>
+          <Button
+            type="primary"
+            icon={<BarChartOutlined />}
+            size="small"
+            onClick={() => fetchDynamicYtdTB(record)}
+            style={{
+              background: '#0958d9',
+              borderColor: '#0958d9',
+              borderRadius: 6,
+            }}
+          >
+            Dynamic YTD TB
           </Button>
         </Space>
       ),
@@ -2735,6 +2797,284 @@ const TrialBalance: React.FC = () => {
     );
   };
 
+  // ── Render: Dynamic YTD Trial Balance tab ─────────────────
+  const renderRrYtdTBTab = (tab: TabData) => {
+    if (tab.loading) {
+      return <div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" /></div>;
+    }
+    if (tab.error) {
+      return <Alert type="error" showIcon message="Error" description={tab.error} />;
+    }
+
+    const fmtAbs = (n: number) =>
+      new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(n));
+
+    const fmtNet = (n: number) => {
+      if (!n) return <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.textSecondary }}>0.00</Text>;
+      return n > 0
+        ? <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info }}>{fmtAbs(n)}</Text>
+        : <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.primary }}>({fmtAbs(n)})</Text>;
+    };
+    const fmtDr = (n: number) =>
+      n ? <Text style={{ fontFamily: 'monospace', fontSize: 11, color: '#237804' }}>{fmtAbs(n)}</Text>
+        : <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.textSecondary }}>0.00</Text>;
+    const fmtCr = (n: number) =>
+      n ? <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.primary }}>{fmtAbs(n)}</Text>
+        : <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.textSecondary }}>0.00</Text>;
+
+    const accountTypeColor: Record<string, string> = { A: '#e6f7ff', L: '#fff7e6', O: '#f6ffed', R: '#fff0f6', E: '#f9f0ff' };
+    const accountTypeLabel: Record<string, string> = { A: 'Asset', L: 'Liability', O: 'Equity', R: 'Revenue', E: 'Expense' };
+    const typeTagColor: Record<string, string> = { A: 'blue', L: 'orange', O: 'green', R: 'magenta', E: 'purple' };
+
+    let rows = tab.rrData.filter(r => {
+      if (tab.selectedCompany && r.company !== tab.selectedCompany) return false;
+      if (tab.selectedCurrency && r.currency_code !== tab.selectedCurrency) return false;
+      return true;
+    });
+
+    if (tab.gridSearch.trim()) {
+      const lc = tab.gridSearch.toLowerCase();
+      rows = rows.filter(r =>
+        r.account?.toLowerCase().includes(lc) ||
+        r.account_desc?.toLowerCase().includes(lc) ||
+        r.account_combination?.toLowerCase().includes(lc) ||
+        r.company?.toLowerCase().includes(lc)
+      );
+    }
+
+    type YtdGroupRow = {
+      account: string; account_desc: string; account_type: string;
+      ytd_opening: number; ytd_debit: number; ytd_credit: number; closing: number;
+      ytd_entered_opening: number; ytd_entered_debit: number; ytd_entered_credit: number; entered_closing: number;
+    };
+    const grouped = new Map<string, YtdGroupRow>();
+    rows.forEach(r => {
+      const k = r.account;
+      if (!grouped.has(k)) {
+        grouped.set(k, {
+          account: r.account, account_desc: r.account_desc, account_type: r.account_type,
+          ytd_opening: 0, ytd_debit: 0, ytd_credit: 0, closing: 0,
+          ytd_entered_opening: 0, ytd_entered_debit: 0, ytd_entered_credit: 0, entered_closing: 0,
+        });
+      }
+      const g = grouped.get(k)!;
+      g.ytd_opening         += r.ytd_opening         || 0;
+      g.ytd_debit           += r.ytd_debit           || 0;
+      g.ytd_credit          += r.ytd_credit          || 0;
+      g.closing             += r.closing             || 0;
+      g.ytd_entered_opening += r.ytd_entered_opening || 0;
+      g.ytd_entered_debit   += r.ytd_entered_debit   || 0;
+      g.ytd_entered_credit  += r.ytd_entered_credit  || 0;
+      g.entered_closing     += r.entered_closing     || 0;
+    });
+
+    const tableRows = Array.from(grouped.values()).sort((a, b) => a.account.localeCompare(b.account));
+
+    const totals = tableRows.reduce(
+      (acc, r) => ({
+        ytd_opening:         acc.ytd_opening         + r.ytd_opening,
+        ytd_debit:           acc.ytd_debit           + r.ytd_debit,
+        ytd_credit:          acc.ytd_credit          + r.ytd_credit,
+        closing:             acc.closing             + r.closing,
+        ytd_entered_opening: acc.ytd_entered_opening + r.ytd_entered_opening,
+        ytd_entered_debit:   acc.ytd_entered_debit   + r.ytd_entered_debit,
+        ytd_entered_credit:  acc.ytd_entered_credit  + r.ytd_entered_credit,
+        entered_closing:     acc.entered_closing     + r.entered_closing,
+      }),
+      { ytd_opening: 0, ytd_debit: 0, ytd_credit: 0, closing: 0,
+        ytd_entered_opening: 0, ytd_entered_debit: 0, ytd_entered_credit: 0, entered_closing: 0 }
+    );
+
+    const allCompanies = [...new Set(tab.rrData.map(r => r.company).filter(Boolean))]
+      .sort()
+      .map(c => ({ value: c, label: c }));
+
+    const columns = [
+      {
+        title: 'Type', dataIndex: 'account_type', key: 'account_type',
+        width: 62, align: 'center' as const,
+        render: (t: string) => (
+          <Tag color={typeTagColor[t] || 'default'} style={{ fontSize: 10, margin: 0 }}>
+            {accountTypeLabel[t] || t}
+          </Tag>
+        ),
+      },
+      {
+        title: 'Account', dataIndex: 'account', key: 'account', width: 160,
+        sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.account.localeCompare(b.account),
+        defaultSortOrder: 'ascend' as const,
+        render: (v: string) => (
+          <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.info }}>{v}</Text>
+        ),
+      },
+      {
+        title: 'Description', dataIndex: 'account_desc', key: 'account_desc',
+        ellipsis: true,
+        render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
+      },
+      {
+        title: <span style={{ color: '#1677ff' }}>Accounted (YTD)</span>,
+        children: [
+          {
+            title: 'YTD Opening', dataIndex: 'ytd_opening', key: 'ytd_opening',
+            align: 'right' as const, width: 130,
+            sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.ytd_opening - b.ytd_opening,
+            render: fmtNet,
+          },
+          {
+            title: 'YTD Debit', dataIndex: 'ytd_debit', key: 'ytd_debit',
+            align: 'right' as const, width: 130,
+            sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.ytd_debit - b.ytd_debit,
+            render: fmtDr,
+          },
+          {
+            title: 'YTD Credit', dataIndex: 'ytd_credit', key: 'ytd_credit',
+            align: 'right' as const, width: 130,
+            sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.ytd_credit - b.ytd_credit,
+            render: fmtCr,
+          },
+          {
+            title: 'Closing', dataIndex: 'closing', key: 'closing',
+            align: 'right' as const, width: 130,
+            sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.closing - b.closing,
+            render: fmtNet,
+          },
+        ],
+      },
+      {
+        title: <span style={{ color: '#52c41a' }}>Entered (YTD)</span>,
+        children: [
+          {
+            title: 'YTD Opening', dataIndex: 'ytd_entered_opening', key: 'ytd_entered_opening',
+            align: 'right' as const, width: 130,
+            sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.ytd_entered_opening - b.ytd_entered_opening,
+            render: fmtNet,
+          },
+          {
+            title: 'YTD Debit', dataIndex: 'ytd_entered_debit', key: 'ytd_entered_debit',
+            align: 'right' as const, width: 130,
+            sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.ytd_entered_debit - b.ytd_entered_debit,
+            render: fmtDr,
+          },
+          {
+            title: 'YTD Credit', dataIndex: 'ytd_entered_credit', key: 'ytd_entered_credit',
+            align: 'right' as const, width: 130,
+            sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.ytd_entered_credit - b.ytd_entered_credit,
+            render: fmtCr,
+          },
+          {
+            title: 'Closing', dataIndex: 'entered_closing', key: 'entered_closing',
+            align: 'right' as const, width: 130,
+            sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.entered_closing - b.entered_closing,
+            render: fmtNet,
+          },
+        ],
+      },
+    ];
+
+    const fmt = (v: number) =>
+      new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
+
+    const summaryRow = () => {
+      const accValues = [totals.ytd_opening, totals.ytd_debit, totals.ytd_credit, totals.closing];
+      const entValues = [totals.ytd_entered_opening, totals.ytd_entered_debit, totals.ytd_entered_credit, totals.entered_closing];
+      return (
+        <Table.Summary fixed>
+          <Table.Summary.Row style={{ background: '#f0f0f0', fontWeight: 700 }}>
+            <Table.Summary.Cell index={0} colSpan={3} align="right">
+              <Text strong style={{ fontSize: 12 }}>TOTAL</Text>
+            </Table.Summary.Cell>
+            {accValues.map((v, i) => (
+              <Table.Summary.Cell key={`acc-${i}`} index={i + 3} align="right">
+                <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#1677ff' }}>{fmt(v)}</Text>
+              </Table.Summary.Cell>
+            ))}
+            {entValues.map((v, i) => (
+              <Table.Summary.Cell key={`ent-${i}`} index={i + 7} align="right">
+                <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#52c41a' }}>{fmt(v)}</Text>
+              </Table.Summary.Cell>
+            ))}
+          </Table.Summary.Row>
+        </Table.Summary>
+      );
+    };
+
+    return (
+      <div>
+        <Row gutter={8} style={{ marginBottom: 8 }}>
+          <Col>
+            <Tag icon={<BankOutlined />} color="geekblue" style={{ fontSize: 12, padding: '2px 8px' }}>
+              {tab.ledgerName}
+            </Tag>
+          </Col>
+          <Col>
+            <Tag color="blue" style={{ fontSize: 12, padding: '2px 8px' }}>
+              {tab.periodName.replace(/^YTD:\s*/, '')}
+            </Tag>
+          </Col>
+          <Col>
+            <Tag color="default" style={{ fontSize: 12, padding: '2px 8px' }}>
+              {tableRows.length} accounts
+            </Tag>
+          </Col>
+          <Col>
+            <Tag color="blue" style={{ fontSize: 12, padding: '2px 8px', fontWeight: 600 }}>
+              YTD — cumulative from period 1 of fiscal year
+            </Tag>
+          </Col>
+        </Row>
+
+        <Row gutter={12} style={{ marginBottom: 12 }}>
+          <Col span={6}>
+            <Select placeholder="All Companies" allowClear showSearch optionFilterProp="label" style={{ width: '100%' }}
+              value={tab.selectedCompany}
+              onChange={v => updateTabFilter(tab.key, 'selectedCompany', v ?? null)}
+              options={allCompanies.length > 0 ? allCompanies : tab.companies.map(c => ({ value: c, label: c }))}
+            />
+          </Col>
+          <Col span={6}>
+            <Select placeholder="All Currencies" allowClear style={{ width: '100%' }}
+              value={tab.selectedCurrency}
+              onChange={v => updateTabFilter(tab.key, 'selectedCurrency', v ?? null)}
+              options={tab.currencies.map(c => ({ value: c, label: c }))}
+            />
+          </Col>
+          <Col span={6}>
+            <Input.Search placeholder="Search account / description…"
+              value={tab.gridSearch}
+              onChange={e => updateTabSearch(tab.key, e.target.value)}
+              allowClear
+            />
+          </Col>
+          <Col span={6} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Tag color="blue" style={{ lineHeight: '30px', fontSize: 12 }}>{tableRows.length} accounts</Tag>
+          </Col>
+        </Row>
+
+        <Space style={{ marginBottom: 10 }} wrap>
+          {Object.entries(accountTypeLabel).map(([k, v]) => (
+            <Tag key={k} color={typeTagColor[k]} style={{ fontSize: 11 }}>
+              {v}{k === 'R' || k === 'E' ? ' — P&L (resets each fiscal year)' : ' — BS (carries forward)'}
+            </Tag>
+          ))}
+          <Tag style={{ fontSize: 11, color: REDWOOD.info, borderColor: REDWOOD.info }}>positive = Dr balance</Tag>
+          <Tag style={{ fontSize: 11, color: REDWOOD.primary, borderColor: REDWOOD.primary }}>(brackets) = Cr balance</Tag>
+        </Space>
+
+        <Table
+          dataSource={tableRows}
+          columns={columns}
+          rowKey="account"
+          size="small"
+          pagination={false}
+          scroll={{ x: 1600 }}
+          summary={summaryRow}
+          onRow={(r: any) => ({ style: { background: accountTypeColor[r.account_type] || '#fff' } })}
+        />
+      </div>
+    );
+  };
+
   // ── Render: Combinations drill-down modal ────────────────
   const renderDrillComboModal = () => {
     const fmtN = (n: number) =>
@@ -2934,11 +3274,15 @@ const TrialBalance: React.FC = () => {
             ? <BarChartOutlined style={{ marginRight: 6, color: REDWOOD.success }} />
             : tab.tabType === 'reerp-dynamic'
             ? <ThunderboltOutlined style={{ marginRight: 6, color: '#722ed1' }} />
+            : tab.tabType === 'reerp-ytd'
+            ? <BarChartOutlined style={{ marginRight: 6, color: '#0958d9' }} />
             : <TableOutlined style={{ marginRight: 8 }} />}
           {tab.periodName}
         </span>
       ),
-      children: (tab.tabType === 'reerp' || tab.tabType === 'reerp-dynamic') ? renderRrTBTab(tab) : renderTBTab(tab),
+      children: tab.tabType === 'reerp-ytd'
+        ? renderRrYtdTBTab(tab)
+        : (tab.tabType === 'reerp' || tab.tabType === 'reerp-dynamic') ? renderRrTBTab(tab) : renderTBTab(tab),
       closable: true,
     })),
     ...(lsVisible ? [{
