@@ -376,31 +376,37 @@ const InvoicesTabContent: React.FC<InvoicesTabContentProps> = ({
 
   React.useEffect(() => { setPage(1); }, [search, statusFilter]);
 
+  const fmtNum = (n: number) =>
+    new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+
   const columns = React.useMemo(() => [
-    { title: 'Invoice #', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 140 },
-    { title: 'Date', dataIndex: 'invoiceDate', key: 'invoiceDate', width: 110 },
+    { title: 'Invoice #', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 130,
+      render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+    { title: 'Date', dataIndex: 'invoiceDate', key: 'invoiceDate', width: 100,
+      render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
     {
-      title: 'Amount', dataIndex: 'invoiceAmount', key: 'invoiceAmount', width: 130, align: 'right' as const,
-      render: (amt: number, r: InvoiceRecord) => <Text strong>{fmt(amt, r.currency)}</Text>
+      title: 'Amount', dataIndex: 'invoiceAmount', key: 'invoiceAmount', width: 120, align: 'right' as const,
+      render: (amt: number, r: InvoiceRecord) => <Text strong style={{ fontSize: 11 }}>{fmt(amt, r.currency)}</Text>
     },
     {
-      title: 'Paid', dataIndex: 'amountPaid', key: 'amountPaid', width: 130, align: 'right' as const,
-      render: (amt: number, r: InvoiceRecord) => <Text style={{ color: REDWOOD.success }}>{fmt(amt, r.currency)}</Text>
+      title: 'Paid', dataIndex: 'amountPaid', key: 'amountPaid', width: 120, align: 'right' as const,
+      render: (amt: number, r: InvoiceRecord) => <Text style={{ color: REDWOOD.success, fontSize: 11 }}>{fmt(amt, r.currency)}</Text>
     },
     {
-      title: 'Balance', dataIndex: 'amountRemaining', key: 'amountRemaining', width: 130, align: 'right' as const,
-      render: (amt: number, r: InvoiceRecord) => <Text style={{ color: amt > 0 ? REDWOOD.error : REDWOOD.success }}>{fmt(amt, r.currency)}</Text>
+      title: 'Balance', dataIndex: 'amountRemaining', key: 'amountRemaining', width: 120, align: 'right' as const,
+      render: (amt: number, r: InvoiceRecord) => <Text style={{ color: amt > 0 ? REDWOOD.error : REDWOOD.success, fontSize: 11 }}>{fmt(amt, r.currency)}</Text>
     },
     {
-      title: 'Status', dataIndex: 'invoiceStatus', key: 'invoiceStatus', width: 100,
+      title: 'Status', dataIndex: 'invoiceStatus', key: 'invoiceStatus', width: 90,
       render: (status: string) => {
         const color = status === 'PAID' ? 'green' : status === 'CANCELLED' ? 'default' : status === 'HOLD' ? 'orange' : 'blue';
-        return <Tag color={color}>{status || '-'}</Tag>;
+        return <Tag color={color} style={{ fontSize: 10 }}>{status || '-'}</Tag>;
       }
     },
-    { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+    { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true,
+      render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
     {
-      title: '', key: 'actions', width: 60, fixed: 'right' as const,
+      title: '', key: 'actions', width: 40, fixed: 'right' as const,
       render: (_: any, record: InvoiceRecord) => (
         <Tooltip title="View / Edit Invoice">
           <Button type="text" size="small" icon={<EditOutlined />} style={{ color: REDWOOD.info }} onClick={() => onEdit(record)} />
@@ -495,23 +501,21 @@ const InvoicesTabContent: React.FC<InvoicesTabContentProps> = ({
           const fAmt  = filtered.reduce((s, r) => s + (r.invoiceAmount   || 0), 0);
           const fPaid = filtered.reduce((s, r) => s + (r.amountPaid      || 0), 0);
           const fBal  = filtered.reduce((s, r) => s + (r.amountRemaining || 0), 0);
-          const ccy   = filtered[0]?.currency || 'AED';
-          const fmtT  = (n: number) => new Intl.NumberFormat('en-AE', { style: 'currency', currency: ccy, minimumFractionDigits: 2 }).format(n);
           const label = filtered.length !== invoices.length ? `Filtered (${filtered.length})` : `Total (${filtered.length})`;
           return (
             <Table.Summary fixed>
               <Table.Summary.Row style={{ background: '#fff7e6', fontWeight: 600 }}>
                 <Table.Summary.Cell index={0} colSpan={2}>
-                  <Text strong style={{ color: '#d46b08', fontSize: 12 }}>{label}</Text>
+                  <Text strong style={{ color: '#d46b08', fontSize: 11 }}>{label}</Text>
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={2} align="right">
-                  <Text strong style={{ color: '#d46b08', fontFamily: 'monospace', fontSize: 12 }}>{fmtT(fAmt)}</Text>
+                  <Text strong style={{ color: '#d46b08', fontFamily: 'monospace', fontSize: 11 }}>{fmtNum(fAmt)}</Text>
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={3} align="right">
-                  <Text strong style={{ color: REDWOOD.success, fontFamily: 'monospace', fontSize: 12 }}>{fmtT(fPaid)}</Text>
+                  <Text strong style={{ color: REDWOOD.success, fontFamily: 'monospace', fontSize: 11 }}>{fmtNum(fPaid)}</Text>
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={4} align="right">
-                  <Text strong style={{ color: fBal > 0 ? REDWOOD.error : REDWOOD.success, fontFamily: 'monospace', fontSize: 12 }}>{fmtT(fBal)}</Text>
+                  <Text strong style={{ color: fBal > 0 ? REDWOOD.error : REDWOOD.success, fontFamily: 'monospace', fontSize: 11 }}>{fmtNum(fBal)}</Text>
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={5} colSpan={3} />
               </Table.Summary.Row>
