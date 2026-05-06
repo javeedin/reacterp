@@ -797,15 +797,19 @@ const COASegments: React.FC = () => {
                                   </div>
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                                      <Text type="secondary" style={{ fontSize: 10, minWidth: 70 }}>GET Values:</Text>
-                                      <Text code style={{ fontSize: 10, wordBreak: 'break-all' }}>{getValuesUrl(tab.key)}</Text>
+                                      <Text type="secondary" style={{ fontSize: 10, minWidth: 80 }}>APEX GET:</Text>
+                                      <Text code style={{ fontSize: 10, wordBreak: 'break-all' }}>{`${APEX_GET_VALUES_URL}/${tab.key}`}</Text>
                                     </div>
                                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                                      <Text type="secondary" style={{ fontSize: 10, minWidth: 70 }}>POST Sync:</Text>
+                                      <Text type="secondary" style={{ fontSize: 10, minWidth: 80 }}>Fusion GET:</Text>
+                                      <Text code style={{ fontSize: 10, wordBreak: 'break-all' }}>{`https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05/valueSets/${tab.key}/child/values?limit=500&offset=0`}</Text>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                                      <Text type="secondary" style={{ fontSize: 10, minWidth: 80 }}>POST Sync:</Text>
                                       <Text code style={{ fontSize: 10, wordBreak: 'break-all' }}>{APEX_SYNC_URL}</Text>
                                     </div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                      <Text type="secondary" style={{ fontSize: 10, minWidth: 70 }}>Source:</Text>
+                                      <Text type="secondary" style={{ fontSize: 10, minWidth: 80 }}>Source:</Text>
                                       <Text style={{ fontSize: 10 }}>{dataSource === 'fusion' ? (isElectron() ? 'Oracle Fusion (Electron — direct)' : 'Oracle Fusion (proxy)') : 'APEX Database (direct)'}</Text>
                                     </div>
                                   </div>
