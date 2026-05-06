@@ -648,8 +648,16 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
     return result;
   }, [searchData, groupByAccount]);
 
+  // Precompute balance lookup for grouped view — O(n) once, not O(n²) per cell
+  const groupedBalanceMap = useMemo(() => {
+    let di = 0;
+    return groupedSearchData.map(row =>
+      row.isGroupHeader ? null : (runningBalances[di++] ?? null)
+    );
+  }, [groupedSearchData, runningBalances]);
+
   // ── Column definitions ─────────────────────────────────────────────────────
-  const searchColumns: ColumnsType<JournalLineSegment> = [
+  const searchColumns: ColumnsType<JournalLineSegment> = useMemo(() => [
     {
       title: 'Account', dataIndex: 'concatenatedSegments', key: 'concatenatedSegments',
       width: 240, fixed: 'left',
@@ -719,9 +727,7 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
           ...headerStyle(groupBorderRight),
           render: (_: any, r: JournalLineSegment, index: number) => {
             if (r.isGroupHeader) return fmtBalance((r.groupDr ?? 0) - (r.groupCr ?? 0));
-            // Adjust index: subtract the number of group-header rows inserted before this row
-            const adj = groupByAccount ? groupedSearchData.slice(0, index).filter(x => x.isGroupHeader).length : 0;
-            return fmtBalance(runningBalances[index - adj]?.accounted ?? 0);
+            return fmtBalance(groupedBalanceMap[index]?.accounted ?? 0);
           }},
       ],
     },
@@ -742,8 +748,7 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
           ...headerStyle(groupBorderRight),
           render: (_: any, r: JournalLineSegment, index: number) => {
             if (r.isGroupHeader) return fmtBalance((r.groupEnteredDr ?? 0) - (r.groupEnteredCr ?? 0));
-            const adj = groupByAccount ? groupedSearchData.slice(0, index).filter(x => x.isGroupHeader).length : 0;
-            return fmtBalance(runningBalances[index - adj]?.entered ?? 0);
+            return fmtBalance(groupedBalanceMap[index]?.entered ?? 0);
           }},
       ],
     },
@@ -759,7 +764,8 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
           </Tooltip>
         ),
     },
-  ];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [groupByAccount, groupedBalanceMap, onOpenAccountTab, selectedPeriods]);
 
   // ── Pivot columns ──────────────────────────────────────────────────────────
   const pivotColumns: ColumnsType<PivotDataRow> = [
@@ -778,7 +784,7 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
     })),
   ];
 
-  const totals = calculateTotals(searchData);
+  const totals = useMemo(() => calculateTotals(searchData), [searchData]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
