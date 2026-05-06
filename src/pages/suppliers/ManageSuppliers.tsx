@@ -499,7 +499,7 @@ const InvoicesTabContent: React.FC<InvoicesTabContentProps> = ({
           const fmtT  = (n: number) => new Intl.NumberFormat('en-AE', { style: 'currency', currency: ccy, minimumFractionDigits: 2 }).format(n);
           const label = filtered.length !== invoices.length ? `Filtered (${filtered.length})` : `Total (${filtered.length})`;
           return (
-            <Table.Summary>
+            <Table.Summary fixed>
               <Table.Summary.Row style={{ background: '#fff7e6', fontWeight: 600 }}>
                 <Table.Summary.Cell index={0} colSpan={2}>
                   <Text strong style={{ color: '#d46b08', fontSize: 12 }}>{label}</Text>
