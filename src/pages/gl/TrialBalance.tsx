@@ -2886,21 +2886,21 @@ const TrialBalance: React.FC = () => {
         ),
       },
       {
-        title: 'Account', dataIndex: 'account', key: 'account', width: 160,
+        title: <span style={{ color: '#d46b08' }}>Account</span>, dataIndex: 'account', key: 'account', width: 160,
         sorter: (a: GroupRow, b: GroupRow) => a.account.localeCompare(b.account),
         defaultSortOrder: 'ascend' as const,
         render: (v: string) => (
           <Space size={4}>
             <Text
               strong
-              style={{ fontFamily: 'monospace', cursor: 'pointer', color: REDWOOD.info }}
+              style={{ fontFamily: 'monospace', cursor: 'pointer', color: '#d46b08' }}
               onClick={() => openDrillCombo(v, tab.rrData, tab.ledgerName, tab.periodName.replace(/^(?:ReERP|Dynamic):\s*/, ''))}
             >
               {v}
             </Text>
             <Tooltip title="View combinations">
               <ApartmentOutlined
-                style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 13 }}
+                style={{ color: '#d46b08', cursor: 'pointer', fontSize: 13 }}
                 onClick={() => openDrillCombo(v, tab.rrData, tab.ledgerName, tab.periodName.replace(/^(?:ReERP|Dynamic):\s*/, ''))}
               />
             </Tooltip>
@@ -2920,7 +2920,7 @@ const TrialBalance: React.FC = () => {
       },
       {
         title: 'Description', dataIndex: 'account_desc', key: 'account_desc',
-        ellipsis: true,
+        width: 200, ellipsis: true,
         render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
       },
       {
@@ -2953,7 +2953,7 @@ const TrialBalance: React.FC = () => {
         ],
       },
       ...(tab.showEntered ? [{
-        title: <span style={{ color: '#52c41a' }}>Entered</span>,
+        title: <span style={{ color: '#08979c' }}>Entered</span>,
         children: [
           {
             title: 'Opening', dataIndex: 'entered_opening', key: 'entered_opening',
@@ -3002,7 +3002,7 @@ const TrialBalance: React.FC = () => {
             ))}
             {tab.showEntered && entValues.map((v, i) => (
               <Table.Summary.Cell key={`ent-${i}`} index={i + 7} align="right">
-                <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#52c41a' }}>{fmt(v)}</Text>
+                <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#08979c' }}>{fmt(v)}</Text>
               </Table.Summary.Cell>
             ))}
           </Table.Summary.Row>
@@ -3238,16 +3238,16 @@ const TrialBalance: React.FC = () => {
         ),
       },
       {
-        title: 'Account', dataIndex: 'account', key: 'account', width: 160,
+        title: <span style={{ color: '#d46b08' }}>Account</span>, dataIndex: 'account', key: 'account', width: 160,
         sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.account.localeCompare(b.account),
         defaultSortOrder: 'ascend' as const,
         render: (v: string) => (
-          <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.info }}>{v}</Text>
+          <Text strong style={{ fontFamily: 'monospace', color: '#d46b08' }}>{v}</Text>
         ),
       },
       {
         title: 'Description', dataIndex: 'account_desc', key: 'account_desc',
-        ellipsis: true,
+        width: 200, ellipsis: true,
         render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
       },
       {
@@ -3280,7 +3280,7 @@ const TrialBalance: React.FC = () => {
         ],
       },
       ...(tab.showEntered ? [{
-        title: <span style={{ color: '#52c41a' }}>Entered (YTD)</span>,
+        title: <span style={{ color: '#08979c' }}>Entered (YTD)</span>,
         children: [
           {
             title: 'YTD Opening', dataIndex: 'ytd_entered_opening', key: 'ytd_entered_opening',
@@ -3329,7 +3329,7 @@ const TrialBalance: React.FC = () => {
             ))}
             {tab.showEntered && entValues.map((v, i) => (
               <Table.Summary.Cell key={`ent-${i}`} index={i + 7} align="right">
-                <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#52c41a' }}>{fmt(v)}</Text>
+                <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#08979c' }}>{fmt(v)}</Text>
               </Table.Summary.Cell>
             ))}
           </Table.Summary.Row>
