@@ -47,6 +47,8 @@ export const APEX_DB_CONFIG = {
     apInvoicesStats: 'ap/invoices/stats',
     apPayments: 'ap/payments',
     apPaymentByCheckId: 'ap/payments',  // append /:check_id
+    apMigrationCheckSummary: 'ap/migration-check/summary',
+    apMigrationCheckDetails: 'ap/migration-check/details',
     // Rental Management endpoints
     rmAgreements:  'rm/agreements',
     rmProperties:  'rm/properties',

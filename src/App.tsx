@@ -44,6 +44,7 @@ const JournalReconciliation   = lazy(() => import('./pages/gl/JournalReconciliat
 const ManageInvoices          = lazy(() => import('./pages/ap/ManageInvoices'));
 const ManageDistCombinations  = lazy(() => import('./pages/ap/ManageDistCombinations'));
 const APReports               = lazy(() => import('./pages/ap/APReports'));
+const CheckMigration          = lazy(() => import('./pages/ap/CheckMigration'));
 const ManagePayments          = lazy(() => import('./pages/ap/ManagePayments'));
 const Banks                   = lazy(() => import('./pages/ap/Banks'));
 const InvoiceHolds            = lazy(() => import('./pages/ap/InvoiceHolds'));
@@ -186,6 +187,7 @@ function App() {
               <Route path="ap/multiperiod" element={<ManageMultiperiod />} />
               <Route path="ap/reports" element={<APReports />} />
               <Route path="ap/distribution-combinations" element={<ManageDistCombinations />} />
+              <Route path="ap/check-migration" element={<CheckMigration />} />
               <Route path="ap/*" element={<APModule />} />
               <Route path="ar/*" element={<ComingSoon moduleName="Accounts Receivable" />} />
               <Route path="inventory/*" element={<ComingSoon moduleName="Inventory" />} />
