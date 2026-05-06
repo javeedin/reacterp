@@ -365,7 +365,7 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
                 p.CURRENCY_CODE,
                 p.ACCOUNT_COMBINATION,
 
-                -- Fiscal year/period from RR_GL_FISCAL_PERIODS (synced from Fusion).
+                -- Fiscal year/period from RR_V_GL_FISCAL_PERIODS (fiscal calendar view).
                 -- CASE avoids NVL type-propagation: if fp columns are VARCHAR2,
                 -- NVL would keep VARCHAR2 and later arithmetic would ORA-01722.
                 CASE
@@ -435,15 +435,15 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
                   AND vsv.VALUE = NULLIF(
                           TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,4)), '')
             -- Fiscal calendar: collapsed to one row per period to prevent fan-out
-            -- when RR_GL_FISCAL_PERIODS has multiple rows for the same period.
+            -- when RR_V_GL_FISCAL_PERIODS has multiple rows for the same period.
             LEFT JOIN (
                 SELECT
                     PERIOD_NAME,
-                    MAX(FISCAL_YEAR)   AS FISCAL_YEAR,
-                    MAX(FISCAL_PERIOD) AS FISCAL_PERIOD
-                FROM RR_GL_FISCAL_PERIODS
-                WHERE APPLICATION = 'GL'
-                  AND ADJ_FLAG    = 'N'
+                    MAX(TO_NUMBER(FISCAL_YEAR))   AS FISCAL_YEAR,
+                    MAX(TO_NUMBER(FISCAL_PERIOD)) AS FISCAL_PERIOD
+                FROM RR_V_GL_FISCAL_PERIODS
+                WHERE TO_CHAR(APPLICATION) = 'GL'
+                  AND TO_CHAR(ADJ_FLAG)    = 'N'
                 GROUP BY PERIOD_NAME
             ) fp ON fp.PERIOD_NAME = p.PERIOD_NAME
         ),
