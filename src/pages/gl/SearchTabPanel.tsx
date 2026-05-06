@@ -767,7 +767,52 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
   // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [groupByAccount, groupedBalanceMap, onOpenAccountTab, selectedPeriods]);
 
-  // ── Pivot columns ──────────────────────────────────────────────────────────
+  // Memoize filtered display data — stable reference prevents Ant Design Table re-rendering all rows
+  const { displayData, filterMatchCount } = useMemo(() => {
+    if (!gridFilter) return { displayData: groupedSearchData, filterMatchCount: 0 };
+    const q = gridFilter.toLowerCase();
+    const matchFields = (r: JournalLineSegment) =>
+      [r.concatenatedSegments, r.accountDescription, r.jeLineDescription,
+       r.batchName, r.userJeSourceName, r.userJeCategoryName, r.defaultPeriodName, r.currencyCode]
+      .some(v => (v || '').toLowerCase().includes(q));
+
+    let matchCount = 0;
+    let filtered: JournalLineSegment[];
+
+    if (groupByAccount) {
+      filtered = [];
+      let pending: JournalLineSegment[] = [];
+      groupedSearchData.forEach(row => {
+        if (row.isOpeningBalance || row.isClosingBalance) { filtered.push(row); return; }
+        if (row.isGroupHeader) {
+          const matched = pending.filter(matchFields);
+          if (matched.length > 0) {
+            matched.forEach(r => filtered.push(r));
+            matchCount += matched.length;
+            filtered.push({ ...row, groupCount: matched.length,
+              groupDr:        matched.reduce((s, r) => s + (r.accountedDr || 0), 0),
+              groupCr:        matched.reduce((s, r) => s + (r.accountedCr || 0), 0),
+              groupEnteredDr: matched.reduce((s, r) => s + (r.enteredDr   || 0), 0),
+              groupEnteredCr: matched.reduce((s, r) => s + (r.enteredCr   || 0), 0),
+            });
+          }
+          pending = [];
+        } else {
+          pending.push(row);
+        }
+      });
+    } else {
+      filtered = groupedSearchData.filter(r => {
+        if (r.isOpeningBalance || r.isClosingBalance) return true;
+        const m = matchFields(r);
+        if (m) matchCount++;
+        return m;
+      });
+    }
+    return { displayData: filtered, filterMatchCount: matchCount };
+  }, [groupedSearchData, gridFilter, groupByAccount]);
+
+
   const pivotColumns: ColumnsType<PivotDataRow> = [
     ...pivotSegsBefore.map(s => ({ title: s, dataIndex: s, key: s, width: 100, fixed: 'left' as const })),
     { title: 'Account',     dataIndex: 'account',            key: 'account',            width: 100, fixed: 'left' as const },
@@ -985,15 +1030,7 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
             />
             {gridFilter && (
               <Text type="secondary" style={{ fontSize: 11 }}>
-                {(() => {
-                  const q = gridFilter.toLowerCase();
-                  const count = searchData.filter(r =>
-                    [r.concatenatedSegments, r.accountDescription, r.jeLineDescription,
-                     r.batchName, r.userJeSourceName, r.userJeCategoryName, r.defaultPeriodName, r.currencyCode]
-                    .some(v => (v || '').toLowerCase().includes(q))
-                  ).length;
-                  return `${count} of ${searchData.length} rows`;
-                })()}
+                {filterMatchCount} of {searchData.length} rows
               </Text>
             )}
           </div>
@@ -1002,48 +1039,7 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
         <Spin spinning={loading}>
           <Table
             columns={searchColumns}
-            dataSource={(() => {
-              const base = groupedSearchData;
-              if (!gridFilter) return base;
-              const q = gridFilter.toLowerCase();
-              // When filtering: keep group headers whose groups have matching rows,
-              // keep opening/closing balance rows, keep matching detail rows
-              if (groupByAccount) {
-                // Footer is now at the bottom: detail rows come first, then isGroupHeader footer
-                const result: JournalLineSegment[] = [];
-                let pending: JournalLineSegment[] = [];
-                base.forEach(row => {
-                  if (row.isOpeningBalance || row.isClosingBalance) { result.push(row); return; }
-                  if (row.isGroupHeader) {
-                    // End of group — filter pending detail rows then push footer with recalculated totals
-                    const matched = pending.filter(r =>
-                      [r.concatenatedSegments, r.accountDescription, r.jeLineDescription,
-                       r.batchName, r.userJeSourceName, r.userJeCategoryName, r.defaultPeriodName, r.currencyCode]
-                      .some(v => (v || '').toLowerCase().includes(q))
-                    );
-                    if (matched.length > 0) {
-                      matched.forEach(r => result.push(r));
-                      result.push({ ...row, groupCount: matched.length,
-                        groupDr:        matched.reduce((s, r) => s + (r.accountedDr || 0), 0),
-                        groupCr:        matched.reduce((s, r) => s + (r.accountedCr || 0), 0),
-                        groupEnteredDr: matched.reduce((s, r) => s + (r.enteredDr   || 0), 0),
-                        groupEnteredCr: matched.reduce((s, r) => s + (r.enteredCr   || 0), 0),
-                      });
-                    }
-                    pending = [];
-                  } else {
-                    pending.push(row);
-                  }
-                });
-                return result;
-              }
-              return base.filter(r =>
-                r.isOpeningBalance || r.isClosingBalance ||
-                [r.concatenatedSegments, r.accountDescription, r.jeLineDescription,
-                 r.batchName, r.userJeSourceName, r.userJeCategoryName, r.defaultPeriodName, r.currencyCode]
-                .some(v => (v || '').toLowerCase().includes(q))
-              );
-            })()}
+            dataSource={displayData}
             pagination={{ pageSize: searchPageSize, size: 'small', showSizeChanger: true,
               pageSizeOptions: ['10','20','50','100','200'],
               onShowSizeChange: (_, size) => setSearchPageSize(size),
