@@ -31,7 +31,8 @@ WITH
 
 -- ────────────────────────────────────────────────────────────
 -- Step 1 — Account master (ACCOUNT_TYPE + ACCOUNT_DESC)
--- Only accounts listed here will appear in the trial balance.
+-- Used for enrichment only; accounts NOT in this list still
+-- appear in the TB (see all_combos LEFT JOIN below).
 -- ────────────────────────────────────────────────────────────
 accounts AS (
     SELECT
@@ -46,8 +47,9 @@ accounts AS (
 -- Step 2 — All distinct account combinations ever used
 --          (the "account spine", per ledger)
 --
--- INNER JOIN to accounts master: only valid combinations
--- (segment-4 exists in RR_VALUE_SET_VALUES) are included.
+-- LEFT JOIN to accounts master: ALL combinations from journal
+-- lines appear, even if segment-4 is not yet in the value set.
+-- account_type defaults to 'E' (Expense) for unknown accounts.
 -- ────────────────────────────────────────────────────────────
 all_combos AS (
     SELECT DISTINCT
@@ -57,8 +59,6 @@ all_combos AS (
     FROM RR_GL_JE_LINES_ALL  lin
     JOIN RR_GL_JE_HEADERS    hdr
       ON hdr.JE_HEADER_ID = lin.JE_HEADER_ID
-    JOIN accounts            acc
-      ON acc.ACCOUNT = TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,4))
     WHERE lin.ACCOUNT_COMBINATION IS NOT NULL
 ),
 
@@ -154,9 +154,9 @@ enriched AS (
         p.PERIOD_NAME,
         p.CURRENCY_CODE,
         p.ACCOUNT_COMBINATION,
-        TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,1))  AS COMPANY,
-        acc.ACCOUNT,
-        acc.ACCOUNT_TYPE,
+        TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,1))      AS COMPANY,
+        NVL(acc.ACCOUNT,      TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,4)))  AS ACCOUNT,
+        NVL(acc.ACCOUNT_TYPE, 'E')                                   AS ACCOUNT_TYPE,
         acc.ACCOUNT_DESC,
 
         -- Fiscal year: from fiscal calendar view (collapsed to 1 row per period), else fallback
@@ -181,7 +181,7 @@ enriched AS (
         p.PTD_ENTERED_DR - p.PTD_ENTERED_CR  AS PTD_ENTERED_NET
 
     FROM ptd p
-    JOIN accounts acc
+    LEFT JOIN accounts acc
       ON acc.ACCOUNT = TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,4))
     -- Collapse fiscal calendar to one row per PERIOD_NAME to prevent fan-out
     LEFT JOIN (

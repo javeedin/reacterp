@@ -249,19 +249,14 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
   ): Promise<{ opening: JournalLineSegment | null; closing: JournalLineSegment | null }> => {
     const none = { opening: null, closing: null };
     try {
-      let tryPeriod = period;
       let allItems: any[] = [];
-      // Try current period then one period back only — avoids 24 sequential API calls
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const params = new URLSearchParams({ ledger_name: selectedLedger, period_name: tryPeriod, account });
-        if (company) params.append('company', company);
-        const resp = await fetch(`${API_BASE_URL}/rr-trialbalance/standard?${params.toString()}`);
-        if (resp.ok) {
-          const data = await resp.json();
-          allItems = (data.items || []).filter((i: any) => String(i.account) === String(account));
-        }
-        if (allItems.length > 0) break;
-        tryPeriod = getPreviousPeriod(tryPeriod);
+      // Single call — the view computes opening/closing for the period dynamically
+      const params = new URLSearchParams({ ledger_name: selectedLedger, period_name: period, account });
+      if (company) params.append('company', company);
+      const resp = await fetch(`${API_BASE_URL}/rr-trialbalance/standard?${params.toString()}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        allItems = (data.items || []).filter((i: any) => String(i.account) === String(account));
       }
       // If no TB row exists the account has zero opening balance — still show the row
       const accountType: string = allItems[0]?.account_type || '';

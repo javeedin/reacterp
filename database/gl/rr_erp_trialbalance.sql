@@ -286,7 +286,9 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
         )
         WITH
         -- ── 1a. All distinct (account_combination, currency) ever used ──
-        -- INNER JOIN to RR_VALUE_SET_VALUES ensures only master accounts appear.
+        -- LEFT JOIN to RR_VALUE_SET_VALUES: include all accounts that appear in
+        -- journal lines even if they are not yet registered in the value set master.
+        -- (account_desc and account_type default to NULL/'E' via the enriched LEFT JOIN)
         all_combos AS (
             SELECT DISTINCT
                 hdr.LEDGER_NAME,
@@ -295,9 +297,6 @@ CREATE OR REPLACE PACKAGE BODY RR_ERP_TB_PKG AS
             FROM RR_GL_JE_LINES_ALL  lin
             JOIN RR_GL_JE_HEADERS    hdr
               ON hdr.JE_HEADER_ID = lin.JE_HEADER_ID
-            JOIN RR_VALUE_SET_VALUES vsv_m
-              ON vsv_m.VALUE_SET_CODE = 'BUIMERC_FIN_GLB_COA_ACCOUNT'
-             AND vsv_m.VALUE = NULLIF(TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,4)),'')
             WHERE lin.ACCOUNT_COMBINATION IS NOT NULL
               AND (p_ledger_name IS NULL OR hdr.LEDGER_NAME = p_ledger_name)
               AND (p_company IS NULL OR
