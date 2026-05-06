@@ -1496,7 +1496,7 @@ export interface DebugHeaderInfo {
 export const debugStep1_FetchBatches = async (
   parameters: Record<string, string>,
   log?: LogCallback,
-): Promise<{ batches: DebugBatchInfo[]; hasMore: boolean; totalCount: number }> => {
+): Promise<{ batches: DebugBatchInfo[]; hasMore: boolean; totalCount: number; rawResponse: any }> => {
   const filters = Object.entries(parameters)
     .filter(([, v]) => v)
     .map(([k, v]) => `${k}=${v}`)
@@ -1522,7 +1522,7 @@ export const debugStep1_FetchBatches = async (
   }));
 
   log?.('success', `Found ${batches.length} batch(es)${raw.hasMore ? ' — hasMore=true (more pages exist)' : ''}`);
-  return { batches, hasMore: raw.hasMore === true, totalCount: batches.length };
+  return { batches, hasMore: raw.hasMore === true, totalCount: batches.length, rawResponse: raw };
 };
 
 export const debugStep2_FetchHeaders = async (
@@ -1571,7 +1571,7 @@ export const debugStep3_FetchLines = async (
 export const debugStep4_InsertBatch = async (
   batch: DebugBatchInfo,
   log?: LogCallback,
-): Promise<any> => {
+): Promise<{ result: any; payload: any }> => {
   log?.('step', `── Step 4: Insert Batch ${batch.batchId} to APEX ──`);
   const b = batch.rawBatch;
   const payload = {
@@ -1604,14 +1604,14 @@ export const debugStep4_InsertBatch = async (
   };
   const result = await insertToApex(APEX_DB_CONFIG.endpoints.journalBatches, payload, log, true);
   log?.(apexOk(result) ? 'success' : 'error', `Batch insert: ${apexOk(result) ? 'OK' : apexErr(result)}`);
-  return result;
+  return { result, payload };
 };
 
 export const debugStep5_InsertHeaders = async (
   headers: DebugHeaderInfo[],
   batchId: number,
   log?: LogCallback,
-): Promise<{ headerId: number; headerName: string; result: any; ok: boolean }[]> => {
+): Promise<{ headerId: number; headerName: string; result: any; payload: any; ok: boolean }[]> => {
   log?.('step', `── Step 5: Insert ${headers.length} Header(s) to APEX ──`);
   const results = [];
   for (const h of headers) {
@@ -1619,7 +1619,7 @@ export const debugStep5_InsertHeaders = async (
     const res = await insertToApex(APEX_DB_CONFIG.endpoints.journalHeaders, payload, log, true);
     const ok = apexOk(res);
     log?.(ok ? 'success' : 'error', `  Header ${h.headerId} (${h.headerName}): ${ok ? 'OK' : apexErr(res)}`);
-    results.push({ headerId: h.headerId, headerName: h.headerName, result: res, ok });
+    results.push({ headerId: h.headerId, headerName: h.headerName, result: res, payload, ok });
   }
   return results;
 };
@@ -1628,20 +1628,20 @@ export const debugStep6_InsertLines = async (
   linesData: { headerId: number; headerName: string; lines: any[] }[],
   batchId: number,
   log?: LogCallback,
-): Promise<{ headerId: number; headerName: string; result: any; ok: boolean; count: number }[]> => {
+): Promise<{ headerId: number; headerName: string; result: any; payload: any; ok: boolean; count: number }[]> => {
   log?.('step', `── Step 6: Insert Lines to APEX ──`);
   const results = [];
   for (const ld of linesData) {
     if (!ld.lines.length) {
       log?.('warning', `  Header ${ld.headerId}: no lines to insert`);
-      results.push({ headerId: ld.headerId, headerName: ld.headerName, result: null, ok: true, count: 0 });
+      results.push({ headerId: ld.headerId, headerName: ld.headerName, result: null, payload: null, ok: true, count: 0 });
       continue;
     }
     const payload = { batchId, jeHeaderId: ld.headerId, items: ld.lines };
     const res = await insertToApex(APEX_DB_CONFIG.endpoints.journalLines, payload, log, true);
     const ok = apexOk(res);
     log?.(ok ? 'success' : 'error', `  Header ${ld.headerId} (${ld.headerName}): ${ld.lines.length} lines → ${ok ? 'OK' : apexErr(res)}`);
-    results.push({ headerId: ld.headerId, headerName: ld.headerName, result: res, ok, count: ld.lines.length });
+    results.push({ headerId: ld.headerId, headerName: ld.headerName, result: res, payload, ok, count: ld.lines.length });
   }
   return results;
 };

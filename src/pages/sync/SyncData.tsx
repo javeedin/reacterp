@@ -892,13 +892,19 @@ const SyncData: React.FC = () => {
   const [debugStep,           setDebugStep]           = useState(0);
   const [debugLoading,        setDebugLoading]        = useState(false);
   const [debugBatches,        setDebugBatches]        = useState<DebugBatchInfo[]>([]);
+  const [debugStep1Raw,       setDebugStep1Raw]       = useState<any>(null);
   const [debugSelectedBatch,  setDebugSelectedBatch]  = useState<DebugBatchInfo | null>(null);
   const [debugHeaders,        setDebugHeaders]        = useState<DebugHeaderInfo[]>([]);
   const [debugLinesData,      setDebugLinesData]      = useState<{headerId:number;headerName:string;lines:any[];linesHref:string|null}[]>([]);
-  const [debugBatchInsert,    setDebugBatchInsert]    = useState<any>(null);
-  const [debugHeaderInserts,  setDebugHeaderInserts]  = useState<{headerId:number;headerName:string;result:any;ok:boolean}[]>([]);
-  const [debugLineInserts,    setDebugLineInserts]    = useState<{headerId:number;headerName:string;result:any;ok:boolean;count:number}[]>([]);
+  const [debugBatchInsert,    setDebugBatchInsert]    = useState<{result:any;payload:any}|null>(null);
+  const [debugHeaderInserts,  setDebugHeaderInserts]  = useState<{headerId:number;headerName:string;result:any;payload:any;ok:boolean}[]>([]);
+  const [debugLineInserts,    setDebugLineInserts]    = useState<{headerId:number;headerName:string;result:any;payload:any;ok:boolean;count:number}[]>([]);
   const [debugLogs,           setDebugLogs]           = useState<{type:string;msg:string}[]>([]);
+  // JSON viewer popup
+  const [jsonViewOpen,   setJsonViewOpen]   = useState(false);
+  const [jsonViewTitle,  setJsonViewTitle]  = useState('');
+  const [jsonViewTabs,   setJsonViewTabs]   = useState<{label:string;data:any}[]>([]);
+  const [jsonViewTabIdx, setJsonViewTabIdx] = useState(0);
   const [batchListOpen,  setBatchListOpen]  = useState(false);
   const [batchList,      setBatchList]      = useState<BatchListItem[]>([]);
   const [batchSyncing,   setBatchSyncing]   = useState(false);
@@ -1978,11 +1984,19 @@ const SyncData: React.FC = () => {
     setDebugLogs(prev => [...prev, { type, msg }]);
   }, []);
 
+  const openJsonView = useCallback((title: string, tabs: {label:string;data:any}[]) => {
+    setJsonViewTitle(title);
+    setJsonViewTabs(tabs);
+    setJsonViewTabIdx(0);
+    setJsonViewOpen(true);
+  }, []);
+
   const runDebugStep1 = async () => {
     setDebugLoading(true);
     try {
       const r = await debugStep1_FetchBatches(debugParams, debugLog as LogCallback);
       setDebugBatches(r.batches);
+      setDebugStep1Raw(r.rawResponse);
       setDebugSelectedBatch(r.batches[0] ?? null);
       setDebugStep(1);
     } catch (e) { debugLog('error', String(e)); }
@@ -2041,6 +2055,13 @@ const SyncData: React.FC = () => {
       setDebugStep(6);
     } catch (e) { debugLog('error', String(e)); }
     setDebugLoading(false);
+  };
+
+  const resetDebugModal = () => {
+    setDebugStep(0); setDebugBatches([]); setDebugStep1Raw(null);
+    setDebugSelectedBatch(null); setDebugHeaders([]); setDebugLinesData([]);
+    setDebugBatchInsert(null); setDebugHeaderInserts([]); setDebugLineInserts([]);
+    setDebugLogs([]);
   };
 
   const handleSync = async () => {
@@ -3064,15 +3085,7 @@ const SyncData: React.FC = () => {
     } else if (glSyncMode === 'step-debug') {
       // GL Journals — Step Debug mode: open the debug modal with button-per-step
       setDebugParams(parameters);
-      setDebugStep(0);
-      setDebugBatches([]);
-      setDebugSelectedBatch(null);
-      setDebugHeaders([]);
-      setDebugLinesData([]);
-      setDebugBatchInsert(null);
-      setDebugHeaderInserts([]);
-      setDebugLineInserts([]);
-      setDebugLogs([]);
+      resetDebugModal();
       setDebugModalOpen(true);
       isSyncingRef.current = false;
       return;
@@ -7737,8 +7750,12 @@ const SyncData: React.FC = () => {
     <Modal
       open={debugModalOpen}
       onCancel={() => setDebugModalOpen(false)}
-      footer={null}
-      width={860}
+      footer={
+        <Button size="small" onClick={resetDebugModal} disabled={debugLoading}>
+          ↺ Reset All Steps
+        </Button>
+      }
+      width={880}
       title={
         <Space>
           <BugOutlined style={{ color: '#d46b08' }} />
@@ -7764,10 +7781,12 @@ const SyncData: React.FC = () => {
           step: '#531dab', info: '#1677ff', success: '#237804', error: '#c74634', warning: '#d4a800'
         };
 
-        const fmtResult = (r: any) => (
-          <pre style={{ fontSize: 11, background: '#1a1a1a', color: '#d4f7d4', padding: 10, borderRadius: 6, margin: 0, maxHeight: 160, overflow: 'auto' }}>
-            {JSON.stringify(r, null, 2)}
-          </pre>
+        const ShowJsonBtn = ({ label, tabs }: { label: string; tabs: {label:string;data:any}[] }) => (
+          <Button size="small" icon={<FileTextOutlined />}
+            style={{ fontSize: 11 }}
+            onClick={() => openJsonView(label, tabs)}>
+            Show JSON
+          </Button>
         );
 
         return (
@@ -7779,14 +7798,21 @@ const SyncData: React.FC = () => {
                 <Text strong>Fetch Batch from Oracle Fusion</Text>
                 <Tag color="blue">GET journalBatches</Tag>
               </Space>
-              <div style={{ marginBottom: 8 }}>
+              <Space style={{ marginBottom: 8 }}>
                 <Button size="small" type="primary" loading={debugLoading && debugStep === 0}
                   disabled={debugLoading || debugStep > 0}
                   style={{ background: '#d46b08', borderColor: '#d46b08' }}
                   onClick={runDebugStep1}>
                   ▶ Run Step 1
                 </Button>
-              </div>
+                {debugStep >= 1 && debugStep1Raw && (
+                  <ShowJsonBtn label="Step 1 — Oracle Fusion Response"
+                    tabs={[
+                      { label: `Full Response (${debugBatches.length} batches)`, data: debugStep1Raw },
+                      ...debugBatches.map((b, i) => ({ label: `Batch ${b.batchId}`, data: b.rawBatch })),
+                    ]} />
+                )}
+              </Space>
               {debugStep >= 1 && (
                 <div>
                   <Text type="secondary" style={{ fontSize: 11 }}>Found {debugBatches.length} batch(es){debugBatches.length === 0 && ' — check your filter parameters'}</Text>
@@ -7798,10 +7824,10 @@ const SyncData: React.FC = () => {
                         {b.status && <Tag>{b.status}</Tag>}
                         {b.period && <Tag color="geekblue">{b.period}</Tag>}
                         {b.ledger && <Text type="secondary">{b.ledger}</Text>}
+                        <span style={{ fontSize: 11, color: b.headersHref ? '#237804' : '#c74634' }}>
+                          Headers link: {b.headersHref ? '✓' : '✗ missing'}
+                        </span>
                       </Space>
-                      <div style={{ fontSize: 11, marginTop: 4, color: b.headersHref ? '#237804' : '#c74634' }}>
-                        Headers link: {b.headersHref ? '✓ present' : '✗ missing'}
-                      </div>
                     </div>
                   ))}
                 </div>
@@ -7815,14 +7841,21 @@ const SyncData: React.FC = () => {
                 <Text strong>Fetch Headers from Oracle Fusion</Text>
                 <Tag color="blue">GET journalHeaders (child link)</Tag>
               </Space>
-              <div style={{ marginBottom: 8 }}>
+              <Space style={{ marginBottom: 8 }}>
                 <Button size="small" type="primary" loading={debugLoading && debugStep === 1}
                   disabled={debugLoading || debugStep !== 1}
                   style={{ background: '#d46b08', borderColor: '#d46b08' }}
                   onClick={runDebugStep2}>
                   ▶ Run Step 2
                 </Button>
-              </div>
+                {debugStep >= 2 && (
+                  <ShowJsonBtn label="Step 2 — Oracle Fusion Headers"
+                    tabs={[
+                      { label: `All Headers (${debugHeaders.length})`, data: debugHeaders.map(h => h.rawHeader) },
+                      ...debugHeaders.map((h, i) => ({ label: `Header ${h.headerId}`, data: h.rawHeader })),
+                    ]} />
+                )}
+              </Space>
               {debugStep >= 2 && (
                 <div>
                   <Text type="secondary" style={{ fontSize: 11 }}>Found {debugHeaders.length} header(s) for batch {debugSelectedBatch?.batchId}</Text>
@@ -7848,14 +7881,21 @@ const SyncData: React.FC = () => {
                 <Text strong>Fetch Lines from Oracle Fusion</Text>
                 <Tag color="blue">GET journalLines (per header)</Tag>
               </Space>
-              <div style={{ marginBottom: 8 }}>
+              <Space style={{ marginBottom: 8 }}>
                 <Button size="small" type="primary" loading={debugLoading && debugStep === 2}
                   disabled={debugLoading || debugStep !== 2}
                   style={{ background: '#d46b08', borderColor: '#d46b08' }}
                   onClick={runDebugStep3}>
                   ▶ Run Step 3
                 </Button>
-              </div>
+                {debugStep >= 3 && (
+                  <ShowJsonBtn label="Step 3 — Oracle Fusion Lines"
+                    tabs={debugLinesData.map(ld => ({
+                      label: `Header ${ld.headerId} (${ld.lines.length} lines)`,
+                      data: ld.lines,
+                    }))} />
+                )}
+              </Space>
               {debugStep >= 3 && (
                 <div>
                   {debugLinesData.map((ld, i) => (
@@ -7878,21 +7918,24 @@ const SyncData: React.FC = () => {
                 <Text strong>Insert Batch to APEX</Text>
                 <Tag color="volcano">POST gl/journalbatches</Tag>
               </Space>
-              <div style={{ marginBottom: 8 }}>
+              <Space style={{ marginBottom: 8 }}>
                 <Button size="small" type="primary" loading={debugLoading && debugStep === 3}
                   disabled={debugLoading || debugStep !== 3}
-                  danger
-                  onClick={runDebugStep4}>
+                  danger onClick={runDebugStep4}>
                   ▶ Run Step 4
                 </Button>
-              </div>
+                {debugStep >= 4 && debugBatchInsert && (
+                  <ShowJsonBtn label="Step 4 — APEX Batch Insert"
+                    tabs={[
+                      { label: 'Payload sent to APEX', data: debugBatchInsert.payload },
+                      { label: 'APEX Response', data: debugBatchInsert.result },
+                    ]} />
+                )}
+              </Space>
               {debugStep >= 4 && debugBatchInsert && (
-                <div>
-                  <Tag color={debugBatchInsert.success || debugBatchInsert.syncedCount > 0 ? 'green' : 'red'}>
-                    {debugBatchInsert.success || debugBatchInsert.syncedCount > 0 ? 'SUCCESS' : 'FAILED'}
-                  </Tag>
-                  {fmtResult(debugBatchInsert)}
-                </div>
+                <Tag color={debugBatchInsert.result?.success || debugBatchInsert.result?.syncedCount > 0 ? 'green' : 'red'}>
+                  {debugBatchInsert.result?.success || debugBatchInsert.result?.syncedCount > 0 ? 'SUCCESS' : 'FAILED'}
+                </Tag>
               )}
             </div>
 
@@ -7903,14 +7946,20 @@ const SyncData: React.FC = () => {
                 <Text strong>Insert Headers to APEX</Text>
                 <Tag color="volcano">POST gl/journals/headers</Tag>
               </Space>
-              <div style={{ marginBottom: 8 }}>
+              <Space style={{ marginBottom: 8 }}>
                 <Button size="small" type="primary" loading={debugLoading && debugStep === 4}
                   disabled={debugLoading || debugStep !== 4}
-                  danger
-                  onClick={runDebugStep5}>
+                  danger onClick={runDebugStep5}>
                   ▶ Run Step 5
                 </Button>
-              </div>
+                {debugStep >= 5 && debugHeaderInserts.length > 0 && (
+                  <ShowJsonBtn label="Step 5 — APEX Header Inserts"
+                    tabs={debugHeaderInserts.flatMap(hi => [
+                      { label: `H${hi.headerId} Payload`, data: hi.payload },
+                      { label: `H${hi.headerId} Response`, data: hi.result },
+                    ])} />
+                )}
+              </Space>
               {debugStep >= 5 && (
                 <div>
                   {debugHeaderInserts.map((hi, i) => (
@@ -7919,8 +7968,8 @@ const SyncData: React.FC = () => {
                         <Tag color="purple">Header {hi.headerId}</Tag>
                         <Text>{hi.headerName}</Text>
                         <Tag color={hi.ok ? 'green' : 'red'}>{hi.ok ? 'OK' : 'FAILED'}</Tag>
+                        {!hi.ok && <Text type="danger" style={{ fontSize: 11 }}>{hi.result?.error || hi.result?.lastError || 'Unknown error'}</Text>}
                       </Space>
-                      {fmtResult(hi.result)}
                     </div>
                   ))}
                 </div>
@@ -7934,25 +7983,34 @@ const SyncData: React.FC = () => {
                 <Text strong>Insert Lines to APEX</Text>
                 <Tag color="volcano">POST gl/journals/lines</Tag>
               </Space>
-              <div style={{ marginBottom: 8 }}>
+              <Space style={{ marginBottom: 8 }}>
                 <Button size="small" type="primary" loading={debugLoading && debugStep === 5}
                   disabled={debugLoading || debugStep !== 5}
-                  danger
-                  onClick={runDebugStep6}>
+                  danger onClick={runDebugStep6}>
                   ▶ Run Step 6
                 </Button>
-              </div>
+                {debugStep >= 6 && debugLineInserts.length > 0 && (
+                  <ShowJsonBtn label="Step 6 — APEX Lines Inserts"
+                    tabs={debugLineInserts.flatMap(li => [
+                      { label: `H${li.headerId} Payload (${li.count} lines)`, data: li.payload },
+                      { label: `H${li.headerId} Response`, data: li.result },
+                    ].filter(t => t.data))} />
+                )}
+              </Space>
               {debugStep >= 6 && (
                 <div>
                   {debugLineInserts.map((li, i) => (
-                    <div key={i} style={{ marginTop: 6, padding: '6px 10px', background: '#fff', borderRadius: 6, border: '1px solid #e5e5e5', fontSize: 12 }}>
+                    <div key={i} style={{ marginTop: 6, padding: '6px 10px', background: '#fff', borderRadius: 6, border: `1px solid ${li.ok ? '#e5e5e5' : '#ffccc7'}`, fontSize: 12 }}>
                       <Space wrap>
                         <Tag color="purple">Header {li.headerId}</Tag>
                         <Text>{li.headerName}</Text>
                         <Tag>{li.count} lines</Tag>
                         <Tag color={li.ok ? 'green' : 'red'}>{li.ok ? 'OK' : 'FAILED'}</Tag>
+                        {li.result && <Text type="secondary" style={{ fontSize: 11 }}>
+                          inserted: {li.result.inserted ?? '—'} | errors: {li.result.errors ?? '—'}
+                          {li.result.lastError ? ` | ${li.result.lastError}` : ''}
+                        </Text>}
                       </Space>
-                      {li.result && fmtResult(li.result)}
                     </div>
                   ))}
                   {debugStep === 6 && debugLineInserts.every(li => li.ok) && (
@@ -7978,6 +8036,47 @@ const SyncData: React.FC = () => {
           </div>
         );
       })()}
+    </Modal>
+
+    {/* ── JSON Viewer Popup ─────────────────────────────────────────── */}
+    <Modal
+      open={jsonViewOpen}
+      onCancel={() => setJsonViewOpen(false)}
+      footer={null}
+      width={820}
+      title={
+        <Space>
+          <FileTextOutlined style={{ color: '#1677ff' }} />
+          <span style={{ fontSize: 13 }}>{jsonViewTitle}</span>
+        </Space>
+      }
+      styles={{ body: { padding: 0 } }}
+    >
+      {jsonViewTabs.length > 0 && (
+        <div>
+          <div style={{ display: 'flex', gap: 2, padding: '8px 12px 0', borderBottom: '1px solid #e5e5e5', flexWrap: 'wrap' }}>
+            {jsonViewTabs.map((t, i) => (
+              <button key={i} onClick={() => setJsonViewTabIdx(i)} style={{
+                padding: '4px 12px', fontSize: 12, cursor: 'pointer', border: 'none', borderRadius: '4px 4px 0 0',
+                background: jsonViewTabIdx === i ? '#1677ff' : '#f0f0f0',
+                color: jsonViewTabIdx === i ? '#fff' : '#333',
+                fontWeight: jsonViewTabIdx === i ? 600 : 400,
+              }}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <pre style={{
+            margin: 0, padding: '14px 16px',
+            background: '#141414', color: '#e6f4ff',
+            fontSize: 12, lineHeight: 1.6,
+            maxHeight: '65vh', overflow: 'auto',
+            fontFamily: 'monospace',
+          }}>
+            {JSON.stringify(jsonViewTabs[jsonViewTabIdx]?.data, null, 2)}
+          </pre>
+        </div>
+      )}
     </Modal>
     </>
   );
