@@ -251,7 +251,8 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
     try {
       let tryPeriod = period;
       let allItems: any[] = [];
-      for (let attempt = 0; attempt < 24; attempt++) {
+      // Try current period then one period back only — avoids 24 sequential API calls
+      for (let attempt = 0; attempt < 2; attempt++) {
         const params = new URLSearchParams({ ledger_name: selectedLedger, period_name: tryPeriod, account });
         if (company) params.append('company', company);
         const resp = await fetch(`${API_BASE_URL}/rr-trialbalance/standard?${params.toString()}`);
@@ -262,12 +263,12 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
         if (allItems.length > 0) break;
         tryPeriod = getPreviousPeriod(tryPeriod);
       }
-      if (allItems.length === 0) return none;
-      const accountType: string = allItems[0].account_type || '';
+      // If no TB row exists the account has zero opening balance — still show the row
+      const accountType: string = allItems[0]?.account_type || '';
       const isRetainedEarnings = accountType === 'O';
       const isDebitNormal = accountType === 'A' || accountType === 'E';
-      const currencyCode = allItems[0].currency_code || 'AED';
-      const accountDesc  = allItems[0].account_desc  || '';
+      const currencyCode = allItems[0]?.currency_code || 'AED';
+      const accountDesc  = allItems[0]?.account_desc  || '';
       const openingAmt    = allItems.reduce((s: number, i: any) => s + (i.opening         || 0), 0);
       const closingAmt    = allItems.reduce((s: number, i: any) => s + (i.closing         || 0), 0);
       const entOpeningAmt = allItems.reduce((s: number, i: any) => s + (i.entered_opening || 0), 0);
@@ -276,15 +277,13 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
         isDebitNormal
           ? { dr: amt, cr: 0 }    // debit-normal: preserve sign in Dr (neg = unusual credit balance)
           : { dr: 0, cr: -amt };  // credit-normal: negate into Cr (neg opening → positive Cr = normal credit balance)
-      const makeRow = (accAmt: number, entAmt: number, label: string, key: string, isOpen: boolean): JournalLineSegment | null => {
+      const makeRow = (accAmt: number, entAmt: number, label: string, key: string, isOpen: boolean): JournalLineSegment => {
         const eA = isRetainedEarnings && isOpen ? closingAmt    : accAmt;
         const eE = isRetainedEarnings && isOpen ? entClosingAmt : entAmt;
-        if (eA === 0 && eE === 0) return null;
         const acc = toDrCr(eA), ent = toDrCr(eE);
-        if (acc.dr === 0 && acc.cr === 0 && ent.dr === 0 && ent.cr === 0) return null;
         return {
           key, batchId: 0, jeHeaderId: 0, jeLineNumber: 0,
-          currencyCode, company: allItems[0].company || company,
+          currencyCode, company: (allItems[0]?.company) || company,
           lob: '', department: '', account, subAccount: '', analysis: '',
           intercompany: '', future1: '', future2: '',
           enteredDr: ent.dr, enteredCr: ent.cr, accountedDr: acc.dr, accountedCr: acc.cr,
@@ -473,13 +472,11 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
         });
       }
       const g = map.get(line.jeHeaderId)!;
-      if (!g.lines.find(e => e.jeLineNumber === line.jeLineNumber)) {
-        g.lines.push(line);
-        g.totalEnteredDr   += line.enteredDr   || 0;
-        g.totalEnteredCr   += line.enteredCr   || 0;
-        g.totalAccountedDr += line.accountedDr || 0;
-        g.totalAccountedCr += line.accountedCr || 0;
-      }
+      g.lines.push(line);
+      g.totalEnteredDr   += line.enteredDr   || 0;
+      g.totalEnteredCr   += line.enteredCr   || 0;
+      g.totalAccountedDr += line.accountedDr || 0;
+      g.totalAccountedCr += line.accountedCr || 0;
     });
     return Array.from(map.values()).sort((a, b) =>
       a.defaultPeriodName.localeCompare(b.defaultPeriodName) || a.batchName.localeCompare(b.batchName));
