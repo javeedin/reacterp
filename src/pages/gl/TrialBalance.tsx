@@ -334,6 +334,7 @@ const TrialBalance: React.FC = () => {
   const [ytdMovProgress,  setYtdMovProgress]  = useState('');
   const [ytdMovRows,      setYtdMovRows]      = useState<{ period: string; period_year: number; period_number: number; ytd_opening: number; ytd_debit: number; ytd_credit: number; closing: number }[]>([]);
   const [ytdMovError,    setYtdMovError]    = useState<string | null>(null);
+  const [ytdMovApiUrls,  setYtdMovApiUrls]  = useState<string[]>([]);
   // Prompt modal state
   const [ytdMovPromptVisible,  setYtdMovPromptVisible]  = useState(false);
   const [ytdMovPromptYear,     setYtdMovPromptYear]     = useState<number | null>(null);
@@ -763,6 +764,7 @@ const TrialBalance: React.FC = () => {
     setYtdMovCurrency(currency);
     setYtdMovRows([]);
     setYtdMovError(null);
+    setYtdMovApiUrls([]);
     setYtdMovVisible(true);
     setYtdMovLoading(true);
 
@@ -789,6 +791,7 @@ const TrialBalance: React.FC = () => {
           + `&period_name=${encodeURIComponent(p.period_name_id)}`
           + `&account=${encodeURIComponent(account)}`
           + `&limit=500`;
+        setYtdMovApiUrls(prev => [...prev, url]);
         const res = await fetch(url, { headers: { Accept: 'application/json' } });
         if (!res.ok) continue;
         const data = await res.json();
@@ -4560,40 +4563,39 @@ const TrialBalance: React.FC = () => {
           open={ytdMovVisible}
           onClose={() => setYtdMovVisible(false)}
           extra={
-            <Tooltip title={`API: GET gl/rr-trialbalance/standard?ledger_name=...&period_name=<period>&account=${ytdMovAccount}&limit=500`}>
-              <Button
-                size="small"
-                icon={<ApiOutlined />}
-                style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
-                onClick={() => {
-                  const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceStandard}`
-                    + `?ledger_name=${encodeURIComponent(ytdMovLedger)}&period_name=<period>&account=${encodeURIComponent(ytdMovAccount)}&limit=500`;
-                  Modal.info({
-                    title: <Space><ApiOutlined style={{ color: REDWOOD.info }} />API Endpoints — YTD Balance Movement</Space>,
-                    width: 680,
-                    content: (
-                      <div>
-                        <div style={{ marginBottom: 8, fontSize: 12, color: '#888' }}>
-                          One request per period, filtered client-side by account <strong>{ytdMovAccount}</strong>
-                          {ytdMovCompany  ? `, company <strong>${ytdMovCompany}</strong>`  : ''}
-                          {ytdMovCurrency ? `, currency <strong>${ytdMovCurrency}</strong>` : ''}
-                        </div>
-                        <div style={{ background: '#f5f5f5', padding: 10, borderRadius: 6, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
-                          <div style={{ color: '#888', marginBottom: 4 }}>GET (per period):</div>
-                          {url}
-                        </div>
-                        <div style={{ marginTop: 10, fontSize: 12, color: '#888' }}>
-                          Periods fetched: <strong>{ytdMovRows.length}</strong> with activity
-                          {ytdMovLoading && <span style={{ color: '#1677ff', marginLeft: 8 }}>(loading…)</span>}
-                        </div>
+            <Button
+              size="small"
+              icon={<ApiOutlined />}
+              style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
+              onClick={() => {
+                Modal.info({
+                  title: <Space><ApiOutlined style={{ color: REDWOOD.info }} />API Calls — YTD Balance Movement</Space>,
+                  width: 760,
+                  content: (
+                    <div>
+                      <div style={{ marginBottom: 8, fontSize: 12, color: '#555' }}>
+                        <strong>{ytdMovApiUrls.length}</strong> request(s) fired — one per period, server-filtered by account <Tag style={{ fontFamily: 'monospace' }}>{ytdMovAccount}</Tag>
+                        {ytdMovCompany  && <>{', company '}<Tag color="orange">{ytdMovCompany}</Tag></>}
+                        {ytdMovCurrency && <>{', currency '}<Tag color="cyan">{ytdMovCurrency}</Tag></>}
+                        {ytdMovLoading  && <Tag icon={<LoadingOutlined />} color="processing">loading…</Tag>}
                       </div>
-                    ),
-                  });
-                }}
-              >
-                API
-              </Button>
-            </Tooltip>
+                      <div style={{ maxHeight: 400, overflowY: 'auto', background: '#f5f5f5', padding: 10, borderRadius: 6 }}>
+                        {ytdMovApiUrls.length === 0
+                          ? <span style={{ color: '#aaa', fontSize: 12 }}>No requests yet.</span>
+                          : ytdMovApiUrls.map((u, i) => (
+                            <div key={i} style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', marginBottom: 6, borderBottom: '1px solid #e0e0e0', paddingBottom: 4 }}>
+                              <span style={{ color: '#888', marginRight: 6 }}>{i + 1}.</span>{u}
+                            </div>
+                          ))
+                        }
+                      </div>
+                    </div>
+                  ),
+                });
+              }}
+            >
+              API ({ytdMovApiUrls.length})
+            </Button>
           }
         >
           {ytdMovLoading && ytdMovRows.length === 0 ? (
