@@ -263,6 +263,14 @@ const ExternalTxnForm: React.FC<{
         payeeName:                 initialValues.payeeName,
         payeeId:                   initialValues.payeeId,
       });
+      // Populate lines table from initial values (edit mode)
+      setExtTxnLines([{
+        key: 0,
+        amount: initialValues.amount ?? undefined,
+        description: initialValues.description ?? '',
+        offsetAccount: initialValues.offsetAccountCombination ?? '',
+        offsetDesc: '',
+      }]);
       // Fetch existing attachments for edit mode
       if (initialValues.externalTransactionId) {
         fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.externalTransactionId}/attachments`, { headers: { Accept: 'application/json' } })
@@ -279,6 +287,7 @@ const ExternalTxnForm: React.FC<{
       setTxnDirection('CR');
       setAssetAcctDesc('');
       setOffsetAcctDesc('');
+      setExtTxnLines([{ key: 0, amount: undefined, description: '', offsetAccount: '', offsetDesc: '' }]);
     }
   }, [initialValues, form]);
 
@@ -320,102 +329,104 @@ const ExternalTxnForm: React.FC<{
     let values: any;
     try { values = await form.validateFields(); } catch { return; }
 
-    if (extTxnMode === 'multiple') {
-      const invalid = extTxnLines.filter(l => !l.amount);
-      if (invalid.length > 0) { message.error('All lines must have an amount'); return; }
-      const missingOffset = extTxnLines.filter(l => !l.offsetAccount);
-      if (missingOffset.length > 0) { message.error('All lines must have an offset account'); return; }
-      setSaving(true);
-      const baseRef = values.referenceText?.trim() || '';
-      const baseHeader = {
-        BankAccountName:         values.bankAccountName,
-        BusinessUnitName:        values.businessUnitName ?? '',
-        TransactionDate:         values.transactionDate?.format('YYYY-MM-DD'),
-        ValueDate:               values.valueDate?.format('YYYY-MM-DD') ?? null,
-        CurrencyCode:            values.currencyCode ?? '',
-        TransactionType:         values.transactionType ?? '',
-        AssetAccountCombination: values.assetAccountCombination ?? '',
-        TransactionDirection:    values.transactionDirection ?? txnDirection,
-        Source: 'ORA_MAN', Status: 'UNR', AccountingFlag: false,
-        CreatedBy: 'ERP_USER', CreationDate: new Date().toISOString(),
-        LastUpdatedBy: 'ERP_USER', LastUpdateDate: new Date().toISOString(), LastUpdateLogin: '',
-        PaymentMethod:        values.paymentMethod ?? null,
-        PaymentDocument:      values.paymentDocument ?? null,
-        PaperDocumentNumber:  values.paperDocumentNumber ?? null,
-        PayeeName:            values.payeeName ?? null,
-        PayeeId:              values.payeeId ?? null,
-      };
-      let successCount = 0;
-      for (let i = 0; i < extTxnLines.length; i++) {
-        const line = extTxnLines[i];
-        const payload = {
-          items: [{
-            ...baseHeader,
-            Amount:                   line.amount,
-            ReferenceText:            extTxnLines.length > 1 ? `${baseRef}-${i + 1}` : baseRef,
-            Description:              line.description ?? '',
-            OffsetAccountCombination: line.offsetAccount ?? '',
-          }],
-        };
-        try {
-          const res = await fetch(`${APEX_BASE}/cash/externaltransactions`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-          const data = await res.json();
-          if (data.status === 'success') {
-            successCount++;
-          } else {
-            message.error(`Line ${i + 1}: ${data.message || 'Save failed.'}`);
-            setSaving(false);
-            return;
-          }
-        } catch (e: any) {
-          message.error(`Line ${i + 1}: Network error: ${e.message}`);
-          setSaving(false);
-          return;
+    const invalid = extTxnLines.filter(l => !l.amount);
+    if (invalid.length > 0) { message.error('All lines must have an amount'); return; }
+    const missingOffset = extTxnLines.filter(l => !l.offsetAccount);
+    if (missingOffset.length > 0) { message.error('All lines must have an offset account'); return; }
+
+    setSaving(true);
+
+    if (isEdit) {
+      // Edit: update the single transaction using first line values
+      const line = extTxnLines[0];
+      try {
+        const res = await fetch(`${APEX_BASE}/cash/externaltransactions`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildPayload({ ...values, amount: line.amount, description: line.description ?? '', offsetAccountCombination: line.offsetAccount ?? '' })),
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+          message.success('Transaction updated.');
+          onSave();
+        } else {
+          message.error(data.message || 'Update failed.');
         }
-      }
-      setSaving(false);
-      message.success(`${successCount} transaction(s) created.`);
-      onSave();
+      } catch (e: any) {
+        message.error('Network error: ' + e.message);
+      } finally { setSaving(false); }
       return;
     }
 
-    setSaving(true);
-    try {
-      const res = await fetch(`${APEX_BASE}/cash/externaltransactions`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildPayload(values)),
-      });
-      const data = await res.json();
-      if (data.status === 'success') {
-        // Upload attachments
-        const newExtId = data.externalTransactionId;
-        if (newExtId && attachments.length > 0) {
-          for (const att of attachments.filter(a => !a.id)) {
-            try {
-              await fetch(`${APEX_BASE}/cash/externaltransactions/${newExtId}/attachments`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fileName: att.name, fileType: att.fileType, fileSize: att.fileSize, content: att.content, createdBy: 'ERP_USER' }),
-              });
-            } catch { /* ignore upload errors silently */ }
+    // Create: one POST per line
+    const baseRef = values.referenceText?.trim() || '';
+    const baseHeader = {
+      BankAccountName:         values.bankAccountName,
+      BusinessUnitName:        values.businessUnitName ?? '',
+      TransactionDate:         values.transactionDate?.format('YYYY-MM-DD'),
+      ValueDate:               values.valueDate?.format('YYYY-MM-DD') ?? null,
+      CurrencyCode:            values.currencyCode ?? '',
+      TransactionType:         values.transactionType ?? '',
+      AssetAccountCombination: values.assetAccountCombination ?? '',
+      TransactionDirection:    values.transactionDirection ?? txnDirection,
+      BankConversionRate:      values.bankConversionRate ?? null,
+      BankConversionRateType:  values.bankConversionRateType ?? null,
+      Source: 'ORA_MAN', Status: 'UNR', AccountingFlag: false,
+      CreatedBy: 'ERP_USER', CreationDate: new Date().toISOString(),
+      LastUpdatedBy: 'ERP_USER', LastUpdateDate: new Date().toISOString(), LastUpdateLogin: '',
+      PaymentMethod:        values.paymentMethod ?? null,
+      PaymentDocument:      values.paymentDocument ?? null,
+      PaperDocumentNumber:  values.paperDocumentNumber ?? null,
+      PayeeName:            values.payeeName ?? null,
+      PayeeId:              values.payeeId ?? null,
+    };
+    let successCount = 0;
+    let savedId: any = null;
+    for (let i = 0; i < extTxnLines.length; i++) {
+      const line = extTxnLines[i];
+      const payload = {
+        items: [{
+          ...baseHeader,
+          Amount:                   line.amount,
+          ReferenceText:            extTxnLines.length > 1 ? `${baseRef}-${i + 1}` : baseRef,
+          Description:              line.description ?? '',
+          OffsetAccountCombination: line.offsetAccount ?? '',
+        }],
+      };
+      try {
+        const res = await fetch(`${APEX_BASE}/cash/externaltransactions`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+          successCount++;
+          if (i === 0) savedId = data.externalTransactionId ?? null;
+          // Upload attachments on first line
+          if (i === 0 && data.externalTransactionId && attachments.length > 0) {
+            for (const att of attachments.filter(a => !a.id)) {
+              try {
+                await fetch(`${APEX_BASE}/cash/externaltransactions/${data.externalTransactionId}/attachments`, {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ fileName: att.name, fileType: att.fileType, fileSize: att.fileSize, content: att.content, createdBy: 'ERP_USER' }),
+                });
+              } catch { /* ignore */ }
+            }
           }
-        }
-        message.success(isEdit ? 'Transaction updated.' : 'Transaction created.');
-        if (isEdit) {
-          onSave();
         } else {
-          setSaved(true);
-          setSavedExtId(data.externalTransactionId ?? null);
+          message.error(`Line ${i + 1}: ${data.message || 'Save failed.'}`);
+          setSaving(false);
+          return;
         }
-      } else {
-        message.error(data.message || 'Save failed.');
+      } catch (e: any) {
+        message.error(`Line ${i + 1}: Network error: ${e.message}`);
+        setSaving(false);
+        return;
       }
-    } catch (e: any) {
-      message.error('Network error: ' + e.message);
-    } finally { setSaving(false); }
+    }
+    setSaving(false);
+    message.success(`${successCount} transaction(s) created.`);
+    setSaved(true);
+    setSavedExtId(savedId);
   };
 
   const handleApiOpen = async () => {
@@ -499,21 +510,25 @@ const ExternalTxnForm: React.FC<{
       `}</style>
 
       <Form form={form} layout="vertical" size="middle">
-        <Row gutter={16} align="stretch">
-        <Col xs={24} xl={11} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
-        {/* ── Section 1: Organisation ── */}
-        <Card styles={{ body: { padding: '14px 16px' } }} style={sectionCard(REDWOOD.info)}>
-          <div style={sectionHeader(REDWOOD.info)}>
-            <BankOutlined /> Organisation
-          </div>
-          <Row gutter={16}>
-            <Col xs={24} md={12}>
+        {/* ══════════════════ HEADER CARD ══════════════════ */}
+        <Card
+          styles={{ body: { padding: '16px 20px' } }}
+          style={{ ...sectionCard(REDWOOD.primary), marginBottom: 12 }}
+          title={
+            <span style={{ ...sectionHeader(REDWOOD.primary), marginBottom: 0, fontSize: 13 }}>
+              <BankOutlined style={{ marginRight: 6 }} /> Transaction Header
+            </span>
+          }
+        >
+          {/* Row 1: Organisation */}
+          <Row gutter={12}>
+            <Col xs={24} md={8}>
               <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Business Unit</span>}
+                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Business Unit</span>}
                 name="businessUnitName"
                 rules={[{ required: !isEdit, message: 'Required' }]}
-                style={{ marginBottom: 0 }}
+                style={{ marginBottom: 10 }}
               >
                 <Select
                   showSearch optionFilterProp="label" options={businessUnits}
@@ -536,30 +551,28 @@ const ExternalTxnForm: React.FC<{
                 />
               </Form.Item>
               {selectedBu && derivedCompany && (
-                <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Text style={{ fontSize: 11, color: REDWOOD.textSecondary }}>Company Code:</Text>
-                  <Tag color="blue" style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{derivedCompany}</Tag>
+                <div style={{ marginTop: -6, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Text style={{ fontSize: 11, color: REDWOOD.textSecondary }}>Company:</Text>
+                  <Tag color="blue" style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 11 }}>{derivedCompany}</Tag>
                 </div>
               )}
               {selectedBu && !derivedCompany && (
-                <div style={{ marginTop: 4, padding: '4px 8px', background: '#fff2f0', border: '1px solid #ffa39e', borderRadius: 4 }}>
-                  <Text style={{ fontSize: 11, color: '#cf1322' }}>
-                    ⚠ No company code configured for this Business Unit. Cannot proceed with accounting.
-                  </Text>
+                <div style={{ marginTop: -6, marginBottom: 6, padding: '3px 7px', background: '#fff2f0', border: '1px solid #ffa39e', borderRadius: 4 }}>
+                  <Text style={{ fontSize: 11, color: '#cf1322' }}>⚠ No company code for this BU</Text>
                 </div>
               )}
             </Col>
-            <Col xs={24} md={12}>
+            <Col xs={24} md={10}>
               <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Bank Account</span>}
+                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Bank Account</span>}
                 name="bankAccountName"
                 rules={[{ required: !isEdit, message: 'Required' }]}
-                style={{ marginBottom: 0 }}
+                style={{ marginBottom: 10 }}
               >
                 <Select
                   showSearch optionFilterProp="label"
                   options={filteredBankAccounts}
-                  placeholder={buSelected && !derivedCompany ? 'No company code — cannot select bank' : buSelected ? 'Select bank account' : 'Select Business Unit first'}
+                  placeholder={buSelected && !derivedCompany ? 'No company code — cannot select bank' : buSelected ? 'Select bank account' : 'Select BU first'}
                   disabled={isEdit || !buSelected || saved || (!derivedCompany && buSelected)}
                   style={{ width: '100%' }}
                   notFoundContent={<Text type="secondary">No accounts for this BU</Text>}
@@ -581,18 +594,53 @@ const ExternalTxnForm: React.FC<{
                 />
               </Form.Item>
             </Col>
-          </Row>
-        </Card>
-
-        {/* ── Section 2: Transaction Details ── */}
-        <Card styles={{ body: { padding: '14px 16px' } }} style={{ ...sectionCard(REDWOOD.primary), flex: 1 }}>
-          <div style={sectionHeader(REDWOOD.primary)}>
-            <DollarOutlined /> Transaction Details
-          </div>
-          <Row gutter={16}>
-            <Col xs={12} md={6}>
+            <Col xs={12} md={3}>
               <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Transaction Date</span>}
+                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Currency</span>}
+                name="currencyCode"
+                style={{ marginBottom: 10 }}
+              >
+                <Select placeholder="Auto" allowClear disabled={isEdit || !bankSelected || saved}>
+                  {['AED', 'USD', 'EUR', 'GBP', 'SAR', 'QAR', 'KWD', 'BHD', 'OMR'].map(c => (
+                    <Option key={c} value={c}>{c}</Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col xs={12} md={3}>
+              <Form.Item
+                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Direction</span>}
+                name="transactionDirection"
+                initialValue="CR"
+                style={{ marginBottom: 10 }}
+              >
+                <Segmented
+                  options={[
+                    { label: 'DR', value: 'DR' },
+                    { label: 'CR', value: 'CR' },
+                  ]}
+                  onChange={(v) => {
+                    const dir = v as 'DR' | 'CR';
+                    setTxnDirection(dir);
+                    setExtTxnLines(prev => prev.map(l =>
+                      l.amount != null
+                        ? { ...l, amount: dir === 'DR' ? Math.abs(l.amount) : -Math.abs(l.amount) }
+                        : l
+                    ));
+                  }}
+                  disabled={isEdit || !bankSelected || isAdhocPayment || saved}
+                  style={{ background: txnDirection === 'DR' ? '#e6f4ff' : '#fff1f0', opacity: isAdhocPayment ? 0.7 : 1 }}
+                  className={`direction-segmented direction-${txnDirection.toLowerCase()}`}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          {/* Row 2: Dates + Type + Reference */}
+          <Row gutter={12}>
+            <Col xs={12} md={4}>
+              <Form.Item
+                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Transaction Date</span>}
                 name="transactionDate"
                 rules={[{ required: !isEdit, message: 'Required' }]}
                 style={{ marginBottom: 10 }}
@@ -600,34 +648,21 @@ const ExternalTxnForm: React.FC<{
                 <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isEdit || !bankSelected || saved} />
               </Form.Item>
             </Col>
-            <Col xs={12} md={6}>
+            <Col xs={12} md={4}>
               <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Value Date</span>}
+                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Value Date</span>}
                 name="valueDate"
                 style={{ marginBottom: 10 }}
               >
                 <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isEdit || !bankSelected || saved} />
               </Form.Item>
             </Col>
-            <Col xs={12} md={6}>
+            <Col xs={24} md={6}>
               <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Currency</span>}
-                name="currencyCode"
-                style={{ marginBottom: 10 }}
-              >
-                <Select placeholder="Auto-filled" allowClear disabled={isEdit || !bankSelected || saved}>
-                  {['AED', 'USD', 'EUR', 'GBP', 'SAR', 'QAR', 'KWD', 'BHD', 'OMR'].map(c => (
-                    <Option key={c} value={c}>{c}</Option>
-                  ))}
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col xs={12} md={6}>
-              <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Transaction Type</span>}
+                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Transaction Type</span>}
                 name="transactionType"
                 initialValue="External Transaction"
-                rules={[{ required: true, message: 'Transaction Type is required' }]}
+                rules={[{ required: true, message: 'Required' }]}
                 style={{ marginBottom: 10 }}
               >
                 <Select placeholder="Select type" disabled={isEdit || !bankSelected || saved}>
@@ -636,99 +671,58 @@ const ExternalTxnForm: React.FC<{
                 </Select>
               </Form.Item>
             </Col>
-          </Row>
-          <Row gutter={16}>
-            <Col xs={24} md={12}>
+            <Col xs={24} md={10}>
               <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Reference</span>}
+                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Reference</span>}
                 name="referenceText"
-                style={{ marginBottom: 0 }}
+                style={{ marginBottom: 10 }}
               >
                 <Input placeholder="e.g. STMT-REF-001" disabled={isEdit || !bankSelected || saved} />
               </Form.Item>
             </Col>
-            <Col xs={24} md={12}>
-              <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Direction</span>}
-                name="transactionDirection"
-                initialValue="CR"
-                style={{ marginBottom: 0 }}
-              >
-                <Segmented
-                  options={[
-                    { label: '▲ DR — Money In',  value: 'DR' },
-                    { label: '▼ CR — Money Out', value: 'CR' },
-                  ]}
-                  onChange={(v) => {
-                    const dir = v as 'DR' | 'CR';
-                    setTxnDirection(dir);
-                    // Re-sign single-mode amount
-                    const cur = form.getFieldValue('amount');
-                    if (cur != null && cur !== '' && cur !== 0) {
-                      const abs = Math.abs(Number(cur));
-                      form.setFieldsValue({ amount: dir === 'DR' ? abs : -abs });
-                    }
-                    // Re-sign all multi-line amounts
-                    setExtTxnLines(prev => prev.map(l =>
-                      l.amount != null
-                        ? { ...l, amount: dir === 'DR' ? Math.abs(l.amount) : -Math.abs(l.amount) }
-                        : l
-                    ));
-                  }}
-                  disabled={isEdit || !bankSelected || isAdhocPayment || saved}
-                  style={{
-                    background: txnDirection === 'DR' ? '#e6f4ff' : '#fff1f0',
-                    opacity: isAdhocPayment ? 0.7 : 1,
-                  }}
-                  className={`direction-segmented direction-${txnDirection.toLowerCase()}`}
-                />
-              </Form.Item>
-            </Col>
           </Row>
-          <Row gutter={16} style={{ marginTop: 8 }}>
-            <Col xs={24} md={8}>
+
+          {/* Row 3: Payment + Conversion */}
+          <Row gutter={12}>
+            <Col xs={12} md={4}>
               <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Payment Method</span>}
+                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Payment Method</span>}
                 name="paymentMethod"
-                style={{ marginBottom: isAdhocPayment ? 10 : 0 }}
+                style={{ marginBottom: 10 }}
               >
-                <Select placeholder="Select method" allowClear disabled={isEdit || !bankSelected || saved}>
+                <Select placeholder="Method" allowClear disabled={isEdit || !bankSelected || saved}>
                   {['CHECK', 'EFT', 'WIRE', 'CASH', 'MISC'].map(m => <Option key={m} value={m}>{m}</Option>)}
                 </Select>
               </Form.Item>
             </Col>
-            <Col xs={24} md={8}>
+            <Col xs={12} md={6}>
               <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Payment Document</span>}
+                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Payment Document</span>}
                 name="paymentDocument"
-                style={{ marginBottom: isAdhocPayment ? 10 : 0 }}
+                style={{ marginBottom: 10 }}
               >
                 <Input placeholder="e.g. Cheque Book Name" disabled={isEdit || !bankSelected || saved} />
               </Form.Item>
             </Col>
-            <Col xs={24} md={8}>
+            <Col xs={12} md={4}>
               <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Paper Document #</span>}
+                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Paper Doc #</span>}
                 name="paperDocumentNumber"
-                style={{ marginBottom: isAdhocPayment ? 10 : 0 }}
+                style={{ marginBottom: 10 }}
               >
-                <Input placeholder="e.g. CHQ-00123" disabled={isEdit || !bankSelected || saved} />
+                <Input placeholder="CHQ-00123" disabled={isEdit || !bankSelected || saved} />
               </Form.Item>
             </Col>
-          </Row>
-
-          {/* ── Conversion Rate ── */}
-          <Row gutter={16} style={{ marginTop: 8 }}>
-            <Col xs={24} md={12}>
+            <Col xs={12} md={4}>
               <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Conversion Rate Type</span>}
+                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Conv. Rate Type</span>}
                 name="bankConversionRateType"
-                style={{ marginBottom: 0 }}
+                style={{ marginBottom: 10 }}
                 required={isForeignCurrency}
-                rules={[{ required: isForeignCurrency, message: 'Conversion Rate Type is required for foreign currency' }]}
+                rules={[{ required: isForeignCurrency, message: 'Required for foreign currency' }]}
               >
                 <Select
-                  placeholder={isForeignCurrency ? 'Required for foreign currency' : 'Select rate type'}
+                  placeholder={isForeignCurrency ? 'Required' : 'Optional'}
                   allowClear
                   disabled={isEdit || !bankSelected || saved}
                 >
@@ -738,151 +732,29 @@ const ExternalTxnForm: React.FC<{
                 </Select>
               </Form.Item>
             </Col>
-            <Col xs={24} md={12}>
+            <Col xs={12} md={6}>
               <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Conversion Rate</span>}
+                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Conversion Rate</span>}
                 name="bankConversionRate"
-                style={{ marginBottom: 0 }}
+                style={{ marginBottom: 10 }}
                 required={isForeignCurrency}
-                rules={[{ required: isForeignCurrency, message: 'Conversion Rate is required for foreign currency' }]}
+                rules={[{ required: isForeignCurrency, message: 'Required for foreign currency' }]}
               >
                 <InputNumber
                   style={{ width: '100%' }}
-                  precision={6}
-                  min={0}
-                  placeholder={isForeignCurrency ? 'Required — e.g. 3.672500' : 'e.g. 3.672500'}
+                  precision={6} min={0}
+                  placeholder={isForeignCurrency ? 'Required' : 'e.g. 3.672500'}
                   disabled={isEdit || !bankSelected || saved}
                 />
               </Form.Item>
             </Col>
           </Row>
-          {isAdhocPayment && (
-            <Row gutter={16} style={{ marginTop: 8 }}>
-              <Col xs={24}>
-                <Form.Item
-                  label={<span style={{ fontWeight: 600, fontSize: 13 }}>Payee</span>}
-                  name="payeeId"
-                  rules={[{ required: true, message: 'Select a payee for Adhoc Payment' }]}
-                  style={{ marginBottom: 0 }}
-                >
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <Select
-                      showSearch
-                      placeholder="Select payee..."
-                      disabled={isEdit || !bankSelected || saved}
-                      optionFilterProp="label"
-                      options={payeeOptions}
-                      style={{ flex: 1 }}
-                      onChange={(val: number) => {
-                        const p = payeeOptions.find(o => o.value === val);
-                        if (p) form.setFieldsValue({ payeeName: p.payeeName });
-                      }}
-                    />
-                    {!isEdit && !saved && (
-                      <Tooltip title="Create new payee">
-                        <Button
-                          icon={<PlusOutlined />}
-                          onClick={() => { createPayeeForm.resetFields(); setCreatePayeeVisible(true); }}
-                          style={{ flexShrink: 0 }}
-                        />
-                      </Tooltip>
-                    )}
-                  </div>
-                </Form.Item>
-                {/* hidden field keeps payeeName in sync */}
-                <Form.Item name="payeeName" hidden><Input /></Form.Item>
-              </Col>
-            </Row>
-          )}
 
-          {/* ── Create Payee Modal ── */}
-          <Modal
-            title="Create New Payee"
-            open={createPayeeVisible}
-            onCancel={() => setCreatePayeeVisible(false)}
-            confirmLoading={createPayeeSaving}
-            onOk={async () => {
-              try {
-                const vals = await createPayeeForm.validateFields();
-                setCreatePayeeSaving(true);
-                const res = await fetch(`${APEX_BASE}/cash/payees`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-                  body: JSON.stringify({
-                    payeeName: vals.payeeName,
-                    taxRegistrationNumber: vals.taxRegistrationNumber || null,
-                    description: vals.description || null,
-                    active: 'Y',
-                  }),
-                });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data?.message || `HTTP ${res.status}`);
-                const newId = data.payee_id ?? data.payeeId ?? data.id;
-                const newName = vals.payeeName;
-                const newOption: PayeeOption = { label: newName, value: newId, payeeName: newName };
-                onPayeeCreated(newOption);
-                form.setFieldsValue({ payeeId: newId, payeeName: newName });
-                setCreatePayeeVisible(false);
-                message.success(`Payee "${newName}" created`);
-              } catch (err: any) {
-                if (err?.errorFields) return; // validation error, stay open
-                message.error(`Failed to create payee: ${err?.message ?? err}`);
-              } finally {
-                setCreatePayeeSaving(false);
-              }
-            }}
-            okText="Create Payee"
-            width={480}
-          >
-            <Form form={createPayeeForm} layout="vertical" style={{ marginTop: 8 }}>
+          {/* Row 4: Cash account + Payee (adhoc) */}
+          <Row gutter={12}>
+            <Col xs={24} md={isAdhocPayment ? 12 : 16}>
               <Form.Item
-                label="Payee Name"
-                name="payeeName"
-                rules={[{ required: true, message: 'Payee name is required' }]}
-              >
-                <Input placeholder="Enter payee name" />
-              </Form.Item>
-              <Form.Item label="Tax Registration Number" name="taxRegistrationNumber">
-                <Input placeholder="Optional" />
-              </Form.Item>
-              <Form.Item label="Description" name="description">
-                <Input.TextArea rows={3} placeholder="Optional" />
-              </Form.Item>
-            </Form>
-          </Modal>
-        </Card>
-
-        </Col>
-        {/* RIGHT COLUMN */}
-        <Col xs={24} xl={13} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-
-        {/* ── Section 3: Account Coding ── */}
-        <Card
-          styles={{ body: { padding: '14px 16px' } }}
-          style={{ ...sectionCard(REDWOOD.success), flex: 1 }}
-          title={
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
-              <span style={{ ...sectionHeader(REDWOOD.success), marginBottom: 0 }}>
-                <FileTextOutlined /> Account Coding
-              </span>
-              {!isEdit && !isAdhocPayment && (
-                <Segmented
-                  size="small"
-                  value={extTxnMode}
-                  onChange={(v) => setExtTxnMode(v as 'single' | 'multiple')}
-                  options={[
-                    { label: 'Single', value: 'single' },
-                    { label: 'Multiple', value: 'multiple' },
-                  ]}
-                />
-              )}
-            </div>
-          }
-        >
-          <Row gutter={16}>
-            <Col xs={24} md={extTxnMode === 'single' ? 12 : 24}>
-              <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Cash / Asset Account</span>}
+                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Cash / Asset Account</span>}
                 style={{ marginBottom: 0 }}
               >
                 <div style={{ display: 'flex', gap: 0, alignItems: 'center' }}>
@@ -905,195 +777,58 @@ const ExternalTxnForm: React.FC<{
                 {assetAcctDesc && <div style={{ fontSize: 11, color: REDWOOD.info, marginTop: 3 }}>{assetAcctDesc}</div>}
               </Form.Item>
             </Col>
-            {extTxnMode === 'single' && (
+            {isAdhocPayment && (
               <Col xs={24} md={12}>
                 <Form.Item
-                  label={<span style={{ fontWeight: 600, fontSize: 13 }}>Offset Account</span>}
+                  label={<span style={{ fontWeight: 600, fontSize: 12 }}>Payee</span>}
+                  name="payeeId"
+                  rules={[{ required: true, message: 'Select a payee for Adhoc Payment' }]}
                   style={{ marginBottom: 0 }}
                 >
-                  {/* Distribution set picker */}
-                  {!isEdit && !saved && (
-                    <AutoComplete
-                      value={offsetDistSet}
-                      disabled={!bankSelected}
-                      placeholder="Distribution set…"
-                      style={{ width: '100%', marginBottom: 6 }}
-                      options={distCombinations
-                        .filter(d => {
-                          if (!offsetDistSet) return true;
-                          const q = offsetDistSet.toLowerCase();
-                          return d.combinationName.toLowerCase().includes(q)
-                            || (d.description || '').toLowerCase().includes(q)
-                            || (d.glAccountDesc || '').toLowerCase().includes(q);
-                        })
-                        .map(d => ({
-                          value: d.combinationName,
-                          label: (
-                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                              <span style={{ fontSize: 12, fontWeight: 600 }}>{d.combinationName}</span>
-                              <span style={{ fontSize: 11, color: '#999', fontFamily: 'monospace' }}>{d.glAccountDesc || ''}</span>
-                            </div>
-                          ),
-                          combination: d,
-                        }))}
-                      onChange={v => setOffsetDistSet(v)}
-                      onSelect={(_v, opt) => {
-                        const d = (opt as { combination: DistCombination }).combination;
-                        setOffsetDistSet(d.combinationName);
-                        if (d.glAccountDesc) {
-                          const acct = applyCompanySegment(d.glAccountDesc);
-                          form.setFieldValue('offsetAccountCombination', acct);
-                          setOffsetAcctDesc('');
-                        }
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Select
+                      showSearch
+                      placeholder="Select payee..."
+                      disabled={isEdit || !bankSelected || saved}
+                      optionFilterProp="label"
+                      options={payeeOptions}
+                      style={{ flex: 1 }}
+                      onChange={(val: number) => {
+                        const p = payeeOptions.find(o => o.value === val);
+                        if (p) form.setFieldsValue({ payeeName: p.payeeName });
                       }}
-                      filterOption={false}
                     />
-                  )}
-                  <div style={{ display: 'flex', gap: 0, alignItems: 'center' }}>
-                    <Form.Item name="offsetAccountCombination" noStyle
-                      rules={[{ required: !isEdit, message: 'Offset account is required' }]}
-                    >
-                      <Input
-                        readOnly disabled={isEdit || saved}
-                        placeholder={isEdit ? '—' : 'Select offset account'}
-                        style={{ ...acctFieldStyle, borderRadius: isEdit ? 6 : '6px 0 0 6px' }}
-                      />
-                    </Form.Item>
                     {!isEdit && !saved && (
-                      <Tooltip title={!derivedCompany && selectedBu ? 'No company code for this BU — cannot select account' : undefined}>
-                        <Button
-                          icon={<SearchOutlined />}
-                          disabled={!bankSelected || (!derivedCompany && !!selectedBu)}
-                          onClick={() => setOffsetAcctOpen(true)}
-                          style={{ borderRadius: '0 6px 6px 0', height: 36, borderLeft: 0 }}
-                        />
+                      <Tooltip title="Create new payee">
+                        <Button icon={<PlusOutlined />}
+                          onClick={() => { createPayeeForm.resetFields(); setCreatePayeeVisible(true); }}
+                          style={{ flexShrink: 0 }} />
                       </Tooltip>
                     )}
                   </div>
-                  {offsetAcctDesc && <div style={{ fontSize: 11, color: REDWOOD.info, marginTop: 3 }}>{offsetAcctDesc}</div>}
                 </Form.Item>
+                <Form.Item name="payeeName" hidden><Input /></Form.Item>
               </Col>
             )}
           </Row>
-
-          {/* ── Amount + Description (single mode) ── */}
-          {(isEdit || extTxnMode === 'single') && (
-            <Row gutter={12} style={{ marginTop: 10 }}>
-              <Col xs={24} md={10}>
-                <Form.Item
-                  label={<span style={{ fontWeight: 600, fontSize: 13 }}>Amount</span>}
-                  name="amount"
-                  rules={[{ required: !isEdit, message: 'Required' }]}
-                  style={{ marginBottom: 0 }}
-                >
-                  <InputNumber
-                    style={{ width: '100%' }}
-                    precision={2}
-                    disabled={isEdit || !bankSelected || saved}
-                    placeholder={txnDirection === 'DR' ? '+ve Money In' : '-ve Money Out'}
-                    formatter={v => v ? String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''}
-                    onChange={(v) => {
-                      if (v == null) return;
-                      const signed = txnDirection === 'DR' ? Math.abs(Number(v)) : -Math.abs(Number(v));
-                      if (signed !== Number(v)) form.setFieldsValue({ amount: signed });
-                    }}
-                  />
-                </Form.Item>
-              </Col>
-              <Col xs={24} md={14}>
-                <Form.Item
-                  label={<span style={{ fontWeight: 600, fontSize: 13 }}>Description</span>}
-                  name="description"
-                  style={{ marginBottom: 0 }}
-                >
-                  <Input.TextArea
-                    rows={1}
-                    autoSize={{ minRows: 1, maxRows: 3 }}
-                    placeholder="Enter description"
-                    disabled={isEdit || !bankSelected || saved}
-                  />
-                </Form.Item>
-              </Col>
-            </Row>
-          )}
-
-          {/* ── Journal Entry Preview ── */}
-          {extTxnMode === 'single' && watchedAsset && watchedOffset && (
-            <div style={{
-              marginTop: 16,
-              background: '#1e1e2e',
-              borderRadius: 6,
-              padding: '12px 16px',
-              fontFamily: 'monospace',
-              fontSize: 12,
-            }}>
-              <div style={{ color: '#89b4fa', fontWeight: 600, marginBottom: 8, fontSize: 11, letterSpacing: '0.5px', textTransform: 'uppercase' }}>
-                Journal Entry Preview
-              </div>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr>
-                    <th style={{ color: '#6c7086', fontSize: 10, textAlign: 'left', paddingBottom: 4, width: 36 }}>Dr/Cr</th>
-                    <th style={{ color: '#6c7086', fontSize: 10, textAlign: 'left', paddingBottom: 4 }}>Account</th>
-                    <th style={{ color: '#6c7086', fontSize: 10, textAlign: 'right', paddingBottom: 4, width: 100 }}>Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {txnDirection === 'DR' ? (
-                    <>
-                      <tr>
-                        <td style={{ color: '#89b4fa', fontWeight: 700, paddingTop: 2, verticalAlign: 'top' }}>DR</td>
-                        <td style={{ color: '#cdd6f4', paddingTop: 2 }}>
-                          {watchedAsset}
-                          {assetAcctDesc && <div style={{ color: '#6c7086', fontSize: 10, marginTop: 1 }}>{assetAcctDesc}</div>}
-                        </td>
-                        <td style={{ color: '#89b4fa', textAlign: 'right', paddingTop: 2, verticalAlign: 'top' }}>{fmtAmount(Math.abs(watchedAmount ?? 0))}</td>
-                      </tr>
-                      <tr>
-                        <td style={{ color: '#a6e3a1', fontWeight: 700, paddingTop: 4, verticalAlign: 'top' }}>CR</td>
-                        <td style={{ color: '#cdd6f4', paddingTop: 4 }}>
-                          {watchedOffset}
-                          {offsetAcctDesc && <div style={{ color: '#6c7086', fontSize: 10, marginTop: 1 }}>{offsetAcctDesc}</div>}
-                        </td>
-                        <td style={{ color: '#a6e3a1', textAlign: 'right', paddingTop: 4, verticalAlign: 'top' }}>{fmtAmount(Math.abs(watchedAmount ?? 0))}</td>
-                      </tr>
-                    </>
-                  ) : (
-                    <>
-                      <tr>
-                        <td style={{ color: '#89b4fa', fontWeight: 700, paddingTop: 2, verticalAlign: 'top' }}>DR</td>
-                        <td style={{ color: '#cdd6f4', paddingTop: 2 }}>
-                          {watchedOffset}
-                          {offsetAcctDesc && <div style={{ color: '#6c7086', fontSize: 10, marginTop: 1 }}>{offsetAcctDesc}</div>}
-                        </td>
-                        <td style={{ color: '#89b4fa', textAlign: 'right', paddingTop: 2, verticalAlign: 'top' }}>{fmtAmount(Math.abs(watchedAmount ?? 0))}</td>
-                      </tr>
-                      <tr>
-                        <td style={{ color: '#a6e3a1', fontWeight: 700, paddingTop: 4, verticalAlign: 'top' }}>CR</td>
-                        <td style={{ color: '#cdd6f4', paddingTop: 4 }}>
-                          {watchedAsset}
-                          {assetAcctDesc && <div style={{ color: '#6c7086', fontSize: 10, marginTop: 1 }}>{assetAcctDesc}</div>}
-                        </td>
-                        <td style={{ color: '#a6e3a1', textAlign: 'right', paddingTop: 4, verticalAlign: 'top' }}>{fmtAmount(Math.abs(watchedAmount ?? 0))}</td>
-                      </tr>
-                    </>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
         </Card>
 
-        {/* ── Transaction Lines (multiple mode, inside right column) ── */}
-        {!isEdit && extTxnMode === 'multiple' && (
+        {/* ══════════════════ DETAIL: TRANSACTION LINES ══════════════════ */}
         <Card
-          styles={{ body: { padding: '14px 16px' } }}
-          style={{ ...sectionCard(REDWOOD.warning), marginBottom: 0 }}
+          styles={{ body: { padding: '0 0 12px' } }}
+          style={{ ...sectionCard(REDWOOD.warning), marginBottom: 12 }}
           title={
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
-              <span style={{ ...sectionHeader(REDWOOD.warning), marginBottom: 0 }}>
-                <SwapOutlined /> Transaction Lines
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ ...sectionHeader(REDWOOD.warning), marginBottom: 0, fontSize: 13 }}>
+                <SwapOutlined style={{ marginRight: 6 }} /> Transaction Lines
               </span>
+              <Space>
+                <Text type="secondary" style={{ fontSize: 12 }}>{extTxnLines.length} line(s)</Text>
+                <Divider type="vertical" />
+                <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>
+                  {fmtAmount(extTxnLines.reduce((s, l) => s + (l.amount ?? 0), 0), form.getFieldValue('currencyCode'))}
+                </Text>
+              </Space>
             </div>
           }
         >
@@ -1102,24 +837,24 @@ const ExternalTxnForm: React.FC<{
             dataSource={extTxnLines}
             rowKey="key"
             pagination={false}
-            scroll={{ y: 200 }}
-            style={{ marginBottom: 10, borderRadius: 6, overflow: 'hidden' }}
+            scroll={{ x: 700 }}
             rowClassName={(_, idx) => idx % 2 === 1 ? 'alt-row' : ''}
             columns={[
               {
                 title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>#</span>,
-                width: 32,
+                width: 36,
                 render: (_: any, _r: any, idx: number) => (
                   <span style={{ fontSize: 12, color: REDWOOD.neutral600, fontWeight: 600 }}>{idx + 1}</span>
                 ),
               },
               {
                 title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Amount</span>,
-                width: 120,
+                width: 140,
                 render: (_: any, record: ExtTxnLine, idx: number) => (
                   <InputNumber
                     size="small" style={{ width: '100%' }} precision={2}
                     value={record.amount}
+                    disabled={isEdit || !bankSelected || saved}
                     placeholder={txnDirection === 'DR' ? '+ve' : '-ve'}
                     onChange={(v) => {
                       if (v === null || v === undefined) { updateExtLine(idx, 'amount', v); return; }
@@ -1134,6 +869,7 @@ const ExternalTxnForm: React.FC<{
                 render: (_: any, record: ExtTxnLine, idx: number) => (
                   <Input
                     size="small" value={record.description}
+                    disabled={isEdit || !bankSelected || saved}
                     placeholder="Optional"
                     onChange={(e) => updateExtLine(idx, 'description', e.target.value)}
                   />
@@ -1141,14 +877,14 @@ const ExternalTxnForm: React.FC<{
               },
               {
                 title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Offset Account</span>,
-                width: 240,
+                width: 260,
                 render: (_: any, record: ExtTxnLine, idx: number) => (
                   <>
-                    {/* Distribution set picker */}
                     <AutoComplete
                       size="small"
                       value={lineDistSets[idx] || ''}
-                      placeholder="Distribution set…"
+                      placeholder="Distribution set..."
+                      disabled={isEdit || !bankSelected || saved}
                       style={{ width: '100%', marginBottom: 4 }}
                       options={distCombinations
                         .filter(d => {
@@ -1173,8 +909,7 @@ const ExternalTxnForm: React.FC<{
                         const d = (opt as { combination: DistCombination }).combination;
                         setLineDistSets(prev => ({ ...prev, [idx]: d.combinationName }));
                         if (d.glAccountDesc) {
-                          const acct = applyCompanySegment(d.glAccountDesc);
-                          updateExtLine(idx, 'offsetAccount', acct);
+                          updateExtLine(idx, 'offsetAccount', applyCompanySegment(d.glAccountDesc));
                           updateExtLine(idx, 'offsetDesc', '');
                         }
                       }}
@@ -1186,13 +921,15 @@ const ExternalTxnForm: React.FC<{
                       <Input
                         size="small" readOnly value={record.offsetAccount}
                         style={{ fontFamily: 'monospace', fontSize: 11, background: record.offsetAccount ? '#f0f7ff' : undefined }}
-                        placeholder="Select account…"
+                        placeholder="Select account..."
                       />
-                      <Button size="small" icon={<SearchOutlined />} onClick={() => {
-                        setLineCoaIdx(idx);
-                        setLineCoaInitial(record.offsetAccount || '');
-                        setLineCoaOpen(true);
-                      }} />
+                      <Button size="small" icon={<SearchOutlined />}
+                        disabled={isEdit || !bankSelected || saved}
+                        onClick={() => {
+                          setLineCoaIdx(idx);
+                          setLineCoaInitial(record.offsetAccount || '');
+                          setLineCoaOpen(true);
+                        }} />
                     </Space.Compact>
                     {record.offsetDesc && (
                       <div style={{ fontSize: 10, color: REDWOOD.info, marginTop: 2, paddingLeft: 2 }}>{record.offsetDesc}</div>
@@ -1200,59 +937,47 @@ const ExternalTxnForm: React.FC<{
                   </>
                 ),
               },
-              {
+              ...(!isEdit && !saved ? [{
                 title: '',
-                width: 32,
+                width: 36,
                 render: (_: any, _r: any, idx: number) => (
                   <Tooltip title="Remove line">
                     <Button size="small" type="text" danger icon={<CloseOutlined />}
+                      disabled={extTxnLines.length === 1}
                       onClick={() => setExtTxnLines(prev => prev.filter((_, i) => i !== idx))} />
                   </Tooltip>
                 ),
-              },
+              }] : []),
             ]}
-            footer={() => (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
-                <Button
-                  size="small" type="dashed" icon={<PlusOutlined />}
-                  onClick={() => setExtTxnLines(prev => [
-                    ...prev,
-                    { key: Date.now(), amount: undefined, description: '', offsetAccount: '', offsetDesc: '' },
-                  ])}
-                >
-                  Add Line
-                </Button>
-                <Space>
-                  <Text type="secondary" style={{ fontSize: 12 }}>{extTxnLines.length} line(s)</Text>
-                  <Divider type="vertical" />
-                  <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>
-                    {fmtAmount(extTxnLines.reduce((s, l) => s + (l.amount ?? 0), 0), form.getFieldValue('currencyCode'))}
-                  </Text>
-                </Space>
-              </div>
-            )}
           />
+          {!isEdit && !saved && !isAdhocPayment && (
+            <div style={{ padding: '8px 16px' }}>
+              <Button
+                size="small" type="dashed" icon={<PlusOutlined />}
+                disabled={!bankSelected}
+                onClick={() => setExtTxnLines(prev => [
+                  ...prev,
+                  { key: Date.now(), amount: undefined, description: '', offsetAccount: '', offsetDesc: '' },
+                ])}
+              >
+                Add Line
+              </Button>
+            </div>
+          )}
         </Card>
-        )}
 
-        {/* ── Attachments ── */}
+        {/* ══════════════════ ATTACHMENTS ══════════════════ */}
         <Card styles={{ body: { padding: '14px 16px' } }} style={sectionCard(REDWOOD.neutral600)}>
           <div style={sectionHeader(REDWOOD.neutral600)}>
             <PaperClipOutlined /> Attachments
           </div>
           <Upload
-            fileList={attachments.map(a => ({
-              uid: a.uid, name: a.name, status: a.status,
-              size: a.fileSize, type: a.fileType,
-            }))}
+            fileList={attachments.map(a => ({ uid: a.uid, name: a.name, status: a.status, size: a.fileSize, type: a.fileType }))}
             beforeUpload={(file) => {
               const reader = new FileReader();
               reader.onload = (e) => {
                 const base64 = (e.target?.result as string)?.split(',')[1] || '';
-                setAttachments(prev => [...prev, {
-                  uid: `new-${Date.now()}`, name: file.name, fileType: file.type,
-                  fileSize: file.size, content: base64, status: 'done',
-                }]);
+                setAttachments(prev => [...prev, { uid: `new-${Date.now()}`, name: file.name, fileType: file.type, fileSize: file.size, content: base64, status: 'done' }]);
               };
               reader.readAsDataURL(file);
               return false;
@@ -1267,17 +992,57 @@ const ExternalTxnForm: React.FC<{
             multiple
             disabled={(!bankSelected && !isEdit) || saved}
           >
-            <Button icon={<UploadOutlined />} disabled={(!bankSelected && !isEdit) || saved}>
-              Attach Files
-            </Button>
+            <Button icon={<UploadOutlined />} disabled={(!bankSelected && !isEdit) || saved}>Attach Files</Button>
           </Upload>
           {attachments.length === 0 && (
             <Text type="secondary" style={{ fontSize: 12, marginTop: 8, display: 'block' }}>No attachments</Text>
           )}
         </Card>
 
-        </Col>
-        </Row>
+        {/* ── Create Payee Modal ── */}
+        <Modal
+          title="Create New Payee"
+          open={createPayeeVisible}
+          onCancel={() => setCreatePayeeVisible(false)}
+          confirmLoading={createPayeeSaving}
+          onOk={async () => {
+            try {
+              const vals = await createPayeeForm.validateFields();
+              setCreatePayeeSaving(true);
+              const res = await fetch(`${APEX_BASE}/cash/payees`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify({ payeeName: vals.payeeName, taxRegistrationNumber: vals.taxRegistrationNumber || null, description: vals.description || null, active: 'Y' }),
+              });
+              const data = await res.json();
+              if (!res.ok) throw new Error(data?.message || `HTTP ${res.status}`);
+              const newId = data.payee_id ?? data.payeeId ?? data.id;
+              const newName = vals.payeeName;
+              const newOption: PayeeOption = { label: newName, value: newId, payeeName: newName };
+              onPayeeCreated(newOption);
+              form.setFieldsValue({ payeeId: newId, payeeName: newName });
+              setCreatePayeeVisible(false);
+              message.success(`Payee "${newName}" created`);
+            } catch (err: any) {
+              if (err?.errorFields) return;
+              message.error(`Failed to create payee: ${err?.message ?? err}`);
+            } finally { setCreatePayeeSaving(false); }
+          }}
+          okText="Create Payee"
+          width={480}
+        >
+          <Form form={createPayeeForm} layout="vertical" style={{ marginTop: 8 }}>
+            <Form.Item label="Payee Name" name="payeeName" rules={[{ required: true, message: 'Payee name is required' }]}>
+              <Input placeholder="Enter payee name" />
+            </Form.Item>
+            <Form.Item label="Tax Registration Number" name="taxRegistrationNumber">
+              <Input placeholder="Optional" />
+            </Form.Item>
+            <Form.Item label="Description" name="description">
+              <Input.TextArea rows={3} placeholder="Optional" />
+            </Form.Item>
+          </Form>
+        </Modal>
 
       </Form>
 
