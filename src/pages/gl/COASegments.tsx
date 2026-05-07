@@ -18,6 +18,7 @@ import {
   Progress,
   Radio,
   Tooltip,
+  Modal,
 } from 'antd';
 import {
   SearchOutlined,
@@ -479,7 +480,7 @@ const COASegments: React.FC = () => {
     if (segments.length === 0) { message.warning('Load segments first'); return; }
     const rows = segments
       .sort((a, b) => a.sequence_no - b.sequence_no)
-      .map(s => ({ code: s.segment_code, name: s.segment_name, status: 'pending' as const, fetched: 0, synced: 0, message: '' }));
+      .map(s => ({ code: s.segment_code, name: s.segment_name, status: 'pending' as 'pending' | 'fetching' | 'syncing' | 'done' | 'error', fetched: 0, synced: 0, message: '' }));
     setSyncAllRows(rows);
     setSyncAllVisible(true);
     setSyncAllRunning(true);

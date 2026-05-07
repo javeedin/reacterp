@@ -1473,3 +1473,174 @@ export const syncGLLinesOnly = async (
     return progress;
   }
 };
+// ── Step-by-step debug exports (GL Journal Full Sync Debug Modal) ─────────────
+
+export interface DebugBatchInfo {
+  batchId: number;
+  batchName: string;
+  status: string;
+  period: string;
+  ledger: string;
+  headersHref: string | null;
+  rawBatch: any;
+}
+
+export interface DebugHeaderInfo {
+  headerId: number;
+  headerName: string;
+  linesHref: string | null;
+  rawHeader: any;
+}
+
+export const debugStep1_FetchBatches = async (
+  parameters: Record<string, string>,
+  log?: LogCallback,
+): Promise<{ batches: DebugBatchInfo[]; hasMore: boolean; totalCount: number; rawResponse: any }> => {
+  const filters = Object.entries(parameters)
+    .filter(([, v]) => v)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(';');
+
+  const params: Record<string, string> = { limit: '500', offset: '0' };
+  if (filters) params.q = filters;
+
+  log?.('step', '── Step 1: Fetch Batches from Oracle Fusion ──');
+  log?.('info', `Filter: ${filters || '(none)'}`);
+
+  const raw = await fetchFromOracle('journalBatches', params, log, true);
+  const items: any[] = raw.items || [];
+
+  const batches: DebugBatchInfo[] = items.map((b: any) => ({
+    batchId: extractBatchIdFromHref(findChildLink(b.links, 'journalHeaders') || '') || 0,
+    batchName: b.JournalBatchName || b.JournalName || 'Unnamed',
+    status: b.Status || b.StatusMeaning || '',
+    period: b.DefaultPeriodName || '',
+    ledger: b.LedgerName || '',
+    headersHref: findChildLink(b.links, 'journalHeaders'),
+    rawBatch: b,
+  }));
+
+  log?.('success', `Found ${batches.length} batch(es)${raw.hasMore ? ' — hasMore=true (more pages exist)' : ''}`);
+  return { batches, hasMore: raw.hasMore === true, totalCount: batches.length, rawResponse: raw };
+};
+
+export const debugStep2_FetchHeaders = async (
+  batch: DebugBatchInfo,
+  log?: LogCallback,
+): Promise<{ headers: DebugHeaderInfo[]; rawItems: any[] }> => {
+  if (!batch.headersHref) throw new Error('No journalHeaders link found in batch');
+
+  log?.('step', `── Step 2: Fetch Headers for Batch ${batch.batchId} ──`);
+  log?.('info', `Headers URL: ${batch.headersHref}`);
+
+  const rawItems = await fetchAllFromOracleUrl(batch.headersHref, log, true, 500);
+
+  const headers: DebugHeaderInfo[] = rawItems.map((h: any) => ({
+    headerId: extractHeaderIdFromHref(findChildLink(h.links, 'journalLines') || '')
+      || extractIdFromHref(h.links?.[0]?.href || '') || 0,
+    headerName: h.JournalName || 'Unnamed',
+    linesHref: findChildLink(h.links, 'journalLines'),
+    rawHeader: h,
+  }));
+
+  log?.('success', `Found ${headers.length} header(s)`);
+  return { headers, rawItems };
+};
+
+export const debugStep3_FetchLines = async (
+  headers: DebugHeaderInfo[],
+  log?: LogCallback,
+): Promise<{ headerId: number; headerName: string; lines: any[]; linesHref: string | null }[]> => {
+  log?.('step', `── Step 3: Fetch Lines for ${headers.length} Header(s) ──`);
+  const results = [];
+  for (const h of headers) {
+    if (!h.linesHref) {
+      log?.('warning', `Header ${h.headerId} (${h.headerName}): no journalLines link`);
+      results.push({ headerId: h.headerId, headerName: h.headerName, lines: [], linesHref: null });
+      continue;
+    }
+    log?.('info', `Fetching lines for header ${h.headerId} (${h.headerName})…`);
+    const lines = await fetchAllFromOracleUrl(h.linesHref, log, true, 500);
+    log?.('success', `  → ${lines.length} line(s)`);
+    results.push({ headerId: h.headerId, headerName: h.headerName, lines, linesHref: h.linesHref });
+  }
+  return results;
+};
+
+export const debugStep4_InsertBatch = async (
+  batch: DebugBatchInfo,
+  log?: LogCallback,
+): Promise<{ result: any; payload: any }> => {
+  log?.('step', `── Step 4: Insert Batch ${batch.batchId} to APEX ──`);
+  const b = batch.rawBatch;
+  const payload = {
+    items: [{
+      JeBatchId: batch.batchId,
+      AccountedPeriodType: b.AccountedPeriodType,
+      DefaultPeriodName: b.DefaultPeriodName,
+      BatchName: b.JournalBatchName || b.JournalName,
+      Status: b.Status,
+      ControlTotal: b.ControlTotal,
+      BatchDescription: b.Description || b.BatchDescription,
+      ErrorMessage: b.ErrorMessage,
+      PostedDate: b.PostedDate,
+      PostingRunId: b.PostingRunId,
+      RequestId: b.RequestId,
+      RunningTotalAccountedCr: b.RunningTotalAccountedCr,
+      RunningTotalAccountedDr: b.RunningTotalAccountedDr,
+      RunningTotalCr: b.RunningTotalCr,
+      RunningTotalDr: b.RunningTotalDr,
+      CreatedBy: b.CreatedBy,
+      CreationDate: b.CreationDate,
+      LastUpdateDate: b.LastUpdateDate,
+      LastUpdatedBy: b.LastUpdatedBy,
+      ActualFlagMeaning: b.ActualFlagMeaning,
+      ApprovalStatusMeaning: b.ApprovalStatusMeaning,
+      LedgerId: b.LedgerId,
+      LedgerName: b.LedgerName,
+      JournalName: b.JournalName,
+    }],
+  };
+  const result = await insertToApex(APEX_DB_CONFIG.endpoints.journalBatches, payload, log, true);
+  log?.(apexOk(result) ? 'success' : 'error', `Batch insert: ${apexOk(result) ? 'OK' : apexErr(result)}`);
+  return { result, payload };
+};
+
+export const debugStep5_InsertHeaders = async (
+  headers: DebugHeaderInfo[],
+  batchId: number,
+  log?: LogCallback,
+): Promise<{ headerId: number; headerName: string; result: any; payload: any; ok: boolean }[]> => {
+  log?.('step', `── Step 5: Insert ${headers.length} Header(s) to APEX ──`);
+  const results = [];
+  for (const h of headers) {
+    const payload = { batchId, items: [{ JeHeaderId: h.headerId, ...h.rawHeader }] };
+    const res = await insertToApex(APEX_DB_CONFIG.endpoints.journalHeaders, payload, log, true);
+    const ok = apexOk(res);
+    log?.(ok ? 'success' : 'error', `  Header ${h.headerId} (${h.headerName}): ${ok ? 'OK' : apexErr(res)}`);
+    results.push({ headerId: h.headerId, headerName: h.headerName, result: res, payload, ok });
+  }
+  return results;
+};
+
+export const debugStep6_InsertLines = async (
+  linesData: { headerId: number; headerName: string; lines: any[] }[],
+  batchId: number,
+  log?: LogCallback,
+): Promise<{ headerId: number; headerName: string; result: any; payload: any; ok: boolean; count: number }[]> => {
+  log?.('step', `── Step 6: Insert Lines to APEX ──`);
+  const results = [];
+  for (const ld of linesData) {
+    if (!ld.lines.length) {
+      log?.('warning', `  Header ${ld.headerId}: no lines to insert`);
+      results.push({ headerId: ld.headerId, headerName: ld.headerName, result: null, payload: null, ok: true, count: 0 });
+      continue;
+    }
+    const payload = { batchId, jeHeaderId: ld.headerId, items: ld.lines };
+    const res = await insertToApex(APEX_DB_CONFIG.endpoints.journalLines, payload, log, true);
+    const ok = apexOk(res);
+    log?.(ok ? 'success' : 'error', `  Header ${ld.headerId} (${ld.headerName}): ${ld.lines.length} lines → ${ok ? 'OK' : apexErr(res)}`);
+    results.push({ headerId: ld.headerId, headerName: ld.headerName, result: res, payload, ok, count: ld.lines.length });
+  }
+  return results;
+};
