@@ -537,8 +537,8 @@ const ExternalTxnForm: React.FC<{
                 <Select
                   showSearch optionFilterProp="label"
                   options={filteredBankAccounts}
-                  placeholder={buSelected ? 'Select bank account' : 'Select Business Unit first'}
-                  disabled={isEdit || !buSelected || saved}
+                  placeholder={buSelected && !derivedCompany ? 'No company code — cannot select bank' : buSelected ? 'Select bank account' : 'Select Business Unit first'}
+                  disabled={isEdit || !buSelected || saved || (!derivedCompany && buSelected)}
                   style={{ width: '100%' }}
                   notFoundContent={<Text type="secondary">No accounts for this BU</Text>}
                   onChange={v => {
@@ -1436,16 +1436,33 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
         const acctMap: Record<string, string> = {};
         const ccyMap:  Record<string, string> = {};
         const allAccts: string[] = [];
+        // Map: legal entity name → list of bank account names
+        const leBankMap: Record<string, string[]> = {};
         (baData.items as any[]).forEach((i: any) => {
           const name = i.bank_account_name || '';
           if (!name) return;
           allAccts.push(name);
           if (i.cash_account_combination) acctMap[name] = i.cash_account_combination;
           if (i.currency_code)            ccyMap[name]  = i.currency_code;
+          const le = (i.legal_entity_name || '').trim();
+          if (le) {
+            if (!leBankMap[le]) leBankMap[le] = [];
+            leBankMap[le].push(name);
+          }
         });
         setAllBankAccounts(allAccts.sort().map(n => ({ label: n, value: n })));
         setBankAccountMap(acctMap);
         setBankAccountCurrencyMap(ccyMap);
+
+        // Build BU → bank accounts from bank master via legal entity
+        const buBanksFromMaster: Record<string, string[]> = {};
+        Object.entries(buLeMapping).forEach(([buName, leName]) => {
+          const banks = leBankMap[leName] || [];
+          if (banks.length > 0) buBanksFromMaster[buName] = banks;
+        });
+        if (Object.keys(buBanksFromMaster).length > 0) {
+          setBuBankMap(buBanksFromMaster);
+        }
       }
     } catch { /* silent */ }
 
@@ -1480,9 +1497,14 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
         setBankAccountMap(prev => ({ ...prev, ...acctMap }));
         setBankAccountCurrencyMap(prev => ({ ...prev, ...ccyMap }));
         setBuLeMap({ ...buLeMapping });
-        setBuBankMap(Object.fromEntries(
-          Object.entries(buBanks).map(([bu, set]) => [bu, [...set]])
-        ));
+        // Only fill buBankMap from transaction history for BUs not covered by bank master data
+        setBuBankMap(prev => {
+          const merged = { ...prev };
+          Object.entries(buBanks).forEach(([bu, set]) => {
+            if (!merged[bu]) merged[bu] = [...set];
+          });
+          return merged;
+        });
         setBusinessUnits([...buSet].sort().map(n => ({ label: n, value: n })));
       }
     } catch { /* silent */ }
