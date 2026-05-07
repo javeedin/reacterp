@@ -218,6 +218,13 @@ const ExternalTxnForm: React.FC<{
     }
   }, [isAdhocPayment, form]);
 
+  // AED → auto-set conversion rate to 1
+  useEffect(() => {
+    if (watchedCurrency === 'AED') {
+      form.setFieldsValue({ bankConversionRate: 1, bankConversionRateType: 'Corporate' });
+    }
+  }, [watchedCurrency, form]);
+
   const filteredBankAccounts = selectedBu && buBankMap[selectedBu]?.length
     ? buBankMap[selectedBu].sort().map(n => ({ label: n, value: n }))
     : bankAccounts;
@@ -665,7 +672,27 @@ const ExternalTxnForm: React.FC<{
                 rules={[{ required: true, message: 'Required' }]}
                 style={{ marginBottom: 10 }}
               >
-                <Select placeholder="Select type" disabled={isEdit || !bankSelected || saved}>
+                <Select
+                  placeholder="Select type"
+                  disabled={isEdit || !bankSelected || saved}
+                  onChange={(val) => {
+                    if (val === 'Adhoc Payment' && extTxnLines.length > 1) {
+                      Modal.confirm({
+                        title: 'Switch to Adhoc Payment?',
+                        content: 'Adhoc Payment supports only one line. All existing lines will be cleared. Continue?',
+                        okText: 'Yes, clear lines',
+                        cancelText: 'Cancel',
+                        onOk: () => {
+                          setExtTxnLines([{ key: 0, amount: undefined, description: '', offsetAccount: '', offsetDesc: '' }]);
+                          form.setFieldsValue({ transactionType: val });
+                        },
+                        onCancel: () => {
+                          form.setFieldsValue({ transactionType: 'External Transaction' });
+                        },
+                      });
+                    }
+                  }}
+                >
                   <Option value="External Transaction">External Transaction</Option>
                   <Option value="Adhoc Payment">Adhoc Payment</Option>
                 </Select>
@@ -688,6 +715,7 @@ const ExternalTxnForm: React.FC<{
               <Form.Item
                 label={<span style={{ fontWeight: 600, fontSize: 12 }}>Payment Method</span>}
                 name="paymentMethod"
+                rules={[{ required: true, message: 'Required' }]}
                 style={{ marginBottom: 10 }}
               >
                 <Select placeholder="Method" allowClear disabled={isEdit || !bankSelected || saved}>
@@ -699,6 +727,7 @@ const ExternalTxnForm: React.FC<{
               <Form.Item
                 label={<span style={{ fontWeight: 600, fontSize: 12 }}>Payment Document</span>}
                 name="paymentDocument"
+                rules={[{ required: true, message: 'Required' }]}
                 style={{ marginBottom: 10 }}
               >
                 <Input placeholder="e.g. Cheque Book Name" disabled={isEdit || !bankSelected || saved} />
@@ -922,8 +951,12 @@ const ExternalTxnForm: React.FC<{
                       const d = (opt as { combination: DistCombination }).combination;
                       setLineDistSets(prev => ({ ...prev, [idx]: d.combinationName }));
                       if (d.glAccountDesc) {
-                        updateExtLine(idx, 'offsetAccount', applyCompanySegment(d.glAccountDesc));
-                        updateExtLine(idx, 'offsetDesc', '');
+                        const acct = applyCompanySegment(d.glAccountDesc);
+                        updateExtLine(idx, 'offsetAccount', acct);
+                        validateAccountCode(acct).then(r => {
+                          const seg4 = Object.values(r.segmentDetails)[3];
+                          updateExtLine(idx, 'offsetDesc', (seg4 as any)?.description || '');
+                        }).catch(() => { updateExtLine(idx, 'offsetDesc', ''); });
                       }
                     }}
                     filterOption={false}
