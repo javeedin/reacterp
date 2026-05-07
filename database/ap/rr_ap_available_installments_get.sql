@@ -78,7 +78,7 @@ FROM  RR_AP_INVOICE_INSTALLMENTS inst
 JOIN  RR_AP_INVOICES_ALL         i   ON i.INVOICE_ID = inst.INVOICE_ID
 WHERE NVL(i.CANCELED_FLAG, 'N') != 'Y'
   AND (i.SUPPLIER_NUMBER = :supplier_number  OR :supplier_number  IS NULL)
-  AND (i.BUSINESS_UNIT   = :business_unit    OR :business_unit    IS NULL)
+  AND  i.BUSINESS_UNIT   = :business_unit
   AND (UPPER(i.INVOICE_NUMBER) LIKE '%' || UPPER(:invoice_number) || '%'
        OR :invoice_number IS NULL)
   AND (i.INVOICE_ID      = :invoice_id       OR :invoice_id       IS NULL)
