@@ -329,6 +329,8 @@ const TrialBalance: React.FC = () => {
   const [ytdMovAccount,   setYtdMovAccount]   = useState('');
   const [ytdMovDesc,      setYtdMovDesc]      = useState('');
   const [ytdMovLedger,    setYtdMovLedger]    = useState('');
+  const [ytdMovCompany,   setYtdMovCompany]   = useState<string | null>(null);
+  const [ytdMovCurrency,  setYtdMovCurrency]  = useState<string | null>(null);
   const [ytdMovProgress,  setYtdMovProgress]  = useState('');
   const [ytdMovRows,      setYtdMovRows]      = useState<{ period: string; period_year: number; period_number: number; ytd_opening: number; ytd_debit: number; ytd_credit: number; closing: number }[]>([]);
   const [ytdMovError,    setYtdMovError]    = useState<string | null>(null);
@@ -740,10 +742,15 @@ const TrialBalance: React.FC = () => {
   }, [tabs]);
 
   // Open YTD Movement drawer — fetch all periods from the beginning for one account
-  const openYtdMovement = useCallback(async (account: string, accountDesc: string, ledgerName: string) => {
+  const openYtdMovement = useCallback(async (
+    account: string, accountDesc: string, ledgerName: string,
+    company: string | null, currency: string | null,
+  ) => {
     setYtdMovAccount(account);
     setYtdMovDesc(accountDesc);
     setYtdMovLedger(ledgerName);
+    setYtdMovCompany(company);
+    setYtdMovCurrency(currency);
     setYtdMovRows([]);
     setYtdMovError(null);
     setYtdMovVisible(true);
@@ -777,7 +784,11 @@ const TrialBalance: React.FC = () => {
         if (!res.ok) continue;
         const data = await res.json();
         const items: RrTBRecord[] = (data.items || []) as RrTBRecord[];
-        const acctRows = items.filter(r => r.account === account);
+        const acctRows = items.filter(r =>
+          r.account === account &&
+          (!company  || r.company       === company) &&
+          (!currency || r.currency_code === currency)
+        );
         if (acctRows.length > 0) {
           const ytd_opening = acctRows.reduce((s, r) => s + (r.ytd_opening || 0), 0);
           const ytd_debit   = acctRows.reduce((s, r) => s + (r.ytd_debit   || 0), 0);
@@ -3936,7 +3947,7 @@ const TrialBalance: React.FC = () => {
                     onClick: () => {
                       const selAccount = (tabSelections[tab.key] || [])[0] as string;
                       const row = tableRows.find(r => r.account === selAccount);
-                      openYtdMovement(selAccount, row?.account_desc ?? '', tab.ledgerName);
+                      openYtdMovement(selAccount, row?.account_desc ?? '', tab.ledgerName, tab.selectedCompany, tab.selectedCurrency);
                     },
                   },
                 ],
@@ -4469,7 +4480,14 @@ const TrialBalance: React.FC = () => {
           width={820}
           open={ytdMovVisible}
           onClose={() => setYtdMovVisible(false)}
-          extra={<Tag color="geekblue">{ytdMovLedger}</Tag>}
+          extra={
+            <Space>
+              <Tag color="geekblue">{ytdMovLedger}</Tag>
+              {ytdMovCompany  && <Tag color="orange">{ytdMovCompany}</Tag>}
+              {ytdMovCurrency && <Tag color="cyan">{ytdMovCurrency}</Tag>}
+              {!ytdMovCompany && <Tag color="default">All Companies</Tag>}
+            </Space>
+          }
         >
           {ytdMovLoading && ytdMovRows.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 60 }}>
