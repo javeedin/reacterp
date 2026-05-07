@@ -779,34 +779,33 @@ const ExternalTxnForm: React.FC<{
             </Col>
             {isAdhocPayment && (
               <Col xs={24} md={12}>
-                <Form.Item
-                  label={<span style={{ fontWeight: 600, fontSize: 12 }}>Payee</span>}
-                  name="payeeId"
-                  rules={[{ required: true, message: 'Select a payee for Adhoc Payment' }]}
-                  style={{ marginBottom: 0 }}
-                >
-                  <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                  <Form.Item
+                    label={<span style={{ fontWeight: 600, fontSize: 12 }}>Payee</span>}
+                    name="payeeId"
+                    rules={[{ required: true, message: 'Select a payee for Adhoc Payment' }]}
+                    style={{ marginBottom: 0, flex: 1 }}
+                  >
                     <Select
                       showSearch
                       placeholder="Select payee..."
                       disabled={isEdit || !bankSelected || saved}
                       optionFilterProp="label"
                       options={payeeOptions}
-                      style={{ flex: 1 }}
                       onChange={(val: number) => {
                         const p = payeeOptions.find(o => o.value === val);
                         if (p) form.setFieldsValue({ payeeName: p.payeeName });
                       }}
                     />
-                    {!isEdit && !saved && (
-                      <Tooltip title="Create new payee">
-                        <Button icon={<PlusOutlined />}
-                          onClick={() => { createPayeeForm.resetFields(); setCreatePayeeVisible(true); }}
-                          style={{ flexShrink: 0 }} />
-                      </Tooltip>
-                    )}
-                  </div>
-                </Form.Item>
+                  </Form.Item>
+                  {!isEdit && !saved && (
+                    <Tooltip title="Create new payee">
+                      <Button icon={<PlusOutlined />}
+                        onClick={() => { createPayeeForm.resetFields(); setCreatePayeeVisible(true); }}
+                        style={{ flexShrink: 0, marginTop: 22 }} />
+                    </Tooltip>
+                  )}
+                </div>
                 <Form.Item name="payeeName" hidden><Input /></Form.Item>
               </Col>
             )}
