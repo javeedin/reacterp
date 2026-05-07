@@ -334,6 +334,15 @@ const TrialBalance: React.FC = () => {
   const [ytdMovProgress,  setYtdMovProgress]  = useState('');
   const [ytdMovRows,      setYtdMovRows]      = useState<{ period: string; period_year: number; period_number: number; ytd_opening: number; ytd_debit: number; ytd_credit: number; closing: number }[]>([]);
   const [ytdMovError,    setYtdMovError]    = useState<string | null>(null);
+  // Prompt modal state
+  const [ytdMovPromptVisible,  setYtdMovPromptVisible]  = useState(false);
+  const [ytdMovPromptYear,     setYtdMovPromptYear]     = useState<number | null>(null);
+  const [ytdMovPromptPeriod,   setYtdMovPromptPeriod]   = useState<string | null>(null);
+  const [ytdMovPendingAccount, setYtdMovPendingAccount] = useState('');
+  const [ytdMovPendingDesc,    setYtdMovPendingDesc]    = useState('');
+  const [ytdMovPendingLedger,  setYtdMovPendingLedger]  = useState('');
+  const [ytdMovPendingCompany, setYtdMovPendingCompany] = useState<string | null>(null);
+  const [ytdMovPendingCurrency,setYtdMovPendingCurrency]= useState<string | null>(null);
 
   // ── All companies from COA value set ────────────────────────
   const [allCompanies, setAllCompanies] = useState<{ value: string; label: string }[]>([]);
@@ -741,10 +750,11 @@ const TrialBalance: React.FC = () => {
     }
   }, [tabs]);
 
-  // Open YTD Movement drawer — fetch all periods from the beginning for one account
+  // Open YTD Movement drawer — fetch periods from fromPeriodId onwards for one account
   const openYtdMovement = useCallback(async (
     account: string, accountDesc: string, ledgerName: string,
     company: string | null, currency: string | null,
+    fromPeriodId: string,
   ) => {
     setYtdMovAccount(account);
     setYtdMovDesc(accountDesc);
@@ -756,14 +766,12 @@ const TrialBalance: React.FC = () => {
     setYtdMovVisible(true);
     setYtdMovLoading(true);
 
-    // periods are already fetched for selectedLedger — use all of them sorted oldest → newest
-    const allPeriods = [...periods]
-      .filter(p => !p.ledger_name || p.ledger_name.toLowerCase() === ledgerName.toLowerCase())
-      .sort((a, b) => a.period_year !== b.period_year ? a.period_year - b.period_year : a.period_number - b.period_number);
-
-    const periodsToUse = allPeriods.length > 0 ? allPeriods : [...periods].sort((a, b) =>
+    // Sort all periods oldest → newest, then slice from the chosen start period
+    const sortedAll = [...periods].sort((a, b) =>
       a.period_year !== b.period_year ? a.period_year - b.period_year : a.period_number - b.period_number
     );
+    const startIdx = sortedAll.findIndex(p => p.period_name_id === fromPeriodId);
+    const periodsToUse = startIdx >= 0 ? sortedAll.slice(startIdx) : sortedAll;
 
     if (periodsToUse.length === 0) {
       setYtdMovError('No periods available. Please load periods first from the Periods tab.');
@@ -3936,25 +3944,29 @@ const TrialBalance: React.FC = () => {
             >
               Revalue
             </Button>
-            <Dropdown
+            <Button
+              size="small"
+              icon={<LineChartOutlined />}
               disabled={(tabSelections[tab.key] || []).length !== 1}
-              menu={{
-                items: [
-                  {
-                    key: 'ytd-movement',
-                    icon: <LineChartOutlined />,
-                    label: 'Show YTD Balances',
-                    onClick: () => {
-                      const selAccount = (tabSelections[tab.key] || [])[0] as string;
-                      const row = tableRows.find(r => r.account === selAccount);
-                      openYtdMovement(selAccount, row?.account_desc ?? '', tab.ledgerName, tab.selectedCompany, tab.selectedCurrency);
-                    },
-                  },
-                ],
+              onClick={() => {
+                const selAccount = (tabSelections[tab.key] || [])[0] as string;
+                const row = tableRows.find(r => r.account === selAccount);
+                setYtdMovPendingAccount(selAccount);
+                setYtdMovPendingDesc(row?.account_desc ?? '');
+                setYtdMovPendingLedger(tab.ledgerName);
+                setYtdMovPendingCompany(tab.selectedCompany);
+                setYtdMovPendingCurrency(tab.selectedCurrency);
+                // Default to earliest available year/period
+                const sorted = [...periods].sort((a, b) =>
+                  a.period_year !== b.period_year ? a.period_year - b.period_year : a.period_number - b.period_number
+                );
+                setYtdMovPromptYear(sorted[0]?.period_year ?? null);
+                setYtdMovPromptPeriod(sorted[0]?.period_name_id ?? null);
+                setYtdMovPromptVisible(true);
               }}
             >
-              <Button size="small" icon={<DownOutlined />}>Actions</Button>
-            </Dropdown>
+              Show YTD Balances
+            </Button>
           </Col>
         </Row>
 
@@ -4467,6 +4479,69 @@ const TrialBalance: React.FC = () => {
           })()}
         </Modal>
         {renderRevalModal()}
+
+        {/* ── YTD Movement: Start Period Prompt ── */}
+        <Modal
+          title={<Space><LineChartOutlined style={{ color: '#0958d9' }} />Show YTD Balances</Space>}
+          open={ytdMovPromptVisible}
+          onCancel={() => setYtdMovPromptVisible(false)}
+          onOk={() => {
+            if (!ytdMovPromptPeriod) { message.warning('Please select a start period.'); return; }
+            setYtdMovPromptVisible(false);
+            openYtdMovement(
+              ytdMovPendingAccount, ytdMovPendingDesc, ytdMovPendingLedger,
+              ytdMovPendingCompany, ytdMovPendingCurrency,
+              ytdMovPromptPeriod,
+            );
+          }}
+          okText="Load Balances"
+          width={400}
+        >
+          <div style={{ marginBottom: 8, fontSize: 13 }}>
+            Select the <strong>start year and period</strong> to load YTD balances from:
+          </div>
+          <Space direction="vertical" style={{ width: '100%' }} size={10}>
+            <Select
+              placeholder="Select Year"
+              style={{ width: '100%' }}
+              value={ytdMovPromptYear}
+              onChange={(yr: number) => {
+                setYtdMovPromptYear(yr);
+                // reset period to first period of that year
+                const first = [...periods]
+                  .filter(p => p.period_year === yr)
+                  .sort((a, b) => a.period_number - b.period_number)[0];
+                setYtdMovPromptPeriod(first?.period_name_id ?? null);
+              }}
+            >
+              {[...new Set(periods.map(p => p.period_year))].sort((a, b) => a - b).map(yr => (
+                <Select.Option key={yr} value={yr}><CalendarOutlined style={{ marginRight: 6 }} />{yr}</Select.Option>
+              ))}
+            </Select>
+            <Select
+              placeholder="Select Period"
+              style={{ width: '100%' }}
+              value={ytdMovPromptPeriod}
+              onChange={(v: string) => setYtdMovPromptPeriod(v)}
+              disabled={!ytdMovPromptYear}
+            >
+              {periods
+                .filter(p => !ytdMovPromptYear || p.period_year === ytdMovPromptYear)
+                .sort((a, b) => a.period_number - b.period_number)
+                .map(p => (
+                  <Select.Option key={p.period_name_id} value={p.period_name_id}>
+                    {p.period_name_id}
+                  </Select.Option>
+                ))}
+            </Select>
+          </Space>
+          {(ytdMovPendingCompany || ytdMovPendingCurrency) && (
+            <div style={{ marginTop: 12, fontSize: 12, color: '#888' }}>
+              Filtered to: {ytdMovPendingCompany && <Tag color="orange">{ytdMovPendingCompany}</Tag>}
+              {ytdMovPendingCurrency && <Tag color="cyan">{ytdMovPendingCurrency}</Tag>}
+            </div>
+          )}
+        </Modal>
 
         {/* ── YTD Movement Drawer ── */}
         <Drawer
