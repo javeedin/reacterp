@@ -244,7 +244,6 @@ interface InvoiceLine {
   startDate: string;
   endDate: string;
   accrualAccount: string;
-  accrualDistSet: string;
   taxAmount: number;
   taxAccountCombination?: string;  // GL account for this line's tax, from BU tax assignment
   accountDescription?: string;
@@ -421,7 +420,6 @@ const createBlankLine = (lineNumber: number, defaults?: { accountingDate?: strin
     startDate: acctDate,
     endDate: getEndOfMonth(acctDate),
     accrualAccount: defaults?.accrualAccount || '',
-    accrualDistSet: '',
     taxAmount: 0,
   };
 };
@@ -498,7 +496,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [distLovOpen, setDistLovOpen]     = useState(false);
   const [distLovLineKey, setDistLovLineKey] = useState<string | null>(null);
   const [distLovSearch, setDistLovSearch] = useState('');
-  const [distLovMode, setDistLovMode]     = useState<'distribution' | 'accrual'>('distribution');
 
   // Supplier modal
   const [supplierModalVisible, setSupplierModalVisible] = useState(false);
@@ -2277,7 +2274,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               startDate: formatDateStr(item.multiperiod_start_date) || '',
               endDate: formatDateStr(item.multiperiod_end_date) || '',
               accrualAccount: item.multiperiod_accrual_account || item.accrual_account || '',
-              accrualDistSet: '',
               // Only carry taxAmount if the line actually has a tax classification
               taxAmount: taxClass ? (item.tax_amount || 0) : 0,
             };
@@ -4756,7 +4752,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 style={{ color: isReadOnly ? REDWOOD.neutral300 : REDWOOD.info, fontSize: 11, cursor: isReadOnly ? 'default' : 'pointer' }}
                 onClick={() => {
                   if (isReadOnly) return;
-                  setDistLovMode('distribution');
                   setDistLovLineKey(record.key);
                   setDistLovSearch(val || '');
                   setDistLovOpen(true);
@@ -5180,95 +5175,23 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       title: 'Accrual Account',
       dataIndex: 'accrualAccount',
       key: 'accrualAccount',
-      width: 280,
-      render: (val: string, record: InvoiceLine) => {
-        const distVal = record.accrualDistSet || '';
-        const accrualRest = derivedCompany && val ? val.split('-').slice(1).join('-') : val;
-        const buildAccrualFull = (rest: string) => derivedCompany ? `${derivedCompany}-${rest}` : rest;
-        return (
-          <div>
-            {/* Distribution set picker */}
-            <AutoComplete
-              size="small"
-              value={distVal}
-              disabled={isReadOnly}
-              placeholder="Distribution set…"
-              style={{ width: '100%', marginBottom: 4 }}
-              options={distCombinations
-                .filter(d => {
-                  if (!distVal) return true;
-                  const q = distVal.toLowerCase();
-                  return d.combinationName.toLowerCase().includes(q)
-                    || (d.description || '').toLowerCase().includes(q)
-                    || (d.glAccountDesc || '').toLowerCase().includes(q);
-                })
-                .map(d => ({
-                  value: d.combinationName,
-                  label: (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                      <span style={{ fontSize: 12, fontWeight: 600 }}>{d.combinationName}</span>
-                      <span style={{ fontSize: 11, color: REDWOOD.neutral300, fontFamily: 'monospace' }}>{d.glAccountDesc || ''}</span>
-                    </div>
-                  ),
-                  combination: d,
-                }))}
-              onChange={v => updateLine(record.key, 'accrualDistSet', v)}
-              onSelect={(_v, opt) => {
-                const d = (opt as { combination: DistCombination }).combination;
-                updateLine(record.key, 'accrualDistSet', d.combinationName);
-                if (d.glAccountDesc) updateLine(record.key, 'accrualAccount', applyCompanySegment(d.glAccountDesc));
-              }}
-              filterOption={false}
-              notFoundContent={distVal ? <span style={{ fontSize: 12, color: REDWOOD.neutral300 }}>No match</span> : null}
-            >
-              <Input
-                size="small"
-                variant="borderless"
-                suffix={
-                  <SearchOutlined
-                    style={{ color: isReadOnly ? REDWOOD.neutral300 : REDWOOD.info, fontSize: 11, cursor: isReadOnly ? 'default' : 'pointer' }}
-                    onClick={() => {
-                      if (isReadOnly) return;
-                      setDistLovMode('accrual');
-                      setDistLovLineKey(record.key);
-                      setDistLovSearch(distVal || '');
-                      setDistLovOpen(true);
-                    }}
-                  />
-                }
-              />
-            </AutoComplete>
-            {/* Account code with locked company segment */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              {derivedCompany && (
-                <span style={{
-                  fontSize: 11, fontFamily: 'monospace',
-                  background: '#f0f0f0', padding: '2px 5px',
-                  borderRadius: 3, color: '#555', whiteSpace: 'nowrap',
-                  border: '1px solid #d9d9d9',
-                }}>
-                  {derivedCompany}-
-                </span>
-              )}
-              <Input
-                size="small"
-                value={derivedCompany ? accrualRest : val}
-                onChange={(e) => updateLine(record.key, 'accrualAccount', buildAccrualFull(e.target.value))}
-                variant="borderless"
-                placeholder={derivedCompany ? '000-2200-0000-000' : 'e.g. 01-000-2200-0000-000'}
-                readOnly={isReadOnly}
-                style={{ flex: 1 }}
-                suffix={
-                  <SearchOutlined
-                    style={{ color: isReadOnly ? REDWOOD.neutral300 : REDWOOD.info, fontSize: 12, cursor: isReadOnly ? 'default' : 'pointer' }}
-                    onClick={() => !isReadOnly && openAccountSelector(record.key, val, 'accrualAccount')}
-                  />
-                }
-              />
-            </div>
-          </div>
-        );
-      },
+      width: 250,
+      render: (val: string, record: InvoiceLine) => (
+        <Input
+          size="small"
+          value={val}
+          onChange={(e) => updateLine(record.key, 'accrualAccount', e.target.value)}
+          variant="borderless"
+          placeholder="e.g. 01-000-2200-0000-000"
+          readOnly={isReadOnly}
+          suffix={
+            <SearchOutlined
+              style={{ color: isReadOnly ? REDWOOD.neutral300 : REDWOOD.info, fontSize: 12, cursor: isReadOnly ? 'default' : 'pointer' }}
+              onClick={() => !isReadOnly && openAccountSelector(record.key, val, 'accrualAccount')}
+            />
+          }
+        />
+      ),
     },
   ];
 
@@ -7481,7 +7404,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         title={
           <Space>
             <SearchOutlined style={{ color: REDWOOD.info }} />
-            {distLovMode === 'accrual' ? 'Select Accrual Account' : 'Select Distribution Set'}
+            Select Distribution Set
             <Tooltip
               title={
                 <div style={{ fontFamily: 'monospace', fontSize: 11 }}>
@@ -7534,13 +7457,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               style: { cursor: 'pointer' },
               onClick: () => {
                 if (distLovLineKey) {
-                  if (distLovMode === 'accrual') {
-                    updateLine(distLovLineKey, 'accrualDistSet', d.combinationName);
-                    if (d.glAccountDesc) updateLine(distLovLineKey, 'accrualAccount', applyCompanySegment(d.glAccountDesc));
-                  } else {
-                    updateLine(distLovLineKey, 'distributionSet', d.combinationName);
-                    if (d.glAccountDesc) updateLine(distLovLineKey, 'distributionCombination', applyCompanySegment(d.glAccountDesc));
-                  }
+                  updateLine(distLovLineKey, 'distributionSet', d.combinationName);
+                  if (d.glAccountDesc) updateLine(distLovLineKey, 'distributionCombination', applyCompanySegment(d.glAccountDesc));
                 }
                 setDistLovOpen(false);
               },
