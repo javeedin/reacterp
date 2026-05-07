@@ -39,6 +39,7 @@ import {
   CheckOutlined,
   TableOutlined,
   WalletOutlined,
+  RetweetOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import Autopilot from '../../components/Autopilot';
@@ -130,6 +131,7 @@ const setupItems: MenuItemType[] = [
 const reportsItems: MenuItemType[] = [
   { key: 'ap-reports', icon: <BarChartOutlined />, label: 'Payables Reports', description: 'Suppliers listing, balance, payment register, aging report', color: REDWOOD.reportGreen, path: '/ap/reports' },
   { key: 'check-migration', icon: <ApiOutlined />, label: 'Check Migration', description: 'Verify AP invoice headers vs lines integrity — missing lines, amount mismatches, truncated', color: REDWOOD.info, path: '/ap/check-migration' },
+  { key: 'manage-revaluation', icon: <RetweetOutlined />, label: 'Manage Revaluation', description: 'View and manage FX revaluation entries', color: '#722ed1', path: '/gl/revaluation' },
 ];
 
 // Payment task items

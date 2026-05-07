@@ -48,7 +48,11 @@ import {
   ThunderboltOutlined,
   ApartmentOutlined,
   UnorderedListOutlined,
+  PrinterOutlined,
+  SaveOutlined,
 } from '@ant-design/icons';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { Link } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import { Divider } from 'antd';
@@ -274,6 +278,7 @@ const TrialBalance: React.FC = () => {
   >([]);
   const [revalAcctSelectorOpen,    setRevalAcctSelectorOpen]    = useState(false);
   const [revalAcctSelectorLineNum, setRevalAcctSelectorLineNum] = useState<number | null>(null);
+  const [revalSaving,              setRevalSaving]              = useState(false);
   const [apiPanelVisible, setApiPanelVisible] = useState(false);
   const [apiCalls, setApiCalls] = useState<Record<string, ApiCallInfo>>({
     ledgers:      { label: 'GET Ledgers',            url: '', method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
@@ -2753,16 +2758,197 @@ const TrialBalance: React.FC = () => {
             </Col>
           </Row>
 
-          {/* Preview button */}
-          <Button
-            type="primary"
-            icon={<FileTextOutlined />}
-            onClick={buildPreview}
-            disabled={ccyRows.every(r => r.newRate === 0)}
-            style={{ background: REDWOOD.info, borderColor: REDWOOD.info, marginBottom: 16 }}
-          >
-            Preview Journal Entry
-          </Button>
+          {/* Preview button + Save + Print row */}
+          <Space style={{ marginBottom: 16 }}>
+            <Button
+              type="primary"
+              icon={<FileTextOutlined />}
+              onClick={buildPreview}
+              disabled={ccyRows.every(r => r.newRate === 0)}
+              style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+            >
+              Preview Journal Entry
+            </Button>
+
+            <Button
+              type="primary"
+              icon={<SaveOutlined />}
+              disabled={revalPreviewRows.length === 0}
+              loading={revalSaving}
+              style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+              onClick={async () => {
+                setRevalSaving(true);
+                try {
+                  const body = {
+                    ledger_id:      0,
+                    period_name:    tab.periodName,
+                    account:        revalAccount,
+                    account_desc:   accountDesc,
+                    functional_ccy: functionalCcy,
+                    gain_account:   revalGainCombo,
+                    loss_account:   revalLossCombo,
+                    total_gain:     totalGain,
+                    total_loss:     totalLoss,
+                    notes:          '',
+                    created_by:     'ReactERP',
+                    ccy_rows: ccyRows.filter(r => r.newRate > 0).map(r => ({
+                      currency_code:  r.ccy,
+                      ent_closing:    r.entClosing,
+                      acct_closing:   r.acctClosing,
+                      book_rate:      r.bookRate,
+                      new_rate:       r.newRate,
+                      new_acct_value: r.newAcctValue,
+                      reval_amt:      r.revalAmt,
+                      is_gain:        r.isGain ? 1 : 0,
+                    })),
+                    lines: revalPreviewRows.map(r => ({
+                      line_num:     r.lineNum,
+                      combo:        r.combo,
+                      description:  r.desc,
+                      comment_text: r.comment,
+                      dr_amount:    r.dr,
+                      cr_amount:    r.cr,
+                    })),
+                  };
+                  const res = await fetch(
+                    `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}`,
+                    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+                  );
+                  const text = await res.text();
+                  const json = JSON.parse(text);
+                  if (json.status === 'SUCCESS') {
+                    message.success(`Revaluation saved successfully (ID: ${json.revalueId})`);
+                  } else {
+                    throw new Error(json.error || 'Save failed');
+                  }
+                } catch (e) {
+                  message.error('Failed to save revaluation: ' + (e instanceof Error ? e.message : String(e)));
+                } finally {
+                  setRevalSaving(false);
+                }
+              }}
+            >
+              Save Revaluation
+            </Button>
+
+            <Button
+              icon={<PrinterOutlined />}
+              disabled={revalPreviewRows.length === 0}
+              onClick={() => {
+                try {
+                  const doc = new jsPDF('portrait', 'mm', 'a4');
+                  const pageW = doc.internal.pageSize.getWidth();
+                  doc.setFontSize(16);
+                  doc.setFont('helvetica', 'bold');
+                  doc.text('FX Revaluation', pageW / 2, 18, { align: 'center' });
+
+                  doc.setFontSize(9);
+                  doc.setFont('helvetica', 'normal');
+                  const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+                  const hdrRows = [
+                    [`Period: ${tab.periodName}`, `Account: ${revalAccount}`],
+                    [`Account Desc: ${accountDesc}`, `Functional CCY: ${functionalCcy}`],
+                    [`Date: ${today}`, `Status: DRAFT`],
+                  ];
+                  let y = 26;
+                  hdrRows.forEach(([left, right]) => {
+                    doc.text(left, 14, y);
+                    doc.text(right, pageW / 2 + 4, y);
+                    y += 6;
+                  });
+
+                  y += 2;
+                  doc.setFont('helvetica', 'bold');
+                  doc.setFontSize(10);
+                  doc.text('Section 1: Currency Rates', 14, y);
+                  y += 4;
+
+                  autoTable(doc, {
+                    startY: y,
+                    head: [['Currency', 'Ent. Balance', 'Acctd Balance', 'Book Rate', 'New Rate', 'New Acctd Value', 'Adjustment']],
+                    body: ccyRows.map(r => [
+                      r.ccy,
+                      r.entClosing.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+                      r.acctClosing.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+                      r.bookRate.toFixed(6),
+                      r.newRate.toFixed(6),
+                      r.newAcctValue.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+                      r.revalAmt.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+                    ]),
+                    styles: { fontSize: 8 },
+                    headStyles: { fillColor: [7, 114, 206] },
+                    margin: { left: 14, right: 14 },
+                  });
+
+                  y = (doc as any).lastAutoTable.finalY + 8;
+                  doc.setFont('helvetica', 'bold');
+                  doc.setFontSize(10);
+                  doc.text('Section 2: Gain / Loss Summary', 14, y);
+                  y += 4;
+
+                  autoTable(doc, {
+                    startY: y,
+                    head: [['', 'Amount']],
+                    body: [
+                      ['Total Gain', totalGain.toLocaleString('en-US', { minimumFractionDigits: 2 })],
+                      ['Total Loss', totalLoss.toLocaleString('en-US', { minimumFractionDigits: 2 })],
+                    ],
+                    styles: { fontSize: 9 },
+                    headStyles: { fillColor: [29, 123, 77] },
+                    margin: { left: 14, right: 14 },
+                    tableWidth: 80,
+                  });
+
+                  y = (doc as any).lastAutoTable.finalY + 8;
+                  doc.setFont('helvetica', 'bold');
+                  doc.setFontSize(10);
+                  doc.text('Section 3: Journal Preview Lines', 14, y);
+                  y += 4;
+
+                  const totalDr = revalPreviewRows.reduce((s, r) => s + r.dr, 0);
+                  const totalCr = revalPreviewRows.reduce((s, r) => s + r.cr, 0);
+
+                  autoTable(doc, {
+                    startY: y,
+                    head: [['Line#', 'Account Combination', 'Description', 'Comment', 'Debit', 'Credit']],
+                    body: [
+                      ...revalPreviewRows.map(r => [
+                        r.lineNum,
+                        r.combo,
+                        r.desc,
+                        r.comment || '',
+                        r.dr > 0 ? r.dr.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '',
+                        r.cr > 0 ? r.cr.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '',
+                      ]),
+                      ['', '', '', 'Totals',
+                        totalDr.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+                        totalCr.toLocaleString('en-US', { minimumFractionDigits: 2 })],
+                    ],
+                    styles: { fontSize: 7.5 },
+                    headStyles: { fillColor: [58, 58, 58] },
+                    margin: { left: 14, right: 14 },
+                  });
+
+                  const pageCount = (doc as any).internal.getNumberOfPages();
+                  for (let i = 1; i <= pageCount; i++) {
+                    doc.setPage(i);
+                    doc.setFontSize(8);
+                    doc.setFont('helvetica', 'normal');
+                    doc.setTextColor(150);
+                    doc.text('Generated by ReactERP', pageW / 2, 290, { align: 'center' });
+                    doc.setTextColor(0);
+                  }
+
+                  const blobUrl = doc.output('bloburl') as unknown as string;
+                  window.open(blobUrl, '_blank');
+                } catch (e) {
+                  message.error('PDF generation failed: ' + (e instanceof Error ? e.message : String(e)));
+                }
+              }}
+            >
+              Print PDF
+            </Button>
+          </Space>
 
           {/* Journal preview table */}
           {revalPreviewRows.length > 0 && (

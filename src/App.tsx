@@ -93,6 +93,7 @@ const ManageTickets           = lazy(() => import('./pages/support/ManageTickets
 const MyTickets               = lazy(() => import('./pages/support/MyTickets'));
 const TrainingModule          = lazy(() => import('./pages/training/TrainingModule'));
 const OracleFusion            = lazy(() => import('./pages/oracle/OracleFusion'));
+const ManageRevaluation       = lazy(() => import('./pages/gl/ManageRevaluation'));
 
 // Placeholder component for modules under development
 const ComingSoon = ({ moduleName }: { moduleName: string }) => (
@@ -165,6 +166,7 @@ function App() {
               <Route path="gl/currencies" element={<Currencies />} />
               <Route path="gl/journal-reconciliation" element={<JournalReconciliation />} />
               <Route path="gl/categories" element={<GLManageCategories />} />
+              <Route path="gl/revaluation" element={<ManageRevaluation />} />
               {/* Fixed Assets */}
               <Route path="fa"             element={<FAModule />} />
               <Route path="fa/assets"       element={<ManageAssets />} />
