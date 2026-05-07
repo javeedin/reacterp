@@ -269,7 +269,7 @@ const TrialBalance: React.FC = () => {
   const [revalComboPickerFor,  setRevalComboPickerFor]  = useState<'gain'|'loss'>('gain');
   const [revalComboSearch,     setRevalComboSearch]     = useState('');
   const [revalPreviewRows,     setRevalPreviewRows]     = useState<
-    { lineNum: number; combo: string; desc: string; dr: number; cr: number }[]
+    { lineNum: number; combo: string; desc: string; comment: string; dr: number; cr: number }[]
   >([]);
   const [apiPanelVisible, setApiPanelVisible] = useState(false);
   const [apiCalls, setApiCalls] = useState<Record<string, ApiCallInfo>>({
@@ -2522,21 +2522,27 @@ const TrialBalance: React.FC = () => {
 
     // Build journal preview
     const buildPreview = () => {
-      const lines: { lineNum: number; combo: string; desc: string; dr: number; cr: number }[] = [];
+      const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      const baseDesc = `${accountDesc} - Revaluation on ${today}`;
+      const lines: { lineNum: number; combo: string; desc: string; comment: string; dr: number; cr: number }[] = [];
       let ln = 1;
       ccyRows.forEach(r => {
         if (r.revalAmt === 0 || r.newRate === 0) return;
         const abs = Math.abs(r.revalAmt);
         const combo = r.combos[0] || revalAccount;
         if (r.isGain) {
-          lines.push({ lineNum: ln++, combo, desc: `FX Revaluation ${r.ccy} → ${functionalCcy} (Gain)`, dr: abs, cr: 0 });
-          lines.push({ lineNum: ln++, combo: revalGainCombo || '[Gain Account]', desc: 'Unrealized FX Gain', dr: 0, cr: abs });
+          lines.push({ lineNum: ln++, combo, desc: baseDesc, comment: '', dr: abs, cr: 0 });
+          lines.push({ lineNum: ln++, combo: revalGainCombo || '[Gain Account]', desc: `Unrealized FX Gain - ${r.ccy}`, comment: '', dr: 0, cr: abs });
         } else {
-          lines.push({ lineNum: ln++, combo: revalLossCombo || '[Loss Account]', desc: 'Unrealized FX Loss', dr: abs, cr: 0 });
-          lines.push({ lineNum: ln++, combo, desc: `FX Revaluation ${r.ccy} → ${functionalCcy} (Loss)`, dr: 0, cr: abs });
+          lines.push({ lineNum: ln++, combo: revalLossCombo || '[Loss Account]', desc: `Unrealized FX Loss - ${r.ccy}`, comment: '', dr: abs, cr: 0 });
+          lines.push({ lineNum: ln++, combo, desc: baseDesc, comment: '', dr: 0, cr: abs });
         }
       });
       setRevalPreviewRows(lines);
+    };
+
+    const updatePreviewRow = (lineNum: number, field: string, value: string) => {
+      setRevalPreviewRows(prev => prev.map(r => r.lineNum === lineNum ? { ...r, [field]: value } : r));
     };
 
     // Account combo picker entries (all unique combos in this tab)
@@ -2602,13 +2608,36 @@ const TrialBalance: React.FC = () => {
     ];
 
     const previewColumns = [
-      { title: '#', dataIndex: 'lineNum', key: 'lineNum', width: 40 },
-      { title: 'Account Combination', dataIndex: 'combo', key: 'combo',
-        render: (v: string) => <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{v}</Text> },
-      { title: 'Description', dataIndex: 'desc', key: 'desc', ellipsis: true },
-      { title: 'Debit', dataIndex: 'dr', key: 'dr', align: 'right' as const, width: 130,
+      { title: '#', dataIndex: 'lineNum', key: 'lineNum', width: 36 },
+      { title: 'Account', dataIndex: 'combo', key: 'combo', width: 270,
+        render: (v: string, row: any) => (
+          <Input
+            size="small"
+            value={v}
+            onChange={e => updatePreviewRow(row.lineNum, 'combo', e.target.value)}
+            style={{ fontFamily: 'monospace', fontSize: 11 }}
+          />
+        )},
+      { title: 'Description', dataIndex: 'desc', key: 'desc',
+        render: (v: string, row: any) => (
+          <Input
+            size="small"
+            value={v}
+            onChange={e => updatePreviewRow(row.lineNum, 'desc', e.target.value)}
+          />
+        )},
+      { title: 'Comment', dataIndex: 'comment', key: 'comment', width: 160,
+        render: (v: string, row: any) => (
+          <Input
+            size="small"
+            value={v}
+            onChange={e => updatePreviewRow(row.lineNum, 'comment', e.target.value)}
+            placeholder="Optional comment…"
+          />
+        )},
+      { title: 'Debit', dataIndex: 'dr', key: 'dr', align: 'right' as const, width: 120,
         render: (v: number) => v ? <Text style={{ fontFamily: 'monospace', color: '#237804', fontWeight: 600 }}>{fmtN(v)}</Text> : null },
-      { title: 'Credit', dataIndex: 'cr', key: 'cr', align: 'right' as const, width: 130,
+      { title: 'Credit', dataIndex: 'cr', key: 'cr', align: 'right' as const, width: 120,
         render: (v: number) => v ? <Text style={{ fontFamily: 'monospace', color: REDWOOD.primary, fontWeight: 600 }}>{fmtN(v)}</Text> : null },
     ];
 
@@ -2618,7 +2647,7 @@ const TrialBalance: React.FC = () => {
           open={revalVisible}
           onCancel={() => { setRevalVisible(false); setRevalPreviewRows([]); }}
           footer={null}
-          width={900}
+          width={1150}
           title={
             <Space>
               <Tag color={accountType === 'A' ? 'blue' : accountType === 'L' ? 'orange' : 'green'}>
@@ -2728,15 +2757,15 @@ const TrialBalance: React.FC = () => {
                 summary={() => (
                   <Table.Summary fixed>
                     <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 700 }}>
-                      <Table.Summary.Cell index={0} colSpan={3} align="right">
+                      <Table.Summary.Cell index={0} colSpan={4} align="right">
                         <Text strong>Total</Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={3} align="right">
+                      <Table.Summary.Cell index={4} align="right">
                         <Text strong style={{ fontFamily: 'monospace', color: '#237804' }}>
                           {fmtN(revalPreviewRows.reduce((s, r) => s + r.dr, 0))}
                         </Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={4} align="right">
+                      <Table.Summary.Cell index={5} align="right">
                         <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>
                           {fmtN(revalPreviewRows.reduce((s, r) => s + r.cr, 0))}
                         </Text>
