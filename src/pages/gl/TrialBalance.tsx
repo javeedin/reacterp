@@ -4550,7 +4550,43 @@ const TrialBalance: React.FC = () => {
         <Modal
           open={ytdMovVisible}
           onCancel={() => setYtdMovVisible(false)}
-          footer={null}
+          footer={
+            <Space>
+              <Button
+                icon={<FileExcelOutlined />}
+                disabled={ytdMovRows.length === 0}
+                onClick={() => {
+                  const data = ytdMovRows.map(r => ({
+                    'Period':       r.period,
+                    'YTD Opening':  r.ytd_opening,
+                    'YTD Debit':    r.ytd_debit,
+                    'YTD Credit':   r.ytd_credit,
+                    'YTD Closing':  r.closing,
+                  }));
+                  const ws = XLSX.utils.json_to_sheet(data);
+                  // Right-align numeric columns
+                  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+                  for (let R = 1; R <= range.e.r; R++) {
+                    ['B','C','D','E'].forEach(col => {
+                      const cell = ws[`${col}${R + 1}`];
+                      if (cell) cell.z = '#,##0.00';
+                    });
+                  }
+                  ws['!cols'] = [{ wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 16 }];
+                  const wb = XLSX.utils.book_new();
+                  XLSX.utils.book_append_sheet(wb, ws, 'YTD Movement');
+                  const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+                  saveAs(
+                    new Blob([buf], { type: 'application/octet-stream' }),
+                    `YTD_${ytdMovAccount}_${ytdMovCompany || 'AllCo'}_${ytdMovLedger}.xlsx`
+                  );
+                }}
+              >
+                Export to Excel
+              </Button>
+              <Button onClick={() => setYtdMovVisible(false)}>Close</Button>
+            </Space>
+          }
           width={900}
           destroyOnClose
           title={
