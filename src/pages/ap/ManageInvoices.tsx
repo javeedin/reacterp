@@ -331,6 +331,17 @@ const ManageInvoices: React.FC = () => {
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [searchCollapsed, setSearchCollapsed] = useState(false);
+  const [businessUnits, setBusinessUnits] = useState<{ name: string }[]>([]);
+
+  useEffect(() => {
+    fetch(`${APEX_DB_CONFIG.baseUrl}/gl/businessunits`, { headers: { Accept: 'application/json' } })
+      .then(r => r.json())
+      .then(d => {
+        const items = (d.items || []).map((i: any) => ({ name: i.business_unit_name || '' })).filter((i: any) => i.name);
+        setBusinessUnits(items);
+      })
+      .catch(() => {});
+  }, []);
 
   // Tab management state
   const [activeTab, setActiveTab] = useState('search');
@@ -1507,13 +1518,10 @@ const ManageInvoices: React.FC = () => {
                             name="businessUnit"
                             style={{ marginBottom: 8 }}
                           >
-                            <Select
-                              placeholder="Select Business Unit"
-                              allowClear
-                              showSearch
-                            >
-                              <Option value="BUIMERC CORP FZE_JAFZA">BUIMERC CORP FZE_JAFZA</Option>
-                              <Option value="BUIMERC CORP_DIFC_INVST">BUIMERC CORP_DIFC_INVST</Option>
+                            <Select placeholder="Select Business Unit" allowClear showSearch optionFilterProp="children">
+                              {businessUnits.map(bu => (
+                                <Option key={bu.name} value={bu.name}>{bu.name}</Option>
+                              ))}
                             </Select>
                           </Form.Item>
                           <Form.Item
@@ -2227,9 +2235,10 @@ const ManageInvoices: React.FC = () => {
             </Form.Item>
             <Form.Item name="supplierNumber" hidden><Input /></Form.Item>
             <Form.Item name="businessUnit" label="Business Unit" rules={[{ required: true, message: 'Required' }]} style={{ marginBottom: 12 }}>
-              <Select placeholder="Select Business Unit" allowClear showSearch>
-                <Option value="BUIMERC CORP FZE_JAFZA">BUIMERC CORP FZE_JAFZA</Option>
-                <Option value="BUIMERC CORP_DIFC_INVST">BUIMERC CORP_DIFC_INVST</Option>
+              <Select placeholder="Select Business Unit" allowClear showSearch optionFilterProp="children">
+                {businessUnits.map(bu => (
+                  <Option key={bu.name} value={bu.name}>{bu.name}</Option>
+                ))}
               </Select>
             </Form.Item>
             <Row gutter={12}>
