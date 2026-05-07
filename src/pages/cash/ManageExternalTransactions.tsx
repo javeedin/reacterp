@@ -3,7 +3,7 @@ import dayjs, { type Dayjs } from 'dayjs';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
   DatePicker, InputNumber, Row, Col, Space, Tag, Tooltip, Tabs, Collapse,
-  message, Empty, Divider, Badge, Modal, Alert, Spin, Segmented, Upload, Popconfirm,
+  message, Empty, Divider, Badge, Modal, Alert, Spin, Segmented, Upload, Popconfirm, AutoComplete,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -23,6 +23,7 @@ import { useAuth } from '../../context/AuthContext';
 import {
   buildPcBankTxnSlaPayload, fetchLedgerByBusinessUnit, derivePeriodName, createAccounting,
 } from '../../services/sla.service';
+import { searchCombinations, type DistCombination } from '../../services/distCombinations.service';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -184,6 +185,9 @@ const ExternalTxnForm: React.FC<{
   const [lineCoaOpen, setLineCoaOpen]     = useState(false);
   const [lineCoaIdx, setLineCoaIdx]       = useState(0);
   const [lineCoaInitial, setLineCoaInitial] = useState('');
+  const [distCombinations, setDistCombinations] = useState<DistCombination[]>([]);
+  const [offsetDistSet, setOffsetDistSet] = useState('');                  // single mode
+  const [lineDistSets, setLineDistSets]   = useState<Record<number, string>>({}); // multiple mode
   const [attachments, setAttachments]   = useState<Array<{id?: number; uid: string; name: string; fileType: string; fileSize: number; content?: string; status: 'done' | 'uploading' | 'error'}>>([]);
   const [attachUploading, setAttachUploading] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -220,6 +224,17 @@ const ExternalTxnForm: React.FC<{
     setExtTxnLines(prev => prev.map((l, i) => i === idx ? { ...l, [field]: value } : l));
 
   useEffect(() => { setSelectedBu(initialValues?.businessUnitName); }, [initialValues]);
+
+  useEffect(() => {
+    searchCombinations('').then(setDistCombinations).catch(() => {});
+  }, []);
+
+  const applyCompanySegment = useCallback((combo: string): string => {
+    if (!derivedCompany || !combo) return combo;
+    const parts = combo.split('-');
+    parts[0] = derivedCompany;
+    return parts.join('-');
+  }, [derivedCompany]);
 
   useEffect(() => {
     if (initialValues) {
@@ -854,6 +869,44 @@ const ExternalTxnForm: React.FC<{
                   label={<span style={{ fontWeight: 600, fontSize: 13 }}>Offset Account</span>}
                   style={{ marginBottom: 0 }}
                 >
+                  {/* Distribution set picker */}
+                  {!isEdit && !saved && (
+                    <AutoComplete
+                      value={offsetDistSet}
+                      disabled={!bankSelected}
+                      placeholder="Distribution set…"
+                      style={{ width: '100%', marginBottom: 6 }}
+                      options={distCombinations
+                        .filter(d => {
+                          if (!offsetDistSet) return true;
+                          const q = offsetDistSet.toLowerCase();
+                          return d.combinationName.toLowerCase().includes(q)
+                            || (d.description || '').toLowerCase().includes(q)
+                            || (d.glAccountDesc || '').toLowerCase().includes(q);
+                        })
+                        .map(d => ({
+                          value: d.combinationName,
+                          label: (
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                              <span style={{ fontSize: 12, fontWeight: 600 }}>{d.combinationName}</span>
+                              <span style={{ fontSize: 11, color: '#999', fontFamily: 'monospace' }}>{d.glAccountDesc || ''}</span>
+                            </div>
+                          ),
+                          combination: d,
+                        }))}
+                      onChange={v => setOffsetDistSet(v)}
+                      onSelect={(_v, opt) => {
+                        const d = (opt as { combination: DistCombination }).combination;
+                        setOffsetDistSet(d.combinationName);
+                        if (d.glAccountDesc) {
+                          const acct = applyCompanySegment(d.glAccountDesc);
+                          form.setFieldValue('offsetAccountCombination', acct);
+                          setOffsetAcctDesc('');
+                        }
+                      }}
+                      filterOption={false}
+                    />
+                  )}
                   <div style={{ display: 'flex', gap: 0, alignItems: 'center' }}>
                     <Form.Item name="offsetAccountCombination" noStyle
                       rules={[{ required: !isEdit, message: 'Offset account is required' }]}
@@ -1082,9 +1135,47 @@ const ExternalTxnForm: React.FC<{
               },
               {
                 title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Offset Account</span>,
-                width: 200,
+                width: 240,
                 render: (_: any, record: ExtTxnLine, idx: number) => (
                   <>
+                    {/* Distribution set picker */}
+                    <AutoComplete
+                      size="small"
+                      value={lineDistSets[idx] || ''}
+                      placeholder="Distribution set…"
+                      style={{ width: '100%', marginBottom: 4 }}
+                      options={distCombinations
+                        .filter(d => {
+                          const q = (lineDistSets[idx] || '').toLowerCase();
+                          if (!q) return true;
+                          return d.combinationName.toLowerCase().includes(q)
+                            || (d.description || '').toLowerCase().includes(q)
+                            || (d.glAccountDesc || '').toLowerCase().includes(q);
+                        })
+                        .map(d => ({
+                          value: d.combinationName,
+                          label: (
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                              <span style={{ fontSize: 11, fontWeight: 600 }}>{d.combinationName}</span>
+                              <span style={{ fontSize: 10, color: '#999', fontFamily: 'monospace' }}>{d.glAccountDesc || ''}</span>
+                            </div>
+                          ),
+                          combination: d,
+                        }))}
+                      onChange={v => setLineDistSets(prev => ({ ...prev, [idx]: v }))}
+                      onSelect={(_v, opt) => {
+                        const d = (opt as { combination: DistCombination }).combination;
+                        setLineDistSets(prev => ({ ...prev, [idx]: d.combinationName }));
+                        if (d.glAccountDesc) {
+                          const acct = applyCompanySegment(d.glAccountDesc);
+                          updateExtLine(idx, 'offsetAccount', acct);
+                          updateExtLine(idx, 'offsetDesc', '');
+                        }
+                      }}
+                      filterOption={false}
+                    >
+                      <Input size="small" variant="borderless" />
+                    </AutoComplete>
                     <Space.Compact style={{ width: '100%' }}>
                       <Input
                         size="small" readOnly value={record.offsetAccount}
