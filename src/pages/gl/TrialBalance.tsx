@@ -787,13 +787,13 @@ const TrialBalance: React.FC = () => {
         const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceStandard}`
           + `?ledger_name=${encodeURIComponent(ledgerName)}`
           + `&period_name=${encodeURIComponent(p.period_name_id)}`
-          + `&limit=10000`;
+          + `&account=${encodeURIComponent(account)}`
+          + `&limit=500`;
         const res = await fetch(url, { headers: { Accept: 'application/json' } });
         if (!res.ok) continue;
         const data = await res.json();
         const items: RrTBRecord[] = (data.items || []) as RrTBRecord[];
         const acctRows = items.filter(r =>
-          r.account === account &&
           (!company  || r.company       === company) &&
           (!currency || r.currency_code === currency)
         );
@@ -4560,14 +4560,14 @@ const TrialBalance: React.FC = () => {
           open={ytdMovVisible}
           onClose={() => setYtdMovVisible(false)}
           extra={
-            <Tooltip title={`API: GET gl/rr-trialbalance/standard?ledger_name=${encodeURIComponent(ytdMovLedger)}&period_name=<period>&limit=10000`}>
+            <Tooltip title={`API: GET gl/rr-trialbalance/standard?ledger_name=...&period_name=<period>&account=${ytdMovAccount}&limit=500`}>
               <Button
                 size="small"
                 icon={<ApiOutlined />}
                 style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
                 onClick={() => {
                   const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceStandard}`
-                    + `?ledger_name=${encodeURIComponent(ytdMovLedger)}&period_name=<period>&limit=10000`;
+                    + `?ledger_name=${encodeURIComponent(ytdMovLedger)}&period_name=<period>&account=${encodeURIComponent(ytdMovAccount)}&limit=500`;
                   Modal.info({
                     title: <Space><ApiOutlined style={{ color: REDWOOD.info }} />API Endpoints — YTD Balance Movement</Space>,
                     width: 680,
