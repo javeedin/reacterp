@@ -523,6 +523,7 @@ const ManagePayments: React.FC = () => {
   // Supplier lookup modal state
   const [supplierModalVisible, setSupplierModalVisible] = useState(false);
   const [supplierModalContext, setSupplierModalContext] = useState<'search' | 'create'>('search');
+  const [supplierApiUrl, setSupplierApiUrl] = useState('');
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
   const [supplierLoading, setSupplierLoading] = useState(false);
   const [supplierSearchText, setSupplierSearchText] = useState('');
@@ -1114,6 +1115,7 @@ const ManagePayments: React.FC = () => {
     setSupplierLoading(true);
     const bu = createPaymentForm.getFieldValue('businessUnit') || '';
     const url = bu ? `${APEX_SUPPLIERS_URL}?P_BUSINESS_UNIT=${encodeURIComponent(bu)}` : APEX_SUPPLIERS_URL;
+    setSupplierApiUrl(url);
     debugLog('INFO', `Fetching suppliers from: ${url}`);
     try {
       const response = await fetch(url, {
@@ -4256,14 +4258,38 @@ const ManagePayments: React.FC = () => {
               <Text type="secondary" style={{ fontSize: 12 }}>
                 {filteredSuppliers.length} supplier{filteredSuppliers.length !== 1 ? 's' : ''} found
               </Text>
-              <Button
-                size="small"
-                icon={<ReloadOutlined />}
-                onClick={fetchSuppliers}
-                loading={supplierLoading}
-              >
-                Refresh
-              </Button>
+              <Space size={8}>
+                {supplierApiUrl && (
+                  <Popover
+                    title={<Space><ApiOutlined style={{ color: '#1677ff' }} /><span>API Request</span></Space>}
+                    content={
+                      <div style={{ maxWidth: 560 }}>
+                        <div style={{ marginBottom: 6 }}>
+                          <Tag color="blue">GET</Tag>
+                          <span style={{ fontSize: 11, fontWeight: 600 }}>/suppliers</span>
+                        </div>
+                        <div style={{ background: '#1e1e1e', color: '#d4d4d4', borderRadius: 6, padding: '8px 10px', fontSize: 11, fontFamily: 'monospace', wordBreak: 'break-all', maxHeight: 80, overflowY: 'auto' }}>
+                          {supplierApiUrl}
+                        </div>
+                        <div style={{ marginTop: 8, fontSize: 11, color: '#555' }}>
+                          {supplierApiUrl.includes('P_BUSINESS_UNIT')
+                            ? <>Filtered by BU: <code>{createPaymentForm.getFieldValue('businessUnit')}</code></>
+                            : 'No BU selected — showing all suppliers'}
+                        </div>
+                      </div>
+                    }
+                    trigger="click"
+                    placement="bottomRight"
+                  >
+                    <Tooltip title="View API details">
+                      <ApiOutlined style={{ color: '#1677ff', cursor: 'pointer', fontSize: 15 }} />
+                    </Tooltip>
+                  </Popover>
+                )}
+                <Button size="small" icon={<ReloadOutlined />} onClick={fetchSuppliers} loading={supplierLoading}>
+                  Refresh
+                </Button>
+              </Space>
             </div>
           </div>
           <Table
