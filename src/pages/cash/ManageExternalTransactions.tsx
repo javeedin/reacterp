@@ -1598,7 +1598,11 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
         // Validate company codes match between DR and CR
         const drCompany = (drAccount || '').split('-')[0]?.trim();
         const crCompany = (crAccount || '').split('-')[0]?.trim();
-        if (drCompany && crCompany && drCompany !== crCompany) {
+        if (!drCompany || !crCompany) {
+          updateRow(row.extTxnId, { status: 'error', message: `Company code not found for Business Unit '${txn.businessUnitName}'. Cannot create accounting without a valid company code.` });
+          continue;
+        }
+        if (drCompany !== crCompany) {
           updateRow(row.extTxnId, { status: 'error', message: `Company code mismatch: DR account starts with '${drCompany}' but CR account starts with '${crCompany}'. Both must use the same company code.` });
           continue;
         }
@@ -1761,7 +1765,11 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
         // Validate company codes match between DR and CR
         const drCompany = (drAccount || '').split('-')[0]?.trim();
         const crCompany = (crAccount || '').split('-')[0]?.trim();
-        if (drCompany && crCompany && drCompany !== crCompany) {
+        if (!drCompany || !crCompany) {
+          updateRow(row.extTxnId, { status: 'error', message: `Company code not found for Business Unit '${txn.businessUnitName}'. Cannot create accounting without a valid company code.` });
+          continue;
+        }
+        if (drCompany !== crCompany) {
           updateRow(row.extTxnId, { status: 'error', message: `Company code mismatch: DR account starts with '${drCompany}' but CR account starts with '${crCompany}'. Both must use the same company code.` });
           continue;
         }
