@@ -324,16 +324,13 @@ const TrialBalance: React.FC = () => {
   const [drillComboPeriod,  setDrillComboPeriod]  = useState('');
 
   // ── YTD Movement Drawer ──────────────────────────────────────
-  interface YtdMovRow {
-    period: string; period_year: number; period_number: number;
-    ytd_opening: number; ytd_debit: number; ytd_credit: number; closing: number;
-  }
-  const [ytdMovVisible,  setYtdMovVisible]  = useState(false);
-  const [ytdMovLoading,  setYtdMovLoading]  = useState(false);
-  const [ytdMovAccount,  setYtdMovAccount]  = useState('');
-  const [ytdMovDesc,     setYtdMovDesc]     = useState('');
-  const [ytdMovLedger,   setYtdMovLedger]   = useState('');
-  const [ytdMovRows,     setYtdMovRows]     = useState<YtdMovRow[]>([]);
+  const [ytdMovVisible,   setYtdMovVisible]   = useState(false);
+  const [ytdMovLoading,   setYtdMovLoading]   = useState(false);
+  const [ytdMovAccount,   setYtdMovAccount]   = useState('');
+  const [ytdMovDesc,      setYtdMovDesc]      = useState('');
+  const [ytdMovLedger,    setYtdMovLedger]    = useState('');
+  const [ytdMovProgress,  setYtdMovProgress]  = useState('');
+  const [ytdMovRows,      setYtdMovRows]      = useState<{ period: string; period_year: number; period_number: number; ytd_opening: number; ytd_debit: number; ytd_credit: number; closing: number }[]>([]);
   const [ytdMovError,    setYtdMovError]    = useState<string | null>(null);
 
   // ── All companies from COA value set ────────────────────────
@@ -752,19 +749,26 @@ const TrialBalance: React.FC = () => {
     setYtdMovVisible(true);
     setYtdMovLoading(true);
 
+    // periods are already fetched for selectedLedger — use all of them sorted oldest → newest
     const allPeriods = [...periods]
-      .filter(p => p.ledger_name === ledgerName)
+      .filter(p => !p.ledger_name || p.ledger_name.toLowerCase() === ledgerName.toLowerCase())
       .sort((a, b) => a.period_year !== b.period_year ? a.period_year - b.period_year : a.period_number - b.period_number);
 
-    if (allPeriods.length === 0) {
-      setYtdMovError('No periods found for this ledger.');
+    const periodsToUse = allPeriods.length > 0 ? allPeriods : [...periods].sort((a, b) =>
+      a.period_year !== b.period_year ? a.period_year - b.period_year : a.period_number - b.period_number
+    );
+
+    if (periodsToUse.length === 0) {
+      setYtdMovError('No periods available. Please load periods first from the Periods tab.');
       setYtdMovLoading(false);
       return;
     }
 
     try {
       const results: { period: string; period_year: number; period_number: number; ytd_opening: number; ytd_debit: number; ytd_credit: number; closing: number }[] = [];
-      for (const p of allPeriods) {
+      for (let i = 0; i < periodsToUse.length; i++) {
+        const p = periodsToUse[i];
+        setYtdMovProgress(`Fetching ${i + 1} / ${periodsToUse.length} — ${p.period_name_id}`);
         const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceStandard}`
           + `?ledger_name=${encodeURIComponent(ledgerName)}`
           + `&period_name=${encodeURIComponent(p.period_name_id)}`
@@ -780,14 +784,17 @@ const TrialBalance: React.FC = () => {
           const ytd_credit  = acctRows.reduce((s, r) => s + (r.ytd_credit  || 0), 0);
           const closing     = acctRows.reduce((s, r) => s + (r.closing     || 0), 0);
           results.push({ period: p.period_name_id, period_year: p.period_year, period_number: p.period_number, ytd_opening, ytd_debit, ytd_credit, closing });
+          // Update rows incrementally so user sees data as it arrives
+          setYtdMovRows([...results]);
         }
       }
-      setYtdMovRows(results);
+      setYtdMovProgress('');
       if (results.length === 0) setYtdMovError('No balances found for this account across any period.');
     } catch (err) {
       setYtdMovError(err instanceof Error ? err.message : 'Failed to load YTD movement');
     } finally {
       setYtdMovLoading(false);
+      setYtdMovProgress('');
     }
   }, [periods]);
 
@@ -4464,15 +4471,21 @@ const TrialBalance: React.FC = () => {
           onClose={() => setYtdMovVisible(false)}
           extra={<Tag color="geekblue">{ytdMovLedger}</Tag>}
         >
-          {ytdMovLoading ? (
+          {ytdMovLoading && ytdMovRows.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 60 }}>
-              <Spin size="large" tip="Loading all periods..." />
+              <Spin size="large" />
+              <div style={{ marginTop: 16, color: '#666', fontSize: 13 }}>{ytdMovProgress || 'Loading...'}</div>
             </div>
           ) : ytdMovError ? (
             <Alert type="error" showIcon message={ytdMovError} />
           ) : (
             <>
-              <Tag color="blue" style={{ marginBottom: 12 }}>{ytdMovRows.length} period(s) with activity</Tag>
+              <Space style={{ marginBottom: 12 }} wrap>
+                <Tag color="blue">{ytdMovRows.length} period(s) with activity</Tag>
+                {ytdMovLoading && ytdMovProgress && (
+                  <Tag icon={<LoadingOutlined />} color="processing">{ytdMovProgress}</Tag>
+                )}
+              </Space>
               <Table
                 dataSource={ytdMovRows}
                 rowKey="period"
