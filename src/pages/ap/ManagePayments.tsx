@@ -3398,6 +3398,60 @@ const ManagePayments: React.FC = () => {
                             </Form.Item>
                           </Col>
                         </Row>
+                        {/* Account Combinations (from selected bank) */}
+                        {selectedBankAccount && (() => {
+                          const effectiveCash = bankAcctCashOverride || selectedBankAccount.cashAccountCombination;
+                          const effectivePdc  = bankAcctPdcOverride  || selectedBankAccount.pdcAccountCombination;
+                          const maturityDate  = createPaymentForm.getFieldValue('maturityDate');
+                          return (
+                            <Row gutter={32} style={{ marginTop: 4, paddingTop: 8, borderTop: `1px solid ${REDWOOD.neutral200}` }}>
+                              <Col span={12}>
+                                <Form.Item
+                                  label="Cash Account"
+                                  validateStatus={!effectiveCash ? 'error' : ''}
+                                  help={!effectiveCash ? 'Required — click to select' : (selectedBankAccount.cashAccountDescription || undefined)}
+                                >
+                                  <Input.Group compact>
+                                    <Input
+                                      readOnly
+                                      value={effectiveCash}
+                                      style={{ background: effectiveCash ? '#f5f5f5' : '#fff2f0', color: '#333', width: 'calc(100% - 32px)', borderColor: !effectiveCash ? '#ff4d4f' : undefined, fontFamily: 'monospace', fontSize: 12 }}
+                                      placeholder="Not set"
+                                    />
+                                    <Button icon={<SearchOutlined />} onClick={() => setBankAcctSelectorField('cash')} style={{ borderColor: !effectiveCash ? '#ff4d4f' : undefined }} />
+                                  </Input.Group>
+                                </Form.Item>
+                              </Col>
+                              <Col span={12}>
+                                <Form.Item
+                                  label="Cash Clearing Account"
+                                  help={selectedBankAccount.cashClearingAccountDescription || undefined}
+                                >
+                                  <Input readOnly value={selectedBankAccount.cashClearingAccountCombination} style={{ background: '#f5f5f5', color: '#333', fontFamily: 'monospace', fontSize: 12 }} placeholder="—" />
+                                </Form.Item>
+                              </Col>
+                              {(maturityDate || effectivePdc) && (
+                                <Col span={12}>
+                                  <Form.Item
+                                    label="PDC Account"
+                                    validateStatus={maturityDate && !effectivePdc ? 'error' : ''}
+                                    help={maturityDate && !effectivePdc ? 'Required when Maturity Date is set' : undefined}
+                                  >
+                                    <Input.Group compact>
+                                      <Input
+                                        readOnly
+                                        value={effectivePdc}
+                                        style={{ background: effectivePdc ? '#f5f5f5' : '#fff2f0', color: '#333', width: 'calc(100% - 32px)', borderColor: maturityDate && !effectivePdc ? '#ff4d4f' : undefined, fontFamily: 'monospace', fontSize: 12 }}
+                                        placeholder="Not set"
+                                      />
+                                      <Button icon={<SearchOutlined />} onClick={() => setBankAcctSelectorField('pdc')} style={{ borderColor: maturityDate && !effectivePdc ? '#ff4d4f' : undefined }} />
+                                    </Input.Group>
+                                  </Form.Item>
+                                </Col>
+                              )}
+                            </Row>
+                          );
+                        })()}
                         {/* Stats row */}
                         <Row gutter={0} style={{ borderTop: `1px solid ${REDWOOD.neutral200}`, marginTop: 8, paddingTop: 8, background: '#fafafa', borderRadius: '0 0 6px 6px' }}>
                           {/* Supplier Due Balance */}
