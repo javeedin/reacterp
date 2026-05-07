@@ -513,10 +513,17 @@ const ExternalTxnForm: React.FC<{
                   allowClear onClear={() => { setSelectedBu(undefined); setSelectedBank(undefined); }}
                 />
               </Form.Item>
-              {derivedCompany && (
+              {selectedBu && derivedCompany && (
                 <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Text style={{ fontSize: 11, color: REDWOOD.textSecondary }}>Company Code:</Text>
                   <Tag color="blue" style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{derivedCompany}</Tag>
+                </div>
+              )}
+              {selectedBu && !derivedCompany && (
+                <div style={{ marginTop: 4, padding: '4px 8px', background: '#fff2f0', border: '1px solid #ffa39e', borderRadius: 4 }}>
+                  <Text style={{ fontSize: 11, color: '#cf1322' }}>
+                    ⚠ No company code configured for this Business Unit. Cannot proceed with accounting.
+                  </Text>
                 </div>
               )}
             </Col>
@@ -853,12 +860,14 @@ const ExternalTxnForm: React.FC<{
                       />
                     </Form.Item>
                     {!isEdit && !saved && (
-                      <Button
-                        icon={<SearchOutlined />}
-                        disabled={!bankSelected}
-                        onClick={() => setOffsetAcctOpen(true)}
-                        style={{ borderRadius: '0 6px 6px 0', height: 36, borderLeft: 0 }}
-                      />
+                      <Tooltip title={!derivedCompany && selectedBu ? 'No company code for this BU — cannot select account' : undefined}>
+                        <Button
+                          icon={<SearchOutlined />}
+                          disabled={!bankSelected || (!derivedCompany && !!selectedBu)}
+                          onClick={() => setOffsetAcctOpen(true)}
+                          style={{ borderRadius: '0 6px 6px 0', height: 36, borderLeft: 0 }}
+                        />
+                      </Tooltip>
                     )}
                   </div>
                   {offsetAcctDesc && <div style={{ fontSize: 11, color: REDWOOD.info, marginTop: 3 }}>{offsetAcctDesc}</div>}
@@ -1191,18 +1200,21 @@ const ExternalTxnForm: React.FC<{
             {isEdit || saved ? 'Close' : 'Cancel'}
           </Button>
           {!isEdit && !saved && (
-            <Button
-              size="large"
-              type="primary"
-              loading={saving}
-              onClick={handleSubmit}
-              icon={<PlusOutlined />}
-              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary, minWidth: 180 }}
-            >
+            <Tooltip title={selectedBu && !derivedCompany ? 'No company code configured for this Business Unit. Cannot save.' : undefined}>
+              <Button
+                size="large"
+                type="primary"
+                loading={saving}
+                disabled={!!(selectedBu && !derivedCompany)}
+                onClick={handleSubmit}
+                icon={<PlusOutlined />}
+                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary, minWidth: 180 }}
+              >
               {extTxnMode === 'multiple'
                 ? `Create ${extTxnLines.length} Transaction${extTxnLines.length !== 1 ? 's' : ''}`
                 : 'Create Transaction'}
-            </Button>
+              </Button>
+            </Tooltip>
           )}
         </Space>
       </div>
