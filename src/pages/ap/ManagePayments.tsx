@@ -224,6 +224,7 @@ interface PaymentInvoice {
   supplierSite: string;
   liabilityDistribution?: string;
   installmentNumber?: number | null;
+  businessUnit?: string;
 }
 
 // Supplier record from API
@@ -1039,7 +1040,7 @@ const ManagePayments: React.FC = () => {
     setAvailableInvoicesLoading(true);
     try {
       const buName = createPaymentForm.getFieldValue('businessUnit') || '';
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/available-installments?supplier_number=${encodeURIComponent(supplierNumber)}${buName ? `&p_business_unit=${encodeURIComponent(buName)}` : ''}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/available-installments?supplier_number=${encodeURIComponent(supplierNumber)}`;
       setAddInvoicesApiUrl(url);
       const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -1063,9 +1064,15 @@ const ManagePayments: React.FC = () => {
             supplierSite: item.supplier_site || '',
             liabilityDistribution: item.liability_distribution || '',
             installmentNumber: item.installment_id != null ? Number(item.installment_id) : null,
+            businessUnit: item.business_unit || item.businessUnit || '',
           };
         })
-        .filter((inv: PaymentInvoice) => inv.amountDue > 0 && !already.has(inv.key));
+        .filter((inv: PaymentInvoice) => {
+          if (inv.amountDue <= 0) return false;
+          if (already.has(inv.key)) return false;
+          if (buName && inv.businessUnit && inv.businessUnit.toLowerCase() !== buName.toLowerCase()) return false;
+          return true;
+        });
       setAvailableInvoices(items);
       setSelectedInvoiceKeys([]);
     } catch (err) {
