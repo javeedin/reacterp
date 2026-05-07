@@ -3459,14 +3459,19 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Handle account code validation on blur
   const handleAccountBlur = async (lineKey: string, accountCode: string) => {
     if (!accountCode || accountCode.trim() === '' || !accountCode.includes('-')) return;
+    // always enforce company segment before validation
+    const normalised = applyCompanySegment(accountCode);
+    if (normalised !== accountCode) {
+      setLines((prev) => prev.map((l) => l.key === lineKey ? { ...l, distributionCombination: normalised } : l));
+    }
 
     try {
-      const result = await validateAccountCode(accountCode);
+      const result = await validateAccountCode(normalised);
       if (!result.segmentsLoaded) {
         message.info('Could not load segment data for validation.');
         return;
       }
-      const naturalValue = accountCode.split('-')[3] || '';
+      const naturalValue = normalised.split('-')[3] || '';
       const natDesc = Object.values(result.segmentDetails).find(s => s.value === naturalValue)?.description || '';
       if (!result.isValid) {
         message.warning(`Invalid segment value(s): ${result.invalidSegments.join(', ')}. Please correct using the account selector.`);
@@ -4762,26 +4767,40 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       dataIndex: 'distributionCombination',
       key: 'distributionCombination',
       width: 280,
-      render: (val: string, record: InvoiceLine) => (
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Input
-              size="small"
-              value={val}
-              onChange={(e) => updateLine(record.key, 'distributionCombination', e.target.value)}
-              onBlur={(e) => handleAccountBlur(record.key, e.target.value)}
-              placeholder="e.g. 01-000-2100-0000-000"
-              variant="borderless"
-              style={{ flex: 1 }}
-              disabled={isReadOnly}
-              suffix={
-                <SearchOutlined
-                  style={{ color: isReadOnly ? REDWOOD.neutral300 : REDWOOD.info, fontSize: 12, cursor: isReadOnly ? 'default' : 'pointer' }}
-                  onClick={() => !isReadOnly && openAccountSelector(record.key, val)}
-                />
-              }
-            />
-                {val && lines.length > 1 && (
+      render: (val: string, record: InvoiceLine) => {
+        // company segment is locked to derivedCompany; user edits only the rest
+        const restVal = derivedCompany && val ? val.split('-').slice(1).join('-') : val;
+        const buildFull = (rest: string) => derivedCompany ? `${derivedCompany}-${rest}` : rest;
+        return (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              {derivedCompany && (
+                <span style={{
+                  fontSize: 11, fontFamily: 'monospace',
+                  background: '#f0f0f0', padding: '2px 5px',
+                  borderRadius: 3, color: '#555', whiteSpace: 'nowrap',
+                  border: '1px solid #d9d9d9',
+                }}>
+                  {derivedCompany}-
+                </span>
+              )}
+              <Input
+                size="small"
+                value={derivedCompany ? restVal : val}
+                onChange={(e) => updateLine(record.key, 'distributionCombination', buildFull(e.target.value))}
+                onBlur={(e) => handleAccountBlur(record.key, buildFull(e.target.value))}
+                placeholder={derivedCompany ? '000-2100-0000-000' : 'e.g. 01-000-2100-0000-000'}
+                variant="borderless"
+                style={{ flex: 1 }}
+                disabled={isReadOnly}
+                suffix={
+                  <SearchOutlined
+                    style={{ color: isReadOnly ? REDWOOD.neutral300 : REDWOOD.info, fontSize: 12, cursor: isReadOnly ? 'default' : 'pointer' }}
+                    onClick={() => !isReadOnly && openAccountSelector(record.key, val)}
+                  />
+                }
+              />
+              {val && lines.length > 1 && (
                 <Tooltip title="Apply to all lines">
                   <AppstoreOutlined
                     style={{ color: REDWOOD.info, fontSize: 13, cursor: 'pointer', flexShrink: 0 }}
@@ -4798,7 +4817,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                         cancelText: 'Cancel',
                         onOk: () => {
                           setLines((prev) =>
-                            prev.map((line) => ({ ...line, distributionCombination: val }))
+                            prev.map((line) => ({ ...line, distributionCombination: applyCompanySegment(line.distributionCombination || val) }))
                           );
                           message.success(`Distribution applied to all ${lines.length} lines`);
                           setIsValidated(false);
@@ -4814,8 +4833,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 {record.accountDescription}
               </div>
             )}
-        </div>
-      ),
+          </div>
+        );
+      },
     },
     {
       title: 'Accounting Date',
