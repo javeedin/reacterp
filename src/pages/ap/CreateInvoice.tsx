@@ -533,11 +533,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   // Check if all required header fields are filled
   const isHeaderComplete = useMemo(() => {
     const requiredFields = ['businessUnit', 'invoiceNumber', 'invoiceCurrency', 'invoiceAmount', 'invoiceDate', 'supplier', 'invoiceType'];
-    return requiredFields.every((field) => {
+    const fieldsOk = requiredFields.every((field) => {
       const val = headerValues[field];
       return val !== undefined && val !== null && val !== '';
     });
-  }, [headerValues]);
+    return fieldsOk && !!derivedCompany;
+  }, [headerValues, derivedCompany]);
 
   // Line selection
   const [selectedLineKeys, setSelectedLineKeys] = useState<React.Key[]>([]);
@@ -4881,7 +4882,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               variant="borderless"
               placeholder={!buSelected ? 'Select BU first' : ''}
               allowClear
-              disabled={isReadOnly || !buSelected}
+              disabled={isReadOnly || !buSelected || (buSelected && !derivedCompany)}
               notFoundContent={!buSelected ? 'Select a business unit to load taxes' : 'No taxes configured for this BU'}
             >
               {taxCodes.map(t => (
@@ -5484,7 +5485,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             labelCol={{ span: 9 }}
             wrapperCol={{ span: 15 }}
             size="small"
-            disabled={isReadOnly || !buSelected}
+            disabled={isReadOnly || !buSelected || (buSelected && !derivedCompany)}
             initialValues={{
               invoiceType: 'Standard',
               invoiceCurrency: initialData?.invoiceCurrency || 'AED',
