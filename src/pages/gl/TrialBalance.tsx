@@ -55,6 +55,7 @@ import { Divider } from 'antd';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import { exportRrTBToExcel, exportFusionTBToExcel, exportBothTBToExcel } from '../../utils/tbExcelExport';
+import AccountSelector from '../../components/AccountSelector';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -271,6 +272,8 @@ const TrialBalance: React.FC = () => {
   const [revalPreviewRows,     setRevalPreviewRows]     = useState<
     { lineNum: number; combo: string; desc: string; comment: string; dr: number; cr: number }[]
   >([]);
+  const [revalAcctSelectorOpen,    setRevalAcctSelectorOpen]    = useState(false);
+  const [revalAcctSelectorLineNum, setRevalAcctSelectorLineNum] = useState<number | null>(null);
   const [apiPanelVisible, setApiPanelVisible] = useState(false);
   const [apiCalls, setApiCalls] = useState<Record<string, ApiCallInfo>>({
     ledgers:      { label: 'GET Ledgers',            url: '', method: 'GET',  status: null, ok: null, durationMs: null, running: false, body: '' },
@@ -2622,14 +2625,21 @@ const TrialBalance: React.FC = () => {
 
     const previewColumns = [
       { title: '#', dataIndex: 'lineNum', key: 'lineNum', width: 36 },
-      { title: 'Account', dataIndex: 'combo', key: 'combo', width: 270,
+      { title: 'Account', dataIndex: 'combo', key: 'combo', width: 290,
         render: (v: string, row: any) => (
-          <Input
-            size="small"
-            value={v}
-            onChange={e => updatePreviewRow(row.lineNum, 'combo', e.target.value)}
-            style={{ fontFamily: 'monospace', fontSize: 11 }}
-          />
+          <Space.Compact style={{ width: '100%' }}>
+            <Input
+              size="small"
+              value={v}
+              onChange={e => updatePreviewRow(row.lineNum, 'combo', e.target.value)}
+              style={{ fontFamily: 'monospace', fontSize: 11 }}
+            />
+            <Button
+              size="small"
+              icon={<ApartmentOutlined />}
+              onClick={() => { setRevalAcctSelectorLineNum(row.lineNum); setRevalAcctSelectorOpen(true); }}
+            />
+          </Space.Compact>
         )},
       { title: 'Description', dataIndex: 'desc', key: 'desc',
         render: (v: string, row: any) => (
@@ -2829,6 +2839,18 @@ const TrialBalance: React.FC = () => {
             ))}
           </div>
         </Modal>
+
+        <AccountSelector
+          visible={revalAcctSelectorOpen}
+          onCancel={() => { setRevalAcctSelectorOpen(false); setRevalAcctSelectorLineNum(null); }}
+          onSelect={(accountCode) => {
+            if (revalAcctSelectorLineNum !== null)
+              setRevalPreviewRows(prev => prev.map(r => r.lineNum === revalAcctSelectorLineNum ? { ...r, combo: accountCode } : r));
+            setRevalAcctSelectorOpen(false);
+            setRevalAcctSelectorLineNum(null);
+          }}
+          initialValue={revalAcctSelectorLineNum !== null ? revalPreviewRows.find(r => r.lineNum === revalAcctSelectorLineNum)?.combo : undefined}
+        />
       </>
     );
   };
@@ -3153,6 +3175,15 @@ const TrialBalance: React.FC = () => {
                 Export Both
               </Button>
             </Tooltip>
+            <Button
+              size="small"
+              type="primary"
+              disabled={(tabSelections[tab.key] || []).length !== 1}
+              style={{ background: '#d46b08', borderColor: '#d46b08' }}
+              onClick={() => openRevalModal(tab.key, (tabSelections[tab.key] || [])[0])}
+            >
+              Revalue
+            </Button>
           </Col>
         </Row>
 
