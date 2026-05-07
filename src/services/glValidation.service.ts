@@ -159,6 +159,16 @@ export function validateGlPayload(
       errors.push({ category: 'ACCOUNT', severity: 'WARNING', message: `${side} ${ref}: accountCombination "${l.accountCombination}" is suspiciously short — may be a placeholder` });
   });
 
+  // 4b. COMPANY CODE — all lines must share the same company (first segment) ──
+  const companyCodes = lines
+    .map(l => (l.accountCombination?.trim() || '').split('-')[0]?.trim())
+    .filter(Boolean);
+  const uniqueCompanies = [...new Set(companyCodes)];
+  if (uniqueCompanies.length === 0)
+    errors.push({ category: 'ACCOUNT', severity: 'ERROR', message: 'No valid account combinations found — cannot determine company code' });
+  else if (uniqueCompanies.length > 1)
+    errors.push({ category: 'ACCOUNT', severity: 'ERROR', message: `Company code mismatch across journal lines: found ${uniqueCompanies.join(', ')}. All lines must use the same company code.` });
+
   // 5. INTEGRITY — every Dr line must belong to this reference group ─────────
   if (meta.sourceTxnIds && meta.sourceTxnIds.length > 0) {
     const validIds = new Set(meta.sourceTxnIds.map(String));

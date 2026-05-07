@@ -505,6 +505,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [selectedSupplierInfo, setSelectedSupplierInfo] = useState<{ number: string; id: number } | null>(null);
   const [businessUnits, setBusinessUnits] = useState<{ name: string; company: string }[]>([]);
   const [buSelected, setBuSelected] = useState<boolean>(!!initialData?.businessUnit);
+  const [derivedCompany, setDerivedCompany] = useState<string>('');
 
   // Supplier sites
   const [supplierSites, setSupplierSites] = useState<SupplierSiteRecord[]>([]);
@@ -2336,7 +2337,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         const items = (data?.items ?? [])
           .filter((i: any) => i.business_unit_name)
           .map((i: any) => ({ name: i.business_unit_name as string, company: (i.company || '') as string }));
-        setBusinessUnits(items.length > 0 ? items : FALLBACK_BUSINESS_UNITS);
+        const buList = items.length > 0 ? items : FALLBACK_BUSINESS_UNITS;
+        setBusinessUnits(buList);
+        // Initialise derivedCompany for edit mode (BU already set)
+        const currentBu = form.getFieldValue('businessUnit') || initialData?.businessUnit || '';
+        if (currentBu) {
+          const match = buList.find((b: { name: string; company: string }) => b.name === currentBu);
+          if (match?.company) setDerivedCompany(match.company);
+        }
       })
       .catch(() => setBusinessUnits(FALLBACK_BUSINESS_UNITS));
 
@@ -5410,17 +5418,19 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             </Tag>
           )}
           {!isReadOnly && (
-            <Button
-              type="primary"
-              onClick={handleSave}
-              loading={saving}
-              disabled={saving}
-              icon={<SaveOutlined />}
-              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-              data-sat-id="invoice-save-button"
-            >
-              {savedInvoiceId ? 'Update Invoice' : 'Save'}
-            </Button>
+            <Tooltip title={buSelected && !derivedCompany ? 'No company code for this Business Unit — cannot save invoice' : undefined}>
+              <Button
+                type="primary"
+                onClick={handleSave}
+                loading={saving}
+                disabled={saving || !!(buSelected && !derivedCompany)}
+                icon={<SaveOutlined />}
+                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+                data-sat-id="invoice-save-button"
+              >
+                {savedInvoiceId ? 'Update Invoice' : 'Save'}
+              </Button>
+            </Tooltip>
           )}
           <Button onClick={onClose}>
             {isReadOnly ? 'Close' : 'Cancel'}
@@ -5580,6 +5590,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               if ('businessUnit' in changedValues) {
                 setBuSelected(!!changedValues.businessUnit);
                 fetchTaxCodes(changedValues.businessUnit || '');
+                // Derive and store company code for this BU
+                const matchedBU = businessUnits.find(bu => bu.name === changedValues.businessUnit);
+                setDerivedCompany(matchedBU?.company || '');
               }
               // When business unit changes, build liability distribution:
               // segment 1 = company from BU webservice; rest is fixed
@@ -5624,6 +5637,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           data-sat-id="invoice-business-unit"
                           extra={!buSelected && !isReadOnly
                             ? <Text style={{ fontSize: 11, color: REDWOOD.warning }}>Select a Business Unit to enable the rest of the form</Text>
+                            : buSelected && !derivedCompany && !isReadOnly
+                            ? <Text style={{ fontSize: 11, color: '#cf1322' }}>⚠ No company code for this BU — cannot save or select accounts</Text>
+                            : buSelected && derivedCompany
+                            ? <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Text style={{ fontSize: 11, color: REDWOOD.textSecondary }}>Company Code:</Text><Tag color="blue" style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 11, marginLeft: 0 }}>{derivedCompany}</Tag></span>
                             : undefined}
                         >
                           <Select
@@ -7331,11 +7348,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             ? lines.find((l) => l.key === editingLineKey)?.distributionCombination
             : undefined)
         }
-        lockedFirstSegment={
-          editingLineKey && editingLineKey !== '__liability__'
-            ? (form.getFieldValue('liabilityDistribution') || '').split('-')[0] || undefined
-            : undefined
-        }
+        lockedFirstSegment={derivedCompany || undefined}
       />
 
       {/* ========== DISTRIBUTION SET LOV ========== */}
