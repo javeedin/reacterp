@@ -23,6 +23,8 @@ import {
   message,
   Switch,
   Descriptions,
+  Dropdown,
+  Drawer,
 } from 'antd';
 import {
   HomeOutlined,
@@ -50,6 +52,8 @@ import {
   UnorderedListOutlined,
   PrinterOutlined,
   SaveOutlined,
+  LineChartOutlined,
+  DownOutlined,
 } from '@ant-design/icons';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -318,6 +322,19 @@ const TrialBalance: React.FC = () => {
   const [drillComboSearch,  setDrillComboSearch]  = useState('');
   const [drillComboLedger,  setDrillComboLedger]  = useState('');
   const [drillComboPeriod,  setDrillComboPeriod]  = useState('');
+
+  // ── YTD Movement Drawer ──────────────────────────────────────
+  interface YtdMovRow {
+    period: string; period_year: number; period_number: number;
+    ytd_opening: number; ytd_debit: number; ytd_credit: number; closing: number;
+  }
+  const [ytdMovVisible,  setYtdMovVisible]  = useState(false);
+  const [ytdMovLoading,  setYtdMovLoading]  = useState(false);
+  const [ytdMovAccount,  setYtdMovAccount]  = useState('');
+  const [ytdMovDesc,     setYtdMovDesc]     = useState('');
+  const [ytdMovLedger,   setYtdMovLedger]   = useState('');
+  const [ytdMovRows,     setYtdMovRows]     = useState<YtdMovRow[]>([]);
+  const [ytdMovError,    setYtdMovError]    = useState<string | null>(null);
 
   // ── All companies from COA value set ────────────────────────
   const [allCompanies, setAllCompanies] = useState<{ value: string; label: string }[]>([]);
@@ -724,6 +741,55 @@ const TrialBalance: React.FC = () => {
       ));
     }
   }, [tabs]);
+
+  // Open YTD Movement drawer — fetch all periods from the beginning for one account
+  const openYtdMovement = useCallback(async (account: string, accountDesc: string, ledgerName: string) => {
+    setYtdMovAccount(account);
+    setYtdMovDesc(accountDesc);
+    setYtdMovLedger(ledgerName);
+    setYtdMovRows([]);
+    setYtdMovError(null);
+    setYtdMovVisible(true);
+    setYtdMovLoading(true);
+
+    const allPeriods = [...periods]
+      .filter(p => p.ledger_name === ledgerName)
+      .sort((a, b) => a.period_year !== b.period_year ? a.period_year - b.period_year : a.period_number - b.period_number);
+
+    if (allPeriods.length === 0) {
+      setYtdMovError('No periods found for this ledger.');
+      setYtdMovLoading(false);
+      return;
+    }
+
+    try {
+      const results: { period: string; period_year: number; period_number: number; ytd_opening: number; ytd_debit: number; ytd_credit: number; closing: number }[] = [];
+      for (const p of allPeriods) {
+        const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceStandard}`
+          + `?ledger_name=${encodeURIComponent(ledgerName)}`
+          + `&period_name=${encodeURIComponent(p.period_name_id)}`
+          + `&limit=10000`;
+        const res = await fetch(url, { headers: { Accept: 'application/json' } });
+        if (!res.ok) continue;
+        const data = await res.json();
+        const items: RrTBRecord[] = (data.items || []) as RrTBRecord[];
+        const acctRows = items.filter(r => r.account === account);
+        if (acctRows.length > 0) {
+          const ytd_opening = acctRows.reduce((s, r) => s + (r.ytd_opening || 0), 0);
+          const ytd_debit   = acctRows.reduce((s, r) => s + (r.ytd_debit   || 0), 0);
+          const ytd_credit  = acctRows.reduce((s, r) => s + (r.ytd_credit  || 0), 0);
+          const closing     = acctRows.reduce((s, r) => s + (r.closing     || 0), 0);
+          results.push({ period: p.period_name_id, period_year: p.period_year, period_number: p.period_number, ytd_opening, ytd_debit, ytd_credit, closing });
+        }
+      }
+      setYtdMovRows(results);
+      if (results.length === 0) setYtdMovError('No balances found for this account across any period.');
+    } catch (err) {
+      setYtdMovError(err instanceof Error ? err.message : 'Failed to load YTD movement');
+    } finally {
+      setYtdMovLoading(false);
+    }
+  }, [periods]);
 
   // Close a tab
   const closeTab = useCallback((tabKey: string) => {
@@ -3852,6 +3918,25 @@ const TrialBalance: React.FC = () => {
             >
               Revalue
             </Button>
+            <Dropdown
+              disabled={(tabSelections[tab.key] || []).length !== 1}
+              menu={{
+                items: [
+                  {
+                    key: 'ytd-movement',
+                    icon: <LineChartOutlined />,
+                    label: 'Show YTD Balances',
+                    onClick: () => {
+                      const selAccount = (tabSelections[tab.key] || [])[0] as string;
+                      const row = tableRows.find(r => r.account === selAccount);
+                      openYtdMovement(selAccount, row?.account_desc ?? '', tab.ledgerName);
+                    },
+                  },
+                ],
+              }}
+            >
+              <Button size="small" icon={<DownOutlined />}>Actions</Button>
+            </Dropdown>
           </Col>
         </Row>
 
@@ -4364,6 +4449,127 @@ const TrialBalance: React.FC = () => {
           })()}
         </Modal>
         {renderRevalModal()}
+
+        {/* ── YTD Movement Drawer ── */}
+        <Drawer
+          title={
+            <Space>
+              <LineChartOutlined style={{ color: '#0958d9' }} />
+              <span>YTD Balance Movement — <strong style={{ fontFamily: 'monospace' }}>{ytdMovAccount}</strong></span>
+              {ytdMovDesc && <Tag color="blue" style={{ fontSize: 11 }}>{ytdMovDesc}</Tag>}
+            </Space>
+          }
+          width={820}
+          open={ytdMovVisible}
+          onClose={() => setYtdMovVisible(false)}
+          extra={<Tag color="geekblue">{ytdMovLedger}</Tag>}
+        >
+          {ytdMovLoading ? (
+            <div style={{ textAlign: 'center', padding: 60 }}>
+              <Spin size="large" tip="Loading all periods..." />
+            </div>
+          ) : ytdMovError ? (
+            <Alert type="error" showIcon message={ytdMovError} />
+          ) : (
+            <>
+              <Tag color="blue" style={{ marginBottom: 12 }}>{ytdMovRows.length} period(s) with activity</Tag>
+              <Table
+                dataSource={ytdMovRows}
+                rowKey="period"
+                size="small"
+                pagination={false}
+                scroll={{ y: 'calc(100vh - 220px)' }}
+                columns={[
+                  {
+                    title: 'Period',
+                    dataIndex: 'period',
+                    key: 'period',
+                    width: 140,
+                    render: (v: string) => <Text strong style={{ fontSize: 12 }}>{v}</Text>,
+                  },
+                  {
+                    title: 'YTD Opening',
+                    dataIndex: 'ytd_opening',
+                    key: 'ytd_opening',
+                    align: 'right' as const,
+                    width: 140,
+                    render: (n: number) => {
+                      const f = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(n));
+                      return n < 0
+                        ? <Text style={{ fontFamily: 'monospace', fontSize: 11, color: '#cf1322' }}>({f})</Text>
+                        : <Text style={{ fontFamily: 'monospace', fontSize: 11, color: '#1677ff' }}>{f}</Text>;
+                    },
+                  },
+                  {
+                    title: 'YTD Debit',
+                    dataIndex: 'ytd_debit',
+                    key: 'ytd_debit',
+                    align: 'right' as const,
+                    width: 130,
+                    render: (n: number) => (
+                      <Text style={{ fontFamily: 'monospace', fontSize: 11, color: n ? '#237804' : '#aaa' }}>
+                        {new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(n))}
+                      </Text>
+                    ),
+                  },
+                  {
+                    title: 'YTD Credit',
+                    dataIndex: 'ytd_credit',
+                    key: 'ytd_credit',
+                    align: 'right' as const,
+                    width: 130,
+                    render: (n: number) => (
+                      <Text style={{ fontFamily: 'monospace', fontSize: 11, color: n ? '#cf1322' : '#aaa' }}>
+                        {new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(n))}
+                      </Text>
+                    ),
+                  },
+                  {
+                    title: 'YTD Closing',
+                    dataIndex: 'closing',
+                    key: 'closing',
+                    align: 'right' as const,
+                    width: 140,
+                    render: (n: number) => {
+                      const f = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(n));
+                      return n < 0
+                        ? <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#cf1322' }}>({f})</Text>
+                        : <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#237804' }}>{f}</Text>;
+                    },
+                  },
+                ]}
+                summary={(data) => {
+                  if (!data.length) return null;
+                  const last = data[data.length - 1];
+                  const fmt = (n: number) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(n));
+                  return (
+                    <Table.Summary fixed>
+                      <Table.Summary.Row style={{ background: '#f0f0f0', fontWeight: 700 }}>
+                        <Table.Summary.Cell index={0}>
+                          <Text strong style={{ fontSize: 11 }}>Latest ({last.period})</Text>
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={1} align="right">
+                          <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#1677ff' }}>{last.ytd_opening < 0 ? `(${fmt(last.ytd_opening)})` : fmt(last.ytd_opening)}</Text>
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={2} align="right">
+                          <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#237804' }}>{fmt(last.ytd_debit)}</Text>
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={3} align="right">
+                          <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#cf1322' }}>{fmt(last.ytd_credit)}</Text>
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={4} align="right">
+                          <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: last.closing < 0 ? '#cf1322' : '#237804' }}>
+                            {last.closing < 0 ? `(${fmt(last.closing)})` : fmt(last.closing)}
+                          </Text>
+                        </Table.Summary.Cell>
+                      </Table.Summary.Row>
+                    </Table.Summary>
+                  );
+                }}
+              />
+            </>
+          )}
+        </Drawer>
       </Content>
     </Layout>
   );
