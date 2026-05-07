@@ -105,9 +105,11 @@ const TransferForm: React.FC<{
   bankAccounts: BankAccountOption[];
   businessUnits: BUOption[];
   bankCurrencyMap: Record<string, string>;
+  buBankMap: Record<string, string[]>;
+  bankAccountAssetMap: Record<string, string>;
   onSave: () => void;
   onCancel: () => void;
-}> = ({ initialValues, bankAccounts, businessUnits, bankCurrencyMap, onSave, onCancel }) => {
+}> = ({ initialValues, bankAccounts, businessUnits, bankCurrencyMap, buBankMap, bankAccountAssetMap, onSave, onCancel }) => {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [apiModal, setApiModal]       = useState(false);
@@ -260,9 +262,20 @@ const TransferForm: React.FC<{
     initialValues?.businessUnit ?? undefined
   );
   const buSelected = !!selectedBu;
+  const [selectedFromAcct, setSelectedFromAcct] = useState<string>(initialValues?.fromBankAccountName ?? '');
+  const [selectedToAcct,   setSelectedToAcct]   = useState<string>(initialValues?.toBankAccountName   ?? '');
+
+  // Filter bank accounts to those belonging to the selected BU
+  const filteredBankAccounts = selectedBu && buBankMap[selectedBu]?.length
+    ? bankAccounts.filter(a => buBankMap[selectedBu].includes(a.value))
+    : bankAccounts;
 
   // sync selectedBu when initialValues changes (edit mode)
-  useEffect(() => { setSelectedBu(initialValues?.businessUnit ?? undefined); }, [initialValues]);
+  useEffect(() => {
+    setSelectedBu(initialValues?.businessUnit ?? undefined);
+    setSelectedFromAcct(initialValues?.fromBankAccountName ?? '');
+    setSelectedToAcct(initialValues?.toBankAccountName ?? '');
+  }, [initialValues]);
 
   const fs = { marginBottom: 14 };
   const lc = { span: 8 };
@@ -289,9 +302,23 @@ const TransferForm: React.FC<{
               <Select
                 showSearch placeholder="Select business unit" optionFilterProp="label" options={businessUnits}
                 style={{ width: '100%' }}
-                onChange={(v) => setSelectedBu(v ?? undefined)}
+                onChange={(v) => {
+                  setSelectedBu(v ?? undefined);
+                  form.setFieldsValue({ fromBankAccountName: undefined, toBankAccountName: undefined });
+                  setSelectedFromAcct('');
+                  setSelectedToAcct('');
+                  setFromCurrency('');
+                  setToCurrency('');
+                }}
                 allowClear
-                onClear={() => setSelectedBu(undefined)}
+                onClear={() => {
+                  setSelectedBu(undefined);
+                  form.setFieldsValue({ fromBankAccountName: undefined, toBankAccountName: undefined });
+                  setSelectedFromAcct('');
+                  setSelectedToAcct('');
+                  setFromCurrency('');
+                  setToCurrency('');
+                }}
                 disabled={isEdit}
               />
             </Form.Item>
@@ -306,30 +333,39 @@ const TransferForm: React.FC<{
         <Row gutter={40}>
           {/* Left column */}
           <Col xs={24} lg={12}>
-            <Form.Item label="From Account" style={fs}>
+            <Form.Item label="From Account" style={{ marginBottom: 4 }}>
               <div style={{ display: 'flex', gap: 0 }}>
                 <Form.Item name="fromBankAccountName" noStyle rules={[{ required: true, message: 'From Account is required' }]}>
-                  <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={bankAccounts}
+                  <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={filteredBankAccounts}
                     style={{ borderRadius: '6px 0 0 6px', flex: 1 }} disabled={isEdit || !buSelected}
-                    notFoundContent={<Text type="secondary">No accounts loaded</Text>}
-                    onChange={(v: string) => { setFromCurrency(bankCurrencyMap[v] ?? ''); }}
+                    notFoundContent={<Text type="secondary">{buSelected ? 'No accounts for this BU' : 'Select a BU first'}</Text>}
+                    onChange={(v: string) => {
+                      setFromCurrency(bankCurrencyMap[v] ?? '');
+                      setSelectedFromAcct(v);
+                    }}
                   />
                 </Form.Item>
                 <div style={{ display: 'flex', alignItems: 'center', padding: '0 10px', background: '#f5f5f5', border: '1px solid #d9d9d9', borderLeft: 0, borderRadius: '0 6px 6px 0', minWidth: 52, justifyContent: 'center' }}>
                   <Text style={{ fontSize: 12, fontWeight: 600, color: fromCurrency ? REDWOOD.info : REDWOOD.neutral300 }}>{fromCurrency || 'CCY'}</Text>
                 </div>
               </div>
+              {selectedFromAcct && bankAccountAssetMap[selectedFromAcct] && (
+                <div style={{ marginTop: 4, fontSize: 11, color: REDWOOD.info, fontFamily: 'monospace', paddingLeft: 2 }}>
+                  Cash Account: <strong>{bankAccountAssetMap[selectedFromAcct]}</strong>
+                </div>
+              )}
             </Form.Item>
 
-            <Form.Item label="To Account" style={fs}>
+            <Form.Item label="To Account" style={{ marginBottom: 4 }}>
               <div style={{ display: 'flex', gap: 0 }}>
                 <Form.Item name="toBankAccountName" noStyle rules={[{ required: true, message: 'To Account is required' }]}>
-                  <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={bankAccounts}
+                  <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={filteredBankAccounts}
                     style={{ borderRadius: '6px 0 0 6px', flex: 1 }} disabled={isEdit || !buSelected}
-                    notFoundContent={<Text type="secondary">No accounts loaded</Text>}
+                    notFoundContent={<Text type="secondary">{buSelected ? 'No accounts for this BU' : 'Select a BU first'}</Text>}
                     onChange={(v: string) => {
                       const ccy = bankCurrencyMap[v] ?? '';
                       setToCurrency(ccy);
+                      setSelectedToAcct(v);
                       if (ccy) form.setFieldsValue({ paymentCurrencyCode: ccy });
                     }}
                   />
@@ -338,7 +374,13 @@ const TransferForm: React.FC<{
                   <Text style={{ fontSize: 12, fontWeight: 600, color: toCurrency ? REDWOOD.info : REDWOOD.neutral300 }}>{toCurrency || 'CCY'}</Text>
                 </div>
               </div>
+              {selectedToAcct && bankAccountAssetMap[selectedToAcct] && (
+                <div style={{ marginTop: 4, fontSize: 11, color: REDWOOD.success, fontFamily: 'monospace', paddingLeft: 2 }}>
+                  Cash Account: <strong>{bankAccountAssetMap[selectedToAcct]}</strong>
+                </div>
+              )}
             </Form.Item>
+            <div style={{ marginBottom: 14 }} />
 
             <Form.Item label="Payment Currency" name="paymentCurrencyCode" style={fs}>
               <Select placeholder="Select currency" allowClear disabled={isEdit || !buSelected}>
@@ -607,9 +649,11 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
   const [transfers, setTransfers]         = useState<TransferRecord[]>([]);
   const [loading, setLoading]             = useState(false);
   const [hasSearched, setHasSearched]     = useState(false);
-  const [bankAccounts, setBankAccounts]   = useState<BankAccountOption[]>([]);
-  const [businessUnits, setBusinessUnits] = useState<BUOption[]>([]);
+  const [bankAccounts, setBankAccounts]       = useState<BankAccountOption[]>([]);
+  const [businessUnits, setBusinessUnits]     = useState<BUOption[]>([]);
   const [bankCurrencyMap, setBankCurrencyMap] = useState<Record<string, string>>({});
+  const [buBankMap, setBuBankMap]             = useState<Record<string, string[]>>({});
+  const [bankAccountAssetMap, setBankAccountAssetMap] = useState<Record<string, string>>({});
   const [activeTab, setActiveTab]         = useState('search');
   const [editTabs, setEditTabs]           = useState<TabItem[]>([]);
   const [showApiModal, setShowApiModal]   = useState(false);
@@ -622,27 +666,35 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
   // ── Load LOV data from existing transfers ─────────────────────────────────
   const loadLovs = useCallback(async () => {
     try {
-      const res = await fetch(`${APEX_BASE}/cash/banktransfers?row_limit=500`);
-      const data = await parseApexJson(res);
-      if (data.status === 'success' && data.items) {
-        const items: TransferRecord[] = data.items;
-
-        // Unique bank account names
+      // Load BU→bank mapping and cash account from external transactions
+      const extRes = await fetch(`${APEX_BASE}/cash/externaltransactions?limit=2000`);
+      const extData = await extRes.json();
+      if (extData.items) {
+        const extItems: any[] = extData.items;
+        const buBankMapLocal: Record<string, string[]> = {};
+        const assetMapLocal: Record<string, string> = {};
+        const currMapLocal: Record<string, string> = {};
         const acctSet = new Set<string>();
-        items.forEach(i => { if (i.fromBankAccountName) acctSet.add(i.fromBankAccountName); if (i.toBankAccountName) acctSet.add(i.toBankAccountName); });
-        setBankAccounts([...acctSet].sort().map(n => ({ label: n, value: n })));
+        const buSet   = new Set<string>();
 
-        // Currency map: account name → currency code
-        const currMap: Record<string, string> = {};
-        items.forEach(i => {
-          if (i.fromBankAccountName && i.fromCurrencyCode) currMap[i.fromBankAccountName] = i.fromCurrencyCode;
-          if (i.toBankAccountName && i.toCurrencyCode) currMap[i.toBankAccountName] = i.toCurrencyCode;
+        extItems.forEach(i => {
+          const acct = i.bankAccountName;
+          const bu   = i.businessUnitName;
+          if (!acct) return;
+          acctSet.add(acct);
+          if (bu) {
+            buSet.add(bu);
+            if (!buBankMapLocal[bu]) buBankMapLocal[bu] = [];
+            if (!buBankMapLocal[bu].includes(acct)) buBankMapLocal[bu].push(acct);
+          }
+          if (i.assetAccountCombination) assetMapLocal[acct] = i.assetAccountCombination;
+          if (i.currencyCode) currMapLocal[acct] = i.currencyCode;
         });
-        setBankCurrencyMap(currMap);
 
-        // Unique BUs
-        const buSet = new Set<string>();
-        items.forEach(i => { if (i.businessUnit) buSet.add(i.businessUnit); });
+        setBankAccounts([...acctSet].sort().map(n => ({ label: n, value: n })));
+        setBuBankMap(buBankMapLocal);
+        setBankAccountAssetMap(assetMapLocal);
+        setBankCurrencyMap(currMapLocal);
         setBusinessUnits([...buSet].sort().map(n => ({ label: n, value: n })));
       }
     } catch { /* silently skip */ }
@@ -1037,6 +1089,8 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
           bankAccounts={bankAccounts}
           businessUnits={businessUnits}
           bankCurrencyMap={bankCurrencyMap}
+          buBankMap={buBankMap}
+          bankAccountAssetMap={bankAccountAssetMap}
           onSave={handleSaved}
           onCancel={() => closeTab('create')}
         />
@@ -1057,6 +1111,8 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
           bankAccounts={bankAccounts}
           businessUnits={businessUnits}
           bankCurrencyMap={bankCurrencyMap}
+          buBankMap={buBankMap}
+          bankAccountAssetMap={bankAccountAssetMap}
           onSave={handleSaved}
           onCancel={() => closeTab(t.key)}
         />
