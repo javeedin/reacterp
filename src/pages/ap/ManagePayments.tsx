@@ -1040,7 +1040,7 @@ const ManagePayments: React.FC = () => {
     setAvailableInvoicesLoading(true);
     try {
       const buName = createPaymentForm.getFieldValue('businessUnit') || '';
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/available-installments?supplier_number=${encodeURIComponent(supplierNumber)}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/available-installments?supplier_number=${encodeURIComponent(supplierNumber)}${buName ? `&business_unit=${encodeURIComponent(buName)}` : ''}`;
       setAddInvoicesApiUrl(url);
       const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -1067,12 +1067,7 @@ const ManagePayments: React.FC = () => {
             businessUnit: item.business_unit || item.businessUnit || '',
           };
         })
-        .filter((inv: PaymentInvoice) => {
-          if (inv.amountDue <= 0) return false;
-          if (already.has(inv.key)) return false;
-          if (buName && inv.businessUnit && inv.businessUnit.toLowerCase() !== buName.toLowerCase()) return false;
-          return true;
-        });
+        .filter((inv: PaymentInvoice) => inv.amountDue > 0 && !already.has(inv.key));
       setAvailableInvoices(items);
       setSelectedInvoiceKeys([]);
     } catch (err) {
@@ -4091,7 +4086,7 @@ const ManagePayments: React.FC = () => {
                     <div style={{ maxWidth: 520 }}>
                       <div style={{ marginBottom: 6 }}>
                         <Tag color="blue">GET</Tag>
-                        <span style={{ fontSize: 11, fontWeight: 600 }}>/ap/createinvoice</span>
+                        <span style={{ fontSize: 11, fontWeight: 600 }}>/ap/payments/available-installments</span>
                       </div>
                       <div style={{
                         background: '#1e1e1e', color: '#d4d4d4', borderRadius: 6,
