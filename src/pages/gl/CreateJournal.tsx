@@ -11,6 +11,7 @@ import {
   Space,
   Typography,
   Table,
+  Tag,
   Row,
   Col,
   Tooltip,
@@ -42,6 +43,8 @@ import {
   FilePdfOutlined,
   ApiOutlined,
   CheckSquareOutlined,
+  CopyOutlined,
+  CheckOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -74,6 +77,12 @@ const REDWOOD = {
   neutral900: '#1A1A1A',
   surface: '#FFFFFF',
 };
+
+// Currency interface from API
+interface Currency {
+  code: string;
+  name: string;
+}
 
 // Ledger interface from API
 interface Ledger {
@@ -255,7 +264,7 @@ const createDefaultLines = (currency: string = 'AED'): JournalLine[] => [
     account: '',
     accountDescription: '',
     segmentDetails: {},
-    currency: `${currency} UAE Dirham`,
+    currency: currency,
     enteredDr: null,
     enteredCr: null,
     conversionDate: dayjs().format('D-MMM-YYYY'),
@@ -269,7 +278,7 @@ const createDefaultLines = (currency: string = 'AED'): JournalLine[] => [
     account: '',
     accountDescription: '',
     segmentDetails: {},
-    currency: `${currency} UAE Dirham`,
+    currency: currency,
     enteredDr: null,
     enteredCr: null,
     conversionDate: dayjs().format('D-MMM-YYYY'),
@@ -319,6 +328,14 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
   const [loadingLedgers, setLoadingLedgers] = useState(false);
   const [loadingPeriods, setLoadingPeriods] = useState(false);
 
+  // Currency list
+  const [currencies, setCurrencies] = useState<Currency[]>([]);
+  // Category list (from RR_GL_CATEGORIES via API)
+  const [glCategories, setGLCategories] = useState<{ jeCategoryName: string; userJeCategoryName: string }[]>([]);
+  const [deleteBatchModalVisible, setDeleteBatchModalVisible] = useState(false);
+  const [savedBatchId, setSavedBatchId] = useState<number | null>(null); // JE_BATCH_ID after successful save
+  const [deletingBatch, setDeletingBatch] = useState(false);
+
   // Collapsible states
   const [batchExpanded, setBatchExpanded] = useState(true);
   const [journalExpanded, setJournalExpanded] = useState(true);
@@ -352,6 +369,15 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
   const [jsonPayload, setJsonPayload] = useState<any>(null);
   const [postingJournal, setPostingJournal] = useState(false);
   const [saveResponse, setSaveResponse] = useState<any>(null);
+  const [copiedEndpoint, setCopiedEndpoint] = useState(false);
+
+  const SAVE_ENDPOINT = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/journals/create';
+
+  const copyEndpoint = () => {
+    navigator.clipboard.writeText(SAVE_ENDPOINT);
+    setCopiedEndpoint(true);
+    setTimeout(() => setCopiedEndpoint(false), 2000);
+  };
 
   // Initialize batch name with timestamp
   const [batchData, setBatchData] = useState<BatchData>(() => {
@@ -423,6 +449,41 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
       }
     };
     fetchLedgers();
+  }, []);
+
+  // Fetch currencies on mount
+  useEffect(() => {
+    const fetchCurrencies = async () => {
+      try {
+        const response = await fetch(`${APEX_DB_CONFIG.baseUrl}/currencies`);
+        const data = await response.json();
+        if (data.items && data.items.length > 0) {
+          setCurrencies(data.items);
+        }
+      } catch (error) {
+        console.error('Error fetching currencies:', error);
+      }
+    };
+    fetchCurrencies();
+  }, []);
+
+  // Fetch GL Categories on mount
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const response = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/categories`);
+        const data = await response.json();
+        if (data.items && data.items.length > 0) {
+          setGLCategories(data.items.map((c: any) => ({
+            jeCategoryName:     c.jeCategoryName,
+            userJeCategoryName: c.userJeCategoryName || c.jeCategoryName,
+          })));
+        }
+      } catch (error) {
+        console.error('Error fetching GL categories:', error);
+      }
+    };
+    fetchCategories();
   }, []);
 
   // Fetch periods when ledger changes
@@ -552,12 +613,43 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
     const freshJournal = createNewJournal('1');
     setJournals([freshJournal]);
     setCurrentJournalIndex(0);
+    setSavedBatchId(null);
     setBatchData({
       batchName: generateBatchName(),
       description: '',
       balanceType: 'Actual',
       accountingPeriod: batchData.accountingPeriod,
     });
+  };
+
+  // Delete entire batch — calls API if already saved, otherwise just resets the form
+  const handleDeleteBatch = async () => {
+    if (savedBatchId) {
+      const deleteUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/batches/${savedBatchId}`;
+      setDeletingBatch(true);
+      try {
+        const res = await fetch(deleteUrl, { method: 'DELETE' });
+        const text = await res.text();
+        let data: any;
+        try { data = JSON.parse(text); } catch { data = { status: 'ERROR', message: text.substring(0, 200) }; }
+        if (res.ok && data?.status === 'SUCCESS') {
+          message.success(`Batch ${batchData.batchName} deleted successfully`);
+          setDeleteBatchModalVisible(false);
+          handleResetForNewJournal();
+        } else {
+          message.error(`Delete failed: ${data?.message || data?.error || `HTTP ${res.status}`}`);
+        }
+      } catch (e: any) {
+        message.error(`Delete failed: ${e.message}`);
+      } finally {
+        setDeletingBatch(false);
+      }
+    } else {
+      // Batch not yet saved — just reset the form
+      handleResetForNewJournal();
+      setDeleteBatchModalVisible(false);
+      message.success('Journal cleared');
+    }
   };
 
   // Open account selector for a line
@@ -681,7 +773,7 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
         account: '',
         accountDescription: '',
         segmentDetails: {},
-        currency: `${journalData.currency} UAE Dirham`,
+        currency: journalData.currency,
         enteredDr: null,
         enteredCr: null,
         conversionDate: journalData.conversionDate,
@@ -840,7 +932,7 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
       String(line.lineNum),
       line.account || '-',
       line.accountDescription || '-',
-      line.currency.split(' ')[0], // Just currency code
+      line.currency,
       line.enteredDr !== null ? formatNumber(line.enteredDr) : '-',
       line.enteredCr !== null ? formatNumber(line.enteredCr) : '-',
       line.accountedDr !== null ? formatNumber(line.accountedDr) : '-',
@@ -1071,7 +1163,7 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
     setSaveResponse(null);
     try {
       const response = await fetch(
-        'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/journals/create',
+        SAVE_ENDPOINT,
         {
           method: 'POST',
           headers: {
@@ -1088,6 +1180,7 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
 
       const result = await response.json();
       setSaveResponse(result);
+      if (result?.batchId) { setSavedBatchId(result.batchId); }
       message.success('Journal saved successfully!');
       // Don't close modal - show the response
     } catch (error: any) {
@@ -1372,7 +1465,7 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
       ],
     },
     {
-      title: `Accounted (${journalData.currency})`,
+      title: `Accounted (${selectedLedger?.currency_code || journalData.currency})`,
       children: [
         {
           title: 'Debit',
@@ -1671,11 +1764,26 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
                         onChange={(val) => setJournalData({ ...journalData, category: val })}
                         size="small"
                         style={{ width: '100%' }}
-                        placeholder="Select"
+                        placeholder="Select category"
+                        showSearch
+                        filterOption={(input, option) =>
+                          String(option?.children ?? '').toLowerCase().includes(input.toLowerCase())
+                        }
                       >
-                        <Option value="Adjustment">Adjustment</Option>
-                        <Option value="Accrual">Accrual</Option>
-                        <Option value="Other">Other</Option>
+                        {glCategories.length > 0
+                          ? glCategories.map(c => (
+                              <Option key={c.jeCategoryName} value={c.jeCategoryName}>
+                                {c.userJeCategoryName}
+                              </Option>
+                            ))
+                          : (
+                            <>
+                              <Option value="Adjustment">Adjustment</Option>
+                              <Option value="Accrual">Accrual</Option>
+                              <Option value="Other">Other</Option>
+                            </>
+                          )
+                        }
                       </Select>
                     </Col>
 
@@ -1697,10 +1805,25 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
                         onChange={(val) => setJournalData({ ...journalData, currency: val })}
                         size="small"
                         style={{ width: '100%' }}
+                        showSearch
+                        filterOption={(input, option) =>
+                          String(option?.children ?? '').toLowerCase().includes(input.toLowerCase())
+                        }
                       >
-                        <Option value="AED">AED UAE Dirham</Option>
-                        <Option value="USD">USD US Dollar</Option>
-                        <Option value="INR">INR Indian Rupee</Option>
+                        {currencies.length > 0
+                          ? currencies.map(c => (
+                              <Option key={c.code} value={c.code}>
+                                {c.code}
+                              </Option>
+                            ))
+                          : (
+                            <>
+                              <Option value="AED">AED</Option>
+                              <Option value="USD">USD</Option>
+                              <Option value="INR">INR</Option>
+                            </>
+                          )
+                        }
                       </Select>
                     </Col>
 
@@ -2025,6 +2148,16 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
                   {batchExpanded ? 'Show Less' : 'Show More'}
                 </Text>
               </Space>
+              <Tooltip title="Delete this journal batch">
+                <Button
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={e => { e.stopPropagation(); setDeleteBatchModalVisible(true); }}
+                >
+                  Delete Batch
+                </Button>
+              </Tooltip>
             </div>
 
             <div style={{ display: batchExpanded ? 'block' : 'none' }}>
@@ -2256,6 +2389,41 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
           .ant-dropdown-button > .ant-btn:last-child { background: ${REDWOOD.warning}; border-color: ${REDWOOD.warning}; border-left-color: rgba(255,255,255,0.3); }
         `}</style>
 
+        {/* Delete Batch Confirmation Modal */}
+        <Modal
+          title={<Space><DeleteOutlined style={{ color: REDWOOD.primary }} /><span>Delete Journal Batch</span></Space>}
+          open={deleteBatchModalVisible}
+          onCancel={() => !deletingBatch && setDeleteBatchModalVisible(false)}
+          footer={
+            <Space>
+              <Button onClick={() => setDeleteBatchModalVisible(false)} disabled={deletingBatch}>Cancel</Button>
+              <Button danger type="primary" icon={<DeleteOutlined />} onClick={handleDeleteBatch} loading={deletingBatch}>
+                {savedBatchId ? 'Delete from Database' : 'Clear Batch'}
+              </Button>
+            </Space>
+          }
+          width={480}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 6, padding: '10px 14px' }}>
+              <Text strong style={{ color: '#cf1322' }}>
+                {savedBatchId
+                  ? `This batch was saved to the database (ID: ${savedBatchId}). It will be permanently deleted including all journal headers and lines.`
+                  : 'This batch has not been saved yet. All entries will be cleared from the form.'}
+              </Text>
+            </div>
+            <div>
+              <Text>Batch: <Text strong>{batchData.batchName}</Text></Text>
+            </div>
+            {savedBatchId && (
+              <div style={{ background: '#f5f5f5', borderRadius: 4, padding: '8px 12px', fontFamily: 'monospace', fontSize: 12 }}>
+                <Tag color="red" style={{ fontFamily: 'monospace', fontSize: 11 }}>DELETE</Tag>
+                {` ${APEX_DB_CONFIG.baseUrl}/gl/journals/batches/${savedBatchId}`}
+              </div>
+            )}
+          </div>
+        </Modal>
+
         {/* Account Selector Modal */}
         <AccountSelector
           visible={accountSelectorVisible}
@@ -2458,15 +2626,28 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
           style={{ top: 20 }}
           footer={
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Space>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  Batch: {jsonPayload?.batch?.batchName} | Lines: {jsonPayload?.lines?.length || 0}
-                </Text>
-                {!isBalanced && !saveResponse && (
-                  <Text type="danger" style={{ fontSize: 12 }}>
-                    (Unbalanced)
+              <Space direction="vertical" size={2} style={{ alignItems: 'flex-start' }}>
+                <Space>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    Batch: {jsonPayload?.batch?.batchName} | Lines: {jsonPayload?.lines?.length || 0}
                   </Text>
-                )}
+                  {!isBalanced && !saveResponse && (
+                    <Text type="danger" style={{ fontSize: 12 }}>
+                      (Unbalanced)
+                    </Text>
+                  )}
+                </Space>
+                <Tooltip title={SAVE_ENDPOINT} placement="topLeft">
+                  <Space size={4} style={{ cursor: 'pointer' }} onClick={copyEndpoint}>
+                    <ApiOutlined style={{ fontSize: 11, color: '#0572CE' }} />
+                    <Text style={{ fontSize: 11, color: '#0572CE', fontFamily: 'monospace' }}>
+                      POST {SAVE_ENDPOINT.replace('https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp', '…/reerp')}
+                    </Text>
+                    {copiedEndpoint
+                      ? <CheckOutlined style={{ fontSize: 11, color: '#1D7B4D' }} />
+                      : <CopyOutlined  style={{ fontSize: 11, color: '#6B6B6B' }} />}
+                  </Space>
+                </Tooltip>
               </Space>
               <Space>
                 {saveResponse ? (

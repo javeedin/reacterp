@@ -160,6 +160,15 @@ const COASegments: React.FC = () => {
   const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'reports'>('none');
   const [isClosing, setIsClosing] = useState(false);
 
+  // Sync-all modal state
+  const [syncAllVisible, setSyncAllVisible] = useState(false);
+  const [syncAllRunning, setSyncAllRunning] = useState(false);
+  const [syncAllRows, setSyncAllRows] = useState<{
+    code: string; name: string;
+    status: 'pending' | 'fetching' | 'syncing' | 'done' | 'error';
+    fetched: number; synced: number; message: string;
+  }[]>([]);
+
   const panelRef = useRef<HTMLDivElement>(null);
   const floatingIconsRef = useRef<HTMLDivElement>(null);
   const segmentsCache = useRef<Segment[]>([]);
@@ -465,10 +474,74 @@ const COASegments: React.FC = () => {
   const BATCH_SIZE = 5;
 
   // Sync values to APEX database with batching
+  // ── Sync all segments from Fusion → APEX ──────────────────────────────────
+  const handleSyncAll = async () => {
+    if (segments.length === 0) { message.warning('Load segments first'); return; }
+    const rows = segments
+      .sort((a, b) => a.sequence_no - b.sequence_no)
+      .map(s => ({ code: s.segment_code, name: s.segment_name, status: 'pending' as const, fetched: 0, synced: 0, message: '' }));
+    setSyncAllRows(rows);
+    setSyncAllVisible(true);
+    setSyncAllRunning(true);
+
+    const update = (code: string, patch: Partial<typeof rows[0]>) =>
+      setSyncAllRows(prev => prev.map(r => r.code === code ? { ...r, ...patch } : r));
+
+    for (const seg of rows) {
+      // Fetch from Fusion
+      update(seg.code, { status: 'fetching', message: 'Fetching from Fusion…' });
+      let values: ValueSetValue[] = [];
+      try {
+        valuesCache.current.delete(`fusion_${seg.code}`);
+        values = await fetchValuesFromFusion(seg.code);
+        update(seg.code, { fetched: values.length, message: `Fetched ${values.length} values` });
+      } catch (e: any) {
+        update(seg.code, { status: 'error', message: `Fetch failed: ${e.message}` });
+        continue;
+      }
+      if (values.length === 0) {
+        update(seg.code, { status: 'done', message: 'No values returned from Fusion' });
+        continue;
+      }
+
+      // Push to APEX in batches
+      update(seg.code, { status: 'syncing', message: `Syncing ${values.length} values…` });
+      let synced = 0;
+      let failed = false;
+      const batches = Math.ceil(values.length / BATCH_SIZE);
+      for (let b = 0; b < batches && !failed; b++) {
+        const batch = values.slice(b * BATCH_SIZE, (b + 1) * BATCH_SIZE);
+        try {
+          const resp = await fetch(APEX_SYNC_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ valueSetCode: seg.code, items: batch }),
+          });
+          const json = await resp.json().catch(() => ({}));
+          if (json.success) { synced += json.insertedCount || batch.length; }
+          else { failed = true; update(seg.code, { status: 'error', message: json.error || 'Sync failed' }); }
+        } catch (e: any) { failed = true; update(seg.code, { status: 'error', message: e.message }); }
+        update(seg.code, { synced });
+      }
+      if (!failed) update(seg.code, { status: 'done', synced, message: `✅ ${synced} values synced` });
+    }
+    setSyncAllRunning(false);
+  };
+
   // testLimit: 0 = all, 1 = first 1, 5 = first 5, etc.
   const handleSyncToDb = async (tab: TabItem, testLimit: number = 0) => {
     if (tab.values.length === 0) {
-      message.warning('No values to sync');
+      // Open log panel and explain why nothing ran
+      setTabs(prev => prev.map(t =>
+        t.key === tab.key ? { ...t, showLogs: true, syncLogs: [
+          `❌ No values loaded for "${tab.key}"`,
+          `Current source: ${dataSource === 'fusion' ? 'Oracle Fusion' : 'APEX Database'}`,
+          dataSource === 'fusion' && !isElectron()
+            ? '⚠ Fusion requires the proxy server — run: node server/proxy.cjs'
+            : `Try clicking the Reload button to re-fetch from ${dataSource === 'fusion' ? 'Fusion' : 'APEX DB'}`,
+        ]} : t
+      ));
+      message.warning('No values loaded — check the Logs panel for details');
       return;
     }
 
@@ -682,6 +755,7 @@ const COASegments: React.FC = () => {
               <Radio.Button value="apex"><HddOutlined /> APEX DB</Radio.Button>
             </Radio.Group>
             <Button size="small" icon={<ReloadOutlined />} onClick={handleRefresh}>Refresh</Button>
+            <Button size="small" type="primary" icon={<SyncOutlined />} onClick={handleSyncAll} disabled={segments.length === 0} style={{ background: REDWOOD.success }}>Sync All to DB</Button>
             <Button size="small" type="primary" icon={<PlusOutlined />} style={{ background: REDWOOD.info }}>Add Value Set</Button>
           </Space>
         </div>
@@ -761,6 +835,18 @@ const COASegments: React.FC = () => {
                                   {tab.syncStatus === 'error' && <Text style={{ fontSize: 11, color: REDWOOD.primary }}>{tab.syncMessage}</Text>}
                                 </Space>
                                 <Space>
+                                  <Tooltip title={`Reload from ${dataSource === 'fusion' ? 'Oracle Fusion' : 'APEX DB'}`}>
+                                    <Button size="small" icon={<ReloadOutlined />} loading={tab.loading}
+                                      onClick={async () => {
+                                        valuesCache.current.delete(`${dataSource}_${tab.key}`);
+                                        setTabs(prev => prev.map(t => t.key === tab.key ? { ...t, loading: true } : t));
+                                        const values = await fetchValues(tab.key);
+                                        setTabs(prev => prev.map(t => t.key === tab.key ? { ...t, values, loading: false } : t));
+                                        message.success(`Reloaded ${values.length} values from ${dataSource === 'fusion' ? 'Fusion' : 'APEX DB'}`);
+                                      }}>
+                                      Reload
+                                    </Button>
+                                  </Tooltip>
                                   <Tooltip title={tab.showApiInfo ? 'Hide API Info' : 'Show API Endpoints'}>
                                     <Button size="small" icon={<ApiOutlined />} onClick={() => toggleApiInfo(tab.key)} type={tab.showApiInfo ? 'primary' : 'default'} style={tab.showApiInfo ? { background: REDWOOD.info } : { borderColor: REDWOOD.info, color: REDWOOD.info }}>
                                       API
@@ -771,36 +857,18 @@ const COASegments: React.FC = () => {
                                       {tab.syncLogs.length > 0 ? `Logs (${tab.syncLogs.length})` : 'Logs'}
                                     </Button>
                                   </Tooltip>
-                                  <Tooltip title={
-                                    dataSource === 'apex'
-                                      ? 'Switch to Fusion to enable sync to APEX DB'
-                                      : tab.values.length === 0
-                                      ? 'No values loaded — segment may not exist in Fusion or fetch failed'
-                                      : 'Test sync with 1 item only'
-                                  }>
-                                    <Button size="small" onClick={() => handleSyncToDb(tab, 1)} disabled={tab.syncing || tab.values.length === 0 || dataSource === 'apex'} style={{ borderColor: REDWOOD.success, color: REDWOOD.success }}>
+                                  <Tooltip title={tab.values.length === 0 ? 'No values loaded' : 'Test sync with 1 item only'}>
+                                    <Button size="small" onClick={() => handleSyncToDb(tab, 1)} disabled={tab.syncing || tab.values.length === 0} style={{ borderColor: REDWOOD.success, color: REDWOOD.success }}>
                                       Test (1)
                                     </Button>
                                   </Tooltip>
-                                  <Tooltip title={
-                                    dataSource === 'apex'
-                                      ? 'Switch to Fusion to enable sync to APEX DB'
-                                      : tab.values.length === 0
-                                      ? 'No values loaded — segment may not exist in Fusion or fetch failed'
-                                      : 'Test sync with first 5 items'
-                                  }>
-                                    <Button size="small" onClick={() => handleSyncToDb(tab, 5)} disabled={tab.syncing || tab.values.length === 0 || dataSource === 'apex'} style={{ borderColor: REDWOOD.warning, color: REDWOOD.warning }}>
+                                  <Tooltip title={tab.values.length === 0 ? 'No values loaded' : 'Test sync with first 5 items'}>
+                                    <Button size="small" onClick={() => handleSyncToDb(tab, 5)} disabled={tab.syncing || tab.values.length === 0} style={{ borderColor: REDWOOD.warning, color: REDWOOD.warning }}>
                                       Test (5)
                                     </Button>
                                   </Tooltip>
-                                  <Tooltip title={
-                                    dataSource === 'apex'
-                                      ? 'Switch to Fusion to enable sync to APEX DB'
-                                      : tab.values.length === 0
-                                      ? 'No values loaded — segment may not exist in Fusion or fetch failed'
-                                      : 'Sync all values to APEX DB'
-                                  }>
-                                    <Button type="primary" size="small" icon={tab.syncing ? <SyncOutlined spin /> : <CloudUploadOutlined />} onClick={() => handleSyncToDb(tab, 0)} disabled={tab.syncing || tab.values.length === 0 || dataSource === 'apex'} style={{ background: tab.syncStatus === 'success' ? REDWOOD.success : REDWOOD.info }}>
+                                  <Tooltip title={tab.values.length === 0 ? 'No values loaded' : 'Sync all values to APEX DB'}>
+                                    <Button type="primary" size="small" icon={tab.syncing ? <SyncOutlined spin /> : <CloudUploadOutlined />} onClick={() => handleSyncToDb(tab, 0)} disabled={tab.syncing || tab.values.length === 0} style={{ background: tab.syncStatus === 'success' ? REDWOOD.success : REDWOOD.info }}>
                                       {tab.syncing ? 'Syncing...' : 'Sync to DB'}
                                     </Button>
                                   </Tooltip>
@@ -815,15 +883,19 @@ const COASegments: React.FC = () => {
                                   </div>
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                                      <Text type="secondary" style={{ fontSize: 10, minWidth: 70 }}>GET Values:</Text>
-                                      <Text code style={{ fontSize: 10, wordBreak: 'break-all' }}>{getValuesUrl(tab.key)}</Text>
+                                      <Text type="secondary" style={{ fontSize: 10, minWidth: 80 }}>APEX GET:</Text>
+                                      <Text code style={{ fontSize: 10, wordBreak: 'break-all' }}>{`${APEX_GET_VALUES_URL}/${tab.key}`}</Text>
                                     </div>
                                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                                      <Text type="secondary" style={{ fontSize: 10, minWidth: 70 }}>POST Sync:</Text>
+                                      <Text type="secondary" style={{ fontSize: 10, minWidth: 80 }}>Fusion GET:</Text>
+                                      <Text code style={{ fontSize: 10, wordBreak: 'break-all' }}>{`https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05/valueSets/${tab.key}/child/values?limit=500&offset=0`}</Text>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                                      <Text type="secondary" style={{ fontSize: 10, minWidth: 80 }}>POST Sync:</Text>
                                       <Text code style={{ fontSize: 10, wordBreak: 'break-all' }}>{APEX_SYNC_URL}</Text>
                                     </div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                      <Text type="secondary" style={{ fontSize: 10, minWidth: 70 }}>Source:</Text>
+                                      <Text type="secondary" style={{ fontSize: 10, minWidth: 80 }}>Source:</Text>
                                       <Text style={{ fontSize: 10 }}>{dataSource === 'fusion' ? (isElectron() ? 'Oracle Fusion (Electron — direct)' : 'Oracle Fusion (proxy)') : 'APEX Database (direct)'}</Text>
                                     </div>
                                   </div>
@@ -892,6 +964,78 @@ const COASegments: React.FC = () => {
       </Content>
 
       <Autopilot />
+
+      {/* ── Sync All Modal ─────────────────────────────────────────────── */}
+      <Modal
+        open={syncAllVisible}
+        title={<Space><SyncOutlined spin={syncAllRunning} style={{ color: REDWOOD.success }} /><Text strong>Sync All Segments — Fusion → APEX DB</Text></Space>}
+        footer={
+          <Button type="primary" disabled={syncAllRunning} onClick={() => setSyncAllVisible(false)}
+            style={{ background: REDWOOD.info }}>
+            {syncAllRunning ? 'Running…' : 'Close'}
+          </Button>
+        }
+        width={640}
+        closable={!syncAllRunning}
+        onCancel={() => { if (!syncAllRunning) setSyncAllVisible(false); }}
+      >
+        {/* Overall progress bar */}
+        {syncAllRows.length > 0 && (() => {
+          const done = syncAllRows.filter(r => r.status === 'done' || r.status === 'error').length;
+          const errors = syncAllRows.filter(r => r.status === 'error').length;
+          return (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                <Text style={{ fontSize: 11 }}>{done} / {syncAllRows.length} segments</Text>
+                {errors > 0 && <Text style={{ fontSize: 11, color: REDWOOD.primary }}>{errors} error{errors > 1 ? 's' : ''}</Text>}
+              </div>
+              <Progress
+                percent={Math.round((done / syncAllRows.length) * 100)}
+                status={errors > 0 ? 'exception' : done === syncAllRows.length ? 'success' : 'active'}
+                size="small"
+              />
+            </div>
+          );
+        })()}
+
+        {/* Per-segment rows */}
+        <div style={{ maxHeight: 420, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {syncAllRows.map(row => {
+            const icon = row.status === 'done' ? '✅'
+              : row.status === 'error' ? '❌'
+              : row.status === 'fetching' ? '⬇'
+              : row.status === 'syncing' ? '⬆'
+              : '⏳';
+            const color = row.status === 'done' ? REDWOOD.success
+              : row.status === 'error' ? REDWOOD.primary
+              : row.status === 'pending' ? REDWOOD.neutral300
+              : REDWOOD.info;
+            return (
+              <div key={row.code} style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '6px 10px', borderRadius: 6,
+                background: row.status === 'pending' ? REDWOOD.neutral100 : row.status === 'error' ? '#fff1f0' : row.status === 'done' ? '#f6ffed' : '#e6f4ff',
+                border: `1px solid ${color}22`,
+              }}>
+                <span style={{ fontSize: 14, minWidth: 20, textAlign: 'center' }}>{icon}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text strong style={{ fontSize: 11 }}>{row.name}</Text>
+                    <Text code style={{ fontSize: 10 }}>{row.code}</Text>
+                  </div>
+                  <Text style={{ fontSize: 10, color: REDWOOD.neutral600 }}>{row.message}</Text>
+                </div>
+                {(row.status === 'fetching' || row.status === 'syncing') && (
+                  <SyncOutlined spin style={{ color: REDWOOD.info, fontSize: 12 }} />
+                )}
+                {row.status === 'done' && row.synced > 0 && (
+                  <Text style={{ fontSize: 10, color: REDWOOD.success, whiteSpace: 'nowrap' }}>{row.synced.toLocaleString()} rows</Text>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </Modal>
 
       <style>{`
         .compact-table .ant-table-tbody > tr > td { padding: 6px 8px !important; }

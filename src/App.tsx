@@ -39,6 +39,7 @@ const TrialBalance            = lazy(() => import('./pages/gl/TrialBalance'));
 const GenerateTrialBalance    = lazy(() => import('./pages/gl/GenerateTrialBalance'));
 const IncomeStatementTemplates= lazy(() => import('./pages/gl/IncomeStatementTemplates'));
 const Currencies              = lazy(() => import('./pages/gl/Currencies'));
+const GLManageCategories      = lazy(() => import('./pages/gl/ManageCategories'));
 const JournalReconciliation   = lazy(() => import('./pages/gl/JournalReconciliation'));
 const ManageInvoices          = lazy(() => import('./pages/ap/ManageInvoices'));
 const ManageDistCombinations  = lazy(() => import('./pages/ap/ManageDistCombinations'));
@@ -50,6 +51,7 @@ const ManageSLAJournals       = lazy(() => import('./pages/ap/ManageSLAJournals'
 const CreateAccounting        = lazy(() => import('./pages/ap/CreateAccounting'));
 const PrepaymentApplications  = lazy(() => import('./pages/ap/PrepaymentApplications'));
 const ManageMultiperiod       = lazy(() => import('./pages/ap/ManageMultiperiod'));
+const CheckMigration          = lazy(() => import('./pages/ap/CheckMigration'));
 const ManageSuppliers         = lazy(() => import('./pages/suppliers/ManageSuppliers'));
 const SupplierBalance         = lazy(() => import('./pages/suppliers/SupplierBalance'));
 const SyncData                = lazy(() => import('./pages/sync/SyncData'));
@@ -162,6 +164,7 @@ function App() {
               <Route path="gl/income-statement-templates" element={<IncomeStatementTemplates />} />
               <Route path="gl/currencies" element={<Currencies />} />
               <Route path="gl/journal-reconciliation" element={<JournalReconciliation />} />
+              <Route path="gl/categories" element={<GLManageCategories />} />
               {/* Fixed Assets */}
               <Route path="fa"             element={<FAModule />} />
               <Route path="fa/assets"       element={<ManageAssets />} />
@@ -182,6 +185,7 @@ function App() {
               <Route path="ap/create-accounting" element={<CreateAccounting />} />
               <Route path="ap/prepayment-applications" element={<PrepaymentApplications />} />
               <Route path="ap/multiperiod" element={<ManageMultiperiod />} />
+              <Route path="ap/check-migration" element={<CheckMigration />} />
               <Route path="ap/reports" element={<APReports />} />
               <Route path="ap/distribution-combinations" element={<ManageDistCombinations />} />
               <Route path="ap/*" element={<APModule />} />

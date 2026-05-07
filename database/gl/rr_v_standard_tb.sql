@@ -31,7 +31,8 @@ WITH
 
 -- ────────────────────────────────────────────────────────────
 -- Step 1 — Account master (ACCOUNT_TYPE + ACCOUNT_DESC)
--- Only accounts listed here will appear in the trial balance.
+-- Used for enrichment only; accounts NOT in this list still
+-- appear in the TB (see all_combos LEFT JOIN below).
 -- ────────────────────────────────────────────────────────────
 accounts AS (
     SELECT
@@ -46,8 +47,9 @@ accounts AS (
 -- Step 2 — All distinct account combinations ever used
 --          (the "account spine", per ledger)
 --
--- INNER JOIN to accounts master: only valid combinations
--- (segment-4 exists in RR_VALUE_SET_VALUES) are included.
+-- LEFT JOIN to accounts master: ALL combinations from journal
+-- lines appear, even if segment-4 is not yet in the value set.
+-- account_type defaults to 'E' (Expense) for unknown accounts.
 -- ────────────────────────────────────────────────────────────
 all_combos AS (
     SELECT DISTINCT
@@ -57,8 +59,6 @@ all_combos AS (
     FROM RR_GL_JE_LINES_ALL  lin
     JOIN RR_GL_JE_HEADERS    hdr
       ON hdr.JE_HEADER_ID = lin.JE_HEADER_ID
-    JOIN accounts            acc
-      ON acc.ACCOUNT = TRIM(REGEXP_SUBSTR(lin.ACCOUNT_COMBINATION,'[^-]+',1,4))
     WHERE lin.ACCOUNT_COMBINATION IS NOT NULL
 ),
 
@@ -154,9 +154,9 @@ enriched AS (
         p.PERIOD_NAME,
         p.CURRENCY_CODE,
         p.ACCOUNT_COMBINATION,
-        TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,1))  AS COMPANY,
-        acc.ACCOUNT,
-        acc.ACCOUNT_TYPE,
+        TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,1))      AS COMPANY,
+        NVL(acc.ACCOUNT,      TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,4)))  AS ACCOUNT,
+        NVL(acc.ACCOUNT_TYPE, 'E')                                   AS ACCOUNT_TYPE,
         acc.ACCOUNT_DESC,
 
         -- Fiscal year: from fiscal calendar view (collapsed to 1 row per period), else fallback
@@ -181,7 +181,7 @@ enriched AS (
         p.PTD_ENTERED_DR - p.PTD_ENTERED_CR  AS PTD_ENTERED_NET
 
     FROM ptd p
-    JOIN accounts acc
+    LEFT JOIN accounts acc
       ON acc.ACCOUNT = TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,4))
     -- Collapse fiscal calendar to one row per PERIOD_NAME to prevent fan-out
     LEFT JOIN (
@@ -197,7 +197,7 @@ enriched AS (
 ),
 
 -- ────────────────────────────────────────────────────────────
--- Step 7 — Opening balance via window functions
+-- Step 7 — PTD opening balance via window functions
 -- ────────────────────────────────────────────────────────────
 calc AS (
     SELECT
@@ -230,6 +230,78 @@ calc AS (
             ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
         ), 0)  AS PL_ENTERED_OPENING
     FROM enriched e
+),
+
+-- ────────────────────────────────────────────────────────────
+-- Step 8 — YTD columns via window functions
+--
+-- YTD Opening:
+--   B/S → BS_OPENING at the first period of the fiscal year
+--         (balance carried in from prior fiscal year; fixed for the year)
+--   P&L → always 0 (income-statement accounts reset each year)
+--
+-- YTD Debit / Credit:
+--   Cumulative Dr / Cr from fiscal period 1 through the current period.
+--
+-- YTD Closing (not stored — identical to PTD Closing):
+--   Proof B/S: YTD_OPENING + (YTD_DR − YTD_CR)
+--            = BS_OPEN(p1) + cumulative_net_year
+--            = BS_OPEN(current) + PTD_NET  ← same as PTD CLOSING ✓
+--   Proof P&L: 0 + (YTD_DR − YTD_CR)
+--            = PL_OPEN + PTD_NET           ← same as PTD CLOSING ✓
+-- ────────────────────────────────────────────────────────────
+ytd AS (
+    SELECT
+        c.*,
+        -- YTD Opening (accounted)
+        CASE WHEN c.ACCOUNT_TYPE IN ('A','L','O')
+             THEN FIRST_VALUE(c.BS_OPENING) OVER (
+                     PARTITION BY c.LEDGER_NAME, c.ACCOUNT_COMBINATION, c.CURRENCY_CODE,
+                                  c.FISCAL_YEAR
+                     ORDER BY c.FISCAL_PERIOD
+                     ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                  )
+             ELSE 0
+        END  AS YTD_OPENING,
+        -- YTD Debit (accounted)
+        SUM(c.PTD_DR) OVER (
+            PARTITION BY c.LEDGER_NAME, c.ACCOUNT_COMBINATION, c.CURRENCY_CODE,
+                         c.FISCAL_YEAR
+            ORDER BY c.FISCAL_PERIOD
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        )  AS YTD_DR,
+        -- YTD Credit (accounted)
+        SUM(c.PTD_CR) OVER (
+            PARTITION BY c.LEDGER_NAME, c.ACCOUNT_COMBINATION, c.CURRENCY_CODE,
+                         c.FISCAL_YEAR
+            ORDER BY c.FISCAL_PERIOD
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        )  AS YTD_CR,
+        -- YTD Opening (entered)
+        CASE WHEN c.ACCOUNT_TYPE IN ('A','L','O')
+             THEN FIRST_VALUE(c.BS_ENTERED_OPENING) OVER (
+                     PARTITION BY c.LEDGER_NAME, c.ACCOUNT_COMBINATION, c.CURRENCY_CODE,
+                                  c.FISCAL_YEAR
+                     ORDER BY c.FISCAL_PERIOD
+                     ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                  )
+             ELSE 0
+        END  AS YTD_ENTERED_OPENING,
+        -- YTD Debit (entered)
+        SUM(c.PTD_ENTERED_DR) OVER (
+            PARTITION BY c.LEDGER_NAME, c.ACCOUNT_COMBINATION, c.CURRENCY_CODE,
+                         c.FISCAL_YEAR
+            ORDER BY c.FISCAL_PERIOD
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        )  AS YTD_ENTERED_DR,
+        -- YTD Credit (entered)
+        SUM(c.PTD_ENTERED_CR) OVER (
+            PARTITION BY c.LEDGER_NAME, c.ACCOUNT_COMBINATION, c.CURRENCY_CODE,
+                         c.FISCAL_YEAR
+            ORDER BY c.FISCAL_PERIOD
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        )  AS YTD_ENTERED_CR
+    FROM calc c
 )
 
 -- ────────────────────────────────────────────────────────────
@@ -243,42 +315,56 @@ calc AS (
 -- ORDER BY is left to the caller.
 -- ────────────────────────────────────────────────────────────
 SELECT
-    c.LEDGER_NAME,
-    c.PERIOD_NAME,
-    c.FISCAL_YEAR,
-    c.FISCAL_PERIOD,
-    c.CURRENCY_CODE,
-    c.ACCOUNT_COMBINATION,
-    c.COMPANY,
-    c.ACCOUNT,
-    c.ACCOUNT_TYPE,
-    c.ACCOUNT_DESC,
+    y.LEDGER_NAME,
+    y.PERIOD_NAME,
+    y.FISCAL_YEAR,
+    y.FISCAL_PERIOD,
+    y.CURRENCY_CODE,
+    y.ACCOUNT_COMBINATION,
+    y.COMPANY,
+    y.ACCOUNT,
+    y.ACCOUNT_TYPE,
+    y.ACCOUNT_DESC,
 
-    CASE WHEN c.ACCOUNT_TYPE IN ('A','L','O')
-         THEN c.BS_OPENING ELSE c.PL_OPENING END                    AS OPENING,
+    -- ── PTD columns ──────────────────────────────────────────
+    CASE WHEN y.ACCOUNT_TYPE IN ('A','L','O')
+         THEN y.BS_OPENING ELSE y.PL_OPENING END                    AS OPENING,
 
-    c.PTD_DR                                                        AS DEBIT,
-    c.PTD_CR                                                        AS CREDIT,
+    y.PTD_DR                                                        AS DEBIT,
+    y.PTD_CR                                                        AS CREDIT,
 
-    CASE WHEN c.ACCOUNT_TYPE IN ('A','L','O')
-         THEN c.BS_OPENING + c.PTD_NET
-         ELSE c.PL_OPENING + c.PTD_NET END                          AS CLOSING,
+    CASE WHEN y.ACCOUNT_TYPE IN ('A','L','O')
+         THEN y.BS_OPENING + y.PTD_NET
+         ELSE y.PL_OPENING + y.PTD_NET END                          AS CLOSING,
 
-    -- Entered (transaction) currency equivalents
-    CASE WHEN c.ACCOUNT_TYPE IN ('A','L','O')
-         THEN c.BS_ENTERED_OPENING ELSE c.PL_ENTERED_OPENING END    AS ENTERED_OPENING,
+    -- ── PTD entered currency ──────────────────────────────────
+    CASE WHEN y.ACCOUNT_TYPE IN ('A','L','O')
+         THEN y.BS_ENTERED_OPENING ELSE y.PL_ENTERED_OPENING END    AS ENTERED_OPENING,
 
-    c.PTD_ENTERED_DR                                                AS ENTERED_DEBIT,
-    c.PTD_ENTERED_CR                                                AS ENTERED_CREDIT,
+    y.PTD_ENTERED_DR                                                AS ENTERED_DEBIT,
+    y.PTD_ENTERED_CR                                                AS ENTERED_CREDIT,
 
-    CASE WHEN c.ACCOUNT_TYPE IN ('A','L','O')
-         THEN c.BS_ENTERED_OPENING + c.PTD_ENTERED_NET
-         ELSE c.PL_ENTERED_OPENING + c.PTD_ENTERED_NET END          AS ENTERED_CLOSING
+    CASE WHEN y.ACCOUNT_TYPE IN ('A','L','O')
+         THEN y.BS_ENTERED_OPENING + y.PTD_ENTERED_NET
+         ELSE y.PL_ENTERED_OPENING + y.PTD_ENTERED_NET END          AS ENTERED_CLOSING,
 
-FROM calc c
+    -- ── YTD columns (accounted) ───────────────────────────────
+    -- Opening = balance at start of fiscal year (B/S carried-in, P&L = 0)
+    -- Debit / Credit = cumulative within fiscal year through this period
+    -- Closing = same as PTD CLOSING (see proof in Step 8 comment)
+    y.YTD_OPENING                                                   AS YTD_OPENING,
+    y.YTD_DR                                                        AS YTD_DEBIT,
+    y.YTD_CR                                                        AS YTD_CREDIT,
+
+    -- ── YTD columns (entered currency) ───────────────────────
+    y.YTD_ENTERED_OPENING                                           AS YTD_ENTERED_OPENING,
+    y.YTD_ENTERED_DR                                                AS YTD_ENTERED_DEBIT,
+    y.YTD_ENTERED_CR                                                AS YTD_ENTERED_CREDIT
+
+FROM ytd y
 WHERE (
-    CASE WHEN c.ACCOUNT_TYPE IN ('A','L','O') THEN c.BS_OPENING ELSE c.PL_OPENING END <> 0
-    OR c.PTD_DR <> 0
-    OR c.PTD_CR <> 0
+    CASE WHEN y.ACCOUNT_TYPE IN ('A','L','O') THEN y.BS_OPENING ELSE y.PL_OPENING END <> 0
+    OR y.PTD_DR <> 0
+    OR y.PTD_CR <> 0
 )
 ;

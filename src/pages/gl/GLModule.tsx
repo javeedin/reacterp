@@ -25,6 +25,7 @@ import {
   CheckCircleOutlined,
   SyncOutlined,
   WarningOutlined,
+  TagsOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import Autopilot from '../../components/Autopilot';
@@ -93,6 +94,7 @@ const setupMenuItems: MenuItemType[] = [
   { key: 'account-combinations', icon: <SettingOutlined />, label: 'Account Combinations', description: 'Valid account combinations', color: REDWOOD.primaryDark, path: '/gl/account-combinations' },
   { key: 'cross-validation', icon: <SolutionOutlined />, label: 'Cross Validation', description: 'Validation rules setup', color: REDWOOD.reportGreen },
   { key: 'income-statement-templates', icon: <LineChartOutlined />, label: 'Income Statement Templates', description: 'Manage P&L statement templates', color: REDWOOD.success, path: '/gl/income-statement-templates' },
+  { key: 'categories', icon: <TagsOutlined />, label: 'Manage Categories', description: 'Journal entry categories', color: REDWOOD.info, path: '/gl/categories' },
 ];
 
 // GL KPI Data (mock - would come from API)

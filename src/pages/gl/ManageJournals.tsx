@@ -76,6 +76,7 @@ import type { ColumnsType } from 'antd/es/table';
 import Autopilot from '../../components/Autopilot';
 import { validateAccountCode } from '../../components/AccountSelector';
 import CreateJournal from './CreateJournal';
+import * as XLSX from 'xlsx';
 
 const { Content } = Layout;
 const { Text } = Typography;
@@ -171,6 +172,9 @@ interface JournalLine {
   accountedDr: number;
   accountedCr: number;
   currency: string;
+  conversionRate?: number;
+  conversionRateType?: string;
+  conversionDate?: string;
   accountDescription?: string;
 }
 
@@ -196,6 +200,8 @@ interface JournalRecord {
   ledgerName: string;
   legalEntityName: string;
   currencyCode: string;
+  conversionRate: number;
+  conversionRateType: string;
   enteredDebit: number;
   enteredCredit: number;
   accountedDebit: number;
@@ -231,6 +237,7 @@ const STORAGE_KEY = 'manageJournals_searchData';
 interface OpenJournalTab {
   key: string;
   journal: JournalRecord;
+  sourceUrl?: string;
 }
 
 // Debug log entry
@@ -267,6 +274,9 @@ const ManageJournals: React.FC = () => {
   const [loadingLedgers, setLoadingLedgers] = useState(false);
   const [loadingPeriods, setLoadingPeriods] = useState(false);
 
+  // GL Categories for search dropdown
+  const [glCategories, setGLCategories] = useState<{ jeCategoryName: string; userJeCategoryName: string }[]>([]);
+
   // Accounting date range filter
   const [acctDatePreset, setAcctDatePreset] = useState<string | null>(null);
   const [acctFromDate, setAcctFromDate] = useState<Dayjs | null>(null);
@@ -287,6 +297,7 @@ const ManageJournals: React.FC = () => {
   // Debug log state
   const [debugLogs, setDebugLogs] = useState<DebugLogEntry[]>([]);
   const [debugModalVisible, setDebugModalVisible] = useState(false);
+  const [apiTestResult, setApiTestResult] = useState<{ loading: boolean; status?: number; body?: string; error?: string } | null>(null);
 
   // Bulk post state
   const [bulkPostVisible, setBulkPostVisible] = useState(false);
@@ -306,6 +317,11 @@ const ManageJournals: React.FC = () => {
   const [pageApiModalVisible, setPageApiModalVisible] = useState(false);
   const [pageApiExecResults, setPageApiExecResults] = useState<Record<number, { loading: boolean; response: string | null }>>({});
 
+  // Stores the base search params (without offset/limit) for export re-fetch
+  const lastBaseParamsRef = React.useRef<URLSearchParams | null>(null);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [gridFilter, setGridFilter] = useState('');
+
   // Journal panel expanded/collapsed state per tab (for Show More/Show Less)
   const [journalExpandedState, setJournalExpandedState] = useState<Record<string, boolean>>({});
   const [activeDetailTabState, setActiveDetailTabState] = useState<Record<string, string>>({});
@@ -323,6 +339,10 @@ const ManageJournals: React.FC = () => {
   const [tabSaving, setTabSaving] = useState<Record<string, boolean>>({});
   const [tabPosting, setTabPosting] = useState<Record<string, boolean>>({});
   const [selectedLinesByTab, setSelectedLinesByTab] = useState<Record<string, number[]>>({});
+  const [tabGetUrlCopied, setTabGetUrlCopied] = useState<Record<string, boolean>>({});
+  const [journalApiModalVisible, setJournalApiModalVisible] = useState(false);
+  const [journalApiTabKey, setJournalApiTabKey] = useState<string | null>(null);
+  const [journalApiExecResults, setJournalApiExecResults] = useState<Record<number, { loading: boolean; response: string | null }>>({});
 
   // Lookup data for journal edit dropdowns
   const [journalCategories, setJournalCategories] = useState<string[]>([]);
@@ -344,6 +364,12 @@ const ManageJournals: React.FC = () => {
   const [apTransactionLines, setApTransactionLines] = useState<any[]>([]);
   const [apTransactionLinesLoading, setApTransactionLinesLoading] = useState(false);
   const [apLineDescMap, setApLineDescMap] = useState<Record<string, string>>({});
+
+  // Delete batch state
+  const [deleteBatchModalVisible, setDeleteBatchModalVisible] = useState(false);
+  const [deleteBatchTarget, setDeleteBatchTarget] = useState<{ jeBatchId: number; batchId: number; batchName: string; statusMeaning: string } | null>(null);
+  const [deleteBatchLoading, setDeleteBatchLoading] = useState(false);
+  const [deleteBatchTestResult, setDeleteBatchTestResult] = useState<{ loading: boolean; status?: number; body?: string; error?: string } | null>(null);
 
   // Floating panel state
   const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'reports'>('none');
@@ -369,6 +395,14 @@ const ManageJournals: React.FC = () => {
         console.error('Error restoring search data:', e);
       }
     }
+  }, []);
+
+  // Fetch GL categories on mount for search dropdown
+  useEffect(() => {
+    fetch(`${APEX_DB_CONFIG.baseUrl}/gl/categories`)
+      .then(r => r.json())
+      .then(d => { if (d.items) setGLCategories(d.items); })
+      .catch(() => {});
   }, []);
 
   // Fetch ledgers on component mount
@@ -567,14 +601,14 @@ const ManageJournals: React.FC = () => {
           journalDescription: journal.journalDescription || '',
           category: journal.category || '',
           currencyCode: journal.currencyCode || '',
-          conversionRate: 1,
-          conversionRateType: 'User',
+          conversionRate: journal.conversionRate || 1,
+          conversionRateType: journal.conversionRateType || 'User',
         },
       }));
     }
 
-    // Add new tab
-    setOpenJournalTabs(prev => [...prev, { key: tabKey, journal }]);
+    // Add new tab (store the search URL that produced this journal)
+    setOpenJournalTabs(prev => [...prev, { key: tabKey, journal, sourceUrl: lastSearchUrl || undefined }]);
     setActiveTabKey(tabKey);
   };
 
@@ -671,6 +705,25 @@ const ManageJournals: React.FC = () => {
     }
   };
 
+  const executeJournalApi = async (index: number, url: string) => {
+    setJournalApiExecResults(prev => ({ ...prev, [index]: { loading: true, response: null } }));
+    try {
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const text = await res.text();
+      let formatted = text;
+      try { formatted = JSON.stringify(JSON.parse(text), null, 2); } catch { /* keep raw */ }
+      setJournalApiExecResults(prev => ({ ...prev, [index]: { loading: false, response: `HTTP ${res.status}\n\n${formatted}` } }));
+    } catch (e: any) {
+      setJournalApiExecResults(prev => ({ ...prev, [index]: { loading: false, response: `Error: ${e.message}` } }));
+    }
+  };
+
+  const openJournalApiModal = (tabKey: string) => {
+    setJournalApiTabKey(tabKey);
+    setJournalApiExecResults({});
+    setJournalApiModalVisible(true);
+  };
+
   // Add debug log helper
   const addDebugLog = (type: DebugLogEntry['type'], message: string, data?: any) => {
     const entry: DebugLogEntry = {
@@ -681,6 +734,47 @@ const ManageJournals: React.FC = () => {
     };
     setDebugLogs(prev => [...prev, entry]);
     console.log(`[DEBUG ${type.toUpperCase()}] ${message}`, data || '');
+  };
+
+  // Helper: operator label → single-char code used by the API
+  const opToCode = (op: string) => {
+    if (op === 'Starts with') return 'S';
+    if (op === 'Ends with')   return 'E';
+    if (op === 'Equals')      return 'X';
+    return 'C';
+  };
+
+  // Build the full search URL from current form values (no offset/limit)
+  const buildSearchUrl = (offsetVal = 0, limitVal = 500) => {
+    const values = form.getFieldsValue();
+    const p = new URLSearchParams();
+    if (values.ledger)           p.append('ledger',  values.ledger);
+    if (values.accountingPeriod) p.append('period',  values.accountingPeriod);
+    if (values.journalBatch) {
+      p.append('batchName', values.journalBatch);
+      p.append('batchOp',   opToCode(values.batchOperator || 'Contains'));
+    }
+    if (values.batchDescription) {
+      p.append('batchDesc', values.batchDescription);
+      p.append('batchDescOp', opToCode(values.batchDescOperator || 'Contains'));
+    }
+    if (values.journalName) {
+      p.append('journalName', values.journalName);
+      p.append('journalNameOp', opToCode(values.journalNameOperator || 'Contains'));
+    }
+    if (values.journalDescription) {
+      p.append('journalDesc', values.journalDescription);
+      p.append('journalOp',   opToCode(values.journalOperator || 'Contains'));
+    }
+    if (values.category)   p.append('category',     values.category);
+    if (values.source)     p.append('source',        values.source);
+    if (values.batchStatus && values.batchStatus !== 'All') p.append('statusMeaning', values.batchStatus);
+    const { from: acctFrom, to: acctTo } = getAcctDateRange();
+    if (acctFrom) p.append('from_date', acctFrom.format('YYYY-MM-DD'));
+    if (acctTo)   p.append('to_date',   acctTo.format('YYYY-MM-DD'));
+    p.append('offset', offsetVal.toString());
+    p.append('limit',  limitVal.toString());
+    return `${API_BASE_URL}/headers?${p.toString()}`;
   };
 
   // Search handler - calls the API with pagination to get ALL records
@@ -713,19 +807,31 @@ const ManageJournals: React.FC = () => {
 
       if (values.journalBatch) {
         baseParams.append('batchName', values.journalBatch);
+        baseParams.append('batchOp', opToCode(values.batchOperator || 'Contains'));
+      }
+      if (values.batchDescription) {
+        baseParams.append('batchDesc', values.batchDescription);
+        baseParams.append('batchDescOp', opToCode(values.batchDescOperator || 'Contains'));
+      }
+      if (values.journalName) {
+        baseParams.append('journalName', values.journalName);
+        baseParams.append('journalNameOp', opToCode(values.journalNameOperator || 'Contains'));
       }
       if (values.journalDescription) {
         baseParams.append('journalDesc', values.journalDescription);
+        baseParams.append('journalOp', opToCode(values.journalOperator || 'Contains'));
       }
-      if (values.source) {
-        baseParams.append('source', values.source);
-      }
+      if (values.category)   baseParams.append('category',      values.category);
+      if (values.source)     baseParams.append('source',         values.source);
       if (values.batchStatus && values.batchStatus !== 'All') {
         baseParams.append('statusMeaning', values.batchStatus);
       }
       const { from: acctFrom, to: acctTo } = getAcctDateRange();
       if (acctFrom) baseParams.append('from_date', acctFrom.format('YYYY-MM-DD'));
       if (acctTo)   baseParams.append('to_date',   acctTo.format('YYYY-MM-DD'));
+
+      // Save for export re-fetch
+      lastBaseParamsRef.current = new URLSearchParams(baseParams.toString());
 
       // Fetch with pagination - get ALL records
       const PAGE_SIZE = 500; // ORDS default max
@@ -1065,149 +1171,193 @@ const ManageJournals: React.FC = () => {
     return `${value.toLocaleString('en-US', { minimumFractionDigits: 2 })} ${currency}`;
   };
 
-  // Table columns
+  // Helper: column text-search filter dropdown
+  const getColumnSearchProps = (dataIndex: keyof JournalRecord, placeholder = 'Search') => ({
+    filterDropdown: ({ setSelectedKeys, selectedKeys, confirm, clearFilters }: any) => (
+      <div style={{ padding: 8, minWidth: 200 }}>
+        <Input
+          placeholder={placeholder}
+          value={selectedKeys[0] as string}
+          onChange={e => setSelectedKeys(e.target.value ? [e.target.value] : [])}
+          onPressEnter={() => confirm()}
+          style={{ marginBottom: 8, display: 'block' }}
+          autoFocus
+        />
+        <Space>
+          <Button
+            type="primary"
+            onClick={() => confirm()}
+            icon={<SearchOutlined />}
+            size="small"
+            style={{ width: 90 }}
+          >
+            Filter
+          </Button>
+          <Button
+            onClick={() => { clearFilters?.(); confirm(); }}
+            size="small"
+            style={{ width: 70 }}
+          >
+            Reset
+          </Button>
+        </Space>
+      </div>
+    ),
+    filterIcon: (filtered: boolean) => (
+      <SearchOutlined style={{ color: filtered ? REDWOOD.info : undefined }} />
+    ),
+    onFilter: (value: any, record: JournalRecord) =>
+      String(record[dataIndex] ?? '').toLowerCase().includes(String(value).toLowerCase()),
+  });
+
+  // Table columns — mirrors the JSON fields exactly
   const columns: ColumnsType<JournalRecord> = [
     {
-      title: 'Journal',
+      title: 'Batch Name',
+      dataIndex: 'batchName',
+      key: 'batchName',
+      width: 200,
+      fixed: 'left',
+      ellipsis: true,
+      render: (text, record) => (
+        <Tooltip title={record.batchDescription || text}>
+          <a style={{ color: REDWOOD.info, fontWeight: 500 }} onClick={() => openJournalTab(record)}>
+            {text || '-'}
+          </a>
+        </Tooltip>
+      ),
+      sorter: (a, b) => (a.batchName || '').localeCompare(b.batchName || ''),
+      ...getColumnSearchProps('batchName', 'Search batch name'),
+    },
+    {
+      title: 'Batch Description',
+      dataIndex: 'batchDescription',
+      key: 'batchDescription',
+      width: 240,
+      ellipsis: true,
+      render: (text) => <Tooltip title={text}><span>{text || '-'}</span></Tooltip>,
+      ...getColumnSearchProps('batchDescription', 'Search batch description'),
+    },
+    {
+      title: 'Journal Name',
       dataIndex: 'journalName',
       key: 'journalName',
       width: 200,
-      fixed: 'left',
+      ellipsis: true,
       render: (text, record) => (
         record.statusMeaning === 'Posted' ? (
-          <Tooltip title="Posted — view only">
-            <a
-              style={{ color: REDWOOD.neutral600, fontWeight: 500 }}
-              onClick={() => openJournalTab(record)}
-            >
+          <Tooltip title={`Posted — ${text}`}>
+            <a style={{ color: REDWOOD.neutral600, fontWeight: 500 }} onClick={() => openJournalTab(record)}>
               {text || '-'}
             </a>
           </Tooltip>
         ) : (
-          <a
-            style={{ color: REDWOOD.info, fontWeight: 500 }}
-            onClick={() => openJournalTab(record)}
-          >
+          <a style={{ color: REDWOOD.info, fontWeight: 500 }} onClick={() => openJournalTab(record)}>
             {text || '-'}
           </a>
         )
       ),
       sorter: (a, b) => (a.journalName || '').localeCompare(b.journalName || ''),
+      ...getColumnSearchProps('journalName', 'Search journal name'),
     },
     {
-      title: 'Journal Batch',
-      dataIndex: 'batchName',
-      key: 'batchName',
-      width: 250,
+      title: 'Journal Description',
+      dataIndex: 'journalDescription',
+      key: 'journalDescription',
+      width: 240,
       ellipsis: true,
-      render: (text, record) => {
-        const batchName = text || record.batchDescription || '-';
-        return (
-          <a
-            style={{ color: REDWOOD.info }}
-            onClick={() => openJournalTab(record)}
-          >
-            {batchName}
-          </a>
-        );
-      },
+      render: (text) => <Tooltip title={text}><span>{text || '-'}</span></Tooltip>,
+      ...getColumnSearchProps('journalDescription', 'Search journal description'),
     },
     {
-      title: 'Accounting Period',
+      title: 'Category',
+      dataIndex: 'category',
+      key: 'category',
+      width: 140,
+      render: (text) => text ? <Tag color="blue" style={{ fontSize: 11 }}>{text}</Tag> : '-',
+      filters: [...new Set(journals.map(j => j.category).filter(Boolean))].map(c => ({ text: c, value: c })),
+      onFilter: (value, record) => record.category === value,
+    },
+    {
+      title: 'Period',
       dataIndex: 'periodName',
       key: 'periodName',
-      width: 130,
+      width: 90,
       sorter: (a, b) => (a.periodName || '').localeCompare(b.periodName || ''),
+      filters: [...new Set(journals.map(j => j.periodName).filter(Boolean))].map(p => ({ text: p, value: p })),
+      onFilter: (value, record) => record.periodName === value,
     },
     {
       title: 'Source',
       dataIndex: 'source',
       key: 'source',
       width: 120,
+      ellipsis: true,
       render: (text) => text || '-',
+      filters: [...new Set(journals.map(j => j.source).filter(Boolean))].map(s => ({ text: s, value: s })),
+      onFilter: (value, record) => record.source === value,
     },
     {
-      title: 'Category',
-      dataIndex: 'category',
-      key: 'category',
-      width: 120,
-      render: (text) => text || '-',
-    },
-    {
-      title: 'Entered Debit',
-      dataIndex: 'enteredDebit',
-      key: 'enteredDebit',
-      width: 150,
-      align: 'right',
-      render: (value, record) => formatCurrency(value, record.currencyCode),
-      sorter: (a, b) => (a.enteredDebit || 0) - (b.enteredDebit || 0),
-    },
-    {
-      title: 'Entered Credit',
-      dataIndex: 'enteredCredit',
-      key: 'enteredCredit',
-      width: 150,
-      align: 'right',
-      render: (value, record) => formatCurrency(value, record.currencyCode),
-      sorter: (a, b) => (a.enteredCredit || 0) - (b.enteredCredit || 0),
-    },
-    {
-      title: 'Batch Status',
+      title: 'Status',
       dataIndex: 'statusMeaning',
       key: 'statusMeaning',
-      width: 120,
+      width: 100,
       render: (status) => getBatchStatusTag(status),
       filters: batchStatuses.filter(s => s !== 'All').map(s => ({ text: s, value: s })),
       onFilter: (value, record) => record.statusMeaning === value,
     },
     {
-      title: 'Currency',
+      title: 'Ccy',
       dataIndex: 'currencyCode',
       key: 'currencyCode',
-      width: 80,
+      width: 60,
       render: (text) => text || '-',
     },
     {
-      title: 'Ledger',
-      dataIndex: 'ledgerName',
-      key: 'ledgerName',
-      width: 150,
-      render: (text) => text || '-',
-    },
-    {
-      title: 'Approval Status',
-      dataIndex: 'approvalStatusMeaning',
-      key: 'approvalStatusMeaning',
+      title: 'Entered Dr',
+      dataIndex: 'enteredDebit',
+      key: 'enteredDebit',
       width: 130,
-      render: (status) => getApprovalStatusTag(status),
+      align: 'right',
+      render: (value, record) => formatCurrency(value, record.currencyCode),
+      sorter: (a, b) => (a.enteredDebit || 0) - (b.enteredDebit || 0),
+    },
+    {
+      title: 'Entered Cr',
+      dataIndex: 'enteredCredit',
+      key: 'enteredCredit',
+      width: 130,
+      align: 'right',
+      render: (value, record) => formatCurrency(value, record.currencyCode),
+      sorter: (a, b) => (a.enteredCredit || 0) - (b.enteredCredit || 0),
+    },
+    {
+      title: 'Acctg Date',
+      dataIndex: 'effectiveDate',
+      key: 'effectiveDate',
+      width: 100,
+      render: (text) => text || '-',
     },
     {
       title: 'Posted Date',
       dataIndex: 'postedDate',
       key: 'postedDate',
-      width: 110,
+      width: 100,
       render: (text) => text || '-',
+    },
+    {
+      title: 'Approval',
+      dataIndex: 'approvalStatusMeaning',
+      key: 'approvalStatusMeaning',
+      width: 110,
+      render: (status) => getApprovalStatusTag(status),
     },
     {
       title: 'JE Batch ID',
       dataIndex: 'jeBatchId',
       key: 'jeBatchId',
-      width: 120,
-      render: (text) => <Text code>{text || '-'}</Text>,
-    },
-    {
-      title: 'Batch ID',
-      dataIndex: 'batchId',
-      key: 'batchId',
-      width: 100,
-      render: (text) => <Text code>{text || '-'}</Text>,
-    },
-    {
-      title: 'Header ID',
-      dataIndex: 'headerId',
-      key: 'headerId',
-      width: 100,
-      render: (text) => <Text code>{text || '-'}</Text>,
+      width: 110,
+      render: (text) => <Text code style={{ fontSize: 11 }}>{text || '-'}</Text>,
     },
   ];
 
@@ -1259,6 +1409,153 @@ const ManageJournals: React.FC = () => {
   };
 
   // Open the bulk post modal for the selected journals
+  const promptDeleteBatch = (journal: JournalRecord) => {
+    setDeleteBatchTarget({
+      jeBatchId:    journal.jeBatchId,
+      batchId:      journal.batchId,
+      batchName:    journal.batchName,
+      statusMeaning: journal.statusMeaning,
+    });
+    setDeleteBatchTestResult(null);
+    setDeleteBatchModalVisible(true);
+  };
+
+  const handleDeleteBatch = async () => {
+    if (!deleteBatchTarget) return;
+    setDeleteBatchLoading(true);
+    try {
+      // Use jeBatchId — the DELETE handler queries by JE_BATCH_ID in RR_GL_JOURNAL_BATCHES
+      const url = `${APEX_DB_CONFIG.baseUrl}/gl/journals/batches/${deleteBatchTarget.jeBatchId}`;
+      const res = await fetch(url, { method: 'DELETE' });
+      const text = await res.text();
+      let data: any = {};
+      try { data = JSON.parse(text); } catch { data = { status: 'ERROR', message: text.substring(0, 200) }; }
+      if (res.ok && data.status === 'SUCCESS') {
+        message.success(`Batch "${deleteBatchTarget.batchName}" deleted (${data.headersDeleted} header(s), ${data.linesDeleted} line(s))`);
+        setDeleteBatchModalVisible(false);
+        setDeleteBatchTarget(null);
+        setDeleteBatchTestResult(null);
+        setSelectedRowKeys([]);
+        setOpenJournalTabs(prev => prev.filter(t => t.journal.jeBatchId !== deleteBatchTarget.jeBatchId));
+        setActiveTabKey('search');
+        setTimeout(() => {
+          const searchBtn = document.querySelector<HTMLElement>('.mj-search-btn');
+          if (searchBtn) searchBtn.click();
+        }, 100);
+      } else {
+        message.error(data.message || data.error || `HTTP ${res.status} — delete failed`);
+      }
+    } catch (e: any) {
+      message.error(`Delete failed: ${e.message}`);
+    } finally {
+      setDeleteBatchLoading(false);
+    }
+  };
+
+  // Export journals to Excel — fetches ALL pages fresh from the API
+  const handleExportExcel = async () => {
+    if (!lastBaseParamsRef.current) {
+      message.warning('No search results to export. Run a search first.');
+      return;
+    }
+
+    setExportLoading(true);
+    const key = 'excel-export';
+    message.loading({ content: 'Fetching all journals for export…', key, duration: 0 });
+
+    try {
+      const PAGE_SIZE = 1000;
+      let offset = 0;
+      let allRows: JournalRecord[] = [];
+      let hasMore = true;
+
+      while (hasMore) {
+        const params = new URLSearchParams(lastBaseParamsRef.current.toString());
+        params.set('offset', offset.toString());
+        params.set('limit', PAGE_SIZE.toString());
+        const url = `${API_BASE_URL}/headers?${params.toString()}`;
+
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const text = await res.text();
+        if (text.trimStart().startsWith('<')) throw new Error('ORDS returned HTML — endpoint error');
+        const data: ApiResponse = JSON.parse(text);
+        if (!data.success) throw new Error(data.error || 'API returned success=false');
+
+        const items: JournalRecord[] = (data.items || []).map((item: any, idx: number) => ({
+          key: `export-${offset}-${idx}`,
+          batchId: item.batchId, jeBatchId: item.jeBatchId,
+          batchName: item.batchName, batchDescription: item.batchDescription || '',
+          source: item.source || '', status: item.status || '',
+          statusMeaning: item.statusMeaning || '', approvalStatusMeaning: item.approvalStatusMeaning || '',
+          postedDate: item.postedDate || null, headerId: item.headerId, jeHeaderId: item.jeHeaderId,
+          journalName: item.journalName || '', journalDescription: item.journalDescription || '',
+          periodName: item.periodName || '', category: item.category || '',
+          ledgerName: item.ledgerName || '', legalEntityName: item.legalEntityName || '',
+          currencyCode: item.currencyCode || '', conversionRate: item.conversionRate ?? 1,
+          conversionRateType: item.conversionRateType || '',
+          enteredDebit: item.enteredDebit ?? 0, enteredCredit: item.enteredCredit ?? 0,
+          accountedDebit: item.accountedDebit ?? 0, accountedCredit: item.accountedCredit ?? 0,
+          effectiveDate: item.effectiveDate || '', externalReference: item.externalReference || '',
+          creationDate: item.creationDate || '', lines: [],
+        }));
+
+        allRows = [...allRows, ...items];
+        message.loading({ content: `Fetching… ${allRows.length} journals loaded`, key, duration: 0 });
+
+        if (items.length < PAGE_SIZE) {
+          hasMore = false;
+        } else {
+          offset += PAGE_SIZE;
+        }
+      }
+
+      if (allRows.length === 0) {
+        message.warning({ content: 'No data returned from API.', key });
+        return;
+      }
+
+      const rows = allRows.map(j => ({
+        'JE Batch ID':         j.jeBatchId,
+        'Batch Name':          j.batchName,
+        'Batch Description':   j.batchDescription,
+        'Status':              j.statusMeaning,
+        'Source':              j.source,
+        'Period':              j.periodName,
+        'Ledger':              j.ledgerName,
+        'Journal Name':        j.journalName,
+        'Journal Description': j.journalDescription,
+        'Category':            j.category,
+        'Currency':            j.currencyCode,
+        'Conversion Rate':     j.conversionRate,
+        'Accounting Date':     j.effectiveDate,
+        'Posted Date':         j.postedDate || '',
+        'Creation Date':       j.creationDate,
+        'Entered Debit':       j.enteredDebit,
+        'Entered Credit':      j.enteredCredit,
+        'Accounted Debit':     j.accountedDebit,
+        'Accounted Credit':    j.accountedCredit,
+        'Legal Entity':        j.legalEntityName,
+        'External Reference':  j.externalReference,
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const colWidths = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 14) }));
+      ws['!cols'] = colWidths;
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Journals');
+      const period = (lastBaseParamsRef.current.get('period') || 'export').replace(/[^a-zA-Z0-9-]/g, '_');
+      const fileName = `Journals_${period}_${dayjs().format('YYYYMMDD_HHmmss')}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+      message.success({ content: `Exported ${allRows.length} journals to ${fileName}`, key, duration: 4 });
+    } catch (e: any) {
+      message.error({ content: `Export failed: ${e.message}`, key, duration: 5 });
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
   const handleOpenBulkPost = () => {
     const selectedJournals = journals.filter(j => selectedRowKeys.includes(j.key));
     const items: BulkPostItem[] = selectedJournals.map(j => ({
@@ -1354,7 +1651,7 @@ const ManageJournals: React.FC = () => {
   };
 
   // Render Journal Edit Panel (for tab content)
-  const renderJournalEditPanel = (journal: JournalRecord, tabKey: string) => {
+  const renderJournalEditPanel = (journal: JournalRecord, tabKey: string, sourceUrl?: string) => {
     const formatNumber = (num: number | null | undefined) => {
       if (num === null || num === undefined) return '';
       return num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1374,8 +1671,8 @@ const ManageJournals: React.FC = () => {
       journalDescription: journal.journalDescription || '',
       category: journal.category || '',
       currencyCode: journal.currencyCode || '',
-      conversionRate: 1,
-      conversionRateType: 'User',
+      conversionRate: (journal as any).conversionRate || 1,
+      conversionRateType: (journal as any).conversionRateType || 'User',
     };
     const isSaving = tabSaving[tabKey] || false;
     const isPosting = tabPosting[tabKey] || false;
@@ -1739,7 +2036,7 @@ const ManageJournals: React.FC = () => {
                             ))}
                           </Select>
                         ) : (
-                          <Text style={{ fontSize: 13 }}>User</Text>
+                          <Text style={{ fontSize: 13 }}>{headerFields.conversionRateType || journal.conversionRateType || 'User'}</Text>
                         )}
                       </Col>
 
@@ -1755,16 +2052,17 @@ const ManageJournals: React.FC = () => {
                             onChange={v => handleHeaderFieldChange('conversionRate', v || 1)}
                           />
                         ) : (
-                          <Text style={{ fontSize: 13 }}>1</Text>
+                          <Text style={{ fontSize: 13 }}>{headerFields.conversionRate ?? journal.conversionRate ?? 1}</Text>
                         )}
                       </Col>
 
                       <Col span={10}><Text type="secondary" style={{ fontSize: 13 }}>Inverse Rate</Text></Col>
                       <Col span={14}>
                         <Text style={{ fontSize: 13 }}>
-                          {isEditable && headerFields.conversionRate > 0
-                            ? (1 / headerFields.conversionRate).toFixed(6)
-                            : '1'}
+                          {(() => {
+                            const rate = headerFields.conversionRate ?? journal.conversionRate;
+                            return rate && rate > 0 ? (1 / rate).toFixed(6) : '1';
+                          })()}
                         </Text>
                       </Col>
 
@@ -1974,7 +2272,7 @@ const ManageJournals: React.FC = () => {
                             ))}
                           </Select>
                         ) : (
-                          <Text style={{ fontSize: 13 }}>User</Text>
+                          <Text style={{ fontSize: 13 }}>{headerFields.conversionRateType || journal.conversionRateType || 'User'}</Text>
                         )}
                       </Col>
 
@@ -1990,16 +2288,17 @@ const ManageJournals: React.FC = () => {
                             onChange={v => handleHeaderFieldChange('conversionRate', v || 1)}
                           />
                         ) : (
-                          <Text style={{ fontSize: 13 }}>1</Text>
+                          <Text style={{ fontSize: 13 }}>{headerFields.conversionRate ?? journal.conversionRate ?? 1}</Text>
                         )}
                       </Col>
 
                       <Col span={10}><Text type="secondary" style={{ fontSize: 13 }}>Inverse Rate</Text></Col>
                       <Col span={14}>
                         <Text style={{ fontSize: 13 }}>
-                          {isEditable && headerFields.conversionRate > 0
-                            ? (1 / headerFields.conversionRate).toFixed(6)
-                            : '1'}
+                          {(() => {
+                            const rate = headerFields.conversionRate ?? journal.conversionRate;
+                            return rate && rate > 0 ? (1 / rate).toFixed(6) : '1';
+                          })()}
                         </Text>
                       </Col>
                     </Row>
@@ -2141,6 +2440,16 @@ const ManageJournals: React.FC = () => {
               >
                 {journal.statusMeaning}
               </Tag>
+              <Tooltip title="View all API calls for this journal">
+                <Button
+                  size="small"
+                  icon={<ApiOutlined />}
+                  style={{ fontSize: 11, color: REDWOOD.info, borderColor: REDWOOD.info }}
+                  onClick={() => openJournalApiModal(tabKey)}
+                >
+                  APIs
+                </Button>
+              </Tooltip>
             </Space>
             <Space size="small">
               {/* Save — only for Manual unposted journals */}
@@ -2291,7 +2600,16 @@ const ManageJournals: React.FC = () => {
             </Space>
             <Space size="small">
               <Button size="small" icon={<PlusOutlined />} />
-              <Button size="small" icon={<DeleteOutlined />} />
+              {journal.statusMeaning !== 'Posted' && (
+                <Tooltip title="Delete this batch (lines + headers + batch)">
+                  <Button
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={() => promptDeleteBatch(journal)}
+                  />
+                </Tooltip>
+              )}
               <Dropdown menu={{ items: [{ key: 'copy', label: 'Copy' }, { key: 'reverse', label: 'Reverse' }, { key: 'delete', label: 'Delete' }] }}>
                 <Button size="small" style={{ fontSize: 10 }}>
                   Journal Actions <DownOutlined />
@@ -2415,7 +2733,7 @@ const ManageJournals: React.FC = () => {
               },
               { title: 'Currency', dataIndex: 'currency', key: 'currency', width: 70 },
               {
-                title: 'Entered Dr',
+                title: `Entered Dr (${journal.currencyCode || headerFields.currencyCode || 'Entered'})`,
                 dataIndex: 'enteredDr',
                 key: 'enteredDr',
                 width: isEditable ? 120 : 100,
@@ -2437,7 +2755,7 @@ const ManageJournals: React.FC = () => {
                 },
               },
               {
-                title: 'Entered Cr',
+                title: `Entered Cr (${journal.currencyCode || headerFields.currencyCode || 'Entered'})`,
                 dataIndex: 'enteredCr',
                 key: 'enteredCr',
                 width: isEditable ? 120 : 100,
@@ -2458,8 +2776,8 @@ const ManageJournals: React.FC = () => {
                   return v > 0 ? formatNumber(v) : '';
                 },
               },
-              { title: 'Acc Dr', dataIndex: 'accountedDr', key: 'accountedDr', width: 90, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
-              { title: 'Acc Cr', dataIndex: 'accountedCr', key: 'accountedCr', width: 90, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
+              { title: `Acc Dr (${selectedLedger?.currency_code || 'Accounted'})`, dataIndex: 'accountedDr', key: 'accountedDr', width: 90, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
+              { title: `Acc Cr (${selectedLedger?.currency_code || 'Accounted'})`, dataIndex: 'accountedCr', key: 'accountedCr', width: 90, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
               ...(!isEditable && (journal.source || '').toLowerCase() === 'payables' ? [{
                 title: 'Transaction',
                 key: 'viewTransaction',
@@ -2645,17 +2963,23 @@ const ManageJournals: React.FC = () => {
               key="search"
               style={{ borderRadius: 8 }}
             >
+              <style>{`.mj-search-form .ant-form-item { margin-bottom: 8px; } .mj-search-form .ant-form-item-label { padding-bottom: 0; }`}</style>
               <Form
                 form={form}
                 layout="horizontal"
-                labelCol={{ span: 8 }}
-                wrapperCol={{ span: 16 }}
+                labelCol={{ span: 7 }}
+                wrapperCol={{ span: 17 }}
+                size="small"
+                className="mj-search-form"
+                style={{ fontSize: 12 }}
                 initialValues={{
                   journalOperator: 'Starts with',
                   batchOperator: 'Starts with',
+                  batchDescOperator: 'Contains',
+                  journalNameOperator: 'Starts with',
                 }}
               >
-                <Row gutter={24}>
+                <Row gutter={12}>
                   <Col span={12}>
                     {/* Ledger - Required */}
                     <Form.Item
@@ -2692,16 +3016,30 @@ const ManageJournals: React.FC = () => {
                       </Select>
                     </Form.Item>
 
-                    {/* Journal Batch */}
-                    <Form.Item label="Journal Batch">
+                    {/* Batch Name */}
+                    <Form.Item label="Batch Name">
                       <Space.Compact style={{ width: '100%' }}>
                         <Form.Item name="batchOperator" noStyle>
-                          <Select style={{ width: 120 }}>
+                          <Select style={{ width: 105 }}>
                             {operators.map(op => <Option key={op} value={op}>{op}</Option>)}
                           </Select>
                         </Form.Item>
                         <Form.Item name="journalBatch" noStyle>
                           <Input style={{ flex: 1 }} placeholder="Enter batch name" />
+                        </Form.Item>
+                      </Space.Compact>
+                    </Form.Item>
+
+                    {/* Batch Description */}
+                    <Form.Item label="Batch Desc">
+                      <Space.Compact style={{ width: '100%' }}>
+                        <Form.Item name="batchDescOperator" noStyle>
+                          <Select style={{ width: 105 }}>
+                            {operators.map(op => <Option key={op} value={op}>{op}</Option>)}
+                          </Select>
+                        </Form.Item>
+                        <Form.Item name="batchDescription" noStyle>
+                          <Input style={{ flex: 1 }} placeholder="Enter batch description" />
                         </Form.Item>
                       </Space.Compact>
                     </Form.Item>
@@ -2751,11 +3089,25 @@ const ManageJournals: React.FC = () => {
                   </Col>
 
                   <Col span={12}>
+                    {/* Journal Name */}
+                    <Form.Item label="Journal Name">
+                      <Space.Compact style={{ width: '100%' }}>
+                        <Form.Item name="journalNameOperator" noStyle>
+                          <Select style={{ width: 105 }}>
+                            {operators.map(op => <Option key={op} value={op}>{op}</Option>)}
+                          </Select>
+                        </Form.Item>
+                        <Form.Item name="journalName" noStyle>
+                          <Input style={{ flex: 1 }} placeholder="Enter journal name" />
+                        </Form.Item>
+                      </Space.Compact>
+                    </Form.Item>
+
                     {/* Journal Description */}
                     <Form.Item label="Journal Desc">
                       <Space.Compact style={{ width: '100%' }}>
                         <Form.Item name="journalOperator" noStyle>
-                          <Select style={{ width: 120 }}>
+                          <Select style={{ width: 105 }}>
                             {operators.map(op => <Option key={op} value={op}>{op}</Option>)}
                           </Select>
                         </Form.Item>
@@ -2763,6 +3115,17 @@ const ManageJournals: React.FC = () => {
                           <Input style={{ flex: 1 }} placeholder="Enter description" />
                         </Form.Item>
                       </Space.Compact>
+                    </Form.Item>
+
+                    {/* Category */}
+                    <Form.Item label="Category" name="category">
+                      <Select placeholder="Select category" allowClear showSearch optionFilterProp="children">
+                        {glCategories.map(c => (
+                          <Option key={c.jeCategoryName} value={c.userJeCategoryName || c.jeCategoryName}>
+                            {c.userJeCategoryName || c.jeCategoryName}
+                          </Option>
+                        ))}
+                      </Select>
                     </Form.Item>
 
                     {/* Source */}
@@ -2782,6 +3145,7 @@ const ManageJournals: React.FC = () => {
                 {/* Action Buttons */}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16, gap: 8 }}>
                   <Button
+                    className="mj-search-btn"
                     icon={<SearchOutlined />}
                     onClick={handleSearch}
                     loading={loading}
@@ -2795,11 +3159,19 @@ const ManageJournals: React.FC = () => {
                     Save...
                   </Button>
                   <Button
-                    icon={<BugOutlined />}
-                    onClick={() => setDebugModalVisible(true)}
-                    disabled={debugLogs.length === 0}
+                    icon={<ExportOutlined />}
+                    onClick={handleExportExcel}
+                    loading={exportLoading}
+                    disabled={!lastBaseParamsRef.current}
+                    style={lastBaseParamsRef.current ? { background: '#1D7B4D', borderColor: '#1D7B4D', color: '#fff' } : {}}
                   >
-                    Debug Log ({debugLogs.length})
+                    Export Excel {journals.length > 0 ? `(${journals.length})` : ''}
+                  </Button>
+                  <Button
+                    icon={<ApiOutlined />}
+                    onClick={() => { setApiTestResult(null); setDebugModalVisible(true); }}
+                  >
+                    Test API
                   </Button>
                 </div>
               </Form>
@@ -2869,8 +3241,20 @@ const ManageJournals: React.FC = () => {
                     Edit
                   </Button>
                 </Tooltip>
-                <Tooltip title="Delete">
-                  <Button size="small" icon={<DeleteOutlined />} disabled={selectedRowKeys.length === 0} />
+                <Tooltip title="Delete selected batch (only unposted)">
+                  <Button
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                    disabled={
+                      selectedRowKeys.length !== 1 ||
+                      journals.find(j => j.key === selectedRowKeys[0])?.statusMeaning === 'Posted'
+                    }
+                    onClick={() => {
+                      const j = journals.find(x => x.key === selectedRowKeys[0]);
+                      if (j) promptDeleteBatch(j);
+                    }}
+                  />
                 </Tooltip>
               </Space>
               <Space size="small">
@@ -2947,11 +3331,54 @@ const ManageJournals: React.FC = () => {
               </Space>
             </div>
 
+            {/* Quick filter bar */}
+            {journals.length > 0 && (
+              <div style={{
+                padding: '6px 12px',
+                borderBottom: `1px solid ${REDWOOD.neutral200}`,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                background: '#fff',
+              }}>
+                <FilterOutlined style={{ color: REDWOOD.neutral600, fontSize: 12 }} />
+                <Input
+                  size="small"
+                  placeholder="Filter results — type to search across Batch Name, Journal Name, Description, Category, Source…"
+                  prefix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />}
+                  allowClear
+                  value={gridFilter}
+                  onChange={e => setGridFilter(e.target.value)}
+                  style={{ maxWidth: 520, fontSize: 12 }}
+                />
+                {gridFilter && (
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    {(() => {
+                      const q = gridFilter.toLowerCase();
+                      const count = journals.filter(j =>
+                        [j.batchName, j.batchDescription, j.journalName, j.journalDescription,
+                         j.category, j.source, j.statusMeaning, j.periodName, j.ledgerName]
+                        .some(v => (v || '').toLowerCase().includes(q))
+                      ).length;
+                      return `${count} of ${journals.length} shown`;
+                    })()}
+                  </Text>
+                )}
+              </div>
+            )}
+
             {/* Table */}
             <Table
               rowSelection={rowSelection}
               columns={columns}
-              dataSource={journals}
+              dataSource={gridFilter
+                ? journals.filter(j => {
+                    const q = gridFilter.toLowerCase();
+                    return [j.batchName, j.batchDescription, j.journalName, j.journalDescription,
+                            j.category, j.source, j.statusMeaning, j.periodName, j.ledgerName]
+                      .some(v => (v || '').toLowerCase().includes(q));
+                  })
+                : journals}
               loading={loading}
               pagination={{
                 total: totalCount,
@@ -3013,7 +3440,7 @@ const ManageJournals: React.FC = () => {
                 </span>
               ),
               closable: true,
-              children: renderJournalEditPanel(tab.journal, tab.key),
+              children: renderJournalEditPanel(tab.journal, tab.key, tab.sourceUrl),
             })),
           ]}
         />
@@ -3563,85 +3990,337 @@ const ManageJournals: React.FC = () => {
         );
       })()}
 
-      {/* Debug Log Modal */}
+      {/* Delete Batch Confirmation Modal */}
+      <Modal
+        title={<Space><DeleteOutlined style={{ color: '#ff4d4f' }} /><span>Delete Journal Batch</span></Space>}
+        open={deleteBatchModalVisible}
+        onCancel={() => { setDeleteBatchModalVisible(false); setDeleteBatchTarget(null); setDeleteBatchTestResult(null); }}
+        footer={
+          <Space>
+            <Button onClick={() => { setDeleteBatchModalVisible(false); setDeleteBatchTarget(null); setDeleteBatchTestResult(null); }}>
+              Cancel
+            </Button>
+            <Button
+              danger
+              type="primary"
+              icon={<DeleteOutlined />}
+              loading={deleteBatchLoading}
+              onClick={handleDeleteBatch}
+            >
+              Delete Batch
+            </Button>
+          </Space>
+        }
+        width={600}
+      >
+        {deleteBatchTarget && (() => {
+          const deleteUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/batches/${deleteBatchTarget.jeBatchId}`;
+
+          const runTest = async () => {
+            setDeleteBatchTestResult({ loading: true });
+            try {
+              // Try a DELETE with a dry-run by checking the endpoint exists via a dummy fetch
+              // We send DELETE but catch the response to show what ORDS would return
+              const res = await fetch(deleteUrl, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+              });
+              const text = await res.text();
+              let parsed: any;
+              try { parsed = JSON.parse(text); } catch { parsed = null; }
+              const preview = parsed
+                ? JSON.stringify(parsed, null, 2)
+                : text.substring(0, 400);
+              setDeleteBatchTestResult({ loading: false, status: res.status, body: preview });
+              // If test actually deleted — refresh and close
+              if (res.ok && parsed?.status === 'SUCCESS') {
+                message.success(`Batch "${deleteBatchTarget.batchName}" deleted via test (${parsed.headersDeleted} headers, ${parsed.linesDeleted} lines)`);
+                setDeleteBatchModalVisible(false);
+                setDeleteBatchTarget(null);
+                setDeleteBatchTestResult(null);
+                setSelectedRowKeys([]);
+                setOpenJournalTabs(prev => prev.filter(t => t.journal.jeBatchId !== deleteBatchTarget.jeBatchId));
+                setActiveTabKey('search');
+                setTimeout(() => { const btn = document.querySelector<HTMLElement>('.mj-search-btn'); if (btn) btn.click(); }, 100);
+              }
+            } catch (e: any) {
+              setDeleteBatchTestResult({ loading: false, error: e.message });
+            }
+          };
+
+          return (
+            <div>
+              {/* Warning */}
+              <div style={{ background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 8, padding: '10px 14px', marginBottom: 16 }}>
+                <Typography.Text type="danger" strong>⚠ This action is irreversible. </Typography.Text>
+                <Typography.Text>All journal lines and headers belonging to this batch will be permanently deleted.</Typography.Text>
+              </div>
+
+              {/* Batch details */}
+              <div style={{ background: '#f7f7f7', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 13 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '4px 8px' }}>
+                  <Typography.Text type="secondary">Batch Name</Typography.Text>
+                  <Typography.Text strong>{deleteBatchTarget.batchName}</Typography.Text>
+                  <Typography.Text type="secondary">JE Batch ID</Typography.Text>
+                  <Typography.Text code>{deleteBatchTarget.jeBatchId}</Typography.Text>
+                  <Typography.Text type="secondary">Batch Sync ID</Typography.Text>
+                  <Typography.Text code>{deleteBatchTarget.batchId}</Typography.Text>
+                  <Typography.Text type="secondary">Status</Typography.Text>
+                  <Typography.Text>{deleteBatchTarget.statusMeaning}</Typography.Text>
+                </div>
+              </div>
+
+              {/* API Endpoint */}
+              <div style={{ marginBottom: 12 }}>
+                <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                  API Endpoint
+                </Typography.Text>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Tag color="red" style={{ fontFamily: 'monospace', fontSize: 11 }}>DELETE</Tag>
+                  <code style={{
+                    flex: 1, fontSize: 11, background: '#f5f5f5', border: '1px solid #d9d9d9',
+                    borderRadius: 4, padding: '4px 8px', wordBreak: 'break-all',
+                  }}>
+                    {deleteUrl}
+                  </code>
+                  <Button
+                    size="small"
+                    icon={<CopyOutlined />}
+                    onClick={() => { navigator.clipboard.writeText(deleteUrl); message.success('URL copied'); }}
+                  />
+                </div>
+                <Typography.Text type="secondary" style={{ fontSize: 11, marginTop: 4, display: 'block' }}>
+                  Cascades: RR_GL_JE_LINES_ALL → RR_GL_JE_HEADERS → RR_GL_JOURNAL_BATCHES (by JE_BATCH_ID = {deleteBatchTarget.jeBatchId})
+                </Typography.Text>
+              </div>
+
+              {/* Test button */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: deleteBatchTestResult ? 10 : 0 }}>
+                <Button
+                  size="small"
+                  icon={<ApiOutlined />}
+                  loading={deleteBatchTestResult?.loading}
+                  onClick={runTest}
+                  style={{ borderRadius: 6 }}
+                >
+                  Test DELETE Endpoint
+                </Button>
+                {deleteBatchTestResult && !deleteBatchTestResult.loading && deleteBatchTestResult.status && (
+                  <Tag color={deleteBatchTestResult.status === 200 ? 'green' : 'red'}>
+                    HTTP {deleteBatchTestResult.status}
+                  </Tag>
+                )}
+                <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                  Sends the actual DELETE request — batch will be removed if successful.
+                </Typography.Text>
+              </div>
+
+              {/* Test result */}
+              {deleteBatchTestResult && !deleteBatchTestResult.loading && (
+                <div style={{ marginTop: 8 }}>
+                  {deleteBatchTestResult.error ? (
+                    <div style={{ background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 6, padding: 8, fontSize: 12 }}>
+                      <Typography.Text type="danger">Error: {deleteBatchTestResult.error}</Typography.Text>
+                    </div>
+                  ) : (
+                    <pre style={{
+                      fontSize: 11, background: '#f6ffed', border: '1px solid #b7eb8f',
+                      borderRadius: 6, padding: 8, maxHeight: 140, overflow: 'auto', margin: 0,
+                    }}>
+                      {deleteBatchTestResult.body}
+                    </pre>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </Modal>
+
+      {/* Search API Test Modal */}
       <Modal
         title={
           <Space>
-            <BugOutlined style={{ color: REDWOOD.warning }} />
-            <span>Debug Log - API Calls</span>
+            <ApiOutlined style={{ color: REDWOOD.info }} />
+            <span>Search API — Test Endpoint</span>
           </Space>
         }
         open={debugModalVisible}
-        onCancel={() => setDebugModalVisible(false)}
+        onCancel={() => { setDebugModalVisible(false); setApiTestResult(null); }}
         footer={[
-          <Button key="clear" onClick={() => setDebugLogs([])}>
-            Clear Logs
+          <Button key="clear" onClick={() => { setDebugLogs([]); setApiTestResult(null); }}>
+            Clear
           </Button>,
-          <Button key="close" type="primary" onClick={() => setDebugModalVisible(false)}>
+          <Button key="close" type="primary" onClick={() => { setDebugModalVisible(false); setApiTestResult(null); }}>
             Close
           </Button>,
         ]}
-        width={900}
+        width={960}
+        style={{ top: 40 }}
       >
-        <div style={{ maxHeight: 500, overflow: 'auto' }}>
-          {debugLogs.length === 0 ? (
-            <Text type="secondary">No logs yet. Run a search to see API calls.</Text>
-          ) : (
-            debugLogs.map((log, index) => (
-              <div
-                key={index}
-                style={{
-                  padding: '8px 12px',
-                  marginBottom: 8,
-                  borderRadius: 6,
-                  background:
-                    log.type === 'error' ? '#fff2f0' :
-                    log.type === 'request' ? '#e6f7ff' :
-                    log.type === 'response' ? '#f6ffed' :
-                    '#fafafa',
-                  border: `1px solid ${
-                    log.type === 'error' ? '#ffccc7' :
-                    log.type === 'request' ? '#91d5ff' :
-                    log.type === 'response' ? '#b7eb8f' :
-                    '#d9d9d9'
-                  }`,
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <Tag
-                    color={
-                      log.type === 'error' ? 'error' :
-                      log.type === 'request' ? 'processing' :
-                      log.type === 'response' ? 'success' :
-                      'default'
-                    }
-                  >
-                    {log.type.toUpperCase()}
-                  </Tag>
-                  <Text type="secondary" style={{ fontSize: 11 }}>
-                    {new Date(log.timestamp).toLocaleTimeString()}
-                  </Text>
+        {(() => {
+          const testUrl = buildSearchUrl(0, 500);
+          const params = new URLSearchParams(testUrl.split('?')[1] || '');
+          const paramRows: { key: string; value: string }[] = [];
+          params.forEach((v, k) => paramRows.push({ key: k, value: v }));
+
+          const runTest = async () => {
+            setApiTestResult({ loading: true });
+            try {
+              const res = await fetch(testUrl);
+              const text = await res.text();
+              let parsed: any;
+              try { parsed = JSON.parse(text); } catch { parsed = null; }
+              const preview = parsed
+                ? JSON.stringify({ success: parsed.success, totalCount: parsed.totalCount, itemsReturned: (parsed.items || []).length, firstItem: (parsed.items || [])[0] || null, error: parsed.error }, null, 2)
+                : text.substring(0, 800);
+              setApiTestResult({ loading: false, status: res.status, body: preview });
+            } catch (e: any) {
+              setApiTestResult({ loading: false, error: e.message });
+            }
+          };
+
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+              {/* ── Full URL ── */}
+              <div style={{ background: '#f0f5ff', border: '1px solid #adc6ff', borderRadius: 8, padding: '12px 14px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <Space>
+                    <Tag color="blue" style={{ fontFamily: 'monospace', fontWeight: 600 }}>GET</Tag>
+                    <Text strong style={{ fontSize: 13 }}>Search API Endpoint</Text>
+                  </Space>
+                  <Space>
+                    <Button
+                      size="small"
+                      icon={<CopyOutlined />}
+                      onClick={() => { navigator.clipboard.writeText(testUrl); message.success('URL copied'); }}
+                    >
+                      Copy URL
+                    </Button>
+                    <Button
+                      size="small"
+                      type="primary"
+                      icon={<SearchOutlined />}
+                      loading={apiTestResult?.loading}
+                      onClick={runTest}
+                    >
+                      Test
+                    </Button>
+                  </Space>
                 </div>
-                <Text strong style={{ display: 'block', marginBottom: 4 }}>{log.message}</Text>
-                {log.data && (
-                  <pre
-                    style={{
-                      margin: 0,
-                      padding: 8,
-                      background: '#f5f5f5',
-                      borderRadius: 4,
-                      fontSize: 11,
-                      overflow: 'auto',
-                      maxHeight: 200,
-                    }}
-                  >
-                    {typeof log.data === 'string' ? log.data : JSON.stringify(log.data, null, 2)}
-                  </pre>
-                )}
+                <div style={{
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  wordBreak: 'break-all',
+                  background: '#fff',
+                  border: '1px solid #d6e4ff',
+                  borderRadius: 4,
+                  padding: '8px 10px',
+                  userSelect: 'all',
+                }}>
+                  {testUrl}
+                </div>
               </div>
-            ))
-          )}
-        </div>
+
+              {/* ── Parameters table ── */}
+              <div>
+                <Text strong style={{ fontSize: 12, marginBottom: 6, display: 'block' }}>
+                  Query Parameters ({paramRows.length})
+                </Text>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: '#fafafa' }}>
+                      <th style={{ textAlign: 'left', padding: '5px 10px', border: '1px solid #f0f0f0', width: '35%' }}>Parameter</th>
+                      <th style={{ textAlign: 'left', padding: '5px 10px', border: '1px solid #f0f0f0' }}>Value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paramRows.map(({ key, value }) => (
+                      <tr key={key}>
+                        <td style={{ padding: '5px 10px', border: '1px solid #f0f0f0', fontFamily: 'monospace', color: '#0572CE' }}>{key}</td>
+                        <td style={{ padding: '5px 10px', border: '1px solid #f0f0f0', fontFamily: 'monospace' }}>{decodeURIComponent(value)}</td>
+                      </tr>
+                    ))}
+                    {paramRows.length === 0 && (
+                      <tr>
+                        <td colSpan={2} style={{ padding: '8px 10px', color: '#aaa', fontStyle: 'italic' }}>
+                          Fill in the search form fields above, then re-open this dialog to see the parameters.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* ── Test result ── */}
+              {apiTestResult && !apiTestResult.loading && (
+                <div style={{
+                  background: apiTestResult.error || (apiTestResult.status && apiTestResult.status >= 400) ? '#fff2f0' : '#f6ffed',
+                  border: `1px solid ${apiTestResult.error || (apiTestResult.status && apiTestResult.status >= 400) ? '#ffccc7' : '#b7eb8f'}`,
+                  borderRadius: 8,
+                  padding: '12px 14px',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <Space>
+                      <Text strong style={{ fontSize: 13 }}>Test Result</Text>
+                      {apiTestResult.status && (
+                        <Tag color={apiTestResult.status < 300 ? 'success' : 'error'}>
+                          HTTP {apiTestResult.status}
+                        </Tag>
+                      )}
+                    </Space>
+                    {apiTestResult.error && <Tag color="error">Error</Tag>}
+                  </div>
+                  <pre style={{ margin: 0, padding: 8, background: '#fff', borderRadius: 4, fontSize: 11, overflow: 'auto', maxHeight: 300 }}>
+                    {apiTestResult.error || apiTestResult.body}
+                  </pre>
+                </div>
+              )}
+              {apiTestResult?.loading && (
+                <div style={{ textAlign: 'center', padding: 16 }}>
+                  <Spin /> <Text type="secondary" style={{ marginLeft: 8 }}>Calling API…</Text>
+                </div>
+              )}
+
+              {/* ── Debug logs (collapsed, for advanced use) ── */}
+              {debugLogs.length > 0 && (
+                <Collapse ghost size="small">
+                  <Panel header={<Text type="secondary" style={{ fontSize: 12 }}>Raw Debug Logs ({debugLogs.length} entries)</Text>} key="logs">
+                    <div style={{ maxHeight: 300, overflow: 'auto' }}>
+                      {debugLogs.map((log, index) => (
+                        <div
+                          key={index}
+                          style={{
+                            padding: '6px 10px',
+                            marginBottom: 6,
+                            borderRadius: 4,
+                            background: log.type === 'error' ? '#fff2f0' : log.type === 'request' ? '#e6f7ff' : log.type === 'response' ? '#f6ffed' : '#fafafa',
+                            border: `1px solid ${log.type === 'error' ? '#ffccc7' : log.type === 'request' ? '#91d5ff' : log.type === 'response' ? '#b7eb8f' : '#d9d9d9'}`,
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <Tag color={log.type === 'error' ? 'error' : log.type === 'request' ? 'processing' : log.type === 'response' ? 'success' : 'default'} style={{ fontSize: 10 }}>
+                              {log.type.toUpperCase()}
+                            </Tag>
+                            <Text type="secondary" style={{ fontSize: 10 }}>{new Date(log.timestamp).toLocaleTimeString()}</Text>
+                          </div>
+                          <Text strong style={{ display: 'block', marginBottom: 2, fontSize: 12 }}>{log.message}</Text>
+                          {log.data && (
+                            <pre style={{ margin: 0, padding: 6, background: '#f5f5f5', borderRadius: 4, fontSize: 10, overflow: 'auto', maxHeight: 150 }}>
+                              {typeof log.data === 'string' ? log.data : JSON.stringify(log.data, null, 2)}
+                            </pre>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </Panel>
+                </Collapse>
+              )}
+
+            </div>
+          );
+        })()}
       </Modal>
 
       {/* ── GL Journal Entry View Modal ──────────────────────────────────── */}
@@ -3836,6 +4515,108 @@ const ManageJournals: React.FC = () => {
           )
         ) : null}
       </Modal>
+
+      {/* Journal APIs Modal — per-journal debug popup */}
+      {(() => {
+        const tab = openJournalTabs.find(t => t.key === journalApiTabKey);
+        if (!tab) return null;
+        const j = tab.journal;
+        const JOURNAL_APIS = [
+          {
+            name: 'Search Journals (loaded this record)',
+            method: 'GET',
+            url: tab.sourceUrl || `${APEX_DB_CONFIG.baseUrl}/gl/journals/headers?ledger_name=${encodeURIComponent(j.ledgerName || '')}`,
+            description: `Returned this journal. conversionRate in response: ${j.conversionRate ?? '⚠ undefined — run 32_fix_search_journals_add_conv_rate.sql'}`,
+          },
+          {
+            name: 'Get Journal Lines',
+            method: 'GET',
+            url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/${j.jeHeaderId}/lines`,
+            description: `Lines for jeHeaderId=${j.jeHeaderId}. Should include conversionRate per line.`,
+          },
+          {
+            name: 'Update Journal (Save)',
+            method: 'PUT',
+            url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/${j.jeHeaderId}`,
+            description: `PUT body: { jeBatchId, batchDescription, journalDescription, conversionRate, lines:[...] }`,
+          },
+          {
+            name: 'Post Journal Batch',
+            method: 'PUT',
+            url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/${j.jeBatchId}/post`,
+            description: `Posts batch jeBatchId=${j.jeBatchId}`,
+          },
+          {
+            name: 'Delete Journal Batch',
+            method: 'DELETE',
+            url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/batches/${j.batchId || j.jeBatchId}`,
+            description: `Cascades: lines → headers → batch. Blocked if status=Posted.`,
+          },
+        ];
+        return (
+          <Modal
+            title={
+              <Space>
+                <ApiOutlined style={{ color: REDWOOD.info }} />
+                <span>Journal APIs</span>
+                <Tag style={{ fontSize: 10 }}>{j.batchName}</Tag>
+                <Tag color={j.statusMeaning === 'Posted' ? 'green' : 'orange'} style={{ fontSize: 10 }}>{j.statusMeaning}</Tag>
+              </Space>
+            }
+            open={journalApiModalVisible}
+            onCancel={() => { setJournalApiModalVisible(false); setJournalApiExecResults({}); }}
+            footer={<Button onClick={() => { setJournalApiModalVisible(false); setJournalApiExecResults({}); }}>Close</Button>}
+            width={780}
+            destroyOnClose
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {JOURNAL_APIS.map((api, index) => (
+                <div key={index} style={{ border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, padding: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <Tag
+                      color={api.method === 'GET' ? 'blue' : api.method === 'PUT' ? 'orange' : 'red'}
+                      style={{ fontSize: 10, margin: 0 }}
+                    >
+                      {api.method}
+                    </Tag>
+                    <Text strong style={{ fontSize: 12 }}>{api.name}</Text>
+                  </div>
+                  <div style={{ background: '#1e1e1e', borderRadius: 4, padding: '6px 10px', marginBottom: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <code style={{ fontSize: 10, color: '#9cdcfe', wordBreak: 'break-all', flex: 1 }}>{api.url}</code>
+                    <CopyOutlined
+                      style={{ color: '#6b6b6b', fontSize: 11, marginLeft: 8, cursor: 'pointer', flexShrink: 0 }}
+                      onClick={() => navigator.clipboard.writeText(api.url)}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <Text type="secondary" style={{ fontSize: 11, flex: 1 }}>{api.description}</Text>
+                    {api.method === 'GET' && (
+                      <Button
+                        size="small"
+                        style={{ fontSize: 11, marginLeft: 12, flexShrink: 0 }}
+                        loading={journalApiExecResults[index]?.loading}
+                        onClick={() => executeJournalApi(index, api.url)}
+                      >
+                        Test
+                      </Button>
+                    )}
+                  </div>
+                  {journalApiExecResults[index]?.response && (
+                    <div style={{ marginTop: 8, background: '#1e1e1e', borderRadius: 4, padding: '8px 10px', maxHeight: 260, overflow: 'auto' }}>
+                      <pre style={{
+                        margin: 0, fontSize: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                        color: journalApiExecResults[index].response!.startsWith('HTTP 2') ? '#4ec9b0' : '#f48771'
+                      }}>
+                        {journalApiExecResults[index].response}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </Modal>
+        );
+      })()}
 
       {/* Page APIs Modal */}
       <Modal

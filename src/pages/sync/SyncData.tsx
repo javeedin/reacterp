@@ -48,12 +48,13 @@ import {
   MinusCircleOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import { SYNC_OBJECTS, PROXY_CONFIG, APEX_DB_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
-import { syncGLJournals, syncGLBatchesOnly, syncGLHeadersOnly, syncGLLinesOnly, testGLConnection, fetchGLJournalBatches, processSingleGLBatch, type SyncProgress, type BatchOnlySyncProgress, type HeadersOnlySyncProgress, type LinesOnlySyncProgress, type LogCallback, type BatchPayloadCallback, type SingleBatchResult } from '../../services/gl-sync.service';
+import { SYNC_OBJECTS, PROXY_CONFIG, APEX_DB_CONFIG, ORACLE_FUSION_CONFIG, type SyncObjectConfig, type ApiType } from '../../config/api.config';
+import { syncGLJournals, syncGLBatchesOnly, syncGLHeadersOnly, syncGLLinesOnly, testGLConnection, fetchGLJournalBatches, processSingleGLBatch, debugStep1_FetchBatches, debugStep2_FetchHeaders, debugStep3_FetchLines, debugStep4_InsertBatch, debugStep5_InsertHeaders, debugStep6_InsertLines, type SyncProgress, type BatchOnlySyncProgress, type HeadersOnlySyncProgress, type LinesOnlySyncProgress, type LogCallback, type BatchPayloadCallback, type SingleBatchResult, type DebugBatchInfo, type DebugHeaderInfo } from '../../services/gl-sync.service';
 import { syncAPInvoices, testAPConnection, type APSyncProgress, type InvoicePayloadCallback } from '../../services/ap-sync.service';
 import { syncAPPayments, testAPPaymentsConnection, type APPaymentsSyncProgress, type PaymentPayloadCallback } from '../../services/ap-payments-sync.service';
 import { syncGLCodeCombinations, testGLCodeCombConnection, type CodeCombSyncProgress, type CodeCombPayloadCallback } from '../../services/gl-codecomb-sync.service';
 import { syncGLPeriodStatus, testGLPeriodStatusConnection, type PeriodStatusSyncProgress, type PeriodStatusPayloadCallback } from '../../services/gl-periodstatus-sync.service';
+import { syncGLCategories, testGLCategoriesConnection, type GLCategoriesSyncProgress } from '../../services/gl-categories-sync.service';
 import { syncBanks, testBanksConnection, type BanksSyncProgress, type BanksPayloadCallback } from '../../services/banks-sync.service';
 import { syncBankBranches, testBankBranchesConnection, type BankBranchesSyncProgress, type BankBranchesPayloadCallback } from '../../services/bank-branches-sync.service';
 import { syncBankAccounts, testBankAccountsConnection, type BankAccountsSyncProgress, type BankAccountsPayloadCallback } from '../../services/bank-accounts-sync.service';
@@ -207,6 +208,10 @@ const SyncData: React.FC = () => {
   // Payment payload state (for AP Payments debug - reserved for future use)
   const [, setPaymentPayloads] = useState<PaymentPayloadLog[]>([]);
 
+  // GL Headers API debug popup
+  const [glHeadersApiVisible, setGlHeadersApiVisible] = useState(false);
+  const [glHeadersApiTestResults, setGlHeadersApiTestResults] = useState<Record<string, { loading: boolean; result?: string; error?: string }>>({});
+
   // Electron notifications and background sync
   const {
     isElectron: isRunningInElectron,
@@ -327,6 +332,19 @@ const SyncData: React.FC = () => {
     status: 'pending' | 'success' | 'error';
     errorMessage?: string;
   }>>([]);
+
+  // GL Categories Progress State
+  const [glCategoriesProgress, setGLCategoriesProgress] = useState<GLCategoriesSyncProgress>({
+    status: 'idle',
+    totalRecords: 0,
+    insertedRecords: 0,
+    currentPage: 0,
+    totalPages: 0,
+    errors: 0,
+    lastError: '',
+    startTime: null,
+    endTime: null,
+  });
 
   // Banks Progress State
   const [banksProgress, setBanksProgress] = useState<BanksSyncProgress>({
@@ -745,6 +763,7 @@ const SyncData: React.FC = () => {
   const isAPPayments = selectedObject?.id === 'ap-payments';
   const isGLCodeComb = selectedObject?.id === 'gl-code-combinations';
   const isGLPeriodStatus = selectedObject?.id === 'gl-period-status';
+  const isGLCategories = selectedObject?.id === 'gl-categories';
   const isBanks = selectedObject?.id === 'banks';
   const isBankBranches = selectedObject?.id === 'bank-branches';
   const isBankAccounts = selectedObject?.id === 'bank-accounts';
@@ -865,7 +884,27 @@ const SyncData: React.FC = () => {
   const isSyncingRef = useRef(false);
 
   // Batch list modal state (two-phase GL Journal sync)
-  const [glSyncMode,     setGlSyncMode]     = useState<'chain' | 'batch-popup'>('chain');
+  const [glSyncMode,     setGlSyncMode]     = useState<'chain' | 'batch-popup' | 'step-debug'>('chain');
+
+  // Step-debug modal state
+  const [debugModalOpen,      setDebugModalOpen]      = useState(false);
+  const [debugParams,         setDebugParams]         = useState<Record<string, string>>({});
+  const [debugStep,           setDebugStep]           = useState(0);
+  const [debugLoading,        setDebugLoading]        = useState(false);
+  const [debugBatches,        setDebugBatches]        = useState<DebugBatchInfo[]>([]);
+  const [debugStep1Raw,       setDebugStep1Raw]       = useState<any>(null);
+  const [debugSelectedBatch,  setDebugSelectedBatch]  = useState<DebugBatchInfo | null>(null);
+  const [debugHeaders,        setDebugHeaders]        = useState<DebugHeaderInfo[]>([]);
+  const [debugLinesData,      setDebugLinesData]      = useState<{headerId:number;headerName:string;lines:any[];linesHref:string|null}[]>([]);
+  const [debugBatchInsert,    setDebugBatchInsert]    = useState<{result:any;payload:any}|null>(null);
+  const [debugHeaderInserts,  setDebugHeaderInserts]  = useState<{headerId:number;headerName:string;result:any;payload:any;ok:boolean}[]>([]);
+  const [debugLineInserts,    setDebugLineInserts]    = useState<{headerId:number;headerName:string;result:any;payload:any;ok:boolean;count:number}[]>([]);
+  const [debugLogs,           setDebugLogs]           = useState<{type:string;msg:string}[]>([]);
+  // JSON viewer popup
+  const [jsonViewOpen,   setJsonViewOpen]   = useState(false);
+  const [jsonViewTitle,  setJsonViewTitle]  = useState('');
+  const [jsonViewTabs,   setJsonViewTabs]   = useState<{label:string;data:any}[]>([]);
+  const [jsonViewTabIdx, setJsonViewTabIdx] = useState(0);
   const [batchListOpen,  setBatchListOpen]  = useState(false);
   const [batchList,      setBatchList]      = useState<BatchListItem[]>([]);
   const [batchSyncing,   setBatchSyncing]   = useState(false);
@@ -1835,6 +1874,9 @@ const SyncData: React.FC = () => {
     } else if (isGLPeriodStatus) {
       addLog('info', 'Testing GL Period Status endpoint...');
       success = await testGLPeriodStatusConnection(addLog);
+    } else if (isGLCategories) {
+      addLog('info', 'Testing GL Categories endpoint...');
+      success = await testGLCategoriesConnection(addLog);
     } else if (isBanks) {
       addLog('info', 'Testing Banks endpoint...');
       success = await testBanksConnection(addLog);
@@ -1936,6 +1978,91 @@ const SyncData: React.FC = () => {
       }
     });
   }, []);
+
+  // ── Debug modal step runners ──────────────────────────────────────────────
+  const debugLog = useCallback((type: string, msg: string) => {
+    setDebugLogs(prev => [...prev, { type, msg }]);
+  }, []);
+
+  const openJsonView = useCallback((title: string, tabs: {label:string;data:any}[]) => {
+    setJsonViewTitle(title);
+    setJsonViewTabs(tabs);
+    setJsonViewTabIdx(0);
+    setJsonViewOpen(true);
+  }, []);
+
+  const runDebugStep1 = async () => {
+    setDebugLoading(true);
+    try {
+      const r = await debugStep1_FetchBatches(debugParams, debugLog as LogCallback);
+      setDebugBatches(r.batches);
+      setDebugStep1Raw(r.rawResponse);
+      setDebugSelectedBatch(r.batches[0] ?? null);
+      setDebugStep(1);
+    } catch (e) { debugLog('error', String(e)); }
+    setDebugLoading(false);
+  };
+
+  const runDebugStep2 = async () => {
+    if (!debugSelectedBatch) return;
+    setDebugLoading(true);
+    try {
+      const r = await debugStep2_FetchHeaders(debugSelectedBatch, debugLog as LogCallback);
+      setDebugHeaders(r.headers);
+      setDebugStep(2);
+    } catch (e) { debugLog('error', String(e)); }
+    setDebugLoading(false);
+  };
+
+  const runDebugStep3 = async () => {
+    setDebugLoading(true);
+    try {
+      const r = await debugStep3_FetchLines(debugHeaders, debugLog as LogCallback);
+      setDebugLinesData(r);
+      setDebugStep(3);
+    } catch (e) { debugLog('error', String(e)); }
+    setDebugLoading(false);
+  };
+
+  const runDebugStep4 = async () => {
+    if (!debugSelectedBatch) return;
+    setDebugLoading(true);
+    try {
+      const r = await debugStep4_InsertBatch(debugSelectedBatch, debugLog as LogCallback);
+      setDebugBatchInsert(r);
+      setDebugStep(4);
+    } catch (e) { debugLog('error', String(e)); }
+    setDebugLoading(false);
+  };
+
+  const runDebugStep5 = async () => {
+    if (!debugSelectedBatch) return;
+    setDebugLoading(true);
+    try {
+      const r = await debugStep5_InsertHeaders(debugHeaders, debugSelectedBatch.batchId, debugLog as LogCallback);
+      setDebugHeaderInserts(r);
+      setDebugStep(5);
+    } catch (e) { debugLog('error', String(e)); }
+    setDebugLoading(false);
+  };
+
+  const runDebugStep6 = async () => {
+    if (!debugSelectedBatch) return;
+    setDebugLoading(true);
+    try {
+      const r = await debugStep6_InsertLines(debugLinesData, debugSelectedBatch.batchId, debugLog as LogCallback);
+      setDebugLineInserts(r);
+      setDebugStep(6);
+    } catch (e) { debugLog('error', String(e)); }
+    setDebugLoading(false);
+  };
+
+  const resetDebugModal = () => {
+    setDebugStep(0); setDebugBatches([]); setDebugStep1Raw(null);
+    setDebugSelectedBatch(null); setDebugHeaders([]); setDebugLinesData([]);
+    setDebugBatchInsert(null); setDebugHeaderInserts([]); setDebugLineInserts([]);
+    setDebugLogs([]);
+  };
 
   const handleSync = async () => {
     if (!selectedObject) {
@@ -2162,6 +2289,33 @@ const SyncData: React.FC = () => {
         handlePeriodStatusPayload
       );
       syncResult = { inserted: result.insertedRecords, errors: result.errors, type: 'period statuses' };
+    } else if (isGLCategories) {
+      // GL Categories Sync
+      setGLCategoriesProgress({
+        status: 'fetching',
+        totalRecords: 0,
+        insertedRecords: 0,
+        currentPage: 0,
+        totalPages: 0,
+        errors: 0,
+        lastError: '',
+        startTime: new Date(),
+        endTime: null,
+      });
+
+      const result = await syncGLCategories(
+        parameters,
+        testMode,
+        addLog,
+        (newProgress) => {
+          setGLCategoriesProgress((prev) => ({ ...prev, ...newProgress }));
+          if (newProgress.insertedRecords !== undefined && newProgress.totalRecords) {
+            notifySyncProgress(`${newProgress.insertedRecords}/${newProgress.totalRecords} categories`);
+          }
+        },
+        abortControllerRef.current.signal
+      );
+      syncResult = { inserted: result.insertedRecords, errors: result.errors, type: 'categories' };
     } else if (isBanks) {
       // Banks Sync
       setBanksProgress({
@@ -2928,6 +3082,14 @@ const SyncData: React.FC = () => {
       isSyncingRef.current = false;
       return; // Modal takes over from here
 
+    } else if (glSyncMode === 'step-debug') {
+      // GL Journals — Step Debug mode: open the debug modal with button-per-step
+      setDebugParams(parameters);
+      resetDebugModal();
+      setDebugModalOpen(true);
+      isSyncingRef.current = false;
+      return;
+
     } else {
       // GL Journals — Chain mode: auto process everything in sequence
       setProgress({
@@ -3223,6 +3385,8 @@ const SyncData: React.FC = () => {
     ? codeCombProgress.status
     : isGLPeriodStatus
     ? periodStatusProgress.status
+    : isGLCategories
+    ? glCategoriesProgress.status
     : isBanks
     ? banksProgress.status
     : isBankBranches
@@ -3746,11 +3910,22 @@ const SyncData: React.FC = () => {
                           >
                             Batch Popup
                           </Button>
+                          <Button
+                            size="small"
+                            type={glSyncMode === 'step-debug' ? 'primary' : 'default'}
+                            icon={<BugOutlined />}
+                            onClick={() => setGlSyncMode('step-debug')}
+                            style={glSyncMode === 'step-debug' ? { background: '#d46b08', borderColor: '#d46b08' } : {}}
+                          >
+                            Step Debug
+                          </Button>
                         </Space>
                         <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 6 }}>
                           {glSyncMode === 'chain'
                             ? 'Processes all batches automatically in sequence.'
-                            : 'Shows batch list — process one by one, resume after refresh.'}
+                            : glSyncMode === 'batch-popup'
+                            ? 'Shows batch list — process one by one, resume after refresh.'
+                            : 'Run each webservice step manually — inspect Oracle & APEX responses.'}
                         </Text>
                       </div>
                     )}
@@ -4226,6 +4401,17 @@ const SyncData: React.FC = () => {
                 </Row>
               ) : isGLHeadersOnly ? (
                 /* GL Headers Only KPI Cards */
+                <>
+                <Row justify="end" style={{ marginBottom: 8 }}>
+                  <Button
+                    size="small"
+                    icon={<ApiOutlined />}
+                    onClick={() => setGlHeadersApiVisible(true)}
+                    style={{ borderRadius: 6 }}
+                  >
+                    View API Calls
+                  </Button>
+                </Row>
                 <Row gutter={16} style={{ marginBottom: 16 }}>
                   {/* Headers Card */}
                   <Col xs={24} sm={8}>
@@ -4314,6 +4500,7 @@ const SyncData: React.FC = () => {
                     </Card>
                   </Col>
                 </Row>
+                </>
               ) : isGLLinesOnly ? (
                 /* GL Lines Only KPI Cards */
                 <Row gutter={16} style={{ marginBottom: 16 }}>
@@ -4578,6 +4765,61 @@ const SyncData: React.FC = () => {
                         <Tooltip title={periodStatusProgress.lastError}>
                           <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>
                             {periodStatusProgress.lastError}
+                          </Text>
+                        </Tooltip>
+                      )}
+                    </Card>
+                  </Col>
+                </Row>
+              ) : isGLCategories ? (
+                /* GL Categories KPI Cards */
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  <Col xs={24} sm={8}>
+                    <Card style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }} bodyStyle={{ padding: 16 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <DatabaseOutlined style={{ fontSize: 20, color: REDWOOD.primary, marginRight: 8 }} />
+                        <Text strong>Categories</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {glCategoriesProgress.insertedRecords} / {glCategoriesProgress.totalRecords}
+                      </div>
+                      <Progress
+                        percent={glCategoriesProgress.totalRecords > 0 ? Math.round((glCategoriesProgress.insertedRecords / glCategoriesProgress.totalRecords) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.primary}
+                        style={{ marginTop: 8 }}
+                      />
+                      {glCategoriesProgress.currentPage > 0 && (
+                        <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 4 }}>
+                          Page {glCategoriesProgress.currentPage}/{glCategoriesProgress.totalPages}
+                        </Text>
+                      )}
+                    </Card>
+                  </Col>
+                  <Col xs={24} sm={8}>
+                    <Card style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }} bodyStyle={{ padding: 16 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <FileTextOutlined style={{ fontSize: 20, color: REDWOOD.success, marginRight: 8 }} />
+                        <Text strong>Total Fetched</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {glCategoriesProgress.totalRecords}
+                      </div>
+                    </Card>
+                  </Col>
+                  <Col xs={24} sm={8}>
+                    <Card style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }} bodyStyle={{ padding: 16 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <WarningOutlined style={{ fontSize: 20, color: glCategoriesProgress.errors > 0 ? REDWOOD.error : REDWOOD.textSecondary, marginRight: 8 }} />
+                        <Text strong>Errors</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: glCategoriesProgress.errors > 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+                        {glCategoriesProgress.errors}
+                      </div>
+                      {glCategoriesProgress.lastError && (
+                        <Tooltip title={glCategoriesProgress.lastError}>
+                          <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>
+                            {glCategoriesProgress.lastError}
                           </Text>
                         </Tooltip>
                       )}
@@ -6016,14 +6258,14 @@ const SyncData: React.FC = () => {
                           {getStatusText(currentStatus)}
                         </Tag>
                       </div>
-                      {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : isGLPeriodStatus ? periodStatusProgress.startTime : isBanks ? banksProgress.startTime : isBankBranches ? bankBranchesProgress.startTime : isBankAccounts ? bankAccountsProgress.startTime : isBankAccountTransfers ? bankAccountTransfersProgress.startTime : isExternalCashTxn ? externalCashTxnProgress.startTime : isLegalEntities ? legalEntitiesProgress.startTime : isUserAccounts ? userAccountsProgress.startTime : isUserAccountRoles ? userAccountRolesProgress.startTime : isRoles ? rolesProgress.startTime : isSuppliers ? suppliersProgress.startTime : isSupplierAddresses ? supplierAddressProgress.startTime : progress.startTime) && (
+                      {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : isGLPeriodStatus ? periodStatusProgress.startTime : isGLCategories ? glCategoriesProgress.startTime : isBanks ? banksProgress.startTime : isBankBranches ? bankBranchesProgress.startTime : isBankAccounts ? bankAccountsProgress.startTime : isBankAccountTransfers ? bankAccountTransfersProgress.startTime : isExternalCashTxn ? externalCashTxnProgress.startTime : isLegalEntities ? legalEntitiesProgress.startTime : isUserAccounts ? userAccountsProgress.startTime : isUserAccountRoles ? userAccountRolesProgress.startTime : isRoles ? rolesProgress.startTime : isSuppliers ? suppliersProgress.startTime : isSupplierAddresses ? supplierAddressProgress.startTime : progress.startTime) && (
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          Started: {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : isGLPeriodStatus ? periodStatusProgress.startTime : isBanks ? banksProgress.startTime : isBankBranches ? bankBranchesProgress.startTime : isBankAccounts ? bankAccountsProgress.startTime : isBankAccountTransfers ? bankAccountTransfersProgress.startTime : isExternalCashTxn ? externalCashTxnProgress.startTime : isLegalEntities ? legalEntitiesProgress.startTime : isUserAccounts ? userAccountsProgress.startTime : isUserAccountRoles ? userAccountRolesProgress.startTime : isRoles ? rolesProgress.startTime : isSuppliers ? suppliersProgress.startTime : isSupplierAddresses ? supplierAddressProgress.startTime : progress.startTime)?.toLocaleTimeString()}
+                          Started: {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : isGLPeriodStatus ? periodStatusProgress.startTime : isGLCategories ? glCategoriesProgress.startTime : isBanks ? banksProgress.startTime : isBankBranches ? bankBranchesProgress.startTime : isBankAccounts ? bankAccountsProgress.startTime : isBankAccountTransfers ? bankAccountTransfersProgress.startTime : isExternalCashTxn ? externalCashTxnProgress.startTime : isLegalEntities ? legalEntitiesProgress.startTime : isUserAccounts ? userAccountsProgress.startTime : isUserAccountRoles ? userAccountRolesProgress.startTime : isRoles ? rolesProgress.startTime : isSuppliers ? suppliersProgress.startTime : isSupplierAddresses ? supplierAddressProgress.startTime : progress.startTime)?.toLocaleTimeString()}
                         </Text>
                       )}
-                      {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : isGLPeriodStatus ? periodStatusProgress.endTime : isBanks ? banksProgress.endTime : isBankBranches ? bankBranchesProgress.endTime : isBankAccounts ? bankAccountsProgress.endTime : isBankAccountTransfers ? bankAccountTransfersProgress.endTime : isExternalCashTxn ? externalCashTxnProgress.endTime : isLegalEntities ? legalEntitiesProgress.endTime : isUserAccounts ? userAccountsProgress.endTime : isUserAccountRoles ? userAccountRolesProgress.endTime : isRoles ? rolesProgress.endTime : isSuppliers ? suppliersProgress.endTime : isSupplierAddresses ? supplierAddressProgress.endTime : progress.endTime) && (
+                      {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : isGLPeriodStatus ? periodStatusProgress.endTime : isGLCategories ? glCategoriesProgress.endTime : isBanks ? banksProgress.endTime : isBankBranches ? bankBranchesProgress.endTime : isBankAccounts ? bankAccountsProgress.endTime : isBankAccountTransfers ? bankAccountTransfersProgress.endTime : isExternalCashTxn ? externalCashTxnProgress.endTime : isLegalEntities ? legalEntitiesProgress.endTime : isUserAccounts ? userAccountsProgress.endTime : isUserAccountRoles ? userAccountRolesProgress.endTime : isRoles ? rolesProgress.endTime : isSuppliers ? suppliersProgress.endTime : isSupplierAddresses ? supplierAddressProgress.endTime : progress.endTime) && (
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          Ended: {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : isGLPeriodStatus ? periodStatusProgress.endTime : isBanks ? banksProgress.endTime : isBankBranches ? bankBranchesProgress.endTime : isBankAccounts ? bankAccountsProgress.endTime : isBankAccountTransfers ? bankAccountTransfersProgress.endTime : isExternalCashTxn ? externalCashTxnProgress.endTime : isLegalEntities ? legalEntitiesProgress.endTime : isUserAccounts ? userAccountsProgress.endTime : isUserAccountRoles ? userAccountRolesProgress.endTime : isRoles ? rolesProgress.endTime : isSuppliers ? suppliersProgress.endTime : isSupplierAddresses ? supplierAddressProgress.endTime : progress.endTime)?.toLocaleTimeString()}
+                          Ended: {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : isGLPeriodStatus ? periodStatusProgress.endTime : isGLCategories ? glCategoriesProgress.endTime : isBanks ? banksProgress.endTime : isBankBranches ? bankBranchesProgress.endTime : isBankAccounts ? bankAccountsProgress.endTime : isBankAccountTransfers ? bankAccountTransfersProgress.endTime : isExternalCashTxn ? externalCashTxnProgress.endTime : isLegalEntities ? legalEntitiesProgress.endTime : isUserAccounts ? userAccountsProgress.endTime : isUserAccountRoles ? userAccountRolesProgress.endTime : isRoles ? rolesProgress.endTime : isSuppliers ? suppliersProgress.endTime : isSupplierAddresses ? supplierAddressProgress.endTime : progress.endTime)?.toLocaleTimeString()}
                         </Text>
                       )}
                     </Space>
@@ -6046,6 +6288,8 @@ const SyncData: React.FC = () => {
                           ? `${codeCombProgress.insertedRecords} code combinations inserted`
                           : isGLPeriodStatus
                           ? `${periodStatusProgress.insertedRecords} period statuses inserted`
+                          : isGLCategories
+                          ? `${glCategoriesProgress.insertedRecords} categories inserted`
                           : isBanks
                           ? `${banksProgress.insertedRecords} banks inserted`
                           : isBankBranches
@@ -6075,10 +6319,10 @@ const SyncData: React.FC = () => {
                           : `${progress.totalBatchesInserted + progress.totalHeadersInserted + progress.totalLinesInserted} inserted`
                         }
                       </Text>
-                      {(isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLBatchesOnly ? glBatchesOnlyProgress.errors : isGLHeadersOnly ? glHeadersOnlyProgress.errors : isGLLinesOnly ? glLinesOnlyProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isBankAccountTransfers ? bankAccountTransfersProgress.errors : isExternalCashTxn ? externalCashTxnProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : isSupplierSites ? supplierSitesProgress.errors : progress.errors) > 0 && (
+                      {(isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLBatchesOnly ? glBatchesOnlyProgress.errors : isGLHeadersOnly ? glHeadersOnlyProgress.errors : isGLLinesOnly ? glLinesOnlyProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isGLCategories ? glCategoriesProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isBankAccountTransfers ? bankAccountTransfersProgress.errors : isExternalCashTxn ? externalCashTxnProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : isSupplierSites ? supplierSitesProgress.errors : progress.errors) > 0 && (
                         <Text type="danger">
                           <CloseCircleOutlined style={{ marginRight: 4 }} />
-                          {isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLBatchesOnly ? glBatchesOnlyProgress.errors : isGLHeadersOnly ? glHeadersOnlyProgress.errors : isGLLinesOnly ? glLinesOnlyProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isBankAccountTransfers ? bankAccountTransfersProgress.errors : isExternalCashTxn ? externalCashTxnProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : isSupplierSites ? supplierSitesProgress.errors : progress.errors} errors
+                          {isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLBatchesOnly ? glBatchesOnlyProgress.errors : isGLHeadersOnly ? glHeadersOnlyProgress.errors : isGLLinesOnly ? glLinesOnlyProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isGLCategories ? glCategoriesProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isBankAccountTransfers ? bankAccountTransfersProgress.errors : isExternalCashTxn ? externalCashTxnProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : isSupplierSites ? supplierSitesProgress.errors : progress.errors} errors
                         </Text>
                       )}
                     </Space>
@@ -6382,6 +6626,129 @@ const SyncData: React.FC = () => {
 
       {/* Autopilot Assistant */}
       <Autopilot />
+
+      {/* GL Headers API Debug Modal */}
+      <Modal
+        title={
+          <Space>
+            <ApiOutlined style={{ color: REDWOOD.primary }} />
+            <span>GL Headers Sync — API Calls</span>
+          </Space>
+        }
+        open={glHeadersApiVisible}
+        onCancel={() => setGlHeadersApiVisible(false)}
+        footer={<Button onClick={() => setGlHeadersApiVisible(false)}>Close</Button>}
+        width={820}
+      >
+        {(() => {
+          const params = getParameters();
+          const periodName = params.DefaultPeriodName || '';
+          const apexBatchUrl = `${APEX_DB_CONFIG.baseUrl}/SYNC/jebatches${periodName ? `?PERIOD_NAME=${encodeURIComponent(periodName)}` : ''}`;
+          const sampleBatchId = glHeadersOnlyProgress.currentBatchId || '{batchId}';
+          const oracleHeadersUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/journalBatches/${sampleBatchId}/child/journalHeaders`;
+          const proxyOracleUrl = `${PROXY_CONFIG.baseUrl}/oracle-url?url=${encodeURIComponent(oracleHeadersUrl)}`;
+          const apexPostUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/headers`;
+
+          const testEndpoint = async (key: string, url: string, useProxy = false) => {
+            setGlHeadersApiTestResults(prev => ({ ...prev, [key]: { loading: true } }));
+            try {
+              const fetchUrl = useProxy ? `${PROXY_CONFIG.baseUrl}/oracle-url?url=${encodeURIComponent(url)}` : url;
+              const resp = await fetch(fetchUrl);
+              const text = await resp.text();
+              let parsed: any;
+              try { parsed = JSON.parse(text); } catch { parsed = text; }
+              const preview = typeof parsed === 'object'
+                ? JSON.stringify(parsed, null, 2).substring(0, 600)
+                : String(parsed).substring(0, 600);
+              setGlHeadersApiTestResults(prev => ({ ...prev, [key]: { loading: false, result: `HTTP ${resp.status}\n${preview}` } }));
+            } catch (e: any) {
+              setGlHeadersApiTestResults(prev => ({ ...prev, [key]: { loading: false, error: e.message } }));
+            }
+          };
+
+          const endpoints = [
+            {
+              key: 'apex-batches',
+              step: '1',
+              label: 'GET Batch IDs from APEX DB',
+              method: 'GET',
+              url: apexBatchUrl,
+              description: `Fetches synced batch IDs to process. Filtered by period: ${periodName || '(all)'}`,
+              testFn: () => testEndpoint('apex-batches', apexBatchUrl),
+            },
+            {
+              key: 'oracle-headers',
+              step: '2',
+              label: 'GET Journal Headers from Oracle Fusion',
+              method: 'GET',
+              url: oracleHeadersUrl,
+              description: `Fetches all headers for a batch via proxy. Current batch: ${sampleBatchId}`,
+              testFn: () => testEndpoint('oracle-headers', oracleHeadersUrl, true),
+              proxyUrl: proxyOracleUrl,
+            },
+            {
+              key: 'apex-post',
+              step: '3',
+              label: 'POST Headers to APEX DB',
+              method: 'POST',
+              url: apexPostUrl,
+              description: 'Inserts/merges each header into RR_GL_HEADERS table. Body: { batchId, items: [...] }',
+              testFn: null,
+            },
+          ];
+
+          return (
+            <div>
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 16, borderRadius: 8 }}
+                message={`GL Headers sync runs ${endpoints.length} steps per batch. ${glHeadersOnlyProgress.errors > 0 ? `⚠ ${glHeadersOnlyProgress.errors} errors detected — check step 2 for Oracle 404s.` : ''}`}
+              />
+              {endpoints.map(ep => {
+                const testResult = glHeadersApiTestResults[ep.key];
+                return (
+                  <div key={ep.key} style={{ marginBottom: 20, padding: 14, background: '#fafafa', borderRadius: 8, border: '1px solid #e8e8e8' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <Tag color={ep.method === 'GET' ? 'blue' : 'green'} style={{ borderRadius: 4, fontFamily: 'monospace', fontSize: 11 }}>{ep.method}</Tag>
+                      <Tag style={{ borderRadius: 10, background: REDWOOD.primary, color: '#fff', border: 'none', fontSize: 11 }}>Step {ep.step}</Tag>
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>{ep.label}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: '#666', marginBottom: 8 }}>{ep.description}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: ep.proxyUrl ? 4 : 0 }}>
+                      <code style={{ flex: 1, fontSize: 11, background: '#fff', border: '1px solid #d9d9d9', borderRadius: 4, padding: '4px 8px', wordBreak: 'break-all', display: 'block' }}>
+                        {ep.url}
+                      </code>
+                      <Button size="small" icon={<CopyOutlined />} onClick={() => navigator.clipboard.writeText(ep.url)} />
+                      {ep.testFn && (
+                        <Button size="small" type="primary" loading={testResult?.loading} onClick={ep.testFn} style={{ background: REDWOOD.primary }}>
+                          Test
+                        </Button>
+                      )}
+                    </div>
+                    {ep.proxyUrl && (
+                      <div style={{ fontSize: 10, color: '#999', marginBottom: 6 }}>
+                        Proxy: <code style={{ fontSize: 10 }}>{ep.proxyUrl.substring(0, 120)}…</code>
+                      </div>
+                    )}
+                    {testResult && !testResult.loading && (
+                      <div style={{ marginTop: 8 }}>
+                        {testResult.error ? (
+                          <Alert type="error" showIcon message={testResult.error} style={{ borderRadius: 6 }} />
+                        ) : (
+                          <pre style={{ fontSize: 11, background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6, padding: 8, maxHeight: 160, overflow: 'auto', margin: 0 }}>
+                            {testResult.result}
+                          </pre>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
+      </Modal>
 
       {/* Log Detail Modal */}
       <Modal
@@ -7378,6 +7745,339 @@ const SyncData: React.FC = () => {
 
     {/* ── Fixed Assets BIP Reports Modal ────────────────────────────── */}
     <FixedAssetsSync open={faModalOpen} onClose={() => setFaModalOpen(false)} />
+
+    {/* ── GL Journals Step-Debug Modal ──────────────────────────────── */}
+    <Modal
+      open={debugModalOpen}
+      onCancel={() => setDebugModalOpen(false)}
+      footer={
+        <Button size="small" onClick={resetDebugModal} disabled={debugLoading}>
+          ↺ Reset All Steps
+        </Button>
+      }
+      width={880}
+      title={
+        <Space>
+          <BugOutlined style={{ color: '#d46b08' }} />
+          <span>GL Journal Full Sync — Step Debug</span>
+          <Tag color="orange">
+            {Object.entries(debugParams).filter(([,v])=>v).map(([k,v])=>`${k}=${v}`).join(', ') || 'No filter'}
+          </Tag>
+        </Space>
+      }
+      styles={{ body: { padding: 16, maxHeight: '80vh', overflowY: 'auto' } }}
+    >
+      {(() => {
+        const stepStyle = (n: number): React.CSSProperties => ({
+          border: `1px solid ${debugStep >= n - 1 ? '#d46b08' : '#e5e5e5'}`,
+          borderRadius: 8,
+          padding: 14,
+          marginBottom: 12,
+          background: debugStep >= n ? '#fffbe6' : debugStep === n - 1 ? '#fff7e6' : '#fafafa',
+          opacity: debugStep < n - 1 ? 0.45 : 1,
+        });
+
+        const logColor: Record<string, string> = {
+          step: '#531dab', info: '#1677ff', success: '#237804', error: '#c74634', warning: '#d4a800'
+        };
+
+        const ShowJsonBtn = ({ label, tabs }: { label: string; tabs: {label:string;data:any}[] }) => (
+          <Button size="small" icon={<FileTextOutlined />}
+            style={{ fontSize: 11 }}
+            onClick={() => openJsonView(label, tabs)}>
+            Show JSON
+          </Button>
+        );
+
+        return (
+          <div>
+            {/* Step 1 — Fetch Batch */}
+            <div style={stepStyle(1)}>
+              <Space style={{ marginBottom: 8 }}>
+                <Tag color="orange">Step 1</Tag>
+                <Text strong>Fetch Batch from Oracle Fusion</Text>
+                <Tag color="blue">GET journalBatches</Tag>
+              </Space>
+              <Space style={{ marginBottom: 8 }}>
+                <Button size="small" type="primary" loading={debugLoading && debugStep === 0}
+                  disabled={debugLoading || debugStep > 0}
+                  style={{ background: '#d46b08', borderColor: '#d46b08' }}
+                  onClick={runDebugStep1}>
+                  ▶ Run Step 1
+                </Button>
+                {debugStep >= 1 && debugStep1Raw && (
+                  <ShowJsonBtn label="Step 1 — Oracle Fusion Response"
+                    tabs={[
+                      { label: `Full Response (${debugBatches.length} batches)`, data: debugStep1Raw },
+                      ...debugBatches.map((b, i) => ({ label: `Batch ${b.batchId}`, data: b.rawBatch })),
+                    ]} />
+                )}
+              </Space>
+              {debugStep >= 1 && (
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Found {debugBatches.length} batch(es){debugBatches.length === 0 && ' — check your filter parameters'}</Text>
+                  {debugBatches.map((b, i) => (
+                    <div key={i} style={{ marginTop: 6, padding: '6px 10px', background: '#fff', borderRadius: 6, border: '1px solid #e5e5e5', fontSize: 12 }}>
+                      <Space wrap>
+                        <Tag color="blue">ID: {b.batchId}</Tag>
+                        <Text strong>{b.batchName}</Text>
+                        {b.status && <Tag>{b.status}</Tag>}
+                        {b.period && <Tag color="geekblue">{b.period}</Tag>}
+                        {b.ledger && <Text type="secondary">{b.ledger}</Text>}
+                        <span style={{ fontSize: 11, color: b.headersHref ? '#237804' : '#c74634' }}>
+                          Headers link: {b.headersHref ? '✓' : '✗ missing'}
+                        </span>
+                      </Space>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Step 2 — Fetch Headers */}
+            <div style={stepStyle(2)}>
+              <Space style={{ marginBottom: 8 }}>
+                <Tag color="orange">Step 2</Tag>
+                <Text strong>Fetch Headers from Oracle Fusion</Text>
+                <Tag color="blue">GET journalHeaders (child link)</Tag>
+              </Space>
+              <Space style={{ marginBottom: 8 }}>
+                <Button size="small" type="primary" loading={debugLoading && debugStep === 1}
+                  disabled={debugLoading || debugStep !== 1}
+                  style={{ background: '#d46b08', borderColor: '#d46b08' }}
+                  onClick={runDebugStep2}>
+                  ▶ Run Step 2
+                </Button>
+                {debugStep >= 2 && (
+                  <ShowJsonBtn label="Step 2 — Oracle Fusion Headers"
+                    tabs={[
+                      { label: `All Headers (${debugHeaders.length})`, data: debugHeaders.map(h => h.rawHeader) },
+                      ...debugHeaders.map((h, i) => ({ label: `Header ${h.headerId}`, data: h.rawHeader })),
+                    ]} />
+                )}
+              </Space>
+              {debugStep >= 2 && (
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Found {debugHeaders.length} header(s) for batch {debugSelectedBatch?.batchId}</Text>
+                  {debugHeaders.map((h, i) => (
+                    <div key={i} style={{ marginTop: 6, padding: '6px 10px', background: '#fff', borderRadius: 6, border: '1px solid #e5e5e5', fontSize: 12 }}>
+                      <Space wrap>
+                        <Tag color="purple">ID: {h.headerId}</Tag>
+                        <Text strong>{h.headerName}</Text>
+                        <span style={{ fontSize: 11, color: h.linesHref ? '#237804' : '#c74634' }}>
+                          Lines link: {h.linesHref ? '✓' : '✗ missing'}
+                        </span>
+                      </Space>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Step 3 — Fetch Lines */}
+            <div style={stepStyle(3)}>
+              <Space style={{ marginBottom: 8 }}>
+                <Tag color="orange">Step 3</Tag>
+                <Text strong>Fetch Lines from Oracle Fusion</Text>
+                <Tag color="blue">GET journalLines (per header)</Tag>
+              </Space>
+              <Space style={{ marginBottom: 8 }}>
+                <Button size="small" type="primary" loading={debugLoading && debugStep === 2}
+                  disabled={debugLoading || debugStep !== 2}
+                  style={{ background: '#d46b08', borderColor: '#d46b08' }}
+                  onClick={runDebugStep3}>
+                  ▶ Run Step 3
+                </Button>
+                {debugStep >= 3 && (
+                  <ShowJsonBtn label="Step 3 — Oracle Fusion Lines"
+                    tabs={debugLinesData.map(ld => ({
+                      label: `Header ${ld.headerId} (${ld.lines.length} lines)`,
+                      data: ld.lines,
+                    }))} />
+                )}
+              </Space>
+              {debugStep >= 3 && (
+                <div>
+                  {debugLinesData.map((ld, i) => (
+                    <div key={i} style={{ marginTop: 6, padding: '6px 10px', background: '#fff', borderRadius: 6, border: '1px solid #e5e5e5', fontSize: 12 }}>
+                      <Space wrap>
+                        <Tag color="purple">Header {ld.headerId}</Tag>
+                        <Text>{ld.headerName}</Text>
+                        <Tag color={ld.lines.length > 0 ? 'green' : 'red'}>{ld.lines.length} line(s)</Tag>
+                      </Space>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Step 4 — Insert Batch to APEX */}
+            <div style={stepStyle(4)}>
+              <Space style={{ marginBottom: 8 }}>
+                <Tag color="volcano">Step 4</Tag>
+                <Text strong>Insert Batch to APEX</Text>
+                <Tag color="volcano">POST gl/journalbatches</Tag>
+              </Space>
+              <Space style={{ marginBottom: 8 }}>
+                <Button size="small" type="primary" loading={debugLoading && debugStep === 3}
+                  disabled={debugLoading || debugStep !== 3}
+                  danger onClick={runDebugStep4}>
+                  ▶ Run Step 4
+                </Button>
+                {debugStep >= 4 && debugBatchInsert && (
+                  <ShowJsonBtn label="Step 4 — APEX Batch Insert"
+                    tabs={[
+                      { label: 'Payload sent to APEX', data: debugBatchInsert.payload },
+                      { label: 'APEX Response', data: debugBatchInsert.result },
+                    ]} />
+                )}
+              </Space>
+              {debugStep >= 4 && debugBatchInsert && (
+                <Tag color={debugBatchInsert.result?.success || debugBatchInsert.result?.syncedCount > 0 ? 'green' : 'red'}>
+                  {debugBatchInsert.result?.success || debugBatchInsert.result?.syncedCount > 0 ? 'SUCCESS' : 'FAILED'}
+                </Tag>
+              )}
+            </div>
+
+            {/* Step 5 — Insert Headers to APEX */}
+            <div style={stepStyle(5)}>
+              <Space style={{ marginBottom: 8 }}>
+                <Tag color="volcano">Step 5</Tag>
+                <Text strong>Insert Headers to APEX</Text>
+                <Tag color="volcano">POST gl/journals/headers</Tag>
+              </Space>
+              <Space style={{ marginBottom: 8 }}>
+                <Button size="small" type="primary" loading={debugLoading && debugStep === 4}
+                  disabled={debugLoading || debugStep !== 4}
+                  danger onClick={runDebugStep5}>
+                  ▶ Run Step 5
+                </Button>
+                {debugStep >= 5 && debugHeaderInserts.length > 0 && (
+                  <ShowJsonBtn label="Step 5 — APEX Header Inserts"
+                    tabs={debugHeaderInserts.flatMap(hi => [
+                      { label: `H${hi.headerId} Payload`, data: hi.payload },
+                      { label: `H${hi.headerId} Response`, data: hi.result },
+                    ])} />
+                )}
+              </Space>
+              {debugStep >= 5 && (
+                <div>
+                  {debugHeaderInserts.map((hi, i) => (
+                    <div key={i} style={{ marginTop: 6, padding: '6px 10px', background: '#fff', borderRadius: 6, border: '1px solid #e5e5e5', fontSize: 12 }}>
+                      <Space wrap>
+                        <Tag color="purple">Header {hi.headerId}</Tag>
+                        <Text>{hi.headerName}</Text>
+                        <Tag color={hi.ok ? 'green' : 'red'}>{hi.ok ? 'OK' : 'FAILED'}</Tag>
+                        {!hi.ok && <Text type="danger" style={{ fontSize: 11 }}>{hi.result?.error || hi.result?.lastError || 'Unknown error'}</Text>}
+                      </Space>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Step 6 — Insert Lines to APEX */}
+            <div style={stepStyle(6)}>
+              <Space style={{ marginBottom: 8 }}>
+                <Tag color="volcano">Step 6</Tag>
+                <Text strong>Insert Lines to APEX</Text>
+                <Tag color="volcano">POST gl/journals/lines</Tag>
+              </Space>
+              <Space style={{ marginBottom: 8 }}>
+                <Button size="small" type="primary" loading={debugLoading && debugStep === 5}
+                  disabled={debugLoading || debugStep !== 5}
+                  danger onClick={runDebugStep6}>
+                  ▶ Run Step 6
+                </Button>
+                {debugStep >= 6 && debugLineInserts.length > 0 && (
+                  <ShowJsonBtn label="Step 6 — APEX Lines Inserts"
+                    tabs={debugLineInserts.flatMap(li => [
+                      { label: `H${li.headerId} Payload (${li.count} lines)`, data: li.payload },
+                      { label: `H${li.headerId} Response`, data: li.result },
+                    ].filter(t => t.data))} />
+                )}
+              </Space>
+              {debugStep >= 6 && (
+                <div>
+                  {debugLineInserts.map((li, i) => (
+                    <div key={i} style={{ marginTop: 6, padding: '6px 10px', background: '#fff', borderRadius: 6, border: `1px solid ${li.ok ? '#e5e5e5' : '#ffccc7'}`, fontSize: 12 }}>
+                      <Space wrap>
+                        <Tag color="purple">Header {li.headerId}</Tag>
+                        <Text>{li.headerName}</Text>
+                        <Tag>{li.count} lines</Tag>
+                        <Tag color={li.ok ? 'green' : 'red'}>{li.ok ? 'OK' : 'FAILED'}</Tag>
+                        {li.result && <Text type="secondary" style={{ fontSize: 11 }}>
+                          inserted: {li.result.inserted ?? '—'} | errors: {li.result.errors ?? '—'}
+                          {li.result.lastError ? ` | ${li.result.lastError}` : ''}
+                        </Text>}
+                      </Space>
+                    </div>
+                  ))}
+                  {debugStep === 6 && debugLineInserts.every(li => li.ok) && (
+                    <Alert type="success" showIcon message="All steps completed successfully!" style={{ marginTop: 12 }} />
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Log Panel */}
+            {debugLogs.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <Text strong style={{ fontSize: 12 }}>Debug Log</Text>
+                <div style={{ marginTop: 6, background: '#141414', borderRadius: 6, padding: 10, maxHeight: 200, overflowY: 'auto', fontFamily: 'monospace', fontSize: 11 }}>
+                  {debugLogs.map((l, i) => (
+                    <div key={i} style={{ color: logColor[l.type] || '#ccc', lineHeight: 1.5 }}>
+                      [{l.type.toUpperCase()}] {l.msg}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+    </Modal>
+
+    {/* ── JSON Viewer Popup ─────────────────────────────────────────── */}
+    <Modal
+      open={jsonViewOpen}
+      onCancel={() => setJsonViewOpen(false)}
+      footer={null}
+      width={820}
+      title={
+        <Space>
+          <FileTextOutlined style={{ color: '#1677ff' }} />
+          <span style={{ fontSize: 13 }}>{jsonViewTitle}</span>
+        </Space>
+      }
+      styles={{ body: { padding: 0 } }}
+    >
+      {jsonViewTabs.length > 0 && (
+        <div>
+          <div style={{ display: 'flex', gap: 2, padding: '8px 12px 0', borderBottom: '1px solid #e5e5e5', flexWrap: 'wrap' }}>
+            {jsonViewTabs.map((t, i) => (
+              <button key={i} onClick={() => setJsonViewTabIdx(i)} style={{
+                padding: '4px 12px', fontSize: 12, cursor: 'pointer', border: 'none', borderRadius: '4px 4px 0 0',
+                background: jsonViewTabIdx === i ? '#1677ff' : '#f0f0f0',
+                color: jsonViewTabIdx === i ? '#fff' : '#333',
+                fontWeight: jsonViewTabIdx === i ? 600 : 400,
+              }}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <pre style={{
+            margin: 0, padding: '14px 16px',
+            background: '#141414', color: '#e6f4ff',
+            fontSize: 12, lineHeight: 1.6,
+            maxHeight: '65vh', overflow: 'auto',
+            fontFamily: 'monospace',
+          }}>
+            {JSON.stringify(jsonViewTabs[jsonViewTabIdx]?.data, null, 2)}
+          </pre>
+        </div>
+      )}
+    </Modal>
     </>
   );
 };

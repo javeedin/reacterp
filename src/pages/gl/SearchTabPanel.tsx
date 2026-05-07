@@ -36,7 +36,11 @@ export interface JournalLineSegment {
   currencyCode: string; company: string; lob: string; department: string;
   account: string; subAccount: string; analysis: string; intercompany: string;
   future1: string; future2: string;
-  isOpeningBalance?: boolean; isClosingBalance?: boolean; accountType?: string;
+  isOpeningBalance?: boolean; isClosingBalance?: boolean;
+  isGroupHeader?: boolean; groupCount?: number;
+  groupDr?: number; groupCr?: number;
+  groupEnteredDr?: number; groupEnteredCr?: number;
+  accountType?: string;
   enteredDr: number; enteredCr: number; accountedDr: number; accountedCr: number;
   chartOfAccountsName: string; accountingDate?: string; defaultPeriodName: string;
   batchName: string; actualFlagMeaning: string; approvalStatusMeaning: string;
@@ -163,6 +167,8 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
 
   // Pivot modal
   const [pivotVisible, setPivotVisible] = useState(false);
+  const [groupByAccount, setGroupByAccount] = useState(false);
+  const [gridFilter, setGridFilter] = useState('');
   const [pivotSegsBefore, setPivotSegsBefore] = useState<string[]>([]);
   const [pivotSegsAfter,  setPivotSegsAfter]  = useState<string[]>([]);
 
@@ -243,42 +249,36 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
   ): Promise<{ opening: JournalLineSegment | null; closing: JournalLineSegment | null }> => {
     const none = { opening: null, closing: null };
     try {
-      let tryPeriod = period;
       let allItems: any[] = [];
-      for (let attempt = 0; attempt < 24; attempt++) {
-        const params = new URLSearchParams({ ledger_name: selectedLedger, period_name: tryPeriod, account });
-        if (company) params.append('company', company);
-        const resp = await fetch(`${API_BASE_URL}/rr-trialbalance/standard?${params.toString()}`);
-        if (resp.ok) {
-          const data = await resp.json();
-          allItems = (data.items || []).filter((i: any) => String(i.account) === String(account));
-        }
-        if (allItems.length > 0) break;
-        tryPeriod = getPreviousPeriod(tryPeriod);
+      // Single call — the view computes opening/closing for the period dynamically
+      const params = new URLSearchParams({ ledger_name: selectedLedger, period_name: period, account });
+      if (company) params.append('company', company);
+      const resp = await fetch(`${API_BASE_URL}/rr-trialbalance/standard?${params.toString()}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        allItems = (data.items || []).filter((i: any) => String(i.account) === String(account));
       }
-      if (allItems.length === 0) return none;
-      const accountType: string = allItems[0].account_type || '';
+      // If no TB row exists the account has zero opening balance — still show the row
+      const accountType: string = allItems[0]?.account_type || '';
       const isRetainedEarnings = accountType === 'O';
       const isDebitNormal = accountType === 'A' || accountType === 'E';
-      const currencyCode = allItems[0].currency_code || 'AED';
-      const accountDesc  = allItems[0].account_desc  || '';
+      const currencyCode = allItems[0]?.currency_code || 'AED';
+      const accountDesc  = allItems[0]?.account_desc  || '';
       const openingAmt    = allItems.reduce((s: number, i: any) => s + (i.opening         || 0), 0);
       const closingAmt    = allItems.reduce((s: number, i: any) => s + (i.closing         || 0), 0);
       const entOpeningAmt = allItems.reduce((s: number, i: any) => s + (i.entered_opening || 0), 0);
       const entClosingAmt = allItems.reduce((s: number, i: any) => s + (i.entered_closing || 0), 0);
-      const toDrCr = (amt: number) => ({
-        dr: isDebitNormal && amt > 0 ? amt : (!isDebitNormal && amt < 0 ? Math.abs(amt) : 0),
-        cr: !isDebitNormal && amt > 0 ? amt : (isDebitNormal && amt < 0 ? Math.abs(amt) : 0),
-      });
-      const makeRow = (accAmt: number, entAmt: number, label: string, key: string, isOpen: boolean): JournalLineSegment | null => {
+      const toDrCr = (amt: number) =>
+        isDebitNormal
+          ? { dr: amt, cr: 0 }    // debit-normal: preserve sign in Dr (neg = unusual credit balance)
+          : { dr: 0, cr: -amt };  // credit-normal: negate into Cr (neg opening → positive Cr = normal credit balance)
+      const makeRow = (accAmt: number, entAmt: number, label: string, key: string, isOpen: boolean): JournalLineSegment => {
         const eA = isRetainedEarnings && isOpen ? closingAmt    : accAmt;
         const eE = isRetainedEarnings && isOpen ? entClosingAmt : entAmt;
-        if (eA === 0 && eE === 0) return null;
         const acc = toDrCr(eA), ent = toDrCr(eE);
-        if (acc.dr === 0 && acc.cr === 0 && ent.dr === 0 && ent.cr === 0) return null;
         return {
           key, batchId: 0, jeHeaderId: 0, jeLineNumber: 0,
-          currencyCode, company: allItems[0].company || company,
+          currencyCode, company: (allItems[0]?.company) || company,
           lob: '', department: '', account, subAccount: '', analysis: '',
           intercompany: '', future1: '', future2: '',
           enteredDr: ent.dr, enteredCr: ent.cr, accountedDr: acc.dr, accountedCr: acc.cr,
@@ -467,13 +467,11 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
         });
       }
       const g = map.get(line.jeHeaderId)!;
-      if (!g.lines.find(e => e.jeLineNumber === line.jeLineNumber)) {
-        g.lines.push(line);
-        g.totalEnteredDr   += line.enteredDr   || 0;
-        g.totalEnteredCr   += line.enteredCr   || 0;
-        g.totalAccountedDr += line.accountedDr || 0;
-        g.totalAccountedCr += line.accountedCr || 0;
-      }
+      g.lines.push(line);
+      g.totalEnteredDr   += line.enteredDr   || 0;
+      g.totalEnteredCr   += line.enteredCr   || 0;
+      g.totalAccountedDr += line.accountedDr || 0;
+      g.totalAccountedCr += line.accountedCr || 0;
     });
     return Array.from(map.values()).sort((a, b) =>
       a.defaultPeriodName.localeCompare(b.defaultPeriodName) || a.batchName.localeCompare(b.batchName));
@@ -610,19 +608,65 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
     saveAs(new Blob([buf]), `${title}.xlsx`);
   };
 
+  // ── Grouped dataSource ─────────────────────────────────────────────────────
+  const groupedSearchData: JournalLineSegment[] = useMemo(() => {
+    if (!groupByAccount) return searchData;
+    const opening = searchData.filter(r => r.isOpeningBalance);
+    const closing = searchData.filter(r => r.isClosingBalance);
+    const normal  = searchData.filter(r => !r.isOpeningBalance && !r.isClosingBalance);
+
+    const groups = new Map<string, JournalLineSegment[]>();
+    normal.forEach(row => {
+      const k = row.concatenatedSegments || `${row.company}-${row.lob}-${row.department}-${row.account}-${row.subAccount}-${row.analysis}-${row.intercompany}`;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)!.push(row);
+    });
+
+    const result: JournalLineSegment[] = [...opening];
+    [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).forEach(([acct, rows]) => {
+      const accDr  = rows.reduce((s, r) => s + (r.accountedDr || 0), 0);
+      const accCr  = rows.reduce((s, r) => s + (r.accountedCr || 0), 0);
+      const entDr  = rows.reduce((s, r) => s + (r.enteredDr   || 0), 0);
+      const entCr  = rows.reduce((s, r) => s + (r.enteredCr   || 0), 0);
+      rows.forEach(r => result.push(r));
+      result.push({
+        ...rows[0], key: `grpftr-${acct}`, isGroupHeader: true,
+        groupCount: rows.length,
+        groupDr: accDr, groupCr: accCr,
+        groupEnteredDr: entDr, groupEnteredCr: entCr,
+      });
+    });
+    result.push(...closing);
+    return result;
+  }, [searchData, groupByAccount]);
+
+  // Precompute balance lookup for grouped view — O(n) once, not O(n²) per cell
+  const groupedBalanceMap = useMemo(() => {
+    let di = 0;
+    return groupedSearchData.map(row =>
+      row.isGroupHeader ? null : (runningBalances[di++] ?? null)
+    );
+  }, [groupedSearchData, runningBalances]);
+
   // ── Column definitions ─────────────────────────────────────────────────────
-  const searchColumns: ColumnsType<JournalLineSegment> = [
+  const searchColumns: ColumnsType<JournalLineSegment> = useMemo(() => [
     {
       title: 'Account', dataIndex: 'concatenatedSegments', key: 'concatenatedSegments',
       width: 240, fixed: 'left',
       render: (text: string, record: JournalLineSegment) =>
-        record.isOpeningBalance ? (
+        record.isGroupHeader ? (
+          <Space size={6}>
+            <Text strong style={{ fontSize: 10, color: REDWOOD.neutral600 }}>Subtotal —</Text>
+            <Text strong style={{ fontSize: 10 }}>{text || `${record.company}-${record.lob}-${record.department}-${record.account}-${record.subAccount}-${record.analysis}-${record.intercompany}`}</Text>
+            <Tag style={{ fontSize: 10, lineHeight: '16px', padding: '0 5px' }}>{record.groupCount} lines</Tag>
+          </Space>
+        ) : record.isOpeningBalance ? (
           <Text strong style={{ fontSize: 10, color: REDWOOD.warning }}>{record.jeLineDescription}</Text>
         ) : record.isClosingBalance ? (
           <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{record.jeLineDescription}</Text>
         ) : (
           <a onClick={() => onOpenAccountTab(record, selectedPeriods)}
-            style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 10 }}>
+            style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 10, paddingLeft: groupByAccount ? 14 : 0 }}>
             {text || `${record.company}-${record.lob}-${record.department}-${record.account}-${record.subAccount}-${record.analysis}-${record.intercompany}`}
           </a>
         ),
@@ -630,37 +674,53 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
     {
       title: 'Description', dataIndex: 'accountDescription', key: 'accountDescription',
       width: 180, ellipsis: true,
-      render: (text: string) => <Tooltip title={text}><span style={{ fontSize: 10 }}>{text || '-'}</span></Tooltip>,
+      render: (text: string, record: JournalLineSegment) =>
+        record.isGroupHeader ? null :
+        <Tooltip title={text}><span style={{ fontSize: 10 }}>{text || '-'}</span></Tooltip>,
     },
     {
       title: 'Line Description', dataIndex: 'jeLineDescription', key: 'jeLineDescription',
       width: 200, ellipsis: true,
-      render: (text: string, record: JournalLineSegment) => (
-        <Tooltip title={text}>
-          <span style={{ fontSize: 10, fontWeight: (record.isOpeningBalance || record.isClosingBalance) ? 600 : undefined }}>
-            {text || '-'}
-          </span>
-        </Tooltip>
-      ),
+      render: (text: string, record: JournalLineSegment) =>
+        record.isGroupHeader ? null : (
+          <Tooltip title={text}>
+            <span style={{ fontSize: 10, fontWeight: (record.isOpeningBalance || record.isClosingBalance) ? 600 : undefined }}>
+              {text || '-'}
+            </span>
+          </Tooltip>
+        ),
     },
-    { title: 'Period',    dataIndex: 'defaultPeriodName',  key: 'defaultPeriodName',  width: 80 },
-    { title: 'Acctg Date', dataIndex: 'accountingDate',    key: 'accountingDate',     width: 100 },
-    { title: 'Batch',     dataIndex: 'batchName',          key: 'batchName',          width: 150, ellipsis: true },
-    { title: 'Source',    dataIndex: 'userJeSourceName',   key: 'userJeSourceName',   width: 100 },
-    { title: 'Category',  dataIndex: 'userJeCategoryName', key: 'userJeCategoryName', width: 120 },
-    { title: 'Currency',  dataIndex: 'currencyCode',       key: 'currencyCode',       width: 90 },
+    { title: 'Period',    dataIndex: 'defaultPeriodName',  key: 'defaultPeriodName',  width: 80,
+      render: (v: string, r: JournalLineSegment) => r.isGroupHeader ? null : v },
+    { title: 'Acctg Date', dataIndex: 'accountingDate',   key: 'accountingDate',     width: 100,
+      render: (v: string, r: JournalLineSegment) => r.isGroupHeader ? null : v },
+    { title: 'Batch',     dataIndex: 'batchName',          key: 'batchName',          width: 150, ellipsis: true,
+      render: (v: string, r: JournalLineSegment) => r.isGroupHeader ? null : v },
+    { title: 'Source',    dataIndex: 'userJeSourceName',   key: 'userJeSourceName',   width: 100,
+      render: (v: string, r: JournalLineSegment) => r.isGroupHeader ? null : v },
+    { title: 'Category',  dataIndex: 'userJeCategoryName', key: 'userJeCategoryName', width: 120,
+      render: (v: string, r: JournalLineSegment) => r.isGroupHeader ? null : v },
+    { title: 'Currency',  dataIndex: 'currencyCode',       key: 'currencyCode',       width: 90,
+      render: (v: string, r: JournalLineSegment) => r.isGroupHeader ? null : v },
     {
       title: <span style={{ color: '#1677ff', fontWeight: 600 }}>Accounted</span>,
       onHeaderCell: () => ({ style: groupBorderLeft }),
       children: [
         { title: 'Dr', dataIndex: 'accountedDr', key: 'accountedDr', width: 120, align: 'right' as const,
           ...headerStyle(groupBorderLeft),
-          render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span> },
+          render: (v: number, r: JournalLineSegment) => r.isGroupHeader
+            ? <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(r.groupDr ?? 0)}</Text>
+            : <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span> },
         { title: 'Cr', dataIndex: 'accountedCr', key: 'accountedCr', width: 120, align: 'right' as const,
-          render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span> },
+          render: (v: number, r: JournalLineSegment) => r.isGroupHeader
+            ? <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(r.groupCr ?? 0)}</Text>
+            : <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span> },
         { title: 'Balance', key: 'accountedRunning', width: 130, align: 'right' as const,
           ...headerStyle(groupBorderRight),
-          render: (_: any, __: JournalLineSegment, index: number) => fmtBalance(runningBalances[index]?.accounted ?? 0) },
+          render: (_: any, r: JournalLineSegment, index: number) => {
+            if (r.isGroupHeader) return fmtBalance((r.groupDr ?? 0) - (r.groupCr ?? 0));
+            return fmtBalance(groupedBalanceMap[index]?.accounted ?? 0);
+          }},
       ],
     },
     {
@@ -669,28 +729,82 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
       children: [
         { title: 'Dr', dataIndex: 'enteredDr', key: 'enteredDr', width: 120, align: 'right' as const,
           ...headerStyle(groupBorderLeft),
-          render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span> },
+          render: (v: number, r: JournalLineSegment) => r.isGroupHeader
+            ? <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(r.groupEnteredDr ?? 0)}</Text>
+            : <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span> },
         { title: 'Cr', dataIndex: 'enteredCr', key: 'enteredCr', width: 120, align: 'right' as const,
-          render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span> },
+          render: (v: number, r: JournalLineSegment) => r.isGroupHeader
+            ? <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(r.groupEnteredCr ?? 0)}</Text>
+            : <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span> },
         { title: 'Balance', key: 'enteredRunning', width: 130, align: 'right' as const,
           ...headerStyle(groupBorderRight),
-          render: (_: any, __: JournalLineSegment, index: number) => fmtBalance(runningBalances[index]?.entered ?? 0) },
+          render: (_: any, r: JournalLineSegment, index: number) => {
+            if (r.isGroupHeader) return fmtBalance((r.groupEnteredDr ?? 0) - (r.groupEnteredCr ?? 0));
+            return fmtBalance(groupedBalanceMap[index]?.entered ?? 0);
+          }},
       ],
     },
     {
       title: '', key: 'drillDown', width: 36, fixed: 'right' as const,
-      render: (_: any, record: JournalLineSegment) => (
-        <Tooltip title={`View Journal (Header ${record.jeHeaderId})`}>
-          <Button type="text" size="small"
-            icon={<AuditOutlined style={{ color: REDWOOD.info }} />}
-            onClick={(e) => { e.stopPropagation(); setJournalDrillRecord(record); setJournalDrillVisible(true); }}
-          />
-        </Tooltip>
-      ),
+      render: (_: any, record: JournalLineSegment) =>
+        record.isGroupHeader ? null : (
+          <Tooltip title={`View Journal (Header ${record.jeHeaderId})`}>
+            <Button type="text" size="small"
+              icon={<AuditOutlined style={{ color: REDWOOD.info }} />}
+              onClick={(e) => { e.stopPropagation(); setJournalDrillRecord(record); setJournalDrillVisible(true); }}
+            />
+          </Tooltip>
+        ),
     },
-  ];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [groupByAccount, groupedBalanceMap, onOpenAccountTab, selectedPeriods]);
 
-  // ── Pivot columns ──────────────────────────────────────────────────────────
+  // Memoize filtered display data — stable reference prevents Ant Design Table re-rendering all rows
+  const { displayData, filterMatchCount } = useMemo(() => {
+    if (!gridFilter) return { displayData: groupedSearchData, filterMatchCount: 0 };
+    const q = gridFilter.toLowerCase();
+    const matchFields = (r: JournalLineSegment) =>
+      [r.concatenatedSegments, r.accountDescription, r.jeLineDescription,
+       r.batchName, r.userJeSourceName, r.userJeCategoryName, r.defaultPeriodName, r.currencyCode]
+      .some(v => (v || '').toLowerCase().includes(q));
+
+    let matchCount = 0;
+    let filtered: JournalLineSegment[];
+
+    if (groupByAccount) {
+      filtered = [];
+      let pending: JournalLineSegment[] = [];
+      groupedSearchData.forEach(row => {
+        if (row.isOpeningBalance || row.isClosingBalance) { filtered.push(row); return; }
+        if (row.isGroupHeader) {
+          const matched = pending.filter(matchFields);
+          if (matched.length > 0) {
+            matched.forEach(r => filtered.push(r));
+            matchCount += matched.length;
+            filtered.push({ ...row, groupCount: matched.length,
+              groupDr:        matched.reduce((s, r) => s + (r.accountedDr || 0), 0),
+              groupCr:        matched.reduce((s, r) => s + (r.accountedCr || 0), 0),
+              groupEnteredDr: matched.reduce((s, r) => s + (r.enteredDr   || 0), 0),
+              groupEnteredCr: matched.reduce((s, r) => s + (r.enteredCr   || 0), 0),
+            });
+          }
+          pending = [];
+        } else {
+          pending.push(row);
+        }
+      });
+    } else {
+      filtered = groupedSearchData.filter(r => {
+        if (r.isOpeningBalance || r.isClosingBalance) return true;
+        const m = matchFields(r);
+        if (m) matchCount++;
+        return m;
+      });
+    }
+    return { displayData: filtered, filterMatchCount: matchCount };
+  }, [groupedSearchData, gridFilter, groupByAccount]);
+
+
   const pivotColumns: ColumnsType<PivotDataRow> = [
     ...pivotSegsBefore.map(s => ({ title: s, dataIndex: s, key: s, width: 100, fixed: 'left' as const })),
     { title: 'Account',     dataIndex: 'account',            key: 'account',            width: 100, fixed: 'left' as const },
@@ -707,7 +821,7 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
     })),
   ];
 
-  const totals = calculateTotals(searchData);
+  const totals = useMemo(() => calculateTotals(searchData), [searchData]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -872,6 +986,15 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
             )}
           </Space>
           <Space size={6}>
+            <Button
+              size="small"
+              icon={<FilterOutlined />}
+              disabled={searchData.length === 0}
+              onClick={() => setGroupByAccount(g => !g)}
+              style={{ fontSize: 11, ...(groupByAccount ? { background: REDWOOD.info, borderColor: REDWOOD.info, color: '#fff' } : {}) }}
+            >
+              {groupByAccount ? 'Ungroup' : 'Group by Account'}
+            </Button>
             <Button size="small" icon={<PieChartOutlined />} disabled={searchData.length === 0}
               onClick={() => setPivotVisible(true)} style={{ fontSize: 11 }}>
               View Pivot
@@ -884,10 +1007,31 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
           </Space>
         </div>
 
+        {/* Grid quick-filter */}
+        {searchData.length > 0 && (
+          <div style={{ padding: '6px 12px', borderBottom: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <FilterOutlined style={{ color: REDWOOD.neutral600, fontSize: 11 }} />
+            <Input
+              size="small"
+              allowClear
+              placeholder="Filter grid — account, description, batch, source, category…"
+              prefix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />}
+              value={gridFilter}
+              onChange={e => setGridFilter(e.target.value)}
+              style={{ maxWidth: 480, fontSize: 11 }}
+            />
+            {gridFilter && (
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                {filterMatchCount} of {searchData.length} rows
+              </Text>
+            )}
+          </div>
+        )}
+
         <Spin spinning={loading}>
           <Table
             columns={searchColumns}
-            dataSource={searchData}
+            dataSource={displayData}
             pagination={{ pageSize: searchPageSize, size: 'small', showSizeChanger: true,
               pageSizeOptions: ['10','20','50','100','200'],
               onShowSizeChange: (_, size) => setSearchPageSize(size),
@@ -896,7 +1040,14 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
             scroll={{ x: 1800 }}
             size="small"
             className="compact-table aa-grid"
-            rowClassName={(record: JournalLineSegment) => record.isOpeningBalance ? 'opening-balance-row' : ''}
+            rowClassName={(record: JournalLineSegment) =>
+              record.isGroupHeader ? 'aa-group-header-row' :
+              record.isOpeningBalance ? 'opening-balance-row' : ''}
+            onRow={(record) => record.isGroupHeader ? { style: {
+              background: '#e8f0fe',
+              borderTop: `2px solid ${REDWOOD.info}55`,
+              fontWeight: 600,
+            }} : {}}
             locale={{ emptyText: <Empty description="Click Search to load data" /> }}
             summary={() =>
               searchData.length > 0 ? (
@@ -913,7 +1064,9 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
                       <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.accountedCr)}</Text>
                     </Table.Summary.Cell>
                     {/* @ts-expect-error antd6 SummaryCell lacks style */}
-                    <Table.Summary.Cell index={11} align="right" style={groupBorderRight} />
+                    <Table.Summary.Cell index={11} align="right" style={groupBorderRight}>
+                      <Text strong style={{ fontSize: 10 }}>{fmtBalance(gridTotals.accountedDr - gridTotals.accountedCr)}</Text>
+                    </Table.Summary.Cell>
                     {/* @ts-expect-error antd6 SummaryCell lacks style */}
                     <Table.Summary.Cell index={12} align="right" style={groupBorderLeft}>
                       <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(gridTotals.enteredDr)}</Text>
@@ -922,7 +1075,9 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
                       <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.enteredCr)}</Text>
                     </Table.Summary.Cell>
                     {/* @ts-expect-error antd6 SummaryCell lacks style */}
-                    <Table.Summary.Cell index={14} align="right" style={groupBorderRight} />
+                    <Table.Summary.Cell index={14} align="right" style={groupBorderRight}>
+                      <Text strong style={{ fontSize: 10 }}>{fmtBalance(gridTotals.enteredDr - gridTotals.enteredCr)}</Text>
+                    </Table.Summary.Cell>
                     <Table.Summary.Cell index={15} />
                   </Table.Summary.Row>
                 </Table.Summary>
@@ -938,15 +1093,14 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
               <Text strong style={{ fontSize: 11, color: '#1677ff', display: 'block', marginBottom: 8 }}>Accounted</Text>
               <Row gutter={0} align="middle">
                 {[
-                  { label: 'Opening Balance', value: openingBalanceRow ? (openingBalanceRow.accountedDr||0)-(openingBalanceRow.accountedCr||0) : null, border: true, color: REDWOOD.warning },
-                  { label: 'PTD Debits',      value: totals.accountedDr, border: true, color: REDWOOD.success },
-                  { label: 'PTD Credits',     value: totals.accountedCr, border: true, color: REDWOOD.primary },
-                  { label: 'Closing Balance', value: closingBalanceRow ? (closingBalanceRow.accountedDr||0)-(closingBalanceRow.accountedCr||0) : null, border: false,
-                    color: closingBalanceRow ? ((closingBalanceRow.accountedDr||0)-(closingBalanceRow.accountedCr||0))>=0 ? REDWOOD.success : REDWOOD.primary : REDWOOD.neutral600 },
-                ].map(({ label, value, border, color }) => (
+                  { label: 'Opening Balance', value: openingBalanceRow ? (openingBalanceRow.accountedDr||0)-(openingBalanceRow.accountedCr||0) : null, border: true },
+                  { label: 'PTD Debits',      value: totals.accountedDr, border: true },
+                  { label: 'PTD Credits',     value: totals.accountedCr, border: true },
+                  { label: 'Closing Balance', value: closingBalanceRow ? (closingBalanceRow.accountedDr||0)-(closingBalanceRow.accountedCr||0) : null, border: false },
+                ].map(({ label, value, border }) => (
                   <Col key={label} flex="1" style={{ textAlign: 'center', padding: '4px 12px', borderRight: border ? '1px solid #adc6ff' : undefined }}>
                     <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>{label}</Text>
-                    <Text strong style={{ fontSize: 14, color }}>{value != null ? formatNumber(value) : '—'}</Text>
+                    <Text strong style={{ fontSize: 14 }}>{value != null ? fmtBalance(value) : '—'}</Text>
                   </Col>
                 ))}
               </Row>
@@ -955,15 +1109,14 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
               <Text strong style={{ fontSize: 11, color: '#52c41a', display: 'block', marginBottom: 8 }}>Entered</Text>
               <Row gutter={0} align="middle">
                 {[
-                  { label: 'Opening Balance', value: openingBalanceRow ? (openingBalanceRow.enteredDr||0)-(openingBalanceRow.enteredCr||0) : null, border: true, color: REDWOOD.warning },
-                  { label: 'PTD Debits',      value: totals.enteredDr, border: true, color: REDWOOD.success },
-                  { label: 'PTD Credits',     value: totals.enteredCr, border: true, color: REDWOOD.primary },
-                  { label: 'Closing Balance', value: closingBalanceRow ? (closingBalanceRow.enteredDr||0)-(closingBalanceRow.enteredCr||0) : null, border: false,
-                    color: closingBalanceRow ? ((closingBalanceRow.enteredDr||0)-(closingBalanceRow.enteredCr||0))>=0 ? REDWOOD.success : REDWOOD.primary : REDWOOD.neutral600 },
-                ].map(({ label, value, border, color }) => (
+                  { label: 'Opening Balance', value: openingBalanceRow ? (openingBalanceRow.enteredDr||0)-(openingBalanceRow.enteredCr||0) : null, border: true },
+                  { label: 'PTD Debits',      value: totals.enteredDr, border: true },
+                  { label: 'PTD Credits',     value: totals.enteredCr, border: true },
+                  { label: 'Closing Balance', value: closingBalanceRow ? (closingBalanceRow.enteredDr||0)-(closingBalanceRow.enteredCr||0) : null, border: false },
+                ].map(({ label, value, border }) => (
                   <Col key={label} flex="1" style={{ textAlign: 'center', padding: '4px 12px', borderRight: border ? '1px solid #b7eb8f' : undefined }}>
                     <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>{label}</Text>
-                    <Text strong style={{ fontSize: 14, color }}>{value != null ? formatNumber(value) : '—'}</Text>
+                    <Text strong style={{ fontSize: 14 }}>{value != null ? fmtBalance(value) : '—'}</Text>
                   </Col>
                 ))}
               </Row>

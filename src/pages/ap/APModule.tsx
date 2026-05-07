@@ -129,6 +129,7 @@ const setupItems: MenuItemType[] = [
 // Reports items
 const reportsItems: MenuItemType[] = [
   { key: 'ap-reports', icon: <BarChartOutlined />, label: 'Payables Reports', description: 'Suppliers listing, balance, payment register, aging report', color: REDWOOD.reportGreen, path: '/ap/reports' },
+  { key: 'check-migration', icon: <ApiOutlined />, label: 'Check Migration', description: 'Verify AP invoice headers vs lines integrity — missing lines, amount mismatches, truncated', color: REDWOOD.info, path: '/ap/check-migration' },
 ];
 
 // Payment task items
