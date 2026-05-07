@@ -1038,7 +1038,8 @@ const ManagePayments: React.FC = () => {
   const fetchAvailableInvoices = async (supplierNumber: string) => {
     setAvailableInvoicesLoading(true);
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/available-installments?supplier_number=${encodeURIComponent(supplierNumber)}`;
+      const buName = createPaymentForm.getFieldValue('businessUnit') || '';
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/available-installments?supplier_number=${encodeURIComponent(supplierNumber)}${buName ? `&business_unit=${encodeURIComponent(buName)}` : ''}`;
       setAddInvoicesApiUrl(url);
       const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -1109,9 +1110,11 @@ const ManagePayments: React.FC = () => {
   // Fetch suppliers from API
   const fetchSuppliers = async () => {
     setSupplierLoading(true);
-    debugLog('INFO', `Fetching suppliers from: ${APEX_SUPPLIERS_URL}`);
+    const bu = createPaymentForm.getFieldValue('businessUnit') || '';
+    const url = bu ? `${APEX_SUPPLIERS_URL}?P_BUSINESS_UNIT=${encodeURIComponent(bu)}` : APEX_SUPPLIERS_URL;
+    debugLog('INFO', `Fetching suppliers from: ${url}`);
     try {
-      const response = await fetch(APEX_SUPPLIERS_URL, {
+      const response = await fetch(url, {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
       });
@@ -1152,9 +1155,7 @@ const ManagePayments: React.FC = () => {
     setSupplierModalContext(context);
     setSupplierModalVisible(true);
     setSupplierSearchText('');
-    if (suppliers.length === 0) {
-      fetchSuppliers();
-    }
+    fetchSuppliers();
   };
 
   // Handle supplier selection
@@ -3088,6 +3089,25 @@ const ManagePayments: React.FC = () => {
                     >
                       Cancel
                     </Button>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        createPaymentForm.resetFields();
+                        setSelectedBuLegalEntityName('');
+                        setDerivedCompany('');
+                        setSelectedBankAccount(null);
+                        setInvoicesToPay([]);
+                        setSupplierTotalBalance(null);
+                        setBankAcctCashOverride('');
+                        setBankAcctPdcOverride('');
+                        setTimeout(() => {
+                          const buField = createPaymentForm.getFieldInstance?.('businessUnit');
+                          if (buField && typeof buField.focus === 'function') buField.focus();
+                        }, 100);
+                      }}
+                    >
+                      Clear Data
+                    </Button>
                     <Tooltip title="View API payload & test">
                       <Button
                         size="small"
@@ -3156,6 +3176,7 @@ const ManagePayments: React.FC = () => {
                                   optionFilterProp="children"
                                   notFoundContent={businessUnitsListLoading ? 'Loading…' : 'No business units found'}
                                   style={{ flex: 1 }}
+                                  disabled={!!selectedBankAccount}
                                   onChange={(value) => {
                                     const bu = businessUnitsList.find(b => b.name === value);
                                     setSelectedBuLegalEntityName(bu?.legalEntityName || '');

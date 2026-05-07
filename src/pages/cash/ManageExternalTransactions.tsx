@@ -497,7 +497,8 @@ const ExternalTxnForm: React.FC<{
                 <Select
                   showSearch optionFilterProp="label" options={businessUnits}
                   placeholder="Select business unit"
-                  disabled={isEdit || saved}
+                  disabled={isEdit || saved || !!selectedBank}
+                  className="ext-txn-bu-select"
                   style={{ width: '100%' }}
                   onChange={v => {
                     setSelectedBu(v);
@@ -1195,6 +1196,27 @@ const ExternalTxnForm: React.FC<{
                 Delete
               </Button>
             </Popconfirm>
+          )}
+          {!isEdit && (
+            <Button
+              size="large"
+              onClick={() => {
+                form.resetFields();
+                setSelectedBu(undefined);
+                setSelectedBank(undefined);
+                setSaved(false);
+                setSavedExtId(null);
+                setExtTxnLines([{ key: 0, amount: undefined, description: '', offsetAccount: '', offsetDesc: '' }]);
+                setAttachments([]);
+                setTimeout(() => {
+                  const sel = document.querySelector('.ext-txn-bu-select .ant-select-selector');
+                  if (sel) (sel as HTMLElement).click();
+                }, 100);
+              }}
+              style={{ minWidth: 110 }}
+            >
+              Clear Data
+            </Button>
           )}
           <Button size="large" onClick={onCancel} style={{ minWidth: 100 }}>
             {isEdit || saved ? 'Close' : 'Cancel'}

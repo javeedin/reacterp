@@ -5426,19 +5426,39 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             </Tag>
           )}
           {!isReadOnly && (
-            <Tooltip title={buSelected && !derivedCompany ? 'No company code for this Business Unit — cannot save invoice' : undefined}>
+            <>
               <Button
-                type="primary"
-                onClick={handleSave}
-                loading={saving}
-                disabled={saving || !!(buSelected && !derivedCompany)}
-                icon={<SaveOutlined />}
-                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-                data-sat-id="invoice-save-button"
+                type="default"
+                danger
+                onClick={() => {
+                  form.resetFields();
+                  setBuSelected(false);
+                  setDerivedCompany('');
+                  setSelectedSupplierInfo(null);
+                  setLines([createBlankLine(1, { accountingDate: dayjs().format('DD-MMM-YYYY') })]);
+                  setSavedInvoiceId(null);
+                  setTimeout(() => {
+                    const el = document.querySelector('[data-sat-id="invoice-business-unit"] .ant-select-selector');
+                    if (el) (el as HTMLElement).click();
+                  }, 100);
+                }}
               >
-                {savedInvoiceId ? 'Update Invoice' : 'Save'}
+                Clear Data
               </Button>
-            </Tooltip>
+              <Tooltip title={buSelected && !derivedCompany ? 'No company code for this Business Unit — cannot save invoice' : undefined}>
+                <Button
+                  type="primary"
+                  onClick={handleSave}
+                  loading={saving}
+                  disabled={saving || !!(buSelected && !derivedCompany)}
+                  icon={<SaveOutlined />}
+                  style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+                  data-sat-id="invoice-save-button"
+                >
+                  {savedInvoiceId ? 'Update Invoice' : 'Save'}
+                </Button>
+              </Tooltip>
+            </>
           )}
           <Button onClick={onClose}>
             {isReadOnly ? 'Close' : 'Cancel'}
@@ -5655,7 +5675,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                             placeholder="Select Business Unit"
                             showSearch
                             allowClear
-                            disabled={isReadOnly}
+                            disabled={isReadOnly || (!!selectedSupplierInfo && !isReadOnly)}
                           >
                             {businessUnits.map(bu => (
                               <Option key={bu.name} value={bu.name}>{bu.name}</Option>
