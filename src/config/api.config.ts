@@ -56,6 +56,8 @@ export const APEX_DB_CONFIG = {
     // Cash Endpoints
     bankAccountTransfers: 'cash/banktransfers',
     externalCashTransactions: 'cash/externaltransactions',
+    // Revaluation Endpoints
+    revaluation: 'gl/revaluation',
   },
 };
 
