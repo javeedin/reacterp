@@ -3176,48 +3176,48 @@ const ManagePayments: React.FC = () => {
                               name="businessUnit"
                               rules={[{ required: true, message: 'Required' }]}
                             >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <Select
-                                  placeholder="Select Business Unit"
-                                  allowClear
-                                  showSearch
-                                  loading={businessUnitsListLoading}
-                                  optionFilterProp="children"
-                                  notFoundContent={businessUnitsListLoading ? 'Loading…' : 'No business units found'}
-                                  style={{ flex: 1 }}
-                                  disabled={!!selectedBankAccount}
-                                  onChange={(value) => {
-                                    const bu = businessUnitsList.find(b => b.name === value);
-                                    setSelectedBuLegalEntityName(bu?.legalEntityName || '');
-                                    setDerivedCompany(bu?.company || '');
-                                    setSelectedBankAccount(null);
-                                    setSupplierTotalBalance(null);
-                                    setInvoicesToPay([]);
-                                    createPaymentForm.setFieldsValue({ disbursementBankAccount: undefined, payee: undefined, supplierNumber: undefined });
-                                  }}
-                                  onClear={() => {
-                                    setSelectedBuLegalEntityName('');
-                                    setDerivedCompany('');
-                                    setSelectedBankAccount(null);
-                                    setSupplierTotalBalance(null);
-                                    setInvoicesToPay([]);
-                                    createPaymentForm.setFieldsValue({ disbursementBankAccount: undefined, payee: undefined, supplierNumber: undefined });
-                                  }}
-                                >
-                                  {businessUnitsList.map(bu => (
-                                    <Option key={bu.id} value={bu.name}>{bu.name}</Option>
-                                  ))}
-                                </Select>
-                                {selectedBuLegalEntityName && derivedCompany && (
-                                  <Tag color="blue" style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap', margin: 0 }}>{derivedCompany}</Tag>
-                                )}
-                                {selectedBuLegalEntityName && !derivedCompany && (
-                                  <Tooltip title="No company code configured for this Business Unit. Cannot proceed.">
-                                    <Tag color="error" style={{ whiteSpace: 'nowrap', margin: 0, cursor: 'default' }}>⚠ No Company</Tag>
-                                  </Tooltip>
-                                )}
-                              </div>
+                              <Select
+                                placeholder="Select Business Unit"
+                                allowClear
+                                showSearch
+                                loading={businessUnitsListLoading}
+                                optionFilterProp="children"
+                                notFoundContent={businessUnitsListLoading ? 'Loading…' : 'No business units found'}
+                                disabled={!!selectedBankAccount}
+                                onChange={(value) => {
+                                  const bu = businessUnitsList.find(b => b.name === value);
+                                  setSelectedBuLegalEntityName(bu?.legalEntityName || '');
+                                  setDerivedCompany(bu?.company || '');
+                                  setSelectedBankAccount(null);
+                                  setSupplierTotalBalance(null);
+                                  setInvoicesToPay([]);
+                                  createPaymentForm.setFieldsValue({ disbursementBankAccount: undefined, payee: undefined, supplierNumber: undefined });
+                                }}
+                                onClear={() => {
+                                  setSelectedBuLegalEntityName('');
+                                  setDerivedCompany('');
+                                  setSelectedBankAccount(null);
+                                  setSupplierTotalBalance(null);
+                                  setInvoicesToPay([]);
+                                  createPaymentForm.setFieldsValue({ disbursementBankAccount: undefined, payee: undefined, supplierNumber: undefined });
+                                }}
+                              >
+                                {businessUnitsList.map(bu => (
+                                  <Option key={bu.id} value={bu.name}>{bu.name}</Option>
+                                ))}
+                              </Select>
                             </Form.Item>
+                            {selectedBuLegalEntityName && derivedCompany && (
+                              <div style={{ marginTop: -10, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ fontSize: 11, color: '#6B6B6B' }}>Company Code:</span>
+                                <Tag color="blue" style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{derivedCompany}</Tag>
+                              </div>
+                            )}
+                            {selectedBuLegalEntityName && !derivedCompany && (
+                              <div style={{ marginTop: -10, marginBottom: 8, padding: '4px 8px', background: '#fff2f0', border: '1px solid #ffa39e', borderRadius: 4 }}>
+                                <span style={{ fontSize: 11, color: '#cf1322' }}>⚠ No company code configured for this Business Unit. Cannot proceed.</span>
+                              </div>
+                            )}
                             <Form.Item
                               label={<><span style={{ color: REDWOOD.primary }}>*</span> Supplier or Party</>}
                               name="payee"
