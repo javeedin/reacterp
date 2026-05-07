@@ -205,6 +205,8 @@ const ExternalTxnForm: React.FC<{
   const watchedOffset  = Form.useWatch('offsetAccountCombination', form);
   const watchedAmount  = Form.useWatch('amount', form);
   const watchedTxnType = Form.useWatch('transactionType', form);
+  const watchedCurrency = Form.useWatch('currencyCode', form);
+  const isForeignCurrency = !!watchedCurrency && watchedCurrency !== 'AED';
   const isAdhocPayment = watchedTxnType === 'Adhoc Payment';
 
   // Adhoc Payment → always money out (CR), always single mode
@@ -722,9 +724,11 @@ const ExternalTxnForm: React.FC<{
                 label={<span style={{ fontWeight: 600, fontSize: 13 }}>Conversion Rate Type</span>}
                 name="bankConversionRateType"
                 style={{ marginBottom: 0 }}
+                required={isForeignCurrency}
+                rules={[{ required: isForeignCurrency, message: 'Conversion Rate Type is required for foreign currency' }]}
               >
                 <Select
-                  placeholder="Select rate type"
+                  placeholder={isForeignCurrency ? 'Required for foreign currency' : 'Select rate type'}
                   allowClear
                   disabled={isEdit || !bankSelected || saved}
                 >
@@ -739,12 +743,14 @@ const ExternalTxnForm: React.FC<{
                 label={<span style={{ fontWeight: 600, fontSize: 13 }}>Conversion Rate</span>}
                 name="bankConversionRate"
                 style={{ marginBottom: 0 }}
+                required={isForeignCurrency}
+                rules={[{ required: isForeignCurrency, message: 'Conversion Rate is required for foreign currency' }]}
               >
                 <InputNumber
                   style={{ width: '100%' }}
                   precision={6}
                   min={0}
-                  placeholder="e.g. 3.672500"
+                  placeholder={isForeignCurrency ? 'Required — e.g. 3.672500' : 'e.g. 3.672500'}
                   disabled={isEdit || !bankSelected || saved}
                 />
               </Form.Item>
