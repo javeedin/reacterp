@@ -1068,7 +1068,12 @@ const ManagePayments: React.FC = () => {
             businessUnit: item.business_unit || item.businessUnit || '',
           };
         })
-        .filter((inv: PaymentInvoice) => inv.amountDue > 0 && !already.has(inv.key));
+        .filter((inv: PaymentInvoice) => {
+          if (inv.amountDue <= 0 || already.has(inv.key)) return false;
+          // Client-side BU filter — covers cases where ORDS param isn't bound server-side
+          if (buName && inv.businessUnit && inv.businessUnit.trim().toLowerCase() !== buName.trim().toLowerCase()) return false;
+          return true;
+        });
       setAvailableInvoices(items);
       setSelectedInvoiceKeys([]);
     } catch (err) {
