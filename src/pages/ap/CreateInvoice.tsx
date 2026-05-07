@@ -3413,6 +3413,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     message.success(`${newLines.length} line(s) imported`);
   };
 
+  const applyCompanySegment = useCallback((combo: string): string => {
+    if (!derivedCompany || !combo) return combo;
+    const parts = combo.split('-');
+    parts[0] = derivedCompany;
+    return parts.join('-');
+  }, [derivedCompany]);
+
   const updateLine = useCallback((key: string, field: string, value: any) => {
     setLines((prev) =>
       prev.map((line) => {
@@ -4727,7 +4734,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           onSelect={(_v, opt) => {
             const d = (opt as { combination: DistCombination }).combination;
             updateLine(record.key, 'distributionSet', d.combinationName);
-            if (d.glAccountDesc) updateLine(record.key, 'distributionCombination', d.glAccountDesc);
+            if (d.glAccountDesc) updateLine(record.key, 'distributionCombination', applyCompanySegment(d.glAccountDesc));
           }}
           filterOption={false}
           notFoundContent={val ? <span style={{ fontSize: 12, color: REDWOOD.neutral300 }}>No match</span> : null}
@@ -7411,7 +7418,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               onClick: () => {
                 if (distLovLineKey) {
                   updateLine(distLovLineKey, 'distributionSet', d.combinationName);
-                  if (d.glAccountDesc) updateLine(distLovLineKey, 'distributionCombination', d.glAccountDesc);
+                  if (d.glAccountDesc) updateLine(distLovLineKey, 'distributionCombination', applyCompanySegment(d.glAccountDesc));
                 }
                 setDistLovOpen(false);
               },
