@@ -159,14 +159,16 @@ const ExternalTxnForm: React.FC<{
   bankAccountCurrencyMap: Record<string, string>;
   payeeOptions: PayeeOption[];
   buBankMap: Record<string, string[]>;
+  buCompanyMap: Record<string, string>;
   onSave: () => void;
   onCancel: () => void;
   onPayeeCreated: (newOption: PayeeOption) => void;
-}> = ({ initialValues, bankAccounts, businessUnits, bankAccountMap, bankAccountCurrencyMap, buBankMap, payeeOptions, onSave, onCancel, onPayeeCreated }) => {
+}> = ({ initialValues, bankAccounts, businessUnits, bankAccountMap, bankAccountCurrencyMap, buBankMap, buCompanyMap, payeeOptions, onSave, onCancel, onPayeeCreated }) => {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [txnDirection, setTxnDirection] = useState<'DR' | 'CR'>('CR');
   const [selectedBu, setSelectedBu] = useState<string | undefined>(initialValues?.businessUnitName);
+  const derivedCompany = selectedBu ? (buCompanyMap[selectedBu] || '') : '';
   const [apiModal, setApiModal]           = useState(false);
   const [apiPayload, setApiPayload]       = useState('');
   const [apiPosting, setApiPosting]       = useState(false);
@@ -511,6 +513,12 @@ const ExternalTxnForm: React.FC<{
                   allowClear onClear={() => { setSelectedBu(undefined); setSelectedBank(undefined); }}
                 />
               </Form.Item>
+              {derivedCompany && (
+                <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Text style={{ fontSize: 11, color: REDWOOD.textSecondary }}>Company Code:</Text>
+                  <Tag color="blue" style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{derivedCompany}</Tag>
+                </div>
+              )}
             </Col>
             <Col xs={24} md={12}>
               <Form.Item
@@ -1217,6 +1225,7 @@ const ExternalTxnForm: React.FC<{
         visible={offsetAcctOpen}
         onCancel={() => setOffsetAcctOpen(false)}
         initialValue={form.getFieldValue('offsetAccountCombination') || ''}
+        lockedFirstSegment={derivedCompany || undefined}
         onSelect={(code: string) => {
           form.setFieldValue('offsetAccountCombination', code);
           setOffsetAcctOpen(false);
@@ -1298,6 +1307,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   const [bankAccountMap, setBankAccountMap] = useState<Record<string, string>>({});
   const [bankAccountCurrencyMap, setBankAccountCurrencyMap] = useState<Record<string, string>>({});
   const [buLeMap, setBuLeMap]             = useState<Record<string, string>>({});
+  const [buCompanyMap, setBuCompanyMap]   = useState<Record<string, string>>({});
   const [buBankMap, setBuBankMap]         = useState<Record<string, string[]>>({});
   const [payeeOptions, setPayeeOptions]   = useState<PayeeOption[]>([]);
   const [selectedBU, setSelectedBU]       = useState<string>('');
@@ -1368,6 +1378,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   // ── Load LOVs ─────────────────────────────────────────────────────────────
   const loadLovs = useCallback(async () => {
     const buLeMapping: Record<string, string> = {};
+    const buCompanyMapping: Record<string, string> = {};
     const buSet = new Set<string>();
 
     // Step 1: BUs from gl/businessunits
@@ -1378,12 +1389,14 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
         (buData.items as any[]).forEach(i => {
           const buName = i.business_unit_name || i.businessUnitName || '';
           const leName = i.legal_entity_name  || i.legalEntityName  || '';
-          if (buName) { buSet.add(buName); buLeMapping[buName] = leName; }
+          const company = i.company || '';
+          if (buName) { buSet.add(buName); buLeMapping[buName] = leName; buCompanyMapping[buName] = company; }
         });
       }
     } catch { /* silent */ }
 
     setBuLeMap({ ...buLeMapping });
+    setBuCompanyMap({ ...buCompanyMapping });
     setBusinessUnits([...buSet].sort().map(n => ({ label: n, value: n })));
 
     // Step 2: Payees from cash/payees
@@ -1582,6 +1595,14 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
         const drAccount = direction === 'DR' ? txn.assetAccountCombination : txn.offsetAccountCombination;
         const crAccount = direction === 'DR' ? txn.offsetAccountCombination : txn.assetAccountCombination;
 
+        // Validate company codes match between DR and CR
+        const drCompany = (drAccount || '').split('-')[0]?.trim();
+        const crCompany = (crAccount || '').split('-')[0]?.trim();
+        if (drCompany && crCompany && drCompany !== crCompany) {
+          updateRow(row.extTxnId, { status: 'error', message: `Company code mismatch: DR account starts with '${drCompany}' but CR account starts with '${crCompany}'. Both must use the same company code.` });
+          continue;
+        }
+
         // buildPcBankTxnSlaPayload always makes offsetAccount the DR line and assetAccount the CR line
         const slaPayload = buildPcBankTxnSlaPayload({
           externalTransactionId:   txn.externalTransactionId,
@@ -1736,6 +1757,15 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
         const absAmount = Math.abs(txn.amount ?? 0);
         const drAccount = direction === 'DR' ? txn.assetAccountCombination : txn.offsetAccountCombination;
         const crAccount = direction === 'DR' ? txn.offsetAccountCombination : txn.assetAccountCombination;
+
+        // Validate company codes match between DR and CR
+        const drCompany = (drAccount || '').split('-')[0]?.trim();
+        const crCompany = (crAccount || '').split('-')[0]?.trim();
+        if (drCompany && crCompany && drCompany !== crCompany) {
+          updateRow(row.extTxnId, { status: 'error', message: `Company code mismatch: DR account starts with '${drCompany}' but CR account starts with '${crCompany}'. Both must use the same company code.` });
+          continue;
+        }
+
         const slaPayload = buildPcBankTxnSlaPayload({
           externalTransactionId:   txn.externalTransactionId,
           referenceText:           txn.referenceText || String(txn.externalTransactionId),
@@ -2314,6 +2344,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           bankAccountMap={bankAccountMap}
           bankAccountCurrencyMap={bankAccountCurrencyMap}
           buBankMap={buBankMap}
+          buCompanyMap={buCompanyMap}
           payeeOptions={payeeOptions}
           onPayeeCreated={(newOpt) => setPayeeOptions(prev => [...prev, newOpt].sort((a, b) => a.label.localeCompare(b.label)))}
           onSave={() => { closeTab(t.key); handleSearch(); loadLovs(); }}
