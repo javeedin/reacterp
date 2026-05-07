@@ -1041,7 +1041,7 @@ const ManagePayments: React.FC = () => {
     setAvailableInvoicesLoading(true);
     try {
       const buName = createPaymentForm.getFieldValue('businessUnit') || '';
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/available-installments?supplier_number=${encodeURIComponent(supplierNumber)}${buName ? `&business_unit=${encodeURIComponent(buName)}` : ''}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/available-installments?supplier_number=${encodeURIComponent(supplierNumber)}&business_unit=${encodeURIComponent(buName)}`;
       setAddInvoicesApiUrl(url);
       const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -3788,6 +3788,8 @@ const ManagePayments: React.FC = () => {
                   onClick={() => {
                     const supplierNum = createPaymentForm.getFieldValue('supplierNumber');
                     if (!supplierNum) { message.warning('Please select a supplier first'); return; }
+                    const buName = createPaymentForm.getFieldValue('businessUnit') || '';
+                    if (!buName) { message.warning('Please select a Business Unit first'); return; }
                     fetchAvailableInvoices(supplierNum);
                     setAddInvoicesModalVisible(true);
                   }}
