@@ -1039,7 +1039,7 @@ const ManagePayments: React.FC = () => {
     setAvailableInvoicesLoading(true);
     try {
       const buName = createPaymentForm.getFieldValue('businessUnit') || '';
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/available-installments?supplier_number=${encodeURIComponent(supplierNumber)}${buName ? `&business_unit=${encodeURIComponent(buName)}` : ''}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/available-installments?supplier_number=${encodeURIComponent(supplierNumber)}${buName ? `&p_business_unit=${encodeURIComponent(buName)}` : ''}`;
       setAddInvoicesApiUrl(url);
       const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
