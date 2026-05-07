@@ -714,6 +714,42 @@ const ExternalTxnForm: React.FC<{
               </Form.Item>
             </Col>
           </Row>
+
+          {/* ── Conversion Rate ── */}
+          <Row gutter={16} style={{ marginTop: 8 }}>
+            <Col xs={24} md={12}>
+              <Form.Item
+                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Conversion Rate Type</span>}
+                name="bankConversionRateType"
+                style={{ marginBottom: 0 }}
+              >
+                <Select
+                  placeholder="Select rate type"
+                  allowClear
+                  disabled={isEdit || !bankSelected || saved}
+                >
+                  <Option value="Corporate">Corporate</Option>
+                  <Option value="Spot">Spot</Option>
+                  <Option value="User">User</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12}>
+              <Form.Item
+                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Conversion Rate</span>}
+                name="bankConversionRate"
+                style={{ marginBottom: 0 }}
+              >
+                <InputNumber
+                  style={{ width: '100%' }}
+                  precision={6}
+                  min={0}
+                  placeholder="e.g. 3.672500"
+                  disabled={isEdit || !bankSelected || saved}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
           {isAdhocPayment && (
             <Row gutter={16} style={{ marginTop: 8 }}>
               <Col xs={24}>
@@ -932,42 +968,6 @@ const ExternalTxnForm: React.FC<{
                 </Form.Item>
               </Col>
             )}
-          </Row>
-
-          {/* ── Conversion Rate ── */}
-          <Row gutter={16} style={{ marginTop: 10 }}>
-            <Col xs={24} md={12}>
-              <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Conversion Rate Type</span>}
-                name="bankConversionRateType"
-                style={{ marginBottom: 0 }}
-              >
-                <Select
-                  placeholder="Select rate type"
-                  allowClear
-                  disabled={isEdit || !bankSelected || saved}
-                >
-                  <Option value="Corporate">Corporate</Option>
-                  <Option value="Spot">Spot</Option>
-                  <Option value="User">User</Option>
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col xs={24} md={12}>
-              <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 13 }}>Conversion Rate</span>}
-                name="bankConversionRate"
-                style={{ marginBottom: 0 }}
-              >
-                <InputNumber
-                  style={{ width: '100%' }}
-                  precision={6}
-                  min={0}
-                  placeholder="e.g. 3.672500"
-                  disabled={isEdit || !bankSelected || saved}
-                />
-              </Form.Item>
-            </Col>
           </Row>
 
           {/* ── Amount + Description (single mode) ── */}
