@@ -527,9 +527,10 @@ const ManagePayments: React.FC = () => {
   const [supplierSearchText, setSupplierSearchText] = useState('');
 
   // Business Units state (for Business Unit LOV)
-  const [businessUnitsList, setBusinessUnitsList] = useState<{ id: number; name: string; legalEntityName: string }[]>([]);
+  const [businessUnitsList, setBusinessUnitsList] = useState<{ id: number; name: string; legalEntityName: string; company: string }[]>([]);
   const [businessUnitsListLoading, setBusinessUnitsListLoading] = useState(false);
   const [selectedBuLegalEntityName, setSelectedBuLegalEntityName] = useState<string>('');
+  const [derivedCompany, setDerivedCompany] = useState<string>('');
 
   // Payment date filter state
   const [paymentDateMode, setPaymentDateMode]   = useState<string>('');
@@ -549,6 +550,7 @@ const ManagePayments: React.FC = () => {
         id: item.business_unit_id,
         name: item.business_unit_name || '',
         legalEntityName: item.legal_entity_name || '',
+        company: item.company || '',
       }));
       setBusinessUnitsList(items);
     } catch (err) {
@@ -1094,10 +1096,14 @@ const ManagePayments: React.FC = () => {
     }
   };
 
+  // True when a BU is selected AND has a company code — gates all payment form fields
+  const buReady = !!selectedBuLegalEntityName && !!derivedCompany;
+
   // Filter bank accounts to only those matching the selected BU's legal entity
   const filteredBankAccounts = useMemo(() => {
     if (!selectedBuLegalEntityName) return [];
-    return bankAccounts.filter(a => a.legalEntityName === selectedBuLegalEntityName);
+    const le = selectedBuLegalEntityName.trim().toLowerCase();
+    return bankAccounts.filter(a => a.legalEntityName.trim().toLowerCase() === le);
   }, [bankAccounts, selectedBuLegalEntityName]);
 
   // Fetch suppliers from API
@@ -3151,6 +3157,7 @@ const ManagePayments: React.FC = () => {
                                 onChange={(value) => {
                                   const bu = businessUnitsList.find(b => b.name === value);
                                   setSelectedBuLegalEntityName(bu?.legalEntityName || '');
+                                  setDerivedCompany(bu?.company || '');
                                   setSelectedBankAccount(null);
                                   setSupplierTotalBalance(null);
                                   setInvoicesToPay([]);
@@ -3158,6 +3165,7 @@ const ManagePayments: React.FC = () => {
                                 }}
                                 onClear={() => {
                                   setSelectedBuLegalEntityName('');
+                                  setDerivedCompany('');
                                   setSelectedBankAccount(null);
                                   setSupplierTotalBalance(null);
                                   setInvoicesToPay([]);
@@ -3169,6 +3177,17 @@ const ManagePayments: React.FC = () => {
                                 ))}
                               </Select>
                             </Form.Item>
+                            {selectedBuLegalEntityName && derivedCompany && (
+                              <div style={{ marginTop: -8, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ fontSize: 11, color: '#6B6B6B' }}>Company Code:</span>
+                                <Tag color="blue" style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{derivedCompany}</Tag>
+                              </div>
+                            )}
+                            {selectedBuLegalEntityName && !derivedCompany && (
+                              <div style={{ marginTop: -8, marginBottom: 12, padding: '4px 8px', background: '#fff2f0', border: '1px solid #ffa39e', borderRadius: 4 }}>
+                                <span style={{ fontSize: 11, color: '#cf1322' }}>⚠ No company code configured for this Business Unit. Cannot proceed.</span>
+                              </div>
+                            )}
                             <Form.Item
                               label={<><span style={{ color: REDWOOD.primary }}>*</span> Supplier or Party</>}
                               name="payee"
@@ -3177,15 +3196,15 @@ const ManagePayments: React.FC = () => {
                               <Input
                                 placeholder="Search and select supplier"
                                 readOnly
-                                disabled={!selectedBuLegalEntityName}
+                                disabled={!buReady}
                                 suffix={
                                   <SearchOutlined
-                                    style={{ color: selectedBuLegalEntityName ? REDWOOD.info : '#ccc', cursor: selectedBuLegalEntityName ? 'pointer' : 'default', fontSize: 14 }}
-                                    onClick={() => selectedBuLegalEntityName && openSupplierModal('create')}
+                                    style={{ color: buReady ? REDWOOD.info : '#ccc', cursor: buReady ? 'pointer' : 'default', fontSize: 14 }}
+                                    onClick={() => buReady && openSupplierModal('create')}
                                   />
                                 }
-                                onClick={() => selectedBuLegalEntityName && openSupplierModal('create')}
-                                style={{ cursor: selectedBuLegalEntityName ? 'pointer' : 'not-allowed' }}
+                                onClick={() => buReady && openSupplierModal('create')}
+                                style={{ cursor: buReady ? 'pointer' : 'not-allowed' }}
                               />
                             </Form.Item>
                             <Form.Item label="Supplier Number" name="supplierNumber">
@@ -3196,7 +3215,7 @@ const ManagePayments: React.FC = () => {
                               name="payeeSite"
                               rules={[{ required: true, message: 'Required' }]}
                             >
-                              <Select placeholder="Select Supplier Site" allowClear disabled={!selectedBuLegalEntityName}>
+                              <Select placeholder="Select Supplier Site" allowClear disabled={!buReady}>
                                 <Option value="MAIN">Main</Option>
                                 <Option value="HQ">Headquarters</Option>
                               </Select>
@@ -3214,7 +3233,7 @@ const ManagePayments: React.FC = () => {
                               name="paymentDate"
                               rules={[{ required: true, message: 'Required' }]}
                             >
-                              <DatePicker disabled={!selectedBuLegalEntityName} style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
+                              <DatePicker disabled={!buReady} style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
                             </Form.Item>
                             <Form.Item
                               label={<><span style={{ color: REDWOOD.primary }}>*</span> Type</>}
@@ -3222,7 +3241,7 @@ const ManagePayments: React.FC = () => {
                               initialValue="QUICK"
                               rules={[{ required: true, message: 'Required' }]}
                             >
-                              <Select disabled={!selectedBuLegalEntityName} style={{ width: 130 }}>
+                              <Select disabled={!buReady} style={{ width: 130 }}>
                                 <Option value="QUICK">Quick</Option>
                                 <Option value="STANDARD">Standard</Option>
                                 <Option value="MANUAL">Manual</Option>
@@ -3235,15 +3254,15 @@ const ManagePayments: React.FC = () => {
                               label={<><span style={{ color: REDWOOD.primary }}>*</span> Disbursement Bank Account</>}
                               name="disbursementBankAccount"
                               rules={[{ required: true, message: 'Required' }]}
-                              extra={selectedBuLegalEntityName && filteredBankAccounts.length === 0 && !bankAccountsLoading
+                              extra={buReady && filteredBankAccounts.length === 0 && !bankAccountsLoading
                                 ? <span style={{ color: REDWOOD.warning, fontSize: 12 }}>No bank accounts found for {selectedBuLegalEntityName}</span>
                                 : null}
                             >
                               <Select
-                                placeholder={selectedBuLegalEntityName ? 'Select Bank Account' : 'Select Business Unit first'}
+                                placeholder={!selectedBuLegalEntityName ? 'Select Business Unit first' : !derivedCompany ? 'No company code — cannot select bank' : 'Select Bank Account'}
                                 allowClear
                                 showSearch
-                                disabled={!selectedBuLegalEntityName}
+                                disabled={!buReady}
                                 loading={bankAccountsLoading}
                                 optionFilterProp="children"
                                 notFoundContent={bankAccountsLoading ? 'Loading…' : 'No bank accounts found'}
@@ -3272,7 +3291,7 @@ const ManagePayments: React.FC = () => {
                                 showSearch
                                 optionFilterProp="label"
                                 placeholder="Select Currency"
-                                disabled={!selectedBuLegalEntityName}
+                                disabled={!buReady}
                                 onChange={(val) => {
                                   setCreatePaymentCurrency(val || 'AED');
                                   createPaymentForm.validateFields(['conversionRateType', 'conversionDate', 'conversionRate']);
@@ -3305,7 +3324,7 @@ const ManagePayments: React.FC = () => {
                               name="conversionRateType"
                               rules={[{ required: createPaymentCurrency !== 'AED', message: 'Required for foreign currency' }]}
                             >
-                              <Select placeholder="Select rate type" allowClear disabled={!selectedBuLegalEntityName}>
+                              <Select placeholder="Select rate type" allowClear disabled={!buReady}>
                                 <Option value="User">User</Option>
                                 <Option value="Corporate">Corporate</Option>
                                 <Option value="Spot">Spot</Option>
@@ -3316,14 +3335,14 @@ const ManagePayments: React.FC = () => {
                               name="conversionDate"
                               rules={[{ required: createPaymentCurrency !== 'AED', message: 'Required for foreign currency' }]}
                             >
-                              <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" disabled={!selectedBuLegalEntityName} />
+                              <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" disabled={!buReady} />
                             </Form.Item>
                             <Form.Item
                               label={createPaymentCurrency !== 'AED' ? <><span style={{ color: REDWOOD.primary }}>*</span> Conversion Rate</> : 'Conversion Rate'}
                               name="conversionRate"
                               rules={[{ required: createPaymentCurrency !== 'AED', message: 'Required for foreign currency' }]}
                             >
-                              <InputNumber style={{ width: '100%' }} placeholder="0.000000" precision={6} min={0} disabled={!selectedBuLegalEntityName} />
+                              <InputNumber style={{ width: '100%' }} placeholder="0.000000" precision={6} min={0} disabled={!buReady} />
                             </Form.Item>
                             {createPaymentCurrency !== 'AED' && (
                               <Form.Item label="Functional Amount (AED)">
@@ -3342,14 +3361,14 @@ const ManagePayments: React.FC = () => {
                               </Form.Item>
                             )}
                             <Form.Item label="Maturity Date" name="maturityDate">
-                              <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" disabled={!selectedBuLegalEntityName} />
+                              <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" disabled={!buReady} />
                             </Form.Item>
                             <Form.Item
                               label={<><span style={{ color: REDWOOD.primary }}>*</span> Payment Method</>}
                               name="paymentMethod"
                               rules={[{ required: true, message: 'Required' }]}
                             >
-                              <Select placeholder="Select Payment Method" disabled={!selectedBuLegalEntityName}>
+                              <Select placeholder="Select Payment Method" disabled={!buReady}>
                                 <Option value="CHECK">Check</Option>
                                 <Option value="EFT">Electronic Funds Transfer</Option>
                                 <Option value="WIRE">Wire Transfer</Option>
@@ -3357,10 +3376,10 @@ const ManagePayments: React.FC = () => {
                               </Select>
                             </Form.Item>
                             <Form.Item label="Payment Document" name="paymentDocument">
-                              <Select placeholder="Select Payment Document" allowClear disabled={!selectedBuLegalEntityName} />
+                              <Select placeholder="Select Payment Document" allowClear disabled={!buReady} />
                             </Form.Item>
                             <Form.Item label="Paper Document Number" name="paperDocumentNumber">
-                              <Input disabled={!selectedBuLegalEntityName} placeholder="Leave blank to auto-generate" />
+                              <Input disabled={!buReady} placeholder="Leave blank to auto-generate" />
                             </Form.Item>
                             <Form.Item label="Attachments">
                               <Space size={4}>
@@ -3369,13 +3388,13 @@ const ManagePayments: React.FC = () => {
                                   size="small"
                                   type="text"
                                   icon={<PlusOutlined />}
-                                  disabled={!selectedBuLegalEntityName}
-                                  style={{ color: selectedBuLegalEntityName ? REDWOOD.info : '#ccc', padding: '0 4px', height: 22 }}
+                                  disabled={!buReady}
+                                  style={{ color: buReady ? REDWOOD.info : '#ccc', padding: '0 4px', height: 22 }}
                                 />
                               </Space>
                             </Form.Item>
                             <Form.Item label="Description" name="paymentDescription">
-                              <Input disabled={!selectedBuLegalEntityName} />
+                              <Input disabled={!buReady} />
                             </Form.Item>
                           </Col>
                         </Row>
@@ -3513,10 +3532,10 @@ const ManagePayments: React.FC = () => {
                         <Row gutter={32}>
                           <Col span={12}>
                             <Form.Item label="Payment Process Profile" name="paymentProcessProfile">
-                              <Select placeholder="Select Profile" allowClear disabled={!selectedBuLegalEntityName} />
+                              <Select placeholder="Select Profile" allowClear disabled={!buReady} />
                             </Form.Item>
                             <Form.Item label="Remit-to Account" name="remitToAccount">
-                              <Select placeholder="Select Remit-to Account" allowClear disabled={!selectedBuLegalEntityName} />
+                              <Select placeholder="Select Remit-to Account" allowClear disabled={!buReady} />
                             </Form.Item>
                           </Col>
                           <Col span={12}>
