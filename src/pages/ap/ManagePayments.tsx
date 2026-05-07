@@ -4081,35 +4081,38 @@ const ManagePayments: React.FC = () => {
             <Space>
               <FileTextOutlined style={{ color: REDWOOD.info }} />
               <span>Select Invoices to Pay</span>
-              {addInvoicesApiUrl && (
-                <Popover
-                  title={<Space><ApiOutlined style={{ color: '#1677ff' }} /><span>API Request</span></Space>}
-                  content={
-                    <div style={{ maxWidth: 520 }}>
-                      <div style={{ marginBottom: 6 }}>
-                        <Tag color="blue">GET</Tag>
-                        <span style={{ fontSize: 11, fontWeight: 600 }}>/ap/payments/available-installments</span>
+              {(() => {
+                const bu = createPaymentForm.getFieldValue('businessUnit') || '';
+                const previewUrl = `${APEX_DB_CONFIG.baseUrl}/ap/payments/available-installments?supplier_number=<supplier_number>${bu ? `&business_unit=${encodeURIComponent(bu)}` : ''}`;
+                const displayUrl = addInvoicesApiUrl || previewUrl;
+                return (
+                  <Popover
+                    title={<Space><ApiOutlined style={{ color: '#1677ff' }} /><span>API Request</span></Space>}
+                    content={
+                      <div style={{ maxWidth: 560 }}>
+                        <div style={{ marginBottom: 6 }}>
+                          <Tag color="blue">GET</Tag>
+                          <span style={{ fontSize: 11, fontWeight: 600 }}>/ap/payments/available-installments</span>
+                        </div>
+                        <div style={{ background: '#1e1e1e', color: '#d4d4d4', borderRadius: 6, padding: '8px 10px', fontSize: 11, fontFamily: 'monospace', wordBreak: 'break-all', maxHeight: 100, overflowY: 'auto' }}>
+                          {displayUrl}
+                        </div>
+                        <div style={{ marginTop: 8, fontSize: 11, color: '#555' }}>
+                          {bu
+                            ? <><span style={{ color: '#389e0d' }}>✓</span> BU filter: <code>{bu}</code> passed as <code>business_unit</code></>
+                            : <span style={{ color: '#cf1322' }}>⚠ No BU selected — all invoices for supplier will show</span>}
+                        </div>
                       </div>
-                      <div style={{
-                        background: '#1e1e1e', color: '#d4d4d4', borderRadius: 6,
-                        padding: '8px 10px', fontSize: 11, fontFamily: 'monospace',
-                        wordBreak: 'break-all', maxHeight: 80, overflowY: 'auto',
-                      }}>
-                        {addInvoicesApiUrl}
-                      </div>
-                      <div style={{ marginTop: 8, fontSize: 11, color: '#555' }}>
-                        Filters: <code>unpaid_amount &gt; 0</code> (derived from <code>RR_AP_PAYMENTS_RELATED_INVOICES</code>)
-                      </div>
-                    </div>
-                  }
-                  trigger="click"
-                  placement="bottomLeft"
-                >
-                  <Tooltip title="View API details">
-                    <ApiOutlined style={{ color: '#1677ff', cursor: 'pointer', fontSize: 15 }} />
-                  </Tooltip>
-                </Popover>
-              )}
+                    }
+                    trigger="click"
+                    placement="bottomLeft"
+                  >
+                    <Tooltip title="View API details">
+                      <ApiOutlined style={{ color: '#1677ff', cursor: 'pointer', fontSize: 15 }} />
+                    </Tooltip>
+                  </Popover>
+                );
+              })()}
             </Space>
           }
           open={addInvoicesModalVisible}
