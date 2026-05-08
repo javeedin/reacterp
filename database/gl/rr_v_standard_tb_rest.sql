@@ -60,7 +60,13 @@ SELECT
     entered_opening,
     entered_debit,
     entered_credit,
-    entered_closing
+    entered_closing,
+    ytd_opening,
+    ytd_debit,
+    ytd_credit,
+    ytd_entered_opening,
+    ytd_entered_debit,
+    ytd_entered_credit
 FROM RR_V_STANDARD_TB
 WHERE ledger_name          = :ledger_name
   AND (:period_name   IS NULL OR period_name          = :period_name)
