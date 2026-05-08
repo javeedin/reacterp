@@ -3905,7 +3905,18 @@ const TrialBalance: React.FC = () => {
               style={{ background: '#d46b08', borderColor: '#d46b08' }}
               onClick={() => openRevalModal(tab.key, (tabSelections[tab.key] || [])[0])}
             >
-              Revalue
+              Revalue by Currency
+            </Button>
+            <Button
+              size="small"
+              disabled={(tabSelections[tab.key] || []).length !== 1}
+              style={{ borderColor: '#d46b08', color: '#d46b08' }}
+              onClick={() => {
+                const accountKey = (tabSelections[tab.key] || [])[0];
+                if (accountKey) openDrillCombo(accountKey, tab.rrData, tab.ledgerName, tab.periodName.replace(/^(?:ReERP|Dynamic):\s*/, ''), tab.key);
+              }}
+            >
+              Revalue by Segments
             </Button>
             <Button
               icon={<FileExcelOutlined />}
@@ -4041,7 +4052,7 @@ const TrialBalance: React.FC = () => {
                 openRevalModal(drillComboTabKey, drillComboAccount);
               }}
             >
-              Revalue
+              Revalue by Segments
             </Button>
           )}
         </div>
@@ -4433,7 +4444,18 @@ const TrialBalance: React.FC = () => {
               style={{ background: '#d46b08', borderColor: '#d46b08' }}
               onClick={() => openRevalModal(tab.key, (tabSelections[tab.key] || [])[0])}
             >
-              Revalue
+              Revalue by Currency
+            </Button>
+            <Button
+              size="small"
+              disabled={(tabSelections[tab.key] || []).length !== 1}
+              style={{ borderColor: '#d46b08', color: '#d46b08' }}
+              onClick={() => {
+                const accountKey = (tabSelections[tab.key] || [])[0];
+                if (accountKey) openDrillCombo(accountKey, tab.rrData, tab.ledgerName, tab.periodName.replace(/^YTD:\s*/, ''), tab.key);
+              }}
+            >
+              Revalue by Segments
             </Button>
             <Button
               icon={<FileExcelOutlined />}
