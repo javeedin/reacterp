@@ -83,6 +83,44 @@ export async function generateMpaSchedule(invoiceId: number): Promise<void> {
   if (!res.ok || !data.success) throw new Error(data?.error || `HTTP ${res.status}`);
 }
 
+export interface FusionMpaLine {
+  invoiceId:               number;
+  invoiceNumber:           string;
+  invoiceDate:             string;
+  invoiceAmount:           number;
+  invoiceCurrency:         string;
+  businessUnit:            string;
+  supplier:                string;
+  supplierNumber:          string;
+  lineNumber:              number;
+  lineAmount:              number;
+  lineDescription:         string | null;
+  chargeAccount:           string | null;
+  multiperiodAccrualAccount: string | null;
+  multiperiodStartDate:    string;
+  multiperiodEndDate:      string;
+  scheduleGenerated:       number; // 1 = yes, 0 = no
+}
+
+export async function listFusionMpaLines(params: {
+  invoiceNumber?:   string;
+  supplier?:        string;
+  businessUnit?:    string;
+  lineDescription?: string;
+} = {}): Promise<FusionMpaLine[]> {
+  const q = new URLSearchParams();
+  if (params.invoiceNumber)   q.set('invoice_number',   params.invoiceNumber);
+  if (params.supplier)        q.set('supplier',          params.supplier);
+  if (params.businessUnit)    q.set('business_unit',     params.businessUnit);
+  if (params.lineDescription) q.set('line_description',  params.lineDescription);
+  const res = await fetch(`${BASE}/fusion-data${q.toString() ? '?' + q.toString() : ''}`, {
+    headers: { Accept: 'application/json' },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+  return (data.items || []) as FusionMpaLine[];
+}
+
 export async function markPeriodPosted(
   invoiceId: number,
   periodName: string,

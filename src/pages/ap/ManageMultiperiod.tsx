@@ -16,7 +16,9 @@ import type { ColumnsType } from 'antd/es/table';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
   listMpaInvoices, getMpaSchedule, generateMpaSchedule, markPeriodPosted,
+  listFusionMpaLines,
   type MpaInvoiceSummary, type MpaScheduleLine, type MpaInvoiceDetail,
+  type FusionMpaLine,
 } from '../../services/multiperiod.service';
 import {
   createAccounting, fetchLedgerByBusinessUnit, getAccounting,
@@ -91,6 +93,13 @@ const ManageMultiperiod: React.FC = () => {
   const [acctModalInvoiceId, setAcctModalInvoiceId] = useState<number | null>(null);
   const [acctData,           setAcctData]           = useState<SlaGetResult | null>(null);
   const [acctLoading,        setAcctLoading]        = useState(false);
+
+  // ── Fusion data tab ───────────────────────────────────────────────────────
+  const [fusionForm]        = Form.useForm();
+  const [fusionRows,        setFusionRows]        = useState<FusionMpaLine[]>([]);
+  const [fusionLoading,     setFusionLoading]     = useState(false);
+  const [fusionErr,         setFusionErr]         = useState<string | null>(null);
+  const [fusionSearched,    setFusionSearched]    = useState(false);
 
   // Load business units
   useEffect(() => {
@@ -343,6 +352,95 @@ const ManageMultiperiod: React.FC = () => {
     }
     setAcctLoading(false);
   }, []);
+
+  // ── fusion data search ────────────────────────────────────────────────────
+
+  const handleFusionSearch = useCallback(async () => {
+    const vals = fusionForm.getFieldsValue();
+    setFusionLoading(true);
+    setFusionErr(null);
+    try {
+      const rows = await listFusionMpaLines({
+        invoiceNumber:   vals.invoiceNumber   || undefined,
+        supplier:        vals.supplier        || undefined,
+        businessUnit:    vals.businessUnit    || undefined,
+        lineDescription: vals.lineDescription || undefined,
+      });
+      setFusionRows(rows);
+      setFusionSearched(true);
+    } catch (e: any) {
+      setFusionErr(e?.message ?? 'Search failed');
+    }
+    setFusionLoading(false);
+  }, [fusionForm]);
+
+  const fusionColumns: ColumnsType<FusionMpaLine> = [
+    {
+      title: 'Invoice Number', dataIndex: 'invoiceNumber', width: 150, fixed: 'left' as const,
+      render: (v, rec) => (
+        <Button type="link" size="small" style={{ padding: 0 }} onClick={() => openDetail({
+          invoiceId: rec.invoiceId, invoiceNumber: rec.invoiceNumber,
+          supplier: rec.supplier, supplierNumber: rec.supplierNumber,
+          businessUnit: rec.businessUnit, invoiceDate: rec.invoiceDate,
+          currencyCode: rec.invoiceCurrency, totalLines: 0, totalAmount: rec.invoiceAmount,
+          postedAmount: 0, notPostedAmount: 0, minPeriodDate: rec.multiperiodStartDate,
+          maxPeriodDate: rec.multiperiodEndDate,
+        })}>{v}</Button>
+      ),
+    },
+    {
+      title: 'Invoice Date', dataIndex: 'invoiceDate', width: 110,
+      render: v => <Text style={{ fontSize: 12 }}>{fmtDate(v)}</Text>,
+    },
+    { title: 'Supplier', dataIndex: 'supplier', ellipsis: true, width: 200 },
+    { title: 'Supplier No.', dataIndex: 'supplierNumber', width: 110 },
+    { title: 'Business Unit', dataIndex: 'businessUnit', width: 160, ellipsis: true },
+    {
+      title: 'Invoice Amount', dataIndex: 'invoiceAmount', width: 140, align: 'right' as const,
+      render: (v, rec) => <Text strong style={{ fontSize: 12 }}>{fmtAmt(v, rec.invoiceCurrency)}</Text>,
+    },
+    { title: 'Line', dataIndex: 'lineNumber', width: 55, align: 'center' as const },
+    {
+      title: 'Line Amount', dataIndex: 'lineAmount', width: 130, align: 'right' as const,
+      render: (v, rec) => <Text style={{ fontSize: 12 }}>{fmtAmt(v, rec.invoiceCurrency)}</Text>,
+    },
+    { title: 'Line Description', dataIndex: 'lineDescription', ellipsis: true, width: 200 },
+    {
+      title: 'MPA Start', dataIndex: 'multiperiodStartDate', width: 110,
+      render: v => <Text style={{ fontSize: 12, color: REDWOOD.info }}>{fmtDate(v)}</Text>,
+    },
+    {
+      title: 'MPA End', dataIndex: 'multiperiodEndDate', width: 110,
+      render: v => <Text style={{ fontSize: 12, color: REDWOOD.info }}>{fmtDate(v)}</Text>,
+    },
+    {
+      title: 'Charge A/C', dataIndex: 'chargeAccount', width: 190, ellipsis: true,
+      render: v => <Text code style={{ fontSize: 11 }}>{v || '—'}</Text>,
+    },
+    {
+      title: 'Accrual A/C', dataIndex: 'multiperiodAccrualAccount', width: 190, ellipsis: true,
+      render: v => <Text code style={{ fontSize: 11 }}>{v || '—'}</Text>,
+    },
+    {
+      title: 'Schedule', dataIndex: 'scheduleGenerated', width: 100, align: 'center' as const,
+      render: v => v
+        ? <Tag color="success" icon={<CheckCircleOutlined />}>Generated</Tag>
+        : <Tag color="default">Pending</Tag>,
+    },
+    {
+      title: 'Action', width: 110, fixed: 'right' as const,
+      render: (_, rec) => (
+        <Button
+          size="small"
+          icon={<SyncOutlined />}
+          loading={generating.has(rec.invoiceId)}
+          onClick={() => handleGenerate(rec.invoiceId)}
+        >
+          {rec.scheduleGenerated ? 'Regen' : 'Generate'}
+        </Button>
+      ),
+    },
+  ];
 
   // ── search columns ────────────────────────────────────────────────────────
 
@@ -613,6 +711,92 @@ const ManageMultiperiod: React.FC = () => {
         </>
       ),
     },
+    {
+      key:   'fusion',
+      label: <span><ApiOutlined style={{ marginRight: 4 }} />Data from Fusion</span>,
+      children: (
+        <>
+          <Card size="small" style={{ marginBottom: 12 }}>
+            <Form form={fusionForm} layout="inline" size="small" onFinish={handleFusionSearch}>
+              <Form.Item name="invoiceNumber" label="Invoice Number">
+                <Input placeholder="Search…" style={{ width: 160 }} allowClear />
+              </Form.Item>
+              <Form.Item name="supplier" label="Supplier">
+                <Input placeholder="Search…" style={{ width: 180 }} allowClear />
+              </Form.Item>
+              <Form.Item name="businessUnit" label="Business Unit">
+                <Select placeholder="All" style={{ width: 200 }} allowClear>
+                  {businessUnits.map(bu => <Option key={bu} value={bu}>{bu}</Option>)}
+                </Select>
+              </Form.Item>
+              <Form.Item name="lineDescription" label="Description">
+                <Input placeholder="Search…" style={{ width: 160 }} allowClear />
+              </Form.Item>
+              <Form.Item>
+                <Space>
+                  <Button type="primary" htmlType="submit" icon={<SearchOutlined />} loading={fusionLoading}>
+                    Search
+                  </Button>
+                  <Button icon={<ReloadOutlined />} onClick={() => { fusionForm.resetFields(); setFusionRows([]); setFusionErr(null); setFusionSearched(false); }}>
+                    Reset
+                  </Button>
+                </Space>
+              </Form.Item>
+            </Form>
+          </Card>
+
+          {fusionErr && <Alert type="error" showIcon message={fusionErr} style={{ marginBottom: 12 }} />}
+
+          {fusionSearched && !fusionLoading && fusionRows.length > 0 && (
+            <Row gutter={12} style={{ marginBottom: 12 }}>
+              <Col span={6}>
+                <Card size="small">
+                  <Statistic title="Lines Found" value={fusionRows.length} valueStyle={{ fontSize: 14 }} />
+                </Card>
+              </Col>
+              <Col span={6}>
+                <Card size="small">
+                  <Statistic
+                    title="Invoices"
+                    value={new Set(fusionRows.map(r => r.invoiceId)).size}
+                    valueStyle={{ fontSize: 14 }}
+                  />
+                </Card>
+              </Col>
+              <Col span={6}>
+                <Card size="small">
+                  <Statistic
+                    title="Schedules Generated"
+                    value={new Set(fusionRows.filter(r => r.scheduleGenerated).map(r => r.invoiceId)).size}
+                    valueStyle={{ fontSize: 14, color: REDWOOD.success }}
+                  />
+                </Card>
+              </Col>
+              <Col span={6}>
+                <Card size="small">
+                  <Statistic
+                    title="Pending Generation"
+                    value={new Set(fusionRows.filter(r => !r.scheduleGenerated).map(r => r.invoiceId)).size}
+                    valueStyle={{ fontSize: 14, color: REDWOOD.warning }}
+                  />
+                </Card>
+              </Col>
+            </Row>
+          )}
+
+          <Table
+            dataSource={fusionRows}
+            columns={fusionColumns}
+            rowKey={(r) => `${r.invoiceId}-${r.lineNumber}`}
+            size="small"
+            loading={fusionLoading}
+            pagination={{ pageSize: 25, showSizeChanger: true, showTotal: (total) => `${total} lines` }}
+            scroll={{ x: 1600 }}
+            locale={{ emptyText: fusionSearched ? 'No multiperiod invoice lines found' : 'Run a search to see invoice lines eligible for multiperiod accounting' }}
+          />
+        </>
+      ),
+    },
     ...detailTabs.map(tab => ({
       key:   tab.key,
       label: (
@@ -805,6 +989,7 @@ const ManageMultiperiod: React.FC = () => {
             pagination={false}
             style={{ marginBottom: lastApiUrl ? 16 : 0 }}
             dataSource={[
+              { method: 'GET',  endpoint: `${APEX_DB_CONFIG.baseUrl}/ap/multiperiod/fusion-data`,       purpose: 'Data from Fusion — AP invoice lines with MPA dates' },
               { method: 'GET',  endpoint: `${APEX_DB_CONFIG.baseUrl}/ap/multiperiod`,                  purpose: 'Search — list invoices with MPA schedules' },
               { method: 'GET',  endpoint: `${APEX_DB_CONFIG.baseUrl}/ap/multiperiod/:invoice_id`,      purpose: 'Detail — schedule lines for one invoice' },
               { method: 'POST', endpoint: `${APEX_DB_CONFIG.baseUrl}/ap/multiperiod/generate`,         purpose: 'Generate / refresh schedule for an invoice' },
