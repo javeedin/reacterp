@@ -4416,6 +4416,7 @@ const TrialBalance: React.FC = () => {
         </Row>
 
         <Row gutter={12} style={{ marginBottom: 6 }}>
+          <Col flex="auto" />
           <Col style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Button
               size="small"
