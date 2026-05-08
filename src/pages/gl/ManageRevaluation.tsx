@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layout, Card, Table, Button, Space, Typography, Breadcrumb,
   Input, Row, Col, Spin, Tag, Modal, message, Select, Popconfirm,
-  Descriptions, Divider,
+  Descriptions, Divider, Alert, Steps,
 } from 'antd';
 import {
   HomeOutlined,
@@ -14,9 +14,12 @@ import {
   SearchOutlined,
   CheckCircleOutlined,
   EyeOutlined,
+  LoadingOutlined,
+  CloseCircleOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
+import { createAccounting, checkAccountingExists, type SlaCreatePayload } from '../../services/sla.service';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -221,6 +224,10 @@ const ManageRevaluation: React.FC = () => {
   const [pdfVisible,     setPdfVisible]     = useState(false);
   const [accountingId,   setAccountingId]   = useState<number | null>(null);
   const [accountingLoading, setAccountingLoading] = useState<number | null>(null);
+  // SLA accounting flow status modal
+  const [acctFlowVisible, setAcctFlowVisible] = useState(false);
+  const [acctFlowSteps,   setAcctFlowSteps]   = useState<{ title: string; status: 'wait'|'process'|'finish'|'error'; desc?: string }[]>([]);
+  const [acctFlowDone,    setAcctFlowDone]    = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -384,9 +391,31 @@ const ManageRevaluation: React.FC = () => {
   };
 
   const handleCreateAccounting = async (id: number) => {
+    // Open the status modal and reset steps
+    const initSteps: { title: string; status: 'wait'|'process'|'finish'|'error'; desc?: string }[] = [
+      { title: 'Load Detail',        status: 'wait' },
+      { title: 'Check SLA Exists',   status: 'wait' },
+      { title: 'Write to SLA',       status: 'wait' },
+      { title: 'Mark Accounted',     status: 'wait' },
+    ];
+    setAcctFlowSteps(initSteps);
+    setAcctFlowDone(false);
+    setAcctFlowVisible(true);
     setAccountingLoading(id);
+
+    const updateStep = (
+      idx: number,
+      status: 'wait'|'process'|'finish'|'error',
+      desc?: string,
+    ) => {
+      setAcctFlowSteps(prev => prev.map((s, i) =>
+        i === idx ? { ...s, status, desc: desc ?? s.desc } : s
+      ));
+    };
+
     try {
-      // 1. Load detail if not already for this record
+      // Step 0 — Load detail
+      updateStep(0, 'process');
       let d: RevalDetail | null = detail?.revalueId === id ? detail : null;
       if (!d) {
         const res  = await fetch(`${ORDS_BASE}/${APEX_DB_CONFIG.endpoints.revaluation}/${id}`);
@@ -438,97 +467,94 @@ const ManageRevaluation: React.FC = () => {
       if (!d.lines || d.lines.length === 0)
         throw new Error('No journal lines found on this revaluation');
 
+      updateStep(0, 'finish', `${d.lines.length} lines loaded`);
+
+      // Step 1 — Check if SLA accounting already exists
+      updateStep(1, 'process');
+      const existsRes = await checkAccountingExists('RR_REVALUE_HEADER', id, 'GL_REVALUATION');
+      if (existsRes.exists && existsRes.accountingStatus === 'POSTED') {
+        updateStep(1, 'error', `Already posted (SLA header ${existsRes.headerId})`);
+        throw new Error('SLA accounting already posted for this revaluation');
+      }
+      updateStep(1, 'finish', existsRes.exists
+        ? `Existing DRAFT found (header ${existsRes.headerId}) — will replace`
+        : 'No existing SLA entry — creating new');
+
+      // Step 2 — Write to SLA
+      updateStep(2, 'process');
       const today      = new Date().toISOString().split('T')[0];
       const periodName = d.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '');
       const currency   = d.functionalCcy || 'AED';
-      const totalDr    = d.lines.reduce((s, l) => s + (l.drAmount || 0), 0);
-      const totalCr    = d.lines.reduce((s, l) => s + (l.crAmount || 0), 0);
-      const batchName  = `REVAL-${id}-${Date.now()}`;
       const createdBy  = d.createdBy || 'SYSTEM';
 
-      // 2. Build GL journal payload
-      const glPayload = {
-        batch: {
-          batchName,
-          batchDescription: `FX Revaluation – ${d.account} – ${periodName}`,
-          ledgerName:       d.ledgerName || '',
-          ledgerId:         d.ledgerId   || 0,
-          status:           'NEW',
-          accountingPeriod: periodName,
-          controlTotal:     Math.max(totalDr, totalCr),
-          runningTotalDr:   totalDr,
-          runningTotalCr:   totalCr,
-          batchSource:      'General Ledger',
-          createdBy,
-        },
+      const slaPayload: SlaCreatePayload = {
         header: {
-          ledgerId:                d.ledgerId   || 0,
-          ledgerName:              d.ledgerName || '',
-          jeCategory:              'Revaluation',
-          jeSource:                'General Ledger',
+          moduleName:       'GL',
+          sourceTable:      'RR_REVALUE_HEADER',
+          sourceId:         id,
+          sourceNumber:     `REVAL-${id}`,
+          sourceType:       'Revaluation',
+          eventTypeCode:    'GL_REVALUATION',
+          eventDate:        today,
+          accountingDate:   today,
           periodName,
-          journalName:             `REVAL-${d.account}-${periodName}`,
-          description:             `FX Revaluation – ${d.accountDesc || d.account} – ${periodName}`,
-          currencyCode:            currency,
-          currencyConversionType:  'User',
-          currencyConversionDate:  today,
-          currencyConversionRate:  1,
-          defaultEffectiveDate:    today,
-          status:                  'NEW',
-          runningTotalDr:          totalDr,
-          runningTotalCr:          totalCr,
+          ledgerId:         d.ledgerId   || 0,
+          ledgerName:       d.ledgerName || '',
+          currencyCode:     currency,
+          ledgerCurrency:   currency,
+          exchangeRate:     1,
+          exchangeRateType: 'User',
+          description:      `FX Revaluation – ${d.accountDesc || d.account} – ${periodName}`,
           createdBy,
         },
-        lines: d.lines.map(l => ({
-          enteredDr:                 l.drAmount > 0 ? l.drAmount : null,
-          enteredCr:                 l.crAmount > 0 ? l.crAmount : null,
-          accountedDr:               l.drAmount > 0 ? l.drAmount : null,
-          accountedCr:               l.crAmount > 0 ? l.crAmount : null,
-          statAmount:                null,
-          description:               l.description || `Revaluation – ${d!.account}`,
-          currencyCode:              currency,
-          currencyConversionDate:    today,
-          currencyConversionRate:    1,
-          userCurrencyConversionType:'User',
-          accountCombination:        l.combo,
-          chartOfAccountsName:       'Chart of Accounts',
-          reference1:                String(id),
-          reference2:                d!.account || '',
-          reference3:                'Revaluation',
-          reference4:                null,
-          reference5:                null,
-          createdBy,
+        lines: d.lines.map((l, idx) => ({
+          lineNumber:         l.lineNum || idx + 1,
+          lineType:           l.drAmount > 0 ? 'DR' : 'CR',
+          accountingClass:    'Revaluation',
+          accountCombination: l.combo,
+          enteredDr:          l.drAmount || 0,
+          enteredCr:          l.crAmount || 0,
+          accountedDr:        l.drAmount || 0,
+          accountedCr:        l.crAmount || 0,
+          currencyCode:       currency,
+          exchangeRate:       1,
+          description:        l.description || `Revaluation – ${d!.account}`,
+          sourceLineId:       l.lineId || idx + 1,
+          sourceLineNumber:   l.lineNum || idx + 1,
         })),
       };
 
-      // 3. Create GL journal
-      const glRes  = await fetch(`${ORDS_BASE}/journals/create`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body:    JSON.stringify(glPayload),
-      });
-      const glData = await glRes.json();
-      if (!glRes.ok) throw new Error(glData?.message || `GL journal failed (HTTP ${glRes.status})`);
+      const slaResult = await createAccounting(slaPayload);
+      updateStep(2, 'finish',
+        `SLA header ${slaResult.headerId} created — ${slaResult.lineCount} lines (${slaResult.status})`);
 
-      // 4. Mark revaluation as ACCOUNTED with GL batch reference
-      const putRes  = await fetch(`${ORDS_BASE}/${APEX_DB_CONFIG.endpoints.revaluation}/${id}`, {
+      // Step 3 — Mark revaluation ACCOUNTED
+      updateStep(3, 'process');
+      const putRes = await fetch(`${ORDS_BASE}/${APEX_DB_CONFIG.endpoints.revaluation}/${id}`, {
         method:  'PUT',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
-          status:        'ACCOUNTED',
-          gl_batch_id:   glData.batchId   || 0,
-          gl_batch_name: batchName,
-          gl_header_id:  glData.headerId  || 0,
+          status:          'ACCOUNTED',
+          gl_batch_id:     0,
+          gl_batch_name:   `SLA-${slaResult.headerId}`,
+          gl_header_id:    slaResult.headerId,
         }),
       });
-      const putData = await putRes.json();
-      if (putData.status !== 'SUCCESS') throw new Error(putData.error || 'Status update failed');
+      const putText = await putRes.text();
+      let putData: any = {};
+      try { putData = JSON.parse(putText); } catch { /* non-JSON */ }
+      if (!putRes.ok || putData.status === 'ERROR') {
+        updateStep(3, 'error', putData.error || `HTTP ${putRes.status}`);
+        throw new Error(putData.error || `Status update failed (HTTP ${putRes.status})`);
+      }
+      updateStep(3, 'finish', 'Status set to ACCOUNTED');
+      setAcctFlowDone(true);
 
-      message.success(`Revaluation #${id} accounted — GL Batch: ${batchName}`);
+      message.success(`Revaluation #${id} written to SLA — push to GL from SLA Journals page`);
       setAccountingId(id);
       load();
       if (detail?.revalueId === id) {
-        setDetail({ ...d, status: 'ACCOUNTED', glBatchId: glData.batchId || null, glBatchName: batchName });
+        setDetail({ ...d, status: 'ACCOUNTED', glBatchId: null, glBatchName: `SLA-${slaResult.headerId}` });
       }
     } catch (e) {
       message.error('Accounting failed: ' + (e instanceof Error ? e.message : String(e)));
@@ -915,6 +941,63 @@ const ManageRevaluation: React.FC = () => {
             </>
           )}
         </Spin>
+      </Modal>
+
+      {/* Accounting Flow Status Modal */}
+      <Modal
+        open={acctFlowVisible}
+        onCancel={() => setAcctFlowVisible(false)}
+        title={
+          <Space>
+            <CheckCircleOutlined style={{ color: REDWOOD.success }} />
+            <span>Create Accounting — Progress</span>
+          </Space>
+        }
+        width={520}
+        footer={
+          <Button
+            type={acctFlowDone ? 'primary' : 'default'}
+            onClick={() => setAcctFlowVisible(false)}
+          >
+            {acctFlowDone ? 'Done' : 'Close'}
+          </Button>
+        }
+        destroyOnClose
+      >
+        <div style={{ padding: '12px 0 4px' }}>
+          <Steps
+            direction="vertical"
+            size="small"
+            current={acctFlowSteps.findIndex(s => s.status === 'process' || s.status === 'error')}
+            items={acctFlowSteps.map(s => ({
+              title: s.title,
+              description: s.desc,
+              status: s.status,
+              icon: s.status === 'process'
+                ? <LoadingOutlined />
+                : s.status === 'error'
+                ? <CloseCircleOutlined style={{ color: '#ff4d4f' }} />
+                : undefined,
+            }))}
+          />
+          {acctFlowDone && (
+            <Alert
+              type="success"
+              showIcon
+              message="SLA accounting created successfully"
+              description="Go to SLA Journals to review and push entries to the GL ledger."
+              style={{ marginTop: 16 }}
+            />
+          )}
+          {acctFlowSteps.some(s => s.status === 'error') && (
+            <Alert
+              type="error"
+              showIcon
+              message="Accounting failed — see step above for details"
+              style={{ marginTop: 16 }}
+            />
+          )}
+        </div>
       </Modal>
 
       {/* PDF Modal */}
