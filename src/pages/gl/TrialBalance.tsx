@@ -285,6 +285,7 @@ const TrialBalance: React.FC = () => {
   const [revalId,                  setRevalId]                  = useState<number | null>(null);
   const [revalChecking,            setRevalChecking]            = useState(false);
   const [revalStatus,              setRevalStatus]              = useState<string | null>(null);
+  const [revalExcludedCombos,      setRevalExcludedCombos]      = useState<Set<string>>(new Set());
   const [revalApiError,            setRevalApiError]            = useState<string | null>(null);
   const [revalLastCall,            setRevalLastCall]            = useState<{ url: string; method: string; payload: object; responseText: string; httpStatus: number } | null>(null);
   const [revalApiDebugOpen,        setRevalApiDebugOpen]        = useState(false);
@@ -328,6 +329,7 @@ const TrialBalance: React.FC = () => {
   const [drillComboSearch,  setDrillComboSearch]  = useState('');
   const [drillComboLedger,  setDrillComboLedger]  = useState('');
   const [drillComboPeriod,  setDrillComboPeriod]  = useState('');
+  const [drillComboTabKey,  setDrillComboTabKey]  = useState('');
 
   // ── YTD Movement Drawer ──────────────────────────────────────
   const [ytdMovVisible,   setYtdMovVisible]   = useState(false);
@@ -841,11 +843,13 @@ const TrialBalance: React.FC = () => {
     rrData: RrTBRecord[],
     ledgerName: string,
     periodName: string,
+    tabKey?: string,
   ) => {
     setDrillComboAccount(account);
     setDrillComboRows(rrData.filter(r => r.account === account));
     setDrillComboLedger(ledgerName);
     setDrillComboPeriod(periodName);
+    setDrillComboTabKey(tabKey || '');
     setDrillComboSearch('');
     setDrillComboVisible(true);
   }, []);
@@ -2592,6 +2596,7 @@ const TrialBalance: React.FC = () => {
     setRevalPreviewRows([]);
     setRevalId(null);
     setRevalStatus(null);
+    setRevalExcludedCombos(new Set());
     setRevalVisible(true);
 
     // Look up existing revaluation for this account + ledger + period
@@ -2644,11 +2649,15 @@ const TrialBalance: React.FC = () => {
 
     const isPosted = revalStatus === 'ACCOUNTED';
 
-    // All raw rows for this account
-    const rawRows = tab.rrData.filter(r => r.account === revalAccount);
-    const accountType = rawRows[0]?.account_type || 'A';
-    const accountDesc = rawRows[0]?.account_desc || '';
-    const functionalCcy = rawRows[0]?.currency_code || 'AED'; // default
+    // All raw rows for this account (excluding user-deleted combos)
+    const allRawRows = tab.rrData.filter(r => r.account === revalAccount);
+    const rawRows = allRawRows.filter(r => !revalExcludedCombos.has(r.account_combination || ''));
+    const accountType = allRawRows[0]?.account_type || 'A';
+    const accountDesc = allRawRows[0]?.account_desc || '';
+    const functionalCcy = allRawRows[0]?.currency_code || 'AED'; // default
+
+    // All combos across all currencies (for delete UI: shows excluded ones too)
+    const allCombosForAccount = [...new Set(allRawRows.map(r => r.account_combination).filter(Boolean))].sort();
 
     // Group by entered currency, sum balances
     const byFxCcy = new Map<string, { entClosing: number; acctClosing: number; combos: string[] }>();
@@ -2774,6 +2783,39 @@ const TrialBalance: React.FC = () => {
             {r.isGain ? '+' : '-'}{fmtN(r.revalAmt)} {r.isGain ? '▲ GAIN' : '▼ LOSS'}
           </Tag>
         )},
+      { title: 'Combinations', key: 'combos',
+        render: (_: any, r: CcyRow) => {
+          // Show active combos (closeable) + excluded combos for this ccy (greyed restore)
+          const activeCombos = allRawRows
+            .filter(row => row.currency_code === r.ccy && row.account_combination && !revalExcludedCombos.has(row.account_combination))
+            .map(row => row.account_combination!)
+            .filter((c, i, arr) => arr.indexOf(c) === i);
+          const excludedCombos = allCombosForAccount.filter(c => revalExcludedCombos.has(c));
+          return (
+            <Space wrap size={2}>
+              {activeCombos.map(c => (
+                <Tag
+                  key={c}
+                  closable={!isPosted}
+                  onClose={() => setRevalExcludedCombos(prev => new Set([...prev, c]))}
+                  style={{ fontFamily: 'monospace', fontSize: 10 }}
+                >
+                  {c}
+                </Tag>
+              ))}
+              {excludedCombos.map(c => (
+                <Tag
+                  key={`ex-${c}`}
+                  color="default"
+                  style={{ fontFamily: 'monospace', fontSize: 10, opacity: 0.45, cursor: 'pointer', textDecoration: 'line-through' }}
+                  onClick={() => setRevalExcludedCombos(prev => { const s = new Set(prev); s.delete(c); return s; })}
+                >
+                  {c} ↩
+                </Tag>
+              ))}
+            </Space>
+          );
+        }},
     ];
 
     const previewColumns = [
@@ -3474,14 +3516,14 @@ const TrialBalance: React.FC = () => {
             <Text
               strong
               style={{ fontFamily: 'monospace', cursor: 'pointer', color: REDWOOD.info }}
-              onClick={() => openDrillCombo(v, tab.rrData, tab.ledgerName, tab.periodName.replace(/^(?:ReERP|Dynamic):\s*/, ''))}
+              onClick={() => openDrillCombo(v, tab.rrData, tab.ledgerName, tab.periodName.replace(/^(?:ReERP|Dynamic):\s*/, ''), tab.key)}
             >
               {v}
             </Text>
             <Tooltip title="View combinations">
               <ApartmentOutlined
                 style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 13 }}
-                onClick={() => openDrillCombo(v, tab.rrData, tab.ledgerName, tab.periodName.replace(/^(?:ReERP|Dynamic):\s*/, ''))}
+                onClick={() => openDrillCombo(v, tab.rrData, tab.ledgerName, tab.periodName.replace(/^(?:ReERP|Dynamic):\s*/, ''), tab.key)}
               />
             </Tooltip>
             <Tooltip title="View journal lines">
@@ -3767,13 +3809,29 @@ const TrialBalance: React.FC = () => {
           </Space>
         }
       >
-        <Input.Search
-          placeholder="Search combination / currency / company…"
-          value={drillComboSearch}
-          onChange={e => setDrillComboSearch(e.target.value)}
-          allowClear
-          style={{ marginBottom: 12 }}
-        />
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+          <Input.Search
+            placeholder="Search combination / currency / company…"
+            value={drillComboSearch}
+            onChange={e => setDrillComboSearch(e.target.value)}
+            allowClear
+            style={{ flex: 1 }}
+          />
+          {drillComboTabKey && (
+            <Button
+              type="primary"
+              size="small"
+              style={{ background: '#d46b08', borderColor: '#d46b08', whiteSpace: 'nowrap' }}
+              onClick={() => {
+                setDrillComboVisible(false);
+                setRevalExcludedCombos(new Set());
+                openRevalModal(drillComboTabKey, drillComboAccount);
+              }}
+            >
+              Revalue
+            </Button>
+          )}
+        </div>
         <Table
           dataSource={rows}
           columns={cols}
@@ -3991,11 +4049,19 @@ const TrialBalance: React.FC = () => {
         ),
       },
       {
-        title: <span style={{ color: '#d46b08' }}>Account</span>, dataIndex: 'account', key: 'account', width: 110,
+        title: <span style={{ color: '#d46b08' }}>Account</span>, dataIndex: 'account', key: 'account', width: 145,
         sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.account.localeCompare(b.account),
         defaultSortOrder: 'ascend' as const,
         render: (v: string) => (
-          <Text strong style={{ fontFamily: 'monospace', color: '#d46b08' }}>{v}</Text>
+          <Space size={4}>
+            <Text strong style={{ fontFamily: 'monospace', color: '#d46b08' }}>{v}</Text>
+            <Tooltip title="View combinations">
+              <ApartmentOutlined
+                style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 13 }}
+                onClick={() => openDrillCombo(v, tab.rrData, tab.ledgerName, tab.periodName.replace(/^YTD:\s*/, ''), tab.key)}
+              />
+            </Tooltip>
+          </Space>
         ),
       },
       {
