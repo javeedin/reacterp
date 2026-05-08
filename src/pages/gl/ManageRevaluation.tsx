@@ -20,6 +20,7 @@ import {
 import { Link } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import { createAccounting, checkAccountingExists, type SlaCreatePayload } from '../../services/sla.service';
+import { postSlaToGL } from '../../services/glPosting.service';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -401,6 +402,7 @@ const ManageRevaluation: React.FC = () => {
       { title: 'Load Detail',        status: 'wait' },
       { title: 'Check SLA Exists',   status: 'wait' },
       { title: 'Write to SLA',       status: 'wait' },
+      { title: 'Post to GL',         status: 'wait' },
       { title: 'Mark Accounted',     status: 'wait' },
     ];
     setAcctFlowSteps(initSteps);
@@ -548,14 +550,54 @@ const ManageRevaluation: React.FC = () => {
       updateStep(2, 'finish',
         `SLA header ${slaResult.headerId} created — ${slaResult.lineCount} lines (${slaResult.status})`);
 
-      // Step 3 — Mark revaluation ACCOUNTED
+      // Step 3 — Post to GL via glPosting service
       updateStep(3, 'process');
+      const glResult = await postSlaToGL({
+        slaHeaderId:   slaResult.headerId,
+        sourceNumber:  `REVAL-${id}`,
+        sourceId:      id,
+        eventTypeCode: 'GL_REVALUATION',
+        periodName,
+        ledgerName:    d.ledgerName || '',
+        ledgerId:      d.ledgerId   || 0,
+        currency,
+        accountingDate: periodLastDay,
+        legalEntity:   '',
+        businessUnit:  '',
+        jeCategory:    'Revaluation',
+        jeSource:      'General Ledger',
+        batchSource:   'General Ledger',
+        createdBy,
+        lines: d.lines.map(l => ({
+          lineType:           l.drAmount > 0 ? 'DR' as const : 'CR' as const,
+          enteredDr:          l.drAmount > 0 ? l.drAmount : null,
+          enteredCr:          l.crAmount > 0 ? l.crAmount : null,
+          accountedDr:        l.drAmount > 0 ? l.drAmount : null,
+          accountedCr:        l.crAmount > 0 ? l.crAmount : null,
+          description:        l.description || `Revaluation – ${d!.account}`,
+          currencyCode:       currency,
+          accountingDate:     periodLastDay,
+          accountCombination: l.combo,
+          accountingClass:    'Revaluation',
+          legalEntity:        null,
+        })),
+      });
+
+      if (!glResult.success) {
+        updateStep(3, 'error', glResult.error || 'GL posting failed');
+        throw new Error(glResult.error || 'GL posting failed');
+      }
+      updateStep(3, 'finish',
+        `${glResult.skipped ? 'Reused' : 'Created'} GL batch ${glResult.batchName}`);
+
+      // Step 4 — Mark revaluation ACCOUNTED
+      updateStep(4, 'process');
       const putUrl     = `${ORDS_BASE}/${APEX_DB_CONFIG.endpoints.revaluation}/${id}`;
       const putPayload = {
         status:        'ACCOUNTED',
-        gl_batch_id:   0,
-        gl_batch_name: `SLA-${slaResult.headerId}`,
-        gl_header_id:  slaResult.headerId,
+        gl_batch_id:   glResult.batchId   || 0,
+        gl_batch_name: glResult.batchName,
+        gl_header_id:  glResult.headerId  || 0,
       };
       const putRes  = await fetch(putUrl, {
         method:  'PUT',
@@ -572,17 +614,17 @@ const ManageRevaluation: React.FC = () => {
       });
 
       if (!putRes.ok || putData.status === 'ERROR') {
-        updateStep(3, 'error', `HTTP ${putRes.status}${putData.error ? ` — ${putData.error}` : ''}`);
+        updateStep(4, 'error', `HTTP ${putRes.status}${putData.error ? ` — ${putData.error}` : ''}`);
         throw new Error(putData.error || `Status update failed (HTTP ${putRes.status})`);
       }
-      updateStep(3, 'finish', 'Status set to ACCOUNTED');
+      updateStep(4, 'finish', 'Status set to ACCOUNTED');
       setAcctFlowDone(true);
 
-      message.success(`Revaluation #${id} written to SLA — push to GL from SLA Journals page`);
+      message.success(`Revaluation #${id} accounted — GL Batch: ${glResult.batchName}`);
       setAccountingId(id);
       load();
       if (detail?.revalueId === id) {
-        setDetail({ ...d, status: 'ACCOUNTED', glBatchId: null, glBatchName: `SLA-${slaResult.headerId}` });
+        setDetail({ ...d, status: 'ACCOUNTED', glBatchId: glResult.batchId, glBatchName: glResult.batchName });
       }
     } catch (e) {
       message.error('Accounting failed: ' + (e instanceof Error ? e.message : String(e)));
@@ -1084,7 +1126,7 @@ const ManageRevaluation: React.FC = () => {
                       let parsed: any = {};
                       try { parsed = JSON.parse(text); } catch { /* non-JSON */ }
                       if (res.ok && parsed.status !== 'ERROR') {
-                        updateStep(3, 'finish', 'Status set to ACCOUNTED (via retry)');
+                        updateStep(4, 'finish', 'Status set to ACCOUNTED (via retry)');
                         setAcctFlowDone(true);
                         load();
                         message.success('Retry succeeded — revaluation marked ACCOUNTED');

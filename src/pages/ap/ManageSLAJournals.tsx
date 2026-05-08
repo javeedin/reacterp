@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import dayjs from 'dayjs';
 import {
   Card, Table, Tabs, Form, Select, DatePicker, Input, Button,
@@ -119,6 +119,9 @@ const ManageSLAJournals: React.FC = () => {
   const navigate = useNavigate();
   const [headerForm] = Form.useForm();
   const [lineForm]   = Form.useForm();
+
+  // Auto-load all SLA headers on first render (no filters = all modules)
+  useEffect(() => { fetchHeaders({}); }, [fetchHeaders]);
 
   // ── Headers tab state ────────────────────────────────────────────────────
   const [headers, setHeaders]           = useState<SlaHeader[]>([]);
