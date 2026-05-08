@@ -4555,29 +4555,116 @@ const TrialBalance: React.FC = () => {
                 icon={<FileExcelOutlined />}
                 disabled={ytdMovRows.length === 0}
                 onClick={() => {
-                  const data = ytdMovRows.map(r => ({
-                    'Period':       r.period,
-                    'YTD Opening':  r.ytd_opening,
-                    'YTD Debit':    r.ytd_debit,
-                    'YTD Credit':   r.ytd_credit,
-                    'YTD Closing':  r.closing,
-                  }));
-                  const ws = XLSX.utils.json_to_sheet(data);
-                  // Right-align numeric columns
-                  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-                  for (let R = 1; R <= range.e.r; R++) {
-                    ['B','C','D','E'].forEach(col => {
-                      const cell = ws[`${col}${R + 1}`];
-                      if (cell) cell.z = '#,##0.00';
+                  const exportDate = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+                  const exportTime = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+                  const fromPeriod = ytdMovRows[0]?.period  || '';
+                  const toPeriod   = ytdMovRows[ytdMovRows.length - 1]?.period || '';
+
+                  const ws = XLSX.utils.aoa_to_sheet([]);
+
+                  // ── Header block ──────────────────────────────────────────
+                  const headerRows: (string | number | null)[][] = [
+                    ['YTD Balance Movement'],
+                    [],
+                    ['Ledger',        ytdMovLedger,    '',  'Account',    ytdMovAccount],
+                    ['Company',       ytdMovCompany || 'All Companies', '', 'Description', ytdMovDesc || ''],
+                    ['Currency',      ytdMovCurrency || 'All Currencies', '', 'Period Range', `${fromPeriod} – ${toPeriod}`],
+                    ['Export Date',   `${exportDate} ${exportTime}`, '', 'Total Periods', ytdMovRows.length],
+                    [],
+                    // Column headings
+                    ['Period', 'Fiscal Year', 'YTD Opening', 'YTD Debit', 'YTD Credit', 'YTD Closing'],
+                  ];
+                  XLSX.utils.sheet_add_aoa(ws, headerRows, { origin: 'A1' });
+
+                  // ── Data rows ─────────────────────────────────────────────
+                  const dataRows = ytdMovRows.map(r => [
+                    r.period,
+                    r.period_year,
+                    r.ytd_opening,
+                    r.ytd_debit,
+                    r.ytd_credit,
+                    r.closing,
+                  ]);
+                  XLSX.utils.sheet_add_aoa(ws, dataRows, { origin: `A${headerRows.length + 1}` });
+
+                  const dataStartRow = headerRows.length + 1;
+                  const dataEndRow   = dataStartRow + ytdMovRows.length - 1;
+
+                  // ── Totals row ────────────────────────────────────────────
+                  const totalRow = [
+                    'TOTAL', '',
+                    { f: `SUM(C${dataStartRow}:C${dataEndRow})` },
+                    { f: `SUM(D${dataStartRow}:D${dataEndRow})` },
+                    { f: `SUM(E${dataStartRow}:E${dataEndRow})` },
+                    { f: `SUM(F${dataStartRow}:F${dataEndRow})` },
+                  ];
+                  XLSX.utils.sheet_add_aoa(ws, [totalRow], { origin: `A${dataEndRow + 1}` });
+
+                  // ── Styles: title, header labels, column headings ─────────
+                  ws['A1'] = { v: 'YTD Balance Movement', t: 's', s: { font: { bold: true, sz: 14 }, alignment: { horizontal: 'left' } } };
+
+                  // Bold label cells in header block (A3:A6, D3:D6)
+                  ['A3','A4','A5','A6','D3','D4','D5','D6'].forEach(addr => {
+                    if (ws[addr]) ws[addr].s = { font: { bold: true }, fill: { fgColor: { rgb: 'F0F4FF' } } };
+                  });
+
+                  // Column heading row style
+                  const headingRow = headerRows.length;
+                  ['A','B','C','D','E','F'].forEach(col => {
+                    const addr = `${col}${headingRow}`;
+                    if (ws[addr]) ws[addr].s = {
+                      font: { bold: true, color: { rgb: 'FFFFFF' } },
+                      fill: { fgColor: { rgb: '1F4E79' } },
+                      alignment: { horizontal: col === 'A' || col === 'B' ? 'left' : 'right' },
+                    };
+                  });
+
+                  // Number format for numeric data columns (C–F)
+                  for (let row = dataStartRow; row <= dataEndRow + 1; row++) {
+                    ['C','D','E','F'].forEach(col => {
+                      const addr = `${col}${row}`;
+                      if (ws[addr]) { ws[addr].z = '#,##0.00'; }
                     });
+                    // Alternate row shading
+                    if ((row - dataStartRow) % 2 === 1) {
+                      ['A','B','C','D','E','F'].forEach(col => {
+                        const addr = `${col}${row}`;
+                        if (ws[addr]) ws[addr].s = { ...(ws[addr].s || {}), fill: { fgColor: { rgb: 'F7F9FC' } } };
+                      });
+                    }
                   }
-                  ws['!cols'] = [{ wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 16 }];
+
+                  // Totals row bold
+                  ['A','B','C','D','E','F'].forEach(col => {
+                    const addr = `${col}${dataEndRow + 1}`;
+                    if (ws[addr]) ws[addr].s = {
+                      font: { bold: true },
+                      fill: { fgColor: { rgb: 'E8F0FE' } },
+                      ...((['C','D','E','F'].includes(col)) ? { z: '#,##0.00', alignment: { horizontal: 'right' } } : {}),
+                    };
+                  });
+
+                  // Column widths
+                  ws['!cols'] = [
+                    { wch: 14 }, // Period
+                    { wch: 12 }, // Fiscal Year
+                    { wch: 18 }, // YTD Opening
+                    { wch: 16 }, // YTD Debit
+                    { wch: 16 }, // YTD Credit
+                    { wch: 18 }, // YTD Closing
+                  ];
+
+                  // Merge title cell A1 across columns
+                  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }];
+
+                  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: dataEndRow, c: 5 } });
+
                   const wb = XLSX.utils.book_new();
                   XLSX.utils.book_append_sheet(wb, ws, 'YTD Movement');
                   const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
                   saveAs(
                     new Blob([buf], { type: 'application/octet-stream' }),
-                    `YTD_${ytdMovAccount}_${ytdMovCompany || 'AllCo'}_${ytdMovLedger}.xlsx`
+                    `YTD_${ytdMovAccount}_${ytdMovCompany || 'All'}_${ytdMovLedger}_${fromPeriod}.xlsx`
                   );
                 }}
               >
