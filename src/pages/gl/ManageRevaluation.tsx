@@ -553,36 +553,59 @@ const ManageRevaluation: React.FC = () => {
       // Step 3 — Post to GL via glPosting service
       updateStep(3, 'process');
 
-      // Build lineNum → foreignCurrency map so each line gets the right currency code.
-      // Lines were generated in ccyRow order (2 lines per active ccyRow):
-      //   gain ccyRow → [DR balanceSheet, CR gainAccount]
-      //   loss ccyRow → [DR lossAccount,  CR balanceSheet]
-      // Balance-sheet lines use the foreign currency; gain/loss account lines use functional.
-      const lineCcyMap = new Map<number, string>();
+      // Build per-line maps for currency and description.
+      // Lines are generated in ccyRow order (2 lines per active ccyRow):
+      //   gain ccyRow → [DR balanceSheet(foreignCcy), CR gainAccount(functionalCcy)]
+      //   loss ccyRow → [DR lossAccount(functionalCcy), CR balanceSheet(foreignCcy)]
+      const lineCcyMap  = new Map<number, string>();
+      const lineDescMap = new Map<number, string>();
       const activeCcyRows = d.ccyRows.filter(c => c.revalAmt !== 0 && c.newRate !== 0);
       activeCcyRows.forEach((ccyRow, idx) => {
         const l1 = d.lines[idx * 2];
         const l2 = d.lines[idx * 2 + 1];
         const foreignCcy = ccyRow.currencyCode || currency;
-        if (l1) lineCcyMap.set(l1.lineNum, ccyRow.isGain ? foreignCcy : currency);
-        if (l2) lineCcyMap.set(l2.lineNum, ccyRow.isGain ? currency    : foreignCcy);
+        const acctLabel  = d.accountDesc || d.account;
+        if (ccyRow.isGain) {
+          if (l1) {
+            lineCcyMap.set(l1.lineNum, foreignCcy);
+            lineDescMap.set(l1.lineNum, `FX Revaluation Gain – ${foreignCcy} – ${acctLabel} – ${periodName}`);
+          }
+          if (l2) {
+            lineCcyMap.set(l2.lineNum, currency);
+            lineDescMap.set(l2.lineNum, `FX Revaluation Gain – ${foreignCcy} – ${d.gainAccount || 'Gain A/C'} – ${periodName}`);
+          }
+        } else {
+          if (l1) {
+            lineCcyMap.set(l1.lineNum, currency);
+            lineDescMap.set(l1.lineNum, `FX Revaluation Loss – ${foreignCcy} – ${d.lossAccount || 'Loss A/C'} – ${periodName}`);
+          }
+          if (l2) {
+            lineCcyMap.set(l2.lineNum, foreignCcy);
+            lineDescMap.set(l2.lineNum, `FX Revaluation Loss – ${foreignCcy} – ${acctLabel} – ${periodName}`);
+          }
+        }
       });
 
+      const journalDesc = `FX Revaluation – ${d.accountDesc || d.account} – ${periodName}`;
+
       const glResult = await postSlaToGL({
-        slaHeaderId:   slaResult.headerId,
-        sourceNumber:  `REVAL-${id}`,
-        sourceId:      id,
-        eventTypeCode: 'GL_REVALUATION',
+        slaHeaderId:        slaResult.headerId,
+        sourceNumber:       `REVAL-${id}`,
+        sourceId:           id,
+        eventTypeCode:      'GL_REVALUATION',
         periodName,
-        ledgerName:    d.ledgerName || '',
-        ledgerId:      d.ledgerId   || 0,
+        ledgerName:         d.ledgerName || '',
+        ledgerId:           d.ledgerId   || 0,
         currency,
-        accountingDate: periodLastDay,
-        legalEntity:   '',
-        businessUnit:  '',
-        jeCategory:    'Revaluation',
-        jeSource:      'General Ledger',
-        batchSource:   'General Ledger',
+        accountingDate:     periodLastDay,
+        legalEntity:        '',
+        businessUnit:       '',
+        jeCategory:         'Revaluation',
+        jeSource:           'General Ledger',
+        batchSource:        'General Ledger',
+        batchDescription:   journalDesc,
+        journalDescription: journalDesc,
+        journalName:        `FX REVAL – ${d.account} – ${periodName}`,
         createdBy,
         lines: d.lines.map(l => ({
           lineType:           l.drAmount > 0 ? 'DR' as const : 'CR' as const,
@@ -590,7 +613,7 @@ const ManageRevaluation: React.FC = () => {
           enteredCr:          l.crAmount > 0 ? l.crAmount : null,
           accountedDr:        l.drAmount > 0 ? l.drAmount : null,
           accountedCr:        l.crAmount > 0 ? l.crAmount : null,
-          description:        l.description || `Revaluation – ${d!.account}`,
+          description:        l.description || lineDescMap.get(l.lineNum) || journalDesc,
           currencyCode:       lineCcyMap.get(l.lineNum) || currency,
           accountingDate:     periodLastDay,
           accountCombination: l.combo,

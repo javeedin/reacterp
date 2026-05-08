@@ -60,6 +60,10 @@ export interface GlPostingOptions {
   jeCategory?:     string;          // defaults to 'Purchase Invoices' if omitted
   jeSource?:       string;          // defaults to 'Payables' if omitted
   batchSource?:    string;          // defaults to 'Payables' if omitted
+  // Optional description overrides (fall back to auto-generated if omitted)
+  batchDescription?: string;
+  journalDescription?: string;
+  journalName?:    string;
   // Lines
   lines:          GlPostingLine[];
   createdBy?:     string;
@@ -81,6 +85,9 @@ export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResu
     legalEntity, businessUnit, lines, createdBy = 'user',
     conversionRate = 1, jeCategory = 'Purchase Invoices',
     jeSource = 'Payables', batchSource = 'Payables',
+    batchDescription: batchDescOverride,
+    journalDescription: journalDescOverride,
+    journalName: journalNameOverride,
   } = opts;
 
   const rate = (conversionRate && conversionRate > 0) ? conversionRate : 1;
@@ -109,7 +116,7 @@ export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResu
   const payload = {
     batch: {
       batchName,
-      batchDescription:  `${ref5} – ${sourceNumber}`,
+      batchDescription:  batchDescOverride || `${ref5} – ${sourceNumber}`,
       ledgerName, ledgerId,
       status:            'NEW',
       accountingPeriod:  periodName,
@@ -124,8 +131,8 @@ export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResu
       jeCategory:             jeCategory,
       jeSource:               jeSource,
       periodName,
-      journalName:            `${ref5}-${sourceNumber}`,
-      description:            `${ref5} – ${sourceNumber}`,
+      journalName:            journalNameOverride || `${ref5}-${sourceNumber}`,
+      description:            journalDescOverride || batchDescOverride || `${ref5} – ${sourceNumber}`,
       currencyCode:           currency,
       currencyConversionType: 'User',
       currencyConversionDate: accountingDate,
