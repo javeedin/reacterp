@@ -72,5 +72,5 @@ export async function deleteCombination(combinationId: number): Promise<void> {
   if (!res.ok || !data.success) throw new Error(data?.message || `HTTP ${res.status}`);
 }
 
-export const MODULES = ['AP', 'PC', 'GL', 'FA', 'AR', 'CASH', 'ALL'] as const;
+export const MODULES = ['AP', 'PC', 'GL', 'FA', 'AR', 'CASH', 'ALL', 'GL Revaluation'] as const;
 export type ModuleType = typeof MODULES[number];

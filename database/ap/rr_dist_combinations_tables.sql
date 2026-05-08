@@ -18,7 +18,7 @@ CREATE TABLE RR_DIST_COMBINATIONS (
     LAST_UPDATED_BY     VARCHAR2(150),
     LAST_UPDATE_DATE    TIMESTAMP      DEFAULT SYSTIMESTAMP,
     CONSTRAINT RR_DIST_CMB_STATUS_CK CHECK (STATUS IN ('ACTIVE','INACTIVE')),
-    CONSTRAINT RR_DIST_CMB_MODULE_CK CHECK (MODULE IN ('AP','PC','GL','FA','AR','CASH','ALL')),
+    CONSTRAINT RR_DIST_CMB_MODULE_CK CHECK (MODULE IN ('AP','PC','GL','FA','AR','CASH','ALL','GL Revaluation')),
     CONSTRAINT RR_DIST_CMB_NAME_UK   UNIQUE (COMBINATION_NAME, MODULE)
 );
 
@@ -27,7 +27,7 @@ CREATE INDEX IDX_RR_DIST_CMB_STATUS ON RR_DIST_COMBINATIONS(STATUS);
 
 COMMENT ON TABLE  RR_DIST_COMBINATIONS                         IS 'Distribution combinations master — links a name to a GL account for use as an expense type LOV';
 COMMENT ON COLUMN RR_DIST_COMBINATIONS.BUSINESS_UNIT           IS 'Business unit that owns this combination (NULL = available to all BUs)';
-COMMENT ON COLUMN RR_DIST_COMBINATIONS.MODULE                  IS 'AP | PC | GL | FA | AR | CASH | ALL — which module this combination belongs to';
+COMMENT ON COLUMN RR_DIST_COMBINATIONS.MODULE                  IS 'AP | PC | GL | FA | AR | CASH | ALL | GL Revaluation — which module this combination belongs to';
 COMMENT ON COLUMN RR_DIST_COMBINATIONS.GL_ACCOUNT_CCID         IS 'GL code combination ID (FK to REERP_GL_CODE_COMBINATIONS)';
 COMMENT ON COLUMN RR_DIST_COMBINATIONS.GL_ACCOUNT_DESC         IS 'Denormalised segment string, e.g. 01-100-6010-000';
 COMMENT ON COLUMN RR_DIST_COMBINATIONS.STATUS                  IS 'ACTIVE = visible in LOVs; INACTIVE = hidden from LOVs';

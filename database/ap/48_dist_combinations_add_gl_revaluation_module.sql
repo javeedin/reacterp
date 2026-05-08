@@ -1,16 +1,30 @@
 -- ============================================================
--- Distribution Combinations — PL/SQL Package
--- File: database/ap/rr_dist_combinations_pkg.sql
--- Run order: 2nd
+-- Migration: add 'GL Revaluation' to the allowed module list
+--
+-- Two changes needed:
+--   1. Drop + recreate the CHECK constraint on RR_DIST_COMBINATIONS
+--   2. Replace the PL/SQL package body (validation list)
+--
+-- Safe to run multiple times (constraint drop is guarded).
 -- ============================================================
 
-CREATE OR REPLACE PACKAGE RR_DIST_PKG AS
-    PROCEDURE create_combination (p_body IN CLOB);
-    PROCEDURE update_combination (p_id   IN NUMBER, p_body IN CLOB);
-    PROCEDURE delete_combination (p_id   IN NUMBER);
-END RR_DIST_PKG;
+-- ── 1. Update table CHECK constraint ─────────────────────────
+DECLARE
+    l_count NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO l_count
+    FROM user_constraints
+    WHERE table_name      = 'RR_DIST_COMBINATIONS'
+      AND constraint_name = 'RR_DIST_CMB_MODULE_CK';
+    IF l_count > 0 THEN
+        EXECUTE IMMEDIATE 'ALTER TABLE RR_DIST_COMBINATIONS DROP CONSTRAINT RR_DIST_CMB_MODULE_CK';
+    END IF;
+    EXECUTE IMMEDIATE q'[ALTER TABLE RR_DIST_COMBINATIONS ADD CONSTRAINT RR_DIST_CMB_MODULE_CK CHECK (MODULE IN ('AP','PC','GL','FA','AR','CASH','ALL','GL Revaluation'))]';
+    DBMS_OUTPUT.PUT_LINE('RR_DIST_CMB_MODULE_CK constraint updated');
+END;
 /
 
+-- ── 2. Replace the package body (validation guard) ───────────
 CREATE OR REPLACE PACKAGE BODY RR_DIST_PKG AS
 
     -- ────────────────────────────────────────────────────────
@@ -158,3 +172,5 @@ CREATE OR REPLACE PACKAGE BODY RR_DIST_PKG AS
 
 END RR_DIST_PKG;
 /
+
+DBMS_OUTPUT.PUT_LINE('RR_DIST_PKG body updated — GL Revaluation module now allowed');
