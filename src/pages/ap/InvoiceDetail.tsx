@@ -307,53 +307,33 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
     }
   };
 
-  // Fetch payments related to this invoice
+  // Fetch payments related to this invoice via createinvoice/payments endpoint
   const fetchPayments = async () => {
     setPaymentsLoading(true);
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/related-invoices?invoice_id=${invoice.invoiceId}`;
-      console.log('Fetching payments from:', url);
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice/payments?P_INVOICE_ID=${invoice.invoiceId}`;
       const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
-      const items = data.items || data || [];
-      if (Array.isArray(items) && items.length > 0) {
-        // Get related payment details by joining with payments
-        const mappedPayments: Payment[] = [];
-        for (const rel of items) {
-          // Try to fetch parent payment details
-          let paymentDetails: any = {};
-          if (rel.check_id || rel.CHECK_ID) {
-            try {
-              const checkId = rel.check_id || rel.CHECK_ID;
-              const payUrl = `${APEX_DB_CONFIG.baseUrl}/ap/payments/${checkId}`;
-              const payResp = await fetch(payUrl, { headers: { 'Accept': 'application/json' } });
-              if (payResp.ok) {
-                const payData = await payResp.json();
-                paymentDetails = payData.items?.[0] || payData || {};
-              }
-            } catch { /* use what we have */ }
-          }
-          const amountPaidInvCcy = Number(rel.amount_paid_invoice_currency ?? rel.AMOUNT_PAID_INVOICE_CURRENCY ?? rel.AmountPaidInvoiceCurrency ?? 0);
-          const discountTaken    = Number(rel.discount_taken              ?? rel.DISCOUNT_TAKEN              ?? rel.DiscountTaken              ?? 0);
-          mappedPayments.push({
-            key: (rel.invoice_payment_id || rel.INVOICE_PAYMENT_ID || mappedPayments.length + 1).toString(),
-            number: (paymentDetails.payment_number || paymentDetails.PAYMENT_NUMBER || rel.check_id || rel.CHECK_ID || '').toString(),
-            paymentDocument: paymentDetails.payment_process_request || paymentDetails.PAYMENT_PROCESS_REQUEST || '',
-            status: paymentDetails.payment_status || paymentDetails.PAYMENT_STATUS || rel.invoice_payment_status || rel.INVOICE_PAYMENT_STATUS || '',
-            reconciled: (paymentDetails.payment_status || paymentDetails.PAYMENT_STATUS || '') === 'Cleared' ? 'Yes' : 'No',
-            currentPayeeName: paymentDetails.payee_name || paymentDetails.PAYEE_NAME || invoice.supplierOrParty || '',
-            paymentDate: formatDate(paymentDetails.payment_date || paymentDetails.PAYMENT_DATE || ''),
-            paidAmount: `${(rel.amount_paid_payment_currency || rel.AMOUNT_PAID_PAYMENT_CURRENCY || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })} ${rel.invoice_currency || rel.INVOICE_CURRENCY || invoice.invoiceCurrency}`,
-            amountPaidInvoiceCurrency: amountPaidInvCcy,
-            discountTaken,
-            address: paymentDetails.payee_address || paymentDetails.PAYEE_ADDRESS || '',
-          });
-        }
-        setPayments(mappedPayments);
-      } else {
-        setPayments([]);
-      }
+      const items: any[] = data.items || (Array.isArray(data) ? data : []);
+      const mappedPayments: Payment[] = items.map((item: any, idx: number) => {
+        const amountPaidInvCcy = Number(item.amount_paid_invoice_currency ?? 0);
+        const discountTaken    = Number(item.discount_taken ?? 0);
+        return {
+          key:                       (item.invoice_payment_id ?? item.id ?? idx).toString(),
+          number:                    (item.paper_document_number ?? item.check_id ?? '').toString(),
+          paymentDocument:           item.invoice_number ?? '',
+          status:                    item.payment_status ?? item.invoice_payment_status ?? '',
+          reconciled:                item.reconciled_flag === 'Y' ? 'Yes' : item.reconciled_flag === 'N' ? 'No' : '—',
+          currentPayeeName:          item.invoice_business_unit ?? invoice.supplierOrParty ?? '',
+          paymentDate:               formatDate(item.payment_date ?? ''),
+          paidAmount:                `${Number(item.amount_paid_payment_currency ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })} ${item.invoice_currency ?? invoice.invoiceCurrency}`,
+          amountPaidInvoiceCurrency: amountPaidInvCcy,
+          discountTaken,
+          address:                   '',
+        };
+      });
+      setPayments(mappedPayments);
     } catch (error) {
       console.error('Error fetching payments:', error);
       setPayments([]);
