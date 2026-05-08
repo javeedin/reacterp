@@ -2649,69 +2649,87 @@ const TrialBalance: React.FC = () => {
 
     const isPosted = revalStatus === 'ACCOUNTED';
 
-    // All raw rows for this account (excluding user-deleted combos)
+    // All raw rows for this account
     const allRawRows = tab.rrData.filter(r => r.account === revalAccount);
-    const rawRows = allRawRows.filter(r => !revalExcludedCombos.has(r.account_combination || ''));
     const accountType = allRawRows[0]?.account_type || 'A';
     const accountDesc = allRawRows[0]?.account_desc || '';
     const functionalCcy = allRawRows[0]?.currency_code || 'AED'; // default
 
-    // All combos across all currencies (for delete UI: shows excluded ones too)
-    const allCombosForAccount = [...new Set(allRawRows.map(r => r.account_combination).filter(Boolean))].sort();
-
-    // Group by entered currency, sum balances
-    const byFxCcy = new Map<string, { entClosing: number; acctClosing: number; combos: string[] }>();
-    rawRows.forEach(r => {
-      const ccy = r.currency_code || '';
-      if (!byFxCcy.has(ccy)) byFxCcy.set(ccy, { entClosing: 0, acctClosing: 0, combos: [] });
-      const g = byFxCcy.get(ccy)!;
-      g.entClosing  += r.entered_closing || 0;
-      g.acctClosing += r.closing        || 0;
-      if (r.account_combination && !g.combos.includes(r.account_combination))
-        g.combos.push(r.account_combination);
-    });
-
     const fmtN = (n: number) =>
       new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(n));
 
-    // Build per-currency revaluation rows
+    // One row per (combination, currency) pair — the primary table rows
+    interface ComboRow {
+      rowKey: string; combo: string; ccy: string;
+      entClosing: number; acctClosing: number;
+      bookRate: number; newRate: number; newAcctValue: number;
+      revalAmt: number; isGain: boolean; excluded: boolean;
+    }
+    const comboRows: ComboRow[] = allRawRows.map(r => {
+      const ccy        = r.currency_code || '';
+      const entClosing = r.entered_closing || 0;
+      const acctClosing = r.closing || 0;
+      const excluded   = revalExcludedCombos.has(r.account_combination || '');
+      const newRate    = excluded ? 0 : (parseFloat(revalRates[ccy] || '') || 0);
+      const bookRate   = entClosing !== 0 ? acctClosing / entClosing : 0;
+      const newAcctVal = entClosing * newRate;
+      const revalAmt   = newAcctVal - acctClosing;
+      return {
+        rowKey:       `${r.account_combination}-${ccy}`,
+        combo:        r.account_combination || revalAccount,
+        ccy,
+        entClosing,
+        acctClosing,
+        bookRate,
+        newRate,
+        newAcctValue: newAcctVal,
+        revalAmt,
+        isGain:       revalAmt >= 0,
+        excluded,
+      };
+    });
+
+    // Active rows only (for totals + preview)
+    const activeComboRows = comboRows.filter(r => !r.excluded);
+
+    // Currency-aggregated rows — used for save payload (ccy_rows)
     interface CcyRow {
       ccy: string; entClosing: number; acctClosing: number;
       bookRate: number; newRate: number; newAcctValue: number;
       revalAmt: number; isGain: boolean; combos: string[];
     }
-    const ccyRows: CcyRow[] = [];
-    byFxCcy.forEach((v, ccy) => {
-      const newRateStr = revalRates[ccy] || '';
-      const newRate    = parseFloat(newRateStr) || 0;
-      const bookRate   = v.entClosing !== 0 ? v.acctClosing / v.entClosing : 0;
-      const newAcctVal = v.entClosing * newRate;
-      const revalAmt   = newAcctVal - v.acctClosing;
-      // Universal rule: revalAmt > 0 → Dr Account, Cr Gain; < 0 → Dr Loss, Cr Account
-      const isGain = revalAmt >= 0;
-      ccyRows.push({ ccy, entClosing: v.entClosing, acctClosing: v.acctClosing,
-        bookRate, newRate, newAcctValue: newAcctVal, revalAmt, isGain, combos: v.combos });
+    const ccyMap = new Map<string, CcyRow>();
+    activeComboRows.forEach(r => {
+      if (!ccyMap.has(r.ccy)) ccyMap.set(r.ccy, { ccy: r.ccy, entClosing: 0, acctClosing: 0, bookRate: 0, newRate: r.newRate, newAcctValue: 0, revalAmt: 0, isGain: true, combos: [] });
+      const g = ccyMap.get(r.ccy)!;
+      g.entClosing  += r.entClosing;
+      g.acctClosing += r.acctClosing;
+      g.newAcctValue += r.newAcctValue;
+      g.revalAmt    += r.revalAmt;
+      g.isGain       = g.revalAmt >= 0;
+      g.bookRate     = g.entClosing !== 0 ? g.acctClosing / g.entClosing : 0;
+      if (!g.combos.includes(r.combo)) g.combos.push(r.combo);
     });
+    const ccyRows: CcyRow[] = Array.from(ccyMap.values());
 
-    const totalGain = ccyRows.filter(r => r.isGain && r.revalAmt !== 0).reduce((s, r) => s + r.revalAmt, 0);
-    const totalLoss = ccyRows.filter(r => !r.isGain).reduce((s, r) => s + Math.abs(r.revalAmt), 0);
+    const totalGain = activeComboRows.filter(r => r.isGain && r.revalAmt !== 0).reduce((s, r) => s + r.revalAmt, 0);
+    const totalLoss = activeComboRows.filter(r => !r.isGain).reduce((s, r) => s + Math.abs(r.revalAmt), 0);
 
-    // Build journal preview
+    // Build journal preview — one line pair per active combination
     const buildPreview = () => {
       const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
       const baseDesc = `${accountDesc} - Revaluation on ${today}`;
       const lines: { lineNum: number; combo: string; desc: string; comment: string; dr: number; cr: number }[] = [];
       let ln = 1;
-      ccyRows.forEach(r => {
+      activeComboRows.forEach(r => {
         if (r.revalAmt === 0 || r.newRate === 0) return;
         const abs = Math.abs(r.revalAmt);
-        const combo = r.combos[0] || revalAccount;
         if (r.isGain) {
-          lines.push({ lineNum: ln++, combo, desc: baseDesc, comment: '', dr: abs, cr: 0 });
+          lines.push({ lineNum: ln++, combo: r.combo, desc: baseDesc, comment: '', dr: abs, cr: 0 });
           lines.push({ lineNum: ln++, combo: revalGainCombo || '[Gain Account]', desc: `Unrealized FX Gain - ${r.ccy}`, comment: '', dr: 0, cr: abs });
         } else {
           lines.push({ lineNum: ln++, combo: revalLossCombo || '[Loss Account]', desc: `Unrealized FX Loss - ${r.ccy}`, comment: '', dr: abs, cr: 0 });
-          lines.push({ lineNum: ln++, combo, desc: baseDesc, comment: '', dr: 0, cr: abs });
+          lines.push({ lineNum: ln++, combo: r.combo, desc: baseDesc, comment: '', dr: 0, cr: abs });
         }
       });
       setRevalPreviewRows(lines);
@@ -2728,28 +2746,60 @@ const TrialBalance: React.FC = () => {
       : allCombos;
 
     const ccyColumns = [
-      { title: 'Currency', dataIndex: 'ccy', key: 'ccy', width: 80,
-        render: (v: string) => <Tag color="blue">{v}</Tag> },
+      { title: '', key: 'action', width: 36,
+        render: (_: any, r: ComboRow) => r.excluded
+          ? (
+            <Tooltip title="Restore this combination">
+              <Button
+                type="text" size="small" icon={<span style={{ fontSize: 12 }}>↩</span>}
+                style={{ color: REDWOOD.info }}
+                onClick={() => setRevalExcludedCombos(prev => { const s = new Set(prev); s.delete(r.combo); return s; })}
+              />
+            </Tooltip>
+          ) : (
+            <Tooltip title="Exclude this combination">
+              <Button
+                type="text" size="small" danger disabled={isPosted}
+                icon={<span style={{ fontSize: 14, lineHeight: 1 }}>×</span>}
+                onClick={() => setRevalExcludedCombos(prev => new Set([...prev, r.combo]))}
+              />
+            </Tooltip>
+          ),
+      },
+      { title: 'Combination', dataIndex: 'combo', key: 'combo',
+        render: (v: string, r: ComboRow) => (
+          <Text
+            style={{
+              fontFamily: 'monospace', fontSize: 11,
+              opacity: r.excluded ? 0.4 : 1,
+              textDecoration: r.excluded ? 'line-through' : 'none',
+            }}
+          >{v}</Text>
+        ),
+      },
+      { title: 'Ccy', dataIndex: 'ccy', key: 'ccy', width: 60,
+        render: (v: string, r: ComboRow) => <Tag color={r.excluded ? 'default' : 'blue'} style={{ opacity: r.excluded ? 0.4 : 1 }}>{v}</Tag> },
       { title: 'Entered Balance', dataIndex: 'entClosing', key: 'entClosing', align: 'right' as const, width: 140,
-        render: (v: number, r: CcyRow) => (
-          <Text style={{ fontFamily: 'monospace', color: v >= 0 ? '#237804' : REDWOOD.primary }}>
+        render: (v: number, r: ComboRow) => (
+          <Text style={{ fontFamily: 'monospace', color: r.excluded ? '#aaa' : (v >= 0 ? '#237804' : REDWOOD.primary) }}>
             {v >= 0 ? fmtN(v) : `(${fmtN(v)})`}
           </Text>
         )},
       { title: 'Acctd Balance', dataIndex: 'acctClosing', key: 'acctClosing', align: 'right' as const, width: 140,
-        render: (v: number) => (
-          <Text style={{ fontFamily: 'monospace', color: v >= 0 ? '#237804' : REDWOOD.primary }}>
+        render: (v: number, r: ComboRow) => (
+          <Text style={{ fontFamily: 'monospace', color: r.excluded ? '#aaa' : (v >= 0 ? '#237804' : REDWOOD.primary) }}>
             {v >= 0 ? fmtN(v) : `(${fmtN(v)})`}
           </Text>
         )},
       { title: 'Book Rate', dataIndex: 'bookRate', key: 'bookRate', align: 'right' as const, width: 100,
-        render: (v: number, r: CcyRow) => (
+        render: (v: number, r: ComboRow) => r.excluded
+          ? <Text style={{ color: '#aaa', fontFamily: 'monospace' }}>—</Text>
+          : (
           <Tooltip
             title={
               <div style={{ fontSize: 12 }}>
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>Book Rate Formula</div>
-                <div style={{ fontFamily: 'monospace' }}>Accounted Closing ÷ Entered Closing</div>
-                <div style={{ marginTop: 6, color: '#ffffffa0' }}>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>Book Rate = Accounted ÷ Entered</div>
+                <div style={{ fontFamily: 'monospace', color: '#ffffffa0' }}>
                   {r.acctClosing.toFixed(2)} ÷ {r.entClosing.toFixed(2)}
                 </div>
               </div>
@@ -2762,7 +2812,9 @@ const TrialBalance: React.FC = () => {
           </Tooltip>
         )},
       { title: 'New Rate', key: 'newRate', align: 'right' as const, width: 120,
-        render: (_: any, r: CcyRow) => isPosted
+        render: (_: any, r: ComboRow) => r.excluded
+          ? <Text style={{ color: '#aaa', fontFamily: 'monospace' }}>—</Text>
+          : isPosted
           ? <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{revalRates[r.ccy] || '—'}</Text>
           : (
           <Input
@@ -2774,48 +2826,17 @@ const TrialBalance: React.FC = () => {
           />
         )},
       { title: 'New Acctd Value', dataIndex: 'newAcctValue', key: 'newAcctValue', align: 'right' as const, width: 140,
-        render: (v: number, r: CcyRow) => r.newRate > 0 ? (
-          <Text style={{ fontFamily: 'monospace', color: REDWOOD.info }}>{v >= 0 ? fmtN(v) : `(${fmtN(v)})`}</Text>
-        ) : <Text style={{ color: REDWOOD.textSecondary }}>—</Text> },
-      { title: 'Adjustment', key: 'revalAmt', align: 'right' as const, width: 130,
-        render: (_: any, r: CcyRow) => r.newRate === 0 ? <Text style={{ color: REDWOOD.textSecondary }}>—</Text> : (
+        render: (v: number, r: ComboRow) => r.excluded || r.newRate === 0
+          ? <Text style={{ color: '#aaa' }}>—</Text>
+          : <Text style={{ fontFamily: 'monospace', color: REDWOOD.info }}>{v >= 0 ? fmtN(v) : `(${fmtN(v)})`}</Text> },
+      { title: 'Adjustment', key: 'revalAmt', align: 'right' as const, width: 140,
+        render: (_: any, r: ComboRow) => r.excluded || r.newRate === 0
+          ? <Text style={{ color: '#aaa' }}>—</Text>
+          : (
           <Tag color={r.isGain ? 'green' : 'red'} style={{ fontFamily: 'monospace', fontWeight: 700 }}>
-            {r.isGain ? '+' : '-'}{fmtN(r.revalAmt)} {r.isGain ? '▲ GAIN' : '▼ LOSS'}
+            {r.isGain ? '+' : '-'}{fmtN(r.revalAmt)} {r.isGain ? '▲' : '▼'}
           </Tag>
         )},
-      { title: 'Combinations', key: 'combos',
-        render: (_: any, r: CcyRow) => {
-          // Show active combos (closeable) + excluded combos for this ccy (greyed restore)
-          const activeCombos = allRawRows
-            .filter(row => row.currency_code === r.ccy && row.account_combination && !revalExcludedCombos.has(row.account_combination))
-            .map(row => row.account_combination!)
-            .filter((c, i, arr) => arr.indexOf(c) === i);
-          const excludedCombos = allCombosForAccount.filter(c => revalExcludedCombos.has(c));
-          return (
-            <Space wrap size={2}>
-              {activeCombos.map(c => (
-                <Tag
-                  key={c}
-                  closable={!isPosted}
-                  onClose={() => setRevalExcludedCombos(prev => new Set([...prev, c]))}
-                  style={{ fontFamily: 'monospace', fontSize: 10 }}
-                >
-                  {c}
-                </Tag>
-              ))}
-              {excludedCombos.map(c => (
-                <Tag
-                  key={`ex-${c}`}
-                  color="default"
-                  style={{ fontFamily: 'monospace', fontSize: 10, opacity: 0.45, cursor: 'pointer', textDecoration: 'line-through' }}
-                  onClick={() => setRevalExcludedCombos(prev => { const s = new Set(prev); s.delete(c); return s; })}
-                >
-                  {c} ↩
-                </Tag>
-              ))}
-            </Space>
-          );
-        }},
     ];
 
     const previewColumns = [
@@ -2907,14 +2928,16 @@ const TrialBalance: React.FC = () => {
             </Text>
           </div>
 
-          {/* Per-currency balance + rate table */}
+          {/* Per-combination balance + rate table */}
           <Table
-            dataSource={ccyRows}
+            dataSource={comboRows}
             columns={ccyColumns}
-            rowKey="ccy"
+            rowKey="rowKey"
             size="small"
             pagination={false}
+            scroll={{ x: 1000, y: 300 }}
             style={{ marginBottom: 16 }}
+            rowClassName={(r: ComboRow) => r.excluded ? 'reval-row-excluded' : ''}
           />
 
           {/* Gain / Loss totals */}
@@ -2979,7 +3002,7 @@ const TrialBalance: React.FC = () => {
               type="primary"
               icon={<FileTextOutlined />}
               onClick={buildPreview}
-              disabled={isPosted || ccyRows.every(r => r.newRate === 0)}
+              disabled={isPosted || activeComboRows.every(r => r.newRate === 0)}
               style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
             >
               Preview Journal Entry
@@ -2997,7 +3020,7 @@ const TrialBalance: React.FC = () => {
                 const rawPeriod = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '');
                 const isUpdate  = revalId != null;
                 const payload   = {
-                  ledger_id:      rawRows[0] ? (rawRows[0] as any).ledger_id || 0 : 0,
+                  ledger_id:      allRawRows[0] ? (allRawRows[0] as any).ledger_id || 0 : 0,
                   ledger_name:    tab.ledgerName,
                   period_name:    rawPeriod,
                   account:        revalAccount,
