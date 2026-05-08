@@ -64,6 +64,7 @@ import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import { exportRrTBToExcel, exportFusionTBToExcel, exportBothTBToExcel } from '../../utils/tbExcelExport';
 import AccountSelector from '../../components/AccountSelector';
+import { searchCombinations, createCombination, type DistCombination } from '../../services/distCombinations.service';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -279,6 +280,14 @@ const TrialBalance: React.FC = () => {
   const [revalComboSearch,     setRevalComboSearch]     = useState('');
   const [revalGainLossAcctOpen, setRevalGainLossAcctOpen] = useState(false);
   const [revalGainLossAcctFor,  setRevalGainLossAcctFor]  = useState<'gain'|'loss'>('gain');
+  // Distribution combinations LOV
+  const [distComboList,      setDistComboList]      = useState<DistCombination[]>([]);
+  const [distComboLoading,   setDistComboLoading]   = useState(false);
+  const [distComboNewOpen,   setDistComboNewOpen]   = useState(false);
+  const [distComboNewName,   setDistComboNewName]   = useState('');
+  const [distComboNewDesc,   setDistComboNewDesc]   = useState('');
+  const [distComboNewSaving, setDistComboNewSaving] = useState(false);
+  const [distComboAcctOpen,  setDistComboAcctOpen]  = useState(false);
   const [revalPreviewRows,     setRevalPreviewRows]     = useState<
     { lineNum: number; combo: string; desc: string; comment: string; dr: number; cr: number }[]
   >([]);
@@ -1214,6 +1223,19 @@ const TrialBalance: React.FC = () => {
     setSelectedYear(null);
     fetchPeriods();
   }, [selectedLedger]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load GL Revaluation distributions whenever the LOV picker opens
+  useEffect(() => {
+    if (!revalComboPickerOpen) return;
+    setDistComboLoading(true);
+    setDistComboNewOpen(false);
+    setDistComboNewName('');
+    setDistComboNewDesc('');
+    searchCombinations({ module: 'GL Revaluation', status: 'ACTIVE' })
+      .then(items => setDistComboList(items))
+      .catch(() => setDistComboList([]))
+      .finally(() => setDistComboLoading(false));
+  }, [revalComboPickerOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Format currency
   const formatCurrency = (value: number) => {
@@ -2743,16 +2765,14 @@ const TrialBalance: React.FC = () => {
       setRevalPreviewRows(prev => prev.map(r => r.lineNum === lineNum ? { ...r, [field]: value } : r));
     };
 
-    // Account combo picker entries (all unique combos in this tab, filtered by company if set)
-    const allCombos = [...new Set(
-      tab.rrData
-        .filter(r => !revalCompany || r.company === revalCompany)
-        .map(r => r.account_combination)
-        .filter(Boolean)
-    )].sort();
-    const filteredCombos = revalComboSearch
-      ? allCombos.filter(c => c.toLowerCase().includes(revalComboSearch.toLowerCase()))
-      : allCombos;
+    // GL Revaluation distributions — loaded from API when LOV opens
+    const filteredDistCombos = revalComboSearch
+      ? distComboList.filter(c =>
+          c.combinationName.toLowerCase().includes(revalComboSearch.toLowerCase()) ||
+          (c.description || '').toLowerCase().includes(revalComboSearch.toLowerCase()) ||
+          (c.glAccountDesc || '').toLowerCase().includes(revalComboSearch.toLowerCase())
+        )
+      : distComboList;
 
     const ccyColumns = [
       { title: '', key: 'action', width: 36,
@@ -3383,63 +3403,182 @@ const TrialBalance: React.FC = () => {
           )}
         </Modal>
 
-        {/* Account combination LOV picker */}
+        {/* GL Revaluation — Distribution Combinations LOV */}
         <Modal
           open={revalComboPickerOpen}
-          onCancel={() => setRevalComboPickerOpen(false)}
+          onCancel={() => { setRevalComboPickerOpen(false); setDistComboNewOpen(false); }}
           footer={null}
-          width={680}
+          width={720}
           title={
             <Space>
               <SearchOutlined style={{ color: REDWOOD.info }} />
               <span>
-                Select {revalComboPickerFor === 'gain' ? 'Gain' : 'Loss'} Account — Distribution Combinations
+                {revalComboPickerFor === 'gain' ? 'Gain' : 'Loss'} Account — GL Revaluation Distributions
               </span>
-              {revalCompany && <Tag color="blue">Company: {revalCompany}</Tag>}
-              <Tag color="default">{filteredCombos.length} combos</Tag>
+              <Tag color="purple">GL Revaluation</Tag>
+              {!distComboLoading && <Tag color="default">{filteredDistCombos.length}</Tag>}
             </Space>
           }
         >
-          <Input.Search
-            placeholder="Search combination…"
-            value={revalComboSearch}
-            onChange={e => setRevalComboSearch(e.target.value)}
-            style={{ marginBottom: 10 }}
-            allowClear
-            autoFocus
-          />
-          <div style={{ maxHeight: 420, overflowY: 'auto' }}>
-            {filteredCombos.length === 0 && (
-              <div style={{ color: '#999', padding: 24, textAlign: 'center' }}>
-                No combinations found{revalCompany ? ` for company ${revalCompany}` : ''}.
-              </div>
-            )}
-            {filteredCombos.map(combo => {
-              const selected = (revalComboPickerFor === 'gain' ? revalGainCombo : revalLossCombo) === combo;
-              return (
-                <div
-                  key={combo}
-                  style={{
-                    padding: '7px 12px', cursor: 'pointer', borderRadius: 4,
-                    fontFamily: 'monospace', fontSize: 12,
-                    borderBottom: `1px solid ${REDWOOD.border}`,
-                    background: selected ? '#e6f7ff' : undefined,
-                    display: 'flex', alignItems: 'center', gap: 8,
-                  }}
-                  onClick={() => {
-                    if (revalComboPickerFor === 'gain') setRevalGainCombo(combo);
-                    else setRevalLossCombo(combo);
-                    setRevalComboPickerOpen(false);
-                  }}
-                  onMouseEnter={e => { if (!selected) e.currentTarget.style.background = '#f0f5ff'; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = selected ? '#e6f7ff' : ''; }}
-                >
-                  {selected && <span style={{ color: REDWOOD.info, fontWeight: 700, fontSize: 14 }}>✓</span>}
-                  <span>{combo}</span>
-                </div>
-              );
-            })}
+          {/* Search + Add New button */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <Input.Search
+              placeholder="Search combination or description…"
+              value={revalComboSearch}
+              onChange={e => setRevalComboSearch(e.target.value)}
+              allowClear
+              autoFocus
+              style={{ flex: 1 }}
+            />
+            <Button
+              icon={<PlusOutlined />}
+              type={distComboNewOpen ? 'primary' : 'default'}
+              onClick={() => {
+                setDistComboNewOpen(v => !v);
+                setDistComboNewName('');
+                setDistComboNewDesc('');
+              }}
+            >
+              New
+            </Button>
           </div>
+
+          {/* Inline new combination form */}
+          {distComboNewOpen && (
+            <div style={{
+              border: `1px solid ${REDWOOD.info}`, borderRadius: 6,
+              padding: '12px 14px', marginBottom: 12, background: '#e6f7ff11',
+            }}>
+              <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>New GL Revaluation Distribution</Text>
+              <Row gutter={8} style={{ marginTop: 8 }}>
+                <Col span={16}>
+                  <div style={{ marginBottom: 4 }}>
+                    <Text style={{ fontSize: 11 }}>Account Combination <span style={{ color: 'red' }}>*</span></Text>
+                  </div>
+                  <Space.Compact style={{ width: '100%' }}>
+                    <Input
+                      size="small"
+                      placeholder="e.g. 100-000-000-7001000-000-000-000"
+                      value={distComboNewName}
+                      onChange={e => setDistComboNewName(e.target.value)}
+                      style={{ fontFamily: 'monospace', fontSize: 11 }}
+                    />
+                    <Tooltip title="Build combination segment by segment">
+                      <Button
+                        size="small"
+                        icon={<ApartmentOutlined />}
+                        onClick={() => setDistComboAcctOpen(true)}
+                      />
+                    </Tooltip>
+                  </Space.Compact>
+                </Col>
+                <Col span={8}>
+                  <div style={{ marginBottom: 4 }}>
+                    <Text style={{ fontSize: 11 }}>Description</Text>
+                  </div>
+                  <Input
+                    size="small"
+                    placeholder="e.g. FX Gain – AED"
+                    value={distComboNewDesc}
+                    onChange={e => setDistComboNewDesc(e.target.value)}
+                  />
+                </Col>
+              </Row>
+              <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+                <Button
+                  type="primary"
+                  size="small"
+                  loading={distComboNewSaving}
+                  disabled={!distComboNewName.trim()}
+                  onClick={async () => {
+                    setDistComboNewSaving(true);
+                    try {
+                      await createCombination({
+                        combinationName: distComboNewName.trim(),
+                        description:     distComboNewDesc.trim() || undefined,
+                        glAccountDesc:   distComboNewDesc.trim() || undefined,
+                        module:          'GL Revaluation',
+                        status:          'ACTIVE',
+                        createdBy:       'ReactERP',
+                      });
+                      message.success('Distribution combination created');
+                      // Reload list
+                      const items = await searchCombinations({ module: 'GL Revaluation', status: 'ACTIVE' });
+                      setDistComboList(items);
+                      setDistComboNewOpen(false);
+                      setDistComboNewName('');
+                      setDistComboNewDesc('');
+                    } catch (e: any) {
+                      message.error(`Failed: ${e.message}`);
+                    } finally {
+                      setDistComboNewSaving(false);
+                    }
+                  }}
+                >
+                  Save &amp; Add
+                </Button>
+                <Button size="small" onClick={() => setDistComboNewOpen(false)}>Cancel</Button>
+              </div>
+            </div>
+          )}
+
+          {/* List */}
+          {distComboLoading ? (
+            <div style={{ textAlign: 'center', padding: 32 }}><Spin /></div>
+          ) : (
+            <div style={{ maxHeight: 380, overflowY: 'auto' }}>
+              {filteredDistCombos.length === 0 && (
+                <div style={{ color: '#999', padding: 24, textAlign: 'center' }}>
+                  No GL Revaluation distributions found. Use <strong>New</strong> to add one.
+                </div>
+              )}
+              {filteredDistCombos.map(item => {
+                const currentVal = revalComboPickerFor === 'gain' ? revalGainCombo : revalLossCombo;
+                const selected   = currentVal === item.combinationName;
+                return (
+                  <div
+                    key={item.combinationId}
+                    style={{
+                      padding: '8px 12px', cursor: 'pointer', borderRadius: 4,
+                      borderBottom: `1px solid ${REDWOOD.border}`,
+                      background: selected ? '#e6f7ff' : undefined,
+                      display: 'flex', alignItems: 'center', gap: 10,
+                    }}
+                    onClick={() => {
+                      if (revalComboPickerFor === 'gain') setRevalGainCombo(item.combinationName);
+                      else setRevalLossCombo(item.combinationName);
+                      setRevalComboPickerOpen(false);
+                    }}
+                    onMouseEnter={e => { if (!selected) e.currentTarget.style.background = '#f0f5ff'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = selected ? '#e6f7ff' : ''; }}
+                  >
+                    {selected && <CheckCircleOutlined style={{ color: REDWOOD.info, fontSize: 14 }} />}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={{ fontFamily: 'monospace', fontSize: 12, display: 'block' }}>
+                        {item.combinationName}
+                      </Text>
+                      {(item.description || item.glAccountDesc) && (
+                        <Text style={{ fontSize: 11, color: REDWOOD.textSecondary }}>
+                          {item.description || item.glAccountDesc}
+                        </Text>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* AccountSelector for the New form */}
+          <AccountSelector
+            visible={distComboAcctOpen}
+            onCancel={() => setDistComboAcctOpen(false)}
+            onSelect={(accountCode) => {
+              setDistComboNewName(accountCode);
+              setDistComboAcctOpen(false);
+            }}
+            lockedFirstSegment={revalCompany || undefined}
+          />
         </Modal>
 
         <AccountSelector
