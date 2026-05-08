@@ -2607,6 +2607,20 @@ const TrialBalance: React.FC = () => {
         setRevalId(existing.revalueId);
         setRevalGainCombo(existing.gainAccount || '');
         setRevalLossCombo(existing.lossAccount || '');
+
+        // Fetch full detail to restore saved new rates per currency
+        try {
+          const detRes  = await fetch(`${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}/${existing.revalueId}`);
+          const detJson = await detRes.json();
+          if (Array.isArray(detJson.ccyRows) && detJson.ccyRows.length > 0) {
+            const rates: Record<string, string> = {};
+            detJson.ccyRows.forEach((c: any) => {
+              if (c.currencyCode && c.newRate != null) rates[c.currencyCode] = String(c.newRate);
+            });
+            setRevalRates(rates);
+          }
+        } catch { /* ignore — rates stay blank */ }
+
         message.info({ content: `Existing revaluation found (ID: ${existing.revalueId}) — editing`, key: 'reval-check', duration: 3 });
       }
     } catch {
