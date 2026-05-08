@@ -25,6 +25,7 @@ import {
   Descriptions,
   Dropdown,
   Drawer,
+  Collapse,
 } from 'antd';
 import {
   HomeOutlined,
@@ -54,6 +55,7 @@ import {
   SaveOutlined,
   LineChartOutlined,
   DownOutlined,
+  CalculatorOutlined,
 } from '@ant-design/icons';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -288,6 +290,9 @@ const TrialBalance: React.FC = () => {
   const [distComboNewDesc,   setDistComboNewDesc]   = useState('');
   const [distComboNewSaving, setDistComboNewSaving] = useState(false);
   const [distComboAcctOpen,  setDistComboAcctOpen]  = useState(false);
+  // Retained Earnings calculator
+  const [reCalcVisible, setReCalcVisible] = useState(false);
+  const [reCalcTab,     setReCalcTab]     = useState<TabData | null>(null);
   const [revalPreviewRows,     setRevalPreviewRows]     = useState<
     { lineNum: number; combo: string; desc: string; comment: string; dr: number; cr: number }[]
   >([]);
@@ -4171,6 +4176,194 @@ const TrialBalance: React.FC = () => {
     );
   };
 
+  // ── Render: Retained Earnings calculator popup ───────────────
+  const RE_ACCOUNT = '3112100';
+
+  const renderReCalcModal = () => {
+    const tab = reCalcTab;
+    if (!tab) return null;
+
+    const fmtN = (n: number) =>
+      new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(n));
+    const fmtSigned = (n: number) =>
+      n >= 0
+        ? <Text style={{ fontFamily: 'monospace', color: '#237804' }}>{fmtN(n)}</Text>
+        : <Text style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>({fmtN(n)})</Text>;
+
+    const period = tab.periodName.replace(/^YTD:\s*/, '');
+    const rows   = tab.rrData;
+
+    // Revenue rows (type R) — credit balance, stored as negative closing
+    const revenueRows = rows.filter(r => r.account_type === 'R');
+    const revenueTotal = revenueRows.reduce((s, r) => s + (r.closing || 0), 0);
+
+    // Expense rows (type E) — debit balance, stored as positive closing
+    const expenseRows = rows.filter(r => r.account_type === 'E');
+    const expenseTotal = expenseRows.reduce((s, r) => s + (r.closing || 0), 0);
+
+    // Net P&L: revenue is Cr (negative) + expenses are Dr (positive)
+    // Net Income = -(revenueTotal) - expenseTotal
+    // Equivalently: revenueTotal + expenseTotal already gives the P&L with correct sign
+    // because revenueTotal < 0 and expenseTotal > 0
+    const netPL = -(revenueTotal + expenseTotal);   // positive = net income, negative = net loss
+
+    // Retained Earnings account current balance
+    const reRows = rows.filter(r => r.account === RE_ACCOUNT);
+    const reCurrentClosing = reRows.reduce((s, r) => s + (r.closing || 0), 0);
+    const reAdjusted = reCurrentClosing - netPL;   // RE is Cr (negative), add net income increases Cr
+
+    const isProfit = netPL >= 0;
+
+    // Summary table for revenue accounts
+    const revSummary = revenueRows.map(r => ({
+      key: r.account,
+      account: r.account,
+      desc: r.account_desc,
+      closing: r.closing || 0,
+    })).sort((a, b) => a.account.localeCompare(b.account));
+
+    // Summary table for expense accounts
+    const expSummary = expenseRows.map(r => ({
+      key: r.account,
+      account: r.account,
+      desc: r.account_desc,
+      closing: r.closing || 0,
+    })).sort((a, b) => a.account.localeCompare(b.account));
+
+    const acctCol = [
+      { title: 'Account', dataIndex: 'account', key: 'account', width: 110,
+        render: (v: string) => <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{v}</Text> },
+      { title: 'Description', dataIndex: 'desc', key: 'desc', ellipsis: true,
+        render: (v: string) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text> },
+      { title: 'Balance', dataIndex: 'closing', key: 'closing', align: 'right' as const, width: 130,
+        render: (v: number) => fmtSigned(v) },
+    ];
+
+    return (
+      <Modal
+        open={reCalcVisible}
+        onCancel={() => setReCalcVisible(false)}
+        footer={null}
+        width={860}
+        title={
+          <Space>
+            <CalculatorOutlined style={{ color: '#722ed1' }} />
+            <span>Retained Earnings Calculation</span>
+            <Tag color="purple">{period}</Tag>
+            <Tag color="geekblue">{tab.ledgerName}</Tag>
+          </Space>
+        }
+      >
+        {/* Summary cards */}
+        <Row gutter={12} style={{ marginBottom: 20 }}>
+          <Col span={6}>
+            <div style={{ border: '1px solid #d9d9d9', borderRadius: 8, padding: '12px 16px', background: '#f6ffed' }}>
+              <div style={{ fontSize: 11, color: REDWOOD.textSecondary, marginBottom: 4 }}>Total Revenue</div>
+              <div style={{ fontFamily: 'monospace', fontSize: 15, fontWeight: 700, color: '#237804' }}>
+                {fmtN(revenueTotal)}
+              </div>
+              <div style={{ fontSize: 10, color: REDWOOD.textSecondary }}>{revenueRows.length} accounts</div>
+            </div>
+          </Col>
+          <Col span={6}>
+            <div style={{ border: '1px solid #d9d9d9', borderRadius: 8, padding: '12px 16px', background: '#fff1f0' }}>
+              <div style={{ fontSize: 11, color: REDWOOD.textSecondary, marginBottom: 4 }}>Total Expenses</div>
+              <div style={{ fontFamily: 'monospace', fontSize: 15, fontWeight: 700, color: REDWOOD.primary }}>
+                {fmtN(expenseTotal)}
+              </div>
+              <div style={{ fontSize: 10, color: REDWOOD.textSecondary }}>{expenseRows.length} accounts</div>
+            </div>
+          </Col>
+          <Col span={6}>
+            <div style={{ border: `2px solid ${isProfit ? '#52c41a' : REDWOOD.primary}`, borderRadius: 8, padding: '12px 16px', background: isProfit ? '#f6ffed' : '#fff1f0' }}>
+              <div style={{ fontSize: 11, color: REDWOOD.textSecondary, marginBottom: 4 }}>Net {isProfit ? 'Income' : 'Loss'}</div>
+              <div style={{ fontFamily: 'monospace', fontSize: 15, fontWeight: 700, color: isProfit ? '#237804' : REDWOOD.primary }}>
+                {fmtN(netPL)}
+              </div>
+              <Tag color={isProfit ? 'success' : 'error'} style={{ marginTop: 4 }}>
+                {isProfit ? '▲ PROFIT' : '▼ LOSS'}
+              </Tag>
+            </div>
+          </Col>
+          <Col span={6}>
+            <div style={{ border: '2px solid #722ed1', borderRadius: 8, padding: '12px 16px', background: '#f9f0ff' }}>
+              <div style={{ fontSize: 11, color: REDWOOD.textSecondary, marginBottom: 4 }}>
+                RE Account ({RE_ACCOUNT})
+              </div>
+              <div style={{ fontSize: 10, color: REDWOOD.textSecondary, marginBottom: 2 }}>
+                Current: <span style={{ fontFamily: 'monospace' }}>{fmtN(reCurrentClosing)}</span>
+              </div>
+              <div style={{ fontFamily: 'monospace', fontSize: 15, fontWeight: 700, color: '#722ed1' }}>
+                {fmtN(reAdjusted)}
+              </div>
+              <div style={{ fontSize: 10, color: REDWOOD.textSecondary }}>After closing P&amp;L</div>
+            </div>
+          </Col>
+        </Row>
+
+        {/* Formula note */}
+        <div style={{ background: '#fafafa', border: '1px solid #e8e8e8', borderRadius: 6, padding: '8px 14px', marginBottom: 16, fontSize: 12, color: REDWOOD.textSecondary }}>
+          <strong>Formula:</strong>&nbsp; RE Adjusted = RE Current ({fmtN(reCurrentClosing)}) − Net {isProfit ? 'Income' : 'Loss'} ({fmtN(netPL)}) = <strong style={{ color: '#722ed1' }}>{fmtN(reAdjusted)}</strong>
+          &nbsp;·&nbsp; Revenue and Expense accounts close to zero; balance transfers to Retained Earnings.
+        </div>
+
+        {/* Revenue breakdown */}
+        <Collapse size="small" style={{ marginBottom: 8 }} items={[{
+          key: 'rev',
+          label: <span style={{ color: '#237804', fontWeight: 600 }}>Revenue Accounts — {revenueRows.length} accounts, Total: {fmtN(revenueTotal)}</span>,
+          children: (
+            <Table
+              dataSource={revSummary}
+              columns={acctCol}
+              size="small"
+              pagination={false}
+              scroll={{ y: 200 }}
+              summary={() => (
+                <Table.Summary>
+                  <Table.Summary.Row style={{ background: '#f6ffed' }}>
+                    <Table.Summary.Cell index={0} colSpan={2} align="right">
+                      <Text strong style={{ fontSize: 12 }}>Total Revenue</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={2} align="right">
+                      <Text strong style={{ fontFamily: 'monospace', color: '#237804' }}>{fmtN(revenueTotal)}</Text>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              )}
+            />
+          ),
+        }]} />
+
+        {/* Expense breakdown */}
+        <Collapse size="small" items={[{
+          key: 'exp',
+          label: <span style={{ color: REDWOOD.primary, fontWeight: 600 }}>Expense Accounts — {expenseRows.length} accounts, Total: {fmtN(expenseTotal)}</span>,
+          children: (
+            <Table
+              dataSource={expSummary}
+              columns={acctCol}
+              size="small"
+              pagination={false}
+              scroll={{ y: 200 }}
+              summary={() => (
+                <Table.Summary>
+                  <Table.Summary.Row style={{ background: '#fff1f0' }}>
+                    <Table.Summary.Cell index={0} colSpan={2} align="right">
+                      <Text strong style={{ fontSize: 12 }}>Total Expenses</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={2} align="right">
+                      <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmtN(expenseTotal)}</Text>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              )}
+            />
+          ),
+        }]} />
+      </Modal>
+    );
+  };
+
   // ── Render: Dynamic YTD Trial Balance tab ─────────────────
   const renderRrYtdTBTab = (tab: TabData) => {
     if (tab.loading) {
@@ -4418,6 +4611,14 @@ const TrialBalance: React.FC = () => {
         <Row gutter={12} style={{ marginBottom: 6 }}>
           <Col flex="auto" />
           <Col style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Button
+              size="small"
+              icon={<CalculatorOutlined />}
+              style={{ borderColor: '#722ed1', color: '#722ed1' }}
+              onClick={() => { setReCalcTab(tab); setReCalcVisible(true); }}
+            >
+              Retained Earnings
+            </Button>
             <Button
               size="small"
               type="primary"
@@ -5092,6 +5293,7 @@ const TrialBalance: React.FC = () => {
           })()}
         </Modal>
         {renderRevalModal()}
+        {renderReCalcModal()}
 
         {/* ── YTD Movement: Start Period Prompt ── */}
         <Modal
