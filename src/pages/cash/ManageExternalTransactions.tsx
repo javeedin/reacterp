@@ -2545,17 +2545,23 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           open={viewAcctOpen}
           onCancel={() => setViewAcctOpen(false)}
           footer={<Button onClick={() => setViewAcctOpen(false)}>Close</Button>}
-          width={700}
+          width={860}
           destroyOnClose
         >
           {viewAcctTxn && (() => {
             const txn = viewAcctTxn;
             const direction = txn.transactionDirection ?? ((txn.amount ?? 0) >= 0 ? 'DR' : 'CR');
             const absAmount = Math.abs(txn.amount ?? 0);
+            const exRate    = txn.bankConversionRate ?? 1;
+            const acctedAmt = Math.round(absAmount * exRate * 100) / 100;
+            const ledgerCcy = 'AED';
             const drLabel = direction === 'DR' ? 'Bank / Asset Account' : 'Offset Account';
             const crLabel = direction === 'DR' ? 'Offset Account' : 'Bank / Asset Account';
             const drAcct  = direction === 'DR' ? txn.assetAccountCombination : txn.offsetAccountCombination;
             const crAcct  = direction === 'DR' ? txn.offsetAccountCombination : txn.assetAccountCombination;
+            const tdStyle = (extra?: React.CSSProperties): React.CSSProperties => ({
+              padding: '8px 10px', border: `1px solid ${REDWOOD.neutral200}`, ...extra,
+            });
             return (
               <>
                 {/* Transaction Info Header */}
@@ -2581,7 +2587,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                     </Col>
                   </Row>
                   <Row gutter={16} style={{ marginTop: 8 }}>
-                    <Col xs={24} md={12}>
+                    <Col xs={24} md={6}>
                       <Text type="secondary" style={{ fontSize: 11 }}>Direction</Text>
                       <div>
                         <Tag color={direction === 'DR' ? 'blue' : 'green'} style={{ fontSize: 12, fontWeight: 600 }}>
@@ -2589,9 +2595,17 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                         </Tag>
                       </div>
                     </Col>
-                    <Col xs={24} md={12}>
+                    <Col xs={24} md={6}>
                       <Text type="secondary" style={{ fontSize: 11 }}>Reference</Text>
                       <div style={{ fontSize: 13 }}>{txn.referenceText || '—'}</div>
+                    </Col>
+                    <Col xs={12} md={6}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>Conversion Rate</Text>
+                      <div style={{ fontSize: 13, fontFamily: 'monospace' }}>{exRate} ({txn.bankConversionRateType || 'Corporate'})</div>
+                    </Col>
+                    <Col xs={12} md={6}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>Ledger Currency</Text>
+                      <div style={{ fontSize: 13, fontFamily: 'monospace' }}>{ledgerCcy}</div>
                     </Col>
                   </Row>
                 </div>
@@ -2603,33 +2617,52 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'monospace', fontSize: 12 }}>
                   <thead>
                     <tr style={{ background: REDWOOD.neutral100 }}>
-                      <th style={{ textAlign: 'left', padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, width: 50 }}>Dr/Cr</th>
-                      <th style={{ textAlign: 'left', padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}` }}>Account</th>
-                      <th style={{ textAlign: 'left', padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, width: 120 }}>Label</th>
-                      <th style={{ textAlign: 'right', padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, width: 110 }}>DR Amount</th>
-                      <th style={{ textAlign: 'right', padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, width: 110 }}>CR Amount</th>
+                      <th style={tdStyle({ textAlign: 'left', width: 44 })}>Dr/Cr</th>
+                      <th style={tdStyle({ textAlign: 'left' })}>Account</th>
+                      <th style={tdStyle({ textAlign: 'left', width: 130, fontSize: 11 })}>Label</th>
+                      <th colSpan={2} style={tdStyle({ textAlign: 'center', width: 220, background: '#e6f4ff', color: REDWOOD.info })}>
+                        Entered ({txn.currencyCode || '—'})
+                      </th>
+                      <th colSpan={2} style={tdStyle({ textAlign: 'center', width: 220, background: '#f6ffed', color: REDWOOD.success })}>
+                        Accounted ({ledgerCcy})
+                      </th>
+                    </tr>
+                    <tr style={{ background: REDWOOD.neutral100 }}>
+                      <th style={tdStyle()} />
+                      <th style={tdStyle()} />
+                      <th style={tdStyle()} />
+                      <th style={tdStyle({ textAlign: 'right', background: '#e6f4ff', fontSize: 11 })}>DR</th>
+                      <th style={tdStyle({ textAlign: 'right', background: '#e6f4ff', fontSize: 11 })}>CR</th>
+                      <th style={tdStyle({ textAlign: 'right', background: '#f6ffed', fontSize: 11 })}>DR</th>
+                      <th style={tdStyle({ textAlign: 'right', background: '#f6ffed', fontSize: 11 })}>CR</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr>
-                      <td style={{ padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, color: REDWOOD.info, fontWeight: 700 }}>DR</td>
-                      <td style={{ padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}` }}>{drAcct || '—'}</td>
-                      <td style={{ padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, fontSize: 11, color: REDWOOD.neutral600 }}>{drLabel}</td>
-                      <td style={{ padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, textAlign: 'right', color: REDWOOD.info, fontWeight: 600 }}>{fmtAmount(absAmount)}</td>
-                      <td style={{ padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, textAlign: 'right' }}>—</td>
+                      <td style={tdStyle({ color: REDWOOD.info, fontWeight: 700 })}>DR</td>
+                      <td style={tdStyle()}>{drAcct || '—'}</td>
+                      <td style={tdStyle({ fontSize: 11, color: REDWOOD.neutral600 })}>{drLabel}</td>
+                      <td style={tdStyle({ textAlign: 'right', color: REDWOOD.info, fontWeight: 600 })}>{fmtAmount(absAmount)}</td>
+                      <td style={tdStyle({ textAlign: 'right' })}>—</td>
+                      <td style={tdStyle({ textAlign: 'right', color: REDWOOD.info, fontWeight: 600 })}>{fmtAmount(acctedAmt)}</td>
+                      <td style={tdStyle({ textAlign: 'right' })}>—</td>
                     </tr>
                     <tr style={{ background: REDWOOD.neutral100 }}>
-                      <td style={{ padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, color: REDWOOD.success, fontWeight: 700 }}>CR</td>
-                      <td style={{ padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}` }}>{crAcct || '—'}</td>
-                      <td style={{ padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, fontSize: 11, color: REDWOOD.neutral600 }}>{crLabel}</td>
-                      <td style={{ padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, textAlign: 'right' }}>—</td>
-                      <td style={{ padding: '8px 12px', border: `1px solid ${REDWOOD.neutral200}`, textAlign: 'right', color: REDWOOD.success, fontWeight: 600 }}>{fmtAmount(absAmount)}</td>
+                      <td style={tdStyle({ color: REDWOOD.success, fontWeight: 700 })}>CR</td>
+                      <td style={tdStyle()}>{crAcct || '—'}</td>
+                      <td style={tdStyle({ fontSize: 11, color: REDWOOD.neutral600 })}>{crLabel}</td>
+                      <td style={tdStyle({ textAlign: 'right' })}>—</td>
+                      <td style={tdStyle({ textAlign: 'right', color: REDWOOD.success, fontWeight: 600 })}>{fmtAmount(absAmount)}</td>
+                      <td style={tdStyle({ textAlign: 'right' })}>—</td>
+                      <td style={tdStyle({ textAlign: 'right', color: REDWOOD.success, fontWeight: 600 })}>{fmtAmount(acctedAmt)}</td>
                     </tr>
                   </tbody>
                 </table>
-                <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end', gap: 16, padding: '6px 12px', background: REDWOOD.neutral100, borderRadius: '0 0 4px 4px', border: `1px solid ${REDWOOD.neutral200}`, borderTop: 'none' }}>
-                  <Text style={{ fontSize: 12 }}>Total DR: <Text strong style={{ color: REDWOOD.info }}>{fmtAmount(absAmount, txn.currencyCode)}</Text></Text>
-                  <Text style={{ fontSize: 12 }}>Total CR: <Text strong style={{ color: REDWOOD.success }}>{fmtAmount(absAmount, txn.currencyCode)}</Text></Text>
+                <div style={{ marginTop: 0, display: 'flex', justifyContent: 'flex-end', gap: 24, padding: '6px 12px', background: REDWOOD.neutral100, borderRadius: '0 0 4px 4px', border: `1px solid ${REDWOOD.neutral200}`, borderTop: 'none' }}>
+                  <Text style={{ fontSize: 12 }}>Entered DR: <Text strong style={{ color: REDWOOD.info }}>{fmtAmount(absAmount, txn.currencyCode)}</Text></Text>
+                  <Text style={{ fontSize: 12 }}>Entered CR: <Text strong style={{ color: REDWOOD.success }}>{fmtAmount(absAmount, txn.currencyCode)}</Text></Text>
+                  <Text style={{ fontSize: 12 }}>Accounted DR: <Text strong style={{ color: REDWOOD.info }}>{fmtAmount(acctedAmt, ledgerCcy)}</Text></Text>
+                  <Text style={{ fontSize: 12 }}>Accounted CR: <Text strong style={{ color: REDWOOD.success }}>{fmtAmount(acctedAmt, ledgerCcy)}</Text></Text>
                 </div>
               </>
             );
