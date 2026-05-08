@@ -1452,6 +1452,8 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
         const acctMap: Record<string, string>      = {};
         const ccyMap:  Record<string, string>      = {};
         const buBanks: Record<string, Set<string>> = {};
+        // Build LE → bank map from transaction data as well
+        const leBankMapFromTxn: Record<string, Set<string>> = {};
 
         items.forEach(i => {
           if (i.bankAccountName) {
@@ -1459,6 +1461,10 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
               if (!buBanks[i.businessUnitName]) buBanks[i.businessUnitName] = new Set();
               buBanks[i.businessUnitName].add(i.bankAccountName);
               buSet.add(i.businessUnitName);
+            }
+            if (i.legalEntityName) {
+              if (!leBankMapFromTxn[i.legalEntityName]) leBankMapFromTxn[i.legalEntityName] = new Set();
+              leBankMapFromTxn[i.legalEntityName].add(i.bankAccountName);
             }
           }
           if (i.bankAccountName && i.assetAccountCombination)
@@ -1474,10 +1480,22 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
         setBankAccountCurrencyMap(prev => ({ ...prev, ...ccyMap }));
         setBuLeMap({ ...buLeMapping });
         // Only fill buBankMap from transaction history for BUs not covered by bank master data
+        // Build BU→bank via LE chain from transaction data (most reliable source)
+        const buBanksViaLe: Record<string, string[]> = {};
+        Object.entries(buLeMapping).forEach(([buName, leName]) => {
+          const leSet = leBankMapFromTxn[leName];
+          if (leSet?.size) buBanksViaLe[buName] = [...leSet];
+        });
+
         setBuBankMap(prev => {
           const merged = { ...prev };
+          // First layer: history-based BU → bank (direct)
           Object.entries(buBanks).forEach(([bu, set]) => {
             if (!merged[bu]) merged[bu] = [...set];
+          });
+          // Second layer: LE-chain derived (overrides if present, more accurate)
+          Object.entries(buBanksViaLe).forEach(([bu, banks]) => {
+            merged[bu] = banks;
           });
           return merged;
         });
@@ -2168,50 +2186,33 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           ),
           children: (
         <Form form={searchForm} layout="horizontal" labelCol={{ span: 8 }} wrapperCol={{ span: 16 }}>
-          <Row gutter={[24, 4]}>
+          <Row gutter={[16, 0]}>
 
-            {/* ── Row 1: BU → LE ── */}
             <Col xs={24} md={12}>
-              <Form.Item label="Business Unit" name="businessUnit" style={{ marginBottom: 10 }}>
-                <Select
-                  showSearch placeholder="Select Business Unit"
-                  optionFilterProp="label" options={businessUnits}
-                  allowClear style={{ width: '100%' }}
-                  onChange={handleBUChange}
-                  onClear={() => handleBUChange('')}
-                />
+              <Form.Item label="Business Unit" name="businessUnit" style={{ marginBottom: 4 }}>
+                <Select showSearch placeholder="Select Business Unit" optionFilterProp="label" options={businessUnits}
+                  allowClear style={{ width: '100%' }} onChange={handleBUChange} onClear={() => handleBUChange('')} />
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
-              <Form.Item label="Legal Entity" style={{ marginBottom: 10 }}>
-                <Input
-                  value={derivedLE || (selectedBU ? '—' : '')}
-                  readOnly
-                  placeholder="Auto-derived from BU"
-                  style={{ background: '#f5f5f5', color: derivedLE ? REDWOOD.info : REDWOOD.neutral600, cursor: 'default' }}
-                />
-              </Form.Item>
-            </Col>
-
-            {/* ── Row 2: Bank (filtered by BU) + Date From ── */}
-            <Col xs={24} md={12}>
-              <Form.Item label="Bank Account" name="bankAccount" style={{ marginBottom: 10 }}>
-                <Select
-                  showSearch placeholder={selectedBU ? `Banks for ${selectedBU}` : 'Select account'}
-                  optionFilterProp="label" options={filteredBankAccounts}
-                  allowClear style={{ width: '100%' }}
-                />
+              <Form.Item label="Legal Entity" style={{ marginBottom: 4 }}>
+                <Input value={derivedLE || (selectedBU ? '—' : '')} readOnly placeholder="Auto-derived from BU"
+                  style={{ background: '#f5f5f5', color: derivedLE ? REDWOOD.info : REDWOOD.neutral600, cursor: 'default' }} />
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
-              <Form.Item label="Date From" name="dateFrom" style={{ marginBottom: 10 }}>
+              <Form.Item label="Bank Account" name="bankAccount" style={{ marginBottom: 4 }}>
+                <Select showSearch placeholder={selectedBU ? `Banks for ${selectedBU}` : 'Select account'}
+                  optionFilterProp="label" options={filteredBankAccounts} allowClear style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12}>
+              <Form.Item label="Date From" name="dateFrom" style={{ marginBottom: 4 }}>
                 <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
               </Form.Item>
             </Col>
-
-            {/* ── Row 3: Status + Date To ── */}
             <Col xs={24} md={12}>
-              <Form.Item label="Status" name="status" style={{ marginBottom: 10 }}>
+              <Form.Item label="Status" name="status" style={{ marginBottom: 4 }}>
                 <Select placeholder="Select status" allowClear>
                   <Option value="REC">Reconciled</Option>
                   <Option value="UNR">Unreconciled</Option>
@@ -2221,26 +2222,22 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
-              <Form.Item label="Date To" name="dateTo" style={{ marginBottom: 10 }}>
+              <Form.Item label="Date To" name="dateTo" style={{ marginBottom: 4 }}>
                 <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
               </Form.Item>
             </Col>
-
-            {/* ── Row 4: Txn # + Reference ── */}
             <Col xs={24} md={12}>
-              <Form.Item label="Transaction #" name="transactionNumber" style={{ marginBottom: 10 }}>
+              <Form.Item label="Transaction #" name="transactionNumber" style={{ marginBottom: 4 }}>
                 <Input placeholder="Transaction number" />
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
-              <Form.Item label="Reference" name="reference" style={{ marginBottom: 10 }}>
+              <Form.Item label="Reference" name="reference" style={{ marginBottom: 4 }}>
                 <Input placeholder="Reference text" />
               </Form.Item>
             </Col>
-
-            {/* ── Row 5: Type + Currency ── */}
             <Col xs={24} md={12}>
-              <Form.Item label="Transaction Type" name="transactionType" style={{ marginBottom: 10 }}>
+              <Form.Item label="Transaction Type" name="transactionType" style={{ marginBottom: 4 }}>
                 <Select placeholder="Select type" allowClear>
                   <Option value="External Transaction">External Transaction</Option>
                   <Option value="Adhoc Payment">Adhoc Payment</Option>
@@ -2248,26 +2245,24 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
-              <Form.Item label="Currency" name="currencyCode" style={{ marginBottom: 10 }}>
+              <Form.Item label="Currency" name="currencyCode" style={{ marginBottom: 4 }}>
                 <Select placeholder="Select currency" allowClear>
                   {['AED','USD','EUR','GBP','SAR','QAR','KWD','BHD','OMR'].map(c => <Option key={c} value={c}>{c}</Option>)}
                 </Select>
               </Form.Item>
             </Col>
-
-            {/* ── Row 6: Amount range + Origin ── */}
             <Col xs={24} md={12}>
-              <Form.Item label="Amount From" name="amountFrom" style={{ marginBottom: 10 }}>
+              <Form.Item label="Amount From" name="amountFrom" style={{ marginBottom: 4 }}>
                 <InputNumber style={{ width: '100%' }} placeholder="Min amount" precision={2} />
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
-              <Form.Item label="Amount To" name="amountTo" style={{ marginBottom: 10 }}>
+              <Form.Item label="Amount To" name="amountTo" style={{ marginBottom: 4 }}>
                 <InputNumber style={{ width: '100%' }} placeholder="Max amount" precision={2} />
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
-              <Form.Item label="Origin" name="source" style={{ marginBottom: 10 }}>
+              <Form.Item label="Origin" name="source" style={{ marginBottom: 4 }}>
                 <Select placeholder="Select origin" allowClear>
                   <Option value="ORA_BAT">Bank</Option>
                   <Option value="ORA_MAN">Manual</Option>
