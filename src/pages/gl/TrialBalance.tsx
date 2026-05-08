@@ -277,6 +277,8 @@ const TrialBalance: React.FC = () => {
   const [revalComboPickerOpen, setRevalComboPickerOpen] = useState(false);
   const [revalComboPickerFor,  setRevalComboPickerFor]  = useState<'gain'|'loss'>('gain');
   const [revalComboSearch,     setRevalComboSearch]     = useState('');
+  const [revalGainLossAcctOpen, setRevalGainLossAcctOpen] = useState(false);
+  const [revalGainLossAcctFor,  setRevalGainLossAcctFor]  = useState<'gain'|'loss'>('gain');
   const [revalPreviewRows,     setRevalPreviewRows]     = useState<
     { lineNum: number; combo: string; desc: string; comment: string; dr: number; cr: number }[]
   >([]);
@@ -2654,6 +2656,8 @@ const TrialBalance: React.FC = () => {
     const accountType = allRawRows[0]?.account_type || 'A';
     const accountDesc = allRawRows[0]?.account_desc || '';
     const functionalCcy = allRawRows[0]?.currency_code || 'AED'; // default
+    // Company for locking the first segment of gain/loss account selectors
+    const revalCompany = tab.selectedCompany || allRawRows[0]?.company || '';
 
     const fmtN = (n: number) =>
       new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(n));
@@ -2739,8 +2743,13 @@ const TrialBalance: React.FC = () => {
       setRevalPreviewRows(prev => prev.map(r => r.lineNum === lineNum ? { ...r, [field]: value } : r));
     };
 
-    // Account combo picker entries (all unique combos in this tab)
-    const allCombos = [...new Set(tab.rrData.map(r => r.account_combination).filter(Boolean))].sort();
+    // Account combo picker entries (all unique combos in this tab, filtered by company if set)
+    const allCombos = [...new Set(
+      tab.rrData
+        .filter(r => !revalCompany || r.company === revalCompany)
+        .map(r => r.account_combination)
+        .filter(Boolean)
+    )].sort();
     const filteredCombos = revalComboSearch
       ? allCombos.filter(c => c.toLowerCase().includes(revalComboSearch.toLowerCase()))
       : allCombos;
@@ -2960,40 +2969,49 @@ const TrialBalance: React.FC = () => {
 
           {/* Gain / Loss GL account selectors */}
           <Row gutter={12} style={{ marginBottom: 16 }}>
-            <Col span={12}>
-              <div style={{ marginBottom: 4 }}>
-                <Text strong style={{ fontSize: 12, color: '#389e0d' }}>Realised Gain Account</Text>
-              </div>
-              <Space.Compact style={{ width: '100%' }}>
-                <Input
-                  size="small"
-                  placeholder="e.g. 100-000-000-7001000-000-000-000"
-                  value={revalGainCombo}
-                  disabled={isPosted}
-                  onChange={e => setRevalGainCombo(e.target.value)}
-                  style={{ fontFamily: 'monospace', fontSize: 11 }}
-                />
-                <Button size="small" icon={<SearchOutlined />} disabled={isPosted}
-                  onClick={() => { setRevalComboPickerFor('gain'); setRevalComboSearch(''); setRevalComboPickerOpen(true); }} />
-              </Space.Compact>
-            </Col>
-            <Col span={12}>
-              <div style={{ marginBottom: 4 }}>
-                <Text strong style={{ fontSize: 12, color: REDWOOD.primary }}>Realised Loss Account</Text>
-              </div>
-              <Space.Compact style={{ width: '100%' }}>
-                <Input
-                  size="small"
-                  placeholder="e.g. 100-000-000-7002000-000-000-000"
-                  value={revalLossCombo}
-                  disabled={isPosted}
-                  onChange={e => setRevalLossCombo(e.target.value)}
-                  style={{ fontFamily: 'monospace', fontSize: 11 }}
-                />
-                <Button size="small" icon={<SearchOutlined />} disabled={isPosted}
-                  onClick={() => { setRevalComboPickerFor('loss'); setRevalComboSearch(''); setRevalComboPickerOpen(true); }} />
-              </Space.Compact>
-            </Col>
+            {(['gain', 'loss'] as const).map(side => {
+              const isGainSide = side === 'gain';
+              const label      = isGainSide ? 'Unrealised Gain Account' : 'Unrealised Loss Account';
+              const color      = isGainSide ? '#389e0d' : REDWOOD.primary;
+              const value      = isGainSide ? revalGainCombo : revalLossCombo;
+              const setValue   = isGainSide ? setRevalGainCombo : setRevalLossCombo;
+              return (
+                <Col span={12} key={side}>
+                  <div style={{ marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Text strong style={{ fontSize: 12, color }}>{label}</Text>
+                    {revalCompany && (
+                      <Tag color="default" style={{ fontSize: 10, margin: 0 }}>Co: {revalCompany}</Tag>
+                    )}
+                  </div>
+                  <Space.Compact style={{ width: '100%' }}>
+                    <Input
+                      size="small"
+                      placeholder="Select via segments or LOV…"
+                      value={value}
+                      disabled={isPosted}
+                      onChange={e => setValue(e.target.value)}
+                      style={{ fontFamily: 'monospace', fontSize: 11 }}
+                    />
+                    <Tooltip title="Build combination segment by segment">
+                      <Button
+                        size="small"
+                        icon={<ApartmentOutlined />}
+                        disabled={isPosted}
+                        onClick={() => { setRevalGainLossAcctFor(side); setRevalGainLossAcctOpen(true); }}
+                      />
+                    </Tooltip>
+                    <Tooltip title="Pick from existing TB combinations">
+                      <Button
+                        size="small"
+                        icon={<SearchOutlined />}
+                        disabled={isPosted}
+                        onClick={() => { setRevalComboPickerFor(side); setRevalComboSearch(''); setRevalComboPickerOpen(true); }}
+                      />
+                    </Tooltip>
+                  </Space.Compact>
+                </Col>
+              );
+            })}
           </Row>
 
           {/* Preview button + Save + Print row */}
@@ -3365,13 +3383,22 @@ const TrialBalance: React.FC = () => {
           )}
         </Modal>
 
-        {/* Account combination picker */}
+        {/* Account combination LOV picker */}
         <Modal
           open={revalComboPickerOpen}
           onCancel={() => setRevalComboPickerOpen(false)}
           footer={null}
-          width={600}
-          title={`Select ${revalComboPickerFor === 'gain' ? 'Gain' : 'Loss'} Account Combination`}
+          width={680}
+          title={
+            <Space>
+              <SearchOutlined style={{ color: REDWOOD.info }} />
+              <span>
+                Select {revalComboPickerFor === 'gain' ? 'Gain' : 'Loss'} Account — Distribution Combinations
+              </span>
+              {revalCompany && <Tag color="blue">Company: {revalCompany}</Tag>}
+              <Tag color="default">{filteredCombos.length} combos</Tag>
+            </Space>
+          }
         >
           <Input.Search
             placeholder="Search combination…"
@@ -3379,28 +3406,39 @@ const TrialBalance: React.FC = () => {
             onChange={e => setRevalComboSearch(e.target.value)}
             style={{ marginBottom: 10 }}
             allowClear
+            autoFocus
           />
-          <div style={{ maxHeight: 400, overflowY: 'auto' }}>
-            {filteredCombos.map(combo => (
-              <div
-                key={combo}
-                style={{
-                  padding: '6px 10px', cursor: 'pointer', borderRadius: 4,
-                  fontFamily: 'monospace', fontSize: 12,
-                  borderBottom: `1px solid ${REDWOOD.border}`,
-                  background: (revalComboPickerFor === 'gain' ? revalGainCombo : revalLossCombo) === combo ? '#e6f7ff' : undefined,
-                }}
-                onClick={() => {
-                  if (revalComboPickerFor === 'gain') setRevalGainCombo(combo);
-                  else setRevalLossCombo(combo);
-                  setRevalComboPickerOpen(false);
-                }}
-                onMouseEnter={e => (e.currentTarget.style.background = '#f0f5ff')}
-                onMouseLeave={e => (e.currentTarget.style.background = (revalComboPickerFor === 'gain' ? revalGainCombo : revalLossCombo) === combo ? '#e6f7ff' : '')}
-              >
-                {combo}
+          <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+            {filteredCombos.length === 0 && (
+              <div style={{ color: '#999', padding: 24, textAlign: 'center' }}>
+                No combinations found{revalCompany ? ` for company ${revalCompany}` : ''}.
               </div>
-            ))}
+            )}
+            {filteredCombos.map(combo => {
+              const selected = (revalComboPickerFor === 'gain' ? revalGainCombo : revalLossCombo) === combo;
+              return (
+                <div
+                  key={combo}
+                  style={{
+                    padding: '7px 12px', cursor: 'pointer', borderRadius: 4,
+                    fontFamily: 'monospace', fontSize: 12,
+                    borderBottom: `1px solid ${REDWOOD.border}`,
+                    background: selected ? '#e6f7ff' : undefined,
+                    display: 'flex', alignItems: 'center', gap: 8,
+                  }}
+                  onClick={() => {
+                    if (revalComboPickerFor === 'gain') setRevalGainCombo(combo);
+                    else setRevalLossCombo(combo);
+                    setRevalComboPickerOpen(false);
+                  }}
+                  onMouseEnter={e => { if (!selected) e.currentTarget.style.background = '#f0f5ff'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = selected ? '#e6f7ff' : ''; }}
+                >
+                  {selected && <span style={{ color: REDWOOD.info, fontWeight: 700, fontSize: 14 }}>✓</span>}
+                  <span>{combo}</span>
+                </div>
+              );
+            })}
           </div>
         </Modal>
 
@@ -3414,6 +3452,19 @@ const TrialBalance: React.FC = () => {
             setRevalAcctSelectorLineNum(null);
           }}
           initialValue={revalAcctSelectorLineNum !== null ? revalPreviewRows.find(r => r.lineNum === revalAcctSelectorLineNum)?.combo : undefined}
+        />
+
+        {/* Account Selector for Gain / Loss account — segments popup with company locked */}
+        <AccountSelector
+          visible={revalGainLossAcctOpen}
+          onCancel={() => setRevalGainLossAcctOpen(false)}
+          onSelect={(accountCode) => {
+            if (revalGainLossAcctFor === 'gain') setRevalGainCombo(accountCode);
+            else setRevalLossCombo(accountCode);
+            setRevalGainLossAcctOpen(false);
+          }}
+          lockedFirstSegment={revalCompany || undefined}
+          initialValue={revalGainLossAcctFor === 'gain' ? revalGainCombo : revalLossCombo}
         />
       </>
     );
