@@ -284,6 +284,7 @@ const TrialBalance: React.FC = () => {
   const [revalAcctSelectorLineNum, setRevalAcctSelectorLineNum] = useState<number | null>(null);
   const [revalId,                  setRevalId]                  = useState<number | null>(null);
   const [revalChecking,            setRevalChecking]            = useState(false);
+  const [revalStatus,              setRevalStatus]              = useState<string | null>(null);
   const [revalApiError,            setRevalApiError]            = useState<string | null>(null);
   const [revalLastCall,            setRevalLastCall]            = useState<{ url: string; method: string; payload: object; responseText: string; httpStatus: number } | null>(null);
   const [revalApiDebugOpen,        setRevalApiDebugOpen]        = useState(false);
@@ -2590,6 +2591,7 @@ const TrialBalance: React.FC = () => {
     setRevalLossCombo('');
     setRevalPreviewRows([]);
     setRevalId(null);
+    setRevalStatus(null);
     setRevalVisible(true);
 
     // Look up existing revaluation for this account + ledger + period
@@ -2607,6 +2609,7 @@ const TrialBalance: React.FC = () => {
         setRevalId(existing.revalueId);
         setRevalGainCombo(existing.gainAccount || '');
         setRevalLossCombo(existing.lossAccount || '');
+        setRevalStatus(existing.status || 'DRAFT');
 
         // Fetch full detail to restore saved new rates per currency
         try {
@@ -2621,7 +2624,11 @@ const TrialBalance: React.FC = () => {
           }
         } catch { /* ignore — rates stay blank */ }
 
-        message.info({ content: `Existing revaluation found (ID: ${existing.revalueId}) — editing`, key: 'reval-check', duration: 3 });
+        if (existing.status === 'ACCOUNTED') {
+          message.warning({ content: `Revaluation ID: ${existing.revalueId} is already posted — view only`, key: 'reval-check', duration: 4 });
+        } else {
+          message.info({ content: `Existing revaluation found (ID: ${existing.revalueId}) — editing`, key: 'reval-check', duration: 3 });
+        }
       }
     } catch {
       // ignore — proceed as new
@@ -2634,6 +2641,8 @@ const TrialBalance: React.FC = () => {
   const renderRevalModal = () => {
     const tab = tabs.find(t => t.key === revalTabKey);
     if (!tab) return null;
+
+    const isPosted = revalStatus === 'ACCOUNTED';
 
     // All raw rows for this account
     const rawRows = tab.rrData.filter(r => r.account === revalAccount);
@@ -2744,7 +2753,9 @@ const TrialBalance: React.FC = () => {
           </Tooltip>
         )},
       { title: 'New Rate', key: 'newRate', align: 'right' as const, width: 120,
-        render: (_: any, r: CcyRow) => (
+        render: (_: any, r: CcyRow) => isPosted
+          ? <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{revalRates[r.ccy] || '—'}</Text>
+          : (
           <Input
             size="small"
             style={{ width: 100, fontFamily: 'monospace', textAlign: 'right' }}
@@ -2828,9 +2839,25 @@ const TrialBalance: React.FC = () => {
               {!revalId && !revalChecking && (
                 <Tag color="default">New</Tag>
               )}
+              {revalStatus === 'ACCOUNTED' && (
+                <Tag color="green" icon={<CheckCircleOutlined />} style={{ fontWeight: 600 }}>POSTED</Tag>
+              )}
+              {revalStatus === 'DRAFT' && (
+                <Tag color="blue">DRAFT</Tag>
+              )}
             </Space>
           }
         >
+          {revalStatus === 'ACCOUNTED' && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message="Posted — No Changes Allowed"
+              description={`This revaluation (ID: ${revalId}) has already been posted to the General Ledger. The period is locked. To make corrections, reverse the GL batch and create a new revaluation.`}
+            />
+          )}
+
           <div style={{ marginBottom: 16 }}>
             <Text type="secondary" style={{ fontSize: 11 }}>
               Oracle Fusion revaluation logic: New Acctd Value = Entered Balance × New Rate.
@@ -2877,10 +2904,11 @@ const TrialBalance: React.FC = () => {
                   size="small"
                   placeholder="e.g. 100-000-000-7001000-000-000-000"
                   value={revalGainCombo}
+                  disabled={isPosted}
                   onChange={e => setRevalGainCombo(e.target.value)}
                   style={{ fontFamily: 'monospace', fontSize: 11 }}
                 />
-                <Button size="small" icon={<SearchOutlined />}
+                <Button size="small" icon={<SearchOutlined />} disabled={isPosted}
                   onClick={() => { setRevalComboPickerFor('gain'); setRevalComboSearch(''); setRevalComboPickerOpen(true); }} />
               </Space.Compact>
             </Col>
@@ -2893,10 +2921,11 @@ const TrialBalance: React.FC = () => {
                   size="small"
                   placeholder="e.g. 100-000-000-7002000-000-000-000"
                   value={revalLossCombo}
+                  disabled={isPosted}
                   onChange={e => setRevalLossCombo(e.target.value)}
                   style={{ fontFamily: 'monospace', fontSize: 11 }}
                 />
-                <Button size="small" icon={<SearchOutlined />}
+                <Button size="small" icon={<SearchOutlined />} disabled={isPosted}
                   onClick={() => { setRevalComboPickerFor('loss'); setRevalComboSearch(''); setRevalComboPickerOpen(true); }} />
               </Space.Compact>
             </Col>
@@ -2908,7 +2937,7 @@ const TrialBalance: React.FC = () => {
               type="primary"
               icon={<FileTextOutlined />}
               onClick={buildPreview}
-              disabled={ccyRows.every(r => r.newRate === 0)}
+              disabled={isPosted || ccyRows.every(r => r.newRate === 0)}
               style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
             >
               Preview Journal Entry
@@ -2917,7 +2946,7 @@ const TrialBalance: React.FC = () => {
             <Button
               type="primary"
               icon={<SaveOutlined />}
-              disabled={revalPreviewRows.length === 0}
+              disabled={isPosted || revalPreviewRows.length === 0}
               loading={revalSaving}
               style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
               onClick={async () => {
