@@ -282,6 +282,8 @@ const TrialBalance: React.FC = () => {
   >([]);
   const [revalAcctSelectorOpen,    setRevalAcctSelectorOpen]    = useState(false);
   const [revalAcctSelectorLineNum, setRevalAcctSelectorLineNum] = useState<number | null>(null);
+  const [revalId,                  setRevalId]                  = useState<number | null>(null);
+  const [revalChecking,            setRevalChecking]            = useState(false);
   const [revalSaving,              setRevalSaving]              = useState(false);
   const [apiPanelVisible, setApiPanelVisible] = useState(false);
   const [apiCalls, setApiCalls] = useState<Record<string, ApiCallInfo>>({
@@ -2576,14 +2578,39 @@ const TrialBalance: React.FC = () => {
 
   // Render a ReERP TB tab — Standard format: Opening / Debit / Credit / Closing (net)
   // ── Open revaluation modal ───────────────────────────────────
-  const openRevalModal = (tabKey: string, accountKey: string) => {
+  const openRevalModal = async (tabKey: string, accountKey: string) => {
+    const tab = tabs.find(t => t.key === tabKey);
     setRevalTabKey(tabKey);
     setRevalAccount(accountKey);
     setRevalRates({});
     setRevalGainCombo('');
     setRevalLossCombo('');
     setRevalPreviewRows([]);
+    setRevalId(null);
     setRevalVisible(true);
+
+    // Look up existing revaluation for this account + ledger + period
+    setRevalChecking(true);
+    try {
+      const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}`);
+      const json = await res.json();
+      const rawPeriod = tab?.periodName?.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '') ?? '';
+      const existing  = (json.items || []).find((r: any) =>
+        r.account    === accountKey &&
+        r.ledgerName === tab?.ledgerName &&
+        (r.periodName === rawPeriod || r.periodName === tab?.periodName)
+      );
+      if (existing) {
+        setRevalId(existing.revalueId);
+        setRevalGainCombo(existing.gainAccount || '');
+        setRevalLossCombo(existing.lossAccount || '');
+        message.info({ content: `Existing revaluation found (ID: ${existing.revalueId}) — editing`, key: 'reval-check', duration: 3 });
+      }
+    } catch {
+      // ignore — proceed as new
+    } finally {
+      setRevalChecking(false);
+    }
   };
 
   // ── Revaluation modal renderer ────────────────────────────────
@@ -2770,13 +2797,20 @@ const TrialBalance: React.FC = () => {
           footer={null}
           width={1150}
           title={
-            <Space>
+            <Space wrap>
               <Tag color={accountType === 'A' ? 'blue' : accountType === 'L' ? 'orange' : 'green'}>
                 {accountType === 'A' ? 'Asset' : accountType === 'L' ? 'Liability' : accountType === 'O' ? 'Equity' : accountType}
               </Tag>
               <Text strong style={{ fontFamily: 'monospace' }}>{revalAccount}</Text>
               <Text style={{ color: REDWOOD.textSecondary }}>{accountDesc}</Text>
               <Tag color="purple">{tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '')}</Tag>
+              {revalChecking && <Tag icon={<LoadingOutlined />} color="processing">Checking…</Tag>}
+              {revalId && !revalChecking && (
+                <Tag color="success" style={{ fontFamily: 'monospace' }}>ID: {revalId}</Tag>
+              )}
+              {!revalId && !revalChecking && (
+                <Tag color="default">New</Tag>
+              )}
             </Space>
           }
         >
@@ -2872,10 +2906,11 @@ const TrialBalance: React.FC = () => {
               onClick={async () => {
                 setRevalSaving(true);
                 try {
+                  const rawPeriod = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '');
                   const body = {
                     ledger_id:      rawRows[0] ? (rawRows[0] as any).ledger_id || 0 : 0,
                     ledger_name:    tab.ledgerName,
-                    period_name:    tab.periodName,
+                    period_name:    rawPeriod,
                     account:        revalAccount,
                     account_desc:   accountDesc,
                     functional_ccy: functionalCcy,
@@ -2904,14 +2939,20 @@ const TrialBalance: React.FC = () => {
                       cr_amount:    r.cr,
                     })),
                   };
-                  const res = await fetch(
-                    `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}`,
-                    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-                  );
+
+                  const isUpdate = revalId != null;
+                  const url = isUpdate
+                    ? `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}/${revalId}`
+                    : `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}`;
+
+                  const res  = await fetch(url, { method: isUpdate ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
                   const text = await res.text();
                   const json = JSON.parse(text);
+
                   if (json.status === 'SUCCESS') {
-                    message.success(`Revaluation saved successfully (ID: ${json.revalueId})`);
+                    const savedId = json.revalueId ?? revalId;
+                    if (!isUpdate) setRevalId(savedId);
+                    message.success(`Revaluation ${isUpdate ? 'updated' : 'saved'} (ID: ${savedId})`);
                   } else {
                     throw new Error(json.error || 'Save failed');
                   }
@@ -2922,7 +2963,7 @@ const TrialBalance: React.FC = () => {
                 }
               }}
             >
-              Save Revaluation
+              {revalId ? 'Update Revaluation' : 'Save Revaluation'}
             </Button>
 
             <Button
