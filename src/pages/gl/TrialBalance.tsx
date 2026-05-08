@@ -783,6 +783,14 @@ const TrialBalance: React.FC = () => {
 
     try {
       const results: { period: string; period_year: number; period_number: number; ytd_opening: number; ytd_debit: number; ytd_credit: number; closing: number }[] = [];
+
+      // Track running YTD state — computed from PTD to avoid view zero-suppression inconsistency
+      let currentFiscalYear = 0;
+      let ytdOpeningForYear = 0;
+      let ytdDebitForYear   = 0;
+      let ytdCreditForYear  = 0;
+      let prevClosing       = 0;
+
       for (let i = 0; i < periodsToUse.length; i++) {
         const p = periodsToUse[i];
         setYtdMovProgress(`Fetching ${i + 1} / ${periodsToUse.length} — ${p.period_name_id}`);
@@ -800,13 +808,35 @@ const TrialBalance: React.FC = () => {
           (!company  || r.company       === company) &&
           (!currency || r.currency_code === currency)
         );
-        if (acctRows.length > 0) {
-          const ytd_opening = acctRows.reduce((s, r) => s + (r.ytd_opening || 0), 0);
-          const ytd_debit   = acctRows.reduce((s, r) => s + (r.ytd_debit   || 0), 0);
-          const ytd_credit  = acctRows.reduce((s, r) => s + (r.ytd_credit  || 0), 0);
-          const closing     = acctRows.reduce((s, r) => s + (r.closing     || 0), 0);
-          results.push({ period: p.period_name_id, period_year: p.period_year, period_number: p.period_number, ytd_opening, ytd_debit, ytd_credit, closing });
-          // Update rows incrementally so user sees data as it arrives
+        // Sum PTD debit/credit/closing — safe to sum even with zero-suppression because
+        // suppressed rows have PTD_DR=0, PTD_CR=0, closing=0, so they contribute 0.
+        const ptd_debit  = acctRows.reduce((s, r) => s + (r.debit   || 0), 0);
+        const ptd_credit = acctRows.reduce((s, r) => s + (r.credit  || 0), 0);
+        const closing    = acctRows.reduce((s, r) => s + (r.closing  || 0), 0);
+
+        // Detect fiscal year boundary and reset YTD accumulators.
+        // We compute YTD ourselves from PTD to avoid the view's ytd_opening being
+        // inconsistent when different combinations are zero-suppressed per period.
+        if (p.period_year !== currentFiscalYear) {
+          currentFiscalYear = p.period_year;
+          ytdOpeningForYear = prevClosing;   // closing of last period of prior year
+          ytdDebitForYear   = 0;
+          ytdCreditForYear  = 0;
+        }
+        ytdDebitForYear  += ptd_debit;
+        ytdCreditForYear += ptd_credit;
+        prevClosing       = closing;
+
+        if (acctRows.length > 0 || closing !== 0) {
+          results.push({
+            period: p.period_name_id,
+            period_year: p.period_year,
+            period_number: p.period_number,
+            ytd_opening: ytdOpeningForYear,
+            ytd_debit:   ytdDebitForYear,
+            ytd_credit:  ytdCreditForYear,
+            closing,
+          });
           setYtdMovRows([...results]);
         }
       }
