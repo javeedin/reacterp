@@ -908,7 +908,7 @@ const ExternalTxnForm: React.FC<{
               }] : []),
               {
                 title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Description</span>,
-                width: 160,
+                width: 220,
                 render: (_: any, record: ExtTxnLine, idx: number) => (
                   <Input
                     size="small" value={record.description}
@@ -967,6 +967,7 @@ const ExternalTxnForm: React.FC<{
               },
               {
                 title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Offset Account</span>,
+                width: 220,
                 render: (_: any, record: ExtTxnLine, idx: number) => (
                   <>
                     <Space.Compact style={{ width: '100%' }}>
