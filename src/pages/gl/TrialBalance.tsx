@@ -1966,7 +1966,7 @@ const TrialBalance: React.FC = () => {
           size="small"
           style={{ borderRadius: 8 }}
           summary={() => (
-            <Table.Summary fixed>
+            <Table.Summary>
               <Table.Summary.Row style={{ background: REDWOOD.surfaceSecondary, fontWeight: 'bold' }}>
                 <Table.Summary.Cell index={0} colSpan={segmentColCount}>
                   <Text strong>TOTAL</Text>
@@ -1999,7 +1999,7 @@ const TrialBalance: React.FC = () => {
     );
   };
 
-  // ── Lines Summary Tab ────────────────────────────────────
+  // ── Lines Summary Tab ─────────────────────────────────────
   const renderLinesSummaryTab = () => {
     const fmtN = (n: number) =>
       n === 0 ? '—' : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -3183,7 +3183,7 @@ const TrialBalance: React.FC = () => {
                 size="small"
                 pagination={false}
                 summary={() => (
-                  <Table.Summary fixed>
+                  <Table.Summary>
                     <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 700 }}>
                       <Table.Summary.Cell index={0} colSpan={4} align="right">
                         <Text strong>Total</Text>
@@ -3575,7 +3575,7 @@ const TrialBalance: React.FC = () => {
       const accValues   = [totals.opening, totals.debit, totals.credit, totals.closing];
       const entValues   = [totals.entered_opening, totals.entered_debit, totals.entered_credit, totals.entered_closing];
       return (
-        <Table.Summary fixed>
+        <Table.Summary>
           <Table.Summary.Row style={{ background: '#f0f0f0', fontWeight: 700 }}>
             <Table.Summary.Cell index={0} colSpan={3} align="right">
               <Text strong style={{ fontSize: 12 }}>TOTAL</Text>
@@ -3828,7 +3828,7 @@ const TrialBalance: React.FC = () => {
     ];
 
     const summary = () => (
-      <Table.Summary fixed>
+      <Table.Summary>
         <Table.Summary.Row style={{ background: '#f0f0f0', fontWeight: 700 }}>
           <Table.Summary.Cell index={0} colSpan={7} align="right">
             <Text strong style={{ fontSize: 12 }}>TOTAL ({rows.length} lines)</Text>
@@ -4079,7 +4079,7 @@ const TrialBalance: React.FC = () => {
       const accValues = [totals.ytd_opening, totals.ytd_debit, totals.ytd_credit, totals.closing];
       const entValues = [totals.ytd_entered_opening, totals.ytd_entered_debit, totals.ytd_entered_credit, totals.entered_closing];
       return (
-        <Table.Summary fixed>
+        <Table.Summary>
           <Table.Summary.Row style={{ background: '#f0f0f0', fontWeight: 700 }}>
             <Table.Summary.Cell index={0} colSpan={3} align="right">
               <Text strong style={{ fontSize: 12 }}>TOTAL</Text>
@@ -5053,7 +5053,7 @@ const TrialBalance: React.FC = () => {
                   const last = data[data.length - 1];
                   const fmt = (n: number) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(n));
                   return (
-                    <Table.Summary fixed>
+                    <Table.Summary>
                       <Table.Summary.Row style={{ background: '#f0f0f0', fontWeight: 700 }}>
                         <Table.Summary.Cell index={0}>
                           <Text strong style={{ fontSize: 11 }}>Latest ({last.period})</Text>
