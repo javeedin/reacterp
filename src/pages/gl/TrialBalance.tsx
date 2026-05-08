@@ -3423,8 +3423,16 @@ const TrialBalance: React.FC = () => {
               allowClear
             />
           </Col>
-          <Col span={6} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <Tag color="blue" style={{ lineHeight: '30px', fontSize: 12 }}>{tableRows.length} accounts</Tag>
+          <Col span={6} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <Button
+              size="small"
+              type="primary"
+              disabled={(tabSelections[tab.key] || []).length !== 1}
+              style={{ background: '#d46b08', borderColor: '#d46b08' }}
+              onClick={() => openRevalModal(tab.key, (tabSelections[tab.key] || [])[0])}
+            >
+              Revalue
+            </Button>
             <Button
               icon={<FileExcelOutlined />}
               size="small"
@@ -3432,14 +3440,6 @@ const TrialBalance: React.FC = () => {
               style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
             >
               Excel
-            </Button>
-            <Button
-              icon={<CheckCircleOutlined />}
-              size="small"
-              onClick={() => handleRrReconcile(tab)}
-              style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
-            >
-              Reconcile
             </Button>
             <Tooltip title={
               tabs.find(t => t.tabType === 'fusion' && t.periodName === tab.periodName.replace(/^(?:ReERP|Dynamic):\s*/, ''))
@@ -3456,13 +3456,12 @@ const TrialBalance: React.FC = () => {
               </Button>
             </Tooltip>
             <Button
+              icon={<CheckCircleOutlined />}
               size="small"
-              type="primary"
-              disabled={(tabSelections[tab.key] || []).length !== 1}
-              style={{ background: '#d46b08', borderColor: '#d46b08' }}
-              onClick={() => openRevalModal(tab.key, (tabSelections[tab.key] || [])[0])}
+              onClick={() => handleRrReconcile(tab)}
+              style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
             >
-              Revalue
+              Reconcile
             </Button>
           </Col>
         </Row>
@@ -4549,130 +4548,7 @@ const TrialBalance: React.FC = () => {
         <Modal
           open={ytdMovVisible}
           onCancel={() => setYtdMovVisible(false)}
-          footer={
-            <Space>
-              <Button
-                icon={<FileExcelOutlined />}
-                disabled={ytdMovRows.length === 0}
-                onClick={() => {
-                  const exportDate = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-                  const exportTime = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-                  const fromPeriod = ytdMovRows[0]?.period  || '';
-                  const toPeriod   = ytdMovRows[ytdMovRows.length - 1]?.period || '';
-
-                  const ws = XLSX.utils.aoa_to_sheet([]);
-
-                  // ── Header block ──────────────────────────────────────────
-                  const headerRows: (string | number | null)[][] = [
-                    ['YTD Balance Movement'],
-                    [],
-                    ['Ledger',        ytdMovLedger,    '',  'Account',    ytdMovAccount],
-                    ['Company',       ytdMovCompany || 'All Companies', '', 'Description', ytdMovDesc || ''],
-                    ['Currency',      ytdMovCurrency || 'All Currencies', '', 'Period Range', `${fromPeriod} – ${toPeriod}`],
-                    ['Export Date',   `${exportDate} ${exportTime}`, '', 'Total Periods', ytdMovRows.length],
-                    [],
-                    // Column headings
-                    ['Period', 'Fiscal Year', 'YTD Opening', 'YTD Debit', 'YTD Credit', 'YTD Closing'],
-                  ];
-                  XLSX.utils.sheet_add_aoa(ws, headerRows, { origin: 'A1' });
-
-                  // ── Data rows ─────────────────────────────────────────────
-                  const dataRows = ytdMovRows.map(r => [
-                    r.period,
-                    r.period_year,
-                    r.ytd_opening,
-                    r.ytd_debit,
-                    r.ytd_credit,
-                    r.closing,
-                  ]);
-                  XLSX.utils.sheet_add_aoa(ws, dataRows, { origin: `A${headerRows.length + 1}` });
-
-                  const dataStartRow = headerRows.length + 1;
-                  const dataEndRow   = dataStartRow + ytdMovRows.length - 1;
-
-                  // ── Totals row ────────────────────────────────────────────
-                  const totalRow = [
-                    'TOTAL', '',
-                    { f: `SUM(C${dataStartRow}:C${dataEndRow})` },
-                    { f: `SUM(D${dataStartRow}:D${dataEndRow})` },
-                    { f: `SUM(E${dataStartRow}:E${dataEndRow})` },
-                    { f: `SUM(F${dataStartRow}:F${dataEndRow})` },
-                  ];
-                  XLSX.utils.sheet_add_aoa(ws, [totalRow], { origin: `A${dataEndRow + 1}` });
-
-                  // ── Styles: title, header labels, column headings ─────────
-                  ws['A1'] = { v: 'YTD Balance Movement', t: 's', s: { font: { bold: true, sz: 14 }, alignment: { horizontal: 'left' } } };
-
-                  // Bold label cells in header block (A3:A6, D3:D6)
-                  ['A3','A4','A5','A6','D3','D4','D5','D6'].forEach(addr => {
-                    if (ws[addr]) ws[addr].s = { font: { bold: true }, fill: { fgColor: { rgb: 'F0F4FF' } } };
-                  });
-
-                  // Column heading row style
-                  const headingRow = headerRows.length;
-                  ['A','B','C','D','E','F'].forEach(col => {
-                    const addr = `${col}${headingRow}`;
-                    if (ws[addr]) ws[addr].s = {
-                      font: { bold: true, color: { rgb: 'FFFFFF' } },
-                      fill: { fgColor: { rgb: '1F4E79' } },
-                      alignment: { horizontal: col === 'A' || col === 'B' ? 'left' : 'right' },
-                    };
-                  });
-
-                  // Number format for numeric data columns (C–F)
-                  for (let row = dataStartRow; row <= dataEndRow + 1; row++) {
-                    ['C','D','E','F'].forEach(col => {
-                      const addr = `${col}${row}`;
-                      if (ws[addr]) { ws[addr].z = '#,##0.00'; }
-                    });
-                    // Alternate row shading
-                    if ((row - dataStartRow) % 2 === 1) {
-                      ['A','B','C','D','E','F'].forEach(col => {
-                        const addr = `${col}${row}`;
-                        if (ws[addr]) ws[addr].s = { ...(ws[addr].s || {}), fill: { fgColor: { rgb: 'F7F9FC' } } };
-                      });
-                    }
-                  }
-
-                  // Totals row bold
-                  ['A','B','C','D','E','F'].forEach(col => {
-                    const addr = `${col}${dataEndRow + 1}`;
-                    if (ws[addr]) ws[addr].s = {
-                      font: { bold: true },
-                      fill: { fgColor: { rgb: 'E8F0FE' } },
-                      ...((['C','D','E','F'].includes(col)) ? { z: '#,##0.00', alignment: { horizontal: 'right' } } : {}),
-                    };
-                  });
-
-                  // Column widths
-                  ws['!cols'] = [
-                    { wch: 14 }, // Period
-                    { wch: 12 }, // Fiscal Year
-                    { wch: 18 }, // YTD Opening
-                    { wch: 16 }, // YTD Debit
-                    { wch: 16 }, // YTD Credit
-                    { wch: 18 }, // YTD Closing
-                  ];
-
-                  // Merge title cell A1 across columns
-                  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }];
-
-                  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: dataEndRow, c: 5 } });
-
-                  const wb = XLSX.utils.book_new();
-                  XLSX.utils.book_append_sheet(wb, ws, 'YTD Movement');
-                  const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-                  saveAs(
-                    new Blob([buf], { type: 'application/octet-stream' }),
-                    `YTD_${ytdMovAccount}_${ytdMovCompany || 'All'}_${ytdMovLedger}_${fromPeriod}.xlsx`
-                  );
-                }}
-              >
-                Export to Excel
-              </Button>
-              <Button onClick={() => setYtdMovVisible(false)}>Close</Button>
-            </Space>
-          }
+          footer={<Button onClick={() => setYtdMovVisible(false)}>Close</Button>}
           width={900}
           destroyOnClose
           title={
@@ -4684,39 +4560,6 @@ const TrialBalance: React.FC = () => {
               {ytdMovCurrency && <Tag color="cyan"    style={{ fontSize: 12 }}>{ytdMovCurrency}</Tag>}
               <Tag color="gold" style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 700 }}>{ytdMovAccount}</Tag>
               {ytdMovDesc && <Tag color="blue" style={{ fontSize: 11 }}>{ytdMovDesc}</Tag>}
-              <Button
-                size="small"
-                icon={<ApiOutlined />}
-                style={{ color: REDWOOD.info, borderColor: REDWOOD.info, marginLeft: 8 }}
-                onClick={() => {
-                  Modal.info({
-                    title: <Space><ApiOutlined style={{ color: REDWOOD.info }} />API Calls — YTD Balance Movement</Space>,
-                    width: 760,
-                    content: (
-                      <div>
-                        <div style={{ marginBottom: 8, fontSize: 12, color: '#555' }}>
-                          <strong>{ytdMovApiUrls.length}</strong> request(s) — one per period, server-filtered by account <Tag style={{ fontFamily: 'monospace' }}>{ytdMovAccount}</Tag>
-                          {ytdMovCompany  && <>{', company '}<Tag color="orange">{ytdMovCompany}</Tag></>}
-                          {ytdMovCurrency && <>{', currency '}<Tag color="cyan">{ytdMovCurrency}</Tag></>}
-                          {ytdMovLoading  && <Tag icon={<LoadingOutlined />} color="processing">loading…</Tag>}
-                        </div>
-                        <div style={{ maxHeight: 400, overflowY: 'auto', background: '#f5f5f5', padding: 10, borderRadius: 6 }}>
-                          {ytdMovApiUrls.length === 0
-                            ? <span style={{ color: '#aaa', fontSize: 12 }}>No requests yet.</span>
-                            : ytdMovApiUrls.map((u, i) => (
-                              <div key={i} style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', marginBottom: 6, borderBottom: '1px solid #e0e0e0', paddingBottom: 4 }}>
-                                <span style={{ color: '#888', marginRight: 6 }}>{i + 1}.</span>{u}
-                              </div>
-                            ))
-                          }
-                        </div>
-                      </div>
-                    ),
-                  });
-                }}
-              >
-                API ({ytdMovApiUrls.length})
-              </Button>
             </Space>
           }
         >
@@ -4729,12 +4572,113 @@ const TrialBalance: React.FC = () => {
             <Alert type="error" showIcon message={ytdMovError} />
           ) : (
             <>
-              <Space style={{ marginBottom: 12 }} wrap>
-                <Tag color="blue">{ytdMovRows.length} period(s) with activity</Tag>
-                {ytdMovLoading && ytdMovProgress && (
-                  <Tag icon={<LoadingOutlined />} color="processing">{ytdMovProgress}</Tag>
-                )}
-              </Space>
+              {/* ── Toolbar ── */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <Space wrap>
+                  <Tag color="blue">{ytdMovRows.length} period(s) with activity</Tag>
+                  {ytdMovLoading && ytdMovProgress && (
+                    <Tag icon={<LoadingOutlined />} color="processing">{ytdMovProgress}</Tag>
+                  )}
+                </Space>
+                <Space>
+                  <Button
+                    icon={<FileExcelOutlined />}
+                    size="small"
+                    disabled={ytdMovRows.length === 0}
+                    style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
+                    onClick={() => {
+                      const exportDate = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+                      const exportTime = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+                      const fromPeriod = ytdMovRows[0]?.period  || '';
+                      const toPeriod   = ytdMovRows[ytdMovRows.length - 1]?.period || '';
+
+                      const ws = XLSX.utils.aoa_to_sheet([]);
+
+                      const headerRows: (string | number | null)[][] = [
+                        ['YTD Balance Movement'],
+                        [],
+                        ['Ledger',      ytdMovLedger,                     '', 'Account',      ytdMovAccount],
+                        ['Company',     ytdMovCompany || 'All Companies',  '', 'Description',  ytdMovDesc || ''],
+                        ['Currency',    ytdMovCurrency || 'All Currencies','', 'Period Range',  `${fromPeriod} – ${toPeriod}`],
+                        ['Export Date', `${exportDate} ${exportTime}`,     '', 'Total Periods', ytdMovRows.length],
+                        [],
+                        ['Period', 'Fiscal Year', 'YTD Opening', 'YTD Debit', 'YTD Credit', 'YTD Closing'],
+                      ];
+                      XLSX.utils.sheet_add_aoa(ws, headerRows, { origin: 'A1' });
+
+                      const dataRows = ytdMovRows.map(r => [r.period, r.period_year, r.ytd_opening, r.ytd_debit, r.ytd_credit, r.closing]);
+                      XLSX.utils.sheet_add_aoa(ws, dataRows, { origin: `A${headerRows.length + 1}` });
+
+                      const dataStartRow = headerRows.length + 1;
+                      const dataEndRow   = dataStartRow + ytdMovRows.length - 1;
+
+                      XLSX.utils.sheet_add_aoa(ws, [['TOTAL', '', { f: `SUM(C${dataStartRow}:C${dataEndRow})` }, { f: `SUM(D${dataStartRow}:D${dataEndRow})` }, { f: `SUM(E${dataStartRow}:E${dataEndRow})` }, { f: `SUM(F${dataStartRow}:F${dataEndRow})` }]], { origin: `A${dataEndRow + 1}` });
+
+                      ws['A1'] = { v: 'YTD Balance Movement', t: 's', s: { font: { bold: true, sz: 14 } } };
+                      ['A3','A4','A5','A6','D3','D4','D5','D6'].forEach(addr => {
+                        if (ws[addr]) ws[addr].s = { font: { bold: true }, fill: { fgColor: { rgb: 'F0F4FF' } } };
+                      });
+                      const headingRow = headerRows.length;
+                      ['A','B','C','D','E','F'].forEach(col => {
+                        const addr = `${col}${headingRow}`;
+                        if (ws[addr]) ws[addr].s = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '1F4E79' } }, alignment: { horizontal: col <= 'B' ? 'left' : 'right' } };
+                      });
+                      for (let row = dataStartRow; row <= dataEndRow + 1; row++) {
+                        ['C','D','E','F'].forEach(col => { const addr = `${col}${row}`; if (ws[addr]) ws[addr].z = '#,##0.00'; });
+                        if ((row - dataStartRow) % 2 === 1)
+                          ['A','B','C','D','E','F'].forEach(col => { const addr = `${col}${row}`; if (ws[addr]) ws[addr].s = { ...(ws[addr].s || {}), fill: { fgColor: { rgb: 'F7F9FC' } } }; });
+                      }
+                      ['A','B','C','D','E','F'].forEach(col => {
+                        const addr = `${col}${dataEndRow + 1}`;
+                        if (ws[addr]) ws[addr].s = { font: { bold: true }, fill: { fgColor: { rgb: 'E8F0FE' } }, ...(['C','D','E','F'].includes(col) ? { z: '#,##0.00', alignment: { horizontal: 'right' } } : {}) };
+                      });
+                      ws['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 18 }];
+                      ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }];
+                      ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: dataEndRow + 1, c: 5 } });
+
+                      const wb = XLSX.utils.book_new();
+                      XLSX.utils.book_append_sheet(wb, ws, 'YTD Movement');
+                      const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+                      saveAs(new Blob([buf], { type: 'application/octet-stream' }), `YTD_${ytdMovAccount}_${ytdMovCompany || 'All'}_${ytdMovLedger}_${fromPeriod}.xlsx`);
+                    }}
+                  >
+                    Export to Excel
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<ApiOutlined />}
+                    style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
+                    onClick={() => {
+                      Modal.info({
+                        title: <Space><ApiOutlined style={{ color: REDWOOD.info }} />API Calls — YTD Balance Movement</Space>,
+                        width: 760,
+                        content: (
+                          <div>
+                            <div style={{ marginBottom: 8, fontSize: 12, color: '#555' }}>
+                              <strong>{ytdMovApiUrls.length}</strong> request(s) — one per period, server-filtered by account <Tag style={{ fontFamily: 'monospace' }}>{ytdMovAccount}</Tag>
+                              {ytdMovCompany  && <>{', company '}<Tag color="orange">{ytdMovCompany}</Tag></>}
+                              {ytdMovCurrency && <>{', currency '}<Tag color="cyan">{ytdMovCurrency}</Tag></>}
+                              {ytdMovLoading  && <Tag icon={<LoadingOutlined />} color="processing">loading…</Tag>}
+                            </div>
+                            <div style={{ maxHeight: 400, overflowY: 'auto', background: '#f5f5f5', padding: 10, borderRadius: 6 }}>
+                              {ytdMovApiUrls.length === 0
+                                ? <span style={{ color: '#aaa', fontSize: 12 }}>No requests yet.</span>
+                                : ytdMovApiUrls.map((u, i) => (
+                                  <div key={i} style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', marginBottom: 6, borderBottom: '1px solid #e0e0e0', paddingBottom: 4 }}>
+                                    <span style={{ color: '#888', marginRight: 6 }}>{i + 1}.</span>{u}
+                                  </div>
+                                ))
+                              }
+                            </div>
+                          </div>
+                        ),
+                      });
+                    }}
+                  >
+                    API ({ytdMovApiUrls.length})
+                  </Button>
+                </Space>
+              </div>
               <Table
                 dataSource={ytdMovRows}
                 rowKey="period"
