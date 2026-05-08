@@ -3927,15 +3927,7 @@ const TrialBalance: React.FC = () => {
               allowClear
             />
           </Col>
-          <Col span={6} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Tag color="blue" style={{ lineHeight: '30px', fontSize: 12 }}>{tableRows.length} accounts</Tag>
-            <Switch
-              size="small"
-              checked={tab.showEntered}
-              onChange={v => updateTabEntered(tab.key, v)}
-              checkedChildren="Entered ✓"
-              unCheckedChildren="Entered"
-            />
+          <Col span={6} style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
             <Button
               size="small"
               type="primary"
@@ -3944,6 +3936,93 @@ const TrialBalance: React.FC = () => {
               onClick={() => openRevalModal(tab.key, (tabSelections[tab.key] || [])[0])}
             >
               Revalue
+            </Button>
+            <Button
+              icon={<FileExcelOutlined />}
+              size="small"
+              disabled={tableRows.length === 0}
+              style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
+              onClick={() => {
+                const exportDate = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+                const exportTime = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+                const period = tab.periodName.replace(/^YTD:\s*/, '');
+                const company = tab.selectedCompany || 'All Companies';
+                const currency = tab.selectedCurrency || 'All Currencies';
+
+                const ws = XLSX.utils.aoa_to_sheet([]);
+                const hasEntered = tab.showEntered;
+                const colCount = hasEntered ? 11 : 7;
+                const lastCol = String.fromCharCode(64 + colCount);
+
+                const headerRows: (string | number | null)[][] = [
+                  ['YTD Trial Balance'],
+                  [],
+                  ['Ledger',      tab.ledgerName, '', 'Period',    period],
+                  ['Company',     company,         '', 'Currency',  currency],
+                  ['Export Date', `${exportDate} ${exportTime}`, '', 'Accounts', tableRows.length],
+                  [],
+                  hasEntered
+                    ? ['Type', 'Account', 'Description', 'YTD Opening', 'YTD Debit', 'YTD Credit', 'YTD Closing', 'Ent. YTD Opening', 'Ent. YTD Debit', 'Ent. YTD Credit', 'Ent. Closing']
+                    : ['Type', 'Account', 'Description', 'YTD Opening', 'YTD Debit', 'YTD Credit', 'YTD Closing'],
+                ];
+                XLSX.utils.sheet_add_aoa(ws, headerRows, { origin: 'A1' });
+
+                const dataRows = tableRows.map(r => hasEntered
+                  ? [r.account_type, r.account, r.account_desc, r.ytd_opening, r.ytd_debit, r.ytd_credit, r.closing, r.ytd_entered_opening, r.ytd_entered_debit, r.ytd_entered_credit, r.entered_closing]
+                  : [r.account_type, r.account, r.account_desc, r.ytd_opening, r.ytd_debit, r.ytd_credit, r.closing]
+                );
+                XLSX.utils.sheet_add_aoa(ws, dataRows, { origin: `A${headerRows.length + 1}` });
+
+                const dataStart = headerRows.length + 1;
+                const dataEnd   = dataStart + tableRows.length - 1;
+
+                const numCols = hasEntered ? ['D','E','F','G','H','I','J','K'] : ['D','E','F','G'];
+                const totalRow: (string | object)[] = ['', 'TOTAL', ''];
+                numCols.forEach((_, i) => {
+                  const col = String.fromCharCode(68 + i);
+                  totalRow.push({ f: `SUM(${col}${dataStart}:${col}${dataEnd})` });
+                });
+                XLSX.utils.sheet_add_aoa(ws, [totalRow], { origin: `A${dataEnd + 1}` });
+
+                // Title style
+                ws['A1'] = { v: 'YTD Trial Balance', t: 's', s: { font: { bold: true, sz: 14 } } };
+                ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: colCount - 1 } }];
+
+                // Header label bold
+                ['A3','A4','A5','D3','D4','D5'].forEach(addr => {
+                  if (ws[addr]) ws[addr].s = { font: { bold: true }, fill: { fgColor: { rgb: 'F0F4FF' } } };
+                });
+
+                // Column heading row
+                const headingRow = headerRows.length;
+                for (let c = 0; c < colCount; c++) {
+                  const addr = `${String.fromCharCode(65 + c)}${headingRow}`;
+                  if (ws[addr]) ws[addr].s = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '1F4E79' } }, alignment: { horizontal: c < 3 ? 'left' : 'right' } };
+                }
+
+                // Data rows: number format + alternate shading
+                for (let row = dataStart; row <= dataEnd + 1; row++) {
+                  numCols.forEach(col => { const a = `${col}${row}`; if (ws[a]) ws[a].z = '#,##0.00'; });
+                  if ((row - dataStart) % 2 === 1)
+                    for (let c = 0; c < colCount; c++) { const a = `${String.fromCharCode(65 + c)}${row}`; if (ws[a]) ws[a].s = { ...(ws[a].s || {}), fill: { fgColor: { rgb: 'F7F9FC' } } }; }
+                }
+
+                // Totals row
+                for (let c = 0; c < colCount; c++) {
+                  const a = `${String.fromCharCode(65 + c)}${dataEnd + 1}`;
+                  if (ws[a]) ws[a].s = { font: { bold: true }, fill: { fgColor: { rgb: 'E8F0FE' } }, ...(c >= 3 ? { z: '#,##0.00', alignment: { horizontal: 'right' } } : {}) };
+                }
+
+                ws['!cols'] = [{ wch: 8 }, { wch: 14 }, { wch: 28 }, ...Array(colCount - 3).fill({ wch: 18 })];
+                ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: dataEnd + 1, c: colCount - 1 } });
+
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, 'YTD TB');
+                const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+                saveAs(new Blob([buf], { type: 'application/octet-stream' }), `YTD_TB_${tab.ledgerName}_${period}_${tab.selectedCompany || 'All'}.xlsx`);
+              }}
+            >
+              Excel
             </Button>
             <Button
               size="small"
@@ -3957,7 +4036,6 @@ const TrialBalance: React.FC = () => {
                 setYtdMovPendingLedger(tab.ledgerName);
                 setYtdMovPendingCompany(tab.selectedCompany);
                 setYtdMovPendingCurrency(tab.selectedCurrency);
-                // Default to earliest available year/period
                 const sorted = [...periods].sort((a, b) =>
                   a.period_year !== b.period_year ? a.period_year - b.period_year : a.period_number - b.period_number
                 );
@@ -3968,6 +4046,13 @@ const TrialBalance: React.FC = () => {
             >
               Show YTD Balances
             </Button>
+            <Switch
+              size="small"
+              checked={tab.showEntered}
+              onChange={v => updateTabEntered(tab.key, v)}
+              checkedChildren="Entered ✓"
+              unCheckedChildren="Entered"
+            />
           </Col>
         </Row>
 
