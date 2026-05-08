@@ -4414,6 +4414,31 @@ const TrialBalance: React.FC = () => {
           </Col>
         </Row>
 
+        <Row gutter={12} style={{ marginBottom: 6 }}>
+          <Col flex="auto" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Button
+              size="small"
+              type="primary"
+              disabled={(tabSelections[tab.key] || []).length !== 1}
+              style={{ background: '#d46b08', borderColor: '#d46b08' }}
+              onClick={() => openRevalModal(tab.key, (tabSelections[tab.key] || [])[0])}
+            >
+              Revalue by Currency
+            </Button>
+            <Button
+              size="small"
+              disabled={(tabSelections[tab.key] || []).length !== 1}
+              style={{ borderColor: '#d46b08', color: '#d46b08' }}
+              onClick={() => {
+                const accountKey = (tabSelections[tab.key] || [])[0];
+                if (accountKey) openDrillCombo(accountKey, tab.rrData, tab.ledgerName, tab.periodName.replace(/^YTD:\s*/, ''), tab.key);
+              }}
+            >
+              Revalue by Segments
+            </Button>
+          </Col>
+        </Row>
+
         <Row gutter={12} style={{ marginBottom: 12 }}>
           <Col span={5}>
             <Select placeholder="All Companies" allowClear showSearch optionFilterProp="label" style={{ width: '100%' }}
@@ -4437,26 +4462,6 @@ const TrialBalance: React.FC = () => {
             />
           </Col>
           <Col span={10} style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
-            <Button
-              size="small"
-              type="primary"
-              disabled={(tabSelections[tab.key] || []).length !== 1}
-              style={{ background: '#d46b08', borderColor: '#d46b08' }}
-              onClick={() => openRevalModal(tab.key, (tabSelections[tab.key] || [])[0])}
-            >
-              Revalue by Currency
-            </Button>
-            <Button
-              size="small"
-              disabled={(tabSelections[tab.key] || []).length !== 1}
-              style={{ borderColor: '#d46b08', color: '#d46b08' }}
-              onClick={() => {
-                const accountKey = (tabSelections[tab.key] || [])[0];
-                if (accountKey) openDrillCombo(accountKey, tab.rrData, tab.ledgerName, tab.periodName.replace(/^YTD:\s*/, ''), tab.key);
-              }}
-            >
-              Revalue by Segments
-            </Button>
             <Button
               icon={<FileExcelOutlined />}
               size="small"
