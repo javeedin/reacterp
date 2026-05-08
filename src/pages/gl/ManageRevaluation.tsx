@@ -590,26 +590,26 @@ const ManageRevaluation: React.FC = () => {
       updateStep(3, 'finish',
         `${glResult.skipped ? 'Reused' : 'Created'} GL batch ${glResult.batchName}`);
 
-      // Step 4 — Mark revaluation ACCOUNTED
+      // Step 4 — Mark revaluation ACCOUNTED via dedicated status endpoint
       updateStep(4, 'process');
-      const putUrl     = `${ORDS_BASE}/${APEX_DB_CONFIG.endpoints.revaluation}/${id}`;
-      const putPayload = {
+      const statusUrl     = `${ORDS_BASE}/${APEX_DB_CONFIG.endpoints.revaluation}/${id}/accounting`;
+      const statusPayload = {
         status:        'ACCOUNTED',
         gl_batch_id:   glResult.batchId   || 0,
         gl_batch_name: glResult.batchName,
         gl_header_id:  glResult.headerId  || 0,
       };
-      const putRes  = await fetch(putUrl, {
-        method:  'PUT',
+      const putRes  = await fetch(statusUrl, {
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(putPayload),
+        body:    JSON.stringify(statusPayload),
       });
       const putText = await putRes.text();
       let putData: any = {};
       try { putData = JSON.parse(putText); } catch { /* non-JSON */ }
 
       setAcctFlowApiLog({
-        url: putUrl, method: 'PUT', payload: putPayload,
+        url: statusUrl, method: 'POST', payload: statusPayload,
         httpStatus: putRes.status, rawResponse: putText,
       });
 
@@ -1117,7 +1117,7 @@ const ManageRevaluation: React.FC = () => {
                     setAcctFlowRetrying(true);
                     try {
                       const res = await fetch(acctFlowApiLog.url, {
-                        method: 'PUT',
+                        method: acctFlowApiLog.method,
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(acctFlowApiLog.payload),
                       });
