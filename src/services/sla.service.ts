@@ -400,6 +400,7 @@ export interface PcBankTxnSlaOptions {
   amount:                   number;
   assetAccountCombination:  string;   // bank account (CR)
   offsetAccountCombination: string;   // petty cash account (DR)
+  description?:             string;   // from external transaction line
   businessUnit?:            string;
   legalEntity?:             string;
   ledgerId:                 number;
@@ -446,7 +447,7 @@ export function buildPcBankTxnSlaPayload(opts: PcBankTxnSlaOptions): SlaCreatePa
         accountedCr:        0,
         currencyCode:       currency,
         exchangeRate:       exRate,
-        description:        `Petty Cash DR – Refill ${opts.externalTransactionId}`,
+        description:        opts.description || `Petty Cash DR – Refill ${opts.externalTransactionId}`,
       },
       {
         lineNumber:         2,
@@ -459,7 +460,7 @@ export function buildPcBankTxnSlaPayload(opts: PcBankTxnSlaOptions): SlaCreatePa
         accountedCr:        Math.round(opts.amount * exRate * 100) / 100,
         currencyCode:       currency,
         exchangeRate:       exRate,
-        description:        `Bank Asset CR – Refill ${opts.externalTransactionId}`,
+        description:        opts.description || `Bank Asset CR – Refill ${opts.externalTransactionId}`,
       },
     ],
   };

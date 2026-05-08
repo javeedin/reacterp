@@ -1647,6 +1647,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           amount:                  absAmount,
           assetAccountCombination: crAccount,   // CR side goes to assetAccountCombination param
           offsetAccountCombination: drAccount,  // DR side goes to offsetAccountCombination param
+          description:             txn.description || undefined,
           businessUnit:            txn.businessUnitName || undefined,
           legalEntity:             txn.legalEntityName  || undefined,
           ledgerId:                ledger.ledgerId,
@@ -1813,6 +1814,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           amount:                  absAmount,
           assetAccountCombination: crAccount,
           offsetAccountCombination: drAccount,
+          description:             txn.description || undefined,
           businessUnit:            txn.businessUnitName || undefined,
           legalEntity:             txn.legalEntityName  || undefined,
           ledgerId:                ledger.ledgerId,
