@@ -482,10 +482,24 @@ const ManageRevaluation: React.FC = () => {
 
       // Step 2 — Write to SLA
       updateStep(2, 'process');
-      const today      = new Date().toISOString().split('T')[0];
       const periodName = d.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '');
       const currency   = d.functionalCcy || 'AED';
       const createdBy  = d.createdBy || 'SYSTEM';
+
+      // Derive last day of the period (e.g. "Apr-26" → 2026-04-30)
+      const periodLastDay = (() => {
+        const MONTHS: Record<string, number> = {
+          Jan:0, Feb:1, Mar:2, Apr:3, May:4, Jun:5,
+          Jul:6, Aug:7, Sep:8, Oct:9, Nov:10, Dec:11,
+        };
+        const [mon, yr] = periodName.split('-');
+        if (mon && yr && MONTHS[mon] !== undefined) {
+          const year = 2000 + parseInt(yr, 10);
+          const last = new Date(year, MONTHS[mon] + 1, 0); // day 0 of next month = last day of this month
+          return last.toISOString().split('T')[0];
+        }
+        return new Date().toISOString().split('T')[0]; // fallback to today
+      })();
 
       const slaPayload: SlaCreatePayload = {
         header: {
@@ -495,8 +509,8 @@ const ManageRevaluation: React.FC = () => {
           sourceNumber:     `REVAL-${id}`,
           sourceType:       'Revaluation',
           eventTypeCode:    'GL_REVALUATION',
-          eventDate:        today,
-          accountingDate:   today,
+          eventDate:        periodLastDay,
+          accountingDate:   periodLastDay,
           periodName,
           ledgerId:         d.ledgerId   || 0,
           ledgerName:       d.ledgerName || '',

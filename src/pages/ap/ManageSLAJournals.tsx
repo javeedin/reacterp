@@ -857,7 +857,7 @@ const ManageSLAJournals: React.FC = () => {
                       layout="vertical"
                       size="small"
                       onFinish={fetchHeaders}
-                      initialValues={{ status: '', moduleName: 'AP' }}
+                      initialValues={{ status: '', moduleName: '' }}
                     >
                       <Row gutter={[12, 0]} align="bottom">
                         <Col xs={24} sm={12} md={6}>
@@ -886,6 +886,7 @@ const ManageSLAJournals: React.FC = () => {
                               <Option value="AP">AP</Option>
                               <Option value="AR">AR</Option>
                               <Option value="GL">GL</Option>
+                              <Option value="PC">PC</Option>
                             </Select>
                           </Form.Item>
                         </Col>
@@ -1025,7 +1026,7 @@ const ManageSLAJournals: React.FC = () => {
                       layout="vertical"
                       size="small"
                       onFinish={fetchLines}
-                      initialValues={{ status: '', moduleName: 'AP' }}
+                      initialValues={{ status: '', moduleName: '' }}
                     >
                       <Row gutter={[12, 0]} align="bottom">
                         <Col xs={24} sm={12} md={6}>
@@ -1054,6 +1055,7 @@ const ManageSLAJournals: React.FC = () => {
                               <Option value="AP">AP</Option>
                               <Option value="AR">AR</Option>
                               <Option value="GL">GL</Option>
+                              <Option value="PC">PC</Option>
                             </Select>
                           </Form.Item>
                         </Col>
