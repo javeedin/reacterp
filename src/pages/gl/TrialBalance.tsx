@@ -3906,28 +3906,28 @@ const TrialBalance: React.FC = () => {
         </Row>
 
         <Row gutter={12} style={{ marginBottom: 12 }}>
-          <Col span={6}>
+          <Col span={5}>
             <Select placeholder="All Companies" allowClear showSearch optionFilterProp="label" style={{ width: '100%' }}
               value={tab.selectedCompany}
               onChange={v => updateTabFilter(tab.key, 'selectedCompany', v ?? null)}
               options={allCompanies.length > 0 ? allCompanies : tab.companies.map(c => ({ value: c, label: c }))}
             />
           </Col>
-          <Col span={6}>
+          <Col span={4}>
             <Select placeholder="All Currencies" allowClear style={{ width: '100%' }}
               value={tab.selectedCurrency}
               onChange={v => updateTabFilter(tab.key, 'selectedCurrency', v ?? null)}
               options={tab.currencies.map(c => ({ value: c, label: c }))}
             />
           </Col>
-          <Col span={6}>
+          <Col span={5}>
             <Input.Search placeholder="Search account / description…"
               value={tab.gridSearch}
               onChange={e => updateTabSearch(tab.key, e.target.value)}
               allowClear
             />
           </Col>
-          <Col span={6} style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+          <Col span={10} style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
             <Button
               size="small"
               type="primary"
