@@ -284,6 +284,9 @@ const TrialBalance: React.FC = () => {
   const [revalAcctSelectorLineNum, setRevalAcctSelectorLineNum] = useState<number | null>(null);
   const [revalId,                  setRevalId]                  = useState<number | null>(null);
   const [revalChecking,            setRevalChecking]            = useState(false);
+  const [revalApiError,            setRevalApiError]            = useState<string | null>(null);
+  const [revalLastCall,            setRevalLastCall]            = useState<{ url: string; method: string; payload: object; responseText: string; httpStatus: number } | null>(null);
+  const [revalApiDebugOpen,        setRevalApiDebugOpen]        = useState(false);
   const [revalSaving,              setRevalSaving]              = useState(false);
   const [apiPanelVisible, setApiPanelVisible] = useState(false);
   const [apiCalls, setApiCalls] = useState<Record<string, ApiCallInfo>>({
@@ -2905,59 +2908,67 @@ const TrialBalance: React.FC = () => {
               style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
               onClick={async () => {
                 setRevalSaving(true);
+                setRevalApiError(null);
+                const rawPeriod = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '');
+                const isUpdate  = revalId != null;
+                const payload   = {
+                  ledger_id:      rawRows[0] ? (rawRows[0] as any).ledger_id || 0 : 0,
+                  ledger_name:    tab.ledgerName,
+                  period_name:    rawPeriod,
+                  account:        revalAccount,
+                  account_desc:   accountDesc,
+                  functional_ccy: functionalCcy,
+                  gain_account:   revalGainCombo,
+                  loss_account:   revalLossCombo,
+                  total_gain:     totalGain,
+                  total_loss:     totalLoss,
+                  notes:          '',
+                  created_by:     'ReactERP',
+                  ccy_rows: ccyRows.filter(r => r.newRate > 0).map(r => ({
+                    currency_code:  r.ccy,
+                    ent_closing:    r.entClosing,
+                    acct_closing:   r.acctClosing,
+                    book_rate:      r.bookRate,
+                    new_rate:       r.newRate,
+                    new_acct_value: r.newAcctValue,
+                    reval_amt:      r.revalAmt,
+                    is_gain:        r.isGain ? 1 : 0,
+                  })),
+                  lines: revalPreviewRows.map(r => ({
+                    line_num:     r.lineNum,
+                    combo:        r.combo,
+                    description:  r.desc,
+                    comment_text: r.comment,
+                    dr_amount:    r.dr,
+                    cr_amount:    r.cr,
+                  })),
+                };
+                const callUrl = isUpdate
+                  ? `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}/${revalId}`
+                  : `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}`;
+                const method  = isUpdate ? 'PUT' : 'POST';
+
                 try {
-                  const rawPeriod = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '');
-                  const body = {
-                    ledger_id:      rawRows[0] ? (rawRows[0] as any).ledger_id || 0 : 0,
-                    ledger_name:    tab.ledgerName,
-                    period_name:    rawPeriod,
-                    account:        revalAccount,
-                    account_desc:   accountDesc,
-                    functional_ccy: functionalCcy,
-                    gain_account:   revalGainCombo,
-                    loss_account:   revalLossCombo,
-                    total_gain:     totalGain,
-                    total_loss:     totalLoss,
-                    notes:          '',
-                    created_by:     'ReactERP',
-                    ccy_rows: ccyRows.filter(r => r.newRate > 0).map(r => ({
-                      currency_code:  r.ccy,
-                      ent_closing:    r.entClosing,
-                      acct_closing:   r.acctClosing,
-                      book_rate:      r.bookRate,
-                      new_rate:       r.newRate,
-                      new_acct_value: r.newAcctValue,
-                      reval_amt:      r.revalAmt,
-                      is_gain:        r.isGain ? 1 : 0,
-                    })),
-                    lines: revalPreviewRows.map(r => ({
-                      line_num:     r.lineNum,
-                      combo:        r.combo,
-                      description:  r.desc,
-                      comment_text: r.comment,
-                      dr_amount:    r.dr,
-                      cr_amount:    r.cr,
-                    })),
-                  };
-
-                  const isUpdate = revalId != null;
-                  const url = isUpdate
-                    ? `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}/${revalId}`
-                    : `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}`;
-
-                  const res  = await fetch(url, { method: isUpdate ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                  const res  = await fetch(callUrl, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                   const text = await res.text();
-                  const json = JSON.parse(text);
+                  setRevalLastCall({ url: callUrl, method, payload, responseText: text, httpStatus: res.status });
+
+                  let json: any = {};
+                  try { json = JSON.parse(text); } catch {
+                    setRevalApiError(`HTTP ${res.status} — Server returned non-JSON response. Check the API debug panel for full details.`);
+                    return;
+                  }
 
                   if (json.status === 'SUCCESS') {
                     const savedId = json.revalueId ?? revalId;
                     if (!isUpdate) setRevalId(savedId);
                     message.success(`Revaluation ${isUpdate ? 'updated' : 'saved'} (ID: ${savedId})`);
                   } else {
-                    throw new Error(json.error || 'Save failed');
+                    setRevalApiError(`API error: ${json.error || json.message || JSON.stringify(json)}`);
                   }
                 } catch (e) {
-                  message.error('Failed to save revaluation: ' + (e instanceof Error ? e.message : String(e)));
+                  setRevalLastCall({ url: callUrl, method, payload, responseText: String(e), httpStatus: 0 });
+                  setRevalApiError(`Network error: ${e instanceof Error ? e.message : String(e)}`);
                 } finally {
                   setRevalSaving(false);
                 }
@@ -3083,7 +3094,37 @@ const TrialBalance: React.FC = () => {
             >
               Print PDF
             </Button>
+
+            {/* API Debug button */}
+            <Button
+              size="small"
+              icon={<ApiOutlined />}
+              style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
+              onClick={() => setRevalApiDebugOpen(true)}
+            >
+              API {revalLastCall ? `(${revalLastCall.httpStatus})` : ''}
+            </Button>
           </Space>
+
+          {/* Error alert */}
+          {revalApiError && (
+            <Alert
+              type="error"
+              showIcon
+              closable
+              onClose={() => setRevalApiError(null)}
+              style={{ marginTop: 12, marginBottom: 4 }}
+              message="Save Failed"
+              description={
+                <div>
+                  <div style={{ marginBottom: 6 }}>{revalApiError}</div>
+                  <Button size="small" icon={<ApiOutlined />} onClick={() => setRevalApiDebugOpen(true)}>
+                    View API Debug
+                  </Button>
+                </div>
+              }
+            />
+          )}
 
           {/* Journal preview table */}
           {revalPreviewRows.length > 0 && (
@@ -3118,6 +3159,100 @@ const TrialBalance: React.FC = () => {
                   </Table.Summary>
                 )}
               />
+            </div>
+          )}
+        </Modal>
+
+        {/* ── API Debug Modal ── */}
+        <Modal
+          open={revalApiDebugOpen}
+          onCancel={() => setRevalApiDebugOpen(false)}
+          title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>API Debug — Revaluation Save</span></Space>}
+          width={820}
+          footer={
+            <Space>
+              <Button
+                type="primary"
+                icon={<ApiOutlined />}
+                disabled={!revalLastCall}
+                onClick={async () => {
+                  if (!revalLastCall) return;
+                  setRevalApiError(null);
+                  try {
+                    const res  = await fetch(revalLastCall.url, { method: revalLastCall.method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(revalLastCall.payload) });
+                    const text = await res.text();
+                    setRevalLastCall(prev => prev ? { ...prev, responseText: text, httpStatus: res.status } : prev);
+                    let json: any = {};
+                    try { json = JSON.parse(text); } catch { setRevalApiError(`HTTP ${res.status} — non-JSON response`); return; }
+                    if (json.status === 'SUCCESS') {
+                      const isUpdate = revalLastCall.method === 'PUT';
+                      const savedId  = json.revalueId ?? revalId;
+                      if (!isUpdate) setRevalId(savedId);
+                      message.success(`Revaluation ${isUpdate ? 'updated' : 'saved'} (ID: ${savedId})`);
+                      setRevalApiDebugOpen(false);
+                    } else {
+                      setRevalApiError(`API error: ${json.error || JSON.stringify(json)}`);
+                    }
+                  } catch (e) {
+                    setRevalApiError(`Network error: ${e instanceof Error ? e.message : String(e)}`);
+                  }
+                }}
+              >
+                Test / Retry
+              </Button>
+              <Button onClick={() => setRevalApiDebugOpen(false)}>Close</Button>
+            </Space>
+          }
+        >
+          {revalLastCall ? (
+            <div style={{ fontSize: 12 }}>
+              {/* URL + method */}
+              <div style={{ marginBottom: 10 }}>
+                <Text strong>URL</Text>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                  <Tag color={revalLastCall.method === 'POST' ? 'green' : 'blue'} style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                    {revalLastCall.method}
+                  </Tag>
+                  <code style={{ background: '#f5f5f5', padding: '2px 8px', borderRadius: 4, fontSize: 12, wordBreak: 'break-all' }}>
+                    {revalLastCall.url}
+                  </code>
+                </div>
+              </div>
+
+              {/* HTTP status */}
+              <div style={{ marginBottom: 10 }}>
+                <Text strong>HTTP Status </Text>
+                <Tag color={revalLastCall.httpStatus >= 200 && revalLastCall.httpStatus < 300 ? 'success' : 'error'}>
+                  {revalLastCall.httpStatus || 'N/A'}
+                </Tag>
+              </div>
+
+              {/* Request payload */}
+              <div style={{ marginBottom: 10 }}>
+                <Text strong>Request Payload</Text>
+                <div style={{ position: 'relative', marginTop: 4 }}>
+                  <pre style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 10, borderRadius: 6, maxHeight: 220, overflowY: 'auto', fontSize: 11, margin: 0 }}>
+                    {JSON.stringify(revalLastCall.payload, null, 2)}
+                  </pre>
+                </div>
+              </div>
+
+              {/* Response */}
+              <div>
+                <Text strong>Response</Text>
+                <pre style={{
+                  background: revalLastCall.httpStatus >= 200 && revalLastCall.httpStatus < 300 ? '#f6ffed' : '#fff2f0',
+                  border: `1px solid ${revalLastCall.httpStatus >= 200 && revalLastCall.httpStatus < 300 ? '#b7eb8f' : '#ffccc7'}`,
+                  padding: 10, borderRadius: 6, maxHeight: 160, overflowY: 'auto', fontSize: 11, margin: '4px 0 0',
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                }}>
+                  {(() => { try { return JSON.stringify(JSON.parse(revalLastCall.responseText), null, 2); } catch { return revalLastCall.responseText; } })()}
+                </pre>
+              </div>
+            </div>
+          ) : (
+            <div style={{ color: '#999', padding: 24, textAlign: 'center' }}>
+              No API call made yet. Click Save / Update Revaluation first.
             </div>
           )}
         </Modal>
