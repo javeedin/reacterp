@@ -3578,6 +3578,7 @@ const TrialBalance: React.FC = () => {
               setDistComboAcctOpen(false);
             }}
             lockedFirstSegment={revalCompany || undefined}
+            initialValue={distComboNewName || undefined}
           />
         </Modal>
 
