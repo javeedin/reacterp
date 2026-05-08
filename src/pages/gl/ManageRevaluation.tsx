@@ -552,6 +552,22 @@ const ManageRevaluation: React.FC = () => {
 
       // Step 3 — Post to GL via glPosting service
       updateStep(3, 'process');
+
+      // Build lineNum → foreignCurrency map so each line gets the right currency code.
+      // Lines were generated in ccyRow order (2 lines per active ccyRow):
+      //   gain ccyRow → [DR balanceSheet, CR gainAccount]
+      //   loss ccyRow → [DR lossAccount,  CR balanceSheet]
+      // Balance-sheet lines use the foreign currency; gain/loss account lines use functional.
+      const lineCcyMap = new Map<number, string>();
+      const activeCcyRows = d.ccyRows.filter(c => c.revalAmt !== 0 && c.newRate !== 0);
+      activeCcyRows.forEach((ccyRow, idx) => {
+        const l1 = d.lines[idx * 2];
+        const l2 = d.lines[idx * 2 + 1];
+        const foreignCcy = ccyRow.currencyCode || currency;
+        if (l1) lineCcyMap.set(l1.lineNum, ccyRow.isGain ? foreignCcy : currency);
+        if (l2) lineCcyMap.set(l2.lineNum, ccyRow.isGain ? currency    : foreignCcy);
+      });
+
       const glResult = await postSlaToGL({
         slaHeaderId:   slaResult.headerId,
         sourceNumber:  `REVAL-${id}`,
@@ -575,7 +591,7 @@ const ManageRevaluation: React.FC = () => {
           accountedDr:        l.drAmount > 0 ? l.drAmount : null,
           accountedCr:        l.crAmount > 0 ? l.crAmount : null,
           description:        l.description || `Revaluation – ${d!.account}`,
-          currencyCode:       currency,
+          currencyCode:       lineCcyMap.get(l.lineNum) || currency,
           accountingDate:     periodLastDay,
           accountCombination: l.combo,
           accountingClass:    'Revaluation',
@@ -1070,7 +1086,7 @@ const ManageRevaluation: React.FC = () => {
                 padding: '6px 12px',
                 display: 'flex', alignItems: 'center', gap: 8,
               }}>
-                <Tag color="blue" style={{ fontFamily: 'monospace', margin: 0 }}>PUT</Tag>
+                <Tag color="blue" style={{ fontFamily: 'monospace', margin: 0 }}>{acctFlowApiLog.method || 'POST'}</Tag>
                 <Text style={{ fontFamily: 'monospace', fontSize: 11, flex: 1, wordBreak: 'break-all' }}>
                   {acctFlowApiLog.url}
                 </Text>
