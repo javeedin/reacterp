@@ -95,9 +95,9 @@ CREATE OR REPLACE PACKAGE BODY RR_REVALUE_PKG AS
         assert_required(v_loss_acct, 'loss_account');
 
         -- ── Validate that at least one journal line exists ───────────────────
-        SELECT JSON_ARRAY_LENGTH(JSON_QUERY(p_body, '$.lines'))
+        SELECT COUNT(*)
         INTO   v_line_count
-        FROM   DUAL;
+        FROM   JSON_TABLE(p_body, '$.lines[*]' COLUMNS (rn FOR ORDINALITY));
 
         IF NVL(v_line_count, 0) = 0 THEN
             RAISE_APPLICATION_ERROR(-20102, 'At least one journal line is required');
