@@ -120,9 +120,6 @@ const ManageSLAJournals: React.FC = () => {
   const [headerForm] = Form.useForm();
   const [lineForm]   = Form.useForm();
 
-  // Auto-load all SLA headers on first render (no filters = all modules)
-  useEffect(() => { fetchHeaders({}); }, [fetchHeaders]);
-
   // ── Headers tab state ────────────────────────────────────────────────────
   const [headers, setHeaders]           = useState<SlaHeader[]>([]);
   const [headerLoading, setHeaderLoading] = useState(false);
@@ -209,6 +206,9 @@ const ManageSLAJournals: React.FC = () => {
       setHeaderLoading(false);
     }
   }, []);
+
+  // Auto-load all SLA headers on first render (no filters = all modules)
+  useEffect(() => { fetchHeaders({}); }, [fetchHeaders]);
 
   // ── Fetch lines ──────────────────────────────────────────────────────────
   const fetchLines = useCallback(async (values: any) => {
