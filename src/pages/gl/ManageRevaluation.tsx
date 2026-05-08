@@ -42,6 +42,7 @@ const REDWOOD = {
 interface RevalHeader {
   revalueId:     number;
   ledgerId:      number | null;
+  ledgerName:    string;
   periodName:    string;
   account:       string;
   accountDesc:   string;
@@ -52,6 +53,7 @@ interface RevalHeader {
   totalLoss:     number;
   status:        string;
   glBatchId:     number | null;
+  glBatchName:   string | null;
   notes:         string | null;
   createdDate:   string;
   createdBy:     string;
@@ -231,6 +233,7 @@ const ManageRevaluation: React.FC = () => {
       setData(items.map((r: any) => ({
         revalueId:     r.revalueId     ?? r.revalue_id,
         ledgerId:      r.ledgerId      ?? r.ledger_id      ?? null,
+        ledgerName:    r.ledgerName    ?? r.ledger_name    ?? '',
         periodName:    r.periodName    ?? r.period_name    ?? '',
         account:       r.account       ?? '',
         accountDesc:   r.accountDesc   ?? r.account_desc   ?? '',
@@ -241,6 +244,7 @@ const ManageRevaluation: React.FC = () => {
         totalLoss:     Number(r.totalLoss  ?? r.total_loss  ?? 0),
         status:        r.status        ?? 'DRAFT',
         glBatchId:     r.glBatchId     ?? r.gl_batch_id    ?? null,
+        glBatchName:   r.glBatchName   ?? r.gl_batch_name  ?? null,
         notes:         r.notes         ?? null,
         createdDate:   r.createdDate   ?? r.created_date   ?? '',
         createdBy:     r.createdBy     ?? r.created_by     ?? '',
@@ -267,6 +271,7 @@ const ManageRevaluation: React.FC = () => {
       const mapped: RevalDetail = {
         revalueId:     r.revalueId     ?? r.revalue_id,
         ledgerId:      r.ledgerId      ?? r.ledger_id ?? null,
+        ledgerName:    r.ledgerName    ?? r.ledger_name ?? '',
         periodName:    r.periodName    ?? r.period_name ?? '',
         account:       r.account       ?? '',
         accountDesc:   r.accountDesc   ?? r.account_desc ?? '',
@@ -277,6 +282,7 @@ const ManageRevaluation: React.FC = () => {
         totalLoss:     Number(r.totalLoss  ?? r.total_loss  ?? 0),
         status:        r.status        ?? 'DRAFT',
         glBatchId:     r.glBatchId     ?? r.gl_batch_id ?? null,
+        glBatchName:   r.glBatchName   ?? r.gl_batch_name ?? null,
         notes:         r.notes         ?? null,
         createdDate:   r.createdDate   ?? r.created_date ?? '',
         createdBy:     r.createdBy     ?? r.created_by ?? '',
@@ -322,7 +328,8 @@ const ManageRevaluation: React.FC = () => {
         const r = JSON.parse(text);
         d = {
           revalueId:     r.revalueId     ?? r.revalue_id,
-          ledgerId:      r.ledgerId      ?? null,
+          ledgerId:      r.ledgerId      ?? r.ledger_id ?? null,
+          ledgerName:    r.ledgerName    ?? r.ledger_name ?? '',
           periodName:    r.periodName    ?? r.period_name ?? '',
           account:       r.account       ?? '',
           accountDesc:   r.accountDesc   ?? r.account_desc ?? '',
@@ -332,7 +339,8 @@ const ManageRevaluation: React.FC = () => {
           totalGain:     Number(r.totalGain  ?? r.total_gain  ?? 0),
           totalLoss:     Number(r.totalLoss  ?? r.total_loss  ?? 0),
           status:        r.status ?? 'DRAFT',
-          glBatchId:     r.glBatchId ?? null,
+          glBatchId:     r.glBatchId ?? r.gl_batch_id ?? null,
+          glBatchName:   r.glBatchName ?? r.gl_batch_name ?? null,
           notes:         r.notes ?? null,
           createdDate:   r.createdDate ?? r.created_date ?? '',
           createdBy:     r.createdBy ?? r.created_by ?? '',
@@ -378,25 +386,152 @@ const ManageRevaluation: React.FC = () => {
   const handleCreateAccounting = async (id: number) => {
     setAccountingLoading(id);
     try {
-      const res = await fetch(
-        `${ORDS_BASE}/${APEX_DB_CONFIG.endpoints.revaluation}/${id}`,
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'ACCOUNTED' }),
-        }
-      );
-      const text = await res.text();
-      const json = JSON.parse(text);
-      if (json.status === 'SUCCESS') {
-        message.success(`Revaluation #${id} marked as ACCOUNTED`);
-        setAccountingId(id);
-        load();
-      } else {
-        throw new Error(json.error || 'Update failed');
+      // 1. Load detail if not already for this record
+      let d: RevalDetail | null = detail?.revalueId === id ? detail : null;
+      if (!d) {
+        const res  = await fetch(`${ORDS_BASE}/${APEX_DB_CONFIG.endpoints.revaluation}/${id}`);
+        const text = await res.text();
+        if (!text.trim()) throw new Error('Empty response from API');
+        const r = JSON.parse(text);
+        d = {
+          revalueId:     r.revalueId     ?? r.revalue_id,
+          ledgerId:      r.ledgerId      ?? r.ledger_id ?? null,
+          ledgerName:    r.ledgerName    ?? r.ledger_name ?? '',
+          periodName:    r.periodName    ?? r.period_name ?? '',
+          account:       r.account       ?? '',
+          accountDesc:   r.accountDesc   ?? r.account_desc ?? '',
+          functionalCcy: r.functionalCcy ?? r.functional_ccy ?? '',
+          gainAccount:   r.gainAccount   ?? r.gain_account ?? '',
+          lossAccount:   r.lossAccount   ?? r.loss_account ?? '',
+          totalGain:     Number(r.totalGain  ?? r.total_gain  ?? 0),
+          totalLoss:     Number(r.totalLoss  ?? r.total_loss  ?? 0),
+          status:        r.status        ?? 'DRAFT',
+          glBatchId:     r.glBatchId     ?? r.gl_batch_id ?? null,
+          glBatchName:   r.glBatchName   ?? r.gl_batch_name ?? null,
+          notes:         r.notes         ?? null,
+          createdDate:   r.createdDate   ?? r.created_date ?? '',
+          createdBy:     r.createdBy     ?? r.created_by ?? '',
+          lineCount:     Number(r.lineCount ?? r.line_count ?? 0),
+          ccyRows: (r.ccyRows || r.ccy_rows || []).map((c: any) => ({
+            ccyId:        c.ccyId        ?? c.ccy_id,
+            currencyCode: c.currencyCode ?? c.currency_code ?? '',
+            entClosing:   Number(c.entClosing  ?? c.ent_closing  ?? 0),
+            acctClosing:  Number(c.acctClosing ?? c.acct_closing ?? 0),
+            bookRate:     Number(c.bookRate    ?? c.book_rate    ?? 0),
+            newRate:      Number(c.newRate     ?? c.new_rate     ?? 0),
+            newAcctValue: Number(c.newAcctValue ?? c.new_acct_value ?? 0),
+            revalAmt:     Number(c.revalAmt    ?? c.reval_amt    ?? 0),
+            isGain:       Number(c.isGain      ?? c.is_gain      ?? 0),
+          })),
+          lines: (r.lines || []).map((l: any) => ({
+            lineId:      l.lineId      ?? l.line_id,
+            lineNum:     l.lineNum     ?? l.line_num,
+            combo:       l.combo       ?? '',
+            description: l.description ?? '',
+            commentText: l.commentText ?? l.comment_text ?? '',
+            drAmount:    Number(l.drAmount ?? l.dr_amount ?? 0),
+            crAmount:    Number(l.crAmount ?? l.cr_amount ?? 0),
+          })),
+        };
+      }
+
+      if (!d.lines || d.lines.length === 0)
+        throw new Error('No journal lines found on this revaluation');
+
+      const today      = new Date().toISOString().split('T')[0];
+      const periodName = d.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '');
+      const currency   = d.functionalCcy || 'AED';
+      const totalDr    = d.lines.reduce((s, l) => s + (l.drAmount || 0), 0);
+      const totalCr    = d.lines.reduce((s, l) => s + (l.crAmount || 0), 0);
+      const batchName  = `REVAL-${id}-${Date.now()}`;
+      const createdBy  = d.createdBy || 'SYSTEM';
+
+      // 2. Build GL journal payload
+      const glPayload = {
+        batch: {
+          batchName,
+          batchDescription: `FX Revaluation – ${d.account} – ${periodName}`,
+          ledgerName:       d.ledgerName || '',
+          ledgerId:         d.ledgerId   || 0,
+          status:           'NEW',
+          accountingPeriod: periodName,
+          controlTotal:     Math.max(totalDr, totalCr),
+          runningTotalDr:   totalDr,
+          runningTotalCr:   totalCr,
+          batchSource:      'General Ledger',
+          createdBy,
+        },
+        header: {
+          ledgerId:                d.ledgerId   || 0,
+          ledgerName:              d.ledgerName || '',
+          jeCategory:              'Revaluation',
+          jeSource:                'General Ledger',
+          periodName,
+          journalName:             `REVAL-${d.account}-${periodName}`,
+          description:             `FX Revaluation – ${d.accountDesc || d.account} – ${periodName}`,
+          currencyCode:            currency,
+          currencyConversionType:  'User',
+          currencyConversionDate:  today,
+          currencyConversionRate:  1,
+          defaultEffectiveDate:    today,
+          status:                  'NEW',
+          runningTotalDr:          totalDr,
+          runningTotalCr:          totalCr,
+          createdBy,
+        },
+        lines: d.lines.map(l => ({
+          enteredDr:                 l.drAmount > 0 ? l.drAmount : null,
+          enteredCr:                 l.crAmount > 0 ? l.crAmount : null,
+          accountedDr:               l.drAmount > 0 ? l.drAmount : null,
+          accountedCr:               l.crAmount > 0 ? l.crAmount : null,
+          statAmount:                null,
+          description:               l.description || `Revaluation – ${d!.account}`,
+          currencyCode:              currency,
+          currencyConversionDate:    today,
+          currencyConversionRate:    1,
+          userCurrencyConversionType:'User',
+          accountCombination:        l.combo,
+          chartOfAccountsName:       'Chart of Accounts',
+          reference1:                String(id),
+          reference2:                d!.account || '',
+          reference3:                'Revaluation',
+          reference4:                null,
+          reference5:                null,
+          createdBy,
+        })),
+      };
+
+      // 3. Create GL journal
+      const glRes  = await fetch(`${ORDS_BASE}/journals/create`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body:    JSON.stringify(glPayload),
+      });
+      const glData = await glRes.json();
+      if (!glRes.ok) throw new Error(glData?.message || `GL journal failed (HTTP ${glRes.status})`);
+
+      // 4. Mark revaluation as ACCOUNTED with GL batch reference
+      const putRes  = await fetch(`${ORDS_BASE}/${APEX_DB_CONFIG.endpoints.revaluation}/${id}`, {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          status:        'ACCOUNTED',
+          gl_batch_id:   glData.batchId   || 0,
+          gl_batch_name: batchName,
+          gl_header_id:  glData.headerId  || 0,
+        }),
+      });
+      const putData = await putRes.json();
+      if (putData.status !== 'SUCCESS') throw new Error(putData.error || 'Status update failed');
+
+      message.success(`Revaluation #${id} accounted — GL Batch: ${batchName}`);
+      setAccountingId(id);
+      load();
+      if (detail?.revalueId === id) {
+        setDetail({ ...d, status: 'ACCOUNTED', glBatchId: glData.batchId || null, glBatchName: batchName });
       }
     } catch (e) {
-      message.error('Failed to create accounting: ' + (e instanceof Error ? e.message : String(e)));
+      message.error('Accounting failed: ' + (e instanceof Error ? e.message : String(e)));
     } finally {
       setAccountingLoading(null);
     }
@@ -728,6 +863,12 @@ const ManageRevaluation: React.FC = () => {
                 </Descriptions.Item>
                 <Descriptions.Item label="Total Loss">
                   <Text style={{ color: REDWOOD.primary, fontWeight: 600 }}>{fmt2(detail.totalLoss)}</Text>
+                </Descriptions.Item>
+                <Descriptions.Item label="Ledger">{detail.ledgerName || '—'}</Descriptions.Item>
+                <Descriptions.Item label="GL Batch">
+                  {detail.glBatchName
+                    ? <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{detail.glBatchName}</Text>
+                    : <Text type="secondary">—</Text>}
                 </Descriptions.Item>
                 <Descriptions.Item label="Created Date">{detail.createdDate?.substring(0, 10)}</Descriptions.Item>
                 <Descriptions.Item label="Created By">{detail.createdBy}</Descriptions.Item>

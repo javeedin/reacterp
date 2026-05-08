@@ -2875,7 +2875,8 @@ const TrialBalance: React.FC = () => {
                 setRevalSaving(true);
                 try {
                   const body = {
-                    ledger_id:      0,
+                    ledger_id:      rawRows[0] ? (rawRows[0] as any).ledger_id || 0 : 0,
+                    ledger_name:    tab.ledgerName,
                     period_name:    tab.periodName,
                     account:        revalAccount,
                     account_desc:   accountDesc,
