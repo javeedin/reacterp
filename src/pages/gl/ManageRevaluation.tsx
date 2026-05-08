@@ -228,6 +228,11 @@ const ManageRevaluation: React.FC = () => {
   const [acctFlowVisible, setAcctFlowVisible] = useState(false);
   const [acctFlowSteps,   setAcctFlowSteps]   = useState<{ title: string; status: 'wait'|'process'|'finish'|'error'; desc?: string }[]>([]);
   const [acctFlowDone,    setAcctFlowDone]    = useState(false);
+  const [acctFlowApiLog,  setAcctFlowApiLog]  = useState<{
+    url: string; method: string; payload: any;
+    httpStatus: number | null; rawResponse: string;
+  } | null>(null);
+  const [acctFlowRetrying, setAcctFlowRetrying] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -400,6 +405,7 @@ const ManageRevaluation: React.FC = () => {
     ];
     setAcctFlowSteps(initSteps);
     setAcctFlowDone(false);
+    setAcctFlowApiLog(null);
     setAcctFlowVisible(true);
     setAccountingLoading(id);
 
@@ -544,21 +550,29 @@ const ManageRevaluation: React.FC = () => {
 
       // Step 3 — Mark revaluation ACCOUNTED
       updateStep(3, 'process');
-      const putRes = await fetch(`${ORDS_BASE}/${APEX_DB_CONFIG.endpoints.revaluation}/${id}`, {
+      const putUrl     = `${ORDS_BASE}/${APEX_DB_CONFIG.endpoints.revaluation}/${id}`;
+      const putPayload = {
+        status:        'ACCOUNTED',
+        gl_batch_id:   0,
+        gl_batch_name: `SLA-${slaResult.headerId}`,
+        gl_header_id:  slaResult.headerId,
+      };
+      const putRes  = await fetch(putUrl, {
         method:  'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
-          status:          'ACCOUNTED',
-          gl_batch_id:     0,
-          gl_batch_name:   `SLA-${slaResult.headerId}`,
-          gl_header_id:    slaResult.headerId,
-        }),
+        body:    JSON.stringify(putPayload),
       });
       const putText = await putRes.text();
       let putData: any = {};
       try { putData = JSON.parse(putText); } catch { /* non-JSON */ }
+
+      setAcctFlowApiLog({
+        url: putUrl, method: 'PUT', payload: putPayload,
+        httpStatus: putRes.status, rawResponse: putText,
+      });
+
       if (!putRes.ok || putData.status === 'ERROR') {
-        updateStep(3, 'error', putData.error || `HTTP ${putRes.status}`);
+        updateStep(3, 'error', `HTTP ${putRes.status}${putData.error ? ` — ${putData.error}` : ''}`);
         throw new Error(putData.error || `Status update failed (HTTP ${putRes.status})`);
       }
       updateStep(3, 'finish', 'Status set to ACCOUNTED');
@@ -967,7 +981,7 @@ const ManageRevaluation: React.FC = () => {
             <span>Create Accounting — Progress</span>
           </Space>
         }
-        width={520}
+        width={700}
         footer={
           <Button
             type={acctFlowDone ? 'primary' : 'default'}
@@ -1003,7 +1017,105 @@ const ManageRevaluation: React.FC = () => {
               style={{ marginTop: 16 }}
             />
           )}
-          {acctFlowSteps.some(s => s.status === 'error') && (
+
+          {/* API Debug Panel — shown whenever a log exists */}
+          {acctFlowApiLog && (
+            <div style={{ marginTop: 16, border: '1px solid #d9d9d9', borderRadius: 6, overflow: 'hidden' }}>
+              {/* Header row */}
+              <div style={{
+                background: acctFlowApiLog.httpStatus && acctFlowApiLog.httpStatus < 300 ? '#f6ffed' : '#fff1f0',
+                borderBottom: '1px solid #d9d9d9',
+                padding: '6px 12px',
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                <Tag color="blue" style={{ fontFamily: 'monospace', margin: 0 }}>PUT</Tag>
+                <Text style={{ fontFamily: 'monospace', fontSize: 11, flex: 1, wordBreak: 'break-all' }}>
+                  {acctFlowApiLog.url}
+                </Text>
+                <Tag color={acctFlowApiLog.httpStatus && acctFlowApiLog.httpStatus < 300 ? 'green' : 'red'}>
+                  HTTP {acctFlowApiLog.httpStatus ?? '—'}
+                </Tag>
+              </div>
+
+              {/* Payload */}
+              <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>
+                <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Request Body</Text>
+                <pre style={{
+                  margin: 0, fontSize: 11, fontFamily: 'monospace',
+                  background: '#fafafa', padding: 8, borderRadius: 4,
+                  maxHeight: 120, overflowY: 'auto', border: '1px solid #f0f0f0',
+                }}>
+                  {JSON.stringify(acctFlowApiLog.payload, null, 2)}
+                </pre>
+              </div>
+
+              {/* Response */}
+              <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>
+                <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Response</Text>
+                <pre style={{
+                  margin: 0, fontSize: 11, fontFamily: 'monospace',
+                  background: '#fafafa', padding: 8, borderRadius: 4,
+                  maxHeight: 140, overflowY: 'auto', border: '1px solid #f0f0f0',
+                  color: acctFlowApiLog.httpStatus && acctFlowApiLog.httpStatus < 300 ? 'inherit' : '#cf1322',
+                }}>
+                  {(() => {
+                    try { return JSON.stringify(JSON.parse(acctFlowApiLog.rawResponse), null, 2); }
+                    catch { return acctFlowApiLog.rawResponse || '(empty)'; }
+                  })()}
+                </pre>
+              </div>
+
+              {/* Test / Retry button */}
+              <div style={{ padding: '8px 12px', background: '#fafafa', display: 'flex', gap: 8 }}>
+                <Button
+                  size="small"
+                  loading={acctFlowRetrying}
+                  onClick={async () => {
+                    if (!acctFlowApiLog) return;
+                    setAcctFlowRetrying(true);
+                    try {
+                      const res = await fetch(acctFlowApiLog.url, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(acctFlowApiLog.payload),
+                      });
+                      const text = await res.text();
+                      setAcctFlowApiLog(prev => prev ? { ...prev, httpStatus: res.status, rawResponse: text } : prev);
+                      let parsed: any = {};
+                      try { parsed = JSON.parse(text); } catch { /* non-JSON */ }
+                      if (res.ok && parsed.status !== 'ERROR') {
+                        updateStep(3, 'finish', 'Status set to ACCOUNTED (via retry)');
+                        setAcctFlowDone(true);
+                        load();
+                        message.success('Retry succeeded — revaluation marked ACCOUNTED');
+                      } else {
+                        message.error(`Retry failed: HTTP ${res.status}${parsed.error ? ` — ${parsed.error}` : ''}`);
+                      }
+                    } catch (e) {
+                      message.error('Retry error: ' + (e instanceof Error ? e.message : String(e)));
+                    } finally {
+                      setAcctFlowRetrying(false);
+                    }
+                  }}
+                >
+                  {acctFlowRetrying ? 'Retrying…' : 'Test / Retry PUT'}
+                </Button>
+                <Button
+                  size="small"
+                  onClick={() => {
+                    navigator.clipboard.writeText(
+                      `URL: ${acctFlowApiLog.url}\n\nPayload:\n${JSON.stringify(acctFlowApiLog.payload, null, 2)}\n\nResponse:\n${acctFlowApiLog.rawResponse}`
+                    );
+                    message.success('Copied to clipboard');
+                  }}
+                >
+                  Copy
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {acctFlowSteps.some(s => s.status === 'error') && !acctFlowApiLog && (
             <Alert
               type="error"
               showIcon
