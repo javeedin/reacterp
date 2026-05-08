@@ -120,7 +120,7 @@ BEGIN
             )) j;
 
             INSERT INTO RR_REVALUE_LINES (
-                REVALUE_ID, LINE_NUM, ACCOUNT_COMBINATION,
+                REVALUE_ID, LINE_NUM, COMBO,
                 DESCRIPTION, COMMENT_TEXT, DR_AMOUNT, CR_AMOUNT
             )
             SELECT
