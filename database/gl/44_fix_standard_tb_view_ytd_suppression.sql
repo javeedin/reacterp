@@ -1,28 +1,22 @@
 -- ============================================================
--- RR_V_STANDARD_TB — Oracle view wrapper for the trial balance
--- ============================================================
--- Returns Opening | Debit | Credit | Closing for every
--- (ledger, period, account_combination, currency) in both
--- Accounted (functional) and Entered (transaction) currency.
+-- Fix: RR_V_STANDARD_TB zero-suppression drops mid-year rows
 --
--- No bind variables — filter on the view:
---   SELECT * FROM RR_V_STANDARD_TB
---   WHERE LEDGER_NAME    = 'BUIMERC LEDGER'
---     AND PERIOD_NAME    = 'Sep-23'       -- optional
---     AND FISCAL_YEAR    = 2024           -- optional
---     AND COMPANY        = '100'          -- optional
---     AND CURRENCY_CODE  = 'AED'          -- optional
---   ORDER BY FISCAL_YEAR, FISCAL_PERIOD, ACCOUNT;
+-- Problem:
+--   The WHERE clause kept only rows where BS_OPENING <> 0 OR PTD <> 0.
+--   A combination whose running balance nets to zero mid-year (e.g. it
+--   had a 750 carry-in from FY-prev, then equal Dr/Cr in FY-current)
+--   gets its BS_OPENING driven to 0 and has no further PTD activity.
+--   That row is zero-suppressed in later periods of the same fiscal year,
+--   even though it still carries a non-zero YTD_OPENING and cumulative
+--   YTD_DR / YTD_CR.  When a caller sums ytd_opening across combinations
+--   for a given period, those missing rows cause the total to drop
+--   inconsistently (e.g. 19,500 → 18,750 in Jul-25).
 --
--- KEY DIFFERENCES vs parameterized SQL:
---   1. Bind variables removed — filtering is the caller's job.
---   2. all_periods now SELECT DISTINCT LEDGER_NAME, PERIOD_NAME
---      (previously filtered to one ledger).
---   3. The CROSS JOIN becomes JOIN ON LEDGER_NAME so that each
---      ledger's combos are only paired with that same ledger's
---      periods — not with periods from every other ledger.
---   4. ORDER BY removed (invalid in a plain Oracle view;
---      callers can add their own ORDER BY).
+-- Fix:
+--   Extend the WHERE clause to also retain rows where YTD_OPENING,
+--   YTD_DR, or YTD_CR is non-zero.  This keeps every combination
+--   visible for the entire fiscal year once it has had any activity,
+--   ensuring consistent YTD sums regardless of the query period.
 -- ============================================================
 
 CREATE OR REPLACE VIEW RR_V_STANDARD_TB AS
@@ -31,8 +25,6 @@ WITH
 
 -- ────────────────────────────────────────────────────────────
 -- Step 1 — Account master (ACCOUNT_TYPE + ACCOUNT_DESC)
--- Used for enrichment only; accounts NOT in this list still
--- appear in the TB (see all_combos LEFT JOIN below).
 -- ────────────────────────────────────────────────────────────
 accounts AS (
     SELECT
@@ -45,11 +37,6 @@ accounts AS (
 
 -- ────────────────────────────────────────────────────────────
 -- Step 2 — All distinct account combinations ever used
---          (the "account spine", per ledger)
---
--- LEFT JOIN to accounts master: ALL combinations from journal
--- lines appear, even if segment-4 is not yet in the value set.
--- account_type defaults to 'E' (Expense) for unknown accounts.
 -- ────────────────────────────────────────────────────────────
 all_combos AS (
     SELECT DISTINCT
@@ -64,11 +51,6 @@ all_combos AS (
 
 -- ────────────────────────────────────────────────────────────
 -- Step 3 — All distinct periods per ledger
---
--- Pulled from the fiscal calendar (RR_V_GL_FISCAL_PERIODS) so
--- that periods with NO journal activity (e.g. May-26) are still
--- included in the dense grid. Each ledger is paired with every
--- calendar period via a CROSS JOIN on the distinct ledger list.
 -- ────────────────────────────────────────────────────────────
 all_periods AS (
     SELECT DISTINCT
@@ -90,7 +72,6 @@ all_periods AS (
 
 -- ────────────────────────────────────────────────────────────
 -- Step 4 — Actual PTD activity per (ledger, combination, period)
---          Both Accounted (functional) and Entered (transaction)
 -- ────────────────────────────────────────────────────────────
 ptd_actual AS (
     SELECT
@@ -116,15 +97,6 @@ ptd_actual AS (
 
 -- ────────────────────────────────────────────────────────────
 -- Step 5 — Dense PTD: every combination × every period
---          (within the same ledger)
---
--- JOIN on LEDGER_NAME (not CROSS JOIN) ensures combos from
--- ledger A are only paired with ledger A's periods, not with
--- periods from ledger B or C.
--- LEFT JOIN fills in actual PTD where activity exists; NVL
--- gives 0 for periods with no activity — so an account with
--- Jul-23 closing=100 and no Aug-23 lines still appears in
--- Aug-23 as opening=100, debit=0, credit=0, closing=100.
 -- ────────────────────────────────────────────────────────────
 ptd AS (
     SELECT
@@ -159,14 +131,12 @@ enriched AS (
         NVL(acc.ACCOUNT_TYPE, 'E')                                   AS ACCOUNT_TYPE,
         acc.ACCOUNT_DESC,
 
-        -- Fiscal year: from fiscal calendar view (collapsed to 1 row per period), else fallback
         CASE
             WHEN fp.FISCAL_YEAR IS NOT NULL
             THEN TO_NUMBER(fp.FISCAL_YEAR)
             ELSE EXTRACT(YEAR  FROM TO_DATE('01-'||p.PERIOD_NAME,'DD-Mon-RR'))
         END  AS FISCAL_YEAR,
 
-        -- Fiscal period (1 = first month of fiscal year)
         CASE
             WHEN fp.FISCAL_PERIOD IS NOT NULL
             THEN TO_NUMBER(fp.FISCAL_PERIOD)
@@ -175,15 +145,14 @@ enriched AS (
 
         p.PTD_DR,
         p.PTD_CR,
-        p.PTD_DR - p.PTD_CR          AS PTD_NET,
+        p.PTD_DR - p.PTD_CR                      AS PTD_NET,
         p.PTD_ENTERED_DR,
         p.PTD_ENTERED_CR,
-        p.PTD_ENTERED_DR - p.PTD_ENTERED_CR  AS PTD_ENTERED_NET
+        p.PTD_ENTERED_DR - p.PTD_ENTERED_CR      AS PTD_ENTERED_NET
 
     FROM ptd p
     LEFT JOIN accounts acc
       ON acc.ACCOUNT = TRIM(REGEXP_SUBSTR(p.ACCOUNT_COMBINATION,'[^-]+',1,4))
-    -- Collapse fiscal calendar to one row per PERIOD_NAME to prevent fan-out
     LEFT JOIN (
         SELECT
             PERIOD_NAME,
@@ -202,22 +171,17 @@ enriched AS (
 calc AS (
     SELECT
         e.*,
-        -- B/S (A/L/O): cumulative net of ALL history before this period
-        -- Carries forward across fiscal years — no FISCAL_YEAR in PARTITION
         NVL(SUM(e.PTD_NET) OVER (
             PARTITION BY e.LEDGER_NAME, e.ACCOUNT_COMBINATION, e.CURRENCY_CODE
             ORDER BY (e.FISCAL_YEAR * 100 + e.FISCAL_PERIOD)
             ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
         ), 0)  AS BS_OPENING,
-        -- P&L (R/E): cumulative net within the SAME fiscal year before this period
-        -- Resets to zero at the start of each fiscal year
         NVL(SUM(e.PTD_NET) OVER (
             PARTITION BY e.LEDGER_NAME, e.ACCOUNT_COMBINATION, e.CURRENCY_CODE,
                          e.FISCAL_YEAR
             ORDER BY e.FISCAL_PERIOD
             ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
         ), 0)  AS PL_OPENING,
-        -- Entered currency equivalents (same partition logic)
         NVL(SUM(e.PTD_ENTERED_NET) OVER (
             PARTITION BY e.LEDGER_NAME, e.ACCOUNT_COMBINATION, e.CURRENCY_CODE
             ORDER BY (e.FISCAL_YEAR * 100 + e.FISCAL_PERIOD)
@@ -234,26 +198,10 @@ calc AS (
 
 -- ────────────────────────────────────────────────────────────
 -- Step 8 — YTD columns via window functions
---
--- YTD Opening:
---   B/S → BS_OPENING at the first period of the fiscal year
---         (balance carried in from prior fiscal year; fixed for the year)
---   P&L → always 0 (income-statement accounts reset each year)
---
--- YTD Debit / Credit:
---   Cumulative Dr / Cr from fiscal period 1 through the current period.
---
--- YTD Closing (not stored — identical to PTD Closing):
---   Proof B/S: YTD_OPENING + (YTD_DR − YTD_CR)
---            = BS_OPEN(p1) + cumulative_net_year
---            = BS_OPEN(current) + PTD_NET  ← same as PTD CLOSING ✓
---   Proof P&L: 0 + (YTD_DR − YTD_CR)
---            = PL_OPEN + PTD_NET           ← same as PTD CLOSING ✓
 -- ────────────────────────────────────────────────────────────
 ytd AS (
     SELECT
         c.*,
-        -- YTD Opening (accounted)
         CASE WHEN c.ACCOUNT_TYPE IN ('A','L','O')
              THEN FIRST_VALUE(c.BS_OPENING) OVER (
                      PARTITION BY c.LEDGER_NAME, c.ACCOUNT_COMBINATION, c.CURRENCY_CODE,
@@ -263,21 +211,18 @@ ytd AS (
                   )
              ELSE 0
         END  AS YTD_OPENING,
-        -- YTD Debit (accounted)
         SUM(c.PTD_DR) OVER (
             PARTITION BY c.LEDGER_NAME, c.ACCOUNT_COMBINATION, c.CURRENCY_CODE,
                          c.FISCAL_YEAR
             ORDER BY c.FISCAL_PERIOD
             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
         )  AS YTD_DR,
-        -- YTD Credit (accounted)
         SUM(c.PTD_CR) OVER (
             PARTITION BY c.LEDGER_NAME, c.ACCOUNT_COMBINATION, c.CURRENCY_CODE,
                          c.FISCAL_YEAR
             ORDER BY c.FISCAL_PERIOD
             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
         )  AS YTD_CR,
-        -- YTD Opening (entered)
         CASE WHEN c.ACCOUNT_TYPE IN ('A','L','O')
              THEN FIRST_VALUE(c.BS_ENTERED_OPENING) OVER (
                      PARTITION BY c.LEDGER_NAME, c.ACCOUNT_COMBINATION, c.CURRENCY_CODE,
@@ -287,14 +232,12 @@ ytd AS (
                   )
              ELSE 0
         END  AS YTD_ENTERED_OPENING,
-        -- YTD Debit (entered)
         SUM(c.PTD_ENTERED_DR) OVER (
             PARTITION BY c.LEDGER_NAME, c.ACCOUNT_COMBINATION, c.CURRENCY_CODE,
                          c.FISCAL_YEAR
             ORDER BY c.FISCAL_PERIOD
             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
         )  AS YTD_ENTERED_DR,
-        -- YTD Credit (entered)
         SUM(c.PTD_ENTERED_CR) OVER (
             PARTITION BY c.LEDGER_NAME, c.ACCOUNT_COMBINATION, c.CURRENCY_CODE,
                          c.FISCAL_YEAR
@@ -305,14 +248,13 @@ ytd AS (
 )
 
 -- ────────────────────────────────────────────────────────────
--- Final — Output all non-zero rows
+-- Final — Output rows
 --
--- Zero suppression: exclude rows where opening AND closing AND
--- PTD are all zero (periods before the account's first entry).
---
--- Callers filter by LEDGER_NAME, PERIOD_NAME, FISCAL_YEAR,
--- COMPANY, CURRENCY_CODE with a WHERE clause on this view.
--- ORDER BY is left to the caller.
+-- Zero suppression extended to retain rows that have YTD activity
+-- or a YTD carry-in balance, so that a combination whose PTD
+-- balance nets to zero mid-year is not silently dropped for the
+-- remaining periods of the fiscal year.  Without this retention
+-- the summed YTD_OPENING / YTD_DR / YTD_CR varies by period.
 -- ────────────────────────────────────────────────────────────
 SELECT
     y.LEDGER_NAME,
@@ -326,7 +268,6 @@ SELECT
     y.ACCOUNT_TYPE,
     y.ACCOUNT_DESC,
 
-    -- ── PTD columns ──────────────────────────────────────────
     CASE WHEN y.ACCOUNT_TYPE IN ('A','L','O')
          THEN y.BS_OPENING ELSE y.PL_OPENING END                    AS OPENING,
 
@@ -337,7 +278,6 @@ SELECT
          THEN y.BS_OPENING + y.PTD_NET
          ELSE y.PL_OPENING + y.PTD_NET END                          AS CLOSING,
 
-    -- ── PTD entered currency ──────────────────────────────────
     CASE WHEN y.ACCOUNT_TYPE IN ('A','L','O')
          THEN y.BS_ENTERED_OPENING ELSE y.PL_ENTERED_OPENING END    AS ENTERED_OPENING,
 
@@ -348,32 +288,27 @@ SELECT
          THEN y.BS_ENTERED_OPENING + y.PTD_ENTERED_NET
          ELSE y.PL_ENTERED_OPENING + y.PTD_ENTERED_NET END          AS ENTERED_CLOSING,
 
-    -- ── YTD columns (accounted) ───────────────────────────────
-    -- Opening = balance at start of fiscal year (B/S carried-in, P&L = 0)
-    -- Debit / Credit = cumulative within fiscal year through this period
-    -- Closing = same as PTD CLOSING (see proof in Step 8 comment)
     y.YTD_OPENING                                                   AS YTD_OPENING,
     y.YTD_DR                                                        AS YTD_DEBIT,
     y.YTD_CR                                                        AS YTD_CREDIT,
 
-    -- ── YTD columns (entered currency) ───────────────────────
     y.YTD_ENTERED_OPENING                                           AS YTD_ENTERED_OPENING,
     y.YTD_ENTERED_DR                                                AS YTD_ENTERED_DEBIT,
     y.YTD_ENTERED_CR                                                AS YTD_ENTERED_CREDIT
 
 FROM ytd y
 WHERE (
-    -- PTD-level suppression: exclude completely blank rows
+    -- PTD-level: keep rows with a non-zero PTD opening or activity
     CASE WHEN y.ACCOUNT_TYPE IN ('A','L','O') THEN y.BS_OPENING ELSE y.PL_OPENING END <> 0
     OR y.PTD_DR <> 0
     OR y.PTD_CR <> 0
-    -- YTD-level retention: keep rows alive for the full fiscal year if they had
-    -- a carry-in balance or any Dr/Cr activity within the year.
-    -- Without this, a combination whose running balance nets to zero mid-year
-    -- gets zero-suppressed in later periods, causing the summed YTD_OPENING,
-    -- YTD_DR, and YTD_CR to drop inconsistently when queried period by period.
+    -- YTD-level retention (the fix): keep rows alive for the entire fiscal year
+    -- once they have a carry-in balance or any cumulative Dr/Cr within the year.
+    -- This prevents a combination that nets to zero mid-year from disappearing
+    -- and causing the summed YTD_OPENING / YTD_DR / YTD_CR to drop inconsistently.
     OR y.YTD_OPENING <> 0
     OR y.YTD_DR      <> 0
     OR y.YTD_CR      <> 0
 )
 ;
+/
