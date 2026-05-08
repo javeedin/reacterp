@@ -3940,7 +3940,7 @@ const TrialBalance: React.FC = () => {
     const columns = [
       {
         title: 'Type', dataIndex: 'account_type', key: 'account_type',
-        width: 62, align: 'center' as const,
+        width: 55, align: 'center' as const,
         render: (t: string) => (
           <Tag color={typeTagColor[t] || 'default'} style={{ fontSize: 10, margin: 0 }}>
             {accountTypeLabel[t] || t}
@@ -3948,7 +3948,7 @@ const TrialBalance: React.FC = () => {
         ),
       },
       {
-        title: <span style={{ color: '#d46b08' }}>Account</span>, dataIndex: 'account', key: 'account', width: 160,
+        title: <span style={{ color: '#d46b08' }}>Account</span>, dataIndex: 'account', key: 'account', width: 110,
         sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.account.localeCompare(b.account),
         defaultSortOrder: 'ascend' as const,
         render: (v: string) => (
@@ -3957,7 +3957,7 @@ const TrialBalance: React.FC = () => {
       },
       {
         title: 'Description', dataIndex: 'account_desc', key: 'account_desc',
-        width: 200, ellipsis: true,
+        width: 180, ellipsis: true,
         render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
       },
       {
@@ -3965,25 +3965,25 @@ const TrialBalance: React.FC = () => {
         children: [
           {
             title: 'YTD Opening', dataIndex: 'ytd_opening', key: 'ytd_opening',
-            align: 'right' as const, width: 130,
+            align: 'right' as const, width: 115,
             sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.ytd_opening - b.ytd_opening,
             render: fmtNet,
           },
           {
             title: 'YTD Debit', dataIndex: 'ytd_debit', key: 'ytd_debit',
-            align: 'right' as const, width: 130,
+            align: 'right' as const, width: 115,
             sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.ytd_debit - b.ytd_debit,
             render: fmtDr,
           },
           {
             title: 'YTD Credit', dataIndex: 'ytd_credit', key: 'ytd_credit',
-            align: 'right' as const, width: 130,
+            align: 'right' as const, width: 115,
             sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.ytd_credit - b.ytd_credit,
             render: fmtCr,
           },
           {
             title: 'Closing', dataIndex: 'closing', key: 'closing',
-            align: 'right' as const, width: 130,
+            align: 'right' as const, width: 115,
             sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.closing - b.closing,
             render: fmtNet,
           },
@@ -3995,7 +3995,7 @@ const TrialBalance: React.FC = () => {
         children: [
           {
             title: 'YTD Opening', dataIndex: 'ytd_entered_opening', key: 'ytd_entered_opening',
-            align: 'right' as const, width: 130,
+            align: 'right' as const, width: 115,
             sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.ytd_entered_opening - b.ytd_entered_opening,
             render: fmtNet,
             onHeaderCell: () => ({ style: { background: '#e6fffb' } }),
@@ -4003,7 +4003,7 @@ const TrialBalance: React.FC = () => {
           },
           {
             title: 'YTD Debit', dataIndex: 'ytd_entered_debit', key: 'ytd_entered_debit',
-            align: 'right' as const, width: 130,
+            align: 'right' as const, width: 115,
             sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.ytd_entered_debit - b.ytd_entered_debit,
             render: fmtDr,
             onHeaderCell: () => ({ style: { background: '#e6fffb' } }),
@@ -4011,7 +4011,7 @@ const TrialBalance: React.FC = () => {
           },
           {
             title: 'YTD Credit', dataIndex: 'ytd_entered_credit', key: 'ytd_entered_credit',
-            align: 'right' as const, width: 130,
+            align: 'right' as const, width: 115,
             sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.ytd_entered_credit - b.ytd_entered_credit,
             render: fmtCr,
             onHeaderCell: () => ({ style: { background: '#e6fffb' } }),
@@ -4019,7 +4019,7 @@ const TrialBalance: React.FC = () => {
           },
           {
             title: 'Closing', dataIndex: 'entered_closing', key: 'entered_closing',
-            align: 'right' as const, width: 130,
+            align: 'right' as const, width: 115,
             sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.entered_closing - b.entered_closing,
             render: fmtNet,
             onHeaderCell: () => ({ style: { background: '#e6fffb' } }),
@@ -4248,7 +4248,7 @@ const TrialBalance: React.FC = () => {
           rowKey="account"
           size="small"
           pagination={false}
-          scroll={{ x: 1600 }}
+          scroll={{ x: 'max-content' }}
           summary={summaryRow}
           rowSelection={{
             type: 'checkbox',
