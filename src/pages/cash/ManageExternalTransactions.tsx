@@ -165,7 +165,7 @@ const ExternalTxnForm: React.FC<{
   onSave: () => void;
   onCancel: () => void;
   onPayeeCreated: (newOption: PayeeOption) => void;
-  onCreateAccounting?: (txn: ExternalTxnRecord) => void;
+  onCreateAccounting?: (txns: ExternalTxnRecord[]) => void;
 }> = ({ initialValues, bankAccounts, businessUnits, bankAccountMap, bankAccountCurrencyMap, buBankMap, buCompanyMap, payeeOptions, onSave, onCancel, onPayeeCreated, onCreateAccounting }) => {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
@@ -194,6 +194,7 @@ const ExternalTxnForm: React.FC<{
   const [attachUploading, setAttachUploading] = useState(false);
   const [saved, setSaved] = useState(false);
   const [savedExtId, setSavedExtId] = useState<number | null>(null);
+  const [savedExtIds, setSavedExtIds] = useState<number[]>([]);
   const [deleting, setDeleting] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfVisible, setPdfVisible] = useState(false);
@@ -304,7 +305,7 @@ const ExternalTxnForm: React.FC<{
       }
     } else {
       form.resetFields();
-      form.setFieldsValue({ transactionDate: dayjs(), transactionDirection: 'CR', transactionType: 'External Transaction' });
+      form.setFieldsValue({ transactionDate: dayjs(), valueDate: dayjs(), transactionDirection: 'CR', transactionType: 'External Transaction' });
       setTxnDirection('CR');
       setAssetAcctDesc('');
       setOffsetAcctDesc('');
@@ -547,6 +548,7 @@ const ExternalTxnForm: React.FC<{
     };
     let successCount = 0;
     let savedId: any = null;
+    const allSavedIds: number[] = [];
     for (let i = 0; i < extTxnLines.length; i++) {
       const line = extTxnLines[i];
       const payload = {
@@ -567,6 +569,7 @@ const ExternalTxnForm: React.FC<{
         if (data.status === 'success') {
           successCount++;
           if (i === 0) savedId = data.externalTransactionId ?? null;
+          if (data.externalTransactionId) allSavedIds.push(data.externalTransactionId);
           // Upload attachments on first line
           if (i === 0 && data.externalTransactionId && attachments.length > 0) {
             for (const att of attachments.filter(a => !a.id)) {
@@ -593,6 +596,7 @@ const ExternalTxnForm: React.FC<{
     message.success(`${successCount} transaction(s) created.`);
     setSaved(true);
     setSavedExtId(savedId);
+    setSavedExtIds(allSavedIds);
   };
 
   const handleApiOpen = async () => {
@@ -1290,15 +1294,16 @@ const ExternalTxnForm: React.FC<{
               style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
               onClick={() => {
                 const values = form.getFieldsValue();
-                const txnRecord: ExternalTxnRecord = {
-                  externalTransactionId: savedExtId ?? initialValues?.externalTransactionId ?? 0,
+                const ids = savedExtIds.length > 0 ? savedExtIds : (savedExtId ? [savedExtId] : (initialValues?.externalTransactionId ? [initialValues.externalTransactionId] : []));
+                const records: ExternalTxnRecord[] = ids.map((extId, i) => ({
+                  externalTransactionId: extId,
                   transactionId:         initialValues?.transactionId ?? 0,
                   transactionDate:       values.transactionDate?.format('YYYY-MM-DD') ?? '',
                   valueDate:             values.valueDate?.format('YYYY-MM-DD') ?? '',
                   clearedDate:           '',
-                  amount:                extTxnLines[0].amount ?? 0,
+                  amount:                extTxnLines[i]?.amount ?? 0,
                   currencyCode:          values.currencyCode ?? '',
-                  description:           extTxnLines[0].description ?? '',
+                  description:           extTxnLines[i]?.description ?? '',
                   referenceText:         values.referenceText ?? '',
                   source:                'ORA_MAN',
                   status:                initialValues?.status ?? 'UNR',
@@ -1308,7 +1313,7 @@ const ExternalTxnForm: React.FC<{
                   businessUnitName:      values.businessUnitName ?? '',
                   legalEntityName:       initialValues?.legalEntityName ?? '',
                   assetAccountCombination:  values.assetAccountCombination ?? '',
-                  offsetAccountCombination: extTxnLines[0].offsetAccount ?? '',
+                  offsetAccountCombination: extTxnLines[i]?.offsetAccount ?? '',
                   bankConversionRate:    values.bankConversionRate ?? 0,
                   bankConversionRateType: values.bankConversionRateType ?? '',
                   transferId:            0,
@@ -1324,8 +1329,8 @@ const ExternalTxnForm: React.FC<{
                   paperDocumentNumber:   values.paperDocumentNumber,
                   payeeName:             values.payeeName,
                   payeeId:               values.payeeId,
-                };
-                onCreateAccounting(txnRecord);
+                }));
+                onCreateAccounting(records);
               }}
             >
               Create Accounting
@@ -1347,6 +1352,7 @@ const ExternalTxnForm: React.FC<{
                 setSelectedBank(undefined);
                 setSaved(false);
                 setSavedExtId(null);
+                setSavedExtIds([]);
                 setExtTxnLines([{ key: 0, amount: undefined, description: '', offsetAccount: '', offsetDesc: '' }]);
                 setAttachments([]);
                 setTimeout(() => {
@@ -1540,7 +1546,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   const [singleAcctProgress, setSingleAcctProgress]   = useState<BankAcctProgressRow[]>([]);
   const [singleAcctRunning, setSingleAcctRunning]     = useState(false);
   const [singleAcctDone, setSingleAcctDone]           = useState(false);
-  const [singleAcctTxnRecord, setSingleAcctTxnRecord] = useState<ExternalTxnRecord | null>(null);
+  const [singleAcctTxnRecords, setSingleAcctTxnRecords] = useState<ExternalTxnRecord[]>([]);
 
   // ── View Accounting modal state ───────────────────────────────────────────
   const [viewAcctOpen, setViewAcctOpen]   = useState(false);
@@ -1965,30 +1971,34 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   };
 
   // ── Single-row Create Accounting ──────────────────────────────────────────
-  const openSingleAcctModal = (txn: ExternalTxnRecord) => {
-    if (!txn.assetAccountCombination || !txn.offsetAccountCombination) {
-      message.warning('Missing cash/offset account — cannot create accounting.');
+  const openSingleAcctModal = (txnOrTxns: ExternalTxnRecord | ExternalTxnRecord[]) => {
+    const txnArray = Array.isArray(txnOrTxns) ? txnOrTxns : [txnOrTxns];
+    const missing = txnArray.filter(t => !t.assetAccountCombination || !t.offsetAccountCombination);
+    if (missing.length > 0) {
+      message.warning('Some transactions are missing cash/offset accounts — cannot create accounting.');
       return;
     }
-    const date = txn.transactionDate || txn.valueDate || dayjs().format('YYYY-MM-DD');
-    const absAmount = Math.abs(txn.amount ?? 0);
-    const direction = txn.transactionDirection ?? ((txn.amount ?? 0) >= 0 ? 'DR' : 'CR');
-    const drAccount = direction === 'DR' ? txn.assetAccountCombination : txn.offsetAccountCombination;
-    const crAccount = direction === 'DR' ? txn.offsetAccountCombination : txn.assetAccountCombination;
-    const row: BankAcctProgressRow = {
-      extTxnId:   txn.externalTransactionId,
-      txnDate:    date,
-      periodName: derivePeriodName(new Date(date)),
-      amount:     absAmount,
-      currency:   txn.currencyCode || 'AED',
-      drAccount,
-      crAccount,
-      bu:         txn.businessUnitName || '',
-      status:     'pending',
-    };
-    setSingleAcctProgress([row]);
+    const rows: BankAcctProgressRow[] = txnArray.map(txn => {
+      const date = txn.transactionDate || txn.valueDate || dayjs().format('YYYY-MM-DD');
+      const absAmount = Math.abs(txn.amount ?? 0);
+      const direction = txn.transactionDirection ?? ((txn.amount ?? 0) >= 0 ? 'DR' : 'CR');
+      const drAccount = direction === 'DR' ? txn.assetAccountCombination : txn.offsetAccountCombination;
+      const crAccount = direction === 'DR' ? txn.offsetAccountCombination : txn.assetAccountCombination;
+      return {
+        extTxnId:   txn.externalTransactionId,
+        txnDate:    date,
+        periodName: derivePeriodName(new Date(date)),
+        amount:     absAmount,
+        currency:   txn.currencyCode || 'AED',
+        drAccount,
+        crAccount,
+        bu:         txn.businessUnitName || '',
+        status:     'pending' as const,
+      };
+    });
+    setSingleAcctProgress(rows);
     setSingleAcctDone(false);
-    setSingleAcctTxnRecord(txn);
+    setSingleAcctTxnRecords(txnArray);
     setSingleAcctModalOpen(true);
   };
 
@@ -2001,7 +2011,8 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       if (row.status === 'skipped' || row.status === 'error') continue;
       updateRow(row.extTxnId, { status: 'running' });
       const txn = transactions.find(t => t.externalTransactionId === row.extTxnId)
-        ?? (singleAcctTxnRecord?.externalTransactionId === row.extTxnId ? singleAcctTxnRecord : null);
+        ?? singleAcctTxnRecords.find(t => t.externalTransactionId === row.extTxnId)
+        ?? null;
       if (!txn) { updateRow(row.extTxnId, { status: 'error', message: 'Transaction not found' }); continue; }
       try {
         const ledger = await fetchLedgerByBusinessUnit(txn.businessUnitName);
@@ -2584,7 +2595,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           onPayeeCreated={(newOpt) => setPayeeOptions(prev => [...prev, newOpt].sort((a, b) => a.label.localeCompare(b.label)))}
           onSave={() => { closeTab(t.key); handleSearch(); loadLovs(); }}
           onCancel={() => closeTab(t.key)}
-          onCreateAccounting={openSingleAcctModal}
+          onCreateAccounting={(txns) => openSingleAcctModal(txns)}
         />
       ),
       closable: false,
