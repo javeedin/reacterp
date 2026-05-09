@@ -17,6 +17,7 @@ import {
   LoadingOutlined,
   CloseCircleOutlined,
   BugOutlined,
+  PlayCircleOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -244,6 +245,34 @@ const ManageRevaluation: React.FC = () => {
   const [debugPayloads, setDebugPayloads] = useState<{
     step: string; method: string; url: string; payload: any;
   }[]>([]);
+  const [debugRunning,  setDebugRunning]  = useState(false);
+  const [debugResults,  setDebugResults]  = useState<{
+    status: number; ok: boolean; data: any;
+  }[]>([]);
+
+  const handleRunDebug = async () => {
+    setDebugRunning(true);
+    setDebugResults([]);
+    const results: { status: number; ok: boolean; data: any }[] = [];
+    for (const p of debugPayloads) {
+      try {
+        const res = await fetch(p.url, {
+          method: p.method,
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: p.method !== 'GET' ? JSON.stringify(p.payload) : undefined,
+        });
+        const data = await res.json().catch(() => ({}));
+        results.push({ status: res.status, ok: res.ok, data });
+        setDebugResults([...results]);
+        if (!res.ok) break;
+      } catch (e: any) {
+        results.push({ status: 0, ok: false, data: { error: e.message } });
+        setDebugResults([...results]);
+        break;
+      }
+    }
+    setDebugRunning(false);
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -701,6 +730,7 @@ const ManageRevaluation: React.FC = () => {
   const handleCreateAccountingDebug = async (id: number) => {
     setDebugLoading(true);
     setDebugPayloads([]);
+    setDebugResults([]);
     setDebugVisible(true);
     try {
       // Load detail
@@ -1472,58 +1502,98 @@ const ManageRevaluation: React.FC = () => {
           </Space>
         }
         width={860}
-        footer={<Button onClick={() => setDebugVisible(false)}>Close</Button>}
+        footer={
+          <Space>
+            <Button onClick={() => setDebugVisible(false)}>Close</Button>
+            <Button
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              loading={debugRunning}
+              disabled={debugPayloads.length === 0 || debugLoading}
+              onClick={handleRunDebug}
+            >
+              Run
+            </Button>
+          </Space>
+        }
         destroyOnClose
       >
         <Spin spinning={debugLoading} tip="Building payloads…">
           {debugPayloads.length === 0 && !debugLoading && (
             <Alert type="info" showIcon message="No payloads generated yet." />
           )}
-          {debugPayloads.map((p, i) => (
-            <div key={i} style={{ marginBottom: 20, border: '1px solid #d9d9d9', borderRadius: 6, overflow: 'hidden' }}>
-              {/* Header */}
-              <div style={{
-                background: '#f0f5ff', borderBottom: '1px solid #d9d9d9',
-                padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 8,
-              }}>
-                <Tag color="blue" style={{ fontFamily: 'monospace', margin: 0 }}>{p.method}</Tag>
-                <Text strong style={{ fontSize: 12 }}>{p.step}</Text>
-              </div>
-              {/* URL */}
-              <div style={{ padding: '4px 12px', background: '#fafafa', borderBottom: '1px solid #f0f0f0' }}>
-                <Text style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: '#595959' }}>
-                  {p.url}
-                </Text>
-              </div>
-              {/* JSON Payload */}
-              <div style={{ padding: '8px 12px' }}>
-                <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Request Body</Text>
-                <pre style={{
-                  margin: 0, fontSize: 11, fontFamily: 'monospace',
-                  background: '#f6ffed', padding: 8, borderRadius: 4,
-                  maxHeight: 300, overflowY: 'auto',
-                  border: '1px solid #b7eb8f',
-                  whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+          {debugPayloads.map((p, i) => {
+            const result = debugResults[i];
+            return (
+              <div key={i} style={{ marginBottom: 20, border: `1px solid ${result ? (result.ok ? '#52c41a' : '#ff4d4f') : '#d9d9d9'}`, borderRadius: 6, overflow: 'hidden' }}>
+                {/* Header */}
+                <div style={{
+                  background: result ? (result.ok ? '#f6ffed' : '#fff2f0') : '#f0f5ff',
+                  borderBottom: '1px solid #d9d9d9',
+                  padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 8,
                 }}>
-                  {JSON.stringify(p.payload, null, 2)}
-                </pre>
+                  <Tag color="blue" style={{ fontFamily: 'monospace', margin: 0 }}>{p.method}</Tag>
+                  <Text strong style={{ fontSize: 12 }}>{p.step}</Text>
+                  {result && (
+                    <Tag color={result.ok ? 'success' : 'error'} style={{ marginLeft: 'auto' }}>
+                      {result.ok ? '✓' : '✗'} HTTP {result.status}
+                    </Tag>
+                  )}
+                  {debugRunning && !result && i === debugResults.length && (
+                    <Tag color="processing" style={{ marginLeft: 'auto' }}>Running…</Tag>
+                  )}
+                </div>
+                {/* URL */}
+                <div style={{ padding: '4px 12px', background: '#fafafa', borderBottom: '1px solid #f0f0f0' }}>
+                  <Text style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: '#595959' }}>
+                    {p.url}
+                  </Text>
+                </div>
+                {/* Request Body */}
+                <div style={{ padding: '8px 12px', borderBottom: result ? '1px solid #f0f0f0' : undefined }}>
+                  <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Request Body</Text>
+                  <pre style={{
+                    margin: 0, fontSize: 11, fontFamily: 'monospace',
+                    background: '#f6ffed', padding: 8, borderRadius: 4,
+                    maxHeight: 200, overflowY: 'auto',
+                    border: '1px solid #b7eb8f',
+                    whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                  }}>
+                    {JSON.stringify(p.payload, null, 2)}
+                  </pre>
+                </div>
+                {/* Response */}
+                {result && (
+                  <div style={{ padding: '8px 12px' }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Response</Text>
+                    <pre style={{
+                      margin: 0, fontSize: 11, fontFamily: 'monospace',
+                      background: result.ok ? '#f6ffed' : '#fff2f0', padding: 8, borderRadius: 4,
+                      maxHeight: 200, overflowY: 'auto',
+                      border: `1px solid ${result.ok ? '#b7eb8f' : '#ffccc7'}`,
+                      whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                    }}>
+                      {JSON.stringify(result.data, null, 2)}
+                    </pre>
+                  </div>
+                )}
+                {/* Copy button */}
+                <div style={{ padding: '4px 12px 8px', display: 'flex', gap: 8 }}>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      navigator.clipboard.writeText(
+                        `${p.method} ${p.url}\n\n${JSON.stringify(p.payload, null, 2)}`
+                      );
+                      message.success('Copied!');
+                    }}
+                  >
+                    Copy
+                  </Button>
+                </div>
               </div>
-              {/* Copy button */}
-              <div style={{ padding: '4px 12px 8px', display: 'flex', gap: 8 }}>
-                <Button
-                  size="small"
-                  onClick={() => {
-                    navigator.clipboard.writeText(
-                      `${p.method} ${p.url}\n\n${JSON.stringify(p.payload, null, 2)}`
-                    );
-                    message.success('Copied!');
-                  }}
-                >
-                  Copy
-                </Button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </Spin>
       </Modal>
 
