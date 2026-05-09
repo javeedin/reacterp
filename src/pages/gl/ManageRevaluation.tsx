@@ -16,6 +16,7 @@ import {
   EyeOutlined,
   LoadingOutlined,
   CloseCircleOutlined,
+  BugOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
@@ -234,6 +235,13 @@ const ManageRevaluation: React.FC = () => {
     httpStatus: number | null; rawResponse: string;
   } | null>(null);
   const [acctFlowRetrying, setAcctFlowRetrying] = useState(false);
+
+  // Debug / dry-run preview modal
+  const [debugVisible,  setDebugVisible]  = useState(false);
+  const [debugLoading,  setDebugLoading]  = useState(false);
+  const [debugPayloads, setDebugPayloads] = useState<{
+    step: string; method: string; url: string; payload: any;
+  }[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -687,6 +695,216 @@ const ManageRevaluation: React.FC = () => {
     }
   };
 
+  // ── Debug / dry-run: build all payloads without sending ────────────────────
+  const handleCreateAccountingDebug = async (id: number) => {
+    setDebugLoading(true);
+    setDebugPayloads([]);
+    setDebugVisible(true);
+    try {
+      // Load detail
+      let d: RevalDetail | null = detail?.revalueId === id ? detail : null;
+      if (!d) {
+        const res  = await fetch(`${ORDS_BASE}/${APEX_DB_CONFIG.endpoints.revaluation}/${id}`);
+        const text = await res.text();
+        const r    = JSON.parse(text);
+        d = {
+          revalueId:     r.revalueId     ?? r.revalue_id,
+          ledgerId:      r.ledgerId      ?? r.ledger_id ?? null,
+          ledgerName:    r.ledgerName    ?? r.ledger_name ?? '',
+          periodName:    r.periodName    ?? r.period_name ?? '',
+          account:       r.account       ?? '',
+          accountDesc:   r.accountDesc   ?? r.account_desc ?? '',
+          functionalCcy: r.baseCurrency  ?? r.base_currency ?? r.functionalCcy ?? r.functional_ccy ?? '',
+          gainAccount:   r.gainAccount   ?? r.gain_account ?? '',
+          lossAccount:   r.lossAccount   ?? r.loss_account ?? '',
+          totalGain:     Number(r.totalGain  ?? r.total_gain  ?? 0),
+          totalLoss:     Number(r.totalLoss  ?? r.total_loss  ?? 0),
+          status:        r.status        ?? 'DRAFT',
+          glBatchId:     r.glBatchId     ?? r.gl_batch_id ?? null,
+          glBatchName:   r.glBatchName   ?? r.gl_batch_name ?? null,
+          notes:         r.notes         ?? null,
+          createdDate:   r.createdDate   ?? r.created_date ?? '',
+          createdBy:     r.createdBy     ?? r.created_by ?? '',
+          lineCount:     Number(r.lineCount ?? r.line_count ?? 0),
+          ccyRows: (r.ccyRows || r.ccy_rows || []).map((c: any) => ({
+            ccyId: c.ccyId ?? c.ccy_id, currencyCode: c.currencyCode ?? c.currency_code ?? '',
+            entClosing: Number(c.entClosing ?? c.ent_closing ?? 0),
+            acctClosing: Number(c.acctClosing ?? c.acct_closing ?? 0),
+            bookRate: Number(c.bookRate ?? c.book_rate ?? 0),
+            newRate: Number(c.newRate ?? c.new_rate ?? 0),
+            newAcctValue: Number(c.newAcctValue ?? c.new_acct_value ?? 0),
+            revalAmt: Number(c.revalAmt ?? c.reval_amt ?? 0),
+            isGain: Number(c.isGain ?? c.is_gain ?? 0),
+          })),
+          lines: (r.lines || []).map((l: any) => ({
+            lineId: l.lineId ?? l.line_id, lineNum: l.lineNum ?? l.line_num,
+            combo: l.combo ?? '', description: l.description ?? '',
+            commentText: l.commentText ?? l.comment_text ?? '',
+            drAmount: Number(l.drAmount ?? l.dr_amount ?? 0),
+            crAmount: Number(l.crAmount ?? l.cr_amount ?? 0),
+          })),
+        };
+      }
+
+      const periodName   = d.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '');
+      const foreignCcys  = new Set(d.ccyRows.map((c: any) => c.currencyCode).filter(Boolean));
+      const currency     = (d.functionalCcy && !foreignCcys.has(d.functionalCcy)) ? d.functionalCcy : 'AED';
+      const createdBy    = d.createdBy || 'SYSTEM';
+      const MONTHS: Record<string, number> = {
+        Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11,
+      };
+      const [mon, yr] = periodName.split('-');
+      const periodLastDay = (mon && yr && MONTHS[mon] !== undefined)
+        ? new Date(2000 + parseInt(yr, 10), MONTHS[mon] + 1, 0).toISOString().split('T')[0]
+        : new Date().toISOString().split('T')[0];
+
+      const payloads: { step: string; method: string; url: string; payload: any }[] = [];
+
+      // ── Step 1: SLA create ────────────────────────────────────────────────────
+      const slaUrl     = `${ORDS_BASE}/sla/accounting/create`;
+      const slaPayload = {
+        header: {
+          moduleName: 'GL', sourceTable: 'RR_REVALUE_HEADER', sourceId: id,
+          sourceNumber: `REVAL-${id}`, sourceType: 'Revaluation',
+          eventTypeCode: 'GL_REVALUATION', eventDate: periodLastDay,
+          accountingDate: periodLastDay, periodName,
+          ledgerId: d.ledgerId || 0, ledgerName: d.ledgerName || '',
+          currencyCode: currency, ledgerCurrency: currency,
+          exchangeRate: 1, exchangeRateType: 'User',
+          description: `FX Revaluation – ${d.accountDesc || d.account} – ${periodName}`,
+          createdBy,
+        },
+        lines: d.lines.map((l, idx) => ({
+          lineNumber: l.lineNum || idx + 1,
+          lineType: l.drAmount > 0 ? 'DR' : 'CR',
+          accountingClass: 'Revaluation',
+          accountCombination: l.combo,
+          enteredDr: l.drAmount || 0, enteredCr: l.crAmount || 0,
+          accountedDr: l.drAmount || 0, accountedCr: l.crAmount || 0,
+          currencyCode: currency, exchangeRate: 1,
+          description: l.description || `Revaluation – ${d!.account}`,
+          sourceLineId: l.lineId || idx + 1, sourceLineNumber: l.lineNum || idx + 1,
+        })),
+      };
+      payloads.push({ step: 'Step 1 — POST SLA Accounting', method: 'POST', url: slaUrl, payload: slaPayload });
+
+      // ── Step 2: GL journal create — one per active CCY ────────────────────────
+      const activeCcyRows = d.ccyRows.filter(c => c.revalAmt !== 0 && c.newRate !== 0);
+      const acctLabel     = d.accountDesc || d.account;
+      const journalDesc   = `FX Revaluation – ${acctLabel} – ${periodName}`;
+
+      activeCcyRows.forEach((ccyRow, idx) => {
+        const l1      = d!.lines[idx * 2];
+        const l2      = d!.lines[idx * 2 + 1];
+        if (!l1 || !l2) return;
+
+        const fCcy    = ccyRow.currencyCode || currency;
+        const newRate = ccyRow.newRate || 1;
+        const ref5    = 'GL-REVALUATION';
+        const batchName = `${ref5}-REVAL-${id}-${fCcy}-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-XXXXXX`;
+
+        const l1Desc = ccyRow.isGain
+          ? `FX Revaluation Gain – ${fCcy} – ${acctLabel} – ${periodName}`
+          : `FX Revaluation Loss – ${fCcy} – ${d!.lossAccount || 'Loss A/C'} – ${periodName}`;
+        const l2Desc = ccyRow.isGain
+          ? `FX Revaluation Gain – ${fCcy} – ${d!.gainAccount || 'Gain A/C'} – ${periodName}`
+          : `FX Revaluation Loss – ${fCcy} – ${acctLabel} – ${periodName}`;
+
+        // Mirror the glPosting service payload logic exactly
+        const buildLine = (l: typeof l1, desc: string) => {
+          const lineType = l.drAmount > 0 ? 'DR' : 'CR';
+          const eDr = lineType === 'DR' ? 0 : null;
+          const eCr = lineType === 'CR' ? 0 : null;
+          const aDr = lineType === 'DR' ? (l.drAmount > 0 ? l.drAmount : null) : null;
+          const aCr = lineType === 'CR' ? (l.crAmount > 0 ? l.crAmount : null) : null;
+          return {
+            enteredDr: eDr, enteredCr: eCr,
+            accountedDr: aDr, accountedCr: aCr,
+            statAmount: null,
+            description: l.description || desc,
+            currencyCode: fCcy,
+            currencyConversionDate: periodLastDay,
+            currencyConversionRate: newRate,
+            userCurrencyConversionType: 'User',
+            accountCombination: l.combo,
+            chartOfAccountsName: 'Chart of Accounts',
+            reference1: `REVAL-${id}-${fCcy}`,
+            reference2: String(id),
+            reference3: 'Revaluation',
+            reference4: null,
+            reference5: ref5,
+            createdBy,
+          };
+        };
+
+        const totalDr = (l1.drAmount > 0 ? l1.drAmount : 0) + (l2.drAmount > 0 ? l2.drAmount : 0);
+        const totalCr = (l1.crAmount > 0 ? l1.crAmount : 0) + (l2.crAmount > 0 ? l2.crAmount : 0);
+
+        const glPayload = {
+          batch: {
+            batchName, batchDescription: journalDesc,
+            ledgerName: d!.ledgerName || '', ledgerId: d!.ledgerId || 0,
+            status: 'NEW', accountingPeriod: periodName,
+            controlTotal: totalDr, runningTotalDr: totalDr, runningTotalCr: totalCr,
+            batchSource: 'General Ledger', createdBy,
+          },
+          header: {
+            ledgerId: d!.ledgerId || 0, ledgerName: d!.ledgerName || '',
+            jeCategory: 'Revaluation', jeSource: 'General Ledger',
+            periodName,
+            journalName: `FX REVAL – ${d!.account} – ${fCcy} – ${periodName}`,
+            description: journalDesc,
+            currencyCode: fCcy,
+            currencyConversionType: 'User',
+            currencyConversionDate: periodLastDay,
+            currencyConversionRate: newRate,
+            defaultEffectiveDate: periodLastDay,
+            status: 'NEW',
+            runningTotalDr: totalDr, runningTotalCr: totalCr,
+            createdBy,
+          },
+          lines: [buildLine(l1, l1Desc), buildLine(l2, l2Desc)],
+        };
+
+        payloads.push({
+          step: `Step 2 [${fCcy}] — POST journals/create`,
+          method: 'POST',
+          url: `${ORDS_BASE}/journals/create`,
+          payload: glPayload,
+        });
+
+        // ── Step 3: GL post (PUT) — placeholder batch ID ─────────────────────
+        payloads.push({
+          step: `Step 3 [${fCcy}] — PUT gl/journals/{batchId}/post`,
+          method: 'PUT',
+          url: `${ORDS_BASE}/gl/journals/{batchId_from_step2}/post`,
+          payload: {},
+        });
+      });
+
+      // ── Step 4: Mark revaluation ACCOUNTED ────────────────────────────────────
+      payloads.push({
+        step: 'Step 4 — PUT revaluation accounting status',
+        method: 'PUT',
+        url: `${ORDS_BASE}/${APEX_DB_CONFIG.endpoints.revaluation}/${id}/accounting`,
+        payload: {
+          status: 'ACCOUNTED',
+          gl_batch_id: '{batchId_from_step2}',
+          gl_batch_name: '{batchName_from_step2}',
+          gl_header_id: '{headerId_from_step2}',
+          posted_by: createdBy,
+        },
+      });
+
+      setDebugPayloads(payloads);
+    } catch (e) {
+      message.error('Debug preview failed: ' + (e instanceof Error ? e.message : String(e)));
+      setDebugVisible(false);
+    } finally {
+      setDebugLoading(false);
+    }
+  };
+
   const handleDelete = async (id: number) => {
     try {
       const res = await fetch(
@@ -806,16 +1024,26 @@ const ManageRevaluation: React.FC = () => {
             PDF
           </Button>
           {rec.status === 'DRAFT' && (
-            <Button
-              size="small"
-              type="primary"
-              icon={<CheckCircleOutlined />}
-              loading={accountingLoading === rec.revalueId}
-              onClick={() => handleCreateAccounting(rec.revalueId)}
-              style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
-            >
-              Account
-            </Button>
+            <>
+              <Button
+                size="small"
+                type="primary"
+                icon={<CheckCircleOutlined />}
+                loading={accountingLoading === rec.revalueId}
+                onClick={() => handleCreateAccounting(rec.revalueId)}
+                style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+              >
+                Account
+              </Button>
+              <Button
+                size="small"
+                icon={<BugOutlined />}
+                onClick={() => handleCreateAccountingDebug(rec.revalueId)}
+                title="Preview payloads (dry run — nothing is sent)"
+              >
+                Debug
+              </Button>
+            </>
           )}
           <Popconfirm
             title="Delete this revaluation?"
@@ -978,15 +1206,24 @@ const ManageRevaluation: React.FC = () => {
                   View PDF
                 </Button>
                 {detail.status === 'DRAFT' && (
-                  <Button
-                    type="primary"
-                    icon={<CheckCircleOutlined />}
-                    loading={accountingLoading === detail.revalueId}
-                    onClick={() => handleCreateAccounting(detail.revalueId)}
-                    style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
-                  >
-                    Create Accounting
-                  </Button>
+                  <>
+                    <Button
+                      type="primary"
+                      icon={<CheckCircleOutlined />}
+                      loading={accountingLoading === detail.revalueId}
+                      onClick={() => handleCreateAccounting(detail.revalueId)}
+                      style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+                    >
+                      Create Accounting
+                    </Button>
+                    <Button
+                      icon={<BugOutlined />}
+                      onClick={() => handleCreateAccountingDebug(detail.revalueId)}
+                      title="Preview payloads (dry run — nothing is sent)"
+                    >
+                      Debug Payloads
+                    </Button>
+                  </>
                 )}
               </>
             )}
@@ -1220,6 +1457,72 @@ const ManageRevaluation: React.FC = () => {
             />
           )}
         </div>
+      </Modal>
+
+      {/* Debug / Dry-Run Payload Preview Modal */}
+      <Modal
+        open={debugVisible}
+        onCancel={() => setDebugVisible(false)}
+        title={
+          <Space>
+            <BugOutlined style={{ color: '#fa8c16' }} />
+            <span>Create Accounting — Payload Preview (Dry Run)</span>
+          </Space>
+        }
+        width={860}
+        footer={<Button onClick={() => setDebugVisible(false)}>Close</Button>}
+        destroyOnClose
+      >
+        <Spin spinning={debugLoading} tip="Building payloads…">
+          {debugPayloads.length === 0 && !debugLoading && (
+            <Alert type="info" showIcon message="No payloads generated yet." />
+          )}
+          {debugPayloads.map((p, i) => (
+            <div key={i} style={{ marginBottom: 20, border: '1px solid #d9d9d9', borderRadius: 6, overflow: 'hidden' }}>
+              {/* Header */}
+              <div style={{
+                background: '#f0f5ff', borderBottom: '1px solid #d9d9d9',
+                padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                <Tag color="blue" style={{ fontFamily: 'monospace', margin: 0 }}>{p.method}</Tag>
+                <Text strong style={{ fontSize: 12 }}>{p.step}</Text>
+              </div>
+              {/* URL */}
+              <div style={{ padding: '4px 12px', background: '#fafafa', borderBottom: '1px solid #f0f0f0' }}>
+                <Text style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: '#595959' }}>
+                  {p.url}
+                </Text>
+              </div>
+              {/* JSON Payload */}
+              <div style={{ padding: '8px 12px' }}>
+                <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Request Body</Text>
+                <pre style={{
+                  margin: 0, fontSize: 11, fontFamily: 'monospace',
+                  background: '#f6ffed', padding: 8, borderRadius: 4,
+                  maxHeight: 300, overflowY: 'auto',
+                  border: '1px solid #b7eb8f',
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                }}>
+                  {JSON.stringify(p.payload, null, 2)}
+                </pre>
+              </div>
+              {/* Copy button */}
+              <div style={{ padding: '4px 12px 8px', display: 'flex', gap: 8 }}>
+                <Button
+                  size="small"
+                  onClick={() => {
+                    navigator.clipboard.writeText(
+                      `${p.method} ${p.url}\n\n${JSON.stringify(p.payload, null, 2)}`
+                    );
+                    message.success('Copied!');
+                  }}
+                >
+                  Copy
+                </Button>
+              </div>
+            </div>
+          ))}
+        </Spin>
       </Modal>
 
       {/* PDF Modal */}
