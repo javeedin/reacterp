@@ -1548,7 +1548,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
 
   // Bank accounts filtered by selected BU (or all if no BU selected)
   const filteredBankAccounts = selectedBU && buBankMap[selectedBU]
-    ? buBankMap[selectedBU].sort().map(n => ({ label: n, value: n }))
+    ? buBankMap[selectedBU].sort().map(n => ({ label: bankAccountCurrencyMap[n] ? `${n} (${bankAccountCurrencyMap[n]})` : n, value: n }))
     : allBankAccounts;
 
   // ── Accounting state ─────────────────────────────────────────────────────
@@ -1666,7 +1666,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
             leBankMap[le].push(name);
           }
         });
-        setAllBankAccounts(allAccts.sort().map(n => ({ label: n, value: n })));
+        setAllBankAccounts(allAccts.sort().map(n => ({ label: ccyMap[n] ? `${n} (${ccyMap[n]})` : n, value: n })));
         setBankAccountMap(acctMap);
         setBankAccountCurrencyMap(ccyMap);
 
