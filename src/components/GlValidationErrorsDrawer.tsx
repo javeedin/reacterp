@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Drawer, Tabs, Table, Tag, Badge, Button, Space, Typography, Tooltip,
-  Collapse, Select, DatePicker, Empty, Alert,
+  Collapse, Select, DatePicker, Empty, Alert, Modal,
 } from 'antd';
 import {
   WarningOutlined, CheckCircleOutlined, CloseCircleOutlined,
-  ReloadOutlined, ClearOutlined, InfoCircleOutlined,
+  ReloadOutlined, ClearOutlined, InfoCircleOutlined, ApiOutlined,
 } from '@ant-design/icons';
+import { APEX_DB_CONFIG } from '../config/api.config';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { useGlValidation } from '../context/GlValidationContext';
@@ -169,6 +170,8 @@ const LogTable: React.FC<{ rows: GlValidationLogEntry[]; loading?: boolean }> = 
 
 // ── Main Drawer ───────────────────────────────────────────────────────────────
 
+const GL_BASE = `${APEX_DB_CONFIG.baseUrl}/gl`;
+
 const GlValidationErrorsDrawer: React.FC = () => {
   const { sessionErrors, clearSession, drawerOpen, closeDrawer } = useGlValidation();
 
@@ -179,6 +182,7 @@ const GlValidationErrorsDrawer: React.FC = () => {
   const [filterMod,  setFilterMod]  = useState<string | undefined>();
   const [filterRes,  setFilterRes]  = useState<'FAILED' | 'PASSED' | undefined>();
   const [dateRange,  setDateRange]  = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
+  const [apiModalOpen, setApiModalOpen] = useState(false);
 
   const loadDbLogs = useCallback(async () => {
     setDbLoading(true);
@@ -284,6 +288,29 @@ const GlValidationErrorsDrawer: React.FC = () => {
   ];
 
   return (
+    <>
+    <Modal
+      open={apiModalOpen}
+      onCancel={() => setApiModalOpen(false)}
+      title={<Space><ApiOutlined style={{ color: '#1677ff' }} /><span>GL Validation Log — API Endpoints</span></Space>}
+      footer={<Button onClick={() => setApiModalOpen(false)}>Close</Button>}
+      width={620}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {[
+          { method: 'GET',  label: 'Fetch log entries (Database History tab)', url: `${GL_BASE}/validation-log?module=&result=&date_from=&date_to=&limit=500` },
+          { method: 'POST', label: 'Persist a new validation result',          url: `${GL_BASE}/validation-log` },
+        ].map(ep => (
+          <div key={ep.method} style={{ border: '1px solid #f0f0f0', borderRadius: 6, padding: '10px 14px' }}>
+            <Space style={{ marginBottom: 4 }}>
+              <Tag color={ep.method === 'GET' ? 'blue' : 'green'} style={{ fontFamily: 'monospace', fontWeight: 700 }}>{ep.method}</Tag>
+              <Text type="secondary" style={{ fontSize: 12 }}>{ep.label}</Text>
+            </Space>
+            <Text code copyable style={{ fontSize: 11, wordBreak: 'break-all', display: 'block' }}>{ep.url}</Text>
+          </div>
+        ))}
+      </div>
+    </Modal>
     <Drawer
       title={
         <Space>
@@ -291,6 +318,9 @@ const GlValidationErrorsDrawer: React.FC = () => {
           <span>GL Journal Validation Log</span>
           <Tooltip title="Records every GL journal validation attempt across all modules. Errors here mean no journal was posted.">
             <InfoCircleOutlined style={{ color: '#999', fontSize: 13 }} />
+          </Tooltip>
+          <Tooltip title="Show API endpoints">
+            <Button size="small" type="text" icon={<ApiOutlined style={{ color: '#1677ff' }} />} onClick={() => setApiModalOpen(true)} />
           </Tooltip>
         </Space>
       }
@@ -319,6 +349,7 @@ const GlValidationErrorsDrawer: React.FC = () => {
         items={tabItems}
       />
     </Drawer>
+    </>
   );
 };
 

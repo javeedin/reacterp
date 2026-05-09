@@ -230,6 +230,19 @@ EXCEPTION WHEN OTHERS THEN NULL;
 END;
 /
 
+-- Re-create the template (required before defining handlers)
+BEGIN
+  ORDS.DEFINE_TEMPLATE(
+    p_module_name => 'reerp',
+    p_pattern     => 'gl/validation-log',
+    p_priority    => 0,
+    p_etag_type   => 'HASH',
+    p_comments    => 'GL journal pre-flight validation log — GET (list) + POST (insert)'
+  );
+  COMMIT;
+END;
+/
+
 
 -- ---------------------------------------------------------------------------
 -- 5a.  ORDS handler: POST gl/validation-log  (insert)
