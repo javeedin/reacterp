@@ -667,6 +667,39 @@ const ExternalTxnForm: React.FC<{
             </span>
             <span style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12 }}>
               {savedExtId
+  return (
+    <div style={{ padding: '0 0 80px' }}>
+      <style>{`
+        .direction-dr .ant-segmented-item-selected { background: #1677ff !important; color: #fff !important; }
+        .direction-cr .ant-segmented-item-selected { background: #ff4d4f !important; color: #fff !important; }
+        .ext-doc-wrap { border: 1px solid #d0d0d0; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 16px rgba(0,0,0,0.09); background: #fff; max-width: 980px; margin: 0 auto; }
+        .ext-sec { border-bottom: 2px solid #ddd; }
+        .ext-sec-title { font-weight: 700; font-size: 13px; color: #1a1a1a; padding: 9px 14px; border-bottom: 1px solid #e4e4e4; background: #fafafa; letter-spacing: 0.1px; }
+        .ext-row { display: grid; grid-template-columns: 180px 1fr 160px 1fr; border-bottom: 1px solid #ebebeb; min-height: 48px; }
+        .ext-row:last-child { border-bottom: none; }
+        .ext-row-alt { background: #f7f7f7; }
+        .ext-lbl { font-weight: 600; font-size: 12px; color: #3a3a3a; padding: 8px 12px; background: #efefef; border-right: 1px solid #e0e0e0; display: flex; align-items: center; }
+        .ext-val { padding: 4px 10px; border-right: 1px solid #e8e8e8; display: flex; align-items: center; flex-wrap: wrap; gap: 2px; min-height: 48px; }
+        .ext-val:last-child { border-right: none; }
+        .ext-val .ant-form-item { margin-bottom: 0; width: 100%; }
+        .ext-val .ant-select { width: 100%; }
+        .ext-val .ant-picker { width: 100%; }
+        .ext-val .ant-input-number { width: 100%; }
+        .ext-lines-hdr { font-weight: 700; font-size: 13px; color: #1a1a1a; padding: 9px 14px; background: #fafafa; border-bottom: 1px solid #e4e4e4; border-top: 2px solid #ddd; display: flex; justify-content: space-between; align-items: center; }
+        .ext-attach { padding: 12px 16px; border-top: 2px solid #ddd; background: #fafafa; }
+        .ext-attach-title { font-weight: 700; font-size: 13px; color: #1a1a1a; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+      `}</style>
+
+      <Form form={form} layout="vertical" size="middle">
+        <div className="ext-doc-wrap">
+
+          {/* ── Document header bar ── */}
+          <div style={{ background: '#C74634', padding: '13px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ color: '#fff', fontWeight: 700, fontSize: 16, letterSpacing: 0.2 }}>
+              External Transaction
+            </span>
+            <span style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12 }}>
+              {savedExtId
                 ? `Transaction ID: ${savedExtId}`
                 : saved
                   ? <Space size={6}><LockOutlined /><span>Saved</span></Space>
@@ -939,7 +972,6 @@ const ExternalTxnForm: React.FC<{
             <div className="ext-sec">
               <div className="ext-sec-title">Payee Details</div>
 
-              {/* Payee Name | Payee Type */}
               <div className="ext-row">
                 <div className="ext-lbl">Payee Name</div>
                 <div className="ext-val">
@@ -967,7 +999,6 @@ const ExternalTxnForm: React.FC<{
                 <div className="ext-val"><Text type="secondary" style={{ fontSize: 12 }}>—</Text></div>
               </div>
 
-              {/* Payee Account | Bank Name */}
               <div className="ext-row ext-row-alt">
                 <div className="ext-lbl">Payee Account</div>
                 <div className="ext-val"><Text type="secondary" style={{ fontSize: 12 }}>—</Text></div>
@@ -975,7 +1006,6 @@ const ExternalTxnForm: React.FC<{
                 <div className="ext-val"><Text type="secondary" style={{ fontSize: 12 }}>—</Text></div>
               </div>
 
-              {/* IBAN */}
               <div className="ext-row">
                 <div className="ext-lbl">IBAN</div>
                 <div className="ext-val"><Text type="secondary" style={{ fontSize: 12 }}>—</Text></div>
@@ -1423,109 +1453,7 @@ const ExternalTxnForm: React.FC<{
       </Modal>
     </div>
   );
-};
 
-// ────────────────────────────────────────────────────────────────────────────
-// Main Page
-// ────────────────────────────────────────────────────────────────────────────
-const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'cash' }) => {
-  const { user } = useAuth();
-  const currentUser = user?.email ?? user?.username ?? 'SYSTEM';
-
-  const [transactions, setTransactions]   = useState<ExternalTxnRecord[]>([]);
-  const [loading, setLoading]             = useState(false);
-  const [hasSearched, setHasSearched]     = useState(false);
-  const [allBankAccounts, setAllBankAccounts] = useState<BankAccountOption[]>([]);
-  const [businessUnits, setBusinessUnits] = useState<BUOption[]>([]);
-  const [bankAccountMap, setBankAccountMap] = useState<Record<string, string>>({});
-  const [bankAccountCurrencyMap, setBankAccountCurrencyMap] = useState<Record<string, string>>({});
-  const [buLeMap, setBuLeMap]             = useState<Record<string, string>>({});
-  const [buCompanyMap, setBuCompanyMap]   = useState<Record<string, string>>({});
-  const [buBankMap, setBuBankMap]         = useState<Record<string, string[]>>({});
-  const [payeeOptions, setPayeeOptions]   = useState<PayeeOption[]>([]);
-  const [selectedBU, setSelectedBU]       = useState<string>('');
-  const [derivedLE, setDerivedLE]         = useState<string>('');
-  const [activeTabKey, setActiveTabKey]   = useState('search');
-  const [tabs, setTabs]                   = useState<{ key: string; label: string; record?: ExternalTxnRecord }[]>([]);
-  const [lastApiUrl, setLastApiUrl]       = useState('');
-  const [showApiModal, setShowApiModal]   = useState(false);
-  const [searchForm] = Form.useForm();
-
-  // Bank accounts filtered by selected BU (or all if no BU selected)
-  const filteredBankAccounts = selectedBU && buBankMap[selectedBU]
-    ? buBankMap[selectedBU].sort().map(n => ({ label: bankAccountCurrencyMap[n] ? `${n} (${bankAccountCurrencyMap[n]})` : n, value: n }))
-    : allBankAccounts;
-
-  // ── Accounting state ─────────────────────────────────────────────────────
-  const [selectedRowKeys, setSelectedRowKeys]   = useState<number[]>([]);
-  const [acctModalOpen, setAcctModalOpen]       = useState(false);
-  const [acctProgress, setAcctProgress]         = useState<BankAcctProgressRow[]>([]);
-  const [acctRunning, setAcctRunning]           = useState(false);
-  const [acctDone, setAcctDone]                 = useState(false);
-
-  // ── Single-row Create Accounting state ───────────────────────────────────
-  const [singleAcctModalOpen, setSingleAcctModalOpen] = useState(false);
-  const [singleAcctProgress, setSingleAcctProgress]   = useState<BankAcctProgressRow[]>([]);
-  const [singleAcctRunning, setSingleAcctRunning]     = useState(false);
-  const [singleAcctDone, setSingleAcctDone]           = useState(false);
-
-  // ── View Accounting modal state ───────────────────────────────────────────
-  const [viewAcctOpen, setViewAcctOpen]   = useState(false);
-  const [viewAcctTxn, setViewAcctTxn]     = useState<ExternalTxnRecord | null>(null);
-
-  const modulePrefix = module === 'ap' ? '/ap' : '/cash';
-
-  const exportToExcel = () => {
-    const rows = transactions.map(t => ({
-      'Txn Number':       t.transactionId ?? '',
-      'Bank Account':     t.bankAccountName ?? '',
-      'Business Unit':    t.businessUnitName ?? '',
-      'Date':             t.transactionDate ?? '',
-      'Value Date':       t.valueDate ?? '',
-      'Cleared Date':     t.clearedDate ?? '',
-      'Amount':           t.amount ?? '',
-      'Currency':         t.currencyCode ?? '',
-      'Reference':        t.referenceText ?? '',
-      'Description':      t.description ?? '',
-      'Cash Account':     t.assetAccountCombination ?? '',
-      'Offset Account':   t.offsetAccountCombination ?? '',
-      'Transaction Type': t.transactionType ?? '',
-      'Status':           t.status ?? '',
-      'Origin':           t.source ?? '',
-      'Legal Entity':     t.legalEntityName ?? '',
-      'Accounting Flag':  t.accountingFlag ?? '',
-      'Check Number':     t.checkNumber ?? '',
-      'Recon Reference':  t.reconReference ?? '',
-      'Created By':       t.createdBy ?? '',
-      'Creation Date':    t.creationDate ?? '',
-      'Last Update Date': t.lastUpdateDate ?? '',
-      'Sync Date':        t.syncDate ?? '',
-    }));
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'External Transactions');
-    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    saveAs(new Blob([buf], { type: 'application/octet-stream' }), `external_transactions_${dayjs().format('YYYYMMDD_HHmmss')}.xlsx`);
-  };
-
-  // ── Load LOVs ─────────────────────────────────────────────────────────────
-  const loadLovs = useCallback(async () => {
-    const buLeMapping: Record<string, string> = {};
-    const buCompanyMapping: Record<string, string> = {};
-    const buSet = new Set<string>();
-
-    // Step 1: BUs from gl/businessunits
-    try {
-      const buRes = await fetch(`${APEX_BASE}/gl/businessunits`, { headers: { Accept: 'application/json' } });
-      const buData = buRes.ok ? await buRes.json() : null;
-      if (buData?.items) {
-        (buData.items as any[]).forEach(i => {
-          const buName = i.business_unit_name || i.businessUnitName || '';
-          const leName = i.legal_entity_name  || i.legalEntityName  || '';
-          const company = i.company || '';
-          if (buName) { buSet.add(buName); buLeMapping[buName] = leName; buCompanyMapping[buName] = company; }
-        });
-      }
     } catch { /* silent */ }
 
     setBuLeMap({ ...buLeMapping });
