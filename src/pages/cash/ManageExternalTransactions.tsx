@@ -672,7 +672,7 @@ const ExternalTxnForm: React.FC<{
       <style>{`
         .direction-dr .ant-segmented-item-selected { background: #1677ff !important; color: #fff !important; }
         .direction-cr .ant-segmented-item-selected { background: #ff4d4f !important; color: #fff !important; }
-        .ext-doc-wrap { border: 1px solid #d0d0d0; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 16px rgba(0,0,0,0.09); background: #fff; max-width: 980px; margin: 0 auto; }
+        .ext-doc-wrap { border: 1px solid #d0d0d0; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 16px rgba(0,0,0,0.09); background: #fff; max-width: 1400px; margin: 0 auto; }
         .ext-sec { border-bottom: 2px solid #ddd; }
         .ext-sec-title { font-weight: 700; font-size: 13px; color: #1a1a1a; padding: 9px 14px; border-bottom: 1px solid #e4e4e4; background: #fafafa; letter-spacing: 0.1px; }
         .ext-row { display: grid; grid-template-columns: 180px 1fr 160px 1fr; border-bottom: 1px solid #ebebeb; min-height: 48px; }
@@ -1019,7 +1019,7 @@ const ExternalTxnForm: React.FC<{
               dataSource={extTxnLines}
               rowKey="key"
               pagination={false}
-              scroll={{ x: 700 }}
+              scroll={{ x: 1200 }}
               rowClassName={(_, idx) => idx % 2 === 1 ? 'alt-row' : ''}
               columns={[
                 {
@@ -1030,16 +1030,16 @@ const ExternalTxnForm: React.FC<{
                   ),
                 },
                 {
-                  title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Distribution Set / Offset Account</span>,
-                  width: 340,
-                  render: (_: any, record: ExtTxnLine, idx: number) => (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Distribution Set <span style={{ color: '#ff4d4f' }}>*</span></span>,
+                  width: 230,
+                  render: (_: any, _record: ExtTxnLine, idx: number) => (
+                    <Space.Compact style={{ width: '100%' }}>
                       <AutoComplete
                         size="small"
                         value={lineDistSets[idx] || ''}
                         placeholder="Search distribution set…"
                         disabled={isEdit || !bankSelected || saved}
-                        style={{ flex: 1, minWidth: 0 }}
+                        style={{ width: '100%' }}
                         options={distCombinations
                           .filter(d => {
                             const q = (lineDistSets[idx] || '').toLowerCase();
@@ -1075,15 +1075,21 @@ const ExternalTxnForm: React.FC<{
                       >
                         <Input size="small" variant="borderless" />
                       </AutoComplete>
-                      {record.offsetAccount && (
-                        <span style={{ fontFamily: 'monospace', fontSize: 10, color: REDWOOD.info, whiteSpace: 'nowrap' }}>
-                          {record.offsetAccount}
-                        </span>
-                      )}
+                    </Space.Compact>
+                  ),
+                },
+                {
+                  title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Offset Account <span style={{ color: '#ff4d4f' }}>*</span></span>,
+                  width: 230,
+                  render: (_: any, record: ExtTxnLine, idx: number) => (
+                    <Space.Compact style={{ width: '100%' }}>
+                      <div style={{ flex: 1, fontFamily: 'monospace', fontSize: 10, color: REDWOOD.info, display: 'flex', alignItems: 'center', paddingLeft: 6, overflow: 'hidden' }}>
+                        {record.offsetAccount || <span style={{ color: REDWOOD.neutral300, fontFamily: 'sans-serif', fontSize: 11 }}>—</span>}
+                      </div>
                       <Button size="small" icon={<SearchOutlined />}
                         disabled={isEdit || !bankSelected || saved}
                         onClick={() => { setLineCoaIdx(idx); setLineCoaInitial(record.offsetAccount || ''); setLineCoaOpen(true); }} />
-                    </div>
+                    </Space.Compact>
                   ),
                 },
                 {
@@ -1095,7 +1101,7 @@ const ExternalTxnForm: React.FC<{
                 },
                 {
                   title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Description</span>,
-                  width: 200,
+                  width: 180,
                   render: (_: any, record: ExtTxnLine, idx: number) => (
                     <Input
                       size="small" value={record.description}
@@ -1106,8 +1112,8 @@ const ExternalTxnForm: React.FC<{
                   ),
                 },
                 {
-                  title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Amount ({watchedCurrency || 'CCY'})</span>,
-                  width: 130,
+                  title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Amount ({watchedCurrency || 'CCY'}) <span style={{ color: '#ff4d4f' }}>*</span></span>,
+                  width: 140,
                   align: 'right' as const,
                   render: (_: any, record: ExtTxnLine, idx: number) => (
                     <InputNumber
