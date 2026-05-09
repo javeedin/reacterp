@@ -505,7 +505,7 @@ const ManageRevaluation: React.FC = () => {
       // an older code version. Exclude it if it matches one of the ccyRow foreign currencies.
       const foreignCcys = new Set(d.ccyRows.map((c: any) => c.currencyCode).filter(Boolean));
       const currency   = (d.functionalCcy && !foreignCcys.has(d.functionalCcy)) ? d.functionalCcy : 'AED';
-      const createdBy  = user?.username || d.createdBy || 'SYSTEM';
+      const createdBy  = user?.username || 'SYSTEM';
 
       // Derive last day of the period (e.g. "Apr-26" → 2026-04-30)
       const periodLastDay = (() => {
@@ -751,7 +751,7 @@ const ManageRevaluation: React.FC = () => {
       const periodName   = d.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '');
       const foreignCcys  = new Set(d.ccyRows.map((c: any) => c.currencyCode).filter(Boolean));
       const currency     = (d.functionalCcy && !foreignCcys.has(d.functionalCcy)) ? d.functionalCcy : 'AED';
-      const createdBy    = user?.username || d.createdBy || 'SYSTEM';
+      const createdBy    = user?.username || 'SYSTEM';
       const MONTHS: Record<string, number> = {
         Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11,
       };
