@@ -154,10 +154,13 @@ export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResu
       createdBy,
     },
     lines: lines.map(l => {
-      // Use ?? null so that explicit 0 (revaluation journals) is preserved, not coerced to null.
-      const eDr = l.lineType === 'DR' ? (l.enteredDr ?? null) : null;
-      const eCr = l.lineType === 'CR' ? (l.enteredCr ?? null) : null;
-      // Respect explicit accountedDr/Cr (e.g. revaluation journals where entered=0 but accounted≠0).
+      // Always send both enteredDr and enteredCr from the input.
+      // For revaluation lines both are 0; for normal lines the inactive side is 0 or null.
+      const eDr = l.enteredDr ?? null;
+      const eCr = l.enteredCr ?? null;
+      // accountedDr only on DR lines; accountedCr only on CR lines.
+      // Use the explicit value when provided (revaluation sends actual AED amounts here).
+      // Fall back to entered × rate for normal currency conversion journals.
       const aDr = l.lineType === 'DR'
         ? (l.accountedDr != null ? l.accountedDr : (eDr != null ? Math.round(eDr * rate * 100) / 100 : null))
         : null;

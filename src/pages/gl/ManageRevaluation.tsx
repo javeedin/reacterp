@@ -19,6 +19,7 @@ import {
   BugOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import { createAccounting, checkAccountingExists, type SlaCreatePayload } from '../../services/sla.service';
 import { postSlaToGL } from '../../services/glPosting.service';
@@ -215,6 +216,7 @@ function generateRevalPdf(detail: RevalDetail): string {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 const ManageRevaluation: React.FC = () => {
+  const { user } = useAuth();
   const [loading,        setLoading]        = useState(false);
   const [data,           setData]           = useState<RevalHeader[]>([]);
   const [statusFilter,   setStatusFilter]   = useState<string>('ALL');
@@ -503,7 +505,7 @@ const ManageRevaluation: React.FC = () => {
       // an older code version. Exclude it if it matches one of the ccyRow foreign currencies.
       const foreignCcys = new Set(d.ccyRows.map((c: any) => c.currencyCode).filter(Boolean));
       const currency   = (d.functionalCcy && !foreignCcys.has(d.functionalCcy)) ? d.functionalCcy : 'AED';
-      const createdBy  = d.createdBy || 'SYSTEM';
+      const createdBy  = user?.username || d.createdBy || 'SYSTEM';
 
       // Derive last day of the period (e.g. "Apr-26" → 2026-04-30)
       const periodLastDay = (() => {

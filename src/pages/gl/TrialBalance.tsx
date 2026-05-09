@@ -61,6 +61,7 @@ import {
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import { Divider } from 'antd';
 import * as XLSX from 'xlsx';
@@ -251,6 +252,7 @@ interface ReconRecord {
 }
 
 const TrialBalance: React.FC = () => {
+  const { user } = useAuth();
   // Periods list state
   const [periods, setPeriods] = useState<PeriodInfo[]>([]);
   const [loadingPeriods, setLoadingPeriods] = useState(false);
@@ -2771,7 +2773,7 @@ const TrialBalance: React.FC = () => {
       // an older code version. Exclude it if it matches one of the ccyRow foreign currencies.
       const foreignCcys = new Set(d.ccyRows.map((c: any) => c.currencyCode).filter(Boolean));
       const currency   = (d.functionalCcy && !foreignCcys.has(d.functionalCcy)) ? d.functionalCcy : 'AED';
-      const createdBy  = 'ReactERP';
+      const createdBy  = user?.username || 'SYSTEM';
 
       const MONTHS: Record<string, number> = {
         Jan:0, Feb:1, Mar:2, Apr:3, May:4, Jun:5,
@@ -3377,7 +3379,7 @@ const TrialBalance: React.FC = () => {
                 const rawPeriod = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '');
                 const isUpdate  = revalId != null;
                 const payload   = {
-                  ledger_id:      allRawRows[0] ? (allRawRows[0] as any).ledger_id || 0 : 0,
+                  ledger_id:      Number((allRawRows[0] as any)?.ledger_id) || 0,
                   ledger_name:    tab.ledgerName,
                   period_name:    rawPeriod,
                   account:        revalAccount,
@@ -3389,7 +3391,7 @@ const TrialBalance: React.FC = () => {
                   total_gain:     totalGain,
                   total_loss:     totalLoss,
                   notes:          '',
-                  created_by:     'ReactERP',
+                  created_by:     user?.username || 'SYSTEM',
                   ccy_rows: ccyRows.filter(r => r.newRate > 0).map(r => ({
                     currency_code:  r.ccy,
                     ent_closing:    r.entClosing,
@@ -3895,7 +3897,7 @@ const TrialBalance: React.FC = () => {
                         glAccountDesc:   distComboNewDesc.trim() || undefined,
                         module:          'GL Revaluation',
                         status:          'ACTIVE',
-                        createdBy:       'ReactERP',
+                        createdBy:       user?.username || 'SYSTEM',
                       });
                       message.success('Distribution combination created');
                       // Reload list
