@@ -740,7 +740,7 @@ const ExternalTxnForm: React.FC<{
               <div className="ext-val">
                 <Form.Item name="bankAccountName" rules={[{ required: !isEdit, message: 'Required' }]}>
                   <Select
-                    showSearch optionFilterProp="label" options={filteredBankAccounts}
+                    showSearch optionFilterProp="label" optionLabelProp="label" options={filteredBankAccounts}
                     variant="borderless"
                     placeholder={buSelected && !derivedCompany ? 'No company code' : buSelected ? 'Select bank account' : 'Select BU first'}
                     disabled={isEdit || !buSelected || saved || (!derivedCompany && buSelected)}
