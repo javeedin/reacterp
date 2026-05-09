@@ -2801,15 +2801,17 @@ const TrialBalance: React.FC = () => {
             </Tooltip>
           ),
       },
-      { title: 'Combination', dataIndex: 'combo', key: 'combo',
+      { title: 'Combination', dataIndex: 'combo', key: 'combo', width: 200, ellipsis: true,
         render: (v: string, r: ComboRow) => (
-          <Text
-            style={{
-              fontFamily: 'monospace', fontSize: 11,
-              opacity: r.excluded ? 0.4 : 1,
-              textDecoration: r.excluded ? 'line-through' : 'none',
-            }}
-          >{v}</Text>
+          <Tooltip title={v}>
+            <Text
+              style={{
+                fontFamily: 'monospace', fontSize: 11,
+                opacity: r.excluded ? 0.4 : 1,
+                textDecoration: r.excluded ? 'line-through' : 'none',
+              }}
+            >{v}</Text>
+          </Tooltip>
         ),
       },
       { title: 'Ccy', dataIndex: 'ccy', key: 'ccy', width: 60,
@@ -2954,7 +2956,7 @@ const TrialBalance: React.FC = () => {
           open={revalVisible}
           onCancel={() => { setRevalVisible(false); setRevalPreviewRows([]); }}
           footer={null}
-          width={1150}
+          width={1400}
           title={
             <Space wrap>
               <Tag color={accountType === 'A' ? 'blue' : accountType === 'L' ? 'orange' : 'green'}>
@@ -3003,7 +3005,7 @@ const TrialBalance: React.FC = () => {
             rowKey="rowKey"
             size="small"
             pagination={false}
-            scroll={{ x: 1000, y: 300 }}
+            scroll={{ x: 1350, y: 300 }}
             style={{ marginBottom: 16 }}
             rowClassName={(r: ComboRow) => r.excluded ? 'reval-row-excluded' : ''}
           />
