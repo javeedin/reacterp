@@ -207,6 +207,7 @@ const ExternalTxnForm: React.FC<{
   const watchedAmount  = Form.useWatch('amount', form);
   const watchedTxnType = Form.useWatch('transactionType', form);
   const watchedCurrency = Form.useWatch('currencyCode', form);
+  const watchedRate     = Form.useWatch('bankConversionRate', form);
   const isForeignCurrency = !!watchedCurrency && watchedCurrency !== 'AED';
   const isAdhocPayment = watchedTxnType === 'Adhoc Payment';
 
@@ -762,9 +763,9 @@ const ExternalTxnForm: React.FC<{
                 </Select>
               </Form.Item>
             </Col>
-            <Col xs={12} md={6}>
+            <Col xs={12} md={4}>
               <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Conversion Rate</span>}
+                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Conv. Rate ({watchedCurrency || 'FCY'} → Functional)</span>}
                 name="bankConversionRate"
                 style={{ marginBottom: 10 }}
                 required={isForeignCurrency}
@@ -773,8 +774,22 @@ const ExternalTxnForm: React.FC<{
                 <InputNumber
                   style={{ width: '100%' }}
                   precision={6} min={0}
-                  placeholder={isForeignCurrency ? 'Required' : 'e.g. 3.672500'}
+                  placeholder={isForeignCurrency ? 'Required' : 'e.g. 0.038212'}
                   disabled={isEdit || !bankSelected || saved}
+                />
+              </Form.Item>
+            </Col>
+            <Col xs={12} md={4}>
+              <Form.Item
+                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Inverse Rate (Functional → {watchedCurrency || 'FCY'})</span>}
+                style={{ marginBottom: 10 }}
+              >
+                <InputNumber
+                  style={{ width: '100%', background: '#fafafa' }}
+                  precision={6}
+                  value={watchedRate && watchedRate > 0 ? Math.round((1 / watchedRate) * 1000000) / 1000000 : undefined}
+                  placeholder="Auto-calculated"
+                  disabled
                 />
               </Form.Item>
             </Col>
@@ -1229,6 +1244,7 @@ const ExternalTxnForm: React.FC<{
         visible={lineCoaOpen}
         onCancel={() => setLineCoaOpen(false)}
         initialValue={lineCoaInitial}
+        lockedFirstSegment={derivedCompany || undefined}
         onSelect={(code: string) => {
           updateExtLine(lineCoaIdx, 'offsetAccount', code);
           validateAccountCode(code).then(r => {
