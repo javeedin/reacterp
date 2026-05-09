@@ -165,7 +165,8 @@ const ExternalTxnForm: React.FC<{
   onSave: () => void;
   onCancel: () => void;
   onPayeeCreated: (newOption: PayeeOption) => void;
-}> = ({ initialValues, bankAccounts, businessUnits, bankAccountMap, bankAccountCurrencyMap, buBankMap, buCompanyMap, payeeOptions, onSave, onCancel, onPayeeCreated }) => {
+  onCreateAccounting?: (txn: ExternalTxnRecord) => void;
+}> = ({ initialValues, bankAccounts, businessUnits, bankAccountMap, bankAccountCurrencyMap, buBankMap, buCompanyMap, payeeOptions, onSave, onCancel, onPayeeCreated, onCreateAccounting }) => {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [txnDirection, setTxnDirection] = useState<'DR' | 'CR'>('CR');
@@ -1282,6 +1283,54 @@ const ExternalTxnForm: React.FC<{
           )}
         </Space>
         <Space size={8}>
+          {(saved || (isEdit && initialValues?.accountingFlag !== 'Y')) && onCreateAccounting && (
+            <Button
+              size="large"
+              icon={<AccountBookOutlined />}
+              style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
+              onClick={() => {
+                const values = form.getFieldsValue();
+                const txnRecord: ExternalTxnRecord = {
+                  externalTransactionId: savedExtId ?? initialValues?.externalTransactionId ?? 0,
+                  transactionId:         initialValues?.transactionId ?? 0,
+                  transactionDate:       values.transactionDate?.format('YYYY-MM-DD') ?? '',
+                  valueDate:             values.valueDate?.format('YYYY-MM-DD') ?? '',
+                  clearedDate:           '',
+                  amount:                extTxnLines[0].amount ?? 0,
+                  currencyCode:          values.currencyCode ?? '',
+                  description:           extTxnLines[0].description ?? '',
+                  referenceText:         values.referenceText ?? '',
+                  source:                'ORA_MAN',
+                  status:                initialValues?.status ?? 'UNR',
+                  transactionType:       values.transactionType ?? '',
+                  accountingFlag:        initialValues?.accountingFlag ?? '',
+                  bankAccountName:       values.bankAccountName ?? '',
+                  businessUnitName:      values.businessUnitName ?? '',
+                  legalEntityName:       initialValues?.legalEntityName ?? '',
+                  assetAccountCombination:  values.assetAccountCombination ?? '',
+                  offsetAccountCombination: extTxnLines[0].offsetAccount ?? '',
+                  bankConversionRate:    values.bankConversionRate ?? 0,
+                  bankConversionRateType: values.bankConversionRateType ?? '',
+                  transferId:            0,
+                  checkNumber:           '',
+                  reconReference:        '',
+                  createdBy:             'ERP_USER',
+                  creationDate:          new Date().toISOString(),
+                  lastUpdateDate:        new Date().toISOString(),
+                  syncDate:              '',
+                  transactionDirection:  values.transactionDirection ?? txnDirection,
+                  paymentMethod:         values.paymentMethod,
+                  paymentDocument:       values.paymentDocument,
+                  paperDocumentNumber:   values.paperDocumentNumber,
+                  payeeName:             values.payeeName,
+                  payeeId:               values.payeeId,
+                };
+                onCreateAccounting(txnRecord);
+              }}
+            >
+              Create Accounting
+            </Button>
+          )}
           {(saved || (isEdit && initialValues?.accountingFlag !== 'Y')) && (
             <Popconfirm title="Delete this transaction?" description="This action cannot be undone."
               onConfirm={handleDelete} okText="Delete" okButtonProps={{ danger: true }}>
@@ -2532,6 +2581,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           onPayeeCreated={(newOpt) => setPayeeOptions(prev => [...prev, newOpt].sort((a, b) => a.label.localeCompare(b.label)))}
           onSave={() => { closeTab(t.key); handleSearch(); loadLovs(); }}
           onCancel={() => closeTab(t.key)}
+          onCreateAccounting={openSingleAcctModal}
         />
       ),
       closable: false,
