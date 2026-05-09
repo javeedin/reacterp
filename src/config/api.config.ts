@@ -321,6 +321,37 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
     parameters: [],
   },
   {
+    id: 'ar-invoices',
+    name: 'AR Invoices',
+    description: 'Sync AR Invoices (Receivables Transactions) from Oracle Fusion',
+    oracleEndpoint: 'receivablesInvoices',
+    apexEndpoint: 'ar/invoices/bulk',
+    parameters: [
+      {
+        key: 'BusinessUnit',
+        label: 'Business Unit',
+        type: 'api-select',
+        required: false,
+        apiUrl: 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/gl/businessunits',
+        apiLabelKey: 'business_unit_name',
+        apiValueKey: 'business_unit_name',
+        placeholder: 'All business units',
+      },
+      {
+        key: 'TransactionDateFrom',
+        label: 'Transaction Date From',
+        type: 'date',
+        required: false,
+      },
+      {
+        key: 'TransactionDateTo',
+        label: 'Transaction Date To',
+        type: 'date',
+        required: false,
+      },
+    ],
+  },
+  {
     id: 'gl-period-status',
     name: 'GL Period Status',
     description: 'Sync GL Accounting Period Status from Oracle Fusion',

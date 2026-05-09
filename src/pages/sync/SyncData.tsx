@@ -70,6 +70,7 @@ import { syncSupplierAddresses, testSupplierAddressConnection, type SupplierAddr
 import { syncSupplierSites, testSupplierSitesConnection, type SupplierSitesSyncProgress, type SupplierSitesPayloadCallback } from '../../services/supplier-sites-sync.service';
 import { syncSiteAssignments, testSiteAssignmentsConnection, type SiteAssignmentsSyncProgress, type SiteAssignmentsPayloadCallback } from '../../services/supplier-site-assignments-sync.service';
 import { syncGLBalances, testGLBalancesConnection, type GLBalancesSyncProgress, type BalancePayloadCallback, type GLBalanceRecord } from '../../services/gl-balances-sync.service';
+import { syncARInvoices, testARConnection, type ARSyncProgress } from '../../services/ar-sync.service';
 import { useSyncWorker, type WorkerSyncProgress, type WorkerLog } from '../../hooks/useSyncWorker';
 import Autopilot from '../../components/Autopilot';
 import { useElectron, useElectronBackgroundSync } from '../../hooks/useElectron';
@@ -760,6 +761,7 @@ const SyncData: React.FC = () => {
 
   // Determine sync type based on selected object
   const isAPInvoices = selectedObject?.id === 'ap-invoices';
+  const isARInvoices = selectedObject?.id === 'ar-invoices';
   const isAPPayments = selectedObject?.id === 'ap-payments';
   const isGLCodeComb = selectedObject?.id === 'gl-code-combinations';
   const isGLPeriodStatus = selectedObject?.id === 'gl-period-status';
@@ -933,6 +935,16 @@ const SyncData: React.FC = () => {
     invoicesInserted: 0, paymentsInserted: 0,
     invoicesErrors: 0,  paymentsErrors: 0,
     visible: false,
+  });
+
+  const [arProgress, setArProgress] = useState<ARSyncProgress>({
+    status: 'idle',
+    totalInvoices: 0, processedInvoices: 0, insertedInvoices: 0,
+    currentInvoiceNumber: '',
+    totalLines: 0, processedLines: 0,
+    currentPage: 0, totalPages: 0,
+    errors: 0, lastError: '',
+    startTime: null, endTime: null,
   });
   const [allSuppliersMode, setAllSuppliersMode] = useState(false);
   const [supplierSyncOpen, setSupplierSyncOpen] = useState(false);
@@ -1868,6 +1880,9 @@ const SyncData: React.FC = () => {
     } else if (isAPInvoices) {
       addLog('info', 'Testing AP Invoices endpoint...');
       success = await testAPConnection(addLog);
+    } else if (isARInvoices) {
+      addLog('info', 'Testing AR Invoices endpoint...');
+      success = await testARConnection(addLog);
     } else if (isGLCodeComb) {
       addLog('info', 'Testing GL Code Combinations endpoint...');
       success = await testGLCodeCombConnection(addLog);
@@ -2231,6 +2246,31 @@ const SyncData: React.FC = () => {
       } else {
         syncResult = { inserted: result.insertedInvoices, errors: result.errors, type: 'invoices' };
       }
+    } else if (isARInvoices) {
+      // AR Invoices Sync
+      setArProgress({
+        status: 'fetching',
+        totalInvoices: 0, processedInvoices: 0, insertedInvoices: 0,
+        currentInvoiceNumber: '',
+        totalLines: 0, processedLines: 0,
+        currentPage: 0, totalPages: 0,
+        errors: 0, lastError: '',
+        startTime: new Date(), endTime: null,
+      });
+
+      const result = await syncARInvoices(
+        parameters,
+        testMode,
+        addLog,
+        (p) => {
+          setArProgress((prev) => ({ ...prev, ...p }));
+          if (p.processedInvoices && p.totalInvoices)
+            notifySyncProgress(`${p.processedInvoices}/${p.totalInvoices} AR invoices`);
+        },
+        abortControllerRef.current.signal
+      );
+
+      syncResult = { inserted: result.insertedInvoices, errors: result.errors, type: 'AR invoices' };
     } else if (isGLCodeComb) {
       // GL Code Combinations Sync
       setCodeCombProgress({
@@ -3375,6 +3415,8 @@ const SyncData: React.FC = () => {
     ? apPaymentsProgress.status
     : isAPInvoices
     ? apProgress.status
+    : isARInvoices
+    ? arProgress.status
     : isGLBatchesOnly
     ? glBatchesOnlyProgress.status
     : isGLHeadersOnly
@@ -4309,6 +4351,79 @@ const SyncData: React.FC = () => {
                   </Col>
                 </Row>
                 </>
+              ) : isARInvoices ? (
+                /* AR Invoices KPI Cards */
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <FileSearchOutlined style={{ fontSize: 20, color: REDWOOD.primary, marginRight: 8 }} />
+                        <Text strong>AR Invoices</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {arProgress.insertedInvoices} / {arProgress.totalInvoices}
+                      </div>
+                      <Progress
+                        percent={arProgress.totalInvoices > 0 ? Math.round((arProgress.insertedInvoices / arProgress.totalInvoices) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.primary}
+                        style={{ marginTop: 8 }}
+                      />
+                      {arProgress.currentPage > 0 && (
+                        <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 4 }}>
+                          Page {arProgress.currentPage}/{arProgress.totalPages}
+                        </Text>
+                      )}
+                    </Card>
+                  </Col>
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <UnorderedListOutlined style={{ fontSize: 20, color: REDWOOD.success, marginRight: 8 }} />
+                        <Text strong>Invoice Lines</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {arProgress.processedLines}
+                        <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
+                          / {arProgress.totalLines}
+                        </Text>
+                      </div>
+                      <Progress
+                        percent={arProgress.totalLines > 0 ? Math.round((arProgress.processedLines / arProgress.totalLines) * 100) : 0}
+                        showInfo={false}
+                        strokeColor={REDWOOD.success}
+                        style={{ marginTop: 8 }}
+                      />
+                    </Card>
+                  </Col>
+                  <Col xs={24} sm={8}>
+                    <Card
+                      style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <WarningOutlined style={{ fontSize: 20, color: arProgress.errors > 0 ? REDWOOD.error : REDWOOD.textSecondary, marginRight: 8 }} />
+                        <Text strong>Errors</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: arProgress.errors > 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+                        {arProgress.errors}
+                      </div>
+                      {arProgress.lastError && (
+                        <Tooltip title={arProgress.lastError}>
+                          <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>
+                            {arProgress.lastError}
+                          </Text>
+                        </Tooltip>
+                      )}
+                    </Card>
+                  </Col>
+                </Row>
               ) : isGLBatchesOnly ? (
                 /* GL Batches Only KPI Cards */
                 <Row gutter={16} style={{ marginBottom: 16 }}>
@@ -6258,14 +6373,14 @@ const SyncData: React.FC = () => {
                           {getStatusText(currentStatus)}
                         </Tag>
                       </div>
-                      {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : isGLPeriodStatus ? periodStatusProgress.startTime : isGLCategories ? glCategoriesProgress.startTime : isBanks ? banksProgress.startTime : isBankBranches ? bankBranchesProgress.startTime : isBankAccounts ? bankAccountsProgress.startTime : isBankAccountTransfers ? bankAccountTransfersProgress.startTime : isExternalCashTxn ? externalCashTxnProgress.startTime : isLegalEntities ? legalEntitiesProgress.startTime : isUserAccounts ? userAccountsProgress.startTime : isUserAccountRoles ? userAccountRolesProgress.startTime : isRoles ? rolesProgress.startTime : isSuppliers ? suppliersProgress.startTime : isSupplierAddresses ? supplierAddressProgress.startTime : progress.startTime) && (
+                      {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isARInvoices ? arProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : isGLPeriodStatus ? periodStatusProgress.startTime : isGLCategories ? glCategoriesProgress.startTime : isBanks ? banksProgress.startTime : isBankBranches ? bankBranchesProgress.startTime : isBankAccounts ? bankAccountsProgress.startTime : isBankAccountTransfers ? bankAccountTransfersProgress.startTime : isExternalCashTxn ? externalCashTxnProgress.startTime : isLegalEntities ? legalEntitiesProgress.startTime : isUserAccounts ? userAccountsProgress.startTime : isUserAccountRoles ? userAccountRolesProgress.startTime : isRoles ? rolesProgress.startTime : isSuppliers ? suppliersProgress.startTime : isSupplierAddresses ? supplierAddressProgress.startTime : progress.startTime) && (
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          Started: {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : isGLPeriodStatus ? periodStatusProgress.startTime : isGLCategories ? glCategoriesProgress.startTime : isBanks ? banksProgress.startTime : isBankBranches ? bankBranchesProgress.startTime : isBankAccounts ? bankAccountsProgress.startTime : isBankAccountTransfers ? bankAccountTransfersProgress.startTime : isExternalCashTxn ? externalCashTxnProgress.startTime : isLegalEntities ? legalEntitiesProgress.startTime : isUserAccounts ? userAccountsProgress.startTime : isUserAccountRoles ? userAccountRolesProgress.startTime : isRoles ? rolesProgress.startTime : isSuppliers ? suppliersProgress.startTime : isSupplierAddresses ? supplierAddressProgress.startTime : progress.startTime)?.toLocaleTimeString()}
+                          Started: {(isAPPayments ? apPaymentsProgress.startTime : isAPInvoices ? apProgress.startTime : isARInvoices ? arProgress.startTime : isGLCodeComb ? codeCombProgress.startTime : isGLPeriodStatus ? periodStatusProgress.startTime : isGLCategories ? glCategoriesProgress.startTime : isBanks ? banksProgress.startTime : isBankBranches ? bankBranchesProgress.startTime : isBankAccounts ? bankAccountsProgress.startTime : isBankAccountTransfers ? bankAccountTransfersProgress.startTime : isExternalCashTxn ? externalCashTxnProgress.startTime : isLegalEntities ? legalEntitiesProgress.startTime : isUserAccounts ? userAccountsProgress.startTime : isUserAccountRoles ? userAccountRolesProgress.startTime : isRoles ? rolesProgress.startTime : isSuppliers ? suppliersProgress.startTime : isSupplierAddresses ? supplierAddressProgress.startTime : progress.startTime)?.toLocaleTimeString()}
                         </Text>
                       )}
-                      {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : isGLPeriodStatus ? periodStatusProgress.endTime : isGLCategories ? glCategoriesProgress.endTime : isBanks ? banksProgress.endTime : isBankBranches ? bankBranchesProgress.endTime : isBankAccounts ? bankAccountsProgress.endTime : isBankAccountTransfers ? bankAccountTransfersProgress.endTime : isExternalCashTxn ? externalCashTxnProgress.endTime : isLegalEntities ? legalEntitiesProgress.endTime : isUserAccounts ? userAccountsProgress.endTime : isUserAccountRoles ? userAccountRolesProgress.endTime : isRoles ? rolesProgress.endTime : isSuppliers ? suppliersProgress.endTime : isSupplierAddresses ? supplierAddressProgress.endTime : progress.endTime) && (
+                      {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isARInvoices ? arProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : isGLPeriodStatus ? periodStatusProgress.endTime : isGLCategories ? glCategoriesProgress.endTime : isBanks ? banksProgress.endTime : isBankBranches ? bankBranchesProgress.endTime : isBankAccounts ? bankAccountsProgress.endTime : isBankAccountTransfers ? bankAccountTransfersProgress.endTime : isExternalCashTxn ? externalCashTxnProgress.endTime : isLegalEntities ? legalEntitiesProgress.endTime : isUserAccounts ? userAccountsProgress.endTime : isUserAccountRoles ? userAccountRolesProgress.endTime : isRoles ? rolesProgress.endTime : isSuppliers ? suppliersProgress.endTime : isSupplierAddresses ? supplierAddressProgress.endTime : progress.endTime) && (
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          Ended: {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : isGLPeriodStatus ? periodStatusProgress.endTime : isGLCategories ? glCategoriesProgress.endTime : isBanks ? banksProgress.endTime : isBankBranches ? bankBranchesProgress.endTime : isBankAccounts ? bankAccountsProgress.endTime : isBankAccountTransfers ? bankAccountTransfersProgress.endTime : isExternalCashTxn ? externalCashTxnProgress.endTime : isLegalEntities ? legalEntitiesProgress.endTime : isUserAccounts ? userAccountsProgress.endTime : isUserAccountRoles ? userAccountRolesProgress.endTime : isRoles ? rolesProgress.endTime : isSuppliers ? suppliersProgress.endTime : isSupplierAddresses ? supplierAddressProgress.endTime : progress.endTime)?.toLocaleTimeString()}
+                          Ended: {(isAPPayments ? apPaymentsProgress.endTime : isAPInvoices ? apProgress.endTime : isARInvoices ? arProgress.endTime : isGLCodeComb ? codeCombProgress.endTime : isGLPeriodStatus ? periodStatusProgress.endTime : isGLCategories ? glCategoriesProgress.endTime : isBanks ? banksProgress.endTime : isBankBranches ? bankBranchesProgress.endTime : isBankAccounts ? bankAccountsProgress.endTime : isBankAccountTransfers ? bankAccountTransfersProgress.endTime : isExternalCashTxn ? externalCashTxnProgress.endTime : isLegalEntities ? legalEntitiesProgress.endTime : isUserAccounts ? userAccountsProgress.endTime : isUserAccountRoles ? userAccountRolesProgress.endTime : isRoles ? rolesProgress.endTime : isSuppliers ? suppliersProgress.endTime : isSupplierAddresses ? supplierAddressProgress.endTime : progress.endTime)?.toLocaleTimeString()}
                         </Text>
                       )}
                     </Space>
@@ -6278,6 +6393,8 @@ const SyncData: React.FC = () => {
                           ? `${apPaymentsProgress.insertedPayments} payments, ${apPaymentsProgress.processedRelatedInvoices} related invoices inserted`
                           : isAPInvoices
                           ? `${apProgress.insertedInvoices} invoices inserted`
+                          : isARInvoices
+                          ? `${arProgress.insertedInvoices} AR invoices, ${arProgress.processedLines} lines inserted`
                           : isGLBatchesOnly
                           ? `${glBatchesOnlyProgress.insertedBatches} batches inserted`
                           : isGLHeadersOnly
@@ -6319,10 +6436,10 @@ const SyncData: React.FC = () => {
                           : `${progress.totalBatchesInserted + progress.totalHeadersInserted + progress.totalLinesInserted} inserted`
                         }
                       </Text>
-                      {(isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLBatchesOnly ? glBatchesOnlyProgress.errors : isGLHeadersOnly ? glHeadersOnlyProgress.errors : isGLLinesOnly ? glLinesOnlyProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isGLCategories ? glCategoriesProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isBankAccountTransfers ? bankAccountTransfersProgress.errors : isExternalCashTxn ? externalCashTxnProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : isSupplierSites ? supplierSitesProgress.errors : progress.errors) > 0 && (
+                      {(isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isARInvoices ? arProgress.errors : isGLBatchesOnly ? glBatchesOnlyProgress.errors : isGLHeadersOnly ? glHeadersOnlyProgress.errors : isGLLinesOnly ? glLinesOnlyProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isGLCategories ? glCategoriesProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isBankAccountTransfers ? bankAccountTransfersProgress.errors : isExternalCashTxn ? externalCashTxnProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : isSupplierSites ? supplierSitesProgress.errors : progress.errors) > 0 && (
                         <Text type="danger">
                           <CloseCircleOutlined style={{ marginRight: 4 }} />
-                          {isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isGLBatchesOnly ? glBatchesOnlyProgress.errors : isGLHeadersOnly ? glHeadersOnlyProgress.errors : isGLLinesOnly ? glLinesOnlyProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isGLCategories ? glCategoriesProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isBankAccountTransfers ? bankAccountTransfersProgress.errors : isExternalCashTxn ? externalCashTxnProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : isSupplierSites ? supplierSitesProgress.errors : progress.errors} errors
+                          {isAPPayments ? apPaymentsProgress.errors : isAPInvoices ? apProgress.errors : isARInvoices ? arProgress.errors : isGLBatchesOnly ? glBatchesOnlyProgress.errors : isGLHeadersOnly ? glHeadersOnlyProgress.errors : isGLLinesOnly ? glLinesOnlyProgress.errors : isGLCodeComb ? codeCombProgress.errors : isGLPeriodStatus ? periodStatusProgress.errors : isGLCategories ? glCategoriesProgress.errors : isBanks ? banksProgress.errors : isBankBranches ? bankBranchesProgress.errors : isBankAccounts ? bankAccountsProgress.errors : isBankAccountTransfers ? bankAccountTransfersProgress.errors : isExternalCashTxn ? externalCashTxnProgress.errors : isLegalEntities ? legalEntitiesProgress.errors : isUserAccounts ? userAccountsProgress.errors : isUserAccountRoles ? userAccountRolesProgress.errors : isRoles ? rolesProgress.errors : isSuppliers ? suppliersProgress.errors : isSupplierAddresses ? supplierAddressProgress.errors : isSupplierSites ? supplierSitesProgress.errors : progress.errors} errors
                         </Text>
                       )}
                     </Space>
