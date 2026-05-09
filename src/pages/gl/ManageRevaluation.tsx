@@ -554,94 +554,104 @@ const ManageRevaluation: React.FC = () => {
         `SLA header ${slaResult.headerId} created — ${slaResult.lineCount} lines (${slaResult.status})`);
 
       // Step 3 — Post to GL via glPosting service
+      // Oracle Fusion revaluation: one journal per foreign currency.
+      // Journal currency = foreign ccy (e.g. INR), entered = 0, accounted = AED amounts.
       updateStep(3, 'process');
 
-      // Build per-line maps for currency and description.
-      // Lines are generated in ccyRow order (2 lines per active ccyRow):
-      //   gain ccyRow → [DR balanceSheet(foreignCcy), CR gainAccount(functionalCcy)]
-      //   loss ccyRow → [DR lossAccount(functionalCcy), CR balanceSheet(foreignCcy)]
-      const lineCcyMap  = new Map<number, string>();
-      const lineDescMap = new Map<number, string>();
+      const journalDesc   = `FX Revaluation – ${d.accountDesc || d.account} – ${periodName}`;
       const activeCcyRows = d.ccyRows.filter(c => c.revalAmt !== 0 && c.newRate !== 0);
-      activeCcyRows.forEach((ccyRow, idx) => {
-        const l1 = d.lines[idx * 2];
-        const l2 = d.lines[idx * 2 + 1];
-        const foreignCcy = ccyRow.currencyCode || currency;
-        const acctLabel  = d.accountDesc || d.account;
-        if (ccyRow.isGain) {
-          if (l1) {
-            lineCcyMap.set(l1.lineNum, foreignCcy);
-            lineDescMap.set(l1.lineNum, `FX Revaluation Gain – ${foreignCcy} – ${acctLabel} – ${periodName}`);
-          }
-          if (l2) {
-            lineCcyMap.set(l2.lineNum, currency);
-            lineDescMap.set(l2.lineNum, `FX Revaluation Gain – ${foreignCcy} – ${d.gainAccount || 'Gain A/C'} – ${periodName}`);
-          }
-        } else {
-          if (l1) {
-            lineCcyMap.set(l1.lineNum, currency);
-            lineDescMap.set(l1.lineNum, `FX Revaluation Loss – ${foreignCcy} – ${d.lossAccount || 'Loss A/C'} – ${periodName}`);
-          }
-          if (l2) {
-            lineCcyMap.set(l2.lineNum, foreignCcy);
-            lineDescMap.set(l2.lineNum, `FX Revaluation Loss – ${foreignCcy} – ${acctLabel} – ${periodName}`);
-          }
-        }
-      });
+      const acctLabel     = d.accountDesc || d.account;
 
-      const journalDesc = `FX Revaluation – ${d.accountDesc || d.account} – ${periodName}`;
+      const glResults: { success: boolean; skipped: boolean; batchName: string; batchId: number | null; headerId: number | null; error?: string }[] = [];
 
-      const glResult = await postSlaToGL({
-        slaHeaderId:        slaResult.headerId,
-        sourceNumber:       `REVAL-${id}`,
-        sourceId:           id,
-        eventTypeCode:      'GL_REVALUATION',
-        periodName,
-        ledgerName:         d.ledgerName || '',
-        ledgerId:           d.ledgerId   || 0,
-        currency,
-        accountingDate:     periodLastDay,
-        legalEntity:        '',
-        businessUnit:       '',
-        jeCategory:         'Revaluation',
-        jeSource:           'General Ledger',
-        batchSource:        'General Ledger',
-        batchDescription:   journalDesc,
-        journalDescription: journalDesc,
-        journalName:        `FX REVAL – ${d.account} – ${periodName}`,
-        createdBy,
-        forceCreate:        true,   // always create fresh — never reuse an old FC journal
-        lines: d.lines.map(l => ({
-          lineType:           l.drAmount > 0 ? 'DR' as const : 'CR' as const,
-          enteredDr:          l.drAmount > 0 ? l.drAmount : null,
-          enteredCr:          l.crAmount > 0 ? l.crAmount : null,
-          accountedDr:        l.drAmount > 0 ? l.drAmount : null,
-          accountedCr:        l.crAmount > 0 ? l.crAmount : null,
-          description:        l.description || lineDescMap.get(l.lineNum) || journalDesc,
-          currencyCode:       currency,   // revaluation adjustments are always in functional currency
-          exchangeRate:       1,
+      for (let idx = 0; idx < activeCcyRows.length; idx++) {
+        const ccyRow  = activeCcyRows[idx];
+        const l1      = d.lines[idx * 2];
+        const l2      = d.lines[idx * 2 + 1];
+        if (!l1 || !l2) continue;
+
+        const fCcy    = ccyRow.currencyCode || currency;
+        const newRate = ccyRow.newRate || 1;
+        const l1Desc  = ccyRow.isGain
+          ? `FX Revaluation Gain – ${fCcy} – ${acctLabel} – ${periodName}`
+          : `FX Revaluation Loss – ${fCcy} – ${d.lossAccount || 'Loss A/C'} – ${periodName}`;
+        const l2Desc  = ccyRow.isGain
+          ? `FX Revaluation Gain – ${fCcy} – ${d.gainAccount || 'Gain A/C'} – ${periodName}`
+          : `FX Revaluation Loss – ${fCcy} – ${acctLabel} – ${periodName}`;
+
+        const r = await postSlaToGL({
+          slaHeaderId:        slaResult.headerId,
+          sourceNumber:       `REVAL-${id}-${fCcy}`,
+          sourceId:           id,
+          eventTypeCode:      'GL_REVALUATION',
+          periodName,
+          ledgerName:         d.ledgerName || '',
+          ledgerId:           d.ledgerId   || 0,
+          currency:           fCcy,        // foreign currency (e.g. INR) — Oracle standard
+          conversionRate:     newRate,      // new revaluation rate
           accountingDate:     periodLastDay,
-          accountCombination: l.combo,
-          accountingClass:    'Revaluation',
-          legalEntity:        null,
-        })),
-      });
-
-      if (!glResult.success) {
-        updateStep(3, 'error', glResult.error || 'GL posting failed');
-        throw new Error(glResult.error || 'GL posting failed');
+          legalEntity:        '',
+          businessUnit:       '',
+          jeCategory:         'Revaluation',
+          jeSource:           'General Ledger',
+          batchSource:        'General Ledger',
+          batchDescription:   journalDesc,
+          journalDescription: journalDesc,
+          journalName:        `FX REVAL – ${d.account} – ${fCcy} – ${periodName}`,
+          createdBy,
+          forceCreate:        true,
+          lines: [
+            {
+              lineType:           l1.drAmount > 0 ? 'DR' as const : 'CR' as const,
+              enteredDr:          0,
+              enteredCr:          0,
+              accountedDr:        l1.drAmount > 0 ? l1.drAmount : null,
+              accountedCr:        l1.crAmount > 0 ? l1.crAmount : null,
+              description:        l1.description || l1Desc,
+              currencyCode:       fCcy,
+              accountingDate:     periodLastDay,
+              accountCombination: l1.combo,
+              accountingClass:    'Revaluation',
+              legalEntity:        null,
+            },
+            {
+              lineType:           l2.drAmount > 0 ? 'DR' as const : 'CR' as const,
+              enteredDr:          0,
+              enteredCr:          0,
+              accountedDr:        l2.drAmount > 0 ? l2.drAmount : null,
+              accountedCr:        l2.crAmount > 0 ? l2.crAmount : null,
+              description:        l2.description || l2Desc,
+              currencyCode:       fCcy,
+              accountingDate:     periodLastDay,
+              accountCombination: l2.combo,
+              accountingClass:    'Revaluation',
+              legalEntity:        null,
+            },
+          ],
+        });
+        glResults.push(r);
+        if (!r.success) {
+          updateStep(3, 'error', `${fCcy}: ${r.error || 'GL posting failed'}`);
+          throw new Error(`${fCcy}: ${r.error || 'GL posting failed'}`);
+        }
       }
+
+      if (glResults.length === 0) {
+        updateStep(3, 'error', 'No active CCY rows to post');
+        throw new Error('No active CCY rows to post');
+      }
+      const lastGlResult = glResults[glResults.length - 1];
       updateStep(3, 'finish',
-        `${glResult.skipped ? 'Reused' : 'Created'} GL batch ${glResult.batchName}`);
+        `Posted ${glResults.length} GL batch(es): ${glResults.map(r => r.batchName).join(', ')}`);
 
       // Step 4 — Mark revaluation ACCOUNTED via dedicated status endpoint
       updateStep(4, 'process');
       const statusUrl     = `${ORDS_BASE}/${APEX_DB_CONFIG.endpoints.revaluation}/${id}/accounting`;
       const statusPayload = {
         status:        'ACCOUNTED',
-        gl_batch_id:   glResult.batchId   || 0,
-        gl_batch_name: glResult.batchName,
-        gl_header_id:  glResult.headerId  || 0,
+        gl_batch_id:   lastGlResult.batchId   || 0,
+        gl_batch_name: lastGlResult.batchName,
+        gl_header_id:  lastGlResult.headerId  || 0,
       };
       const putRes  = await fetch(statusUrl, {
         method:  'POST',
