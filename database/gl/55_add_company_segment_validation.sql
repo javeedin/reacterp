@@ -4,15 +4,17 @@
 --   2. RR_SLA_PKG.create_accounting (sla/accounting/create)
 --
 -- Rule: segment 1 (company) of every account combination in a
--- journal batch must be identical. A mismatch is logged to
--- RR_GL_JOURNAL_VALIDATION_LOG — the journal is NOT rejected,
--- but the anomaly is captured for review.
+-- journal batch must be identical.
+--
+-- GL behaviour: validation runs BEFORE any inserts.
+--   If a mismatch is found the journal is REJECTED (error returned)
+--   and a row is logged to RR_GL_JOURNAL_VALIDATION_LOG.
+--   Nothing is written to the journal tables.
 --
 -- Account combination format: SS-00-00-NNNNNN-CCCC-000-00-000-000
---   Segment 1 = REGEXP_SUBSTR(combination, '[^-]+', 1, 1)
+--   Segment 1 (company) = REGEXP_SUBSTR(combination, '[^-]+', 1, 1)
 -- ============================================================
 
--- ── 1. RR_INSERT_GL_JOURNALS_POST ────────────────────────────
 CREATE OR REPLACE PROCEDURE RR_INSERT_GL_JOURNALS_POST (
     p_json_input   IN  CLOB,
     p_json_output  OUT CLOB
@@ -83,12 +85,13 @@ AS
 
     v_eff_rate              NUMBER;
 
-    -- Company-segment validation
+    -- Company-segment pre-validation
     v_first_company         VARCHAR2(100);
     v_line_company          VARCHAR2(100);
     v_mismatch_found        BOOLEAN := FALSE;
-    v_mismatch_detail       CLOB    := '[]';
-    v_detail_arr            VARCHAR2(32767) := '';
+    v_mismatch_detail       VARCHAR2(32767) := '';
+    v_val_source_number     VARCHAR2(500);
+    v_val_source_id         VARCHAR2(200);
 
     FUNCTION safe_get_string(p_obj JSON_OBJECT_T, p_key VARCHAR2) RETURN VARCHAR2 IS
     BEGIN
@@ -134,13 +137,83 @@ BEGIN
     l_header_obj := l_input_obj.get_Object('header');
     l_lines_arr  := l_input_obj.get_Array('lines');
 
+    -- ── Extract values needed for validation and error logging ───────────────
+    v_batch_name        := safe_get_string(l_batch_obj,  'batchName');
+    v_batch_created_by  := safe_get_string(l_batch_obj,  'createdBy');
+    v_header_je_category := safe_get_string(l_header_obj, 'jeCategory');
+
+    -- ── PRE-VALIDATION: company segment must be the same on all lines ─────────
+    -- Scan the JSON lines array before touching any tables.
+    l_step := 'Pre-validating company segments';
+    FOR i IN 0 .. l_lines_arr.get_size() - 1 LOOP
+        l_line_obj       := JSON_OBJECT_T(l_lines_arr.get(i));
+        v_line_account_comb := safe_get_string(l_line_obj, 'accountCombination');
+        v_line_company   := REGEXP_SUBSTR(v_line_account_comb, '[^-]+', 1, 1);
+
+        -- Capture reference1/2 from first line for the log record
+        IF i = 0 THEN
+            v_first_company     := v_line_company;
+            v_val_source_number := safe_get_string(l_line_obj, 'reference1');
+            v_val_source_id     := safe_get_string(l_line_obj, 'reference2');
+        ELSIF v_line_company IS NOT NULL
+              AND v_first_company IS NOT NULL
+              AND v_line_company != v_first_company
+        THEN
+            v_mismatch_found := TRUE;
+            IF v_mismatch_detail IS NOT NULL THEN
+                v_mismatch_detail := v_mismatch_detail || ',';
+            END IF;
+            v_mismatch_detail := v_mismatch_detail
+                || '{"line":' || (i + 1)
+                || ',"combination":"' || REPLACE(v_line_account_comb, '"', '\"')
+                || '","company":"' || v_line_company || '"}';
+        END IF;
+    END LOOP;
+
+    -- ── Reject if company segment mismatch found ─────────────────────────────
+    IF v_mismatch_found THEN
+        -- Log to validation table (best-effort — must not mask the real error)
+        BEGIN
+            INSERT INTO RR_GL_JOURNAL_VALIDATION_LOG (
+                SOURCE, SOURCE_NUMBER, SOURCE_ID,
+                VALIDATION_TYPE, MESSAGE, LINE_DETAILS,
+                CREATED_BY
+            ) VALUES (
+                'GL_JOURNAL', v_val_source_number, v_val_source_id,
+                'COMPANY_SEGMENT_MISMATCH',
+                'Journal rejected: lines span multiple company segments. '
+                    || 'First line company: ' || v_first_company || '. '
+                    || 'Batch: ' || v_batch_name,
+                TO_CLOB(
+                    '[{"line":1,"combination":"'
+                    || REPLACE(safe_get_string(JSON_OBJECT_T(l_lines_arr.get(0)), 'accountCombination'), '"', '\"')
+                    || '","company":"' || v_first_company || '"},'
+                    || v_mismatch_detail || ']'
+                ),
+                v_batch_created_by
+            );
+            COMMIT;
+        EXCEPTION WHEN OTHERS THEN NULL;
+        END;
+
+        -- Return error — nothing inserted into journal tables
+        l_result_obj.put('status',  'ERROR');
+        l_result_obj.put('message', 'Journal rejected: account combinations span multiple company segments. '
+                                    || 'All lines must belong to the same company (segment 1). '
+                                    || 'First line company: ' || v_first_company || '. '
+                                    || 'Mismatch logged to RR_GL_JOURNAL_VALIDATION_LOG.');
+        l_result_obj.put('validationError', 'COMPANY_SEGMENT_MISMATCH');
+        p_json_output := l_result_obj.to_clob();
+        RETURN;
+    END IF;
+
+    -- ── Validation passed — proceed with inserts ──────────────────────────────
     l_step := 'Getting sequence values';
     l_batch_id  := RR_GL_BATCH_SEQ.NEXTVAL;
     l_header_id := RR_GL_HEADER_SEQ.NEXTVAL;
 
     -- ── Batch ────────────────────────────────────────────────────────────────
     l_step := 'Extracting batch values';
-    v_batch_name          := safe_get_string(l_batch_obj, 'batchName');
     v_batch_description   := safe_get_string(l_batch_obj, 'batchDescription');
     v_batch_ledger_name   := safe_get_string(l_batch_obj, 'ledgerName');
     v_batch_ledger_id     := safe_get_number(l_batch_obj, 'ledgerId');
@@ -150,7 +223,6 @@ BEGIN
     v_batch_total_dr      := safe_get_number(l_batch_obj, 'runningTotalDr');
     v_batch_total_cr      := safe_get_number(l_batch_obj, 'runningTotalCr');
     v_batch_source        := safe_get_string(l_batch_obj, 'batchSource');
-    v_batch_created_by    := safe_get_string(l_batch_obj, 'createdBy');
 
     l_step := 'Inserting batch';
     INSERT INTO RR_GL_JOURNAL_BATCHES (
@@ -171,7 +243,6 @@ BEGIN
     l_step := 'Extracting header values';
     v_header_ledger_id      := safe_get_number(l_header_obj, 'ledgerId');
     v_header_ledger_name    := safe_get_string(l_header_obj, 'ledgerName');
-    v_header_je_category    := safe_get_string(l_header_obj, 'jeCategory');
     v_header_je_source      := safe_get_string(l_header_obj, 'jeSource');
     v_header_period_name    := safe_get_string(l_header_obj, 'periodName');
     v_header_journal_name   := safe_get_string(l_header_obj, 'journalName');
@@ -234,24 +305,6 @@ BEGIN
         v_line_ref5         := safe_get_string(l_line_obj, 'reference5');
         v_line_created_by   := safe_get_string(l_line_obj, 'createdBy');
 
-        -- ── Company segment validation ───────────────────────────────────────
-        -- Segment 1 = first token before '-' in the account combination.
-        v_line_company := REGEXP_SUBSTR(v_line_account_comb, '[^-]+', 1, 1);
-        IF l_line_count = 1 THEN
-            v_first_company := v_line_company;
-        ELSIF v_line_company IS NOT NULL
-              AND v_first_company IS NOT NULL
-              AND v_line_company != v_first_company
-        THEN
-            v_mismatch_found := TRUE;
-            -- Accumulate JSON array of mismatching combinations
-            IF v_detail_arr IS NOT NULL THEN v_detail_arr := v_detail_arr || ','; END IF;
-            v_detail_arr := v_detail_arr
-                || '{"line":' || l_line_count
-                || ',"combination":"' || REPLACE(v_line_account_comb, '"', '\"')
-                || '","company":"' || v_line_company || '"}';
-        END IF;
-
         -- ── Accounted DR/CR ──────────────────────────────────────────────────
         v_eff_rate := NVL(v_line_conv_rate, NVL(v_header_conv_rate, 1));
         IF v_eff_rate IS NULL OR v_eff_rate <= 0 THEN
@@ -295,42 +348,12 @@ BEGIN
         );
     END LOOP;
 
-    -- ── Company segment mismatch: log warning (non-blocking) ─────────────────
-    IF v_mismatch_found THEN
-        BEGIN
-            v_mismatch_detail := TO_CLOB(
-                '[{"line":1,"combination":"' ||
-                REPLACE(safe_get_string(JSON_OBJECT_T(l_lines_arr.get(0)), 'accountCombination'), '"', '\"') ||
-                '","company":"' || v_first_company || '"},' || v_detail_arr || ']'
-            );
-            INSERT INTO RR_GL_JOURNAL_VALIDATION_LOG (
-                SOURCE, BATCH_ID, HEADER_ID,
-                SOURCE_NUMBER, SOURCE_ID,
-                VALIDATION_TYPE, MESSAGE, LINE_DETAILS,
-                CREATED_BY
-            ) VALUES (
-                'GL_JOURNAL', l_batch_id, l_header_id,
-                v_line_ref1, v_line_ref2,
-                'COMPANY_SEGMENT_MISMATCH',
-                'Journal lines contain multiple company segments. '
-                    || 'First line company: ' || v_first_company || '. '
-                    || 'Batch: ' || v_batch_name,
-                v_mismatch_detail,
-                v_batch_created_by
-            );
-        EXCEPTION WHEN OTHERS THEN NULL;  -- log failure must not abort the journal
-        END;
-    END IF;
-
     COMMIT;
 
-    l_result_obj.put('status',    'SUCCESS');
-    l_result_obj.put('jeBatchId', l_batch_id);
+    l_result_obj.put('status',     'SUCCESS');
+    l_result_obj.put('jeBatchId',  l_batch_id);
     l_result_obj.put('jeHeaderId', l_header_id);
-    l_result_obj.put('lineCount', l_line_count);
-    IF v_mismatch_found THEN
-        l_result_obj.put('warning', 'Company segment mismatch detected across journal lines — logged to RR_GL_JOURNAL_VALIDATION_LOG');
-    END IF;
+    l_result_obj.put('lineCount',  l_line_count);
     p_json_output := l_result_obj.to_clob();
 
 EXCEPTION
@@ -345,67 +368,73 @@ EXCEPTION
 END RR_INSERT_GL_JOURNALS_POST;
 /
 
-DBMS_OUTPUT.PUT_LINE('RR_INSERT_GL_JOURNALS_POST updated — company segment cross-company validation added');
+DBMS_OUTPUT.PUT_LINE('RR_INSERT_GL_JOURNALS_POST updated — company segment mismatch now BLOCKS journal creation');
 
 
 -- ============================================================
--- 2. RR_SLA_PKG.create_accounting — company segment validation
+-- RR_SLA_PKG.create_accounting — company segment validation
 --
--- Add the block below inside RR_SLA_PKG body, at the END of the
--- create_accounting procedure, BEFORE the final COMMIT, after
--- all lines have been inserted into RR_SLA_ACCOUNTING_LINES.
---
--- Replace  <p_header_id>  with the local variable holding the
--- newly created SLA header_id, and <p_source_number> /
--- <p_source_id> with whatever variables hold those values.
+-- Paste this block inside the create_accounting procedure BEFORE
+-- inserting any SLA lines. Replace the placeholders with the
+-- actual variable names used in the procedure.
 -- ============================================================
 
 /*
 ── PASTE THIS BLOCK into RR_SLA_PKG.create_accounting ──────────
+── Add it BEFORE the line inserts. Replace placeholders. ───────
 
-    -- Company segment validation (non-blocking — logs to RR_GL_JOURNAL_VALIDATION_LOG)
+    -- Company segment validation: reject if lines span multiple companies
     DECLARE
-        v_sla_first_company  VARCHAR2(100);
-        v_sla_mismatch       BOOLEAN := FALSE;
-        v_sla_detail         VARCHAR2(32767) := '';
-        v_sla_line_num       NUMBER  := 0;
+        v_val_first_company  VARCHAR2(100);
+        v_val_line_company   VARCHAR2(100);
+        v_val_mismatch       BOOLEAN := FALSE;
+        v_val_detail         VARCHAR2(32767) := '';
+        v_val_line_num       NUMBER := 0;
+        v_val_comb           VARCHAR2(500);
     BEGIN
-        FOR rec IN (
-            SELECT account_combination,
-                   REGEXP_SUBSTR(account_combination, '[^-]+', 1, 1) AS company
-            FROM   RR_SLA_ACCOUNTING_LINES
-            WHERE  header_id = <p_header_id>
-            ORDER  BY line_id
-        ) LOOP
-            v_sla_line_num := v_sla_line_num + 1;
-            IF v_sla_line_num = 1 THEN
-                v_sla_first_company := rec.company;
-            ELSIF rec.company IS NOT NULL
-                  AND v_sla_first_company IS NOT NULL
-                  AND rec.company != v_sla_first_company
+        -- Loop through the lines JSON array before inserting
+        FOR i IN 0 .. <l_lines_arr>.get_size() - 1 LOOP
+            v_val_comb        := safe_get_string(JSON_OBJECT_T(<l_lines_arr>.get(i)), 'accountCombination');
+            v_val_line_company := REGEXP_SUBSTR(v_val_comb, '[^-]+', 1, 1);
+            v_val_line_num    := v_val_line_num + 1;
+            IF v_val_line_num = 1 THEN
+                v_val_first_company := v_val_line_company;
+            ELSIF v_val_line_company IS NOT NULL
+                  AND v_val_first_company IS NOT NULL
+                  AND v_val_line_company != v_val_first_company
             THEN
-                v_sla_mismatch := TRUE;
-                IF v_sla_detail IS NOT NULL THEN v_sla_detail := v_sla_detail || ','; END IF;
-                v_sla_detail := v_sla_detail
-                    || '{"line":' || v_sla_line_num
-                    || ',"combination":"' || REPLACE(rec.account_combination, '"', '\"')
-                    || '","company":"' || rec.company || '"}';
+                v_val_mismatch := TRUE;
+                IF v_val_detail IS NOT NULL THEN v_val_detail := v_val_detail || ','; END IF;
+                v_val_detail := v_val_detail
+                    || '{"line":' || v_val_line_num
+                    || ',"combination":"' || REPLACE(v_val_comb, '"', '\"')
+                    || '","company":"' || v_val_line_company || '"}';
             END IF;
         END LOOP;
 
-        IF v_sla_mismatch THEN
-            INSERT INTO RR_GL_JOURNAL_VALIDATION_LOG (
-                SOURCE, HEADER_ID, SOURCE_NUMBER, SOURCE_ID,
-                VALIDATION_TYPE, MESSAGE, LINE_DETAILS, CREATED_BY
-            ) VALUES (
-                'SLA', <p_header_id>, <p_source_number>, TO_CHAR(<p_source_id>),
-                'COMPANY_SEGMENT_MISMATCH',
-                'SLA lines contain multiple company segments. First company: ' || v_sla_first_company,
-                TO_CLOB('[' || v_sla_detail || ']'),
-                <p_created_by>
-            );
+        IF v_val_mismatch THEN
+            BEGIN
+                INSERT INTO RR_GL_JOURNAL_VALIDATION_LOG (
+                    SOURCE, SOURCE_NUMBER, SOURCE_ID,
+                    VALIDATION_TYPE, MESSAGE, LINE_DETAILS, CREATED_BY
+                ) VALUES (
+                    'SLA', <v_source_number>, TO_CHAR(<v_source_id>),
+                    'COMPANY_SEGMENT_MISMATCH',
+                    'SLA rejected: lines span multiple company segments. First company: ' || v_val_first_company,
+                    TO_CLOB('[' || v_val_detail || ']'),
+                    <v_created_by>
+                );
+                COMMIT;
+            EXCEPTION WHEN OTHERS THEN NULL;
+            END;
+            -- Return error to caller
+            p_status   := 422;
+            p_response := '{"status":"ERROR","validationError":"COMPANY_SEGMENT_MISMATCH",'
+                       || '"message":"SLA rejected: account combinations span multiple company segments. '
+                       || 'All lines must belong to the same company (segment 1). '
+                       || 'First line company: ' || v_val_first_company || '"}';
+            RETURN;
         END IF;
-    EXCEPTION WHEN OTHERS THEN NULL;
     END;
 
 */
