@@ -194,6 +194,8 @@ const ExternalTxnForm: React.FC<{
   const [saved, setSaved] = useState(false);
   const [savedExtId, setSavedExtId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pdfVisible, setPdfVisible] = useState(false);
   const [createPayeeVisible, setCreatePayeeVisible] = useState(false);
   const [createPayeeForm] = Form.useForm();
   const [createPayeeSaving, setCreatePayeeSaving] = useState(false);
@@ -333,6 +335,151 @@ const ExternalTxnForm: React.FC<{
       PayeeId:              values.payeeId ?? null,
     }],
   });
+
+  const handlePrintPdf = () => {
+    const values = form.getFieldsValue();
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const fmt = (v: any) => v != null && v !== '' ? String(v) : '—';
+    const fmtNum = (v: any) => v != null ? Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 }) : '—';
+    const fmtDate = (v: any) => {
+      if (!v) return '—';
+      try { return new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
+      catch { return String(v); }
+    };
+
+    // Header bar
+    doc.setFillColor(191, 70, 0);
+    doc.rect(0, 0, pageW, 18, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    doc.text('External Transaction', 14, 11);
+    doc.setFontSize(9);
+    doc.text(`Printed: ${new Date().toLocaleString()}`, pageW - 14, 11, { align: 'right' });
+    doc.setTextColor(0, 0, 0);
+
+    let y = 26;
+
+    // Transaction ID if saved
+    if (savedExtId) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(191, 70, 0);
+      doc.text(`Transaction ID: ${savedExtId}`, 14, y);
+      doc.setTextColor(0, 0, 0);
+      y += 8;
+    }
+
+    // Section 1: Organisation & Bank
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text('Organisation & Bank', 14, y);
+    y += 2;
+    autoTable(doc, {
+      startY: y,
+      body: [
+        ['Business Unit', fmt(values.businessUnitName), 'Company Code', fmt(derivedCompany)],
+        ['Bank Account', fmt(values.bankAccountName), 'Currency', fmt(values.currencyCode)],
+        ['Cash / Asset Account', fmt(values.assetAccountCombination), 'Direction', values.transactionDirection === 'DR' ? 'Money In (DR)' : 'Money Out (CR)'],
+      ],
+      styles: { fontSize: 9, cellPadding: 2 },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 42 }, 2: { fontStyle: 'bold', cellWidth: 42 } },
+      alternateRowStyles: { fillColor: [247, 247, 247] },
+      margin: { left: 14, right: 14 },
+    });
+
+    y = (doc as any).lastAutoTable.finalY + 6;
+
+    // Section 2: Transaction Details
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text('Transaction Details', 14, y);
+    y += 2;
+    const inverseRate = watchedRate && watchedRate > 0 ? Math.round((1 / watchedRate) * 1000000) / 1000000 : null;
+    autoTable(doc, {
+      startY: y,
+      body: [
+        ['Transaction Date', fmtDate(values.transactionDate), 'Value Date', fmtDate(values.valueDate)],
+        ['Transaction Type', fmt(values.transactionType), 'Reference', fmt(values.referenceText)],
+        ['Payment Method', fmt(values.paymentMethod), 'Payment Document', fmt(values.paymentDocument)],
+        ['Paper Doc #', fmt(values.paperDocumentNumber), 'Conv. Rate Type', fmt(values.bankConversionRateType)],
+        [`Conv. Rate (${values.currencyCode || 'FCY'} → Functional)`, fmtNum(values.bankConversionRate),
+         `Inverse Rate (Functional → ${values.currencyCode || 'FCY'})`, fmtNum(inverseRate)],
+      ],
+      styles: { fontSize: 9, cellPadding: 2 },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 42 }, 2: { fontStyle: 'bold', cellWidth: 42 } },
+      alternateRowStyles: { fillColor: [247, 247, 247] },
+      margin: { left: 14, right: 14 },
+    });
+
+    y = (doc as any).lastAutoTable.finalY + 6;
+
+    // Section 3: Adhoc Payee (if applicable)
+    if (values.transactionType === 'Adhoc Payment' && values.payeeName) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.text('Payee Details', 14, y);
+      y += 2;
+      autoTable(doc, {
+        startY: y,
+        body: [
+          ['Payee Name', fmt(values.payeeName), 'Payee Type', fmt(values.payeeType)],
+          ['Payee Account', fmt(values.payeeAccountNumber), 'Bank Name', fmt(values.payeeBankName)],
+          ['IBAN', fmt(values.payeeIban), '', ''],
+        ],
+        styles: { fontSize: 9, cellPadding: 2 },
+        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 42 }, 2: { fontStyle: 'bold', cellWidth: 42 } },
+        alternateRowStyles: { fillColor: [247, 247, 247] },
+        margin: { left: 14, right: 14 },
+      });
+      y = (doc as any).lastAutoTable.finalY + 6;
+    }
+
+    // Section 4: Transaction Lines
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text('Transaction Lines', 14, y);
+    y += 2;
+
+    const lineRows = extTxnLines.map((l, i) => [
+      i + 1,
+      l.offsetAccount || '—',
+      l.offsetDesc || '—',
+      l.description || '—',
+      l.amount != null ? fmtNum(Math.abs(l.amount)) : '—',
+    ]);
+    const totalAmt = extTxnLines.reduce((s, l) => s + Math.abs(l.amount ?? 0), 0);
+    lineRows.push(['', '', '', 'Total', fmtNum(totalAmt)] as any);
+
+    autoTable(doc, {
+      startY: y,
+      head: [['#', 'Offset Account', 'Account Desc', 'Description', 'Amount']],
+      body: lineRows,
+      styles: { fontSize: 8.5, cellPadding: 2 },
+      headStyles: { fillColor: [58, 58, 58] },
+      alternateRowStyles: { fillColor: [247, 247, 247] },
+      columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 50 }, 4: { halign: 'right', cellWidth: 28 } },
+      margin: { left: 14, right: 14 },
+    });
+
+    // Footer
+    const pageCount = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(150);
+      doc.text(`Page ${i} of ${pageCount}`, pageW / 2, 290, { align: 'center' });
+      doc.text('Generated by ReactERP', 14, 290);
+      doc.setTextColor(0);
+    }
+
+    const blob = doc.output('blob');
+    const url = URL.createObjectURL(blob);
+    setPdfUrl(url);
+    setPdfVisible(true);
+  };
 
   const handleSubmit = async () => {
     let values: any;
@@ -1146,6 +1293,16 @@ const ExternalTxnForm: React.FC<{
               <span style={{ fontSize: 13, color: REDWOOD.success, fontWeight: 600 }}>Saved &amp; Locked</span>
             </Space>
           )}
+          {(saved || isEdit) && (
+            <Button
+              size="large"
+              icon={<PrinterOutlined />}
+              onClick={handlePrintPdf}
+              style={{ minWidth: 130 }}
+            >
+              Print PDF
+            </Button>
+          )}
         </div>
         <Space size={8}>
           {/* Delete button — shown after save (new) or in edit when not accounted */}
@@ -1204,8 +1361,8 @@ const ExternalTxnForm: React.FC<{
                 style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary, minWidth: 180 }}
               >
               {extTxnMode === 'multiple'
-                ? `Create ${extTxnLines.length} Transaction${extTxnLines.length !== 1 ? 's' : ''}`
-                : 'Create Transaction'}
+                ? `Save ${extTxnLines.length} Transaction${extTxnLines.length !== 1 ? 's' : ''}`
+                : 'Save'}
               </Button>
             </Tooltip>
           )}
@@ -1292,6 +1449,39 @@ const ExternalTxnForm: React.FC<{
               {apiResponse.body}
             </pre>
           </>
+        )}
+      </Modal>
+
+      {/* ── PDF Preview Modal ── */}
+      <Modal
+        open={pdfVisible}
+        onCancel={() => { setPdfVisible(false); setPdfUrl(null); }}
+        title={<Space><PrinterOutlined style={{ color: REDWOOD.primary }} /><span>External Transaction — PDF Preview</span></Space>}
+        width="85vw"
+        style={{ top: 20 }}
+        footer={
+          <Space>
+            <Button onClick={() => { setPdfVisible(false); setPdfUrl(null); }}>Close</Button>
+            <Button
+              type="primary"
+              icon={<PrinterOutlined />}
+              onClick={() => {
+                if (pdfUrl) {
+                  const a = document.createElement('a');
+                  a.href = pdfUrl;
+                  a.download = `external-transaction${savedExtId ? `-${savedExtId}` : ''}.pdf`;
+                  a.click();
+                }
+              }}
+            >
+              Download PDF
+            </Button>
+          </Space>
+        }
+        destroyOnClose
+      >
+        {pdfUrl && (
+          <iframe src={pdfUrl} style={{ width: '100%', height: '75vh', border: 'none' }} title="PDF Preview" />
         )}
       </Modal>
     </div>
