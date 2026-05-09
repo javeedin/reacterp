@@ -4183,25 +4183,31 @@ const TrialBalance: React.FC = () => {
     const summaryRow = () => {
       const fmt = (v: number) =>
         new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
-      const accValues   = [totals.opening, totals.debit, totals.credit, totals.closing];
-      const entValues   = [totals.entered_opening, totals.entered_debit, totals.entered_credit, totals.entered_closing];
+      const accValues = [totals.opening, totals.debit, totals.credit, totals.closing];
+      const entValues = [totals.entered_opening, totals.entered_debit, totals.entered_credit, totals.entered_closing];
+      const bg = '#f0f0f0';
       return (
-        <Table.Summary>
-          <Table.Summary.Row style={{ background: '#f0f0f0', fontWeight: 700 }}>
-            <Table.Summary.Cell index={0} colSpan={3} align="right">
-              <Text strong style={{ fontSize: 12 }}>TOTAL</Text>
+        <Table.Summary fixed>
+          <Table.Summary.Row style={{ background: bg, fontWeight: 700 }}>
+            {/* Type col */}
+            <Table.Summary.Cell index={0} style={{ background: bg }} />
+            {/* Account col */}
+            <Table.Summary.Cell index={1} style={{ background: bg }} />
+            {/* Description col — holds the TOTAL label */}
+            <Table.Summary.Cell index={2} style={{ textAlign: 'right', background: bg }}>
+              <Text strong style={{ fontSize: 12 }}>TOTAL ({tableRows.length})</Text>
             </Table.Summary.Cell>
             {accValues.map((v, i) => (
-              <Table.Summary.Cell key={`acc-${i}`} index={i + 3} align="right">
+              <Table.Summary.Cell key={`acc-${i}`} index={i + 3} style={{ textAlign: 'right', background: bg }}>
                 <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#1677ff' }}>{fmt(v)}</Text>
               </Table.Summary.Cell>
             ))}
             {entValues.map((v, i) => (
-              <Table.Summary.Cell key={`ent-${i}`} index={i + 7} align="right">
+              <Table.Summary.Cell key={`ent-${i}`} index={i + 7} style={{ textAlign: 'right', background: bg }}>
                 <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#52c41a' }}>{fmt(v)}</Text>
               </Table.Summary.Cell>
             ))}
-            <Table.Summary.Cell index={11} align="right">
+            <Table.Summary.Cell index={11} style={{ textAlign: 'right', background: bg }}>
               <Text strong style={{ fontFamily: 'monospace', fontSize: 11 }}>{fmt(totals.ytd_net)}</Text>
             </Table.Summary.Cell>
           </Table.Summary.Row>
@@ -4912,19 +4918,24 @@ const TrialBalance: React.FC = () => {
     const summaryRow = () => {
       const accValues = [totals.ytd_opening, totals.ytd_debit, totals.ytd_credit, totals.closing];
       const entValues = [totals.ytd_entered_opening, totals.ytd_entered_debit, totals.ytd_entered_credit, totals.entered_closing];
+      const bg = '#f0f0f0';
+      // rowSelection adds a checkbox col at index 0; Type=1, Account=2, Description=3, accValues start at 4
       return (
-        <Table.Summary>
-          <Table.Summary.Row style={{ background: '#f0f0f0', fontWeight: 700 }}>
-            <Table.Summary.Cell index={0} colSpan={3} align="right">
-              <Text strong style={{ fontSize: 12 }}>TOTAL</Text>
+        <Table.Summary fixed>
+          <Table.Summary.Row style={{ background: bg, fontWeight: 700 }}>
+            <Table.Summary.Cell index={0} style={{ background: bg }} />
+            <Table.Summary.Cell index={1} style={{ background: bg }} />
+            <Table.Summary.Cell index={2} style={{ background: bg }} />
+            <Table.Summary.Cell index={3} style={{ textAlign: 'right', background: bg }}>
+              <Text strong style={{ fontSize: 12 }}>TOTAL ({tableRows.length})</Text>
             </Table.Summary.Cell>
             {accValues.map((v, i) => (
-              <Table.Summary.Cell key={`acc-${i}`} index={i + 3} align="right">
+              <Table.Summary.Cell key={`acc-${i}`} index={i + 4} style={{ textAlign: 'right', background: bg }}>
                 <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#1677ff' }}>{fmt(v)}</Text>
               </Table.Summary.Cell>
             ))}
             {tab.showEntered && entValues.map((v, i) => (
-              <Table.Summary.Cell key={`ent-${i}`} index={i + 7} align="right">
+              <Table.Summary.Cell key={`ent-${i}`} index={i + 8} style={{ textAlign: 'right', background: bg }}>
                 <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#08979c' }}>{fmt(v)}</Text>
               </Table.Summary.Cell>
             ))}
