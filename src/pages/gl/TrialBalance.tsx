@@ -2000,27 +2000,27 @@ const TrialBalance: React.FC = () => {
           size="small"
           style={{ borderRadius: 8 }}
           summary={() => (
-            <Table.Summary>
+            <Table.Summary fixed>
               <Table.Summary.Row style={{ background: REDWOOD.surfaceSecondary, fontWeight: 'bold' }}>
-                <Table.Summary.Cell index={0} colSpan={segmentColCount}>
+                <Table.Summary.Cell index={0} colSpan={segmentColCount} style={{ background: REDWOOD.surfaceSecondary }}>
                   <Text strong>TOTAL</Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={segmentColCount} align="right" style={{ textAlign: 'right' }}>
+                <Table.Summary.Cell index={segmentColCount} align="right" style={{ textAlign: 'right', background: REDWOOD.surfaceSecondary }}>
                   <Text strong style={{ fontFamily: 'monospace' }}>
                     {formatCurrency(totals.opening)}
                   </Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={segmentColCount + 1} align="right" style={{ textAlign: 'right' }}>
+                <Table.Summary.Cell index={segmentColCount + 1} align="right" style={{ textAlign: 'right', background: REDWOOD.surfaceSecondary }}>
                   <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.info }}>
                     {formatCurrency(totals.debit)}
                   </Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={segmentColCount + 2} align="right" style={{ textAlign: 'right' }}>
+                <Table.Summary.Cell index={segmentColCount + 2} align="right" style={{ textAlign: 'right', background: REDWOOD.surfaceSecondary }}>
                   <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.success }}>
                     {formatCurrency(totals.credit)}
                   </Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={segmentColCount + 3} align="right" style={{ textAlign: 'right' }}>
+                <Table.Summary.Cell index={segmentColCount + 3} align="right" style={{ textAlign: 'right', background: REDWOOD.surfaceSecondary }}>
                   <Text strong style={{ fontFamily: 'monospace' }}>
                     {formatCurrency(totals.closing)}
                   </Text>

@@ -557,20 +557,33 @@ const GenerateTrialBalance: React.FC = () => {
   ];
 
   // ── Table summary row ────────────────────────────────────
+  // Wrapped in <Table.Summary fixed> so the row scrolls in sync with the
+  // table body and the fixed-left Type/Account columns stay pinned correctly.
   const tableSummary = () => (
-    <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-      <Table.Summary.Cell index={0} colSpan={7}>
-        <Text strong style={{ fontSize: 11 }}>
-          TOTAL  ({filteredData.length.toLocaleString()} rows)
-        </Text>
-      </Table.Summary.Cell>
-      {[kpi.openingDr, kpi.openingCr, kpi.ptdDr, kpi.ptdCr,
-        kpi.ytdDr, kpi.ytdCr, kpi.closingDr, kpi.closingCr].map((v, i) => (
-        <Table.Summary.Cell key={i} index={7 + i} align="right" style={{ textAlign: 'right' }}>
-          <Text strong style={{ fontSize: 11 }}>{fmtCcy(v)}</Text>
+    <Table.Summary fixed>
+      <Table.Summary.Row style={{ background: REDWOOD.neutral100, fontWeight: 700 }}>
+        {/* Fixed-left span: Type + Account */}
+        <Table.Summary.Cell index={0} colSpan={2} style={{ background: REDWOOD.neutral100 }}>
+          <Text strong style={{ fontSize: 11 }}>
+            TOTAL ({filteredData.length.toLocaleString()} rows)
+          </Text>
         </Table.Summary.Cell>
-      ))}
-    </Table.Summary.Row>
+        {/* Non-fixed non-numeric cols: Description, Company, LOB, Dept, Period */}
+        <Table.Summary.Cell index={2} colSpan={5} style={{ background: REDWOOD.neutral100 }} />
+        {/* Numeric columns */}
+        {[kpi.openingDr, kpi.openingCr, kpi.ptdDr, kpi.ptdCr,
+          kpi.ytdDr, kpi.ytdCr, kpi.closingDr, kpi.closingCr].map((v, i) => (
+          <Table.Summary.Cell
+            key={i}
+            index={7 + i}
+            align="right"
+            style={{ textAlign: 'right', background: REDWOOD.neutral100 }}
+          >
+            <Text strong style={{ fontSize: 11 }}>{fmtCcy(v)}</Text>
+          </Table.Summary.Cell>
+        ))}
+      </Table.Summary.Row>
+    </Table.Summary>
   );
 
   // ── Render ───────────────────────────────────────────────
