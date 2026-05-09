@@ -40,16 +40,16 @@ BEGIN
     p_comments      => 'Return AP invoice lines with multiperiod dates populated, including schedule-generated flag',
     p_source        => q'[
 DECLARE
-  -- Filter bind variables
-  v_invoice_number  VARCHAR2(200) := NULLIF(TRIM(:invoice_number),   '');
-  v_supplier        VARCHAR2(500) := NULLIF(TRIM(:supplier),         '');
-  v_business_unit   VARCHAR2(200) := NULLIF(TRIM(:business_unit),    '');
-  v_line_desc       VARCHAR2(500) := NULLIF(TRIM(:line_description), '');
+  -- Filter bind variables (initialized in BEGIN to avoid CLOB init issues)
+  v_invoice_number  VARCHAR2(200);
+  v_supplier        VARCHAR2(500);
+  v_business_unit   VARCHAR2(200);
+  v_line_desc       VARCHAR2(500);
 
-  -- Output buffer (must come before local subprograms)
-  v_buf   CLOB    := '{"items":[';
-  v_first BOOLEAN := TRUE;
-  v_count NUMBER  := 0;
+  -- Output buffer declared without init — initialized via DBMS_LOB in BEGIN
+  v_buf   CLOB;
+  v_first BOOLEAN;
+  v_count NUMBER;
 
   -- JSON helpers (local subprograms must be last in DECLARE section)
   FUNCTION esc(p IN VARCHAR2) RETURN VARCHAR2 IS
@@ -74,6 +74,18 @@ DECLARE
   END;
 
 BEGIN
+  -- Assign filter values
+  v_invoice_number := NULLIF(TRIM(:invoice_number),   '');
+  v_supplier       := NULLIF(TRIM(:supplier),         '');
+  v_business_unit  := NULLIF(TRIM(:business_unit),    '');
+  v_line_desc      := NULLIF(TRIM(:line_description), '');
+
+  -- Initialise CLOB output buffer
+  DBMS_LOB.CREATETEMPORARY(v_buf, TRUE);
+  v_buf   := '{"items":[';
+  v_first := TRUE;
+  v_count := 0;
+
   FOR r IN (
     SELECT
       -- Invoice header columns
