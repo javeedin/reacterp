@@ -2751,7 +2751,7 @@ const ManageJournals: React.FC = () => {
                       />
                     );
                   }
-                  return v > 0 ? formatNumber(v) : '';
+                  return v != null ? formatNumber(v) : '';
                 },
               },
               {
@@ -2773,11 +2773,11 @@ const ManageJournals: React.FC = () => {
                       />
                     );
                   }
-                  return v > 0 ? formatNumber(v) : '';
+                  return v != null ? formatNumber(v) : '';
                 },
               },
-              { title: `Acc Dr (${selectedLedger?.currency_code || 'Accounted'})`, dataIndex: 'accountedDr', key: 'accountedDr', width: 90, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
-              { title: `Acc Cr (${selectedLedger?.currency_code || 'Accounted'})`, dataIndex: 'accountedCr', key: 'accountedCr', width: 90, align: 'right' as const, render: (v: number) => v > 0 ? formatNumber(v) : '' },
+              { title: `Acc Dr (${selectedLedger?.currency_code || 'Accounted'})`, dataIndex: 'accountedDr', key: 'accountedDr', width: 90, align: 'right' as const, render: (v: number) => v != null ? formatNumber(v) : '' },
+              { title: `Acc Cr (${selectedLedger?.currency_code || 'Accounted'})`, dataIndex: 'accountedCr', key: 'accountedCr', width: 90, align: 'right' as const, render: (v: number) => v != null ? formatNumber(v) : '' },
               ...(!isEditable && (journal.source || '').toLowerCase() === 'payables' ? [{
                 title: 'Transaction',
                 key: 'viewTransaction',
