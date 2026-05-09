@@ -2844,7 +2844,7 @@ const TrialBalance: React.FC = () => {
             color="#1d3557"
           >
             <Text style={{ fontFamily: 'monospace', color: REDWOOD.textSecondary, cursor: 'help', borderBottom: '1px dashed #aaa' }}>
-              {v ? v.toFixed(5) : '—'}
+              {v ? v.toFixed(6) : '—'}
             </Text>
           </Tooltip>
         )},
