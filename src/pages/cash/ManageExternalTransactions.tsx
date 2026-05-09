@@ -210,6 +210,7 @@ const ExternalTxnForm: React.FC<{
   const watchedTxnType = Form.useWatch('transactionType', form);
   const watchedCurrency = Form.useWatch('currencyCode', form);
   const watchedRate     = Form.useWatch('bankConversionRate', form);
+  const [inverseRateVal, setInverseRateVal] = useState<number | undefined>(undefined);
   const isForeignCurrency = !!watchedCurrency && watchedCurrency !== 'AED';
   const isAdhocPayment = watchedTxnType === 'Adhoc Payment';
 
@@ -226,8 +227,16 @@ const ExternalTxnForm: React.FC<{
   useEffect(() => {
     if (watchedCurrency === 'AED') {
       form.setFieldsValue({ bankConversionRate: 1, bankConversionRateType: 'Corporate' });
+      setInverseRateVal(1);
     }
   }, [watchedCurrency, form]);
+
+  // Sync inverse rate display when watchedRate changes externally (e.g. on edit load)
+  useEffect(() => {
+    if (watchedRate && watchedRate > 0) {
+      setInverseRateVal(Math.round((1 / watchedRate) * 1000000) / 1000000);
+    }
+  }, [watchedRate]);
 
   const filteredBankAccounts = selectedBu && buBankMap[selectedBu]?.length
     ? buBankMap[selectedBu].sort().map(n => ({ label: n, value: n }))
@@ -858,7 +867,7 @@ const ExternalTxnForm: React.FC<{
             </Col>
           </Row>
 
-          {/* Row 3: Payment + Conversion */}
+          {/* Row 3: Payment fields */}
           <Row gutter={12}>
             <Col xs={12} md={4}>
               <Form.Item
@@ -872,7 +881,7 @@ const ExternalTxnForm: React.FC<{
                 </Select>
               </Form.Item>
             </Col>
-            <Col xs={12} md={6}>
+            <Col xs={12} md={8}>
               <Form.Item
                 label={<span style={{ fontWeight: 600, fontSize: 12 }}>Payment Document</span>}
                 name="paymentDocument"
@@ -891,9 +900,26 @@ const ExternalTxnForm: React.FC<{
                 <Input placeholder="CHQ-00123" disabled={isEdit || !bankSelected || saved} />
               </Form.Item>
             </Col>
+          </Row>
+
+          {/* Row 4: Currency conversion */}
+          <Row gutter={12}>
+            <Col xs={12} md={3}>
+              <Form.Item
+                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Currency</span>}
+                name="currencyCode"
+                style={{ marginBottom: 10 }}
+              >
+                <Select placeholder="Auto" allowClear disabled={isEdit || !bankSelected || saved}>
+                  {['AED', 'USD', 'EUR', 'GBP', 'SAR', 'QAR', 'KWD', 'BHD', 'OMR'].map(c => (
+                    <Option key={c} value={c}>{c}</Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
             <Col xs={12} md={4}>
               <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Conv. Rate Type</span>}
+                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Rate Type</span>}
                 name="bankConversionRateType"
                 style={{ marginBottom: 10 }}
                 required={isForeignCurrency}
@@ -910,33 +936,43 @@ const ExternalTxnForm: React.FC<{
                 </Select>
               </Form.Item>
             </Col>
-            <Col xs={12} md={4}>
+            <Col xs={12} md={5}>
               <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Conv. Rate ({watchedCurrency || 'FCY'} → Functional)</span>}
+                label={<span style={{ fontWeight: 600, fontSize: 12 }}>{watchedCurrency || 'FCY'} → AED (Conv. Rate)</span>}
                 name="bankConversionRate"
                 style={{ marginBottom: 10 }}
                 required={isForeignCurrency}
-                rules={[{ required: isForeignCurrency, message: 'Required for foreign currency' }]}
+                rules={[{ required: isForeignCurrency, message: 'Required' }]}
               >
                 <InputNumber
                   style={{ width: '100%' }}
                   precision={6} min={0}
-                  placeholder={isForeignCurrency ? 'Required' : 'e.g. 0.038212'}
+                  placeholder={isForeignCurrency ? 'e.g. 3.672500' : 'e.g. 1.000000'}
                   disabled={isEdit || !bankSelected || saved}
+                  onChange={v => {
+                    if (v && v > 0) setInverseRateVal(Math.round((1 / v) * 1000000) / 1000000);
+                    else setInverseRateVal(undefined);
+                  }}
                 />
               </Form.Item>
             </Col>
-            <Col xs={12} md={4}>
+            <Col xs={12} md={5}>
               <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Inverse Rate (Functional → {watchedCurrency || 'FCY'})</span>}
+                label={<span style={{ fontWeight: 600, fontSize: 12 }}>AED → {watchedCurrency || 'FCY'} (Inverse Rate)</span>}
                 style={{ marginBottom: 10 }}
               >
                 <InputNumber
-                  style={{ width: '100%', background: '#fafafa' }}
-                  precision={6}
-                  value={watchedRate && watchedRate > 0 ? Math.round((1 / watchedRate) * 1000000) / 1000000 : undefined}
-                  placeholder="Auto-calculated"
-                  disabled
+                  style={{ width: '100%' }}
+                  precision={6} min={0}
+                  placeholder="e.g. 0.272400"
+                  disabled={isEdit || !bankSelected || saved}
+                  value={inverseRateVal}
+                  onChange={v => {
+                    setInverseRateVal(v ?? undefined);
+                    if (v && v > 0) {
+                      form.setFieldValue('bankConversionRate', Math.round((1 / v) * 1000000) / 1000000);
+                    }
+                  }}
                 />
               </Form.Item>
             </Col>
@@ -1293,7 +1329,7 @@ const ExternalTxnForm: React.FC<{
               <span style={{ fontSize: 13, color: REDWOOD.success, fontWeight: 600 }}>Saved &amp; Locked</span>
             </Space>
           )}
-          {(saved || isEdit) && (
+          {(saved || isEdit || bankSelected) && (
             <Button
               size="large"
               icon={<PrinterOutlined />}
