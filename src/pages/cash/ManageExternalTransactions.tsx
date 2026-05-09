@@ -693,19 +693,6 @@ const ExternalTxnForm: React.FC<{
       <Form form={form} layout="vertical" size="middle">
         <div className="ext-doc-wrap">
 
-          {/* ── Document header bar ── */}
-          <div style={{ background: '#C74634', padding: '13px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ color: '#fff', fontWeight: 700, fontSize: 16, letterSpacing: 0.2 }}>
-              External Transaction
-            </span>
-            <span style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12 }}>
-              {savedExtId
-                ? `Transaction ID: ${savedExtId}`
-                : saved
-                  ? <Space size={6}><LockOutlined /><span>Saved</span></Space>
-                  : `${new Date().toLocaleString()}`}
-            </span>
-          </div>
 
           {/* ══════════ SECTION 1: Organisation & Bank ══════════ */}
           <div className="ext-sec">
