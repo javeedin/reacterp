@@ -1030,64 +1030,60 @@ const ExternalTxnForm: React.FC<{
                   ),
                 },
                 {
-                  title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Distribution Set</span>,
-                  width: 200,
-                  render: (_: any, _record: ExtTxnLine, idx: number) => (
-                    <AutoComplete
-                      size="small"
-                      value={lineDistSets[idx] || ''}
-                      placeholder="Search distribution set…"
-                      disabled={isEdit || !bankSelected || saved}
-                      style={{ width: '100%' }}
-                      options={distCombinations
-                        .filter(d => {
-                          const q = (lineDistSets[idx] || '').toLowerCase();
-                          if (!q) return true;
-                          return d.combinationName.toLowerCase().includes(q)
-                            || (d.description || '').toLowerCase().includes(q)
-                            || (d.glAccountDesc || '').toLowerCase().includes(q);
-                        })
-                        .map(d => ({
-                          value: d.combinationName,
-                          label: (
-                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                              <span style={{ fontSize: 11, fontWeight: 600 }}>{d.combinationName}</span>
-                              <span style={{ fontSize: 10, color: '#999', fontFamily: 'monospace' }}>{d.glAccountDesc || ''}</span>
-                            </div>
-                          ),
-                          combination: d,
-                        }))}
-                      onChange={v => setLineDistSets(prev => ({ ...prev, [idx]: v }))}
-                      onSelect={(_v, opt) => {
-                        const d = (opt as { combination: DistCombination }).combination;
-                        setLineDistSets(prev => ({ ...prev, [idx]: d.combinationName }));
-                        if (d.glAccountDesc) {
-                          const acct = applyCompanySegment(d.glAccountDesc);
-                          updateExtLine(idx, 'offsetAccount', acct);
-                          validateAccountCode(acct).then(r => {
-                            const seg4 = Object.values(r.segmentDetails)[3];
-                            updateExtLine(idx, 'offsetDesc', (seg4 as any)?.description || '');
-                          }).catch(() => { updateExtLine(idx, 'offsetDesc', ''); });
-                        }
-                      }}
-                      filterOption={false}
-                    >
-                      <Input size="small" variant="borderless" />
-                    </AutoComplete>
-                  ),
-                },
-                {
-                  title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Offset Account</span>,
-                  width: 200,
+                  title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Distribution Set / Offset Account</span>,
+                  width: 340,
                   render: (_: any, record: ExtTxnLine, idx: number) => (
-                    <Space.Compact style={{ width: '100%' }}>
-                      <div style={{ flex: 1, fontFamily: 'monospace', fontSize: 10, color: REDWOOD.info, display: 'flex', alignItems: 'center', paddingLeft: 4 }}>
-                        {record.offsetAccount || <span style={{ color: REDWOOD.neutral300, fontFamily: 'inherit' }}>—</span>}
-                      </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <AutoComplete
+                        size="small"
+                        value={lineDistSets[idx] || ''}
+                        placeholder="Search distribution set…"
+                        disabled={isEdit || !bankSelected || saved}
+                        style={{ flex: 1, minWidth: 0 }}
+                        options={distCombinations
+                          .filter(d => {
+                            const q = (lineDistSets[idx] || '').toLowerCase();
+                            if (!q) return true;
+                            return d.combinationName.toLowerCase().includes(q)
+                              || (d.description || '').toLowerCase().includes(q)
+                              || (d.glAccountDesc || '').toLowerCase().includes(q);
+                          })
+                          .map(d => ({
+                            value: d.combinationName,
+                            label: (
+                              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                                <span style={{ fontSize: 11, fontWeight: 600 }}>{d.combinationName}</span>
+                                <span style={{ fontSize: 10, color: '#999', fontFamily: 'monospace' }}>{d.glAccountDesc || ''}</span>
+                              </div>
+                            ),
+                            combination: d,
+                          }))}
+                        onChange={v => setLineDistSets(prev => ({ ...prev, [idx]: v }))}
+                        onSelect={(_v, opt) => {
+                          const d = (opt as { combination: DistCombination }).combination;
+                          setLineDistSets(prev => ({ ...prev, [idx]: d.combinationName }));
+                          if (d.glAccountDesc) {
+                            const acct = applyCompanySegment(d.glAccountDesc);
+                            updateExtLine(idx, 'offsetAccount', acct);
+                            validateAccountCode(acct).then(r => {
+                              const seg4 = Object.values(r.segmentDetails)[3];
+                              updateExtLine(idx, 'offsetDesc', (seg4 as any)?.description || '');
+                            }).catch(() => { updateExtLine(idx, 'offsetDesc', ''); });
+                          }
+                        }}
+                        filterOption={false}
+                      >
+                        <Input size="small" variant="borderless" />
+                      </AutoComplete>
+                      {record.offsetAccount && (
+                        <span style={{ fontFamily: 'monospace', fontSize: 10, color: REDWOOD.info, whiteSpace: 'nowrap' }}>
+                          {record.offsetAccount}
+                        </span>
+                      )}
                       <Button size="small" icon={<SearchOutlined />}
                         disabled={isEdit || !bankSelected || saved}
                         onClick={() => { setLineCoaIdx(idx); setLineCoaInitial(record.offsetAccount || ''); setLineCoaOpen(true); }} />
-                    </Space.Compact>
+                    </div>
                   ),
                 },
                 {
@@ -1145,11 +1141,11 @@ const ExternalTxnForm: React.FC<{
                 ...(!isEdit && !saved ? [{
                   title: '',
                   width: 36,
-                  render: (_: any, _r: any, idx: number) => (
+                  render: (_: any, record: ExtTxnLine) => (
                     <Tooltip title="Remove line">
                       <Button size="small" type="text" danger icon={<CloseOutlined />}
                         disabled={extTxnLines.length === 1}
-                        onClick={() => setExtTxnLines(prev => prev.filter((_, i) => i !== idx))} />
+                        onClick={() => setExtTxnLines(prev => prev.filter(l => l.key !== record.key))} />
                     </Tooltip>
                   ),
                 }] : []),
