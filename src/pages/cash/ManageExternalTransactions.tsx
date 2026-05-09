@@ -867,9 +867,9 @@ const ExternalTxnForm: React.FC<{
             </Col>
           </Row>
 
-          {/* Row 3: Payment fields */}
+          {/* Row 3: Payment + Currency (merged) */}
           <Row gutter={12}>
-            <Col xs={12} md={4}>
+            <Col xs={12} md={3}>
               <Form.Item
                 label={<span style={{ fontWeight: 600, fontSize: 12 }}>Payment Method</span>}
                 name="paymentMethod"
@@ -881,7 +881,7 @@ const ExternalTxnForm: React.FC<{
                 </Select>
               </Form.Item>
             </Col>
-            <Col xs={12} md={8}>
+            <Col xs={12} md={4}>
               <Form.Item
                 label={<span style={{ fontWeight: 600, fontSize: 12 }}>Payment Document</span>}
                 name="paymentDocument"
@@ -891,7 +891,7 @@ const ExternalTxnForm: React.FC<{
                 <Input placeholder="e.g. Cheque Book Name" disabled={isEdit || !bankSelected || saved} />
               </Form.Item>
             </Col>
-            <Col xs={12} md={4}>
+            <Col xs={12} md={3}>
               <Form.Item
                 label={<span style={{ fontWeight: 600, fontSize: 12 }}>Paper Doc #</span>}
                 name="paperDocumentNumber"
@@ -900,10 +900,6 @@ const ExternalTxnForm: React.FC<{
                 <Input placeholder="CHQ-00123" disabled={isEdit || !bankSelected || saved} />
               </Form.Item>
             </Col>
-          </Row>
-
-          {/* Row 4: Currency conversion */}
-          <Row gutter={12}>
             <Col xs={12} md={3}>
               <Form.Item
                 label={<span style={{ fontWeight: 600, fontSize: 12 }}>Currency</span>}
@@ -917,7 +913,7 @@ const ExternalTxnForm: React.FC<{
                 </Select>
               </Form.Item>
             </Col>
-            <Col xs={12} md={4}>
+            <Col xs={12} md={3}>
               <Form.Item
                 label={<span style={{ fontWeight: 600, fontSize: 12 }}>Rate Type</span>}
                 name="bankConversionRateType"
@@ -936,7 +932,7 @@ const ExternalTxnForm: React.FC<{
                 </Select>
               </Form.Item>
             </Col>
-            <Col xs={12} md={5}>
+            <Col xs={12} md={4}>
               <Form.Item
                 label={<span style={{ fontWeight: 600, fontSize: 12 }}>{watchedCurrency || 'FCY'} → AED (Conv. Rate)</span>}
                 name="bankConversionRate"
@@ -947,7 +943,7 @@ const ExternalTxnForm: React.FC<{
                 <InputNumber
                   style={{ width: '100%' }}
                   precision={6} min={0}
-                  placeholder={isForeignCurrency ? 'e.g. 3.672500' : 'e.g. 1.000000'}
+                  placeholder={isForeignCurrency ? 'e.g. 3.6725' : 'e.g. 1.0000'}
                   disabled={isEdit || !bankSelected || saved}
                   onChange={v => {
                     if (v && v > 0) setInverseRateVal(Math.round((1 / v) * 1000000) / 1000000);
@@ -956,15 +952,15 @@ const ExternalTxnForm: React.FC<{
                 />
               </Form.Item>
             </Col>
-            <Col xs={12} md={5}>
+            <Col xs={12} md={4}>
               <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 12 }}>AED → {watchedCurrency || 'FCY'} (Inverse Rate)</span>}
+                label={<span style={{ fontWeight: 600, fontSize: 12 }}>AED → {watchedCurrency || 'FCY'} (Inverse)</span>}
                 style={{ marginBottom: 10 }}
               >
                 <InputNumber
                   style={{ width: '100%' }}
                   precision={6} min={0}
-                  placeholder="e.g. 0.272400"
+                  placeholder="e.g. 0.2724"
                   disabled={isEdit || !bankSelected || saved}
                   value={inverseRateVal}
                   onChange={v => {
