@@ -607,6 +607,7 @@ const ManageRevaluation: React.FC = () => {
         journalDescription: journalDesc,
         journalName:        `FX REVAL – ${d.account} – ${periodName}`,
         createdBy,
+        forceCreate:        true,   // always create fresh — never reuse an old FC journal
         lines: d.lines.map(l => ({
           lineType:           l.drAmount > 0 ? 'DR' as const : 'CR' as const,
           enteredDr:          l.drAmount > 0 ? l.drAmount : null,

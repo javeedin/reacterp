@@ -67,6 +67,9 @@ export interface GlPostingOptions {
   // Lines
   lines:          GlPostingLine[];
   createdBy?:     string;
+  // When true, skip the duplicate-journal check and always create a fresh batch.
+  // Use for revaluation accounting where an old FC journal must NOT be reused.
+  forceCreate?:   boolean;
 }
 
 export interface GlPostingResult {
@@ -88,6 +91,7 @@ export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResu
     batchDescription: batchDescOverride,
     journalDescription: journalDescOverride,
     journalName: journalNameOverride,
+    forceCreate = false,
   } = opts;
 
   const rate = (conversionRate && conversionRate > 0) ? conversionRate : 1;
@@ -95,18 +99,22 @@ export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResu
   const batchName = `${ref5}-${sourceNumber}-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Date.now().toString().slice(-6)}`;
 
   // ── 0. Duplicate check ────────────────────────────────────────────────────
-  const exists = await checkGLJournalExists(sourceNumber, String(sourceId), ref5);
-  if (exists.exists) {
-    if (exists.status === 'P') {
-      // Already posted — just stamp SLA and return
+  // forceCreate=true bypasses this check (used for revaluation to avoid reusing
+  // an old journal created with the wrong currency before a code fix).
+  if (!forceCreate) {
+    const exists = await checkGLJournalExists(sourceNumber, String(sourceId), ref5);
+    if (exists.exists) {
+      if (exists.status === 'P') {
+        // Already posted — just stamp SLA and return
+        await stampSla(slaHeaderId, exists.batchId, batchName, exists.headerId, createdBy);
+        return { success: true, skipped: true, batchId: exists.batchId, headerId: exists.headerId, batchName };
+      }
+      // Exists but unposted — post the existing batch
+      const putOk = await putPostJournal(exists.batchId!);
+      if (!putOk.success) return { success: false, skipped: false, batchId: exists.batchId, headerId: exists.headerId, batchName, error: putOk.error };
       await stampSla(slaHeaderId, exists.batchId, batchName, exists.headerId, createdBy);
       return { success: true, skipped: true, batchId: exists.batchId, headerId: exists.headerId, batchName };
     }
-    // Exists but unposted — post the existing batch
-    const putOk = await putPostJournal(exists.batchId!);
-    if (!putOk.success) return { success: false, skipped: false, batchId: exists.batchId, headerId: exists.headerId, batchName, error: putOk.error };
-    await stampSla(slaHeaderId, exists.batchId, batchName, exists.headerId, createdBy);
-    return { success: true, skipped: true, batchId: exists.batchId, headerId: exists.headerId, batchName };
   }
 
   // ── 1. Create journal ─────────────────────────────────────────────────────
