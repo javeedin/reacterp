@@ -1012,7 +1012,7 @@ const ManageRevaluation: React.FC = () => {
                 {detail.notes && <Descriptions.Item label="Notes" span={2}>{detail.notes}</Descriptions.Item>}
               </Descriptions>
 
-              <Divider orientation="left" style={{ fontSize: 13 }}>Currency Rates</Divider>
+              <Divider style={{ fontSize: 13 }}>Currency Rates</Divider>
               <Table<RevalCcyRow>
                 dataSource={detail.ccyRows}
                 columns={ccyColumns}
@@ -1023,7 +1023,7 @@ const ManageRevaluation: React.FC = () => {
                 style={{ marginBottom: 16 }}
               />
 
-              <Divider orientation="left" style={{ fontSize: 13 }}>Journal Lines</Divider>
+              <Divider style={{ fontSize: 13 }}>Journal Lines</Divider>
               <Table<RevalLine>
                 dataSource={detail.lines}
                 columns={lineColumns}
@@ -1167,7 +1167,7 @@ const ManageRevaluation: React.FC = () => {
                       let parsed: any = {};
                       try { parsed = JSON.parse(text); } catch { /* non-JSON */ }
                       if (res.ok && parsed.status !== 'ERROR') {
-                        updateStep(4, 'finish', 'Status set to ACCOUNTED (via retry)');
+                        setAcctFlowSteps(prev => prev.map((s, i) => i === 4 ? { ...s, status: 'finish' as const, desc: 'Status set to ACCOUNTED (via retry)' } : s));
                         setAcctFlowDone(true);
                         load();
                         message.success('Retry succeeded — revaluation marked ACCOUNTED');

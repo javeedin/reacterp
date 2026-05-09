@@ -68,6 +68,8 @@ import { saveAs } from 'file-saver';
 import { exportRrTBToExcel, exportFusionTBToExcel, exportBothTBToExcel } from '../../utils/tbExcelExport';
 import AccountSelector from '../../components/AccountSelector';
 import { searchCombinations, createCombination, type DistCombination } from '../../services/distCombinations.service';
+// antd 6 SummaryCellProps omits style — use this cast helper where needed
+const SummaryCell = Table.Summary.Cell as React.ComponentType<React.ComponentProps<typeof Table.Summary.Cell> & { style?: React.CSSProperties }>;
 import { createAccounting, checkAccountingExists, type SlaCreatePayload } from '../../services/sla.service';
 import { postSlaToGL } from '../../services/glPosting.service';
 
@@ -2013,29 +2015,29 @@ const TrialBalance: React.FC = () => {
           summary={() => (
             <Table.Summary fixed>
               <Table.Summary.Row style={{ background: REDWOOD.surfaceSecondary, fontWeight: 'bold' }}>
-                <Table.Summary.Cell index={0} colSpan={segmentColCount} style={{ background: REDWOOD.surfaceSecondary }}>
+                <SummaryCell index={0} colSpan={segmentColCount} style={{ background: REDWOOD.surfaceSecondary }}>
                   <Text strong>TOTAL</Text>
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={segmentColCount} align="right" style={{ textAlign: 'right', background: REDWOOD.surfaceSecondary }}>
+                </SummaryCell>
+                <SummaryCell index={segmentColCount} align="right" style={{ textAlign: 'right', background: REDWOOD.surfaceSecondary }}>
                   <Text strong style={{ fontFamily: 'monospace' }}>
                     {formatCurrency(totals.opening)}
                   </Text>
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={segmentColCount + 1} align="right" style={{ textAlign: 'right', background: REDWOOD.surfaceSecondary }}>
+                </SummaryCell>
+                <SummaryCell index={segmentColCount + 1} align="right" style={{ textAlign: 'right', background: REDWOOD.surfaceSecondary }}>
                   <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.info }}>
                     {formatCurrency(totals.debit)}
                   </Text>
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={segmentColCount + 2} align="right" style={{ textAlign: 'right', background: REDWOOD.surfaceSecondary }}>
+                </SummaryCell>
+                <SummaryCell index={segmentColCount + 2} align="right" style={{ textAlign: 'right', background: REDWOOD.surfaceSecondary }}>
                   <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.success }}>
                     {formatCurrency(totals.credit)}
                   </Text>
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={segmentColCount + 3} align="right" style={{ textAlign: 'right', background: REDWOOD.surfaceSecondary }}>
+                </SummaryCell>
+                <SummaryCell index={segmentColCount + 3} align="right" style={{ textAlign: 'right', background: REDWOOD.surfaceSecondary }}>
                   <Text strong style={{ fontFamily: 'monospace' }}>
                     {formatCurrency(totals.closing)}
                   </Text>
-                </Table.Summary.Cell>
+                </SummaryCell>
               </Table.Summary.Row>
             </Table.Summary>
           )}
@@ -4191,26 +4193,26 @@ const TrialBalance: React.FC = () => {
         <Table.Summary fixed>
           <Table.Summary.Row style={{ background: bg, fontWeight: 700 }}>
             {/* Type col */}
-            <Table.Summary.Cell index={0} style={{ background: bg }} />
+            <SummaryCell index={0} style={{ background: bg }} />
             {/* Account col */}
-            <Table.Summary.Cell index={1} style={{ background: bg }} />
+            <SummaryCell index={1} style={{ background: bg }} />
             {/* Description col — holds the TOTAL label */}
-            <Table.Summary.Cell index={2} style={{ textAlign: 'right', background: bg }}>
+            <SummaryCell index={2} style={{ textAlign: 'right', background: bg }}>
               <Text strong style={{ fontSize: 12 }}>TOTAL ({tableRows.length})</Text>
-            </Table.Summary.Cell>
+            </SummaryCell>
             {accValues.map((v, i) => (
-              <Table.Summary.Cell key={`acc-${i}`} index={i + 3} style={{ textAlign: 'right', background: bg }}>
+              <SummaryCell key={`acc-${i}`} index={i + 3} style={{ textAlign: 'right', background: bg }}>
                 <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#1677ff' }}>{fmt(v)}</Text>
-              </Table.Summary.Cell>
+              </SummaryCell>
             ))}
             {entValues.map((v, i) => (
-              <Table.Summary.Cell key={`ent-${i}`} index={i + 7} style={{ textAlign: 'right', background: bg }}>
+              <SummaryCell key={`ent-${i}`} index={i + 7} style={{ textAlign: 'right', background: bg }}>
                 <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#52c41a' }}>{fmt(v)}</Text>
-              </Table.Summary.Cell>
+              </SummaryCell>
             ))}
-            <Table.Summary.Cell index={11} style={{ textAlign: 'right', background: bg }}>
+            <SummaryCell index={11} style={{ textAlign: 'right', background: bg }}>
               <Text strong style={{ fontFamily: 'monospace', fontSize: 11 }}>{fmt(totals.ytd_net)}</Text>
-            </Table.Summary.Cell>
+            </SummaryCell>
           </Table.Summary.Row>
         </Table.Summary>
       );
@@ -4924,21 +4926,21 @@ const TrialBalance: React.FC = () => {
       return (
         <Table.Summary fixed>
           <Table.Summary.Row style={{ background: bg, fontWeight: 700 }}>
-            <Table.Summary.Cell index={0} style={{ background: bg }} />
-            <Table.Summary.Cell index={1} style={{ background: bg }} />
-            <Table.Summary.Cell index={2} style={{ background: bg }} />
-            <Table.Summary.Cell index={3} style={{ textAlign: 'right', background: bg }}>
+            <SummaryCell index={0} style={{ background: bg }} />
+            <SummaryCell index={1} style={{ background: bg }} />
+            <SummaryCell index={2} style={{ background: bg }} />
+            <SummaryCell index={3} style={{ textAlign: 'right', background: bg }}>
               <Text strong style={{ fontSize: 12 }}>TOTAL ({tableRows.length})</Text>
-            </Table.Summary.Cell>
+            </SummaryCell>
             {accValues.map((v, i) => (
-              <Table.Summary.Cell key={`acc-${i}`} index={i + 4} style={{ textAlign: 'right', background: bg }}>
+              <SummaryCell key={`acc-${i}`} index={i + 4} style={{ textAlign: 'right', background: bg }}>
                 <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#1677ff' }}>{fmt(v)}</Text>
-              </Table.Summary.Cell>
+              </SummaryCell>
             ))}
             {tab.showEntered && entValues.map((v, i) => (
-              <Table.Summary.Cell key={`ent-${i}`} index={i + 8} style={{ textAlign: 'right', background: bg }}>
+              <SummaryCell key={`ent-${i}`} index={i + 8} style={{ textAlign: 'right', background: bg }}>
                 <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: '#08979c' }}>{fmt(v)}</Text>
-              </Table.Summary.Cell>
+              </SummaryCell>
             ))}
           </Table.Summary.Row>
         </Table.Summary>

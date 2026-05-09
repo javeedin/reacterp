@@ -113,6 +113,7 @@ const REDWOOD = {
   neutral700: '#4A4A4A',
   neutral900: '#1A1A1A',
   surface: '#FFFFFF',
+  textSecondary: '#6B6B6B',
 };
 
 const APEX_SUPPLIERS_URL      = `${APEX_DB_CONFIG.baseUrl}/suppliers?limit=500`;

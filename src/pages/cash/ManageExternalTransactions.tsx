@@ -34,6 +34,7 @@ const REDWOOD = {
   success: '#1D7B4D', warning: '#D4A800', info: '#0572CE', error: '#D93025',
   neutral100: '#F7F7F7', neutral200: '#E5E5E5', neutral300: '#C7C7C7',
   neutral600: '#6B6B6B', neutral900: '#1A1A1A', surface: '#FFFFFF',
+  textSecondary: '#6B6B6B',
 };
 
 const APEX_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp';
@@ -235,7 +236,7 @@ const ExternalTxnForm: React.FC<{
   useEffect(() => { setSelectedBu(initialValues?.businessUnitName); }, [initialValues]);
 
   useEffect(() => {
-    searchCombinations('').then(setDistCombinations).catch(() => {});
+    searchCombinations({}).then(setDistCombinations).catch(() => {});
   }, []);
 
   const applyCompanySegment = useCallback((combo: string): string => {

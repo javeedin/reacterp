@@ -5,6 +5,8 @@ import {
   Popover, Badge, message, Progress,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+// antd 6 SummaryCellProps omits style — use this cast helper where needed
+const SummaryCell = Table.Summary.Cell as React.ComponentType<React.ComponentProps<typeof Table.Summary.Cell> & { style?: React.CSSProperties }>;
 import {
   HomeOutlined, ReloadOutlined, CalculatorOutlined, PlayCircleOutlined,
   FilterOutlined, FileExcelOutlined, ApiOutlined, CheckCircleOutlined,
@@ -563,24 +565,24 @@ const GenerateTrialBalance: React.FC = () => {
     <Table.Summary fixed>
       <Table.Summary.Row style={{ background: REDWOOD.neutral100, fontWeight: 700 }}>
         {/* Fixed-left span: Type + Account */}
-        <Table.Summary.Cell index={0} colSpan={2} style={{ background: REDWOOD.neutral100 }}>
+        <SummaryCell index={0} colSpan={2} style={{ background: REDWOOD.neutral100 }}>
           <Text strong style={{ fontSize: 11 }}>
             TOTAL ({filteredData.length.toLocaleString()} rows)
           </Text>
-        </Table.Summary.Cell>
+        </SummaryCell>
         {/* Non-fixed non-numeric cols: Description, Company, LOB, Dept, Period */}
-        <Table.Summary.Cell index={2} colSpan={5} style={{ background: REDWOOD.neutral100 }} />
+        <SummaryCell index={2} colSpan={5} style={{ background: REDWOOD.neutral100 }} />
         {/* Numeric columns */}
         {[kpi.openingDr, kpi.openingCr, kpi.ptdDr, kpi.ptdCr,
           kpi.ytdDr, kpi.ytdCr, kpi.closingDr, kpi.closingCr].map((v, i) => (
-          <Table.Summary.Cell
+          <SummaryCell
             key={i}
             index={7 + i}
             align="right"
             style={{ textAlign: 'right', background: REDWOOD.neutral100 }}
           >
             <Text strong style={{ fontSize: 11 }}>{fmtCcy(v)}</Text>
-          </Table.Summary.Cell>
+          </SummaryCell>
         ))}
       </Table.Summary.Row>
     </Table.Summary>
