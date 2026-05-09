@@ -413,8 +413,8 @@ const ExternalTxnForm: React.FC<{
         ['Transaction Type', fmt(values.transactionType), 'Reference', fmt(values.referenceText)],
         ['Payment Method', fmt(values.paymentMethod), 'Payment Document', fmt(values.paymentDocument)],
         ['Paper Doc #', fmt(values.paperDocumentNumber), 'Conv. Rate Type', fmt(values.bankConversionRateType)],
-        [`Conv. Rate (${values.currencyCode || 'FCY'} → Functional)`, fmtNum(values.bankConversionRate),
-         `Inverse Rate (Functional → ${values.currencyCode || 'FCY'})`, fmtNum(inverseRate)],
+        [`Conv. Rate (${values.currencyCode || 'FCY'}→AED)`, fmtNum(values.bankConversionRate),
+         `Inverse Rate (AED→${values.currencyCode || 'FCY'})`, fmtNum(inverseRate)],
       ],
       styles: { fontSize: 9, cellPadding: 2 },
       columnStyles: { 0: { fontStyle: 'bold', cellWidth: 42 }, 2: { fontStyle: 'bold', cellWidth: 42 } },
@@ -686,7 +686,7 @@ const ExternalTxnForm: React.FC<{
             </span>
           }
         >
-          {/* Row 1: Organisation */}
+          {/* Row 1: Organisation — BU(8) | Bank(12) | Direction(4) */}
           <Row gutter={12}>
             <Col xs={24} md={8}>
               <Form.Item
@@ -727,7 +727,7 @@ const ExternalTxnForm: React.FC<{
                 </div>
               )}
             </Col>
-            <Col xs={24} md={10}>
+            <Col xs={24} md={12}>
               <Form.Item
                 label={<span style={{ fontWeight: 600, fontSize: 12 }}>Bank Account</span>}
                 name="bankAccountName"
@@ -759,20 +759,7 @@ const ExternalTxnForm: React.FC<{
                 />
               </Form.Item>
             </Col>
-            <Col xs={12} md={3}>
-              <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Currency</span>}
-                name="currencyCode"
-                style={{ marginBottom: 10 }}
-              >
-                <Select placeholder="Auto" allowClear disabled={isEdit || !bankSelected || saved}>
-                  {['AED', 'USD', 'EUR', 'GBP', 'SAR', 'QAR', 'KWD', 'BHD', 'OMR'].map(c => (
-                    <Option key={c} value={c}>{c}</Option>
-                  ))}
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col xs={12} md={3}>
+            <Col xs={12} md={4}>
               <Form.Item
                 label={<span style={{ fontWeight: 600, fontSize: 12 }}>Direction</span>}
                 name="transactionDirection"
@@ -867,110 +854,131 @@ const ExternalTxnForm: React.FC<{
             </Col>
           </Row>
 
-          {/* Row 3: Payment + Currency (merged) */}
-          <Row gutter={12}>
-            <Col xs={12} md={3}>
-              <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Payment Method</span>}
-                name="paymentMethod"
-                rules={[{ required: true, message: 'Required' }]}
-                style={{ marginBottom: 10 }}
-              >
-                <Select placeholder="Method" allowClear disabled={isEdit || !bankSelected || saved}>
-                  {['CHECK', 'EFT', 'WIRE', 'CASH', 'MISC'].map(m => <Option key={m} value={m}>{m}</Option>)}
-                </Select>
-              </Form.Item>
+          {/* Row 3: Payment (left) + Conversion panel (right) */}
+          <Row gutter={12} align="top">
+            {/* ── Payment fields ── */}
+            <Col xs={24} md={10}>
+              <Row gutter={12}>
+                <Col xs={12} md={8}>
+                  <Form.Item
+                    label={<span style={{ fontWeight: 600, fontSize: 12 }}>Payment Method</span>}
+                    name="paymentMethod"
+                    rules={[{ required: true, message: 'Required' }]}
+                    style={{ marginBottom: 10 }}
+                  >
+                    <Select placeholder="Method" allowClear disabled={isEdit || !bankSelected || saved}>
+                      {['CHECK', 'EFT', 'WIRE', 'CASH', 'MISC'].map(m => <Option key={m} value={m}>{m}</Option>)}
+                    </Select>
+                  </Form.Item>
+                </Col>
+                <Col xs={12} md={8}>
+                  <Form.Item
+                    label={<span style={{ fontWeight: 600, fontSize: 12 }}>Payment Document</span>}
+                    name="paymentDocument"
+                    rules={[{ required: true, message: 'Required' }]}
+                    style={{ marginBottom: 10 }}
+                  >
+                    <Input placeholder="e.g. Cheque Book Name" disabled={isEdit || !bankSelected || saved} />
+                  </Form.Item>
+                </Col>
+                <Col xs={12} md={8}>
+                  <Form.Item
+                    label={<span style={{ fontWeight: 600, fontSize: 12 }}>Paper Doc #</span>}
+                    name="paperDocumentNumber"
+                    style={{ marginBottom: 10 }}
+                  >
+                    <Input placeholder="CHQ-00123" disabled={isEdit || !bankSelected || saved} />
+                  </Form.Item>
+                </Col>
+              </Row>
             </Col>
-            <Col xs={12} md={4}>
-              <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Payment Document</span>}
-                name="paymentDocument"
-                rules={[{ required: true, message: 'Required' }]}
-                style={{ marginBottom: 10 }}
-              >
-                <Input placeholder="e.g. Cheque Book Name" disabled={isEdit || !bankSelected || saved} />
-              </Form.Item>
-            </Col>
-            <Col xs={12} md={3}>
-              <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Paper Doc #</span>}
-                name="paperDocumentNumber"
-                style={{ marginBottom: 10 }}
-              >
-                <Input placeholder="CHQ-00123" disabled={isEdit || !bankSelected || saved} />
-              </Form.Item>
-            </Col>
-            <Col xs={12} md={3}>
-              <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Currency</span>}
-                name="currencyCode"
-                style={{ marginBottom: 10 }}
-              >
-                <Select placeholder="Auto" allowClear disabled={isEdit || !bankSelected || saved}>
-                  {['AED', 'USD', 'EUR', 'GBP', 'SAR', 'QAR', 'KWD', 'BHD', 'OMR'].map(c => (
-                    <Option key={c} value={c}>{c}</Option>
-                  ))}
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col xs={12} md={3}>
-              <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Rate Type</span>}
-                name="bankConversionRateType"
-                style={{ marginBottom: 10 }}
-                required={isForeignCurrency}
-                rules={[{ required: isForeignCurrency, message: 'Required for foreign currency' }]}
-              >
-                <Select
-                  placeholder={isForeignCurrency ? 'Required' : 'Optional'}
-                  allowClear
-                  disabled={isEdit || !bankSelected || saved}
-                >
-                  <Option value="Corporate">Corporate</Option>
-                  <Option value="Spot">Spot</Option>
-                  <Option value="User">User</Option>
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col xs={12} md={4}>
-              <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 12 }}>{watchedCurrency || 'FCY'} → AED (Conv. Rate)</span>}
-                name="bankConversionRate"
-                style={{ marginBottom: 10 }}
-                required={isForeignCurrency}
-                rules={[{ required: isForeignCurrency, message: 'Required' }]}
-              >
-                <InputNumber
-                  style={{ width: '100%' }}
-                  precision={6} min={0}
-                  placeholder={isForeignCurrency ? 'e.g. 3.6725' : 'e.g. 1.0000'}
-                  disabled={isEdit || !bankSelected || saved}
-                  onChange={v => {
-                    if (v && v > 0) setInverseRateVal(Math.round((1 / v) * 1000000) / 1000000);
-                    else setInverseRateVal(undefined);
-                  }}
-                />
-              </Form.Item>
-            </Col>
-            <Col xs={12} md={4}>
-              <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 12 }}>AED → {watchedCurrency || 'FCY'} (Inverse)</span>}
-                style={{ marginBottom: 10 }}
-              >
-                <InputNumber
-                  style={{ width: '100%' }}
-                  precision={6} min={0}
-                  placeholder="e.g. 0.2724"
-                  disabled={isEdit || !bankSelected || saved}
-                  value={inverseRateVal}
-                  onChange={v => {
-                    setInverseRateVal(v ?? undefined);
-                    if (v && v > 0) {
-                      form.setFieldValue('bankConversionRate', Math.round((1 / v) * 1000000) / 1000000);
-                    }
-                  }}
-                />
-              </Form.Item>
+
+            {/* ── Conversion rates panel ── */}
+            <Col xs={24} md={14}>
+              <div style={{
+                background: '#f0f5ff',
+                border: '1px solid #d6e4ff',
+                borderRadius: 8,
+                padding: '8px 12px 2px',
+                marginBottom: 10,
+              }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#1677ff', marginBottom: 6, letterSpacing: 0.3 }}>
+                  Currency &amp; Conversion Rates
+                </div>
+                <Row gutter={10}>
+                  <Col xs={12} md={6}>
+                    <Form.Item
+                      label={<span style={{ fontWeight: 600, fontSize: 12 }}>Currency</span>}
+                      name="currencyCode"
+                      style={{ marginBottom: 8 }}
+                    >
+                      <Select placeholder="Auto" allowClear disabled={isEdit || !bankSelected || saved}>
+                        {['AED', 'USD', 'EUR', 'GBP', 'SAR', 'QAR', 'KWD', 'BHD', 'OMR'].map(c => (
+                          <Option key={c} value={c}>{c}</Option>
+                        ))}
+                      </Select>
+                    </Form.Item>
+                  </Col>
+                  <Col xs={12} md={6}>
+                    <Form.Item
+                      label={<span style={{ fontWeight: 600, fontSize: 12 }}>Rate Type</span>}
+                      name="bankConversionRateType"
+                      style={{ marginBottom: 8 }}
+                      required={isForeignCurrency}
+                      rules={[{ required: isForeignCurrency, message: 'Required' }]}
+                    >
+                      <Select
+                        placeholder={isForeignCurrency ? 'Required' : 'Optional'}
+                        allowClear
+                        disabled={isEdit || !bankSelected || saved}
+                      >
+                        <Option value="Corporate">Corporate</Option>
+                        <Option value="Spot">Spot</Option>
+                        <Option value="User">User</Option>
+                      </Select>
+                    </Form.Item>
+                  </Col>
+                  <Col xs={12} md={6}>
+                    <Form.Item
+                      label={<span style={{ fontWeight: 600, fontSize: 12 }}>{watchedCurrency || 'FCY'} → AED</span>}
+                      name="bankConversionRate"
+                      style={{ marginBottom: 8 }}
+                      required={isForeignCurrency}
+                      rules={[{ required: isForeignCurrency, message: 'Required' }]}
+                    >
+                      <InputNumber
+                        style={{ width: '100%' }}
+                        precision={6} min={0}
+                        placeholder="e.g. 3.6725"
+                        disabled={isEdit || !bankSelected || saved}
+                        onChange={v => {
+                          if (v && v > 0) setInverseRateVal(Math.round((1 / v) * 1000000) / 1000000);
+                          else setInverseRateVal(undefined);
+                        }}
+                      />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={12} md={6}>
+                    <Form.Item
+                      label={<span style={{ fontWeight: 600, fontSize: 12 }}>AED → {watchedCurrency || 'FCY'}</span>}
+                      style={{ marginBottom: 8 }}
+                    >
+                      <InputNumber
+                        style={{ width: '100%' }}
+                        precision={6} min={0}
+                        placeholder="e.g. 0.2724"
+                        disabled={isEdit || !bankSelected || saved}
+                        value={inverseRateVal}
+                        onChange={v => {
+                          setInverseRateVal(v ?? undefined);
+                          if (v && v > 0)
+                            form.setFieldValue('bankConversionRate', Math.round((1 / v) * 1000000) / 1000000);
+                        }}
+                      />
+                    </Form.Item>
+                  </Col>
+                </Row>
+              </div>
             </Col>
           </Row>
 
