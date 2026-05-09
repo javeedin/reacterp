@@ -2863,8 +2863,8 @@ const TrialBalance: React.FC = () => {
         forceCreate:        true,   // always create fresh — never reuse an old FC journal
         lines: d.lines.map((l: any) => ({
           lineType:           l.drAmount > 0 ? 'DR' as const : 'CR' as const,
-          enteredDr:          0,
-          enteredCr:          0,
+          enteredDr:          l.drAmount > 0 ? l.drAmount : null,
+          enteredCr:          l.crAmount > 0 ? l.crAmount : null,
           accountedDr:        l.drAmount > 0 ? l.drAmount : null,
           accountedCr:        l.crAmount > 0 ? l.crAmount : null,
           description:        l.description || lineDescMap.get(l.lineNum) || journalDesc,
