@@ -1540,6 +1540,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   const [singleAcctProgress, setSingleAcctProgress]   = useState<BankAcctProgressRow[]>([]);
   const [singleAcctRunning, setSingleAcctRunning]     = useState(false);
   const [singleAcctDone, setSingleAcctDone]           = useState(false);
+  const [singleAcctTxnRecord, setSingleAcctTxnRecord] = useState<ExternalTxnRecord | null>(null);
 
   // ── View Accounting modal state ───────────────────────────────────────────
   const [viewAcctOpen, setViewAcctOpen]   = useState(false);
@@ -1987,6 +1988,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     };
     setSingleAcctProgress([row]);
     setSingleAcctDone(false);
+    setSingleAcctTxnRecord(txn);
     setSingleAcctModalOpen(true);
   };
 
@@ -1998,7 +2000,8 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     for (const row of singleAcctProgress) {
       if (row.status === 'skipped' || row.status === 'error') continue;
       updateRow(row.extTxnId, { status: 'running' });
-      const txn = transactions.find(t => t.externalTransactionId === row.extTxnId);
+      const txn = transactions.find(t => t.externalTransactionId === row.extTxnId)
+        ?? (singleAcctTxnRecord?.externalTransactionId === row.extTxnId ? singleAcctTxnRecord : null);
       if (!txn) { updateRow(row.extTxnId, { status: 'error', message: 'Transaction not found' }); continue; }
       try {
         const ledger = await fetchLedgerByBusinessUnit(txn.businessUnitName);
