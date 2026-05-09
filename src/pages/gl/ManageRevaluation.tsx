@@ -491,7 +491,10 @@ const ManageRevaluation: React.FC = () => {
       // Step 2 — Write to SLA
       updateStep(2, 'process');
       const periodName = d.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '');
-      const currency   = d.functionalCcy || 'AED';
+      // Safety: functionalCcy in DB might have been saved as a foreign currency (e.g. INR) from
+      // an older code version. Exclude it if it matches one of the ccyRow foreign currencies.
+      const foreignCcys = new Set(d.ccyRows.map((c: any) => c.currencyCode).filter(Boolean));
+      const currency   = (d.functionalCcy && !foreignCcys.has(d.functionalCcy)) ? d.functionalCcy : 'AED';
       const createdBy  = d.createdBy || 'SYSTEM';
 
       // Derive last day of the period (e.g. "Apr-26" → 2026-04-30)
@@ -610,8 +613,8 @@ const ManageRevaluation: React.FC = () => {
         forceCreate:        true,   // always create fresh — never reuse an old FC journal
         lines: d.lines.map(l => ({
           lineType:           l.drAmount > 0 ? 'DR' as const : 'CR' as const,
-          enteredDr:          l.drAmount > 0 ? l.drAmount : null,
-          enteredCr:          l.crAmount > 0 ? l.crAmount : null,
+          enteredDr:          0,
+          enteredCr:          0,
           accountedDr:        l.drAmount > 0 ? l.drAmount : null,
           accountedCr:        l.crAmount > 0 ? l.crAmount : null,
           description:        l.description || lineDescMap.get(l.lineNum) || journalDesc,

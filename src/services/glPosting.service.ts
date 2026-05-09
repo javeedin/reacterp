@@ -118,8 +118,10 @@ export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResu
   }
 
   // ── 1. Create journal ─────────────────────────────────────────────────────
-  const totalDr = lines.reduce((s, l) => s + (l.enteredDr || 0), 0);
-  const totalCr = lines.reduce((s, l) => s + (l.enteredCr || 0), 0);
+  // Use accountedDr/Cr for control totals — enteredDr/Cr may be 0 for revaluation journals
+  // where amounts are purely in functional currency.
+  const totalDr = lines.reduce((s, l) => s + (l.accountedDr ?? l.enteredDr ?? 0), 0);
+  const totalCr = lines.reduce((s, l) => s + (l.accountedCr ?? l.enteredCr ?? 0), 0);
 
   const payload = {
     batch: {
@@ -152,13 +154,21 @@ export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResu
       createdBy,
     },
     lines: lines.map(l => {
-      const eDr = l.lineType === 'DR' ? (l.enteredDr || null) : null;
-      const eCr = l.lineType === 'CR' ? (l.enteredCr || null) : null;
+      // Use ?? null so that explicit 0 (revaluation journals) is preserved, not coerced to null.
+      const eDr = l.lineType === 'DR' ? (l.enteredDr ?? null) : null;
+      const eCr = l.lineType === 'CR' ? (l.enteredCr ?? null) : null;
+      // Respect explicit accountedDr/Cr (e.g. revaluation journals where entered=0 but accounted≠0).
+      const aDr = l.lineType === 'DR'
+        ? (l.accountedDr != null ? l.accountedDr : (eDr != null ? Math.round(eDr * rate * 100) / 100 : null))
+        : null;
+      const aCr = l.lineType === 'CR'
+        ? (l.accountedCr != null ? l.accountedCr : (eCr != null ? Math.round(eCr * rate * 100) / 100 : null))
+        : null;
       return {
       enteredDr:                eDr,
       enteredCr:                eCr,
-      accountedDr:              eDr != null ? Math.round(eDr * rate * 100) / 100 : null,
-      accountedCr:              eCr != null ? Math.round(eCr * rate * 100) / 100 : null,
+      accountedDr:              aDr,
+      accountedCr:              aCr,
       statAmount:               null,
       description:              l.description || '',
       currencyCode:             l.currencyCode || currency,
