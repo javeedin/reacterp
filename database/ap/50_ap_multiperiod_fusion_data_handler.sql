@@ -44,12 +44,18 @@ DECLARE
   v_supplier        VARCHAR2(500);
   v_business_unit   VARCHAR2(200);
   v_line_desc       VARCHAR2(500);
+  v_open_as_of      DATE;
   v_count           NUMBER := 0;
 BEGIN
   v_invoice_number := NULLIF(TRIM(:invoice_number),   '');
   v_supplier       := NULLIF(TRIM(:supplier),         '');
   v_business_unit  := NULLIF(TRIM(:business_unit),    '');
   v_line_desc      := NULLIF(TRIM(:line_description), '');
+  -- open_as_of: filter to lines whose MPA end date >= this date
+  -- e.g. open_as_of=2026-05-01 returns lines still open on 1 May 2026
+  IF NULLIF(TRIM(:open_as_of), '') IS NOT NULL THEN
+    v_open_as_of := TO_DATE(TRIM(:open_as_of), 'YYYY-MM-DD');
+  END IF;
 
   :status_code := 200;
   OWA_UTIL.MIME_HEADER('application/json', TRUE);
@@ -87,6 +93,7 @@ BEGIN
       AND (v_supplier       IS NULL OR UPPER(inv.SUPPLIER)       LIKE '%'||UPPER(v_supplier)||'%')
       AND (v_business_unit  IS NULL OR inv.BUSINESS_UNIT = v_business_unit)
       AND (v_line_desc      IS NULL OR UPPER(ln.DESCRIPTION)     LIKE '%'||UPPER(v_line_desc)||'%')
+      AND (v_open_as_of     IS NULL OR ln.MULTIPERIOD_END_DATE  >= v_open_as_of)
     ORDER BY inv.INVOICE_DATE DESC, inv.INVOICE_NUMBER, ln.LINE_NUMBER
   ) LOOP
     v_count := v_count + 1;

@@ -3,7 +3,7 @@ import dayjs from 'dayjs';
 import {
   Layout, Card, Form, Select, Input, Button, Space, Typography,
   Table, Tag, Row, Col, Breadcrumb, Tabs, Descriptions, Alert,
-  Modal, message, Tooltip, Statistic, Spin,
+  Modal, message, Tooltip, Statistic, Spin, DatePicker,
 } from 'antd';
 import {
   HomeOutlined, SearchOutlined, ReloadOutlined, CalendarOutlined,
@@ -365,6 +365,7 @@ const ManageMultiperiod: React.FC = () => {
         supplier:        vals.supplier        || undefined,
         businessUnit:    vals.businessUnit    || undefined,
         lineDescription: vals.lineDescription || undefined,
+        openAsOf:        vals.openAsOf ? (vals.openAsOf as any).format('YYYY-MM-DD') : undefined,
       });
       setFusionRows(rows);
       setFusionSearched(true);
@@ -731,6 +732,18 @@ const ManageMultiperiod: React.FC = () => {
               </Form.Item>
               <Form.Item name="lineDescription" label="Description">
                 <Input placeholder="Search…" style={{ width: 160 }} allowClear />
+              </Form.Item>
+              <Form.Item
+                name="openAsOf"
+                label="Open As Of"
+                tooltip="Show only lines where MPA End Date ≥ selected date"
+              >
+                <DatePicker
+                  format="DD-MMM-YY"
+                  placeholder="e.g. 01-May-26"
+                  style={{ width: 140 }}
+                  allowClear
+                />
               </Form.Item>
               <Form.Item>
                 <Space>

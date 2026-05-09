@@ -107,12 +107,14 @@ export async function listFusionMpaLines(params: {
   supplier?:        string;
   businessUnit?:    string;
   lineDescription?: string;
+  openAsOf?:        string;  // YYYY-MM-DD — only lines with MPA end date >= this date
 } = {}): Promise<FusionMpaLine[]> {
   const q = new URLSearchParams();
   if (params.invoiceNumber)   q.set('invoice_number',   params.invoiceNumber);
   if (params.supplier)        q.set('supplier',          params.supplier);
   if (params.businessUnit)    q.set('business_unit',     params.businessUnit);
   if (params.lineDescription) q.set('line_description',  params.lineDescription);
+  if (params.openAsOf)        q.set('open_as_of',        params.openAsOf);
   const res = await fetch(`${BASE}/fusion-data${q.toString() ? '?' + q.toString() : ''}`, {
     headers: { Accept: 'application/json' },
   });
