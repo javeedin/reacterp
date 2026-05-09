@@ -24,6 +24,8 @@ import {
   buildPcBankTxnSlaPayload, fetchLedgerByBusinessUnit, derivePeriodName, createAccounting,
 } from '../../services/sla.service';
 import { searchCombinations, type DistCombination } from '../../services/distCombinations.service';
+import { validateGlPayload, persistValidationLog, type GlJournalPayload } from '../../services/glValidation.service';
+import { useGlValidation } from '../../context/GlValidationContext';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -1509,6 +1511,7 @@ const ExternalTxnForm: React.FC<{
 const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'cash' }) => {
   const { user } = useAuth();
   const currentUser = user?.email ?? user?.username ?? 'SYSTEM';
+  const { addSessionEntry } = useGlValidation();
 
   const [transactions, setTransactions]   = useState<ExternalTxnRecord[]>([]);
   const [loading, setLoading]             = useState(false);
@@ -1923,6 +1926,33 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           })),
         };
 
+        // GL pre-flight validation + session logging
+        const validationPayload: GlJournalPayload = {
+          batch: { batchName, ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName, accountingPeriod: row.periodName, controlTotal: absAmount, runningTotalDr: absAmount, runningTotalCr: absAmount },
+          header: { periodName: row.periodName, currencyCode: txn.currencyCode || 'AED', currencyConversionDate: row.txnDate, journalName: `BANK-EXT-${txn.externalTransactionId}` },
+          lines: glPayload.lines.map((l: any) => ({ enteredDr: l.enteredDr, enteredCr: l.enteredCr, accountCombination: l.accountCombination, description: l.description, reference1: l.reference1 })),
+        };
+        const validation = validateGlPayload(validationPayload, { module: 'CASH', referenceNo: txn.referenceText || String(txn.externalTransactionId) });
+        const logId = await persistValidationLog('CASH', txn.referenceText || String(txn.externalTransactionId), batchName, validation.valid ? 'PASSED' : 'FAILED', validation.errors, validationPayload, currentUser);
+        addSessionEntry({
+          logId: logId ?? Date.now(),
+          module: 'CASH',
+          referenceNo: txn.referenceText || String(txn.externalTransactionId),
+          batchName,
+          result: validation.valid ? 'PASSED' : 'FAILED',
+          errorCount: validation.errors.filter(e => e.severity === 'ERROR').length,
+          warningCount: validation.errors.filter(e => e.severity === 'WARNING').length,
+          errorCategories: [...new Set(validation.errors.map(e => e.category))].join(',') || null,
+          errorSummary: validation.errors.filter(e => e.severity === 'ERROR').map(e => `[${e.category}] ${e.message}`).join(' | ') || null,
+          errorDetail: validation.errors,
+          createdBy: currentUser,
+          creationDate: new Date().toISOString(),
+        });
+        if (!validation.valid) {
+          updateRow(row.extTxnId, { status: 'error', message: `GL validation failed: ${validation.errors.filter(e => e.severity === 'ERROR').map(e => e.category).join(', ')}` });
+          continue;
+        }
+
         const glRes = await fetch(`${APEX_BASE}/journals/create`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -2092,6 +2122,32 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
             reference5: null, createdBy: currentUser,
           })),
         };
+        // GL pre-flight validation + session logging
+        const validationPayload: GlJournalPayload = {
+          batch: { batchName, ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName, accountingPeriod: row.periodName, controlTotal: absAmount, runningTotalDr: absAmount, runningTotalCr: absAmount },
+          header: { periodName: row.periodName, currencyCode: txn.currencyCode || 'AED', currencyConversionDate: row.txnDate, journalName: `BANK-EXT-${txn.externalTransactionId}` },
+          lines: glPayload.lines.map((l: any) => ({ enteredDr: l.enteredDr, enteredCr: l.enteredCr, accountCombination: l.accountCombination, description: l.description, reference1: l.reference1 })),
+        };
+        const validation = validateGlPayload(validationPayload, { module: 'CASH', referenceNo: txn.referenceText || String(txn.externalTransactionId) });
+        const logId = await persistValidationLog('CASH', txn.referenceText || String(txn.externalTransactionId), batchName, validation.valid ? 'PASSED' : 'FAILED', validation.errors, validationPayload, currentUser);
+        addSessionEntry({
+          logId: logId ?? Date.now(),
+          module: 'CASH',
+          referenceNo: txn.referenceText || String(txn.externalTransactionId),
+          batchName,
+          result: validation.valid ? 'PASSED' : 'FAILED',
+          errorCount: validation.errors.filter(e => e.severity === 'ERROR').length,
+          warningCount: validation.errors.filter(e => e.severity === 'WARNING').length,
+          errorCategories: [...new Set(validation.errors.map(e => e.category))].join(',') || null,
+          errorSummary: validation.errors.filter(e => e.severity === 'ERROR').map(e => `[${e.category}] ${e.message}`).join(' | ') || null,
+          errorDetail: validation.errors,
+          createdBy: currentUser,
+          creationDate: new Date().toISOString(),
+        });
+        if (!validation.valid) {
+          updateRow(row.extTxnId, { status: 'error', message: `GL validation failed: ${validation.errors.filter(e => e.severity === 'ERROR').map(e => e.category).join(', ')}` });
+          continue;
+        }
         const glRes = await fetch(`${APEX_BASE}/journals/create`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
