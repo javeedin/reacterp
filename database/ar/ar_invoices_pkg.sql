@@ -317,10 +317,11 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
         p_updated       OUT NUMBER,
         p_errors        OUT NUMBER
     ) IS
-        l_root  JSON_OBJECT_T;
-        l_items JSON_ARRAY_T;
-        l_item  JSON_OBJECT_T;
-        l_lines JSON_ARRAY_T;
+        l_root    JSON_OBJECT_T;
+        l_items   JSON_ARRAY_T;
+        l_item    JSON_OBJECT_T;
+        l_lines   JSON_ARRAY_T;
+        l_err_msg VARCHAR2(4000);
     BEGIN
         p_inserted := 0;
         p_updated  := 0;
@@ -342,11 +343,12 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
                 p_inserted := p_inserted + 1;
             EXCEPTION
                 WHEN OTHERS THEN
+                    l_err_msg := SQLERRM;
                     p_errors := p_errors + 1;
                     -- log but continue
                     UPDATE RR_AR_INVOICE_HEADERS
                        SET SYNC_STATUS   = 'ERROR',
-                           ERROR_MESSAGE = SQLERRM
+                           ERROR_MESSAGE = l_err_msg
                      WHERE CUSTOMER_TRANSACTION_ID = l_item.get_number('CustomerTransactionId');
             END;
         END LOOP;
