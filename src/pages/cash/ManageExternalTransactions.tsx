@@ -677,7 +677,7 @@ const ExternalTxnForm: React.FC<{
         .ext-sec-title { font-weight: 700; font-size: 13px; color: #1a1a1a; padding: 9px 14px; border-bottom: 1px solid #e4e4e4; background: #fafafa; letter-spacing: 0.1px; }
         .ext-row { display: grid; grid-template-columns: 180px 1fr 160px 1fr; border-bottom: 1px solid #ebebeb; min-height: 48px; }
         .ext-row:last-child { border-bottom: none; }
-        .ext-row-alt { background: #f7f7f7; }
+        .ext-row-alt { background: #fff; }
         .ext-lbl { font-weight: 600; font-size: 12px; color: #3a3a3a; padding: 8px 12px; background: #efefef; border-right: 1px solid #e0e0e0; display: flex; align-items: center; }
         .ext-val { padding: 4px 10px; border-right: 1px solid #e8e8e8; display: flex; align-items: center; flex-wrap: wrap; gap: 2px; min-height: 48px; }
         .ext-val:last-child { border-right: none; }
@@ -871,7 +871,7 @@ const ExternalTxnForm: React.FC<{
               </div>
             </div>
 
-            {/* Payment Method | Payment Document */}
+            {/* Payment Method | Conv. Rate Type */}
             <div className="ext-row">
               <div className="ext-lbl">Payment Method</div>
               <div className="ext-val">
@@ -881,23 +881,9 @@ const ExternalTxnForm: React.FC<{
                   </Select>
                 </Form.Item>
               </div>
-              <div className="ext-lbl">Payment Document</div>
-              <div className="ext-val">
-                <Form.Item name="paymentDocument" rules={[{ required: true, message: 'Required' }]}>
-                  <Input variant="borderless" placeholder="e.g. Cheque Book Name" disabled={isEdit || !bankSelected || saved} />
-                </Form.Item>
+              <div className="ext-lbl">
+                Conv. Rate Type{isForeignCurrency && <span style={{ color: '#ff4d4f', marginLeft: 2 }}>*</span>}
               </div>
-            </div>
-
-            {/* Paper Doc # | Conv. Rate Type */}
-            <div className="ext-row ext-row-alt">
-              <div className="ext-lbl">Paper Doc #</div>
-              <div className="ext-val">
-                <Form.Item name="paperDocumentNumber">
-                  <Input variant="borderless" placeholder="CHQ-00123" disabled={isEdit || !bankSelected || saved} />
-                </Form.Item>
-              </div>
-              <div className="ext-lbl">Conv. Rate Type</div>
               <div className="ext-val">
                 <Form.Item name="bankConversionRateType"
                   rules={[{ required: isForeignCurrency, message: 'Required' }]}
@@ -914,10 +900,26 @@ const ExternalTxnForm: React.FC<{
               </div>
             </div>
 
+            {/* Paper Doc # | Payment Document */}
+            <div className="ext-row ext-row-alt">
+              <div className="ext-lbl">Paper Doc #</div>
+              <div className="ext-val">
+                <Form.Item name="paperDocumentNumber">
+                  <Input variant="borderless" placeholder="CHQ-00123" disabled={isEdit || !bankSelected || saved} />
+                </Form.Item>
+              </div>
+              <div className="ext-lbl">Payment Document</div>
+              <div className="ext-val">
+                <Form.Item name="paymentDocument" rules={[{ required: true, message: 'Required' }]}>
+                  <Input variant="borderless" placeholder="e.g. Cheque Book Name" disabled={isEdit || !bankSelected || saved} />
+                </Form.Item>
+              </div>
+            </div>
+
             {/* Conv. Rate | Inverse Rate */}
             <div className="ext-row">
               <div className="ext-lbl" style={{ fontFamily: 'monospace', fontSize: 11 }}>
-                Conv. Rate ({watchedCurrency || 'FCY'}→AED)
+                Conv. Rate ({watchedCurrency || 'FCY'}→AED){isForeignCurrency && <span style={{ color: '#ff4d4f', marginLeft: 2 }}>*</span>}
               </div>
               <div className="ext-val">
                 <Form.Item name="bankConversionRate"
@@ -936,7 +938,7 @@ const ExternalTxnForm: React.FC<{
                 </Form.Item>
               </div>
               <div className="ext-lbl" style={{ fontFamily: 'monospace', fontSize: 11 }}>
-                Inverse Rate (AED→{watchedCurrency || 'FCY'})
+                Inverse Rate (AED→{watchedCurrency || 'FCY'}){isForeignCurrency && <span style={{ color: '#ff4d4f', marginLeft: 2 }}>*</span>}
               </div>
               <div className="ext-val">
                 <InputNumber
