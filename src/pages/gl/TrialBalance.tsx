@@ -2722,7 +2722,7 @@ const TrialBalance: React.FC = () => {
         periodName:    r.periodName    ?? r.period_name ?? '',
         account:       r.account       ?? '',
         accountDesc:   r.accountDesc   ?? r.account_desc ?? '',
-        functionalCcy: r.functionalCcy ?? r.functional_ccy ?? '',
+        functionalCcy: r.baseCurrency  ?? r.base_currency  ?? r.functionalCcy ?? r.functional_ccy ?? '',
         gainAccount:   r.gainAccount   ?? r.gain_account ?? '',
         lossAccount:   r.lossAccount   ?? r.loss_account ?? '',
         status:        r.status        ?? 'DRAFT',
@@ -2927,9 +2927,12 @@ const TrialBalance: React.FC = () => {
     const allRawRows = tab.rrData.filter(r => r.account === revalAccount);
     const accountType = allRawRows[0]?.account_type || 'A';
     const accountDesc = allRawRows[0]?.account_desc || '';
-    // currency_code is the FOREIGN (transaction) currency — NOT the functional currency.
-    // Functional currency for this ledger is always AED.
-    const functionalCcy = 'AED';
+    // Derive the ledger functional currency from the Fusion TB tab for the same period.
+    // Fusion TB only stores rows in functional currency, so data[0].currency is the functional ccy.
+    // Falls back to 'AED' if no Fusion tab is loaded yet.
+    const periodClean = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '');
+    const fusionTabForPeriod = tabs.find(t => t.tabType === 'fusion' && t.periodName === periodClean);
+    const functionalCcy = fusionTabForPeriod?.data.find(r => r.currency)?.currency || 'AED';
     // Company for locking the first segment of gain/loss account selectors
     const revalCompany = tab.selectedCompany || allRawRows[0]?.company || '';
 
@@ -3351,6 +3354,7 @@ const TrialBalance: React.FC = () => {
                   account:        revalAccount,
                   account_desc:   accountDesc,
                   functional_ccy: functionalCcy,
+                  base_currency:  functionalCcy,   // dedicated column — read back during accounting
                   gain_account:   revalGainCombo,
                   loss_account:   revalLossCombo,
                   total_gain:     totalGain,
