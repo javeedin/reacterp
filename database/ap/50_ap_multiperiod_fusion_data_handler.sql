@@ -40,123 +40,80 @@ BEGIN
     p_comments      => 'Return AP invoice lines with multiperiod dates populated, including schedule-generated flag',
     p_source        => q'[
 DECLARE
-  -- Filter bind variables (initialized in BEGIN to avoid CLOB init issues)
   v_invoice_number  VARCHAR2(200);
   v_supplier        VARCHAR2(500);
   v_business_unit   VARCHAR2(200);
   v_line_desc       VARCHAR2(500);
-
-  -- Output buffer declared without init — initialized via DBMS_LOB in BEGIN
-  v_buf   CLOB;
-  v_first BOOLEAN;
-  v_count NUMBER;
-
-  -- JSON helpers (local subprograms must be last in DECLARE section)
-  FUNCTION esc(p IN VARCHAR2) RETURN VARCHAR2 IS
-  BEGIN
-    RETURN REPLACE(REPLACE(p, CHR(92), CHR(92)||CHR(92)), '"', CHR(92)||'"');
-  END;
-
-  FUNCTION jstr(p IN VARCHAR2) RETURN VARCHAR2 IS
-  BEGIN
-    RETURN CASE WHEN p IS NULL THEN 'null' ELSE '"'||esc(p)||'"' END;
-  END;
-
-  FUNCTION jnum(p IN NUMBER) RETURN VARCHAR2 IS
-  BEGIN
-    RETURN CASE WHEN p IS NULL THEN 'null' ELSE TO_CHAR(p) END;
-  END;
-
-  FUNCTION jdate(p IN DATE) RETURN VARCHAR2 IS
-  BEGIN
-    RETURN CASE WHEN p IS NULL THEN 'null'
-           ELSE '"'||TO_CHAR(p, 'YYYY-MM-DD')||'"' END;
-  END;
-
+  v_count           NUMBER := 0;
 BEGIN
-  -- Assign filter values
   v_invoice_number := NULLIF(TRIM(:invoice_number),   '');
   v_supplier       := NULLIF(TRIM(:supplier),         '');
   v_business_unit  := NULLIF(TRIM(:business_unit),    '');
   v_line_desc      := NULLIF(TRIM(:line_description), '');
 
-  -- Initialise CLOB output buffer
-  DBMS_LOB.CREATETEMPORARY(v_buf, TRUE);
-  v_buf   := '{"items":[';
-  v_first := TRUE;
-  v_count := 0;
+  :status_code := 200;
+  OWA_UTIL.MIME_HEADER('application/json', TRUE);
+
+  APEX_JSON.INITIALIZE_OUTPUT(p_http_header => FALSE);
+  APEX_JSON.OPEN_OBJECT;
+  APEX_JSON.OPEN_ARRAY('items');
 
   FOR r IN (
     SELECT
-      -- Invoice header columns
       inv.INVOICE_ID,
       inv.INVOICE_NUMBER,
-      inv.INVOICE_DATE,
+      TO_CHAR(inv.INVOICE_DATE,        'YYYY-MM-DD') AS INVOICE_DATE_STR,
       inv.INVOICE_AMOUNT,
       inv.INVOICE_CURRENCY,
       inv.BUSINESS_UNIT,
       inv.SUPPLIER,
       inv.SUPPLIER_NUMBER,
-      -- Invoice line columns
       ln.LINE_NUMBER,
       ln.LINE_AMOUNT,
-      ln.DESCRIPTION                AS LINE_DESCRIPTION,
-      ln.DISTRIBUTION_COMBINATION   AS CHARGE_ACCOUNT,
+      ln.DESCRIPTION                                 AS LINE_DESCRIPTION,
+      ln.DISTRIBUTION_COMBINATION                    AS CHARGE_ACCOUNT,
       ln.MULTIPERIOD_ACCRUAL_ACCOUNT,
-      ln.MULTIPERIOD_START_DATE,
-      ln.MULTIPERIOD_END_DATE,
-      -- Schedule-generated flag: 1 if any schedule row exists for this invoice
-      CASE
-        WHEN EXISTS (
-          SELECT 1
-            FROM RR_AP_INVOICE_MULTIPERIOD_SCHEDULE sch
-           WHERE sch.INVOICE_ID = inv.INVOICE_ID
-        ) THEN 1
-        ELSE 0
-      END AS SCHEDULE_GENERATED
+      TO_CHAR(ln.MULTIPERIOD_START_DATE, 'YYYY-MM-DD') AS MPA_START,
+      TO_CHAR(ln.MULTIPERIOD_END_DATE,   'YYYY-MM-DD') AS MPA_END,
+      CASE WHEN EXISTS (
+        SELECT 1 FROM RR_AP_INVOICE_MULTIPERIOD_SCHEDULE s
+         WHERE s.INVOICE_ID = inv.INVOICE_ID
+      ) THEN 1 ELSE 0 END AS SCHEDULE_GENERATED
     FROM RR_AP_INVOICE_LINES_ALL ln
     JOIN RR_AP_INVOICES_ALL      inv ON inv.INVOICE_ID = ln.INVOICE_ID
     WHERE ln.MULTIPERIOD_START_DATE IS NOT NULL
       AND ln.MULTIPERIOD_END_DATE   IS NOT NULL
-      AND (v_invoice_number IS NULL
-           OR UPPER(inv.INVOICE_NUMBER) LIKE '%'||UPPER(v_invoice_number)||'%')
-      AND (v_supplier       IS NULL
-           OR UPPER(inv.SUPPLIER)       LIKE '%'||UPPER(v_supplier)||'%')
-      AND (v_business_unit  IS NULL
-           OR inv.BUSINESS_UNIT = v_business_unit)
-      AND (v_line_desc      IS NULL
-           OR UPPER(ln.DESCRIPTION)     LIKE '%'||UPPER(v_line_desc)||'%')
+      AND (v_invoice_number IS NULL OR UPPER(inv.INVOICE_NUMBER) LIKE '%'||UPPER(v_invoice_number)||'%')
+      AND (v_supplier       IS NULL OR UPPER(inv.SUPPLIER)       LIKE '%'||UPPER(v_supplier)||'%')
+      AND (v_business_unit  IS NULL OR inv.BUSINESS_UNIT = v_business_unit)
+      AND (v_line_desc      IS NULL OR UPPER(ln.DESCRIPTION)     LIKE '%'||UPPER(v_line_desc)||'%')
     ORDER BY inv.INVOICE_DATE DESC, inv.INVOICE_NUMBER, ln.LINE_NUMBER
   ) LOOP
-    IF NOT v_first THEN v_buf := v_buf || ','; END IF;
-    v_first := FALSE;
     v_count := v_count + 1;
-
-    v_buf := v_buf || '{'
-      || '"invoiceId":'               || jnum(r.INVOICE_ID)               || ','
-      || '"invoiceNumber":'           || jstr(r.INVOICE_NUMBER)           || ','
-      || '"invoiceDate":'             || jdate(r.INVOICE_DATE)            || ','
-      || '"invoiceAmount":'           || jnum(r.INVOICE_AMOUNT)           || ','
-      || '"invoiceCurrency":'         || jstr(r.INVOICE_CURRENCY)         || ','
-      || '"businessUnit":'            || jstr(r.BUSINESS_UNIT)            || ','
-      || '"supplier":'                || jstr(r.SUPPLIER)                 || ','
-      || '"supplierNumber":'          || jstr(r.SUPPLIER_NUMBER)          || ','
-      || '"lineNumber":'              || jnum(r.LINE_NUMBER)              || ','
-      || '"lineAmount":'              || jnum(r.LINE_AMOUNT)              || ','
-      || '"lineDescription":'         || jstr(r.LINE_DESCRIPTION)         || ','
-      || '"chargeAccount":'           || jstr(r.CHARGE_ACCOUNT)           || ','
-      || '"multiperiodAccrualAccount":' || jstr(r.MULTIPERIOD_ACCRUAL_ACCOUNT) || ','
-      || '"multiperiodStartDate":'    || jdate(r.MULTIPERIOD_START_DATE)  || ','
-      || '"multiperiodEndDate":'      || jdate(r.MULTIPERIOD_END_DATE)    || ','
-      || '"scheduleGenerated":'       || jnum(r.SCHEDULE_GENERATED)
-    || '}';
+    APEX_JSON.OPEN_OBJECT;
+    APEX_JSON.WRITE('invoiceId',                 r.INVOICE_ID);
+    APEX_JSON.WRITE('invoiceNumber',             r.INVOICE_NUMBER);
+    APEX_JSON.WRITE('invoiceDate',               r.INVOICE_DATE_STR);
+    APEX_JSON.WRITE('invoiceAmount',             r.INVOICE_AMOUNT);
+    APEX_JSON.WRITE('invoiceCurrency',           r.INVOICE_CURRENCY);
+    APEX_JSON.WRITE('businessUnit',              r.BUSINESS_UNIT);
+    APEX_JSON.WRITE('supplier',                  r.SUPPLIER);
+    APEX_JSON.WRITE('supplierNumber',            r.SUPPLIER_NUMBER);
+    APEX_JSON.WRITE('lineNumber',                r.LINE_NUMBER);
+    APEX_JSON.WRITE('lineAmount',                r.LINE_AMOUNT);
+    APEX_JSON.WRITE('lineDescription',           r.LINE_DESCRIPTION);
+    APEX_JSON.WRITE('chargeAccount',             r.CHARGE_ACCOUNT);
+    APEX_JSON.WRITE('multiperiodAccrualAccount', r.MULTIPERIOD_ACCRUAL_ACCOUNT);
+    APEX_JSON.WRITE('multiperiodStartDate',      r.MPA_START);
+    APEX_JSON.WRITE('multiperiodEndDate',        r.MPA_END);
+    APEX_JSON.WRITE('scheduleGenerated',         r.SCHEDULE_GENERATED);
+    APEX_JSON.CLOSE_OBJECT;
   END LOOP;
 
-  v_buf := v_buf || '],"count":' || TO_CHAR(v_count) || '}';
+  APEX_JSON.CLOSE_ARRAY;
+  APEX_JSON.WRITE('count', v_count);
+  APEX_JSON.CLOSE_OBJECT;
 
-  :status_code := 200;
-  OWA_UTIL.MIME_HEADER('application/json', TRUE);
-  HTP.PRN(v_buf);
 EXCEPTION
   WHEN OTHERS THEN
     :status_code := 500;
