@@ -46,7 +46,12 @@ DECLARE
   v_business_unit   VARCHAR2(200) := NULLIF(TRIM(:business_unit),    '');
   v_line_desc       VARCHAR2(500) := NULLIF(TRIM(:line_description), '');
 
-  -- JSON helpers
+  -- Output buffer (must come before local subprograms)
+  v_buf   CLOB    := '{"items":[';
+  v_first BOOLEAN := TRUE;
+  v_count NUMBER  := 0;
+
+  -- JSON helpers (local subprograms must be last in DECLARE section)
   FUNCTION esc(p IN VARCHAR2) RETURN VARCHAR2 IS
   BEGIN
     RETURN REPLACE(REPLACE(p, CHR(92), CHR(92)||CHR(92)), '"', CHR(92)||'"');
@@ -67,11 +72,6 @@ DECLARE
     RETURN CASE WHEN p IS NULL THEN 'null'
            ELSE '"'||TO_CHAR(p, 'YYYY-MM-DD')||'"' END;
   END;
-
-  -- Output buffer
-  v_buf   CLOB    := '{"items":[';
-  v_first BOOLEAN := TRUE;
-  v_count NUMBER  := 0;
 
 BEGIN
   FOR r IN (
