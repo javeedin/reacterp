@@ -3,20 +3,20 @@ import dayjs from 'dayjs';
 import {
   Layout, Card, Form, Select, Input, Button, Space, Typography,
   Table, Tag, Row, Col, Breadcrumb, Tabs, Descriptions, Alert,
-  Modal, message, Tooltip, Statistic, Spin, DatePicker, Drawer, Collapse,
+  Modal, message, Tooltip, Statistic, Spin, DatePicker, Drawer, Collapse, Popconfirm,
 } from 'antd';
 import {
   HomeOutlined, SearchOutlined, ReloadOutlined, CalendarOutlined,
   CheckCircleOutlined, CloseOutlined, SyncOutlined, BookOutlined,
   FileTextOutlined, WarningOutlined, ApiOutlined, CopyOutlined,
-  EyeOutlined,
+  EyeOutlined, DeleteOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
   listMpaInvoices, getMpaSchedule, generateMpaSchedule, markPeriodPosted,
-  listFusionMpaLines, getFusionMpaDetail,
+  listFusionMpaLines, getFusionMpaDetail, deleteMpaSchedule,
   type MpaInvoiceSummary, type MpaScheduleLine, type MpaInvoiceDetail,
   type FusionMpaLine, type FusionMpaDetail, type FusionMpaSchedulePeriod,
 } from '../../services/multiperiod.service';
@@ -81,6 +81,7 @@ const ManageMultiperiod: React.FC = () => {
   const [searchErr,    setSearchErr]    = useState<string | null>(null);
   const [businessUnits, setBusinessUnits] = useState<string[]>([]);
   const [generating,   setGenerating]   = useState<Set<number>>(new Set());
+  const [deleting,     setDeleting]     = useState<Set<number>>(new Set());
   const [postingTab,   setPostingTab]   = useState<string | null>(null);
   const [confirmOpen,  setConfirmOpen]  = useState(false);
   const [confirmTab,   setConfirmTab]   = useState<string | null>(null);
@@ -205,6 +206,27 @@ const ManageMultiperiod: React.FC = () => {
     }
     setGenerating(prev => { const s = new Set(prev); s.delete(invoiceId); return s; });
   }, [handleSearch, refreshDetail]);
+
+  // ── delete MPA schedule ───────────────────────────────────────────────────
+
+  const handleDeleteMpa = useCallback(async (invoiceId: number) => {
+    setDeleting(prev => new Set([...prev, invoiceId]));
+    try {
+      const result = await deleteMpaSchedule(invoiceId);
+      if (result.deleted === 0 && result.postedKept === 0) {
+        message.warning('No schedule rows found for this invoice');
+      } else if (result.deleted === 0 && result.postedKept > 0) {
+        message.info(`All ${result.postedKept} period(s) are already Posted — nothing to delete`);
+      } else {
+        const kept = result.postedKept > 0 ? ` (${result.postedKept} posted period(s) kept)` : '';
+        message.success(`Deleted ${result.deleted} pending period(s)${kept}`);
+        await handleSearch();
+      }
+    } catch (e: any) {
+      message.error(`Delete failed: ${e?.message}`);
+    }
+    setDeleting(prev => { const s = new Set(prev); s.delete(invoiceId); return s; });
+  }, [handleSearch]);
 
   // ── post current period ───────────────────────────────────────────────────
 
@@ -473,14 +495,16 @@ const ManageMultiperiod: React.FC = () => {
             >
               Detail
             </Button>
-            <Button
-              size="small"
-              icon={<SyncOutlined />}
-              loading={generating.has(rec.invoiceId)}
-              onClick={() => handleGenerate(rec.invoiceId)}
-            >
-              {rec.scheduleGenerated ? 'Regen' : 'Gen'}
-            </Button>
+            {!rec.scheduleGenerated && (
+              <Button
+                size="small"
+                icon={<SyncOutlined />}
+                loading={generating.has(rec.invoiceId)}
+                onClick={() => handleGenerate(rec.invoiceId)}
+              >
+                Generate
+              </Button>
+            )}
           </Space>
         );
       },
@@ -525,18 +549,27 @@ const ManageMultiperiod: React.FC = () => {
         : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>,
     },
     {
-      title: 'Actions', width: 160,
+      title: 'Actions', width: 140,
       render: (_, rec) => (
         <Space size={4}>
           <Button size="small" type="primary" onClick={() => openDetail(rec)}>View</Button>
-          <Button
-            size="small"
-            icon={<SyncOutlined />}
-            loading={generating.has(rec.invoiceId)}
-            onClick={() => handleGenerate(rec.invoiceId)}
+          <Popconfirm
+            title="Delete MPA Schedule"
+            description={`Delete all pending (not-posted) schedule rows for invoice ${rec.invoiceNumber}?`}
+            onConfirm={() => handleDeleteMpa(rec.invoiceId)}
+            okText="Delete"
+            okButtonProps={{ danger: true }}
+            cancelText="Cancel"
           >
-            Regenerate
-          </Button>
+            <Button
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              loading={deleting.has(rec.invoiceId)}
+            >
+              Delete
+            </Button>
+          </Popconfirm>
         </Space>
       ),
     },
@@ -941,20 +974,45 @@ const ManageMultiperiod: React.FC = () => {
               >
                 Refresh
               </Button>
-              {drawerData && (
+              {drawerData && (() => {
+              const hasSchedule = (drawerData.lines || []).some(l => l.scheduleGenerated);
+              if (!hasSchedule) return (
                 <Button
                   size="small"
                   icon={<SyncOutlined />}
                   loading={generating.has(drawerData.invoiceId)}
                   onClick={async () => {
-                    if (!drawerData) return;
                     await handleGenerate(drawerData.invoiceId);
                     await refreshDrawer();
                   }}
                 >
-                  {(drawerData.lines || []).some(l => l.scheduleGenerated) ? 'Regenerate All' : 'Generate Schedule'}
+                  Generate Schedule
                 </Button>
-              )}
+              );
+              return (
+                <Popconfirm
+                  title="Delete MPA Schedule"
+                  description="Delete all pending (not-posted) periods for this invoice?"
+                  onConfirm={async () => {
+                    await handleDeleteMpa(drawerData.invoiceId);
+                    setDrawerOpen(false);
+                    await handleFusionSearch();
+                  }}
+                  okText="Delete"
+                  okButtonProps={{ danger: true }}
+                  cancelText="Cancel"
+                >
+                  <Button
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                    loading={deleting.has(drawerData.invoiceId)}
+                  >
+                    Delete Schedule
+                  </Button>
+                </Popconfirm>
+              );
+            })()}
             </Space>
           }
         >

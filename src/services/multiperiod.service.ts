@@ -184,6 +184,16 @@ export async function getFusionMpaDetail(
   return data as FusionMpaDetail;
 }
 
+export async function deleteMpaSchedule(invoiceId: number): Promise<{ deleted: number; postedKept: number }> {
+  const res = await fetch(`${BASE}/${invoiceId}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json' },
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data?.error || `HTTP ${res.status}`);
+  return { deleted: data.deleted, postedKept: data.postedKept };
+}
+
 export async function markPeriodPosted(
   invoiceId: number,
   periodName: string,
