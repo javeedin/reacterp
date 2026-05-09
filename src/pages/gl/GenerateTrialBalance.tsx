@@ -566,7 +566,7 @@ const GenerateTrialBalance: React.FC = () => {
       </Table.Summary.Cell>
       {[kpi.openingDr, kpi.openingCr, kpi.ptdDr, kpi.ptdCr,
         kpi.ytdDr, kpi.ytdCr, kpi.closingDr, kpi.closingCr].map((v, i) => (
-        <Table.Summary.Cell key={i} index={7 + i} align="right">
+        <Table.Summary.Cell key={i} index={7 + i} align="right" style={{ textAlign: 'right' }}>
           <Text strong style={{ fontSize: 11 }}>{fmtCcy(v)}</Text>
         </Table.Summary.Cell>
       ))}

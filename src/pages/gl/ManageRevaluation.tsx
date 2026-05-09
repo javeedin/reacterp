@@ -614,7 +614,8 @@ const ManageRevaluation: React.FC = () => {
           accountedDr:        l.drAmount > 0 ? l.drAmount : null,
           accountedCr:        l.crAmount > 0 ? l.crAmount : null,
           description:        l.description || lineDescMap.get(l.lineNum) || journalDesc,
-          currencyCode:       lineCcyMap.get(l.lineNum) || currency,
+          currencyCode:       currency,   // revaluation adjustments are always in functional currency
+          exchangeRate:       1,
           accountingDate:     periodLastDay,
           accountCombination: l.combo,
           accountingClass:    'Revaluation',

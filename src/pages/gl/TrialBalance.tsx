@@ -275,6 +275,7 @@ const TrialBalance: React.FC = () => {
   const [revalTabKey,          setRevalTabKey]          = useState('');
   const [revalAccount,         setRevalAccount]         = useState('');
   const [revalRates,           setRevalRates]           = useState<Record<string, string>>({});
+  const [revalFuncRates,       setRevalFuncRates]       = useState<Record<string, string>>({});
   const [revalGainCombo,       setRevalGainCombo]       = useState('');
   const [revalLossCombo,       setRevalLossCombo]       = useState('');
   const [revalComboPickerOpen, setRevalComboPickerOpen] = useState(false);
@@ -2004,22 +2005,22 @@ const TrialBalance: React.FC = () => {
                 <Table.Summary.Cell index={0} colSpan={segmentColCount}>
                   <Text strong>TOTAL</Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={segmentColCount} align="right">
+                <Table.Summary.Cell index={segmentColCount} align="right" style={{ textAlign: 'right' }}>
                   <Text strong style={{ fontFamily: 'monospace' }}>
                     {formatCurrency(totals.opening)}
                   </Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={segmentColCount + 1} align="right">
+                <Table.Summary.Cell index={segmentColCount + 1} align="right" style={{ textAlign: 'right' }}>
                   <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.info }}>
                     {formatCurrency(totals.debit)}
                   </Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={segmentColCount + 2} align="right">
+                <Table.Summary.Cell index={segmentColCount + 2} align="right" style={{ textAlign: 'right' }}>
                   <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.success }}>
                     {formatCurrency(totals.credit)}
                   </Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={segmentColCount + 3} align="right">
+                <Table.Summary.Cell index={segmentColCount + 3} align="right" style={{ textAlign: 'right' }}>
                   <Text strong style={{ fontFamily: 'monospace' }}>
                     {formatCurrency(totals.closing)}
                   </Text>
@@ -2845,7 +2846,7 @@ const TrialBalance: React.FC = () => {
             </Text>
           </Tooltip>
         )},
-      { title: 'New Rate', key: 'newRate', align: 'right' as const, width: 120,
+      { title: 'New Rate (FCY→Func)', key: 'newRate', align: 'right' as const, width: 150,
         render: (_: any, r: ComboRow) => r.excluded
           ? <Text style={{ color: '#aaa', fontFamily: 'monospace' }}>—</Text>
           : isPosted
@@ -2853,10 +2854,43 @@ const TrialBalance: React.FC = () => {
           : (
           <Input
             size="small"
-            style={{ width: 100, fontFamily: 'monospace', textAlign: 'right' }}
+            style={{ width: 120, fontFamily: 'monospace', textAlign: 'right' }}
             placeholder="e.g. 3.675"
             value={revalRates[r.ccy] || ''}
-            onChange={e => setRevalRates(prev => ({ ...prev, [r.ccy]: e.target.value }))}
+            onChange={e => {
+              const val = e.target.value;
+              setRevalRates(prev => ({ ...prev, [r.ccy]: val }));
+              const n = parseFloat(val);
+              if (!isNaN(n) && n !== 0)
+                setRevalFuncRates(prev => ({ ...prev, [r.ccy]: (1 / n).toFixed(6) }));
+              else
+                setRevalFuncRates(prev => ({ ...prev, [r.ccy]: '' }));
+            }}
+          />
+        )},
+      { title: 'Func. Rate (Func→FCY)', key: 'funcRate', align: 'right' as const, width: 160,
+        render: (_: any, r: ComboRow) => r.excluded
+          ? <Text style={{ color: '#aaa', fontFamily: 'monospace' }}>—</Text>
+          : isPosted
+          ? <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>
+              {revalRates[r.ccy] && parseFloat(revalRates[r.ccy]) !== 0
+                ? (1 / parseFloat(revalRates[r.ccy])).toFixed(6) : '—'}
+            </Text>
+          : (
+          <Input
+            size="small"
+            style={{ width: 120, fontFamily: 'monospace', textAlign: 'right' }}
+            placeholder="e.g. 0.272109"
+            value={revalFuncRates[r.ccy] || ''}
+            onChange={e => {
+              const val = e.target.value;
+              setRevalFuncRates(prev => ({ ...prev, [r.ccy]: val }));
+              const n = parseFloat(val);
+              if (!isNaN(n) && n !== 0)
+                setRevalRates(prev => ({ ...prev, [r.ccy]: (1 / n).toFixed(6) }));
+              else
+                setRevalRates(prev => ({ ...prev, [r.ccy]: '' }));
+            }}
           />
         )},
       { title: 'New Acctd Value', dataIndex: 'newAcctValue', key: 'newAcctValue', align: 'right' as const, width: 140,
