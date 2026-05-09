@@ -900,7 +900,7 @@ const ExternalTxnForm: React.FC<{
               </div>
             </div>
 
-            {/* Paper Doc # | Payment Document */}
+            {/* Paper Doc # | Conv. Rate */}
             <div className="ext-row ext-row-alt">
               <div className="ext-lbl">Paper Doc #</div>
               <div className="ext-val">
@@ -908,16 +908,6 @@ const ExternalTxnForm: React.FC<{
                   <Input variant="borderless" placeholder="CHQ-00123" disabled={isEdit || !bankSelected || saved} />
                 </Form.Item>
               </div>
-              <div className="ext-lbl">Payment Document</div>
-              <div className="ext-val">
-                <Form.Item name="paymentDocument" rules={[{ required: true, message: 'Required' }]}>
-                  <Input variant="borderless" placeholder="e.g. Cheque Book Name" disabled={isEdit || !bankSelected || saved} />
-                </Form.Item>
-              </div>
-            </div>
-
-            {/* Conv. Rate | Inverse Rate */}
-            <div className="ext-row">
               <div className="ext-lbl" style={{ fontFamily: 'monospace', fontSize: 11 }}>
                 Conv. Rate ({watchedCurrency || 'FCY'}→AED){isForeignCurrency && <span style={{ color: '#ff4d4f', marginLeft: 2 }}>*</span>}
               </div>
@@ -935,6 +925,16 @@ const ExternalTxnForm: React.FC<{
                       else setInverseRateVal(undefined);
                     }}
                   />
+                </Form.Item>
+              </div>
+            </div>
+
+            {/* Payment Document | Inverse Rate */}
+            <div className="ext-row">
+              <div className="ext-lbl">Payment Document</div>
+              <div className="ext-val">
+                <Form.Item name="paymentDocument" rules={[{ required: true, message: 'Required' }]}>
+                  <Input variant="borderless" placeholder="e.g. Cheque Book Name" disabled={isEdit || !bankSelected || saved} />
                 </Form.Item>
               </div>
               <div className="ext-lbl" style={{ fontFamily: 'monospace', fontSize: 11 }}>
