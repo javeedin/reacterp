@@ -100,6 +100,53 @@ export interface FusionMpaLine {
   multiperiodStartDate:    string;
   multiperiodEndDate:      string;
   scheduleGenerated:       number; // 1 = yes, 0 = no
+  totalScheduled:          number;
+  postedAmount:            number;
+  pendingAmount:           number;
+  pendingFromDate:         number;
+}
+
+export interface FusionMpaSchedulePeriod {
+  scheduleId:     number;
+  periodName:     string;
+  periodDate:     string;
+  periodAmount:   number;
+  originalAmount: number;
+  postingStatus:  string;
+  postedDate:     string | null;
+  postedBy:       string | null;
+  slaHeaderId:    number | null;
+  accrualAccount: string | null;
+  chargeAccount:  string | null;
+}
+
+export interface FusionMpaDetailLine {
+  lineNumber:        number;
+  lineAmount:        number;
+  lineDescription:   string | null;
+  chargeAccount:     string | null;
+  accrualAccount:    string | null;
+  mpaStartDate:      string;
+  mpaEndDate:        string;
+  scheduleGenerated: number;
+  totalScheduled:    number;
+  postedAmount:      number;
+  pendingAmount:     number;
+  pendingFromDate:   number;
+  periods:           FusionMpaSchedulePeriod[];
+}
+
+export interface FusionMpaDetail {
+  invoiceId:      number;
+  invoiceNumber:  string;
+  invoiceDate:    string;
+  invoiceAmount:  number;
+  currencyCode:   string;
+  supplier:       string;
+  supplierNumber: string;
+  businessUnit:   string;
+  openAsOf:       string | null;
+  lines:          FusionMpaDetailLine[];
 }
 
 export async function listFusionMpaLines(params: {
@@ -121,6 +168,20 @@ export async function listFusionMpaLines(params: {
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
   return (data.items || []) as FusionMpaLine[];
+}
+
+export async function getFusionMpaDetail(
+  invoiceId: number,
+  openAsOf?: string,
+): Promise<FusionMpaDetail> {
+  const q = new URLSearchParams();
+  if (openAsOf) q.set('open_as_of', openAsOf);
+  const res = await fetch(`${BASE}/fusion-detail/${invoiceId}${q.toString() ? '?' + q.toString() : ''}`, {
+    headers: { Accept: 'application/json' },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+  return data as FusionMpaDetail;
 }
 
 export async function markPeriodPosted(

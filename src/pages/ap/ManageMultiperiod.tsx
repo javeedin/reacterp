@@ -3,7 +3,7 @@ import dayjs from 'dayjs';
 import {
   Layout, Card, Form, Select, Input, Button, Space, Typography,
   Table, Tag, Row, Col, Breadcrumb, Tabs, Descriptions, Alert,
-  Modal, message, Tooltip, Statistic, Spin, DatePicker,
+  Modal, message, Tooltip, Statistic, Spin, DatePicker, Drawer, Collapse,
 } from 'antd';
 import {
   HomeOutlined, SearchOutlined, ReloadOutlined, CalendarOutlined,
@@ -16,9 +16,9 @@ import type { ColumnsType } from 'antd/es/table';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
   listMpaInvoices, getMpaSchedule, generateMpaSchedule, markPeriodPosted,
-  listFusionMpaLines,
+  listFusionMpaLines, getFusionMpaDetail,
   type MpaInvoiceSummary, type MpaScheduleLine, type MpaInvoiceDetail,
-  type FusionMpaLine,
+  type FusionMpaLine, type FusionMpaDetail, type FusionMpaSchedulePeriod,
 } from '../../services/multiperiod.service';
 import {
   createAccounting, fetchLedgerByBusinessUnit, getAccounting,
@@ -100,6 +100,12 @@ const ManageMultiperiod: React.FC = () => {
   const [fusionLoading,     setFusionLoading]     = useState(false);
   const [fusionErr,         setFusionErr]         = useState<string | null>(null);
   const [fusionSearched,    setFusionSearched]    = useState(false);
+
+  // ── Fusion detail drawer ──────────────────────────────────────────────────
+  const [drawerOpen,        setDrawerOpen]        = useState(false);
+  const [drawerData,        setDrawerData]        = useState<FusionMpaDetail | null>(null);
+  const [drawerLoading,     setDrawerLoading]     = useState(false);
+  const [drawerOpenAsOf,    setDrawerOpenAsOf]    = useState<string | undefined>(undefined);
 
   // Load business units
   useEffect(() => {
@@ -375,19 +381,45 @@ const ManageMultiperiod: React.FC = () => {
     setFusionLoading(false);
   }, [fusionForm]);
 
+  const openFusionDetail = useCallback(async (invoiceId: number, openAsOf?: string) => {
+    setDrawerOpen(true);
+    setDrawerLoading(true);
+    setDrawerData(null);
+    setDrawerOpenAsOf(openAsOf);
+    try {
+      const detail = await getFusionMpaDetail(invoiceId, openAsOf);
+      setDrawerData(detail);
+    } catch (e: any) {
+      message.error(`Failed to load detail: ${e?.message}`);
+      setDrawerOpen(false);
+    }
+    setDrawerLoading(false);
+  }, []);
+
+  const refreshDrawer = useCallback(async () => {
+    if (!drawerData) return;
+    setDrawerLoading(true);
+    try {
+      const detail = await getFusionMpaDetail(drawerData.invoiceId, drawerOpenAsOf);
+      setDrawerData(detail);
+    } catch (e: any) {
+      message.error(`Refresh failed: ${e?.message}`);
+    }
+    setDrawerLoading(false);
+  }, [drawerData, drawerOpenAsOf]);
+
   const fusionColumns: ColumnsType<FusionMpaLine> = [
     {
       title: 'Invoice Number', dataIndex: 'invoiceNumber', width: 150, fixed: 'left' as const,
-      render: (v, rec) => (
-        <Button type="link" size="small" style={{ padding: 0 }} onClick={() => openDetail({
-          invoiceId: rec.invoiceId, invoiceNumber: rec.invoiceNumber,
-          supplier: rec.supplier, supplierNumber: rec.supplierNumber,
-          businessUnit: rec.businessUnit, invoiceDate: rec.invoiceDate,
-          currencyCode: rec.invoiceCurrency, totalLines: 0, totalAmount: rec.invoiceAmount,
-          postedAmount: 0, notPostedAmount: 0, minPeriodDate: rec.multiperiodStartDate,
-          maxPeriodDate: rec.multiperiodEndDate,
-        })}>{v}</Button>
-      ),
+      render: (v, rec) => {
+        const openAsOf = fusionForm.getFieldValue('openAsOf')?.format?.('YYYY-MM-DD');
+        return (
+          <Button type="link" size="small" style={{ padding: 0 }}
+            onClick={() => openFusionDetail(rec.invoiceId, openAsOf)}>
+            {v}
+          </Button>
+        );
+      },
     },
     {
       title: 'Invoice Date', dataIndex: 'invoiceDate', width: 110,
@@ -429,17 +461,29 @@ const ManageMultiperiod: React.FC = () => {
         : <Tag color="default">Pending</Tag>,
     },
     {
-      title: 'Action', width: 110, fixed: 'right' as const,
-      render: (_, rec) => (
-        <Button
-          size="small"
-          icon={<SyncOutlined />}
-          loading={generating.has(rec.invoiceId)}
-          onClick={() => handleGenerate(rec.invoiceId)}
-        >
-          {rec.scheduleGenerated ? 'Regen' : 'Generate'}
-        </Button>
-      ),
+      title: 'Action', width: 160, fixed: 'right' as const,
+      render: (_, rec) => {
+        const openAsOf = fusionForm.getFieldValue('openAsOf')?.format?.('YYYY-MM-DD');
+        return (
+          <Space size={4}>
+            <Button
+              size="small"
+              icon={<EyeOutlined />}
+              onClick={() => openFusionDetail(rec.invoiceId, openAsOf)}
+            >
+              Detail
+            </Button>
+            <Button
+              size="small"
+              icon={<SyncOutlined />}
+              loading={generating.has(rec.invoiceId)}
+              onClick={() => handleGenerate(rec.invoiceId)}
+            >
+              {rec.scheduleGenerated ? 'Regen' : 'Gen'}
+            </Button>
+          </Space>
+        );
+      },
     },
   ];
 
@@ -760,42 +804,46 @@ const ManageMultiperiod: React.FC = () => {
 
           {fusionErr && <Alert type="error" showIcon message={fusionErr} style={{ marginBottom: 12 }} />}
 
-          {fusionSearched && !fusionLoading && fusionRows.length > 0 && (
-            <Row gutter={12} style={{ marginBottom: 12 }}>
-              <Col span={6}>
-                <Card size="small">
-                  <Statistic title="Lines Found" value={fusionRows.length} valueStyle={{ fontSize: 14 }} />
-                </Card>
-              </Col>
-              <Col span={6}>
-                <Card size="small">
-                  <Statistic
-                    title="Invoices"
-                    value={new Set(fusionRows.map(r => r.invoiceId)).size}
-                    valueStyle={{ fontSize: 14 }}
-                  />
-                </Card>
-              </Col>
-              <Col span={6}>
-                <Card size="small">
-                  <Statistic
-                    title="Schedules Generated"
-                    value={new Set(fusionRows.filter(r => r.scheduleGenerated).map(r => r.invoiceId)).size}
-                    valueStyle={{ fontSize: 14, color: REDWOOD.success }}
-                  />
-                </Card>
-              </Col>
-              <Col span={6}>
-                <Card size="small">
-                  <Statistic
-                    title="Pending Generation"
-                    value={new Set(fusionRows.filter(r => !r.scheduleGenerated).map(r => r.invoiceId)).size}
-                    valueStyle={{ fontSize: 14, color: REDWOOD.warning }}
-                  />
-                </Card>
-              </Col>
-            </Row>
-          )}
+          {fusionSearched && !fusionLoading && fusionRows.length > 0 && (() => {
+            const totalScheduled  = fusionRows.reduce((s, r) => s + (r.totalScheduled  || 0), 0);
+            const totalPosted     = fusionRows.reduce((s, r) => s + (r.postedAmount    || 0), 0);
+            const totalPending    = fusionRows.reduce((s, r) => s + (r.pendingAmount   || 0), 0);
+            const currency        = fusionRows[0]?.invoiceCurrency || '';
+            return (
+              <Row gutter={12} style={{ marginBottom: 12 }}>
+                <Col span={4}>
+                  <Card size="small">
+                    <Statistic title="Lines" value={fusionRows.length} valueStyle={{ fontSize: 14 }} />
+                  </Card>
+                </Col>
+                <Col span={4}>
+                  <Card size="small">
+                    <Statistic title="Invoices" value={new Set(fusionRows.map(r => r.invoiceId)).size} valueStyle={{ fontSize: 14 }} />
+                  </Card>
+                </Col>
+                <Col span={4}>
+                  <Card size="small">
+                    <Statistic title="Schedules" value={new Set(fusionRows.filter(r => r.scheduleGenerated).map(r => r.invoiceId)).size} valueStyle={{ fontSize: 14, color: REDWOOD.success }} suffix="generated" />
+                  </Card>
+                </Col>
+                <Col span={4}>
+                  <Card size="small">
+                    <Statistic title="Total Scheduled" value={totalScheduled} precision={2} prefix={currency} valueStyle={{ fontSize: 13 }} />
+                  </Card>
+                </Col>
+                <Col span={4}>
+                  <Card size="small">
+                    <Statistic title="Posted" value={totalPosted} precision={2} prefix={currency} valueStyle={{ fontSize: 13, color: REDWOOD.success }} />
+                  </Card>
+                </Col>
+                <Col span={4}>
+                  <Card size="small">
+                    <Statistic title="Pending" value={totalPending} precision={2} prefix={currency} valueStyle={{ fontSize: 13, color: REDWOOD.warning }} />
+                  </Card>
+                </Col>
+              </Row>
+            );
+          })()}
 
           <Table
             dataSource={fusionRows}
@@ -863,6 +911,227 @@ const ManageMultiperiod: React.FC = () => {
             items={tabItems}
           />
         </Card>
+
+        {/* ── Fusion Detail Drawer ─────────────────────────────────────── */}
+        <Drawer
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          width={900}
+          title={
+            drawerData
+              ? <Space>
+                  <FileTextOutlined style={{ color: REDWOOD.primary }} />
+                  <span style={{ color: REDWOOD.primary, fontWeight: 600 }}>
+                    {drawerData.invoiceNumber}
+                  </span>
+                  <Tag color="default">{drawerData.businessUnit}</Tag>
+                  {drawerData.openAsOf && (
+                    <Tag color="blue" icon={<CalendarOutlined />}>Open as of {fmtDate(drawerData.openAsOf)}</Tag>
+                  )}
+                </Space>
+              : 'Invoice Detail'
+          }
+          extra={
+            <Space>
+              <Button
+                size="small"
+                icon={<ReloadOutlined />}
+                loading={drawerLoading}
+                onClick={refreshDrawer}
+              >
+                Refresh
+              </Button>
+              {drawerData && (
+                <Button
+                  size="small"
+                  icon={<SyncOutlined />}
+                  loading={generating.has(drawerData.invoiceId)}
+                  onClick={async () => {
+                    if (!drawerData) return;
+                    await handleGenerate(drawerData.invoiceId);
+                    await refreshDrawer();
+                  }}
+                >
+                  {(drawerData.lines || []).some(l => l.scheduleGenerated) ? 'Regenerate All' : 'Generate Schedule'}
+                </Button>
+              )}
+            </Space>
+          }
+        >
+          {drawerLoading && !drawerData && (
+            <div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" /></div>
+          )}
+          {drawerData && (() => {
+            const d = drawerData;
+            const currency = d.currencyCode || '';
+            const totalScheduled = (d.lines || []).reduce((s, l) => s + (l.totalScheduled || 0), 0);
+            const totalPosted    = (d.lines || []).reduce((s, l) => s + (l.postedAmount   || 0), 0);
+            const totalPending   = (d.lines || []).reduce((s, l) => s + (l.pendingAmount  || 0), 0);
+            const totalPendingFD = (d.lines || []).reduce((s, l) => s + (l.pendingFromDate|| 0), 0);
+
+            const periodCols: ColumnsType<FusionMpaSchedulePeriod> = [
+              {
+                title: 'Period', dataIndex: 'periodName', width: 95,
+                render: v => <Text strong style={{ fontSize: 12 }}>{v}</Text>,
+              },
+              {
+                title: 'Date', dataIndex: 'periodDate', width: 100,
+                render: v => <Text style={{ fontSize: 12 }}>{fmtDate(v)}</Text>,
+              },
+              {
+                title: 'Amount', dataIndex: 'periodAmount', width: 120, align: 'right' as const,
+                render: v => <Text strong style={{ fontSize: 12 }}>{fmtAmt(v, currency)}</Text>,
+              },
+              {
+                title: 'Status', dataIndex: 'postingStatus', width: 110,
+                render: v => statusTag(v),
+              },
+              {
+                title: 'Posted By', dataIndex: 'postedBy', width: 120, ellipsis: true,
+                render: v => <Text type="secondary" style={{ fontSize: 11 }}>{v || '—'}</Text>,
+              },
+              {
+                title: 'Posted Date', dataIndex: 'postedDate', width: 105,
+                render: v => <Text type="secondary" style={{ fontSize: 11 }}>{fmtDate(v)}</Text>,
+              },
+              {
+                title: 'Accrual A/C', dataIndex: 'accrualAccount', ellipsis: true,
+                render: v => <Text code style={{ fontSize: 10 }}>{v || '—'}</Text>,
+              },
+            ];
+
+            const collapseItems = (d.lines || []).map(ln => ({
+              key: String(ln.lineNumber),
+              label: (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <Tag color="blue">Line {ln.lineNumber}</Tag>
+                  <Text style={{ fontSize: 12 }}>{ln.lineDescription || '—'}</Text>
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    {fmtDate(ln.mpaStartDate)} → {fmtDate(ln.mpaEndDate)}
+                  </Text>
+                  <span style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                    {ln.scheduleGenerated
+                      ? <Tag color="success" icon={<CheckCircleOutlined />}>Generated</Tag>
+                      : <Tag color="default">No Schedule</Tag>
+                    }
+                    <Text strong style={{ fontSize: 12 }}>{fmtAmt(ln.lineAmount, currency)}</Text>
+                  </span>
+                </div>
+              ),
+              children: (
+                <div>
+                  <Row gutter={8} style={{ marginBottom: 10 }}>
+                    <Col span={6}>
+                      <Card size="small" bodyStyle={{ padding: '6px 10px' }}>
+                        <Statistic title="Scheduled" value={ln.totalScheduled} precision={2} prefix={currency} valueStyle={{ fontSize: 12 }} />
+                      </Card>
+                    </Col>
+                    <Col span={6}>
+                      <Card size="small" bodyStyle={{ padding: '6px 10px' }}>
+                        <Statistic title="Posted" value={ln.postedAmount} precision={2} prefix={currency} valueStyle={{ fontSize: 12, color: REDWOOD.success }} />
+                      </Card>
+                    </Col>
+                    <Col span={6}>
+                      <Card size="small" bodyStyle={{ padding: '6px 10px' }}>
+                        <Statistic title="Pending" value={ln.pendingAmount} precision={2} prefix={currency} valueStyle={{ fontSize: 12, color: REDWOOD.warning }} />
+                      </Card>
+                    </Col>
+                    <Col span={6}>
+                      <Card size="small" bodyStyle={{ padding: '6px 10px' }}>
+                        <Statistic
+                          title={d.openAsOf ? `Pending ≥ ${fmtDate(d.openAsOf)}` : 'Pending (all)'}
+                          value={ln.pendingFromDate}
+                          precision={2}
+                          prefix={currency}
+                          valueStyle={{ fontSize: 12, color: REDWOOD.warning }}
+                        />
+                      </Card>
+                    </Col>
+                  </Row>
+                  <div style={{ marginBottom: 6 }}>
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      Charge A/C: <Text code style={{ fontSize: 10 }}>{ln.chargeAccount || '—'}</Text>
+                      {'  '}
+                      Accrual A/C: <Text code style={{ fontSize: 10 }}>{ln.accrualAccount || '—'}</Text>
+                    </Text>
+                  </div>
+                  {(ln.periods || []).length === 0 ? (
+                    <Alert type="info" showIcon message="No schedule periods — generate the schedule first." />
+                  ) : (
+                    <Table
+                      dataSource={ln.periods}
+                      columns={periodCols}
+                      rowKey="scheduleId"
+                      size="small"
+                      pagination={false}
+                      scroll={{ x: 700 }}
+                      rowClassName={rec => rec.postingStatus !== 'Posted' ? 'ant-table-row-selected' : ''}
+                    />
+                  )}
+                </div>
+              ),
+            }));
+
+            return (
+              <>
+                {/* Invoice header */}
+                <Descriptions size="small" column={3} bordered style={{ marginBottom: 14 }}>
+                  <Descriptions.Item label="Invoice Number">
+                    <Text strong>{d.invoiceNumber}</Text>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Invoice Date">{fmtDate(d.invoiceDate)}</Descriptions.Item>
+                  <Descriptions.Item label="Invoice Amount">
+                    <Text strong>{fmtAmt(d.invoiceAmount, currency)}</Text>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Supplier">{d.supplier}</Descriptions.Item>
+                  <Descriptions.Item label="Supplier No.">{d.supplierNumber}</Descriptions.Item>
+                  <Descriptions.Item label="Business Unit">{d.businessUnit}</Descriptions.Item>
+                </Descriptions>
+
+                {/* Summary */}
+                <Row gutter={8} style={{ marginBottom: 14 }}>
+                  <Col span={6}>
+                    <Card size="small">
+                      <Statistic title="Total Scheduled" value={totalScheduled} precision={2} prefix={currency} valueStyle={{ fontSize: 13 }} />
+                    </Card>
+                  </Col>
+                  <Col span={6}>
+                    <Card size="small">
+                      <Statistic title="Posted / Expensed" value={totalPosted} precision={2} prefix={currency} valueStyle={{ fontSize: 13, color: REDWOOD.success }} />
+                    </Card>
+                  </Col>
+                  <Col span={6}>
+                    <Card size="small">
+                      <Statistic title="Pending (Total)" value={totalPending} precision={2} prefix={currency} valueStyle={{ fontSize: 13, color: REDWOOD.warning }} />
+                    </Card>
+                  </Col>
+                  <Col span={6}>
+                    <Card size="small">
+                      <Statistic
+                        title={d.openAsOf ? `Pending ≥ ${fmtDate(d.openAsOf)}` : 'Pending (all)'}
+                        value={totalPendingFD}
+                        precision={2}
+                        prefix={currency}
+                        valueStyle={{ fontSize: 13, color: REDWOOD.warning }}
+                      />
+                    </Card>
+                  </Col>
+                </Row>
+
+                {/* Per-line collapse */}
+                {drawerLoading ? (
+                  <div style={{ textAlign: 'center', padding: 24 }}><Spin /></div>
+                ) : (
+                  <Collapse
+                    defaultActiveKey={(d.lines || []).map(l => String(l.lineNumber))}
+                    items={collapseItems}
+                    size="small"
+                  />
+                )}
+              </>
+            );
+          })()}
+        </Drawer>
 
         {/* Post confirmation modal */}
         <Modal
@@ -1003,6 +1272,7 @@ const ManageMultiperiod: React.FC = () => {
             style={{ marginBottom: lastApiUrl ? 16 : 0 }}
             dataSource={[
               { method: 'GET',  endpoint: `${APEX_DB_CONFIG.baseUrl}/ap/multiperiod/fusion-data`,       purpose: 'Data from Fusion — AP invoice lines with MPA dates' },
+              { method: 'GET',  endpoint: `${APEX_DB_CONFIG.baseUrl}/ap/multiperiod/fusion-detail/:id`, purpose: 'Fusion Detail — per-line schedule with posted/pending totals' },
               { method: 'GET',  endpoint: `${APEX_DB_CONFIG.baseUrl}/ap/multiperiod`,                  purpose: 'Search — list invoices with MPA schedules' },
               { method: 'GET',  endpoint: `${APEX_DB_CONFIG.baseUrl}/ap/multiperiod/:invoice_id`,      purpose: 'Detail — schedule lines for one invoice' },
               { method: 'POST', endpoint: `${APEX_DB_CONFIG.baseUrl}/ap/multiperiod/generate`,         purpose: 'Generate / refresh schedule for an invoice' },
