@@ -41,6 +41,9 @@ const IncomeStatementTemplates= lazy(() => import('./pages/gl/IncomeStatementTem
 const Currencies              = lazy(() => import('./pages/gl/Currencies'));
 const GLManageCategories      = lazy(() => import('./pages/gl/ManageCategories'));
 const JournalReconciliation   = lazy(() => import('./pages/gl/JournalReconciliation'));
+const ARModule                = lazy(() => import('./pages/ar/ARModule'));
+const ARManageInvoices        = lazy(() => import('./pages/ar/ManageInvoices'));
+const ARInvoiceDetail         = lazy(() => import('./pages/ar/InvoiceDetail'));
 const ManageInvoices          = lazy(() => import('./pages/ap/ManageInvoices'));
 const ManageDistCombinations  = lazy(() => import('./pages/ap/ManageDistCombinations'));
 const APReports               = lazy(() => import('./pages/ap/APReports'));
@@ -191,7 +194,9 @@ function App() {
               <Route path="ap/reports" element={<APReports />} />
               <Route path="ap/distribution-combinations" element={<ManageDistCombinations />} />
               <Route path="ap/*" element={<APModule />} />
-              <Route path="ar/*" element={<ComingSoon moduleName="Accounts Receivable" />} />
+              <Route path="ar/manage-invoices" element={<ARManageInvoices />} />
+              <Route path="ar/invoices/:id" element={<ARInvoiceDetail />} />
+              <Route path="ar/*" element={<ARModule />} />
               <Route path="inventory/*" element={<ComingSoon moduleName="Inventory" />} />
               <Route path="procurement/suppliers" element={<ManageSuppliers />} />
               <Route path="ap/suppliers" element={<ManageSuppliers />} />

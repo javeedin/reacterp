@@ -58,6 +58,12 @@ export const ALL_MENU_ITEMS: MenuSearchItem[] = [
   { key: 'ap-ext-transactions',   label: 'External Transactions (AP)',   module: 'AP',   moduleLabel: 'Accounts Payable',        path: '/ap/external-transactions',       description: 'External bank transactions for AP' },
   { key: 'ap-suppliers',          label: 'Suppliers',                   module: 'AP',   moduleLabel: 'Accounts Payable',        path: '/ap/suppliers',                   description: 'Manage supplier master data', keywords: 'vendor supplier party' },
 
+  // ── Accounts Receivable ─────────────────────────────────────────────────────
+  { key: 'ar',                    label: 'Accounts Receivable',         module: 'AR',   moduleLabel: 'Accounts Receivable',     path: '/ar',                             description: 'AR module home' },
+  { key: 'ar-manage-invoices',    label: 'Manage Invoices',             module: 'AR',   moduleLabel: 'Accounts Receivable',     path: '/ar/manage-invoices',             description: 'Search and manage AR transactions', keywords: 'invoice receivable customer bill transaction' },
+  { key: 'ar-manage-customers',   label: 'Manage Customers',            module: 'AR',   moduleLabel: 'Accounts Receivable',     path: '/ar/manage-customers',            description: 'View and manage customer accounts', keywords: 'customer account party receivable' },
+  { key: 'ar-manage-receipts',    label: 'Manage Receipts',             module: 'AR',   moduleLabel: 'Accounts Receivable',     path: '/ar/manage-receipts',             description: 'Search and manage cash receipts', keywords: 'receipt cash collection payment receivable' },
+
   // ── Cash Management ─────────────────────────────────────────────────────────
   { key: 'cash',                  label: 'Cash Management',             module: 'CASH', moduleLabel: 'Cash Management',         path: '/cash',                           description: 'Cash module home' },
   { key: 'cash-bank-transfers',   label: 'Bank Transfers',              module: 'CASH', moduleLabel: 'Cash Management',         path: '/cash/bank-transfers',            description: 'Manage cash bank transfers', keywords: 'transfer wire bank' },
