@@ -23,7 +23,6 @@ export type LogCallback = (type: 'info' | 'success' | 'error' | 'warning' | 'ste
 export type ARProgressCallback = (progress: Partial<ARSyncProgress>) => void;
 
 const APEX_AR_INVOICES_ENDPOINT = 'ar/invoices/bulk';
-const APEX_AR_LINES_ENDPOINT    = 'ar/invoices/lines/bulk';
 
 // ─── Oracle Fetch ─────────────────────────────────────────────────────────────
 
@@ -120,17 +119,19 @@ const insertARLinesToApex = async (
   log?: LogCallback,
 ): Promise<{ success: boolean; successCount: number; error?: string }> => {
   try {
+    // Use the correct per-invoice lines endpoint: ar/invoices/:id/lines
+    const linesEndpoint = `ar/invoices/${customerTransactionId}/lines`;
     const payload = { items: lines.map(line => {
       const { links, ...rest } = line as any;
-      return { CustomerTransactionId: customerTransactionId, ...rest };
+      return rest;
     }) };
 
     log?.('step', `──── [POST] APEX AR Lines for Txn ${customerTransactionId} (${lines.length} lines) ────`);
-    log?.('info', `  URL: ${APEX_DB_CONFIG.baseUrl}/${APEX_AR_LINES_ENDPOINT}`);
+    log?.('info', `  URL: ${APEX_DB_CONFIG.baseUrl}/${linesEndpoint}`);
     log?.('step', '──── POST PAYLOAD (Invoice Lines) ────');
     log?.('info', JSON.stringify(payload, null, 2));
 
-    const data = await insertToApex(APEX_AR_LINES_ENDPOINT, payload, log, true);
+    const data = await insertToApex(linesEndpoint, payload, log, true);
 
     log?.('step', '──── POST RESPONSE (Invoice Lines) ────');
     log?.('success', JSON.stringify(data, null, 2));
