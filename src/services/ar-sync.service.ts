@@ -53,23 +53,19 @@ const fetchARInvoicesFromOracle = async (
 const fetchARInvoiceLinesFromOracle = async (
   customerTransactionId: number,
   log?: LogCallback,
-  verbose = true
 ): Promise<{ success: boolean; items: any[]; error?: string }> => {
   try {
     const url = `${ORACLE_FUSION_CONFIG.baseUrl}/receivablesInvoices/${customerTransactionId}/child/receivablesInvoiceLines`;
 
-    if (verbose) {
-      log?.('step', `──── [GET] Oracle Fusion AR Invoice Lines (Txn: ${customerTransactionId}) ────`);
-      log?.('info', `  URL: ${url}`);
-    }
+    log?.('step', `──── [GET] Oracle Fusion AR Invoice Lines (Txn: ${customerTransactionId}) ────`);
+    log?.('info', `  URL: ${url}`);
 
-    const items = await fetchAllFromOracleUrl(url, log, verbose, 500);
+    const items = await fetchAllFromOracleUrl(url, log, true, 500);
 
-    if (verbose) {
-      log?.('success', `  Fetched ${items.length} lines for Transaction ${customerTransactionId}`);
-      log?.('step', '──── GET RESPONSE (Invoice Lines) ────');
-      log?.('info', JSON.stringify({ count: items.length, items }, null, 2));
-    }
+    log?.('success', `  Fetched ${items.length} lines for Transaction ${customerTransactionId}`);
+    log?.('step', '──── GET RESPONSE (Invoice Lines) ────');
+    log?.('info', JSON.stringify({ count: items.length, items }, null, 2));
+
     return { success: true, items };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -120,7 +116,6 @@ const insertARLinesToApex = async (
   lines: any[],
   customerTransactionId: number,
   log?: LogCallback,
-  verbose = true
 ): Promise<{ success: boolean; successCount: number; error?: string }> => {
   try {
     const payload = { items: lines.map(line => {
@@ -128,19 +123,15 @@ const insertARLinesToApex = async (
       return { CustomerTransactionId: customerTransactionId, ...rest };
     }) };
 
-    if (verbose) {
-      log?.('step', `──── [POST] APEX AR Lines for Txn ${customerTransactionId} (${lines.length} lines) ────`);
-      log?.('info', `  URL: ${APEX_AR_LINES_ENDPOINT}`);
-      log?.('step', '──── POST PAYLOAD (Invoice Lines) ────');
-      log?.('info', JSON.stringify(payload, null, 2));
-    }
+    log?.('step', `──── [POST] APEX AR Lines for Txn ${customerTransactionId} (${lines.length} lines) ────`);
+    log?.('info', `  URL: ${APEX_DB_CONFIG.baseUrl}/${APEX_AR_LINES_ENDPOINT}`);
+    log?.('step', '──── POST PAYLOAD (Invoice Lines) ────');
+    log?.('info', JSON.stringify(payload, null, 2));
 
-    const data = await insertToApex(APEX_AR_LINES_ENDPOINT, payload, log, verbose);
+    const data = await insertToApex(APEX_AR_LINES_ENDPOINT, payload, log, true);
 
-    if (verbose) {
-      log?.('step', '──── POST RESPONSE (Invoice Lines) ────');
-      log?.('success', JSON.stringify(data, null, 2));
-    }
+    log?.('step', '──── POST RESPONSE (Invoice Lines) ────');
+    log?.('success', JSON.stringify(data, null, 2));
 
     const isSuccess = data.status === 'SUCCESS';
     return {
@@ -358,11 +349,15 @@ export const syncARInvoices = async (
         continue;
       }
 
-      const linesResult = await fetchARInvoiceLinesFromOracle(txnId, log, verbose);
+      const linesResult = await fetchARInvoiceLinesFromOracle(txnId, log);
 
-      if (!linesResult.success || linesResult.items.length === 0) {
-        if (verbose && linesResult.success) log?.('info', `  No lines for ${txnNumber}`);
-        if (!linesResult.success) log?.('error', `  Failed to fetch lines for ${txnNumber}: ${linesResult.error}`);
+      if (!linesResult.success) {
+        log?.('error', `  ✗ Failed to fetch lines for ${txnNumber}: ${linesResult.error}`);
+        continue;
+      }
+
+      if (linesResult.items.length === 0) {
+        log?.('info', `  No lines found for ${txnNumber} — skipping POST`);
         continue;
       }
 
@@ -373,7 +368,7 @@ export const syncARInvoices = async (
       const lineBatchSize = 100;
       for (let j = 0; j < linesResult.items.length; j += lineBatchSize) {
         const lineBatch = linesResult.items.slice(j, j + lineBatchSize);
-        const lineInsertResult = await insertARLinesToApex(lineBatch, txnId, log, verbose);
+        const lineInsertResult = await insertARLinesToApex(lineBatch, txnId, log);
 
         if (lineInsertResult.success) {
           processedLines += lineInsertResult.successCount;
