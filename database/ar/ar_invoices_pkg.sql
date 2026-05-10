@@ -387,11 +387,14 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
         p_updated       OUT NUMBER,
         p_errors        OUT NUMBER
     ) IS
-        l_root    JSON_OBJECT_T;
-        l_items   JSON_ARRAY_T;
-        l_item    JSON_OBJECT_T;
-        l_lines   JSON_ARRAY_T;
-        l_err_msg VARCHAR2(4000);
+        l_root        JSON_OBJECT_T;
+        l_items       JSON_ARRAY_T;
+        l_item        JSON_OBJECT_T;
+        l_lines       JSON_ARRAY_T;
+        l_err_msg     VARCHAR2(4000);
+        l_last_err    VARCHAR2(4000);
+        l_txn_id      NUMBER;
+        l_error_log   VARCHAR2(32767) := '';
     BEGIN
         p_inserted := 0;
         p_updated  := 0;
@@ -402,24 +405,30 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
 
         FOR i IN 0 .. l_items.get_size - 1 LOOP
             BEGIN
-                l_item := TREAT(l_items.get(i) AS JSON_OBJECT_T);
+                l_item   := TREAT(l_items.get(i) AS JSON_OBJECT_T);
+                l_txn_id := l_item.get_number('CustomerTransactionId');
                 upsert_header(l_item);
 
                 IF l_item.has('lines') THEN
                     l_lines := l_item.get_array('lines');
-                    upsert_lines(l_item.get_number('CustomerTransactionId'), l_lines);
+                    upsert_lines(l_txn_id, l_lines);
                 END IF;
 
                 p_inserted := p_inserted + 1;
             EXCEPTION
                 WHEN OTHERS THEN
-                    l_err_msg := SQLERRM;
-                    p_errors  := p_errors + 1;
+                    l_err_msg  := SQLERRM;
+                    l_last_err := 'TxnId=' || NVL(TO_CHAR(l_txn_id), '?') || ': ' || l_err_msg;
+                    p_errors   := p_errors + 1;
+                    -- Append to error log (first 3 errors)
+                    IF p_errors <= 3 THEN
+                        l_error_log := l_error_log || ' | [' || p_errors || '] ' || l_last_err;
+                    END IF;
                     BEGIN
                         UPDATE RR_AR_INVOICE_HEADERS
                            SET SYNC_STATUS   = 'ERROR',
                                ERROR_MESSAGE = l_err_msg
-                         WHERE CUSTOMER_TRANSACTION_ID = l_item.get_number('CustomerTransactionId');
+                         WHERE CUSTOMER_TRANSACTION_ID = l_txn_id;
                     EXCEPTION WHEN OTHERS THEN NULL;
                     END;
             END;
@@ -427,7 +436,8 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
 
         COMMIT;
         p_status  := 'SUCCESS';
-        p_message := 'Bulk complete. Saved: ' || p_inserted || ', Errors: ' || p_errors;
+        p_message := 'Bulk complete. Saved: ' || p_inserted || ', Errors: ' || p_errors
+                     || CASE WHEN l_error_log IS NOT NULL THEN ' -- ERRORS:' || l_error_log ELSE '' END;
     EXCEPTION
         WHEN OTHERS THEN
             ROLLBACK;
