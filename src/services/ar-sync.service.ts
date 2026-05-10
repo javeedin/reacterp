@@ -226,7 +226,7 @@ export const syncARInvoices = async (
     log?.('info', `  │   Lines:    ${ORACLE_FUSION_CONFIG.baseUrl}/receivablesInvoices/{id}/child/receivablesInvoiceLines`);
     log?.('info', '  │ APEX POST (Target):');
     log?.('info', `  │   Invoices: ${APEX_DB_CONFIG.baseUrl}/${APEX_AR_INVOICES_ENDPOINT}`);
-    log?.('info', `  │   Lines:    ${APEX_DB_CONFIG.baseUrl}/${APEX_AR_LINES_ENDPOINT}`);
+    log?.('info', `  │   Lines:    ${APEX_DB_CONFIG.baseUrl}/ar/invoices/:id/lines`);
     log?.('step', '═══════════════════════════════════════════════════════════');
 
     // ── STEP 1: Fetch AR Invoices ──────────────────────────────────────────────
