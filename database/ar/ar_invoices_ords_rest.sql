@@ -65,12 +65,9 @@ END;
 /
 
 -- =====================================================
--- 4. GET /ar/invoices  — list headers with filters
--- Supported query params:
---   business_unit, transaction_source, transaction_class,
---   transaction_type, transaction_number (starts-with),
---   bill_to_customer (name or number, case-insensitive),
---   cross_reference, date_from (YYYY-MM-DD), date_to (YYYY-MM-DD)
+-- 4. GET /ar/invoices  — list headers with optional filters
+-- Each bind variable referenced EXACTLY ONCE via CTE
+-- (multiple refs cause empty results in some ORDS versions)
 -- =====================================================
 BEGIN
     ORDS.DEFINE_HANDLER(
@@ -81,6 +78,18 @@ BEGIN
         p_items_per_page => 200,
         p_comments       => 'List AR invoice headers with optional filters',
         p_source         => '
+WITH fp AS (
+    SELECT :business_unit      AS bu,
+           :transaction_source AS src,
+           :transaction_class  AS cls,
+           :transaction_type   AS typ,
+           :transaction_number AS num,
+           :bill_to_customer   AS cust,
+           :cross_reference    AS ref,
+           :date_from          AS dfrom,
+           :date_to            AS dto
+    FROM DUAL
+)
 SELECT
     h.CUSTOMER_TRANSACTION_ID,
     h.TRANSACTION_NUMBER,
@@ -104,25 +113,17 @@ SELECT
     h.SYNC_STATUS,
     h.SYNC_DATE
 FROM RR_AR_INVOICE_HEADERS h
-WHERE (NULLIF(:business_unit, '''') IS NULL
-       OR UPPER(h.BUSINESS_UNIT) LIKE ''%'' || UPPER(:business_unit) || ''%'')
-  AND (NULLIF(:transaction_source, '''') IS NULL
-       OR UPPER(h.TRANSACTION_SOURCE) LIKE ''%'' || UPPER(:transaction_source) || ''%'')
-  AND (NULLIF(:transaction_class, '''') IS NULL
-       OR UPPER(h.TRANSACTION_CLASS) = UPPER(:transaction_class))
-  AND (NULLIF(:transaction_type, '''') IS NULL
-       OR UPPER(h.TRANSACTION_TYPE) LIKE ''%'' || UPPER(:transaction_type) || ''%'')
-  AND (NULLIF(:transaction_number, '''') IS NULL
-       OR UPPER(h.TRANSACTION_NUMBER) LIKE UPPER(:transaction_number) || ''%'')
-  AND (NULLIF(:bill_to_customer, '''') IS NULL
-       OR UPPER(h.BILL_TO_CUSTOMER_NAME) LIKE ''%'' || UPPER(:bill_to_customer) || ''%''
-       OR UPPER(h.BILL_TO_CUSTOMER_NUMBER) LIKE ''%'' || UPPER(:bill_to_customer) || ''%'')
-  AND (NULLIF(:cross_reference, '''') IS NULL
-       OR UPPER(h.CROSS_REFERENCE) LIKE ''%'' || UPPER(:cross_reference) || ''%'')
-  AND (NULLIF(:date_from, '''') IS NULL
-       OR h.TRANSACTION_DATE >= TO_DATE(SUBSTR(:date_from, 1, 10), ''YYYY-MM-DD''))
-  AND (NULLIF(:date_to, '''') IS NULL
-       OR h.TRANSACTION_DATE <= TO_DATE(SUBSTR(:date_to, 1, 10), ''YYYY-MM-DD''))
+CROSS JOIN fp
+WHERE (fp.bu    IS NULL OR fp.bu    = '''' OR UPPER(h.BUSINESS_UNIT)       LIKE ''%'' || UPPER(fp.bu)   || ''%'')
+  AND (fp.src   IS NULL OR fp.src   = '''' OR UPPER(h.TRANSACTION_SOURCE)  LIKE ''%'' || UPPER(fp.src)  || ''%'')
+  AND (fp.cls   IS NULL OR fp.cls   = '''' OR UPPER(h.TRANSACTION_CLASS)   =            UPPER(fp.cls))
+  AND (fp.typ   IS NULL OR fp.typ   = '''' OR UPPER(h.TRANSACTION_TYPE)    LIKE ''%'' || UPPER(fp.typ)  || ''%'')
+  AND (fp.num   IS NULL OR fp.num   = '''' OR UPPER(h.TRANSACTION_NUMBER)  LIKE         UPPER(fp.num)   || ''%'')
+  AND (fp.cust  IS NULL OR fp.cust  = '''' OR UPPER(h.BILL_TO_CUSTOMER_NAME)   LIKE ''%'' || UPPER(fp.cust) || ''%''
+                                           OR UPPER(h.BILL_TO_CUSTOMER_NUMBER) LIKE ''%'' || UPPER(fp.cust) || ''%'')
+  AND (fp.ref   IS NULL OR fp.ref   = '''' OR UPPER(h.CROSS_REFERENCE)     LIKE ''%'' || UPPER(fp.ref)  || ''%'')
+  AND (fp.dfrom IS NULL OR fp.dfrom = '''' OR h.TRANSACTION_DATE >= TO_DATE(SUBSTR(fp.dfrom, 1, 10), ''YYYY-MM-DD''))
+  AND (fp.dto   IS NULL OR fp.dto   = '''' OR h.TRANSACTION_DATE <= TO_DATE(SUBSTR(fp.dto,   1, 10), ''YYYY-MM-DD''))
 ORDER BY h.TRANSACTION_DATE DESC, h.TRANSACTION_NUMBER DESC'
     );
     COMMIT;
