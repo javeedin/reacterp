@@ -1,15 +1,14 @@
 import React, { useState, useCallback } from 'react';
 import {
   Layout, Card, Form, Select, Input, Button, Space, Typography, Table, Tag,
-  Row, Col, Breadcrumb, Tooltip, DatePicker, Collapse, message, Modal,
+  Row, Col, Breadcrumb, Tooltip, DatePicker, Collapse, message, Modal, Spin,
 } from 'antd';
 import {
   HomeOutlined, SearchOutlined, ReloadOutlined, FileTextOutlined,
-  CheckCircleOutlined, CloseCircleOutlined, ApiOutlined, CopyOutlined,
-  CheckOutlined, DatabaseOutlined,
+  ApiOutlined, CopyOutlined, CheckOutlined, DatabaseOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
-import type { ColumnsType } from 'antd/es/table';
+import type { ColumnsType, ExpandableConfig } from 'antd/es/table';
 import dayjs from 'dayjs';
 import FloatingMenu from '../../components/FloatingMenu';
 import Autopilot from '../../components/Autopilot';
@@ -54,6 +53,16 @@ interface ARInvoiceRecord {
   crossReference: string;
 }
 
+interface ARLineRecord {
+  key: string;
+  lineNumber: number;
+  description: string;
+  quantity: number;
+  unitSellingPrice: number;
+  lineAmount: number;
+  taxClassificationCode: string;
+}
+
 const APEX_AR_INVOICES_URL = `${APEX_DB_CONFIG.baseUrl}/ar/invoices`;
 
 const ManageInvoices: React.FC = () => {
@@ -63,6 +72,9 @@ const ManageInvoices: React.FC = () => {
   const [invoices, setInvoices] = useState<ARInvoiceRecord[]>([]);
   const [searched, setSearched] = useState(false);
   const [searchCollapsed, setSearchCollapsed] = useState(false);
+
+  // Expanded lines state: { [customerTransactionId]: { loading, lines } }
+  const [expandedLines, setExpandedLines] = useState<Record<number, { loading: boolean; lines: ARLineRecord[] }>>({});
 
   // API modal state
   const [apiModalVisible, setApiModalVisible] = useState(false);
@@ -77,21 +89,21 @@ const ManageInvoices: React.FC = () => {
       method: 'GET',
       url: APEX_AR_INVOICES_URL,
       params: 'business_unit={bu}&transaction_source={src}&transaction_class={class}&transaction_type={type}&transaction_number={num}&bill_to_customer={customer}&cross_reference={ref}&date_from={YYYY-MM-DD}&date_to={YYYY-MM-DD}&limit=200',
-      description: 'Returns AR invoice headers matching the search criteria. Used when the Search button is clicked.',
+      description: 'Returns AR invoice headers matching the search criteria.',
     },
     {
       name: 'Get Invoice Detail',
       method: 'GET',
       url: `${APEX_AR_INVOICES_URL}/{customerTransactionId}`,
       params: '',
-      description: 'Fetches a single AR invoice header by its Customer Transaction ID. Called when opening the detail page.',
+      description: 'Fetches a single AR invoice header by its Customer Transaction ID.',
     },
     {
       name: 'Get Invoice Lines',
       method: 'GET',
       url: `${APEX_AR_INVOICES_URL}/{customerTransactionId}/lines`,
       params: '',
-      description: 'Returns all invoice line items for a given transaction. Called alongside the header on the detail page.',
+      description: 'Returns all invoice line items for a given transaction.',
     },
   ];
 
@@ -115,11 +127,33 @@ const ManageInvoices: React.FC = () => {
     }
   };
 
+  const fetchLines = async (txnId: number) => {
+    if (expandedLines[txnId]) return; // already loaded
+    setExpandedLines(prev => ({ ...prev, [txnId]: { loading: true, lines: [] } }));
+    try {
+      const resp = await fetch(`${APEX_AR_INVOICES_URL}/${txnId}/lines`);
+      const data = await resp.json();
+      const lines: ARLineRecord[] = (data.items || []).map((l: any, i: number) => ({
+        key: String(l.customer_transaction_line_id ?? l.CUSTOMER_TRANSACTION_LINE_ID ?? i),
+        lineNumber:            l.line_number            ?? l.LINE_NUMBER,
+        description:           l.description            ?? l.DESCRIPTION,
+        quantity:              l.quantity               ?? l.QUANTITY,
+        unitSellingPrice:      l.unit_selling_price     ?? l.UNIT_SELLING_PRICE,
+        lineAmount:            l.line_amount            ?? l.LINE_AMOUNT,
+        taxClassificationCode: l.tax_classification_code ?? l.TAX_CLASSIFICATION_CODE,
+      }));
+      setExpandedLines(prev => ({ ...prev, [txnId]: { loading: false, lines } }));
+    } catch {
+      setExpandedLines(prev => ({ ...prev, [txnId]: { loading: false, lines: [] } }));
+    }
+  };
+
   const handleSearch = useCallback(async () => {
     try {
       const values = form.getFieldsValue();
       setLoading(true);
       setSearched(true);
+      setExpandedLines({});
 
       const params = new URLSearchParams();
       if (values.businessUnit)       params.append('business_unit',      values.businessUnit);
@@ -144,23 +178,23 @@ const ManageInvoices: React.FC = () => {
       setLastApiStatus('success');
       const data = await resp.json();
       const rows: ARInvoiceRecord[] = (data.items || []).map((r: any) => ({
-        key:                    String(r.CUSTOMER_TRANSACTION_ID),
-        customerTransactionId:  r.CUSTOMER_TRANSACTION_ID,
-        transactionNumber:      r.TRANSACTION_NUMBER,
-        transactionSource:      r.TRANSACTION_SOURCE,
-        transactionClass:       r.TRANSACTION_CLASS || 'Invoice',
-        transactionType:        r.TRANSACTION_TYPE,
-        invoiceStatus:          r.INVOICE_STATUS,
-        billToCustomerName:     r.BILL_TO_CUSTOMER_NAME,
-        billToCustomerNumber:   r.BILL_TO_CUSTOMER_NUMBER,
-        enteredAmount:          r.ENTERED_AMOUNT,
-        invoiceCurrencyCode:    r.INVOICE_CURRENCY_CODE,
-        transactionDate:        r.TRANSACTION_DATE,
-        accountingDate:         r.ACCOUNTING_DATE,
-        businessUnit:           r.BUSINESS_UNIT,
-        documentNumber:         r.DOCUMENT_NUMBER,
-        purchaseOrder:          r.PURCHASE_ORDER,
-        crossReference:         r.CROSS_REFERENCE,
+        key:                    String(r.customer_transaction_id ?? r.CUSTOMER_TRANSACTION_ID),
+        customerTransactionId:  r.customer_transaction_id  ?? r.CUSTOMER_TRANSACTION_ID,
+        transactionNumber:      r.transaction_number       ?? r.TRANSACTION_NUMBER,
+        transactionSource:      r.transaction_source       ?? r.TRANSACTION_SOURCE,
+        transactionClass:       r.transaction_class        ?? r.TRANSACTION_CLASS ?? '',
+        transactionType:        r.transaction_type         ?? r.TRANSACTION_TYPE,
+        invoiceStatus:          r.invoice_status           ?? r.INVOICE_STATUS,
+        billToCustomerName:     r.bill_to_customer_name    ?? r.BILL_TO_CUSTOMER_NAME,
+        billToCustomerNumber:   r.bill_to_customer_number  ?? r.BILL_TO_CUSTOMER_NUMBER,
+        enteredAmount:          r.entered_amount           ?? r.ENTERED_AMOUNT,
+        invoiceCurrencyCode:    r.invoice_currency_code    ?? r.INVOICE_CURRENCY_CODE,
+        transactionDate:        r.transaction_date         ?? r.TRANSACTION_DATE,
+        accountingDate:         r.accounting_date          ?? r.ACCOUNTING_DATE,
+        businessUnit:           r.business_unit            ?? r.BUSINESS_UNIT,
+        documentNumber:         r.document_number          ?? r.DOCUMENT_NUMBER,
+        purchaseOrder:          r.purchase_order           ?? r.PURCHASE_ORDER,
+        crossReference:         r.cross_reference          ?? r.CROSS_REFERENCE,
       }));
       setInvoices(rows);
       if (rows.length === 0) message.info('No invoices found for the given criteria');
@@ -177,7 +211,26 @@ const ManageInvoices: React.FC = () => {
     setSearched(false);
     setLastCalledUrl(null);
     setLastApiStatus(null);
+    setExpandedLines({});
   };
+
+  const lineColumns: ColumnsType<ARLineRecord> = [
+    { title: 'Line', dataIndex: 'lineNumber', key: 'lineNumber', width: 60, align: 'center' },
+    { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+    {
+      title: 'Quantity', dataIndex: 'quantity', key: 'quantity', width: 90, align: 'right',
+      render: (v) => v != null ? Number(v).toLocaleString() : '',
+    },
+    {
+      title: 'Unit Price', dataIndex: 'unitSellingPrice', key: 'unitSellingPrice', width: 120, align: 'right',
+      render: (v) => v != null ? Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '',
+    },
+    {
+      title: 'Line Amount', dataIndex: 'lineAmount', key: 'lineAmount', width: 130, align: 'right',
+      render: (v) => v != null ? Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '',
+    },
+    { title: 'Tax Code', dataIndex: 'taxClassificationCode', key: 'taxClassificationCode', width: 130 },
+  ];
 
   const columns: ColumnsType<ARInvoiceRecord> = [
     {
@@ -185,7 +238,7 @@ const ManageInvoices: React.FC = () => {
       dataIndex: 'transactionNumber',
       key: 'transactionNumber',
       fixed: 'left',
-      width: 160,
+      width: 155,
       render: (val, record) => (
         <Button
           type="link"
@@ -200,31 +253,37 @@ const ManageInvoices: React.FC = () => {
       title: 'Transaction Source',
       dataIndex: 'transactionSource',
       key: 'transactionSource',
-      width: 160,
+      width: 155,
+      ellipsis: true,
+      render: (val) => <Tooltip title={val}><span>{val}</span></Tooltip>,
     },
     {
       title: 'Transaction Class',
       dataIndex: 'transactionClass',
       key: 'transactionClass',
-      width: 140,
+      width: 130,
     },
     {
       title: 'Transaction Type',
       dataIndex: 'transactionType',
       key: 'transactionType',
-      width: 150,
+      width: 140,
+      ellipsis: true,
+      render: (val) => <Tooltip title={val}><span>{val}</span></Tooltip>,
     },
     {
       title: 'Complete',
       dataIndex: 'invoiceStatus',
       key: 'invoiceStatus',
-      width: 100,
+      width: 90,
       align: 'center',
       render: (val) => {
         const isComplete = val === 'Complete';
-        return isComplete
-          ? <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 16 }} />
-          : <CloseCircleOutlined style={{ color: REDWOOD.neutral600, fontSize: 16 }} />;
+        return (
+          <span style={{ color: isComplete ? REDWOOD.success : REDWOOD.neutral600, fontWeight: 500 }}>
+            {isComplete ? 'Yes' : 'No'}
+          </span>
+        );
       },
     },
     {
@@ -251,16 +310,22 @@ const ManageInvoices: React.FC = () => {
       title: 'Transaction Date',
       dataIndex: 'transactionDate',
       key: 'transactionDate',
-      width: 140,
+      width: 130,
       render: (val) => val ? dayjs(val).format('D-MMM-YYYY') : '',
     },
     {
       title: 'Business Unit',
       dataIndex: 'businessUnit',
       key: 'businessUnit',
-      width: 200,
+      width: 180,
       ellipsis: true,
       render: (val) => <Tooltip title={val}><span>{val}</span></Tooltip>,
+    },
+    {
+      title: 'Original Transaction Number',
+      key: 'originalTransactionNumber',
+      width: 180,
+      render: () => '',
     },
     {
       title: 'Document Number',
@@ -274,21 +339,58 @@ const ManageInvoices: React.FC = () => {
       key: 'purchaseOrder',
       width: 140,
       ellipsis: true,
+      render: (val) => <Tooltip title={val}><span>{val}</span></Tooltip>,
     },
     {
       title: 'Reference',
       dataIndex: 'crossReference',
       key: 'crossReference',
-      width: 160,
+      width: 150,
       ellipsis: true,
       render: (val) => <Tooltip title={val}><span>{val}</span></Tooltip>,
     },
   ];
 
+  const expandable: ExpandableConfig<ARInvoiceRecord> = {
+    onExpand: (expanded, record) => {
+      if (expanded) fetchLines(record.customerTransactionId);
+    },
+    expandedRowRender: (record) => {
+      const state = expandedLines[record.customerTransactionId];
+      if (!state || state.loading) {
+        return (
+          <div style={{ padding: '12px 24px', textAlign: 'center' }}>
+            <Spin size="small" />
+            <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>Loading lines...</Text>
+          </div>
+        );
+      }
+      if (state.lines.length === 0) {
+        return (
+          <div style={{ padding: '12px 24px' }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>No lines found for this transaction.</Text>
+          </div>
+        );
+      }
+      return (
+        <div style={{ padding: '8px 24px 16px' }}>
+          <Table
+            columns={lineColumns}
+            dataSource={state.lines}
+            size="small"
+            pagination={false}
+            style={{ background: '#fff' }}
+            rowClassName={() => ''}
+          />
+        </div>
+      );
+    },
+  };
+
   return (
     <Layout style={{ minHeight: '100vh', background: REDWOOD.neutral100 }}>
       <Content style={{ padding: '0 24px 24px' }}>
-        {/* Breadcrumb + title */}
+        {/* Breadcrumb + actions */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 0' }}>
           <Breadcrumb items={[
             { title: <Link to="/"><HomeOutlined /></Link> },
@@ -337,17 +439,16 @@ const ManageInvoices: React.FC = () => {
             >
               <Form form={form} layout="vertical" style={{ padding: '8px 0 16px' }}>
                 <Row gutter={[24, 0]}>
-                  {/* Left column */}
                   <Col xs={24} md={12}>
                     <Row gutter={[16, 0]}>
                       <Col xs={24} sm={12}>
                         <Form.Item label="Business Unit" name="businessUnit" style={{ marginBottom: 12 }}>
-                          <Input placeholder="Select business unit" allowClear />
+                          <Input placeholder="Business unit" allowClear />
                         </Form.Item>
                       </Col>
                       <Col xs={24} sm={12}>
                         <Form.Item label="Transaction Source" name="transactionSource" style={{ marginBottom: 12 }}>
-                          <Input placeholder="Select transaction source" allowClear />
+                          <Input placeholder="Transaction source" allowClear />
                         </Form.Item>
                       </Col>
                       <Col xs={24} sm={12}>
@@ -367,8 +468,6 @@ const ManageInvoices: React.FC = () => {
                       </Col>
                     </Row>
                   </Col>
-
-                  {/* Right column */}
                   <Col xs={24} md={12}>
                     <Row gutter={[16, 0]}>
                       <Col xs={24} sm={12}>
@@ -394,8 +493,6 @@ const ManageInvoices: React.FC = () => {
                     </Row>
                   </Col>
                 </Row>
-
-                {/* Search buttons */}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
                   <Button onClick={handleReset} icon={<ReloadOutlined />}>Reset</Button>
                   <Button
@@ -419,29 +516,26 @@ const ManageInvoices: React.FC = () => {
             style={{ borderRadius: 8, border: `1px solid ${REDWOOD.border}` }}
             bodyStyle={{ padding: 0 }}
             title={
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Space>
-                  <FileTextOutlined style={{ color: REDWOOD.primary }} />
-                  <Text strong>Search Results</Text>
-                  {invoices.length > 0 && (
-                    <Tag style={{ borderRadius: 10 }}>{invoices.length} records</Tag>
-                  )}
-                </Space>
-              </div>
+              <Space>
+                <FileTextOutlined style={{ color: REDWOOD.primary }} />
+                <Text strong>Search Results</Text>
+                {invoices.length > 0 && <Tag style={{ borderRadius: 10 }}>{invoices.length} records</Tag>}
+              </Space>
             }
           >
             <Table
               columns={columns}
               dataSource={invoices}
               loading={loading}
-              scroll={{ x: 1400 }}
+              expandable={expandable}
+              scroll={{ x: 1700 }}
               size="small"
               pagination={{
                 pageSize: 20,
                 showSizeChanger: true,
                 showTotal: (total) => `${total} invoices`,
               }}
-              rowClassName={(_, idx) => idx % 2 === 0 ? '' : 'ant-table-row-alt'}
+              rowClassName={(_, idx) => idx % 2 === 0 ? '' : 'ar-row-alt'}
               onRow={(record) => ({
                 onDoubleClick: () => navigate(`/ar/invoices/${record.customerTransactionId}`),
               })}
@@ -458,6 +552,11 @@ const ManageInvoices: React.FC = () => {
             </Text>
           </Card>
         )}
+
+        <style>{`
+          .ar-row-alt { background: ${REDWOOD.neutral100}; }
+          .ant-table-expand-icon-col { width: 32px !important; }
+        `}</style>
       </Content>
 
       {/* API Viewer Modal */}
@@ -470,9 +569,7 @@ const ManageInvoices: React.FC = () => {
         }
         open={apiModalVisible}
         onCancel={() => setApiModalVisible(false)}
-        footer={[
-          <Button key="close" onClick={() => setApiModalVisible(false)}>Close</Button>,
-        ]}
+        footer={[<Button key="close" onClick={() => setApiModalVisible(false)}>Close</Button>]}
         width={860}
       >
         <div style={{ marginBottom: 16 }}>
@@ -482,14 +579,10 @@ const ManageInvoices: React.FC = () => {
           </Text>
         </div>
 
-        {/* Last called URL banner */}
         {lastCalledUrl && (
           <Card
             size="small"
-            style={{
-              marginBottom: 16,
-              border: `1px solid ${lastApiStatus === 'error' ? '#ff4d4f' : '#52c41a'}`,
-            }}
+            style={{ marginBottom: 16, border: `1px solid ${lastApiStatus === 'error' ? '#ff4d4f' : '#52c41a'}` }}
             title={
               <Space>
                 <span style={{ color: lastApiStatus === 'error' ? '#ff4d4f' : '#52c41a' }}>●</span>
@@ -502,27 +595,14 @@ const ManageInvoices: React.FC = () => {
           >
             <Text type="secondary" style={{ fontSize: 12 }}>URL:</Text>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-              <code style={{
-                background: '#fff7e6',
-                padding: '6px 10px',
-                borderRadius: 4,
-                fontSize: 12,
-                flex: 1,
-                wordBreak: 'break-all',
-                border: '1px solid #ffd591',
-              }}>
+              <code style={{ background: '#fff7e6', padding: '6px 10px', borderRadius: 4, fontSize: 12, flex: 1, wordBreak: 'break-all', border: '1px solid #ffd591' }}>
                 {lastCalledUrl}
               </code>
-              <Button
-                size="small"
-                icon={copiedUrl === lastCalledUrl ? <CheckOutlined /> : <CopyOutlined />}
-                onClick={() => copyToClipboard(lastCalledUrl)}
-              />
+              <Button size="small" icon={copiedUrl === lastCalledUrl ? <CheckOutlined /> : <CopyOutlined />} onClick={() => copyToClipboard(lastCalledUrl)} />
             </div>
           </Card>
         )}
 
-        {/* API list */}
         <Card
           size="small"
           title={
@@ -536,15 +616,7 @@ const ManageInvoices: React.FC = () => {
           {PAGE_APIS.map((api, index) => {
             const exec = apiExecResults[index];
             return (
-              <div
-                key={index}
-                style={{
-                  padding: 12,
-                  background: REDWOOD.neutral100,
-                  borderRadius: 6,
-                  marginBottom: index < PAGE_APIS.length - 1 ? 12 : 0,
-                }}
-              >
+              <div key={index} style={{ padding: 12, background: REDWOOD.neutral100, borderRadius: 6, marginBottom: index < PAGE_APIS.length - 1 ? 12 : 0 }}>
                 <Row justify="space-between" align="middle" style={{ marginBottom: 6 }}>
                   <Col>
                     <Space>
@@ -554,81 +626,35 @@ const ManageInvoices: React.FC = () => {
                   </Col>
                   {api.method === 'GET' && !api.url.includes('{') && (
                     <Col>
-                      <Button
-                        size="small"
-                        type="primary"
-                        loading={exec?.loading}
-                        onClick={() => executeApi(index, api.url)}
-                        style={{ background: REDWOOD.success, borderColor: REDWOOD.success, fontSize: 12 }}
-                      >
+                      <Button size="small" type="primary" loading={exec?.loading} onClick={() => executeApi(index, api.url)}
+                        style={{ background: REDWOOD.success, borderColor: REDWOOD.success, fontSize: 12 }}>
                         Execute
                       </Button>
                     </Col>
                   )}
                 </Row>
-
-                <Text type="secondary" style={{ display: 'block', marginBottom: 8, fontSize: 13 }}>
-                  {api.description}
-                </Text>
-
-                {/* Full URL */}
+                <Text type="secondary" style={{ display: 'block', marginBottom: 8, fontSize: 13 }}>{api.description}</Text>
                 <Text type="secondary" style={{ fontSize: 12 }}>Full URL:</Text>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2, marginBottom: api.params ? 8 : 0 }}>
-                  <code style={{
-                    background: '#e8f4ff',
-                    padding: '5px 10px',
-                    borderRadius: 4,
-                    fontSize: 12,
-                    flex: 1,
-                    wordBreak: 'break-all',
-                    border: `1px solid #91caff`,
-                  }}>
+                  <code style={{ background: '#e8f4ff', padding: '5px 10px', borderRadius: 4, fontSize: 12, flex: 1, wordBreak: 'break-all', border: '1px solid #91caff' }}>
                     {api.url}
                   </code>
-                  <Button
-                    size="small"
-                    icon={copiedUrl === api.url ? <CheckOutlined /> : <CopyOutlined />}
-                    onClick={() => copyToClipboard(api.url)}
-                  />
+                  <Button size="small" icon={copiedUrl === api.url ? <CheckOutlined /> : <CopyOutlined />} onClick={() => copyToClipboard(api.url)} />
                 </div>
-
-                {/* Query params */}
                 {api.params && (
                   <>
                     <Text type="secondary" style={{ fontSize: 12 }}>Query Parameters:</Text>
                     <div style={{ marginTop: 2 }}>
-                      <code style={{
-                        background: '#f5f5f5',
-                        padding: '5px 10px',
-                        borderRadius: 4,
-                        fontSize: 11,
-                        display: 'block',
-                        wordBreak: 'break-all',
-                        border: '1px solid #d9d9d9',
-                        color: REDWOOD.neutral600,
-                      }}>
+                      <code style={{ background: '#f5f5f5', padding: '5px 10px', borderRadius: 4, fontSize: 11, display: 'block', wordBreak: 'break-all', border: '1px solid #d9d9d9', color: REDWOOD.neutral600 }}>
                         ?{api.params}
                       </code>
                     </div>
                   </>
                 )}
-
-                {/* Execute response */}
                 {exec && !exec.loading && exec.response !== null && (
                   <div style={{ marginTop: 10 }}>
                     <Text type="secondary" style={{ fontSize: 12 }}>Response:</Text>
-                    <pre style={{
-                      background: '#0d1117',
-                      borderRadius: 6,
-                      padding: '8px 10px',
-                      fontSize: 11,
-                      fontFamily: 'monospace',
-                      maxHeight: 220,
-                      overflowY: 'auto',
-                      overflowX: 'auto',
-                      margin: '4px 0 0',
-                      color: exec.response.startsWith('Error') ? '#ff7875' : '#7ee787',
-                    }}>
+                    <pre style={{ background: '#0d1117', borderRadius: 6, padding: '8px 10px', fontSize: 11, fontFamily: 'monospace', maxHeight: 220, overflowY: 'auto', overflowX: 'auto', margin: '4px 0 0', color: exec.response.startsWith('Error') ? '#ff7875' : '#7ee787' }}>
                       {exec.response}
                     </pre>
                   </div>
