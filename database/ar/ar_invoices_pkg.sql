@@ -37,72 +37,132 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
 
     -- -------------------------------------------------------
     -- Internal: upsert one header row
+    -- All JSON values extracted into local vars first to avoid
+    -- ORA-40573 (PL/SQL JSON types invalid in SQL context)
     -- -------------------------------------------------------
     PROCEDURE upsert_header (p_j IN JSON_OBJECT_T) IS
-        l_id NUMBER := p_j.get_number('CustomerTransactionId');
+        l_id                        NUMBER          := p_j.get_number('CustomerTransactionId');
+        l_transaction_number        VARCHAR2(150)   := p_j.get_string('TransactionNumber');
+        l_document_number           NUMBER          := p_j.get_number('DocumentNumber');
+        l_cross_reference           VARCHAR2(150)   := p_j.get_string('CrossReference');
+        l_transaction_date          DATE            := TO_DATE(NULLIF(p_j.get_string('TransactionDate'),  ''), 'YYYY-MM-DD');
+        l_accounting_date           DATE            := TO_DATE(NULLIF(p_j.get_string('AccountingDate'),   ''), 'YYYY-MM-DD');
+        l_due_date                  DATE            := TO_DATE(NULLIF(p_j.get_string('DueDate'),          ''), 'YYYY-MM-DD');
+        l_billing_date              DATE            := TO_DATE(NULLIF(p_j.get_string('BillingDate'),      ''), 'YYYY-MM-DD');
+        l_ship_date                 DATE            := TO_DATE(NULLIF(p_j.get_string('ShipDate'),         ''), 'YYYY-MM-DD');
+        l_transaction_type          VARCHAR2(150)   := p_j.get_string('TransactionType');
+        l_transaction_source        VARCHAR2(150)   := p_j.get_string('TransactionSource');
+        l_invoice_status            VARCHAR2(150)   := p_j.get_string('InvoiceStatus');
+        l_invoice_currency_code     VARCHAR2(15)    := p_j.get_string('InvoiceCurrencyCode');
+        l_conversion_rate_type      VARCHAR2(150)   := p_j.get_string('ConversionRateType');
+        l_conversion_date           DATE            := TO_DATE(NULLIF(p_j.get_string('ConversionDate'),   ''), 'YYYY-MM-DD');
+        l_conversion_rate           NUMBER          := p_j.get_number('ConversionRate');
+        l_entered_amount            NUMBER          := p_j.get_number('EnteredAmount');
+        l_invoice_balance_amount    NUMBER          := p_j.get_number('InvoiceBalanceAmount');
+        l_freight_amount            NUMBER          := p_j.get_number('FreightAmount');
+        l_bill_to_customer_number   VARCHAR2(150)   := p_j.get_string('BillToCustomerNumber');
+        l_bill_to_customer_name     VARCHAR2(360)   := p_j.get_string('BillToCustomerName');
+        l_bill_to_site              VARCHAR2(150)   := p_j.get_string('BillToSite');
+        l_bill_to_contact           VARCHAR2(360)   := p_j.get_string('BillToContact');
+        l_bill_to_party_id          NUMBER          := p_j.get_number('BillToPartyId');
+        l_ship_to_customer_number   VARCHAR2(150)   := p_j.get_string('ShipToCustomerNumber');
+        l_ship_to_customer_name     VARCHAR2(360)   := p_j.get_string('ShipToCustomerName');
+        l_ship_to_site              VARCHAR2(150)   := p_j.get_string('ShipToSite');
+        l_ship_to_contact           VARCHAR2(360)   := p_j.get_string('ShipToContact');
+        l_paying_customer_name      VARCHAR2(360)   := p_j.get_string('PayingCustomerName');
+        l_paying_customer_site      VARCHAR2(150)   := p_j.get_string('PayingCustomerSite');
+        l_paying_customer_account   VARCHAR2(150)   := p_j.get_string('PayingCustomerAccount');
+        l_business_unit             VARCHAR2(240)   := p_j.get_string('BusinessUnit');
+        l_legal_entity_identifier   VARCHAR2(150)   := p_j.get_string('LegalEntityIdentifier');
+        l_payment_terms             VARCHAR2(150)   := p_j.get_string('PaymentTerms');
+        l_receipt_method            VARCHAR2(150)   := p_j.get_string('ReceiptMethod');
+        l_purchase_order            VARCHAR2(150)   := p_j.get_string('PurchaseOrder');
+        l_purchase_order_date       DATE            := TO_DATE(NULLIF(p_j.get_string('PurchaseOrderDate'), ''), 'YYYY-MM-DD');
+        l_purchase_order_revision   VARCHAR2(150)   := p_j.get_string('PurchaseOrderRevision');
+        l_carrier                   VARCHAR2(150)   := p_j.get_string('Carrier');
+        l_shipping_reference        VARCHAR2(150)   := p_j.get_string('ShippingReference');
+        l_default_taxation_country  VARCHAR2(150)   := p_j.get_string('DefaultTaxationCountry');
+        l_first_party_reg_number    VARCHAR2(150)   := p_j.get_string('FirstPartyRegistrationNumber');
+        l_third_party_reg_number    VARCHAR2(150)   := p_j.get_string('ThirdPartyRegistrationNumber');
+        l_prepayment                VARCHAR2(30)    := p_j.get_string('Prepayment');
+        l_intercompany              VARCHAR2(30)    := p_j.get_string('Intercompany');
+        l_print_option              VARCHAR2(30)    := p_j.get_string('PrintOption');
+        l_sold_to_party_number      VARCHAR2(150)   := p_j.get_string('SoldToPartyNumber');
+        l_remit_to_address          VARCHAR2(360)   := p_j.get_string('RemitToAddress');
+        l_salesperson_number        VARCHAR2(150)   := p_j.get_string('SalesPersonNumber');
+        l_delivery_method           VARCHAR2(150)   := p_j.get_string('DeliveryMethod');
+        l_email                     VARCHAR2(360)   := p_j.get_string('Email');
+        l_special_instructions      VARCHAR2(1000)  := p_j.get_string('SpecialInstructions');
+        l_comments                  VARCHAR2(1000)  := p_j.get_string('Comments');
+        l_internal_notes            VARCHAR2(1000)  := p_j.get_string('InternalNotes');
+        l_invoicing_rule            VARCHAR2(150)   := p_j.get_string('InvoicingRule');
+        l_fusion_created_by         VARCHAR2(150)   := p_j.get_string('CreatedBy');
+        l_fusion_creation_date      TIMESTAMP       := TO_TIMESTAMP(REGEXP_REPLACE(NULLIF(p_j.get_string('CreationDate'),   ''), 'T', ' '), 'YYYY-MM-DD HH24:MI:SS');
+        l_fusion_last_updated_by    VARCHAR2(150)   := p_j.get_string('LastUpdatedBy');
+        l_fusion_last_update_date   TIMESTAMP       := TO_TIMESTAMP(REGEXP_REPLACE(NULLIF(p_j.get_string('LastUpdateDate'), ''), 'T', ' '), 'YYYY-MM-DD HH24:MI:SS');
     BEGIN
         MERGE INTO RR_AR_INVOICE_HEADERS h
         USING (SELECT l_id AS customer_transaction_id FROM DUAL) src
         ON (h.CUSTOMER_TRANSACTION_ID = src.customer_transaction_id)
         WHEN MATCHED THEN UPDATE SET
-            TRANSACTION_NUMBER          = p_j.get_string('TransactionNumber'),
-            DOCUMENT_NUMBER             = p_j.get_number('DocumentNumber'),
-            CROSS_REFERENCE             = p_j.get_string('CrossReference'),
-            TRANSACTION_DATE            = TO_DATE(p_j.get_string('TransactionDate'),         'YYYY-MM-DD'),
-            ACCOUNTING_DATE             = TO_DATE(p_j.get_string('AccountingDate'),          'YYYY-MM-DD'),
-            DUE_DATE                    = TO_DATE(p_j.get_string('DueDate'),                 'YYYY-MM-DD'),
-            BILLING_DATE                = TO_DATE(p_j.get_string('BillingDate'),             'YYYY-MM-DD'),
-            SHIP_DATE                   = TO_DATE(p_j.get_string('ShipDate'),                'YYYY-MM-DD'),
-            TRANSACTION_TYPE            = p_j.get_string('TransactionType'),
-            TRANSACTION_SOURCE          = p_j.get_string('TransactionSource'),
-            INVOICE_STATUS              = p_j.get_string('InvoiceStatus'),
-            INVOICE_CURRENCY_CODE       = p_j.get_string('InvoiceCurrencyCode'),
-            CONVERSION_RATE_TYPE        = p_j.get_string('ConversionRateType'),
-            CONVERSION_DATE             = TO_DATE(p_j.get_string('ConversionDate'),          'YYYY-MM-DD'),
-            CONVERSION_RATE             = p_j.get_number('ConversionRate'),
-            ENTERED_AMOUNT              = p_j.get_number('EnteredAmount'),
-            INVOICE_BALANCE_AMOUNT      = p_j.get_number('InvoiceBalanceAmount'),
-            FREIGHT_AMOUNT              = p_j.get_number('FreightAmount'),
-            BILL_TO_CUSTOMER_NUMBER     = p_j.get_string('BillToCustomerNumber'),
-            BILL_TO_CUSTOMER_NAME       = p_j.get_string('BillToCustomerName'),
-            BILL_TO_SITE                = p_j.get_string('BillToSite'),
-            BILL_TO_CONTACT             = p_j.get_string('BillToContact'),
-            BILL_TO_PARTY_ID            = p_j.get_number('BillToPartyId'),
-            SHIP_TO_CUSTOMER_NUMBER     = p_j.get_string('ShipToCustomerNumber'),
-            SHIP_TO_CUSTOMER_NAME       = p_j.get_string('ShipToCustomerName'),
-            SHIP_TO_SITE                = p_j.get_string('ShipToSite'),
-            SHIP_TO_CONTACT             = p_j.get_string('ShipToContact'),
-            PAYING_CUSTOMER_NAME        = p_j.get_string('PayingCustomerName'),
-            PAYING_CUSTOMER_SITE        = p_j.get_string('PayingCustomerSite'),
-            PAYING_CUSTOMER_ACCOUNT     = p_j.get_string('PayingCustomerAccount'),
-            BUSINESS_UNIT               = p_j.get_string('BusinessUnit'),
-            LEGAL_ENTITY_IDENTIFIER     = p_j.get_string('LegalEntityIdentifier'),
-            PAYMENT_TERMS               = p_j.get_string('PaymentTerms'),
-            RECEIPT_METHOD              = p_j.get_string('ReceiptMethod'),
-            PURCHASE_ORDER              = p_j.get_string('PurchaseOrder'),
-            PURCHASE_ORDER_DATE         = TO_DATE(p_j.get_string('PurchaseOrderDate'),       'YYYY-MM-DD'),
-            PURCHASE_ORDER_REVISION     = p_j.get_string('PurchaseOrderRevision'),
-            CARRIER                     = p_j.get_string('Carrier'),
-            SHIPPING_REFERENCE          = p_j.get_string('ShippingReference'),
-            DEFAULT_TAXATION_COUNTRY    = p_j.get_string('DefaultTaxationCountry'),
-            FIRST_PARTY_REG_NUMBER      = p_j.get_string('FirstPartyRegistrationNumber'),
-            THIRD_PARTY_REG_NUMBER      = p_j.get_string('ThirdPartyRegistrationNumber'),
-            PREPAYMENT                  = p_j.get_string('Prepayment'),
-            INTERCOMPANY                = p_j.get_string('Intercompany'),
-            PRINT_OPTION                = p_j.get_string('PrintOption'),
-            SOLD_TO_PARTY_NUMBER        = p_j.get_string('SoldToPartyNumber'),
-            REMIT_TO_ADDRESS            = p_j.get_string('RemitToAddress'),
-            SALESPERSON_NUMBER          = p_j.get_string('SalesPersonNumber'),
-            DELIVERY_METHOD             = p_j.get_string('DeliveryMethod'),
-            EMAIL                       = p_j.get_string('Email'),
-            SPECIAL_INSTRUCTIONS        = p_j.get_string('SpecialInstructions'),
-            COMMENTS                    = p_j.get_string('Comments'),
-            INTERNAL_NOTES              = p_j.get_string('InternalNotes'),
-            INVOICING_RULE              = p_j.get_string('InvoicingRule'),
-            FUSION_CREATED_BY           = p_j.get_string('CreatedBy'),
-            FUSION_CREATION_DATE        = TO_TIMESTAMP(REGEXP_REPLACE(p_j.get_string('CreationDate'),    'T', ' '), 'YYYY-MM-DD HH24:MI:SS'),
-            FUSION_LAST_UPDATED_BY      = p_j.get_string('LastUpdatedBy'),
-            FUSION_LAST_UPDATE_DATE     = TO_TIMESTAMP(REGEXP_REPLACE(p_j.get_string('LastUpdateDate'),  'T', ' '), 'YYYY-MM-DD HH24:MI:SS'),
+            TRANSACTION_NUMBER          = l_transaction_number,
+            DOCUMENT_NUMBER             = l_document_number,
+            CROSS_REFERENCE             = l_cross_reference,
+            TRANSACTION_DATE            = l_transaction_date,
+            ACCOUNTING_DATE             = l_accounting_date,
+            DUE_DATE                    = l_due_date,
+            BILLING_DATE                = l_billing_date,
+            SHIP_DATE                   = l_ship_date,
+            TRANSACTION_TYPE            = l_transaction_type,
+            TRANSACTION_SOURCE          = l_transaction_source,
+            INVOICE_STATUS              = l_invoice_status,
+            INVOICE_CURRENCY_CODE       = l_invoice_currency_code,
+            CONVERSION_RATE_TYPE        = l_conversion_rate_type,
+            CONVERSION_DATE             = l_conversion_date,
+            CONVERSION_RATE             = l_conversion_rate,
+            ENTERED_AMOUNT              = l_entered_amount,
+            INVOICE_BALANCE_AMOUNT      = l_invoice_balance_amount,
+            FREIGHT_AMOUNT              = l_freight_amount,
+            BILL_TO_CUSTOMER_NUMBER     = l_bill_to_customer_number,
+            BILL_TO_CUSTOMER_NAME       = l_bill_to_customer_name,
+            BILL_TO_SITE                = l_bill_to_site,
+            BILL_TO_CONTACT             = l_bill_to_contact,
+            BILL_TO_PARTY_ID            = l_bill_to_party_id,
+            SHIP_TO_CUSTOMER_NUMBER     = l_ship_to_customer_number,
+            SHIP_TO_CUSTOMER_NAME       = l_ship_to_customer_name,
+            SHIP_TO_SITE                = l_ship_to_site,
+            SHIP_TO_CONTACT             = l_ship_to_contact,
+            PAYING_CUSTOMER_NAME        = l_paying_customer_name,
+            PAYING_CUSTOMER_SITE        = l_paying_customer_site,
+            PAYING_CUSTOMER_ACCOUNT     = l_paying_customer_account,
+            BUSINESS_UNIT               = l_business_unit,
+            LEGAL_ENTITY_IDENTIFIER     = l_legal_entity_identifier,
+            PAYMENT_TERMS               = l_payment_terms,
+            RECEIPT_METHOD              = l_receipt_method,
+            PURCHASE_ORDER              = l_purchase_order,
+            PURCHASE_ORDER_DATE         = l_purchase_order_date,
+            PURCHASE_ORDER_REVISION     = l_purchase_order_revision,
+            CARRIER                     = l_carrier,
+            SHIPPING_REFERENCE          = l_shipping_reference,
+            DEFAULT_TAXATION_COUNTRY    = l_default_taxation_country,
+            FIRST_PARTY_REG_NUMBER      = l_first_party_reg_number,
+            THIRD_PARTY_REG_NUMBER      = l_third_party_reg_number,
+            PREPAYMENT                  = l_prepayment,
+            INTERCOMPANY                = l_intercompany,
+            PRINT_OPTION                = l_print_option,
+            SOLD_TO_PARTY_NUMBER        = l_sold_to_party_number,
+            REMIT_TO_ADDRESS            = l_remit_to_address,
+            SALESPERSON_NUMBER          = l_salesperson_number,
+            DELIVERY_METHOD             = l_delivery_method,
+            EMAIL                       = l_email,
+            SPECIAL_INSTRUCTIONS        = l_special_instructions,
+            COMMENTS                    = l_comments,
+            INTERNAL_NOTES              = l_internal_notes,
+            INVOICING_RULE              = l_invoicing_rule,
+            FUSION_CREATED_BY           = l_fusion_created_by,
+            FUSION_CREATION_DATE        = l_fusion_creation_date,
+            FUSION_LAST_UPDATED_BY      = l_fusion_last_updated_by,
+            FUSION_LAST_UPDATE_DATE     = l_fusion_last_update_date,
             LAST_UPDATED_BY             = USER,
             LAST_UPDATE_DATE            = SYSTIMESTAMP,
             SYNC_DATE                   = SYSTIMESTAMP,
@@ -129,148 +189,159 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
             INVOICING_RULE,             FUSION_CREATED_BY,          FUSION_CREATION_DATE,
             FUSION_LAST_UPDATED_BY,     FUSION_LAST_UPDATE_DATE,    SYNC_STATUS
         ) VALUES (
-            l_id,
-            p_j.get_string('TransactionNumber'),
-            p_j.get_number('DocumentNumber'),
-            p_j.get_string('CrossReference'),
-            TO_DATE(p_j.get_string('TransactionDate'),        'YYYY-MM-DD'),
-            TO_DATE(p_j.get_string('AccountingDate'),         'YYYY-MM-DD'),
-            TO_DATE(p_j.get_string('DueDate'),                'YYYY-MM-DD'),
-            TO_DATE(p_j.get_string('BillingDate'),            'YYYY-MM-DD'),
-            TO_DATE(p_j.get_string('ShipDate'),               'YYYY-MM-DD'),
-            p_j.get_string('TransactionType'),
-            p_j.get_string('TransactionSource'),
-            p_j.get_string('InvoiceStatus'),
-            p_j.get_string('InvoiceCurrencyCode'),
-            p_j.get_string('ConversionRateType'),
-            TO_DATE(p_j.get_string('ConversionDate'),         'YYYY-MM-DD'),
-            p_j.get_number('ConversionRate'),
-            p_j.get_number('EnteredAmount'),
-            p_j.get_number('InvoiceBalanceAmount'),
-            p_j.get_number('FreightAmount'),
-            p_j.get_string('BillToCustomerNumber'),
-            p_j.get_string('BillToCustomerName'),
-            p_j.get_string('BillToSite'),
-            p_j.get_string('BillToContact'),
-            p_j.get_number('BillToPartyId'),
-            p_j.get_string('ShipToCustomerNumber'),
-            p_j.get_string('ShipToCustomerName'),
-            p_j.get_string('ShipToSite'),
-            p_j.get_string('ShipToContact'),
-            p_j.get_string('PayingCustomerName'),
-            p_j.get_string('PayingCustomerSite'),
-            p_j.get_string('PayingCustomerAccount'),
-            p_j.get_string('BusinessUnit'),
-            p_j.get_string('LegalEntityIdentifier'),
-            p_j.get_string('PaymentTerms'),
-            p_j.get_string('ReceiptMethod'),
-            p_j.get_string('PurchaseOrder'),
-            TO_DATE(p_j.get_string('PurchaseOrderDate'),      'YYYY-MM-DD'),
-            p_j.get_string('PurchaseOrderRevision'),
-            p_j.get_string('Carrier'),
-            p_j.get_string('ShippingReference'),
-            p_j.get_string('DefaultTaxationCountry'),
-            p_j.get_string('FirstPartyRegistrationNumber'),
-            p_j.get_string('ThirdPartyRegistrationNumber'),
-            p_j.get_string('Prepayment'),
-            p_j.get_string('Intercompany'),
-            p_j.get_string('PrintOption'),
-            p_j.get_string('SoldToPartyNumber'),
-            p_j.get_string('RemitToAddress'),
-            p_j.get_string('SalesPersonNumber'),
-            p_j.get_string('DeliveryMethod'),
-            p_j.get_string('Email'),
-            p_j.get_string('SpecialInstructions'),
-            p_j.get_string('Comments'),
-            p_j.get_string('InternalNotes'),
-            p_j.get_string('InvoicingRule'),
-            p_j.get_string('CreatedBy'),
-            TO_TIMESTAMP(REGEXP_REPLACE(p_j.get_string('CreationDate'),   'T', ' '), 'YYYY-MM-DD HH24:MI:SS'),
-            p_j.get_string('LastUpdatedBy'),
-            TO_TIMESTAMP(REGEXP_REPLACE(p_j.get_string('LastUpdateDate'), 'T', ' '), 'YYYY-MM-DD HH24:MI:SS'),
-            'NEW'
+            l_id,                       l_transaction_number,       l_document_number,
+            l_cross_reference,          l_transaction_date,         l_accounting_date,
+            l_due_date,                 l_billing_date,             l_ship_date,
+            l_transaction_type,         l_transaction_source,       l_invoice_status,
+            l_invoice_currency_code,    l_conversion_rate_type,     l_conversion_date,
+            l_conversion_rate,          l_entered_amount,           l_invoice_balance_amount,
+            l_freight_amount,           l_bill_to_customer_number,  l_bill_to_customer_name,
+            l_bill_to_site,             l_bill_to_contact,          l_bill_to_party_id,
+            l_ship_to_customer_number,  l_ship_to_customer_name,    l_ship_to_site,
+            l_ship_to_contact,          l_paying_customer_name,     l_paying_customer_site,
+            l_paying_customer_account,  l_business_unit,            l_legal_entity_identifier,
+            l_payment_terms,            l_receipt_method,           l_purchase_order,
+            l_purchase_order_date,      l_purchase_order_revision,  l_carrier,
+            l_shipping_reference,       l_default_taxation_country, l_first_party_reg_number,
+            l_third_party_reg_number,   l_prepayment,               l_intercompany,
+            l_print_option,             l_sold_to_party_number,     l_remit_to_address,
+            l_salesperson_number,       l_delivery_method,          l_email,
+            l_special_instructions,     l_comments,                 l_internal_notes,
+            l_invoicing_rule,           l_fusion_created_by,        l_fusion_creation_date,
+            l_fusion_last_updated_by,   l_fusion_last_update_date,  'NEW'
         );
     END upsert_header;
 
     -- -------------------------------------------------------
     -- Internal: upsert lines for a header
+    -- All JSON values extracted into local vars first to avoid
+    -- ORA-40573 (PL/SQL JSON types invalid in SQL context)
     -- -------------------------------------------------------
     PROCEDURE upsert_lines (p_transaction_id IN NUMBER, p_lines IN JSON_ARRAY_T) IS
-        l_line JSON_OBJECT_T;
-        l_line_id NUMBER;
+        l_line                          JSON_OBJECT_T;
+        l_line_id                       NUMBER;
+        l_line_number                   NUMBER;
+        l_description                   VARCHAR2(2000);
+        l_item_number                   VARCHAR2(150);
+        l_unit_of_measure               VARCHAR2(30);
+        l_warehouse                     VARCHAR2(150);
+        l_memo_line                     VARCHAR2(150);
+        l_quantity                      NUMBER;
+        l_unit_selling_price            NUMBER;
+        l_line_amount                   NUMBER;
+        l_assessable_value              NUMBER;
+        l_allocated_freight_amount      NUMBER;
+        l_sales_order                   VARCHAR2(150);
+        l_sales_order_date              DATE;
+        l_tax_classification_code       VARCHAR2(150);
+        l_tax_exemption_handling        VARCHAR2(30);
+        l_accounting_rule               VARCHAR2(150);
+        l_accounting_rule_duration      NUMBER;
+        l_rule_start_date               DATE;
+        l_rule_end_date                 DATE;
+        l_transaction_business_category VARCHAR2(150);
+        l_product_fiscal_classification VARCHAR2(150);
+        l_product_category              VARCHAR2(150);
+        l_product_type                  VARCHAR2(150);
+        l_line_intended_use             VARCHAR2(150);
+        l_fusion_created_by             VARCHAR2(150);
+        l_fusion_creation_date          TIMESTAMP;
+        l_fusion_last_updated_by        VARCHAR2(150);
+        l_fusion_last_update_date       TIMESTAMP;
     BEGIN
         FOR i IN 0 .. p_lines.get_size - 1 LOOP
-            l_line    := TREAT(p_lines.get(i) AS JSON_OBJECT_T);
-            l_line_id := l_line.get_number('CustomerTransactionLineId');
+            l_line := TREAT(p_lines.get(i) AS JSON_OBJECT_T);
+
+            -- Extract all values into local variables before the MERGE
+            l_line_id                       := l_line.get_number('CustomerTransactionLineId');
+            l_line_number                   := l_line.get_number('LineNumber');
+            l_description                   := l_line.get_string('Description');
+            l_item_number                   := l_line.get_string('ItemNumber');
+            l_unit_of_measure               := l_line.get_string('UnitOfMeasure');
+            l_warehouse                     := l_line.get_string('Warehouse');
+            l_memo_line                     := l_line.get_string('MemoLine');
+            l_quantity                      := l_line.get_number('Quantity');
+            l_unit_selling_price            := l_line.get_number('UnitSellingPrice');
+            l_line_amount                   := l_line.get_number('LineAmount');
+            l_assessable_value              := l_line.get_number('AssessableValue');
+            l_allocated_freight_amount      := l_line.get_number('AllocatedFreightAmount');
+            l_sales_order                   := l_line.get_string('SalesOrder');
+            l_sales_order_date              := TO_DATE(NULLIF(l_line.get_string('SalesOrderDate'), ''), 'YYYY-MM-DD');
+            l_tax_classification_code       := l_line.get_string('TaxClassificationCode');
+            l_tax_exemption_handling        := l_line.get_string('TaxExemptionHandling');
+            l_accounting_rule               := l_line.get_string('AccountingRule');
+            l_accounting_rule_duration      := l_line.get_number('AccountingRuleDuration');
+            l_rule_start_date               := TO_DATE(NULLIF(l_line.get_string('RuleStartDate'), ''), 'YYYY-MM-DD');
+            l_rule_end_date                 := TO_DATE(NULLIF(l_line.get_string('RuleEndDate'),   ''), 'YYYY-MM-DD');
+            l_transaction_business_category := l_line.get_string('TransacationBusinessCategory');
+            l_product_fiscal_classification := l_line.get_string('ProductFiscalClassification');
+            l_product_category              := l_line.get_string('ProductCategory');
+            l_product_type                  := l_line.get_string('ProductType');
+            l_line_intended_use             := l_line.get_string('LineIntendedUse');
+            l_fusion_created_by             := l_line.get_string('CreatedBy');
+            l_fusion_creation_date          := TO_TIMESTAMP(REGEXP_REPLACE(NULLIF(l_line.get_string('CreationDate'),   ''), 'T', ' '), 'YYYY-MM-DD HH24:MI:SS');
+            l_fusion_last_updated_by        := l_line.get_string('LastUpdatedBy');
+            l_fusion_last_update_date       := TO_TIMESTAMP(REGEXP_REPLACE(NULLIF(l_line.get_string('LastUpdateDate'), ''), 'T', ' '), 'YYYY-MM-DD HH24:MI:SS');
 
             MERGE INTO RR_AR_INVOICE_LINES ln
             USING (SELECT l_line_id AS id FROM DUAL) src
             ON (ln.CUSTOMER_TRANSACTION_LINE_ID = src.id)
             WHEN MATCHED THEN UPDATE SET
-                LINE_NUMBER                     = l_line.get_number('LineNumber'),
-                DESCRIPTION                     = l_line.get_string('Description'),
-                ITEM_NUMBER                     = l_line.get_string('ItemNumber'),
-                UNIT_OF_MEASURE                 = l_line.get_string('UnitOfMeasure'),
-                WAREHOUSE                       = l_line.get_string('Warehouse'),
-                MEMO_LINE                       = l_line.get_string('MemoLine'),
-                QUANTITY                        = l_line.get_number('Quantity'),
-                UNIT_SELLING_PRICE              = l_line.get_number('UnitSellingPrice'),
-                LINE_AMOUNT                     = l_line.get_number('LineAmount'),
-                ASSESSABLE_VALUE                = l_line.get_number('AssessableValue'),
-                ALLOCATED_FREIGHT_AMOUNT        = l_line.get_number('AllocatedFreightAmount'),
-                SALES_ORDER                     = l_line.get_string('SalesOrder'),
-                SALES_ORDER_DATE                = TO_DATE(l_line.get_string('SalesOrderDate'), 'YYYY-MM-DD'),
-                TAX_CLASSIFICATION_CODE         = l_line.get_string('TaxClassificationCode'),
-                TAX_EXEMPTION_HANDLING          = l_line.get_string('TaxExemptionHandling'),
-                ACCOUNTING_RULE                 = l_line.get_string('AccountingRule'),
-                ACCOUNTING_RULE_DURATION        = l_line.get_number('AccountingRuleDuration'),
-                RULE_START_DATE                 = TO_DATE(l_line.get_string('RuleStartDate'), 'YYYY-MM-DD'),
-                RULE_END_DATE                   = TO_DATE(l_line.get_string('RuleEndDate'),   'YYYY-MM-DD'),
-                TRANSACTION_BUSINESS_CATEGORY   = l_line.get_string('TransacationBusinessCategory'),
-                PRODUCT_FISCAL_CLASSIFICATION   = l_line.get_string('ProductFiscalClassification'),
-                PRODUCT_CATEGORY                = l_line.get_string('ProductCategory'),
-                PRODUCT_TYPE                    = l_line.get_string('ProductType'),
-                LINE_INTENDED_USE               = l_line.get_string('LineIntendedUse'),
-                FUSION_CREATED_BY               = l_line.get_string('CreatedBy'),
-                FUSION_CREATION_DATE            = TO_TIMESTAMP(REGEXP_REPLACE(l_line.get_string('CreationDate'),   'T', ' '), 'YYYY-MM-DD HH24:MI:SS'),
-                FUSION_LAST_UPDATED_BY          = l_line.get_string('LastUpdatedBy'),
-                FUSION_LAST_UPDATE_DATE         = TO_TIMESTAMP(REGEXP_REPLACE(l_line.get_string('LastUpdateDate'), 'T', ' '), 'YYYY-MM-DD HH24:MI:SS'),
+                LINE_NUMBER                     = l_line_number,
+                DESCRIPTION                     = l_description,
+                ITEM_NUMBER                     = l_item_number,
+                UNIT_OF_MEASURE                 = l_unit_of_measure,
+                WAREHOUSE                       = l_warehouse,
+                MEMO_LINE                       = l_memo_line,
+                QUANTITY                        = l_quantity,
+                UNIT_SELLING_PRICE              = l_unit_selling_price,
+                LINE_AMOUNT                     = l_line_amount,
+                ASSESSABLE_VALUE                = l_assessable_value,
+                ALLOCATED_FREIGHT_AMOUNT        = l_allocated_freight_amount,
+                SALES_ORDER                     = l_sales_order,
+                SALES_ORDER_DATE                = l_sales_order_date,
+                TAX_CLASSIFICATION_CODE         = l_tax_classification_code,
+                TAX_EXEMPTION_HANDLING          = l_tax_exemption_handling,
+                ACCOUNTING_RULE                 = l_accounting_rule,
+                ACCOUNTING_RULE_DURATION        = l_accounting_rule_duration,
+                RULE_START_DATE                 = l_rule_start_date,
+                RULE_END_DATE                   = l_rule_end_date,
+                TRANSACTION_BUSINESS_CATEGORY   = l_transaction_business_category,
+                PRODUCT_FISCAL_CLASSIFICATION   = l_product_fiscal_classification,
+                PRODUCT_CATEGORY                = l_product_category,
+                PRODUCT_TYPE                    = l_product_type,
+                LINE_INTENDED_USE               = l_line_intended_use,
+                FUSION_CREATED_BY               = l_fusion_created_by,
+                FUSION_CREATION_DATE            = l_fusion_creation_date,
+                FUSION_LAST_UPDATED_BY          = l_fusion_last_updated_by,
+                FUSION_LAST_UPDATE_DATE         = l_fusion_last_update_date,
                 LAST_UPDATED_BY                 = USER,
                 LAST_UPDATE_DATE                = SYSTIMESTAMP,
                 SYNC_DATE                       = SYSTIMESTAMP,
                 SYNC_STATUS                     = 'UPDATED'
             WHEN NOT MATCHED THEN INSERT (
-                CUSTOMER_TRANSACTION_LINE_ID,   CUSTOMER_TRANSACTION_ID,    LINE_NUMBER,
-                DESCRIPTION,                    ITEM_NUMBER,                UNIT_OF_MEASURE,
-                WAREHOUSE,                      MEMO_LINE,                  QUANTITY,
-                UNIT_SELLING_PRICE,             LINE_AMOUNT,                ASSESSABLE_VALUE,
-                ALLOCATED_FREIGHT_AMOUNT,       SALES_ORDER,                SALES_ORDER_DATE,
-                TAX_CLASSIFICATION_CODE,        TAX_EXEMPTION_HANDLING,     ACCOUNTING_RULE,
-                ACCOUNTING_RULE_DURATION,       RULE_START_DATE,            RULE_END_DATE,
-                TRANSACTION_BUSINESS_CATEGORY,  PRODUCT_FISCAL_CLASSIFICATION, PRODUCT_CATEGORY,
-                PRODUCT_TYPE,                   LINE_INTENDED_USE,          FUSION_CREATED_BY,
-                FUSION_CREATION_DATE,           FUSION_LAST_UPDATED_BY,     FUSION_LAST_UPDATE_DATE,
+                CUSTOMER_TRANSACTION_LINE_ID,   CUSTOMER_TRANSACTION_ID,        LINE_NUMBER,
+                DESCRIPTION,                    ITEM_NUMBER,                    UNIT_OF_MEASURE,
+                WAREHOUSE,                      MEMO_LINE,                      QUANTITY,
+                UNIT_SELLING_PRICE,             LINE_AMOUNT,                    ASSESSABLE_VALUE,
+                ALLOCATED_FREIGHT_AMOUNT,       SALES_ORDER,                    SALES_ORDER_DATE,
+                TAX_CLASSIFICATION_CODE,        TAX_EXEMPTION_HANDLING,         ACCOUNTING_RULE,
+                ACCOUNTING_RULE_DURATION,       RULE_START_DATE,                RULE_END_DATE,
+                TRANSACTION_BUSINESS_CATEGORY,  PRODUCT_FISCAL_CLASSIFICATION,  PRODUCT_CATEGORY,
+                PRODUCT_TYPE,                   LINE_INTENDED_USE,              FUSION_CREATED_BY,
+                FUSION_CREATION_DATE,           FUSION_LAST_UPDATED_BY,         FUSION_LAST_UPDATE_DATE,
                 SYNC_STATUS
             ) VALUES (
-                l_line_id,                      p_transaction_id,           l_line.get_number('LineNumber'),
-                l_line.get_string('Description'), l_line.get_string('ItemNumber'), l_line.get_string('UnitOfMeasure'),
-                l_line.get_string('Warehouse'),  l_line.get_string('MemoLine'), l_line.get_number('Quantity'),
-                l_line.get_number('UnitSellingPrice'), l_line.get_number('LineAmount'), l_line.get_number('AssessableValue'),
-                l_line.get_number('AllocatedFreightAmount'), l_line.get_string('SalesOrder'),
-                TO_DATE(l_line.get_string('SalesOrderDate'), 'YYYY-MM-DD'),
-                l_line.get_string('TaxClassificationCode'), l_line.get_string('TaxExemptionHandling'),
-                l_line.get_string('AccountingRule'), l_line.get_number('AccountingRuleDuration'),
-                TO_DATE(l_line.get_string('RuleStartDate'), 'YYYY-MM-DD'),
-                TO_DATE(l_line.get_string('RuleEndDate'),   'YYYY-MM-DD'),
-                l_line.get_string('TransacationBusinessCategory'),
-                l_line.get_string('ProductFiscalClassification'),
-                l_line.get_string('ProductCategory'),
-                l_line.get_string('ProductType'),
-                l_line.get_string('LineIntendedUse'),
-                l_line.get_string('CreatedBy'),
-                TO_TIMESTAMP(REGEXP_REPLACE(l_line.get_string('CreationDate'),   'T', ' '), 'YYYY-MM-DD HH24:MI:SS'),
-                l_line.get_string('LastUpdatedBy'),
-                TO_TIMESTAMP(REGEXP_REPLACE(l_line.get_string('LastUpdateDate'), 'T', ' '), 'YYYY-MM-DD HH24:MI:SS'),
+                l_line_id,                      p_transaction_id,               l_line_number,
+                l_description,                  l_item_number,                  l_unit_of_measure,
+                l_warehouse,                    l_memo_line,                    l_quantity,
+                l_unit_selling_price,           l_line_amount,                  l_assessable_value,
+                l_allocated_freight_amount,     l_sales_order,                  l_sales_order_date,
+                l_tax_classification_code,      l_tax_exemption_handling,       l_accounting_rule,
+                l_accounting_rule_duration,     l_rule_start_date,              l_rule_end_date,
+                l_transaction_business_category, l_product_fiscal_classification, l_product_category,
+                l_product_type,                 l_line_intended_use,            l_fusion_created_by,
+                l_fusion_creation_date,         l_fusion_last_updated_by,       l_fusion_last_update_date,
                 'NEW'
             );
         END LOOP;
@@ -290,7 +361,6 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
         l_j := JSON_OBJECT_T.parse(p_invoice_json);
         upsert_header(l_j);
 
-        -- If lines are embedded in the payload
         IF l_j.has('lines') THEN
             l_lines := l_j.get_array('lines');
             upsert_lines(l_j.get_number('CustomerTransactionId'), l_lines);
@@ -344,12 +414,14 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
             EXCEPTION
                 WHEN OTHERS THEN
                     l_err_msg := SQLERRM;
-                    p_errors := p_errors + 1;
-                    -- log but continue
-                    UPDATE RR_AR_INVOICE_HEADERS
-                       SET SYNC_STATUS   = 'ERROR',
-                           ERROR_MESSAGE = l_err_msg
-                     WHERE CUSTOMER_TRANSACTION_ID = l_item.get_number('CustomerTransactionId');
+                    p_errors  := p_errors + 1;
+                    BEGIN
+                        UPDATE RR_AR_INVOICE_HEADERS
+                           SET SYNC_STATUS   = 'ERROR',
+                               ERROR_MESSAGE = l_err_msg
+                         WHERE CUSTOMER_TRANSACTION_ID = l_item.get_number('CustomerTransactionId');
+                    EXCEPTION WHEN OTHERS THEN NULL;
+                    END;
             END;
         END LOOP;
 
