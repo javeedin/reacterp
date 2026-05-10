@@ -97,9 +97,9 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
         l_internal_notes            VARCHAR2(1000)  := p_j.get_string('InternalNotes');
         l_invoicing_rule            VARCHAR2(150)   := p_j.get_string('InvoicingRule');
         l_fusion_created_by         VARCHAR2(150)   := p_j.get_string('CreatedBy');
-        l_fusion_creation_date      TIMESTAMP       := TO_TIMESTAMP(REGEXP_REPLACE(NULLIF(p_j.get_string('CreationDate'),   ''), 'T', ' '), 'YYYY-MM-DD HH24:MI:SS');
+        l_fusion_creation_date      TIMESTAMP       := TO_TIMESTAMP(SUBSTR(REPLACE(NULLIF(p_j.get_string('CreationDate'),   ''), 'T', ' '), 1, 19), 'YYYY-MM-DD HH24:MI:SS');
         l_fusion_last_updated_by    VARCHAR2(150)   := p_j.get_string('LastUpdatedBy');
-        l_fusion_last_update_date   TIMESTAMP       := TO_TIMESTAMP(REGEXP_REPLACE(NULLIF(p_j.get_string('LastUpdateDate'), ''), 'T', ' '), 'YYYY-MM-DD HH24:MI:SS');
+        l_fusion_last_update_date   TIMESTAMP       := TO_TIMESTAMP(SUBSTR(REPLACE(NULLIF(p_j.get_string('LastUpdateDate'), ''), 'T', ' '), 1, 19), 'YYYY-MM-DD HH24:MI:SS');
     BEGIN
         MERGE INTO RR_AR_INVOICE_HEADERS h
         USING (SELECT l_id AS customer_transaction_id FROM DUAL) src
@@ -279,9 +279,9 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
             l_product_type                  := l_line.get_string('ProductType');
             l_line_intended_use             := l_line.get_string('LineIntendedUse');
             l_fusion_created_by             := l_line.get_string('CreatedBy');
-            l_fusion_creation_date          := TO_TIMESTAMP(REGEXP_REPLACE(NULLIF(l_line.get_string('CreationDate'),   ''), 'T', ' '), 'YYYY-MM-DD HH24:MI:SS');
+            l_fusion_creation_date          := TO_TIMESTAMP(SUBSTR(REPLACE(NULLIF(l_line.get_string('CreationDate'),   ''), 'T', ' '), 1, 19), 'YYYY-MM-DD HH24:MI:SS');
             l_fusion_last_updated_by        := l_line.get_string('LastUpdatedBy');
-            l_fusion_last_update_date       := TO_TIMESTAMP(REGEXP_REPLACE(NULLIF(l_line.get_string('LastUpdateDate'), ''), 'T', ' '), 'YYYY-MM-DD HH24:MI:SS');
+            l_fusion_last_update_date       := TO_TIMESTAMP(SUBSTR(REPLACE(NULLIF(l_line.get_string('LastUpdateDate'), ''), 'T', ' '), 1, 19), 'YYYY-MM-DD HH24:MI:SS');
 
             MERGE INTO RR_AR_INVOICE_LINES ln
             USING (SELECT l_line_id AS id FROM DUAL) src
