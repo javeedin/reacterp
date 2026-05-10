@@ -98,7 +98,6 @@ SELECT
     h.TRANSACTION_DATE,
     h.ACCOUNTING_DATE,
     h.DUE_DATE,
-    h.TRANSACTION_CLASS,
     h.TRANSACTION_TYPE,
     h.TRANSACTION_SOURCE,
     h.INVOICE_STATUS,
@@ -114,16 +113,15 @@ SELECT
     h.SYNC_DATE
 FROM RR_AR_INVOICE_HEADERS h
 CROSS JOIN fp
-WHERE (fp.bu    IS NULL OR fp.bu    = '''' OR UPPER(h.BUSINESS_UNIT)       LIKE ''%'' || UPPER(fp.bu)   || ''%'')
-  AND (fp.src   IS NULL OR fp.src   = '''' OR UPPER(h.TRANSACTION_SOURCE)  LIKE ''%'' || UPPER(fp.src)  || ''%'')
-  AND (fp.cls   IS NULL OR fp.cls   = '''' OR UPPER(h.TRANSACTION_CLASS)   =            UPPER(fp.cls))
-  AND (fp.typ   IS NULL OR fp.typ   = '''' OR UPPER(h.TRANSACTION_TYPE)    LIKE ''%'' || UPPER(fp.typ)  || ''%'')
-  AND (fp.num   IS NULL OR fp.num   = '''' OR UPPER(h.TRANSACTION_NUMBER)  LIKE         UPPER(fp.num)   || ''%'')
-  AND (fp.cust  IS NULL OR fp.cust  = '''' OR UPPER(h.BILL_TO_CUSTOMER_NAME)   LIKE ''%'' || UPPER(fp.cust) || ''%''
-                                           OR UPPER(h.BILL_TO_CUSTOMER_NUMBER) LIKE ''%'' || UPPER(fp.cust) || ''%'')
-  AND (fp.ref   IS NULL OR fp.ref   = '''' OR UPPER(h.CROSS_REFERENCE)     LIKE ''%'' || UPPER(fp.ref)  || ''%'')
-  AND (fp.dfrom IS NULL OR fp.dfrom = '''' OR h.TRANSACTION_DATE >= TO_DATE(SUBSTR(fp.dfrom, 1, 10), ''YYYY-MM-DD''))
-  AND (fp.dto   IS NULL OR fp.dto   = '''' OR h.TRANSACTION_DATE <= TO_DATE(SUBSTR(fp.dto,   1, 10), ''YYYY-MM-DD''))
+WHERE (fp.bu    IS NULL OR fp.bu    = '''' OR UPPER(h.BUSINESS_UNIT)      LIKE ''%''||UPPER(fp.bu)||''%'')
+  AND (fp.src   IS NULL OR fp.src   = '''' OR UPPER(h.TRANSACTION_SOURCE) LIKE ''%''||UPPER(fp.src)||''%'')
+  AND (fp.typ   IS NULL OR fp.typ   = '''' OR UPPER(h.TRANSACTION_TYPE)   LIKE ''%''||UPPER(fp.typ)||''%'')
+  AND (fp.num   IS NULL OR fp.num   = '''' OR UPPER(h.TRANSACTION_NUMBER) LIKE       UPPER(fp.num)||''%'')
+  AND (fp.cust  IS NULL OR fp.cust  = '''' OR UPPER(h.BILL_TO_CUSTOMER_NAME)   LIKE ''%''||UPPER(fp.cust)||''%''
+                                           OR UPPER(h.BILL_TO_CUSTOMER_NUMBER) LIKE ''%''||UPPER(fp.cust)||''%'')
+  AND (fp.ref   IS NULL OR fp.ref   = '''' OR UPPER(h.CROSS_REFERENCE)    LIKE ''%''||UPPER(fp.ref)||''%'')
+  AND (fp.dfrom IS NULL OR fp.dfrom = '''' OR h.TRANSACTION_DATE >= TO_DATE(SUBSTR(fp.dfrom,1,10),''YYYY-MM-DD''))
+  AND (fp.dto   IS NULL OR fp.dto   = '''' OR h.TRANSACTION_DATE <= TO_DATE(SUBSTR(fp.dto,1,10),''YYYY-MM-DD''))
 ORDER BY h.TRANSACTION_DATE DESC, h.TRANSACTION_NUMBER DESC'
     );
     COMMIT;

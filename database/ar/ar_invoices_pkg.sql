@@ -327,20 +327,19 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
         p_status        OUT VARCHAR2,
         p_message       OUT VARCHAR2
     ) IS
-        l_txn_id   NUMBER := JSON_VALUE(p_invoice_json, '$.CustomerTransactionId' RETURNING NUMBER);
+        l_txn_id   NUMBER        := JSON_VALUE(p_invoice_json, '$.CustomerTransactionId' RETURNING NUMBER);
         l_txn_num  VARCHAR2(150) := JSON_VALUE(p_invoice_json, '$.TransactionNumber');
-        l_items    JSON_OBJECT_T;
-        l_lines    JSON_ARRAY_T;
     BEGIN
         upsert_header(p_invoice_json);
 
-        l_items := JSON_OBJECT_T.parse(p_invoice_json);
-        IF l_items.has('lines') THEN
-            l_lines := l_items.get_array('lines');
-            FOR i IN 0 .. l_lines.get_size - 1 LOOP
-                upsert_one_line(l_txn_id, l_lines.get(i).to_clob());
-            END LOOP;
-        END IF;
+        FOR rec IN (
+            SELECT j.item_clob
+            FROM JSON_TABLE(p_invoice_json, '$.lines[*]'
+                COLUMNS (item_clob CLOB FORMAT JSON PATH '$')
+            ) j
+        ) LOOP
+            upsert_one_line(l_txn_id, rec.item_clob);
+        END LOOP;
 
         COMMIT;
         p_status  := 'SUCCESS';
@@ -354,6 +353,9 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
 
     -- -------------------------------------------------------
     -- save_invoices_bulk: {"items":[...]} array of headers
+    -- Uses JSON_TABLE (SQL function) to iterate items so that
+    -- JSON key casing is preserved — JSON_OBJECT_T.to_clob()
+    -- can normalize keys to lowercase in some Oracle versions.
     -- -------------------------------------------------------
     PROCEDURE save_invoices_bulk (
         p_invoices_json IN  CLOB,
@@ -363,9 +365,6 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
         p_updated       OUT NUMBER,
         p_errors        OUT NUMBER
     ) IS
-        l_root      JSON_OBJECT_T;
-        l_items     JSON_ARRAY_T;
-        l_item_clob CLOB;
         l_txn_id    NUMBER;
         l_err_msg   VARCHAR2(4000);
         l_error_log VARCHAR2(32767) := '';
@@ -374,16 +373,15 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
         p_updated  := 0;
         p_errors   := 0;
 
-        l_root  := JSON_OBJECT_T.parse(p_invoices_json);
-        l_items := l_root.get_array('items');
-
-        FOR i IN 0 .. l_items.get_size - 1 LOOP
+        FOR rec IN (
+            SELECT j.item_clob
+            FROM JSON_TABLE(p_invoices_json, '$.items[*]'
+                COLUMNS (item_clob CLOB FORMAT JSON PATH '$')
+            ) j
+        ) LOOP
             BEGIN
-                -- Convert item to CLOB so JSON_VALUE works reliably
-                l_item_clob := l_items.get(i).to_clob();
-                l_txn_id    := JSON_VALUE(l_item_clob, '$.CustomerTransactionId' RETURNING NUMBER);
-
-                upsert_header(l_item_clob);
+                l_txn_id := JSON_VALUE(rec.item_clob, '$.CustomerTransactionId' RETURNING NUMBER);
+                upsert_header(rec.item_clob);
                 p_inserted := p_inserted + 1;
 
             EXCEPTION
@@ -413,6 +411,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
 
     -- -------------------------------------------------------
     -- save_invoice_lines: {"items":[...]} array of lines
+    -- Uses JSON_TABLE to preserve key casing (same reason as bulk)
     -- -------------------------------------------------------
     PROCEDURE save_invoice_lines (
         p_transaction_id  IN  NUMBER,
@@ -420,20 +419,18 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
         p_status          OUT VARCHAR2,
         p_message         OUT VARCHAR2
     ) IS
-        l_root      JSON_OBJECT_T;
-        l_items     JSON_ARRAY_T;
-        l_line_clob CLOB;
         l_inserted  NUMBER := 0;
         l_errors    NUMBER := 0;
         l_err_log   VARCHAR2(4000) := '';
     BEGIN
-        l_root  := JSON_OBJECT_T.parse(p_lines_json);
-        l_items := l_root.get_array('items');
-
-        FOR i IN 0 .. l_items.get_size - 1 LOOP
+        FOR rec IN (
+            SELECT j.item_clob
+            FROM JSON_TABLE(p_lines_json, '$.items[*]'
+                COLUMNS (item_clob CLOB FORMAT JSON PATH '$')
+            ) j
+        ) LOOP
             BEGIN
-                l_line_clob := l_items.get(i).to_clob();
-                upsert_one_line(p_transaction_id, l_line_clob);
+                upsert_one_line(p_transaction_id, rec.item_clob);
                 l_inserted := l_inserted + 1;
             EXCEPTION
                 WHEN OTHERS THEN
