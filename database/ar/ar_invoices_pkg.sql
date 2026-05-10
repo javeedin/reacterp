@@ -74,6 +74,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
         l_due_date                  DATE            := to_safe_date(p_j.get_string('DueDate'));
         l_billing_date              DATE            := to_safe_date(p_j.get_string('BillingDate'));
         l_ship_date                 DATE            := to_safe_date(p_j.get_string('ShipDate'));
+        l_transaction_class         VARCHAR2(30)    := p_j.get_string('TransactionClass');
         l_transaction_type          VARCHAR2(150)   := p_j.get_string('TransactionType');
         l_transaction_source        VARCHAR2(150)   := p_j.get_string('TransactionSource');
         l_invoice_status            VARCHAR2(150)   := p_j.get_string('InvoiceStatus');
@@ -137,6 +138,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
             DUE_DATE                    = l_due_date,
             BILLING_DATE                = l_billing_date,
             SHIP_DATE                   = l_ship_date,
+            TRANSACTION_CLASS           = l_transaction_class,
             TRANSACTION_TYPE            = l_transaction_type,
             TRANSACTION_SOURCE          = l_transaction_source,
             INVOICE_STATUS              = l_invoice_status,
@@ -195,7 +197,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
             CUSTOMER_TRANSACTION_ID,    TRANSACTION_NUMBER,         DOCUMENT_NUMBER,
             CROSS_REFERENCE,            TRANSACTION_DATE,           ACCOUNTING_DATE,
             DUE_DATE,                   BILLING_DATE,               SHIP_DATE,
-            TRANSACTION_TYPE,           TRANSACTION_SOURCE,         INVOICE_STATUS,
+            TRANSACTION_CLASS,          TRANSACTION_TYPE,           TRANSACTION_SOURCE,         INVOICE_STATUS,
             INVOICE_CURRENCY_CODE,      CONVERSION_RATE_TYPE,       CONVERSION_DATE,
             CONVERSION_RATE,            ENTERED_AMOUNT,             INVOICE_BALANCE_AMOUNT,
             FREIGHT_AMOUNT,             BILL_TO_CUSTOMER_NUMBER,    BILL_TO_CUSTOMER_NAME,
@@ -216,7 +218,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
             l_id,                       l_transaction_number,       l_document_number,
             l_cross_reference,          l_transaction_date,         l_accounting_date,
             l_due_date,                 l_billing_date,             l_ship_date,
-            l_transaction_type,         l_transaction_source,       l_invoice_status,
+            l_transaction_class,        l_transaction_type,         l_transaction_source,       l_invoice_status,
             l_invoice_currency_code,    l_conversion_rate_type,     l_conversion_date,
             l_conversion_rate,          l_entered_amount,           l_invoice_balance_amount,
             l_freight_amount,           l_bill_to_customer_number,  l_bill_to_customer_name,
