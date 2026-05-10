@@ -33,9 +33,11 @@ const fetchARInvoicesFromOracle = async (
   verbose = true
 ): Promise<{ success: boolean; items: any[]; hasMore: boolean; totalResults?: number; error?: string }> => {
   try {
-    if (verbose) log?.('step', '──── [GET] Oracle Fusion AR Invoices ────');
+    log?.('step', `──── [GET] Oracle Fusion AR Invoices (offset=${params.offset ?? 0}, limit=${params.limit}) ────`);
 
     const data = await fetchFromOracle('receivablesInvoices', params, log, verbose);
+
+    log?.('info', `  Oracle response: ${(data.items || []).length} items, hasMore=${data.hasMore}, totalResults=${data.totalResults ?? data.count ?? 'N/A'}`);
 
     return {
       success: true,
@@ -205,7 +207,7 @@ export const syncARInvoices = async (
     pageSize = 25;
     maxRecords = 25;
   } else {
-    pageSize = 100;
+    pageSize = 500;  // Full sync: 500 per page
     maxRecords = null;
   }
 
@@ -268,10 +270,12 @@ export const syncARInvoices = async (
       }
 
       allInvoices = [...allInvoices, ...result.items];
-      hasMore = result.hasMore && result.items.length === fetchLimit;
+      // Continue if: got a full page OR Oracle explicitly says hasMore
+      // (don't rely solely on hasMore flag — some Fusion endpoints omit it on the last page)
+      hasMore = result.items.length > 0 && (result.hasMore === true || result.items.length === fetchLimit);
       if (maxRecords !== null && allInvoices.length >= maxRecords) hasMore = false;
 
-      if (verbose) log?.('success', `Page ${currentPage}: ${result.items.length} invoices (Total: ${allInvoices.length})`);
+      log?.('info', `Page ${currentPage}: ${result.items.length} invoices fetched (Total so far: ${allInvoices.length}, hasMore: ${hasMore})`);
 
       if (hasMore) await new Promise(r => setTimeout(r, 100));
     }
