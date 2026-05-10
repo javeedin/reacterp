@@ -143,29 +143,31 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
             LAST_UPDATED_BY          = USER,
             LAST_UPDATE_DATE         = SYSTIMESTAMP,
             SYNC_DATE                = SYSTIMESTAMP,
-            SYNC_STATUS              = 'UPDATED'
+            SYNC_STATUS              = 'UPDATED',
+            -- DIAGNOSTIC: store raw JSON so we can see exact field names received
+            ERROR_MESSAGE            = SUBSTR(p_json, 1, 3900)
         WHEN NOT MATCHED THEN INSERT (
             CUSTOMER_TRANSACTION_ID,  TRANSACTION_NUMBER,       DOCUMENT_NUMBER,
-            CROSS_REFERENCE,          TRANSACTION_DATE,          ACCOUNTING_DATE,
-            DUE_DATE,                 BILLING_DATE,              SHIP_DATE,
-            TRANSACTION_CLASS,        TRANSACTION_TYPE,          TRANSACTION_SOURCE,
-            INVOICE_STATUS,           INVOICE_CURRENCY_CODE,     CONVERSION_RATE_TYPE,
-            CONVERSION_DATE,          CONVERSION_RATE,           ENTERED_AMOUNT,
-            INVOICE_BALANCE_AMOUNT,   FREIGHT_AMOUNT,            BILL_TO_CUSTOMER_NUMBER,
-            BILL_TO_CUSTOMER_NAME,    BILL_TO_SITE,              BILL_TO_CONTACT,
-            BILL_TO_PARTY_ID,         SHIP_TO_CUSTOMER_NUMBER,   SHIP_TO_CUSTOMER_NAME,
-            SHIP_TO_SITE,             SHIP_TO_CONTACT,           PAYING_CUSTOMER_NAME,
-            PAYING_CUSTOMER_SITE,     PAYING_CUSTOMER_ACCOUNT,   BUSINESS_UNIT,
-            LEGAL_ENTITY_IDENTIFIER,  PAYMENT_TERMS,             RECEIPT_METHOD,
-            PURCHASE_ORDER,           PURCHASE_ORDER_DATE,       PURCHASE_ORDER_REVISION,
-            CARRIER,                  SHIPPING_REFERENCE,        DEFAULT_TAXATION_COUNTRY,
-            FIRST_PARTY_REG_NUMBER,   THIRD_PARTY_REG_NUMBER,    PREPAYMENT,
-            INTERCOMPANY,             PRINT_OPTION,              SOLD_TO_PARTY_NUMBER,
-            REMIT_TO_ADDRESS,         SALESPERSON_NUMBER,        DELIVERY_METHOD,
-            EMAIL,                    SPECIAL_INSTRUCTIONS,      COMMENTS,
-            INTERNAL_NOTES,           INVOICING_RULE,            FUSION_CREATED_BY,
-            FUSION_CREATION_DATE,     FUSION_LAST_UPDATED_BY,    FUSION_LAST_UPDATE_DATE,
-            SYNC_STATUS
+            CROSS_REFERENCE,          TRANSACTION_DATE,         ACCOUNTING_DATE,
+            DUE_DATE,                 BILLING_DATE,             SHIP_DATE,
+            TRANSACTION_CLASS,        TRANSACTION_TYPE,         TRANSACTION_SOURCE,
+            INVOICE_STATUS,           INVOICE_CURRENCY_CODE,    CONVERSION_RATE_TYPE,
+            CONVERSION_DATE,          CONVERSION_RATE,          ENTERED_AMOUNT,
+            INVOICE_BALANCE_AMOUNT,   FREIGHT_AMOUNT,           BILL_TO_CUSTOMER_NUMBER,
+            BILL_TO_CUSTOMER_NAME,    BILL_TO_SITE,             BILL_TO_CONTACT,
+            BILL_TO_PARTY_ID,         SHIP_TO_CUSTOMER_NUMBER,  SHIP_TO_CUSTOMER_NAME,
+            SHIP_TO_SITE,             SHIP_TO_CONTACT,          PAYING_CUSTOMER_NAME,
+            PAYING_CUSTOMER_SITE,     PAYING_CUSTOMER_ACCOUNT,  BUSINESS_UNIT,
+            LEGAL_ENTITY_IDENTIFIER,  PAYMENT_TERMS,            RECEIPT_METHOD,
+            PURCHASE_ORDER,           PURCHASE_ORDER_DATE,      PURCHASE_ORDER_REVISION,
+            CARRIER,                  SHIPPING_REFERENCE,       DEFAULT_TAXATION_COUNTRY,
+            FIRST_PARTY_REG_NUMBER,   THIRD_PARTY_REG_NUMBER,   PREPAYMENT,
+            INTERCOMPANY,             PRINT_OPTION,             SOLD_TO_PARTY_NUMBER,
+            REMIT_TO_ADDRESS,         SALESPERSON_NUMBER,       DELIVERY_METHOD,
+            EMAIL,                    SPECIAL_INSTRUCTIONS,     COMMENTS,
+            INTERNAL_NOTES,           INVOICING_RULE,           FUSION_CREATED_BY,
+            FUSION_CREATION_DATE,     FUSION_LAST_UPDATED_BY,   FUSION_LAST_UPDATE_DATE,
+            SYNC_STATUS,              ERROR_MESSAGE
         ) VALUES (
             l_id,
             JSON_VALUE(p_json, '$.TransactionNumber'),
@@ -223,7 +225,9 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
             l_cr_ts,
             JSON_VALUE(p_json, '$.LastUpdatedBy'),
             l_upd_ts,
-            'NEW'
+            'NEW',
+            -- DIAGNOSTIC: store raw JSON so we can see exact field names received
+            SUBSTR(p_json, 1, 3900)
         );
     END upsert_header;
 
@@ -353,9 +357,10 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
 
     -- -------------------------------------------------------
     -- save_invoices_bulk: {"items":[...]} array of headers
-    -- Uses JSON_TABLE with scalar column extraction directly
-    -- from the original CLOB — no intermediate serialization,
-    -- no CLOB FORMAT JSON, guarantees PascalCase key matching.
+    -- Iterates by index and extracts each item via JSON_QUERY
+    -- (EXECUTE IMMEDIATE) to preserve original key casing,
+    -- then delegates to upsert_header (JSON_VALUE) which is
+    -- proven to work on a correctly-cased CLOB.
     -- -------------------------------------------------------
     PROCEDURE save_invoices_bulk (
         p_invoices_json IN  CLOB,
@@ -365,214 +370,32 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
         p_updated       OUT NUMBER,
         p_errors        OUT NUMBER
     ) IS
+        l_count     NUMBER;
+        l_item_clob CLOB;
         l_txn_id    NUMBER;
         l_err_msg   VARCHAR2(4000);
         l_error_log VARCHAR2(32767) := '';
-        l_txn_date  DATE;
-        l_acct_date DATE;
-        l_due_date  DATE;
-        l_bill_date DATE;
-        l_ship_date DATE;
-        l_conv_date DATE;
-        l_po_date   DATE;
-        l_cr_ts     TIMESTAMP;
-        l_upd_ts    TIMESTAMP;
     BEGIN
         p_inserted := 0;
         p_updated  := 0;
         p_errors   := 0;
 
-        FOR rec IN (
-            SELECT j.*
-            FROM JSON_TABLE(p_invoices_json, '$.items[*]' COLUMNS (
-                CUSTOMER_TRANSACTION_ID  NUMBER         PATH '$.CustomerTransactionId',
-                TRANSACTION_NUMBER       VARCHAR2(50)   PATH '$.TransactionNumber',
-                DOCUMENT_NUMBER          NUMBER         PATH '$.DocumentNumber',
-                CROSS_REFERENCE          VARCHAR2(150)  PATH '$.CrossReference',
-                TRANSACTION_DATE_STR     VARCHAR2(50)   PATH '$.TransactionDate',
-                ACCOUNTING_DATE_STR      VARCHAR2(50)   PATH '$.AccountingDate',
-                DUE_DATE_STR             VARCHAR2(50)   PATH '$.DueDate',
-                BILLING_DATE_STR         VARCHAR2(50)   PATH '$.BillingDate',
-                SHIP_DATE_STR            VARCHAR2(50)   PATH '$.ShipDate',
-                TRANSACTION_CLASS        VARCHAR2(30)   PATH '$.TransactionClass',
-                TRANSACTION_TYPE         VARCHAR2(50)   PATH '$.TransactionType',
-                TRANSACTION_SOURCE       VARCHAR2(240)  PATH '$.TransactionSource',
-                INVOICE_STATUS           VARCHAR2(30)   PATH '$.InvoiceStatus',
-                INVOICE_CURRENCY_CODE    VARCHAR2(15)   PATH '$.InvoiceCurrencyCode',
-                CONVERSION_RATE_TYPE     VARCHAR2(30)   PATH '$.ConversionRateType',
-                CONVERSION_DATE_STR      VARCHAR2(50)   PATH '$.ConversionDate',
-                CONVERSION_RATE          NUMBER         PATH '$.ConversionRate',
-                ENTERED_AMOUNT           NUMBER         PATH '$.EnteredAmount',
-                INVOICE_BALANCE_AMOUNT   NUMBER         PATH '$.InvoiceBalanceAmount',
-                FREIGHT_AMOUNT           NUMBER         PATH '$.FreightAmount',
-                BILL_TO_CUSTOMER_NUMBER  VARCHAR2(50)   PATH '$.BillToCustomerNumber',
-                BILL_TO_CUSTOMER_NAME    VARCHAR2(360)  PATH '$.BillToCustomerName',
-                BILL_TO_SITE             VARCHAR2(50)   PATH '$.BillToSite',
-                BILL_TO_CONTACT          VARCHAR2(360)  PATH '$.BillToContact',
-                BILL_TO_PARTY_ID         NUMBER         PATH '$.BillToPartyId',
-                SHIP_TO_CUSTOMER_NUMBER  VARCHAR2(50)   PATH '$.ShipToCustomerNumber',
-                SHIP_TO_CUSTOMER_NAME    VARCHAR2(360)  PATH '$.ShipToCustomerName',
-                SHIP_TO_SITE             VARCHAR2(50)   PATH '$.ShipToSite',
-                SHIP_TO_CONTACT          VARCHAR2(360)  PATH '$.ShipToContact',
-                PAYING_CUSTOMER_NAME     VARCHAR2(360)  PATH '$.PayingCustomerName',
-                PAYING_CUSTOMER_SITE     VARCHAR2(50)   PATH '$.PayingCustomerSite',
-                PAYING_CUSTOMER_ACCOUNT  VARCHAR2(100)  PATH '$.PayingCustomerAccount',
-                BUSINESS_UNIT            VARCHAR2(240)  PATH '$.BusinessUnit',
-                LEGAL_ENTITY_IDENTIFIER  VARCHAR2(30)   PATH '$.LegalEntityIdentifier',
-                PAYMENT_TERMS            VARCHAR2(100)  PATH '$.PaymentTerms',
-                RECEIPT_METHOD           VARCHAR2(100)  PATH '$.ReceiptMethod',
-                PURCHASE_ORDER           VARCHAR2(150)  PATH '$.PurchaseOrder',
-                PURCHASE_ORDER_DATE_STR  VARCHAR2(50)   PATH '$.PurchaseOrderDate',
-                PURCHASE_ORDER_REVISION  VARCHAR2(50)   PATH '$.PurchaseOrderRevision',
-                CARRIER                  VARCHAR2(100)  PATH '$.Carrier',
-                SHIPPING_REFERENCE       VARCHAR2(150)  PATH '$.ShippingReference',
-                DEFAULT_TAXATION_COUNTRY VARCHAR2(10)   PATH '$.DefaultTaxationCountry',
-                FIRST_PARTY_REG_NUMBER   VARCHAR2(100)  PATH '$.FirstPartyRegistrationNumber',
-                THIRD_PARTY_REG_NUMBER   VARCHAR2(100)  PATH '$.ThirdPartyRegistrationNumber',
-                PREPAYMENT               VARCHAR2(10)   PATH '$.Prepayment',
-                INTERCOMPANY             VARCHAR2(10)   PATH '$.Intercompany',
-                PRINT_OPTION             VARCHAR2(10)   PATH '$.PrintOption',
-                SOLD_TO_PARTY_NUMBER     VARCHAR2(50)   PATH '$.SoldToPartyNumber',
-                REMIT_TO_ADDRESS         VARCHAR2(500)  PATH '$.RemitToAddress',
-                SALESPERSON_NUMBER       VARCHAR2(50)   PATH '$.SalesPersonNumber',
-                DELIVERY_METHOD          VARCHAR2(50)   PATH '$.DeliveryMethod',
-                EMAIL                    VARCHAR2(240)  PATH '$.Email',
-                SPECIAL_INSTRUCTIONS     VARCHAR2(4000) PATH '$.SpecialInstructions',
-                COMMENTS                 VARCHAR2(4000) PATH '$.Comments',
-                INTERNAL_NOTES           VARCHAR2(4000) PATH '$.InternalNotes',
-                INVOICING_RULE           VARCHAR2(100)  PATH '$.InvoicingRule',
-                FUSION_CREATED_BY        VARCHAR2(240)  PATH '$.CreatedBy',
-                CREATION_DATE_STR        VARCHAR2(50)   PATH '$.CreationDate',
-                FUSION_LAST_UPDATED_BY   VARCHAR2(240)  PATH '$.LastUpdatedBy',
-                LAST_UPDATE_DATE_STR     VARCHAR2(50)   PATH '$.LastUpdateDate'
-            )) j
-        ) LOOP
+        -- Count items in the array
+        SELECT COUNT(*) INTO l_count
+        FROM JSON_TABLE(p_invoices_json, '$.items[*]'
+            COLUMNS (dummy NUMBER PATH '$.CustomerTransactionId')
+        ) j;
+
+        -- Loop by index; JSON_QUERY via dynamic SQL preserves original key casing
+        FOR i IN 0 .. l_count - 1 LOOP
             BEGIN
-                l_txn_id    := rec.CUSTOMER_TRANSACTION_ID;
-                l_txn_date  := to_safe_date(rec.TRANSACTION_DATE_STR);
-                l_acct_date := to_safe_date(rec.ACCOUNTING_DATE_STR);
-                l_due_date  := to_safe_date(rec.DUE_DATE_STR);
-                l_bill_date := to_safe_date(rec.BILLING_DATE_STR);
-                l_ship_date := to_safe_date(rec.SHIP_DATE_STR);
-                l_conv_date := to_safe_date(rec.CONVERSION_DATE_STR);
-                l_po_date   := to_safe_date(rec.PURCHASE_ORDER_DATE_STR);
-                l_cr_ts     := to_safe_ts(rec.CREATION_DATE_STR);
-                l_upd_ts    := to_safe_ts(rec.LAST_UPDATE_DATE_STR);
+                EXECUTE IMMEDIATE
+                    'SELECT JSON_QUERY(:1, ''$.items[' || TO_CHAR(i) || ']'' RETURNING CLOB) FROM DUAL'
+                INTO l_item_clob
+                USING p_invoices_json;
 
-                MERGE INTO RR_AR_INVOICE_HEADERS h
-                USING DUAL
-                ON (h.CUSTOMER_TRANSACTION_ID = l_txn_id)
-                WHEN MATCHED THEN UPDATE SET
-                    TRANSACTION_NUMBER       = rec.TRANSACTION_NUMBER,
-                    DOCUMENT_NUMBER          = rec.DOCUMENT_NUMBER,
-                    CROSS_REFERENCE          = rec.CROSS_REFERENCE,
-                    TRANSACTION_DATE         = l_txn_date,
-                    ACCOUNTING_DATE          = l_acct_date,
-                    DUE_DATE                 = l_due_date,
-                    BILLING_DATE             = l_bill_date,
-                    SHIP_DATE                = l_ship_date,
-                    TRANSACTION_CLASS        = rec.TRANSACTION_CLASS,
-                    TRANSACTION_TYPE         = rec.TRANSACTION_TYPE,
-                    TRANSACTION_SOURCE       = rec.TRANSACTION_SOURCE,
-                    INVOICE_STATUS           = rec.INVOICE_STATUS,
-                    INVOICE_CURRENCY_CODE    = rec.INVOICE_CURRENCY_CODE,
-                    CONVERSION_RATE_TYPE     = rec.CONVERSION_RATE_TYPE,
-                    CONVERSION_DATE          = l_conv_date,
-                    CONVERSION_RATE          = rec.CONVERSION_RATE,
-                    ENTERED_AMOUNT           = rec.ENTERED_AMOUNT,
-                    INVOICE_BALANCE_AMOUNT   = rec.INVOICE_BALANCE_AMOUNT,
-                    FREIGHT_AMOUNT           = rec.FREIGHT_AMOUNT,
-                    BILL_TO_CUSTOMER_NUMBER  = rec.BILL_TO_CUSTOMER_NUMBER,
-                    BILL_TO_CUSTOMER_NAME    = rec.BILL_TO_CUSTOMER_NAME,
-                    BILL_TO_SITE             = rec.BILL_TO_SITE,
-                    BILL_TO_CONTACT          = rec.BILL_TO_CONTACT,
-                    BILL_TO_PARTY_ID         = rec.BILL_TO_PARTY_ID,
-                    SHIP_TO_CUSTOMER_NUMBER  = rec.SHIP_TO_CUSTOMER_NUMBER,
-                    SHIP_TO_CUSTOMER_NAME    = rec.SHIP_TO_CUSTOMER_NAME,
-                    SHIP_TO_SITE             = rec.SHIP_TO_SITE,
-                    SHIP_TO_CONTACT          = rec.SHIP_TO_CONTACT,
-                    PAYING_CUSTOMER_NAME     = rec.PAYING_CUSTOMER_NAME,
-                    PAYING_CUSTOMER_SITE     = rec.PAYING_CUSTOMER_SITE,
-                    PAYING_CUSTOMER_ACCOUNT  = rec.PAYING_CUSTOMER_ACCOUNT,
-                    BUSINESS_UNIT            = rec.BUSINESS_UNIT,
-                    LEGAL_ENTITY_IDENTIFIER  = rec.LEGAL_ENTITY_IDENTIFIER,
-                    PAYMENT_TERMS            = rec.PAYMENT_TERMS,
-                    RECEIPT_METHOD           = rec.RECEIPT_METHOD,
-                    PURCHASE_ORDER           = rec.PURCHASE_ORDER,
-                    PURCHASE_ORDER_DATE      = l_po_date,
-                    PURCHASE_ORDER_REVISION  = rec.PURCHASE_ORDER_REVISION,
-                    CARRIER                  = rec.CARRIER,
-                    SHIPPING_REFERENCE       = rec.SHIPPING_REFERENCE,
-                    DEFAULT_TAXATION_COUNTRY = rec.DEFAULT_TAXATION_COUNTRY,
-                    FIRST_PARTY_REG_NUMBER   = rec.FIRST_PARTY_REG_NUMBER,
-                    THIRD_PARTY_REG_NUMBER   = rec.THIRD_PARTY_REG_NUMBER,
-                    PREPAYMENT               = rec.PREPAYMENT,
-                    INTERCOMPANY             = rec.INTERCOMPANY,
-                    PRINT_OPTION             = rec.PRINT_OPTION,
-                    SOLD_TO_PARTY_NUMBER     = rec.SOLD_TO_PARTY_NUMBER,
-                    REMIT_TO_ADDRESS         = rec.REMIT_TO_ADDRESS,
-                    SALESPERSON_NUMBER       = rec.SALESPERSON_NUMBER,
-                    DELIVERY_METHOD          = rec.DELIVERY_METHOD,
-                    EMAIL                    = rec.EMAIL,
-                    SPECIAL_INSTRUCTIONS     = rec.SPECIAL_INSTRUCTIONS,
-                    COMMENTS                 = rec.COMMENTS,
-                    INTERNAL_NOTES           = rec.INTERNAL_NOTES,
-                    INVOICING_RULE           = rec.INVOICING_RULE,
-                    FUSION_CREATED_BY        = rec.FUSION_CREATED_BY,
-                    FUSION_CREATION_DATE     = l_cr_ts,
-                    FUSION_LAST_UPDATED_BY   = rec.FUSION_LAST_UPDATED_BY,
-                    FUSION_LAST_UPDATE_DATE  = l_upd_ts,
-                    LAST_UPDATED_BY          = USER,
-                    LAST_UPDATE_DATE         = SYSTIMESTAMP,
-                    SYNC_DATE                = SYSTIMESTAMP,
-                    SYNC_STATUS              = 'UPDATED'
-                WHEN NOT MATCHED THEN INSERT (
-                    CUSTOMER_TRANSACTION_ID,  TRANSACTION_NUMBER,       DOCUMENT_NUMBER,
-                    CROSS_REFERENCE,          TRANSACTION_DATE,         ACCOUNTING_DATE,
-                    DUE_DATE,                 BILLING_DATE,             SHIP_DATE,
-                    TRANSACTION_CLASS,        TRANSACTION_TYPE,         TRANSACTION_SOURCE,
-                    INVOICE_STATUS,           INVOICE_CURRENCY_CODE,    CONVERSION_RATE_TYPE,
-                    CONVERSION_DATE,          CONVERSION_RATE,          ENTERED_AMOUNT,
-                    INVOICE_BALANCE_AMOUNT,   FREIGHT_AMOUNT,           BILL_TO_CUSTOMER_NUMBER,
-                    BILL_TO_CUSTOMER_NAME,    BILL_TO_SITE,             BILL_TO_CONTACT,
-                    BILL_TO_PARTY_ID,         SHIP_TO_CUSTOMER_NUMBER,  SHIP_TO_CUSTOMER_NAME,
-                    SHIP_TO_SITE,             SHIP_TO_CONTACT,          PAYING_CUSTOMER_NAME,
-                    PAYING_CUSTOMER_SITE,     PAYING_CUSTOMER_ACCOUNT,  BUSINESS_UNIT,
-                    LEGAL_ENTITY_IDENTIFIER,  PAYMENT_TERMS,            RECEIPT_METHOD,
-                    PURCHASE_ORDER,           PURCHASE_ORDER_DATE,      PURCHASE_ORDER_REVISION,
-                    CARRIER,                  SHIPPING_REFERENCE,       DEFAULT_TAXATION_COUNTRY,
-                    FIRST_PARTY_REG_NUMBER,   THIRD_PARTY_REG_NUMBER,   PREPAYMENT,
-                    INTERCOMPANY,             PRINT_OPTION,             SOLD_TO_PARTY_NUMBER,
-                    REMIT_TO_ADDRESS,         SALESPERSON_NUMBER,       DELIVERY_METHOD,
-                    EMAIL,                    SPECIAL_INSTRUCTIONS,     COMMENTS,
-                    INTERNAL_NOTES,           INVOICING_RULE,           FUSION_CREATED_BY,
-                    FUSION_CREATION_DATE,     FUSION_LAST_UPDATED_BY,   FUSION_LAST_UPDATE_DATE,
-                    SYNC_STATUS
-                ) VALUES (
-                    l_txn_id,
-                    rec.TRANSACTION_NUMBER,       rec.DOCUMENT_NUMBER,
-                    rec.CROSS_REFERENCE,          l_txn_date,             l_acct_date,
-                    l_due_date,                   l_bill_date,            l_ship_date,
-                    rec.TRANSACTION_CLASS,        rec.TRANSACTION_TYPE,   rec.TRANSACTION_SOURCE,
-                    rec.INVOICE_STATUS,           rec.INVOICE_CURRENCY_CODE, rec.CONVERSION_RATE_TYPE,
-                    l_conv_date,                  rec.CONVERSION_RATE,    rec.ENTERED_AMOUNT,
-                    rec.INVOICE_BALANCE_AMOUNT,   rec.FREIGHT_AMOUNT,     rec.BILL_TO_CUSTOMER_NUMBER,
-                    rec.BILL_TO_CUSTOMER_NAME,    rec.BILL_TO_SITE,       rec.BILL_TO_CONTACT,
-                    rec.BILL_TO_PARTY_ID,         rec.SHIP_TO_CUSTOMER_NUMBER, rec.SHIP_TO_CUSTOMER_NAME,
-                    rec.SHIP_TO_SITE,             rec.SHIP_TO_CONTACT,    rec.PAYING_CUSTOMER_NAME,
-                    rec.PAYING_CUSTOMER_SITE,     rec.PAYING_CUSTOMER_ACCOUNT, rec.BUSINESS_UNIT,
-                    rec.LEGAL_ENTITY_IDENTIFIER,  rec.PAYMENT_TERMS,      rec.RECEIPT_METHOD,
-                    rec.PURCHASE_ORDER,           l_po_date,              rec.PURCHASE_ORDER_REVISION,
-                    rec.CARRIER,                  rec.SHIPPING_REFERENCE, rec.DEFAULT_TAXATION_COUNTRY,
-                    rec.FIRST_PARTY_REG_NUMBER,   rec.THIRD_PARTY_REG_NUMBER, rec.PREPAYMENT,
-                    rec.INTERCOMPANY,             rec.PRINT_OPTION,       rec.SOLD_TO_PARTY_NUMBER,
-                    rec.REMIT_TO_ADDRESS,         rec.SALESPERSON_NUMBER, rec.DELIVERY_METHOD,
-                    rec.EMAIL,                    rec.SPECIAL_INSTRUCTIONS, rec.COMMENTS,
-                    rec.INTERNAL_NOTES,           rec.INVOICING_RULE,     rec.FUSION_CREATED_BY,
-                    l_cr_ts,                      rec.FUSION_LAST_UPDATED_BY, l_upd_ts,
-                    'NEW'
-                );
-
+                l_txn_id := JSON_VALUE(l_item_clob, '$.CustomerTransactionId' RETURNING NUMBER);
+                upsert_header(l_item_clob);
                 p_inserted := p_inserted + 1;
 
             EXCEPTION
