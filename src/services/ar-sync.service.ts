@@ -56,16 +56,20 @@ const fetchARInvoiceLinesFromOracle = async (
   verbose = true
 ): Promise<{ success: boolean; items: any[]; error?: string }> => {
   try {
-    if (verbose) log?.('info', `  Fetching lines for Transaction ${customerTransactionId}...`);
+    const url = `${ORACLE_FUSION_CONFIG.baseUrl}/receivablesInvoices/${customerTransactionId}/child/receivablesInvoiceLines`;
 
-    const items = await fetchAllFromOracleUrl(
-      `${ORACLE_FUSION_CONFIG.baseUrl}/receivablesInvoices/${customerTransactionId}/child/receivablesInvoiceLines`,
-      log,
-      verbose,
-      500
-    );
+    if (verbose) {
+      log?.('step', `──── [GET] Oracle Fusion AR Invoice Lines (Txn: ${customerTransactionId}) ────`);
+      log?.('info', `  URL: ${url}`);
+    }
 
-    if (verbose) log?.('success', `  Fetched ${items.length} lines for Transaction ${customerTransactionId}`);
+    const items = await fetchAllFromOracleUrl(url, log, verbose, 500);
+
+    if (verbose) {
+      log?.('success', `  Fetched ${items.length} lines for Transaction ${customerTransactionId}`);
+      log?.('step', '──── GET RESPONSE (Invoice Lines) ────');
+      log?.('info', JSON.stringify({ count: items.length, items }, null, 2));
+    }
     return { success: true, items };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -126,9 +130,17 @@ const insertARLinesToApex = async (
 
     if (verbose) {
       log?.('step', `──── [POST] APEX AR Lines for Txn ${customerTransactionId} (${lines.length} lines) ────`);
+      log?.('info', `  URL: ${APEX_AR_LINES_ENDPOINT}`);
+      log?.('step', '──── POST PAYLOAD (Invoice Lines) ────');
+      log?.('info', JSON.stringify(payload, null, 2));
     }
 
     const data = await insertToApex(APEX_AR_LINES_ENDPOINT, payload, log, verbose);
+
+    if (verbose) {
+      log?.('step', '──── POST RESPONSE (Invoice Lines) ────');
+      log?.('success', JSON.stringify(data, null, 2));
+    }
 
     const isSuccess = data.status === 'SUCCESS';
     return {
