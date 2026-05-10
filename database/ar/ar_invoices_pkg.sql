@@ -5,14 +5,12 @@
 
 CREATE OR REPLACE PACKAGE RR_AR_INVOICES_PKG AS
 
-    -- Save / upsert a single AR invoice header + lines from JSON
     PROCEDURE save_invoice (
         p_invoice_json  IN  CLOB,
         p_status        OUT VARCHAR2,
         p_message       OUT VARCHAR2
     );
 
-    -- Bulk upsert - accepts {"items":[...]} array
     PROCEDURE save_invoices_bulk (
         p_invoices_json IN  CLOB,
         p_status        OUT VARCHAR2,
@@ -22,7 +20,6 @@ CREATE OR REPLACE PACKAGE RR_AR_INVOICES_PKG AS
         p_errors        OUT NUMBER
     );
 
-    -- Save / upsert lines for a specific header
     PROCEDURE save_invoice_lines (
         p_transaction_id  IN  NUMBER,
         p_lines_json      IN  CLOB,
@@ -36,26 +33,53 @@ END RR_AR_INVOICES_PKG;
 CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
 
     -- -------------------------------------------------------
+    -- Safe date parser: handles YYYY-MM-DD or ISO 8601
+    -- Returns NULL on any conversion error
+    -- -------------------------------------------------------
+    FUNCTION to_safe_date (p_str IN VARCHAR2) RETURN DATE IS
+    BEGIN
+        IF p_str IS NULL OR TRIM(p_str) IS NULL THEN
+            RETURN NULL;
+        END IF;
+        RETURN TO_DATE(SUBSTR(TRIM(p_str), 1, 10), 'YYYY-MM-DD');
+    EXCEPTION WHEN OTHERS THEN RETURN NULL;
+    END to_safe_date;
+
+    -- -------------------------------------------------------
+    -- Safe timestamp parser: handles 2024-01-15T10:30:00.123+00:00
+    -- Returns NULL on any conversion error
+    -- -------------------------------------------------------
+    FUNCTION to_safe_ts (p_str IN VARCHAR2) RETURN TIMESTAMP IS
+    BEGIN
+        IF p_str IS NULL OR TRIM(p_str) IS NULL THEN
+            RETURN NULL;
+        END IF;
+        -- Replace T separator, then take first 19 chars (YYYY-MM-DD HH24:MI:SS)
+        -- This strips milliseconds (.123) and timezone offset (+00:00)
+        RETURN TO_TIMESTAMP(SUBSTR(REPLACE(TRIM(p_str), 'T', ' '), 1, 19), 'YYYY-MM-DD HH24:MI:SS');
+    EXCEPTION WHEN OTHERS THEN RETURN NULL;
+    END to_safe_ts;
+
+    -- -------------------------------------------------------
     -- Internal: upsert one header row
-    -- All JSON values extracted into local vars first to avoid
-    -- ORA-40573 (PL/SQL JSON types invalid in SQL context)
+    -- All JSON values extracted into local vars first (ORA-40573 fix)
     -- -------------------------------------------------------
     PROCEDURE upsert_header (p_j IN JSON_OBJECT_T) IS
         l_id                        NUMBER          := p_j.get_number('CustomerTransactionId');
         l_transaction_number        VARCHAR2(150)   := p_j.get_string('TransactionNumber');
         l_document_number           NUMBER          := p_j.get_number('DocumentNumber');
         l_cross_reference           VARCHAR2(150)   := p_j.get_string('CrossReference');
-        l_transaction_date          DATE            := TO_DATE(SUBSTR(NULLIF(p_j.get_string('TransactionDate'),  ''), 1, 10), 'YYYY-MM-DD');
-        l_accounting_date           DATE            := TO_DATE(SUBSTR(NULLIF(p_j.get_string('AccountingDate'),   ''), 1, 10), 'YYYY-MM-DD');
-        l_due_date                  DATE            := TO_DATE(SUBSTR(NULLIF(p_j.get_string('DueDate'),          ''), 1, 10), 'YYYY-MM-DD');
-        l_billing_date              DATE            := TO_DATE(SUBSTR(NULLIF(p_j.get_string('BillingDate'),      ''), 1, 10), 'YYYY-MM-DD');
-        l_ship_date                 DATE            := TO_DATE(SUBSTR(NULLIF(p_j.get_string('ShipDate'),         ''), 1, 10), 'YYYY-MM-DD');
+        l_transaction_date          DATE            := to_safe_date(p_j.get_string('TransactionDate'));
+        l_accounting_date           DATE            := to_safe_date(p_j.get_string('AccountingDate'));
+        l_due_date                  DATE            := to_safe_date(p_j.get_string('DueDate'));
+        l_billing_date              DATE            := to_safe_date(p_j.get_string('BillingDate'));
+        l_ship_date                 DATE            := to_safe_date(p_j.get_string('ShipDate'));
         l_transaction_type          VARCHAR2(150)   := p_j.get_string('TransactionType');
         l_transaction_source        VARCHAR2(150)   := p_j.get_string('TransactionSource');
         l_invoice_status            VARCHAR2(150)   := p_j.get_string('InvoiceStatus');
         l_invoice_currency_code     VARCHAR2(15)    := p_j.get_string('InvoiceCurrencyCode');
         l_conversion_rate_type      VARCHAR2(150)   := p_j.get_string('ConversionRateType');
-        l_conversion_date           DATE            := TO_DATE(SUBSTR(NULLIF(p_j.get_string('ConversionDate'),   ''), 1, 10), 'YYYY-MM-DD');
+        l_conversion_date           DATE            := to_safe_date(p_j.get_string('ConversionDate'));
         l_conversion_rate           NUMBER          := p_j.get_number('ConversionRate');
         l_entered_amount            NUMBER          := p_j.get_number('EnteredAmount');
         l_invoice_balance_amount    NUMBER          := p_j.get_number('InvoiceBalanceAmount');
@@ -77,7 +101,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
         l_payment_terms             VARCHAR2(150)   := p_j.get_string('PaymentTerms');
         l_receipt_method            VARCHAR2(150)   := p_j.get_string('ReceiptMethod');
         l_purchase_order            VARCHAR2(150)   := p_j.get_string('PurchaseOrder');
-        l_purchase_order_date       DATE            := TO_DATE(SUBSTR(NULLIF(p_j.get_string('PurchaseOrderDate'), ''), 1, 10), 'YYYY-MM-DD');
+        l_purchase_order_date       DATE            := to_safe_date(p_j.get_string('PurchaseOrderDate'));
         l_purchase_order_revision   VARCHAR2(150)   := p_j.get_string('PurchaseOrderRevision');
         l_carrier                   VARCHAR2(150)   := p_j.get_string('Carrier');
         l_shipping_reference        VARCHAR2(150)   := p_j.get_string('ShippingReference');
@@ -97,9 +121,9 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
         l_internal_notes            VARCHAR2(1000)  := p_j.get_string('InternalNotes');
         l_invoicing_rule            VARCHAR2(150)   := p_j.get_string('InvoicingRule');
         l_fusion_created_by         VARCHAR2(150)   := p_j.get_string('CreatedBy');
-        l_fusion_creation_date      TIMESTAMP       := TO_TIMESTAMP(SUBSTR(REPLACE(NULLIF(p_j.get_string('CreationDate'),   ''), 'T', ' '), 1, 19), 'YYYY-MM-DD HH24:MI:SS');
+        l_fusion_creation_date      TIMESTAMP       := to_safe_ts(p_j.get_string('CreationDate'));
         l_fusion_last_updated_by    VARCHAR2(150)   := p_j.get_string('LastUpdatedBy');
-        l_fusion_last_update_date   TIMESTAMP       := TO_TIMESTAMP(SUBSTR(REPLACE(NULLIF(p_j.get_string('LastUpdateDate'), ''), 'T', ' '), 1, 19), 'YYYY-MM-DD HH24:MI:SS');
+        l_fusion_last_update_date   TIMESTAMP       := to_safe_ts(p_j.get_string('LastUpdateDate'));
     BEGIN
         MERGE INTO RR_AR_INVOICE_HEADERS h
         USING (SELECT l_id AS customer_transaction_id FROM DUAL) src
@@ -214,8 +238,6 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
 
     -- -------------------------------------------------------
     -- Internal: upsert lines for a header
-    -- All JSON values extracted into local vars first to avoid
-    -- ORA-40573 (PL/SQL JSON types invalid in SQL context)
     -- -------------------------------------------------------
     PROCEDURE upsert_lines (p_transaction_id IN NUMBER, p_lines IN JSON_ARRAY_T) IS
         l_line                          JSON_OBJECT_T;
@@ -252,7 +274,6 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
         FOR i IN 0 .. p_lines.get_size - 1 LOOP
             l_line := TREAT(p_lines.get(i) AS JSON_OBJECT_T);
 
-            -- Extract all values into local variables before the MERGE
             l_line_id                       := l_line.get_number('CustomerTransactionLineId');
             l_line_number                   := l_line.get_number('LineNumber');
             l_description                   := l_line.get_string('Description');
@@ -266,22 +287,22 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
             l_assessable_value              := l_line.get_number('AssessableValue');
             l_allocated_freight_amount      := l_line.get_number('AllocatedFreightAmount');
             l_sales_order                   := l_line.get_string('SalesOrder');
-            l_sales_order_date              := TO_DATE(SUBSTR(NULLIF(l_line.get_string('SalesOrderDate'), ''), 1, 10), 'YYYY-MM-DD');
+            l_sales_order_date              := to_safe_date(l_line.get_string('SalesOrderDate'));
             l_tax_classification_code       := l_line.get_string('TaxClassificationCode');
             l_tax_exemption_handling        := l_line.get_string('TaxExemptionHandling');
             l_accounting_rule               := l_line.get_string('AccountingRule');
             l_accounting_rule_duration      := l_line.get_number('AccountingRuleDuration');
-            l_rule_start_date               := TO_DATE(SUBSTR(NULLIF(l_line.get_string('RuleStartDate'), ''), 1, 10), 'YYYY-MM-DD');
-            l_rule_end_date                 := TO_DATE(SUBSTR(NULLIF(l_line.get_string('RuleEndDate'),   ''), 1, 10), 'YYYY-MM-DD');
+            l_rule_start_date               := to_safe_date(l_line.get_string('RuleStartDate'));
+            l_rule_end_date                 := to_safe_date(l_line.get_string('RuleEndDate'));
             l_transaction_business_category := l_line.get_string('TransacationBusinessCategory');
             l_product_fiscal_classification := l_line.get_string('ProductFiscalClassification');
             l_product_category              := l_line.get_string('ProductCategory');
             l_product_type                  := l_line.get_string('ProductType');
             l_line_intended_use             := l_line.get_string('LineIntendedUse');
             l_fusion_created_by             := l_line.get_string('CreatedBy');
-            l_fusion_creation_date          := TO_TIMESTAMP(SUBSTR(REPLACE(NULLIF(l_line.get_string('CreationDate'),   ''), 'T', ' '), 1, 19), 'YYYY-MM-DD HH24:MI:SS');
+            l_fusion_creation_date          := to_safe_ts(l_line.get_string('CreationDate'));
             l_fusion_last_updated_by        := l_line.get_string('LastUpdatedBy');
-            l_fusion_last_update_date       := TO_TIMESTAMP(SUBSTR(REPLACE(NULLIF(l_line.get_string('LastUpdateDate'), ''), 'T', ' '), 1, 19), 'YYYY-MM-DD HH24:MI:SS');
+            l_fusion_last_update_date       := to_safe_ts(l_line.get_string('LastUpdateDate'));
 
             MERGE INTO RR_AR_INVOICE_LINES ln
             USING (SELECT l_line_id AS id FROM DUAL) src
@@ -387,14 +408,13 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
         p_updated       OUT NUMBER,
         p_errors        OUT NUMBER
     ) IS
-        l_root        JSON_OBJECT_T;
-        l_items       JSON_ARRAY_T;
-        l_item        JSON_OBJECT_T;
-        l_lines       JSON_ARRAY_T;
-        l_err_msg     VARCHAR2(4000);
-        l_last_err    VARCHAR2(4000);
-        l_txn_id      NUMBER;
-        l_error_log   VARCHAR2(32767) := '';
+        l_root      JSON_OBJECT_T;
+        l_items     JSON_ARRAY_T;
+        l_item      JSON_OBJECT_T;
+        l_lines     JSON_ARRAY_T;
+        l_err_msg   VARCHAR2(4000);
+        l_txn_id    NUMBER;
+        l_error_log VARCHAR2(32767) := '';
     BEGIN
         p_inserted := 0;
         p_updated  := 0;
@@ -417,12 +437,10 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
                 p_inserted := p_inserted + 1;
             EXCEPTION
                 WHEN OTHERS THEN
-                    l_err_msg  := SQLERRM;
-                    l_last_err := 'TxnId=' || NVL(TO_CHAR(l_txn_id), '?') || ': ' || l_err_msg;
-                    p_errors   := p_errors + 1;
-                    -- Append to error log (first 3 errors)
+                    l_err_msg := SQLERRM;
+                    p_errors  := p_errors + 1;
                     IF p_errors <= 3 THEN
-                        l_error_log := l_error_log || ' | [' || p_errors || '] ' || l_last_err;
+                        l_error_log := l_error_log || ' | [' || p_errors || '] TxnId=' || NVL(TO_CHAR(l_txn_id), '?') || ': ' || l_err_msg;
                     END IF;
                     BEGIN
                         UPDATE RR_AR_INVOICE_HEADERS
@@ -446,7 +464,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
     END save_invoices_bulk;
 
     -- -------------------------------------------------------
-    -- save_invoice_lines: lines for a specific header
+    -- save_invoice_lines: standalone lines endpoint
     -- payload: {"items":[...]}
     -- -------------------------------------------------------
     PROCEDURE save_invoice_lines (
