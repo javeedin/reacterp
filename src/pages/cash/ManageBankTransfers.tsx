@@ -257,9 +257,11 @@ const TransferForm: React.FC<{
       .then(r => r.json())
       .then(d => {
         setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET', url, status: 200, body: JSON.stringify(d, null, 2) }]);
-        setAttachments((d.items || []).map((a: any) => ({
-          id: a.id, uid: String(a.id), name: a.fileName, fileType: a.fileType || '', fileSize: a.fileSize || 0, status: 'done' as const,
-        })));
+        if (Array.isArray(d.items)) {
+          setAttachments(d.items.map((a: any) => ({
+            id: a.id, uid: String(a.id), name: a.fileName, fileType: a.fileType || '', fileSize: a.fileSize || 0, status: 'done' as const,
+          })));
+        }
       })
       .catch(err => {
         setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET', url, status: 0, body: String(err) }]);
@@ -365,6 +367,31 @@ const TransferForm: React.FC<{
     finally { setPreviewLoading(false); }
   };
 
+  const handleDownloadAttachment = async (file: any) => {
+    const att = attachments.find(a => a.uid === file.uid);
+    if (!att) return;
+    let content = att.content;
+    let fileType = att.fileType;
+    if (!content && att.id && initialValues?.bankAccountTransferId) {
+      try {
+        const res = await fetch(`${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments/${att.id}`, { headers: { Accept: 'application/json' } });
+        const d = await res.json();
+        content = d.content || d.CONTENT || '';
+        fileType = att.fileType || d.fileType || 'application/octet-stream';
+      } catch { message.error('Failed to download attachment.'); return; }
+    }
+    if (!content) { message.warning('No content available for download.'); return; }
+    const bytes = atob(content);
+    const arr = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+    const blobUrl = URL.createObjectURL(new Blob([arr], { type: fileType || 'application/octet-stream' }));
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = att.name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+  };
+
   const handleSaveAttachments = async () => {
     const pending = attachments.filter(a => !a.id);
     if (pending.length === 0) { message.info('No new attachments to save.'); return; }
@@ -384,7 +411,7 @@ const TransferForm: React.FC<{
           dir: 'POST', url: postUrl, status: res.status,
           body: `Request: ${JSON.stringify({ ...payload, content: payload.content ? '[base64 ' + payload.content.length + ' chars]' : '' }, null, 2)}\n\nResponse: ${respText}`,
         }]);
-        saved++;
+        if (res.ok) saved++;
       } catch (e: any) {
         setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST', url: postUrl, status: 0, body: 'Error: ' + e.message }]);
       }
@@ -395,7 +422,9 @@ const TransferForm: React.FC<{
       const r = await fetch(getUrl, { headers: { Accept: 'application/json' } });
       const d = await r.json();
       setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET (refresh)', url: getUrl, status: r.status, body: JSON.stringify(d, null, 2) }]);
-      setAttachments((d.items || []).map((a: any) => ({ id: a.id, uid: String(a.id), name: a.fileName, fileType: a.fileType || '', fileSize: a.fileSize || 0, status: 'done' as const })));
+      if (Array.isArray(d.items)) {
+        setAttachments(d.items.map((a: any) => ({ id: a.id, uid: String(a.id), name: a.fileName, fileType: a.fileType || '', fileSize: a.fileSize || 0, status: 'done' as const })));
+      }
     } catch (e: any) {
       setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET (refresh)', url: getUrl, status: 0, body: 'Error: ' + String(e) }]);
     }
@@ -450,6 +479,7 @@ const TransferForm: React.FC<{
   const [voucherModalOpen, setVoucherModalOpen] = useState(false);
   const [attachments, setAttachments] = useState<Array<{id?: number; uid: string; name: string; fileType: string; fileSize: number; content?: string; status: 'done' | 'uploading' | 'error'}>>([]);
   const [attSaving, setAttSaving] = useState(false);
+  const [attPostTesting, setAttPostTesting] = useState(false);
   const [previewAtt, setPreviewAtt] = useState<{ name: string; fileType: string; content: string; blobUrl?: string } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
@@ -685,7 +715,8 @@ const TransferForm: React.FC<{
                     setAttachments(prev => prev.filter(a => a.uid !== file.uid));
                   }}
                   onPreview={handlePreviewAttachment}
-                  showUploadList={{ showPreviewIcon: true, showRemoveIcon: true }}
+                  onDownload={handleDownloadAttachment}
+                  showUploadList={{ showPreviewIcon: true, showDownloadIcon: true, showRemoveIcon: true }}
                   multiple
                   disabled={!isEdit}
                 >
@@ -875,53 +906,97 @@ const TransferForm: React.FC<{
             {
               key: 'attachments',
               label: 'Attachments API',
-              children: (
-                <div>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    GET: <Text code copyable style={{ fontSize: 12 }}>{APEX_BASE}/cash/banktransfers/{initialValues?.bankAccountTransferId ?? ':transferId'}/attachments</Text>
-                  </Text>
-                  <div style={{ marginTop: 8 }}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      POST: <Text code style={{ fontSize: 12 }}>{APEX_BASE}/cash/banktransfers/{initialValues?.bankAccountTransferId ?? ':transferId'}/attachments</Text>
-                    </Text>
-                  </div>
-                  <Divider style={{ margin: '10px 0' }} />
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <Text strong style={{ fontSize: 13 }}>Request / Response Log</Text>
-                    <Button size="small" onClick={() => {
-                      if (!initialValues?.bankAccountTransferId) return;
-                      const url = `${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments`;
-                      setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET (manual)', url, status: null, body: '…fetching…' }]);
-                      fetch(url, { headers: { Accept: 'application/json' } })
-                        .then(r => r.json().then(d => ({ status: r.status, d })))
-                        .then(({ status, d }) => {
-                          setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET (manual)', url, status, body: JSON.stringify(d, null, 2) }]);
-                        })
-                        .catch(e => setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET (manual)', url, status: 0, body: String(e) }]));
-                    }}>
-                      Test GET
-                    </Button>
-                  </div>
-                  {attApiLog.length === 0 ? (
-                    <Text type="secondary" style={{ fontSize: 12 }}>No calls logged yet. Upload or save an attachment to see the log.</Text>
-                  ) : (
-                    [...attApiLog].reverse().map((entry, i) => (
-                      <div key={i} style={{ marginBottom: 10 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                          <Tag color={entry.dir.startsWith('POST') ? 'blue' : 'green'} style={{ fontSize: 11 }}>{entry.dir}</Tag>
-                          {entry.status != null && (
-                            <Tag color={entry.status >= 200 && entry.status < 300 ? 'success' : 'error'}>HTTP {entry.status}</Tag>
-                          )}
-                          <Text type="secondary" style={{ fontSize: 11, wordBreak: 'break-all' }}>{entry.url}</Text>
-                        </div>
-                        <pre style={{ background: '#1e1e2e', color: '#cdd6f4', padding: 10, borderRadius: 6, fontSize: 11, overflowX: 'auto', maxHeight: 180, whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>
-                          {entry.body}
-                        </pre>
+              children: (() => {
+                const tid = initialValues?.bankAccountTransferId;
+                const baseUrl = tid ? `${APEX_BASE}/cash/banktransfers/${tid}/attachments` : `${APEX_BASE}/cash/banktransfers/:transferId/attachments`;
+                const samplePayload = JSON.stringify({
+                  fileName: 'document.pdf',
+                  fileType: 'application/pdf',
+                  fileSize: 12345,
+                  content: '<base64-encoded file content>',
+                  createdBy: 'ERP_USER',
+                }, null, 2);
+                const TINY_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+                return (
+                  <div>
+                    <div style={{ background: '#f0f5ff', border: '1px solid #adc6ff', borderRadius: 6, padding: '10px 14px', marginBottom: 12 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                        <Tag color="green" style={{ fontSize: 11, margin: 0 }}>GET</Tag>
+                        <Text code copyable style={{ fontSize: 12, wordBreak: 'break-all' }}>{baseUrl}</Text>
                       </div>
-                    ))
-                  )}
-                </div>
-              ),
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Tag color="blue" style={{ fontSize: 11, margin: 0 }}>POST</Tag>
+                        <Text code copyable style={{ fontSize: 12, wordBreak: 'break-all' }}>{baseUrl}</Text>
+                      </div>
+                    </div>
+                    <div style={{ marginBottom: 8 }}>
+                      <Text strong style={{ fontSize: 12 }}>POST Body (JSON):</Text>
+                      <pre style={{ background: '#1e1e2e', color: '#cdd6f4', padding: 10, borderRadius: 6, fontSize: 11, margin: '4px 0 10px', whiteSpace: 'pre-wrap' }}>
+                        {samplePayload}
+                      </pre>
+                    </div>
+                    <Space style={{ marginBottom: 10 }}>
+                      <Button size="small" disabled={!tid} onClick={() => {
+                        if (!tid) return;
+                        const url = baseUrl;
+                        setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET (test)', url, status: null, body: '…fetching…' }]);
+                        fetch(url, { headers: { Accept: 'application/json' } })
+                          .then(r => r.text().then(t => ({ status: r.status, t })))
+                          .then(({ status, t }) => {
+                            const body = (() => { try { return JSON.stringify(JSON.parse(t), null, 2); } catch { return t; } })();
+                            setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET (test)', url, status, body }]);
+                          })
+                          .catch(e => setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET (test)', url, status: 0, body: String(e) }]));
+                      }}>Test GET</Button>
+                      <Button size="small" type="primary" loading={attPostTesting} disabled={!tid}
+                        style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+                        onClick={async () => {
+                          if (!tid) return;
+                          setAttPostTesting(true);
+                          const url = baseUrl;
+                          const body = { fileName: 'test-ping.png', fileType: 'image/png', fileSize: TINY_PNG.length, content: TINY_PNG, createdBy: 'ERP_USER' };
+                          const reqStr = `POST ${url}\nContent-Type: application/json\n\n${JSON.stringify(body, null, 2)}`;
+                          setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST (test)', url, status: null, body: reqStr }]);
+                          try {
+                            const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                            const t = await res.text();
+                            const respBody = (() => { try { return JSON.stringify(JSON.parse(t), null, 2); } catch { return t; } })();
+                            setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST (test)', url, status: res.status, body: `Request:\n${JSON.stringify(body, null, 2)}\n\nResponse (HTTP ${res.status}):\n${respBody}` }]);
+                            if (res.ok) { message.success('POST succeeded — endpoint is working!'); }
+                            else { message.error(`POST failed — HTTP ${res.status}. Check the log.`); }
+                          } catch (e: any) {
+                            setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST (test)', url, status: 0, body: 'Network error: ' + e.message }]);
+                            message.error('POST failed: ' + e.message);
+                          } finally { setAttPostTesting(false); }
+                        }}>
+                        Test POST (ping)
+                      </Button>
+                    </Space>
+                    <Divider style={{ margin: '8px 0' }} />
+                    <Text strong style={{ fontSize: 13 }}>Request / Response Log</Text>
+                    <div style={{ marginTop: 8 }}>
+                      {attApiLog.length === 0 ? (
+                        <Text type="secondary" style={{ fontSize: 12 }}>No calls logged yet.</Text>
+                      ) : (
+                        [...attApiLog].reverse().map((entry, i) => (
+                          <div key={i} style={{ marginBottom: 10 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                              <Tag color={entry.dir.startsWith('POST') ? 'blue' : 'green'} style={{ fontSize: 11 }}>{entry.dir}</Tag>
+                              {entry.status != null && (
+                                <Tag color={entry.status >= 200 && entry.status < 300 ? 'success' : 'error'}>HTTP {entry.status}</Tag>
+                              )}
+                              <Text type="secondary" style={{ fontSize: 11, wordBreak: 'break-all' }}>{entry.url}</Text>
+                            </div>
+                            <pre style={{ background: '#1e1e2e', color: '#cdd6f4', padding: 10, borderRadius: 6, fontSize: 11, overflowX: 'auto', maxHeight: 200, whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>
+                              {entry.body}
+                            </pre>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                );
+              })(),
             },
           ]}
         />

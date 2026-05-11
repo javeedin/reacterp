@@ -664,6 +664,31 @@ const ExternalTxnForm: React.FC<{
     }
   };
 
+  const handleDownloadAttachment = async (file: any) => {
+    const att = attachments.find(a => a.uid === file.uid);
+    if (!att) return;
+    let content = att.content;
+    let fileType = att.fileType;
+    if (!content && att.id && initialValues?.externalTransactionId) {
+      try {
+        const res = await fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.externalTransactionId}/attachments/${att.id}`, { headers: { Accept: 'application/json' } });
+        const d = await res.json();
+        content = d.content || d.CONTENT || '';
+        fileType = att.fileType || d.fileType || 'application/octet-stream';
+      } catch { message.error('Failed to download attachment.'); return; }
+    }
+    if (!content) { message.warning('No content available for download.'); return; }
+    const bytes = atob(content);
+    const arr = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+    const blobUrl = URL.createObjectURL(new Blob([arr], { type: fileType || 'application/octet-stream' }));
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = att.name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+  };
+
   // Locked = reconciled or accounted — cannot delete, but can still add attachments
   const isLocked = isEdit && (initialValues?.status === 'REC' || initialValues?.accountingFlag === 'Y');
 
@@ -1277,7 +1302,8 @@ const ExternalTxnForm: React.FC<{
                 setAttachments(prev => prev.filter(a => a.uid !== file.uid));
               }}
               onPreview={handlePreviewAttachment}
-              showUploadList={{ showPreviewIcon: true, showRemoveIcon: true }}
+              onDownload={handleDownloadAttachment}
+              showUploadList={{ showPreviewIcon: true, showDownloadIcon: true, showRemoveIcon: true }}
               multiple
               disabled={!isEdit && (!bankSelected || saved)}
             >
