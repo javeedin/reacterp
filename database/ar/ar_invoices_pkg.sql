@@ -29,6 +29,13 @@ CREATE OR REPLACE PACKAGE RR_AR_INVOICES_PKG AS
         p_message         OUT VARCHAR2
     );
 
+    PROCEDURE save_invoice_installments (
+        p_transaction_id     IN  NUMBER,
+        p_installments_json  IN  CLOB,
+        p_status             OUT VARCHAR2,
+        p_message            OUT VARCHAR2
+    );
+
 END RR_AR_INVOICES_PKG;
 /
 
@@ -567,6 +574,155 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
             p_status  := 'ERROR';
             p_message := SQLERRM;
     END save_invoice_lines;
+
+    -- -------------------------------------------------------
+    -- save_invoice_installments: {"items":[...]} array
+    -- Uses JSON_TABLE with direct scalar extraction
+    -- -------------------------------------------------------
+    PROCEDURE save_invoice_installments (
+        p_transaction_id     IN  NUMBER,
+        p_installments_json  IN  CLOB,
+        p_status             OUT VARCHAR2,
+        p_message            OUT VARCHAR2
+    ) IS
+        l_inserted  NUMBER := 0;
+        l_errors    NUMBER := 0;
+        l_err_log   VARCHAR2(4000) := '';
+        l_due_date  DATE;
+        l_cls_date  DATE;
+        l_gl_date   DATE;
+        l_dsp_date  DATE;
+        l_cr_ts     TIMESTAMP;
+        l_upd_ts    TIMESTAMP;
+    BEGIN
+        FOR rec IN (
+            SELECT j.*
+            FROM JSON_TABLE(p_installments_json, '$.items[*]' COLUMNS (
+                INSTALLMENT_ID                      NUMBER        PATH '$.InstallmentId',
+                INSTALLMENT_SEQUENCE_NUMBER         NUMBER        PATH '$.InstallmentSequenceNumber',
+                INSTALLMENT_STATUS                  VARCHAR2(30)  PATH '$.InstallmentStatus',
+                INSTALLMENT_DUE_DATE_STR            VARCHAR2(50)  PATH '$.InstallmentDueDate',
+                INSTALLMENT_CLOSED_DATE_STR         VARCHAR2(50)  PATH '$.InstallmentClosedDate',
+                INSTALLMENT_GL_CLOSED_DATE_STR      VARCHAR2(50)  PATH '$.InstallmentGLClosedDate',
+                DISPUTE_DATE_STR                    VARCHAR2(50)  PATH '$.DisputeDate',
+                ORIGINAL_AMOUNT                     NUMBER        PATH '$.OriginalAmount',
+                INSTALLMENT_LINE_AMOUNT_ORIGINAL    NUMBER        PATH '$.InstallmentLineAmountOriginal',
+                INSTALLMENT_FREIGHT_AMT_ORIGINAL    NUMBER        PATH '$.InstallmentFreightAmountOriginal',
+                INSTALLMENT_TAX_AMOUNT_ORIGINAL     NUMBER        PATH '$.InstallmentTaxAmountOriginal',
+                INSTALLMENT_BALANCE_DUE             NUMBER        PATH '$.InstallmentBalanceDue',
+                ACCOUNTED_BALANCE_DUE               NUMBER        PATH '$.AccountedBalanceDue',
+                INSTALLMENT_LINE_AMOUNT_DUE         NUMBER        PATH '$.InstallmentLineAmountDue',
+                INSTALLMENT_FREIGHT_AMT_DUE         NUMBER        PATH '$.InstallmentFreightAmountDue',
+                INSTALLMENT_TAX_AMOUNT_DUE          NUMBER        PATH '$.InstallmentTaxAmountDue',
+                AMOUNT_PAID                         NUMBER        PATH '$.AmountPaid',
+                INSTALLMENT_AMOUNT_ADJUSTED         NUMBER        PATH '$.InstallmentAmountAdjusted',
+                INSTALLMENT_AMOUNT_CREDITED         NUMBER        PATH '$.InstallmentAmountCredited',
+                PENDING_ADJUSTMENT_AMOUNT           NUMBER        PATH '$.PendingAdjustmentAmount',
+                DISPUTE_AMOUNT                      NUMBER        PATH '$.DisputeAmount',
+                PAYMENT_DAYS_LATE                   NUMBER        PATH '$.PaymentDaysLate',
+                EXCLUDE_FROM_COLLECTIONS            VARCHAR2(10)  PATH '$.ExcludeFromCollections',
+                FUSION_CREATED_BY                   VARCHAR2(240) PATH '$.CreatedBy',
+                CREATION_DATE_STR                   VARCHAR2(50)  PATH '$.CreationDate',
+                FUSION_LAST_UPDATED_BY              VARCHAR2(240) PATH '$.LastUpdatedBy',
+                LAST_UPDATE_DATE_STR                VARCHAR2(50)  PATH '$.LastUpdateDate'
+            )) j
+        ) LOOP
+            BEGIN
+                l_due_date := to_safe_date(rec.INSTALLMENT_DUE_DATE_STR);
+                l_cls_date := to_safe_date(rec.INSTALLMENT_CLOSED_DATE_STR);
+                l_gl_date  := to_safe_date(rec.INSTALLMENT_GL_CLOSED_DATE_STR);
+                l_dsp_date := to_safe_date(rec.DISPUTE_DATE_STR);
+                l_cr_ts    := to_safe_ts(rec.CREATION_DATE_STR);
+                l_upd_ts   := to_safe_ts(rec.LAST_UPDATE_DATE_STR);
+
+                MERGE INTO RR_AR_INVOICE_INSTALLMENTS ins
+                USING DUAL
+                ON (ins.INSTALLMENT_ID = rec.INSTALLMENT_ID)
+                WHEN MATCHED THEN UPDATE SET
+                    INSTALLMENT_SEQUENCE_NUMBER         = rec.INSTALLMENT_SEQUENCE_NUMBER,
+                    INSTALLMENT_STATUS                  = rec.INSTALLMENT_STATUS,
+                    INSTALLMENT_DUE_DATE                = l_due_date,
+                    INSTALLMENT_CLOSED_DATE             = l_cls_date,
+                    INSTALLMENT_GL_CLOSED_DATE          = l_gl_date,
+                    DISPUTE_DATE                        = l_dsp_date,
+                    ORIGINAL_AMOUNT                     = rec.ORIGINAL_AMOUNT,
+                    INSTALLMENT_LINE_AMOUNT_ORIGINAL    = rec.INSTALLMENT_LINE_AMOUNT_ORIGINAL,
+                    INSTALLMENT_FREIGHT_AMOUNT_ORIGINAL = rec.INSTALLMENT_FREIGHT_AMT_ORIGINAL,
+                    INSTALLMENT_TAX_AMOUNT_ORIGINAL     = rec.INSTALLMENT_TAX_AMOUNT_ORIGINAL,
+                    INSTALLMENT_BALANCE_DUE             = rec.INSTALLMENT_BALANCE_DUE,
+                    ACCOUNTED_BALANCE_DUE               = rec.ACCOUNTED_BALANCE_DUE,
+                    INSTALLMENT_LINE_AMOUNT_DUE         = rec.INSTALLMENT_LINE_AMOUNT_DUE,
+                    INSTALLMENT_FREIGHT_AMOUNT_DUE      = rec.INSTALLMENT_FREIGHT_AMT_DUE,
+                    INSTALLMENT_TAX_AMOUNT_DUE          = rec.INSTALLMENT_TAX_AMOUNT_DUE,
+                    AMOUNT_PAID                         = rec.AMOUNT_PAID,
+                    INSTALLMENT_AMOUNT_ADJUSTED         = rec.INSTALLMENT_AMOUNT_ADJUSTED,
+                    INSTALLMENT_AMOUNT_CREDITED         = rec.INSTALLMENT_AMOUNT_CREDITED,
+                    PENDING_ADJUSTMENT_AMOUNT           = rec.PENDING_ADJUSTMENT_AMOUNT,
+                    DISPUTE_AMOUNT                      = rec.DISPUTE_AMOUNT,
+                    PAYMENT_DAYS_LATE                   = rec.PAYMENT_DAYS_LATE,
+                    EXCLUDE_FROM_COLLECTIONS            = rec.EXCLUDE_FROM_COLLECTIONS,
+                    FUSION_CREATED_BY                   = rec.FUSION_CREATED_BY,
+                    FUSION_CREATION_DATE                = l_cr_ts,
+                    FUSION_LAST_UPDATED_BY              = rec.FUSION_LAST_UPDATED_BY,
+                    FUSION_LAST_UPDATE_DATE             = l_upd_ts,
+                    LAST_UPDATED_BY                     = USER,
+                    LAST_UPDATE_DATE                    = SYSTIMESTAMP,
+                    SYNC_DATE                           = SYSTIMESTAMP,
+                    SYNC_STATUS                         = 'UPDATED'
+                WHEN NOT MATCHED THEN INSERT (
+                    INSTALLMENT_ID,                     CUSTOMER_TRANSACTION_ID,
+                    INSTALLMENT_SEQUENCE_NUMBER,        INSTALLMENT_STATUS,
+                    INSTALLMENT_DUE_DATE,               INSTALLMENT_CLOSED_DATE,
+                    INSTALLMENT_GL_CLOSED_DATE,         DISPUTE_DATE,
+                    ORIGINAL_AMOUNT,                    INSTALLMENT_LINE_AMOUNT_ORIGINAL,
+                    INSTALLMENT_FREIGHT_AMOUNT_ORIGINAL, INSTALLMENT_TAX_AMOUNT_ORIGINAL,
+                    INSTALLMENT_BALANCE_DUE,            ACCOUNTED_BALANCE_DUE,
+                    INSTALLMENT_LINE_AMOUNT_DUE,        INSTALLMENT_FREIGHT_AMOUNT_DUE,
+                    INSTALLMENT_TAX_AMOUNT_DUE,         AMOUNT_PAID,
+                    INSTALLMENT_AMOUNT_ADJUSTED,        INSTALLMENT_AMOUNT_CREDITED,
+                    PENDING_ADJUSTMENT_AMOUNT,          DISPUTE_AMOUNT,
+                    PAYMENT_DAYS_LATE,                  EXCLUDE_FROM_COLLECTIONS,
+                    FUSION_CREATED_BY,                  FUSION_CREATION_DATE,
+                    FUSION_LAST_UPDATED_BY,             FUSION_LAST_UPDATE_DATE,
+                    SYNC_STATUS
+                ) VALUES (
+                    rec.INSTALLMENT_ID,                 p_transaction_id,
+                    rec.INSTALLMENT_SEQUENCE_NUMBER,    rec.INSTALLMENT_STATUS,
+                    l_due_date,                         l_cls_date,
+                    l_gl_date,                          l_dsp_date,
+                    rec.ORIGINAL_AMOUNT,                rec.INSTALLMENT_LINE_AMOUNT_ORIGINAL,
+                    rec.INSTALLMENT_FREIGHT_AMT_ORIGINAL, rec.INSTALLMENT_TAX_AMOUNT_ORIGINAL,
+                    rec.INSTALLMENT_BALANCE_DUE,        rec.ACCOUNTED_BALANCE_DUE,
+                    rec.INSTALLMENT_LINE_AMOUNT_DUE,    rec.INSTALLMENT_FREIGHT_AMT_DUE,
+                    rec.INSTALLMENT_TAX_AMOUNT_DUE,     rec.AMOUNT_PAID,
+                    rec.INSTALLMENT_AMOUNT_ADJUSTED,    rec.INSTALLMENT_AMOUNT_CREDITED,
+                    rec.PENDING_ADJUSTMENT_AMOUNT,      rec.DISPUTE_AMOUNT,
+                    rec.PAYMENT_DAYS_LATE,              rec.EXCLUDE_FROM_COLLECTIONS,
+                    rec.FUSION_CREATED_BY,              l_cr_ts,
+                    rec.FUSION_LAST_UPDATED_BY,         l_upd_ts,
+                    'NEW'
+                );
+
+                l_inserted := l_inserted + 1;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    l_errors  := l_errors + 1;
+                    IF l_errors <= 3 THEN
+                        l_err_log := l_err_log || ' | [' || l_errors || '] ' || SUBSTR(SQLERRM, 1, 200);
+                    END IF;
+            END;
+        END LOOP;
+
+        COMMIT;
+        p_status  := 'SUCCESS';
+        p_message := 'Installments saved: ' || l_inserted || ', Errors: ' || l_errors ||
+                     CASE WHEN l_err_log IS NOT NULL THEN ' -- ' || l_err_log ELSE '' END;
+    EXCEPTION
+        WHEN OTHERS THEN
+            ROLLBACK;
+            p_status  := 'ERROR';
+            p_message := SQLERRM;
+    END save_invoice_installments;
 
 END RR_AR_INVOICES_PKG;
 /

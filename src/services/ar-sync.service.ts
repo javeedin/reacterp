@@ -11,6 +11,8 @@ export interface ARSyncProgress {
   currentInvoiceNumber: string;
   totalLines: number;
   processedLines: number;
+  totalInstallments: number;
+  processedInstallments: number;
   currentPage: number;
   totalPages: number;
   errors: number;
@@ -113,6 +115,57 @@ const insertARInvoicesToApex = async (
   }
 };
 
+const fetchARInstallmentsFromOracle = async (
+  customerTransactionId: number,
+  log?: LogCallback,
+): Promise<{ success: boolean; items: any[]; error?: string }> => {
+  try {
+    const url = `${ORACLE_FUSION_CONFIG.baseUrl}/receivablesInvoices/${customerTransactionId}/child/receivablesInvoiceInstallments`;
+
+    log?.('step', `──── [GET] Oracle Fusion AR Installments (Txn: ${customerTransactionId}) ────`);
+    log?.('info', `  URL: ${url}`);
+
+    const items = await fetchAllFromOracleUrl(url, log, false, 500);
+
+    log?.('success', `  Fetched ${items.length} installments for Transaction ${customerTransactionId}`);
+
+    return { success: true, items };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    log?.('error', `Fetch Installments Error: ${errorMsg}`);
+    return { success: false, items: [], error: errorMsg };
+  }
+};
+
+const insertARInstallmentsToApex = async (
+  installments: any[],
+  customerTransactionId: number,
+  log?: LogCallback,
+): Promise<{ success: boolean; successCount: number; error?: string }> => {
+  try {
+    const endpoint = `ar/invoices/${customerTransactionId}/installments`;
+    const payload = { items: installments.map(inst => {
+      const { links, ...rest } = inst as any;
+      return rest;
+    }) };
+
+    log?.('step', `──── [POST] APEX AR Installments for Txn ${customerTransactionId} (${installments.length} installments) ────`);
+
+    const data = await insertToApex(endpoint, payload, log, false);
+
+    const isSuccess = data.status === 'SUCCESS';
+    return {
+      success: isSuccess,
+      successCount: data.successCount ?? (isSuccess ? installments.length : 0),
+      error: isSuccess ? undefined : (data.message || data.error || 'Installments insert failed'),
+    };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    log?.('error', `POST Installments Error: ${errorMsg}`);
+    return { success: false, successCount: 0, error: errorMsg };
+  }
+};
+
 const insertARLinesToApex = async (
   lines: any[],
   customerTransactionId: number,
@@ -185,6 +238,8 @@ export const syncARInvoices = async (
     currentInvoiceNumber: '',
     totalLines: 0,
     processedLines: 0,
+    totalInstallments: 0,
+    processedInstallments: 0,
     currentPage: 0,
     totalPages: 0,
     errors: 0,
@@ -223,10 +278,12 @@ export const syncARInvoices = async (
     log?.('step', '═══════════════════════════════════════════════════════════');
     log?.('info', '  │ FUSION GET (Source):');
     log?.('info', `  │   Invoices: ${ORACLE_FUSION_CONFIG.baseUrl}/receivablesInvoices`);
-    log?.('info', `  │   Lines:    ${ORACLE_FUSION_CONFIG.baseUrl}/receivablesInvoices/{id}/child/receivablesInvoiceLines`);
+    log?.('info', `  │   Lines:         ${ORACLE_FUSION_CONFIG.baseUrl}/receivablesInvoices/{id}/child/receivablesInvoiceLines`);
+    log?.('info', `  │   Installments:  ${ORACLE_FUSION_CONFIG.baseUrl}/receivablesInvoices/{id}/child/receivablesInvoiceInstallments`);
     log?.('info', '  │ APEX POST (Target):');
-    log?.('info', `  │   Invoices: ${APEX_DB_CONFIG.baseUrl}/${APEX_AR_INVOICES_ENDPOINT}`);
-    log?.('info', `  │   Lines:    ${APEX_DB_CONFIG.baseUrl}/ar/invoices/:id/lines`);
+    log?.('info', `  │   Invoices:      ${APEX_DB_CONFIG.baseUrl}/${APEX_AR_INVOICES_ENDPOINT}`);
+    log?.('info', `  │   Lines:         ${APEX_DB_CONFIG.baseUrl}/ar/invoices/:id/lines`);
+    log?.('info', `  │   Installments:  ${APEX_DB_CONFIG.baseUrl}/ar/invoices/:id/installments`);
     log?.('step', '═══════════════════════════════════════════════════════════');
 
     // ── STEP 1: Fetch AR Invoices ──────────────────────────────────────────────
@@ -388,6 +445,58 @@ export const syncARInvoices = async (
       if (i < allInvoices.length - 1) await new Promise(r => setTimeout(r, 50));
     }
 
+    // ── STEP 4: Fetch & Insert Installments per Invoice ───────────────────────
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('step', '  STEP 4: Fetching and Inserting AR Invoice Installments');
+    log?.('step', '═══════════════════════════════════════════════════════════');
+
+    let totalInstallments = 0;
+    let processedInstallments = 0;
+
+    for (let i = 0; i < allInvoices.length; i++) {
+      if (abortSignal?.aborted) {
+        updateProgress({ status: 'stopped', endTime: new Date() });
+        log?.('warning', 'Sync stopped by user');
+        return progress;
+      }
+
+      const invoice = allInvoices[i];
+      const txnId: number = invoice.CustomerTransactionId;
+      const txnNumber: string = invoice.TransactionNumber || String(txnId);
+
+      if (!txnId) continue;
+
+      if (verbose) log?.('info', `[${i + 1}/${allInvoices.length}] Installments for ${txnNumber} (ID: ${txnId})`);
+
+      const installmentsResult = await fetchARInstallmentsFromOracle(txnId, log);
+
+      if (!installmentsResult.success) {
+        log?.('error', `  ✗ Failed to fetch installments for ${txnNumber}: ${installmentsResult.error}`);
+        continue;
+      }
+
+      if (installmentsResult.items.length === 0) {
+        if (verbose) log?.('info', `  No installments found for ${txnNumber} — skipping POST`);
+        continue;
+      }
+
+      totalInstallments += installmentsResult.items.length;
+      updateProgress({ totalInstallments });
+
+      const installmentInsertResult = await insertARInstallmentsToApex(installmentsResult.items, txnId, log);
+
+      if (installmentInsertResult.success) {
+        processedInstallments += installmentInsertResult.successCount;
+        updateProgress({ processedInstallments });
+        if (verbose) log?.('success', `  ✓ ${installmentInsertResult.successCount} installments inserted for ${txnNumber}`);
+      } else {
+        updateProgress({ errors: progress.errors + 1, lastError: installmentInsertResult.error || 'Installments insert failed' });
+        log?.('error', `  ✗ Installments failed for ${txnNumber}: ${installmentInsertResult.error}`);
+      }
+
+      if (i < allInvoices.length - 1) await new Promise(r => setTimeout(r, 50));
+    }
+
     // ── COMPLETE ──────────────────────────────────────────────────────────────
     updateProgress({
       status: abortSignal?.aborted ? 'stopped' : 'completed',
@@ -395,9 +504,11 @@ export const syncARInvoices = async (
       processedInvoices: allInvoices.length,
       processedLines,
       totalLines,
+      processedInstallments,
+      totalInstallments,
     });
 
-    log?.('success', `✓ AR Sync completed: ${progress.insertedInvoices} invoices, ${processedLines} lines inserted`);
+    log?.('success', `✓ AR Sync completed: ${progress.insertedInvoices} invoices, ${processedLines} lines, ${processedInstallments} installments inserted`);
     if (progress.errors > 0) log?.('warning', `⚠ ${progress.errors} errors occurred`);
 
     return progress;

@@ -318,13 +318,80 @@ END;
 /
 
 -- =====================================================
+-- 14. Template: ar/invoices/:id/installments
+-- =====================================================
+BEGIN
+    ORDS.DEFINE_TEMPLATE(
+        p_module_name    => 'ar',
+        p_pattern        => 'invoices/:id/installments',
+        p_comments       => 'AR invoice installments for a header'
+    );
+    COMMIT;
+END;
+/
+
+-- =====================================================
+-- 15. POST /ar/invoices/:id/installments  — save installments
+-- =====================================================
+BEGIN
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'ar',
+        p_pattern        => 'invoices/:id/installments',
+        p_method         => 'POST',
+        p_source_type    => 'plsql/block',
+        p_mimes_allowed  => 'application/json',
+        p_comments       => 'Upsert installments for a specific AR invoice',
+        p_source         => '
+DECLARE
+    l_status  VARCHAR2(20);
+    l_message VARCHAR2(4000);
+BEGIN
+    RR_AR_INVOICES_PKG.save_invoice_installments(
+        p_transaction_id    => :id,
+        p_installments_json => :body_text,
+        p_status            => l_status,
+        p_message           => l_message
+    );
+    :status_code := CASE WHEN l_status = ''SUCCESS'' THEN 201 ELSE 400 END;
+    HTP.P(''{"status":"'' || l_status || ''","message":"'' ||
+          REPLACE(l_message, ''"'', ''\\"'') || ''"}'' );
+END;'
+    );
+    COMMIT;
+END;
+/
+
+-- =====================================================
+-- 16. GET /ar/invoices/:id/installments
+-- =====================================================
+BEGIN
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'ar',
+        p_pattern        => 'invoices/:id/installments',
+        p_method         => 'GET',
+        p_source_type    => 'json/collection',
+        p_items_per_page => 500,
+        p_comments       => 'Get installments for an AR invoice',
+        p_source         => '
+SELECT ins.*
+FROM   RR_AR_INVOICE_INSTALLMENTS ins
+WHERE  ins.CUSTOMER_TRANSACTION_ID = :id
+ORDER  BY ins.INSTALLMENT_SEQUENCE_NUMBER'
+    );
+    COMMIT;
+END;
+/
+
+-- =====================================================
 -- ENDPOINTS SUMMARY
 -- =====================================================
--- POST   {base}/ar/invoices              Upsert single header
--- POST   {base}/ar/invoices/bulk         Bulk upsert headers {"items":[...]}
--- POST   {base}/ar/invoices/:id/lines    Upsert lines for a header {"items":[...]}
--- GET    {base}/ar/invoices              List all headers (paginated)
--- GET    {base}/ar/invoices/:id          Get single header
--- GET    {base}/ar/invoices/:id/lines    Get lines for a header
--- GET    {base}/ar/invoices/stats        Dashboard summary stats
+-- POST   {base}/ar/invoices                     Upsert single header
+-- POST   {base}/ar/invoices/bulk                Bulk upsert headers {"items":[...]}
+-- POST   {base}/ar/invoices/:id/lines           Upsert lines for a header {"items":[...]}
+-- POST   {base}/ar/invoices/:id/installments    Upsert installments for a header {"items":[...]}
+-- GET    {base}/ar/invoices                     List all headers (paginated)
+-- GET    {base}/ar/invoices/:id                 Get single header
+-- GET    {base}/ar/invoices/:id/lines           Get lines for a header
+-- GET    {base}/ar/invoices/:id/installments    Get installments for a header
+-- GET    {base}/ar/invoices/stats               Dashboard summary stats
 -- =====================================================
