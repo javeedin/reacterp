@@ -1722,7 +1722,9 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           });
           // Second layer: LE-chain derived (overrides if present, more accurate)
           Object.entries(buBanksViaLe).forEach(([bu, banks]) => {
-            merged[bu] = banks;
+            const existing = new Set(merged[bu] || []);
+            banks.forEach(b => existing.add(b));
+            merged[bu] = [...existing].sort();
           });
           return merged;
         });
