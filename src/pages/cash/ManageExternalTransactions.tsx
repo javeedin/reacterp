@@ -298,16 +298,7 @@ const ExternalTxnForm: React.FC<{
         offsetAccount: initialValues.offsetAccountCombination ?? '',
         offsetDesc: '',
       }]);
-      // Fetch existing attachments for edit mode
-      if (initialValues.externalTransactionId) {
-        fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.externalTransactionId}/attachments`, { headers: { Accept: 'application/json' } })
-          .then(r => r.json())
-          .then(d => {
-            setAttachments((d.items || []).map((a: any) => ({
-              id: a.id, uid: String(a.id), name: a.fileName, fileType: a.fileType || '', fileSize: a.fileSize || 0, status: 'done' as const,
-            })));
-          }).catch(() => {});
-      }
+      // Fetch existing attachments for edit mode — moved to dedicated effect below
     } else {
       form.resetFields();
       form.setFieldsValue({ transactionDate: dayjs(), valueDate: dayjs(), transactionDirection: 'CR', transactionType: 'External Transaction' });
@@ -317,6 +308,21 @@ const ExternalTxnForm: React.FC<{
       setExtTxnLines([{ key: 0, amount: undefined, description: '', offsetAccount: '', offsetDesc: '' }]);
     }
   }, [initialValues, form]);
+
+  // Load attachments only once when the transaction ID becomes known
+  const extTxnId = initialValues?.externalTransactionId;
+  useEffect(() => {
+    if (!extTxnId) return;
+    fetch(`${APEX_BASE}/cash/externaltransactions/${extTxnId}/attachments`, { headers: { Accept: 'application/json' } })
+      .then(r => r.json())
+      .then(d => {
+        setAttachments((d.items || []).map((a: any) => ({
+          id: a.id, uid: String(a.id), name: a.fileName, fileType: a.fileType || '', fileSize: a.fileSize || 0, status: 'done' as const,
+        })));
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [extTxnId]);
 
   const buildPayload = (values: any) => ({
     items: [{
