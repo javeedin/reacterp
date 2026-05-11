@@ -194,6 +194,8 @@ const ExternalTxnForm: React.FC<{
   const [lineDistSets, setLineDistSets]   = useState<Record<number, string>>({}); // multiple mode
   const [attachments, setAttachments]   = useState<Array<{id?: number; uid: string; name: string; fileType: string; fileSize: number; content?: string; status: 'done' | 'uploading' | 'error'}>>([]);
   const [attachUploading, setAttachUploading] = useState(false);
+  const [previewAtt, setPreviewAtt] = useState<{ name: string; fileType: string; content: string } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [saved, setSaved] = useState(false);
   const [savedExtId, setSavedExtId] = useState<number | null>(null);
   const [savedExtIds, setSavedExtIds] = useState<number[]>([]);
@@ -622,6 +624,29 @@ const ExternalTxnForm: React.FC<{
     } catch (e: any) {
       setApiResponse({ status: 0, body: 'Network error: ' + e.message });
     } finally { setApiPosting(false); }
+  };
+
+  const handlePreviewAttachment = async (file: any) => {
+    const att = attachments.find(a => a.uid === file.uid);
+    if (!att) return;
+    if (att.content) {
+      setPreviewAtt({ name: att.name, fileType: att.fileType, content: att.content });
+      return;
+    }
+    if (!att.id || !initialValues?.externalTransactionId) return;
+    setPreviewLoading(true);
+    try {
+      const res = await fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.externalTransactionId}/attachments/${att.id}`, { headers: { Accept: 'application/json' } });
+      const d = await res.json();
+      const content = d.content || d.CONTENT || '';
+      const fileType = att.fileType || d.fileType || d.FILE_TYPE || 'application/octet-stream';
+      if (!content) { message.warning('No content available for preview.'); return; }
+      setPreviewAtt({ name: att.name, fileType, content });
+    } catch {
+      message.error('Failed to load attachment for preview.');
+    } finally {
+      setPreviewLoading(false);
+    }
   };
 
   // Locked = reconciled or accounted — cannot delete, but can still add attachments
@@ -1236,11 +1261,14 @@ const ExternalTxnForm: React.FC<{
                 }
                 setAttachments(prev => prev.filter(a => a.uid !== file.uid));
               }}
+              onPreview={handlePreviewAttachment}
+              showUploadList={{ showPreviewIcon: true, showRemoveIcon: true }}
               multiple
               disabled={!isEdit && (!bankSelected || saved)}
             >
               <Button icon={<UploadOutlined />} disabled={!isEdit && (!bankSelected || saved)}>Attach Files</Button>
             </Upload>
+            {previewLoading && <Spin size="small" style={{ marginTop: 8 }} />}
             {attachments.length === 0 && (
               <Text type="secondary" style={{ fontSize: 12, marginTop: 8, display: 'block' }}>No attachments</Text>
             )}
@@ -3108,6 +3136,61 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
               title="Payment Voucher Preview"
             />
           )}
+        </Modal>
+
+        {/* ── Attachment Preview Modal ──────────────────────────────────── */}
+        <Modal
+          title={<Space><PaperClipOutlined style={{ color: REDWOOD.info }} /><span>{previewAtt?.name}</span></Space>}
+          open={!!previewAtt}
+          onCancel={() => setPreviewAtt(null)}
+          footer={[
+            <Button key="download" icon={<DownloadOutlined />} type="primary"
+              style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+              onClick={() => {
+                if (!previewAtt) return;
+                const a = document.createElement('a');
+                a.href = `data:${previewAtt.fileType};base64,${previewAtt.content}`;
+                a.download = previewAtt.name;
+                a.click();
+              }}>
+              Download
+            </Button>,
+            <Button key="close" onClick={() => setPreviewAtt(null)}>Close</Button>,
+          ]}
+          width={860}
+          styles={{ body: { padding: 0, minHeight: 200 } }}
+        >
+          {previewAtt && (() => {
+            const dataUrl = `data:${previewAtt.fileType};base64,${previewAtt.content}`;
+            if (previewAtt.fileType?.startsWith('image/')) {
+              return (
+                <div style={{ textAlign: 'center', padding: 16 }}>
+                  <img src={dataUrl} alt={previewAtt.name} style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain' }} />
+                </div>
+              );
+            }
+            if (previewAtt.fileType === 'application/pdf') {
+              return <iframe src={dataUrl} style={{ width: '100%', height: '70vh', border: 'none' }} title={previewAtt.name} />;
+            }
+            return (
+              <div style={{ padding: 32, textAlign: 'center' }}>
+                <PaperClipOutlined style={{ fontSize: 48, color: REDWOOD.neutral600, marginBottom: 12 }} />
+                <div><Text type="secondary">Preview not available for this file type ({previewAtt.fileType || 'unknown'}).</Text></div>
+                <Button
+                  icon={<DownloadOutlined />}
+                  style={{ marginTop: 16 }}
+                  onClick={() => {
+                    const a = document.createElement('a');
+                    a.href = dataUrl;
+                    a.download = previewAtt.name;
+                    a.click();
+                  }}
+                >
+                  Download to view
+                </Button>
+              </div>
+            );
+          })()}
         </Modal>
       </Content>
     </Layout>
