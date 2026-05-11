@@ -194,7 +194,7 @@ const ExternalTxnForm: React.FC<{
   const [lineDistSets, setLineDistSets]   = useState<Record<number, string>>({}); // multiple mode
   const [attachments, setAttachments]   = useState<Array<{id?: number; uid: string; name: string; fileType: string; fileSize: number; content?: string; status: 'done' | 'uploading' | 'error'}>>([]);
   const [attachUploading, setAttachUploading] = useState(false);
-  const [previewAtt, setPreviewAtt] = useState<{ name: string; fileType: string; content: string } | null>(null);
+  const [previewAtt, setPreviewAtt] = useState<{ name: string; fileType: string; content: string; blobUrl?: string } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [saved, setSaved] = useState(false);
   const [savedExtId, setSavedExtId] = useState<number | null>(null);
@@ -632,11 +632,19 @@ const ExternalTxnForm: React.FC<{
     } finally { setApiPosting(false); }
   };
 
+  const makeBlobUrl = (base64: string, mimeType: string): string => {
+    const bytes = atob(base64);
+    const arr = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+    return URL.createObjectURL(new Blob([arr], { type: mimeType || 'application/octet-stream' }));
+  };
+
   const handlePreviewAttachment = async (file: any) => {
     const att = attachments.find(a => a.uid === file.uid);
     if (!att) return;
     if (att.content) {
-      setPreviewAtt({ name: att.name, fileType: att.fileType, content: att.content });
+      const blobUrl = makeBlobUrl(att.content, att.fileType || 'application/octet-stream');
+      setPreviewAtt({ name: att.name, fileType: att.fileType, content: att.content, blobUrl });
       return;
     }
     if (!att.id || !initialValues?.externalTransactionId) return;
@@ -647,7 +655,8 @@ const ExternalTxnForm: React.FC<{
       const content = d.content || d.CONTENT || '';
       const fileType = att.fileType || d.fileType || d.FILE_TYPE || 'application/octet-stream';
       if (!content) { message.warning('No content available for preview.'); return; }
-      setPreviewAtt({ name: att.name, fileType, content });
+      const blobUrl = makeBlobUrl(content, fileType);
+      setPreviewAtt({ name: att.name, fileType, content, blobUrl });
     } catch {
       message.error('Failed to load attachment for preview.');
     } finally {
@@ -1582,35 +1591,34 @@ const ExternalTxnForm: React.FC<{
       <Modal
         title={<Space><PaperClipOutlined style={{ color: REDWOOD.info }} /><span>{previewAtt?.name}</span></Space>}
         open={!!previewAtt}
-        onCancel={() => setPreviewAtt(null)}
+        onCancel={() => { if (previewAtt?.blobUrl) URL.revokeObjectURL(previewAtt.blobUrl); setPreviewAtt(null); }}
         footer={[
           <Button key="download" icon={<DownloadOutlined />} type="primary"
             style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
             onClick={() => {
               if (!previewAtt) return;
               const a = document.createElement('a');
-              a.href = `data:${previewAtt.fileType};base64,${previewAtt.content}`;
+              a.href = previewAtt.blobUrl || `data:${previewAtt.fileType};base64,${previewAtt.content}`;
               a.download = previewAtt.name;
               a.click();
             }}>
             Download
           </Button>,
-          <Button key="close" onClick={() => setPreviewAtt(null)}>Close</Button>,
+          <Button key="close" onClick={() => { if (previewAtt?.blobUrl) URL.revokeObjectURL(previewAtt.blobUrl); setPreviewAtt(null); }}>Close</Button>,
         ]}
         width={860}
         styles={{ body: { padding: 0, minHeight: 200 } }}
       >
         {previewAtt && (() => {
-          const dataUrl = `data:${previewAtt.fileType};base64,${previewAtt.content}`;
           if (previewAtt.fileType?.startsWith('image/')) {
             return (
               <div style={{ textAlign: 'center', padding: 16 }}>
-                <img src={dataUrl} alt={previewAtt.name} style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain' }} />
+                <img src={previewAtt.blobUrl} alt={previewAtt.name} style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain' }} />
               </div>
             );
           }
-          if (previewAtt.fileType === 'application/pdf') {
-            return <iframe src={dataUrl} style={{ width: '100%', height: '70vh', border: 'none' }} title={previewAtt.name} />;
+          if (previewAtt.fileType?.includes('pdf')) {
+            return <iframe src={previewAtt.blobUrl} style={{ width: '100%', height: '70vh', border: 'none' }} title={previewAtt.name} />;
           }
           return (
             <div style={{ padding: 32, textAlign: 'center' }}>
@@ -1620,8 +1628,9 @@ const ExternalTxnForm: React.FC<{
                 icon={<DownloadOutlined />}
                 style={{ marginTop: 16 }}
                 onClick={() => {
+                  if (!previewAtt) return;
                   const a = document.createElement('a');
-                  a.href = dataUrl;
+                  a.href = previewAtt.blobUrl || `data:${previewAtt.fileType};base64,${previewAtt.content}`;
                   a.download = previewAtt.name;
                   a.click();
                 }}
