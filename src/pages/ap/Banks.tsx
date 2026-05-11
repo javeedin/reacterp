@@ -42,10 +42,13 @@ import {
   BugOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import { PROXY_CONFIG, ORACLE_FUSION_CONFIG } from '../../config/api.config';
+import { ORACLE_FUSION_CONFIG } from '../../config/api.config';
 import Autopilot from '../../components/Autopilot';
 import FloatingMenu from '../../components/FloatingMenu';
 import AccountSelector from '../../components/AccountSelector';
+
+const FUSION_AUTH = 'Basic ' + btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
+const fusionHeaders = { Authorization: FUSION_AUTH, Accept: 'application/json' };
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -213,15 +216,11 @@ const Banks: React.FC = () => {
     setBanks([]);
 
     try {
-      const url = `${PROXY_CONFIG.baseUrl}/oracle/cashBanks?limit=500`;
-      const response = await fetch(url);
+      const url = `${ORACLE_FUSION_CONFIG.baseUrl}/cashBanks?limit=500&onlyData=true`;
+      const response = await fetch(url, { headers: fusionHeaders });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const result = await response.json();
-
-      if (result.success && result.items) {
-        setBanks(result.items);
-      } else {
-        throw new Error(result.error || 'Failed to fetch banks');
-      }
+      setBanks(result.items || []);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown error';
       setError(errorMsg);
@@ -234,14 +233,11 @@ const Banks: React.FC = () => {
   const fetchBranches = async (bankName: string): Promise<BankBranch[]> => {
     try {
       const encodedBankName = encodeURIComponent(bankName);
-      const url = `${PROXY_CONFIG.baseUrl}/oracle/cashBankBranches?q=BankName=${encodedBankName}`;
-      const response = await fetch(url);
+      const url = `${ORACLE_FUSION_CONFIG.baseUrl}/cashBankBranches?q=BankName=${encodedBankName}&limit=500&onlyData=true`;
+      const response = await fetch(url, { headers: fusionHeaders });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const result = await response.json();
-
-      if (result.success && result.items) {
-        return result.items;
-      }
-      return [];
+      return result.items || [];
     } catch (err) {
       console.error('Error fetching branches:', err);
       return [];
@@ -252,14 +248,11 @@ const Banks: React.FC = () => {
   const fetchAccounts = async (branchName: string): Promise<BankAccount[]> => {
     try {
       const encodedBranchName = encodeURIComponent(branchName);
-      const url = `${PROXY_CONFIG.baseUrl}/oracle/cashBankAccounts?q=BankBranchName=${encodedBranchName}`;
-      const response = await fetch(url);
+      const url = `${ORACLE_FUSION_CONFIG.baseUrl}/cashBankAccounts?q=BankBranchName=${encodedBranchName}&limit=500&onlyData=true`;
+      const response = await fetch(url, { headers: fusionHeaders });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const result = await response.json();
-
-      if (result.success && result.items) {
-        return result.items;
-      }
-      return [];
+      return result.items || [];
     } catch (err) {
       console.error('Error fetching accounts:', err);
       return [];
@@ -274,10 +267,8 @@ const Banks: React.FC = () => {
     setCheckbooks([]);
     setApiLogs([]); // Clear previous logs
 
-    // Use fusion proxy endpoint for nested paths
-    const fusionPath = `fscmRestApi/resources/11.13.18.05/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments`;
-    const url = `${PROXY_CONFIG.baseUrl}/fusion/${fusionPath}`;
-    const displayUrl = `https://iaaobn.fa.ocs.oraclecloud.com/${fusionPath}`;
+    const url = `${ORACLE_FUSION_CONFIG.baseUrl}/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments?limit=500&onlyData=true`;
+    const displayUrl = url;
 
     console.log('=== PAYMENT DOCUMENTS API CALL ===');
     console.log('URL:', url);
@@ -285,7 +276,7 @@ const Banks: React.FC = () => {
     console.log('BankAccountId:', bankAccountId);
 
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, { headers: fusionHeaders });
 
       console.log('Response Status:', response.status);
       console.log('Response OK:', response.ok);
@@ -332,10 +323,8 @@ const Banks: React.FC = () => {
     setCheckbooksLoading(true);
     setCheckbooks([]);
 
-    // Use fusion proxy endpoint for nested paths
-    const fusionPath = `fscmRestApi/resources/11.13.18.05/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments/${paymentDocumentId}/child/bankAccountCheckbooks`;
-    const url = `${PROXY_CONFIG.baseUrl}/fusion/${fusionPath}`;
-    const displayUrl = `https://iaaobn.fa.ocs.oraclecloud.com/${fusionPath}`;
+    const url = `${ORACLE_FUSION_CONFIG.baseUrl}/cashBankAccounts/${bankAccountId}/child/bankAccountPaymentDocuments/${paymentDocumentId}/child/bankAccountCheckbooks?limit=500&onlyData=true`;
+    const displayUrl = url;
 
     console.log('=== CHECKBOOKS API CALL ===');
     console.log('URL:', url);
@@ -344,7 +333,7 @@ const Banks: React.FC = () => {
     console.log('PaymentDocumentId:', paymentDocumentId);
 
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, { headers: fusionHeaders });
 
       console.log('Response Status:', response.status);
       console.log('Response OK:', response.ok);
