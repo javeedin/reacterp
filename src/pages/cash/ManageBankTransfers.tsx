@@ -240,7 +240,7 @@ const TransferForm: React.FC<{
       setToCurrency(initialValues.toCurrencyCode ?? '');
       // Load existing attachments for edit mode
       if (initialValues?.bankAccountTransferId) {
-        fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.bankAccountTransferId}/attachments`, { headers: { Accept: 'application/json' } })
+        fetch(`${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments`, { headers: { Accept: 'application/json' } })
           .then(r => r.json())
           .then(d => {
             setAttachments((d.items || []).map((a: any) => ({
@@ -333,7 +333,7 @@ const TransferForm: React.FC<{
     if (!att.id || !initialValues?.bankAccountTransferId) return;
     setPreviewLoading(true);
     try {
-      const res = await fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.bankAccountTransferId}/attachments/${att.id}`, { headers: { Accept: 'application/json' } });
+      const res = await fetch(`${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments/${att.id}`, { headers: { Accept: 'application/json' } });
       const d = await res.json();
       const content = d.content || d.CONTENT || '';
       if (!content) { message.warning('No content available for preview.'); return; }
@@ -350,7 +350,7 @@ const TransferForm: React.FC<{
     let saved = 0;
     for (const att of pending) {
       try {
-        await fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.bankAccountTransferId}/attachments`, {
+        await fetch(`${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ fileName: att.name, fileType: att.fileType, fileSize: att.fileSize, content: att.content, createdBy: 'ERP_USER' }),
         });
@@ -359,7 +359,7 @@ const TransferForm: React.FC<{
     }
     // Refresh
     try {
-      const r = await fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.bankAccountTransferId}/attachments`, { headers: { Accept: 'application/json' } });
+      const r = await fetch(`${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments`, { headers: { Accept: 'application/json' } });
       const d = await r.json();
       setAttachments((d.items || []).map((a: any) => ({ id: a.id, uid: String(a.id), name: a.fileName, fileType: a.fileType || '', fileSize: a.fileSize || 0, status: 'done' as const })));
     } catch { /* skip */ }
@@ -644,7 +644,7 @@ const TransferForm: React.FC<{
                   onRemove={(file) => {
                     const att = attachments.find(a => a.uid === file.uid);
                     if (att?.id && initialValues?.bankAccountTransferId) {
-                      fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.bankAccountTransferId}/attachments/${att.id}`, { method: 'DELETE' }).catch(() => {});
+                      fetch(`${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments/${att.id}`, { method: 'DELETE' }).catch(() => {});
                     }
                     setAttachments(prev => prev.filter(a => a.uid !== file.uid));
                   }}
