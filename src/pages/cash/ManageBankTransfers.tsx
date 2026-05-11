@@ -3,17 +3,20 @@ import dayjs, { type Dayjs } from 'dayjs';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
   DatePicker, InputNumber, Checkbox, Row, Col, Space, Tag, Tooltip, Tabs,
-  message, Spin, Empty, Divider, Badge, Collapse, Modal,
+  message, Spin, Empty, Divider, Badge, Collapse, Modal, Upload, Popconfirm,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, BankOutlined, PlusOutlined, SearchOutlined, ReloadOutlined,
   EditOutlined, CloseOutlined, FilterOutlined, SwapOutlined, DollarOutlined,
   FileTextOutlined, ApiOutlined, ExportOutlined, DownloadOutlined,
+  PrinterOutlined, PaperClipOutlined, UploadOutlined, EyeOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -93,6 +96,93 @@ const statusColor = (s: string) => {
 
 const shortAcct = (name: string) => name?.length > 22 ? name.substring(0, 22) + '…' : (name ?? '—');
 
+// ── PDF Generator ─────────────────────────────────────────────────────────────
+const generateTransferPdf = (r: Partial<TransferRecord>): jsPDF => {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const fmt = (v: any) => v != null && v !== '' ? String(v) : '—';
+  const fmtNum = (v: any) => v != null ? Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 }) : '—';
+  const fmtDt  = (v: any) => { if (!v) return '—'; try { return new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); } catch { return String(v); } };
+  const margin = 14;
+
+  // Red header bar
+  doc.setFillColor(199, 70, 52);
+  doc.rect(0, 0, pageW, 18, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.text('Bank Account Transfer', margin, 12);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Printed: ${new Date().toLocaleString()}`, pageW - margin, 12, { align: 'right' });
+  doc.setTextColor(0, 0, 0);
+
+  // Transfer number + date
+  let y = 26;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.setTextColor(199, 70, 52);
+  doc.text(`Transfer #: ${r.bankAccountTransferNumber ?? r.bankAccountTransferId ?? '—'}`, margin, y);
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Date: ${fmtDt(r.transactionDate)}`, pageW - margin, y, { align: 'right' });
+  y += 8;
+
+  // Section 1: Organisation & Accounts
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.text('Organisation & Accounts', margin, y);
+  y += 2;
+  autoTable(doc, {
+    startY: y,
+    body: [
+      ['Business Unit', fmt(r.businessUnit), 'Status', fmt(r.status)],
+      ['From Account',  fmt(r.fromBankAccountName), 'From Currency', fmt(r.fromCurrencyCode)],
+      ['To Account',    fmt(r.toBankAccountName),   'To Currency',   fmt(r.toCurrencyCode)],
+    ],
+    styles: { fontSize: 9, cellPadding: 2 },
+    columnStyles: { 0: { fontStyle: 'bold', cellWidth: 42 }, 2: { fontStyle: 'bold', cellWidth: 42 } },
+    alternateRowStyles: { fillColor: [247, 247, 247] },
+    margin: { left: margin, right: margin },
+  });
+  y = (doc as any).lastAutoTable.finalY + 6;
+
+  // Section 2: Transfer Details
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.text('Transfer Details', margin, y);
+  y += 2;
+  autoTable(doc, {
+    startY: y,
+    body: [
+      ['Payment Amount', fmtNum(r.paymentAmount), 'Payment Currency', fmt(r.paymentCurrencyCode)],
+      ['From Amount',    fmtNum(r.fromAmount),    'Conversion Rate',  fmtNum(r.conversionRate)],
+      ['Conv. Rate Type', fmt(r.conversionRateType), 'Payment Method', fmt(r.paymentMethod)],
+      ['Payment Profile', fmt(r.paymentProfileName), 'Payment Status', fmt(r.paymentStatus)],
+      ['Settled via IBY', fmt(r.isSettledWithIbyFlag), 'Payment File', fmt(r.paymentFile)],
+      ['Memo', fmt(r.memo), '', ''],
+    ],
+    styles: { fontSize: 9, cellPadding: 2 },
+    columnStyles: { 0: { fontStyle: 'bold', cellWidth: 42 }, 2: { fontStyle: 'bold', cellWidth: 42 } },
+    alternateRowStyles: { fillColor: [247, 247, 247] },
+    margin: { left: margin, right: margin },
+  });
+  y = (doc as any).lastAutoTable.finalY + 10;
+
+  // Signature row
+  const sigLabels = ['Prepared by', 'Checked by', 'Approved by', 'Received by'];
+  const sigW = (pageW - 2 * margin) / sigLabels.length;
+  sigLabels.forEach((label, i) => {
+    const x = margin + i * sigW;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text(label, x + sigW / 2, y, { align: 'center' });
+    doc.line(x + 4, y + 12, x + sigW - 4, y + 12);
+  });
+
+  return doc;
+};
+
 // ── Edit/Create tab key ───────────────────────────────────────────────────────
 let tabCounter = 0;
 const newTabKey = () => `tab_${++tabCounter}`;
@@ -148,6 +238,17 @@ const TransferForm: React.FC<{
       });
       setFromCurrency(initialValues.fromCurrencyCode ?? '');
       setToCurrency(initialValues.toCurrencyCode ?? '');
+      // Load existing attachments for edit mode
+      if (initialValues?.bankAccountTransferId) {
+        fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.bankAccountTransferId}/attachments`, { headers: { Accept: 'application/json' } })
+          .then(r => r.json())
+          .then(d => {
+            setAttachments((d.items || []).map((a: any) => ({
+              id: a.id, uid: String(a.id), name: a.fileName, fileType: a.fileType || '', fileSize: a.fileSize || 0, status: 'done' as const,
+            })));
+          })
+          .catch(() => {});
+      }
     } else {
       form.resetFields();
       form.setFieldsValue({ transactionDate: dayjs(), isSettledWithIbyFlag: true });
@@ -215,6 +316,57 @@ const TransferForm: React.FC<{
     }],
   });
 
+  const handlePrintPdf = () => {
+    if (!initialValues) return;
+    const doc = generateTransferPdf(initialValues);
+    const blob = doc.output('blob');
+    const url = URL.createObjectURL(blob);
+    if (voucherPdfUrl) URL.revokeObjectURL(voucherPdfUrl);
+    setVoucherPdfUrl(url);
+    setVoucherModalOpen(true);
+  };
+
+  const handlePreviewAttachment = async (file: any) => {
+    const att = attachments.find(a => a.uid === file.uid);
+    if (!att) return;
+    if (att.content) { setPreviewAtt({ name: att.name, fileType: att.fileType, content: att.content }); return; }
+    if (!att.id || !initialValues?.bankAccountTransferId) return;
+    setPreviewLoading(true);
+    try {
+      const res = await fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.bankAccountTransferId}/attachments/${att.id}`, { headers: { Accept: 'application/json' } });
+      const d = await res.json();
+      const content = d.content || d.CONTENT || '';
+      if (!content) { message.warning('No content available for preview.'); return; }
+      setPreviewAtt({ name: att.name, fileType: att.fileType || d.fileType || 'application/octet-stream', content });
+    } catch { message.error('Failed to load attachment.'); }
+    finally { setPreviewLoading(false); }
+  };
+
+  const handleSaveAttachments = async () => {
+    const pending = attachments.filter(a => !a.id);
+    if (pending.length === 0) { message.info('No new attachments to save.'); return; }
+    if (!initialValues?.bankAccountTransferId) { message.error('Transfer ID not available'); return; }
+    setAttSaving(true);
+    let saved = 0;
+    for (const att of pending) {
+      try {
+        await fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.bankAccountTransferId}/attachments`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileName: att.name, fileType: att.fileType, fileSize: att.fileSize, content: att.content, createdBy: 'ERP_USER' }),
+        });
+        saved++;
+      } catch { /* skip */ }
+    }
+    // Refresh
+    try {
+      const r = await fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.bankAccountTransferId}/attachments`, { headers: { Accept: 'application/json' } });
+      const d = await r.json();
+      setAttachments((d.items || []).map((a: any) => ({ id: a.id, uid: String(a.id), name: a.fileName, fileType: a.fileType || '', fileSize: a.fileSize || 0, status: 'done' as const })));
+    } catch { /* skip */ }
+    message.success(`${saved} attachment(s) saved.`);
+    setAttSaving(false);
+  };
+
   const handleApiOpen = async () => {
     let values: any;
     try { values = await form.getFieldsValue(); } catch { return; }
@@ -257,6 +409,13 @@ const TransferForm: React.FC<{
       setApiPosting(false);
     }
   };
+
+  const [voucherPdfUrl, setVoucherPdfUrl] = useState<string | null>(null);
+  const [voucherModalOpen, setVoucherModalOpen] = useState(false);
+  const [attachments, setAttachments] = useState<Array<{id?: number; uid: string; name: string; fileType: string; fileSize: number; content?: string; status: 'done' | 'uploading' | 'error'}>>([]);
+  const [attSaving, setAttSaving] = useState(false);
+  const [previewAtt, setPreviewAtt] = useState<{ name: string; fileType: string; content: string } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const [selectedBu, setSelectedBu] = useState<string | undefined>(
     initialValues?.businessUnit ?? undefined
@@ -470,17 +629,62 @@ const TransferForm: React.FC<{
             </Form.Item>
 
             <Form.Item label="Attachments" style={fs}>
-              <Text type="secondary">None</Text>
-              <Button size="small" icon={<PlusOutlined />} style={{ marginLeft: 8 }} disabled>Add</Button>
+              <div>
+                <Upload
+                  fileList={attachments.map(a => ({ uid: a.uid, name: a.name, status: a.status, size: a.fileSize, type: a.fileType }))}
+                  beforeUpload={(file) => {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                      const base64 = (e.target?.result as string)?.split(',')[1] || '';
+                      setAttachments(prev => [...prev, { uid: `new-${Date.now()}`, name: file.name, fileType: file.type, fileSize: file.size, content: base64, status: 'done' as const }]);
+                    };
+                    reader.readAsDataURL(file);
+                    return false;
+                  }}
+                  onRemove={(file) => {
+                    const att = attachments.find(a => a.uid === file.uid);
+                    if (att?.id && initialValues?.bankAccountTransferId) {
+                      fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.bankAccountTransferId}/attachments/${att.id}`, { method: 'DELETE' }).catch(() => {});
+                    }
+                    setAttachments(prev => prev.filter(a => a.uid !== file.uid));
+                  }}
+                  onPreview={handlePreviewAttachment}
+                  showUploadList={{ showPreviewIcon: true, showRemoveIcon: true }}
+                  multiple
+                  disabled={!isEdit}
+                >
+                  <Button size="small" icon={<UploadOutlined />} disabled={!isEdit}>Attach Files</Button>
+                </Upload>
+                {previewLoading && <Spin size="small" style={{ marginTop: 6 }} />}
+                {isEdit && attachments.some(a => !a.id) && (
+                  <Button
+                    size="small"
+                    icon={<PaperClipOutlined />}
+                    loading={attSaving}
+                    onClick={handleSaveAttachments}
+                    style={{ marginTop: 6 }}
+                  >
+                    Save Attachments
+                  </Button>
+                )}
+                {!isEdit && <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>Save transfer first to add attachments</Text>}
+              </div>
             </Form.Item>
           </Col>
         </Row>
 
         <Divider />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Button icon={<ApiOutlined />} onClick={handleApiOpen} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>
-            API
-          </Button>
+          <Space>
+            <Button icon={<ApiOutlined />} onClick={handleApiOpen} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>
+              API
+            </Button>
+            {isEdit && (
+              <Button icon={<PrinterOutlined />} onClick={handlePrintPdf} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>
+                Print PDF
+              </Button>
+            )}
+          </Space>
           <Space>
             <Button onClick={onCancel}>{isEdit ? 'Close' : 'Cancel'}</Button>
             {!isEdit && (
@@ -634,6 +838,50 @@ const TransferForm: React.FC<{
             },
           ]}
         />
+      </Modal>
+
+      {/* ── PDF Preview Modal ── */}
+      <Modal
+        title={<Space><PrinterOutlined style={{ color: REDWOOD.info }} /><span>Bank Transfer — PDF Preview</span></Space>}
+        open={voucherModalOpen}
+        onCancel={() => { setVoucherModalOpen(false); if (voucherPdfUrl) URL.revokeObjectURL(voucherPdfUrl); setVoucherPdfUrl(null); }}
+        footer={[
+          <Button key="dl" type="primary" icon={<DownloadOutlined />}
+            style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+            onClick={() => { if (!voucherPdfUrl) return; const a = document.createElement('a'); a.href = voucherPdfUrl; a.download = `transfer-${initialValues?.bankAccountTransferNumber ?? 'draft'}.pdf`; a.click(); }}>
+            Download PDF
+          </Button>,
+          <Button key="cl" onClick={() => { setVoucherModalOpen(false); if (voucherPdfUrl) URL.revokeObjectURL(voucherPdfUrl); setVoucherPdfUrl(null); }}>Close</Button>,
+        ]}
+        width={820}
+        styles={{ body: { padding: 0 } }}
+        destroyOnClose
+      >
+        {voucherPdfUrl && <iframe src={voucherPdfUrl} style={{ width: '100%', height: '75vh', border: 'none' }} title="Transfer PDF" />}
+      </Modal>
+
+      {/* ── Attachment Preview Modal ── */}
+      <Modal
+        title={<Space><PaperClipOutlined style={{ color: REDWOOD.info }} /><span>{previewAtt?.name}</span></Space>}
+        open={!!previewAtt}
+        onCancel={() => setPreviewAtt(null)}
+        footer={[
+          <Button key="dl" icon={<DownloadOutlined />} type="primary"
+            style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+            onClick={() => { if (!previewAtt) return; const a = document.createElement('a'); a.href = `data:${previewAtt.fileType};base64,${previewAtt.content}`; a.download = previewAtt.name; a.click(); }}>
+            Download
+          </Button>,
+          <Button key="cl" onClick={() => setPreviewAtt(null)}>Close</Button>,
+        ]}
+        width={860}
+        styles={{ body: { padding: 0, minHeight: 200 } }}
+      >
+        {previewAtt && (() => {
+          const dataUrl = `data:${previewAtt.fileType};base64,${previewAtt.content}`;
+          if (previewAtt.fileType?.startsWith('image/')) return <div style={{ textAlign: 'center', padding: 16 }}><img src={dataUrl} alt={previewAtt.name} style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain' }} /></div>;
+          if (previewAtt.fileType === 'application/pdf') return <iframe src={dataUrl} style={{ width: '100%', height: '70vh', border: 'none' }} title={previewAtt.name} />;
+          return <div style={{ padding: 32, textAlign: 'center' }}><PaperClipOutlined style={{ fontSize: 48, color: '#aaa', marginBottom: 12 }} /><div><Text type="secondary">Preview not available. Download to view.</Text></div><Button icon={<DownloadOutlined />} style={{ marginTop: 16 }} onClick={() => { const a = document.createElement('a'); a.href = dataUrl; a.download = previewAtt.name; a.click(); }}>Download</Button></div>;
+        })()}
       </Modal>
     </div>
   );
@@ -922,14 +1170,26 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
     {
       title: 'Actions',
       key: 'actions',
-      width: 70,
+      width: 90,
       fixed: 'right',
       render: (_, record) => (
-        <Tooltip title="Edit">
-          <Button type="text" size="small" icon={<EditOutlined />}
-            style={{ color: REDWOOD.info }}
-            onClick={() => openEdit(record)} />
-        </Tooltip>
+        <Space size={4}>
+          <Tooltip title="Print PDF">
+            <Button type="text" size="small" icon={<PrinterOutlined />}
+              style={{ color: REDWOOD.neutral600 }}
+              onClick={() => {
+                const doc = generateTransferPdf(record);
+                const blob = doc.output('blob');
+                const url = URL.createObjectURL(blob);
+                window.open(url, '_blank');
+              }} />
+          </Tooltip>
+          <Tooltip title="Edit">
+            <Button type="text" size="small" icon={<EditOutlined />}
+              style={{ color: REDWOOD.info }}
+              onClick={() => openEdit(record)} />
+          </Tooltip>
+        </Space>
       ),
     },
   ];
