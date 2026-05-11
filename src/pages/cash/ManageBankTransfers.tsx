@@ -247,11 +247,11 @@ const TransferForm: React.FC<{
     }
   }, [initialValues, form]);
 
-  // Load attachments only once when the transfer ID first becomes available
-  const transferId = initialValues?.bankAccountTransferId;
+  // Load attachments only once when the external transaction ID becomes available
+  const attachExtId = initialValues?.fromExternalTrxId || initialValues?.toExternalTrxId;
   useEffect(() => {
-    if (!transferId) return;
-    const url = `${APEX_BASE}/cash/externaltransactions/${transferId}/attachments`;
+    if (!attachExtId) return;
+    const url = `${APEX_BASE}/cash/externaltransactions/${attachExtId}/attachments`;
     setAttApiLog(prev => [...prev, { dir: 'GET', url, status: null, body: '…fetching…' }]);
     fetch(url, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
@@ -265,7 +265,7 @@ const TransferForm: React.FC<{
         setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET', url, status: 0, body: String(err) }]);
       });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transferId]);
+  }, [attachExtId]);
 
   const handleSubmit = async () => {
     let values: any;
@@ -340,10 +340,11 @@ const TransferForm: React.FC<{
     const att = attachments.find(a => a.uid === file.uid);
     if (!att) return;
     if (att.content) { setPreviewAtt({ name: att.name, fileType: att.fileType, content: att.content }); return; }
-    if (!att.id || !initialValues?.bankAccountTransferId) return;
+    const extId = initialValues?.fromExternalTrxId || initialValues?.toExternalTrxId;
+    if (!att.id || !extId) return;
     setPreviewLoading(true);
     try {
-      const res = await fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.bankAccountTransferId}/attachments/${att.id}`, { headers: { Accept: 'application/json' } });
+      const res = await fetch(`${APEX_BASE}/cash/externaltransactions/${extId}/attachments/${att.id}`, { headers: { Accept: 'application/json' } });
       const d = await res.json();
       const content = d.content || d.CONTENT || '';
       if (!content) { message.warning('No content available for preview.'); return; }
@@ -355,9 +356,10 @@ const TransferForm: React.FC<{
   const handleSaveAttachments = async () => {
     const pending = attachments.filter(a => !a.id);
     if (pending.length === 0) { message.info('No new attachments to save.'); return; }
-    if (!initialValues?.bankAccountTransferId) { message.error('Transfer ID not available'); return; }
+    const extId = initialValues?.fromExternalTrxId || initialValues?.toExternalTrxId;
+    if (!extId) { message.error('External transaction ID not available for this transfer'); return; }
     setAttSaving(true);
-    const postUrl = `${APEX_BASE}/cash/externaltransactions/${initialValues.bankAccountTransferId}/attachments`;
+    const postUrl = `${APEX_BASE}/cash/externaltransactions/${extId}/attachments`;
     let saved = 0;
     for (const att of pending) {
       const payload = { fileName: att.name, fileType: att.fileType, fileSize: att.fileSize, content: att.content, createdBy: 'ERP_USER' };
@@ -377,7 +379,7 @@ const TransferForm: React.FC<{
       }
     }
     // Refresh list
-    const getUrl = `${APEX_BASE}/cash/externaltransactions/${initialValues.bankAccountTransferId}/attachments`;
+    const getUrl = `${APEX_BASE}/cash/externaltransactions/${extId}/attachments`;
     try {
       const r = await fetch(getUrl, { headers: { Accept: 'application/json' } });
       const d = await r.json();
@@ -666,8 +668,9 @@ const TransferForm: React.FC<{
                   }}
                   onRemove={(file) => {
                     const att = attachments.find(a => a.uid === file.uid);
-                    if (att?.id && initialValues?.bankAccountTransferId) {
-                      fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.bankAccountTransferId}/attachments/${att.id}`, { method: 'DELETE' }).catch(() => {});
+                    const extId = initialValues?.fromExternalTrxId || initialValues?.toExternalTrxId;
+                    if (att?.id && extId) {
+                      fetch(`${APEX_BASE}/cash/externaltransactions/${extId}/attachments/${att.id}`, { method: 'DELETE' }).catch(() => {});
                     }
                     setAttachments(prev => prev.filter(a => a.uid !== file.uid));
                   }}
@@ -865,19 +868,20 @@ const TransferForm: React.FC<{
               children: (
                 <div>
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    GET: <Text code copyable style={{ fontSize: 12 }}>{APEX_BASE}/cash/externaltransactions/{initialValues?.bankAccountTransferId ?? ':transferId'}/attachments</Text>
+                    GET: <Text code copyable style={{ fontSize: 12 }}>{APEX_BASE}/cash/externaltransactions/{(initialValues?.fromExternalTrxId || initialValues?.toExternalTrxId) ?? ':externalTransactionId'}/attachments</Text>
                   </Text>
                   <div style={{ marginTop: 8 }}>
                     <Text type="secondary" style={{ fontSize: 12 }}>
-                      POST: <Text code style={{ fontSize: 12 }}>{APEX_BASE}/cash/externaltransactions/{initialValues?.bankAccountTransferId ?? ':transferId'}/attachments</Text>
+                      POST: <Text code style={{ fontSize: 12 }}>{APEX_BASE}/cash/externaltransactions/{(initialValues?.fromExternalTrxId || initialValues?.toExternalTrxId) ?? ':externalTransactionId'}/attachments</Text>
                     </Text>
                   </div>
                   <Divider style={{ margin: '10px 0' }} />
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                     <Text strong style={{ fontSize: 13 }}>Request / Response Log</Text>
                     <Button size="small" onClick={() => {
-                      if (!initialValues?.bankAccountTransferId) return;
-                      const url = `${APEX_BASE}/cash/externaltransactions/${initialValues.bankAccountTransferId}/attachments`;
+                      const extId = initialValues?.fromExternalTrxId || initialValues?.toExternalTrxId;
+                      if (!extId) return;
+                      const url = `${APEX_BASE}/cash/externaltransactions/${extId}/attachments`;
                       setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET (manual)', url, status: null, body: '…fetching…' }]);
                       fetch(url, { headers: { Accept: 'application/json' } })
                         .then(r => r.json().then(d => ({ status: r.status, d })))

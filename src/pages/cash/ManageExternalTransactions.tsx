@@ -1577,6 +1577,61 @@ const ExternalTxnForm: React.FC<{
           <iframe src={pdfUrl} style={{ width: '100%', height: '75vh', border: 'none' }} title="PDF Preview" />
         )}
       </Modal>
+
+      {/* ── Attachment Preview Modal ──────────────────────────────────── */}
+      <Modal
+        title={<Space><PaperClipOutlined style={{ color: REDWOOD.info }} /><span>{previewAtt?.name}</span></Space>}
+        open={!!previewAtt}
+        onCancel={() => setPreviewAtt(null)}
+        footer={[
+          <Button key="download" icon={<DownloadOutlined />} type="primary"
+            style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+            onClick={() => {
+              if (!previewAtt) return;
+              const a = document.createElement('a');
+              a.href = `data:${previewAtt.fileType};base64,${previewAtt.content}`;
+              a.download = previewAtt.name;
+              a.click();
+            }}>
+            Download
+          </Button>,
+          <Button key="close" onClick={() => setPreviewAtt(null)}>Close</Button>,
+        ]}
+        width={860}
+        styles={{ body: { padding: 0, minHeight: 200 } }}
+      >
+        {previewAtt && (() => {
+          const dataUrl = `data:${previewAtt.fileType};base64,${previewAtt.content}`;
+          if (previewAtt.fileType?.startsWith('image/')) {
+            return (
+              <div style={{ textAlign: 'center', padding: 16 }}>
+                <img src={dataUrl} alt={previewAtt.name} style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain' }} />
+              </div>
+            );
+          }
+          if (previewAtt.fileType === 'application/pdf') {
+            return <iframe src={dataUrl} style={{ width: '100%', height: '70vh', border: 'none' }} title={previewAtt.name} />;
+          }
+          return (
+            <div style={{ padding: 32, textAlign: 'center' }}>
+              <PaperClipOutlined style={{ fontSize: 48, color: REDWOOD.neutral600, marginBottom: 12 }} />
+              <div><Text type="secondary">Preview not available for this file type ({previewAtt.fileType || 'unknown'}).</Text></div>
+              <Button
+                icon={<DownloadOutlined />}
+                style={{ marginTop: 16 }}
+                onClick={() => {
+                  const a = document.createElement('a');
+                  a.href = dataUrl;
+                  a.download = previewAtt.name;
+                  a.click();
+                }}
+              >
+                Download to view
+              </Button>
+            </div>
+          );
+        })()}
+      </Modal>
     </div>
   );
 };
@@ -3144,60 +3199,6 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           )}
         </Modal>
 
-        {/* ── Attachment Preview Modal ──────────────────────────────────── */}
-        <Modal
-          title={<Space><PaperClipOutlined style={{ color: REDWOOD.info }} /><span>{previewAtt?.name}</span></Space>}
-          open={!!previewAtt}
-          onCancel={() => setPreviewAtt(null)}
-          footer={[
-            <Button key="download" icon={<DownloadOutlined />} type="primary"
-              style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
-              onClick={() => {
-                if (!previewAtt) return;
-                const a = document.createElement('a');
-                a.href = `data:${previewAtt.fileType};base64,${previewAtt.content}`;
-                a.download = previewAtt.name;
-                a.click();
-              }}>
-              Download
-            </Button>,
-            <Button key="close" onClick={() => setPreviewAtt(null)}>Close</Button>,
-          ]}
-          width={860}
-          styles={{ body: { padding: 0, minHeight: 200 } }}
-        >
-          {previewAtt && (() => {
-            const dataUrl = `data:${previewAtt.fileType};base64,${previewAtt.content}`;
-            if (previewAtt.fileType?.startsWith('image/')) {
-              return (
-                <div style={{ textAlign: 'center', padding: 16 }}>
-                  <img src={dataUrl} alt={previewAtt.name} style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain' }} />
-                </div>
-              );
-            }
-            if (previewAtt.fileType === 'application/pdf') {
-              return <iframe src={dataUrl} style={{ width: '100%', height: '70vh', border: 'none' }} title={previewAtt.name} />;
-            }
-            return (
-              <div style={{ padding: 32, textAlign: 'center' }}>
-                <PaperClipOutlined style={{ fontSize: 48, color: REDWOOD.neutral600, marginBottom: 12 }} />
-                <div><Text type="secondary">Preview not available for this file type ({previewAtt.fileType || 'unknown'}).</Text></div>
-                <Button
-                  icon={<DownloadOutlined />}
-                  style={{ marginTop: 16 }}
-                  onClick={() => {
-                    const a = document.createElement('a');
-                    a.href = dataUrl;
-                    a.download = previewAtt.name;
-                    a.click();
-                  }}
-                >
-                  Download to view
-                </Button>
-              </div>
-            );
-          })()}
-        </Modal>
       </Content>
     </Layout>
   );
