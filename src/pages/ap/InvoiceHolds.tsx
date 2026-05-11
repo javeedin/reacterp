@@ -24,7 +24,7 @@ import {
   ExclamationCircleOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import { PROXY_CONFIG } from '../../config/api.config';
+import { ORACLE_FUSION_CONFIG } from '../../config/api.config';
 import Autopilot from '../../components/Autopilot';
 import FloatingMenu from '../../components/FloatingMenu';
 
@@ -66,6 +66,9 @@ interface InvoiceHold {
   lastUpdatedBy: string;
 }
 
+const FUSION_AUTH = 'Basic ' + btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
+const FUSION_HEADERS = { Authorization: FUSION_AUTH, Accept: 'application/json' };
+
 const InvoiceHolds: React.FC = () => {
   const [holds, setHolds] = useState<InvoiceHold[]>([]);
   const [loading, setLoading] = useState(false);
@@ -92,13 +95,13 @@ const InvoiceHolds: React.FC = () => {
     try {
       while (hasMore) {
         const fusionPath = `fscmRestApi/resources/11.13.18.05/payablesInvoiceHolds?limit=${limit}&offset=${offset}`;
-        const url = `${PROXY_CONFIG.baseUrl}/fusion/${fusionPath}`;
+        const url = `https://iaaobn.fa.ocs.oraclecloud.com/${fusionPath}`;
 
         console.log(`=== FETCHING INVOICE HOLDS PAGE ${pageCount + 1} ===`);
         console.log('URL:', url);
         console.log('Offset:', offset);
 
-        const response = await fetch(url);
+        const response = await fetch(url, { headers: FUSION_HEADERS });
 
         if (!response.ok) {
           throw new Error(`API Error: ${response.status} ${response.statusText}`);

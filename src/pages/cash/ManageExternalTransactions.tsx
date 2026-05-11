@@ -198,6 +198,7 @@ const ExternalTxnForm: React.FC<{
   const [savedExtId, setSavedExtId] = useState<number | null>(null);
   const [savedExtIds, setSavedExtIds] = useState<number[]>([]);
   const [deleting, setDeleting] = useState(false);
+  const [attSaving, setAttSaving] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfVisible, setPdfVisible] = useState(false);
   const [createPayeeVisible, setCreatePayeeVisible] = useState(false);
@@ -621,6 +622,37 @@ const ExternalTxnForm: React.FC<{
     } catch (e: any) {
       setApiResponse({ status: 0, body: 'Network error: ' + e.message });
     } finally { setApiPosting(false); }
+  };
+
+  // Locked = reconciled or accounted — cannot delete, but can still add attachments
+  const isLocked = isEdit && (initialValues?.status === 'REC' || initialValues?.accountingFlag === 'Y');
+
+  const handleSaveAttachments = async () => {
+    const extId = savedExtId ?? initialValues?.externalTransactionId;
+    if (!extId) { message.error('Transaction ID not available'); return; }
+    const pending = attachments.filter(a => !a.id);
+    if (pending.length === 0) { message.info('No new attachments to save.'); return; }
+    setAttSaving(true);
+    let savedCount = 0;
+    for (const att of pending) {
+      try {
+        await fetch(`${APEX_BASE}/cash/externaltransactions/${extId}/attachments`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileName: att.name, fileType: att.fileType, fileSize: att.fileSize, content: att.content, createdBy: 'ERP_USER' }),
+        });
+        savedCount++;
+      } catch { /* ignore individual failures */ }
+    }
+    // Refresh attachment list from server
+    try {
+      const r = await fetch(`${APEX_BASE}/cash/externaltransactions/${extId}/attachments`, { headers: { Accept: 'application/json' } });
+      const d = await r.json();
+      setAttachments((d.items || []).map((a: any) => ({
+        id: a.id, uid: String(a.id), name: a.fileName, fileType: a.fileType || '', fileSize: a.fileSize || 0, status: 'done' as const,
+      })));
+    } catch { /* silent */ }
+    message.success(`${savedCount} attachment(s) saved.`);
+    setAttSaving(false);
   };
 
   const handleDelete = async () => {
@@ -1205,9 +1237,9 @@ const ExternalTxnForm: React.FC<{
                 setAttachments(prev => prev.filter(a => a.uid !== file.uid));
               }}
               multiple
-              disabled={(!bankSelected && !isEdit) || saved}
+              disabled={!isEdit && (!bankSelected || saved)}
             >
-              <Button icon={<UploadOutlined />} disabled={(!bankSelected && !isEdit) || saved}>Attach Files</Button>
+              <Button icon={<UploadOutlined />} disabled={!isEdit && (!bankSelected || saved)}>Attach Files</Button>
             </Upload>
             {attachments.length === 0 && (
               <Text type="secondary" style={{ fontSize: 12, marginTop: 8, display: 'block' }}>No attachments</Text>
@@ -1289,7 +1321,17 @@ const ExternalTxnForm: React.FC<{
           )}
         </Space>
         <Space size={8}>
-          {(saved || (isEdit && initialValues?.accountingFlag !== 'Y')) && onCreateAccounting && (
+          {isEdit && (
+            <Button
+              size="large"
+              icon={<PaperClipOutlined />}
+              loading={attSaving}
+              onClick={handleSaveAttachments}
+            >
+              Save Attachments
+            </Button>
+          )}
+          {(saved || (isEdit && !isLocked)) && onCreateAccounting && (
             <Button
               size="large"
               icon={<AccountBookOutlined />}
@@ -1338,7 +1380,7 @@ const ExternalTxnForm: React.FC<{
               Create Accounting
             </Button>
           )}
-          {(saved || (isEdit && initialValues?.accountingFlag !== 'Y')) && (
+          {(saved || (isEdit && !isLocked)) && (
             <Popconfirm title="Delete this transaction?" description="This action cannot be undone."
               onConfirm={handleDelete} okText="Delete" okButtonProps={{ danger: true }}>
               <Button size="large" danger loading={deleting} icon={<DeleteOutlined />} style={{ minWidth: 110 }}>

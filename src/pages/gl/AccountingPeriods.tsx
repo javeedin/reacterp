@@ -43,7 +43,7 @@ import {
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
-import { PROXY_CONFIG, APEX_DB_CONFIG } from '../../config/api.config';
+import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../../config/api.config';
 import Autopilot from '../../components/Autopilot';
 
 const { Content } = Layout;
@@ -169,6 +169,9 @@ interface LedgerPeriodSummary {
   nextPeriod: PeriodStatus | null;
   allPeriods: PeriodStatus[];
 }
+
+const FUSION_AUTH = 'Basic ' + btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
+const FUSION_HEADERS = { Authorization: FUSION_AUTH, Accept: 'application/json' };
 
 const AccountingPeriods: React.FC = () => {
   const [activeTab, setActiveTab] = useState('status');
@@ -385,12 +388,12 @@ const AccountingPeriods: React.FC = () => {
     try {
       while (hasMore) {
         const fusionPath = `fscmRestApi/resources/11.13.18.05/accountingPeriodStatusLOV?limit=${limit}&offset=${offset}`;
-        const url = `${PROXY_CONFIG.baseUrl}/fusion/${fusionPath}`;
+        const url = `https://iaaobn.fa.ocs.oraclecloud.com/${fusionPath}`;
 
         console.log(`=== FETCHING PERIOD STATUS PAGE ${pageCount + 1} ===`);
         console.log('URL:', url);
 
-        const response = await fetch(url);
+        const response = await fetch(url, { headers: FUSION_HEADERS });
 
         if (!response.ok) {
           throw new Error(`API Error: ${response.status} ${response.statusText}`);
@@ -440,9 +443,9 @@ const AccountingPeriods: React.FC = () => {
     try {
       while (hasMore) {
         const fusionPath = `fscmRestApi/resources/11.13.18.05/accountingPeriodsLOV?limit=${limit}&offset=${offset}`;
-        const url = `${PROXY_CONFIG.baseUrl}/fusion/${fusionPath}`;
+        const url = `https://iaaobn.fa.ocs.oraclecloud.com/${fusionPath}`;
 
-        const response = await fetch(url);
+        const response = await fetch(url, { headers: FUSION_HEADERS });
 
         if (!response.ok) {
           throw new Error(`API Error: ${response.status} ${response.statusText}`);
