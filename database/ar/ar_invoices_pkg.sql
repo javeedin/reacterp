@@ -36,6 +36,13 @@ CREATE OR REPLACE PACKAGE RR_AR_INVOICES_PKG AS
         p_message            OUT VARCHAR2
     );
 
+    PROCEDURE save_invoice_distributions (
+        p_transaction_id       IN  NUMBER,
+        p_distributions_json   IN  CLOB,
+        p_status               OUT VARCHAR2,
+        p_message              OUT VARCHAR2
+    );
+
 END RR_AR_INVOICES_PKG;
 /
 
@@ -723,6 +730,105 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICES_PKG AS
             p_status  := 'ERROR';
             p_message := SQLERRM;
     END save_invoice_installments;
+
+    -- -------------------------------------------------------
+    -- save_invoice_distributions: {"items":[...]} array
+    -- Uses JSON_TABLE with direct scalar extraction
+    -- -------------------------------------------------------
+    PROCEDURE save_invoice_distributions (
+        p_transaction_id       IN  NUMBER,
+        p_distributions_json   IN  CLOB,
+        p_status               OUT VARCHAR2,
+        p_message              OUT VARCHAR2
+    ) IS
+        l_inserted  NUMBER := 0;
+        l_errors    NUMBER := 0;
+        l_err_log   VARCHAR2(4000) := '';
+        l_cr_ts     TIMESTAMP;
+        l_upd_ts    TIMESTAMP;
+    BEGIN
+        FOR rec IN (
+            SELECT j.*
+            FROM JSON_TABLE(p_distributions_json, '$.items[*]' COLUMNS (
+                DISTRIBUTION_ID              NUMBER        PATH '$.DistributionId',
+                INVOICE_LINE_NUMBER          NUMBER        PATH '$.InvoiceLineNumber',
+                DETAILED_TAX_LINE_NUMBER     NUMBER        PATH '$.DetailedTaxLineNumber',
+                ACCOUNT_CLASS                VARCHAR2(100) PATH '$.AccountClass',
+                ACCOUNT_COMBINATION          VARCHAR2(240) PATH '$.AccountCombination',
+                AMOUNT                       NUMBER        PATH '$.Amount',
+                ACCOUNTED_AMOUNT             NUMBER        PATH '$.AccountedAmount',
+                PERCENT                      NUMBER        PATH '$.Percent',
+                COMMENTS                     VARCHAR2(4000) PATH '$.Comments',
+                FUSION_CREATED_BY            VARCHAR2(240) PATH '$.CreatedBy',
+                CREATION_DATE_STR            VARCHAR2(50)  PATH '$.CreationDate',
+                FUSION_LAST_UPDATED_BY       VARCHAR2(240) PATH '$.LastUpdatedBy',
+                LAST_UPDATE_DATE_STR         VARCHAR2(50)  PATH '$.LastUpdateDate'
+            )) j
+        ) LOOP
+            BEGIN
+                l_cr_ts  := to_safe_ts(rec.CREATION_DATE_STR);
+                l_upd_ts := to_safe_ts(rec.LAST_UPDATE_DATE_STR);
+
+                MERGE INTO RR_AR_INVOICE_DISTRIBUTIONS d
+                USING DUAL
+                ON (d.DISTRIBUTION_ID = rec.DISTRIBUTION_ID)
+                WHEN MATCHED THEN UPDATE SET
+                    INVOICE_LINE_NUMBER      = rec.INVOICE_LINE_NUMBER,
+                    DETAILED_TAX_LINE_NUMBER = rec.DETAILED_TAX_LINE_NUMBER,
+                    ACCOUNT_CLASS            = rec.ACCOUNT_CLASS,
+                    ACCOUNT_COMBINATION      = rec.ACCOUNT_COMBINATION,
+                    AMOUNT                   = rec.AMOUNT,
+                    ACCOUNTED_AMOUNT         = rec.ACCOUNTED_AMOUNT,
+                    PERCENT                  = rec.PERCENT,
+                    COMMENTS                 = rec.COMMENTS,
+                    FUSION_CREATED_BY        = rec.FUSION_CREATED_BY,
+                    FUSION_CREATION_DATE     = l_cr_ts,
+                    FUSION_LAST_UPDATED_BY   = rec.FUSION_LAST_UPDATED_BY,
+                    FUSION_LAST_UPDATE_DATE  = l_upd_ts,
+                    LAST_UPDATED_BY          = USER,
+                    LAST_UPDATE_DATE         = SYSTIMESTAMP,
+                    SYNC_DATE                = SYSTIMESTAMP,
+                    SYNC_STATUS              = 'UPDATED'
+                WHEN NOT MATCHED THEN INSERT (
+                    DISTRIBUTION_ID,         CUSTOMER_TRANSACTION_ID,
+                    INVOICE_LINE_NUMBER,      DETAILED_TAX_LINE_NUMBER,
+                    ACCOUNT_CLASS,            ACCOUNT_COMBINATION,
+                    AMOUNT,                   ACCOUNTED_AMOUNT,
+                    PERCENT,                  COMMENTS,
+                    FUSION_CREATED_BY,        FUSION_CREATION_DATE,
+                    FUSION_LAST_UPDATED_BY,   FUSION_LAST_UPDATE_DATE,
+                    SYNC_STATUS
+                ) VALUES (
+                    rec.DISTRIBUTION_ID,      p_transaction_id,
+                    rec.INVOICE_LINE_NUMBER,  rec.DETAILED_TAX_LINE_NUMBER,
+                    rec.ACCOUNT_CLASS,        rec.ACCOUNT_COMBINATION,
+                    rec.AMOUNT,               rec.ACCOUNTED_AMOUNT,
+                    rec.PERCENT,              rec.COMMENTS,
+                    rec.FUSION_CREATED_BY,    l_cr_ts,
+                    rec.FUSION_LAST_UPDATED_BY, l_upd_ts,
+                    'NEW'
+                );
+
+                l_inserted := l_inserted + 1;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    l_errors  := l_errors + 1;
+                    IF l_errors <= 3 THEN
+                        l_err_log := l_err_log || ' | [' || l_errors || '] ' || SUBSTR(SQLERRM, 1, 200);
+                    END IF;
+            END;
+        END LOOP;
+
+        COMMIT;
+        p_status  := 'SUCCESS';
+        p_message := 'Distributions saved: ' || l_inserted || ', Errors: ' || l_errors ||
+                     CASE WHEN l_err_log IS NOT NULL THEN ' -- ' || l_err_log ELSE '' END;
+    EXCEPTION
+        WHEN OTHERS THEN
+            ROLLBACK;
+            p_status  := 'ERROR';
+            p_message := SQLERRM;
+    END save_invoice_distributions;
 
 END RR_AR_INVOICES_PKG;
 /

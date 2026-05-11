@@ -13,6 +13,8 @@ export interface ARSyncProgress {
   processedLines: number;
   totalInstallments: number;
   processedInstallments: number;
+  totalDistributions: number;
+  processedDistributions: number;
   currentPage: number;
   totalPages: number;
   errors: number;
@@ -166,6 +168,57 @@ const insertARInstallmentsToApex = async (
   }
 };
 
+const fetchARDistributionsFromOracle = async (
+  customerTransactionId: number,
+  log?: LogCallback,
+): Promise<{ success: boolean; items: any[]; error?: string }> => {
+  try {
+    const url = `${ORACLE_FUSION_CONFIG.baseUrl}/receivablesInvoices/${customerTransactionId}/child/receivablesInvoiceDistributions`;
+
+    log?.('step', `──── [GET] Oracle Fusion AR Distributions (Txn: ${customerTransactionId}) ────`);
+    log?.('info', `  URL: ${url}`);
+
+    const items = await fetchAllFromOracleUrl(url, log, false, 500);
+
+    log?.('success', `  Fetched ${items.length} distributions for Transaction ${customerTransactionId}`);
+
+    return { success: true, items };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    log?.('error', `Fetch Distributions Error: ${errorMsg}`);
+    return { success: false, items: [], error: errorMsg };
+  }
+};
+
+const insertARDistributionsToApex = async (
+  distributions: any[],
+  customerTransactionId: number,
+  log?: LogCallback,
+): Promise<{ success: boolean; successCount: number; error?: string }> => {
+  try {
+    const endpoint = `ar/invoices/${customerTransactionId}/distributions`;
+    const payload = { items: distributions.map(dist => {
+      const { links, ...rest } = dist as any;
+      return rest;
+    }) };
+
+    log?.('step', `──── [POST] APEX AR Distributions for Txn ${customerTransactionId} (${distributions.length} distributions) ────`);
+
+    const data = await insertToApex(endpoint, payload, log, false);
+
+    const isSuccess = data.status === 'SUCCESS';
+    return {
+      success: isSuccess,
+      successCount: data.successCount ?? (isSuccess ? distributions.length : 0),
+      error: isSuccess ? undefined : (data.message || data.error || 'Distributions insert failed'),
+    };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    log?.('error', `POST Distributions Error: ${errorMsg}`);
+    return { success: false, successCount: 0, error: errorMsg };
+  }
+};
+
 const insertARLinesToApex = async (
   lines: any[],
   customerTransactionId: number,
@@ -240,6 +293,8 @@ export const syncARInvoices = async (
     processedLines: 0,
     totalInstallments: 0,
     processedInstallments: 0,
+    totalDistributions: 0,
+    processedDistributions: 0,
     currentPage: 0,
     totalPages: 0,
     errors: 0,
@@ -279,11 +334,13 @@ export const syncARInvoices = async (
     log?.('info', '  │ FUSION GET (Source):');
     log?.('info', `  │   Invoices: ${ORACLE_FUSION_CONFIG.baseUrl}/receivablesInvoices`);
     log?.('info', `  │   Lines:         ${ORACLE_FUSION_CONFIG.baseUrl}/receivablesInvoices/{id}/child/receivablesInvoiceLines`);
-    log?.('info', `  │   Installments:  ${ORACLE_FUSION_CONFIG.baseUrl}/receivablesInvoices/{id}/child/receivablesInvoiceInstallments`);
+    log?.('info', `  │   Installments:   ${ORACLE_FUSION_CONFIG.baseUrl}/receivablesInvoices/{id}/child/receivablesInvoiceInstallments`);
+    log?.('info', `  │   Distributions:  ${ORACLE_FUSION_CONFIG.baseUrl}/receivablesInvoices/{id}/child/receivablesInvoiceDistributions`);
     log?.('info', '  │ APEX POST (Target):');
-    log?.('info', `  │   Invoices:      ${APEX_DB_CONFIG.baseUrl}/${APEX_AR_INVOICES_ENDPOINT}`);
-    log?.('info', `  │   Lines:         ${APEX_DB_CONFIG.baseUrl}/ar/invoices/:id/lines`);
-    log?.('info', `  │   Installments:  ${APEX_DB_CONFIG.baseUrl}/ar/invoices/:id/installments`);
+    log?.('info', `  │   Invoices:       ${APEX_DB_CONFIG.baseUrl}/${APEX_AR_INVOICES_ENDPOINT}`);
+    log?.('info', `  │   Lines:          ${APEX_DB_CONFIG.baseUrl}/ar/invoices/:id/lines`);
+    log?.('info', `  │   Installments:   ${APEX_DB_CONFIG.baseUrl}/ar/invoices/:id/installments`);
+    log?.('info', `  │   Distributions:  ${APEX_DB_CONFIG.baseUrl}/ar/invoices/:id/distributions`);
     log?.('step', '═══════════════════════════════════════════════════════════');
 
     // ── STEP 1: Fetch AR Invoices ──────────────────────────────────────────────
@@ -497,6 +554,58 @@ export const syncARInvoices = async (
       if (i < allInvoices.length - 1) await new Promise(r => setTimeout(r, 50));
     }
 
+    // ── STEP 5: Fetch & Insert Distributions per Invoice ──────────────────────
+    log?.('step', '═══════════════════════════════════════════════════════════');
+    log?.('step', '  STEP 5: Fetching and Inserting AR Invoice Distributions');
+    log?.('step', '═══════════════════════════════════════════════════════════');
+
+    let totalDistributions = 0;
+    let processedDistributions = 0;
+
+    for (let i = 0; i < allInvoices.length; i++) {
+      if (abortSignal?.aborted) {
+        updateProgress({ status: 'stopped', endTime: new Date() });
+        log?.('warning', 'Sync stopped by user');
+        return progress;
+      }
+
+      const invoice = allInvoices[i];
+      const txnId: number = invoice.CustomerTransactionId;
+      const txnNumber: string = invoice.TransactionNumber || String(txnId);
+
+      if (!txnId) continue;
+
+      if (verbose) log?.('info', `[${i + 1}/${allInvoices.length}] Distributions for ${txnNumber} (ID: ${txnId})`);
+
+      const distResult = await fetchARDistributionsFromOracle(txnId, log);
+
+      if (!distResult.success) {
+        log?.('error', `  ✗ Failed to fetch distributions for ${txnNumber}: ${distResult.error}`);
+        continue;
+      }
+
+      if (distResult.items.length === 0) {
+        if (verbose) log?.('info', `  No distributions found for ${txnNumber} — skipping POST`);
+        continue;
+      }
+
+      totalDistributions += distResult.items.length;
+      updateProgress({ totalDistributions });
+
+      const distInsertResult = await insertARDistributionsToApex(distResult.items, txnId, log);
+
+      if (distInsertResult.success) {
+        processedDistributions += distInsertResult.successCount;
+        updateProgress({ processedDistributions });
+        if (verbose) log?.('success', `  ✓ ${distInsertResult.successCount} distributions inserted for ${txnNumber}`);
+      } else {
+        updateProgress({ errors: progress.errors + 1, lastError: distInsertResult.error || 'Distributions insert failed' });
+        log?.('error', `  ✗ Distributions failed for ${txnNumber}: ${distInsertResult.error}`);
+      }
+
+      if (i < allInvoices.length - 1) await new Promise(r => setTimeout(r, 50));
+    }
+
     // ── COMPLETE ──────────────────────────────────────────────────────────────
     updateProgress({
       status: abortSignal?.aborted ? 'stopped' : 'completed',
@@ -506,9 +615,11 @@ export const syncARInvoices = async (
       totalLines,
       processedInstallments,
       totalInstallments,
+      processedDistributions,
+      totalDistributions,
     });
 
-    log?.('success', `✓ AR Sync completed: ${progress.insertedInvoices} invoices, ${processedLines} lines, ${processedInstallments} installments inserted`);
+    log?.('success', `✓ AR Sync completed: ${progress.insertedInvoices} invoices, ${processedLines} lines, ${processedInstallments} installments, ${processedDistributions} distributions inserted`);
     if (progress.errors > 0) log?.('warning', `⚠ ${progress.errors} errors occurred`);
 
     return progress;
