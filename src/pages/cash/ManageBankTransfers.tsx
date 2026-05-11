@@ -251,7 +251,7 @@ const TransferForm: React.FC<{
   const transferId = initialValues?.bankAccountTransferId;
   useEffect(() => {
     if (!transferId) return;
-    const url = `${APEX_BASE}/cash/banktransfers/${transferId}/attachments`;
+    const url = `${APEX_BASE}/cash/externaltransactions/${transferId}/attachments`;
     setAttApiLog(prev => [...prev, { dir: 'GET', url, status: null, body: '…fetching…' }]);
     fetch(url, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
@@ -343,7 +343,7 @@ const TransferForm: React.FC<{
     if (!att.id || !initialValues?.bankAccountTransferId) return;
     setPreviewLoading(true);
     try {
-      const res = await fetch(`${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments/${att.id}`, { headers: { Accept: 'application/json' } });
+      const res = await fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.bankAccountTransferId}/attachments/${att.id}`, { headers: { Accept: 'application/json' } });
       const d = await res.json();
       const content = d.content || d.CONTENT || '';
       if (!content) { message.warning('No content available for preview.'); return; }
@@ -357,7 +357,7 @@ const TransferForm: React.FC<{
     if (pending.length === 0) { message.info('No new attachments to save.'); return; }
     if (!initialValues?.bankAccountTransferId) { message.error('Transfer ID not available'); return; }
     setAttSaving(true);
-    const postUrl = `${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments`;
+    const postUrl = `${APEX_BASE}/cash/externaltransactions/${initialValues.bankAccountTransferId}/attachments`;
     let saved = 0;
     for (const att of pending) {
       const payload = { fileName: att.name, fileType: att.fileType, fileSize: att.fileSize, content: att.content, createdBy: 'ERP_USER' };
@@ -377,7 +377,7 @@ const TransferForm: React.FC<{
       }
     }
     // Refresh list
-    const getUrl = `${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments`;
+    const getUrl = `${APEX_BASE}/cash/externaltransactions/${initialValues.bankAccountTransferId}/attachments`;
     try {
       const r = await fetch(getUrl, { headers: { Accept: 'application/json' } });
       const d = await r.json();
@@ -667,7 +667,7 @@ const TransferForm: React.FC<{
                   onRemove={(file) => {
                     const att = attachments.find(a => a.uid === file.uid);
                     if (att?.id && initialValues?.bankAccountTransferId) {
-                      fetch(`${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments/${att.id}`, { method: 'DELETE' }).catch(() => {});
+                      fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.bankAccountTransferId}/attachments/${att.id}`, { method: 'DELETE' }).catch(() => {});
                     }
                     setAttachments(prev => prev.filter(a => a.uid !== file.uid));
                   }}
@@ -865,11 +865,11 @@ const TransferForm: React.FC<{
               children: (
                 <div>
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    GET: <Text code copyable style={{ fontSize: 12 }}>{APEX_BASE}/cash/banktransfers/{initialValues?.bankAccountTransferId ?? ':transferId'}/attachments</Text>
+                    GET: <Text code copyable style={{ fontSize: 12 }}>{APEX_BASE}/cash/externaltransactions/{initialValues?.bankAccountTransferId ?? ':transferId'}/attachments</Text>
                   </Text>
                   <div style={{ marginTop: 8 }}>
                     <Text type="secondary" style={{ fontSize: 12 }}>
-                      POST: <Text code style={{ fontSize: 12 }}>{APEX_BASE}/cash/banktransfers/{initialValues?.bankAccountTransferId ?? ':transferId'}/attachments</Text>
+                      POST: <Text code style={{ fontSize: 12 }}>{APEX_BASE}/cash/externaltransactions/{initialValues?.bankAccountTransferId ?? ':transferId'}/attachments</Text>
                     </Text>
                   </div>
                   <Divider style={{ margin: '10px 0' }} />
@@ -877,7 +877,7 @@ const TransferForm: React.FC<{
                     <Text strong style={{ fontSize: 13 }}>Request / Response Log</Text>
                     <Button size="small" onClick={() => {
                       if (!initialValues?.bankAccountTransferId) return;
-                      const url = `${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments`;
+                      const url = `${APEX_BASE}/cash/externaltransactions/${initialValues.bankAccountTransferId}/attachments`;
                       setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET (manual)', url, status: null, body: '…fetching…' }]);
                       fetch(url, { headers: { Accept: 'application/json' } })
                         .then(r => r.json().then(d => ({ status: r.status, d })))
