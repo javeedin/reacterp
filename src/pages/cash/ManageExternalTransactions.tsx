@@ -316,9 +316,11 @@ const ExternalTxnForm: React.FC<{
     fetch(`${APEX_BASE}/cash/externaltransactions/${extTxnId}/attachments`, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
       .then(d => {
-        setAttachments((d.items || []).map((a: any) => ({
-          id: a.id, uid: String(a.id), name: a.fileName, fileType: a.fileType || '', fileSize: a.fileSize || 0, status: 'done' as const,
-        })));
+        if (Array.isArray(d.items)) {
+          setAttachments(d.items.map((a: any) => ({
+            id: a.id, uid: String(a.id), name: a.fileName, fileType: a.fileType || '', fileSize: a.fileSize || 0, status: 'done' as const,
+          })));
+        }
       })
       .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -712,9 +714,11 @@ const ExternalTxnForm: React.FC<{
     try {
       const r = await fetch(`${APEX_BASE}/cash/externaltransactions/${extId}/attachments`, { headers: { Accept: 'application/json' } });
       const d = await r.json();
-      setAttachments((d.items || []).map((a: any) => ({
-        id: a.id, uid: String(a.id), name: a.fileName, fileType: a.fileType || '', fileSize: a.fileSize || 0, status: 'done' as const,
-      })));
+      if (Array.isArray(d.items)) {
+        setAttachments(d.items.map((a: any) => ({
+          id: a.id, uid: String(a.id), name: a.fileName, fileType: a.fileType || '', fileSize: a.fileSize || 0, status: 'done' as const,
+        })));
+      }
     } catch { /* silent */ }
     message.success(`${savedCount} attachment(s) saved.`);
     setAttSaving(false);
@@ -1284,7 +1288,7 @@ const ExternalTxnForm: React.FC<{
               <PaperClipOutlined style={{ color: REDWOOD.neutral600 }} /> Attachments
             </div>
             <Upload
-              fileList={attachments.map(a => ({ uid: a.uid, name: a.name, status: a.status, size: a.fileSize, type: a.fileType }))}
+              fileList={attachments.map(a => ({ uid: a.uid, name: a.name, status: a.status, size: a.fileSize, type: a.fileType, url: ' ' }))}
               beforeUpload={(file) => {
                 const reader = new FileReader();
                 reader.onload = (e) => {
@@ -2430,7 +2434,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     const existing = tabs.find(t => t.record?.externalTransactionId === record.externalTransactionId);
     if (existing) { setActiveTabKey(existing.key); return; }
     const key   = newTabKey();
-    const label = `Txn #${record.transactionId}`;
+    const label = `Txn #${record.transactionId ?? record.externalTransactionId}`;
     setTabs(prev => [...prev, { key, label, record }]);
     setActiveTabKey(key);
   };

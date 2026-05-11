@@ -697,7 +697,7 @@ const TransferForm: React.FC<{
             <Form.Item label="Attachments" style={fs}>
               <div>
                 <Upload
-                  fileList={attachments.map(a => ({ uid: a.uid, name: a.name, status: a.status, size: a.fileSize, type: a.fileType }))}
+                  fileList={attachments.map(a => ({ uid: a.uid, name: a.name, status: a.status, size: a.fileSize, type: a.fileType, url: ' ' }))}
                   beforeUpload={(file) => {
                     const reader = new FileReader();
                     reader.onload = (e) => {
