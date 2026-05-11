@@ -208,7 +208,8 @@ const TransferForm: React.FC<{
   const [apiResponse, setApiResponse] = useState<{ status: number; body: string } | null>(null);
   const [apiGetRunning, setApiGetRunning] = useState(false);
   const [apiGetResponse, setApiGetResponse] = useState<{ status: number; body: string } | null>(null);
-  const [apiTab, setApiTab] = useState<'get' | 'post'>('post');
+  const [apiTab, setApiTab] = useState<'get' | 'post' | 'attachments'>('post');
+  const [attApiLog, setAttApiLog] = useState<Array<{ dir: string; url: string; status: number | null; body: string }>>([]);
   const isEdit = !!initialValues?.bankAccountTransferId;
 
   const [fromCurrency, setFromCurrency] = useState<string>(initialValues?.fromCurrencyCode ?? '');
@@ -238,17 +239,6 @@ const TransferForm: React.FC<{
       });
       setFromCurrency(initialValues.fromCurrencyCode ?? '');
       setToCurrency(initialValues.toCurrencyCode ?? '');
-      // Load existing attachments for edit mode
-      if (initialValues?.bankAccountTransferId) {
-        fetch(`${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments`, { headers: { Accept: 'application/json' } })
-          .then(r => r.json())
-          .then(d => {
-            setAttachments((d.items || []).map((a: any) => ({
-              id: a.id, uid: String(a.id), name: a.fileName, fileType: a.fileType || '', fileSize: a.fileSize || 0, status: 'done' as const,
-            })));
-          })
-          .catch(() => {});
-      }
     } else {
       form.resetFields();
       form.setFieldsValue({ transactionDate: dayjs(), isSettledWithIbyFlag: true });
@@ -256,6 +246,26 @@ const TransferForm: React.FC<{
       setToCurrency('');
     }
   }, [initialValues, form]);
+
+  // Load attachments only once when the transfer ID first becomes available
+  const transferId = initialValues?.bankAccountTransferId;
+  useEffect(() => {
+    if (!transferId) return;
+    const url = `${APEX_BASE}/cash/banktransfers/${transferId}/attachments`;
+    setAttApiLog(prev => [...prev, { dir: 'GET', url, status: null, body: '…fetching…' }]);
+    fetch(url, { headers: { Accept: 'application/json' } })
+      .then(r => r.json())
+      .then(d => {
+        setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET', url, status: 200, body: JSON.stringify(d, null, 2) }]);
+        setAttachments((d.items || []).map((a: any) => ({
+          id: a.id, uid: String(a.id), name: a.fileName, fileType: a.fileType || '', fileSize: a.fileSize || 0, status: 'done' as const,
+        })));
+      })
+      .catch(err => {
+        setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET', url, status: 0, body: String(err) }]);
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transferId]);
 
   const handleSubmit = async () => {
     let values: any;
@@ -347,22 +357,35 @@ const TransferForm: React.FC<{
     if (pending.length === 0) { message.info('No new attachments to save.'); return; }
     if (!initialValues?.bankAccountTransferId) { message.error('Transfer ID not available'); return; }
     setAttSaving(true);
+    const postUrl = `${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments`;
     let saved = 0;
     for (const att of pending) {
+      const payload = { fileName: att.name, fileType: att.fileType, fileSize: att.fileSize, content: att.content, createdBy: 'ERP_USER' };
       try {
-        await fetch(`${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments`, {
+        const res = await fetch(postUrl, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fileName: att.name, fileType: att.fileType, fileSize: att.fileSize, content: att.content, createdBy: 'ERP_USER' }),
+          body: JSON.stringify(payload),
         });
+        const respText = await res.text();
+        setAttApiLog(prev => [...prev.slice(-9), {
+          dir: 'POST', url: postUrl, status: res.status,
+          body: `Request: ${JSON.stringify({ ...payload, content: payload.content ? '[base64 ' + payload.content.length + ' chars]' : '' }, null, 2)}\n\nResponse: ${respText}`,
+        }]);
         saved++;
-      } catch { /* skip */ }
+      } catch (e: any) {
+        setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST', url: postUrl, status: 0, body: 'Error: ' + e.message }]);
+      }
     }
-    // Refresh
+    // Refresh list
+    const getUrl = `${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments`;
     try {
-      const r = await fetch(`${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments`, { headers: { Accept: 'application/json' } });
+      const r = await fetch(getUrl, { headers: { Accept: 'application/json' } });
       const d = await r.json();
+      setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET (refresh)', url: getUrl, status: r.status, body: JSON.stringify(d, null, 2) }]);
       setAttachments((d.items || []).map((a: any) => ({ id: a.id, uid: String(a.id), name: a.fileName, fileType: a.fileType || '', fileSize: a.fileSize || 0, status: 'done' as const })));
-    } catch { /* skip */ }
+    } catch (e: any) {
+      setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET (refresh)', url: getUrl, status: 0, body: 'Error: ' + String(e) }]);
+    }
     message.success(`${saved} attachment(s) saved.`);
     setAttSaving(false);
   };
@@ -708,7 +731,7 @@ const TransferForm: React.FC<{
       >
         <Tabs
           activeKey={apiTab}
-          onChange={k => setApiTab(k as 'get' | 'post')}
+          onChange={k => setApiTab(k as 'get' | 'post' | 'attachments')}
           items={[
             {
               key: 'get',
@@ -832,6 +855,57 @@ const TransferForm: React.FC<{
                         {apiResponse.body}
                       </pre>
                     </>
+                  )}
+                </div>
+              ),
+            },
+            {
+              key: 'attachments',
+              label: 'Attachments API',
+              children: (
+                <div>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    GET: <Text code copyable style={{ fontSize: 12 }}>{APEX_BASE}/cash/banktransfers/{initialValues?.bankAccountTransferId ?? ':transferId'}/attachments</Text>
+                  </Text>
+                  <div style={{ marginTop: 8 }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      POST: <Text code style={{ fontSize: 12 }}>{APEX_BASE}/cash/banktransfers/{initialValues?.bankAccountTransferId ?? ':transferId'}/attachments</Text>
+                    </Text>
+                  </div>
+                  <Divider style={{ margin: '10px 0' }} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <Text strong style={{ fontSize: 13 }}>Request / Response Log</Text>
+                    <Button size="small" onClick={() => {
+                      if (!initialValues?.bankAccountTransferId) return;
+                      const url = `${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments`;
+                      setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET (manual)', url, status: null, body: '…fetching…' }]);
+                      fetch(url, { headers: { Accept: 'application/json' } })
+                        .then(r => r.json().then(d => ({ status: r.status, d })))
+                        .then(({ status, d }) => {
+                          setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET (manual)', url, status, body: JSON.stringify(d, null, 2) }]);
+                        })
+                        .catch(e => setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET (manual)', url, status: 0, body: String(e) }]));
+                    }}>
+                      Test GET
+                    </Button>
+                  </div>
+                  {attApiLog.length === 0 ? (
+                    <Text type="secondary" style={{ fontSize: 12 }}>No calls logged yet. Upload or save an attachment to see the log.</Text>
+                  ) : (
+                    [...attApiLog].reverse().map((entry, i) => (
+                      <div key={i} style={{ marginBottom: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                          <Tag color={entry.dir.startsWith('POST') ? 'blue' : 'green'} style={{ fontSize: 11 }}>{entry.dir}</Tag>
+                          {entry.status != null && (
+                            <Tag color={entry.status >= 200 && entry.status < 300 ? 'success' : 'error'}>HTTP {entry.status}</Tag>
+                          )}
+                          <Text type="secondary" style={{ fontSize: 11, wordBreak: 'break-all' }}>{entry.url}</Text>
+                        </div>
+                        <pre style={{ background: '#1e1e2e', color: '#cdd6f4', padding: 10, borderRadius: 6, fontSize: 11, overflowX: 'auto', maxHeight: 180, whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>
+                          {entry.body}
+                        </pre>
+                      </div>
+                    ))
                   )}
                 </div>
               ),
