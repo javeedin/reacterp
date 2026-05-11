@@ -713,11 +713,11 @@ const ManageRevaluation: React.FC = () => {
       updateStep(4, 'finish', 'Status set to ACCOUNTED');
       setAcctFlowDone(true);
 
-      message.success(`Revaluation #${id} accounted — GL Batch: ${glResult.batchName}`);
+      message.success(`Revaluation #${id} accounted — GL Batch: ${lastGlResult.batchName}`);
       setAccountingId(id);
       load();
       if (detail?.revalueId === id) {
-        setDetail({ ...d, status: 'ACCOUNTED', glBatchId: glResult.batchId, glBatchName: glResult.batchName });
+        setDetail({ ...d, status: 'ACCOUNTED', glBatchId: lastGlResult.batchId, glBatchName: lastGlResult.batchName });
       }
     } catch (e) {
       message.error('Accounting failed: ' + (e instanceof Error ? e.message : String(e)));

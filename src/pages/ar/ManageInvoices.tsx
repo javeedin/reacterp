@@ -8,7 +8,8 @@ import {
   ApiOutlined, CopyOutlined, CheckOutlined, DatabaseOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
-import type { ColumnsType, ExpandableConfig } from 'antd/es/table';
+import type { ColumnsType } from 'antd/es/table';
+import type { TableProps } from 'antd';
 import dayjs from 'dayjs';
 import FloatingMenu from '../../components/FloatingMenu';
 import Autopilot from '../../components/Autopilot';
@@ -351,11 +352,11 @@ const ManageInvoices: React.FC = () => {
     },
   ];
 
-  const expandable: ExpandableConfig<ARInvoiceRecord> = {
-    onExpand: (expanded, record) => {
+  const expandable: TableProps<ARInvoiceRecord>['expandable'] = {
+    onExpand: (expanded: boolean, record: ARInvoiceRecord) => {
       if (expanded) fetchLines(record.customerTransactionId);
     },
-    expandedRowRender: (record) => {
+    expandedRowRender: (record: ARInvoiceRecord) => {
       const state = expandedLines[record.customerTransactionId];
       if (!state || state.loading) {
         return (
