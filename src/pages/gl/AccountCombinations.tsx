@@ -28,7 +28,7 @@ import {
   SettingOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import { PROXY_CONFIG } from '../../config/api.config';
+import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../../config/api.config';
 import Autopilot from '../../components/Autopilot';
 
 const { Content } = Layout;
@@ -148,26 +148,26 @@ const AccountCombinations: React.FC = () => {
     setData([]);
     setFilteredData([]);
 
+    const fusionAuth = 'Basic ' + btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
     try {
       let url: string;
+      let fetchOptions: RequestInit = {};
       if (dataSource === 'fusion') {
-        url = `${PROXY_CONFIG.baseUrl}/oracle/accountCombinationsLOV?limit=500`;
+        url = `${ORACLE_FUSION_CONFIG.baseUrl}/accountCombinationsLOV?limit=500`;
+        fetchOptions = { headers: { Authorization: fusionAuth, Accept: 'application/json' } };
       } else {
-        url = `${PROXY_CONFIG.baseUrl}/apex/getcodecombinations/get`;
+        url = `${APEX_DB_CONFIG.baseUrl}/getcodecombinations/get`;
       }
 
-      const response = await fetch(url);
+      const response = await fetch(url, fetchOptions);
       const result = await response.json();
 
       if (dataSource === 'fusion') {
-        if (result.success && result.items) {
-          const normalized = result.items.map((item: CodeCombination) => normalizeData(item, 'fusion'));
-          setData(normalized);
-          setFilteredData(normalized);
-          setTotalRecords(normalized.length);
-        } else {
-          throw new Error(result.error || 'Failed to fetch from Fusion');
-        }
+        const items = result.items || [];
+        const normalized = items.map((item: CodeCombination) => normalizeData(item, 'fusion'));
+        setData(normalized);
+        setFilteredData(normalized);
+        setTotalRecords(normalized.length);
       } else {
         if (result.items) {
           const normalized = result.items.map((item: CodeCombination) => normalizeData(item, 'apex'));
