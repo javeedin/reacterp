@@ -1,27 +1,28 @@
 /**
  * sync-http.ts
  * HTTP helpers for Sync services.
- *
- * - Electron: calls Oracle Fusion directly (no CORS restrictions in Electron)
- * - Browser:  routes through the local proxy server to avoid CORS
+ * All Oracle Fusion calls use Basic Auth directly — no proxy.
+ * All APEX calls go directly to the APEX base URL.
  */
 
 import { ORACLE_FUSION_CONFIG, ORACLE_SOAP_CONFIG, APEX_DB_CONFIG } from '../config/api.config';
 
 export type LogCallback = (type: 'info' | 'success' | 'error' | 'warning' | 'step', message: string) => void;
 
-// ── Environment detection ──────────────────────────────────────────────────────
-const isElectron = typeof navigator !== 'undefined' && navigator.userAgent.includes('Electron');
-const PROXY_BASE  = 'http://localhost:3001/api';
 const FUSION_HOST = 'https://iaaobn.fa.ocs.oraclecloud.com';
 const HCM_BASE    = 'https://iaaobn-test.fa.ocs.oraclecloud.com/hcmRestApi/resources/11.13.18.05';
 
-// ── Auth headers (used in Electron only) ─────────────────────────────────────
 const oracleAuth = () =>
   `Basic ${btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`)}`;
 
 const hcmAuth = () =>
   `Basic ${btoa('javeedindia@gmail.com:Bumeric2026')}`;
+
+const oracleHeaders = () => ({
+  Authorization: oracleAuth(),
+  'Content-Type': 'application/json',
+  Accept: 'application/json',
+});
 
 // ── Oracle Fusion (standard endpoint) ────────────────────────────────────────
 
@@ -33,19 +34,10 @@ export const fetchFromOracle = async (
 ): Promise<any> => {
   try {
     const queryParams = new URLSearchParams(params);
-    let response: Response;
+    const url = `${ORACLE_FUSION_CONFIG.baseUrl}/${endpoint}?${queryParams.toString()}`;
+    if (verbose) { log?.('step', '──── [GET] Oracle Fusion ────'); log?.('info', `GET URL: ${url}`); }
 
-    if (isElectron) {
-      const url = `${ORACLE_FUSION_CONFIG.baseUrl}/${endpoint}?${queryParams.toString()}`;
-      if (verbose) { log?.('step', '──── [GET] Oracle Fusion (Electron) ────'); log?.('info', `GET URL: ${url}`); }
-      response = await fetch(url, {
-        headers: { 'Authorization': oracleAuth(), 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      });
-    } else {
-      const url = `${PROXY_BASE}/oracle/${endpoint}?${queryParams.toString()}`;
-      if (verbose) { log?.('step', '──── [GET] Oracle Fusion (proxy) ────'); log?.('info', `GET URL: ${url}`); }
-      response = await fetch(url);
-    }
+    const response = await fetch(url, { headers: oracleHeaders() });
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -70,19 +62,9 @@ export const fetchFromOracleUrl = async (
   signal?: AbortSignal,
 ): Promise<any> => {
   try {
-    let response: Response;
+    if (verbose) { log?.('step', '──── [GET] Oracle Fusion URL ────'); log?.('info', `GET URL: ${url}`); }
 
-    if (isElectron) {
-      if (verbose) { log?.('step', '──── [GET] Oracle Fusion URL (Electron) ────'); log?.('info', `GET URL: ${url}`); }
-      response = await fetch(url, {
-        headers: { 'Authorization': oracleAuth(), 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        signal,
-      });
-    } else {
-      const proxyUrl = `${PROXY_BASE}/oracle-url?url=${encodeURIComponent(url)}`;
-      if (verbose) { log?.('step', '──── [GET] Oracle Fusion URL (proxy) ────'); log?.('info', `Original URL: ${url}`); }
-      response = await fetch(proxyUrl, { signal });
-    }
+    const response = await fetch(url, { headers: oracleHeaders(), signal });
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -99,9 +81,6 @@ export const fetchFromOracleUrl = async (
 };
 
 // ── Oracle Fusion (full URL, all pages via pagination) ────────────────────────
-// Always requests `pageSize` records per page and follows hasMore / full-page
-// heuristic until all records are retrieved. Strips any existing limit/offset
-// from the URL so they don't conflict.
 
 export const fetchAllFromOracleUrl = async (
   baseUrl: string,
@@ -115,7 +94,6 @@ export const fetchAllFromOracleUrl = async (
   let pageNum = 0;
   let hasMore = true;
 
-  // Preserve any existing query params (e.g. filters) but override limit/offset
   const [urlBase, existingQuery] = baseUrl.split('?');
   const qp = new URLSearchParams(existingQuery || '');
   qp.delete('limit');
@@ -137,8 +115,8 @@ export const fetchAllFromOracleUrl = async (
     const items: any[] = result.items || [];
     allItems.push(...items);
 
-    const apiHasMore   = result.hasMore === true;
-    const gotFullPage  = items.length === pageSize;
+    const apiHasMore  = result.hasMore === true;
+    const gotFullPage = items.length === pageSize;
     hasMore = items.length > 0 && (apiHasMore || gotFullPage);
     offset += items.length;
   }
@@ -160,19 +138,10 @@ export const fetchFromFusion = async (
 ): Promise<any> => {
   try {
     const queryParams = new URLSearchParams(params);
-    let response: Response;
+    const url = `${FUSION_HOST}/${fusionPath}?${queryParams.toString()}`;
+    if (verbose) { log?.('step', '──── [GET] Oracle Fusion ────'); log?.('info', `GET URL: ${url}`); }
 
-    if (isElectron) {
-      const url = `${FUSION_HOST}/${fusionPath}?${queryParams.toString()}`;
-      if (verbose) { log?.('step', '──── [GET] Oracle Fusion (Electron) ────'); log?.('info', `GET URL: ${url}`); }
-      response = await fetch(url, {
-        headers: { 'Authorization': oracleAuth(), 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      });
-    } else {
-      const url = `${PROXY_BASE}/fusion/${fusionPath}?${queryParams.toString()}`;
-      if (verbose) { log?.('step', '──── [GET] Oracle Fusion (proxy) ────'); log?.('info', `GET URL: ${url}`); }
-      response = await fetch(url);
-    }
+    const response = await fetch(url, { headers: oracleHeaders() });
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -188,7 +157,7 @@ export const fetchFromFusion = async (
   }
 };
 
-// ── Oracle HCM (test environment) ────────────────────────────────────────────
+// ── Oracle HCM ────────────────────────────────────────────────────────────────
 
 export const fetchFromHcm = async (
   endpoint: string,
@@ -198,19 +167,12 @@ export const fetchFromHcm = async (
 ): Promise<any> => {
   try {
     const queryParams = new URLSearchParams(params);
-    let response: Response;
+    const url = `${HCM_BASE}/${endpoint}?${queryParams.toString()}`;
+    if (verbose) { log?.('step', '──── [GET] Oracle HCM ────'); log?.('info', `GET URL: ${url}`); }
 
-    if (isElectron) {
-      const url = `${HCM_BASE}/${endpoint}?${queryParams.toString()}`;
-      if (verbose) { log?.('step', '──── [GET] Oracle HCM (Electron) ────'); log?.('info', `GET URL: ${url}`); }
-      response = await fetch(url, {
-        headers: { 'Authorization': hcmAuth(), 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      });
-    } else {
-      const url = `${PROXY_BASE}/hcm/${endpoint}?${queryParams.toString()}`;
-      if (verbose) { log?.('step', '──── [GET] Oracle HCM (proxy) ────'); log?.('info', `GET URL: ${url}`); }
-      response = await fetch(url);
-    }
+    const response = await fetch(url, {
+      headers: { Authorization: hcmAuth(), 'Content-Type': 'application/json', Accept: 'application/json' },
+    });
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -254,7 +216,6 @@ export const insertToApex = async (
     try {
       data = JSON.parse(responseText);
     } catch {
-      // APEX returned non-JSON (e.g. 404 HTML when endpoint doesn't exist)
       log?.('error', `POST non-JSON response (HTTP ${response.status}): ${responseText.substring(0, 300)}`);
       return { success: false, error: `HTTP ${response.status}: ${responseText.substring(0, 200)}` };
     }
@@ -314,8 +275,6 @@ export const fetchFromApex = async (
   try {
     const queryParams = new URLSearchParams(params);
     const qs = queryParams.toString();
-    // Avoid a trailing '?' when params is empty, and don't double up '?' if
-    // the endpoint already carries its own query string (e.g. 'fa/assets?offset=0')
     const url = qs
       ? `${APEX_DB_CONFIG.baseUrl}/${endpoint}${endpoint.includes('?') ? '&' : '?'}${qs}`
       : `${APEX_DB_CONFIG.baseUrl}/${endpoint}`;
@@ -327,7 +286,6 @@ export const fetchFromApex = async (
 
     const response = await fetch(url);
     const text = await response.text();
-    // Only block HTML error pages (e.g. ORDS 404); valid JSON error responses pass through
     if (text.trimStart().startsWith('<')) {
       const errMsg = `HTTP ${response.status}: endpoint returned HTML (not JSON). Check the ORDS route exists.`;
       log?.('error', `GET Error: ${errMsg}`);
@@ -351,48 +309,33 @@ export const callSoapBip = async (
   log?: LogCallback
 ): Promise<{ success: boolean; decodedXml?: string; recordCount?: number; duration?: number; error?: string; details?: string }> => {
   try {
-    if (isElectron) {
-      // In Electron: call SOAP endpoint directly — no CORS restriction
-      const startTime = Date.now();
-      log?.('info', 'Sending SOAP request (Electron)...');
+    const startTime = Date.now();
+    log?.('info', 'Sending SOAP request...');
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': '"runReport"' },
-        body: envelope,
-      });
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': '"runReport"' },
+      body: envelope,
+    });
 
-      const duration = Date.now() - startTime;
-      if (!response.ok) {
-        const errorText = await response.text();
-        return { success: false, error: `SOAP Error: ${response.status} ${response.statusText}`, details: errorText.substring(0, 500) };
-      }
-
-      const soapResponse = await response.text();
-      const match = soapResponse.match(/<reportBytes[^>]*>([^<]+)<\/reportBytes>/);
-      if (!match) return { success: false, error: 'No reportBytes found in SOAP response' };
-
-      const binaryString = atob(match[1].trim());
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
-      const decodedXml = new TextDecoder('utf-8').decode(bytes);
-      const recordCount = (decodedXml.match(/<G_1>/g) || []).length;
-
-      log?.('success', `SOAP decoded — records: ${recordCount}`);
-      return { success: true, duration, decodedXml, recordCount };
-    } else {
-      // In browser: proxy handles the SOAP call and Base64 decode
-      log?.('info', 'Sending SOAP request (via proxy)...');
-      const response = await fetch(`${PROXY_BASE}/soap/bip-report`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, envelope }),
-      });
-      const data = await response.json();
-      if (!data.success) return { success: false, error: data.error || 'SOAP request failed', details: data.details };
-      log?.('success', `SOAP decoded — records: ${data.recordCount}`);
-      return { success: true, duration: data.duration, decodedXml: data.decodedXml, recordCount: data.recordCount };
+    const duration = Date.now() - startTime;
+    if (!response.ok) {
+      const errorText = await response.text();
+      return { success: false, error: `SOAP Error: ${response.status} ${response.statusText}`, details: errorText.substring(0, 500) };
     }
+
+    const soapResponse = await response.text();
+    const match = soapResponse.match(/<reportBytes[^>]*>([^<]+)<\/reportBytes>/);
+    if (!match) return { success: false, error: 'No reportBytes found in SOAP response' };
+
+    const binaryString = atob(match[1].trim());
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+    const decodedXml = new TextDecoder('utf-8').decode(bytes);
+    const recordCount = (decodedXml.match(/<G_1>/g) || []).length;
+
+    log?.('success', `SOAP decoded — records: ${recordCount}`);
+    return { success: true, duration, decodedXml, recordCount };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
     log?.('error', `SOAP Error: ${errorMsg}`);
