@@ -34,29 +34,63 @@ END;
 /
 
 -- 2) GET handler — returns content field for external transaction attachment
+--    FILE_CONTENT is now BLOB; encode to base64 for the React frontend
 BEGIN
+    BEGIN
+        ORDS.DELETE_HANDLER(
+            p_module_name => 'reerp',
+            p_pattern     => 'cash/externaltransactions/:externalTransactionId/attachments/:attachmentId',
+            p_method      => 'GET'
+        );
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'reerp',
         p_pattern        => 'cash/externaltransactions/:externalTransactionId/attachments/:attachmentId',
         p_method         => 'GET',
         p_source_type    => ORDS.source_type_plsql,
         p_items_per_page => 0,
-        p_comments       => 'Get single attachment with content for preview/download',
+        p_comments       => 'Get single attachment - encodes BLOB to base64',
         p_source         => q'[
 DECLARE
-    r RR_EXTERNAL_TRX_ATTACHMENTS%ROWTYPE;
+    v_id        NUMBER;
+    v_file_name VARCHAR2(500);
+    v_file_type VARCHAR2(100);
+    v_file_size NUMBER;
+    v_content   BLOB;
+    v_blob_len  INTEGER;
+    v_chunk     RAW(15000);
+    v_b64_raw   RAW(21000);
+    v_b64_str   VARCHAR2(32767);
+    v_read_amt  BINARY_INTEGER;
+    v_offset    INTEGER := 1;
 BEGIN
-    SELECT * INTO r
+    SELECT ID, FILE_NAME, FILE_TYPE, FILE_SIZE, FILE_CONTENT
+      INTO v_id, v_file_name, v_file_type, v_file_size, v_content
       FROM RR_EXTERNAL_TRX_ATTACHMENTS
      WHERE ID = :attachmentId
        AND EXTERNAL_TRANSACTION_ID = :externalTransactionId;
 
-    HTP.P('{"id":' || r.ID
-        || ',"fileName":' || APEX_JSON.STRINGIFY(r.FILE_NAME)
-        || ',"fileType":' || APEX_JSON.STRINGIFY(NVL(r.FILE_TYPE,''))
-        || ',"fileSize":' || NVL(TO_CHAR(r.FILE_SIZE),'null')
-        || ',"content":' || APEX_JSON.STRINGIFY(NVL(r.FILE_CONTENT,''))
-        || '}');
+    v_blob_len := CASE WHEN v_content IS NULL THEN 0 ELSE DBMS_LOB.GETLENGTH(v_content) END;
+
+    HTP.PRN('{"id":' || v_id
+        || ',"fileName":' || APEX_JSON.STRINGIFY(v_file_name)
+        || ',"fileType":' || APEX_JSON.STRINGIFY(NVL(v_file_type,''))
+        || ',"fileSize":' || NVL(TO_CHAR(v_file_size),'null')
+        || ',"content":"');
+
+    -- Encode BLOB to base64 in 15KB chunks
+    WHILE v_offset <= v_blob_len LOOP
+        v_read_amt := LEAST(15000, v_blob_len - v_offset + 1);
+        DBMS_LOB.READ(v_content, v_read_amt, v_offset, v_chunk);
+        v_b64_raw := UTL_ENCODE.BASE64_ENCODE(v_chunk);
+        v_b64_str := UTL_RAW.CAST_TO_VARCHAR2(v_b64_raw);
+        v_b64_str := REPLACE(REPLACE(v_b64_str, CHR(13), ''), CHR(10), '');
+        HTP.PRN(v_b64_str);
+        v_offset := v_offset + v_read_amt;
+    END LOOP;
+
+    HTP.PRN('"}');
 EXCEPTION WHEN NO_DATA_FOUND THEN
     HTP.P('{"error":"Not found"}');
 WHEN OTHERS THEN

@@ -1,12 +1,12 @@
 -- ============================================================
--- PATCH v7: Upload attachment — JSON_OBJECT_T approach
---           (same proven pattern as RR_AP_INVOICE_ATTACHMENTS)
+-- PATCH v8: Change FILE_CONTENT to BLOB + JSON_OBJECT_T upload
+--           Mirrors RR_AP_INVOICE_ATTACHMENTS exactly.
 --
--- HOW TO RUN IN SQL WORKSHOP → SQL Commands:
---   Copy the entire BEGIN...END; block below, paste, click Run.
+-- HOW TO RUN: SQL Workshop → SQL Commands
+--   Copy the entire BEGIN...END; block, paste, Run.
 --   Expected: "PL/SQL procedure successfully completed."
 --
--- REQUEST FORMAT (same as before):
+-- REQUEST FORMAT:
 --   POST  .../attachments
 --   Content-Type: application/json
 --   Body: { "fileName":"...", "fileType":"...", "fileSize":N,
@@ -14,6 +14,17 @@
 -- ============================================================
 
 BEGIN
+    -- Step 1: Rename old CLOB column, add new BLOB column
+    BEGIN
+        EXECUTE IMMEDIATE 'ALTER TABLE RR_EXTERNAL_TRX_ATTACHMENTS RENAME COLUMN FILE_CONTENT TO FILE_CONTENT_CLB';
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+    BEGIN
+        EXECUTE IMMEDIATE 'ALTER TABLE RR_EXTERNAL_TRX_ATTACHMENTS ADD (FILE_CONTENT BLOB)';
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+
+    -- Step 2: Remove old POST handler
     BEGIN
         ORDS.DELETE_HANDLER(
             p_module_name => 'reerp',
@@ -23,6 +34,7 @@ BEGIN
     EXCEPTION WHEN OTHERS THEN NULL;
     END;
 
+    -- Step 3: Define new POST handler — stores raw BLOB
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'reerp',
         p_pattern        => 'cash/externaltransactions/:externalTransactionId/attachments',
@@ -30,7 +42,7 @@ BEGIN
         p_source_type    => ORDS.source_type_plsql,
         p_items_per_page => 0,
         p_mimes_allowed  => '',
-        p_comments       => 'Upload attachment v7 - JSON_OBJECT_T',
+        p_comments       => 'Upload attachment v8 - stores BLOB',
         p_source         => q'[
 DECLARE
     v_blob       BLOB := :body;
@@ -45,7 +57,8 @@ DECLARE
     v_file_type  VARCHAR2(100);
     v_file_size  NUMBER;
     v_created_by VARCHAR2(150);
-    v_content    CLOB;
+    v_b64_clob   CLOB;
+    v_content    BLOB;
     v_new_id     NUMBER;
 BEGIN
     v_blob_len := CASE WHEN v_blob IS NULL THEN 0 ELSE DBMS_LOB.GETLENGTH(v_blob) END;
@@ -54,7 +67,7 @@ BEGIN
         RETURN;
     END IF;
 
-    -- Convert BLOB body to CLOB then parse as JSON
+    -- Convert body BLOB to CLOB for JSON parsing
     DBMS_LOB.CREATETEMPORARY(v_body_clob, TRUE);
     DBMS_LOB.CONVERTTOCLOB(
         v_body_clob, v_blob, DBMS_LOB.LOBMAXSIZE,
@@ -62,12 +75,16 @@ BEGIN
         NLS_CHARSET_ID('AL32UTF8'), v_lang_ctx, v_warning
     );
 
+    -- Parse JSON and extract fields
     v_json       := JSON_OBJECT_T.PARSE(v_body_clob);
     v_file_name  := v_json.GET_STRING('fileName');
     v_file_type  := v_json.GET_STRING('fileType');
     v_file_size  := v_json.GET_NUMBER('fileSize');
     v_created_by := v_json.GET_STRING('createdBy');
-    v_content    := v_json.GET_CLOB('content');
+    v_b64_clob   := v_json.GET_CLOB('content');
+
+    -- Decode base64 → BLOB (reuse invoice attachment package)
+    RR_AP_ATTACH_PKG.base64_to_blob(p_base64 => v_b64_clob, p_blob => v_content);
 
     INSERT INTO RR_EXTERNAL_TRX_ATTACHMENTS
         (EXTERNAL_TRANSACTION_ID, FILE_NAME, FILE_TYPE, FILE_SIZE, FILE_CONTENT, CREATED_BY)
@@ -79,7 +96,7 @@ BEGIN
     COMMIT;
     HTP.P('{"status":"success","id":' || v_new_id
         || ',"bodyLen":'       || v_blob_len
-        || ',"contentLength":' || NVL(DBMS_LOB.GETLENGTH(v_content), 0)
+        || ',"blobLength":'    || NVL(DBMS_LOB.GETLENGTH(v_content), 0)
         || '}');
 EXCEPTION WHEN OTHERS THEN
     ROLLBACK;
