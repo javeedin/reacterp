@@ -60,6 +60,7 @@ DECLARE
     v_b64_raw    RAW(21000);
     v_b64_str    VARCHAR2(32767);
     v_read_amt   INTEGER;
+    v_read_one   BINARY_INTEGER := 1;
     v_offset     INTEGER := 1;
     -- Shared
     v_file_name  VARCHAR2(500);
@@ -76,7 +77,7 @@ BEGIN
     END IF;
 
     -- Detect format: '{' (0x7B) = JSON, anything else = raw binary
-    DBMS_LOB.READ(v_blob, 1, 1, v_first_byte);
+    DBMS_LOB.READ(v_blob, v_read_one, 1, v_first_byte);
     v_is_json := (v_first_byte = HEXTORAW('7B'));
 
     IF v_is_json THEN
