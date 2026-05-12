@@ -394,12 +394,14 @@ const TransferForm: React.FC<{
       try { d = JSON.parse(txt); } catch (e) { message.error('Preview: server returned invalid JSON'); return; }
       const content = d.content || d.CONTENT || '';
       const fileType = att.fileType || d.fileType || 'application/octet-stream';
-      console.log('[preview] content length:', content.length, 'fileType:', fileType);
+      console.log('[preview] content length:', content.length, 'fileType:', fileType, 'first50:', content.slice(0,50));
       if (!content) { message.warning('No content returned — try re-uploading the file.'); return; }
       try {
         const blobUrl = makeBlobUrl(content, fileType);
+        console.log('[preview] blobUrl created:', blobUrl);
         setPreviewAtt({ name: att.name, fileType, content, blobUrl });
-      } catch (e) { message.error('Failed to decode file: ' + (e as any).message); }
+        console.log('[preview] setPreviewAtt called');
+      } catch (e) { message.error('Failed to decode file: ' + (e as any).message); console.error('[preview] decode error', e); }
     } catch (e: any) { message.error('Failed to load attachment: ' + e.message); }
     finally { setPreviewLoading(false); }
   };
@@ -1302,7 +1304,7 @@ END;
             return <div style={{ textAlign: 'center', padding: 16 }}><img src={previewAtt.blobUrl} alt={previewAtt.name} style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain' }} /></div>;
           }
           if (previewAtt.fileType?.includes('pdf')) {
-            return <iframe src={previewAtt.blobUrl} style={{ width: '100%', height: '70vh', border: 'none' }} title={previewAtt.name} />;
+            return <embed src={previewAtt.blobUrl} type="application/pdf" style={{ width: '100%', height: '70vh' }} />;
           }
           return (
             <div style={{ padding: 32, textAlign: 'center' }}>
