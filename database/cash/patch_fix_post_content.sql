@@ -1,23 +1,15 @@
 -- ============================================================
--- PATCH: Fix FILE_CONTENT not saving for all file types/sizes
+-- PATCH: Fix FILE_CONTENT not saving for PDFs / large files
 --
--- Request format (unchanged):
---   POST /cash/externaltransactions/:id/attachments
---   Content-Type: application/json
---   Body: {"fileName":"...","fileType":"...","fileSize":N,
---          "content":"<base64>","createdBy":"..."}
+-- HOW TO RUN IN SQL WORKSHOP:
+--   1. Copy EVERYTHING below (the entire file)
+--   2. Oracle APEX → SQL Workshop → SQL Commands
+--   3. Paste and click RUN
+--   4. You should see "PL/SQL procedure successfully completed"
 --
--- Approach:
---   1. DBMS_LOB.CONVERTTOCLOB  → full JSON as CLOB (no size limit)
---   2. JSON_TABLE              → extract scalar fields (VARCHAR2-safe)
---   3. DBMS_LOB.INSTR + COPY  → extract content CLOB directly
---      (base64 alphabet never contains " so the next " after
---       "content":" is always the closing quote — exact every time)
---
--- Success response includes bodyLen + contentLength so you can
--- confirm the content landed in the database.
---
--- Run in SQL Workshop → SQL Commands
+-- If you only see the inner DECLARE block and run that alone,
+-- the handler is NOT registered — you must run the outer
+-- BEGIN ORDS.DEFINE_HANDLER(...) END; wrapper.
 -- ============================================================
 
 BEGIN
@@ -27,8 +19,8 @@ BEGIN
         p_method         => 'POST',
         p_source_type    => ORDS.source_type_plsql,
         p_items_per_page => 0,
-        p_mimes_allowed  => 'application/json',
-        p_comments       => 'Upload attachment for a transaction',
+        p_mimes_allowed  => '',
+        p_comments       => 'Upload attachment for a transaction v4',
         p_source         => q'[
 DECLARE
     v_blob       BLOB    := :body;
@@ -49,15 +41,13 @@ DECLARE
     v_clob_len   INTEGER;
     v_new_id     NUMBER;
 BEGIN
-    -- Step 1: guard against empty body
     v_blob_len := CASE WHEN v_blob IS NULL THEN 0 ELSE DBMS_LOB.GETLENGTH(v_blob) END;
     IF v_blob_len = 0 THEN
         OWA_UTIL.MIME_HEADER('application/json', FALSE);
-        HTP.P('{"status":"error","message":"Request body is empty"}');
+        HTP.P('{"status":"error","message":"empty body"}');
         RETURN;
     END IF;
 
-    -- Step 2: convert full BLOB → CLOB in one call (handles any size)
     DBMS_LOB.CREATETEMPORARY(v_body_clob, TRUE);
     DBMS_LOB.CONVERTTOCLOB(
         v_body_clob, v_blob, DBMS_LOB.LOBMAXSIZE,
@@ -66,7 +56,6 @@ BEGIN
     );
     v_clob_len := DBMS_LOB.GETLENGTH(v_body_clob);
 
-    -- Step 3: extract scalar fields via JSON_TABLE (safe for VARCHAR2)
     SELECT jt.file_name, jt.file_type, jt.file_size, jt.created_by
     INTO   v_file_name, v_file_type, v_file_size, v_created_by
     FROM   JSON_TABLE(v_body_clob, '$' COLUMNS (
@@ -76,9 +65,6 @@ BEGIN
                created_by VARCHAR2(150)  PATH '$.createdBy'
            )) jt;
 
-    -- Step 4: extract content CLOB via direct string search
-    -- Base64 uses only A-Za-z0-9+/= — never contains "
-    -- so the next " after "content":" is always the closing quote
     v_key_pos := DBMS_LOB.INSTR(v_body_clob, v_key);
     IF v_key_pos > 0 THEN
         v_key_pos := v_key_pos + LENGTH(v_key);
@@ -89,7 +75,6 @@ BEGIN
         END IF;
     END IF;
 
-    -- Step 5: insert
     INSERT INTO RR_EXTERNAL_TRX_ATTACHMENTS
         (EXTERNAL_TRANSACTION_ID, FILE_NAME, FILE_TYPE, FILE_SIZE, FILE_CONTENT, CREATED_BY)
     VALUES
@@ -99,19 +84,19 @@ BEGIN
 
     COMMIT;
     OWA_UTIL.MIME_HEADER('application/json', FALSE);
-    HTP.P('{"status":"success","id":' || v_new_id
-        || ',"fileName":'       || APEX_JSON.STRINGIFY(v_file_name)
-        || ',"bodyLen":'        || v_blob_len
-        || ',"clobLen":'        || NVL(v_clob_len, 0)
-        || ',"keyPos":'         || NVL(v_key_pos, 0)
-        || ',"endPos":'         || NVL(v_end_pos, 0)
-        || ',"contentLength":'  || NVL(DBMS_LOB.GETLENGTH(v_content), 0)
+    HTP.P('{"status":"success","version":"v4","id":' || v_new_id
+        || ',"bodyLen":'       || v_blob_len
+        || ',"clobLen":'       || NVL(v_clob_len, 0)
+        || ',"keyPos":'        || NVL(v_key_pos, 0)
+        || ',"endPos":'        || NVL(v_end_pos, 0)
+        || ',"contentLength":' || NVL(DBMS_LOB.GETLENGTH(v_content), 0)
         || '}');
 EXCEPTION WHEN OTHERS THEN
     ROLLBACK;
     OWA_UTIL.MIME_HEADER('application/json', FALSE);
-    HTP.P('{"status":"error","message":' || APEX_JSON.STRINGIFY(SQLERRM)
-        || ',"bodyLen":' || NVL(v_blob_len, -1) || '}');
+    HTP.P('{"status":"error","version":"v4","message":' || APEX_JSON.STRINGIFY(SQLERRM)
+        || ',"bodyLen":' || NVL(v_blob_len, -1)
+        || ',"clobLen":' || NVL(v_clob_len, -1) || '}');
 END;
 ]'
     );
