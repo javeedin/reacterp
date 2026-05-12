@@ -1119,24 +1119,20 @@ END;
                           id="insp-dl-input"
                           type="file"
                           style={{ display: 'none' }}
-                          onChange={async (e) => {
+                          onChange={(e) => {
                             const file = e.target.files?.[0];
                             e.target.value = '';
-                            if (!file) return;
-                            const base64 = await new Promise<string>((resolve, reject) => {
-                              const reader = new FileReader();
-                              reader.onload = () => { const r = reader.result as string; resolve(r.split(',')[1] ?? r); };
-                              reader.onerror = reject;
-                              reader.readAsDataURL(file);
-                            });
-                            const payload = { fileName: file.name, fileType: file.type || 'application/octet-stream', fileSize: file.size, content: base64, createdBy: 'ERP_USER' };
-                            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-                            const a = document.createElement('a');
-                            a.href = URL.createObjectURL(blob);
-                            a.download = file.name.replace(/\.[^.]+$/, '') + '-postman.json';
-                            a.click();
-                            URL.revokeObjectURL(a.href);
-                            message.success(`Downloaded ${a.download} — paste contents as raw JSON body in Postman`);
+                            if (!file || !inspTxnIdInput) return;
+                            const params = new URLSearchParams({ fileName: file.name, fileType: file.type || 'application/octet-stream', fileSize: String(file.size), createdBy: 'ERP_USER' });
+                            const url = `${APEX_BASE}/cash/externaltransactions/${inspTxnIdInput}/attachments?${params}`;
+                            navigator.clipboard.writeText(url).catch(() => {});
+                            setAttApiLog(prev => [...prev.slice(-9), {
+                              dir: 'Postman setup',
+                              url,
+                              status: 200,
+                              body: `━━ POSTMAN SETUP (URL copied to clipboard) ━━\n\n1. Method: POST\n2. URL: ${url}\n\n3. Body tab → Binary → select: ${file.name}\n4. Headers: Content-Type = application/octet-stream\n5. Send`,
+                            }]);
+                            message.success('Postman URL copied to clipboard — see log for full instructions');
                           }}
                         />
                         <Button size="small" type="primary" loading={attPostTesting} disabled={!inspTxnIdInput}
@@ -1145,8 +1141,8 @@ END;
                           Test POST (pick file)
                         </Button>
                         <Button size="small" onClick={() => { document.getElementById('insp-dl-input')?.click(); }}
-                          title="Pick a file → downloads full JSON with base64 for Postman">
-                          ↓ Postman JSON
+                          title="Pick a file → copies Postman URL to clipboard + shows setup instructions">
+                          Postman setup
                         </Button>
                       </>
                     </Space>

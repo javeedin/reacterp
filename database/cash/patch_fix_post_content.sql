@@ -1,34 +1,33 @@
 -- ============================================================
--- PATCH v5: Upload attachment — raw binary body, base64 encoded server-side
+-- PATCH v5: Upload attachment — raw binary body
 --
--- HOW TO RUN IN SQL WORKSHOP:
---   1. Copy EVERYTHING below (entire file)
---   2. Oracle APEX → SQL Workshop → SQL Commands
---   3. Paste and click RUN — one block at a time if needed
---   4. Each block must say "PL/SQL procedure successfully completed."
+-- HOW TO RUN:
+--   Option A (SQL Commands — paste and run as ONE block):
+--     Copy everything from BEGIN to END; below and click Run.
 --
--- WHAT CHANGED FROM JSON APPROACH:
---   • Body is now raw binary (application/octet-stream), NOT JSON
---   • File metadata (fileName, fileType, fileSize, createdBy) come as
---     URL query parameters, NOT in the JSON body
---   • Server encodes the binary body to base64 in 15 KB chunks
---     using UTL_ENCODE.BASE64_ENCODE — no size limits, no JSON parsing
+--   Option B (SQL Scripts — paste entire file and run):
+--     Works as-is with the / delimiter.
+--
+-- EXPECTED RESULT: "PL/SQL procedure successfully completed."
+--
+-- After registering, test with Postman:
+--   POST  <url>/attachments?fileName=file.pdf&fileType=application/pdf&fileSize=12660&createdBy=ERP_USER
+--   Body  → Binary → select the PDF file
+--   Header: Content-Type: application/octet-stream
 -- ============================================================
 
--- Step 1: Remove old POST handler (ignore error if not found)
 BEGIN
-    ORDS.DELETE_HANDLER(
-        p_module_name => 'reerp',
-        p_pattern     => 'cash/externaltransactions/:externalTransactionId/attachments',
-        p_method      => 'POST'
-    );
-    COMMIT;
-EXCEPTION WHEN OTHERS THEN NULL;
-END;
-/
+    -- Remove old handler first (safe even if it does not exist)
+    BEGIN
+        ORDS.DELETE_HANDLER(
+            p_module_name => 'reerp',
+            p_pattern     => 'cash/externaltransactions/:externalTransactionId/attachments',
+            p_method      => 'POST'
+        );
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
 
--- Step 2: Register new POST handler
-BEGIN
+    -- Register new POST handler
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'reerp',
         p_pattern        => 'cash/externaltransactions/:externalTransactionId/attachments',
@@ -51,13 +50,11 @@ DECLARE
 BEGIN
     v_blob_len := CASE WHEN v_blob IS NULL THEN 0 ELSE DBMS_LOB.GETLENGTH(v_blob) END;
     IF v_blob_len = 0 THEN
-        OWA_UTIL.MIME_HEADER('application/json', FALSE);
         HTP.P('{"status":"error","message":"empty body"}');
         RETURN;
     END IF;
 
     -- Encode raw binary body to base64 in 15 KB chunks
-    -- UTL_ENCODE.BASE64_ENCODE adds CRLF every 64 chars; we strip them
     DBMS_LOB.CREATETEMPORARY(v_content, TRUE);
     WHILE v_offset <= v_blob_len LOOP
         v_read_amt := LEAST(15000, v_blob_len - v_offset + 1);
@@ -77,14 +74,12 @@ BEGIN
     RETURNING ID INTO v_new_id;
 
     COMMIT;
-    OWA_UTIL.MIME_HEADER('application/json', FALSE);
     HTP.P('{"status":"success","id":' || v_new_id
         || ',"bodyLen":'       || v_blob_len
         || ',"contentLength":' || NVL(DBMS_LOB.GETLENGTH(v_content), 0)
         || '}');
 EXCEPTION WHEN OTHERS THEN
     ROLLBACK;
-    OWA_UTIL.MIME_HEADER('application/json', FALSE);
     HTP.P('{"status":"error","message":' || APEX_JSON.STRINGIFY(SQLERRM)
         || ',"bodyLen":' || NVL(v_blob_len, -1) || '}');
 END;
