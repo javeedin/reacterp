@@ -702,11 +702,17 @@ const ExternalTxnForm: React.FC<{
     setAttSaving(true);
     let savedCount = 0;
     for (const att of pending) {
-      if (!att.rawFile) { message.warning(`${att.name}: no file data — skipped`); continue; }
+      if (!att.rawFile && !att.content) { message.warning(`${att.name}: no file data — skipped`); continue; }
       try {
-        const params = new URLSearchParams({ fileName: att.name, fileType: att.fileType || '', fileSize: String(att.fileSize), createdBy: 'ERP_USER' });
-        const postUrl = `${APEX_BASE}/cash/externaltransactions/${extId}/attachments?${params}`;
-        const res = await fetch(postUrl, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: att.rawFile });
+        const base64 = att.content ?? await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => { const r = reader.result as string; resolve(r.split(',')[1] ?? r); };
+          reader.onerror = reject;
+          reader.readAsDataURL(att.rawFile!);
+        });
+        const payload = JSON.stringify({ fileName: att.name, fileType: att.fileType || '', fileSize: att.fileSize, content: base64, createdBy: 'ERP_USER' });
+        const postUrl = `${APEX_BASE}/cash/externaltransactions/${extId}/attachments`;
+        const res = await fetch(postUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload });
         const txt = await res.text();
         let resp: any = null;
         try { resp = JSON.parse(txt); } catch { /* not JSON */ }
