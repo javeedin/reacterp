@@ -933,7 +933,6 @@ const TransferForm: React.FC<{
                   content: '<base64-encoded file content>',
                   createdBy: 'ERP_USER',
                 }, null, 2);
-                const TINY_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
                 const sqlBlock = `-- Run in SQL Workshop → SQL Commands
 
 -- 1) External Transactions — GET single attachment with content
@@ -1077,27 +1076,47 @@ END;
                             message.error('GET single failed: ' + e.message);
                           } finally { setAttGetSingleTesting(false); }
                         }}>Test GET Single</Button>
-                      <Button size="small" type="primary" loading={attPostTesting} disabled={!inspTxnIdInput}
-                        style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
-                        onClick={async () => {
-                          if (!inspTxnIdInput) return;
-                          setAttPostTesting(true);
-                          const body = { fileName: 'test-ping.png', fileType: 'image/png', fileSize: TINY_PNG.length, content: TINY_PNG, createdBy: 'ERP_USER' };
-                          setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST upload', url: baseUrl, status: null, body: `POST ${baseUrl}\nContent-Type: application/json\n\n${JSON.stringify(body, null, 2)}` }]);
-                          try {
-                            const res = await fetch(baseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-                            const t = await res.text();
-                            const respBody = (() => { try { return JSON.stringify(JSON.parse(t), null, 2); } catch { return t; } })();
-                            setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST upload', url: baseUrl, status: res.status, body: `Request:\n${JSON.stringify(body, null, 2)}\n\nResponse (HTTP ${res.status}):\n${respBody}` }]);
-                            if (res.ok) message.success('POST succeeded — endpoint is working!');
-                            else message.error(`POST failed — HTTP ${res.status}. Check the log.`);
-                          } catch (e: any) {
-                            setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST upload', url: baseUrl, status: 0, body: 'Network error: ' + e.message }]);
-                            message.error('POST failed: ' + e.message);
-                          } finally { setAttPostTesting(false); }
-                        }}>
-                        Test POST (ping)
-                      </Button>
+                      <>
+                        <input
+                          id="insp-file-input"
+                          type="file"
+                          style={{ display: 'none' }}
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            e.target.value = '';
+                            if (!file || !inspTxnIdInput) return;
+                            setAttPostTesting(true);
+                            try {
+                              const base64 = await new Promise<string>((resolve, reject) => {
+                                const reader = new FileReader();
+                                reader.onload = () => {
+                                  const result = reader.result as string;
+                                  resolve(result.split(',')[1] ?? result);
+                                };
+                                reader.onerror = reject;
+                                reader.readAsDataURL(file);
+                              });
+                              const body = { fileName: file.name, fileType: file.type || 'application/octet-stream', fileSize: file.size, content: base64, createdBy: 'ERP_USER' };
+                              const preview = { ...body, content: base64.slice(0, 80) + `…[${base64.length} chars total]` };
+                              setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST upload', url: baseUrl, status: null, body: `POST ${baseUrl}\nContent-Type: application/json\n\n${JSON.stringify(preview, null, 2)}` }]);
+                              const res = await fetch(baseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                              const t = await res.text();
+                              const respBody = (() => { try { return JSON.stringify(JSON.parse(t), null, 2); } catch { return t; } })();
+                              setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST upload', url: baseUrl, status: res.status, body: `File: ${file.name} (${file.size} bytes)\nBase64 length: ${base64.length} chars\n\nResponse (HTTP ${res.status}):\n${respBody}` }]);
+                              if (res.ok) message.success(`POST succeeded — ${file.name} uploaded!`);
+                              else message.error(`POST failed — HTTP ${res.status}. Check the log.`);
+                            } catch (e: any) {
+                              setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST upload', url: baseUrl, status: 0, body: 'Error: ' + e.message }]);
+                              message.error('POST failed: ' + e.message);
+                            } finally { setAttPostTesting(false); }
+                          }}
+                        />
+                        <Button size="small" type="primary" loading={attPostTesting} disabled={!inspTxnIdInput}
+                          style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+                          onClick={() => { document.getElementById('insp-file-input')?.click(); }}>
+                          Test POST (pick file)
+                        </Button>
+                      </>
                     </Space>
 
                     {/* SQL to register handlers */}
