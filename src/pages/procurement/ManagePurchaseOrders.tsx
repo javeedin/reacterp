@@ -29,7 +29,7 @@ const REDWOOD = {
 };
 
 // ── Oracle Fusion API config ─────────────────────────────────────────────────
-const BASE_URL = 'https://iaaobn.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05';
+const BASE_URL = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05';
 const AUTH_HEADER = 'Basic ' + btoa('ratheesh@buimerccorp.com:BCL#261285');
 const PAGE_SIZE = 25;
 
