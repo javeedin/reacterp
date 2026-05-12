@@ -416,11 +416,14 @@ const TransferForm: React.FC<{
       try {
         const res = await fetch(postUrl, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: att.rawFile });
         const respText = await res.text();
+        let resp: any = null;
+        try { resp = JSON.parse(respText); } catch { /* not JSON */ }
         setAttApiLog(prev => [...prev.slice(-9), {
           dir: 'POST', url: postUrl, status: res.status,
           body: `Sent: ${att.name} — ${att.rawFile!.size} bytes raw\n\nResponse: ${respText}`,
         }]);
-        if (res.ok) saved++;
+        if (resp?.status === 'success') saved++;
+        else message.error(`${att.name}: ${resp?.message || respText}`);
       } catch (e: any) {
         setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST', url: postUrl, status: 0, body: 'Error: ' + e.message }]);
       }
@@ -1141,8 +1144,8 @@ END;
                           Test POST (pick file)
                         </Button>
                         <Button size="small" onClick={() => { document.getElementById('insp-dl-input')?.click(); }}
-                          title="Pick a file → copies Postman URL to clipboard + shows setup instructions">
-                          Postman setup
+                          title="Pick a file → copies binary upload URL to clipboard + shows Postman instructions">
+                          ↓ Postman URL
                         </Button>
                       </>
                     </Space>

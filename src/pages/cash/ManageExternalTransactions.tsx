@@ -707,8 +707,11 @@ const ExternalTxnForm: React.FC<{
         const params = new URLSearchParams({ fileName: att.name, fileType: att.fileType || '', fileSize: String(att.fileSize), createdBy: 'ERP_USER' });
         const postUrl = `${APEX_BASE}/cash/externaltransactions/${extId}/attachments?${params}`;
         const res = await fetch(postUrl, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: att.rawFile });
-        if (res.ok) savedCount++;
-        else { const t = await res.text(); message.error(`${att.name}: server error ${res.status} — ${t}`); }
+        const txt = await res.text();
+        let resp: any = null;
+        try { resp = JSON.parse(txt); } catch { /* not JSON */ }
+        if (resp?.status === 'success') savedCount++;
+        else message.error(`${att.name}: ${resp?.message || txt || `HTTP ${res.status}`}`);
       } catch (e: any) { message.error(`${att.name}: ${e.message}`); }
     }
     // Refresh attachment list from server
