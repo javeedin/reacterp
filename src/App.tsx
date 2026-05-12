@@ -97,6 +97,8 @@ const MyTickets               = lazy(() => import('./pages/support/MyTickets'));
 const TrainingModule          = lazy(() => import('./pages/training/TrainingModule'));
 const OracleFusion            = lazy(() => import('./pages/oracle/OracleFusion'));
 const ManageRevaluation       = lazy(() => import('./pages/gl/ManageRevaluation'));
+const ProcurementModule       = lazy(() => import('./pages/procurement').then(m => ({ default: m.ProcurementModule })));
+const ManagePurchaseOrders    = lazy(() => import('./pages/procurement').then(m => ({ default: m.ManagePurchaseOrders })));
 
 // Placeholder component for modules under development
 const ComingSoon = ({ moduleName }: { moduleName: string }) => (
@@ -199,10 +201,11 @@ function App() {
               <Route path="ar/*" element={<ARModule />} />
               <Route path="inventory/*" element={<ComingSoon moduleName="Inventory" />} />
               <Route path="procurement/suppliers" element={<ManageSuppliers />} />
+              <Route path="procurement/purchase-orders" element={<ManagePurchaseOrders />} />
               <Route path="ap/suppliers" element={<ManageSuppliers />} />
               <Route path="suppliers/manage" element={<ManageSuppliers />} />
               <Route path="suppliers/balance/:supplierNumber" element={<SupplierBalance />} />
-              <Route path="procurement/*" element={<ComingSoon moduleName="Procurement" />} />
+              <Route path="procurement/*" element={<ProcurementModule />} />
               <Route path="hr/*" element={<ComingSoon moduleName="Human Resources" />} />
               <Route path="pms" element={<PMSModule />} />
               <Route path="pms/watchlist" element={<PMSWatchlist />} />
