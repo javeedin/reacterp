@@ -373,23 +373,34 @@ const TransferForm: React.FC<{
 
   const handlePreviewAttachment = async (file: any) => {
     const att = attachments.find(a => a.uid === file.uid);
-    if (!att) return;
+    if (!att) { console.warn('[preview] attachment not found in state', file.uid); return; }
     if (att.content) {
-      const blobUrl = makeBlobUrl(att.content, att.fileType || 'application/octet-stream');
-      setPreviewAtt({ name: att.name, fileType: att.fileType, content: att.content, blobUrl });
+      try {
+        const blobUrl = makeBlobUrl(att.content, att.fileType || 'application/octet-stream');
+        setPreviewAtt({ name: att.name, fileType: att.fileType, content: att.content, blobUrl });
+      } catch (e) { message.error('Preview error: ' + (e as any).message); }
       return;
     }
-    if (!att.id || !extTrxId) return;
+    if (!att.id) { message.warning('Attachment has no ID — save first, then preview.'); return; }
+    if (!extTrxId) { message.warning('Transfer ID not available for preview.'); return; }
     setPreviewLoading(true);
     try {
-      const res = await fetch(`${APEX_BASE}/cash/externaltransactions/${extTrxId}/attachments/${att.id}`, { headers: { Accept: 'application/json' } });
-      const d = await res.json();
+      const url = `${APEX_BASE}/cash/externaltransactions/${extTrxId}/attachments/${att.id}`;
+      console.log('[preview] fetching', url);
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const txt = await res.text();
+      console.log('[preview] response length:', txt.length, 'status:', res.status);
+      let d: any = {};
+      try { d = JSON.parse(txt); } catch (e) { message.error('Preview: server returned invalid JSON'); return; }
       const content = d.content || d.CONTENT || '';
       const fileType = att.fileType || d.fileType || 'application/octet-stream';
-      if (!content) { message.warning('No content available for preview.'); return; }
-      const blobUrl = makeBlobUrl(content, fileType);
-      setPreviewAtt({ name: att.name, fileType, content, blobUrl });
-    } catch { message.error('Failed to load attachment.'); }
+      console.log('[preview] content length:', content.length, 'fileType:', fileType);
+      if (!content) { message.warning('No content returned — try re-uploading the file.'); return; }
+      try {
+        const blobUrl = makeBlobUrl(content, fileType);
+        setPreviewAtt({ name: att.name, fileType, content, blobUrl });
+      } catch (e) { message.error('Failed to decode file: ' + (e as any).message); }
+    } catch (e: any) { message.error('Failed to load attachment: ' + e.message); }
     finally { setPreviewLoading(false); }
   };
 
