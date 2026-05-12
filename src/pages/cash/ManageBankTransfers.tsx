@@ -251,6 +251,9 @@ const TransferForm: React.FC<{
   const transferId = initialValues?.bankAccountTransferId;
   const extTrxId = initialValues?.fromExternalTrxId || null;
   useEffect(() => {
+    if (extTrxId) setInspTxnIdInput(String(extTrxId));
+  }, [extTrxId]);
+  useEffect(() => {
     if (!transferId) return;
     const url = extTrxId
       ? `${APEX_BASE}/cash/externaltransactions/${extTrxId}/attachments`
@@ -265,6 +268,7 @@ const TransferForm: React.FC<{
           setAttachments(d.items.map((a: any) => ({
             id: a.id, uid: String(a.id), name: a.fileName, fileType: a.fileType || '', fileSize: a.fileSize || 0, status: 'done' as const,
           })));
+          if (d.items[0]?.id) setInspAttIdInput(String(d.items[0].id));
         }
       })
       .catch(err => {
@@ -485,6 +489,8 @@ const TransferForm: React.FC<{
   const [attSaving, setAttSaving] = useState(false);
   const [attPostTesting, setAttPostTesting] = useState(false);
   const [attGetSingleTesting, setAttGetSingleTesting] = useState(false);
+  const [inspTxnIdInput, setInspTxnIdInput] = useState('');
+  const [inspAttIdInput, setInspAttIdInput] = useState('');
   const [previewAtt, setPreviewAtt] = useState<{ name: string; fileType: string; content: string; blobUrl?: string } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
@@ -912,14 +918,11 @@ const TransferForm: React.FC<{
               key: 'attachments',
               label: 'Attachments API',
               children: (() => {
-                const tid = initialValues?.bankAccountTransferId;
-                const inspExtId = initialValues?.fromExternalTrxId || null;
-                const baseUrl = inspExtId
-                  ? `${APEX_BASE}/cash/externaltransactions/${inspExtId}/attachments`
+                const baseUrl = inspTxnIdInput
+                  ? `${APEX_BASE}/cash/externaltransactions/${inspTxnIdInput}/attachments`
                   : `${APEX_BASE}/cash/externaltransactions/:externalTransactionId/attachments`;
-                const firstAttId = attachments.find(a => a.id)?.id;
-                const singleUrl = inspExtId && firstAttId
-                  ? `${APEX_BASE}/cash/externaltransactions/${inspExtId}/attachments/${firstAttId}`
+                const singleUrl = inspTxnIdInput && inspAttIdInput
+                  ? `${APEX_BASE}/cash/externaltransactions/${inspTxnIdInput}/attachments/${inspAttIdInput}`
                   : `${APEX_BASE}/cash/externaltransactions/:externalTransactionId/attachments/:attachmentId`;
                 const samplePayload = JSON.stringify({
                   fileName: 'document.pdf',
@@ -984,6 +987,34 @@ END;
 /`;
                 return (
                   <div>
+                    {/* ID inputs */}
+                    <Row gutter={8} style={{ marginBottom: 10 }}>
+                      <Col span={12}>
+                        <Text style={{ fontSize: 11, display: 'block', marginBottom: 3 }}>
+                          External Transaction ID <Text type="secondary" style={{ fontSize: 10 }}>(fromExternalTrxId)</Text>
+                        </Text>
+                        <Input
+                          size="small"
+                          value={inspTxnIdInput}
+                          onChange={e => setInspTxnIdInput(e.target.value)}
+                          placeholder="e.g. 2420251"
+                          style={{ fontFamily: 'monospace', fontSize: 12 }}
+                        />
+                      </Col>
+                      <Col span={12}>
+                        <Text style={{ fontSize: 11, display: 'block', marginBottom: 3 }}>
+                          Attachment ID <Text type="secondary" style={{ fontSize: 10 }}>(from list above)</Text>
+                        </Text>
+                        <Input
+                          size="small"
+                          value={inspAttIdInput}
+                          onChange={e => setInspAttIdInput(e.target.value)}
+                          placeholder="e.g. 26"
+                          style={{ fontFamily: 'monospace', fontSize: 12 }}
+                        />
+                      </Col>
+                    </Row>
+
                     {/* Endpoints */}
                     <div style={{ background: '#f0f5ff', border: '1px solid #adc6ff', borderRadius: 6, padding: '10px 14px', marginBottom: 12 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -1013,8 +1044,8 @@ END;
 
                     {/* Test buttons */}
                     <Space wrap style={{ marginBottom: 10 }}>
-                      <Button size="small" disabled={!inspExtId} onClick={() => {
-                        if (!inspExtId) return;
+                      <Button size="small" disabled={!inspTxnIdInput} onClick={() => {
+                        if (!inspTxnIdInput) return;
                         setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET list', url: baseUrl, status: null, body: '…fetching…' }]);
                         fetch(baseUrl, { headers: { Accept: 'application/json' } })
                           .then(r => r.text().then(t => ({ status: r.status, t })))
@@ -1024,10 +1055,10 @@ END;
                           })
                           .catch(e => setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET list', url: baseUrl, status: 0, body: String(e) }]));
                       }}>Test GET List</Button>
-                      <Button size="small" loading={attGetSingleTesting} disabled={!tid || !firstAttId}
-                        title={!firstAttId ? 'No saved attachments to test with' : ''}
+                      <Button size="small" loading={attGetSingleTesting} disabled={!inspTxnIdInput || !inspAttIdInput}
+                        title={!inspAttIdInput ? 'Enter an Attachment ID above' : ''}
                         onClick={async () => {
-                          if (!inspExtId || !firstAttId) return;
+                          if (!inspTxnIdInput || !inspAttIdInput) return;
                           setAttGetSingleTesting(true);
                           setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET single', url: singleUrl, status: null, body: '…fetching…' }]);
                           try {
@@ -1044,10 +1075,10 @@ END;
                             message.error('GET single failed: ' + e.message);
                           } finally { setAttGetSingleTesting(false); }
                         }}>Test GET Single</Button>
-                      <Button size="small" type="primary" loading={attPostTesting} disabled={!inspExtId}
+                      <Button size="small" type="primary" loading={attPostTesting} disabled={!inspTxnIdInput}
                         style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
                         onClick={async () => {
-                          if (!inspExtId) return;
+                          if (!inspTxnIdInput) return;
                           setAttPostTesting(true);
                           const body = { fileName: 'test-ping.png', fileType: 'image/png', fileSize: TINY_PNG.length, content: TINY_PNG, createdBy: 'ERP_USER' };
                           setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST upload', url: baseUrl, status: null, body: `POST ${baseUrl}\nContent-Type: application/json\n\n${JSON.stringify(body, null, 2)}` }]);
