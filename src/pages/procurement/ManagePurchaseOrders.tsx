@@ -29,8 +29,8 @@ const REDWOOD = {
 };
 
 // ── Oracle Fusion API config ─────────────────────────────────────────────────
-const BASE_URL = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05';
-const AUTH_HEADER = 'Basic ' + btoa('emparun:Fusion@1234');
+const BASE_URL = 'https://iaaobn.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05';
+const AUTH_HEADER = 'Basic ' + btoa('ratheesh@buimerccorp.com:BCL#261285');
 const PAGE_SIZE = 25;
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -163,8 +163,9 @@ const PODetailPage: React.FC<{ po: RawPO }> = ({ po }) => {
       setRawResp(text);
       if (!r.ok) throw new Error(`HTTP ${r.status} — ${text.slice(0, 200)}`);
       const d = JSON.parse(text);
-      setLines(d.items ?? []);
-      if ((d.items ?? []).length === 0) setLE(`API returned 0 items. Raw: ${text.slice(0, 300)}`);
+      const items: POLine[] = Array.isArray(d) ? d : (d.items ?? []);
+      setLines(items);
+      if (items.length === 0) setLE(`API returned 0 items. Raw: ${text.slice(0, 300)}`);
     } catch (e: any) {
       setLE(e.message);
     } finally { setLL(false); }
@@ -172,7 +173,8 @@ const PODetailPage: React.FC<{ po: RawPO }> = ({ po }) => {
 
   useEffect(() => {
     const linesLink = po.links?.find(l => l.name === 'lines');
-    const url = linesLink?.href ?? `${BASE_URL}/purchaseOrders/${po.POHeaderId}/child/lines`;
+    const base = linesLink?.href ?? `${BASE_URL}/purchaseOrders/${po.POHeaderId}/child/lines`;
+    const url = base.includes('?') ? `${base}&limit=500` : `${base}?limit=500`;
     setLinesUrl(url);
     doFetch(url);
   }, [po.POHeaderId, doFetch]);
