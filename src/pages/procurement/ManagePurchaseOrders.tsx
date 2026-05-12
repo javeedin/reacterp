@@ -3,15 +3,17 @@ import dayjs, { type Dayjs } from 'dayjs';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
   DatePicker, Row, Col, Space, Tag, Tabs, message, Spin, Empty, Divider,
-  Modal, Tooltip, Statistic, Badge,
+  Modal, Tooltip, Statistic, Badge, Dropdown,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import type { MenuProps } from 'antd';
 import {
   HomeOutlined, ShoppingCartOutlined, SearchOutlined, ReloadOutlined,
   EyeOutlined, PrinterOutlined, CloseOutlined, CheckCircleOutlined,
   InfoCircleOutlined, UnorderedListOutlined, ApiOutlined, CopyOutlined,
   PlusOutlined, BankOutlined, UserOutlined, CalendarOutlined,
-  DollarOutlined, FileTextOutlined,
+  DollarOutlined, FileTextOutlined, DownOutlined, FilePdfOutlined,
+  HistoryOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 
@@ -145,7 +147,7 @@ const buildQParam = (p: SearchParams): string => {
 };
 
 // ── PO Detail Page (shown as a tab) ─────────────────────────────────────────
-const PODetailPage: React.FC<{ po: RawPO }> = ({ po }) => {
+const PODetailPage: React.FC<{ po: RawPO; onClose?: () => void }> = ({ po, onClose }) => {
   const [lines, setLines]           = useState<POLine[]>([]);
   const [linesLoading, setLL]       = useState(false);
   const [linesError, setLE]         = useState<string | null>(null);
@@ -190,6 +192,144 @@ const PODetailPage: React.FC<{ po: RawPO }> = ({ po }) => {
     } catch (e: any) {
       setApiResult({ status: 0, body: `Network error: ${e.message}` });
     } finally { setATL(false); }
+  };
+
+  const handleViewPDF = () => {
+    const win = window.open('', '_blank', 'width=960,height=780');
+    if (!win) { message.error('Allow popups to view PDF preview'); return; }
+    const linesHtml = lines.map((l, i) => `
+      <tr style="background:${i % 2 === 0 ? '#fff' : '#f7f7f7'}">
+        <td>${l.LineNumber}</td>
+        <td>${l.LineType ?? '—'}</td>
+        <td><strong>${l.Item ?? '—'}</strong></td>
+        <td>${l.Description ?? '—'}</td>
+        <td>${l.UOM ?? '—'}</td>
+        <td style="text-align:right">${l.Quantity ?? '—'}</td>
+        <td style="text-align:right">${fmtAmt(l.Price)}</td>
+        <td style="text-align:right">${fmtAmt(l.Ordered)}</td>
+        <td style="text-align:right">${fmtAmt(l.TotalTax)}</td>
+        <td style="text-align:right;color:#C74634;font-weight:700">${fmtAmt(l.Total)}</td>
+        <td>${l.StatusCode ?? l.Status ?? '—'}</td>
+      </tr>`).join('');
+    win.document.write(`<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>PO ${po.OrderNumber}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Segoe UI',Arial,sans-serif;font-size:12px;color:#1a1a1a;padding:32px;background:#fff}
+  .toolbar{display:flex;justify-content:flex-end;gap:8px;margin-bottom:24px}
+  .btn{padding:7px 18px;border-radius:4px;border:none;cursor:pointer;font-size:12px;font-weight:600}
+  .btn-red{background:#C74634;color:#fff}.btn-def{background:#f5f5f5;color:#333;border:1px solid #d9d9d9}
+  .hdr{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:16px;border-bottom:3px solid #C74634;margin-bottom:20px}
+  .po-no{font-size:24px;font-weight:800}.po-lbl{font-size:10px;font-weight:700;text-transform:uppercase;color:#6b6b6b;letter-spacing:.08em}
+  .sup{font-size:13px;color:#6b6b6b;margin-top:4px}
+  .status{display:inline-block;font-size:11px;padding:2px 10px;border-radius:4px;margin-top:8px;font-weight:600;background:#e6f4ff;color:#0572CE}
+  .amts{display:flex;gap:20px;text-align:right}
+  .amt-lbl{font-size:10px;font-weight:700;text-transform:uppercase;color:#6b6b6b}
+  .amt-val{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
+  .amt-tot{font-size:22px;font-weight:800;color:#C74634}
+  .sec{font-size:10px;font-weight:700;text-transform:uppercase;color:#C74634;letter-spacing:.06em;border-bottom:1px solid #f0d0cc;padding-bottom:4px;margin:18px 0 10px}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .fl{font-size:10px;font-weight:700;text-transform:uppercase;color:#6b6b6b}
+  .fv{font-size:12px;margin-top:2px}
+  table{width:100%;border-collapse:collapse;margin-top:8px;font-size:11px}
+  th{background:#f7f7f7;padding:6px 8px;text-align:left;border:1px solid #e5e5e5;font-weight:700;font-size:10px;text-transform:uppercase;color:#6b6b6b}
+  td{padding:5px 8px;border:1px solid #e5e5e5}
+  .tr-tot td{font-weight:700;background:#f0f0f0}
+  .footer{margin-top:20px;font-size:10px;color:#6b6b6b;text-align:right}
+  @media print{.toolbar{display:none}body{padding:16px}}
+</style></head><body>
+<div class="toolbar">
+  <button class="btn btn-def" onclick="window.close()">Close</button>
+  <button class="btn btn-red" onclick="window.print()">🖨&nbsp; Print / Save as PDF</button>
+</div>
+<div class="hdr">
+  <div>
+    <div class="po-lbl">Purchase Order</div>
+    <div class="po-no">${po.OrderNumber}</div>
+    <div class="sup">${po.Supplier ?? '—'}${po.SupplierSite ? ' &nbsp;·&nbsp; ' + po.SupplierSite : ''}</div>
+    <div><span class="status">${po.StatusCode ?? ''}</span></div>
+  </div>
+  <div class="amts">
+    <div><div class="amt-lbl">Ordered</div><div class="amt-val">${fmtAmt(po.Ordered)}</div><div style="font-size:10px;color:#6b6b6b">${po.CurrencyCode}</div></div>
+    <div><div class="amt-lbl">Tax</div><div class="amt-val">${fmtAmt(po.TotalTax)}</div><div style="font-size:10px;color:#6b6b6b">${po.CurrencyCode}</div></div>
+    <div style="border-left:2px solid #e5e5e5;padding-left:16px"><div class="amt-lbl">Total</div><div class="amt-tot">${fmtAmt(po.Total)}</div><div style="font-size:10px;color:#6b6b6b">${po.CurrencyCode}</div></div>
+  </div>
+</div>
+<div class="sec">General</div>
+<div class="grid">
+  <div><div class="fl">Document Style</div><div class="fv">${po.DocumentStyle ?? '—'}</div></div>
+  <div><div class="fl">Order Date</div><div class="fv">${fmtDate(po.OrderDate)}</div></div>
+  <div><div class="fl">Created</div><div class="fv">${fmtDate(po.CreationDate)}</div></div>
+  <div><div class="fl">Last Updated</div><div class="fv">${fmtDate(po.LastUpdateDate)}</div></div>
+</div>
+<div class="sec">Legal Entity &amp; Supplier</div>
+<div class="grid">
+  <div><div class="fl">Legal Entity</div><div class="fv"><strong>${po.SoldToLegalEntity ?? '—'}</strong></div></div>
+  <div><div class="fl">Supplier</div><div class="fv"><strong>${po.Supplier ?? '—'}</strong></div></div>
+  <div><div class="fl">Supplier Site</div><div class="fv">${po.SupplierSite ?? '—'}</div></div>
+  <div><div class="fl">Supplier Contact</div><div class="fv">${po.SupplierContact ?? '—'}</div></div>
+</div>
+<div class="sec">People &amp; Organizations</div>
+<div class="grid">
+  <div><div class="fl">Buyer</div><div class="fv">${po.BuyerDisplayName ?? po.Buyer ?? '—'}</div></div>
+  <div><div class="fl">Requester</div><div class="fv">${po.RequesterDisplayName ?? '—'}</div></div>
+  <div><div class="fl">Procurement BU</div><div class="fv">${po.ProcurementBU ?? '—'}</div></div>
+  <div><div class="fl">Currency / Terms</div><div class="fv">${po.CurrencyCode} · ${po.PaymentTerms ?? '—'}</div></div>
+</div>
+${po.NoteToSupplier ? `<div class="sec">Notes</div><div class="fv">${po.NoteToSupplier}</div>` : ''}
+<div class="sec">Order Lines</div>
+<table>
+  <thead><tr>
+    <th>#</th><th>Type</th><th>Item</th><th>Description</th><th>UOM</th>
+    <th style="text-align:right">Qty</th><th style="text-align:right">Unit Price</th>
+    <th style="text-align:right">Ordered</th><th style="text-align:right">Tax</th>
+    <th style="text-align:right">Total</th><th>Status</th>
+  </tr></thead>
+  <tbody>
+    ${linesHtml || '<tr><td colspan="11" style="text-align:center;padding:16px;color:#6b6b6b">No lines loaded</td></tr>'}
+    <tr class="tr-tot">
+      <td colspan="7" style="text-align:right">Grand Total</td>
+      <td style="text-align:right">${fmtAmt(lines.reduce((s, l) => s + (l.Ordered ?? 0), 0))}</td>
+      <td style="text-align:right">${fmtAmt(lines.reduce((s, l) => s + (l.TotalTax ?? 0), 0))}</td>
+      <td style="text-align:right;color:#C74634">${fmtAmt(lines.reduce((s, l) => s + (l.Total ?? 0), 0))}</td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
+<div class="footer">Generated ${new Date().toLocaleDateString('en-AE', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+</body></html>`);
+    win.document.close();
+  };
+
+  const handleRefresh = () => {
+    const base = po.links?.find(l => l.name === 'lines')?.href
+      ?? `${BASE_URL}/purchaseOrders/${po.POHeaderId}/child/lines`;
+    const url = base.includes('?') ? `${base}&limit=500` : `${base}?limit=500`;
+    doFetch(url);
+    message.success('Lines refreshed');
+  };
+
+  const actionMenuItems: MenuProps['items'] = [
+    { key: 'edit',      label: 'Edit' },
+    { key: 'delete',    label: 'Delete', danger: true },
+    { type: 'divider' },
+    { key: 'acknowledge',  label: 'Acknowledge' },
+    { key: 'communicate',  label: 'Communicate' },
+    { type: 'divider' },
+    { key: 'cancel',    label: 'Cancel Document', danger: true },
+    { key: 'close',     label: 'Close' },
+    { key: 'reopen',    label: 'Reopen' },
+    { key: 'hold',      label: 'Hold' },
+    { key: 'freeze',    label: 'Freeze' },
+    { key: 'withdraw',  label: 'Withdraw', danger: true },
+    { type: 'divider' },
+    { key: 'docHistory',    label: 'View Document History' },
+    { key: 'changeHistory', label: 'View Change History' },
+    { key: 'revHistory',    label: 'View Revision History' },
+  ];
+
+  const handleActionClick: MenuProps['onClick'] = ({ key }) => {
+    message.info(`"${actionMenuItems.find(i => i && 'key' in i && i.key === key) ? (actionMenuItems.find(i => i && 'key' in i && i.key === key) as any).label : key}" not yet implemented`);
   };
 
   const LabelVal: React.FC<{ label: string; value?: React.ReactNode; wide?: boolean }> = ({ label, value, wide }) => (
@@ -247,6 +387,46 @@ const PODetailPage: React.FC<{ po: RawPO }> = ({ po }) => {
 
   return (
     <div style={{ background: REDWOOD.neutral100, minHeight: '100%' }}>
+
+      {/* ── Toolbar ───────────────────────────────────────────────────────── */}
+      <div style={{
+        background: REDWOOD.surface,
+        padding: '10px 20px',
+        borderBottom: `1px solid ${REDWOOD.neutral200}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8,
+      }}>
+        <Button
+          icon={<FilePdfOutlined />}
+          onClick={handleViewPDF}
+          style={{ background: '#00918A', borderColor: '#00918A', color: '#fff', fontWeight: 600, borderRadius: 4 }}
+        >
+          View PDF
+        </Button>
+
+        <Dropdown
+          menu={{ items: actionMenuItems, onClick: handleActionClick }}
+          trigger={['click']}
+        >
+          <Button style={{ background: '#00918A', borderColor: '#00918A', color: '#fff', fontWeight: 600, borderRadius: 4 }}>
+            Actions <DownOutlined style={{ fontSize: 11 }} />
+          </Button>
+        </Dropdown>
+
+        <Button
+          icon={<ReloadOutlined />}
+          onClick={handleRefresh}
+          style={{ background: '#00918A', borderColor: '#00918A', color: '#fff', fontWeight: 600, borderRadius: 4 }}
+        >
+          Refresh
+        </Button>
+
+        <Button
+          onClick={onClose}
+          style={{ background: '#00918A', borderColor: '#00918A', color: '#fff', fontWeight: 600, borderRadius: 4 }}
+        >
+          Done
+        </Button>
+      </div>
 
       {/* ── Top summary bar ───────────────────────────────────────────────── */}
       <div style={{
@@ -402,14 +582,6 @@ const PODetailPage: React.FC<{ po: RawPO }> = ({ po }) => {
           )}
         </Card>
 
-        {/* ── Actions ────────────────────────────────────────────────────── */}
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <Button icon={<CheckCircleOutlined />} style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}
-            onClick={() => message.info('Approval workflow not yet configured')}>
-            Submit for Approval
-          </Button>
-          <Button icon={<PrinterOutlined />} onClick={() => window.print()}>Print</Button>
-        </div>
 
       </div>
 
@@ -743,7 +915,7 @@ const ManagePurchaseOrders: React.FC = () => {
           </span>
         </span>
       ),
-      children: <PODetailPage po={po} />,
+      children: <PODetailPage po={po} onClose={() => handleCloseTab(String(po.POHeaderId))} />,
       closable: true,
     })),
   ];
