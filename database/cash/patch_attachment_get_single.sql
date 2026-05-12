@@ -1,17 +1,12 @@
 -- ============================================================
--- PATCH: Add GET single-attachment endpoints for preview/download
--- Run this in Oracle SQL Workshop (SQL Commands)
+-- PATCH: GET and DELETE single-attachment endpoints
+-- Both external transactions AND bank transfers use:
+--   cash/externaltransactions/:externalTransactionId/attachments/:attachmentId
 --
--- This adds:
---   GET /cash/externaltransactions/:id/attachments/:attachmentId
---   GET /cash/banktransfers/:id/attachments/:attachmentId
---
--- The list (GET /attachments) omits FILE_CONTENT for performance.
--- These single-item endpoints return the full base64 content
--- so the React app can preview and download files.
+-- HOW TO RUN: SQL Workshop → SQL Commands — run each BEGIN...END; block
 -- ============================================================
 
--- 1) Ensure the /:attachmentId template exists for external transactions
+-- 1) Ensure the /:attachmentId template exists
 BEGIN
     ORDS.DELETE_TEMPLATE(
         p_module_name => 'reerp',
@@ -33,9 +28,8 @@ BEGIN
 END;
 /
 
--- 2) GET handler — returns content field for external transaction attachment
---    FILE_CONTENT is BLOB (new); FILE_CONTENT_CLB is CLOB (old, pre-migration)
---    Falls back to CLOB if BLOB is empty (rows uploaded before v8 migration)
+-- 2) GET — returns base64 content for preview/download
+--    FILE_CONTENT is BLOB (new rows); FILE_CONTENT_CLB is CLOB (pre-v8 rows)
 BEGIN
     BEGIN
         ORDS.DELETE_HANDLER(
@@ -96,7 +90,7 @@ BEGIN
             v_offset := v_offset + v_read_amt;
         END LOOP;
     ELSIF v_clob_len > 0 THEN
-        -- Legacy rows: already base64, output CLOB in 32KB chunks
+        -- Legacy rows: already base64, stream CLOB in 32KB chunks
         WHILE v_offset <= v_clob_len LOOP
             v_clob_chunk := DBMS_LOB.SUBSTR(v_legacy, 32767, v_offset);
             EXIT WHEN v_clob_chunk IS NULL;
@@ -117,8 +111,16 @@ END;
 END;
 /
 
--- 3) DELETE handler for external transaction attachment
+-- 3) DELETE
 BEGIN
+    BEGIN
+        ORDS.DELETE_HANDLER(
+            p_module_name => 'reerp',
+            p_pattern     => 'cash/externaltransactions/:externalTransactionId/attachments/:attachmentId',
+            p_method      => 'DELETE'
+        );
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'reerp',
         p_pattern        => 'cash/externaltransactions/:externalTransactionId/attachments/:attachmentId',
@@ -132,106 +134,13 @@ BEGIN
      WHERE ID = :attachmentId
        AND EXTERNAL_TRANSACTION_ID = :externalTransactionId;
     IF SQL%ROWCOUNT = 0 THEN
-        OWA_UTIL.MIME_HEADER('application/json', FALSE);
         HTP.P('{"status":"error","message":"Attachment not found"}');
     ELSE
         COMMIT;
-        OWA_UTIL.MIME_HEADER('application/json', FALSE);
         HTP.P('{"status":"success"}');
     END IF;
 EXCEPTION WHEN OTHERS THEN
     ROLLBACK;
-    OWA_UTIL.MIME_HEADER('application/json', FALSE);
-    HTP.P('{"status":"error","message":' || APEX_JSON.STRINGIFY(SQLERRM) || '}');
-END;
-]'
-    );
-    COMMIT;
-END;
-/
-
--- ============================================================
--- 4) Bank transfer: /:attachmentId template + GET + DELETE
--- ============================================================
-BEGIN
-    ORDS.DELETE_TEMPLATE(
-        p_module_name => 'reerp',
-        p_pattern     => 'cash/banktransfers/:transferId/attachments/:attachmentId'
-    );
-    COMMIT;
-EXCEPTION WHEN OTHERS THEN NULL;
-END;
-/
-
-BEGIN
-    ORDS.DEFINE_TEMPLATE(
-        p_module_name => 'reerp',
-        p_pattern     => 'cash/banktransfers/:transferId/attachments/:attachmentId',
-        p_priority    => 0,
-        p_etag_type   => 'HASH'
-    );
-    COMMIT;
-END;
-/
-
-BEGIN
-    ORDS.DEFINE_HANDLER(
-        p_module_name    => 'reerp',
-        p_pattern        => 'cash/banktransfers/:transferId/attachments/:attachmentId',
-        p_method         => 'GET',
-        p_source_type    => ORDS.source_type_plsql,
-        p_items_per_page => 0,
-        p_comments       => 'Get single bank transfer attachment with content',
-        p_source         => q'[
-DECLARE
-    r RR_BANK_TRANSFER_ATTACHMENTS%ROWTYPE;
-BEGIN
-    SELECT * INTO r
-      FROM RR_BANK_TRANSFER_ATTACHMENTS
-     WHERE ID = :attachmentId
-       AND BANK_ACCOUNT_TRANSFER_ID = :transferId;
-
-    HTP.P('{"id":' || r.ID
-        || ',"fileName":' || APEX_JSON.STRINGIFY(r.FILE_NAME)
-        || ',"fileType":' || APEX_JSON.STRINGIFY(NVL(r.FILE_TYPE,''))
-        || ',"fileSize":' || NVL(TO_CHAR(r.FILE_SIZE),'null')
-        || ',"content":' || APEX_JSON.STRINGIFY(NVL(r.FILE_CONTENT,''))
-        || '}');
-EXCEPTION WHEN NO_DATA_FOUND THEN
-    HTP.P('{"error":"Not found"}');
-WHEN OTHERS THEN
-    HTP.P('{"error":' || APEX_JSON.STRINGIFY(SQLERRM) || '}');
-END;
-]'
-    );
-    COMMIT;
-END;
-/
-
-BEGIN
-    ORDS.DEFINE_HANDLER(
-        p_module_name    => 'reerp',
-        p_pattern        => 'cash/banktransfers/:transferId/attachments/:attachmentId',
-        p_method         => 'DELETE',
-        p_source_type    => ORDS.source_type_plsql,
-        p_items_per_page => 0,
-        p_comments       => 'Delete a bank transfer attachment',
-        p_source         => q'[
-BEGIN
-    DELETE FROM RR_BANK_TRANSFER_ATTACHMENTS
-     WHERE ID = :attachmentId
-       AND BANK_ACCOUNT_TRANSFER_ID = :transferId;
-    IF SQL%ROWCOUNT = 0 THEN
-        OWA_UTIL.MIME_HEADER('application/json', FALSE);
-        HTP.P('{"status":"error","message":"Attachment not found"}');
-    ELSE
-        COMMIT;
-        OWA_UTIL.MIME_HEADER('application/json', FALSE);
-        HTP.P('{"status":"success"}');
-    END IF;
-EXCEPTION WHEN OTHERS THEN
-    ROLLBACK;
-    OWA_UTIL.MIME_HEADER('application/json', FALSE);
     HTP.P('{"status":"error","message":' || APEX_JSON.STRINGIFY(SQLERRM) || '}');
 END;
 ]'
