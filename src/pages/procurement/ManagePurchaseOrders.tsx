@@ -3,13 +3,13 @@ import dayjs, { type Dayjs } from 'dayjs';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
   DatePicker, Row, Col, Space, Tag, Tabs, message, Spin, Empty, Divider, Drawer,
-  Descriptions, Badge,
+  Descriptions, Badge, Modal, Tooltip,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, ShoppingCartOutlined, SearchOutlined, ReloadOutlined,
   EyeOutlined, PrinterOutlined, CloseOutlined, CheckCircleOutlined,
-  InfoCircleOutlined, UnorderedListOutlined,
+  InfoCircleOutlined, UnorderedListOutlined, ApiOutlined, CopyOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 
@@ -506,6 +506,40 @@ const ManagePurchaseOrders: React.FC = () => {
   const [selectedPO, setSelectedPO] = useState<POHeader | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const [apiInspectorOpen, setApiInspectorOpen] = useState(false);
+  const [apiTestLoading, setApiTestLoading] = useState(false);
+  const [apiTestResult, setApiTestResult] = useState<{ status: number; body: string; url: string } | null>(null);
+
+  const buildInspectorUrl = () => {
+    const vals = form.getFieldsValue();
+    const params: SearchParams = {
+      orderNumber: vals.orderNumber,
+      supplier: vals.supplier,
+      statusCode: vals.statusCode,
+      dateRange: vals.dateRange ?? null,
+    };
+    const q = buildQParam(params);
+    const urlParams = new URLSearchParams({ limit: String(PAGE_SIZE), offset: '0', totalResults: 'true' });
+    if (q) urlParams.set('q', q);
+    return `${BASE_URL}/purchaseOrders?${urlParams.toString()}`;
+  };
+
+  const handleApiTest = async () => {
+    const url = buildInspectorUrl();
+    setApiTestLoading(true);
+    setApiTestResult(null);
+    try {
+      const res = await fetch(url, { headers: { Authorization: AUTH_HEADER, Accept: 'application/json' } });
+      const body = await res.text();
+      let pretty = body;
+      try { pretty = JSON.stringify(JSON.parse(body), null, 2); } catch { /* keep raw */ }
+      setApiTestResult({ status: res.status, body: pretty, url });
+    } catch (e: any) {
+      setApiTestResult({ status: 0, body: `Network error: ${e.message}\n\nThis is likely a CORS issue. The Oracle Fusion API may need to whitelist this origin, or use a proxy.`, url });
+    } finally {
+      setApiTestLoading(false);
+    }
+  };
 
   const fetchPOs = useCallback(async (params: SearchParams, pageNum: number) => {
     setLoading(true);
@@ -793,6 +827,15 @@ const ManagePurchaseOrders: React.FC = () => {
                   >
                     Reset
                   </Button>
+                  <Tooltip title="API Inspector — view the web service URL and test it">
+                    <Button
+                      icon={<ApiOutlined />}
+                      onClick={() => { setApiTestResult(null); setApiInspectorOpen(true); }}
+                      style={{ borderRadius: 6, borderColor: REDWOOD.info, color: REDWOOD.info, marginLeft: 'auto' }}
+                    >
+                      API
+                    </Button>
+                  </Tooltip>
                 </Col>
               </Row>
             </Form>
@@ -878,6 +921,114 @@ const ManagePurchaseOrders: React.FC = () => {
         open={drawerOpen}
         onClose={() => { setDrawerOpen(false); setSelectedPO(null); }}
       />
+
+      {/* API Inspector Modal */}
+      <Modal
+        title={
+          <Space>
+            <ApiOutlined style={{ color: REDWOOD.info }} />
+            <span>API Inspector — Purchase Orders</span>
+          </Space>
+        }
+        open={apiInspectorOpen}
+        onCancel={() => setApiInspectorOpen(false)}
+        footer={null}
+        width={780}
+        styles={{ body: { padding: '16px 0 0' } }}
+      >
+        <div style={{ padding: '0 24px 16px' }}>
+          {/* Endpoint */}
+          <div style={{ marginBottom: 12 }}>
+            <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Endpoint
+            </Text>
+            <div style={{
+              marginTop: 4, padding: '8px 12px', borderRadius: 6,
+              background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`,
+              fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all',
+              color: REDWOOD.info,
+            }}>
+              <Tag color="blue" style={{ marginRight: 8, fontSize: 11 }}>GET</Tag>
+              {buildInspectorUrl()}
+            </div>
+          </div>
+
+          {/* Auth */}
+          <div style={{ marginBottom: 12 }}>
+            <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Authorization Header
+            </Text>
+            <div style={{
+              marginTop: 4, padding: '8px 12px', borderRadius: 6,
+              background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`,
+              fontFamily: 'monospace', fontSize: 12,
+            }}>
+              <span style={{ color: REDWOOD.neutral600 }}>Authorization: </span>
+              <span style={{ color: REDWOOD.success }}>Basic [Base64 encoded credentials]</span>
+              <br />
+              <span style={{ color: REDWOOD.neutral600 }}>Accept: </span>
+              <span>application/json</span>
+            </div>
+          </div>
+
+          {/* Credentials */}
+          <div style={{ marginBottom: 16 }}>
+            <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Credentials (decoded)
+            </Text>
+            <div style={{
+              marginTop: 4, padding: '8px 12px', borderRadius: 6,
+              background: '#fffbf0', border: `1px solid ${REDWOOD.warning}40`,
+              fontFamily: 'monospace', fontSize: 12,
+            }}>
+              <span style={{ color: REDWOOD.neutral600 }}>Username: </span>
+              <span style={{ color: REDWOOD.neutral900 }}>emparun</span>
+              &nbsp;&nbsp;
+              <span style={{ color: REDWOOD.neutral600 }}>Password: </span>
+              <span style={{ color: REDWOOD.neutral900 }}>Fusion@1234</span>
+            </div>
+          </div>
+
+          {/* Test button */}
+          <Button
+            type="primary"
+            icon={<ApiOutlined />}
+            loading={apiTestLoading}
+            onClick={handleApiTest}
+            style={{ background: REDWOOD.info, borderColor: REDWOOD.info, borderRadius: 6, marginBottom: 12 }}
+          >
+            Test Request
+          </Button>
+
+          {/* Result */}
+          {apiTestResult && (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <Tag color={apiTestResult.status >= 200 && apiTestResult.status < 300 ? 'success' : apiTestResult.status === 0 ? 'default' : 'error'}>
+                  {apiTestResult.status === 0 ? 'Network Error' : `HTTP ${apiTestResult.status}`}
+                </Tag>
+                <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Response</Text>
+                <Button
+                  size="small" type="text" icon={<CopyOutlined />}
+                  style={{ marginLeft: 'auto', fontSize: 11 }}
+                  onClick={() => { navigator.clipboard.writeText(apiTestResult.body); message.success('Copied'); }}
+                >
+                  Copy
+                </Button>
+              </div>
+              <div style={{
+                background: '#1e1e1e', color: '#d4d4d4',
+                padding: '12px', borderRadius: 6,
+                fontFamily: 'monospace', fontSize: 11,
+                maxHeight: 320, overflowY: 'auto',
+                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              }}>
+                {apiTestResult.body.slice(0, 4000)}{apiTestResult.body.length > 4000 ? '\n\n... (truncated)' : ''}
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
     </Layout>
   );
 };
