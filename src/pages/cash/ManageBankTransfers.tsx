@@ -249,7 +249,7 @@ const TransferForm: React.FC<{
 
   // Load attachments once when the transfer ID becomes available
   const transferId = initialValues?.bankAccountTransferId;
-  const extTrxId = initialValues?.fromExternalTrxId || null;
+  const extTrxId = initialValues?.fromExternalTrxId || initialValues?.bankAccountTransferId || null;
   useEffect(() => {
     if (extTrxId) setInspTxnIdInput(String(extTrxId));
   }, [extTrxId]);
@@ -258,7 +258,7 @@ const TransferForm: React.FC<{
     const url = extTrxId
       ? `${APEX_BASE}/cash/externaltransactions/${extTrxId}/attachments`
       : null;
-    if (!url) { setAttApiLog(prev => [...prev, { dir: 'GET', url: '(no fromExternalTrxId)', status: null, body: 'No linked external transaction — attachments unavailable.' }]); return; }
+    if (!url) return;
     setAttApiLog(prev => [...prev, { dir: 'GET', url, status: null, body: '…fetching…' }]);
     fetch(url, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
@@ -403,7 +403,7 @@ const TransferForm: React.FC<{
   const handleSaveAttachments = async () => {
     const pending = attachments.filter(a => !a.id);
     if (pending.length === 0) { message.info('No new attachments to save.'); return; }
-    if (!extTrxId) { message.error('No linked external transaction ID — cannot save attachments'); return; }
+    if (!extTrxId) { message.error('Transfer ID not available — cannot save attachments'); return; }
     setAttSaving(true);
     const postUrl = `${APEX_BASE}/cash/externaltransactions/${extTrxId}/attachments`;
     let saved = 0;
@@ -432,6 +432,7 @@ const TransferForm: React.FC<{
       setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET (refresh)', url: getUrl, status: r.status, body: JSON.stringify(d, null, 2) }]);
       if (Array.isArray(d.items)) {
         setAttachments(d.items.map((a: any) => ({ id: a.id, uid: String(a.id), name: a.fileName, fileType: a.fileType || '', fileSize: a.fileSize || 0, status: 'done' as const })));
+        if (d.items[0]?.id) setInspAttIdInput(String(d.items[0].id));
       }
     } catch (e: any) {
       setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET (refresh)', url: getUrl, status: 0, body: 'Error: ' + String(e) }]);
