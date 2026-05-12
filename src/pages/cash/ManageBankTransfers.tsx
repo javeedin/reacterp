@@ -747,13 +747,24 @@ const TransferForm: React.FC<{
                     reader.readAsDataURL(file);
                     return false;
                   }}
-                  onRemove={(file) => {
-                    const att = attachments.find(a => a.uid === file.uid);
-                    if (att?.id && extTrxId) {
-                      fetch(`${APEX_BASE}/cash/externaltransactions/${extTrxId}/attachments/${att.id}`, { method: 'DELETE' }).catch(() => {});
-                    }
-                    setAttachments(prev => prev.filter(a => a.uid !== file.uid));
-                  }}
+                  onRemove={(file) => new Promise((resolve) => {
+                    Modal.confirm({
+                      title: 'Delete attachment?',
+                      content: `"${file.name}" will be permanently removed.`,
+                      okText: 'Delete',
+                      okButtonProps: { danger: true },
+                      cancelText: 'Cancel',
+                      onOk: async () => {
+                        const att = attachments.find(a => a.uid === file.uid);
+                        if (att?.id && extTrxId) {
+                          await fetch(`${APEX_BASE}/cash/externaltransactions/${extTrxId}/attachments/${att.id}`, { method: 'DELETE' }).catch(() => {});
+                        }
+                        setAttachments(prev => prev.filter(a => a.uid !== file.uid));
+                        resolve(false);
+                      },
+                      onCancel: () => resolve(false),
+                    });
+                  })}
                   onPreview={handlePreviewAttachment}
                   onDownload={handleDownloadAttachment}
                   showUploadList={{ showPreviewIcon: true, showDownloadIcon: true, showRemoveIcon: true }}
