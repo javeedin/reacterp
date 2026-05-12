@@ -405,19 +405,28 @@ const TransferForm: React.FC<{
     if (pending.length === 0) { message.info('No new attachments to save.'); return; }
     if (!extTrxId) { message.error('Transfer ID not available — cannot save attachments'); return; }
     setAttSaving(true);
-    const postUrl = `${APEX_BASE}/cash/externaltransactions/${extTrxId}/attachments`;
     let saved = 0;
     for (const att of pending) {
-      const payload = { fileName: att.name, fileType: att.fileType, fileSize: att.fileSize, content: att.content, createdBy: 'ERP_USER' };
+      if (!att.content) {
+        setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST', url: '', status: 0, body: `${att.name}: EMPTY content — skipped` }]);
+        continue;
+      }
+      const params = new URLSearchParams({
+        fileName: att.name,
+        fileType: att.fileType || 'application/octet-stream',
+        fileSize: String(att.fileSize),
+        createdBy: 'ERP_USER',
+      });
+      const postUrl = `${APEX_BASE}/cash/externaltransactions/${extTrxId}/attachments?${params}`;
       try {
         const res = await fetch(postUrl, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
+          method: 'POST', headers: { 'Content-Type': 'text/plain' },
+          body: att.content,
         });
         const respText = await res.text();
         setAttApiLog(prev => [...prev.slice(-9), {
           dir: 'POST', url: postUrl, status: res.status,
-          body: `Request payload:\n  fileName: ${payload.fileName}\n  fileType: ${payload.fileType}\n  fileSize: ${payload.fileSize}\n  content: ${payload.content ? payload.content.length + ' base64 chars (' + Math.round(payload.content.length * 0.75 / 1024) + ' KB)' : 'EMPTY — content missing!'}\n  createdBy: ${payload.createdBy}\n\nResponse: ${respText}`,
+          body: `Sent: ${att.name} — ${att.content.length} base64 chars (${Math.round(att.content.length * 0.75 / 1024)} KB)\n\nResponse: ${respText}`,
         }]);
         if (res.ok) saved++;
       } catch (e: any) {
