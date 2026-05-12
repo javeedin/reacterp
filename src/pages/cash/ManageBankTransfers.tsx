@@ -1114,10 +1114,38 @@ END;
                             } finally { setAttPostTesting(false); }
                           }}
                         />
+                        <input
+                          id="insp-dl-input"
+                          type="file"
+                          style={{ display: 'none' }}
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            e.target.value = '';
+                            if (!file) return;
+                            const base64 = await new Promise<string>((resolve, reject) => {
+                              const reader = new FileReader();
+                              reader.onload = () => { const r = reader.result as string; resolve(r.split(',')[1] ?? r); };
+                              reader.onerror = reject;
+                              reader.readAsDataURL(file);
+                            });
+                            const payload = { fileName: file.name, fileType: file.type || 'application/octet-stream', fileSize: file.size, content: base64, createdBy: 'ERP_USER' };
+                            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+                            const a = document.createElement('a');
+                            a.href = URL.createObjectURL(blob);
+                            a.download = file.name.replace(/\.[^.]+$/, '') + '-postman.json';
+                            a.click();
+                            URL.revokeObjectURL(a.href);
+                            message.success(`Downloaded ${a.download} — paste contents as raw JSON body in Postman`);
+                          }}
+                        />
                         <Button size="small" type="primary" loading={attPostTesting} disabled={!inspTxnIdInput}
                           style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
                           onClick={() => { document.getElementById('insp-file-input')?.click(); }}>
                           Test POST (pick file)
+                        </Button>
+                        <Button size="small" onClick={() => { document.getElementById('insp-dl-input')?.click(); }}
+                          title="Pick a file → downloads full JSON with base64 for Postman">
+                          ↓ Postman JSON
                         </Button>
                       </>
                     </Space>
