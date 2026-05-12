@@ -77,23 +77,26 @@ interface RawPO {
 }
 
 interface POLine {
+  POLineId: number;
   LineNumber: number;
-  LineId?: number;
-  ItemNumber?: string;
-  ItemDescription: string;
-  CategoryName?: string;
-  UnitOfMeasure?: string;
-  QuantityOrdered: number;
+  LineType?: string;
+  Item?: string;
+  Description: string;
+  Category?: string;
+  UOM?: string;
+  Quantity: number;
   QuantityReceived?: number;
   QuantityBilled?: number;
-  UnitPrice: number;
-  Amount: number;
-  LineAmount?: number;
+  BasePrice: number;
+  Price: number;
+  Ordered: number;
+  TotalTax?: number;
+  Total: number;
   StatusCode?: string;
   Status?: string;
   NeedByDate?: string;
   ShipToLocationAddress?: string;
-  LineType?: string;
+  CurrencyCode?: string;
   links?: Array<{ rel: string; href: string; name: string; kind: string }>;
 }
 
@@ -211,37 +214,33 @@ const PODetailPage: React.FC<{ po: RawPO }> = ({ po }) => {
   );
 
   const lineColumns: ColumnsType<POLine> = [
-    { title: '#', dataIndex: 'LineNumber', width: 48, align: 'center', render: v => <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>{v}</Text> },
-    { title: 'Item', dataIndex: 'ItemNumber', width: 120, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
-    { title: 'Description', dataIndex: 'ItemDescription', ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
-    { title: 'Category', dataIndex: 'CategoryName', width: 140, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
-    { title: 'UOM', dataIndex: 'UnitOfMeasure', width: 64, align: 'center', render: v => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
-    {
-      title: 'Qty Ordered', dataIndex: 'QuantityOrdered', width: 100, align: 'right',
-      render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{v ?? '—'}</Text>,
-    },
-    {
-      title: 'Qty Received', dataIndex: 'QuantityReceived', width: 110, align: 'right',
-      render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: (v ?? 0) > 0 ? REDWOOD.success : undefined }}>{v ?? 0}</Text>,
-    },
-    {
-      title: 'Qty Billed', dataIndex: 'QuantityBilled', width: 95, align: 'right',
-      render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{v ?? 0}</Text>,
-    },
-    {
-      title: 'Unit Price', dataIndex: 'UnitPrice', width: 110, align: 'right',
-      render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{fmtAmt(v)}</Text>,
-    },
-    {
-      title: 'Amount', dataIndex: 'Amount', width: 120, align: 'right',
-      render: (v, rec) => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{fmtAmt(v ?? rec.LineAmount)}</Text>,
-    },
-    {
-      title: 'Status', dataIndex: 'StatusCode', width: 140,
-      render: (v, rec) => getStatusTag(v ?? rec.Status),
-    },
+    { title: '#', dataIndex: 'LineNumber', width: 48, align: 'center',
+      render: v => <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>{v}</Text> },
+    { title: 'Type', dataIndex: 'LineType', width: 80,
+      render: v => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+    { title: 'Item', dataIndex: 'Item', width: 130,
+      render: v => <Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.info }}>{v ?? '—'}</Text> },
+    { title: 'Description', dataIndex: 'Description', ellipsis: true,
+      render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Category', dataIndex: 'Category', width: 90,
+      render: v => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+    { title: 'UOM', dataIndex: 'UOM', width: 60, align: 'center',
+      render: v => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+    { title: 'Qty', dataIndex: 'Quantity', width: 90, align: 'right',
+      render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Base Price', dataIndex: 'BasePrice', width: 100, align: 'right',
+      render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: REDWOOD.neutral600 }}>{fmtAmt(v)}</Text> },
+    { title: 'Unit Price', dataIndex: 'Price', width: 100, align: 'right',
+      render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{fmtAmt(v)}</Text> },
+    { title: 'Ordered Amt', dataIndex: 'Ordered', width: 120, align: 'right',
+      render: v => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{fmtAmt(v)}</Text> },
+    { title: 'Tax', dataIndex: 'TotalTax', width: 90, align: 'right',
+      render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{fmtAmt(v)}</Text> },
+    { title: 'Total', dataIndex: 'Total', width: 120, align: 'right',
+      render: v => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: REDWOOD.primary }}>{fmtAmt(v)}</Text> },
+    { title: 'Status', dataIndex: 'StatusCode', width: 160,
+      render: (v, rec) => getStatusTag(v ?? rec.Status) },
     { title: 'Need-By', dataIndex: 'NeedByDate', width: 110, render: d => fmtDate(d) },
-    { title: 'Ship To', dataIndex: 'ShipToLocationAddress', ellipsis: true, render: v => <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{v ?? '—'}</Text> },
   ];
 
   return (
@@ -377,7 +376,7 @@ const PODetailPage: React.FC<{ po: RawPO }> = ({ po }) => {
             <Table
               columns={lineColumns}
               dataSource={lines}
-              rowKey={(r, i) => `${r.LineNumber ?? i}`}
+              rowKey={(r, i) => `${r.POLineId ?? r.LineNumber ?? i}`}
               size="small"
               pagination={false}
               scroll={{ x: 1400 }}
@@ -390,10 +389,10 @@ const PODetailPage: React.FC<{ po: RawPO }> = ({ po }) => {
                     </Table.Summary.Cell>
                     <Table.Summary.Cell index={1} align="right">
                       <Text strong style={{ fontVariantNumeric: 'tabular-nums', color: REDWOOD.primary }}>
-                        {fmtAmt(lines.reduce((s, l) => s + (l.Amount ?? l.LineAmount ?? 0), 0))}
+                        {fmtAmt(lines.reduce((s, l) => s + (l.Total ?? 0), 0))}
                       </Text>
                     </Table.Summary.Cell>
-                    <Table.Summary.Cell index={2} colSpan={3} />
+                    <Table.Summary.Cell index={2} colSpan={2} />
                   </Table.Summary.Row>
                 </Table.Summary>
               )}
