@@ -407,18 +407,18 @@ const TransferForm: React.FC<{
     setAttSaving(true);
     let saved = 0;
     for (const att of pending) {
-      if (!att.content) {
-        setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST', url: '', status: 0, body: `${att.name}: EMPTY content — skipped` }]);
+      if (!att.rawFile) {
+        setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST', url: '', status: 0, body: `${att.name}: no file data — skipped` }]);
         continue;
       }
-      const postUrl = `${APEX_BASE}/cash/externaltransactions/${extTrxId}/attachments`;
-      const payload = { fileName: att.name, fileType: att.fileType, fileSize: att.fileSize, content: att.content, createdBy: 'ERP_USER' };
+      const params = new URLSearchParams({ fileName: att.name, fileType: att.fileType || '', fileSize: String(att.fileSize), createdBy: 'ERP_USER' });
+      const postUrl = `${APEX_BASE}/cash/externaltransactions/${extTrxId}/attachments?${params}`;
       try {
-        const res = await fetch(postUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const res = await fetch(postUrl, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: att.rawFile });
         const respText = await res.text();
         setAttApiLog(prev => [...prev.slice(-9), {
           dir: 'POST', url: postUrl, status: res.status,
-          body: `Sent: ${att.name} — ${att.content.length} base64 chars (${Math.round(att.content.length * 0.75 / 1024)} KB)\n\nResponse: ${respText}`,
+          body: `Sent: ${att.name} — ${att.rawFile!.size} bytes raw\n\nResponse: ${respText}`,
         }]);
         if (res.ok) saved++;
       } catch (e: any) {
@@ -487,7 +487,7 @@ const TransferForm: React.FC<{
 
   const [voucherPdfUrl, setVoucherPdfUrl] = useState<string | null>(null);
   const [voucherModalOpen, setVoucherModalOpen] = useState(false);
-  const [attachments, setAttachments] = useState<Array<{id?: number; uid: string; name: string; fileType: string; fileSize: number; content?: string; status: 'done' | 'uploading' | 'error'}>>([]);
+  const [attachments, setAttachments] = useState<Array<{id?: number; uid: string; name: string; fileType: string; fileSize: number; content?: string; rawFile?: File; status: 'done' | 'uploading' | 'error'}>>([]);
   const [attSaving, setAttSaving] = useState(false);
   const [attPostTesting, setAttPostTesting] = useState(false);
   const [attGetSingleTesting, setAttGetSingleTesting] = useState(false);
@@ -715,7 +715,7 @@ const TransferForm: React.FC<{
                     const reader = new FileReader();
                     reader.onload = (e) => {
                       const base64 = (e.target?.result as string)?.split(',')[1] || '';
-                      setAttachments(prev => [...prev, { uid: `new-${Date.now()}`, name: file.name, fileType: file.type, fileSize: file.size, content: base64, status: 'done' as const }]);
+                      setAttachments(prev => [...prev, { uid: `new-${Date.now()}`, name: file.name, fileType: file.type, fileSize: file.size, content: base64, rawFile: file, status: 'done' as const }]);
                     };
                     reader.readAsDataURL(file);
                     return false;
@@ -1096,15 +1096,16 @@ END;
                                 reader.onerror = reject;
                                 reader.readAsDataURL(file);
                               });
-                              const body = { fileName: file.name, fileType: file.type || 'application/octet-stream', fileSize: file.size, content: base64, createdBy: 'ERP_USER' };
-                              const res = await fetch(baseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                              const params = new URLSearchParams({ fileName: file.name, fileType: file.type || 'application/octet-stream', fileSize: String(file.size), createdBy: 'ERP_USER' });
+                              const uploadUrl = `${baseUrl}?${params}`;
+                              const res = await fetch(uploadUrl, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file });
                               const t = await res.text();
                               const respBody = (() => { try { return JSON.stringify(JSON.parse(t), null, 2); } catch { return t; } })();
                               setAttApiLog(prev => [...prev.slice(-9), {
                                 dir: 'POST upload',
-                                url: baseUrl,
+                                url: uploadUrl,
                                 status: res.status,
-                                body: `━━ REQUEST ━━\nFile: ${file.name}  |  originalSize: ${file.size} bytes  |  base64Length: ${base64.length} chars\nPOST ${baseUrl}\n\n━━ SERVER RESPONSE (HTTP ${res.status}) ━━\n${respBody}`,
+                                body: `━━ REQUEST ━━\nFile: ${file.name}  |  size: ${file.size} bytes (raw binary — no base64)\nPOST ${uploadUrl}\n\n━━ SERVER RESPONSE (HTTP ${res.status}) ━━\n${respBody}`,
                               }]);
                               if (res.ok) message.success(`POST succeeded — check the log for bodyLen / contentLength`);
                               else message.error(`POST failed — HTTP ${res.status}. Check the log.`);

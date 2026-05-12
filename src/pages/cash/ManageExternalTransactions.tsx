@@ -192,7 +192,7 @@ const ExternalTxnForm: React.FC<{
   const [distCombinations, setDistCombinations] = useState<DistCombination[]>([]);
   const [offsetDistSet, setOffsetDistSet] = useState('');                  // single mode
   const [lineDistSets, setLineDistSets]   = useState<Record<number, string>>({}); // multiple mode
-  const [attachments, setAttachments]   = useState<Array<{id?: number; uid: string; name: string; fileType: string; fileSize: number; content?: string; status: 'done' | 'uploading' | 'error'}>>([]);
+  const [attachments, setAttachments]   = useState<Array<{id?: number; uid: string; name: string; fileType: string; fileSize: number; content?: string; rawFile?: File; status: 'done' | 'uploading' | 'error'}>>([]);
   const [attachUploading, setAttachUploading] = useState(false);
   const [previewAtt, setPreviewAtt] = useState<{ name: string; fileType: string; content: string; blobUrl?: string } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -702,11 +702,11 @@ const ExternalTxnForm: React.FC<{
     setAttSaving(true);
     let savedCount = 0;
     for (const att of pending) {
-      if (!att.content) { message.warning(`${att.name}: no content — skipped`); continue; }
+      if (!att.rawFile) { message.warning(`${att.name}: no file data — skipped`); continue; }
       try {
-        const postUrl = `${APEX_BASE}/cash/externaltransactions/${extId}/attachments`;
-        const body = JSON.stringify({ fileName: att.name, fileType: att.fileType, fileSize: att.fileSize, content: att.content, createdBy: 'ERP_USER' });
-        const res = await fetch(postUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+        const params = new URLSearchParams({ fileName: att.name, fileType: att.fileType || '', fileSize: String(att.fileSize), createdBy: 'ERP_USER' });
+        const postUrl = `${APEX_BASE}/cash/externaltransactions/${extId}/attachments?${params}`;
+        const res = await fetch(postUrl, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: att.rawFile });
         if (res.ok) savedCount++;
         else { const t = await res.text(); message.error(`${att.name}: server error ${res.status} — ${t}`); }
       } catch (e: any) { message.error(`${att.name}: ${e.message}`); }
@@ -1294,7 +1294,7 @@ const ExternalTxnForm: React.FC<{
                 const reader = new FileReader();
                 reader.onload = (e) => {
                   const base64 = (e.target?.result as string)?.split(',')[1] || '';
-                  setAttachments(prev => [...prev, { uid: `new-${Date.now()}`, name: file.name, fileType: file.type, fileSize: file.size, content: base64, status: 'done' }]);
+                  setAttachments(prev => [...prev, { uid: `new-${Date.now()}`, name: file.name, fileType: file.type, fileSize: file.size, content: base64, rawFile: file, status: 'done' }]);
                 };
                 reader.readAsDataURL(file);
                 return false;
