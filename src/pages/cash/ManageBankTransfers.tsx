@@ -480,6 +480,7 @@ const TransferForm: React.FC<{
   const [attachments, setAttachments] = useState<Array<{id?: number; uid: string; name: string; fileType: string; fileSize: number; content?: string; status: 'done' | 'uploading' | 'error'}>>([]);
   const [attSaving, setAttSaving] = useState(false);
   const [attPostTesting, setAttPostTesting] = useState(false);
+  const [attGetSingleTesting, setAttGetSingleTesting] = useState(false);
   const [previewAtt, setPreviewAtt] = useState<{ name: string; fileType: string; content: string; blobUrl?: string } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
@@ -909,6 +910,10 @@ const TransferForm: React.FC<{
               children: (() => {
                 const tid = initialValues?.bankAccountTransferId;
                 const baseUrl = tid ? `${APEX_BASE}/cash/banktransfers/${tid}/attachments` : `${APEX_BASE}/cash/banktransfers/:transferId/attachments`;
+                const firstAttId = attachments.find(a => a.id)?.id;
+                const singleUrl = tid && firstAttId
+                  ? `${APEX_BASE}/cash/banktransfers/${tid}/attachments/${firstAttId}`
+                  : `${APEX_BASE}/cash/banktransfers/:transferId/attachments/:attachmentId`;
                 const samplePayload = JSON.stringify({
                   fileName: 'document.pdf',
                   fileType: 'application/pdf',
@@ -917,61 +922,158 @@ const TransferForm: React.FC<{
                   createdBy: 'ERP_USER',
                 }, null, 2);
                 const TINY_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+                const sqlBlock = `-- Run in SQL Workshop → SQL Commands
+
+-- 1) External Transactions — GET single attachment with content
+BEGIN
+  ORDS.DEFINE_HANDLER(
+    p_module_name    => 'reerp',
+    p_pattern        => 'cash/externaltransactions/:externalTransactionId/attachments/:attachmentId',
+    p_method         => 'GET',
+    p_source_type    => ORDS.source_type_plsql,
+    p_items_per_page => 0,
+    p_source         => q'[
+DECLARE r RR_EXTERNAL_TRX_ATTACHMENTS%ROWTYPE;
+BEGIN
+  SELECT * INTO r FROM RR_EXTERNAL_TRX_ATTACHMENTS
+   WHERE ID = :attachmentId AND EXTERNAL_TRANSACTION_ID = :externalTransactionId;
+  HTP.P(\'{"id":\' || r.ID
+    || \',"fileName":\' || APEX_JSON.STRINGIFY(r.FILE_NAME)
+    || \',"fileType":\' || APEX_JSON.STRINGIFY(NVL(r.FILE_TYPE,\'\'))
+    || \',"content":\' || APEX_JSON.STRINGIFY(NVL(r.FILE_CONTENT,\'\'))
+    || \'}\');
+EXCEPTION WHEN NO_DATA_FOUND THEN HTP.P(\'{"error":"Not found"}\');
+WHEN OTHERS THEN HTP.P(\'{"error":\' || APEX_JSON.STRINGIFY(SQLERRM) || \'}\');
+END;]'
+  );
+  COMMIT;
+END;
+/
+
+-- 2) Bank Transfers — GET single attachment with content
+BEGIN
+  ORDS.DEFINE_HANDLER(
+    p_module_name    => 'reerp',
+    p_pattern        => 'cash/banktransfers/:transferId/attachments/:attachmentId',
+    p_method         => 'GET',
+    p_source_type    => ORDS.source_type_plsql,
+    p_items_per_page => 0,
+    p_source         => q'[
+DECLARE r RR_BANK_TRANSFER_ATTACHMENTS%ROWTYPE;
+BEGIN
+  SELECT * INTO r FROM RR_BANK_TRANSFER_ATTACHMENTS
+   WHERE ID = :attachmentId AND BANK_ACCOUNT_TRANSFER_ID = :transferId;
+  HTP.P(\'{"id":\' || r.ID
+    || \',"fileName":\' || APEX_JSON.STRINGIFY(r.FILE_NAME)
+    || \',"fileType":\' || APEX_JSON.STRINGIFY(NVL(r.FILE_TYPE,\'\'))
+    || \',"content":\' || APEX_JSON.STRINGIFY(NVL(r.FILE_CONTENT,\'\'))
+    || \'}\');
+EXCEPTION WHEN NO_DATA_FOUND THEN HTP.P(\'{"error":"Not found"}\');
+WHEN OTHERS THEN HTP.P(\'{"error":\' || APEX_JSON.STRINGIFY(SQLERRM) || \'}\');
+END;]'
+  );
+  COMMIT;
+END;
+/`;
                 return (
                   <div>
+                    {/* Endpoints */}
                     <div style={{ background: '#f0f5ff', border: '1px solid #adc6ff', borderRadius: 6, padding: '10px 14px', marginBottom: 12 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                         <Tag color="green" style={{ fontSize: 11, margin: 0 }}>GET</Tag>
+                        <Text type="secondary" style={{ fontSize: 11, marginRight: 4 }}>list</Text>
                         <Text code copyable style={{ fontSize: 12, wordBreak: 'break-all' }}>{baseUrl}</Text>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                        <Tag color="green" style={{ fontSize: 11, margin: 0 }}>GET</Tag>
+                        <Text type="secondary" style={{ fontSize: 11, marginRight: 4 }}>single</Text>
+                        <Text code copyable style={{ fontSize: 12, wordBreak: 'break-all' }}>{singleUrl}</Text>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <Tag color="blue" style={{ fontSize: 11, margin: 0 }}>POST</Tag>
+                        <Text type="secondary" style={{ fontSize: 11, marginRight: 4 }}>upload</Text>
                         <Text code copyable style={{ fontSize: 12, wordBreak: 'break-all' }}>{baseUrl}</Text>
                       </div>
                     </div>
-                    <div style={{ marginBottom: 8 }}>
+
+                    {/* POST body */}
+                    <div style={{ marginBottom: 10 }}>
                       <Text strong style={{ fontSize: 12 }}>POST Body (JSON):</Text>
-                      <pre style={{ background: '#1e1e2e', color: '#cdd6f4', padding: 10, borderRadius: 6, fontSize: 11, margin: '4px 0 10px', whiteSpace: 'pre-wrap' }}>
+                      <pre style={{ background: '#1e1e2e', color: '#cdd6f4', padding: 10, borderRadius: 6, fontSize: 11, margin: '4px 0 0', whiteSpace: 'pre-wrap' }}>
                         {samplePayload}
                       </pre>
                     </div>
-                    <Space style={{ marginBottom: 10 }}>
+
+                    {/* Test buttons */}
+                    <Space wrap style={{ marginBottom: 10 }}>
                       <Button size="small" disabled={!tid} onClick={() => {
                         if (!tid) return;
-                        const url = baseUrl;
-                        setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET (test)', url, status: null, body: '…fetching…' }]);
-                        fetch(url, { headers: { Accept: 'application/json' } })
+                        setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET list', url: baseUrl, status: null, body: '…fetching…' }]);
+                        fetch(baseUrl, { headers: { Accept: 'application/json' } })
                           .then(r => r.text().then(t => ({ status: r.status, t })))
                           .then(({ status, t }) => {
                             const body = (() => { try { return JSON.stringify(JSON.parse(t), null, 2); } catch { return t; } })();
-                            setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET (test)', url, status, body }]);
+                            setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET list', url: baseUrl, status, body }]);
                           })
-                          .catch(e => setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET (test)', url, status: 0, body: String(e) }]));
-                      }}>Test GET</Button>
+                          .catch(e => setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET list', url: baseUrl, status: 0, body: String(e) }]));
+                      }}>Test GET List</Button>
+                      <Button size="small" loading={attGetSingleTesting} disabled={!tid || !firstAttId}
+                        title={!firstAttId ? 'No saved attachments to test with' : ''}
+                        onClick={async () => {
+                          if (!tid || !firstAttId) return;
+                          setAttGetSingleTesting(true);
+                          setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET single', url: singleUrl, status: null, body: '…fetching…' }]);
+                          try {
+                            const r = await fetch(singleUrl, { headers: { Accept: 'application/json' } });
+                            const t = await r.text();
+                            const parsed = (() => { try { return JSON.parse(t); } catch { return null; } })();
+                            const preview = parsed ? JSON.stringify({ ...parsed, content: parsed.content ? `<${parsed.content.length} chars of base64>` : '' }, null, 2) : t;
+                            setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET single', url: singleUrl, status: r.status, body: preview }]);
+                            if (r.ok && parsed?.content) message.success('GET single OK — content returned!');
+                            else if (r.ok) message.warning('GET single OK but no content field — endpoint may not be registered yet.');
+                            else message.error(`GET single failed — HTTP ${r.status}`);
+                          } catch (e: any) {
+                            setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET single', url: singleUrl, status: 0, body: 'Network error: ' + e.message }]);
+                            message.error('GET single failed: ' + e.message);
+                          } finally { setAttGetSingleTesting(false); }
+                        }}>Test GET Single</Button>
                       <Button size="small" type="primary" loading={attPostTesting} disabled={!tid}
                         style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
                         onClick={async () => {
                           if (!tid) return;
                           setAttPostTesting(true);
-                          const url = baseUrl;
                           const body = { fileName: 'test-ping.png', fileType: 'image/png', fileSize: TINY_PNG.length, content: TINY_PNG, createdBy: 'ERP_USER' };
-                          const reqStr = `POST ${url}\nContent-Type: application/json\n\n${JSON.stringify(body, null, 2)}`;
-                          setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST (test)', url, status: null, body: reqStr }]);
+                          setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST upload', url: baseUrl, status: null, body: `POST ${baseUrl}\nContent-Type: application/json\n\n${JSON.stringify(body, null, 2)}` }]);
                           try {
-                            const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                            const res = await fetch(baseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
                             const t = await res.text();
                             const respBody = (() => { try { return JSON.stringify(JSON.parse(t), null, 2); } catch { return t; } })();
-                            setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST (test)', url, status: res.status, body: `Request:\n${JSON.stringify(body, null, 2)}\n\nResponse (HTTP ${res.status}):\n${respBody}` }]);
-                            if (res.ok) { message.success('POST succeeded — endpoint is working!'); }
-                            else { message.error(`POST failed — HTTP ${res.status}. Check the log.`); }
+                            setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST upload', url: baseUrl, status: res.status, body: `Request:\n${JSON.stringify(body, null, 2)}\n\nResponse (HTTP ${res.status}):\n${respBody}` }]);
+                            if (res.ok) message.success('POST succeeded — endpoint is working!');
+                            else message.error(`POST failed — HTTP ${res.status}. Check the log.`);
                           } catch (e: any) {
-                            setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST (test)', url, status: 0, body: 'Network error: ' + e.message }]);
+                            setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST upload', url: baseUrl, status: 0, body: 'Network error: ' + e.message }]);
                             message.error('POST failed: ' + e.message);
                           } finally { setAttPostTesting(false); }
                         }}>
                         Test POST (ping)
                       </Button>
                     </Space>
+
+                    {/* SQL to register handlers */}
+                    <Divider style={{ margin: '8px 0' }} />
+                    <Collapse ghost size="small">
+                      <Panel header={<Text strong style={{ fontSize: 12 }}>SQL — Register GET single-attachment handlers in ORDS</Text>} key="sql">
+                        <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 6 }}>
+                          Copy and run in SQL Workshop → SQL Commands. Required for preview &amp; download to work.
+                        </Text>
+                        <pre style={{ background: '#1e1e2e', color: '#cdd6f4', padding: 10, borderRadius: 6, fontSize: 11, overflowX: 'auto', maxHeight: 320, whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0, userSelect: 'all' }}>
+                          {sqlBlock}
+                        </pre>
+                      </Panel>
+                    </Collapse>
+
+                    {/* Log */}
                     <Divider style={{ margin: '8px 0' }} />
                     <Text strong style={{ fontSize: 13 }}>Request / Response Log</Text>
                     <div style={{ marginTop: 8 }}>
