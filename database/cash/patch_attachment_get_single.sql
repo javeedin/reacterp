@@ -34,7 +34,8 @@ END;
 /
 
 -- 2) GET handler — returns content field for external transaction attachment
---    FILE_CONTENT is now BLOB; encode to base64 for the React frontend
+--    FILE_CONTENT is BLOB (new); FILE_CONTENT_CLB is CLOB (old, pre-migration)
+--    Falls back to CLOB if BLOB is empty (rows uploaded before v8 migration)
 BEGIN
     BEGIN
         ORDS.DELETE_HANDLER(
@@ -50,28 +51,32 @@ BEGIN
         p_method         => 'GET',
         p_source_type    => ORDS.source_type_plsql,
         p_items_per_page => 0,
-        p_comments       => 'Get single attachment - encodes BLOB to base64',
+        p_comments       => 'Get single attachment - BLOB or legacy CLOB fallback',
         p_source         => q'[
 DECLARE
-    v_id        NUMBER;
-    v_file_name VARCHAR2(500);
-    v_file_type VARCHAR2(100);
-    v_file_size NUMBER;
-    v_content   BLOB;
-    v_blob_len  INTEGER;
-    v_chunk     RAW(15000);
-    v_b64_raw   RAW(21000);
-    v_b64_str   VARCHAR2(32767);
-    v_read_amt  BINARY_INTEGER;
-    v_offset    INTEGER := 1;
+    v_id         NUMBER;
+    v_file_name  VARCHAR2(500);
+    v_file_type  VARCHAR2(100);
+    v_file_size  NUMBER;
+    v_content    BLOB;
+    v_legacy     CLOB;
+    v_blob_len   INTEGER;
+    v_clob_len   INTEGER;
+    v_chunk      RAW(15000);
+    v_b64_raw    RAW(21000);
+    v_b64_str    VARCHAR2(32767);
+    v_read_amt   BINARY_INTEGER;
+    v_offset     INTEGER := 1;
+    v_clob_chunk VARCHAR2(32767);
 BEGIN
-    SELECT ID, FILE_NAME, FILE_TYPE, FILE_SIZE, FILE_CONTENT
-      INTO v_id, v_file_name, v_file_type, v_file_size, v_content
+    SELECT ID, FILE_NAME, FILE_TYPE, FILE_SIZE, FILE_CONTENT, FILE_CONTENT_CLB
+      INTO v_id, v_file_name, v_file_type, v_file_size, v_content, v_legacy
       FROM RR_EXTERNAL_TRX_ATTACHMENTS
      WHERE ID = :attachmentId
        AND EXTERNAL_TRANSACTION_ID = :externalTransactionId;
 
     v_blob_len := CASE WHEN v_content IS NULL THEN 0 ELSE DBMS_LOB.GETLENGTH(v_content) END;
+    v_clob_len := CASE WHEN v_legacy  IS NULL THEN 0 ELSE DBMS_LOB.GETLENGTH(v_legacy)  END;
 
     HTP.PRN('{"id":' || v_id
         || ',"fileName":' || APEX_JSON.STRINGIFY(v_file_name)
@@ -79,16 +84,26 @@ BEGIN
         || ',"fileSize":' || NVL(TO_CHAR(v_file_size),'null')
         || ',"content":"');
 
-    -- Encode BLOB to base64 in 15KB chunks
-    WHILE v_offset <= v_blob_len LOOP
-        v_read_amt := LEAST(15000, v_blob_len - v_offset + 1);
-        DBMS_LOB.READ(v_content, v_read_amt, v_offset, v_chunk);
-        v_b64_raw := UTL_ENCODE.BASE64_ENCODE(v_chunk);
-        v_b64_str := UTL_RAW.CAST_TO_VARCHAR2(v_b64_raw);
-        v_b64_str := REPLACE(REPLACE(v_b64_str, CHR(13), ''), CHR(10), '');
-        HTP.PRN(v_b64_str);
-        v_offset := v_offset + v_read_amt;
-    END LOOP;
+    IF v_blob_len > 0 THEN
+        -- New rows: encode BLOB to base64 in 15KB chunks
+        WHILE v_offset <= v_blob_len LOOP
+            v_read_amt := LEAST(15000, v_blob_len - v_offset + 1);
+            DBMS_LOB.READ(v_content, v_read_amt, v_offset, v_chunk);
+            v_b64_raw := UTL_ENCODE.BASE64_ENCODE(v_chunk);
+            v_b64_str := UTL_RAW.CAST_TO_VARCHAR2(v_b64_raw);
+            v_b64_str := REPLACE(REPLACE(v_b64_str, CHR(13), ''), CHR(10), '');
+            HTP.PRN(v_b64_str);
+            v_offset := v_offset + v_read_amt;
+        END LOOP;
+    ELSIF v_clob_len > 0 THEN
+        -- Legacy rows: already base64, output CLOB in 32KB chunks
+        WHILE v_offset <= v_clob_len LOOP
+            v_clob_chunk := DBMS_LOB.SUBSTR(v_legacy, 32767, v_offset);
+            EXIT WHEN v_clob_chunk IS NULL;
+            HTP.PRN(v_clob_chunk);
+            v_offset := v_offset + LENGTH(v_clob_chunk);
+        END LOOP;
+    END IF;
 
     HTP.PRN('"}');
 EXCEPTION WHEN NO_DATA_FOUND THEN
