@@ -97,19 +97,21 @@ BEGIN
         p_comments       => 'Upload attachment for a transaction',
         p_source         => q'[
 DECLARE
-    v_body_raw   BLOB          := :body;
-    v_body_clob  CLOB;
-    v_dest_off   INTEGER       := 1;
-    v_src_off    INTEGER       := 1;
-    v_lang_ctx   INTEGER       := DBMS_LOB.DEFAULT_LANG_CTX;
-    v_warning    INTEGER;
-    l_json       JSON_OBJECT_T;
-    v_file_name  VARCHAR2(500);
-    v_file_type  VARCHAR2(100);
-    v_file_size  NUMBER;
-    v_content    CLOB;
-    v_created_by VARCHAR2(150);
-    v_new_id     NUMBER;
+    v_body_raw    BLOB    := :body;
+    v_body_clob   CLOB;
+    v_dest_off    INTEGER := 1;
+    v_src_off     INTEGER := 1;
+    v_lang_ctx    INTEGER := DBMS_LOB.DEFAULT_LANG_CTX;
+    v_warning     INTEGER;
+    v_file_name   VARCHAR2(500);
+    v_file_type   VARCHAR2(100);
+    v_file_size   NUMBER;
+    v_created_by  VARCHAR2(150);
+    v_content     CLOB;
+    v_key         VARCHAR2(20)  := '"content":"';
+    v_key_pos     INTEGER;
+    v_end_pos     INTEGER;
+    v_new_id      NUMBER;
 BEGIN
     DBMS_LOB.CREATETEMPORARY(v_body_clob, TRUE);
     DBMS_LOB.CONVERTTOCLOB(
@@ -117,19 +119,29 @@ BEGIN
         v_dest_off, v_src_off,
         NLS_CHARSET_ID('AL32UTF8'), v_lang_ctx, v_warning
     );
-    l_json       := JSON_OBJECT_T.PARSE(v_body_clob);
-    v_file_name  := l_json.GET_STRING('fileName');
-    v_file_type  := l_json.GET_STRING('fileType');
-    v_file_size  := l_json.GET_NUMBER('fileSize');
-    v_created_by := NVL(l_json.GET_STRING('createdBy'), 'SYSTEM');
-    v_content    := l_json.GET_CLOB('content');
-
+    SELECT jt.file_name, jt.file_type, jt.file_size, jt.created_by
+    INTO   v_file_name, v_file_type, v_file_size, v_created_by
+    FROM   JSON_TABLE(v_body_clob, '$' COLUMNS (
+               file_name  VARCHAR2(500)  PATH '$.fileName',
+               file_type  VARCHAR2(100)  PATH '$.fileType',
+               file_size  NUMBER         PATH '$.fileSize',
+               created_by VARCHAR2(150)  PATH '$.createdBy'
+           )) jt;
+    v_key_pos := DBMS_LOB.INSTR(v_body_clob, v_key);
+    IF v_key_pos > 0 THEN
+        v_key_pos := v_key_pos + LENGTH(v_key);
+        v_end_pos := DBMS_LOB.INSTR(v_body_clob, '"', v_key_pos);
+        IF v_end_pos > v_key_pos THEN
+            DBMS_LOB.CREATETEMPORARY(v_content, TRUE);
+            DBMS_LOB.COPY(v_content, v_body_clob, v_end_pos - v_key_pos, 1, v_key_pos);
+        END IF;
+    END IF;
     INSERT INTO RR_EXTERNAL_TRX_ATTACHMENTS
         (EXTERNAL_TRANSACTION_ID, FILE_NAME, FILE_TYPE, FILE_SIZE, FILE_CONTENT, CREATED_BY)
     VALUES
-        (:externalTransactionId, v_file_name, v_file_type, v_file_size, v_content, v_created_by)
+        (:externalTransactionId, v_file_name, v_file_type, v_file_size, v_content,
+         NVL(v_created_by, 'SYSTEM'))
     RETURNING ID INTO v_new_id;
-
     COMMIT;
     OWA_UTIL.MIME_HEADER('application/json', FALSE);
     HTP.P('{"status":"success","id":' || v_new_id
