@@ -1,19 +1,21 @@
 -- ============================================================
 -- PATCH: Fix FILE_CONTENT not saving for all file types/sizes
 --
--- Request format (unchanged from original):
+-- Request format (unchanged):
 --   POST /cash/externaltransactions/:id/attachments
 --   Content-Type: application/json
 --   Body: {"fileName":"...","fileType":"...","fileSize":N,
 --          "content":"<base64>","createdBy":"..."}
 --
--- Problem: :body_text is VARCHAR2 (32767-byte limit) so large
--- base64 strings are silently truncated. JSON_TABLE/JSON_VALUE
--- CLOB parsing also has internal limits.
+-- Approach:
+--   1. DBMS_LOB.CONVERTTOCLOB  → full JSON as CLOB (no size limit)
+--   2. JSON_TABLE              → extract scalar fields (VARCHAR2-safe)
+--   3. DBMS_LOB.INSTR + COPY  → extract content CLOB directly
+--      (base64 alphabet never contains " so the next " after
+--       "content":" is always the closing quote — exact every time)
 --
--- Fix: read :body (BLOB) in 8000-byte raw chunks → CLOB, then
--- use DBMS_LOB.INSTR to locate "content":" and DBMS_LOB.COPY
--- to extract it. No Oracle JSON API involved — no size limits.
+-- Success response includes bodyLen + contentLength so you can
+-- confirm the content landed in the database.
 --
 -- Run in SQL Workshop → SQL Commands
 -- ============================================================
@@ -32,9 +34,10 @@ DECLARE
     v_blob       BLOB    := :body;
     v_blob_len   INTEGER;
     v_body_clob  CLOB;
-    v_buf        RAW(8000);
-    v_read_amt   INTEGER;
-    v_offset     INTEGER := 1;
+    v_dest_off   INTEGER := 1;
+    v_src_off    INTEGER := 1;
+    v_lang_ctx   INTEGER := DBMS_LOB.DEFAULT_LANG_CTX;
+    v_warning    INTEGER;
     v_file_name  VARCHAR2(500);
     v_file_type  VARCHAR2(100);
     v_file_size  NUMBER;
@@ -45,24 +48,23 @@ DECLARE
     v_end_pos    INTEGER;
     v_new_id     NUMBER;
 BEGIN
-    -- Step 1: read :body BLOB in 8000-byte chunks → full JSON CLOB
+    -- Step 1: guard against empty body
     v_blob_len := CASE WHEN v_blob IS NULL THEN 0 ELSE DBMS_LOB.GETLENGTH(v_blob) END;
     IF v_blob_len = 0 THEN
         OWA_UTIL.MIME_HEADER('application/json', FALSE);
         HTP.P('{"status":"error","message":"Request body is empty"}');
         RETURN;
     END IF;
-    DBMS_LOB.CREATETEMPORARY(v_body_clob, TRUE);
-    WHILE v_offset <= v_blob_len LOOP
-        v_read_amt := LEAST(8000, v_blob_len - v_offset + 1);
-        DBMS_LOB.READ(v_blob, v_read_amt, v_offset, v_buf);
-        DBMS_LOB.WRITEAPPEND(v_body_clob,
-            UTL_RAW.LENGTH(v_buf),
-            UTL_RAW.CAST_TO_VARCHAR2(v_buf));
-        v_offset := v_offset + v_read_amt;
-    END LOOP;
 
-    -- Step 2: extract scalar fields via JSON_TABLE (safe for VARCHAR2)
+    -- Step 2: convert full BLOB → CLOB in one call (handles any size)
+    DBMS_LOB.CREATETEMPORARY(v_body_clob, TRUE);
+    DBMS_LOB.CONVERTTOCLOB(
+        v_body_clob, v_blob, DBMS_LOB.LOBMAXSIZE,
+        v_dest_off, v_src_off,
+        NLS_CHARSET_ID('AL32UTF8'), v_lang_ctx, v_warning
+    );
+
+    -- Step 3: extract scalar fields via JSON_TABLE (safe for VARCHAR2)
     SELECT jt.file_name, jt.file_type, jt.file_size, jt.created_by
     INTO   v_file_name, v_file_type, v_file_size, v_created_by
     FROM   JSON_TABLE(v_body_clob, '$' COLUMNS (
@@ -72,7 +74,7 @@ BEGIN
                created_by VARCHAR2(150)  PATH '$.createdBy'
            )) jt;
 
-    -- Step 3: extract content CLOB via direct string search
+    -- Step 4: extract content CLOB via direct string search
     -- Base64 uses only A-Za-z0-9+/= — never contains "
     -- so the next " after "content":" is always the closing quote
     v_key_pos := DBMS_LOB.INSTR(v_body_clob, v_key);
@@ -85,7 +87,7 @@ BEGIN
         END IF;
     END IF;
 
-    -- Step 4: insert
+    -- Step 5: insert
     INSERT INTO RR_EXTERNAL_TRX_ATTACHMENTS
         (EXTERNAL_TRANSACTION_ID, FILE_NAME, FILE_TYPE, FILE_SIZE, FILE_CONTENT, CREATED_BY)
     VALUES
