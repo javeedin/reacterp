@@ -1308,13 +1308,24 @@ const ExternalTxnForm: React.FC<{
                 reader.readAsDataURL(file);
                 return false;
               }}
-              onRemove={(file) => {
-                const att = attachments.find(a => a.uid === file.uid);
-                if (att?.id && initialValues?.externalTransactionId) {
-                  fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.externalTransactionId}/attachments/${att.id}`, { method: 'DELETE' }).catch(() => {});
-                }
-                setAttachments(prev => prev.filter(a => a.uid !== file.uid));
-              }}
+              onRemove={(file) => new Promise((resolve) => {
+                Modal.confirm({
+                  title: 'Delete attachment?',
+                  content: `"${file.name}" will be permanently removed.`,
+                  okText: 'Delete',
+                  okButtonProps: { danger: true },
+                  cancelText: 'Cancel',
+                  onOk: async () => {
+                    const att = attachments.find(a => a.uid === file.uid);
+                    if (att?.id && initialValues?.externalTransactionId) {
+                      await fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.externalTransactionId}/attachments/${att.id}`, { method: 'DELETE' }).catch(() => {});
+                    }
+                    setAttachments(prev => prev.filter(a => a.uid !== file.uid));
+                    resolve(false); // we manage fileList ourselves
+                  },
+                  onCancel: () => resolve(false),
+                });
+              })}
               onPreview={handlePreviewAttachment}
               onDownload={handleDownloadAttachment}
               showUploadList={{ showPreviewIcon: true, showDownloadIcon: true, showRemoveIcon: true }}
