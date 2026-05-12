@@ -46,6 +46,7 @@ DECLARE
     v_key        VARCHAR2(20) := '"content":"';
     v_key_pos    INTEGER;
     v_end_pos    INTEGER;
+    v_clob_len   INTEGER;
     v_new_id     NUMBER;
 BEGIN
     -- Step 1: guard against empty body
@@ -63,6 +64,7 @@ BEGIN
         v_dest_off, v_src_off,
         NLS_CHARSET_ID('AL32UTF8'), v_lang_ctx, v_warning
     );
+    v_clob_len := DBMS_LOB.GETLENGTH(v_body_clob);
 
     -- Step 3: extract scalar fields via JSON_TABLE (safe for VARCHAR2)
     SELECT jt.file_name, jt.file_type, jt.file_size, jt.created_by
@@ -100,6 +102,9 @@ BEGIN
     HTP.P('{"status":"success","id":' || v_new_id
         || ',"fileName":'       || APEX_JSON.STRINGIFY(v_file_name)
         || ',"bodyLen":'        || v_blob_len
+        || ',"clobLen":'        || NVL(v_clob_len, 0)
+        || ',"keyPos":'         || NVL(v_key_pos, 0)
+        || ',"endPos":'         || NVL(v_end_pos, 0)
         || ',"contentLength":'  || NVL(DBMS_LOB.GETLENGTH(v_content), 0)
         || '}');
 EXCEPTION WHEN OTHERS THEN
