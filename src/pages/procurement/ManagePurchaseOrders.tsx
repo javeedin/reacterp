@@ -28,7 +28,7 @@ const REDWOOD = {
 
 // ── Oracle Fusion API config ─────────────────────────────────────────────────
 const BASE_URL = 'https://iaaobn.fa.ocs.oraclecloud.com:443/fscmRestApi/resources/11.13.18.05';
-const AUTH_HEADER = 'Basic ' + btoa('bui_int_user:Oracle@1234');
+const AUTH_HEADER = 'Basic ' + btoa('emparun:Fusion@1234');
 const PAGE_SIZE = 25;
 
 // ── Types ────────────────────────────────────────────────────────────────────
