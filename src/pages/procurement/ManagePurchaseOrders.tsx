@@ -223,32 +223,32 @@ const PODetailPage: React.FC<{ po: RawPO }> = ({ po }) => {
 
       {/* ── Top summary bar ───────────────────────────────────────────────── */}
       <div style={{
-        background: `linear-gradient(135deg, ${REDWOOD.primaryDark} 0%, ${REDWOOD.primary} 60%, ${REDWOOD.primaryLight} 100%)`,
+        background: REDWOOD.surface,
         padding: '20px 28px',
-        color: '#fff',
+        borderBottom: `1px solid ${REDWOOD.neutral200}`,
       }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
           <div>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', opacity: 0.75 }}>Purchase Order</div>
-            <div style={{ fontSize: 26, fontWeight: 700, letterSpacing: '-0.02em', lineHeight: 1.2 }}>{po.OrderNumber}</div>
-            <div style={{ fontSize: 13, opacity: 0.85, marginTop: 4 }}>{po.Supplier}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: REDWOOD.neutral600 }}>Purchase Order</div>
+            <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.2, color: REDWOOD.neutral900 }}>{po.OrderNumber}</div>
+            <div style={{ fontSize: 13, color: REDWOOD.neutral600, marginTop: 4 }}>{po.Supplier}</div>
             <div style={{ marginTop: 10 }}>{getStatusTag(po.StatusCode)}</div>
           </div>
-          <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 11, opacity: 0.7, fontWeight: 600, textTransform: 'uppercase' }}>Ordered</div>
-              <div style={{ fontSize: 22, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtAmt(po.Ordered)}</div>
-              <div style={{ fontSize: 11, opacity: 0.7 }}>{po.Currency ?? po.CurrencyCode}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: REDWOOD.neutral600, letterSpacing: '0.05em' }}>Ordered</div>
+              <div style={{ fontSize: 22, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: REDWOOD.neutral900 }}>{fmtAmt(po.Ordered)}</div>
+              <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{po.Currency ?? po.CurrencyCode}</div>
             </div>
             <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 11, opacity: 0.7, fontWeight: 600, textTransform: 'uppercase' }}>Tax</div>
-              <div style={{ fontSize: 22, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtAmt(po.TotalTax)}</div>
-              <div style={{ fontSize: 11, opacity: 0.7 }}>{po.CurrencyCode}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: REDWOOD.neutral600, letterSpacing: '0.05em' }}>Tax</div>
+              <div style={{ fontSize: 22, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: REDWOOD.neutral900 }}>{fmtAmt(po.TotalTax)}</div>
+              <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{po.CurrencyCode}</div>
             </div>
-            <div style={{ textAlign: 'right', borderLeft: '1px solid rgba(255,255,255,0.3)', paddingLeft: 24 }}>
-              <div style={{ fontSize: 11, opacity: 0.7, fontWeight: 600, textTransform: 'uppercase' }}>Total</div>
-              <div style={{ fontSize: 28, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{fmtAmt(po.Total)}</div>
-              <div style={{ fontSize: 11, opacity: 0.7 }}>{po.CurrencyCode}</div>
+            <div style={{ textAlign: 'right', borderLeft: `2px solid ${REDWOOD.neutral200}`, paddingLeft: 24 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: REDWOOD.neutral600, letterSpacing: '0.05em' }}>Total</div>
+              <div style={{ fontSize: 28, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: REDWOOD.primary }}>{fmtAmt(po.Total)}</div>
+              <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{po.CurrencyCode}</div>
             </div>
           </div>
         </div>
