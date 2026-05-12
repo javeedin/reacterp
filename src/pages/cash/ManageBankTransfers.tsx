@@ -450,11 +450,13 @@ const TransferForm: React.FC<{
           reader.onerror = reject;
           reader.readAsDataURL(att.rawFile!);
         });
+        console.log('[save] file:', att.name, 'base64 len:', base64.length, 'first50:', base64.slice(0, 50));
         const payload = JSON.stringify({ fileName: att.name, fileType: att.fileType || '', fileSize: att.fileSize, content: base64, createdBy: 'ERP_USER' });
         const res = await fetch(postUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload });
         const respText = await res.text();
         let resp: any = null;
         try { resp = JSON.parse(respText); } catch { /* not JSON */ }
+        console.log('[save] POST response:', respText);
         setAttApiLog(prev => [...prev.slice(-9), {
           dir: 'POST', url: postUrl, status: res.status,
           body: `Sent: ${att.name} — JSON\n\nResponse: ${respText}`,
