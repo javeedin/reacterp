@@ -249,9 +249,13 @@ const TransferForm: React.FC<{
 
   // Load attachments once when the transfer ID becomes available
   const transferId = initialValues?.bankAccountTransferId;
+  const extTrxId = initialValues?.fromExternalTrxId || null;
   useEffect(() => {
     if (!transferId) return;
-    const url = `${APEX_BASE}/cash/banktransfers/${transferId}/attachments`;
+    const url = extTrxId
+      ? `${APEX_BASE}/cash/externaltransactions/${extTrxId}/attachments`
+      : null;
+    if (!url) { setAttApiLog(prev => [...prev, { dir: 'GET', url: '(no fromExternalTrxId)', status: null, body: 'No linked external transaction — attachments unavailable.' }]); return; }
     setAttApiLog(prev => [...prev, { dir: 'GET', url, status: null, body: '…fetching…' }]);
     fetch(url, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
@@ -353,10 +357,10 @@ const TransferForm: React.FC<{
       setPreviewAtt({ name: att.name, fileType: att.fileType, content: att.content, blobUrl });
       return;
     }
-    if (!att.id || !initialValues?.bankAccountTransferId) return;
+    if (!att.id || !extTrxId) return;
     setPreviewLoading(true);
     try {
-      const res = await fetch(`${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments/${att.id}`, { headers: { Accept: 'application/json' } });
+      const res = await fetch(`${APEX_BASE}/cash/externaltransactions/${extTrxId}/attachments/${att.id}`, { headers: { Accept: 'application/json' } });
       const d = await res.json();
       const content = d.content || d.CONTENT || '';
       const fileType = att.fileType || d.fileType || 'application/octet-stream';
@@ -372,9 +376,9 @@ const TransferForm: React.FC<{
     if (!att) return;
     let content = att.content;
     let fileType = att.fileType;
-    if (!content && att.id && initialValues?.bankAccountTransferId) {
+    if (!content && att.id && extTrxId) {
       try {
-        const res = await fetch(`${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments/${att.id}`, { headers: { Accept: 'application/json' } });
+        const res = await fetch(`${APEX_BASE}/cash/externaltransactions/${extTrxId}/attachments/${att.id}`, { headers: { Accept: 'application/json' } });
         const d = await res.json();
         content = d.content || d.CONTENT || '';
         fileType = att.fileType || d.fileType || 'application/octet-stream';
@@ -395,9 +399,9 @@ const TransferForm: React.FC<{
   const handleSaveAttachments = async () => {
     const pending = attachments.filter(a => !a.id);
     if (pending.length === 0) { message.info('No new attachments to save.'); return; }
-    if (!initialValues?.bankAccountTransferId) { message.error('Transfer ID not available'); return; }
+    if (!extTrxId) { message.error('No linked external transaction ID — cannot save attachments'); return; }
     setAttSaving(true);
-    const postUrl = `${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments`;
+    const postUrl = `${APEX_BASE}/cash/externaltransactions/${extTrxId}/attachments`;
     let saved = 0;
     for (const att of pending) {
       const payload = { fileName: att.name, fileType: att.fileType, fileSize: att.fileSize, content: att.content, createdBy: 'ERP_USER' };
@@ -417,7 +421,7 @@ const TransferForm: React.FC<{
       }
     }
     // Refresh list
-    const getUrl = `${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments`;
+    const getUrl = `${APEX_BASE}/cash/externaltransactions/${extTrxId}/attachments`;
     try {
       const r = await fetch(getUrl, { headers: { Accept: 'application/json' } });
       const d = await r.json();
@@ -710,8 +714,8 @@ const TransferForm: React.FC<{
                   }}
                   onRemove={(file) => {
                     const att = attachments.find(a => a.uid === file.uid);
-                    if (att?.id && initialValues?.bankAccountTransferId) {
-                      fetch(`${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}/attachments/${att.id}`, { method: 'DELETE' }).catch(() => {});
+                    if (att?.id && extTrxId) {
+                      fetch(`${APEX_BASE}/cash/externaltransactions/${extTrxId}/attachments/${att.id}`, { method: 'DELETE' }).catch(() => {});
                     }
                     setAttachments(prev => prev.filter(a => a.uid !== file.uid));
                   }}
@@ -909,11 +913,14 @@ const TransferForm: React.FC<{
               label: 'Attachments API',
               children: (() => {
                 const tid = initialValues?.bankAccountTransferId;
-                const baseUrl = tid ? `${APEX_BASE}/cash/banktransfers/${tid}/attachments` : `${APEX_BASE}/cash/banktransfers/:transferId/attachments`;
+                const inspExtId = initialValues?.fromExternalTrxId || null;
+                const baseUrl = inspExtId
+                  ? `${APEX_BASE}/cash/externaltransactions/${inspExtId}/attachments`
+                  : `${APEX_BASE}/cash/externaltransactions/:externalTransactionId/attachments`;
                 const firstAttId = attachments.find(a => a.id)?.id;
-                const singleUrl = tid && firstAttId
-                  ? `${APEX_BASE}/cash/banktransfers/${tid}/attachments/${firstAttId}`
-                  : `${APEX_BASE}/cash/banktransfers/:transferId/attachments/:attachmentId`;
+                const singleUrl = inspExtId && firstAttId
+                  ? `${APEX_BASE}/cash/externaltransactions/${inspExtId}/attachments/${firstAttId}`
+                  : `${APEX_BASE}/cash/externaltransactions/:externalTransactionId/attachments/:attachmentId`;
                 const samplePayload = JSON.stringify({
                   fileName: 'document.pdf',
                   fileType: 'application/pdf',
@@ -1006,8 +1013,8 @@ END;
 
                     {/* Test buttons */}
                     <Space wrap style={{ marginBottom: 10 }}>
-                      <Button size="small" disabled={!tid} onClick={() => {
-                        if (!tid) return;
+                      <Button size="small" disabled={!inspExtId} onClick={() => {
+                        if (!inspExtId) return;
                         setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET list', url: baseUrl, status: null, body: '…fetching…' }]);
                         fetch(baseUrl, { headers: { Accept: 'application/json' } })
                           .then(r => r.text().then(t => ({ status: r.status, t })))
@@ -1020,7 +1027,7 @@ END;
                       <Button size="small" loading={attGetSingleTesting} disabled={!tid || !firstAttId}
                         title={!firstAttId ? 'No saved attachments to test with' : ''}
                         onClick={async () => {
-                          if (!tid || !firstAttId) return;
+                          if (!inspExtId || !firstAttId) return;
                           setAttGetSingleTesting(true);
                           setAttApiLog(prev => [...prev.slice(-9), { dir: 'GET single', url: singleUrl, status: null, body: '…fetching…' }]);
                           try {
@@ -1037,10 +1044,10 @@ END;
                             message.error('GET single failed: ' + e.message);
                           } finally { setAttGetSingleTesting(false); }
                         }}>Test GET Single</Button>
-                      <Button size="small" type="primary" loading={attPostTesting} disabled={!tid}
+                      <Button size="small" type="primary" loading={attPostTesting} disabled={!inspExtId}
                         style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
                         onClick={async () => {
-                          if (!tid) return;
+                          if (!inspExtId) return;
                           setAttPostTesting(true);
                           const body = { fileName: 'test-ping.png', fileType: 'image/png', fileSize: TINY_PNG.length, content: TINY_PNG, createdBy: 'ERP_USER' };
                           setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST upload', url: baseUrl, status: null, body: `POST ${baseUrl}\nContent-Type: application/json\n\n${JSON.stringify(body, null, 2)}` }]);
