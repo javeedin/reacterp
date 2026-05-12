@@ -98,10 +98,17 @@ BEGIN
                    file_size  NUMBER         PATH '$.fileSize',
                    created_by VARCHAR2(150)  PATH '$.createdBy'
                )) jt;
-        -- Extract content via INSTR/COPY (no Oracle JSON API size limit)
+        -- Extract content: handle both "content":"..." and "content": "..."
         v_key_pos := DBMS_LOB.INSTR(v_body_clob, '"content":"');
         IF v_key_pos > 0 THEN
             v_key_pos := v_key_pos + LENGTH('"content":"');
+        ELSE
+            v_key_pos := DBMS_LOB.INSTR(v_body_clob, '"content": "');
+            IF v_key_pos > 0 THEN
+                v_key_pos := v_key_pos + LENGTH('"content": "');
+            END IF;
+        END IF;
+        IF v_key_pos > 0 THEN
             v_end_pos := DBMS_LOB.INSTR(v_body_clob, '"', v_key_pos);
             IF v_end_pos > v_key_pos THEN
                 DBMS_LOB.CREATETEMPORARY(v_content, TRUE);

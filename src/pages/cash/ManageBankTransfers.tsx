@@ -1133,7 +1133,7 @@ END;
                               reader.readAsDataURL(file);
                             });
                             const payload = { fileName: file.name, fileType: file.type || 'application/octet-stream', fileSize: file.size, content: base64, createdBy: 'ERP_USER' };
-                            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+                            const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
                             const a = document.createElement('a');
                             a.href = URL.createObjectURL(blob);
                             a.download = file.name.replace(/\.[^.]+$/, '') + '-postman.json';
