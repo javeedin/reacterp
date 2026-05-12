@@ -702,13 +702,15 @@ const ExternalTxnForm: React.FC<{
     setAttSaving(true);
     let savedCount = 0;
     for (const att of pending) {
+      if (!att.content) { message.warning(`${att.name}: no content — skipped`); continue; }
       try {
-        await fetch(`${APEX_BASE}/cash/externaltransactions/${extId}/attachments`, {
+        const res = await fetch(`${APEX_BASE}/cash/externaltransactions/${extId}/attachments`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ fileName: att.name, fileType: att.fileType, fileSize: att.fileSize, content: att.content, createdBy: 'ERP_USER' }),
         });
-        savedCount++;
-      } catch { /* ignore individual failures */ }
+        if (res.ok) savedCount++;
+        else { const t = await res.text(); message.error(`${att.name}: server error ${res.status} — ${t}`); }
+      } catch (e: any) { message.error(`${att.name}: ${e.message}`); }
     }
     // Refresh attachment list from server
     try {

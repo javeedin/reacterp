@@ -104,15 +104,18 @@ DECLARE
     v_created_by VARCHAR2(150);
     v_new_id     NUMBER;
 BEGIN
-    SELECT jt.file_name, jt.file_type, jt.file_size, jt.content, jt.created_by
-    INTO   v_file_name, v_file_type, v_file_size, v_content, v_created_by
+    -- Extract scalar fields via JSON_TABLE
+    SELECT jt.file_name, jt.file_type, jt.file_size, jt.created_by
+    INTO   v_file_name, v_file_type, v_file_size, v_created_by
     FROM   JSON_TABLE(:body_text, '$' COLUMNS (
                file_name  VARCHAR2(500)  PATH '$.fileName',
                file_type  VARCHAR2(100)  PATH '$.fileType',
                file_size  NUMBER         PATH '$.fileSize',
-               content    CLOB           PATH '$.content',
                created_by VARCHAR2(150)  PATH '$.createdBy'
            )) jt;
+
+    -- Extract CLOB content separately — JSON_TABLE silently returns NULL for large CLOBs
+    v_content := JSON_VALUE(:body_text, '$.content' RETURNING CLOB);
 
     INSERT INTO RR_EXTERNAL_TRX_ATTACHMENTS
         (EXTERNAL_TRANSACTION_ID, FILE_NAME, FILE_TYPE, FILE_SIZE, FILE_CONTENT, CREATED_BY)
@@ -122,7 +125,7 @@ BEGIN
 
     COMMIT;
     OWA_UTIL.MIME_HEADER('application/json', FALSE);
-    HTP.P('{"status":"success","id":' || v_new_id || ',"fileName":' || APEX_JSON.STRINGIFY(v_file_name) || '}');
+    HTP.P('{"status":"success","id":' || v_new_id || ',"fileName":' || APEX_JSON.STRINGIFY(v_file_name) || ',"contentLength":' || NVL(DBMS_LOB.GETLENGTH(v_content),0) || '}');
 EXCEPTION WHEN OTHERS THEN
     ROLLBACK;
     OWA_UTIL.MIME_HEADER('application/json', FALSE);

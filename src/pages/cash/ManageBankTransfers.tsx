@@ -417,7 +417,7 @@ const TransferForm: React.FC<{
         const respText = await res.text();
         setAttApiLog(prev => [...prev.slice(-9), {
           dir: 'POST', url: postUrl, status: res.status,
-          body: `Request: ${JSON.stringify({ ...payload, content: payload.content ? '[base64 ' + payload.content.length + ' chars]' : '' }, null, 2)}\n\nResponse: ${respText}`,
+          body: `Request payload:\n  fileName: ${payload.fileName}\n  fileType: ${payload.fileType}\n  fileSize: ${payload.fileSize}\n  content: ${payload.content ? payload.content.length + ' base64 chars (' + Math.round(payload.content.length * 0.75 / 1024) + ' KB)' : 'EMPTY — content missing!'}\n  createdBy: ${payload.createdBy}\n\nResponse: ${respText}`,
         }]);
         if (res.ok) saved++;
       } catch (e: any) {
