@@ -411,18 +411,10 @@ const TransferForm: React.FC<{
         setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST', url: '', status: 0, body: `${att.name}: EMPTY content — skipped` }]);
         continue;
       }
-      const params = new URLSearchParams({
-        fileName: att.name,
-        fileType: att.fileType || 'application/octet-stream',
-        fileSize: String(att.fileSize),
-        createdBy: 'ERP_USER',
-      });
-      const postUrl = `${APEX_BASE}/cash/externaltransactions/${extTrxId}/attachments?${params}`;
+      const postUrl = `${APEX_BASE}/cash/externaltransactions/${extTrxId}/attachments`;
+      const payload = { fileName: att.name, fileType: att.fileType, fileSize: att.fileSize, content: att.content, createdBy: 'ERP_USER' };
       try {
-        const res = await fetch(postUrl, {
-          method: 'POST', headers: { 'Content-Type': 'text/plain' },
-          body: att.content,
-        });
+        const res = await fetch(postUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         const respText = await res.text();
         setAttApiLog(prev => [...prev.slice(-9), {
           dir: 'POST', url: postUrl, status: res.status,

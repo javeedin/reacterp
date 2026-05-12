@@ -704,16 +704,9 @@ const ExternalTxnForm: React.FC<{
     for (const att of pending) {
       if (!att.content) { message.warning(`${att.name}: no content — skipped`); continue; }
       try {
-        const params = new URLSearchParams({
-          fileName: att.name,
-          fileType: att.fileType || 'application/octet-stream',
-          fileSize: String(att.fileSize),
-          createdBy: 'ERP_USER',
-        });
-        const res = await fetch(`${APEX_BASE}/cash/externaltransactions/${extId}/attachments?${params}`, {
-          method: 'POST', headers: { 'Content-Type': 'text/plain' },
-          body: att.content,
-        });
+        const postUrl = `${APEX_BASE}/cash/externaltransactions/${extId}/attachments`;
+        const body = JSON.stringify({ fileName: att.name, fileType: att.fileType, fileSize: att.fileSize, content: att.content, createdBy: 'ERP_USER' });
+        const res = await fetch(postUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
         if (res.ok) savedCount++;
         else { const t = await res.text(); message.error(`${att.name}: server error ${res.status} — ${t}`); }
       } catch (e: any) { message.error(`${att.name}: ${e.message}`); }
