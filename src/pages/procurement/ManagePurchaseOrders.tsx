@@ -143,23 +143,49 @@ const buildQParam = (p: SearchParams): string => {
 
 // ── PO Detail Page (shown as a tab) ─────────────────────────────────────────
 const PODetailPage: React.FC<{ po: RawPO }> = ({ po }) => {
-  const [lines, setLines]       = useState<POLine[]>([]);
-  const [linesLoading, setLL]   = useState(false);
-  const [linesError, setLE]     = useState<string | null>(null);
+  const [lines, setLines]           = useState<POLine[]>([]);
+  const [linesLoading, setLL]       = useState(false);
+  const [linesError, setLE]         = useState<string | null>(null);
+  const [linesUrl, setLinesUrl]     = useState('');
+  const [rawResponse, setRawResp]   = useState('');
+  const [apiOpen, setApiOpen]       = useState(false);
+  const [apiTestLoading, setATL]    = useState(false);
+  const [apiResult, setApiResult]   = useState<{ status: number; body: string } | null>(null);
+
+  const doFetch = useCallback(async (url: string) => {
+    setLL(true); setLE(null); setRawResp('');
+    try {
+      const r = await fetch(url, { headers: { Authorization: AUTH_HEADER, Accept: 'application/json' } });
+      const text = await r.text();
+      setRawResp(text);
+      if (!r.ok) throw new Error(`HTTP ${r.status} — ${text.slice(0, 200)}`);
+      const d = JSON.parse(text);
+      setLines(d.items ?? []);
+      if ((d.items ?? []).length === 0) setLE(`API returned 0 items. Raw: ${text.slice(0, 300)}`);
+    } catch (e: any) {
+      setLE(e.message);
+    } finally { setLL(false); }
+  }, []);
 
   useEffect(() => {
     const linesLink = po.links?.find(l => l.name === 'lines');
     const url = linesLink?.href ?? `${BASE_URL}/purchaseOrders/${po.POHeaderId}/child/lines`;
-    setLL(true); setLE(null);
-    fetch(url, { headers: { Authorization: AUTH_HEADER, Accept: 'application/json' } })
-      .then(async r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const d = await r.json();
-        setLines(d.items ?? []);
-      })
-      .catch(e => setLE(e.message))
-      .finally(() => setLL(false));
-  }, [po.POHeaderId]);
+    setLinesUrl(url);
+    doFetch(url);
+  }, [po.POHeaderId, doFetch]);
+
+  const handleApiTest = async () => {
+    setATL(true); setApiResult(null);
+    try {
+      const r = await fetch(linesUrl, { headers: { Authorization: AUTH_HEADER, Accept: 'application/json' } });
+      const body = await r.text();
+      let pretty = body;
+      try { pretty = JSON.stringify(JSON.parse(body), null, 2); } catch { /* keep raw */ }
+      setApiResult({ status: r.status, body: pretty });
+    } catch (e: any) {
+      setApiResult({ status: 0, body: `Network error: ${e.message}` });
+    } finally { setATL(false); }
+  };
 
   const LabelVal: React.FC<{ label: string; value?: React.ReactNode; wide?: boolean }> = ({ label, value, wide }) => (
     <Col xs={24} sm={wide ? 24 : 12} md={wide ? 12 : 6}>
@@ -326,6 +352,15 @@ const PODetailPage: React.FC<{ po: RawPO }> = ({ po }) => {
               {lines.length > 0 && <Tag style={{ fontSize: 11 }}>{lines.length} line{lines.length !== 1 ? 's' : ''}</Tag>}
             </Space>
           }
+          extra={
+            <Tooltip title="API Inspector — view the lines web service URL and test it">
+              <Button size="small" icon={<ApiOutlined />}
+                style={{ borderColor: REDWOOD.info, color: REDWOOD.info, fontSize: 11 }}
+                onClick={() => { setApiResult(null); setApiOpen(true); }}>
+                API
+              </Button>
+            </Tooltip>
+          }
         >
           {linesLoading ? (
             <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
@@ -376,6 +411,66 @@ const PODetailPage: React.FC<{ po: RawPO }> = ({ po }) => {
         </div>
 
       </div>
+
+      {/* ── Lines API Inspector Modal ───────────────────────────────────── */}
+      <Modal
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /> Lines API Inspector</Space>}
+        open={apiOpen} onCancel={() => setApiOpen(false)} footer={null} width={820}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div>
+            <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Lines URL</Text>
+            <div style={{ marginTop: 4, padding: '8px 12px', borderRadius: 6, background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info }}>
+              <Tag color="blue" style={{ marginRight: 8 }}>GET</Tag>{linesUrl || '(not yet resolved)'}
+            </div>
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              URL source: {po.links?.find(l => l.name === 'lines') ? '✅ from links array in PO response' : '⚠️ constructed (no links array found in PO)'}
+            </Text>
+          </div>
+
+          <div>
+            <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Headers Sent</Text>
+            <div style={{ marginTop: 4, padding: '8px 12px', borderRadius: 6, background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', fontSize: 12 }}>
+              <div><span style={{ color: REDWOOD.neutral600 }}>Authorization: </span><span style={{ color: REDWOOD.success }}>Basic [emparun:Fusion@1234]</span></div>
+              <div><span style={{ color: REDWOOD.neutral600 }}>Accept: </span>application/json</div>
+            </div>
+          </div>
+
+          {rawResponse && (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Last Auto-fetch Response</Text>
+                <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginLeft: 'auto' }}
+                  onClick={() => { navigator.clipboard.writeText(rawResponse); message.success('Copied'); }}>Copy</Button>
+              </div>
+              <div style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 12, borderRadius: 6, fontFamily: 'monospace', fontSize: 11, maxHeight: 200, overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {(() => { try { return JSON.stringify(JSON.parse(rawResponse), null, 2).slice(0, 3000); } catch { return rawResponse.slice(0, 3000); } })()}
+              </div>
+            </div>
+          )}
+
+          <Button type="primary" icon={<ApiOutlined />} loading={apiTestLoading} onClick={handleApiTest}
+            style={{ background: REDWOOD.info, borderColor: REDWOOD.info, borderRadius: 6, alignSelf: 'flex-start' }}>
+            Test Request Now
+          </Button>
+
+          {apiResult && (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <Tag color={apiResult.status >= 200 && apiResult.status < 300 ? 'success' : apiResult.status === 0 ? 'default' : 'error'}>
+                  {apiResult.status === 0 ? 'Network Error' : `HTTP ${apiResult.status}`}
+                </Tag>
+                <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Test Response</Text>
+                <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginLeft: 'auto' }}
+                  onClick={() => { navigator.clipboard.writeText(apiResult.body); message.success('Copied'); }}>Copy</Button>
+              </div>
+              <div style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 12, borderRadius: 6, fontFamily: 'monospace', fontSize: 11, maxHeight: 320, overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {apiResult.body.slice(0, 5000)}{apiResult.body.length > 5000 ? '\n\n… (truncated)' : ''}
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 };
