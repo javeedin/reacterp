@@ -135,6 +135,44 @@ END;
 /
 
 -- ============================================================
+-- ORDS: GET /cash/externaltransactions/:externalTransactionId/attachments/:attachmentId
+-- Returns single attachment including FILE_CONTENT for preview/download
+-- ============================================================
+BEGIN
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'reerp',
+        p_pattern        => 'cash/externaltransactions/:externalTransactionId/attachments/:attachmentId',
+        p_method         => 'GET',
+        p_source_type    => ORDS.source_type_plsql,
+        p_items_per_page => 0,
+        p_comments       => 'Get single attachment with content for preview/download',
+        p_source         => q'[
+DECLARE
+    r RR_EXTERNAL_TRX_ATTACHMENTS%ROWTYPE;
+BEGIN
+    SELECT * INTO r
+      FROM RR_EXTERNAL_TRX_ATTACHMENTS
+     WHERE ID = :attachmentId
+       AND EXTERNAL_TRANSACTION_ID = :externalTransactionId;
+
+    HTP.P('{"id":' || r.ID
+        || ',"fileName":' || APEX_JSON.STRINGIFY(r.FILE_NAME)
+        || ',"fileType":' || APEX_JSON.STRINGIFY(NVL(r.FILE_TYPE,''))
+        || ',"fileSize":' || NVL(TO_CHAR(r.FILE_SIZE),'null')
+        || ',"content":' || APEX_JSON.STRINGIFY(NVL(r.FILE_CONTENT,''))
+        || '}');
+EXCEPTION WHEN NO_DATA_FOUND THEN
+    HTP.P('{"error":"Not found"}');
+WHEN OTHERS THEN
+    HTP.P('{"error":' || APEX_JSON.STRINGIFY(SQLERRM) || '}');
+END;
+]'
+    );
+    COMMIT;
+END;
+/
+
+-- ============================================================
 -- ORDS: DELETE /cash/externaltransactions/:externalTransactionId/attachments/:attachmentId
 -- ============================================================
 BEGIN
