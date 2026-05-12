@@ -1298,7 +1298,7 @@ const ExternalTxnForm: React.FC<{
               <PaperClipOutlined style={{ color: REDWOOD.neutral600 }} /> Attachments
             </div>
             <Upload
-              fileList={attachments.map(a => ({ uid: a.uid, name: a.name, status: a.status, size: a.fileSize, type: a.fileType, url: ' ' }))}
+              fileList={attachments.map(a => ({ uid: a.uid, name: a.name, status: a.status, size: a.fileSize, type: a.fileType }))}
               beforeUpload={(file) => {
                 const reader = new FileReader();
                 reader.onload = (e) => {
