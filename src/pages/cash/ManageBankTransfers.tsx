@@ -1097,13 +1097,16 @@ END;
                                 reader.readAsDataURL(file);
                               });
                               const body = { fileName: file.name, fileType: file.type || 'application/octet-stream', fileSize: file.size, content: base64, createdBy: 'ERP_USER' };
-                              const preview = { ...body, content: base64.slice(0, 80) + `…[${base64.length} chars total]` };
-                              setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST upload', url: baseUrl, status: null, body: `POST ${baseUrl}\nContent-Type: application/json\n\n${JSON.stringify(preview, null, 2)}` }]);
                               const res = await fetch(baseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
                               const t = await res.text();
                               const respBody = (() => { try { return JSON.stringify(JSON.parse(t), null, 2); } catch { return t; } })();
-                              setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST upload', url: baseUrl, status: res.status, body: `File: ${file.name} (${file.size} bytes)\nBase64 length: ${base64.length} chars\n\nResponse (HTTP ${res.status}):\n${respBody}` }]);
-                              if (res.ok) message.success(`POST succeeded — ${file.name} uploaded!`);
+                              setAttApiLog(prev => [...prev.slice(-9), {
+                                dir: 'POST upload',
+                                url: baseUrl,
+                                status: res.status,
+                                body: `━━ REQUEST ━━\nFile: ${file.name}  |  originalSize: ${file.size} bytes  |  base64Length: ${base64.length} chars\nPOST ${baseUrl}\n\n━━ SERVER RESPONSE (HTTP ${res.status}) ━━\n${respBody}`,
+                              }]);
+                              if (res.ok) message.success(`POST succeeded — check the log for bodyLen / contentLength`);
                               else message.error(`POST failed — HTTP ${res.status}. Check the log.`);
                             } catch (e: any) {
                               setAttApiLog(prev => [...prev.slice(-9), { dir: 'POST upload', url: baseUrl, status: 0, body: 'Error: ' + e.message }]);
