@@ -10,7 +10,7 @@ import {
   HomeOutlined, BankOutlined, PlusOutlined, SearchOutlined, ReloadOutlined,
   EditOutlined, CloseOutlined, FilterOutlined, SwapOutlined, DollarOutlined,
   FileTextOutlined, ApiOutlined, ExportOutlined, DownloadOutlined,
-  PrinterOutlined, PaperClipOutlined, UploadOutlined, EyeOutlined,
+  PrinterOutlined, PaperClipOutlined, UploadOutlined, EyeOutlined, DeleteOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -202,6 +202,7 @@ const TransferForm: React.FC<{
 }> = ({ initialValues, bankAccounts, businessUnits, bankCurrencyMap, buBankMap, bankAccountAssetMap, onSave, onCancel }) => {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [apiModal, setApiModal]       = useState(false);
   const [apiPayload, setApiPayload]   = useState('');
   const [apiPosting, setApiPosting]   = useState(false);
@@ -246,6 +247,23 @@ const TransferForm: React.FC<{
       setToCurrency('');
     }
   }, [initialValues, form]);
+
+  const handleDelete = async () => {
+    if (!initialValues?.bankAccountTransferId) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.status === 'success') {
+        message.success('Transfer deleted.');
+        onSave();
+      } else {
+        message.error(data.message || 'Delete failed.');
+      }
+    } catch (e: any) {
+      message.error('Network error: ' + e.message);
+    } finally { setDeleting(false); }
+  };
 
   // Load attachments once when the transfer ID becomes available
   const transferId = initialValues?.bankAccountTransferId;
@@ -775,6 +793,18 @@ const TransferForm: React.FC<{
             )}
           </Space>
           <Space>
+            {isEdit && (
+              <Popconfirm
+                title="Delete this transfer?"
+                description="This action cannot be undone."
+                onConfirm={handleDelete}
+                okText="Delete"
+                okButtonProps={{ danger: true }}
+                cancelText="Cancel"
+              >
+                <Button danger loading={deleting} icon={<DeleteOutlined />}>Delete</Button>
+              </Popconfirm>
+            )}
             <Button onClick={onCancel}>{isEdit ? 'Close' : 'Cancel'}</Button>
             {!isEdit && (
               <Button type="primary" loading={saving} onClick={handleSubmit}
