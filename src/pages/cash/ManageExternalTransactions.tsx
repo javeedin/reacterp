@@ -1328,12 +1328,38 @@ const ExternalTxnForm: React.FC<{
               })}
               onPreview={handlePreviewAttachment}
               onDownload={handleDownloadAttachment}
-              showUploadList={{ showPreviewIcon: true, showDownloadIcon: true, showRemoveIcon: true }}
+              showUploadList={false}
               multiple
               disabled={!isEdit && (!bankSelected || saved)}
             >
               <Button icon={<UploadOutlined />} disabled={!isEdit && (!bankSelected || saved)}>Attach Files</Button>
             </Upload>
+            {attachments.map(att => {
+              const fileObj = { uid: att.uid, name: att.name, status: att.status as any, size: att.fileSize, type: att.fileType };
+              return (
+                <div key={att.uid} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 0', fontSize: 13 }}>
+                  <PaperClipOutlined style={{ color: REDWOOD.neutral600, flexShrink: 0 }} />
+                  <span style={{ flex: '0 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 280 }} title={att.name}>{att.name}</span>
+                  <Button type="text" size="small" icon={<EyeOutlined />} style={{ flexShrink: 0, padding: '0 4px' }} onClick={() => handlePreviewAttachment(fileObj)} />
+                  <Button type="text" size="small" icon={<DownloadOutlined />} style={{ flexShrink: 0, padding: '0 4px' }} onClick={() => handleDownloadAttachment(fileObj)} />
+                  <Button type="text" size="small" icon={<DeleteOutlined />} style={{ flexShrink: 0, padding: '0 4px', color: REDWOOD.error }}
+                    onClick={() => {
+                      Modal.confirm({
+                        title: 'Delete attachment?',
+                        content: `"${att.name}" will be permanently removed.`,
+                        okText: 'Delete', okButtonProps: { danger: true }, cancelText: 'Cancel',
+                        onOk: async () => {
+                          if (att.id && initialValues?.externalTransactionId) {
+                            await fetch(`${APEX_BASE}/cash/externaltransactions/${initialValues.externalTransactionId}/attachments/${att.id}`, { method: 'DELETE' }).catch(() => {});
+                          }
+                          setAttachments(prev => prev.filter(a => a.uid !== att.uid));
+                        },
+                      });
+                    }}
+                  />
+                </div>
+              );
+            })}
             {previewLoading && <Spin size="small" style={{ marginTop: 8 }} />}
             {attachments.length === 0 && (
               <Text type="secondary" style={{ fontSize: 12, marginTop: 8, display: 'block' }}>No attachments</Text>
