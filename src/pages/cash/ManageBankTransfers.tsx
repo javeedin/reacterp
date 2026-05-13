@@ -806,15 +806,15 @@ const TransferForm: React.FC<{
               name="conversionRate"
               style={fs}
               rules={[{
-                required: !!watchedPaymentCcy && watchedPaymentCcy !== 'AED',
-                message: 'Conversion Rate is required for non-AED payment currency',
+                required: !!(fromCurrency && toCurrency && fromCurrency !== toCurrency),
+                message: 'Conversion Rate is required when currencies differ',
               }]}
             >
               <InputNumber style={{ width: '100%' }} min={0} precision={6} disabled={isReadOnly || !buSelected} />
             </Form.Item>
-            {watchedPaymentCcy && watchedPaymentCcy !== 'AED' && (
+            {fromCurrency && toCurrency && fromCurrency !== toCurrency && (
               <div style={{ fontSize: 11, color: REDWOOD.warning, marginTop: -10, marginBottom: 8 }}>
-                Required: payment currency is {watchedPaymentCcy} (functional: AED)
+                Required: {fromCurrency} → {toCurrency} cross-currency transfer
               </div>
             )}
           </Col>
