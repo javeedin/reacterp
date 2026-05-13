@@ -268,7 +268,8 @@ const ExternalTxnForm: React.FC<{
 
   useEffect(() => {
     if (initialValues) {
-      const dir = (initialValues.transactionDirection as 'DR' | 'CR') || 'DR';
+      const rawDir = initialValues.transactionDirection as 'DR' | 'CR' | undefined;
+      const dir: 'DR' | 'CR' = rawDir || ((initialValues.amount ?? 0) < 0 ? 'CR' : 'DR');
       setTxnDirection(dir);
       form.setFieldsValue({
         bankAccountName:           initialValues.bankAccountName,
