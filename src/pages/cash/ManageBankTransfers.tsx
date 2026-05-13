@@ -1709,12 +1709,13 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
               postedBy: currentUser,
             }),
           });
-          // Stamp AccountingFlag only — do not change Status
-          await fetch(`${APEX_BASE}/cash/banktransfers`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify({ items: [{ BankAccountTransferId: txn.bankAccountTransferId, AccountingFlag: 'Y', LastUpdatedBy: currentUser, LastUpdateDate: new Date().toISOString() }] }),
-          });
+          // Stamp AccountingFlag via dedicated endpoint — does not touch Status
+          const flagUrl = `${APEX_BASE}/cash/banktransfers/${txn.bankAccountTransferId}/acctflag?updated_by=${encodeURIComponent(currentUser)}`;
+          const flagRes = await fetch(flagUrl, { method: 'PUT', headers: { Accept: 'application/json' } });
+          const flagData = await flagRes.json().catch(() => ({})) as { success?: boolean; message?: string };
+          if (!flagRes.ok || !flagData.success) {
+            throw new Error(flagData.message || `Accounting flag update failed (HTTP ${flagRes.status})`);
+          }
           setTransfers(prev => prev.map(t =>
             t.bankAccountTransferId === txn.bankAccountTransferId ? { ...t, accountingFlag: 'Y' } : t
           ));
