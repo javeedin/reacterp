@@ -155,19 +155,9 @@ const DetailModal: React.FC<{ record: any; onClose: () => void }> = ({ record, o
 );
 
 // ── Lines Tab ─────────────────────────────────────────────────────────────────
-const LinesTab: React.FC<{ linesUrl: string }> = ({ linesUrl }) => {
-  const [lines, setLines]     = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
+const LinesTab: React.FC<{ lines: any[]; loading: boolean }> = ({ lines, loading }) => {
   const [filter, setFilter]   = useState('');
   const [detail, setDetail]   = useState<any | null>(null);
-
-  useEffect(() => {
-    setLoading(true);
-    fetchAllPages(linesUrl)
-      .then(setLines)
-      .catch(e => message.error(`Lines load failed: ${e.message}`, 5))
-      .finally(() => setLoading(false));
-  }, [linesUrl]);
 
   const filtered = lines.filter(r => matchesFilter(r, filter));
 
@@ -263,10 +253,25 @@ const LinesTab: React.FC<{ linesUrl: string }> = ({ linesUrl }) => {
 
 // ── Order Detail Page ─────────────────────────────────────────────────────────
 const OrderDetailPage: React.FC<{ order: RawOrder; onClose?: () => void }> = ({ order, onClose }) => {
-  const [activeTab, setActiveTab] = useState('summary');
-  const [detail, setDetail]       = useState<any | null>(null);
+  const [activeTab, setActiveTab]   = useState('summary');
+  const [detail, setDetail]         = useState<any | null>(null);
+  const [lines, setLines]           = useState<any[]>([]);
+  const [linesLoading, setLinesLoading] = useState(false);
 
   const linesUrl = order.links?.find(l => l.name === 'lines')?.href;
+
+  // Fetch lines eagerly so totals are available in the header
+  useEffect(() => {
+    if (!linesUrl) return;
+    setLinesLoading(true);
+    fetchAllPages(linesUrl)
+      .then(setLines)
+      .catch(e => message.error(`Lines load failed: ${e.message}`, 5))
+      .finally(() => setLinesLoading(false));
+  }, [linesUrl]);
+
+  const orderTotal = lines.reduce((s, l) => s + (l.OrderedQuantity ?? 0) * (l.UnitSellingPrice ?? 0), 0);
+  const fmtAmt = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const flags: { label: string; on: boolean; color: string }[] = [
     { label: 'Open',      on: order.OpenFlag,      color: 'green' },
@@ -317,8 +322,14 @@ const OrderDetailPage: React.FC<{ order: RawOrder; onClose?: () => void }> = ({ 
     },
     linesUrl && {
       key: 'lines',
-      label: <Space size={4}><UnorderedListOutlined />Order Lines</Space>,
-      children: <LinesTab linesUrl={linesUrl} />,
+      label: (
+        <Space size={4}>
+          <UnorderedListOutlined />Order Lines
+          {!linesLoading && lines.length > 0 && <Badge count={lines.length} style={{ background: REDWOOD.teal }} />}
+          {linesLoading && <Spin size="small" />}
+        </Space>
+      ),
+      children: <LinesTab lines={lines} loading={linesLoading} />,
     },
   ].filter(Boolean) as any[];
 
@@ -357,6 +368,17 @@ const OrderDetailPage: React.FC<{ order: RawOrder; onClose?: () => void }> = ({ 
             <Text strong style={{ fontSize: 13 }}>{s.val || '—'}</Text>
           </div>
         ))}
+        {/* Order total */}
+        <div style={{ marginLeft: 'auto', borderLeft: `2px solid ${REDWOOD.neutral200}`, paddingLeft: 24 }}>
+          <Text style={{ fontSize: 10, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block' }}>Order Total</Text>
+          {linesLoading
+            ? <Spin size="small" />
+            : <Text strong style={{ fontSize: 18, color: REDWOOD.teal, fontFamily: 'monospace' }}>
+                {order.TransactionalCurrencyCode} {fmtAmt(orderTotal)}
+              </Text>
+          }
+          <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>{lines.length} line{lines.length !== 1 ? 's' : ''}</Text>
+        </div>
         {order.OnHoldFlag && <Tag color="orange" style={{ fontWeight: 600 }}>ON HOLD</Tag>}
         {order.CanceledFlag && <Tag color="red" style={{ fontWeight: 600 }}>CANCELED</Tag>}
       </div>
@@ -627,21 +649,13 @@ const ManageSalesOrders: React.FC = () => {
   return (
     <Layout style={{ minHeight: 'calc(100vh - 64px)', background: REDWOOD.neutral100 }}>
       <Content>
-        <div style={{ padding: '10px 24px', background: REDWOOD.surface, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+        <div style={{ padding: '10px 24px', background: REDWOOD.surface, borderBottom: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Breadcrumb items={[
             { title: <Link to="/home"><HomeOutlined /> Home</Link> },
             { title: <Link to="/om">Order Management</Link> },
             { title: 'Sales Orders' },
           ]} />
-        </div>
-        <div style={{ background: REDWOOD.surface, borderBottom: `1px solid ${REDWOOD.neutral200}`, padding: '12px 24px', display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div style={{ width: 44, height: 44, borderRadius: 10, background: `linear-gradient(135deg, ${REDWOOD.orange} 0%, #A34800 100%)`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 4px 12px ${REDWOOD.orange}40` }}>
-            <ShoppingOutlined style={{ fontSize: 22, color: '#fff' }} />
-          </div>
-          <div>
-            <Title level={4} style={{ margin: 0, color: REDWOOD.neutral900 }}>Sales Orders</Title>
-            <Text type="secondary" style={{ fontSize: 12 }}>Oracle Fusion Order Hub · Real-time order data</Text>
-          </div>
+          <Text type="secondary" style={{ fontSize: 11 }}>Oracle Fusion Order Hub · Real-time order data</Text>
         </div>
         <Tabs type="editable-card" hideAdd activeKey={activeKey} onChange={setActiveKey}
           onEdit={(key, action) => { if (action === 'remove') handleClose(String(key)); }}
