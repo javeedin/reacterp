@@ -2801,7 +2801,7 @@ const TrialBalance: React.FC = () => {
           ledgerCurrency:   currency,
           exchangeRate:     1,
           exchangeRateType: 'User',
-          description:      `FX Revaluation – ${d.accountDesc || d.account} – ${periodName}`,
+          description:      `${d.accountDesc || d.account} Revaluation for ${periodName}`,
           createdBy,
         },
         lines: d.lines.map((l: any, idx: number) => ({
@@ -2815,7 +2815,7 @@ const TrialBalance: React.FC = () => {
           accountedCr:        l.crAmount || 0,
           currencyCode:       currency,
           exchangeRate:       1,
-          description:        l.description || `Revaluation – ${d.account}`,
+          description:        `${d.accountDesc || d.account} Revaluation for ${periodName}`,
           sourceLineId:       l.lineId || idx + 1,
           sourceLineNumber:   l.lineNum || idx + 1,
         })),
@@ -2828,7 +2828,7 @@ const TrialBalance: React.FC = () => {
       // Oracle Fusion revaluation: one journal per foreign currency.
       // Journal currency = foreign ccy (e.g. INR), entered = 0, accounted = AED amounts.
       updateStep(3, 'process');
-      const journalDesc   = `FX Revaluation – ${d.accountDesc || d.account} – ${periodName}`;
+      const journalDesc   = `${d.accountDesc || d.account} Revaluation for ${periodName}`;
       const activeCcyRows = d.ccyRows.filter((c: any) => c.revalAmt !== 0 && c.newRate !== 0);
       const acctLabel     = d.accountDesc || d.account;
 
@@ -2842,12 +2842,9 @@ const TrialBalance: React.FC = () => {
 
         const fCcy    = ccyRow.currencyCode || currency;
         const newRate = ccyRow.newRate || 1;
-        const l1Desc  = ccyRow.isGain
-          ? `FX Revaluation Gain – ${fCcy} – ${acctLabel} – ${periodName}`
-          : `FX Revaluation Loss – ${fCcy} – ${d.lossAccount || 'Loss A/C'} – ${periodName}`;
-        const l2Desc  = ccyRow.isGain
-          ? `FX Revaluation Gain – ${fCcy} – ${d.gainAccount || 'Gain A/C'} – ${periodName}`
-          : `FX Revaluation Loss – ${fCcy} – ${acctLabel} – ${periodName}`;
+        const lineDesc = `${acctLabel} Revaluation for ${periodName}`;
+        const l1Desc  = lineDesc;
+        const l2Desc  = lineDesc;
 
         const r = await postSlaToGL({
           slaHeaderId:        slaResult.headerId,
@@ -2877,7 +2874,7 @@ const TrialBalance: React.FC = () => {
               enteredCr:          0,
               accountedDr:        l1.drAmount > 0 ? l1.drAmount : null,
               accountedCr:        l1.crAmount > 0 ? l1.crAmount : null,
-              description:        l1.description || l1Desc,
+              description:        l1Desc,
               currencyCode:       fCcy,
               accountingDate:     periodLastDay,
               accountCombination: l1.combo,
@@ -2890,7 +2887,7 @@ const TrialBalance: React.FC = () => {
               enteredCr:          0,
               accountedDr:        l2.drAmount > 0 ? l2.drAmount : null,
               accountedCr:        l2.crAmount > 0 ? l2.crAmount : null,
-              description:        l2.description || l2Desc,
+              description:        l2Desc,
               currencyCode:       fCcy,
               accountingDate:     periodLastDay,
               accountCombination: l2.combo,
@@ -3124,7 +3121,7 @@ const TrialBalance: React.FC = () => {
             color="#1d3557"
           >
             <Text style={{ fontFamily: 'monospace', color: REDWOOD.textSecondary, cursor: 'help', borderBottom: '1px dashed #aaa' }}>
-              {v ? v.toFixed(6) : '—'}
+              {v ? v.toFixed(10) : '—'}
             </Text>
           </Tooltip>
         )},
@@ -3144,7 +3141,7 @@ const TrialBalance: React.FC = () => {
               setRevalRates(prev => ({ ...prev, [r.ccy]: val }));
               const n = parseFloat(val);
               if (!isNaN(n) && n !== 0)
-                setRevalFuncRates(prev => ({ ...prev, [r.ccy]: (1 / n).toFixed(6) }));
+                setRevalFuncRates(prev => ({ ...prev, [r.ccy]: (1 / n).toFixed(10) }));
               else
                 setRevalFuncRates(prev => ({ ...prev, [r.ccy]: '' }));
             }}
@@ -3156,7 +3153,7 @@ const TrialBalance: React.FC = () => {
           : isPosted
           ? <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>
               {revalRates[r.ccy] && parseFloat(revalRates[r.ccy]) !== 0
-                ? (1 / parseFloat(revalRates[r.ccy])).toFixed(6) : '—'}
+                ? (1 / parseFloat(revalRates[r.ccy])).toFixed(10) : '—'}
             </Text>
           : (
           <Input
@@ -3169,7 +3166,7 @@ const TrialBalance: React.FC = () => {
               setRevalFuncRates(prev => ({ ...prev, [r.ccy]: val }));
               const n = parseFloat(val);
               if (!isNaN(n) && n !== 0)
-                setRevalRates(prev => ({ ...prev, [r.ccy]: (1 / n).toFixed(6) }));
+                setRevalRates(prev => ({ ...prev, [r.ccy]: (1 / n).toFixed(10) }));
               else
                 setRevalRates(prev => ({ ...prev, [r.ccy]: '' }));
             }}
@@ -3507,8 +3504,8 @@ const TrialBalance: React.FC = () => {
                       r.ccy,
                       r.entClosing.toLocaleString('en-US', { minimumFractionDigits: 2 }),
                       r.acctClosing.toLocaleString('en-US', { minimumFractionDigits: 2 }),
-                      r.bookRate.toFixed(6),
-                      r.newRate.toFixed(6),
+                      r.bookRate.toFixed(10),
+                      r.newRate.toFixed(10),
                       r.newAcctValue.toLocaleString('en-US', { minimumFractionDigits: 2 }),
                       r.revalAmt.toLocaleString('en-US', { minimumFractionDigits: 2 }),
                     ]),
