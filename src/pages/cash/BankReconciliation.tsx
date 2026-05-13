@@ -131,6 +131,7 @@ interface BankStatement {
 
 interface SearchParams {
   bankAccount?: string;
+  businessUnit?: string;
   dateFrom?: Dayjs | null;
   dateTo?: Dayjs | null;
   amountMin?: number;
@@ -940,10 +941,11 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     // CM fetches from the external transactions endpoint (different schema)
     if (txnType === 'CM') {
       const q = new URLSearchParams();
-      if (params.bankAccount)  q.set('bank_account', params.bankAccount);
-      if (effectiveDateFrom)   q.set('date_from',    effectiveDateFrom.format('YYYY-MM-DD'));
-      if (effectiveDateTo)     q.set('date_to',      effectiveDateTo.format('YYYY-MM-DD'));
-      if (params.reference)    q.set('reference',    params.reference);
+      if (params.bankAccount)  q.set('bank_account',  params.bankAccount);
+      if (params.businessUnit) q.set('business_unit', params.businessUnit);
+      if (effectiveDateFrom)   q.set('date_from',     effectiveDateFrom.format('YYYY-MM-DD'));
+      if (effectiveDateTo)     q.set('date_to',       effectiveDateTo.format('YYYY-MM-DD'));
+      if (params.reference)    q.set('reference',     params.reference);
       const rf = cmFilter ?? 'UNRECONCILED';
       if (rf !== 'ALL') q.set('recon_status', rf);
       q.set('row_limit', '500');
@@ -979,9 +981,10 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     }
 
     const q = new URLSearchParams();
-    if (params.bankAccount)  q.set('bank_account', params.bankAccount);
-    if (effectiveDateFrom)   q.set('date_from',    effectiveDateFrom.format('YYYY-MM-DD'));
-    if (effectiveDateTo)     q.set('date_to',      effectiveDateTo.format('YYYY-MM-DD'));
+    if (params.bankAccount)  q.set('bank_account',  params.bankAccount);
+    if (params.businessUnit) q.set('business_unit', params.businessUnit);
+    if (effectiveDateFrom)   q.set('date_from',     effectiveDateFrom.format('YYYY-MM-DD'));
+    if (effectiveDateTo)     q.set('date_to',       effectiveDateTo.format('YYYY-MM-DD'));
     if (params.amountMin != null) q.set('amount_min', String(params.amountMin));
     if (params.amountMax != null) q.set('amount_max', String(params.amountMax));
     if (params.reference) q.set('reference', params.reference);
@@ -2562,10 +2565,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                 value={sysDateFrom}
                 format="D-MMM-YYYY"
                 style={{ flex: 1 }}
-                onChange={v => {
-                  setSysDateFrom(v);
-                  if (lastParams) fetchSysTxns({ ...lastParams, dateFrom: v }, txnSourceFilter, sysReconFilter);
-                }}
+                onChange={v => setSysDateFrom(v)}
                 allowClear
               />
               <DatePicker
@@ -2574,12 +2574,21 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                 value={sysDateTo}
                 format="D-MMM-YYYY"
                 style={{ flex: 1 }}
-                onChange={v => {
-                  setSysDateTo(v);
-                  if (lastParams) fetchSysTxns({ ...lastParams, dateTo: v }, txnSourceFilter, sysReconFilter);
-                }}
+                onChange={v => setSysDateTo(v)}
                 allowClear
               />
+              <Button
+                size="small"
+                type="primary"
+                icon={<SearchOutlined />}
+                disabled={!lastParams?.bankAccount}
+                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary, flexShrink: 0 }}
+                onClick={() => {
+                  if (lastParams) fetchSysTxns({ ...lastParams, dateFrom: sysDateFrom, dateTo: sysDateTo }, txnSourceFilter, sysReconFilter);
+                }}
+              >
+                Search
+              </Button>
             </div>
             <div style={{ padding: '6px 8px', borderBottom: '1px solid #f0f0f0' }}>
               <Input.Search
