@@ -2768,7 +2768,6 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       title: 'Payee', dataIndex: 'payeeName', ellipsis: true,
       render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
     },
-    {
   ];
 
   const [searchOpen, setSearchOpen] = useState(true);
