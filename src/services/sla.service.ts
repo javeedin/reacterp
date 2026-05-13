@@ -466,6 +466,83 @@ export function buildPcBankTxnSlaPayload(opts: PcBankTxnSlaOptions): SlaCreatePa
   };
 }
 
+export interface BankTransferSlaOptions {
+  bankAccountTransferId: number;
+  transferNumber:        number | string;
+  transactionDate:       string;
+  accountingDate:        string;
+  periodName:            string;
+  currency:              string;
+  amount:                number;
+  fromAssetAccount:      string;   // CR side — cash leaving the source bank
+  toAssetAccount:        string;   // DR side — cash arriving at destination bank
+  description?:          string;
+  businessUnit?:         string;
+  legalEntity?:          string;
+  ledgerId:              number;
+  ledgerName:            string;
+  ledgerCurrency?:       string;
+  exchangeRate?:         number;
+  createdBy?:            string;
+}
+
+export function buildBankTransferSlaPayload(opts: BankTransferSlaOptions): SlaCreatePayload {
+  const exRate   = opts.exchangeRate ?? 1;
+  const currency = opts.currency || 'AED';
+  const desc     = opts.description || `Bank Transfer ${opts.transferNumber}`;
+  return {
+    header: {
+      moduleName:       'CM',
+      sourceTable:      'BANK_ACCOUNT_TRANSFERS',
+      sourceId:         opts.bankAccountTransferId,
+      sourceNumber:     String(opts.transferNumber),
+      sourceType:       'Bank Transfer',
+      eventTypeCode:    'BANK_TRANSFER',
+      eventDate:        opts.transactionDate,
+      accountingDate:   opts.accountingDate,
+      periodName:       opts.periodName,
+      ledgerId:         opts.ledgerId,
+      ledgerName:       opts.ledgerName,
+      currencyCode:     currency,
+      ledgerCurrency:   opts.ledgerCurrency ?? currency,
+      exchangeRate:     exRate,
+      exchangeRateType: 'Corporate',
+      businessUnit:     opts.businessUnit,
+      legalEntity:      opts.legalEntity,
+      description:      desc,
+      createdBy:        opts.createdBy ?? 'SYSTEM',
+    },
+    lines: [
+      {
+        lineNumber:         1,
+        lineType:           'DR',
+        accountingClass:    'BANK_ASSET',
+        accountCombination: opts.toAssetAccount,
+        enteredDr:          opts.amount,
+        enteredCr:          0,
+        accountedDr:        Math.round(opts.amount * exRate * 100) / 100,
+        accountedCr:        0,
+        currencyCode:       currency,
+        exchangeRate:       exRate,
+        description:        `${desc} – To Bank DR`,
+      },
+      {
+        lineNumber:         2,
+        lineType:           'CR',
+        accountingClass:    'BANK_ASSET',
+        accountCombination: opts.fromAssetAccount,
+        enteredDr:          0,
+        enteredCr:          opts.amount,
+        accountedDr:        0,
+        accountedCr:        Math.round(opts.amount * exRate * 100) / 100,
+        currencyCode:       currency,
+        exchangeRate:       exRate,
+        description:        `${desc} – From Bank CR`,
+      },
+    ],
+  };
+}
+
 /**
  * Derive GL period name from a date: "Mon-YY" format (e.g. "Mar-26").
  */

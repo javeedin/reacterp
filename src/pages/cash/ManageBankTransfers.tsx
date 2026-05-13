@@ -3,7 +3,7 @@ import dayjs, { type Dayjs } from 'dayjs';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
   DatePicker, InputNumber, Checkbox, Row, Col, Space, Tag, Tooltip, Tabs,
-  message, Spin, Empty, Divider, Badge, Collapse, Modal, Upload, Popconfirm,
+  message, Spin, Empty, Divider, Badge, Collapse, Modal, Upload, Popconfirm, Alert,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -11,12 +11,19 @@ import {
   EditOutlined, CloseOutlined, FilterOutlined, SwapOutlined, DollarOutlined,
   FileTextOutlined, ApiOutlined, ExportOutlined, DownloadOutlined,
   PrinterOutlined, PaperClipOutlined, UploadOutlined, EyeOutlined, DeleteOutlined,
+  AccountBookOutlined, CheckCircleOutlined, SyncOutlined, LockOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { useAuth } from '../../context/AuthContext';
+import {
+  buildBankTransferSlaPayload, createAccounting, fetchLedgerByBusinessUnit, derivePeriodName,
+} from '../../services/sla.service';
+import { validateGlPayload, persistValidationLog, type GlJournalPayload } from '../../services/glValidation.service';
+import { useGlValidation } from '../../context/GlValidationContext';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -61,10 +68,24 @@ interface TransferRecord {
   creationDate: string;
   lastUpdateDate: string;
   syncDate: string;
+  accountingFlag?: string;
 }
 
 interface BankAccountOption { label: string; value: string; }
 interface BUOption { label: string; value: string; }
+
+interface TransferAcctRow {
+  transferId: number;
+  txnDate:    string;
+  periodName: string;
+  amount:     number;
+  currency:   string;
+  drAccount:  string;
+  crAccount:  string;
+  bu:         string;
+  status:     'pending' | 'running' | 'success' | 'error' | 'skipped';
+  message?:   string;
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -214,7 +235,9 @@ const TransferForm: React.FC<{
   const isEdit = !!initialValues?.bankAccountTransferId;
   const isAccounted  = isEdit && initialValues?.status === 'Accounted';
   const isReconciled = isEdit && initialValues?.paymentStatus === 'Reconciled';
-  const isReadOnly   = isAccounted || isReconciled;
+  const isPermanentlyLocked = isAccounted || isReconciled;
+  const [editMode, setEditMode] = useState(false);
+  const isReadOnly = isPermanentlyLocked || (isEdit && !editMode);
 
   const [fromCurrency, setFromCurrency] = useState<string>(initialValues?.fromCurrencyCode ?? '');
   const [toCurrency, setToCurrency] = useState<string>(initialValues?.toCurrencyCode ?? '');
@@ -243,11 +266,13 @@ const TransferForm: React.FC<{
       });
       setFromCurrency(initialValues.fromCurrencyCode ?? '');
       setToCurrency(initialValues.toCurrencyCode ?? '');
+      setEditMode(false);
     } else {
       form.resetFields();
       form.setFieldsValue({ transactionDate: dayjs(), isSettledWithIbyFlag: true });
       setFromCurrency('');
       setToCurrency('');
+      setEditMode(false);
     }
   }, [initialValues, form]);
 
@@ -567,11 +592,14 @@ const TransferForm: React.FC<{
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '12px 24px' }}>
       <Text style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 16 }}>
-        {isEdit ? (isReadOnly ? 'View Bank Account Transfer (Read-only)' : 'Edit Bank Account Transfer') : 'Create Bank Account Transfer'}
+        {isEdit
+          ? (isPermanentlyLocked ? 'View Bank Account Transfer (Read-only)' : editMode ? 'Edit Bank Account Transfer' : 'View Bank Account Transfer')
+          : 'Create Bank Account Transfer'}
       </Text>
 
-      {isReadOnly && (
+      {isPermanentlyLocked && (
         <div style={{ marginBottom: 12, padding: '6px 12px', background: '#fff1f0', border: '1px solid #ffa39e', borderRadius: 4 }}>
+          <LockOutlined style={{ color: '#a8071a', marginRight: 6 }} />
           <Text style={{ fontSize: 12, color: '#a8071a' }}>
             This transfer cannot be edited — it has been {isAccounted ? 'accounted' : ''}{isAccounted && isReconciled ? ' and ' : ''}{isReconciled ? 'reconciled with bank' : ''}.
           </Text>
@@ -843,10 +871,17 @@ const TransferForm: React.FC<{
                 Create Transfer
               </Button>
             )}
-            {isEdit && !isReadOnly && (
+            {isEdit && !isPermanentlyLocked && !editMode && (
+              <Button type="default" icon={<EditOutlined />}
+                style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
+                onClick={() => setEditMode(true)}>
+                Edit
+              </Button>
+            )}
+            {isEdit && editMode && (
               <Button type="primary" loading={saving} onClick={handleSubmit}
-                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
-                Save Transfer
+                style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>
+                Update
               </Button>
             )}
           </Space>
@@ -1347,6 +1382,10 @@ END;
 interface TabItem { key: string; label: React.ReactNode; record?: TransferRecord; }
 
 const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'cash' }) => {
+  const { user } = useAuth();
+  const currentUser = user?.email ?? user?.username ?? 'SYSTEM';
+  const { addSessionEntry } = useGlValidation();
+
   // ── State ─────────────────────────────────────────────────────────────────
   const [transfers, setTransfers]         = useState<TransferRecord[]>([]);
   const [loading, setLoading]             = useState(false);
@@ -1362,6 +1401,13 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
   const [lastApiUrl, setLastApiUrl]       = useState('');
   const [gridSearch, setGridSearch]       = useState('');
   const [searchForm]                      = Form.useForm();
+
+  // ── Create Accounting state ───────────────────────────────────────────────
+  const [selectedRowKeys, setSelectedRowKeys] = useState<number[]>([]);
+  const [acctModalOpen, setAcctModalOpen]     = useState(false);
+  const [acctProgress, setAcctProgress]       = useState<TransferAcctRow[]>([]);
+  const [acctRunning, setAcctRunning]         = useState(false);
+  const [acctDone, setAcctDone]               = useState(false);
 
   const modulePrefix = module === 'ap' ? '/ap' : '/cash';
 
@@ -1499,6 +1545,186 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
   const handleSaved     = () => { loadLovs(); handleSearch(); closeTab(activeTab); };
   const handleEditSaved = () => { loadLovs(); handleSearch(); };
 
+  // ── Create Accounting ─────────────────────────────────────────────────────
+  const openCreateAccountingModal = () => {
+    const selected = transfers.filter(t => selectedRowKeys.includes(t.bankAccountTransferId));
+    const rows: TransferAcctRow[] = selected.map(t => {
+      const alreadyAccounted = t.accountingFlag === 'Y' || t.status === 'Accounted';
+      const fromAsset = bankAccountAssetMap[t.fromBankAccountName] || '';
+      const toAsset   = bankAccountAssetMap[t.toBankAccountName]   || '';
+      const missingAccounts = !fromAsset || !toAsset;
+      const date = t.transactionDate || dayjs().format('YYYY-MM-DD');
+      return {
+        transferId: t.bankAccountTransferId,
+        txnDate:    date,
+        periodName: derivePeriodName(new Date(date)),
+        amount:     Math.abs(t.paymentAmount ?? 0),
+        currency:   t.fromCurrencyCode || t.paymentCurrencyCode || 'AED',
+        drAccount:  toAsset,
+        crAccount:  fromAsset,
+        bu:         t.businessUnit || '',
+        status:     alreadyAccounted ? 'skipped' : missingAccounts ? 'error' : 'pending',
+        message:    alreadyAccounted ? 'Already accounted — skipped'
+                  : missingAccounts ? `Missing asset account for ${!fromAsset ? t.fromBankAccountName : t.toBankAccountName}` : undefined,
+      };
+    });
+    setAcctProgress(rows);
+    setAcctDone(false);
+    setAcctModalOpen(true);
+  };
+
+  const runCreateAccounting = async () => {
+    setAcctRunning(true);
+    const updateRow = (transferId: number, partial: Partial<TransferAcctRow>) =>
+      setAcctProgress(prev => prev.map(r => r.transferId === transferId ? { ...r, ...partial } : r));
+
+    for (const row of acctProgress) {
+      if (row.status === 'skipped' || row.status === 'error') continue;
+      updateRow(row.transferId, { status: 'running' });
+      const txn = transfers.find(t => t.bankAccountTransferId === row.transferId);
+      if (!txn) { updateRow(row.transferId, { status: 'error', message: 'Transfer not found' }); continue; }
+
+      try {
+        const ledger = await fetchLedgerByBusinessUnit(txn.businessUnit);
+        if (!ledger) { updateRow(row.transferId, { status: 'error', message: 'Could not resolve ledger for BU' }); continue; }
+
+        const fromAsset = bankAccountAssetMap[txn.fromBankAccountName] || '';
+        const toAsset   = bankAccountAssetMap[txn.toBankAccountName]   || '';
+
+        const slaPayload = buildBankTransferSlaPayload({
+          bankAccountTransferId: txn.bankAccountTransferId,
+          transferNumber:        txn.bankAccountTransferNumber,
+          transactionDate:       row.txnDate,
+          accountingDate:        row.txnDate,
+          periodName:            row.periodName,
+          currency:              txn.fromCurrencyCode || txn.paymentCurrencyCode || 'AED',
+          amount:                row.amount,
+          fromAssetAccount:      fromAsset,
+          toAssetAccount:        toAsset,
+          description:           txn.memo || `Bank Transfer ${txn.bankAccountTransferNumber}`,
+          businessUnit:          txn.businessUnit || undefined,
+          ledgerId:              ledger.ledgerId,
+          ledgerName:            ledger.ledgerName,
+          ledgerCurrency:        ledger.currency,
+          exchangeRate:          txn.conversionRate || 1,
+          createdBy:             currentUser,
+        });
+
+        const slaResult = await createAccounting(slaPayload);
+
+        const batchName = `BANKTFR-${txn.bankAccountTransferId}-${Date.now()}`;
+        const glPayload = {
+          batch: {
+            batchName, batchDescription: `Bank Transfer ${txn.bankAccountTransferNumber}`,
+            ledgerName: ledger.ledgerName, ledgerId: ledger.ledgerId, status: 'NEW',
+            accountingPeriod: row.periodName, controlTotal: row.amount,
+            runningTotalDr: row.amount, runningTotalCr: row.amount,
+            batchSource: 'Cash Management', createdBy: currentUser,
+          },
+          header: {
+            ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName,
+            jeCategory: 'Cash Management', jeSource: 'Cash Management',
+            periodName: row.periodName,
+            journalName: `BANKTFR-${txn.bankAccountTransferNumber}`,
+            description: txn.memo || `Bank Transfer ${txn.bankAccountTransferNumber}`,
+            currencyCode: slaPayload.header.currencyCode,
+            currencyConversionType: 'Corporate',
+            currencyConversionDate: row.txnDate,
+            currencyConversionRate: txn.conversionRate || 1,
+            defaultEffectiveDate: row.txnDate,
+            status: 'NEW', runningTotalDr: row.amount, runningTotalCr: row.amount,
+            createdBy: currentUser,
+          },
+          lines: slaPayload.lines.map(l => ({
+            enteredDr:  l.lineType === 'DR' ? l.enteredDr : null,
+            enteredCr:  l.lineType === 'CR' ? l.enteredCr : null,
+            accountedDr: l.accountedDr || null, accountedCr: l.accountedCr || null,
+            statAmount: null, description: l.description,
+            currencyCode: l.currencyCode || slaPayload.header.currencyCode,
+            currencyConversionDate: row.txnDate,
+            currencyConversionRate: txn.conversionRate || 1,
+            userCurrencyConversionType: 'Corporate',
+            accountCombination: l.accountCombination,
+            chartOfAccountsName: 'Chart of Accounts',
+            reference1: String(txn.bankAccountTransferId),
+            reference2: String(txn.bankAccountTransferNumber),
+            reference3: l.accountingClass || null,
+            reference4: txn.businessUnit || null,
+            reference5: null, createdBy: currentUser,
+          })),
+        };
+
+        const validationPayload: GlJournalPayload = {
+          batch: { batchName, ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName, accountingPeriod: row.periodName, controlTotal: row.amount, runningTotalDr: row.amount, runningTotalCr: row.amount },
+          header: { periodName: row.periodName, currencyCode: slaPayload.header.currencyCode, currencyConversionDate: row.txnDate, journalName: `BANKTFR-${txn.bankAccountTransferNumber}` },
+          lines: glPayload.lines.map((l: any) => ({ enteredDr: l.enteredDr, enteredCr: l.enteredCr, accountCombination: l.accountCombination, description: l.description, reference1: l.reference1 })),
+        };
+        const validation = validateGlPayload(validationPayload, { module: 'CASH', referenceNo: String(txn.bankAccountTransferNumber) });
+        const logId = await persistValidationLog('CASH', String(txn.bankAccountTransferNumber), batchName, validation.valid ? 'PASSED' : 'FAILED', validation.errors, validationPayload, currentUser);
+        addSessionEntry({
+          logId: logId ?? Date.now(),
+          module: 'CASH',
+          referenceNo: String(txn.bankAccountTransferNumber),
+          batchName,
+          result: validation.valid ? 'PASSED' : 'FAILED',
+          errorCount: validation.errors.filter(e => e.severity === 'ERROR').length,
+          warningCount: validation.errors.filter(e => e.severity === 'WARNING').length,
+          errorCategories: [...new Set(validation.errors.map(e => e.category))].join(',') || null,
+          errorSummary: validation.errors.filter(e => e.severity === 'ERROR').map(e => `[${e.category}] ${e.message}`).join(' | ') || null,
+          errorDetail: validation.errors,
+          createdBy: currentUser,
+          creationDate: new Date().toISOString(),
+        });
+        if (!validation.valid) {
+          updateRow(row.transferId, { status: 'error', message: `GL validation failed: ${validation.errors.filter(e => e.severity === 'ERROR').map(e => e.category).join(', ')}` });
+          continue;
+        }
+
+        const glRes = await fetch(`${APEX_BASE}/journals/create`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(glPayload),
+        });
+
+        let glMsg = '';
+        if (glRes.ok) {
+          const glData = await glRes.json();
+          await fetch(`${APEX_BASE}/sla/accounting/post`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({
+              headerId: slaResult.headerId,
+              glBatchId: glData.batchId || 0,
+              glBatchName: batchName,
+              glHeaderId: glData.headerId || 0,
+              postedBy: currentUser,
+            }),
+          });
+          // Stamp the transfer as Accounted
+          await fetch(`${APEX_BASE}/cash/banktransfers`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ items: [{ BankAccountTransferId: txn.bankAccountTransferId, Status: 'Accounted', LastUpdatedBy: currentUser, LastUpdateDate: new Date().toISOString() }] }),
+          });
+          setTransfers(prev => prev.map(t =>
+            t.bankAccountTransferId === txn.bankAccountTransferId ? { ...t, status: 'Accounted', accountingFlag: 'Y' } : t
+          ));
+          glMsg = `GL: ${batchName}`;
+        } else {
+          glMsg = 'GL journal failed — SLA is Draft';
+        }
+
+        updateRow(row.transferId, { status: 'success', message: `SLA ${slaResult.headerId} — ${glMsg}` });
+      } catch (e: any) {
+        updateRow(row.transferId, { status: 'error', message: e?.message || 'Unexpected error' });
+      }
+    }
+
+    setAcctRunning(false);
+    setAcctDone(true);
+    setSelectedRowKeys([]);
+  };
+
   // ── Columns ───────────────────────────────────────────────────────────────
   const columns: ColumnsType<TransferRecord> = [
     {
@@ -1623,12 +1849,47 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       render: (val: string) => <Text style={{ fontSize: 12 }}>{val ?? '—'}</Text>,
     },
     {
+      title: 'Accounting',
+      key: 'acctFlag',
+      width: 100,
+      render: (_, r) => r.accountingFlag === 'Y' || r.status === 'Accounted'
+        ? <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: 11 }}>Accounted</Tag>
+        : <Tag color="default" style={{ fontSize: 11 }}>Unposted</Tag>,
+    },
+    {
       title: 'Actions',
       key: 'actions',
-      width: 90,
+      width: 110,
       fixed: 'right',
       render: (_, record) => (
         <Space size={4}>
+          <Tooltip title="Create Accounting">
+            <Button type="text" size="small" icon={<AccountBookOutlined />}
+              style={{ color: REDWOOD.info }}
+              onClick={() => {
+                setSelectedRowKeys([record.bankAccountTransferId]);
+                const fromAsset = bankAccountAssetMap[record.fromBankAccountName] || '';
+                const toAsset   = bankAccountAssetMap[record.toBankAccountName]   || '';
+                const alreadyAccounted = record.accountingFlag === 'Y' || record.status === 'Accounted';
+                const missingAccounts  = !fromAsset || !toAsset;
+                const date = record.transactionDate || dayjs().format('YYYY-MM-DD');
+                setAcctProgress([{
+                  transferId: record.bankAccountTransferId,
+                  txnDate:    date,
+                  periodName: derivePeriodName(new Date(date)),
+                  amount:     Math.abs(record.paymentAmount ?? 0),
+                  currency:   record.fromCurrencyCode || record.paymentCurrencyCode || 'AED',
+                  drAccount:  toAsset,
+                  crAccount:  fromAsset,
+                  bu:         record.businessUnit || '',
+                  status:     alreadyAccounted ? 'skipped' : missingAccounts ? 'error' : 'pending',
+                  message:    alreadyAccounted ? 'Already accounted — skipped'
+                            : missingAccounts ? `Missing asset account for ${!fromAsset ? record.fromBankAccountName : record.toBankAccountName}` : undefined,
+                }]);
+                setAcctDone(false);
+                setAcctModalOpen(true);
+              }} />
+          </Tooltip>
           <Tooltip title="Print PDF">
             <Button type="text" size="small" icon={<PrinterOutlined />}
               style={{ color: REDWOOD.neutral600 }}
@@ -1741,6 +2002,13 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
                 )}
               </Space>
               <Space>
+                {selectedRowKeys.length > 0 && (
+                  <Button size="small" icon={<AccountBookOutlined />}
+                    style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
+                    onClick={openCreateAccountingModal}>
+                    Create Accounting ({selectedRowKeys.length})
+                  </Button>
+                )}
                 <Tooltip title="API endpoint">
                   <Button size="small" icon={<ApiOutlined />} onClick={() => setShowApiModal(true)}
                     style={{ color: REDWOOD.info }} />
@@ -1761,7 +2029,8 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
           rowKey="bankAccountTransferId"
           loading={loading}
           size="small"
-          scroll={{ x: 1400 }}
+          scroll={{ x: 1500 }}
+          rowSelection={{ selectedRowKeys, onChange: keys => setSelectedRowKeys(keys as number[]), getCheckboxProps: r => ({ disabled: r.accountingFlag === 'Y' || r.status === 'Accounted' }) }}
           pagination={{
             pageSize: 15,
             showSizeChanger: true,
@@ -1900,6 +2169,77 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
             {APEX_BASE}/cash/banktransfers
           </Text>
         </div>
+      </Modal>
+
+      {/* ── Create Accounting Modal ───────────────────────────────── */}
+      <Modal
+        title={<Space><AccountBookOutlined style={{ color: REDWOOD.info }} />Create Accounting — Bank Transfers</Space>}
+        open={acctModalOpen}
+        onCancel={() => { if (!acctRunning) setAcctModalOpen(false); }}
+        footer={
+          acctDone
+            ? <Button onClick={() => setAcctModalOpen(false)}>Close</Button>
+            : [
+                <Button key="cancel" onClick={() => setAcctModalOpen(false)} disabled={acctRunning}>Cancel</Button>,
+                <Button key="run" type="primary" loading={acctRunning}
+                  disabled={acctProgress.every(r => r.status === 'skipped' || r.status === 'error')}
+                  style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+                  onClick={runCreateAccounting}>
+                  {acctRunning ? 'Processing…' : 'Run Create Accounting'}
+                </Button>,
+              ]
+        }
+        width={920}
+        destroyOnClose
+      >
+        {acctProgress.length > 0 && (() => {
+          const periods = [...new Set(acctProgress.map(r => r.periodName))].filter(Boolean);
+          return (
+            <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Accounting Period{periods.length > 1 ? 's' : ''}:</Text>
+              {periods.map(p => <Tag key={p} color="blue" style={{ fontSize: 12, fontWeight: 600, margin: 0 }}>{p}</Tag>)}
+            </div>
+          );
+        })()}
+        <Table<TransferAcctRow>
+          dataSource={acctProgress}
+          rowKey="transferId"
+          size="small"
+          pagination={false}
+          columns={[
+            { title: 'Transfer ID', dataIndex: 'transferId', width: 100,
+              render: v => <Text style={{ fontSize: 12 }}>{v}</Text> },
+            { title: 'Date', dataIndex: 'txnDate', width: 100,
+              render: v => <Text style={{ fontSize: 11 }}>{v}</Text> },
+            { title: 'Amount', dataIndex: 'amount', width: 120, align: 'right' as const,
+              render: (v, r) => <Text style={{ fontSize: 12, fontWeight: 600 }}>{fmtAmount(v, r.currency)}</Text> },
+            { title: 'DR Account (To Bank)', dataIndex: 'drAccount',
+              render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.primary }}>{v || '—'}</Text> },
+            { title: 'CR Account (From Bank)', dataIndex: 'crAccount',
+              render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.success }}>{v || '—'}</Text> },
+            { title: 'Status', dataIndex: 'status', width: 150,
+              render: (v, r) => {
+                if (v === 'pending') return <Tag color="default" style={{ fontSize: 11 }}>Pending</Tag>;
+                if (v === 'running') return <Tag icon={<SyncOutlined spin />} color="processing" style={{ fontSize: 11 }}>Running</Tag>;
+                if (v === 'success') return <><Tag color="success" style={{ fontSize: 11 }}>Done</Tag>
+                  {r.message && <div style={{ fontSize: 10, color: REDWOOD.success, marginTop: 2 }}>{r.message}</div>}</>;
+                if (v === 'error')   return <><Tag color="error" style={{ fontSize: 11 }}>Error</Tag>
+                  {r.message && <div style={{ fontSize: 10, color: REDWOOD.primary, marginTop: 2 }}>{r.message}</div>}</>;
+                if (v === 'skipped') return <Tag color="warning" style={{ fontSize: 11 }}>Already Posted</Tag>;
+                return null;
+              }},
+          ]}
+        />
+        {acctDone && (
+          <Alert
+            type={acctProgress.some(r => r.status === 'error') ? 'warning' : 'success'}
+            showIcon
+            message={acctProgress.some(r => r.status === 'error')
+              ? 'Accounting completed with some errors'
+              : 'Accounting created and posted to GL successfully'}
+            style={{ marginTop: 12 }}
+          />
+        )}
       </Modal>
     </Layout>
   );
