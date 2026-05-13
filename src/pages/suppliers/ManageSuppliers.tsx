@@ -397,32 +397,25 @@ const SupplierDetailPage: React.FC<{ supplier: RawSupplier; onClose?: () => void
               />
             </Card>
 
-          </div>
-        </>
-      )}
-    </div>
-  );
-};
-
-        {/* ── Child resource tabs ───────────────────────────────────────── */}
-        <Card
-          styles={{ body: { padding: 0 } }}
-          style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}
-          title={<Space style={{ fontSize: 13 }}><InfoCircleOutlined style={{ color: REDWOOD.primary }} /><Text strong>Supplier Information</Text></Space>}
-        >
-          <Tabs
-            activeKey={activeSubTab}
-            onChange={setActiveSubTab}
-            size="small"
-            style={{ paddingLeft: 16, paddingRight: 16 }}
-            tabBarStyle={{ marginBottom: 0, borderBottom: `1px solid ${REDWOOD.neutral200}` }}
-            items={subTabs.map(t => ({
-              key: t.key,
-              label: t.label,
-              children: <ChildTab key={t.key} url={t.url} label={t.key} />,
-            }))}
-          />
-        </Card>
+            {/* ── Child resource tabs ─────────────────────────────────────── */}
+            <Card
+              styles={{ body: { padding: 0 } }}
+              style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}
+              title={<Space style={{ fontSize: 13 }}><InfoCircleOutlined style={{ color: REDWOOD.primary }} /><Text strong>Supplier Information</Text></Space>}
+            >
+              <Tabs
+                activeKey={activeSubTab}
+                onChange={setActiveSubTab}
+                size="small"
+                style={{ paddingLeft: 16, paddingRight: 16 }}
+                tabBarStyle={{ marginBottom: 0, borderBottom: `1px solid ${REDWOOD.neutral200}` }}
+                items={subTabs.map(t => ({
+                  key: t.key,
+                  label: t.label,
+                  children: <ChildTab key={t.url} url={t.url} label={t.key} />,
+                }))}
+              />
+            </Card>
 
           </div>
         </>
