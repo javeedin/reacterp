@@ -34,6 +34,26 @@ const REDWOOD = {
 const BASE_URL = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05';
 const AUTH_HEADER = 'Basic ' + btoa('emparun:Fusion@1234');
 const PAGE_SIZE = 25;
+const CHILD_LIMIT = 500;
+
+// Strips existing limit/offset params then paginates until hasMore=false
+const fetchAllPages = async (baseUrl: string): Promise<any[]> => {
+  const stripped = baseUrl.replace(/[?&]limit=\d+/gi, '').replace(/[?&]offset=\d+/gi, '').replace(/\?&/, '?').replace(/&&/g, '&');
+  const all: any[] = [];
+  let offset = 0;
+  while (true) {
+    const sep = stripped.includes('?') ? '&' : '?';
+    const url = `${stripped}${sep}limit=${CHILD_LIMIT}&offset=${offset}`;
+    const r = await fetch(url, { headers: { Authorization: AUTH_HEADER, Accept: 'application/json' } });
+    if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+    const d = await r.json();
+    const items: any[] = Array.isArray(d) ? d : (d.items ?? []);
+    all.push(...items);
+    if (!d.hasMore || items.length < CHILD_LIMIT) break;
+    offset += CHILD_LIMIT;
+  }
+  return all;
+};
 
 // ── Types ────────────────────────────────────────────────────────────────────
 interface RawPO {
@@ -204,14 +224,10 @@ const PODetailPage: React.FC<{ po: RawPO; onClose?: () => void }> = ({ po, onClo
   const doFetch = useCallback(async (url: string) => {
     setLL(true); setLE(null); setRawResp('');
     try {
-      const r = await fetch(url, { headers: { Authorization: AUTH_HEADER, Accept: 'application/json' } });
-      const text = await r.text();
-      setRawResp(text);
-      if (!r.ok) throw new Error(`HTTP ${r.status} — ${text.slice(0, 200)}`);
-      const d = JSON.parse(text);
-      const items: POLine[] = Array.isArray(d) ? d : (d.items ?? []);
+      const items: POLine[] = await fetchAllPages(url);
+      setRawResp(JSON.stringify(items, null, 2));
       setLines(items);
-      if (items.length === 0) setLE(`API returned 0 items. Raw: ${text.slice(0, 300)}`);
+      if (items.length === 0) setLE('API returned 0 items.');
     } catch (e: any) {
       setLE(e.message);
     } finally { setLL(false); }
@@ -225,11 +241,7 @@ const PODetailPage: React.FC<{ po: RawPO; onClose?: () => void }> = ({ po, onClo
         linesList.map(async (line) => {
           const schedLink = line.links?.find(l => l.name === 'schedules')?.href;
           const base = schedLink ?? `${BASE_URL}/purchaseOrders/${po.POHeaderId}/child/lines/${line.POLineId}/child/schedules`;
-          const url = base.includes('?') ? `${base}&limit=500` : `${base}?limit=500`;
-          const r = await fetch(url, { headers: { Authorization: AUTH_HEADER, Accept: 'application/json' } });
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          const d = await r.json();
-          const items: any[] = Array.isArray(d) ? d : (d.items ?? []);
+          const items = await fetchAllPages(base);
           return items.map(s => ({ ...s, _lineNumber: line.LineNumber, _lineItem: line.Item, _lineDescription: line.Description }));
         })
       );
@@ -248,11 +260,10 @@ const PODetailPage: React.FC<{ po: RawPO; onClose?: () => void }> = ({ po, onClo
   }, [po.POHeaderId]);
 
   useEffect(() => {
-    const linesLink = po.links?.find(l => l.name === 'lines');
-    const base = linesLink?.href ?? `${BASE_URL}/purchaseOrders/${po.POHeaderId}/child/lines`;
-    const url = base.includes('?') ? `${base}&limit=500` : `${base}?limit=500`;
-    setLinesUrl(url);
-    doFetch(url);
+    const base = po.links?.find(l => l.name === 'lines')?.href
+      ?? `${BASE_URL}/purchaseOrders/${po.POHeaderId}/child/lines`;
+    setLinesUrl(base);
+    doFetch(base);
   }, [po.POHeaderId, doFetch]);
 
   const handleApiTest = async () => {
@@ -378,8 +389,7 @@ ${po.NoteToSupplier ? `<div class="sec">Notes</div><div class="fv">${po.NoteToSu
   const handleRefresh = () => {
     const base = po.links?.find(l => l.name === 'lines')?.href
       ?? `${BASE_URL}/purchaseOrders/${po.POHeaderId}/child/lines`;
-    const url = base.includes('?') ? `${base}&limit=500` : `${base}?limit=500`;
-    doFetch(url);
+    doFetch(base);
     message.success('Lines refreshed');
   };
 
