@@ -1022,6 +1022,17 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         fetch(`${APEX_BASE}/cash/banktransfers?${btQ.toString()}`).then(r => parseApexJson(r)),
       ]);
 
+      const resolveReconFlag = (i: any, fallbackFilter: string): string => {
+        const raw = i.reconciledFlag ?? i.reconciled_flag ?? i.RECONCILED_FLAG;
+        if (raw !== undefined && raw !== null && raw !== '') return String(raw);
+        return fallbackFilter === 'RECONCILED' ? 'Y' : 'N';
+      };
+      const resolveBusinessUnit = (i: any): string =>
+        i.businessUnit ?? i.business_unit ?? i.BUSINESS_UNIT ??
+        i.businessUnitName ?? i.business_unit_name ?? i.BUSINESS_UNIT_NAME ??
+        i.operatingUnit ?? i.org_name ?? i.orgName ?? '';
+
+      const rf = cmFilter ?? 'UNRECONCILED';
       const apArGlItems: SysTxn[] = systxnsResult.status === 'fulfilled' && systxnsResult.value.status === 'success'
         ? (systxnsResult.value.items ?? []).map((i: any) => ({
             ...i,
@@ -1030,7 +1041,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
             txnDate:            i.txnDate            ?? i.txn_date            ?? i.TXN_DATE            ?? '',
             amount:             i.amount             ?? i.AMOUNT              ?? 0,
             currencyCode:       i.currencyCode       ?? i.currency_code       ?? i.CURRENCY_CODE       ?? '',
-            businessUnit:       i.businessUnit       ?? i.business_unit       ?? i.BUSINESS_UNIT       ?? '',
+            businessUnit:       resolveBusinessUnit(i),
             source:             i.source             ?? i.SOURCE              ?? '',
             txnStatus:          i.txnStatus          ?? i.txn_status          ?? i.TXN_STATUS          ?? '',
             reference:          i.reference          ?? i.REFERENCE           ?? '',
@@ -1046,7 +1057,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
             accountDescription: i.accountDescription ?? i.account_description ?? i.ACCOUNT_DESCRIPTION ?? '',
             journalCategory:    i.journalCategory    ?? i.journal_category    ?? i.JOURNAL_CATEGORY    ?? '',
             lineDescription:    i.lineDescription    ?? i.line_description    ?? i.LINE_DESCRIPTION    ?? '',
-            reconciledFlag:     i.reconciledFlag     ?? i.reconciled_flag     ?? i.RECONCILED_FLAG     ?? '',
+            reconciledFlag:     resolveReconFlag(i, rf),
             bankAccountName:    i.bankAccountName    ?? i.bank_account_name   ?? i.BANK_ACCOUNT_NAME   ?? '',
           })) as SysTxn[]
         : [];
@@ -1105,6 +1116,16 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     try {
       const res  = await fetch(`${APEX_BASE}/cash/reconciliation/systxns?${q.toString()}`);
       const data = await parseApexJson(res);
+      const inferFlag = (i: any): string => {
+        const raw = i.reconciledFlag ?? i.reconciled_flag ?? i.RECONCILED_FLAG;
+        if (raw !== undefined && raw !== null && raw !== '') return String(raw);
+        return (cmFilter ?? 'UNRECONCILED') === 'RECONCILED' ? 'Y' : 'N';
+      };
+      const inferBU = (i: any): string =>
+        i.businessUnit ?? i.business_unit ?? i.BUSINESS_UNIT ??
+        i.businessUnitName ?? i.business_unit_name ?? i.BUSINESS_UNIT_NAME ??
+        i.operatingUnit ?? i.org_name ?? i.orgName ?? '';
+
       if (data.status === 'success') {
         setSysTxns((data.items ?? []).map((i: any) => ({
           ...i,
@@ -1113,7 +1134,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           txnDate:            i.txnDate            ?? i.txn_date            ?? i.TXN_DATE            ?? '',
           amount:             i.amount             ?? i.AMOUNT              ?? 0,
           currencyCode:       i.currencyCode       ?? i.currency_code       ?? i.CURRENCY_CODE       ?? '',
-          businessUnit:       i.businessUnit       ?? i.business_unit       ?? i.BUSINESS_UNIT       ?? '',
+          businessUnit:       inferBU(i),
           source:             i.source             ?? i.SOURCE              ?? '',
           txnStatus:          i.txnStatus          ?? i.txn_status          ?? i.TXN_STATUS          ?? '',
           reference:          i.reference          ?? i.REFERENCE           ?? '',
@@ -1129,7 +1150,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           accountDescription: i.accountDescription ?? i.account_description ?? i.ACCOUNT_DESCRIPTION ?? '',
           journalCategory:    i.journalCategory    ?? i.journal_category    ?? i.JOURNAL_CATEGORY    ?? '',
           lineDescription:    i.lineDescription    ?? i.line_description    ?? i.LINE_DESCRIPTION    ?? '',
-          reconciledFlag:     i.reconciledFlag     ?? i.reconciled_flag     ?? i.RECONCILED_FLAG     ?? '',
+          reconciledFlag:     inferFlag(i),
           bankAccountName:    i.bankAccountName    ?? i.bank_account_name   ?? i.BANK_ACCOUNT_NAME   ?? '',
         })) as SysTxn[]);
       } else {
@@ -1962,11 +1983,18 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   };
   const colStatus: ColumnsType<SysTxn>[number] = {
     title: 'Status',
-    dataIndex: 'txnStatus',
-    key: 'txnStatus',
+    key: 'reconStatus',
     width: 100,
-    render: (v: string) =>
-      v ? <Tag color={v === 'Cleared' || v === 'Applied' ? 'green' : 'blue'} style={{ margin: 0 }}>{v}</Tag> : <span>—</span>,
+    render: (_: unknown, r: SysTxn) => {
+      const isRecon = r.reconciledFlag === 'Y';
+      return (
+        <Tooltip title={r.txnStatus || undefined}>
+          <Tag color={isRecon ? 'green' : 'orange'} style={{ margin: 0, fontSize: 10 }}>
+            {isRecon ? 'Reconciled' : 'Unreconciled'}
+          </Tag>
+        </Tooltip>
+      );
+    },
   };
 
   const sysColumnsAP: ColumnsType<SysTxn> = [
