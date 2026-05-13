@@ -1407,6 +1407,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
   const [showApiModal, setShowApiModal]   = useState(false);
   const [lastApiUrl, setLastApiUrl]       = useState('');
   const [gridSearch, setGridSearch]       = useState('');
+  const [searchBu, setSearchBu]           = useState<string | undefined>(undefined);
   const [searchForm]                      = Form.useForm();
 
   // ── Create Accounting state ───────────────────────────────────────────────
@@ -1421,17 +1422,39 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
   // ── Load LOV data from existing transfers ─────────────────────────────────
   const loadLovs = useCallback(async () => {
     try {
-      // Load BU→bank mapping and cash account from external transactions
-      const extRes = await fetch(`${APEX_BASE}/cash/externaltransactions?limit=2000`);
-      const extData = await extRes.json();
-      if (extData.items) {
-        const extItems: any[] = extData.items;
-        const buBankMapLocal: Record<string, string[]> = {};
-        const assetMapLocal: Record<string, string> = {};
-        const currMapLocal: Record<string, string> = {};
-        const acctSet = new Set<string>();
-        const buSet   = new Set<string>();
+      // Primary source: bank accounts with legalEntityName for BU→bank mapping
+      const [baRes, extRes] = await Promise.allSettled([
+        fetch(`${APEX_BASE}/banks/bankaccounts`),
+        fetch(`${APEX_BASE}/cash/externaltransactions?row_limit=2000`),
+      ]);
 
+      const buBankMapLocal: Record<string, string[]> = {};
+      const currMapLocal: Record<string, string> = {};
+      const assetMapLocal: Record<string, string> = {};
+      const acctSet = new Set<string>();
+      const buSet = new Set<string>();
+
+      if (baRes.status === 'fulfilled') {
+        const baData = await baRes.value.json();
+        const baItems: any[] = baData.items ?? [];
+        baItems.forEach(i => {
+          const acct = i.bankAccountName;
+          const le   = i.legalEntityName;
+          if (!acct) return;
+          acctSet.add(acct);
+          if (i.currencyCode) currMapLocal[acct] = i.currencyCode;
+          if (i.cashAccountCombination) assetMapLocal[acct] = i.cashAccountCombination;
+          if (le) {
+            buSet.add(le);
+            if (!buBankMapLocal[le]) buBankMapLocal[le] = [];
+            if (!buBankMapLocal[le].includes(acct)) buBankMapLocal[le].push(acct);
+          }
+        });
+      }
+
+      if (extRes.status === 'fulfilled') {
+        const extData = await extRes.value.json();
+        const extItems: any[] = extData.items ?? [];
         extItems.forEach(i => {
           const acct = i.bankAccountName;
           const bu   = i.businessUnitName;
@@ -1443,15 +1466,15 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
             if (!buBankMapLocal[bu].includes(acct)) buBankMapLocal[bu].push(acct);
           }
           if (i.assetAccountCombination) assetMapLocal[acct] = i.assetAccountCombination;
-          if (i.currencyCode) currMapLocal[acct] = i.currencyCode;
+          if (i.currencyCode && !currMapLocal[acct]) currMapLocal[acct] = i.currencyCode;
         });
-
-        setBankAccounts([...acctSet].sort().map(n => ({ label: n, value: n })));
-        setBuBankMap(buBankMapLocal);
-        setBankAccountAssetMap(assetMapLocal);
-        setBankCurrencyMap(currMapLocal);
-        setBusinessUnits([...buSet].sort().map(n => ({ label: n, value: n })));
       }
+
+      setBankAccounts([...acctSet].sort().map(n => ({ label: n, value: n })));
+      setBuBankMap(buBankMapLocal);
+      setBankAccountAssetMap(assetMapLocal);
+      setBankCurrencyMap(currMapLocal);
+      setBusinessUnits([...buSet].sort().map(n => ({ label: n, value: n })));
     } catch { /* silently skip */ }
   }, []);
 
@@ -1784,6 +1807,25 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       ),
     },
     {
+      title: 'Pmt Currency',
+      dataIndex: 'paymentCurrencyCode',
+      key: 'paymentCurrencyCode',
+      width: 90,
+      render: (v: string) => v ? <Tag style={{ margin: 0, fontSize: 11 }}>{v}</Tag> : <Text type="secondary">—</Text>,
+    },
+    {
+      title: 'Transfer Amt',
+      dataIndex: 'paymentAmount',
+      key: 'paymentAmount',
+      width: 120,
+      align: 'right' as const,
+      render: (v: number, r: TransferRecord) => (
+        <Text style={{ fontWeight: 500, color: REDWOOD.neutral900 }}>
+          {fmtAmount(v, r.paymentCurrencyCode)}
+        </Text>
+      ),
+    },
+    {
       title: 'Transfer Date',
       dataIndex: 'transactionDate',
       key: 'txnDate',
@@ -1948,6 +1990,11 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
   ];
 
   // ── Search panel ──────────────────────────────────────────────────────────
+  // compute filtered options for search form
+  const searchBankOpts = searchBu && buBankMap[searchBu]?.length
+    ? bankAccounts.filter(a => buBankMap[searchBu].includes(a.value))
+    : bankAccounts;
+
   const searchPanel = (
     <Card
       style={{ marginBottom: 12, borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
@@ -1956,18 +2003,21 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       <Form form={searchForm} layout="horizontal" labelCol={{ span: 8 }} wrapperCol={{ span: 16 }}>
         <Row gutter={24}>
           <Col xs={24} sm={12} lg={8}>
+            <Form.Item label="Business Unit" name="businessUnit">
+              <Select showSearch allowClear placeholder="Any" options={businessUnits} optionFilterProp="label"
+                onChange={(v) => setSearchBu(v ?? undefined)}
+                onClear={() => setSearchBu(undefined)}
+              />
+            </Form.Item>
+          </Col>
+          <Col xs={24} sm={12} lg={8}>
             <Form.Item label="From Account" name="fromAccount">
-              <Select showSearch allowClear placeholder="Any" options={bankAccounts} optionFilterProp="label" />
+              <Select showSearch allowClear placeholder="Any" options={searchBankOpts} optionFilterProp="label" />
             </Form.Item>
           </Col>
           <Col xs={24} sm={12} lg={8}>
             <Form.Item label="To Account" name="toAccount">
-              <Select showSearch allowClear placeholder="Any" options={bankAccounts} optionFilterProp="label" />
-            </Form.Item>
-          </Col>
-          <Col xs={24} sm={12} lg={8}>
-            <Form.Item label="Business Unit" name="businessUnit">
-              <Select showSearch allowClear placeholder="Any" options={businessUnits} optionFilterProp="label" />
+              <Select showSearch allowClear placeholder="Any" options={searchBankOpts} optionFilterProp="label" />
             </Form.Item>
           </Col>
           <Col xs={24} sm={12} lg={8}>
