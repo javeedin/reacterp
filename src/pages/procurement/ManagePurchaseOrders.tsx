@@ -139,7 +139,7 @@ interface POSchedule {
   [key: string]: any;
 }
 
-
+interface SearchParams {
   orderNumber?: string;
   supplier?: string;
   statusCode?: string;
@@ -224,7 +224,7 @@ const PODetailPage: React.FC<{ po: RawPO; onClose?: () => void }> = ({ po, onClo
       const results = await Promise.allSettled(
         linesList.map(async (line) => {
           const schedLink = line.links?.find(l => l.name === 'schedules')?.href;
-          const base = schedLink ?? `${BASE_URL}/purchaseOrders/${po.POHeaderId}/child/lines/${line.LineNumber}/child/schedules`;
+          const base = schedLink ?? `${BASE_URL}/purchaseOrders/${po.POHeaderId}/child/lines/${line.POLineId}/child/schedules`;
           const url = base.includes('?') ? `${base}&limit=500` : `${base}?limit=500`;
           const r = await fetch(url, { headers: { Authorization: AUTH_HEADER, Accept: 'application/json' } });
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
