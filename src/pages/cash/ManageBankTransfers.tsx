@@ -1748,10 +1748,15 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       width: 110,
       fixed: 'left',
       render: (val, record) => (
-        <Button type="link" size="small" style={{ color: REDWOOD.info, padding: 0, fontWeight: 500 }}
-          onClick={() => openEdit(record)}>
-          {val ?? '—'}
-        </Button>
+        <div>
+          <Button type="link" size="small" style={{ color: REDWOOD.info, padding: 0, fontWeight: 500 }}
+            onClick={() => openEdit(record)}>
+            {val ?? '—'}
+          </Button>
+          {record.businessUnit && (
+            <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 1 }}>{record.businessUnit}</div>
+          )}
+        </div>
       ),
     },
     {
@@ -1854,13 +1859,6 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       render: (val: number) => val
         ? <Button type="link" size="small" style={{ color: REDWOOD.info, padding: 0, fontSize: 12 }}>{val}</Button>
         : <Text type="secondary">—</Text>,
-    },
-    {
-      title: 'Business Unit',
-      dataIndex: 'businessUnit',
-      key: 'bu',
-      width: 180,
-      render: (val: string) => <Text style={{ fontSize: 12 }}>{val ?? '—'}</Text>,
     },
     {
       title: 'Accounting',
