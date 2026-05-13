@@ -1384,6 +1384,74 @@ END;
 };
 
 // ────────────────────────────────────────────────────────────────────────────
+// ── API Inspector Panel ──────────────────────────────────────────────────────
+const ApiInspectorPanel: React.FC<{ apexBase: string; lastApiUrl: string }> = ({ apexBase, lastApiUrl }) => {
+  const [results, setResults] = React.useState<Record<string, { loading: boolean; status?: number; body?: string; error?: string }>>({});
+
+  const endpoints = [
+    { key: 'bu',   label: 'Business Units LOV',   color: 'blue',    url: `${apexBase}/gl/businessunits` },
+    { key: 'ba',   label: 'Bank Accounts LOV',     color: 'cyan',    url: `${apexBase}/banks/bankaccounts` },
+    { key: 'list', label: 'Bank Transfers (last search)', color: 'green', url: lastApiUrl || `${apexBase}/cash/banktransfers` },
+    { key: 'post', label: 'POST — Create/Sync',    color: 'orange',  url: `${apexBase}/cash/banktransfers`, method: 'POST' },
+  ];
+
+  const test = async (key: string, url: string, method = 'GET') => {
+    setResults(prev => ({ ...prev, [key]: { loading: true } }));
+    try {
+      const res = await fetch(url, method === 'POST' ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"items":[]}' } : {});
+      const text = await res.text();
+      let pretty = text;
+      try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch {}
+      setResults(prev => ({ ...prev, [key]: { loading: false, status: res.status, body: pretty.slice(0, 2000) + (pretty.length > 2000 ? '\n…(truncated)' : '') } }));
+    } catch (e: any) {
+      setResults(prev => ({ ...prev, [key]: { loading: false, error: e.message } }));
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {endpoints.map(ep => {
+        const r = results[ep.key];
+        return (
+          <div key={ep.key} style={{ border: `1px solid #2d333b`, borderRadius: 6, overflow: 'hidden' }}>
+            <div style={{ background: '#161b22', padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <Tag color={ep.color} style={{ margin: 0, fontSize: 10, flexShrink: 0 }}>{ep.method ?? 'GET'}</Tag>
+                <Text style={{ color: '#8b949e', fontSize: 11, flexShrink: 0 }}>{ep.label}</Text>
+              </div>
+              <Button size="small" loading={r?.loading}
+                style={{ fontSize: 11, flexShrink: 0 }}
+                onClick={() => test(ep.key, ep.url, ep.method)}>
+                Test
+              </Button>
+            </div>
+            <div style={{ background: '#0d1117', padding: '6px 12px' }}>
+              <Text copyable={{ text: ep.url }} style={{ color: '#58a6ff', fontSize: 11, wordBreak: 'break-all', display: 'block' }}>
+                {ep.url}
+              </Text>
+            </div>
+            {r && !r.loading && (
+              <div style={{ background: '#0d1117', borderTop: '1px solid #2d333b', padding: '8px 12px' }}>
+                {r.error
+                  ? <Text style={{ color: '#f85149', fontSize: 11 }}>Error: {r.error}</Text>
+                  : (
+                    <>
+                      <Tag color={r.status === 200 ? 'success' : 'error'} style={{ marginBottom: 6 }}>HTTP {r.status}</Tag>
+                      <pre style={{ color: '#c9d1d9', fontSize: 11, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 200, overflow: 'auto' }}>
+                        {r.body}
+                      </pre>
+                    </>
+                  )
+                }
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 // Main Page
 // ────────────────────────────────────────────────────────────────────────────
 interface TabItem { key: string; label: React.ReactNode; record?: TransferRecord; }
@@ -2252,20 +2320,12 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       <Modal
         open={showApiModal}
         onCancel={() => setShowApiModal(false)}
-        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /> API Endpoint</Space>}
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /> API Inspector — Bank Transfers</Space>}
         footer={null}
-        width={700}
+        width={780}
+        destroyOnClose
       >
-        <div style={{ background: '#0d1117', borderRadius: 8, padding: 16 }}>
-          <Text style={{ color: '#58a6ff', fontSize: 12, wordBreak: 'break-all', display: 'block' }}>
-            GET {lastApiUrl || `${APEX_BASE}/cash/banktransfers`}
-          </Text>
-          <Divider style={{ borderColor: '#2d333b', margin: '12px 0' }} />
-          <Text style={{ color: '#8b949e', fontSize: 11, display: 'block' }}>POST (Create/Sync)</Text>
-          <Text style={{ color: '#98c379', fontSize: 12, display: 'block', marginTop: 4 }}>
-            {APEX_BASE}/cash/banktransfers
-          </Text>
-        </div>
+        <ApiInspectorPanel apexBase={APEX_BASE} lastApiUrl={lastApiUrl} />
       </Modal>
 
       {/* ── Create Accounting Modal ───────────────────────────────── */}
