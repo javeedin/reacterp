@@ -177,7 +177,11 @@ const LinesTab: React.FC<{ linesUrl: string }> = ({ linesUrl }) => {
   const cols: ColumnsType<any> = [
     { title: '#', dataIndex: 'LineNumber', width: 50, render: (v: any) => <Text style={{ fontFamily: 'monospace' }}>{v}</Text> },
     {
-      title: 'Item', dataIndex: 'OrderedItem', width: 160, ellipsis: true,
+      title: 'Product #', dataIndex: 'ProductNumber', width: 130, ellipsis: true,
+      render: (v: any) => <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{v ?? '—'}</Text>,
+    },
+    {
+      title: 'Item', dataIndex: 'OrderedItem', width: 150, ellipsis: true,
       render: (v: any) => <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.info }}>{v ?? '—'}</Text>,
     },
     { title: 'Description', dataIndex: 'ProductDescription', width: 220, ellipsis: true },
@@ -200,6 +204,8 @@ const LinesTab: React.FC<{ linesUrl: string }> = ({ linesUrl }) => {
     { title: 'Status', dataIndex: 'Status', width: 110, render: (v: any, r: any) => statusTag(v, r.StatusCode ?? '') },
     { title: 'Ship Date', dataIndex: 'RequestedShipDate', width: 110, render: fmtDate },
     { title: 'Sched. Ship', dataIndex: 'ScheduledShipDate', width: 110, render: fmtDate },
+    { title: 'Fulfillment Org', dataIndex: 'RequestedFulfillmentOrganizationCode', width: 120, render: (v: any) => v ? <Tag color="cyan">{v}</Tag> : '—' },
+    { title: 'Subinventory', dataIndex: 'SubinventoryCode', width: 120, render: (v: any) => v ? <Tag>{v}</Tag> : '—' },
     {
       title: '', key: '_info', width: 42, fixed: 'right' as const,
       render: (_: any, row: any) => (
@@ -338,12 +344,13 @@ const OrderDetailPage: React.FC<{ order: RawOrder; onClose?: () => void }> = ({ 
       {/* Quick stats */}
       <div style={{ background: REDWOOD.surface, borderBottom: `1px solid ${REDWOOD.neutral200}`, padding: '10px 24px', display: 'flex', gap: 28, alignItems: 'center', flexWrap: 'wrap' }}>
         {[
-          { label: 'Customer',      val: order.BuyingPartyName },
-          { label: 'Business Unit', val: order.BusinessUnitName },
-          { label: 'Currency',      val: order.TransactionalCurrencyCode },
-          { label: 'Order Date',    val: fmtDate(order.TransactionOn) },
-          { label: 'Ship Date',     val: fmtDate(order.RequestedShipDate) },
-          { label: 'Payment Terms', val: order.PaymentTerms },
+          { label: 'Customer',         val: order.BuyingPartyName },
+          { label: 'Business Unit',    val: order.BusinessUnitName },
+          { label: 'Transaction Type', val: order.TransactionTypeCode || order.TransactionType },
+          { label: 'Currency',         val: order.TransactionalCurrencyCode },
+          { label: 'Order Date',       val: fmtDate(order.TransactionOn) },
+          { label: 'Ship Date',        val: fmtDate(order.RequestedShipDate) },
+          { label: 'Payment Terms',    val: order.PaymentTerms },
         ].map(s => (
           <div key={s.label}>
             <Text style={{ fontSize: 10, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block' }}>{s.label}</Text>
