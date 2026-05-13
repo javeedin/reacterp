@@ -1879,6 +1879,17 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       ),
     },
     {
+      title: 'Status',
+      dataIndex: 'reconStatus',
+      key: 'reconStatus',
+      width: 90,
+      render: (v: string) => {
+        if (v === 'RECONCILED')          return <Tag color="green"  style={{ fontSize: 10, margin: 0 }}>Reconciled</Tag>;
+        if (v === 'PARTIALLY_RECONCILED') return <Tag color="orange" style={{ fontSize: 10, margin: 0 }}>Partial</Tag>;
+        return <Tag color="default" style={{ fontSize: 10, margin: 0 }}>Unrecon</Tag>;
+      },
+    },
+    {
       title: 'Statement #',
       dataIndex: 'statementNumber',
       key: 'statementNumber',
@@ -2118,9 +2129,14 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     txnSourceFilter === 'CM'         ? sysColumnsCM :
     sysColumnsAll;
 
-  const filteredSysTxnsBase = txnSourceFilter === 'ALL' || txnSourceFilter === 'CM'
-    ? sysTxns
-    : sysTxns.filter((t) => t.source === txnSourceFilter);
+  const filteredSysTxnsBase = (() => {
+    let base = txnSourceFilter === 'ALL' || txnSourceFilter === 'CM'
+      ? sysTxns
+      : sysTxns.filter((t) => t.source === txnSourceFilter);
+    if (sysReconFilter === 'RECONCILED')   base = base.filter(t => t.reconciledFlag === 'Y');
+    if (sysReconFilter === 'UNRECONCILED') base = base.filter(t => !t.reconciledFlag || t.reconciledFlag !== 'Y');
+    return base;
+  })();
 
   const sysQ = sysSearch.toLowerCase();
   const filteredSysTxns = sysQ
@@ -2157,27 +2173,31 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     : filteredSysTxnsBase;
 
   const stmtQ = stmtSearch.toLowerCase();
-  const filteredStmtLines = stmtQ
-    ? stmtLines.filter(l =>
-        (l.transactionDate    || '').toLowerCase().includes(stmtQ) ||
-        (l.valueDate          || '').toLowerCase().includes(stmtQ) ||
-        (l.amount != null && String(l.amount).includes(stmtQ))     ||
-        (l.transactionCode    || '').toLowerCase().includes(stmtQ) ||
-        (l.description        || '').toLowerCase().includes(stmtQ) ||
-        (l.reference          || '').toLowerCase().includes(stmtQ) ||
-        (l.bankTxnReference   || '').toLowerCase().includes(stmtQ) ||
-        (l.counterpartyName   || '').toLowerCase().includes(stmtQ) ||
-        (l.reconStatus        || '').toLowerCase().includes(stmtQ) ||
-        (l.reconTxnType       || '').toLowerCase().includes(stmtQ) ||
-        (l.reconTxnNumber     || '').toLowerCase().includes(stmtQ) ||
-        (l.reconNotes         || '').toLowerCase().includes(stmtQ) ||
-        (l.reconDate          || '').toLowerCase().includes(stmtQ) ||
-        (l.bankAccountName    || '').toLowerCase().includes(stmtQ) ||
-        (l.currencyCode       || '').toLowerCase().includes(stmtQ) ||
-        (l.statementNumber    || '').toLowerCase().includes(stmtQ) ||
-        (l.externalTxnRef     || '').toLowerCase().includes(stmtQ)
-      )
-    : stmtLines;
+  const filteredStmtLines = (() => {
+    let base = stmtLines;
+    if (stmtReconFilter === 'RECONCILED')   base = base.filter(l => l.reconStatus === 'RECONCILED');
+    if (stmtReconFilter === 'UNRECONCILED') base = base.filter(l => l.reconStatus !== 'RECONCILED');
+    if (!stmtQ) return base;
+    return base.filter(l =>
+      (l.transactionDate    || '').toLowerCase().includes(stmtQ) ||
+      (l.valueDate          || '').toLowerCase().includes(stmtQ) ||
+      (l.amount != null && String(l.amount).includes(stmtQ))     ||
+      (l.transactionCode    || '').toLowerCase().includes(stmtQ) ||
+      (l.description        || '').toLowerCase().includes(stmtQ) ||
+      (l.reference          || '').toLowerCase().includes(stmtQ) ||
+      (l.bankTxnReference   || '').toLowerCase().includes(stmtQ) ||
+      (l.counterpartyName   || '').toLowerCase().includes(stmtQ) ||
+      (l.reconStatus        || '').toLowerCase().includes(stmtQ) ||
+      (l.reconTxnType       || '').toLowerCase().includes(stmtQ) ||
+      (l.reconTxnNumber     || '').toLowerCase().includes(stmtQ) ||
+      (l.reconNotes         || '').toLowerCase().includes(stmtQ) ||
+      (l.reconDate          || '').toLowerCase().includes(stmtQ) ||
+      (l.bankAccountName    || '').toLowerCase().includes(stmtQ) ||
+      (l.currencyCode       || '').toLowerCase().includes(stmtQ) ||
+      (l.statementNumber    || '').toLowerCase().includes(stmtQ) ||
+      (l.externalTxnRef     || '').toLowerCase().includes(stmtQ)
+    );
+  })();
 
   const exportToExcel = useCallback(async () => {
     if (!lastParams) { msgApi.warning('Run a search first before exporting'); return; }
