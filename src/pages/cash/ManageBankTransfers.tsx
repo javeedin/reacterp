@@ -585,6 +585,12 @@ const TransferForm: React.FC<{
     ? bankAccounts.filter(a => buBankMap[selectedBu].includes(a.value))
     : bankAccounts;
 
+  // Business rule: one side must be AED.
+  // If From Account is non-AED, restrict To Account to AED accounts only.
+  const filteredToAccounts = fromCurrency && fromCurrency !== 'AED'
+    ? filteredBankAccounts.filter(a => (bankCurrencyMap[a.value] ?? '') === 'AED')
+    : filteredBankAccounts;
+
   // sync selectedBu when initialValues changes (edit mode)
   useEffect(() => {
     setSelectedBu(initialValues?.businessUnit ?? undefined);
@@ -660,8 +666,15 @@ const TransferForm: React.FC<{
                     style={{ borderRadius: '6px 0 0 6px', flex: 1 }} disabled={isReadOnly || !buSelected}
                     notFoundContent={<Text type="secondary">{buSelected ? 'No accounts for this BU' : 'Select a BU first'}</Text>}
                     onChange={(v: string) => {
-                      setFromCurrency(bankCurrencyMap[v] ?? '');
+                      const ccy = bankCurrencyMap[v] ?? '';
+                      setFromCurrency(ccy);
                       setSelectedFromAcct(v);
+                      // If new from-currency makes current to-account invalid, clear it
+                      if (ccy !== 'AED' && toCurrency && toCurrency !== 'AED') {
+                        form.setFieldsValue({ toBankAccountName: undefined, paymentCurrencyCode: undefined });
+                        setToCurrency('');
+                        setSelectedToAcct('');
+                      }
                     }}
                   />
                 </Form.Item>
@@ -674,19 +687,26 @@ const TransferForm: React.FC<{
                   Cash Account: <strong>{bankAccountAssetMap[selectedFromAcct]}</strong>
                 </div>
               )}
+              {fromCurrency && fromCurrency !== 'AED' && (
+                <div style={{ marginTop: 4, fontSize: 11, color: REDWOOD.warning, paddingLeft: 2 }}>
+                  Non-AED from account — To Account is restricted to AED accounts only
+                </div>
+              )}
             </Form.Item>
 
             <Form.Item label="To Account" labelCol={{ span: 4 }} wrapperCol={{ span: 20 }} style={{ marginBottom: 4 }}>
               <div style={{ display: 'flex', gap: 0 }}>
                 <Form.Item name="toBankAccountName" noStyle rules={[{ required: true, message: 'To Account is required' }]}>
-                  <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={filteredBankAccounts}
+                  <Select showSearch placeholder={fromCurrency && fromCurrency !== 'AED' ? 'AED accounts only' : 'Select bank account'}
+                    optionFilterProp="label" options={filteredToAccounts}
                     style={{ borderRadius: '6px 0 0 6px', flex: 1 }} disabled={isReadOnly || !buSelected}
-                    notFoundContent={<Text type="secondary">{buSelected ? 'No accounts for this BU' : 'Select a BU first'}</Text>}
+                    notFoundContent={<Text type="secondary">{!buSelected ? 'Select a BU first' : fromCurrency && fromCurrency !== 'AED' ? 'No AED accounts found' : 'No accounts for this BU'}</Text>}
                     onChange={(v: string) => {
                       const ccy = bankCurrencyMap[v] ?? '';
                       setToCurrency(ccy);
                       setSelectedToAcct(v);
-                      if (ccy) form.setFieldsValue({ paymentCurrencyCode: ccy });
+                      // Payment currency always follows To Account
+                      form.setFieldsValue({ paymentCurrencyCode: ccy });
                     }}
                   />
                 </Form.Item>
@@ -709,11 +729,12 @@ const TransferForm: React.FC<{
           <Col xs={24} lg={12}>
 
             <Form.Item label="Payment Currency" name="paymentCurrencyCode" style={fs}>
-              <Select placeholder="Select currency" allowClear disabled={isReadOnly || !buSelected}>
-                {['AED', 'USD', 'EUR', 'GBP', 'SAR', 'QAR', 'BHD', 'KWD', 'OMR', 'JOD', 'EGP', 'INR', 'PKR'].map(c => (
-                  <Option key={c} value={c}>{c}</Option>
-                ))}
-              </Select>
+              <Input readOnly
+                value={toCurrency || ''}
+                style={{ background: '#f5f5f5', color: toCurrency ? REDWOOD.info : REDWOOD.neutral600, fontWeight: 600, cursor: 'default' }}
+                placeholder="Set by To Account"
+                suffix={<Tooltip title="Payment currency is always the To Account currency"><span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>auto</span></Tooltip>}
+              />
             </Form.Item>
 
             <Form.Item label="Transfer Date" name="transactionDate" rules={[{ required: true, message: 'Transfer Date is required' }]} style={fs}>
