@@ -1782,6 +1782,11 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
   const [acctProgress, setAcctProgress]       = useState<TransferAcctRow[]>([]);
   const [acctRunning, setAcctRunning]         = useState(false);
   const [acctDone, setAcctDone]               = useState(false);
+  // ── View Accounting state ─────────────────────────────────────────────────
+  const [viewAcctOpen, setViewAcctOpen]       = useState(false);
+  const [viewAcctSourceId, setViewAcctSourceId] = useState<number | null>(null);
+  const [viewAcctLines, setViewAcctLines]     = useState<any[]>([]);
+  const [viewAcctLoading, setViewAcctLoading] = useState(false);
 
   const modulePrefix = module === 'ap' ? '/ap' : '/cash';
 
@@ -1955,14 +1960,19 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
   const handleEditSaved = () => { loadLovs(); handleSearch(); };
 
   // ── Create Accounting ─────────────────────────────────────────────────────
-  const openCreateAccountingModal = () => {
-    const selected = transfers.filter(t => selectedRowKeys.includes(t.bankAccountTransferId));
+  const openCreateAccountingModal = (forTransfers?: TransferRecord[]) => {
+    const selected = forTransfers ?? transfers.filter(t => selectedRowKeys.includes(t.bankAccountTransferId));
     const rows: TransferAcctRow[] = selected.map(t => {
       const alreadyAccounted = t.accountingFlag === 'Y';
-      const fromAsset = bankAccountAssetMap[t.fromBankAccountName] || '';
-      const toAsset   = bankAccountAssetMap[t.toBankAccountName]   || '';
-      const missingAccounts = !fromAsset || !toAsset;
+      const fromAsset    = bankAccountAssetMap[t.fromBankAccountName] || '';
+      const toAsset      = bankAccountAssetMap[t.toBankAccountName]   || '';
+      const clearingAcct = t.cashClearingAccount || '';
       const date = t.transactionDate || dayjs().format('YYYY-MM-DD');
+      let status: TransferAcctRow['status'] = 'pending';
+      let msg: string | undefined;
+      if (alreadyAccounted) { status = 'skipped'; msg = 'Already accounted — skipped'; }
+      else if (!fromAsset || !toAsset) { status = 'error'; msg = `Missing asset account for ${!fromAsset ? t.fromBankAccountName : t.toBankAccountName}`; }
+      else if (!clearingAcct) { status = 'error'; msg = 'No cash clearing account — open the record and set it first'; }
       return {
         transferId: t.bankAccountTransferId,
         txnDate:    date,
@@ -1972,9 +1982,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
         drAccount:  toAsset,
         crAccount:  fromAsset,
         bu:         t.businessUnit || '',
-        status:     alreadyAccounted ? 'skipped' : missingAccounts ? 'error' : 'pending',
-        message:    alreadyAccounted ? 'Already accounted — skipped'
-                  : missingAccounts ? `Missing asset account for ${!fromAsset ? t.fromBankAccountName : t.toBankAccountName}` : undefined,
+        status, message: msg,
       };
     });
     setAcctProgress(rows);
@@ -1994,7 +2002,6 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       if (!txn) { updateRow(row.transferId, { status: 'error', message: 'Transfer not found' }); continue; }
 
       try {
-        // Guard: check SLA table to prevent duplicate accounting
         const existing = await checkAccountingExists('BANK_ACCOUNT_TRANSFERS', txn.bankAccountTransferId, 'BANK_TRANSFER');
         if (existing.exists && existing.postingStatus === 'POSTED') {
           updateRow(row.transferId, { status: 'skipped', message: `Already posted — SLA header ${existing.headerId}` });
@@ -2005,134 +2012,88 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
         const ledger = await fetchLedgerByBusinessUnit(txn.businessUnit);
         if (!ledger) { updateRow(row.transferId, { status: 'error', message: 'Could not resolve ledger for BU' }); continue; }
 
-        const fromAsset = bankAccountAssetMap[txn.fromBankAccountName] || '';
-        const toAsset   = bankAccountAssetMap[txn.toBankAccountName]   || '';
+        const fromAsset    = bankAccountAssetMap[txn.fromBankAccountName] || '';
+        const toAsset      = bankAccountAssetMap[txn.toBankAccountName]   || '';
+        const clearingAcct = txn.cashClearingAccount || '';
+        const pmtAmt       = Math.abs(txn.paymentAmount ?? 0);
+        const rate         = txn.conversionRate || 1;
+        const j1currency   = txn.fromCurrencyCode || 'AED';
+        const j1Rate       = j1currency === 'AED' ? 1 : rate;
+        const j2currency   = txn.toCurrencyCode   || 'AED';
+        const j2Rate       = j2currency === 'AED' ? 1 : rate;
+        const toAmt        = j2currency === j1currency ? pmtAmt : Math.round(pmtAmt * j1Rate * 100) / 100;
 
-        const slaPayload = buildBankTransferSlaPayload({
-          bankAccountTransferId: txn.bankAccountTransferId,
-          transferNumber:        txn.bankAccountTransferNumber,
-          transactionDate:       row.txnDate,
-          accountingDate:        row.txnDate,
-          periodName:            row.periodName,
-          currency:              txn.fromCurrencyCode || txn.paymentCurrencyCode || 'AED',
-          amount:                row.amount,
-          fromAssetAccount:      fromAsset,
-          toAssetAccount:        toAsset,
-          description:           txn.memo || `Bank Transfer ${txn.bankAccountTransferNumber}`,
-          businessUnit:          txn.businessUnit || undefined,
-          ledgerId:              ledger.ledgerId,
-          ledgerName:            ledger.ledgerName,
-          ledgerCurrency:        ledger.currency,
-          exchangeRate:          txn.conversionRate || 1,
-          createdBy:             currentUser,
-        });
-
-        const slaResult = await createAccounting(slaPayload);
-
-        const batchName = `BANKTFR-${txn.bankAccountTransferId}-${Date.now()}`;
-        const glPayload = {
-          batch: {
-            batchName, batchDescription: `Bank Transfer ${txn.bankAccountTransferNumber}`,
-            ledgerName: ledger.ledgerName, ledgerId: ledger.ledgerId, status: 'NEW',
-            accountingPeriod: row.periodName, controlTotal: row.amount,
-            runningTotalDr: row.amount, runningTotalCr: row.amount,
-            batchSource: 'Cash Management', createdBy: currentUser,
-          },
+        // Journal 1 (Disbursement): DR Cash Clearing / CR From Bank
+        await createAccounting({
           header: {
+            moduleName: 'CM', sourceTable: 'BANK_ACCOUNT_TRANSFERS',
+            sourceId: txn.bankAccountTransferId,
+            sourceNumber: String(txn.bankAccountTransferNumber),
+            sourceType: 'Bank Transfer', eventTypeCode: 'BANK_TRANSFER_DISBURSE',
+            eventDate: row.txnDate, accountingDate: row.txnDate, periodName: row.periodName,
             ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName,
-            jeCategory: 'Cash Management', jeSource: 'Cash Management',
-            periodName: row.periodName,
-            journalName: `BANKTFR-${txn.bankAccountTransferNumber}`,
-            description: txn.memo || `Bank Transfer ${txn.bankAccountTransferNumber}`,
-            currencyCode: slaPayload.header.currencyCode,
-            currencyConversionType: 'Corporate',
-            currencyConversionDate: row.txnDate,
-            currencyConversionRate: txn.conversionRate || 1,
-            defaultEffectiveDate: row.txnDate,
-            status: 'NEW', runningTotalDr: row.amount, runningTotalCr: row.amount,
+            currencyCode: j1currency, ledgerCurrency: ledger.currency || 'AED',
+            exchangeRate: j1Rate, exchangeRateType: 'Corporate',
+            businessUnit: txn.businessUnit, description: 'Bank Transfer - Disbursement',
             createdBy: currentUser,
           },
-          lines: slaPayload.lines.map(l => ({
-            enteredDr:  l.lineType === 'DR' ? l.enteredDr : null,
-            enteredCr:  l.lineType === 'CR' ? l.enteredCr : null,
-            accountedDr: l.accountedDr || null, accountedCr: l.accountedCr || null,
-            statAmount: null, description: l.description,
-            currencyCode: l.currencyCode || slaPayload.header.currencyCode,
-            currencyConversionDate: row.txnDate,
-            currencyConversionRate: txn.conversionRate || 1,
-            userCurrencyConversionType: 'Corporate',
-            accountCombination: l.accountCombination,
-            chartOfAccountsName: 'Chart of Accounts',
-            reference1: String(txn.bankAccountTransferId),
-            reference2: String(txn.bankAccountTransferNumber),
-            reference3: l.accountingClass || null,
-            reference4: txn.businessUnit || null,
-            reference5: null, createdBy: currentUser,
-          })),
-        };
-
-        const validationPayload: GlJournalPayload = {
-          batch: { batchName, ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName, accountingPeriod: row.periodName, controlTotal: row.amount, runningTotalDr: row.amount, runningTotalCr: row.amount },
-          header: { periodName: row.periodName, currencyCode: slaPayload.header.currencyCode, currencyConversionDate: row.txnDate, journalName: `BANKTFR-${txn.bankAccountTransferNumber}` },
-          lines: glPayload.lines.map((l: any) => ({ enteredDr: l.enteredDr, enteredCr: l.enteredCr, accountCombination: l.accountCombination, description: l.description, reference1: l.reference1 })),
-        };
-        const validation = validateGlPayload(validationPayload, { module: 'CASH', referenceNo: String(txn.bankAccountTransferNumber) });
-        const logId = await persistValidationLog('CASH', String(txn.bankAccountTransferNumber), batchName, validation.valid ? 'PASSED' : 'FAILED', validation.errors, validationPayload, currentUser);
-        addSessionEntry({
-          logId: logId ?? Date.now(),
-          module: 'CASH',
-          referenceNo: String(txn.bankAccountTransferNumber),
-          batchName,
-          result: validation.valid ? 'PASSED' : 'FAILED',
-          errorCount: validation.errors.filter(e => e.severity === 'ERROR').length,
-          warningCount: validation.errors.filter(e => e.severity === 'WARNING').length,
-          errorCategories: [...new Set(validation.errors.map(e => e.category))].join(',') || null,
-          errorSummary: validation.errors.filter(e => e.severity === 'ERROR').map(e => `[${e.category}] ${e.message}`).join(' | ') || null,
-          errorDetail: validation.errors,
-          createdBy: currentUser,
-          creationDate: new Date().toISOString(),
-        });
-        if (!validation.valid) {
-          updateRow(row.transferId, { status: 'error', message: `GL validation failed: ${validation.errors.filter(e => e.severity === 'ERROR').map(e => e.category).join(', ')}` });
-          continue;
-        }
-
-        const glRes = await fetch(`${APEX_BASE}/journals/create`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify(glPayload),
+          lines: [
+            { lineNumber: 1, lineType: 'DR', accountingClass: 'CASH_CLEARING',
+              accountCombination: clearingAcct,
+              enteredDr: pmtAmt, enteredCr: 0,
+              accountedDr: Math.round(pmtAmt * j1Rate * 100) / 100, accountedCr: 0,
+              currencyCode: j1currency, exchangeRate: j1Rate,
+              description: `Cash Clearing DR – From ${txn.fromBankAccountName}` },
+            { lineNumber: 2, lineType: 'CR', accountingClass: 'BANK_ASSET',
+              accountCombination: fromAsset,
+              enteredDr: 0, enteredCr: pmtAmt,
+              accountedDr: 0, accountedCr: Math.round(pmtAmt * j1Rate * 100) / 100,
+              currencyCode: j1currency, exchangeRate: j1Rate,
+              description: `From Bank CR – ${txn.fromBankAccountName}` },
+          ],
         });
 
-        let glMsg = '';
-        if (glRes.ok) {
-          const glData = await glRes.json();
-          await fetch(`${APEX_BASE}/sla/accounting/post`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify({
-              headerId: slaResult.headerId,
-              glBatchId: glData.batchId || 0,
-              glBatchName: batchName,
-              glHeaderId: glData.headerId || 0,
-              postedBy: currentUser,
-            }),
-          });
-          // Stamp AccountingFlag via dedicated endpoint — does not touch Status
-          const flagUrl = `${APEX_BASE}/cash/banktransfers/${txn.bankAccountTransferId}/acctflag?updated_by=${encodeURIComponent(currentUser)}`;
-          const flagRes = await fetch(flagUrl, { method: 'PUT', headers: { Accept: 'application/json' } });
-          const flagData = await flagRes.json().catch(() => ({})) as { success?: boolean; message?: string };
-          if (!flagRes.ok || !flagData.success) {
-            throw new Error(flagData.message || `Accounting flag update failed (HTTP ${flagRes.status})`);
-          }
-          setTransfers(prev => prev.map(t =>
-            t.bankAccountTransferId === txn.bankAccountTransferId ? { ...t, accountingFlag: 'Y' } : t
-          ));
-          glMsg = `GL: ${batchName}`;
-        } else {
-          glMsg = 'GL journal failed — SLA is Draft';
-        }
+        // Journal 2 (Receipt): DR To Bank / CR Cash Clearing
+        await createAccounting({
+          header: {
+            moduleName: 'CM', sourceTable: 'BANK_ACCOUNT_TRANSFERS',
+            sourceId: txn.bankAccountTransferId,
+            sourceNumber: String(txn.bankAccountTransferNumber),
+            sourceType: 'Bank Transfer', eventTypeCode: 'BANK_TRANSFER_RECEIPT',
+            eventDate: row.txnDate, accountingDate: row.txnDate, periodName: row.periodName,
+            ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName,
+            currencyCode: j2currency, ledgerCurrency: ledger.currency || 'AED',
+            exchangeRate: j2Rate, exchangeRateType: 'Corporate',
+            businessUnit: txn.businessUnit, description: 'Bank Transfer - Receipt',
+            createdBy: currentUser,
+          },
+          lines: [
+            { lineNumber: 1, lineType: 'DR', accountingClass: 'BANK_ASSET',
+              accountCombination: toAsset,
+              enteredDr: toAmt, enteredCr: 0,
+              accountedDr: Math.round(toAmt * j2Rate * 100) / 100, accountedCr: 0,
+              currencyCode: j2currency, exchangeRate: j2Rate,
+              description: `To Bank DR – ${txn.toBankAccountName}` },
+            { lineNumber: 2, lineType: 'CR', accountingClass: 'CASH_CLEARING',
+              accountCombination: clearingAcct,
+              enteredDr: 0, enteredCr: toAmt,
+              accountedDr: 0, accountedCr: Math.round(toAmt * j2Rate * 100) / 100,
+              currencyCode: j2currency, exchangeRate: j2Rate,
+              description: `Cash Clearing CR – To ${txn.toBankAccountName}` },
+          ],
+        });
 
-        updateRow(row.transferId, { status: 'success', message: `SLA ${slaResult.headerId} — ${glMsg}` });
+        // Stamp accountingFlag — does not touch Status
+        const flagUrl = `${APEX_BASE}/cash/banktransfers/${txn.bankAccountTransferId}/acctflag?updated_by=${encodeURIComponent(currentUser)}`;
+        const flagRes = await fetch(flagUrl, { method: 'PUT', headers: { Accept: 'application/json' } });
+        const flagData = await flagRes.json().catch(() => ({})) as { success?: boolean; message?: string };
+        if (!flagRes.ok || !flagData.success) {
+          throw new Error(flagData.message || `Accounting flag update failed (HTTP ${flagRes.status})`);
+        }
+        setTransfers(prev => prev.map(t =>
+          t.bankAccountTransferId === txn.bankAccountTransferId ? { ...t, accountingFlag: 'Y' } : t
+        ));
+        updateRow(row.transferId, { status: 'success', message: 'Two journals created: Disbursement + Receipt' });
       } catch (e: any) {
         updateRow(row.transferId, { status: 'error', message: e?.message || 'Unexpected error' });
       }
@@ -2337,33 +2298,30 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       fixed: 'right',
       render: (_, record) => (
         <Space size={4}>
-          <Tooltip title="Create Accounting">
-            <Button type="text" size="small" icon={<AccountBookOutlined />}
-              style={{ color: REDWOOD.info }}
-              onClick={() => {
-                setSelectedRowKeys([record.bankAccountTransferId]);
-                const fromAsset = bankAccountAssetMap[record.fromBankAccountName] || '';
-                const toAsset   = bankAccountAssetMap[record.toBankAccountName]   || '';
-                const alreadyAccounted = record.accountingFlag === 'Y';
-                const missingAccounts  = !fromAsset || !toAsset;
-                const date = record.transactionDate || dayjs().format('YYYY-MM-DD');
-                setAcctProgress([{
-                  transferId: record.bankAccountTransferId,
-                  txnDate:    date,
-                  periodName: derivePeriodName(new Date(date)),
-                  amount:     Math.abs(record.paymentAmount ?? 0),
-                  currency:   record.fromCurrencyCode || record.paymentCurrencyCode || 'AED',
-                  drAccount:  toAsset,
-                  crAccount:  fromAsset,
-                  bu:         record.businessUnit || '',
-                  status:     alreadyAccounted ? 'skipped' : missingAccounts ? 'error' : 'pending',
-                  message:    alreadyAccounted ? 'Already accounted — skipped'
-                            : missingAccounts ? `Missing asset account for ${!fromAsset ? record.fromBankAccountName : record.toBankAccountName}` : undefined,
-                }]);
-                setAcctDone(false);
-                setAcctModalOpen(true);
-              }} />
-          </Tooltip>
+          {record.accountingFlag === 'Y' ? (
+            <Tooltip title="View Accounting">
+              <Button type="text" size="small" icon={<EyeOutlined />}
+                style={{ color: REDWOOD.success }}
+                onClick={async () => {
+                  setViewAcctSourceId(record.bankAccountTransferId);
+                  setViewAcctLines([]);
+                  setViewAcctLoading(true);
+                  setViewAcctOpen(true);
+                  try {
+                    const { getAccountingLinesBySourceId } = await import('../../services/sla.service');
+                    const result = await getAccountingLinesBySourceId(record.bankAccountTransferId, 'BANK_ACCOUNT_TRANSFERS', 'CM');
+                    setViewAcctLines(result.items ?? []);
+                  } catch { setViewAcctLines([]); }
+                  finally { setViewAcctLoading(false); }
+                }} />
+            </Tooltip>
+          ) : (
+            <Tooltip title="Create Accounting (2 journals)">
+              <Button type="text" size="small" icon={<AccountBookOutlined />}
+                style={{ color: REDWOOD.info }}
+                onClick={() => openCreateAccountingModal([record])} />
+            </Tooltip>
+          )}
           <Tooltip title="Print PDF">
             <Button type="text" size="small" icon={<PrinterOutlined />}
               style={{ color: REDWOOD.neutral600 }}
@@ -2715,6 +2673,74 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
               : 'Accounting created and posted to GL successfully'}
             style={{ marginTop: 12 }}
           />
+        )}
+      </Modal>
+
+      {/* ── View Accounting Modal ─────────────────────────────────── */}
+      <Modal
+        title={<Space><EyeOutlined style={{ color: REDWOOD.success }} />Accounting Journals — Transfer #{viewAcctSourceId}</Space>}
+        open={viewAcctOpen}
+        onCancel={() => setViewAcctOpen(false)}
+        footer={<Button onClick={() => setViewAcctOpen(false)}>Close</Button>}
+        width={920}
+        destroyOnClose
+      >
+        {viewAcctLoading ? (
+          <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+        ) : viewAcctLines.length === 0 ? (
+          <Empty description="No accounting lines found" />
+        ) : (
+          <>
+            {[...new Set(viewAcctLines.map((l: any) => l.headerId ?? l.header_id))].map(hid => {
+              const lines = viewAcctLines.filter((l: any) => (l.headerId ?? l.header_id) === hid);
+              const first = lines[0] ?? {};
+              const eventType = first.eventTypeCode ?? first.event_type_code ?? '';
+              const label = eventType.includes('DISBURSE') ? 'Journal 1 — Disbursement' : eventType.includes('RECEIPT') ? 'Journal 2 — Receipt' : `Journal — Header ${hid}`;
+              return (
+                <div key={String(hid)} style={{ marginBottom: 20 }}>
+                  <div style={{ background: '#f0f5ff', padding: '6px 12px', borderRadius: '6px 6px 0 0', fontWeight: 600, fontSize: 12 }}>
+                    {label}
+                    <span style={{ marginLeft: 12, fontWeight: 400, color: REDWOOD.neutral600 }}>
+                      {first.periodName ?? first.period_name} · {first.currencyCode ?? first.currency_code}
+                    </span>
+                  </div>
+                  <Table
+                    size="small"
+                    pagination={false}
+                    dataSource={lines.map((l: any, i: number) => ({ ...l, key: i }))}
+                    columns={[
+                      { title: 'Line', dataIndex: 'lineNumber', key: 'ln', width: 50, render: (v: any, _: any, i: number) => v ?? i + 1 },
+                      { title: 'Dr/Cr', key: 'drCr', width: 60, render: (_: any, l: any) =>
+                          (l.enteredDr ?? l.entered_dr) > 0
+                            ? <Tag color="blue">DR</Tag>
+                            : <Tag color="orange">CR</Tag> },
+                      { title: 'Account', key: 'acct', width: 180, render: (_: any, l: any) =>
+                          <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{l.accountCombination ?? l.account_combination ?? '—'}</Text> },
+                      { title: 'Description', key: 'desc', render: (_: any, l: any) =>
+                          <Text style={{ fontSize: 12 }}>{l.description ?? '—'}</Text> },
+                      { title: 'Entered Dr', key: 'eDr', width: 110, align: 'right' as const, render: (_: any, l: any) => {
+                          const v = l.enteredDr ?? l.entered_dr;
+                          return v > 0 ? <Text style={{ fontWeight: 500 }}>{fmtAmount(v, l.currencyCode ?? l.currency_code)}</Text> : <Text type="secondary">—</Text>;
+                      }},
+                      { title: 'Entered Cr', key: 'eCr', width: 110, align: 'right' as const, render: (_: any, l: any) => {
+                          const v = l.enteredCr ?? l.entered_cr;
+                          return v > 0 ? <Text style={{ fontWeight: 500 }}>{fmtAmount(v, l.currencyCode ?? l.currency_code)}</Text> : <Text type="secondary">—</Text>;
+                      }},
+                      { title: 'Accounted Dr', key: 'aDr', width: 120, align: 'right' as const, render: (_: any, l: any) => {
+                          const v = l.accountedDr ?? l.accounted_dr;
+                          return v > 0 ? <Text style={{ color: REDWOOD.info }}>{fmtAmount(v, 'AED')}</Text> : <Text type="secondary">—</Text>;
+                      }},
+                      { title: 'Accounted Cr', key: 'aCr', width: 120, align: 'right' as const, render: (_: any, l: any) => {
+                          const v = l.accountedCr ?? l.accounted_cr;
+                          return v > 0 ? <Text style={{ color: REDWOOD.info }}>{fmtAmount(v, 'AED')}</Text> : <Text type="secondary">—</Text>;
+                      }},
+                    ]}
+                    style={{ borderRadius: '0 0 6px 6px', overflow: 'hidden' }}
+                  />
+                </div>
+              );
+            })}
+          </>
         )}
       </Modal>
     </Layout>
