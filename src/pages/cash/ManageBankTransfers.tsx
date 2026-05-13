@@ -1438,12 +1438,14 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
         const baData = await baRes.value.json();
         const baItems: any[] = baData.items ?? [];
         baItems.forEach(i => {
-          const acct = i.bankAccountName;
-          const le   = i.legalEntityName;
+          const acct = i.bankAccountName ?? i.bank_account_name;
+          const le   = i.legalEntityName ?? i.legal_entity_name;
           if (!acct) return;
           acctSet.add(acct);
-          if (i.currencyCode) currMapLocal[acct] = i.currencyCode;
-          if (i.cashAccountCombination) assetMapLocal[acct] = i.cashAccountCombination;
+          const ccy  = i.currencyCode ?? i.currency_code;
+          const cash = i.cashAccountCombination ?? i.cash_account_combination;
+          if (ccy)  currMapLocal[acct] = ccy;
+          if (cash) assetMapLocal[acct] = cash;
           if (le) {
             buSet.add(le);
             if (!buBankMapLocal[le]) buBankMapLocal[le] = [];
