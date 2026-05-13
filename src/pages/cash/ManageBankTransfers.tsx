@@ -2146,18 +2146,39 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             body: JSON.stringify(glPayload),
           });
-          if (glRes.ok) {
-            const glData = await glRes.json();
-            await fetch(`${APEX_BASE}/sla/accounting/post`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-              body: JSON.stringify({
-                headerId: slaResult.headerId, glBatchId: glData.batchId || 0,
-                glBatchName: glJournalName, glHeaderId: glData.headerId || 0,
-                postedBy: currentUser,
-              }),
-            });
+          if (!glRes.ok) {
+            const errData = await glRes.json().catch(() => ({}));
+            throw new Error(errData?.message || `GL journals/create failed (HTTP ${glRes.status})`);
           }
+          const glData   = await glRes.json();
+          const glBatchId  = glData.jeBatchId  ?? glData.je_batch_id  ?? glData.batchId  ?? null;
+          const glHeaderId = glData.jeHeaderId ?? glData.je_header_id ?? glData.headerId ?? null;
+
+          // Post the GL batch to move it from NEW → POSTED
+          if (glBatchId) {
+            const postRes = await fetch(`${APEX_BASE}/gl/journals/${glBatchId}/post`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+              body: '{}',
+            });
+            if (!postRes.ok) {
+              const postData = await postRes.json().catch(() => ({}));
+              const err = Array.isArray(postData?.errors) && postData.errors.length > 0
+                ? postData.errors[0] : postData?.error || `HTTP ${postRes.status}`;
+              throw new Error(`GL post failed: ${err}`);
+            }
+          }
+
+          // Stamp SLA header with GL reference
+          await fetch(`${APEX_BASE}/sla/accounting/post`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({
+              headerId: slaResult.headerId, glBatchId: glBatchId || 0,
+              glBatchName: glJournalName, glHeaderId: glHeaderId || 0,
+              postedBy: currentUser,
+            }),
+          });
           return slaResult;
         };
 
