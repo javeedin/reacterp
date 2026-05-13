@@ -80,14 +80,21 @@ interface BankAccountOption { label: string; value: string; }
 interface BUOption { label: string; value: string; }
 
 interface TransferAcctRow {
-  transferId: number;
-  txnDate:    string;
-  periodName: string;
-  amount:     number;
-  currency:   string;
-  drAccount:  string;
-  crAccount:  string;
-  bu:         string;
+  transferId:       number;
+  txnDate:          string;
+  periodName:       string;
+  amount:           number;
+  currency:         string;
+  fromCurrency:     string;
+  toCurrency:       string;
+  fromAsset:        string;
+  toAsset:          string;
+  clearingAccount:  string;
+  fromBankName:     string;
+  toBankName:       string;
+  bu:               string;
+  /** @deprecated kept for compat */ drAccount: string;
+  /** @deprecated kept for compat */ crAccount: string;
   status:     'pending' | 'running' | 'success' | 'error' | 'skipped';
   message?:   string;
 }
@@ -1974,14 +1981,21 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       else if (!fromAsset || !toAsset) { status = 'error'; msg = `Missing asset account for ${!fromAsset ? t.fromBankAccountName : t.toBankAccountName}`; }
       else if (!clearingAcct) { status = 'error'; msg = 'No cash clearing account — open the record and set it first'; }
       return {
-        transferId: t.bankAccountTransferId,
-        txnDate:    date,
-        periodName: derivePeriodName(new Date(date)),
-        amount:     Math.abs(t.paymentAmount ?? 0),
-        currency:   t.fromCurrencyCode || t.paymentCurrencyCode || 'AED',
-        drAccount:  toAsset,
-        crAccount:  fromAsset,
-        bu:         t.businessUnit || '',
+        transferId:      t.bankAccountTransferId,
+        txnDate:         date,
+        periodName:      derivePeriodName(new Date(date)),
+        amount:          Math.abs(t.paymentAmount ?? 0),
+        currency:        t.fromCurrencyCode || t.paymentCurrencyCode || 'AED',
+        fromCurrency:    t.fromCurrencyCode || 'AED',
+        toCurrency:      t.toCurrencyCode   || 'AED',
+        fromAsset,
+        toAsset,
+        clearingAccount: clearingAcct,
+        fromBankName:    t.fromBankAccountName || '',
+        toBankName:      t.toBankAccountName   || '',
+        bu:              t.businessUnit || '',
+        drAccount:       toAsset,
+        crAccount:       fromAsset,
         status, message: msg,
       };
     });
@@ -2641,7 +2655,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
                 </Button>,
               ]
         }
-        width={920}
+        width={780}
         destroyOnClose
       >
         {acctProgress.length > 0 && (() => {
@@ -2653,35 +2667,68 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
             </div>
           );
         })()}
-        <Table<TransferAcctRow>
-          dataSource={acctProgress}
-          rowKey="transferId"
-          size="small"
-          pagination={false}
-          columns={[
-            { title: 'Transfer ID', dataIndex: 'transferId', width: 100,
-              render: v => <Text style={{ fontSize: 12 }}>{v}</Text> },
-            { title: 'Date', dataIndex: 'txnDate', width: 100,
-              render: v => <Text style={{ fontSize: 11 }}>{v}</Text> },
-            { title: 'Amount', dataIndex: 'amount', width: 120, align: 'right' as const,
-              render: (v, r) => <Text style={{ fontSize: 12, fontWeight: 600 }}>{fmtAmount(v, r.currency)}</Text> },
-            { title: 'DR Account (To Bank)', dataIndex: 'drAccount',
-              render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.primary }}>{v || '—'}</Text> },
-            { title: 'CR Account (From Bank)', dataIndex: 'crAccount',
-              render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.success }}>{v || '—'}</Text> },
-            { title: 'Status', dataIndex: 'status', width: 150,
-              render: (v, r) => {
-                if (v === 'pending') return <Tag color="default" style={{ fontSize: 11 }}>Pending</Tag>;
-                if (v === 'running') return <Tag icon={<SyncOutlined spin />} color="processing" style={{ fontSize: 11 }}>Running</Tag>;
-                if (v === 'success') return <><Tag color="success" style={{ fontSize: 11 }}>Done</Tag>
-                  {r.message && <div style={{ fontSize: 10, color: REDWOOD.success, marginTop: 2 }}>{r.message}</div>}</>;
-                if (v === 'error')   return <><Tag color="error" style={{ fontSize: 11 }}>Error</Tag>
-                  {r.message && <div style={{ fontSize: 10, color: REDWOOD.primary, marginTop: 2 }}>{r.message}</div>}</>;
-                if (v === 'skipped') return <Tag color="warning" style={{ fontSize: 11 }}>Already Posted</Tag>;
-                return null;
-              }},
-          ]}
-        />
+        {acctProgress.map(r => {
+          const rate    = transfers.find(t => t.bankAccountTransferId === r.transferId)?.conversionRate || 1;
+          const j1Rate  = r.fromCurrency === 'AED' ? 1 : rate;
+          const j2Rate  = r.toCurrency   === 'AED' ? 1 : rate;
+          const toAmt   = r.toCurrency === r.fromCurrency ? r.amount : Math.round(r.amount * j1Rate * 100) / 100;
+          const statusEl = (() => {
+            if (r.status === 'pending') return <Tag color="default">Pending</Tag>;
+            if (r.status === 'running') return <Tag icon={<SyncOutlined spin />} color="processing">Running…</Tag>;
+            if (r.status === 'success') return <Tag color="success">Done</Tag>;
+            if (r.status === 'error')   return <Tag color="error">Error</Tag>;
+            if (r.status === 'skipped') return <Tag color="warning">Already Posted</Tag>;
+            return null;
+          })();
+          const acctLine = (dr: boolean, account: string, bankName: string, amount: number, ccy: string, accounted: number) => (
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '5px 0', borderBottom: '1px solid #f0f0f0' }}>
+              <Tag color={dr ? 'blue' : 'orange'} style={{ minWidth: 32, textAlign: 'center', margin: 0 }}>{dr ? 'DR' : 'CR'}</Tag>
+              <div style={{ flex: 1 }}>
+                <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{account || '—'}</Text>
+                {bankName && <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{bankName}</div>}
+              </div>
+              <div style={{ textAlign: 'right', minWidth: 140 }}>
+                <Text style={{ fontWeight: 600, fontSize: 12 }}>{fmtAmount(amount, ccy)}</Text>
+                {ccy !== 'AED' && <div style={{ fontSize: 11, color: REDWOOD.info }}>{fmtAmount(accounted, 'AED')}</div>}
+              </div>
+            </div>
+          );
+          return (
+            <div key={r.transferId} style={{ border: '1px solid #e5e5e5', borderRadius: 8, marginBottom: 16, overflow: 'hidden' }}>
+              {/* Header row */}
+              <div style={{ background: '#fafafa', padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 16, borderBottom: '1px solid #e5e5e5' }}>
+                <Text style={{ fontWeight: 600, fontSize: 13 }}>Transfer #{r.transferId}</Text>
+                <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>{r.txnDate}</Text>
+                <Text style={{ fontWeight: 600, fontSize: 12 }}>{fmtAmount(r.amount, r.fromCurrency)}</Text>
+                <Tag color="blue" style={{ fontSize: 11, margin: 0 }}>{r.periodName}</Tag>
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {statusEl}
+                  {r.message && <Text style={{ fontSize: 11, color: r.status === 'error' ? REDWOOD.error : REDWOOD.neutral600 }}>{r.message}</Text>}
+                </div>
+              </div>
+              {r.status !== 'skipped' && r.status !== 'error' && (
+                <div style={{ padding: '10px 14px' }}>
+                  {/* Journal 1 */}
+                  <div style={{ marginBottom: 12 }}>
+                    <Text style={{ fontSize: 11, fontWeight: 600, color: REDWOOD.info, display: 'block', marginBottom: 4 }}>
+                      Journal 1 — Disbursement ({r.fromCurrency})
+                    </Text>
+                    {acctLine(true,  r.clearingAccount, 'Cash Clearing Account',  r.amount, r.fromCurrency, Math.round(r.amount * j1Rate * 100) / 100)}
+                    {acctLine(false, r.fromAsset,       r.fromBankName,           r.amount, r.fromCurrency, Math.round(r.amount * j1Rate * 100) / 100)}
+                  </div>
+                  {/* Journal 2 */}
+                  <div>
+                    <Text style={{ fontSize: 11, fontWeight: 600, color: REDWOOD.success, display: 'block', marginBottom: 4 }}>
+                      Journal 2 — Receipt ({r.toCurrency})
+                    </Text>
+                    {acctLine(true,  r.toAsset,         r.toBankName,             toAmt, r.toCurrency, Math.round(toAmt * j2Rate * 100) / 100)}
+                    {acctLine(false, r.clearingAccount, 'Cash Clearing Account',  toAmt, r.toCurrency, Math.round(toAmt * j2Rate * 100) / 100)}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
         {acctDone && (
           <Alert
             type={acctProgress.some(r => r.status === 'error') ? 'warning' : 'success'}
