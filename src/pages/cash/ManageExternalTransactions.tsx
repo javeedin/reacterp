@@ -11,7 +11,8 @@ import {
   EditOutlined, CloseOutlined, DollarOutlined, ApiOutlined, FileTextOutlined,
   SwapOutlined, DownloadOutlined, CheckCircleOutlined, SyncOutlined,
   AccountBookOutlined, EyeOutlined, UploadOutlined, PaperClipOutlined, DeleteOutlined,
-  LockOutlined, PrinterOutlined, FilePdfOutlined,
+  LockOutlined, PrinterOutlined, FilePdfOutlined, QuestionCircleOutlined,
+  ArrowUpOutlined, ArrowDownOutlined,
 } from '@ant-design/icons';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -329,7 +330,7 @@ const ExternalTxnForm: React.FC<{
   const buildPayload = (values: any) => ({
     items: [{
       ExternalTransactionId: initialValues?.externalTransactionId ?? undefined,
-      TransactionId:         initialValues?.transactionId ?? undefined,
+      TransactionId:         initialValues?.transactionId ?? values.transactionId ?? undefined,
       BankAccountName:       values.bankAccountName,
       BusinessUnitName:      values.businessUnitName ?? '',
       Amount:                values.amount,
@@ -950,6 +951,33 @@ const ExternalTxnForm: React.FC<{
               <div className="ext-lbl">Value Date</div>
               <div className="ext-val">
                 <Form.Item name="valueDate">
+                  <DatePicker format="D-MMM-YYYY" variant="borderless" disabled={isEdit || !bankSelected || saved} style={{ width: '100%' }} />
+                </Form.Item>
+              </div>
+            </div>
+
+            {/* Oracle Txn # | Cleared Date */}
+            <div className="ext-row">
+              <div className="ext-lbl">
+                Oracle Txn #
+                <Tooltip title="Oracle Fusion Cash Management transaction number"><QuestionCircleOutlined style={{ marginLeft: 4, color: REDWOOD.neutral600, fontSize: 11 }} /></Tooltip>
+              </div>
+              <div className="ext-val">
+                {isEdit
+                  ? <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.info }}>{initialValues?.transactionId || '—'}</Text>
+                  : (
+                    <Form.Item name="transactionId" style={{ marginBottom: 0, width: '100%' }}>
+                      <InputNumber
+                        variant="borderless" style={{ width: '100%' }} placeholder="Oracle Fusion txn number (optional)"
+                        disabled={!bankSelected || saved}
+                      />
+                    </Form.Item>
+                  )
+                }
+              </div>
+              <div className="ext-lbl">Cleared Date</div>
+              <div className="ext-val">
+                <Form.Item name="clearedDate">
                   <DatePicker format="D-MMM-YYYY" variant="borderless" disabled={isEdit || !bankSelected || saved} style={{ width: '100%' }} />
                 </Form.Item>
               </div>
@@ -2649,12 +2677,24 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Date', dataIndex: 'transactionDate', width: 105, render: fmtDate },
     {
-      title: 'Amount', dataIndex: 'amount', width: 130, align: 'right',
-      render: (v, r) => (
-        <Text style={{ fontSize: 12, color: v < 0 ? REDWOOD.error : REDWOOD.success }}>
-          {fmtAmount(v, r.currencyCode)}
-        </Text>
-      ),
+      title: 'Amount', dataIndex: 'amount', width: 150, align: 'right',
+      render: (v, r) => {
+        const isOut = v < 0 || r.transactionDirection === 'CR';
+        return (
+          <Space size={4} style={{ justifyContent: 'flex-end' }}>
+            <Text style={{ fontSize: 12, color: isOut ? REDWOOD.error : REDWOOD.success, fontWeight: 500 }}>
+              {fmtAmount(Math.abs(v), r.currencyCode)}
+            </Text>
+            <Tag
+              color={isOut ? 'red' : 'green'}
+              icon={isOut ? <ArrowDownOutlined /> : <ArrowUpOutlined />}
+              style={{ fontSize: 10, margin: 0, padding: '0 4px' }}
+            >
+              {isOut ? 'Out' : 'In'}
+            </Tag>
+          </Space>
+        );
+      },
     },
     { title: 'Reference', dataIndex: 'referenceText', ellipsis: true, width: 140,
       render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
