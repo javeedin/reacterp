@@ -650,10 +650,10 @@ const TransferForm: React.FC<{
           )}
         </Row>
 
+        {/* From / To accounts — full width so names aren't truncated */}
         <Row gutter={40}>
-          {/* Left column */}
-          <Col xs={24} lg={12}>
-            <Form.Item label="From Account" style={{ marginBottom: 4 }}>
+          <Col xs={24}>
+            <Form.Item label="From Account" labelCol={{ span: 4 }} wrapperCol={{ span: 20 }} style={{ marginBottom: 4 }}>
               <div style={{ display: 'flex', gap: 0 }}>
                 <Form.Item name="fromBankAccountName" noStyle rules={[{ required: true, message: 'From Account is required' }]}>
                   <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={filteredBankAccounts}
@@ -676,7 +676,7 @@ const TransferForm: React.FC<{
               )}
             </Form.Item>
 
-            <Form.Item label="To Account" style={{ marginBottom: 4 }}>
+            <Form.Item label="To Account" labelCol={{ span: 4 }} wrapperCol={{ span: 20 }} style={{ marginBottom: 4 }}>
               <div style={{ display: 'flex', gap: 0 }}>
                 <Form.Item name="toBankAccountName" noStyle rules={[{ required: true, message: 'To Account is required' }]}>
                   <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={filteredBankAccounts}
@@ -701,6 +701,12 @@ const TransferForm: React.FC<{
               )}
             </Form.Item>
             <div style={{ marginBottom: 14 }} />
+          </Col>
+        </Row>
+
+        <Row gutter={40}>
+          {/* Left column */}
+          <Col xs={24} lg={12}>
 
             <Form.Item label="Payment Currency" name="paymentCurrencyCode" style={fs}>
               <Select placeholder="Select currency" allowClear disabled={isReadOnly || !buSelected}>
