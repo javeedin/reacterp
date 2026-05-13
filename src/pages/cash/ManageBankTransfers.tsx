@@ -931,14 +931,21 @@ const TransferForm: React.FC<{
               </Popconfirm>
             )}
             <Button onClick={onCancel}>{isEdit ? 'Close' : 'Cancel'}</Button>
-            <Button
-              icon={<AccountBookOutlined />}
-              onClick={() => setPreviewAcctOpen(true)}
-              disabled={!selectedFromAcct || !selectedToAcct || !cashClearingAcct}
-              style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
-            >
-              Preview Accounting
-            </Button>
+            <Tooltip title={
+              !isEdit ? 'Save the transfer first before creating accounting' :
+              isAccounted ? 'Accounting has already been created for this transfer' :
+              !cashClearingAcct ? 'Select a cash clearing account first' :
+              (!selectedFromAcct || !selectedToAcct) ? 'Select both bank accounts first' : undefined
+            }>
+              <Button
+                icon={<AccountBookOutlined />}
+                onClick={() => setPreviewAcctOpen(true)}
+                disabled={!isEdit || isAccounted || !selectedFromAcct || !selectedToAcct || !cashClearingAcct}
+                style={{ color: (!isEdit || isAccounted) ? undefined : REDWOOD.info, borderColor: (!isEdit || isAccounted) ? undefined : REDWOOD.info }}
+              >
+                {isAccounted ? 'Accounted' : 'Preview Accounting'}
+              </Button>
+            </Tooltip>
             {!isEdit && (
               <Button type="primary" loading={saving} onClick={handleSubmit}
                 style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
@@ -1471,7 +1478,7 @@ END;
           <Space>
             <Button onClick={() => setPreviewAcctOpen(false)}>Close</Button>
             <Button type="primary" loading={acctCreating}
-              disabled={!cashClearingAcct || !selectedFromAcct || !selectedToAcct}
+              disabled={isAccounted || !cashClearingAcct || !selectedFromAcct || !selectedToAcct}
               style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
               onClick={async () => {
                 const values = form.getFieldsValue();
