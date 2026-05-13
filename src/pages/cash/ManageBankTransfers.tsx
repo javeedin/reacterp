@@ -2308,9 +2308,27 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
                   setViewAcctLoading(true);
                   setViewAcctOpen(true);
                   try {
-                    const { getAccountingLinesBySourceId } = await import('../../services/sla.service');
-                    const result = await getAccountingLinesBySourceId(record.bankAccountTransferId, 'BANK_ACCOUNT_TRANSFERS', 'CM');
-                    setViewAcctLines(result.items ?? []);
+                    const { getLinesByHeaderId } = await import('../../services/sla.service');
+                    // Step 1: get all headers for this transfer (exact sourceTable, sourceNumber)
+                    const hdrsUrl = `${APEX_BASE}/sla/journals?sourceTable=BANK_ACCOUNT_TRANSFERS&sourceNumber=${encodeURIComponent(String(record.bankAccountTransferNumber))}&moduleName=CM&limit=20`;
+                    const hdrsRes = await fetch(hdrsUrl);
+                    const hdrsData = hdrsRes.ok ? await hdrsRes.json() : { items: [] };
+                    const headers = (hdrsData.items ?? []).filter(
+                      (h: any) => String(h.sourceNumber) === String(record.bankAccountTransferNumber)
+                    );
+                    // Step 2: fetch lines for each header individually
+                    const allLines: any[] = [];
+                    for (const hdr of headers) {
+                      const linesResult = await getLinesByHeaderId(hdr.headerId);
+                      (linesResult.items ?? []).forEach((l: any) => allLines.push({
+                        ...l,
+                        headerId: hdr.headerId,
+                        eventTypeCode: hdr.eventTypeCode,
+                        periodName: hdr.periodName,
+                        currencyCode: l.currencyCode || hdr.currencyCode,
+                      }));
+                    }
+                    setViewAcctLines(allLines);
                   } catch { setViewAcctLines([]); }
                   finally { setViewAcctLoading(false); }
                 }} />
@@ -2691,17 +2709,22 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
           <Empty description="No accounting lines found" />
         ) : (
           <>
-            {[...new Set(viewAcctLines.map((l: any) => l.headerId ?? l.header_id))].map(hid => {
-              const lines = viewAcctLines.filter((l: any) => (l.headerId ?? l.header_id) === hid);
+            {[...new Set(viewAcctLines.map((l: any) => l.headerId))].map((hid, idx) => {
+              const lines = viewAcctLines.filter((l: any) => l.headerId === hid);
               const first = lines[0] ?? {};
-              const eventType = first.eventTypeCode ?? first.event_type_code ?? '';
-              const label = eventType.includes('DISBURSE') ? 'Journal 1 — Disbursement' : eventType.includes('RECEIPT') ? 'Journal 2 — Receipt' : `Journal — Header ${hid}`;
+              const eventType = first.eventTypeCode ?? '';
+              const label = eventType.includes('DISBURSE')
+                ? 'Journal 1 — Disbursement (DR Clearing / CR From Bank)'
+                : eventType.includes('RECEIPT')
+                ? 'Journal 2 — Receipt (DR To Bank / CR Clearing)'
+                : `Journal ${idx + 1} — Header ${hid}`;
+              const ccy = first.currencyCode ?? '';
               return (
-                <div key={String(hid)} style={{ marginBottom: 20 }}>
-                  <div style={{ background: '#f0f5ff', padding: '6px 12px', borderRadius: '6px 6px 0 0', fontWeight: 600, fontSize: 12 }}>
-                    {label}
-                    <span style={{ marginLeft: 12, fontWeight: 400, color: REDWOOD.neutral600 }}>
-                      {first.periodName ?? first.period_name} · {first.currencyCode ?? first.currency_code}
+                <div key={String(hid)} style={{ marginBottom: 24 }}>
+                  <div style={{ background: '#f0f5ff', padding: '8px 12px', borderRadius: '6px 6px 0 0', fontWeight: 600, fontSize: 12, display: 'flex', justifyContent: 'space-between' }}>
+                    <span>{label}</span>
+                    <span style={{ fontWeight: 400, color: REDWOOD.neutral600 }}>
+                      {first.periodName} {ccy && <Tag style={{ margin: 0, fontSize: 11 }}>{ccy}</Tag>}
                     </span>
                   </div>
                   <Table
@@ -2709,31 +2732,49 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
                     pagination={false}
                     dataSource={lines.map((l: any, i: number) => ({ ...l, key: i }))}
                     columns={[
-                      { title: 'Line', dataIndex: 'lineNumber', key: 'ln', width: 50, render: (v: any, _: any, i: number) => v ?? i + 1 },
-                      { title: 'Dr/Cr', key: 'drCr', width: 60, render: (_: any, l: any) =>
-                          (l.enteredDr ?? l.entered_dr) > 0
-                            ? <Tag color="blue">DR</Tag>
-                            : <Tag color="orange">CR</Tag> },
-                      { title: 'Account', key: 'acct', width: 180, render: (_: any, l: any) =>
-                          <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{l.accountCombination ?? l.account_combination ?? '—'}</Text> },
-                      { title: 'Description', key: 'desc', render: (_: any, l: any) =>
+                      { title: '#', dataIndex: 'lineNumber', key: 'ln', width: 40,
+                        render: (v: any, _: any, i: number) => v ?? i + 1 },
+                      { title: 'Dr/Cr', key: 'drCr', width: 55,
+                        render: (_: any, l: any) =>
+                          (l.enteredDr ?? 0) > 0
+                            ? <Tag color="blue" style={{ margin: 0 }}>DR</Tag>
+                            : <Tag color="orange" style={{ margin: 0 }}>CR</Tag> },
+                      { title: 'Account', key: 'acct', width: 200,
+                        render: (_: any, l: any) => (
+                          <div>
+                            <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>
+                              {l.accountCombination ?? '—'}
+                            </Text>
+                            {(l.accountDescription) && (
+                              <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 1 }}>
+                                {l.accountDescription}
+                              </div>
+                            )}
+                          </div>
+                        )},
+                      { title: 'Line Description', key: 'desc',
+                        render: (_: any, l: any) =>
                           <Text style={{ fontSize: 12 }}>{l.description ?? '—'}</Text> },
-                      { title: 'Entered Dr', key: 'eDr', width: 110, align: 'right' as const, render: (_: any, l: any) => {
-                          const v = l.enteredDr ?? l.entered_dr;
-                          return v > 0 ? <Text style={{ fontWeight: 500 }}>{fmtAmount(v, l.currencyCode ?? l.currency_code)}</Text> : <Text type="secondary">—</Text>;
-                      }},
-                      { title: 'Entered Cr', key: 'eCr', width: 110, align: 'right' as const, render: (_: any, l: any) => {
-                          const v = l.enteredCr ?? l.entered_cr;
-                          return v > 0 ? <Text style={{ fontWeight: 500 }}>{fmtAmount(v, l.currencyCode ?? l.currency_code)}</Text> : <Text type="secondary">—</Text>;
-                      }},
-                      { title: 'Accounted Dr', key: 'aDr', width: 120, align: 'right' as const, render: (_: any, l: any) => {
-                          const v = l.accountedDr ?? l.accounted_dr;
-                          return v > 0 ? <Text style={{ color: REDWOOD.info }}>{fmtAmount(v, 'AED')}</Text> : <Text type="secondary">—</Text>;
-                      }},
-                      { title: 'Accounted Cr', key: 'aCr', width: 120, align: 'right' as const, render: (_: any, l: any) => {
-                          const v = l.accountedCr ?? l.accounted_cr;
-                          return v > 0 ? <Text style={{ color: REDWOOD.info }}>{fmtAmount(v, 'AED')}</Text> : <Text type="secondary">—</Text>;
-                      }},
+                      { title: 'Entered Dr', key: 'eDr', width: 120, align: 'right' as const,
+                        render: (_: any, l: any) => {
+                          const v = l.enteredDr ?? 0;
+                          return v > 0 ? <Text style={{ fontWeight: 600 }}>{fmtAmount(v, l.currencyCode)}</Text> : <Text type="secondary">—</Text>;
+                        }},
+                      { title: 'Entered Cr', key: 'eCr', width: 120, align: 'right' as const,
+                        render: (_: any, l: any) => {
+                          const v = l.enteredCr ?? 0;
+                          return v > 0 ? <Text style={{ fontWeight: 600 }}>{fmtAmount(v, l.currencyCode)}</Text> : <Text type="secondary">—</Text>;
+                        }},
+                      { title: 'Accounted Dr', key: 'aDr', width: 120, align: 'right' as const,
+                        render: (_: any, l: any) => {
+                          const v = l.accountedDr ?? 0;
+                          return v > 0 ? <Text style={{ color: REDWOOD.info, fontWeight: 500 }}>{fmtAmount(v, 'AED')}</Text> : <Text type="secondary">—</Text>;
+                        }},
+                      { title: 'Accounted Cr', key: 'aCr', width: 120, align: 'right' as const,
+                        render: (_: any, l: any) => {
+                          const v = l.accountedCr ?? 0;
+                          return v > 0 ? <Text style={{ color: REDWOOD.info, fontWeight: 500 }}>{fmtAmount(v, 'AED')}</Text> : <Text type="secondary">—</Text>;
+                        }},
                     ]}
                     style={{ borderRadius: '0 0 6px 6px', overflow: 'hidden' }}
                   />
