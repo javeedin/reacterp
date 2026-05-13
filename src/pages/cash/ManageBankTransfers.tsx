@@ -853,7 +853,7 @@ const TransferForm: React.FC<{
             )}
           </Space>
           <Space>
-            {isEdit && (
+            {isEdit && !isAccounted && (
               <Popconfirm
                 title="Delete this transfer?"
                 description="This action cannot be undone."
