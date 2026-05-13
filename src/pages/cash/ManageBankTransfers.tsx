@@ -227,9 +227,10 @@ const TransferForm: React.FC<{
   bankCurrencyMap: Record<string, string>;
   buBankMap: Record<string, string[]>;
   bankAccountAssetMap: Record<string, string>;
+  buCompanyMap: Record<string, string>;
   onSave: () => void;
   onCancel: () => void;
-}> = ({ initialValues, bankAccounts, businessUnits, bankCurrencyMap, buBankMap, bankAccountAssetMap, onSave, onCancel }) => {
+}> = ({ initialValues, bankAccounts, businessUnits, bankCurrencyMap, buBankMap, bankAccountAssetMap, buCompanyMap, onSave, onCancel }) => {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -251,6 +252,7 @@ const TransferForm: React.FC<{
   const [fromCurrency, setFromCurrency] = useState<string>(initialValues?.fromCurrencyCode ?? '');
   const [toCurrency, setToCurrency] = useState<string>(initialValues?.toCurrencyCode ?? '');
   const [cashClearingAcct, setCashClearingAcct] = useState<string>(initialValues?.cashClearingAccount ?? '');
+  const [cashClearingDesc, setCashClearingDesc] = useState<string>('');
   const [cashClearingOpen, setCashClearingOpen] = useState(false);
   const [previewAcctOpen, setPreviewAcctOpen]   = useState(false);
   const [acctCreating,    setAcctCreating]      = useState(false);
@@ -387,6 +389,7 @@ const TransferForm: React.FC<{
       PaymentProfileName:        values.paymentProfileName ?? '',
       Businessunit:              values.businessUnit ?? '',
       IsSettledWithIbyFlag:      values.isSettledWithIbyFlag ? 'true' : 'false',
+      CashClearingAccount:       cashClearingAcct || null,
       CreatedBy:                 'ERP_USER',
       CreationDate:              new Date().toISOString(),
       LastUpdatedBy:             'ERP_USER',
@@ -583,6 +586,7 @@ const TransferForm: React.FC<{
     initialValues?.businessUnit ?? undefined
   );
   const buSelected = !!selectedBu;
+  const derivedCompany = selectedBu ? (buCompanyMap[selectedBu] || '') : '';
   const [selectedFromAcct, setSelectedFromAcct] = useState<string>(initialValues?.fromBankAccountName ?? '');
   const [selectedToAcct,   setSelectedToAcct]   = useState<string>(initialValues?.toBankAccountName   ?? '');
 
@@ -742,6 +746,11 @@ const TransferForm: React.FC<{
                   style={{ borderLeft: 0 }}
                 />
               </Input.Group>
+              {cashClearingDesc && (
+                <div style={{ marginTop: 2, fontSize: 11, color: REDWOOD.neutral600, paddingLeft: 2 }}>
+                  {cashClearingDesc}
+                </div>
+              )}
             </Form.Item>
             <div style={{ marginBottom: 14 }} />
           </Col>
@@ -1443,8 +1452,11 @@ END;
         visible={cashClearingOpen}
         onCancel={() => setCashClearingOpen(false)}
         initialValue={cashClearingAcct}
-        onSelect={(code: string) => {
+        lockedFirstSegment={derivedCompany || undefined}
+        onSelect={(code: string, segments: Record<string, { value: string; description: string; name?: string }>) => {
           setCashClearingAcct(code);
+          const desc = Object.values(segments).map(s => s.description).filter(Boolean).join(' | ');
+          setCashClearingDesc(desc);
           setCashClearingOpen(false);
         }}
       />
@@ -1748,6 +1760,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
   const [bankCurrencyMap, setBankCurrencyMap] = useState<Record<string, string>>({});
   const [buBankMap, setBuBankMap]             = useState<Record<string, string[]>>({});
   const [bankAccountAssetMap, setBankAccountAssetMap] = useState<Record<string, string>>({});
+  const [buCompanyMap, setBuCompanyMap]               = useState<Record<string, string>>({});
   const [activeTab, setActiveTab]         = useState('search');
   const [editTabs, setEditTabs]           = useState<TabItem[]>([]);
   const [showApiModal, setShowApiModal]   = useState(false);
@@ -1770,6 +1783,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
     const buBankMapLocal: Record<string, string[]> = {};
     const currMapLocal: Record<string, string> = {};
     const assetMapLocal: Record<string, string> = {};
+    const companyMapLocal: Record<string, string> = {};
     const acctSet = new Set<string>();
     const buSet   = new Set<string>();
 
@@ -1779,8 +1793,9 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       const data = await res.json();
       console.log('[ManageBankTransfers] gl/businessunits response:', data);
       (data.items ?? []).forEach((b: any) => {
-        const name = b.business_unit_name || b.businessUnitName || b.BUSINESS_UNIT_NAME;
-        if (name) buSet.add(name);
+        const name    = b.business_unit_name || b.businessUnitName || b.BUSINESS_UNIT_NAME;
+        const company = b.company || b.COMPANY || '';
+        if (name) { buSet.add(name); if (company) companyMapLocal[name] = company; }
       });
     } catch (e) { console.error('[ManageBankTransfers] gl/businessunits failed:', e); }
 
@@ -1831,6 +1846,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
     setBuBankMap(buBankMapLocal);
     setBankAccountAssetMap(assetMapLocal);
     setBankCurrencyMap(currMapLocal);
+    setBuCompanyMap(companyMapLocal);
     setBusinessUnits([...buSet].sort().map(n => ({ label: n, value: n })));
   }, []);
 
@@ -2518,6 +2534,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
           bankCurrencyMap={bankCurrencyMap}
           buBankMap={buBankMap}
           bankAccountAssetMap={bankAccountAssetMap}
+          buCompanyMap={buCompanyMap}
           onSave={handleSaved}
           onCancel={() => closeTab('create')}
         />
@@ -2540,6 +2557,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
           bankCurrencyMap={bankCurrencyMap}
           buBankMap={buBankMap}
           bankAccountAssetMap={bankAccountAssetMap}
+          buCompanyMap={buCompanyMap}
           onSave={handleEditSaved}
           onCancel={() => closeTab(t.key)}
         />
