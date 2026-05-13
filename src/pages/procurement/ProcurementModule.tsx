@@ -58,6 +58,7 @@ const procurementItems: MenuItemType[] = [
     label: 'On-Hand Inventory',
     description: 'View current on-hand stock levels by item and location',
     color: REDWOOD.success,
+    path: '/inventory/onhand',
   },
 ];
 
