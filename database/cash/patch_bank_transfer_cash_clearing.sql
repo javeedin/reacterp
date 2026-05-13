@@ -172,12 +172,174 @@ END;
 END;
 /
 
--- ── Step 3: Update MERGE procedure to store CashClearingAccount ──
--- In your RR_SYNC_BANK_ACCOUNT_TRANSFERS procedure (called by POST handler),
--- add to the JSON_TABLE columns list:
---
---   cash_clearing_account  VARCHAR2(240)  PATH '$.CashClearingAccount'
---
--- And in the MERGE UPDATE SET clause:
---
---   CASH_CLEARING_ACCOUNT = NVL(src.cash_clearing_account, tgt.CASH_CLEARING_ACCOUNT),
+-- ── Step 3: Rebuild MERGE procedure with all new columns ─────────────────────
+-- Replaces RR_SYNC_BANK_ACCOUNT_TRANSFERS to include:
+--   RECONCILED_FLAG, RECONCILED_DATE (from previous patch, docs-only before)
+--   CASH_CLEARING_ACCOUNT (new)
+CREATE OR REPLACE PROCEDURE RR_SYNC_BANK_ACCOUNT_TRANSFERS (
+    p_json    IN  CLOB,
+    p_count   OUT NUMBER,
+    p_error   OUT VARCHAR2,
+    p_last_id OUT NUMBER
+) AS
+    l_transfer_id NUMBER;
+BEGIN
+    p_count   := 0;
+    p_error   := NULL;
+    p_last_id := NULL;
+
+    FOR rec IN (
+        SELECT *
+        FROM JSON_TABLE(p_json, '$.items[*]'
+            COLUMNS (
+                bank_account_transfer_id     NUMBER          PATH '$.BankAccountTransferId',
+                bank_account_transfer_number NUMBER          PATH '$.BankAccountTransferNumber',
+                transaction_date             VARCHAR2(30)    PATH '$.TransactionDate',
+                memo                         VARCHAR2(1000)  PATH '$.Memo',
+                payment_request_id           NUMBER          PATH '$.PaymentRequestId',
+                payment_amount               NUMBER          PATH '$.PaymentAmount',
+                from_amount                  NUMBER          PATH '$.FromAmount',
+                from_external_trx_id         NUMBER          PATH '$.FromExternalTrxId',
+                to_external_trx_id           NUMBER          PATH '$.ToExternalTrxId',
+                conversion_rate              NUMBER          PATH '$.ConversionRate',
+                from_bank_account_name       VARCHAR2(360)   PATH '$.FromBankAccountName',
+                to_bank_account_name         VARCHAR2(360)   PATH '$.ToBankAccountName',
+                from_currency_code           VARCHAR2(15)    PATH '$.FromCurrencyCode',
+                to_currency_code             VARCHAR2(15)    PATH '$.ToCurrencyCode',
+                payment_currency_code        VARCHAR2(15)    PATH '$.PaymentCurrencyCode',
+                conversion_rate_type         VARCHAR2(60)    PATH '$.ConversionRateType',
+                status                       VARCHAR2(60)    PATH '$.Status',
+                payment_status               VARCHAR2(60)    PATH '$.PaymentStatus',
+                payment_method               VARCHAR2(60)    PATH '$.PaymentMethod',
+                payment_profile_name         VARCHAR2(100)   PATH '$.PaymentProfileName',
+                business_unit                VARCHAR2(360)   PATH '$.Businessunit',
+                payment_file                 NUMBER          PATH '$.PaymentFile',
+                is_settled_with_iby_flag     VARCHAR2(10)    PATH '$.IsSettledWithIbyFlag',
+                reconciled_flag              VARCHAR2(1)     PATH '$.ReconciledFlag',
+                reconciled_date              VARCHAR2(30)    PATH '$.ReconciledDate',
+                cash_clearing_account        VARCHAR2(240)   PATH '$.CashClearingAccount',
+                created_by                   VARCHAR2(150)   PATH '$.CreatedBy',
+                creation_date                TIMESTAMP       PATH '$.CreationDate',
+                last_updated_by              VARCHAR2(150)   PATH '$.LastUpdatedBy',
+                last_update_date             TIMESTAMP       PATH '$.LastUpdateDate',
+                last_update_login            VARCHAR2(100)   PATH '$.LastUpdateLogin'
+            )
+        )
+    ) LOOP
+        IF rec.bank_account_transfer_id IS NULL THEN
+            SELECT RR_BAT_MANUAL_SEQ.NEXTVAL INTO l_transfer_id FROM DUAL;
+        ELSE
+            l_transfer_id := rec.bank_account_transfer_id;
+        END IF;
+
+        MERGE INTO RR_BANK_ACCOUNT_TRANSFERS tgt
+        USING (
+            SELECT
+                l_transfer_id                    AS bank_account_transfer_id,
+                NVL(rec.bank_account_transfer_number, l_transfer_id) AS bank_account_transfer_number,
+                TO_DATE(rec.transaction_date, 'YYYY-MM-DD') AS transaction_date,
+                rec.memo                         AS memo,
+                rec.payment_request_id           AS payment_request_id,
+                rec.payment_amount               AS payment_amount,
+                rec.from_amount                  AS from_amount,
+                rec.from_external_trx_id         AS from_external_trx_id,
+                rec.to_external_trx_id           AS to_external_trx_id,
+                rec.conversion_rate              AS conversion_rate,
+                rec.from_bank_account_name       AS from_bank_account_name,
+                rec.to_bank_account_name         AS to_bank_account_name,
+                rec.from_currency_code           AS from_currency_code,
+                rec.to_currency_code             AS to_currency_code,
+                rec.payment_currency_code        AS payment_currency_code,
+                rec.conversion_rate_type         AS conversion_rate_type,
+                rec.status                       AS status,
+                rec.payment_status               AS payment_status,
+                rec.payment_method               AS payment_method,
+                rec.payment_profile_name         AS payment_profile_name,
+                rec.business_unit                AS business_unit,
+                rec.payment_file                 AS payment_file,
+                CASE WHEN LOWER(rec.is_settled_with_iby_flag) = 'true' THEN 'Y' ELSE 'N' END AS is_settled_with_iby_flag,
+                rec.reconciled_flag              AS reconciled_flag,
+                TO_DATE(rec.reconciled_date, 'YYYY-MM-DD') AS reconciled_date,
+                rec.cash_clearing_account        AS cash_clearing_account,
+                rec.created_by                   AS created_by,
+                rec.creation_date                AS creation_date,
+                rec.last_updated_by              AS last_updated_by,
+                rec.last_update_date             AS last_update_date,
+                rec.last_update_login            AS last_update_login
+            FROM DUAL
+        ) src
+        ON (tgt.BANK_ACCOUNT_TRANSFER_ID = src.bank_account_transfer_id)
+        WHEN MATCHED THEN
+            UPDATE SET
+                tgt.BANK_ACCOUNT_TRANSFER_NUMBER = src.bank_account_transfer_number,
+                tgt.TRANSACTION_DATE             = src.transaction_date,
+                tgt.MEMO                         = src.memo,
+                tgt.PAYMENT_REQUEST_ID           = src.payment_request_id,
+                tgt.PAYMENT_AMOUNT               = src.payment_amount,
+                tgt.FROM_AMOUNT                  = src.from_amount,
+                tgt.FROM_EXTERNAL_TRX_ID         = src.from_external_trx_id,
+                tgt.TO_EXTERNAL_TRX_ID           = src.to_external_trx_id,
+                tgt.CONVERSION_RATE              = src.conversion_rate,
+                tgt.FROM_BANK_ACCOUNT_NAME       = src.from_bank_account_name,
+                tgt.TO_BANK_ACCOUNT_NAME         = src.to_bank_account_name,
+                tgt.FROM_CURRENCY_CODE           = src.from_currency_code,
+                tgt.TO_CURRENCY_CODE             = src.to_currency_code,
+                tgt.PAYMENT_CURRENCY_CODE        = src.payment_currency_code,
+                tgt.CONVERSION_RATE_TYPE         = src.conversion_rate_type,
+                tgt.STATUS                       = src.status,
+                tgt.PAYMENT_STATUS               = src.payment_status,
+                tgt.PAYMENT_METHOD               = src.payment_method,
+                tgt.PAYMENT_PROFILE_NAME         = src.payment_profile_name,
+                tgt.BUSINESS_UNIT                = src.business_unit,
+                tgt.PAYMENT_FILE                 = src.payment_file,
+                tgt.IS_SETTLED_WITH_IBY_FLAG     = src.is_settled_with_iby_flag,
+                tgt.RECONCILED_FLAG              = NVL(src.reconciled_flag,       tgt.RECONCILED_FLAG),
+                tgt.RECONCILED_DATE              = NVL(src.reconciled_date,       tgt.RECONCILED_DATE),
+                tgt.CASH_CLEARING_ACCOUNT        = NVL(src.cash_clearing_account, tgt.CASH_CLEARING_ACCOUNT),
+                tgt.CREATED_BY                   = src.created_by,
+                tgt.CREATION_DATE                = src.creation_date,
+                tgt.LAST_UPDATED_BY              = src.last_updated_by,
+                tgt.LAST_UPDATE_DATE             = src.last_update_date,
+                tgt.LAST_UPDATE_LOGIN            = src.last_update_login,
+                tgt.SYNC_DATE                    = SYSTIMESTAMP
+        WHEN NOT MATCHED THEN
+            INSERT (
+                BANK_ACCOUNT_TRANSFER_ID, BANK_ACCOUNT_TRANSFER_NUMBER,
+                TRANSACTION_DATE, MEMO,
+                PAYMENT_REQUEST_ID, PAYMENT_AMOUNT, FROM_AMOUNT,
+                FROM_EXTERNAL_TRX_ID, TO_EXTERNAL_TRX_ID,
+                CONVERSION_RATE, FROM_BANK_ACCOUNT_NAME, TO_BANK_ACCOUNT_NAME,
+                FROM_CURRENCY_CODE, TO_CURRENCY_CODE, PAYMENT_CURRENCY_CODE,
+                CONVERSION_RATE_TYPE, STATUS, PAYMENT_STATUS, PAYMENT_METHOD,
+                PAYMENT_PROFILE_NAME, BUSINESS_UNIT, PAYMENT_FILE,
+                IS_SETTLED_WITH_IBY_FLAG,
+                RECONCILED_FLAG, RECONCILED_DATE, CASH_CLEARING_ACCOUNT,
+                CREATED_BY, CREATION_DATE, LAST_UPDATED_BY, LAST_UPDATE_DATE,
+                LAST_UPDATE_LOGIN, SYNC_DATE
+            ) VALUES (
+                src.bank_account_transfer_id, src.bank_account_transfer_number,
+                src.transaction_date, src.memo,
+                src.payment_request_id, src.payment_amount, src.from_amount,
+                src.from_external_trx_id, src.to_external_trx_id,
+                src.conversion_rate, src.from_bank_account_name, src.to_bank_account_name,
+                src.from_currency_code, src.to_currency_code, src.payment_currency_code,
+                src.conversion_rate_type, src.status, src.payment_status, src.payment_method,
+                src.payment_profile_name, src.business_unit, src.payment_file,
+                src.is_settled_with_iby_flag,
+                NVL(src.reconciled_flag, 'N'), src.reconciled_date, src.cash_clearing_account,
+                src.created_by, src.creation_date, src.last_updated_by, src.last_update_date,
+                src.last_update_login, SYSTIMESTAMP
+            );
+
+        p_count   := p_count + 1;
+        p_last_id := l_transfer_id;
+    END LOOP;
+
+    COMMIT;
+
+EXCEPTION
+    WHEN OTHERS THEN
+        p_error := SQLERRM;
+        ROLLBACK;
+END RR_SYNC_BANK_ACCOUNT_TRANSFERS;
+/
