@@ -1539,7 +1539,12 @@ END;
                   // Journal 2: DR To Bank / CR Cash Clearing (To currency)
                   const j2currency = toCurrency || 'AED';
                   const j2Rate     = j2currency === 'AED' ? 1 : (rate || 1);
-                  const toAmt      = j2currency === fromCurrency ? pmtAmt : Math.round(pmtAmt * j1Rate * 100) / 100;
+                  const isCross2   = j2currency !== j1currency;
+                  const toAmt      = !isCross2
+                    ? pmtAmt
+                    : j1currency !== 'AED'
+                      ? Math.round(pmtAmt * j1Rate * 100) / 100
+                      : rate > 0 ? Math.round((pmtAmt / rate) * 100) / 100 : pmtAmt;
                   await createAccounting({
                     header: {
                       moduleName: 'CM', sourceTable: 'BANK_ACCOUNT_TRANSFERS',
@@ -1591,7 +1596,12 @@ END;
           const j1Rate     = j1currency === 'AED' ? 1 : (rate || 1);
           const j2currency = toCurrency || 'AED';
           const j2Rate     = j2currency === 'AED' ? 1 : (rate || 1);
-          const toAmt      = j2currency === fromCurrency ? pmtAmt : Math.round(pmtAmt * j1Rate * 100) / 100;
+          const isCross    = j1currency !== j2currency;
+          const toAmt      = !isCross
+            ? pmtAmt
+            : j1currency !== 'AED'
+              ? Math.round(pmtAmt * j1Rate * 100) / 100
+              : rate > 0 ? Math.round((pmtAmt / rate) * 100) / 100 : pmtAmt;
           const fromAsset  = bankAccountAssetMap[selectedFromAcct] || '—';
           const toAsset    = bankAccountAssetMap[selectedToAcct]   || '—';
           const clearing   = cashClearingAcct || '—';
@@ -2062,11 +2072,28 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
         const clearingAcct = txn.cashClearingAccount || '';
         const pmtAmt       = Math.abs(txn.paymentAmount ?? 0);
         const rate         = txn.conversionRate || 1;
-        const j1currency   = txn.fromCurrencyCode || 'AED';
-        const j1Rate       = j1currency === 'AED' ? 1 : rate;
-        const j2currency   = txn.toCurrencyCode   || 'AED';
-        const j2Rate       = j2currency === 'AED' ? 1 : rate;
-        const toAmt        = j2currency === j1currency ? pmtAmt : Math.round(pmtAmt * j1Rate * 100) / 100;
+
+        // Resolve currencies — DB fields may be NULL for synced transfers, fall back to bankCurrencyMap
+        const j1currency = txn.fromCurrencyCode || bankCurrencyMap[txn.fromBankAccountName] || 'AED';
+        const j2currency = txn.toCurrencyCode   || bankCurrencyMap[txn.toBankAccountName]   || 'AED';
+        const isCross    = j1currency !== j2currency;
+
+        // Exchange rates: the stored conversionRate is always "foreign units per 1 AED" direction
+        // if j1 is functional (AED), rate applies to j2; otherwise rate applies to j1.
+        const j1Rate = j1currency === 'AED' ? 1 : rate;
+        const j2Rate = j2currency === 'AED' ? 1 : rate;
+
+        // toAmt = amount the TO bank receives in its own currency
+        // When j1 is foreign and j2 is AED: toAmt = pmtAmt (foreign) × rate = AED equivalent
+        // When j1 is AED and j2 is foreign: toAmt = pmtAmt (AED) ÷ rate  (guard divide-by-zero)
+        // When same currency: toAmt = pmtAmt
+        const toAmt = !isCross
+          ? pmtAmt
+          : j1currency !== 'AED'
+            ? Math.round(pmtAmt * j1Rate * 100) / 100
+            : rate > 0
+              ? Math.round((pmtAmt / rate) * 100) / 100
+              : pmtAmt;
 
         const postGlAndSla = async (
           slaPayload: Parameters<typeof createAccounting>[0],
