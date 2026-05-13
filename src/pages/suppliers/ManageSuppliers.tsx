@@ -424,7 +424,9 @@ const SupplierDetailPage: React.FC<{ supplier: RawSupplier; onClose?: () => void
           />
         </Card>
 
-      </div>
+          </div>
+        </>
+      )}
     </div>
   );
 };
