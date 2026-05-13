@@ -1100,7 +1100,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
               bankAccountName: i.fromBankAccountName ?? '',
               source:         'BANK_TRANSFER',
               txnStatus:      i.status ?? '',
-              reconciledFlag: i.paymentStatus === 'Reconciled' || i.paymentStatus === 'RECONCILED' ? 'Y' : 'N',
+              reconciledFlag: i.reconciledFlag ?? (i.paymentStatus === 'Reconciled' || i.paymentStatus === 'RECONCILED' ? 'Y' : 'N'),
               reference:      String(i.bankAccountTransferNumber ?? ''),
               payee:          i.toBankAccountName ?? '',
             })) as SysTxn[];
