@@ -102,7 +102,44 @@ interface POLine {
   links?: Array<{ rel: string; href: string; name: string; kind: string }>;
 }
 
-interface SearchParams {
+interface POSchedule {
+  _lineNumber: number;
+  _lineItem?: string;
+  _lineDescription?: string;
+  ShipmentNumber?: number;
+  LineLocationId?: number;
+  ShipToLocationId?: number;
+  ShipToLocationCode?: string;
+  ShipToLocation?: string;
+  ShipToLocationAddress?: string;
+  DestinationType?: string;
+  DestinationTypeCode?: string;
+  UOM?: string;
+  Quantity?: number;
+  QuantityOrdered?: number;
+  QuantityReceived?: number;
+  QuantityBilled?: number;
+  NeedByDate?: string;
+  PromisedDate?: string;
+  ShipToOrganizationId?: number;
+  ShipToOrganizationCode?: string;
+  ShipToOrganizationName?: string;
+  MatchApprovalLevel?: string;
+  MatchApprovalLevelCode?: string;
+  InspectionRequired?: string;
+  ReceiptRequired?: string;
+  Amount?: number;
+  Price?: number;
+  BasePrice?: number;
+  StatusCode?: string;
+  Status?: string;
+  ClosedCode?: string;
+  ClosedReason?: string;
+  AccrualOnReceiptFlag?: string;
+  [key: string]: any;
+}
+
+
   orderNumber?: string;
   supplier?: string;
   statusCode?: string;
@@ -157,6 +194,13 @@ const PODetailPage: React.FC<{ po: RawPO; onClose?: () => void }> = ({ po, onClo
   const [apiTestLoading, setATL]    = useState(false);
   const [apiResult, setApiResult]   = useState<{ status: number; body: string } | null>(null);
 
+  const [linesSubTab, setLinesSubTab]         = useState<'lines' | 'schedules'>('lines');
+  const [schedules, setSchedules]             = useState<POSchedule[]>([]);
+  const [schLoading, setSchLoading]           = useState(false);
+  const [schError, setSchError]               = useState<string | null>(null);
+  const [schFetched, setSchFetched]           = useState(false);
+  const [schDetailRecord, setSchDetailRecord] = useState<POSchedule | null>(null);
+
   const doFetch = useCallback(async (url: string) => {
     setLL(true); setLE(null); setRawResp('');
     try {
@@ -172,6 +216,36 @@ const PODetailPage: React.FC<{ po: RawPO; onClose?: () => void }> = ({ po, onClo
       setLE(e.message);
     } finally { setLL(false); }
   }, []);
+
+  const fetchSchedules = useCallback(async (linesList: POLine[]) => {
+    if (linesList.length === 0) return;
+    setSchLoading(true); setSchError(null);
+    try {
+      const results = await Promise.allSettled(
+        linesList.map(async (line) => {
+          const schedLink = line.links?.find(l => l.name === 'schedules')?.href;
+          const base = schedLink ?? `${BASE_URL}/purchaseOrders/${po.POHeaderId}/child/lines/${line.LineNumber}/child/schedules`;
+          const url = base.includes('?') ? `${base}&limit=500` : `${base}?limit=500`;
+          const r = await fetch(url, { headers: { Authorization: AUTH_HEADER, Accept: 'application/json' } });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const d = await r.json();
+          const items: any[] = Array.isArray(d) ? d : (d.items ?? []);
+          return items.map(s => ({ ...s, _lineNumber: line.LineNumber, _lineItem: line.Item, _lineDescription: line.Description }));
+        })
+      );
+      const all: POSchedule[] = [];
+      const errors: string[] = [];
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled') all.push(...r.value);
+        else errors.push(`Line ${linesList[i].LineNumber}: ${(r as any).reason?.message ?? 'failed'}`);
+      });
+      setSchedules(all);
+      setSchFetched(true);
+      if (errors.length > 0) setSchError(errors.join(' | '));
+    } catch (e: any) {
+      setSchError(e.message);
+    } finally { setSchLoading(false); }
+  }, [po.POHeaderId]);
 
   useEffect(() => {
     const linesLink = po.links?.find(l => l.name === 'lines');
@@ -385,6 +459,53 @@ ${po.NoteToSupplier ? `<div class="sec">Notes</div><div class="fv">${po.NoteToSu
     { title: 'Need-By', dataIndex: 'NeedByDate', width: 110, render: d => fmtDate(d) },
   ];
 
+  const scheduleColumns: ColumnsType<POSchedule> = [
+    { title: 'Line', dataIndex: '_lineNumber', width: 55, fixed: 'left', align: 'center',
+      render: v => <Tag color="blue" style={{ fontSize: 11 }}>{v}</Tag> },
+    { title: 'Sched #', dataIndex: 'ShipmentNumber', width: 72, align: 'center',
+      render: v => <Text style={{ fontSize: 12, fontWeight: 600 }}>{v ?? '—'}</Text> },
+    { title: 'Item', dataIndex: '_lineItem', width: 120,
+      render: v => <Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.info }}>{v ?? '—'}</Text> },
+    { title: 'Description', dataIndex: '_lineDescription', ellipsis: true,
+      render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Ship To Location', dataIndex: 'ShipToLocationCode', width: 145,
+      render: (v, rec) => (
+        <Tooltip title={rec.ShipToLocation ?? rec.ShipToLocationAddress ?? ''}>
+          <Text style={{ fontSize: 12, color: REDWOOD.info, cursor: 'help' }}>{v ?? rec.ShipToLocation ?? '—'}</Text>
+        </Tooltip>
+      ) },
+    { title: 'Destination Type', dataIndex: 'DestinationType', width: 130,
+      render: (v, rec) => <Tag style={{ fontSize: 11 }}>{v ?? rec.DestinationTypeCode ?? '—'}</Tag> },
+    { title: 'Ship To Org', dataIndex: 'ShipToOrganizationName', width: 165, ellipsis: true,
+      render: (v, rec) => (
+        <div>
+          <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text>
+          {rec.ShipToOrganizationCode && (
+            <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{rec.ShipToOrganizationCode}</div>
+          )}
+        </div>
+      ) },
+    { title: 'UOM', dataIndex: 'UOM', width: 62, align: 'center',
+      render: v => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+    { title: 'Qty', dataIndex: 'Quantity', width: 80, align: 'right',
+      render: (v, rec) => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{v ?? rec.QuantityOrdered ?? '—'}</Text> },
+    { title: 'Qty Received', dataIndex: 'QuantityReceived', width: 100, align: 'right',
+      render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: (v ?? 0) > 0 ? REDWOOD.success : undefined }}>{v ?? 0}</Text> },
+    { title: 'Match Approval', dataIndex: 'MatchApprovalLevel', width: 120,
+      render: (v, rec) => <Tag style={{ fontSize: 11 }}>{v ?? rec.MatchApprovalLevelCode ?? '—'}</Tag> },
+    { title: 'Need By', dataIndex: 'NeedByDate', width: 110, render: d => fmtDate(d) },
+    { title: 'Status', dataIndex: 'StatusCode', width: 130,
+      render: (v, rec) => getStatusTag(v ?? rec.Status) },
+    { title: '', key: 'details', width: 46, fixed: 'right', align: 'center',
+      render: (_, rec) => (
+        <Tooltip title="More details">
+          <Button size="small" type="text" icon={<InfoCircleOutlined />}
+            style={{ color: REDWOOD.info }}
+            onClick={() => setSchDetailRecord(rec)} />
+        </Tooltip>
+      ) },
+  ];
+
   return (
     <div style={{ background: REDWOOD.neutral100, minHeight: '100%' }}>
 
@@ -522,7 +643,7 @@ ${po.NoteToSupplier ? `<div class="sec">Notes</div><div class="fv">${po.NoteToSu
           </Row>
         </Card>
 
-        {/* ── Lines ──────────────────────────────────────────────────────── */}
+        {/* ── Lines & Schedules ─────────────────────────────────────────── */}
         <Card
           styles={{ body: { padding: 0 } }}
           style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}
@@ -531,6 +652,9 @@ ${po.NoteToSupplier ? `<div class="sec">Notes</div><div class="fv">${po.NoteToSu
               <UnorderedListOutlined style={{ color: REDWOOD.primary }} />
               <Text strong>Order Lines</Text>
               {lines.length > 0 && <Tag style={{ fontSize: 11 }}>{lines.length} line{lines.length !== 1 ? 's' : ''}</Tag>}
+              {schedules.length > 0 && linesSubTab === 'schedules' && (
+                <Tag color="geekblue" style={{ fontSize: 11 }}>{schedules.length} schedule{schedules.length !== 1 ? 's' : ''}</Tag>
+              )}
             </Space>
           }
           extra={
@@ -543,43 +667,95 @@ ${po.NoteToSupplier ? `<div class="sec">Notes</div><div class="fv">${po.NoteToSu
             </Tooltip>
           }
         >
-          {linesLoading ? (
-            <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
-              <Spin size="large" tip="Loading lines…" />
-            </div>
-          ) : linesError ? (
-            <div style={{ padding: 24, color: REDWOOD.error, background: REDWOOD.error + '10', borderRadius: 6, margin: 16 }}>
-              <InfoCircleOutlined style={{ marginRight: 8 }} />
-              {linesError}
-            </div>
-          ) : lines.length === 0 ? (
-            <Empty description="No lines found" style={{ padding: 60 }} />
-          ) : (
-            <Table
-              columns={lineColumns}
-              dataSource={lines}
-              rowKey={(r, i) => `${r.POLineId ?? r.LineNumber ?? i}`}
-              size="small"
-              pagination={false}
-              scroll={{ x: 1400 }}
-              rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''}
-              summary={() => (
-                <Table.Summary fixed>
-                  <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-                    <Table.Summary.Cell index={0} colSpan={9} align="right">
-                      <Text strong style={{ fontSize: 12 }}>Total</Text>
-                    </Table.Summary.Cell>
-                    <Table.Summary.Cell index={1} align="right">
-                      <Text strong style={{ fontVariantNumeric: 'tabular-nums', color: REDWOOD.primary }}>
-                        {fmtAmt(lines.reduce((s, l) => s + (l.Total ?? 0), 0))}
-                      </Text>
-                    </Table.Summary.Cell>
-                    <Table.Summary.Cell index={2} colSpan={2} />
-                  </Table.Summary.Row>
-                </Table.Summary>
-              )}
-            />
-          )}
+          <Tabs
+            activeKey={linesSubTab}
+            onChange={key => {
+              setLinesSubTab(key as 'lines' | 'schedules');
+              if (key === 'schedules' && !schFetched && lines.length > 0) {
+                fetchSchedules(lines);
+              }
+            }}
+            size="small"
+            style={{ paddingLeft: 16, paddingRight: 16 }}
+            tabBarStyle={{ marginBottom: 0, borderBottom: `1px solid ${REDWOOD.neutral200}` }}
+            items={[
+              {
+                key: 'lines',
+                label: <span><UnorderedListOutlined style={{ marginRight: 5 }} />Lines</span>,
+                children: (
+                  <>
+                    {linesLoading ? (
+                      <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
+                        <Spin size="large" tip="Loading lines…" />
+                      </div>
+                    ) : linesError ? (
+                      <div style={{ padding: 24, color: REDWOOD.error, background: REDWOOD.error + '10', borderRadius: 6, margin: 16 }}>
+                        <InfoCircleOutlined style={{ marginRight: 8 }} />{linesError}
+                      </div>
+                    ) : lines.length === 0 ? (
+                      <Empty description="No lines found" style={{ padding: 60 }} />
+                    ) : (
+                      <Table
+                        columns={lineColumns}
+                        dataSource={lines}
+                        rowKey={(r, i) => `${r.POLineId ?? r.LineNumber ?? i}`}
+                        size="small"
+                        pagination={false}
+                        scroll={{ x: 1400 }}
+                        rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''}
+                        summary={() => (
+                          <Table.Summary fixed>
+                            <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+                              <Table.Summary.Cell index={0} colSpan={9} align="right">
+                                <Text strong style={{ fontSize: 12 }}>Total</Text>
+                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={1} align="right">
+                                <Text strong style={{ fontVariantNumeric: 'tabular-nums', color: REDWOOD.primary }}>
+                                  {fmtAmt(lines.reduce((s, l) => s + (l.Total ?? 0), 0))}
+                                </Text>
+                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={2} colSpan={2} />
+                            </Table.Summary.Row>
+                          </Table.Summary>
+                        )}
+                      />
+                    )}
+                  </>
+                ),
+              },
+              {
+                key: 'schedules',
+                label: <span><CalendarOutlined style={{ marginRight: 5 }} />Schedules</span>,
+                children: (
+                  <>
+                    {schLoading ? (
+                      <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
+                        <Spin size="large" tip="Loading schedules…" />
+                      </div>
+                    ) : schError ? (
+                      <div style={{ padding: 16, color: REDWOOD.error, background: REDWOOD.error + '10', borderRadius: 6, margin: 16 }}>
+                        <InfoCircleOutlined style={{ marginRight: 8 }} />{schError}
+                      </div>
+                    ) : !schFetched ? (
+                      <Empty description="Select this tab to load schedules" style={{ padding: 60 }} />
+                    ) : schedules.length === 0 ? (
+                      <Empty description="No schedules found" style={{ padding: 60 }} />
+                    ) : (
+                      <Table
+                        columns={scheduleColumns}
+                        dataSource={schedules}
+                        rowKey={(r, i) => `${r._lineNumber}-${r.ShipmentNumber ?? i}`}
+                        size="small"
+                        pagination={false}
+                        scroll={{ x: 1500 }}
+                        rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''}
+                      />
+                    )}
+                  </>
+                ),
+              },
+            ]}
+          />
         </Card>
 
 
@@ -643,6 +819,53 @@ ${po.NoteToSupplier ? `<div class="sec">Notes</div><div class="fv">${po.NoteToSu
             </div>
           )}
         </div>
+      </Modal>
+      {/* ── Schedule Detail Modal ─────────────────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <InfoCircleOutlined style={{ color: REDWOOD.info }} />
+            Schedule Details — Line {schDetailRecord?._lineNumber}, Schedule {schDetailRecord?.ShipmentNumber ?? '—'}
+          </Space>
+        }
+        open={!!schDetailRecord}
+        onCancel={() => setSchDetailRecord(null)}
+        footer={<Button onClick={() => setSchDetailRecord(null)}>Close</Button>}
+        width={780}
+      >
+        {schDetailRecord && (() => {
+          const skip = new Set(['_lineNumber', '_lineItem', '_lineDescription', 'links']);
+          const entries = Object.entries(schDetailRecord).filter(([k]) => !skip.has(k));
+          const LV: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
+            <Col xs={24} sm={12} md={8}>
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
+                <div style={{ fontSize: 12, color: REDWOOD.neutral900, marginTop: 2 }}>{value ?? '—'}</div>
+              </div>
+            </Col>
+          );
+          return (
+            <div>
+              {/* Line context */}
+              <div style={{ background: REDWOOD.neutral100, borderRadius: 6, padding: '8px 14px', marginBottom: 16, display: 'flex', gap: 24 }}>
+                <div><span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Line: </span><Text strong>{schDetailRecord._lineNumber}</Text></div>
+                {schDetailRecord._lineItem && <div><span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Item: </span><Text strong style={{ color: REDWOOD.info }}>{schDetailRecord._lineItem}</Text></div>}
+                {schDetailRecord._lineDescription && <div style={{ flex: 1 }}><span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Description: </span><Text>{schDetailRecord._lineDescription}</Text></div>}
+              </div>
+              {/* All schedule fields */}
+              <Row gutter={[12, 0]}>
+                {entries.map(([key, val]) => (
+                  <LV key={key} label={key.replace(/([A-Z])/g, ' $1').trim()} value={
+                    typeof val === 'boolean' ? (val ? 'Yes' : 'No') :
+                    typeof val === 'object' ? JSON.stringify(val) :
+                    (key.toLowerCase().includes('date') && val) ? fmtDate(String(val)) :
+                    String(val ?? '—')
+                  } />
+                ))}
+              </Row>
+            </div>
+          );
+        })()}
       </Modal>
     </div>
   );
