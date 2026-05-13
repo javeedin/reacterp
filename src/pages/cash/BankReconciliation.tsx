@@ -1426,7 +1426,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     if (sysTxn.source === 'BANK_TRANSFER') {
       return {
         url:   `${APEX_BASE}/cash/banktransfers`,
-        body:  { items: [{ BankAccountTransferId: sysTxn.txnId, PaymentStatus: 'Reconciled', ReconciledDate: new Date().toISOString().split('T')[0], LastUpdatedBy: 'SYSTEM', LastUpdateDate: new Date().toISOString() }] },
+        body:  { items: [{ BankAccountTransferId: sysTxn.txnId, PaymentStatus: 'Reconciled', ReconciledFlag: 'Y', ReconciledDate: today, LastUpdatedBy: 'SYSTEM', LastUpdateDate: new Date().toISOString() }] },
         label: 'Bank Transfer',
       };
     }

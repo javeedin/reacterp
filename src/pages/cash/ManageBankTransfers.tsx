@@ -70,6 +70,7 @@ interface TransferRecord {
   lastUpdateDate: string;
   syncDate: string;
   accountingFlag?: string;
+  reconciledFlag?: string;
   reconciledDate?: string;
 }
 
@@ -240,7 +241,7 @@ const TransferForm: React.FC<{
   const [attApiLog, setAttApiLog] = useState<Array<{ dir: string; url: string; status: number | null; body: string }>>([]);
   const isEdit = !!initialValues?.bankAccountTransferId;
   const isAccounted  = isEdit && initialValues?.accountingFlag === 'Y';
-  const isReconciled = isEdit && initialValues?.paymentStatus === 'Reconciled';
+  const isReconciled = isEdit && (initialValues?.reconciledFlag === 'Y' || initialValues?.paymentStatus === 'Reconciled' || initialValues?.paymentStatus === 'RECONCILED');
   const isPermanentlyLocked = isAccounted || isReconciled;
   const [editMode, setEditMode] = useState(false);
   const isReadOnly = isPermanentlyLocked || (isEdit && !editMode);
@@ -1874,18 +1875,16 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       key: 'reconStatus',
       width: 110,
       render: (_, r) => {
-        const isRecon = r.paymentStatus === 'Reconciled' || r.paymentStatus === 'RECONCILED';
+        const isRecon = r.reconciledFlag === 'Y';
         return isRecon
           ? <Tag color="green" icon={<CheckCircleOutlined />} style={{ fontSize: 11 }}>Reconciled</Tag>
           : <Tag color="orange" style={{ fontSize: 11 }}>Unreconciled</Tag>;
       },
       filters: [
-        { text: 'Reconciled',   value: 'Reconciled' },
-        { text: 'Unreconciled', value: 'Unreconciled' },
+        { text: 'Reconciled',   value: 'Y' },
+        { text: 'Unreconciled', value: 'N' },
       ],
-      onFilter: (val, r) => val === 'Reconciled'
-        ? r.paymentStatus === 'Reconciled' || r.paymentStatus === 'RECONCILED'
-        : r.paymentStatus !== 'Reconciled' && r.paymentStatus !== 'RECONCILED',
+      onFilter: (val, r) => val === 'Y' ? r.reconciledFlag === 'Y' : r.reconciledFlag !== 'Y',
     },
     {
       title: 'Cleared Date',

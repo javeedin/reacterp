@@ -1,10 +1,27 @@
 -- ============================================================
--- Patch: Add RECONCILED_DATE to RR_BANK_ACCOUNT_TRANSFERS
--- and update GET handler to return it.
+-- Patch: Add RECONCILED_FLAG + RECONCILED_DATE to RR_BANK_ACCOUNT_TRANSFERS
+-- and update GET handler to return both.
 -- Run in Oracle APEX SQL Workshop (reerp module must exist)
 -- ============================================================
 
--- ── Step 1: Add RECONCILED_DATE column ───────────────────────
+-- ── Step 1a: Add RECONCILED_FLAG column ──────────────────────
+BEGIN
+  EXECUTE IMMEDIATE '
+    ALTER TABLE RR_BANK_ACCOUNT_TRANSFERS
+    ADD RECONCILED_FLAG VARCHAR2(1) DEFAULT ''N'' NOT NULL
+  ';
+  DBMS_OUTPUT.PUT_LINE('RECONCILED_FLAG column added');
+EXCEPTION
+  WHEN OTHERS THEN
+    IF SQLCODE = -1430 THEN   -- ORA-01430: column already exists
+      DBMS_OUTPUT.PUT_LINE('RECONCILED_FLAG already exists — skipped');
+    ELSE
+      RAISE;
+    END IF;
+END;
+/
+
+-- ── Step 1b: Add RECONCILED_DATE column ──────────────────────
 BEGIN
   EXECUTE IMMEDIATE '
     ALTER TABLE RR_BANK_ACCOUNT_TRANSFERS
@@ -13,7 +30,7 @@ BEGIN
   DBMS_OUTPUT.PUT_LINE('RECONCILED_DATE column added');
 EXCEPTION
   WHEN OTHERS THEN
-    IF SQLCODE = -1430 THEN   -- ORA-01430: column already exists
+    IF SQLCODE = -1430 THEN
       DBMS_OUTPUT.PUT_LINE('RECONCILED_DATE already exists — skipped');
     ELSE
       RAISE;
@@ -21,7 +38,7 @@ EXCEPTION
 END;
 /
 
--- ── Step 2: Rebuild GET handler (adds reconciledDate to cursor + JSON) ───────
+-- ── Step 2: Rebuild GET handler (adds reconciledFlag + reconciledDate) ───────
 BEGIN
   BEGIN
     ORDS.DELETE_HANDLER(
@@ -77,6 +94,7 @@ DECLARE
                PAYMENT_FILE,
                IS_SETTLED_WITH_IBY_FLAG,
                NVL(ACCOUNTING_FLAG, 'N')                              AS ACCOUNTING_FLAG,
+               NVL(RECONCILED_FLAG, 'N')                              AS RECONCILED_FLAG,
                TO_CHAR(RECONCILED_DATE, 'YYYY-MM-DD')                 AS RECONCILED_DATE,
                CREATED_BY,
                TO_CHAR(CREATION_DATE,    'YYYY-MM-DD"T"HH24:MI:SS')   AS CREATION_DATE,
@@ -142,6 +160,7 @@ BEGIN
         APEX_JSON.WRITE('paymentFile',               r.PAYMENT_FILE);
         APEX_JSON.WRITE('isSettledWithIbyFlag',      r.IS_SETTLED_WITH_IBY_FLAG);
         APEX_JSON.WRITE('accountingFlag',            r.ACCOUNTING_FLAG);
+        APEX_JSON.WRITE('reconciledFlag',            r.RECONCILED_FLAG);
         APEX_JSON.WRITE('reconciledDate',            r.RECONCILED_DATE);
         APEX_JSON.WRITE('createdBy',                 r.CREATED_BY);
         APEX_JSON.WRITE('creationDate',              r.CREATION_DATE);
@@ -168,21 +187,24 @@ END;
 END;
 /
 
--- ── Step 3: Update POST/MERGE procedure to store ReconciledDate ──────────────
+-- ── Step 3: Update POST/MERGE procedure to store ReconciledFlag + ReconciledDate ──
 -- In your RR_SYNC_BANK_ACCOUNT_TRANSFERS procedure (called by the POST handler),
 -- add the following to the JSON_TABLE columns list:
 --
---   reconciled_date  DATE  PATH '$.ReconciledDate'
+--   reconciled_flag  VARCHAR2(1)  PATH '$.ReconciledFlag',
+--   reconciled_date  DATE         PATH '$.ReconciledDate'
 --
 -- And in the MERGE UPDATE SET clause add:
 --
+--   RECONCILED_FLAG = NVL(src.reconciled_flag, tgt.RECONCILED_FLAG),
 --   RECONCILED_DATE = NVL(src.reconciled_date, tgt.RECONCILED_DATE),
 --
 -- And in the MERGE INSERT VALUES add:
 --
---   NVL(src.reconciled_date, NULL)   -- i.e. NULL by default on insert
+--   NVL(src.reconciled_flag, 'N'),   -- RECONCILED_FLAG
+--   NVL(src.reconciled_date, NULL)   -- RECONCILED_DATE
 --
 -- The bank reconciliation flow sends:
 --   { "items": [{ "BankAccountTransferId": X, "PaymentStatus": "Reconciled",
---                 "ReconciledDate": "YYYY-MM-DD", ... }] }
--- so the MERGE will pick up ReconciledDate from the JSON and store it.
+--                 "ReconciledFlag": "Y", "ReconciledDate": "YYYY-MM-DD", ... }] }
+-- so the MERGE will pick up both fields and store them.
