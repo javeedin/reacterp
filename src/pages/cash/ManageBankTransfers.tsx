@@ -1421,72 +1421,71 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
 
   // ── Load LOV data ─────────────────────────────────────────────────────────
   const loadLovs = useCallback(async () => {
+    const buBankMapLocal: Record<string, string[]> = {};
+    const currMapLocal: Record<string, string> = {};
+    const assetMapLocal: Record<string, string> = {};
+    const acctSet = new Set<string>();
+    const buSet   = new Set<string>();
+
+    // 1. BUs from dedicated endpoint
     try {
-      const [buRes, baRes, extRes] = await Promise.allSettled([
-        fetch(`${APEX_BASE}/gl/businessunits`),
-        fetch(`${APEX_BASE}/banks/bankaccounts`),
-        fetch(`${APEX_BASE}/cash/externaltransactions?row_limit=2000`),
-      ]);
+      const res  = await fetch(`${APEX_BASE}/gl/businessunits`);
+      const data = await res.json();
+      console.log('[ManageBankTransfers] gl/businessunits response:', data);
+      (data.items ?? []).forEach((b: any) => {
+        const name = b.business_unit_name || b.businessUnitName || b.BUSINESS_UNIT_NAME;
+        if (name) buSet.add(name);
+      });
+    } catch (e) { console.error('[ManageBankTransfers] gl/businessunits failed:', e); }
 
-      const buBankMapLocal: Record<string, string[]> = {};
-      const currMapLocal: Record<string, string> = {};
-      const assetMapLocal: Record<string, string> = {};
-      const acctSet = new Set<string>();
-      const buSet   = new Set<string>();
+    // 2. Bank accounts from master table
+    try {
+      const res  = await fetch(`${APEX_BASE}/banks/bankaccounts`);
+      const data = await res.json();
+      console.log('[ManageBankTransfers] banks/bankaccounts response:', data);
+      (data.items ?? []).forEach((i: any) => {
+        const acct = i.bank_account_name ?? i.bankAccountName ?? i.BANK_ACCOUNT_NAME;
+        const le   = i.legal_entity_name ?? i.legalEntityName ?? i.LEGAL_ENTITY_NAME;
+        if (!acct) return;
+        acctSet.add(acct);
+        const ccy  = i.currency_code ?? i.currencyCode;
+        const cash = i.cash_account_combination ?? i.cashAccountCombination;
+        if (ccy)  currMapLocal[acct] = ccy;
+        if (cash) assetMapLocal[acct] = cash;
+        if (le) {
+          buSet.add(le);
+          if (!buBankMapLocal[le]) buBankMapLocal[le] = [];
+          if (!buBankMapLocal[le].includes(acct)) buBankMapLocal[le].push(acct);
+        }
+      });
+    } catch (e) { console.error('[ManageBankTransfers] banks/bankaccounts failed:', e); }
 
-      // BUs from dedicated endpoint
-      if (buRes.status === 'fulfilled') {
-        const buData = await buRes.value.json();
-        (buData.items ?? []).forEach((b: any) => {
-          const name = b.business_unit_name || b.businessUnitName;
-          if (name) buSet.add(name);
-        });
-      }
+    // 3. External transactions — supplement BU→bank mapping + asset map
+    try {
+      const res  = await fetch(`${APEX_BASE}/cash/externaltransactions?row_limit=2000`);
+      const data = await res.json();
+      (data.items ?? []).forEach((i: any) => {
+        const acct = i.bankAccountName;
+        const bu   = i.businessUnitName;
+        if (!acct) return;
+        acctSet.add(acct);
+        if (bu) {
+          buSet.add(bu);
+          if (!buBankMapLocal[bu]) buBankMapLocal[bu] = [];
+          if (!buBankMapLocal[bu].includes(acct)) buBankMapLocal[bu].push(acct);
+        }
+        if (i.assetAccountCombination) assetMapLocal[acct] = i.assetAccountCombination;
+        if (i.currencyCode && !currMapLocal[acct]) currMapLocal[acct] = i.currencyCode;
+      });
+    } catch (e) { console.error('[ManageBankTransfers] externaltransactions failed:', e); }
 
-      // Bank accounts from master table (snake_case from collection_feed)
-      if (baRes.status === 'fulfilled') {
-        const baData = await baRes.value.json();
-        (baData.items ?? []).forEach((i: any) => {
-          const acct = i.bank_account_name ?? i.bankAccountName;
-          const le   = i.legal_entity_name ?? i.legalEntityName;
-          if (!acct) return;
-          acctSet.add(acct);
-          const ccy  = i.currency_code ?? i.currencyCode;
-          const cash = i.cash_account_combination ?? i.cashAccountCombination;
-          if (ccy)  currMapLocal[acct] = ccy;
-          if (cash) assetMapLocal[acct] = cash;
-          if (le) {
-            buSet.add(le);
-            if (!buBankMapLocal[le]) buBankMapLocal[le] = [];
-            if (!buBankMapLocal[le].includes(acct)) buBankMapLocal[le].push(acct);
-          }
-        });
-      }
-
-      // External transactions — supplement asset map and BU→bank mapping
-      if (extRes.status === 'fulfilled') {
-        const extData = await extRes.value.json();
-        (extData.items ?? []).forEach((i: any) => {
-          const acct = i.bankAccountName;
-          const bu   = i.businessUnitName;
-          if (!acct) return;
-          acctSet.add(acct);
-          if (bu) {
-            buSet.add(bu);
-            if (!buBankMapLocal[bu]) buBankMapLocal[bu] = [];
-            if (!buBankMapLocal[bu].includes(acct)) buBankMapLocal[bu].push(acct);
-          }
-          if (i.assetAccountCombination) assetMapLocal[acct] = i.assetAccountCombination;
-          if (i.currencyCode && !currMapLocal[acct]) currMapLocal[acct] = i.currencyCode;
-        });
-      }
-
-      setBankAccounts([...acctSet].sort().map(n => ({ label: n, value: n })));
-      setBuBankMap(buBankMapLocal);
-      setBankAccountAssetMap(assetMapLocal);
-      setBankCurrencyMap(currMapLocal);
-      setBusinessUnits([...buSet].sort().map(n => ({ label: n, value: n })));
-    } catch { /* silently skip */ }
+    console.log('[ManageBankTransfers] buSet:', [...buSet]);
+    console.log('[ManageBankTransfers] acctSet:', [...acctSet]);
+    setBankAccounts([...acctSet].sort().map(n => ({ label: n, value: n })));
+    setBuBankMap(buBankMapLocal);
+    setBankAccountAssetMap(assetMapLocal);
+    setBankCurrencyMap(currMapLocal);
+    setBusinessUnits([...buSet].sort().map(n => ({ label: n, value: n })));
   }, []);
 
   useEffect(() => { loadLovs(); }, [loadLovs]);
