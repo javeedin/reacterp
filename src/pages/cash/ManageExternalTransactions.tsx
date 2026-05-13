@@ -2630,6 +2630,10 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   // ── Table columns ─────────────────────────────────────────────────────────
   const columns: ColumnsType<ExternalTxnRecord> = [
     {
+      title: 'ID', dataIndex: 'externalTransactionId', width: 70, fixed: 'left',
+      render: (v) => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{v}</Text>,
+    },
+    {
       title: 'Txn Number', dataIndex: 'transactionId', width: 105,
       render: (v, r) => (
         <Button type="link" size="small" style={{ padding: 0, color: REDWOOD.info }} onClick={() => openEditTab(r)}>
@@ -2849,9 +2853,10 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
         const q = gridSearch.trim().toLowerCase();
         const filtered = q
           ? transactions.filter(r =>
-              [r.transactionId, r.bankAccountName, r.businessUnitName, r.referenceText,
-               r.description, r.status, r.source, r.transactionType, r.currencyCode,
-               r.assetAccountCombination, r.offsetAccountCombination, r.transactionDate]
+              [r.externalTransactionId, r.transactionId, r.bankAccountName, r.businessUnitName,
+               r.referenceText, r.description, r.status, r.source, r.transactionType,
+               r.currencyCode, r.assetAccountCombination, r.offsetAccountCombination,
+               r.transactionDate, r.payeeName, r.checkNumber, r.reconReference]
               .some(v => String(v ?? '').toLowerCase().includes(q))
             )
           : transactions;
@@ -2874,15 +2879,35 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                     </Button>
                   )}
                 </Space>
-                <Input
-                  prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
-                  placeholder="Filter results…"
-                  allowClear
-                  size="small"
-                  style={{ width: 220 }}
-                  value={gridSearch}
-                  onChange={e => setGridSearch(e.target.value)}
-                />
+                <Space size={8}>
+                  <Input
+                    prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
+                    placeholder="Search ID, txn#, account, reference…"
+                    allowClear
+                    size="small"
+                    style={{ width: 260 }}
+                    value={gridSearch}
+                    onChange={e => setGridSearch(e.target.value)}
+                  />
+                  <Button
+                    size="small"
+                    icon={<DownloadOutlined />}
+                    disabled={filtered.length === 0}
+                    onClick={exportToExcel}
+                    title="Export to Excel"
+                  >
+                    Excel
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<FilePdfOutlined />}
+                    disabled={filtered.length === 0}
+                    onClick={exportToPdf}
+                    title="Export to PDF"
+                  >
+                    PDF
+                  </Button>
+                </Space>
               </div>
             }
           >
