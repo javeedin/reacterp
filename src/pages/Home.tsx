@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Card, Row, Col, Typography, Space, Progress, Divider, Tooltip } from 'antd';
+import { Card, Row, Col, Typography, Space, Progress, Divider, Tooltip, Modal, Input } from 'antd';
 import {
   AccountBookOutlined,
   ShoppingCartOutlined,
@@ -13,6 +13,7 @@ import {
   ToolOutlined,
   SyncOutlined,
   StockOutlined,
+  LockOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
   ClockCircleOutlined,
@@ -309,12 +310,22 @@ const QuickActionCard = ({
   </Card>
 );
 
+const LOCKED_MODULES: Record<string, string> = {
+  '/om': 'MIT12345',
+};
+
 const Home: React.FC = () => {
   const navigate = useNavigate();
   const [isModulesOpen, setIsModulesOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const floatingIconRef = useRef<HTMLDivElement>(null);
+
+  const [pwdModalOpen, setPwdModalOpen] = useState(false);
+  const [pwdPendingPath, setPwdPendingPath] = useState('');
+  const [pwdInput, setPwdInput] = useState('');
+  const [pwdError, setPwdError] = useState(false);
+  const pwdInputRef = useRef<any>(null);
 
   // Click outside handler
   useEffect(() => {
@@ -355,8 +366,28 @@ const Home: React.FC = () => {
   };
 
   const handleModuleClick = (module: Module) => {
+    if (LOCKED_MODULES[module.path]) {
+      closePanel();
+      setPwdPendingPath(module.path);
+      setPwdInput('');
+      setPwdError(false);
+      setPwdModalOpen(true);
+      setTimeout(() => pwdInputRef.current?.focus(), 100);
+      return;
+    }
     closePanel();
     navigate(module.path);
+  };
+
+  const handlePwdConfirm = () => {
+    if (pwdInput === LOCKED_MODULES[pwdPendingPath]) {
+      setPwdModalOpen(false);
+      navigate(pwdPendingPath);
+    } else {
+      setPwdError(true);
+      setPwdInput('');
+      pwdInputRef.current?.focus();
+    }
   };
 
   return (
@@ -836,6 +867,44 @@ const Home: React.FC = () => {
           }
         }
       `}</style>
+
+      {/* ── Module Password Modal ──────────────────────────────── */}
+      <Modal
+        open={pwdModalOpen}
+        onCancel={() => setPwdModalOpen(false)}
+        onOk={handlePwdConfirm}
+        okText="Unlock"
+        okButtonProps={{ style: { background: '#C74634', borderColor: '#C74634' } }}
+        title={
+          <Space>
+            <LockOutlined style={{ color: '#C74634' }} />
+            <span>Access Restricted</span>
+          </Space>
+        }
+        width={380}
+        destroyOnClose
+      >
+        <div style={{ padding: '8px 0 4px' }}>
+          <div style={{ marginBottom: 12, color: '#6B6B6B', fontSize: 13 }}>
+            Enter the password to access <strong>Order Management</strong>.
+          </div>
+          <Input.Password
+            ref={pwdInputRef}
+            value={pwdInput}
+            onChange={e => { setPwdInput(e.target.value); setPwdError(false); }}
+            onPressEnter={handlePwdConfirm}
+            placeholder="Enter password"
+            status={pwdError ? 'error' : undefined}
+            size="large"
+            prefix={<LockOutlined style={{ color: '#C7C7C7' }} />}
+          />
+          {pwdError && (
+            <div style={{ color: '#C74634', fontSize: 12, marginTop: 6 }}>
+              Incorrect password. Please try again.
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 };
