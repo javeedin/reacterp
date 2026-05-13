@@ -1022,17 +1022,16 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         fetch(`${APEX_BASE}/cash/banktransfers?${btQ.toString()}`).then(r => parseApexJson(r)),
       ]);
 
-      const resolveReconFlag = (i: any, fallbackFilter: string): string => {
+      const resolveReconFlag = (i: any): string => {
         const raw = i.reconciledFlag ?? i.reconciled_flag ?? i.RECONCILED_FLAG;
         if (raw !== undefined && raw !== null && raw !== '') return String(raw);
-        return fallbackFilter === 'RECONCILED' ? 'Y' : 'N';
+        return rf === 'RECONCILED' ? 'Y' : 'N';
       };
       const resolveBusinessUnit = (i: any): string =>
         i.businessUnit ?? i.business_unit ?? i.BUSINESS_UNIT ??
         i.businessUnitName ?? i.business_unit_name ?? i.BUSINESS_UNIT_NAME ??
         i.operatingUnit ?? i.org_name ?? i.orgName ?? '';
 
-      const rf = cmFilter ?? 'UNRECONCILED';
       const apArGlItems: SysTxn[] = systxnsResult.status === 'fulfilled' && systxnsResult.value.status === 'success'
         ? (systxnsResult.value.items ?? []).map((i: any) => ({
             ...i,
@@ -1057,7 +1056,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
             accountDescription: i.accountDescription ?? i.account_description ?? i.ACCOUNT_DESCRIPTION ?? '',
             journalCategory:    i.journalCategory    ?? i.journal_category    ?? i.JOURNAL_CATEGORY    ?? '',
             lineDescription:    i.lineDescription    ?? i.line_description    ?? i.LINE_DESCRIPTION    ?? '',
-            reconciledFlag:     resolveReconFlag(i, rf),
+            reconciledFlag:     resolveReconFlag(i),
             bankAccountName:    i.bankAccountName    ?? i.bank_account_name   ?? i.BANK_ACCOUNT_NAME   ?? '',
           })) as SysTxn[]
         : [];
