@@ -1148,18 +1148,51 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const [apiCopied, setApiCopied] = useState(false);
 
   const buildSysTxnsUrl = useCallback((txnType: string) => {
+    const effectiveDateFrom = lastParams?.dateFrom ?? sysDateFrom;
+    const effectiveDateTo   = lastParams?.dateTo   ?? sysDateTo;
     const q = new URLSearchParams();
-    if (lastParams?.bankAccount) q.set('bank_account', lastParams.bankAccount);
-    if (lastParams?.dateFrom)    q.set('date_from',    lastParams.dateFrom.format('YYYY-MM-DD'));
-    if (lastParams?.dateTo)      q.set('date_to',      lastParams.dateTo.format('YYYY-MM-DD'));
+    if (lastParams?.bankAccount)  q.set('bank_account',  lastParams.bankAccount);
+    if (lastParams?.businessUnit) q.set('business_unit', lastParams.businessUnit);
+    if (effectiveDateFrom)        q.set('date_from',     effectiveDateFrom.format('YYYY-MM-DD'));
+    if (effectiveDateTo)          q.set('date_to',       effectiveDateTo.format('YYYY-MM-DD'));
     if (lastParams?.amountMin != null) q.set('amount_min', String(lastParams.amountMin));
     if (lastParams?.amountMax != null) q.set('amount_max', String(lastParams.amountMax));
-    if (lastParams?.reference)   q.set('reference',    lastParams.reference);
+    if (lastParams?.reference)    q.set('reference',     lastParams.reference);
     if (txnType && txnType !== 'ALL') q.set('txn_type', txnType);
-    q.set('reconciled', 'N');
+    if (sysReconFilter === 'RECONCILED') q.set('reconciled', 'Y');
+    else if (sysReconFilter !== 'ALL')   q.set('reconciled', 'N');
     q.set('row_limit', '500');
     return `${APEX_BASE}/cash/reconciliation/systxns?${q.toString()}`;
-  }, [lastParams]);
+  }, [lastParams, sysDateFrom, sysDateTo, sysReconFilter]);
+
+  const buildExtTxnUrl = useCallback(() => {
+    const effectiveDateFrom = lastParams?.dateFrom ?? sysDateFrom;
+    const effectiveDateTo   = lastParams?.dateTo   ?? sysDateTo;
+    const q = new URLSearchParams();
+    if (lastParams?.bankAccount)  q.set('bank_account',  lastParams.bankAccount);
+    if (lastParams?.businessUnit) q.set('business_unit', lastParams.businessUnit);
+    if (effectiveDateFrom)        q.set('date_from',     effectiveDateFrom.format('YYYY-MM-DD'));
+    if (effectiveDateTo)          q.set('date_to',       effectiveDateTo.format('YYYY-MM-DD'));
+    if (lastParams?.reference)    q.set('reference',     lastParams.reference);
+    if (sysReconFilter !== 'ALL') q.set('recon_status',  sysReconFilter);
+    q.set('row_limit', '500');
+    return `${EXT_TXN_URL}?${q.toString()}`;
+  }, [lastParams, sysDateFrom, sysDateTo, sysReconFilter]);
+
+  const buildBankTransfersUrl = useCallback(() => {
+    const effectiveDateFrom = lastParams?.dateFrom ?? sysDateFrom;
+    const effectiveDateTo   = lastParams?.dateTo   ?? sysDateTo;
+    const q = new URLSearchParams();
+    if (lastParams?.bankAccount) {
+      q.set('from_account', lastParams.bankAccount);
+      q.set('to_account',   lastParams.bankAccount);
+    }
+    if (lastParams?.businessUnit) q.set('business_unit', lastParams.businessUnit);
+    if (effectiveDateFrom)        q.set('date_from',     effectiveDateFrom.format('YYYY-MM-DD'));
+    if (effectiveDateTo)          q.set('date_to',       effectiveDateTo.format('YYYY-MM-DD'));
+    q.set('row_limit', '200');
+    return `${APEX_BASE}/cash/banktransfers?${q.toString()}`;
+  }, [lastParams, sysDateFrom, sysDateTo]);
 
   // When CM records finish loading, auto-select all pending linked transactions
   useEffect(() => {
@@ -1172,16 +1205,6 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       setPendingAutoSelectTxnId([]);
     }
   }, [sysTxns, pendingAutoSelectTxnId]);
-
-  const buildExtTxnUrl = useCallback(() => {
-    const q = new URLSearchParams();
-    if (lastParams?.bankAccount) q.set('bank_account', lastParams.bankAccount);
-    if (lastParams?.dateFrom)    q.set('date_from',    lastParams.dateFrom.format('YYYY-MM-DD'));
-    if (lastParams?.dateTo)      q.set('date_to',      lastParams.dateTo.format('YYYY-MM-DD'));
-    if (lastParams?.reference)   q.set('reference',    lastParams.reference);
-    q.set('row_limit', '500');
-    return `${EXT_TXN_URL}?${q.toString()}`;
-  }, [lastParams]);
 
   const handleCopyUrl = useCallback((url: string) => {
     navigator.clipboard.writeText(url).then(() => {
@@ -2374,26 +2397,29 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                   <Badge count={filteredStmtLines.length} style={{ backgroundColor: REDWOOD.info }} showZero />
                 </Space>
                 <Space size={4}>
-                  <Segmented
-                    size="small"
-                    value={stmtReconFilter}
-                    onChange={(v) => {
-                      const val = v as 'ALL' | 'UNRECONCILED' | 'RECONCILED';
-                      setStmtReconFilter(val);
-                      setSelectedStmtKeys([]);
-                      if (selectedStatement) {
-                        const p = { ...(lastParams ?? {}), statementId: String(selectedStatement.statementId) };
-                        fetchStmtLines(p, val);
-                      } else if (lastParams) {
-                        fetchStmtLines(lastParams, val);
-                      }
-                    }}
-                    options={[
-                      { label: 'All',    value: 'ALL' },
-                      { label: 'Unrecon', value: 'UNRECONCILED' },
-                      { label: 'Recon',  value: 'RECONCILED' },
-                    ]}
-                  />
+                  <Space size={2}>
+                    {([
+                      { label: 'All',     value: 'ALL',          color: '#1677ff' },
+                      { label: 'Unrecon', value: 'UNRECONCILED', color: '#fa8c16' },
+                      { label: 'Recon',   value: 'RECONCILED',   color: '#52c41a' },
+                    ] as { label: string; value: 'ALL' | 'UNRECONCILED' | 'RECONCILED'; color: string }[]).map(opt => {
+                      const active = stmtReconFilter === opt.value;
+                      return (
+                        <Button key={opt.value} size="small"
+                          style={{ fontSize: 11, padding: '0 8px', height: 24, background: active ? opt.color : undefined, borderColor: active ? opt.color : undefined, color: active ? '#fff' : opt.color, fontWeight: active ? 600 : 400 }}
+                          onClick={() => {
+                            setStmtReconFilter(opt.value);
+                            setSelectedStmtKeys([]);
+                            if (selectedStatement) {
+                              fetchStmtLines({ ...(lastParams ?? {}), statementId: String(selectedStatement.statementId) }, opt.value);
+                            } else if (lastParams) {
+                              fetchStmtLines(lastParams, opt.value);
+                            }
+                          }}
+                        >{opt.label}</Button>
+                      );
+                    })}
+                  </Space>
                   {(() => {
                     const selectedLines = stmtLines.filter(l => selectedStmtKeys.includes(l.lineId));
                     const alreadyLinked = selectedLines.some(l => l.externalTxnId);
@@ -2508,42 +2534,52 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
             }
             extra={
               <Space size={8}>
-                {/* Recon status toggle — shown for all modules */}
-                <Segmented
-                  size="small"
-                  value={sysReconFilter}
-                  onChange={(v) => {
-                    const rf = v as 'ALL' | 'UNRECONCILED' | 'RECONCILED';
-                    setSysReconFilter(rf);
-                    if (txnSourceFilter === 'CM') setCmReconFilter(rf);
-                    setSysTxns([]);
-                    setSelectedSysKeys([]);
-                    if (lastParams) fetchSysTxns(lastParams, txnSourceFilter, rf);
-                  }}
-                  options={[
-                    { label: 'All',     value: 'ALL' },
-                    { label: 'Unrecon', value: 'UNRECONCILED' },
-                    { label: 'Recon',   value: 'RECONCILED' },
-                  ]}
-                />
-                <Segmented
-                  size="small"
-                  value={txnSourceFilter}
-                  onChange={(v) => {
-                    const filter = v as string;
-                    setTxnSourceFilter(filter);
-                    setSysTxns([]);
-                    setSelectedSysKeys([]);
-                    if (lastParams) fetchSysTxns(lastParams, filter, sysReconFilter);
-                  }}
-                  options={[
-                    { label: 'All', value: 'ALL' },
-                    { label: 'AP', value: 'AP_PAYMENT' },
-                    { label: 'AR', value: 'AR_RECEIPT' },
-                    { label: 'GL', value: 'GL_JOURNAL' },
-                    { label: 'CM', value: 'CM' },
-                  ]}
-                />
+                {/* Recon status toggle */}
+                <Space size={2}>
+                  {([
+                    { label: 'All',     value: 'ALL',          color: '#1677ff' },
+                    { label: 'Unrecon', value: 'UNRECONCILED', color: '#fa8c16' },
+                    { label: 'Recon',   value: 'RECONCILED',   color: '#52c41a' },
+                  ] as { label: string; value: 'ALL' | 'UNRECONCILED' | 'RECONCILED'; color: string }[]).map(opt => {
+                    const active = sysReconFilter === opt.value;
+                    return (
+                      <Button key={opt.value} size="small"
+                        style={{ fontSize: 11, padding: '0 8px', height: 24, background: active ? opt.color : undefined, borderColor: active ? opt.color : undefined, color: active ? '#fff' : opt.color, fontWeight: active ? 600 : 400 }}
+                        onClick={() => {
+                          const rf = opt.value;
+                          setSysReconFilter(rf);
+                          if (txnSourceFilter === 'CM') setCmReconFilter(rf);
+                          setSysTxns([]);
+                          setSelectedSysKeys([]);
+                          if (lastParams) fetchSysTxns(lastParams, txnSourceFilter, rf);
+                        }}
+                      >{opt.label}</Button>
+                    );
+                  })}
+                </Space>
+                {/* Source filter */}
+                <Space size={2}>
+                  {([
+                    { label: 'All', value: 'ALL',        color: '#1677ff' },
+                    { label: 'AP',  value: 'AP_PAYMENT', color: '#1d39c4' },
+                    { label: 'AR',  value: 'AR_RECEIPT', color: '#52c41a' },
+                    { label: 'GL',  value: 'GL_JOURNAL', color: '#722ed1' },
+                    { label: 'CM',  value: 'CM',         color: '#fa8c16' },
+                  ] as { label: string; value: string; color: string }[]).map(opt => {
+                    const active = txnSourceFilter === opt.value;
+                    return (
+                      <Button key={opt.value} size="small"
+                        style={{ fontSize: 11, padding: '0 8px', height: 24, background: active ? opt.color : undefined, borderColor: active ? opt.color : undefined, color: active ? '#fff' : opt.color, fontWeight: active ? 600 : 400 }}
+                        onClick={() => {
+                          setTxnSourceFilter(opt.value);
+                          setSysTxns([]);
+                          setSelectedSysKeys([]);
+                          if (lastParams) fetchSysTxns(lastParams, opt.value, sysReconFilter);
+                        }}
+                      >{opt.label}</Button>
+                    );
+                  })}
+                </Space>
                 <Tooltip title="API Inspector — view endpoint & parameters">
                   <Button
                     size="small"
@@ -2732,238 +2768,103 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           </Space>
         }
       >
-        {/* ── Base endpoint ── */}
-        <div style={{ marginBottom: 16 }}>
-          <Text style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 4 }}>
-            Base URL
-          </Text>
-          <div
-            style={{
-              background:   REDWOOD.neutral100,
-              border:       `1px solid ${REDWOOD.neutral200}`,
-              borderRadius: 6,
-              padding:      '8px 12px',
-              fontFamily:   'monospace',
-              fontSize:     12,
-              wordBreak:    'break-all',
-              color:        REDWOOD.neutral900,
-            }}
-          >
-            {APEX_BASE}/cash/reconciliation/systxns
-          </div>
+        {/* ── Active filter summary ── */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+          <Tag color="blue">Source: {txnSourceFilter}</Tag>
+          <Tag color={sysReconFilter === 'RECONCILED' ? 'green' : sysReconFilter === 'UNRECONCILED' ? 'orange' : 'default'}>
+            Recon: {sysReconFilter}
+          </Tag>
+          {lastParams?.bankAccount && <Tag color="geekblue">Account: {lastParams.bankAccount}</Tag>}
+          {lastParams?.businessUnit && <Tag color="purple">BU: {lastParams.businessUnit}</Tag>}
+          {(lastParams?.dateFrom ?? sysDateFrom) && <Tag>From: {(lastParams?.dateFrom ?? sysDateFrom)!.format('DD-MMM-YYYY')}</Tag>}
+          {(lastParams?.dateTo   ?? sysDateTo)   && <Tag>To: {(lastParams?.dateTo ?? sysDateTo)!.format('DD-MMM-YYYY')}</Tag>}
         </div>
 
-        {/* ── Parameters table ── */}
-        <div style={{ marginBottom: 16 }}>
-          <Text style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 6 }}>
-            Parameters
-          </Text>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-            <thead>
-              <tr style={{ background: REDWOOD.neutral200 }}>
-                {['Parameter', 'Current Value', 'Description'].map((h) => (
-                  <th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600, borderBottom: `1px solid ${REDWOOD.neutral300}` }}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {[
-                { param: 'bank_account', val: lastParams?.bankAccount ?? '—', desc: 'Bank account name (partial match)', required: true },
-                { param: 'reconciled',  val: 'N',                             desc: 'N = unreconciled only' },
-                { param: 'txn_type',    val: txnSourceFilter === 'ALL' ? '(all sources)' : txnSourceFilter, desc: 'AP_PAYMENT | AR_RECEIPT | GL_JOURNAL' },
-                { param: 'date_from',   val: lastParams?.dateFrom?.format('YYYY-MM-DD') ?? '—', desc: 'Payment / receipt / journal date from' },
-                { param: 'date_to',     val: lastParams?.dateTo?.format('YYYY-MM-DD')   ?? '—', desc: 'Payment / receipt / journal date to' },
-                { param: 'amount_min',  val: lastParams?.amountMin != null ? String(lastParams.amountMin) : '—', desc: 'Minimum transaction amount' },
-                { param: 'amount_max',  val: lastParams?.amountMax != null ? String(lastParams.amountMax) : '—', desc: 'Maximum transaction amount' },
-                { param: 'reference',   val: lastParams?.reference ?? '—',  desc: 'Partial match on txn number or reference' },
-                { param: 'row_limit',   val: '500',                          desc: 'Maximum rows returned' },
-              ].map((row, i) => (
-                <tr key={row.param} style={{ background: i % 2 === 0 ? REDWOOD.surface : REDWOOD.neutral100 }}>
-                  <td style={{ padding: '5px 10px', borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
-                    <code style={{ color: REDWOOD.info, fontSize: 11 }}>{row.param}</code>
-                    {row.required && <Tag color="red" style={{ marginLeft: 4, fontSize: 10, padding: '0 4px' }}>required</Tag>}
-                  </td>
-                  <td style={{ padding: '5px 10px', borderBottom: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', color: row.val === '—' ? REDWOOD.neutral300 : REDWOOD.neutral900 }}>
-                    {row.val}
-                  </td>
-                  <td style={{ padding: '5px 10px', borderBottom: `1px solid ${REDWOOD.neutral200}`, color: REDWOOD.neutral600 }}>
-                    {row.desc}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* ── Full URL ── */}
-        <div>
-          <Text style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 4 }}>
-            Full URL (with current filters)
-          </Text>
-          <div
-            style={{
-              background:   '#0d1117',
-              borderRadius: 6,
-              padding:      '10px 12px',
-              fontFamily:   'monospace',
-              fontSize:     11,
-              wordBreak:    'break-all',
-              color:        '#79c0ff',
-              position:     'relative',
-            }}
-          >
-            {buildSysTxnsUrl(txnSourceFilter)}
-            <Button
-              size="small"
-              icon={<CopyOutlined />}
-              onClick={() => handleCopyUrl(buildSysTxnsUrl(txnSourceFilter))}
-              style={{
-                position:        'absolute',
-                top:             6,
-                right:           6,
-                backgroundColor: apiCopied ? REDWOOD.success : '#30363d',
-                borderColor:     apiCopied ? REDWOOD.success : '#484f58',
-                color:           '#fff',
-                fontSize:        11,
-              }}
-            >
-              {apiCopied ? 'Copied!' : 'Copy'}
-            </Button>
-          </div>
-        </div>
-
-        {/* ── All variant URLs ── */}
-        <div style={{ marginTop: 16 }}>
-          <Text style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 6 }}>
-            Source-specific URLs
-          </Text>
-          {(['AP_PAYMENT', 'AR_RECEIPT', 'GL_JOURNAL', 'CM'] as const).map((src) => {
-            const url = buildSysTxnsUrl(src);
-            const colors: Record<string, string> = { AP_PAYMENT: 'geekblue', AR_RECEIPT: 'green', GL_JOURNAL: 'purple', CM: 'orange' };
-            const labels: Record<string, string> = { AP_PAYMENT: 'AP Payments', AR_RECEIPT: 'AR Receipts', GL_JOURNAL: 'GL Journals', CM: 'Cash Management' };
-            return (
-              <div key={src} style={{ marginBottom: 8 }}>
-                <Space style={{ marginBottom: 3 }}>
-                  <Tag color={colors[src]} style={{ fontSize: 11, margin: 0 }}>{labels[src]}</Tag>
-                  <Button
-                    size="small"
-                    type="link"
-                    icon={<CopyOutlined />}
-                    style={{ padding: 0, fontSize: 11, height: 18 }}
-                    onClick={() => handleCopyUrl(url)}
-                  >
-                    Copy
-                  </Button>
+        {txnSourceFilter === 'ALL' ? (
+          /* ── ALL mode: 3 concurrent API calls ── */
+          <div>
+            <Text style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 10 }}>
+              When <strong>All</strong> is selected, three APIs are called concurrently via <code>Promise.allSettled</code>:
+            </Text>
+            {([
+              { tag: 'geekblue', label: '1 — AP / AR / GL System Transactions', url: buildSysTxnsUrl('ALL') },
+              { tag: 'cyan',     label: '2 — External (CM) Transactions',       url: buildExtTxnUrl() },
+              { tag: 'orange',   label: '3 — Bank Account Transfers',           url: buildBankTransfersUrl() },
+            ] as { tag: string; label: string; url: string }[]).map(({ tag, label, url }) => (
+              <div key={label} style={{ marginBottom: 12 }}>
+                <Space style={{ marginBottom: 4 }}>
+                  <Tag color={tag} style={{ fontSize: 11, margin: 0 }}>{label}</Tag>
+                  <Button size="small" type="link" icon={<CopyOutlined />} style={{ padding: 0, fontSize: 11, height: 18 }} onClick={() => handleCopyUrl(url)}>Copy</Button>
                 </Space>
-                <div
-                  style={{
-                    background:   REDWOOD.neutral100,
-                    border:       `1px solid ${REDWOOD.neutral200}`,
-                    borderRadius: 4,
-                    padding:      '5px 10px',
-                    fontFamily:   'monospace',
-                    fontSize:     10,
-                    wordBreak:    'break-all',
-                    color:        REDWOOD.neutral600,
-                  }}
-                >
+                <div style={{ background: '#0d1117', borderRadius: 5, padding: '8px 10px', fontFamily: 'monospace', fontSize: 10, wordBreak: 'break-all', color: '#79c0ff' }}>
                   {url}
                 </div>
               </div>
-            );
-          })}
-        </div>
-
-        {/* ── External Transactions endpoint ── */}
-        <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${REDWOOD.neutral200}` }}>
-          <Space style={{ marginBottom: 8 }}>
-            <Tag color="cyan" style={{ fontSize: 11, margin: 0 }}>External Transactions (GET)</Tag>
-            <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{EXT_TXN_URL}</Text>
-          </Space>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 10 }}>
-            <thead>
-              <tr style={{ background: REDWOOD.neutral200 }}>
-                {['Parameter', 'Current Value', 'Description'].map((h) => (
-                  <th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600, borderBottom: `1px solid ${REDWOOD.neutral300}` }}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {[
-                { param: 'bank_account', val: lastParams?.bankAccount ?? '—', desc: 'Bank account name filter', required: true },
-                { param: 'date_from',    val: lastParams?.dateFrom?.format('YYYY-MM-DD') ?? '—', desc: 'Transaction date from' },
-                { param: 'date_to',      val: lastParams?.dateTo?.format('YYYY-MM-DD')   ?? '—', desc: 'Transaction date to' },
-                { param: 'reference',    val: lastParams?.reference ?? '—',               desc: 'Reference / description filter' },
-                { param: 'row_limit',    val: '500',                                       desc: 'Maximum rows returned' },
-              ].map((row, i) => (
-                <tr key={row.param} style={{ background: i % 2 === 0 ? REDWOOD.surface : REDWOOD.neutral100 }}>
-                  <td style={{ padding: '5px 10px', borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
-                    <code style={{ color: REDWOOD.info, fontSize: 11 }}>{row.param}</code>
-                    {row.required && <Tag color="red" style={{ marginLeft: 4, fontSize: 10, padding: '0 4px' }}>required</Tag>}
-                  </td>
-                  <td style={{ padding: '5px 10px', borderBottom: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', color: row.val === '—' ? REDWOOD.neutral300 : REDWOOD.neutral900 }}>
-                    {row.val}
-                  </td>
-                  <td style={{ padding: '5px 10px', borderBottom: `1px solid ${REDWOOD.neutral200}`, color: REDWOOD.neutral600 }}>
-                    {row.desc}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div
-            style={{
-              background:   '#0d1117',
-              borderRadius: 6,
-              padding:      '10px 12px',
-              fontFamily:   'monospace',
-              fontSize:     11,
-              wordBreak:    'break-all',
-              color:        '#79c0ff',
-              position:     'relative',
-            }}
-          >
-            {buildExtTxnUrl()}
-            <Button
-              size="small"
-              icon={<CopyOutlined />}
-              onClick={() => handleCopyUrl(buildExtTxnUrl())}
-              style={{
-                position:        'absolute',
-                top:             6,
-                right:           6,
-                backgroundColor: '#30363d',
-                borderColor:     '#484f58',
-                color:           '#fff',
-                fontSize:        11,
-              }}
-            >
-              Copy
-            </Button>
+            ))}
           </div>
-          <div style={{ marginTop: 8 }}>
-            <Space style={{ marginBottom: 3 }}>
-              <Tag color="orange" style={{ fontSize: 11, margin: 0 }}>POST</Tag>
-              <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Create new external transaction</Text>
-            </Space>
-            <div
-              style={{
-                background:   REDWOOD.neutral100,
-                border:       `1px solid ${REDWOOD.neutral200}`,
-                borderRadius: 4,
-                padding:      '5px 10px',
-                fontFamily:   'monospace',
-                fontSize:     10,
-                wordBreak:    'break-all',
-                color:        REDWOOD.neutral600,
-              }}
-            >
-              {EXT_TXN_URL}
+        ) : (
+          /* ── Single-source mode ── */
+          <div>
+            {/* Parameters table */}
+            <div style={{ marginBottom: 12 }}>
+              <Text style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 6 }}>Parameters sent to endpoint</Text>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: REDWOOD.neutral200 }}>
+                    {['Parameter', 'Current Value', 'Description'].map(h => (
+                      <th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600, borderBottom: `1px solid ${REDWOOD.neutral300}` }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    { param: 'bank_account',  val: lastParams?.bankAccount  ?? '—', desc: 'Bank account name (partial match)', required: true },
+                    { param: 'business_unit', val: lastParams?.businessUnit ?? '—', desc: 'Business unit filter' },
+                    { param: txnSourceFilter === 'CM' ? 'recon_status' : 'reconciled',
+                      val: sysReconFilter === 'RECONCILED' ? 'Y' : sysReconFilter === 'UNRECONCILED' ? 'N' : '(all)',
+                      desc: txnSourceFilter === 'CM' ? 'RECONCILED | UNRECONCILED' : 'Y / N / omit for all' },
+                    { param: 'txn_type',      val: txnSourceFilter !== 'CM' && txnSourceFilter !== 'ALL' ? txnSourceFilter : '—', desc: 'AP_PAYMENT | AR_RECEIPT | GL_JOURNAL' },
+                    { param: 'date_from',     val: (lastParams?.dateFrom ?? sysDateFrom)?.format('YYYY-MM-DD') ?? '—', desc: 'Transaction date from' },
+                    { param: 'date_to',       val: (lastParams?.dateTo   ?? sysDateTo)?.format('YYYY-MM-DD')   ?? '—', desc: 'Transaction date to' },
+                    { param: 'amount_min',    val: lastParams?.amountMin != null ? String(lastParams.amountMin) : '—', desc: 'Minimum transaction amount' },
+                    { param: 'amount_max',    val: lastParams?.amountMax != null ? String(lastParams.amountMax) : '—', desc: 'Maximum transaction amount' },
+                    { param: 'reference',     val: lastParams?.reference ?? '—', desc: 'Partial match on txn number or reference' },
+                    { param: 'row_limit',     val: '500', desc: 'Maximum rows returned' },
+                  ].map((row, i) => (
+                    <tr key={row.param} style={{ background: i % 2 === 0 ? REDWOOD.surface : REDWOOD.neutral100 }}>
+                      <td style={{ padding: '5px 10px', borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+                        <code style={{ color: REDWOOD.info, fontSize: 11 }}>{row.param}</code>
+                        {row.required && <Tag color="red" style={{ marginLeft: 4, fontSize: 10, padding: '0 4px' }}>required</Tag>}
+                      </td>
+                      <td style={{ padding: '5px 10px', borderBottom: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', color: row.val === '—' ? REDWOOD.neutral300 : REDWOOD.neutral900 }}>{row.val}</td>
+                      <td style={{ padding: '5px 10px', borderBottom: `1px solid ${REDWOOD.neutral200}`, color: REDWOOD.neutral600 }}>{row.desc}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
+            {/* Full URL */}
+            <Text style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 4 }}>Full URL (with current filters)</Text>
+            <div style={{ background: '#0d1117', borderRadius: 6, padding: '10px 12px', fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: '#79c0ff', position: 'relative' }}>
+              {txnSourceFilter === 'CM' ? buildExtTxnUrl() : buildSysTxnsUrl(txnSourceFilter)}
+              <Button size="small" icon={<CopyOutlined />}
+                onClick={() => handleCopyUrl(txnSourceFilter === 'CM' ? buildExtTxnUrl() : buildSysTxnsUrl(txnSourceFilter))}
+                style={{ position: 'absolute', top: 6, right: 6, backgroundColor: apiCopied ? REDWOOD.success : '#30363d', borderColor: apiCopied ? REDWOOD.success : '#484f58', color: '#fff', fontSize: 11 }}
+              >
+                {apiCopied ? 'Copied!' : 'Copy'}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* ── POST: Create External Transaction ── */}
+        <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${REDWOOD.neutral200}` }}>
+          <Space style={{ marginBottom: 6 }}>
+            <Tag color="orange" style={{ fontSize: 11, margin: 0 }}>POST</Tag>
+            <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Create new external transaction</Text>
+          </Space>
+          <div style={{ background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 4, padding: '5px 10px', fontFamily: 'monospace', fontSize: 10, wordBreak: 'break-all', color: REDWOOD.neutral600 }}>
+            {EXT_TXN_URL}
           </div>
         </div>
       </Modal>
