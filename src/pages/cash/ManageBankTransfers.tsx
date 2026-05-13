@@ -212,6 +212,9 @@ const TransferForm: React.FC<{
   const [apiTab, setApiTab] = useState<'get' | 'post' | 'attachments'>('post');
   const [attApiLog, setAttApiLog] = useState<Array<{ dir: string; url: string; status: number | null; body: string }>>([]);
   const isEdit = !!initialValues?.bankAccountTransferId;
+  const isAccounted  = isEdit && initialValues?.status === 'Accounted';
+  const isReconciled = isEdit && initialValues?.paymentStatus === 'Reconciled';
+  const isReadOnly   = isAccounted || isReconciled;
 
   const [fromCurrency, setFromCurrency] = useState<string>(initialValues?.fromCurrencyCode ?? '');
   const [toCurrency, setToCurrency] = useState<string>(initialValues?.toCurrencyCode ?? '');
@@ -340,7 +343,7 @@ const TransferForm: React.FC<{
       PaymentCurrencyCode:       values.paymentCurrencyCode ?? '',
       ConversionRateType:        values.conversionRateType ?? '',
       ConversionRate:            values.conversionRate ?? null,
-      Status:                    initialValues?.status ?? 'Pending',
+      Status:                    'Completed',
       PaymentStatus:             initialValues?.paymentStatus ?? '',
       PaymentMethod:             values.paymentMethod ?? '',
       PaymentProfileName:        values.paymentProfileName ?? '',
@@ -564,12 +567,14 @@ const TransferForm: React.FC<{
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '12px 24px' }}>
       <Text style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 16 }}>
-        {isEdit ? 'View Bank Account Transfer' : 'Create Bank Account Transfer'}
+        {isEdit ? (isReadOnly ? 'View Bank Account Transfer (Read-only)' : 'Edit Bank Account Transfer') : 'Create Bank Account Transfer'}
       </Text>
 
-      {isEdit && (
-        <div style={{ marginBottom: 12, padding: '6px 12px', background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 4 }}>
-          <Text style={{ fontSize: 12, color: '#ad6800' }}>This record is read-only. Synced records cannot be edited.</Text>
+      {isReadOnly && (
+        <div style={{ marginBottom: 12, padding: '6px 12px', background: '#fff1f0', border: '1px solid #ffa39e', borderRadius: 4 }}>
+          <Text style={{ fontSize: 12, color: '#a8071a' }}>
+            This transfer cannot be edited — it has been {isAccounted ? 'accounted' : ''}{isAccounted && isReconciled ? ' and ' : ''}{isReconciled ? 'reconciled with bank' : ''}.
+          </Text>
         </div>
       )}
 
@@ -599,7 +604,7 @@ const TransferForm: React.FC<{
                   setFromCurrency('');
                   setToCurrency('');
                 }}
-                disabled={isEdit}
+                disabled={isReadOnly}
               />
             </Form.Item>
           </Col>
@@ -617,7 +622,7 @@ const TransferForm: React.FC<{
               <div style={{ display: 'flex', gap: 0 }}>
                 <Form.Item name="fromBankAccountName" noStyle rules={[{ required: true, message: 'From Account is required' }]}>
                   <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={filteredBankAccounts}
-                    style={{ borderRadius: '6px 0 0 6px', flex: 1 }} disabled={isEdit || !buSelected}
+                    style={{ borderRadius: '6px 0 0 6px', flex: 1 }} disabled={isReadOnly || !buSelected}
                     notFoundContent={<Text type="secondary">{buSelected ? 'No accounts for this BU' : 'Select a BU first'}</Text>}
                     onChange={(v: string) => {
                       setFromCurrency(bankCurrencyMap[v] ?? '');
@@ -640,7 +645,7 @@ const TransferForm: React.FC<{
               <div style={{ display: 'flex', gap: 0 }}>
                 <Form.Item name="toBankAccountName" noStyle rules={[{ required: true, message: 'To Account is required' }]}>
                   <Select showSearch placeholder="Select bank account" optionFilterProp="label" options={filteredBankAccounts}
-                    style={{ borderRadius: '6px 0 0 6px', flex: 1 }} disabled={isEdit || !buSelected}
+                    style={{ borderRadius: '6px 0 0 6px', flex: 1 }} disabled={isReadOnly || !buSelected}
                     notFoundContent={<Text type="secondary">{buSelected ? 'No accounts for this BU' : 'Select a BU first'}</Text>}
                     onChange={(v: string) => {
                       const ccy = bankCurrencyMap[v] ?? '';
@@ -663,7 +668,7 @@ const TransferForm: React.FC<{
             <div style={{ marginBottom: 14 }} />
 
             <Form.Item label="Payment Currency" name="paymentCurrencyCode" style={fs}>
-              <Select placeholder="Select currency" allowClear disabled={isEdit || !buSelected}>
+              <Select placeholder="Select currency" allowClear disabled={isReadOnly || !buSelected}>
                 {['AED', 'USD', 'EUR', 'GBP', 'SAR', 'QAR', 'BHD', 'KWD', 'OMR', 'JOD', 'EGP', 'INR', 'PKR'].map(c => (
                   <Option key={c} value={c}>{c}</Option>
                 ))}
@@ -671,11 +676,11 @@ const TransferForm: React.FC<{
             </Form.Item>
 
             <Form.Item label="Transfer Date" name="transactionDate" rules={[{ required: true, message: 'Transfer Date is required' }]} style={fs}>
-              <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isEdit || !buSelected} />
+              <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isReadOnly || !buSelected} />
             </Form.Item>
 
             <Form.Item label="Transfer Amount" name="paymentAmount" rules={[{ required: true, message: 'Amount is required' }]} style={{ marginBottom: fromAmount != null ? 6 : 14 }}>
-              <InputNumber style={{ width: '100%' }} min={0} precision={2} disabled={isEdit || !buSelected} />
+              <InputNumber style={{ width: '100%' }} min={0} precision={2} disabled={isReadOnly || !buSelected} />
             </Form.Item>
             {fromAmount != null && (
               <div style={{ marginBottom: 14, marginLeft: lc.span * (100 / 24) + '%', padding: '8px 12px', background: '#e6f4ff', border: '1px solid #91caff', borderRadius: 6, fontSize: 12 }}>
@@ -694,7 +699,7 @@ const TransferForm: React.FC<{
             )}
 
             <Form.Item label="Conversion Rate Type" name="conversionRateType" style={fs}>
-              <Select placeholder="Select type" allowClear disabled={isEdit || !buSelected}>
+              <Select placeholder="Select type" allowClear disabled={isReadOnly || !buSelected}>
                 <Option value="User">User</Option>
                 <Option value="Corporate">Corporate</Option>
                 <Option value="Spot">Spot</Option>
@@ -711,7 +716,7 @@ const TransferForm: React.FC<{
                 message: 'Conversion Rate is required for non-AED payment currency',
               }]}
             >
-              <InputNumber style={{ width: '100%' }} min={0} precision={6} disabled={isEdit || !buSelected} />
+              <InputNumber style={{ width: '100%' }} min={0} precision={6} disabled={isReadOnly || !buSelected} />
             </Form.Item>
             {watchedPaymentCcy && watchedPaymentCcy !== 'AED' && (
               <div style={{ fontSize: 11, color: REDWOOD.warning, marginTop: -10, marginBottom: 8 }}>
@@ -723,13 +728,13 @@ const TransferForm: React.FC<{
           {/* Right column */}
           <Col xs={24} lg={12}>
             <Form.Item label=" " colon={false} name="isSettledWithIbyFlag" valuePropName="checked" style={fs}>
-              <Checkbox style={{ color: REDWOOD.info, fontWeight: 500 }} disabled={isEdit || !buSelected}>
+              <Checkbox style={{ color: REDWOOD.info, fontWeight: 500 }} disabled={isReadOnly || !buSelected}>
                 Settle transaction through Payments
               </Checkbox>
             </Form.Item>
 
             <Form.Item label="Payment Method" name="paymentMethod" rules={[{ required: true, message: 'Payment Method is required' }]} style={fs}>
-              <Select placeholder="Select method" disabled={isEdit || !buSelected}>
+              <Select placeholder="Select method" disabled={isReadOnly || !buSelected}>
                 <Option value="Electronic">Electronic</Option>
                 <Option value="Check">Check</Option>
                 <Option value="Wire">Wire</Option>
@@ -738,7 +743,7 @@ const TransferForm: React.FC<{
             </Form.Item>
 
             <Form.Item label="Payment Profile" name="paymentProfileName" rules={[{ required: true, message: 'Payment Profile is required' }]} style={fs}>
-              <Select placeholder="Select profile" showSearch optionFilterProp="children" disabled={isEdit || !buSelected}>
+              <Select placeholder="Select profile" showSearch optionFilterProp="children" disabled={isReadOnly || !buSelected}>
                 {['BOB BCL EFT', 'BOB BCL WIRE', 'ADIB EFT', 'ADCB EFT', 'FAB EFT'].map(p => (
                   <Option key={p} value={p}>{p}</Option>
                 ))}
@@ -746,7 +751,7 @@ const TransferForm: React.FC<{
             </Form.Item>
 
             <Form.Item label="Memo" name="memo" style={fs}>
-              <Input.TextArea rows={3} placeholder="Enter memo / description" disabled={isEdit || !buSelected} />
+              <Input.TextArea rows={3} placeholder="Enter memo / description" disabled={isReadOnly || !buSelected} />
             </Form.Item>
 
             <Form.Item label="Attachments" style={fs}>
@@ -836,6 +841,12 @@ const TransferForm: React.FC<{
               <Button type="primary" loading={saving} onClick={handleSubmit}
                 style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
                 Create Transfer
+              </Button>
+            )}
+            {isEdit && !isReadOnly && (
+              <Button type="primary" loading={saving} onClick={handleSubmit}
+                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
+                Save Transfer
               </Button>
             )}
           </Space>
@@ -1485,7 +1496,8 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
     if (activeTab === key) setActiveTab('search');
   };
 
-  const handleSaved = () => { loadLovs(); handleSearch(); closeTab(activeTab); };
+  const handleSaved     = () => { loadLovs(); handleSearch(); closeTab(activeTab); };
+  const handleEditSaved = () => { loadLovs(); handleSearch(); };
 
   // ── Columns ───────────────────────────────────────────────────────────────
   const columns: ColumnsType<TransferRecord> = [
@@ -1816,7 +1828,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
           bankCurrencyMap={bankCurrencyMap}
           buBankMap={buBankMap}
           bankAccountAssetMap={bankAccountAssetMap}
-          onSave={handleSaved}
+          onSave={handleEditSaved}
           onCancel={() => closeTab(t.key)}
         />
       ),
