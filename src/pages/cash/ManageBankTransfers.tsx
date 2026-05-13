@@ -1419,11 +1419,11 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
 
   const modulePrefix = module === 'ap' ? '/ap' : '/cash';
 
-  // ── Load LOV data from existing transfers ─────────────────────────────────
+  // ── Load LOV data ─────────────────────────────────────────────────────────
   const loadLovs = useCallback(async () => {
     try {
-      // Primary source: bank accounts with legalEntityName for BU→bank mapping
-      const [baRes, extRes] = await Promise.allSettled([
+      const [buRes, baRes, extRes] = await Promise.allSettled([
+        fetch(`${APEX_BASE}/gl/businessunits`),
         fetch(`${APEX_BASE}/banks/bankaccounts`),
         fetch(`${APEX_BASE}/cash/externaltransactions?row_limit=2000`),
       ]);
@@ -1432,18 +1432,27 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       const currMapLocal: Record<string, string> = {};
       const assetMapLocal: Record<string, string> = {};
       const acctSet = new Set<string>();
-      const buSet = new Set<string>();
+      const buSet   = new Set<string>();
 
+      // BUs from dedicated endpoint
+      if (buRes.status === 'fulfilled') {
+        const buData = await buRes.value.json();
+        (buData.items ?? []).forEach((b: any) => {
+          const name = b.business_unit_name || b.businessUnitName;
+          if (name) buSet.add(name);
+        });
+      }
+
+      // Bank accounts from master table (snake_case from collection_feed)
       if (baRes.status === 'fulfilled') {
         const baData = await baRes.value.json();
-        const baItems: any[] = baData.items ?? [];
-        baItems.forEach(i => {
-          const acct = i.bankAccountName ?? i.bank_account_name;
-          const le   = i.legalEntityName ?? i.legal_entity_name;
+        (baData.items ?? []).forEach((i: any) => {
+          const acct = i.bank_account_name ?? i.bankAccountName;
+          const le   = i.legal_entity_name ?? i.legalEntityName;
           if (!acct) return;
           acctSet.add(acct);
-          const ccy  = i.currencyCode ?? i.currency_code;
-          const cash = i.cashAccountCombination ?? i.cash_account_combination;
+          const ccy  = i.currency_code ?? i.currencyCode;
+          const cash = i.cash_account_combination ?? i.cashAccountCombination;
           if (ccy)  currMapLocal[acct] = ccy;
           if (cash) assetMapLocal[acct] = cash;
           if (le) {
@@ -1454,10 +1463,10 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
         });
       }
 
+      // External transactions — supplement asset map and BU→bank mapping
       if (extRes.status === 'fulfilled') {
         const extData = await extRes.value.json();
-        const extItems: any[] = extData.items ?? [];
-        extItems.forEach(i => {
+        (extData.items ?? []).forEach((i: any) => {
           const acct = i.bankAccountName;
           const bu   = i.businessUnitName;
           if (!acct) return;
