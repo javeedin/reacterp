@@ -20,7 +20,8 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useAuth } from '../../context/AuthContext';
 import {
-  buildBankTransferSlaPayload, createAccounting, fetchLedgerByBusinessUnit, derivePeriodName,
+  buildBankTransferSlaPayload, createAccounting, checkAccountingExists,
+  fetchLedgerByBusinessUnit, derivePeriodName,
 } from '../../services/sla.service';
 import { validateGlPayload, persistValidationLog, type GlJournalPayload } from '../../services/glValidation.service';
 import { useGlValidation } from '../../context/GlValidationContext';
@@ -233,7 +234,7 @@ const TransferForm: React.FC<{
   const [apiTab, setApiTab] = useState<'get' | 'post' | 'attachments'>('post');
   const [attApiLog, setAttApiLog] = useState<Array<{ dir: string; url: string; status: number | null; body: string }>>([]);
   const isEdit = !!initialValues?.bankAccountTransferId;
-  const isAccounted  = isEdit && initialValues?.status === 'Accounted';
+  const isAccounted  = isEdit && initialValues?.accountingFlag === 'Y';
   const isReconciled = isEdit && initialValues?.paymentStatus === 'Reconciled';
   const isPermanentlyLocked = isAccounted || isReconciled;
   const [editMode, setEditMode] = useState(false);
@@ -1549,7 +1550,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
   const openCreateAccountingModal = () => {
     const selected = transfers.filter(t => selectedRowKeys.includes(t.bankAccountTransferId));
     const rows: TransferAcctRow[] = selected.map(t => {
-      const alreadyAccounted = t.accountingFlag === 'Y' || t.status === 'Accounted';
+      const alreadyAccounted = t.accountingFlag === 'Y';
       const fromAsset = bankAccountAssetMap[t.fromBankAccountName] || '';
       const toAsset   = bankAccountAssetMap[t.toBankAccountName]   || '';
       const missingAccounts = !fromAsset || !toAsset;
@@ -1585,6 +1586,14 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       if (!txn) { updateRow(row.transferId, { status: 'error', message: 'Transfer not found' }); continue; }
 
       try {
+        // Guard: check SLA table to prevent duplicate accounting
+        const existing = await checkAccountingExists('BANK_ACCOUNT_TRANSFERS', txn.bankAccountTransferId, 'BANK_TRANSFER');
+        if (existing.exists && existing.postingStatus === 'POSTED') {
+          updateRow(row.transferId, { status: 'skipped', message: `Already posted — SLA header ${existing.headerId}` });
+          setTransfers(prev => prev.map(t => t.bankAccountTransferId === txn.bankAccountTransferId ? { ...t, accountingFlag: 'Y' } : t));
+          continue;
+        }
+
         const ledger = await fetchLedgerByBusinessUnit(txn.businessUnit);
         if (!ledger) { updateRow(row.transferId, { status: 'error', message: 'Could not resolve ledger for BU' }); continue; }
 
@@ -1700,14 +1709,14 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
               postedBy: currentUser,
             }),
           });
-          // Stamp the transfer as Accounted
+          // Stamp AccountingFlag only — do not change Status
           await fetch(`${APEX_BASE}/cash/banktransfers`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify({ items: [{ BankAccountTransferId: txn.bankAccountTransferId, Status: 'Accounted', LastUpdatedBy: currentUser, LastUpdateDate: new Date().toISOString() }] }),
+            body: JSON.stringify({ items: [{ BankAccountTransferId: txn.bankAccountTransferId, AccountingFlag: 'Y', LastUpdatedBy: currentUser, LastUpdateDate: new Date().toISOString() }] }),
           });
           setTransfers(prev => prev.map(t =>
-            t.bankAccountTransferId === txn.bankAccountTransferId ? { ...t, status: 'Accounted', accountingFlag: 'Y' } : t
+            t.bankAccountTransferId === txn.bankAccountTransferId ? { ...t, accountingFlag: 'Y' } : t
           ));
           glMsg = `GL: ${batchName}`;
         } else {
@@ -1852,7 +1861,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       title: 'Accounting',
       key: 'acctFlag',
       width: 100,
-      render: (_, r) => r.accountingFlag === 'Y' || r.status === 'Accounted'
+      render: (_, r) => r.accountingFlag === 'Y'
         ? <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: 11 }}>Accounted</Tag>
         : <Tag color="default" style={{ fontSize: 11 }}>Unposted</Tag>,
     },
@@ -1870,7 +1879,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
                 setSelectedRowKeys([record.bankAccountTransferId]);
                 const fromAsset = bankAccountAssetMap[record.fromBankAccountName] || '';
                 const toAsset   = bankAccountAssetMap[record.toBankAccountName]   || '';
-                const alreadyAccounted = record.accountingFlag === 'Y' || record.status === 'Accounted';
+                const alreadyAccounted = record.accountingFlag === 'Y';
                 const missingAccounts  = !fromAsset || !toAsset;
                 const date = record.transactionDate || dayjs().format('YYYY-MM-DD');
                 setAcctProgress([{
@@ -2030,7 +2039,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
           loading={loading}
           size="small"
           scroll={{ x: 1500 }}
-          rowSelection={{ selectedRowKeys, onChange: keys => setSelectedRowKeys(keys as number[]), getCheckboxProps: r => ({ disabled: r.accountingFlag === 'Y' || r.status === 'Accounted' }) }}
+          rowSelection={{ selectedRowKeys, onChange: keys => setSelectedRowKeys(keys as number[]), getCheckboxProps: r => ({ disabled: r.accountingFlag === 'Y' }) }}
           pagination={{
             pageSize: 15,
             showSizeChanger: true,
