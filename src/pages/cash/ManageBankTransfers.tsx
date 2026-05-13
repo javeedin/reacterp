@@ -25,6 +25,7 @@ import {
 } from '../../services/sla.service';
 import { validateGlPayload, persistValidationLog, type GlJournalPayload } from '../../services/glValidation.service';
 import { useGlValidation } from '../../context/GlValidationContext';
+import AccountSelector from '../../components/AccountSelector';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -72,6 +73,7 @@ interface TransferRecord {
   accountingFlag?: string;
   reconciledFlag?: string;
   reconciledDate?: string;
+  cashClearingAccount?: string;
 }
 
 interface BankAccountOption { label: string; value: string; }
@@ -248,6 +250,10 @@ const TransferForm: React.FC<{
 
   const [fromCurrency, setFromCurrency] = useState<string>(initialValues?.fromCurrencyCode ?? '');
   const [toCurrency, setToCurrency] = useState<string>(initialValues?.toCurrencyCode ?? '');
+  const [cashClearingAcct, setCashClearingAcct] = useState<string>(initialValues?.cashClearingAccount ?? '');
+  const [cashClearingOpen, setCashClearingOpen] = useState(false);
+  const [previewAcctOpen, setPreviewAcctOpen]   = useState(false);
+  const [acctCreating,    setAcctCreating]      = useState(false);
   const watchedPaymentCcy  = Form.useWatch('paymentCurrencyCode', form);
   const watchedAmount      = Form.useWatch('paymentAmount', form);
   const watchedRate        = Form.useWatch('conversionRate', form);
@@ -720,6 +726,23 @@ const TransferForm: React.FC<{
                 </div>
               )}
             </Form.Item>
+            <Form.Item label="Cash Clearing Account" labelCol={{ span: 4 }} wrapperCol={{ span: 20 }} style={{ marginBottom: 4 }}>
+              <Input.Group compact style={{ display: 'flex' }}>
+                <Input
+                  value={cashClearingAcct}
+                  readOnly
+                  placeholder="Select clearing account combination"
+                  style={{ flex: 1, fontFamily: 'monospace', fontSize: 12, cursor: 'pointer' }}
+                  onClick={() => !isReadOnly && setCashClearingOpen(true)}
+                />
+                <Button
+                  icon={<SearchOutlined />}
+                  disabled={isReadOnly}
+                  onClick={() => setCashClearingOpen(true)}
+                  style={{ borderLeft: 0 }}
+                />
+              </Input.Group>
+            </Form.Item>
             <div style={{ marginBottom: 14 }} />
           </Col>
         </Row>
@@ -899,6 +922,14 @@ const TransferForm: React.FC<{
               </Popconfirm>
             )}
             <Button onClick={onCancel}>{isEdit ? 'Close' : 'Cancel'}</Button>
+            <Button
+              icon={<AccountBookOutlined />}
+              onClick={() => setPreviewAcctOpen(true)}
+              disabled={!selectedFromAcct || !selectedToAcct || !cashClearingAcct}
+              style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
+            >
+              Preview Accounting
+            </Button>
             {!isEdit && (
               <Button type="primary" loading={saving} onClick={handleSubmit}
                 style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
@@ -1402,6 +1433,226 @@ END;
                 }}>
                 Download
               </Button>
+            </div>
+          );
+        })()}
+      </Modal>
+
+      {/* Cash Clearing Account Selector */}
+      <AccountSelector
+        visible={cashClearingOpen}
+        onCancel={() => setCashClearingOpen(false)}
+        initialValue={cashClearingAcct}
+        onSelect={(code: string) => {
+          setCashClearingAcct(code);
+          setCashClearingOpen(false);
+        }}
+      />
+
+      {/* Preview Accounting Modal */}
+      <Modal
+        open={previewAcctOpen}
+        onCancel={() => setPreviewAcctOpen(false)}
+        title={<Space><AccountBookOutlined style={{ color: REDWOOD.info }} /> Preview Accounting — Bank Transfer</Space>}
+        width={820}
+        footer={
+          <Space>
+            <Button onClick={() => setPreviewAcctOpen(false)}>Close</Button>
+            <Button type="primary" loading={acctCreating}
+              disabled={!cashClearingAcct || !selectedFromAcct || !selectedToAcct}
+              style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+              onClick={async () => {
+                const values = form.getFieldsValue();
+                const pmtAmt = values.paymentAmount ?? 0;
+                const rate   = values.conversionRate ?? 1;
+                const fromAsset = bankAccountAssetMap[selectedFromAcct] || '';
+                const toAsset   = bankAccountAssetMap[selectedToAcct]   || '';
+                setAcctCreating(true);
+                try {
+                  const { createAccounting, fetchLedgerByBusinessUnit, derivePeriodName } = await import('../../services/sla.service');
+                  const ledger = await fetchLedgerByBusinessUnit(values.businessUnit || '');
+                  const today  = values.transactionDate ? values.transactionDate.format('YYYY-MM-DD') : new Date().toISOString().slice(0,10);
+                  const period = derivePeriodName(new Date(today));
+
+                  // Journal 1: DR Cash Clearing / CR From Bank (From currency)
+                  const j1currency = fromCurrency || 'AED';
+                  const j1Rate     = j1currency === 'AED' ? 1 : (rate || 1);
+                  await createAccounting({
+                    header: {
+                      moduleName: 'CM', sourceTable: 'BANK_ACCOUNT_TRANSFERS',
+                      sourceId: initialValues?.bankAccountTransferId ?? 0,
+                      sourceNumber: String(values.bankAccountTransferNumber ?? ''),
+                      sourceType: 'Bank Transfer', eventTypeCode: 'BANK_TRANSFER_DISBURSE',
+                      eventDate: today, accountingDate: today, periodName: period,
+                      ledgerId: ledger?.ledgerId ?? 0, ledgerName: ledger?.ledgerName ?? '',
+                      currencyCode: j1currency, ledgerCurrency: 'AED',
+                      exchangeRate: j1Rate, exchangeRateType: 'Corporate',
+                      businessUnit: values.businessUnit, description: `Bank Transfer - Disbursement`,
+                      createdBy: 'SYSTEM',
+                    },
+                    lines: [
+                      { lineNumber: 1, lineType: 'DR', accountingClass: 'CASH_CLEARING',
+                        accountCombination: cashClearingAcct,
+                        enteredDr: pmtAmt, enteredCr: 0,
+                        accountedDr: Math.round(pmtAmt * j1Rate * 100) / 100, accountedCr: 0,
+                        currencyCode: j1currency, exchangeRate: j1Rate,
+                        description: `Cash Clearing DR – From ${selectedFromAcct}` },
+                      { lineNumber: 2, lineType: 'CR', accountingClass: 'BANK_ASSET',
+                        accountCombination: fromAsset,
+                        enteredDr: 0, enteredCr: pmtAmt,
+                        accountedDr: 0, accountedCr: Math.round(pmtAmt * j1Rate * 100) / 100,
+                        currencyCode: j1currency, exchangeRate: j1Rate,
+                        description: `From Bank CR – ${selectedFromAcct}` },
+                    ],
+                  });
+
+                  // Journal 2: DR To Bank / CR Cash Clearing (To currency)
+                  const j2currency = toCurrency || 'AED';
+                  const j2Rate     = j2currency === 'AED' ? 1 : (rate || 1);
+                  const toAmt      = j2currency === fromCurrency ? pmtAmt : Math.round(pmtAmt * j1Rate * 100) / 100;
+                  await createAccounting({
+                    header: {
+                      moduleName: 'CM', sourceTable: 'BANK_ACCOUNT_TRANSFERS',
+                      sourceId: initialValues?.bankAccountTransferId ?? 0,
+                      sourceNumber: String(values.bankAccountTransferNumber ?? ''),
+                      sourceType: 'Bank Transfer', eventTypeCode: 'BANK_TRANSFER_RECEIPT',
+                      eventDate: today, accountingDate: today, periodName: period,
+                      ledgerId: ledger?.ledgerId ?? 0, ledgerName: ledger?.ledgerName ?? '',
+                      currencyCode: j2currency, ledgerCurrency: 'AED',
+                      exchangeRate: j2Rate, exchangeRateType: 'Corporate',
+                      businessUnit: values.businessUnit, description: `Bank Transfer - Receipt`,
+                      createdBy: 'SYSTEM',
+                    },
+                    lines: [
+                      { lineNumber: 1, lineType: 'DR', accountingClass: 'BANK_ASSET',
+                        accountCombination: toAsset,
+                        enteredDr: toAmt, enteredCr: 0,
+                        accountedDr: Math.round(toAmt * j2Rate * 100) / 100, accountedCr: 0,
+                        currencyCode: j2currency, exchangeRate: j2Rate,
+                        description: `To Bank DR – ${selectedToAcct}` },
+                      { lineNumber: 2, lineType: 'CR', accountingClass: 'CASH_CLEARING',
+                        accountCombination: cashClearingAcct,
+                        enteredDr: 0, enteredCr: toAmt,
+                        accountedDr: 0, accountedCr: Math.round(toAmt * j2Rate * 100) / 100,
+                        currencyCode: j2currency, exchangeRate: j2Rate,
+                        description: `Cash Clearing CR – To ${selectedToAcct}` },
+                    ],
+                  });
+
+                  message.success('Accounting journals created successfully');
+                  setPreviewAcctOpen(false);
+                } catch (e: any) {
+                  message.error('Failed to create accounting: ' + e.message);
+                } finally {
+                  setAcctCreating(false);
+                }
+              }}>
+              Create Accounting
+            </Button>
+          </Space>
+        }
+        destroyOnClose
+      >
+        {(() => {
+          const values = form.getFieldsValue();
+          const pmtAmt = values.paymentAmount ?? 0;
+          const rate   = values.conversionRate ?? 1;
+          const j1currency = fromCurrency || 'AED';
+          const j1Rate     = j1currency === 'AED' ? 1 : (rate || 1);
+          const j2currency = toCurrency || 'AED';
+          const j2Rate     = j2currency === 'AED' ? 1 : (rate || 1);
+          const toAmt      = j2currency === fromCurrency ? pmtAmt : Math.round(pmtAmt * j1Rate * 100) / 100;
+          const fromAsset  = bankAccountAssetMap[selectedFromAcct] || '—';
+          const toAsset    = bankAccountAssetMap[selectedToAcct]   || '—';
+          const clearing   = cashClearingAcct || '—';
+
+          if (!cashClearingAcct) return (
+            <Alert type="warning" message="Please select a Cash Clearing Account before previewing accounting." showIcon />
+          );
+
+          const lineStyle = { fontSize: 12, padding: '6px 12px' };
+          const hdrStyle  = { background: '#f0f5ff', fontWeight: 600 as const, fontSize: 12, padding: '8px 12px', borderRadius: '6px 6px 0 0' };
+
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Journal 1 */}
+              <div style={{ border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, overflow: 'hidden' }}>
+                <div style={hdrStyle}>
+                  <Space>
+                    <Tag color="blue">Journal 1</Tag>
+                    <span>Disbursement — {selectedFromAcct}</span>
+                    <Tag color="geekblue">{j1currency}</Tag>
+                  </Space>
+                </div>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: REDWOOD.neutral100, fontSize: 11, color: REDWOOD.neutral600 }}>
+                      <th style={{ padding: '4px 12px', textAlign: 'left' }}>Account</th>
+                      <th style={{ padding: '4px 12px', textAlign: 'right' }}>Entered Dr</th>
+                      <th style={{ padding: '4px 12px', textAlign: 'right' }}>Entered Cr</th>
+                      <th style={{ padding: '4px 12px', textAlign: 'right' }}>Accounted Dr (AED)</th>
+                      <th style={{ padding: '4px 12px', textAlign: 'right' }}>Accounted Cr (AED)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr style={{ borderTop: `1px solid ${REDWOOD.neutral200}` }}>
+                      <td style={lineStyle}><Tag color="green" style={{ fontSize: 10 }}>DR</Tag> <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{clearing}</Text> <Text type="secondary" style={{ fontSize: 11 }}>(Cash Clearing)</Text></td>
+                      <td style={{ ...lineStyle, textAlign: 'right', color: REDWOOD.success, fontWeight: 500 }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(pmtAmt)} {j1currency}</td>
+                      <td style={lineStyle} />
+                      <td style={{ ...lineStyle, textAlign: 'right' }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(Math.round(pmtAmt * j1Rate * 100) / 100)}</td>
+                      <td style={lineStyle} />
+                    </tr>
+                    <tr style={{ borderTop: `1px solid ${REDWOOD.neutral200}` }}>
+                      <td style={lineStyle}><Tag color="red" style={{ fontSize: 10 }}>CR</Tag> <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{fromAsset}</Text> <Text type="secondary" style={{ fontSize: 11 }}>(From Bank)</Text></td>
+                      <td style={lineStyle} />
+                      <td style={{ ...lineStyle, textAlign: 'right', color: REDWOOD.error, fontWeight: 500 }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(pmtAmt)} {j1currency}</td>
+                      <td style={lineStyle} />
+                      <td style={{ ...lineStyle, textAlign: 'right' }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(Math.round(pmtAmt * j1Rate * 100) / 100)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Journal 2 */}
+              <div style={{ border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, overflow: 'hidden' }}>
+                <div style={hdrStyle}>
+                  <Space>
+                    <Tag color="green">Journal 2</Tag>
+                    <span>Receipt — {selectedToAcct}</span>
+                    <Tag color="success">{j2currency}</Tag>
+                  </Space>
+                </div>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: REDWOOD.neutral100, fontSize: 11, color: REDWOOD.neutral600 }}>
+                      <th style={{ padding: '4px 12px', textAlign: 'left' }}>Account</th>
+                      <th style={{ padding: '4px 12px', textAlign: 'right' }}>Entered Dr</th>
+                      <th style={{ padding: '4px 12px', textAlign: 'right' }}>Entered Cr</th>
+                      <th style={{ padding: '4px 12px', textAlign: 'right' }}>Accounted Dr (AED)</th>
+                      <th style={{ padding: '4px 12px', textAlign: 'right' }}>Accounted Cr (AED)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr style={{ borderTop: `1px solid ${REDWOOD.neutral200}` }}>
+                      <td style={lineStyle}><Tag color="green" style={{ fontSize: 10 }}>DR</Tag> <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{toAsset}</Text> <Text type="secondary" style={{ fontSize: 11 }}>(To Bank)</Text></td>
+                      <td style={{ ...lineStyle, textAlign: 'right', color: REDWOOD.success, fontWeight: 500 }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(toAmt)} {j2currency}</td>
+                      <td style={lineStyle} />
+                      <td style={{ ...lineStyle, textAlign: 'right' }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(Math.round(toAmt * j2Rate * 100) / 100)}</td>
+                      <td style={lineStyle} />
+                    </tr>
+                    <tr style={{ borderTop: `1px solid ${REDWOOD.neutral200}` }}>
+                      <td style={lineStyle}><Tag color="red" style={{ fontSize: 10 }}>CR</Tag> <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{clearing}</Text> <Text type="secondary" style={{ fontSize: 11 }}>(Cash Clearing)</Text></td>
+                      <td style={lineStyle} />
+                      <td style={{ ...lineStyle, textAlign: 'right', color: REDWOOD.error, fontWeight: 500 }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(toAmt)} {j2currency}</td>
+                      <td style={lineStyle} />
+                      <td style={{ ...lineStyle, textAlign: 'right' }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(Math.round(toAmt * j2Rate * 100) / 100)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <Alert type="info" showIcon style={{ fontSize: 12 }}
+                message="Cash Clearing nets to zero — Journal 1 Dr is offset by Journal 2 Cr through the clearing account." />
             </div>
           );
         })()}
