@@ -435,11 +435,15 @@ const SearchTab: React.FC<{ onOpen: (order: RawOrder) => void }> = ({ onOpen }) 
 
   const columns: ColumnsType<RawOrder> = [
     {
-      title: 'Order #', dataIndex: 'OrderNumber', fixed: 'left', width: 90,
+      title: 'Source Txn #', dataIndex: 'SourceTransactionNumber', fixed: 'left', width: 110,
       render: (v: any, rec: any) => (
         <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontFamily: 'monospace' }}
           onClick={() => onOpen(rec)}>{v}</Button>
       ),
+    },
+    {
+      title: 'Order #', dataIndex: 'OrderNumber', width: 85,
+      render: (v: any) => <Text style={{ fontFamily: 'monospace', fontWeight: 600 }}>{v}</Text>,
     },
     {
       title: 'Customer', dataIndex: 'BuyingPartyName', ellipsis: true, width: 220,
