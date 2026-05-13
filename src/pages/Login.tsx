@@ -271,8 +271,23 @@ const Login: React.FC = () => {
         >
           {/* Header */}
           <div style={{ textAlign: 'center', marginBottom: 32 }}>
-            <CloudServerOutlined style={{ fontSize: 48, color: '#1890ff', marginBottom: 16 }} />
-            <Title level={2} style={{ margin: 0, color: '#1a1a2e' }}>ReactERP</Title>
+            {/* Re-ERP Logo */}
+            <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ marginBottom: 12 }}>
+              <rect width="64" height="64" rx="13" fill="#C74634"/>
+              <rect x="0" y="0" width="64" height="32" rx="13" fill="rgba(255,255,255,0.1)"/>
+              <rect x="7"  y="7"  width="21" height="21" rx="4" fill="rgba(255,255,255,0.92)"/>
+              <rect x="36" y="7"  width="21" height="21" rx="4" fill="rgba(255,255,255,0.60)"/>
+              <rect x="7"  y="36" width="21" height="21" rx="4" fill="rgba(255,255,255,0.60)"/>
+              <rect x="36" y="36" width="21" height="21" rx="4" fill="rgba(255,255,255,0.35)"/>
+              <rect x="28" y="15" width="8" height="3" rx="1.5" fill="rgba(255,255,255,0.55)"/>
+              <rect x="28" y="46" width="8" height="3" rx="1.5" fill="rgba(255,255,255,0.35)"/>
+              <rect x="15" y="28" width="3" height="8" rx="1.5" fill="rgba(255,255,255,0.55)"/>
+              <rect x="46" y="28" width="3" height="8" rx="1.5" fill="rgba(255,255,255,0.35)"/>
+              <text x="9" y="24" fontFamily="Arial Black, Arial, sans-serif" fontSize="14" fontWeight="900" fill="#C74634">Re</text>
+            </svg>
+            <Title level={2} style={{ margin: 0, color: '#1a1a2e' }}>
+              Re-<span style={{ fontWeight: 400 }}>ERP</span>
+            </Title>
             <Text type="secondary">Enterprise Resource Planning</Text>
           </div>
 

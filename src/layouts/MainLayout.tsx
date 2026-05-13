@@ -164,10 +164,27 @@ const MainLayout: React.FC = () => {
       }}>
         {/* Left side - Logo and App Name */}
         <Link to="/home" style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
-          <CloudServerOutlined style={{ fontSize: 24, color: '#fff' }} />
-          <Text strong style={{ color: '#fff', fontSize: 18 }}>
-            ReactERP
-          </Text>
+          {/* Re-ERP logo mark */}
+          <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="36" height="36" rx="7" fill="rgba(255,255,255,0.18)"/>
+            <rect x="4"  y="4"  width="12" height="12" rx="2.5" fill="rgba(255,255,255,0.92)"/>
+            <rect x="20" y="4"  width="12" height="12" rx="2.5" fill="rgba(255,255,255,0.65)"/>
+            <rect x="4"  y="20" width="12" height="12" rx="2.5" fill="rgba(255,255,255,0.65)"/>
+            <rect x="20" y="20" width="12" height="12" rx="2.5" fill="rgba(255,255,255,0.38)"/>
+            <rect x="16" y="9"  width="4"  height="2"  rx="1" fill="rgba(255,255,255,0.6)"/>
+            <rect x="16" y="25" width="4"  height="2"  rx="1" fill="rgba(255,255,255,0.4)"/>
+            <rect x="9"  y="16" width="2"  height="4"  rx="1" fill="rgba(255,255,255,0.6)"/>
+            <rect x="25" y="16" width="2"  height="4"  rx="1" fill="rgba(255,255,255,0.4)"/>
+            <text x="5.5" y="13.5" fontFamily="Arial Black, Arial, sans-serif" fontSize="8" fontWeight="900" fill="#C74634">Re</text>
+          </svg>
+          <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1 }}>
+            <Text strong style={{ color: '#fff', fontSize: 17, letterSpacing: 0.5 }}>
+              Re-<span style={{ fontWeight: 400 }}>ERP</span>
+            </Text>
+            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 10, letterSpacing: 1 }}>
+              ENTERPRISE PLATFORM
+            </Text>
+          </div>
         </Link>
 
         {/* Right side - Icons */}
@@ -303,7 +320,7 @@ const MainLayout: React.FC = () => {
 
       {/* iOS Install Instructions Modal */}
       <Modal
-        title="Install ReactERP App"
+        title="Install Re-ERP App"
         open={showIOSModal}
         onCancel={() => setShowIOSModal(false)}
         footer={[
@@ -314,7 +331,7 @@ const MainLayout: React.FC = () => {
       >
         <div style={{ textAlign: 'center', padding: '20px 0' }}>
           <Text style={{ fontSize: 16, display: 'block', marginBottom: 24 }}>
-            Install ReactERP on your iPhone/iPad:
+            Install Re-ERP on your iPhone/iPad:
           </Text>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20, textAlign: 'left' }}>

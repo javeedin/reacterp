@@ -1,6 +1,6 @@
 {
-  "name": "ReactERP - Enterprise Resource Planning",
-  "short_name": "ReactERP",
+  "name": "Re-ERP - Enterprise Resource Planning",
+  "short_name": "Re-ERP",
   "description": "Oracle Fusion Cloud ERP Integration Platform",
   "start_url": "/",
   "display": "standalone",
