@@ -114,6 +114,14 @@ const modules: Module[] = [
     color: '#13c2c2',
   },
   {
+    id: 'om',
+    name: 'Order Management',
+    description: 'Sales Orders, Customers, On-Hand Inventory',
+    icon: <ShoppingCartOutlined style={{ fontSize: 32 }} />,
+    path: '/om',
+    color: '#C25700',
+  },
+  {
     id: 'hr',
     name: 'Human Resources',
     description: 'Employees, Payroll, Leave Management',

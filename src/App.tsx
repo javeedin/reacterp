@@ -58,6 +58,8 @@ const CheckMigration          = lazy(() => import('./pages/ap/CheckMigration'));
 const ManageSuppliers         = lazy(() => import('./pages/suppliers/ManageSuppliers'));
 const SupplierBalance         = lazy(() => import('./pages/suppliers/SupplierBalance'));
 const ManageOnhandInventory   = lazy(() => import('./pages/inventory/ManageOnhandInventory'));
+const OrderManagementModule   = lazy(() => import('./pages/orders/OrderManagementModule'));
+const ManageSalesOrders       = lazy(() => import('./pages/orders/ManageSalesOrders'));
 const SyncData                = lazy(() => import('./pages/sync/SyncData'));
 const PettyCash               = lazy(() => import('./pages/pc/PettyCash'));
 const APModule                = lazy(() => import('./pages/ap').then(m => ({ default: m.APModule })));
@@ -202,6 +204,10 @@ function App() {
               <Route path="ar/*" element={<ARModule />} />
               <Route path="inventory/onhand" element={<ManageOnhandInventory />} />
               <Route path="inventory/*" element={<ComingSoon moduleName="Inventory" />} />
+              <Route path="om" element={<OrderManagementModule />} />
+              <Route path="om/orders" element={<ManageSalesOrders />} />
+              <Route path="om/customers" element={<ComingSoon moduleName="Customers" />} />
+              <Route path="om/*" element={<OrderManagementModule />} />
               <Route path="procurement/suppliers" element={<ManageSuppliers />} />
               <Route path="procurement/purchase-orders" element={<ManagePurchaseOrders />} />
               <Route path="ap/suppliers" element={<ManageSuppliers />} />
