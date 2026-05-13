@@ -1956,7 +1956,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
     if (activeTab === key) setActiveTab('search');
   };
 
-  const handleSaved     = () => { loadLovs(); handleSearch(); closeTab(activeTab); };
+  const handleSaved     = () => { loadLovs(); handleSearch(); };
   const handleEditSaved = () => { loadLovs(); handleSearch(); };
 
   // ── Create Accounting ─────────────────────────────────────────────────────
