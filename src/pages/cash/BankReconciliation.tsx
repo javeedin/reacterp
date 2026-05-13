@@ -1075,7 +1075,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
               bankAccountName: i.bankAccountName ?? '',
               source:         i.source          ?? 'ORA_MAN',
               txnStatus:      i.status          ?? '',
-              reconciledFlag: i.reconciledFlag  ?? i.RECONCILED_FLAG ?? 'N',
+              reconciledFlag: i.reconciledFlag  ?? i.RECONCILED_FLAG ?? (i.status === 'REC' ? 'Y' : 'N'),
               payee:          i.description     ?? '',
               reference:      i.description     ?? '',
               assetAccountCombination:  i.assetAccountCombination  ?? '',
@@ -1434,7 +1434,6 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       return {
         url:   `${EXT_TXN_URL}/${sysTxn.txnId}`,
         body:  {
-          status:          'REC',
           reconciledFlag:  'Y',
           reconciledDate:  today,
           statementId:     line.statementId,
