@@ -1233,6 +1233,15 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const handleReconcile = useCallback(async () => {
     if (selectedStmtKeys.length === 0 || selectedSysKeys.length === 0) return;
 
+    const selectedLines0 = stmtLines.filter((l) => selectedStmtKeys.includes(l.lineId));
+    const selectedTxns0  = sysTxns.filter((t) => selectedSysKeys.includes(t.txnId));
+    const alreadyReconStmt = selectedLines0.some(l => l.reconStatus === 'RECONCILED');
+    const alreadyReconSys  = selectedTxns0.some(t => t.reconciledFlag === 'Y');
+    if (alreadyReconStmt || alreadyReconSys) {
+      msgApi.error('One or more selected transactions are already reconciled.');
+      return;
+    }
+
     const visibleSysTxns = txnSourceFilter === 'ALL' || txnSourceFilter === 'CM'
       ? sysTxns
       : sysTxns.filter((t) => t.source === txnSourceFilter);
@@ -2544,6 +2553,34 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
             }
             styles={{ body: { padding: 0 } }}
           >
+            {/* Date filter row */}
+            <div style={{ padding: '4px 8px', borderBottom: '1px solid #f0f0f0', display: 'flex', gap: 6, alignItems: 'center' }}>
+              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, whiteSpace: 'nowrap' }}>Date:</Text>
+              <DatePicker
+                size="small"
+                placeholder="From"
+                value={sysDateFrom}
+                format="D-MMM-YYYY"
+                style={{ flex: 1 }}
+                onChange={v => {
+                  setSysDateFrom(v);
+                  if (lastParams) fetchSysTxns({ ...lastParams, dateFrom: v }, txnSourceFilter, sysReconFilter);
+                }}
+                allowClear
+              />
+              <DatePicker
+                size="small"
+                placeholder="To"
+                value={sysDateTo}
+                format="D-MMM-YYYY"
+                style={{ flex: 1 }}
+                onChange={v => {
+                  setSysDateTo(v);
+                  if (lastParams) fetchSysTxns({ ...lastParams, dateTo: v }, txnSourceFilter, sysReconFilter);
+                }}
+                allowClear
+              />
+            </div>
             <div style={{ padding: '6px 8px', borderBottom: '1px solid #f0f0f0' }}>
               <Input.Search
                 size="small"
