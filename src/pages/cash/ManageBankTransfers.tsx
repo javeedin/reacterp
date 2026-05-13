@@ -20,7 +20,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useAuth } from '../../context/AuthContext';
 import {
-  buildBankTransferSlaPayload, createAccounting, checkAccountingExists,
+  buildBankTransferSlaPayload, createAccounting, checkAccountingExists, checkGLJournalExists,
   fetchLedgerByBusinessUnit, derivePeriodName,
 } from '../../services/sla.service';
 import { validateGlPayload, persistValidationLog, type GlJournalPayload } from '../../services/glValidation.service';
@@ -235,7 +235,7 @@ const TransferForm: React.FC<{
   buBankMap: Record<string, string[]>;
   bankAccountAssetMap: Record<string, string>;
   buCompanyMap: Record<string, string>;
-  onSave: () => void;
+  onSave: (created?: { bankAccountTransferId: number; bankAccountTransferNumber: string }) => void;
   onCancel: () => void;
 }> = ({ initialValues, bankAccounts, businessUnits, bankCurrencyMap, buBankMap, bankAccountAssetMap, buCompanyMap, onSave, onCancel }) => {
   const [form] = Form.useForm();
@@ -362,7 +362,11 @@ const TransferForm: React.FC<{
 
       if (data.status === 'success') {
         message.success(isEdit ? 'Transfer updated.' : 'Transfer created.');
-        onSave();
+        if (!isEdit && data.bankAccountTransferId) {
+          onSave({ bankAccountTransferId: data.bankAccountTransferId, bankAccountTransferNumber: String(data.bankAccountTransferNumber ?? '') });
+        } else {
+          onSave();
+        }
       } else {
         message.error(data.message || 'Save failed.');
       }
@@ -1963,8 +1967,31 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
     if (activeTab === key) setActiveTab('search');
   };
 
-  const handleSaved     = () => { loadLovs(); handleSearch(); };
-  const handleEditSaved = () => { loadLovs(); handleSearch(); };
+  const handleSaved = async (created?: { bankAccountTransferId: number; bankAccountTransferNumber: string }) => {
+    loadLovs();
+    handleSearch();
+    if (created) {
+      // Fetch the newly created record and open it as an edit tab, replacing the create tab
+      try {
+        const res = await fetch(`${APEX_BASE}/cash/banktransfers/${created.bankAccountTransferId}`, { headers: { Accept: 'application/json' } });
+        const data = res.ok ? await res.json() : null;
+        const record: TransferRecord | null = data?.items?.[0] ?? data ?? null;
+        if (record?.bankAccountTransferId) {
+          const key = newTabKey();
+          setEditTabs(prev => [
+            ...prev.filter(t => t.key !== 'create'),
+            { key, label: <span><EditOutlined /> #{record.bankAccountTransferNumber}</span>, record },
+          ]);
+          setActiveTab(key);
+        }
+      } catch {
+        // If fetch fails just close the create tab
+        setEditTabs(prev => prev.filter(t => t.key !== 'create'));
+        setActiveTab('search');
+      }
+    }
+  };
+  const handleEditSaved = (_created?: { bankAccountTransferId: number; bankAccountTransferNumber: string }) => { loadLovs(); handleSearch(); };
 
   // ── Create Accounting ─────────────────────────────────────────────────────
   const openCreateAccountingModal = (forTransfers?: TransferRecord[]) => {
@@ -2016,9 +2043,13 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       if (!txn) { updateRow(row.transferId, { status: 'error', message: 'Transfer not found' }); continue; }
 
       try {
-        const existing = await checkAccountingExists('BANK_ACCOUNT_TRANSFERS', txn.bankAccountTransferId, 'BANK_TRANSFER');
-        if (existing.exists && existing.postingStatus === 'POSTED') {
-          updateRow(row.transferId, { status: 'skipped', message: `Already posted — SLA header ${existing.headerId}` });
+        const [existingDisburse, existingReceipt] = await Promise.all([
+          checkAccountingExists('BANK_ACCOUNT_TRANSFERS', txn.bankAccountTransferId, 'BANK_TRANSFER_DISBURSE'),
+          checkAccountingExists('BANK_ACCOUNT_TRANSFERS', txn.bankAccountTransferId, 'BANK_TRANSFER_RECEIPT'),
+        ]);
+        const bothPosted = existingDisburse.exists && existingReceipt.exists;
+        if (bothPosted) {
+          updateRow(row.transferId, { status: 'skipped', message: `Already posted — SLA ${existingDisburse.headerId}/${existingReceipt.headerId}` });
           setTransfers(prev => prev.map(t => t.bankAccountTransferId === txn.bankAccountTransferId ? { ...t, accountingFlag: 'Y' } : t));
           continue;
         }
@@ -2037,67 +2068,181 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
         const j2Rate       = j2currency === 'AED' ? 1 : rate;
         const toAmt        = j2currency === j1currency ? pmtAmt : Math.round(pmtAmt * j1Rate * 100) / 100;
 
+        const postGlAndSla = async (
+          slaPayload: Parameters<typeof createAccounting>[0],
+          glJournalName: string,
+          glLines: Array<{ accountCombination: string; enteredDr: number | null; enteredCr: number | null; accountedDr: number | null; accountedCr: number | null; currencyCode: string; description: string; accountingClass: string }>,
+          glAmount: number,
+          glCurrency: string,
+          existingSla: Awaited<ReturnType<typeof checkAccountingExists>>,
+          glRef5: string,
+        ) => {
+          // Reuse existing SLA header if already created; otherwise create a new one
+          let slaResult: { headerId: number };
+          if (existingSla.exists && existingSla.headerId) {
+            slaResult = { headerId: existingSla.headerId };
+          } else {
+            slaResult = await createAccounting(slaPayload);
+          }
+
+          // Check GL journal before creating to prevent duplicates
+          const glCheck = await checkGLJournalExists(
+            String(txn.bankAccountTransferId),
+            String(txn.bankAccountTransferNumber),
+            glRef5,
+          );
+          if (glCheck.exists) {
+            // GL already exists — link SLA if not yet linked
+            if (!existingSla.exists || existingSla.postingStatus !== 'POSTED') {
+              await fetch(`${APEX_BASE}/sla/accounting/post`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify({
+                  headerId: slaResult.headerId, glBatchId: glCheck.batchId || 0,
+                  glBatchName: glJournalName, glHeaderId: glCheck.headerId || 0,
+                  postedBy: currentUser,
+                }),
+              });
+            }
+            return slaResult;
+          }
+
+          const glPayload = {
+            batch: {
+              batchName: glJournalName, batchDescription: slaPayload.header.description,
+              ledgerName: ledger.ledgerName, ledgerId: ledger.ledgerId, status: 'NEW',
+              accountingPeriod: row.periodName, controlTotal: glAmount,
+              runningTotalDr: glAmount, runningTotalCr: glAmount,
+              batchSource: 'Cash Management', createdBy: currentUser,
+            },
+            header: {
+              ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName,
+              jeCategory: 'Cash Management', jeSource: 'Cash Management',
+              periodName: row.periodName, journalName: glJournalName,
+              description: slaPayload.header.description,
+              currencyCode: glCurrency,
+              currencyConversionType: 'Corporate',
+              currencyConversionDate: row.txnDate,
+              currencyConversionRate: glCurrency === 'AED' ? 1 : rate,
+              defaultEffectiveDate: row.txnDate,
+              status: 'NEW', runningTotalDr: glAmount, runningTotalCr: glAmount,
+              createdBy: currentUser,
+            },
+            lines: glLines.map(l => ({
+              ...l,
+              statAmount: null,
+              currencyConversionDate: row.txnDate,
+              currencyConversionRate: glCurrency === 'AED' ? 1 : rate,
+              userCurrencyConversionType: 'Corporate',
+              chartOfAccountsName: 'Chart of Accounts',
+              reference1: String(txn.bankAccountTransferId),
+              reference2: String(txn.bankAccountTransferNumber),
+              reference4: txn.businessUnit || null,
+              reference5: glRef5, createdBy: currentUser,
+            })),
+          };
+          const glRes = await fetch(`${APEX_BASE}/journals/create`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify(glPayload),
+          });
+          if (glRes.ok) {
+            const glData = await glRes.json();
+            await fetch(`${APEX_BASE}/sla/accounting/post`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+              body: JSON.stringify({
+                headerId: slaResult.headerId, glBatchId: glData.batchId || 0,
+                glBatchName: glJournalName, glHeaderId: glData.headerId || 0,
+                postedBy: currentUser,
+              }),
+            });
+          }
+          return slaResult;
+        };
+
+        const j1Name = `BANKTFR-${txn.bankAccountTransferNumber}-DISBURSE`;
+        const j2Name = `BANKTFR-${txn.bankAccountTransferNumber}-RECEIPT`;
+        const skipDisburse = existingDisburse.exists && existingDisburse.postingStatus === 'POSTED';
+        const skipReceipt  = existingReceipt.exists  && existingReceipt.postingStatus  === 'POSTED';
+
         // Journal 1 (Disbursement): DR Cash Clearing / CR From Bank
-        await createAccounting({
-          header: {
-            moduleName: 'CM', sourceTable: 'BANK_ACCOUNT_TRANSFERS',
-            sourceId: txn.bankAccountTransferId,
-            sourceNumber: String(txn.bankAccountTransferNumber),
-            sourceType: 'Bank Transfer', eventTypeCode: 'BANK_TRANSFER_DISBURSE',
-            eventDate: row.txnDate, accountingDate: row.txnDate, periodName: row.periodName,
-            ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName,
-            currencyCode: j1currency, ledgerCurrency: ledger.currency || 'AED',
-            exchangeRate: j1Rate, exchangeRateType: 'Corporate',
-            businessUnit: txn.businessUnit, description: 'Bank Transfer - Disbursement',
-            createdBy: currentUser,
-          },
-          lines: [
-            { lineNumber: 1, lineType: 'DR', accountingClass: 'CASH_CLEARING',
-              accountCombination: clearingAcct,
-              enteredDr: pmtAmt, enteredCr: 0,
-              accountedDr: Math.round(pmtAmt * j1Rate * 100) / 100, accountedCr: 0,
-              currencyCode: j1currency, exchangeRate: j1Rate,
-              description: `Cash Clearing DR – From ${txn.fromBankAccountName}` },
-            { lineNumber: 2, lineType: 'CR', accountingClass: 'BANK_ASSET',
-              accountCombination: fromAsset,
-              enteredDr: 0, enteredCr: pmtAmt,
-              accountedDr: 0, accountedCr: Math.round(pmtAmt * j1Rate * 100) / 100,
-              currencyCode: j1currency, exchangeRate: j1Rate,
-              description: `From Bank CR – ${txn.fromBankAccountName}` },
-          ],
-        });
+        if (!skipDisburse) {
+          await postGlAndSla(
+            {
+              header: {
+                moduleName: 'CM', sourceTable: 'BANK_ACCOUNT_TRANSFERS',
+                sourceId: txn.bankAccountTransferId,
+                sourceNumber: String(txn.bankAccountTransferNumber),
+                sourceType: 'Bank Transfer', eventTypeCode: 'BANK_TRANSFER_DISBURSE',
+                eventDate: row.txnDate, accountingDate: row.txnDate, periodName: row.periodName,
+                ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName,
+                currencyCode: j1currency, ledgerCurrency: ledger.currency || 'AED',
+                exchangeRate: j1Rate, exchangeRateType: 'Corporate',
+                businessUnit: txn.businessUnit, description: `Bank Transfer ${txn.bankAccountTransferNumber} — Disbursement`,
+                createdBy: currentUser,
+              },
+              lines: [
+                { lineNumber: 1, lineType: 'DR', accountingClass: 'CASH_CLEARING',
+                  accountCombination: clearingAcct, enteredDr: pmtAmt, enteredCr: 0,
+                  accountedDr: Math.round(pmtAmt * j1Rate * 100) / 100, accountedCr: 0,
+                  currencyCode: j1currency, exchangeRate: j1Rate,
+                  description: `Cash Clearing DR – ${txn.fromBankAccountName}` },
+                { lineNumber: 2, lineType: 'CR', accountingClass: 'BANK_ASSET',
+                  accountCombination: fromAsset, enteredDr: 0, enteredCr: pmtAmt,
+                  accountedDr: 0, accountedCr: Math.round(pmtAmt * j1Rate * 100) / 100,
+                  currencyCode: j1currency, exchangeRate: j1Rate,
+                  description: `From Bank CR – ${txn.fromBankAccountName}` },
+              ],
+            },
+            j1Name,
+            [
+              { accountCombination: clearingAcct, enteredDr: pmtAmt, enteredCr: null, accountedDr: Math.round(pmtAmt * j1Rate * 100) / 100, accountedCr: null, currencyCode: j1currency, description: `Cash Clearing DR – ${txn.fromBankAccountName}`, accountingClass: 'CASH_CLEARING' },
+              { accountCombination: fromAsset,    enteredDr: null, enteredCr: pmtAmt, accountedDr: null, accountedCr: Math.round(pmtAmt * j1Rate * 100) / 100, currencyCode: j1currency, description: `From Bank CR – ${txn.fromBankAccountName}`,    accountingClass: 'BANK_ASSET' },
+            ],
+            pmtAmt, j1currency, existingDisburse, 'BANKTFR-DISBURSE',
+          );
+        }
 
         // Journal 2 (Receipt): DR To Bank / CR Cash Clearing
-        await createAccounting({
-          header: {
-            moduleName: 'CM', sourceTable: 'BANK_ACCOUNT_TRANSFERS',
-            sourceId: txn.bankAccountTransferId,
-            sourceNumber: String(txn.bankAccountTransferNumber),
-            sourceType: 'Bank Transfer', eventTypeCode: 'BANK_TRANSFER_RECEIPT',
-            eventDate: row.txnDate, accountingDate: row.txnDate, periodName: row.periodName,
-            ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName,
-            currencyCode: j2currency, ledgerCurrency: ledger.currency || 'AED',
-            exchangeRate: j2Rate, exchangeRateType: 'Corporate',
-            businessUnit: txn.businessUnit, description: 'Bank Transfer - Receipt',
-            createdBy: currentUser,
-          },
-          lines: [
-            { lineNumber: 1, lineType: 'DR', accountingClass: 'BANK_ASSET',
-              accountCombination: toAsset,
-              enteredDr: toAmt, enteredCr: 0,
-              accountedDr: Math.round(toAmt * j2Rate * 100) / 100, accountedCr: 0,
-              currencyCode: j2currency, exchangeRate: j2Rate,
-              description: `To Bank DR – ${txn.toBankAccountName}` },
-            { lineNumber: 2, lineType: 'CR', accountingClass: 'CASH_CLEARING',
-              accountCombination: clearingAcct,
-              enteredDr: 0, enteredCr: toAmt,
-              accountedDr: 0, accountedCr: Math.round(toAmt * j2Rate * 100) / 100,
-              currencyCode: j2currency, exchangeRate: j2Rate,
-              description: `Cash Clearing CR – To ${txn.toBankAccountName}` },
-          ],
-        });
+        if (!skipReceipt) {
+          await postGlAndSla(
+            {
+              header: {
+                moduleName: 'CM', sourceTable: 'BANK_ACCOUNT_TRANSFERS',
+                sourceId: txn.bankAccountTransferId,
+                sourceNumber: String(txn.bankAccountTransferNumber),
+                sourceType: 'Bank Transfer', eventTypeCode: 'BANK_TRANSFER_RECEIPT',
+                eventDate: row.txnDate, accountingDate: row.txnDate, periodName: row.periodName,
+                ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName,
+                currencyCode: j2currency, ledgerCurrency: ledger.currency || 'AED',
+                exchangeRate: j2Rate, exchangeRateType: 'Corporate',
+                businessUnit: txn.businessUnit, description: `Bank Transfer ${txn.bankAccountTransferNumber} — Receipt`,
+                createdBy: currentUser,
+              },
+              lines: [
+                { lineNumber: 1, lineType: 'DR', accountingClass: 'BANK_ASSET',
+                  accountCombination: toAsset, enteredDr: toAmt, enteredCr: 0,
+                  accountedDr: Math.round(toAmt * j2Rate * 100) / 100, accountedCr: 0,
+                  currencyCode: j2currency, exchangeRate: j2Rate,
+                  description: `To Bank DR – ${txn.toBankAccountName}` },
+                { lineNumber: 2, lineType: 'CR', accountingClass: 'CASH_CLEARING',
+                  accountCombination: clearingAcct, enteredDr: 0, enteredCr: toAmt,
+                  accountedDr: 0, accountedCr: Math.round(toAmt * j2Rate * 100) / 100,
+                  currencyCode: j2currency, exchangeRate: j2Rate,
+                  description: `Cash Clearing CR – ${txn.toBankAccountName}` },
+              ],
+            },
+            j2Name,
+            [
+              { accountCombination: toAsset,      enteredDr: toAmt, enteredCr: null, accountedDr: Math.round(toAmt * j2Rate * 100) / 100, accountedCr: null, currencyCode: j2currency, description: `To Bank DR – ${txn.toBankAccountName}`,         accountingClass: 'BANK_ASSET' },
+              { accountCombination: clearingAcct, enteredDr: null, enteredCr: toAmt, accountedDr: null, accountedCr: Math.round(toAmt * j2Rate * 100) / 100, currencyCode: j2currency, description: `Cash Clearing CR – ${txn.toBankAccountName}`, accountingClass: 'CASH_CLEARING' },
+            ],
+            toAmt, j2currency, existingReceipt, 'BANKTFR-RECEIPT',
+          );
+        }
 
-        // Stamp accountingFlag — does not touch Status
+        // Stamp accountingFlag
         const flagUrl = `${APEX_BASE}/cash/banktransfers/${txn.bankAccountTransferId}/acctflag?updated_by=${encodeURIComponent(currentUser)}`;
         const flagRes = await fetch(flagUrl, { method: 'PUT', headers: { Accept: 'application/json' } });
         const flagData = await flagRes.json().catch(() => ({})) as { success?: boolean; message?: string };
@@ -2107,7 +2252,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
         setTransfers(prev => prev.map(t =>
           t.bankAccountTransferId === txn.bankAccountTransferId ? { ...t, accountingFlag: 'Y' } : t
         ));
-        updateRow(row.transferId, { status: 'success', message: 'Two journals created: Disbursement + Receipt' });
+        updateRow(row.transferId, { status: 'success', message: `GL: ${j1Name} + ${j2Name}` });
       } catch (e: any) {
         updateRow(row.transferId, { status: 'error', message: e?.message || 'Unexpected error' });
       }
