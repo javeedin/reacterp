@@ -1934,6 +1934,20 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         ? <Tooltip title={`Ref: ${r.externalTxnRef || ''}`}><Tag color="purple" style={{ fontSize: 10, margin: 0 }}>#{r.externalTxnId}</Tag></Tooltip>
         : null,
     },
+    {
+      title: 'Stmt ID',
+      dataIndex: 'statementId',
+      key: 'statementId',
+      width: 70,
+      render: (v: number) => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{v}</Text>,
+    },
+    {
+      title: 'Line ID',
+      dataIndex: 'lineId',
+      key: 'lineId',
+      width: 70,
+      render: (v: number) => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{v}</Text>,
+    },
   ];
 
   const SOURCE_COLORS: Record<string, string> = {

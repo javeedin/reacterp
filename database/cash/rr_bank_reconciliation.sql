@@ -49,7 +49,7 @@ DECLARE
         WHERE  (:bank_account  IS NULL
                 OR UPPER(h.BANK_ACCOUNT_NAME)   LIKE '%' || UPPER(:bank_account) || '%'
                 OR UPPER(h.BANK_ACCOUNT_NUMBER) LIKE '%' || UPPER(:bank_account) || '%')
-        AND    l.RECON_STATUS = NVL(:recon_status, 'UNRECONCILED')
+        AND    (:recon_status IS NULL OR l.RECON_STATUS = :recon_status)
         AND    (:date_from    IS NULL OR l.TRANSACTION_DATE >= TO_DATE(:date_from, 'YYYY-MM-DD'))
         AND    (:date_to      IS NULL OR l.TRANSACTION_DATE <= TO_DATE(:date_to,   'YYYY-MM-DD'))
         AND    (:amount_min   IS NULL OR l.AMOUNT >= TO_NUMBER(:amount_min))
