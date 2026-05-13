@@ -2205,6 +2205,22 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       ),
     },
     {
+      title: 'Conv. Rate',
+      key: 'convRate',
+      width: 120,
+      align: 'right' as const,
+      render: (_: any, r: TransferRecord) => {
+        if (!r.conversionRate || r.fromCurrencyCode === r.toCurrencyCode) return <Text type="secondary">—</Text>;
+        return (
+          <Tooltip title={`${r.fromCurrencyCode} → ${r.toCurrencyCode}`}>
+            <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>
+              {r.conversionRate.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 })}
+            </Text>
+          </Tooltip>
+        );
+      },
+    },
+    {
       title: 'Transfer Date',
       dataIndex: 'transactionDate',
       key: 'txnDate',
