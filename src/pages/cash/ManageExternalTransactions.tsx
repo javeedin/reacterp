@@ -2659,6 +2659,33 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   // ── Table columns ─────────────────────────────────────────────────────────
   const columns: ColumnsType<ExternalTxnRecord> = [
     {
+      title: 'Actions', key: 'actions', width: 100, align: 'center', fixed: 'left',
+      render: (_, r) => (
+        <Space size={2}>
+          <Tooltip title="Edit"><Button type="text" size="small" icon={<EditOutlined />} onClick={() => openEditTab(r)} /></Tooltip>
+          <Tooltip title="Print Voucher">
+            <Button type="text" size="small" icon={<PrinterOutlined />}
+              style={{ color: REDWOOD.info }}
+              onClick={() => generateVoucherPdf(r)} />
+          </Tooltip>
+          {r.accountingFlag !== 'Y' && (
+            <Tooltip title="Create Accounting">
+              <Button type="text" size="small" icon={<AccountBookOutlined />}
+                style={{ color: REDWOOD.info }}
+                onClick={() => openSingleAcctModal(r)} />
+            </Tooltip>
+          )}
+          {r.accountingFlag === 'Y' && (
+            <Tooltip title="View Accounting">
+              <Button type="text" size="small" icon={<EyeOutlined />}
+                style={{ color: REDWOOD.success }}
+                onClick={() => { setViewAcctTxn(r); setViewAcctOpen(true); }} />
+            </Tooltip>
+          )}
+        </Space>
+      ),
+    },
+    {
       title: 'ID', dataIndex: 'externalTransactionId', width: 70, fixed: 'left',
       render: (v) => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{v}</Text>,
     },
@@ -2742,32 +2769,6 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
     },
     {
-      title: 'Actions', key: 'actions', width: 130, align: 'center',
-      render: (_, r) => (
-        <Space size={2}>
-          <Tooltip title="Edit"><Button type="text" size="small" icon={<EditOutlined />} onClick={() => openEditTab(r)} /></Tooltip>
-          <Tooltip title="Print Voucher">
-            <Button type="text" size="small" icon={<PrinterOutlined />}
-              style={{ color: REDWOOD.info }}
-              onClick={() => generateVoucherPdf(r)} />
-          </Tooltip>
-          {r.accountingFlag !== 'Y' && (
-            <Tooltip title="Create Accounting">
-              <Button type="text" size="small" icon={<AccountBookOutlined />}
-                style={{ color: REDWOOD.info }}
-                onClick={() => openSingleAcctModal(r)} />
-            </Tooltip>
-          )}
-          {r.accountingFlag === 'Y' && (
-            <Tooltip title="View Accounting">
-              <Button type="text" size="small" icon={<EyeOutlined />}
-                style={{ color: REDWOOD.success }}
-                onClick={() => { setViewAcctTxn(r); setViewAcctOpen(true); }} />
-            </Tooltip>
-          )}
-        </Space>
-      ),
-    },
   ];
 
   const [searchOpen, setSearchOpen] = useState(true);
