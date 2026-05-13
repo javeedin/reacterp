@@ -189,17 +189,21 @@ const generateTransferPdf = (r: Partial<TransferRecord>): jsPDF => {
     alternateRowStyles: { fillColor: [247, 247, 247] },
     margin: { left: margin, right: margin },
   });
-  y = (doc as any).lastAutoTable.finalY + 10;
-
-  // Signature row
+  // Signature row — pinned to page footer
+  const pageH   = doc.internal.pageSize.getHeight();
   const sigLabels = ['Prepared by', 'Checked by', 'Approved by', 'Received by'];
-  const sigW = (pageW - 2 * margin) / sigLabels.length;
+  const sigW    = (pageW - 2 * margin) / sigLabels.length;
+  const sigY    = pageH - 20; // 20 mm from bottom
+  doc.setDrawColor(180, 180, 180);
+  doc.line(margin, sigY - 4, pageW - margin, sigY - 4); // thin separator line
   sigLabels.forEach((label, i) => {
     const x = margin + i * sigW;
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.text(label, x + sigW / 2, y, { align: 'center' });
-    doc.line(x + 4, y + 12, x + sigW - 4, y + 12);
+    doc.setFontSize(8);
+    doc.setTextColor(80, 80, 80);
+    doc.text(label, x + sigW / 2, sigY, { align: 'center' });
+    doc.setDrawColor(100, 100, 100);
+    doc.line(x + 6, sigY + 10, x + sigW - 6, sigY + 10);
   });
 
   return doc;
