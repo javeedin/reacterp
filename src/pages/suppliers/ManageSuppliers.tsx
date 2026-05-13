@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import dayjs from 'dayjs';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
-  Row, Col, Space, Tag, Tabs, message, Spin, Empty, Modal, Tooltip, Dropdown, Descriptions,
+  Row, Col, Space, Tag, Tabs, message, Spin, Empty, Modal, Tooltip, Dropdown,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { MenuProps } from 'antd';
@@ -212,8 +212,21 @@ const ChildTab: React.FC<{ url: string; label: string }> = ({ url, label }) => {
 };
 
 // ── Supplier Detail Page ──────────────────────────────────────────────────────
-const SupplierDetailPage: React.FC<{ supplier: RawSupplier; onClose?: () => void }> = ({ supplier, onClose }) => {
+const SupplierDetailPage: React.FC<{ supplier: RawSupplier; onClose?: () => void }> = ({ supplier: initialSupplier, onClose }) => {
+  const [supplier, setSupplier]   = useState<RawSupplier>(initialSupplier);
+  const [loading, setLoading]     = useState(true);
   const [activeSubTab, setActiveSubTab] = useState('addresses');
+
+  // Fetch full record — search results may omit some fields
+  useEffect(() => {
+    const url = initialSupplier.links?.find(l => l.name === 'self')?.href
+      ?? `${BASE_URL}/suppliers/${initialSupplier.SupplierId}`;
+    fetch(url, { headers: HEADERS })
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(d => setSupplier({ ...d, links: d.links ?? initialSupplier.links }))
+      .catch(() => { /* keep search-result data */ })
+      .finally(() => setLoading(false));
+  }, [initialSupplier.SupplierId]);
 
   const actionItems: MenuProps['items'] = [
     { key: 'edit',       label: 'Edit' },
@@ -226,147 +239,170 @@ const SupplierDetailPage: React.FC<{ supplier: RawSupplier; onClose?: () => void
     { key: 'deactivate', label: 'Deactivate', danger: true },
   ];
 
-  const LV: React.FC<{ label: string; value?: React.ReactNode; span?: number }> = ({ label, value, span = 1 }) => (
-    <Descriptions.Item label={label} span={span}>
-      <span style={{ fontSize: 12 }}>{value ?? '—'}</span>
-    </Descriptions.Item>
+  // Row/Col label-value — avoids Ant Design Descriptions Item wrapping issue
+  const LV: React.FC<{ label: string; value?: React.ReactNode; cols?: number }> = ({ label, value, cols = 1 }) => (
+    <Col xs={24} sm={12} md={6 * cols}>
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 2 }}>{label}</div>
+        <div style={{ fontSize: 13, color: REDWOOD.neutral900 }}>{value ?? <span style={{ color: REDWOOD.neutral300 }}>—</span>}</div>
+      </div>
+    </Col>
+  );
+
+  const SecHead: React.FC<{ icon: React.ReactNode; title: string }> = ({ icon, title }) => (
+    <Col xs={24}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, fontWeight: 700, color: REDWOOD.primary, textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: `2px solid ${REDWOOD.primary}25`, paddingBottom: 6, marginTop: 8, marginBottom: 4 }}>
+        {icon} {title}
+      </div>
+    </Col>
   );
 
   const subTabs = [
-    {
-      key: 'addresses', label: <Space><EnvironmentOutlined />Addresses</Space>,
-      url: getChildUrl(supplier, 'addresses'),
-    },
-    {
-      key: 'sites', label: <Space><BankOutlined />Sites</Space>,
-      url: getChildUrl(supplier, 'sites'),
-    },
-    {
-      key: 'contacts', label: <Space><ContactsOutlined />Contacts</Space>,
-      url: getChildUrl(supplier, 'contacts'),
-    },
-    {
-      key: 'globalDFF', label: <Space><ApartmentOutlined />Global DFF</Space>,
-      url: getChildUrl(supplier, 'globalDFF'),
-    },
-    {
-      key: 'attachments', label: <Space><PaperClipOutlined />Attachments</Space>,
-      url: getChildUrl(supplier, 'attachments'),
-    },
-    {
-      key: 'DFF', label: <Space><FileTextOutlined />DFF</Space>,
-      url: getChildUrl(supplier, 'DFF'),
-    },
+    { key: 'addresses',   label: <Space><EnvironmentOutlined />Addresses</Space>,  url: getChildUrl(supplier, 'addresses') },
+    { key: 'sites',       label: <Space><BankOutlined />Sites</Space>,              url: getChildUrl(supplier, 'sites') },
+    { key: 'contacts',    label: <Space><ContactsOutlined />Contacts</Space>,       url: getChildUrl(supplier, 'contacts') },
+    { key: 'globalDFF',   label: <Space><ApartmentOutlined />Global DFF</Space>,    url: getChildUrl(supplier, 'globalDFF') },
+    { key: 'attachments', label: <Space><PaperClipOutlined />Attachments</Space>,   url: getChildUrl(supplier, 'attachments') },
+    { key: 'DFF',         label: <Space><FileTextOutlined />DFF</Space>,            url: getChildUrl(supplier, 'DFF') },
   ];
 
   return (
     <div style={{ background: REDWOOD.neutral100, minHeight: '100%' }}>
 
       {/* ── Toolbar ──────────────────────────────────────────────────────── */}
-      <div style={{
-        background: REDWOOD.surface, padding: '10px 20px',
-        borderBottom: `1px solid ${REDWOOD.neutral200}`,
-        display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8,
-      }}>
+      <div style={{ background: REDWOOD.surface, padding: '10px 20px', borderBottom: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
         <Dropdown menu={{ items: actionItems, onClick: ({ key }) => message.info(`"${key}" not yet implemented`) }} trigger={['click']}>
           <Button style={{ background: '#00918A', borderColor: '#00918A', color: '#fff', fontWeight: 600, borderRadius: 4 }}>
             Actions <DownOutlined style={{ fontSize: 11 }} />
           </Button>
         </Dropdown>
         <Button style={{ background: '#00918A', borderColor: '#00918A', color: '#fff', fontWeight: 600, borderRadius: 4 }}
-          icon={<ReloadOutlined />} onClick={() => { setActiveSubTab('__reset__'); setTimeout(() => setActiveSubTab('addresses'), 0); }}>
+          icon={<ReloadOutlined />}
+          onClick={() => {
+            setLoading(true);
+            const url = supplier.links?.find(l => l.name === 'self')?.href ?? `${BASE_URL}/suppliers/${supplier.SupplierId}`;
+            fetch(url, { headers: HEADERS }).then(r => r.json()).then(d => setSupplier({ ...d, links: d.links ?? supplier.links })).finally(() => setLoading(false));
+          }}>
           Refresh
         </Button>
-        <Button style={{ background: '#00918A', borderColor: '#00918A', color: '#fff', fontWeight: 600, borderRadius: 4 }}
-          onClick={onClose}>
+        <Button style={{ background: '#00918A', borderColor: '#00918A', color: '#fff', fontWeight: 600, borderRadius: 4 }} onClick={onClose}>
           Done
         </Button>
       </div>
 
-      {/* ── Header summary ───────────────────────────────────────────────── */}
-      <div style={{ background: REDWOOD.surface, padding: '20px 28px', borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: REDWOOD.neutral600 }}>Supplier</div>
-            <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.2, color: REDWOOD.neutral900 }}>{supplier.Supplier}</div>
-            <div style={{ fontSize: 13, color: REDWOOD.neutral600, marginTop: 4 }}>#{supplier.SupplierNumber}</div>
-            <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {statusTag(supplier.Status)}
-              {supplier.BusinessRelationship && <Tag color="blue" style={{ fontSize: 11 }}>{supplier.BusinessRelationship}</Tag>}
-              {supplier.TaxOrganizationType && <Tag style={{ fontSize: 11 }}>{supplier.TaxOrganizationType}</Tag>}
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 80 }}><Spin size="large" tip="Loading supplier…" /></div>
+      ) : (
+        <>
+          {/* ── Header summary ─────────────────────────────────────────────── */}
+          <div style={{ background: REDWOOD.surface, padding: '20px 28px', borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: REDWOOD.neutral600 }}>Supplier</div>
+                <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.2, color: REDWOOD.neutral900 }}>{supplier.Supplier}</div>
+                <div style={{ fontSize: 13, color: REDWOOD.neutral600, marginTop: 4 }}>#{supplier.SupplierNumber}</div>
+                <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {statusTag(supplier.Status)}
+                  {supplier.BusinessRelationship && <Tag color="blue" style={{ fontSize: 11 }}>{supplier.BusinessRelationship}</Tag>}
+                  {supplier.TaxOrganizationType && <Tag style={{ fontSize: 11 }}>{supplier.TaxOrganizationType}</Tag>}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                {supplier.TaxRegistrationNumber && (
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: REDWOOD.neutral600 }}>TRN</div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: REDWOOD.neutral900 }}>{supplier.TaxRegistrationNumber}</div>
+                    <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{supplier.TaxRegistrationCountry}</div>
+                  </div>
+                )}
+                {supplier.TaxpayerId && (
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: REDWOOD.neutral600 }}>Tax ID</div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: REDWOOD.neutral900 }}>{supplier.TaxpayerId}</div>
+                    <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{supplier.TaxpayerCountry}</div>
+                  </div>
+                )}
+                {supplier.DUNSNumber && (
+                  <div style={{ textAlign: 'right', borderLeft: `2px solid ${REDWOOD.neutral200}`, paddingLeft: 24 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: REDWOOD.neutral600 }}>DUNS</div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: REDWOOD.neutral900 }}>{supplier.DUNSNumber}</div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-            {supplier.TaxRegistrationNumber && (
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: REDWOOD.neutral600 }}>TRN</div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: REDWOOD.neutral900 }}>{supplier.TaxRegistrationNumber}</div>
-                <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{supplier.TaxRegistrationCountry}</div>
-              </div>
-            )}
-            {supplier.TaxpayerId && (
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: REDWOOD.neutral600 }}>Tax ID</div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: REDWOOD.neutral900 }}>{supplier.TaxpayerId}</div>
-                <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{supplier.TaxpayerCountry}</div>
-              </div>
-            )}
-            {supplier.DUNSNumber && (
-              <div style={{ textAlign: 'right', borderLeft: `2px solid ${REDWOOD.neutral200}`, paddingLeft: 24 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: REDWOOD.neutral600 }}>DUNS</div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: REDWOOD.neutral900 }}>{supplier.DUNSNumber}</div>
-              </div>
-            )}
+
+          <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+            {/* ── General Details ─────────────────────────────────────────── */}
+            <Card
+              styles={{ body: { padding: '16px 20px' } }}
+              style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}
+              title={<Space style={{ fontSize: 13 }}><TeamOutlined style={{ color: REDWOOD.primary }} /><Text strong>Supplier Details</Text></Space>}
+            >
+              <Row gutter={[16, 0]}>
+                <SecHead icon={<InfoCircleOutlined />} title="General" />
+                <LV label="Supplier ID"       value={String(supplier.SupplierId)} />
+                <LV label="Supplier Number"   value={supplier.SupplierNumber} />
+                <LV label="Status"            value={statusTag(supplier.Status)} />
+                <LV label="Relationship"      value={supplier.RelationshipDisplay ?? supplier.BusinessRelationship} />
+                <LV label="Alternate Name"    value={supplier.AlternateName} />
+                <LV label="Supplier Type"     value={supplier.SupplierType} />
+                <LV label="Tax Org Type"      value={supplier.TaxOrganizationType} />
+                <LV label="Registry ID"       value={supplier.RegistryId} />
+                <LV label="DUNS Number"       value={supplier.DUNSNumber} />
+                <LV label="Customer Number"   value={supplier.CustomerNumber} />
+                <LV label="Website"           value={supplier.CorporateWebsite} />
+                <LV label="Year Established"  value={supplier.YearEstablished != null ? String(supplier.YearEstablished) : undefined} />
+                <LV label="Industry"          value={supplier.IndustryCategory} />
+                <LV label="Std Industry Class" value={supplier.StandardIndustryClass} />
+                <LV label="Pref Currency"     value={supplier.PreferredFunctionalCurrency ?? supplier.PreferredFunctionalCurrencyCode} />
+                <LV label="One-Time Supplier" value={supplier.OneTimeSupplierFlag != null ? (supplier.OneTimeSupplierFlag ? 'Yes' : 'No') : undefined} />
+                <LV label="Parent Supplier"   value={supplier.ParentSupplier} />
+                <LV label="Creation Source"   value={supplier.CreationSource} />
+
+                <SecHead icon={<FileTextOutlined />} title="Tax Information" />
+                <LV label="Tax Registration #"  value={supplier.TaxRegistrationNumber} />
+                <LV label="Tax Reg Country"      value={supplier.TaxRegistrationCountry} />
+                <LV label="Taxpayer ID"          value={supplier.TaxpayerId} />
+                <LV label="Taxpayer Country"     value={supplier.TaxpayerCountry} />
+                <LV label="Federal Reportable"   value={supplier.FederalReportableFlag != null ? (supplier.FederalReportableFlag ? 'Yes' : 'No') : undefined} />
+
+                <SecHead icon={<TeamOutlined />} title="Audit" />
+                <LV label="Created By"      value={supplier.CreatedBy} />
+                <LV label="Created"         value={fmtDate(supplier.CreationDate)} />
+                <LV label="Last Updated By" value={supplier.LastUpdatedBy} />
+                <LV label="Last Updated"    value={fmtDate(supplier.LastUpdateDate)} />
+                <LV label="Inactive Date"   value={fmtDate(supplier.InactiveDate)} />
+              </Row>
+            </Card>
+
+            {/* ── Child resource tabs ─────────────────────────────────────── */}
+            <Card
+              styles={{ body: { padding: 0 } }}
+              style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}
+              title={<Space style={{ fontSize: 13 }}><InfoCircleOutlined style={{ color: REDWOOD.primary }} /><Text strong>Supplier Information</Text></Space>}
+            >
+              <Tabs
+                activeKey={activeSubTab}
+                onChange={setActiveSubTab}
+                size="small"
+                style={{ paddingLeft: 16, paddingRight: 16 }}
+                tabBarStyle={{ marginBottom: 0, borderBottom: `1px solid ${REDWOOD.neutral200}` }}
+                items={subTabs.map(t => ({
+                  key: t.key,
+                  label: t.label,
+                  children: <ChildTab key={t.url} url={t.url} label={t.key} />,
+                }))}
+              />
+            </Card>
+
           </div>
-        </div>
-      </div>
-
-      <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-        {/* ── General Details ───────────────────────────────────────────── */}
-        <Card
-          styles={{ body: { padding: '16px 20px' } }}
-          style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}
-          title={<Space style={{ fontSize: 13 }}><TeamOutlined style={{ color: REDWOOD.primary }} /><Text strong>Supplier Details</Text></Space>}
-        >
-          <Descriptions bordered size="small" column={{ xs: 1, sm: 2, md: 3, lg: 4 }}
-            labelStyle={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase', background: REDWOOD.neutral100, width: 140 }}
-            contentStyle={{ fontSize: 12 }}>
-            <LV label="Supplier ID"         value={supplier.SupplierId} />
-            <LV label="Supplier Number"     value={supplier.SupplierNumber} />
-            <LV label="Status"              value={statusTag(supplier.Status)} />
-            <LV label="Relationship"        value={supplier.RelationshipDisplay ?? supplier.BusinessRelationship} />
-            <LV label="Alternate Name"      value={supplier.AlternateName} />
-            <LV label="Supplier Type"       value={supplier.SupplierType} />
-            <LV label="Tax Org Type"        value={supplier.TaxOrganizationType} />
-            <LV label="Registry ID"         value={supplier.RegistryId} />
-            <LV label="DUNS Number"         value={supplier.DUNSNumber} />
-            <LV label="Customer Number"     value={supplier.CustomerNumber} />
-            <LV label="Website"             value={supplier.CorporateWebsite} />
-            <LV label="Year Established"    value={supplier.YearEstablished} />
-            <LV label="Industry"            value={supplier.IndustryCategory} />
-            <LV label="Std Industry Class"  value={supplier.StandardIndustryClass} />
-            <LV label="Preferred Currency"  value={supplier.PreferredFunctionalCurrency ?? supplier.PreferredFunctionalCurrencyCode} />
-            <LV label="One-Time Supplier"   value={supplier.OneTimeSupplierFlag != null ? (supplier.OneTimeSupplierFlag ? 'Yes' : 'No') : undefined} />
-            <LV label="Parent Supplier"     value={supplier.ParentSupplier} />
-            <LV label="Creation Source"     value={supplier.CreationSource} />
-            <LV label="Created By"          value={supplier.CreatedBy} />
-            <LV label="Created"             value={fmtDate(supplier.CreationDate)} />
-            <LV label="Last Updated By"     value={supplier.LastUpdatedBy} />
-            <LV label="Last Updated"        value={fmtDate(supplier.LastUpdateDate)} />
-            <LV label="Inactive Date"       value={fmtDate(supplier.InactiveDate)} />
-
-            {/* Tax section */}
-            <Descriptions.Item label="Tax Registration #" span={2}>
-              <span style={{ fontSize: 12 }}>{supplier.TaxRegistrationNumber ?? '—'}&nbsp;
-                {supplier.TaxRegistrationCountry && <Text type="secondary" style={{ fontSize: 11 }}>({supplier.TaxRegistrationCountry})</Text>}
-              </span>
-            </Descriptions.Item>
-            <LV label="Taxpayer ID"         value={supplier.TaxpayerId} />
-            <LV label="Taxpayer Country"    value={supplier.TaxpayerCountry} />
-            <LV label="Federal Reportable"  value={supplier.FederalReportableFlag != null ? (supplier.FederalReportableFlag ? 'Yes' : 'No') : undefined} />
-          </Descriptions>
-        </Card>
+        </>
+      )}
+    </div>
+  );
+};
 
         {/* ── Child resource tabs ───────────────────────────────────────── */}
         <Card
