@@ -70,6 +70,7 @@ interface TransferRecord {
   lastUpdateDate: string;
   syncDate: string;
   accountingFlag?: string;
+  reconciledDate?: string;
 }
 
 interface BankAccountOption { label: string; value: string; }
@@ -1867,6 +1868,31 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       render: (_, r) => r.accountingFlag === 'Y'
         ? <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: 11 }}>Accounted</Tag>
         : <Tag color="default" style={{ fontSize: 11 }}>Unposted</Tag>,
+    },
+    {
+      title: 'Reconciled',
+      key: 'reconStatus',
+      width: 110,
+      render: (_, r) => {
+        const isRecon = r.paymentStatus === 'Reconciled' || r.paymentStatus === 'RECONCILED';
+        return isRecon
+          ? <Tag color="green" icon={<CheckCircleOutlined />} style={{ fontSize: 11 }}>Reconciled</Tag>
+          : <Tag color="orange" style={{ fontSize: 11 }}>Unreconciled</Tag>;
+      },
+      filters: [
+        { text: 'Reconciled',   value: 'Reconciled' },
+        { text: 'Unreconciled', value: 'Unreconciled' },
+      ],
+      onFilter: (val, r) => val === 'Reconciled'
+        ? r.paymentStatus === 'Reconciled' || r.paymentStatus === 'RECONCILED'
+        : r.paymentStatus !== 'Reconciled' && r.paymentStatus !== 'RECONCILED',
+    },
+    {
+      title: 'Cleared Date',
+      dataIndex: 'reconciledDate',
+      key: 'reconciledDate',
+      width: 110,
+      render: (val: string) => val ? fmtDate(val) : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>,
     },
     {
       title: 'Actions',

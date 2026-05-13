@@ -2771,6 +2771,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
 
   const [searchOpen, setSearchOpen] = useState(true);
   const [gridSearch, setGridSearch] = useState('');
+  const [reconStatusFilter, setReconStatusFilter] = useState<'ALL' | 'UNR' | 'REC'>('ALL');
 
   // ── Tab items ─────────────────────────────────────────────────────────────
   const searchPane = (
@@ -2891,25 +2892,46 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       {/* Results */}
       {hasSearched && (() => {
         const q = gridSearch.trim().toLowerCase();
-        const filtered = q
-          ? transactions.filter(r =>
-              [r.externalTransactionId, r.transactionId, r.bankAccountName, r.businessUnitName,
-               r.referenceText, r.description, r.status, r.source, r.transactionType,
-               r.currencyCode, r.assetAccountCombination, r.offsetAccountCombination,
-               r.transactionDate, r.payeeName, r.checkNumber, r.reconReference]
-              .some(v => String(v ?? '').toLowerCase().includes(q))
-            )
-          : transactions;
+        const filtered = (() => {
+          let base = transactions;
+          if (reconStatusFilter === 'REC') base = base.filter(t => t.status === 'REC');
+          if (reconStatusFilter === 'UNR') base = base.filter(t => t.status !== 'REC');
+          if (!q) return base;
+          return base.filter(r =>
+            [r.externalTransactionId, r.transactionId, r.bankAccountName, r.businessUnitName,
+             r.referenceText, r.description, r.status, r.source, r.transactionType,
+             r.currencyCode, r.assetAccountCombination, r.offsetAccountCombination,
+             r.transactionDate, r.payeeName, r.checkNumber, r.reconReference]
+            .some(v => String(v ?? '').toLowerCase().includes(q))
+          );
+        })();
         return (
           <Card style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
             styles={{ body: { padding: 0 } }}
             title={
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                <Space>
+                <Space wrap>
                   <Text strong>
                     Search Results{' '}
-                    <Tag color="blue">{filtered.length}{q && filtered.length !== transactions.length ? ` / ${transactions.length}` : ''}</Tag>
+                    <Tag color="blue">{filtered.length}{filtered.length !== transactions.length ? ` / ${transactions.length}` : ''}</Tag>
                   </Text>
+                  {/* Recon status toggle */}
+                  <Space size={2}>
+                    {([
+                      { label: 'All',     value: 'ALL', color: '#1677ff' },
+                      { label: 'Unrecon', value: 'UNR', color: '#fa8c16' },
+                      { label: 'Recon',   value: 'REC', color: '#52c41a' },
+                    ] as { label: string; value: 'ALL' | 'UNR' | 'REC'; color: string }[]).map(opt => {
+                      const active = reconStatusFilter === opt.value;
+                      return (
+                        <Button key={opt.value} size="small"
+                          style={{ fontSize: 11, padding: '0 8px', height: 24, background: active ? opt.color : undefined, borderColor: active ? opt.color : undefined, color: active ? '#fff' : opt.color, fontWeight: active ? 600 : 400 }}
+                          onClick={() => setReconStatusFilter(opt.value)}>
+                          {opt.label}
+                        </Button>
+                      );
+                    })}
+                  </Space>
                   {selectedRowKeys.length > 0 && (
                     <Button
                       size="small" type="primary" icon={<CheckCircleOutlined />}
