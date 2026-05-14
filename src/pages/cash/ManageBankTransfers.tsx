@@ -242,6 +242,7 @@ const TransferForm: React.FC<{
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [savedId, setSavedId] = useState<number | null>(null);
   const [apiModal, setApiModal]       = useState(false);
   const [apiPayload, setApiPayload]   = useState('');
   const [apiPosting, setApiPosting]   = useState(false);
@@ -395,6 +396,7 @@ const TransferForm: React.FC<{
       if (data.status === 'success') {
         message.success(isEdit ? 'Transfer updated.' : 'Transfer created.');
         if (!isEdit && data.bankAccountTransferId) {
+          setSavedId(data.bankAccountTransferId);
           onSave({ bankAccountTransferId: data.bankAccountTransferId, bankAccountTransferNumber: String(data.bankAccountTransferNumber ?? '') });
         } else {
           onSave();
@@ -639,10 +641,12 @@ const TransferForm: React.FC<{
     ? bankAccounts.filter(a => buBankMap[selectedBu].includes(a.value))
     : bankAccounts;
 
-  // Business rule: one side must be AED.
-  // If From Account is non-AED, restrict To Account to AED accounts only.
+  // If From Account is non-AED, restrict To Account to AED or same currency as From.
   const filteredToAccounts = fromCurrency && fromCurrency !== 'AED'
-    ? filteredBankAccounts.filter(a => (bankCurrencyMap[a.value] ?? '') === 'AED')
+    ? filteredBankAccounts.filter(a => {
+        const ccy = bankCurrencyMap[a.value] ?? '';
+        return ccy === 'AED' || ccy === fromCurrency;
+      })
     : filteredBankAccounts;
 
   // sync selectedBu when initialValues changes (edit mode)
@@ -723,8 +727,8 @@ const TransferForm: React.FC<{
                       const ccy = bankCurrencyMap[v] ?? '';
                       setFromCurrency(ccy);
                       setSelectedFromAcct(v);
-                      // If new from-currency makes current to-account invalid, clear it
-                      if (ccy !== 'AED' && toCurrency && toCurrency !== 'AED') {
+                      // Clear to-account if it's now incompatible (not AED and not same currency as from)
+                      if (ccy !== 'AED' && toCurrency && toCurrency !== 'AED' && toCurrency !== ccy) {
                         form.setFieldsValue({ toBankAccountName: undefined, paymentCurrencyCode: undefined });
                         setToCurrency('');
                         setSelectedToAcct('');
@@ -743,7 +747,7 @@ const TransferForm: React.FC<{
               )}
               {fromCurrency && fromCurrency !== 'AED' && (
                 <div style={{ marginTop: 4, fontSize: 11, color: REDWOOD.warning, paddingLeft: 2 }}>
-                  Non-AED from account — To Account is restricted to AED accounts only
+                  Non-AED from account — To Account restricted to AED or {fromCurrency} accounts
                 </div>
               )}
             </Form.Item>
@@ -751,10 +755,10 @@ const TransferForm: React.FC<{
             <Form.Item label="To Account" labelCol={{ span: 4 }} wrapperCol={{ span: 20 }} style={{ marginBottom: 4 }}>
               <div style={{ display: 'flex', gap: 0 }}>
                 <Form.Item name="toBankAccountName" noStyle rules={[{ required: true, message: 'To Account is required' }]}>
-                  <Select showSearch placeholder={fromCurrency && fromCurrency !== 'AED' ? 'AED accounts only' : 'Select bank account'}
+                  <Select showSearch placeholder={fromCurrency && fromCurrency !== 'AED' ? `AED or ${fromCurrency} accounts` : 'Select bank account'}
                     optionFilterProp="label" options={filteredToAccounts}
                     style={{ borderRadius: '6px 0 0 6px', flex: 1 }} disabled={isReadOnly || !buSelected}
-                    notFoundContent={<Text type="secondary">{!buSelected ? 'Select a BU first' : fromCurrency && fromCurrency !== 'AED' ? 'No AED accounts found' : 'No accounts for this BU'}</Text>}
+                    notFoundContent={<Text type="secondary">{!buSelected ? 'Select a BU first' : fromCurrency && fromCurrency !== 'AED' ? `No AED or ${fromCurrency} accounts found` : 'No accounts for this BU'}</Text>}
                     onChange={(v: string) => {
                       const ccy = bankCurrencyMap[v] ?? '';
                       setToCurrency(ccy);
@@ -1015,10 +1019,16 @@ const TransferForm: React.FC<{
                 {isAccounted ? 'Accounted' : 'Preview Accounting'}
               </Button>
             </Tooltip>
-            {!isEdit && (
+            {!isEdit && !savedId && (
               <Button type="primary" loading={saving} onClick={handleSubmit}
                 style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
                 Create Transfer
+              </Button>
+            )}
+            {!isEdit && savedId && (
+              <Button type="default" icon={<EditOutlined />} disabled
+                style={{ color: REDWOOD.neutral600, borderColor: REDWOOD.neutral300 }}>
+                Saved — close and reopen to edit
               </Button>
             )}
             {isEdit && !isPermanentlyLocked && !editMode && (
@@ -2422,13 +2432,24 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       title: 'Transfer Amt',
       dataIndex: 'paymentAmount',
       key: 'paymentAmount',
-      width: 120,
+      width: 140,
       align: 'right' as const,
-      render: (v: number, r: TransferRecord) => (
-        <Text style={{ fontWeight: 500, color: REDWOOD.neutral900 }}>
-          {fmtAmount(v, r.paymentCurrencyCode)}
-        </Text>
-      ),
+      render: (v: number, r: TransferRecord) => {
+        const isCross = r.fromAmount && r.fromCurrencyCode && r.paymentCurrencyCode
+          && r.fromCurrencyCode !== r.paymentCurrencyCode;
+        return (
+          <div style={{ lineHeight: 1.4 }}>
+            <Text style={{ fontWeight: 500, color: REDWOOD.neutral900 }}>
+              {fmtAmount(v, r.paymentCurrencyCode)}
+            </Text>
+            {isCross && (
+              <div style={{ fontSize: 11, color: REDWOOD.info }}>
+                {fmtAmount(r.fromAmount, r.fromCurrencyCode)}
+              </div>
+            )}
+          </div>
+        );
+      },
     },
     {
       title: 'Conv. Rate',
