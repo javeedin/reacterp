@@ -1628,7 +1628,7 @@ END;
               style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
               onClick={async () => {
                 const values = form.getFieldsValue();
-                const pmtAmt = values.paymentAmount ?? 0;
+                const pmtAmt       = values.paymentAmount ?? 0;
                 const rate         = values.conversionRate ?? 1;
                 const funcConvRate = values.funcConversionRate ?? rate;
                 const fromAsset = bankAccountAssetMap[selectedFromAcct] || '';
@@ -1640,9 +1640,27 @@ END;
                   const today  = values.transactionDate ? values.transactionDate.format('YYYY-MM-DD') : new Date().toISOString().slice(0,10);
                   const period = derivePeriodName(new Date(today));
 
-                  // Journal 1: DR Cash Clearing / CR From Bank (From currency)
                   const j1currency = fromCurrency || 'AED';
-                  const j1Rate     = j1currency === 'AED' ? 1 : funcConvRate;
+                  const j2currency = toCurrency   || 'AED';
+                  const isCross    = j1currency !== j2currency;
+
+                  // fromAmt: entered in j1 (from) currency; pmtAmt is always in j2 (payment/to) currency
+                  const fromAmt = isCross ? Math.round(pmtAmt * rate * 100) / 100 : pmtAmt;
+
+                  // AED equivalent of the transfer:
+                  //   from=AED        → fromAmt is already AED
+                  //   to=AED          → pmtAmt is already AED
+                  //   F2F (both fgn)  → pmtAmt × funcConvRate (payment-ccy → AED)
+                  const aedValue = j1currency === 'AED'
+                    ? fromAmt
+                    : j2currency === 'AED'
+                      ? pmtAmt
+                      : Math.round(pmtAmt * funcConvRate * 100) / 100;
+
+                  const j1Rate = j1currency === 'AED' ? 1 : (fromAmt > 0 ? Math.round(aedValue / fromAmt * 1e6) / 1e6 : 1);
+                  const j2Rate = j2currency === 'AED' ? 1 : (pmtAmt  > 0 ? Math.round(aedValue / pmtAmt  * 1e6) / 1e6 : 1);
+
+                  // Journal 1: DR Cash Clearing / CR From Bank (fromCurrency)
                   await createAccounting({
                     header: {
                       moduleName: 'CM', sourceTable: 'BANK_ACCOUNT_TRANSFERS',
@@ -1659,28 +1677,20 @@ END;
                     lines: [
                       { lineNumber: 1, lineType: 'DR', accountingClass: 'CASH_CLEARING',
                         accountCombination: cashClearingAcct,
-                        enteredDr: pmtAmt, enteredCr: 0,
-                        accountedDr: Math.round(pmtAmt * j1Rate * 100) / 100, accountedCr: 0,
+                        enteredDr: fromAmt, enteredCr: 0,
+                        accountedDr: aedValue, accountedCr: 0,
                         currencyCode: j1currency, exchangeRate: j1Rate,
                         description: `Cash Clearing DR – From ${selectedFromAcct}` },
                       { lineNumber: 2, lineType: 'CR', accountingClass: 'BANK_ASSET',
                         accountCombination: fromAsset,
-                        enteredDr: 0, enteredCr: pmtAmt,
-                        accountedDr: 0, accountedCr: Math.round(pmtAmt * j1Rate * 100) / 100,
+                        enteredDr: 0, enteredCr: fromAmt,
+                        accountedDr: 0, accountedCr: aedValue,
                         currencyCode: j1currency, exchangeRate: j1Rate,
                         description: `From Bank CR – ${selectedFromAcct}` },
                     ],
                   });
 
-                  // Journal 2: DR To Bank / CR Cash Clearing (To currency)
-                  const j2currency = toCurrency || 'AED';
-                  const j2Rate     = j2currency === 'AED' ? 1 : funcConvRate;
-                  const isCross2   = j2currency !== j1currency;
-                  const toAmt      = !isCross2
-                    ? pmtAmt
-                    : j1currency !== 'AED'
-                      ? Math.round(pmtAmt * j1Rate * 100) / 100
-                      : rate > 0 ? Math.round((pmtAmt / rate) * 100) / 100 : pmtAmt;
+                  // Journal 2: DR To Bank / CR Cash Clearing (toCurrency = payment currency)
                   await createAccounting({
                     header: {
                       moduleName: 'CM', sourceTable: 'BANK_ACCOUNT_TRANSFERS',
@@ -1697,14 +1707,14 @@ END;
                     lines: [
                       { lineNumber: 1, lineType: 'DR', accountingClass: 'BANK_ASSET',
                         accountCombination: toAsset,
-                        enteredDr: toAmt, enteredCr: 0,
-                        accountedDr: Math.round(toAmt * j2Rate * 100) / 100, accountedCr: 0,
+                        enteredDr: pmtAmt, enteredCr: 0,
+                        accountedDr: aedValue, accountedCr: 0,
                         currencyCode: j2currency, exchangeRate: j2Rate,
                         description: `To Bank DR – ${selectedToAcct}` },
                       { lineNumber: 2, lineType: 'CR', accountingClass: 'CASH_CLEARING',
                         accountCombination: cashClearingAcct,
-                        enteredDr: 0, enteredCr: toAmt,
-                        accountedDr: 0, accountedCr: Math.round(toAmt * j2Rate * 100) / 100,
+                        enteredDr: 0, enteredCr: pmtAmt,
+                        accountedDr: 0, accountedCr: aedValue,
                         currencyCode: j2currency, exchangeRate: j2Rate,
                         description: `Cash Clearing CR – To ${selectedToAcct}` },
                     ],
@@ -1729,19 +1739,20 @@ END;
           const pmtAmt       = values.paymentAmount ?? 0;
           const rate         = values.conversionRate ?? 1;
           const funcConvRate = values.funcConversionRate ?? rate;
-          const j1currency = fromCurrency || 'AED';
-          const j1Rate     = j1currency === 'AED' ? 1 : funcConvRate;
-          const j2currency = toCurrency || 'AED';
-          const j2Rate     = j2currency === 'AED' ? 1 : funcConvRate;
-          const isCross    = j1currency !== j2currency;
-          const toAmt      = !isCross
-            ? pmtAmt
-            : j1currency !== 'AED'
-              ? Math.round(pmtAmt * j1Rate * 100) / 100
-              : rate > 0 ? Math.round((pmtAmt / rate) * 100) / 100 : pmtAmt;
-          const fromAsset  = bankAccountAssetMap[selectedFromAcct] || '—';
-          const toAsset    = bankAccountAssetMap[selectedToAcct]   || '—';
-          const clearing   = cashClearingAcct || '—';
+          const j1currency   = fromCurrency || 'AED';
+          const j2currency   = toCurrency   || 'AED';
+          const isCross      = j1currency !== j2currency;
+          const fromAmt      = isCross ? Math.round(pmtAmt * rate * 100) / 100 : pmtAmt;
+          const aedValue     = j1currency === 'AED'
+            ? fromAmt
+            : j2currency === 'AED'
+              ? pmtAmt
+              : Math.round(pmtAmt * funcConvRate * 100) / 100;
+          const j1Rate       = j1currency === 'AED' ? 1 : (fromAmt > 0 ? Math.round(aedValue / fromAmt * 1e6) / 1e6 : 1);
+          const j2Rate       = j2currency === 'AED' ? 1 : (pmtAmt  > 0 ? Math.round(aedValue / pmtAmt  * 1e6) / 1e6 : 1);
+          const fromAsset    = bankAccountAssetMap[selectedFromAcct] || '—';
+          const toAsset      = bankAccountAssetMap[selectedToAcct]   || '—';
+          const clearing     = cashClearingAcct || '—';
 
           if (!cashClearingAcct) return (
             <Alert type="warning" message="Please select a Cash Clearing Account before previewing accounting." showIcon />
@@ -1774,17 +1785,17 @@ END;
                   <tbody>
                     <tr style={{ borderTop: `1px solid ${REDWOOD.neutral200}` }}>
                       <td style={lineStyle}><Tag color="green" style={{ fontSize: 10 }}>DR</Tag> <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{clearing}</Text> <Text type="secondary" style={{ fontSize: 11 }}>(Cash Clearing)</Text></td>
-                      <td style={{ ...lineStyle, textAlign: 'right', color: REDWOOD.success, fontWeight: 500 }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(pmtAmt)} {j1currency}</td>
+                      <td style={{ ...lineStyle, textAlign: 'right', color: REDWOOD.success, fontWeight: 500 }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(fromAmt)} {j1currency}</td>
                       <td style={lineStyle} />
-                      <td style={{ ...lineStyle, textAlign: 'right' }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(Math.round(pmtAmt * j1Rate * 100) / 100)}</td>
+                      <td style={{ ...lineStyle, textAlign: 'right' }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(aedValue)}</td>
                       <td style={lineStyle} />
                     </tr>
                     <tr style={{ borderTop: `1px solid ${REDWOOD.neutral200}` }}>
                       <td style={lineStyle}><Tag color="red" style={{ fontSize: 10 }}>CR</Tag> <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{fromAsset}</Text> <Text type="secondary" style={{ fontSize: 11 }}>(From Bank)</Text></td>
                       <td style={lineStyle} />
-                      <td style={{ ...lineStyle, textAlign: 'right', color: REDWOOD.error, fontWeight: 500 }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(pmtAmt)} {j1currency}</td>
+                      <td style={{ ...lineStyle, textAlign: 'right', color: REDWOOD.error, fontWeight: 500 }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(fromAmt)} {j1currency}</td>
                       <td style={lineStyle} />
-                      <td style={{ ...lineStyle, textAlign: 'right' }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(Math.round(pmtAmt * j1Rate * 100) / 100)}</td>
+                      <td style={{ ...lineStyle, textAlign: 'right' }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(aedValue)}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -1812,17 +1823,17 @@ END;
                   <tbody>
                     <tr style={{ borderTop: `1px solid ${REDWOOD.neutral200}` }}>
                       <td style={lineStyle}><Tag color="green" style={{ fontSize: 10 }}>DR</Tag> <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{toAsset}</Text> <Text type="secondary" style={{ fontSize: 11 }}>(To Bank)</Text></td>
-                      <td style={{ ...lineStyle, textAlign: 'right', color: REDWOOD.success, fontWeight: 500 }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(toAmt)} {j2currency}</td>
+                      <td style={{ ...lineStyle, textAlign: 'right', color: REDWOOD.success, fontWeight: 500 }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(pmtAmt)} {j2currency}</td>
                       <td style={lineStyle} />
-                      <td style={{ ...lineStyle, textAlign: 'right' }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(Math.round(toAmt * j2Rate * 100) / 100)}</td>
+                      <td style={{ ...lineStyle, textAlign: 'right' }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(aedValue)}</td>
                       <td style={lineStyle} />
                     </tr>
                     <tr style={{ borderTop: `1px solid ${REDWOOD.neutral200}` }}>
                       <td style={lineStyle}><Tag color="red" style={{ fontSize: 10 }}>CR</Tag> <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{clearing}</Text> <Text type="secondary" style={{ fontSize: 11 }}>(Cash Clearing)</Text></td>
                       <td style={lineStyle} />
-                      <td style={{ ...lineStyle, textAlign: 'right', color: REDWOOD.error, fontWeight: 500 }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(toAmt)} {j2currency}</td>
+                      <td style={{ ...lineStyle, textAlign: 'right', color: REDWOOD.error, fontWeight: 500 }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(pmtAmt)} {j2currency}</td>
                       <td style={lineStyle} />
-                      <td style={{ ...lineStyle, textAlign: 'right' }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(Math.round(toAmt * j2Rate * 100) / 100)}</td>
+                      <td style={{ ...lineStyle, textAlign: 'right' }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(aedValue)}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -2217,21 +2228,20 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
         const j2currency = txn.toCurrencyCode   || bankCurrencyMap[txn.toBankAccountName]   || 'AED';
         const isCross    = j1currency !== j2currency;
 
-        // Use funcConversionRate (payment→AED) for accounted amounts; falls back to conversionRate
-        const j1Rate = j1currency === 'AED' ? 1 : funcConvRate;
-        const j2Rate = j2currency === 'AED' ? 1 : funcConvRate;
+        // fromAmt: entered in j1 (from) currency; pmtAmt is always in j2 (payment/to) currency
+        const fromAmt = isCross
+          ? (txn.fromAmount != null ? Math.abs(txn.fromAmount) : Math.round(pmtAmt * rate * 100) / 100)
+          : pmtAmt;
 
-        // toAmt = amount the TO bank receives in its own currency
-        // When j1 is foreign and j2 is AED: toAmt = pmtAmt (foreign) × rate = AED equivalent
-        // When j1 is AED and j2 is foreign: toAmt = pmtAmt (AED) ÷ rate  (guard divide-by-zero)
-        // When same currency: toAmt = pmtAmt
-        const toAmt = !isCross
-          ? pmtAmt
-          : j1currency !== 'AED'
-            ? Math.round(pmtAmt * j1Rate * 100) / 100
-            : rate > 0
-              ? Math.round((pmtAmt / rate) * 100) / 100
-              : pmtAmt;
+        // AED equivalent:  from=AED → fromAmt;  to=AED → pmtAmt;  F2F → pmtAmt × funcConvRate
+        const aedValue = j1currency === 'AED'
+          ? fromAmt
+          : j2currency === 'AED'
+            ? pmtAmt
+            : Math.round(pmtAmt * funcConvRate * 100) / 100;
+
+        const j1Rate = j1currency === 'AED' ? 1 : (fromAmt > 0 ? Math.round(aedValue / fromAmt * 1e6) / 1e6 : 1);
+        const j2Rate = j2currency === 'AED' ? 1 : (pmtAmt  > 0 ? Math.round(aedValue / pmtAmt  * 1e6) / 1e6 : 1);
 
         const postGlAndSla = async (
           slaPayload: Parameters<typeof createAccounting>[0],
@@ -2288,7 +2298,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
               currencyCode: glCurrency,
               currencyConversionType: 'Corporate',
               currencyConversionDate: row.txnDate,
-              currencyConversionRate: glCurrency === 'AED' ? 1 : rate,
+              currencyConversionRate: slaPayload.header.exchangeRate ?? 1,
               defaultEffectiveDate: row.txnDate,
               status: 'NEW', runningTotalDr: glAmount, runningTotalCr: glAmount,
               createdBy: currentUser,
@@ -2297,7 +2307,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
               ...l,
               statAmount: null,
               currencyConversionDate: row.txnDate,
-              currencyConversionRate: glCurrency === 'AED' ? 1 : rate,
+              currencyConversionRate: slaPayload.header.exchangeRate ?? 1,
               userCurrencyConversionType: 'Corporate',
               chartOfAccountsName: 'Chart of Accounts',
               reference1: String(txn.bankAccountTransferId),
@@ -2370,23 +2380,23 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
               },
               lines: [
                 { lineNumber: 1, lineType: 'DR', accountingClass: 'CASH_CLEARING',
-                  accountCombination: clearingAcct, enteredDr: pmtAmt, enteredCr: 0,
-                  accountedDr: Math.round(pmtAmt * j1Rate * 100) / 100, accountedCr: 0,
+                  accountCombination: clearingAcct, enteredDr: fromAmt, enteredCr: 0,
+                  accountedDr: aedValue, accountedCr: 0,
                   currencyCode: j1currency, exchangeRate: j1Rate,
                   description: `Cash Clearing DR – ${txn.fromBankAccountName}` },
                 { lineNumber: 2, lineType: 'CR', accountingClass: 'BANK_ASSET',
-                  accountCombination: fromAsset, enteredDr: 0, enteredCr: pmtAmt,
-                  accountedDr: 0, accountedCr: Math.round(pmtAmt * j1Rate * 100) / 100,
+                  accountCombination: fromAsset, enteredDr: 0, enteredCr: fromAmt,
+                  accountedDr: 0, accountedCr: aedValue,
                   currencyCode: j1currency, exchangeRate: j1Rate,
                   description: `From Bank CR – ${txn.fromBankAccountName}` },
               ],
             },
             j1Name,
             [
-              { accountCombination: clearingAcct, enteredDr: pmtAmt, enteredCr: null, accountedDr: Math.round(pmtAmt * j1Rate * 100) / 100, accountedCr: null, currencyCode: j1currency, description: `Cash Clearing DR – ${txn.fromBankAccountName}`, accountingClass: 'CASH_CLEARING' },
-              { accountCombination: fromAsset,    enteredDr: null, enteredCr: pmtAmt, accountedDr: null, accountedCr: Math.round(pmtAmt * j1Rate * 100) / 100, currencyCode: j1currency, description: `From Bank CR – ${txn.fromBankAccountName}`,    accountingClass: 'BANK_ASSET' },
+              { accountCombination: clearingAcct, enteredDr: fromAmt, enteredCr: null, accountedDr: aedValue, accountedCr: null, currencyCode: j1currency, description: `Cash Clearing DR – ${txn.fromBankAccountName}`, accountingClass: 'CASH_CLEARING' },
+              { accountCombination: fromAsset,    enteredDr: null, enteredCr: fromAmt, accountedDr: null, accountedCr: aedValue, currencyCode: j1currency, description: `From Bank CR – ${txn.fromBankAccountName}`,    accountingClass: 'BANK_ASSET' },
             ],
-            pmtAmt, j1currency, existingDisburse, 'BANKTFR-DISBURSE',
+            aedValue, j1currency, existingDisburse, 'BANKTFR-DISBURSE',
           );
         }
 
@@ -2408,23 +2418,23 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
               },
               lines: [
                 { lineNumber: 1, lineType: 'DR', accountingClass: 'BANK_ASSET',
-                  accountCombination: toAsset, enteredDr: toAmt, enteredCr: 0,
-                  accountedDr: Math.round(toAmt * j2Rate * 100) / 100, accountedCr: 0,
+                  accountCombination: toAsset, enteredDr: pmtAmt, enteredCr: 0,
+                  accountedDr: aedValue, accountedCr: 0,
                   currencyCode: j2currency, exchangeRate: j2Rate,
                   description: `To Bank DR – ${txn.toBankAccountName}` },
                 { lineNumber: 2, lineType: 'CR', accountingClass: 'CASH_CLEARING',
-                  accountCombination: clearingAcct, enteredDr: 0, enteredCr: toAmt,
-                  accountedDr: 0, accountedCr: Math.round(toAmt * j2Rate * 100) / 100,
+                  accountCombination: clearingAcct, enteredDr: 0, enteredCr: pmtAmt,
+                  accountedDr: 0, accountedCr: aedValue,
                   currencyCode: j2currency, exchangeRate: j2Rate,
                   description: `Cash Clearing CR – ${txn.toBankAccountName}` },
               ],
             },
             j2Name,
             [
-              { accountCombination: toAsset,      enteredDr: toAmt, enteredCr: null, accountedDr: Math.round(toAmt * j2Rate * 100) / 100, accountedCr: null, currencyCode: j2currency, description: `To Bank DR – ${txn.toBankAccountName}`,         accountingClass: 'BANK_ASSET' },
-              { accountCombination: clearingAcct, enteredDr: null, enteredCr: toAmt, accountedDr: null, accountedCr: Math.round(toAmt * j2Rate * 100) / 100, currencyCode: j2currency, description: `Cash Clearing CR – ${txn.toBankAccountName}`, accountingClass: 'CASH_CLEARING' },
+              { accountCombination: toAsset,      enteredDr: pmtAmt, enteredCr: null, accountedDr: aedValue, accountedCr: null, currencyCode: j2currency, description: `To Bank DR – ${txn.toBankAccountName}`,         accountingClass: 'BANK_ASSET' },
+              { accountCombination: clearingAcct, enteredDr: null, enteredCr: pmtAmt, accountedDr: null, accountedCr: aedValue, currencyCode: j2currency, description: `Cash Clearing CR – ${txn.toBankAccountName}`, accountingClass: 'CASH_CLEARING' },
             ],
-            toAmt, j2currency, existingReceipt, 'BANKTFR-RECEIPT',
+            aedValue, j2currency, existingReceipt, 'BANKTFR-RECEIPT',
           );
         }
 
