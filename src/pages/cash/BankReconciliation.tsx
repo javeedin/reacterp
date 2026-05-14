@@ -1023,7 +1023,9 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
 
       const [systxnsResult, extResult, btGlResult] = await Promise.allSettled([
         fetch(`${APEX_BASE}/cash/reconciliation/systxns?${q.toString()}`).then(r => parseApexJson(r)),
-        fetch(`${EXT_TXN_URL}?${extQ.toString()}`).then(r => parseApexJson(r)),
+        params.bankAccount
+          ? fetch(`${EXT_TXN_URL}?${extQ.toString()}`).then(r => parseApexJson(r))
+          : Promise.resolve({ status: 'success', items: [] }),
         params.bankAccount
           ? fetch(`${APEX_BASE}/gl/journals/banktxn-lines?${btGlQ.toString()}`).then(r => parseApexJson(r))
           : Promise.resolve({ status: 'success', items: [] }),
