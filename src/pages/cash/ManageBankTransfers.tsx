@@ -2533,6 +2533,31 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       },
     },
     {
+      title: 'Rate Date',
+      key: 'rateDate',
+      width: 100,
+      render: (_: any, r: TransferRecord) =>
+        r.conversionRateDate
+          ? <Text style={{ fontSize: 12 }}>{fmtDate(r.conversionRateDate)}</Text>
+          : <Text type="secondary">—</Text>,
+    },
+    {
+      title: 'Func. Rate',
+      key: 'funcRate',
+      width: 100,
+      align: 'right' as const,
+      render: (_: any, r: TransferRecord) => {
+        if (!r.funcConversionRate || r.toCurrencyCode === 'AED') return <Text type="secondary">—</Text>;
+        return (
+          <Tooltip title={`1 ${r.toCurrencyCode} = ${r.funcConversionRate} AED`}>
+            <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>
+              {r.funcConversionRate.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 })}
+            </Text>
+          </Tooltip>
+        );
+      },
+    },
+    {
       title: 'Transfer Date',
       dataIndex: 'transactionDate',
       key: 'txnDate',
