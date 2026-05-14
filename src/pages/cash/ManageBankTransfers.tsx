@@ -2456,7 +2456,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
             },
             j1Name,
             [
-              { accountCombination: clearingAcct, enteredDr: fromAmt, enteredCr: null, accountedDr: aedValue, accountedCr: null, currencyCode: j1currency, description: `Cash Clearing DR – ${txn.fromBankAccountName}`, accountingClass: 'CASH_CLEARING', reference7: txn.fromBankAccountName },
+              { accountCombination: clearingAcct, enteredDr: fromAmt, enteredCr: null, accountedDr: aedValue, accountedCr: null, currencyCode: j1currency, description: `Cash Clearing DR – ${txn.fromBankAccountName}`, accountingClass: 'CASH_CLEARING' },
               { accountCombination: fromAsset,    enteredDr: null, enteredCr: fromAmt, accountedDr: null, accountedCr: aedValue, currencyCode: j1currency, description: `From Bank CR – ${txn.fromBankAccountName}`,    accountingClass: 'BANK_ASSET',    reference7: txn.fromBankAccountName },
             ],
             aedValue, j1currency, existingDisburse, 'BANKTFR-DISBURSE',
@@ -2495,7 +2495,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
             j2Name,
             [
               { accountCombination: toAsset,      enteredDr: pmtAmt, enteredCr: null, accountedDr: aedValue, accountedCr: null, currencyCode: j2currency, description: `To Bank DR – ${txn.toBankAccountName}`,         accountingClass: 'BANK_ASSET',    reference7: txn.toBankAccountName },
-              { accountCombination: clearingAcct, enteredDr: null, enteredCr: pmtAmt, accountedDr: null, accountedCr: aedValue, currencyCode: j2currency, description: `Cash Clearing CR – ${txn.toBankAccountName}`, accountingClass: 'CASH_CLEARING', reference7: txn.toBankAccountName },
+              { accountCombination: clearingAcct, enteredDr: null, enteredCr: pmtAmt, accountedDr: null, accountedCr: aedValue, currencyCode: j2currency, description: `Cash Clearing CR – ${txn.toBankAccountName}`, accountingClass: 'CASH_CLEARING' },
             ],
             aedValue, j2currency, existingReceipt, 'BANKTFR-RECEIPT',
           );
