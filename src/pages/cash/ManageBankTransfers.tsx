@@ -1749,65 +1749,152 @@ END;
                     return;
                   }
 
+                  const sourceId = initialValues?.bankAccountTransferId ?? savedId ?? 0;
+                  const buName   = values.businessUnit || '';
+                  const j1Name   = `BANKTFR-${transferNumber}-DISBURSE`;
+                  const j2Name   = `BANKTFR-${transferNumber}-RECEIPT`;
+
+                  const doJournal = async (
+                    slaPayload: Parameters<typeof createAccounting>[0],
+                    glJournalName: string,
+                    glLines: Array<{ accountCombination: string; enteredDr: number | null; enteredCr: number | null; accountedDr: number | null; accountedCr: number | null; currencyCode: string; description: string; accountingClass: string }>,
+                    glAedAmount: number,
+                    glEnteredAmount: number,
+                    glCurrency: string,
+                    glRate: number,
+                    glRef5: string,
+                  ) => {
+                    const existing = await checkAccountingExists('BANK_ACCOUNT_TRANSFERS', sourceId, slaPayload.header.eventTypeCode);
+                    let slaResult: { headerId: number };
+                    if (existing.exists && existing.headerId && existing.postingStatus === 'POSTED') {
+                      slaResult = { headerId: existing.headerId };
+                    } else {
+                      slaResult = await createAccounting(slaPayload);
+                    }
+
+                    const glCheck = await checkGLJournalExists(String(sourceId), transferNumber, glRef5);
+                    if (glCheck.exists) {
+                      if (!existing.exists || existing.postingStatus !== 'POSTED') {
+                        await fetch(`${APEX_BASE}/sla/accounting/post`, {
+                          method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                          body: JSON.stringify({ headerId: slaResult.headerId, glBatchId: glCheck.batchId || 0, glBatchName: glJournalName, glHeaderId: glCheck.headerId || 0, postedBy: 'SYSTEM' }),
+                        });
+                      }
+                      return;
+                    }
+
+                    const glPayload = {
+                      batch: {
+                        batchName: glJournalName, batchDescription: slaPayload.header.description,
+                        ledgerName: ledger?.ledgerName ?? '', ledgerId: ledger?.ledgerId ?? 0,
+                        status: 'NEW', accountingPeriod: period, controlTotal: glAedAmount,
+                        runningTotalDr: glEnteredAmount, runningTotalCr: glEnteredAmount,
+                        batchSource: 'Cash Management', createdBy: 'SYSTEM',
+                      },
+                      header: {
+                        ledgerId: ledger?.ledgerId ?? 0, ledgerName: ledger?.ledgerName ?? '',
+                        jeCategory: 'Cash Management', jeSource: 'Cash Management',
+                        periodName: period, journalName: glJournalName,
+                        description: slaPayload.header.description,
+                        currencyCode: glCurrency, currencyConversionType: 'Corporate',
+                        currencyConversionDate: today, currencyConversionRate: glRate,
+                        defaultEffectiveDate: today, status: 'NEW',
+                        runningTotalDr: glEnteredAmount, runningTotalCr: glEnteredAmount,
+                        createdBy: 'SYSTEM',
+                      },
+                      lines: glLines.map((l, i) => ({
+                        ...l, statAmount: null,
+                        currencyConversionDate: today, currencyConversionRate: glRate,
+                        userCurrencyConversionType: 'Corporate', chartOfAccountsName: 'Chart of Accounts',
+                        reference1: String(sourceId), reference2: transferNumber,
+                        reference3: l.accountingClass || null, reference4: buName, reference5: glRef5,
+                        createdBy: 'SYSTEM',
+                      })),
+                    };
+
+                    const glRes = await fetch(`${APEX_BASE}/journals/create`, {
+                      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                      body: JSON.stringify(glPayload),
+                    });
+                    if (!glRes.ok) {
+                      const errData = await glRes.json().catch(() => ({}));
+                      throw new Error(errData?.message || `GL journals/create failed (HTTP ${glRes.status})`);
+                    }
+                    const glData     = await glRes.json();
+                    const glBatchId  = glData.jeBatchId  ?? glData.je_batch_id  ?? null;
+                    const glHeaderId = glData.jeHeaderId ?? glData.je_header_id ?? null;
+
+                    if (glBatchId) {
+                      const postRes = await fetch(`${APEX_BASE}/gl/journals/${glBatchId}/post`, {
+                        method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                        body: '{}',
+                      });
+                      if (!postRes.ok) {
+                        const postData = await postRes.json().catch(() => ({}));
+                        const err = Array.isArray(postData?.errors) && postData.errors.length > 0 ? postData.errors[0] : postData?.error || `HTTP ${postRes.status}`;
+                        throw new Error(`GL post failed: ${err}`);
+                      }
+                    }
+
+                    await fetch(`${APEX_BASE}/sla/accounting/post`, {
+                      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                      body: JSON.stringify({ headerId: slaResult.headerId, glBatchId: glBatchId || 0, glBatchName: glJournalName, glHeaderId: glHeaderId || 0, postedBy: 'SYSTEM' }),
+                    });
+                  };
+
                   // Journal 1: DR Cash Clearing / CR From Bank (fromCurrency)
-                  await createAccounting({
-                    header: {
-                      moduleName: 'CM', sourceTable: 'BANK_ACCOUNT_TRANSFERS',
-                      sourceId: initialValues?.bankAccountTransferId ?? savedId ?? 0,
-                      sourceNumber: transferNumber,
-                      sourceType: 'Bank Transfer', eventTypeCode: 'BANK_TRANSFER_DISBURSE',
-                      eventDate: today, accountingDate: today, periodName: period,
-                      ledgerId: ledger?.ledgerId ?? 0, ledgerName: ledger?.ledgerName ?? '',
-                      currencyCode: j1currency, ledgerCurrency: 'AED',
-                      exchangeRate: j1Rate, exchangeRateType: 'Corporate',
-                      businessUnit: values.businessUnit, description: `Bank Transfer - Disbursement`,
-                      createdBy: 'SYSTEM',
+                  await doJournal(
+                    {
+                      header: {
+                        moduleName: 'CM', sourceTable: 'BANK_ACCOUNT_TRANSFERS',
+                        sourceId, sourceNumber: transferNumber,
+                        sourceType: 'Bank Transfer', eventTypeCode: 'BANK_TRANSFER_DISBURSE',
+                        eventDate: today, accountingDate: today, periodName: period,
+                        ledgerId: ledger?.ledgerId ?? 0, ledgerName: ledger?.ledgerName ?? '',
+                        currencyCode: j1currency, ledgerCurrency: 'AED',
+                        exchangeRate: j1Rate, exchangeRateType: 'Corporate',
+                        businessUnit: buName, description: `Bank Transfer ${transferNumber} — Disbursement`,
+                        createdBy: 'SYSTEM',
+                      },
+                      lines: [
+                        { lineNumber: 1, lineType: 'DR', accountingClass: 'CASH_CLEARING', accountCombination: cashClearingAcct, enteredDr: fromAmt, enteredCr: 0, accountedDr: aedValue, accountedCr: 0, currencyCode: j1currency, exchangeRate: j1Rate, description: `Cash Clearing DR – ${selectedFromAcct}` },
+                        { lineNumber: 2, lineType: 'CR', accountingClass: 'BANK_ASSET',    accountCombination: fromAsset,        enteredDr: 0, enteredCr: fromAmt, accountedDr: 0, accountedCr: aedValue, currencyCode: j1currency, exchangeRate: j1Rate, description: `From Bank CR – ${selectedFromAcct}` },
+                      ],
                     },
-                    lines: [
-                      { lineNumber: 1, lineType: 'DR', accountingClass: 'CASH_CLEARING',
-                        accountCombination: cashClearingAcct,
-                        enteredDr: fromAmt, enteredCr: 0,
-                        accountedDr: aedValue, accountedCr: 0,
-                        currencyCode: j1currency, exchangeRate: j1Rate,
-                        description: `Cash Clearing DR – From ${selectedFromAcct}` },
-                      { lineNumber: 2, lineType: 'CR', accountingClass: 'BANK_ASSET',
-                        accountCombination: fromAsset,
-                        enteredDr: 0, enteredCr: fromAmt,
-                        accountedDr: 0, accountedCr: aedValue,
-                        currencyCode: j1currency, exchangeRate: j1Rate,
-                        description: `From Bank CR – ${selectedFromAcct}` },
+                    j1Name,
+                    [
+                      { accountCombination: cashClearingAcct, enteredDr: fromAmt, enteredCr: null, accountedDr: aedValue, accountedCr: null, currencyCode: j1currency, description: `Cash Clearing DR – ${selectedFromAcct}`, accountingClass: 'CASH_CLEARING' },
+                      { accountCombination: fromAsset,        enteredDr: null, enteredCr: fromAmt, accountedDr: null, accountedCr: aedValue, currencyCode: j1currency, description: `From Bank CR – ${selectedFromAcct}`,    accountingClass: 'BANK_ASSET' },
                     ],
-                  });
+                    aedValue, fromAmt, j1currency, j1Rate, 'BANKTFR-DISBURSE',
+                  );
 
                   // Journal 2: DR To Bank / CR Cash Clearing (toCurrency = payment currency)
-                  await createAccounting({
-                    header: {
-                      moduleName: 'CM', sourceTable: 'BANK_ACCOUNT_TRANSFERS',
-                      sourceId: initialValues?.bankAccountTransferId ?? savedId ?? 0,
-                      sourceNumber: transferNumber,
-                      sourceType: 'Bank Transfer', eventTypeCode: 'BANK_TRANSFER_RECEIPT',
-                      eventDate: today, accountingDate: today, periodName: period,
-                      ledgerId: ledger?.ledgerId ?? 0, ledgerName: ledger?.ledgerName ?? '',
-                      currencyCode: j2currency, ledgerCurrency: 'AED',
-                      exchangeRate: j2Rate, exchangeRateType: 'Corporate',
-                      businessUnit: values.businessUnit, description: `Bank Transfer - Receipt`,
-                      createdBy: 'SYSTEM',
+                  await doJournal(
+                    {
+                      header: {
+                        moduleName: 'CM', sourceTable: 'BANK_ACCOUNT_TRANSFERS',
+                        sourceId, sourceNumber: transferNumber,
+                        sourceType: 'Bank Transfer', eventTypeCode: 'BANK_TRANSFER_RECEIPT',
+                        eventDate: today, accountingDate: today, periodName: period,
+                        ledgerId: ledger?.ledgerId ?? 0, ledgerName: ledger?.ledgerName ?? '',
+                        currencyCode: j2currency, ledgerCurrency: 'AED',
+                        exchangeRate: j2Rate, exchangeRateType: 'Corporate',
+                        businessUnit: buName, description: `Bank Transfer ${transferNumber} — Receipt`,
+                        createdBy: 'SYSTEM',
+                      },
+                      lines: [
+                        { lineNumber: 1, lineType: 'DR', accountingClass: 'BANK_ASSET',    accountCombination: toAsset,          enteredDr: pmtAmt, enteredCr: 0, accountedDr: aedValue, accountedCr: 0, currencyCode: j2currency, exchangeRate: j2Rate, description: `To Bank DR – ${selectedToAcct}` },
+                        { lineNumber: 2, lineType: 'CR', accountingClass: 'CASH_CLEARING', accountCombination: cashClearingAcct, enteredDr: 0, enteredCr: pmtAmt, accountedDr: 0, accountedCr: aedValue, currencyCode: j2currency, exchangeRate: j2Rate, description: `Cash Clearing CR – ${selectedToAcct}` },
+                      ],
                     },
-                    lines: [
-                      { lineNumber: 1, lineType: 'DR', accountingClass: 'BANK_ASSET',
-                        accountCombination: toAsset,
-                        enteredDr: pmtAmt, enteredCr: 0,
-                        accountedDr: aedValue, accountedCr: 0,
-                        currencyCode: j2currency, exchangeRate: j2Rate,
-                        description: `To Bank DR – ${selectedToAcct}` },
-                      { lineNumber: 2, lineType: 'CR', accountingClass: 'CASH_CLEARING',
-                        accountCombination: cashClearingAcct,
-                        enteredDr: 0, enteredCr: pmtAmt,
-                        accountedDr: 0, accountedCr: aedValue,
-                        currencyCode: j2currency, exchangeRate: j2Rate,
-                        description: `Cash Clearing CR – To ${selectedToAcct}` },
+                    j2Name,
+                    [
+                      { accountCombination: toAsset,          enteredDr: pmtAmt, enteredCr: null, accountedDr: aedValue, accountedCr: null, currencyCode: j2currency, description: `To Bank DR – ${selectedToAcct}`,       accountingClass: 'BANK_ASSET' },
+                      { accountCombination: cashClearingAcct, enteredDr: null, enteredCr: pmtAmt, accountedDr: null, accountedCr: aedValue, currencyCode: j2currency, description: `Cash Clearing CR – ${selectedToAcct}`, accountingClass: 'CASH_CLEARING' },
                     ],
-                  });
+                    aedValue, pmtAmt, j2currency, j2Rate, 'BANKTFR-RECEIPT',
+                  );
 
                   message.success('Accounting journals created successfully');
                   setPreviewAcctOpen(false);
@@ -2836,6 +2923,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
           glJournalName: string,
           glLines: Array<{ accountCombination: string; enteredDr: number | null; enteredCr: number | null; accountedDr: number | null; accountedCr: number | null; currencyCode: string; description: string; accountingClass: string; reference7?: string }>,
           glAmount: number,
+          glEnteredAmount: number,
           glCurrency: string,
           existingSla: Awaited<ReturnType<typeof checkAccountingExists>>,
           glRef5: string,
@@ -2876,7 +2964,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
               batchName: glJournalName, batchDescription: slaPayload.header.description,
               ledgerName: ledger.ledgerName, ledgerId: ledger.ledgerId, status: 'NEW',
               accountingPeriod: row.periodName, controlTotal: glAmount,
-              runningTotalDr: glAmount, runningTotalCr: glAmount,
+              runningTotalDr: glEnteredAmount, runningTotalCr: glEnteredAmount,
               batchSource: 'Cash Management', createdBy: currentUser,
             },
             header: {
@@ -2889,7 +2977,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
               currencyConversionDate: row.txnDate,
               currencyConversionRate: slaPayload.header.exchangeRate ?? 1,
               defaultEffectiveDate: row.txnDate,
-              status: 'NEW', runningTotalDr: glAmount, runningTotalCr: glAmount,
+              status: 'NEW', runningTotalDr: glEnteredAmount, runningTotalCr: glEnteredAmount,
               createdBy: currentUser,
             },
             lines: glLines.map(l => ({
@@ -2986,7 +3074,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
               { accountCombination: clearingAcct, enteredDr: fromAmt, enteredCr: null, accountedDr: aedValue, accountedCr: null, currencyCode: j1currency, description: `Cash Clearing DR – ${txn.fromBankAccountName}`, accountingClass: 'CASH_CLEARING' },
               { accountCombination: fromAsset,    enteredDr: null, enteredCr: fromAmt, accountedDr: null, accountedCr: aedValue, currencyCode: j1currency, description: `From Bank CR – ${txn.fromBankAccountName}`,    accountingClass: 'BANK_ASSET',    reference7: txn.fromBankAccountName },
             ],
-            aedValue, j1currency, existingDisburse, 'BANKTFR-DISBURSE',
+            aedValue, fromAmt, j1currency, existingDisburse, 'BANKTFR-DISBURSE',
           );
         }
 
@@ -3024,7 +3112,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
               { accountCombination: toAsset,      enteredDr: pmtAmt, enteredCr: null, accountedDr: aedValue, accountedCr: null, currencyCode: j2currency, description: `To Bank DR – ${txn.toBankAccountName}`,         accountingClass: 'BANK_ASSET',    reference7: txn.toBankAccountName },
               { accountCombination: clearingAcct, enteredDr: null, enteredCr: pmtAmt, accountedDr: null, accountedCr: aedValue, currencyCode: j2currency, description: `Cash Clearing CR – ${txn.toBankAccountName}`, accountingClass: 'CASH_CLEARING' },
             ],
-            aedValue, j2currency, existingReceipt, 'BANKTFR-RECEIPT',
+            aedValue, pmtAmt, j2currency, existingReceipt, 'BANKTFR-RECEIPT',
           );
         }
 
