@@ -19,6 +19,7 @@ import {
   Spin,
   Alert,
   Divider,
+  Switch,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -112,6 +113,16 @@ interface JournalLine {
   accountedCr: number;
   description: string;
   accountDescription: string;
+  reference1?: string;
+  reference2?: string;
+  reference3?: string;
+  reference4?: string;
+  reference5?: string;
+  reference6?: string;
+  reference7?: string;
+  reference8?: string;
+  reference9?: string;
+  reference10?: string;
 }
 
 // Journal data interface
@@ -256,6 +267,7 @@ const EditJournal: React.FC = () => {
   // Collapsible states
   const [batchExpanded, setBatchExpanded] = useState(false);
   const [journalExpanded, setJournalExpanded] = useState(false);
+  const [showReferences, setShowReferences] = useState(false);
 
   // Active detail tab (Journal, Control Total, Sequencing, Reversal)
   const [activeDetailTab, setActiveDetailTab] = useState('journal');
@@ -868,6 +880,16 @@ const EditJournal: React.FC = () => {
       width: 250,
       ellipsis: true,
     },
+    ...(showReferences ? [1,2,3,4,5,6,7,8,9,10].map(n => ({
+      title: `Ref ${n}`,
+      dataIndex: `reference${n}`,
+      key: `reference${n}`,
+      width: 160,
+      ellipsis: true,
+      render: (val: string) => val
+        ? <Tooltip title={val}><span style={{ fontSize: 11 }}>{val}</span></Tooltip>
+        : <span style={{ color: '#bbb' }}>—</span>,
+    })) : []),
   ];
 
   // Calculate totals for current journal
@@ -1536,6 +1558,10 @@ const EditJournal: React.FC = () => {
                 </Tooltip>
                 <Button size="small" style={{ fontSize: 10 }}>Detach</Button>
                 <Button size="small" style={{ fontSize: 10 }}>Wrap</Button>
+              </Space>
+              <Space size={6}>
+                <Typography.Text style={{ fontSize: 11, color: '#666' }}>Show References</Typography.Text>
+                <Switch size="small" checked={showReferences} onChange={setShowReferences} />
               </Space>
             </div>
 
