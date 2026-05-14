@@ -1012,7 +1012,8 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       // REFERENCE7 = bank account name.  Each side of a transfer is a separate GL line,
       // so FROM-bank and TO-bank appear as independent reconciliation records.
       const btGlQ = new URLSearchParams();
-      if (params.bankAccount)  btGlQ.set('bank_account', params.bankAccount);
+      if (params.bankAccount)  btGlQ.set('bank_account',  params.bankAccount);
+      if (params.businessUnit) btGlQ.set('business_unit', params.businessUnit);
       if (effectiveDateFrom)   btGlQ.set('date_from',    effectiveDateFrom.format('YYYY-MM-DD'));
       if (effectiveDateTo)     btGlQ.set('date_to',      effectiveDateTo.format('YYYY-MM-DD'));
       if (rf === 'RECONCILED') btGlQ.set('reconciled', 'Y');
@@ -1099,15 +1100,15 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         txnId:          (i.jeHeaderId ?? 0) * 100000 + (i.jeLineNumber ?? 0),
         txnNumber:      i.sourceNumber ?? String(i.jeHeaderId ?? ''),
         txnDate:        i.accountingDate ?? '',
-        amount:         i.enteredDr ?? i.enteredCr ?? 0,
+        amount:         (i.enteredDr ?? 0) > 0 ? (i.enteredDr ?? 0) : (i.enteredCr ?? 0),
         currencyCode:   i.currencyCode ?? '',
-        businessUnit:   '',
+        businessUnit:   i.businessUnit ?? '',
         bankAccountName: i.bankAccountName ?? '',
         source:         'GL_BANK_TRANSFER',
         txnStatus:      '',
         reconciledFlag: i.reconciledFlag ?? 'N',
         reference:      i.sourceNumber ?? '',
-        payee:          i.description  ?? '',
+        payee:          i.bankAccountName ?? i.description ?? '',
         lineDescription: i.description ?? '',
         journalCategory: i.jeCategory  ?? '',
         jeHeaderId:     i.jeHeaderId,
@@ -1210,9 +1211,10 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     const effectiveDateFrom = lastParams?.dateFrom ?? sysDateFrom;
     const effectiveDateTo   = lastParams?.dateTo   ?? sysDateTo;
     const q = new URLSearchParams();
-    if (lastParams?.bankAccount)  q.set('bank_account', lastParams.bankAccount);
-    if (effectiveDateFrom)        q.set('date_from',    effectiveDateFrom.format('YYYY-MM-DD'));
-    if (effectiveDateTo)          q.set('date_to',      effectiveDateTo.format('YYYY-MM-DD'));
+    if (lastParams?.bankAccount)  q.set('bank_account',  lastParams.bankAccount);
+    if (lastParams?.businessUnit) q.set('business_unit', lastParams.businessUnit);
+    if (effectiveDateFrom)        q.set('date_from',     effectiveDateFrom.format('YYYY-MM-DD'));
+    if (effectiveDateTo)          q.set('date_to',       effectiveDateTo.format('YYYY-MM-DD'));
     q.set('row_limit', '500');
     return `${APEX_BASE}/gl/journals/banktxn-lines?${q.toString()}`;
   }, [lastParams, sysDateFrom, sysDateTo]);
@@ -2115,7 +2117,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       width: 105,
       render: (v: string) => (
         <Tag color={SOURCE_COLORS[v] ?? 'default'} style={{ margin: 0, fontSize: 11 }}>
-          {v === 'AP_PAYMENT' ? 'AP Payment' : v === 'AR_RECEIPT' ? 'AR Receipt' : v === 'GL_JOURNAL' ? 'GL Journal' : v}
+          {v === 'AP_PAYMENT' ? 'AP Payment' : v === 'AR_RECEIPT' ? 'AR Receipt' : v === 'GL_JOURNAL' ? 'GL Journal' : v === 'GL_BANK_TRANSFER' ? 'Journals' : v}
         </Tag>
       ),
     },
@@ -2128,8 +2130,8 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       key: 'party',
       ellipsis: true,
       render: (_: unknown, r: SysTxn) => {
-        const val = r.payee || r.customerName || r.accountCode || '—';
-        const sub = r.supplierNumber || r.customerNumber || r.accountDescription;
+        const val = r.bankAccountName || r.payee || r.customerName || r.accountCode || '—';
+        const sub = r.supplierNumber || r.customerNumber || r.accountDescription || r.lineDescription;
         return (
           <Tooltip title={sub ? `${val} (${sub})` : val}>
             <span>{val}</span>
