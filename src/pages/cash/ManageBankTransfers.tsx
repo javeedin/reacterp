@@ -258,6 +258,8 @@ const TransferForm: React.FC<{
 
   const [fromCurrency, setFromCurrency] = useState<string>(initialValues?.fromCurrencyCode ?? '');
   const [toCurrency, setToCurrency] = useState<string>(initialValues?.toCurrencyCode ?? '');
+  const [bmsRateInfo, setBmsRateInfo] = useState<{ rate: number; date: string; sourceCur: string; targetCur: string } | null>(null);
+  const [bmsRateLoading, setBmsRateLoading] = useState(false);
   const [cashClearingAcct, setCashClearingAcct] = useState<string>(initialValues?.cashClearingAccount ?? '');
   const [cashClearingDesc, setCashClearingDesc] = useState<string>('');
   const [cashClearingOpen, setCashClearingOpen] = useState(false);
@@ -297,6 +299,30 @@ const TransferForm: React.FC<{
       setEditMode(false);
     }
   }, [initialValues, form]);
+
+  // Fetch the latest BMS exchange rate whenever the currency pair changes
+  useEffect(() => {
+    if (!fromCurrency || !toCurrency || fromCurrency === toCurrency) {
+      setBmsRateInfo(null);
+      return;
+    }
+    setBmsRateLoading(true);
+    fetch(`${APEX_BASE}/currencies/bmsrate?source_cur=${fromCurrency}&target_cur=${toCurrency}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.status === 'ok') {
+          setBmsRateInfo({ rate: data.rate, date: data.refreshDate, sourceCur: data.sourceCur, targetCur: data.targetCur });
+          // Auto-fill only when creating a new transfer (no existing rate)
+          if (!initialValues?.conversionRate) {
+            form.setFieldsValue({ conversionRate: data.rate });
+          }
+        } else {
+          setBmsRateInfo(null);
+        }
+      })
+      .catch(() => setBmsRateInfo(null))
+      .finally(() => setBmsRateLoading(false));
+  }, [fromCurrency, toCurrency]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDelete = async () => {
     if (!initialValues?.bankAccountTransferId) return;
@@ -823,8 +849,31 @@ const TransferForm: React.FC<{
             >
               <InputNumber style={{ width: '100%' }} min={0} precision={6} disabled={isReadOnly || !buSelected} />
             </Form.Item>
+            {bmsRateLoading && fromCurrency && toCurrency && fromCurrency !== toCurrency && (
+              <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: -10, marginBottom: 8 }}>
+                <SyncOutlined spin style={{ marginRight: 4 }} />Fetching BMS rate…
+              </div>
+            )}
+            {!bmsRateLoading && bmsRateInfo && (
+              <div style={{ marginTop: -10, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Tag color="blue" style={{ fontSize: 11, margin: 0 }}>
+                  BMS: 1 {bmsRateInfo.sourceCur} = {bmsRateInfo.rate} {bmsRateInfo.targetCur}
+                </Tag>
+                <Text type="secondary" style={{ fontSize: 11 }}>as of {bmsRateInfo.date}</Text>
+                {!isReadOnly && (
+                  <Button
+                    size="small"
+                    type="link"
+                    style={{ fontSize: 11, padding: '0 4px', height: 'auto' }}
+                    onClick={() => form.setFieldsValue({ conversionRate: bmsRateInfo.rate })}
+                  >
+                    Apply
+                  </Button>
+                )}
+              </div>
+            )}
             {fromCurrency && toCurrency && fromCurrency !== toCurrency && (
-              <div style={{ fontSize: 11, color: REDWOOD.warning, marginTop: -10, marginBottom: 8 }}>
+              <div style={{ fontSize: 11, color: REDWOOD.warning, marginTop: -4, marginBottom: 8 }}>
                 Required: {fromCurrency} → {toCurrency} cross-currency transfer
               </div>
             )}
