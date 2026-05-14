@@ -1006,20 +1006,25 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       if (rf !== 'ALL') extQ.set('recon_status', rf);
       extQ.set('row_limit', '500');
 
-      // Build bank transfers query
-      const btQ = new URLSearchParams();
-      if (params.bankAccount) {
-        btQ.set('from_account', params.bankAccount);
-        btQ.set('to_account',   params.bankAccount);
-      }
-      if (effectiveDateFrom) btQ.set('date_from', effectiveDateFrom.format('YYYY-MM-DD'));
-      if (effectiveDateTo)   btQ.set('date_to',   effectiveDateTo.format('YYYY-MM-DD'));
-      btQ.set('row_limit', '200');
+      // Build bank transfers queries — need two fetches because the SQL uses AND logic
+      // for from_account/to_account; a given bank account appears on either side, not both.
+      const btBase = new URLSearchParams();
+      if (effectiveDateFrom) btBase.set('date_from', effectiveDateFrom.format('YYYY-MM-DD'));
+      if (effectiveDateTo)   btBase.set('date_to',   effectiveDateTo.format('YYYY-MM-DD'));
+      btBase.set('row_limit', '200');
 
-      const [systxnsResult, extResult, btResult] = await Promise.allSettled([
+      const btFromQ = new URLSearchParams(btBase);
+      const btToQ   = new URLSearchParams(btBase);
+      if (params.bankAccount) {
+        btFromQ.set('from_account', params.bankAccount);
+        btToQ.set('to_account',     params.bankAccount);
+      }
+
+      const [systxnsResult, extResult, btFromResult, btToResult] = await Promise.allSettled([
         fetch(`${APEX_BASE}/cash/reconciliation/systxns?${q.toString()}`).then(r => parseApexJson(r)),
         fetch(`${EXT_TXN_URL}?${extQ.toString()}`).then(r => parseApexJson(r)),
-        fetch(`${APEX_BASE}/cash/banktransfers?${btQ.toString()}`).then(r => parseApexJson(r)),
+        fetch(`${APEX_BASE}/cash/banktransfers?${btFromQ.toString()}`).then(r => parseApexJson(r)),
+        fetch(`${APEX_BASE}/cash/banktransfers?${btToQ.toString()}`).then(r => parseApexJson(r)),
       ]);
 
       const resolveReconFlag = (i: any): string => {
@@ -1086,26 +1091,36 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           })()
         : [];
 
-      const btItems: SysTxn[] = btResult.status === 'fulfilled'
-        ? (() => {
-            const data = btResult.value;
-            const items = Array.isArray(data) ? data : (data.items ?? []);
-            return items.map((i: any) => ({
-              txnId:          i.bankAccountTransferId ?? 0,
-              txnNumber:      String(i.bankAccountTransferNumber ?? i.bankAccountTransferId ?? ''),
-              txnDate:        i.transactionDate ?? '',
-              amount:         i.paymentAmount ?? 0,
-              currencyCode:   i.fromCurrencyCode ?? i.paymentCurrencyCode ?? '',
-              businessUnit:   i.businessUnit ?? '',
-              bankAccountName: i.fromBankAccountName ?? '',
-              source:         'BANK_TRANSFER',
-              txnStatus:      i.status ?? '',
-              reconciledFlag: i.reconciledFlag ?? (i.paymentStatus === 'Reconciled' || i.paymentStatus === 'RECONCILED' ? 'Y' : 'N'),
-              reference:      String(i.bankAccountTransferNumber ?? ''),
-              payee:          i.toBankAccountName ?? '',
-            })) as SysTxn[];
-          })()
+      const mapBtItem = (i: any): SysTxn => ({
+        txnId:          i.bankAccountTransferId ?? 0,
+        txnNumber:      String(i.bankAccountTransferNumber ?? i.bankAccountTransferId ?? ''),
+        txnDate:        i.transactionDate ?? '',
+        amount:         i.paymentAmount ?? 0,
+        currencyCode:   i.fromCurrencyCode ?? i.paymentCurrencyCode ?? '',
+        businessUnit:   i.businessUnit ?? '',
+        bankAccountName: i.fromBankAccountName ?? '',
+        source:         'BANK_TRANSFER',
+        txnStatus:      i.status ?? '',
+        reconciledFlag: i.reconciledFlag ?? (i.paymentStatus === 'Reconciled' || i.paymentStatus === 'RECONCILED' ? 'Y' : 'N'),
+        reference:      String(i.bankAccountTransferNumber ?? ''),
+        payee:          i.toBankAccountName ?? '',
+      });
+      const rawBtFrom = btFromResult.status === 'fulfilled'
+        ? (Array.isArray(btFromResult.value) ? btFromResult.value : (btFromResult.value?.items ?? []))
         : [];
+      const rawBtTo   = btToResult.status === 'fulfilled'
+        ? (Array.isArray(btToResult.value)   ? btToResult.value   : (btToResult.value?.items   ?? []))
+        : [];
+      // Deduplicate by bankAccountTransferId so transfers that match both sides appear once
+      const seenBt = new Set<number>();
+      const btItems: SysTxn[] = [...rawBtFrom, ...rawBtTo]
+        .filter((i: any) => {
+          const id = i.bankAccountTransferId ?? 0;
+          if (seenBt.has(id)) return false;
+          seenBt.add(id);
+          return true;
+        })
+        .map(mapBtItem);
 
       setSysTxns([...apArGlItems, ...extItems, ...btItems]);
       setLoadingSys(false);
