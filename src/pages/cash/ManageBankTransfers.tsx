@@ -2430,6 +2430,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
               chartOfAccountsName: 'Chart of Accounts',
               reference1: String(txn.bankAccountTransferId),
               reference2: String(txn.bankAccountTransferNumber),
+              reference3: l.accountingClass || null,
               reference4: txn.businessUnit || null,
               reference5: glRef5, createdBy: currentUser,
             })),

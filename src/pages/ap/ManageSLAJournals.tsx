@@ -374,6 +374,13 @@ const ManageSLAJournals: React.FC = () => {
     const ledgerName = resolvedLedgerName ?? hdr.ledgerName;
     const ledgerId   = resolvedLedgerId   ?? 0;
 
+    const isCM = hdr.moduleName === 'CM';
+    const jeSource   = isCM ? 'Cash Management' : 'Payables';
+    const batchSrc   = isCM ? 'Cash Management' : 'Payables';
+    const jeCategory = isCM
+      ? 'Cash Management'
+      : (hdr.eventTypeCode?.includes('PAYMENT') ? 'Payments' : 'Purchase Invoices');
+
     return {
       batch: {
         batchName,
@@ -385,14 +392,14 @@ const ManageSLAJournals: React.FC = () => {
         controlTotal:      totalDr,
         runningTotalDr:    totalDr,
         runningTotalCr:    totalCr,
-        batchSource:       'Payables',
+        batchSource:       batchSrc,
         createdBy:         hdr.createdBy || 'SYSTEM',
       },
       header: {
         ledgerId,
         ledgerName,
-        jeCategory:               hdr.eventTypeCode || 'Payables',
-        jeSource:                 'Payables',
+        jeCategory,
+        jeSource,
         periodName:               hdr.periodName,
         journalName:              `SLA-${hdr.sourceNumber}-${hdr.eventTypeCode}`,
         description:              hdr.description || '',
@@ -422,7 +429,7 @@ const ManageSLAJournals: React.FC = () => {
         reference1:               hdr.sourceNumber || l.sourceNumber || null,
         reference2:               String(hdr.sourceId || ''),
         reference3:               l.accountingClass || null,
-        reference4:               l.legalEntity   || null,
+        reference4:               hdr.businessUnit  || null,
         reference5:               eventTypeToRef5(hdr.eventTypeCode),
         createdBy:                hdr.createdBy || 'SYSTEM',
       })),
