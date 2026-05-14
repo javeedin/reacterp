@@ -2324,7 +2324,8 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
           checkAccountingExists('BANK_ACCOUNT_TRANSFERS', txn.bankAccountTransferId, 'BANK_TRANSFER_DISBURSE'),
           checkAccountingExists('BANK_ACCOUNT_TRANSFERS', txn.bankAccountTransferId, 'BANK_TRANSFER_RECEIPT'),
         ]);
-        const bothPosted = existingDisburse.exists && existingReceipt.exists;
+        const bothPosted = existingDisburse.exists && existingDisburse.postingStatus === 'POSTED'
+                        && existingReceipt.exists  && existingReceipt.postingStatus  === 'POSTED';
         if (bothPosted) {
           updateRow(row.transferId, { status: 'skipped', message: `Already posted — SLA ${existingDisburse.headerId}/${existingReceipt.headerId}` });
           setTransfers(prev => prev.map(t => t.bankAccountTransferId === txn.bankAccountTransferId ? { ...t, accountingFlag: 'Y' } : t));
@@ -2370,9 +2371,10 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
           existingSla: Awaited<ReturnType<typeof checkAccountingExists>>,
           glRef5: string,
         ) => {
-          // Reuse existing SLA header if already created; otherwise create a new one
+          // Reuse existing SLA header only if POSTED (immutable); recreate DRAFTs so
+          // sourceNumber and other fields get corrected on re-run.
           let slaResult: { headerId: number };
-          if (existingSla.exists && existingSla.headerId) {
+          if (existingSla.exists && existingSla.headerId && existingSla.postingStatus === 'POSTED') {
             slaResult = { headerId: existingSla.headerId };
           } else {
             slaResult = await createAccounting(slaPayload);
