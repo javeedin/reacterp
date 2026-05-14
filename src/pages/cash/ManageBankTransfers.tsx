@@ -245,6 +245,7 @@ const TransferForm: React.FC<{
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [savedId, setSavedId] = useState<number | null>(null);
+  const [savedTransferNumber, setSavedTransferNumber] = useState<string | null>(null);
   const [apiModal, setApiModal]       = useState(false);
   const [apiPayload, setApiPayload]   = useState('');
   const [apiPosting, setApiPosting]   = useState(false);
@@ -470,6 +471,7 @@ const TransferForm: React.FC<{
         message.success(isEdit ? 'Transfer updated.' : 'Transfer created.');
         if (!isEdit && data.bankAccountTransferId) {
           setSavedId(data.bankAccountTransferId);
+          setSavedTransferNumber(String(data.bankAccountTransferNumber ?? ''));
           const createdRecord: Partial<TransferRecord> = {
             bankAccountTransferId:     data.bankAccountTransferId,
             bankAccountTransferNumber: Number(data.bankAccountTransferNumber ?? 0),
@@ -761,8 +763,10 @@ const TransferForm: React.FC<{
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '12px 24px' }}>
       <Text style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 16 }}>
         {isEdit
-          ? (isPermanentlyLocked ? 'View Bank Account Transfer (Read-only)' : editMode ? 'Edit Bank Account Transfer' : 'View Bank Account Transfer')
-          : 'Create Bank Account Transfer'}
+          ? (isPermanentlyLocked ? `View Bank Account Transfer #${initialValues?.bankAccountTransferNumber}` : editMode ? `Edit Bank Account Transfer #${initialValues?.bankAccountTransferNumber}` : `View Bank Account Transfer #${initialValues?.bankAccountTransferNumber}`)
+          : savedTransferNumber
+            ? `Bank Account Transfer #${savedTransferNumber} — Saved`
+            : 'Create Bank Account Transfer'}
       </Text>
 
       {isPermanentlyLocked && (
@@ -810,6 +814,21 @@ const TransferForm: React.FC<{
             </Col>
           )}
         </Row>
+
+        {/* Transfer Number — readonly, shown after create or in edit/view mode */}
+        {(isEdit || savedTransferNumber) && (
+          <Row gutter={40}>
+            <Col xs={24} lg={12}>
+              <Form.Item label="Transfer Number" style={fs}>
+                <Input
+                  value={isEdit ? String(initialValues?.bankAccountTransferNumber ?? '') : (savedTransferNumber ?? '')}
+                  readOnly
+                  style={{ background: '#f5f5f5', color: REDWOOD.neutral600, fontWeight: 600 }}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+        )}
 
         {/* From / To accounts — full width so names aren't truncated */}
         <Row gutter={40}>
@@ -1720,12 +1739,22 @@ END;
                   const j1Rate = j1currency === 'AED' ? 1 : (fromAmt > 0 ? Math.round(aedValue / fromAmt * 1e6) / 1e6 : 1);
                   const j2Rate = j2currency === 'AED' ? 1 : (pmtAmt  > 0 ? Math.round(aedValue / pmtAmt  * 1e6) / 1e6 : 1);
 
+                  // Resolve transfer number — from edit mode or from just-saved state
+                  const transferNumber = initialValues?.bankAccountTransferNumber
+                    ? String(initialValues.bankAccountTransferNumber)
+                    : savedTransferNumber ?? '';
+                  if (!transferNumber) {
+                    message.error('Transfer Number is missing. Save the transfer first before creating accounting entries.');
+                    setAcctCreating(false);
+                    return;
+                  }
+
                   // Journal 1: DR Cash Clearing / CR From Bank (fromCurrency)
                   await createAccounting({
                     header: {
                       moduleName: 'CM', sourceTable: 'BANK_ACCOUNT_TRANSFERS',
                       sourceId: initialValues?.bankAccountTransferId ?? 0,
-                      sourceNumber: String(values.bankAccountTransferNumber ?? ''),
+                      sourceNumber: transferNumber,
                       sourceType: 'Bank Transfer', eventTypeCode: 'BANK_TRANSFER_DISBURSE',
                       eventDate: today, accountingDate: today, periodName: period,
                       ledgerId: ledger?.ledgerId ?? 0, ledgerName: ledger?.ledgerName ?? '',
@@ -1755,7 +1784,7 @@ END;
                     header: {
                       moduleName: 'CM', sourceTable: 'BANK_ACCOUNT_TRANSFERS',
                       sourceId: initialValues?.bankAccountTransferId ?? 0,
-                      sourceNumber: String(values.bankAccountTransferNumber ?? ''),
+                      sourceNumber: transferNumber,
                       sourceType: 'Bank Transfer', eventTypeCode: 'BANK_TRANSFER_RECEIPT',
                       eventDate: today, accountingDate: today, periodName: period,
                       ledgerId: ledger?.ledgerId ?? 0, ledgerName: ledger?.ledgerName ?? '',
