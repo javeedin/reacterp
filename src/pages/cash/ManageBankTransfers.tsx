@@ -2837,11 +2837,6 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
                     style={{ color: REDWOOD.info }} />
                 </Tooltip>
                 <Button size="small" icon={<ReloadOutlined />} onClick={handleSearch} loading={loading}>Refresh</Button>
-                <Button size="small" icon={<PlusOutlined />} type="primary"
-                  style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-                  onClick={openCreate}>
-                  Save Transfer
-                </Button>
               </Space>
             </div>
 
@@ -2960,7 +2955,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
               </Button>
               <Button icon={<PlusOutlined />} type="primary" onClick={openCreate}
                 style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
-                Save Transfer
+                Create Transfer
               </Button>
             </Space>
           </div>
