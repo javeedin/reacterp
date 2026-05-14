@@ -2510,10 +2510,13 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       title: 'From Account',
       dataIndex: 'fromBankAccountName',
       key: 'fromAcct',
-      width: 180,
-      render: (val: string) => (
+      width: 230,
+      render: (val: string, r: TransferRecord) => (
         <Tooltip title={val}>
-          <Text style={{ fontSize: 12 }}>{shortAcct(val)}</Text>
+          <div>
+            <Text style={{ fontSize: 12 }}>{shortAcct(val)}</Text>
+            {r.fromCurrencyCode && <Tag style={{ fontSize: 10, margin: '2px 0 0 0', display: 'inline-block' }}>{r.fromCurrencyCode}</Tag>}
+          </div>
         </Tooltip>
       ),
     },
@@ -2521,10 +2524,19 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       title: 'To Account',
       dataIndex: 'toBankAccountName',
       key: 'toAcct',
-      width: 180,
-      render: (val: string) => (
+      width: 230,
+      render: (val: string, r: TransferRecord) => (
         <Tooltip title={val}>
-          <Text style={{ fontSize: 12 }}>{shortAcct(val)}</Text>
+          <div>
+            <Text style={{ fontSize: 12 }}>{shortAcct(val)}</Text>
+            {r.toCurrencyCode && (
+              <Tag style={{ fontSize: 10, margin: '2px 0 0 0', display: 'inline-block',
+                background: r.toCurrencyCode !== r.fromCurrencyCode ? '#e6f4ff' : undefined,
+                borderColor: r.toCurrencyCode !== r.fromCurrencyCode ? REDWOOD.info : undefined,
+                color: r.toCurrencyCode !== r.fromCurrencyCode ? REDWOOD.info : undefined,
+              }}>{r.toCurrencyCode}</Tag>
+            )}
+          </div>
         </Tooltip>
       ),
     },
@@ -2605,26 +2617,6 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       render: fmtDate,
       sorter: (a, b) => (a.transactionDate ?? '').localeCompare(b.transactionDate ?? ''),
       defaultSortOrder: 'descend',
-    },
-    {
-      title: 'Flow',
-      key: 'flow',
-      width: 120,
-      render: (_: any, r: TransferRecord) => {
-        const from = r.fromCurrencyCode;
-        const to   = r.toCurrencyCode;
-        if (!from && !to) return <Text type="secondary">—</Text>;
-        const same = from === to;
-        return (
-          <Space size={3}>
-            <Tag style={{ fontSize: 11, margin: 0 }}>{from || '—'}</Tag>
-            <SwapOutlined style={{ fontSize: 10, color: same ? REDWOOD.neutral300 : REDWOOD.info }} />
-            <Tag style={{ fontSize: 11, margin: 0, background: same ? undefined : '#e6f4ff', borderColor: same ? undefined : REDWOOD.info, color: same ? undefined : REDWOOD.info }}>{to || '—'}</Tag>
-          </Space>
-        );
-      },
-      filters: [...new Set(transfers.map(t => t.fromCurrencyCode).filter(Boolean))].map(c => ({ text: c, value: c })),
-      onFilter: (val, rec) => rec.fromCurrencyCode === val,
     },
     {
       title: 'Status',
