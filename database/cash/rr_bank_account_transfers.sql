@@ -105,6 +105,9 @@ BEGIN
                 business_unit                VARCHAR2(360)   PATH '$.Businessunit',
                 payment_file                 NUMBER          PATH '$.PaymentFile',
                 is_settled_with_iby_flag     VARCHAR2(10)    PATH '$.IsSettledWithIbyFlag',
+                reconciled_flag              VARCHAR2(1)     PATH '$.ReconciledFlag',
+                reconciled_date              VARCHAR2(30)    PATH '$.ReconciledDate',
+                cash_clearing_account        VARCHAR2(240)   PATH '$.CashClearingAccount',
                 created_by                   VARCHAR2(150)   PATH '$.CreatedBy',
                 creation_date                TIMESTAMP       PATH '$.CreationDate',
                 last_updated_by              VARCHAR2(150)   PATH '$.LastUpdatedBy',
@@ -148,6 +151,9 @@ BEGIN
                 rec.business_unit                AS business_unit,
                 rec.payment_file                 AS payment_file,
                 CASE WHEN LOWER(rec.is_settled_with_iby_flag) = 'true' THEN 'Y' ELSE 'N' END AS is_settled_with_iby_flag,
+                rec.reconciled_flag              AS reconciled_flag,
+                TO_DATE(rec.reconciled_date, 'YYYY-MM-DD') AS reconciled_date,
+                rec.cash_clearing_account        AS cash_clearing_account,
                 rec.created_by                   AS created_by,
                 rec.creation_date                AS creation_date,
                 rec.last_updated_by              AS last_updated_by,
@@ -182,6 +188,9 @@ BEGIN
                 tgt.BUSINESS_UNIT                = src.business_unit,
                 tgt.PAYMENT_FILE                 = src.payment_file,
                 tgt.IS_SETTLED_WITH_IBY_FLAG     = src.is_settled_with_iby_flag,
+                tgt.RECONCILED_FLAG              = NVL(src.reconciled_flag,       tgt.RECONCILED_FLAG),
+                tgt.RECONCILED_DATE              = NVL(src.reconciled_date,       tgt.RECONCILED_DATE),
+                tgt.CASH_CLEARING_ACCOUNT        = NVL(src.cash_clearing_account, tgt.CASH_CLEARING_ACCOUNT),
                 tgt.CREATED_BY                   = src.created_by,
                 tgt.CREATION_DATE                = src.creation_date,
                 tgt.LAST_UPDATED_BY              = src.last_updated_by,
@@ -199,6 +208,7 @@ BEGIN
                 CONVERSION_RATE_TYPE, STATUS, PAYMENT_STATUS, PAYMENT_METHOD,
                 PAYMENT_PROFILE_NAME, BUSINESS_UNIT, PAYMENT_FILE,
                 IS_SETTLED_WITH_IBY_FLAG,
+                RECONCILED_FLAG, RECONCILED_DATE, CASH_CLEARING_ACCOUNT,
                 CREATED_BY, CREATION_DATE, LAST_UPDATED_BY, LAST_UPDATE_DATE,
                 LAST_UPDATE_LOGIN, SYNC_DATE
             ) VALUES (
@@ -211,6 +221,7 @@ BEGIN
                 src.conversion_rate_type, src.status, src.payment_status, src.payment_method,
                 src.payment_profile_name, src.business_unit, src.payment_file,
                 src.is_settled_with_iby_flag,
+                NVL(src.reconciled_flag, 'N'), src.reconciled_date, src.cash_clearing_account,
                 src.created_by, src.creation_date, src.last_updated_by, src.last_update_date,
                 src.last_update_login, SYSTIMESTAMP
             );
@@ -329,6 +340,10 @@ DECLARE
                BUSINESS_UNIT,
                PAYMENT_FILE,
                IS_SETTLED_WITH_IBY_FLAG,
+               NVL(ACCOUNTING_FLAG,  'N')                             AS ACCOUNTING_FLAG,
+               NVL(RECONCILED_FLAG,  'N')                             AS RECONCILED_FLAG,
+               TO_CHAR(RECONCILED_DATE, 'YYYY-MM-DD')                 AS RECONCILED_DATE,
+               CASH_CLEARING_ACCOUNT,
                CREATED_BY,
                TO_CHAR(CREATION_DATE,    'YYYY-MM-DD"T"HH24:MI:SS') AS CREATION_DATE,
                LAST_UPDATED_BY,
@@ -395,6 +410,10 @@ BEGIN
         APEX_JSON.WRITE('businessUnit',              r.BUSINESS_UNIT);
         APEX_JSON.WRITE('paymentFile',               r.PAYMENT_FILE);
         APEX_JSON.WRITE('isSettledWithIbyFlag',      r.IS_SETTLED_WITH_IBY_FLAG);
+        APEX_JSON.WRITE('accountingFlag',            r.ACCOUNTING_FLAG);
+        APEX_JSON.WRITE('reconciledFlag',            r.RECONCILED_FLAG);
+        APEX_JSON.WRITE('reconciledDate',            r.RECONCILED_DATE);
+        APEX_JSON.WRITE('cashClearingAccount',       r.CASH_CLEARING_ACCOUNT);
         APEX_JSON.WRITE('createdBy',                 r.CREATED_BY);
         APEX_JSON.WRITE('creationDate',              r.CREATION_DATE);
         APEX_JSON.WRITE('lastUpdatedBy',             r.LAST_UPDATED_BY);
