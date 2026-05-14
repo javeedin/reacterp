@@ -939,230 +939,54 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
 
     const effectiveDateFrom = params.dateFrom ?? sysDateFrom;
     const effectiveDateTo   = params.dateTo   ?? sysDateTo;
+    const rf = cmFilter ?? 'UNRECONCILED';
 
-    // CM fetches from the external transactions endpoint (different schema)
-    if (txnType === 'CM') {
-      const q = new URLSearchParams();
-      if (params.bankAccount)  q.set('bank_account',  params.bankAccount);
-      if (params.businessUnit) q.set('business_unit', params.businessUnit);
-      if (effectiveDateFrom)   q.set('date_from',     effectiveDateFrom.format('YYYY-MM-DD'));
-      if (effectiveDateTo)     q.set('date_to',       effectiveDateTo.format('YYYY-MM-DD'));
-      if (params.reference)    q.set('reference',     params.reference);
-      const rf = cmFilter ?? 'UNRECONCILED';
-      if (rf !== 'ALL') q.set('recon_status', rf);
-      q.set('row_limit', '500');
-      try {
-        const res  = await fetch(`${EXT_TXN_URL}?${q.toString()}`);
-        const data = await parseApexJson(res);
-        const items = Array.isArray(data) ? data : (data.items ?? []);
-        setSysTxns(items.map((i: any) => ({
-          txnId:          i.externalTransactionId ?? 0,
-          txnNumber:      String(i.externalTransactionId ?? ''),
-          txnDate:        i.transactionDate ?? '',
-          amount:         i.amount          ?? 0,
-          currencyCode:   i.currencyCode    ?? '',
-          businessUnit:   i.businessUnitName ?? '',
-          bankAccountName: i.bankAccountName ?? '',
-          source:         i.source          ?? 'ORA_MAN',
-          txnStatus:      i.status          ?? '',
-          reconciledFlag: i.reconciledFlag  ?? i.RECONCILED_FLAG ?? 'N',
-          payee:          i.description     ?? '',
-          reference:      i.description     ?? '',
-          assetAccountCombination:  i.assetAccountCombination  ?? '',
-          offsetAccountCombination: i.offsetAccountCombination ?? '',
-          createdBy:    i.createdBy    ?? '',
-          creationDate: i.creationDate ?? '',
-        })) as SysTxn[]);
-      } catch (err) {
-        msgApi.error('Network error loading external transactions');
-        console.error(err);
-      } finally {
-        setLoadingSys(false);
-      }
-      return;
-    }
-
+    // Single unified endpoint — RR_V_BANK_RECON_SYSTXNS covers AP + External + Bank Transfers
     const q = new URLSearchParams();
-    if (params.bankAccount)  q.set('bank_account',  params.bankAccount);
-    if (params.businessUnit) q.set('business_unit', params.businessUnit);
-    if (effectiveDateFrom)   q.set('date_from',     effectiveDateFrom.format('YYYY-MM-DD'));
-    if (effectiveDateTo)     q.set('date_to',       effectiveDateTo.format('YYYY-MM-DD'));
-    if (params.amountMin != null) q.set('amount_min', String(params.amountMin));
-    if (params.amountMax != null) q.set('amount_max', String(params.amountMax));
-    if (params.reference) q.set('reference', params.reference);
-    if (txnType && txnType !== 'ALL') q.set('txn_type', txnType);
-    // recon filter: use cmFilter arg (which now carries sysReconFilter for all modules)
-    { const rf = cmFilter ?? 'UNRECONCILED';
-      if (rf === 'RECONCILED') q.set('reconciled', 'Y');
-      else if (rf !== 'ALL') q.set('reconciled', 'N'); }
+    if (params.bankAccount)       q.set('bank_account',  params.bankAccount);
+    if (params.businessUnit)      q.set('business_unit', params.businessUnit);
+    if (effectiveDateFrom)        q.set('date_from',     effectiveDateFrom.format('YYYY-MM-DD'));
+    if (effectiveDateTo)          q.set('date_to',       effectiveDateTo.format('YYYY-MM-DD'));
+    if (params.amountMin != null) q.set('amount_min',    String(params.amountMin));
+    if (params.amountMax != null) q.set('amount_max',    String(params.amountMax));
+    if (params.reference)         q.set('reference',     params.reference);
+    // Map old txnType to new source param
+    if (txnType === 'CM') q.set('source', 'EXTERNAL_TXN');
+    else if (txnType && txnType !== 'ALL') q.set('source', txnType);
+    q.set('recon_status', rf === 'ALL' ? 'ALL' : rf);
     q.set('row_limit', '500');
-
-    if (txnType === 'ALL') {
-      // Build external transactions query
-      const extQ = new URLSearchParams();
-      if (params.bankAccount)  extQ.set('bank_account', params.bankAccount);
-      if (effectiveDateFrom)   extQ.set('date_from',    effectiveDateFrom.format('YYYY-MM-DD'));
-      if (effectiveDateTo)     extQ.set('date_to',      effectiveDateTo.format('YYYY-MM-DD'));
-      if (params.reference)    extQ.set('reference',    params.reference);
-      const rf = cmFilter ?? 'UNRECONCILED';
-      if (rf !== 'ALL') extQ.set('recon_status', rf);
-      extQ.set('row_limit', '500');
-
-      // Build bank transfer lines query — fetch from GL journal lines tagged with
-      // REFERENCE7 = bank account name.  Each side of a transfer is a separate GL line,
-      // so FROM-bank and TO-bank appear as independent reconciliation records.
-      const btGlQ = new URLSearchParams();
-      if (params.bankAccount)  btGlQ.set('bank_account',  params.bankAccount);
-      if (params.businessUnit) btGlQ.set('business_unit', params.businessUnit);
-      btGlQ.set('account_class', 'BANK_ASSET');   // only the bank movement line, not clearing
-      if (effectiveDateFrom)   btGlQ.set('date_from',    effectiveDateFrom.format('YYYY-MM-DD'));
-      if (effectiveDateTo)     btGlQ.set('date_to',      effectiveDateTo.format('YYYY-MM-DD'));
-      if (rf === 'RECONCILED') btGlQ.set('reconciled', 'Y');
-      else if (rf !== 'ALL')   btGlQ.set('reconciled', 'N');
-      btGlQ.set('row_limit', '500');
-
-      const [systxnsResult, extResult, btGlResult] = await Promise.allSettled([
-        fetch(`${APEX_BASE}/cash/reconciliation/systxns?${q.toString()}`).then(r => parseApexJson(r)),
-        params.bankAccount
-          ? fetch(`${EXT_TXN_URL}?${extQ.toString()}`).then(r => parseApexJson(r))
-          : Promise.resolve({ status: 'success', items: [] }),
-        params.bankAccount
-          ? fetch(`${APEX_BASE}/gl/journals/banktxn-lines?${btGlQ.toString()}`).then(r => parseApexJson(r))
-          : Promise.resolve({ status: 'success', items: [] }),
-      ]);
-
-      const resolveReconFlag = (i: any): string => {
-        const raw = i.reconciledFlag ?? i.reconciled_flag ?? i.RECONCILED_FLAG;
-        if (raw !== undefined && raw !== null && raw !== '') return String(raw);
-        return rf === 'RECONCILED' ? 'Y' : 'N';
-      };
-      const resolveBusinessUnit = (i: any): string =>
-        i.businessUnit ?? i.business_unit ?? i.BUSINESS_UNIT ??
-        i.businessUnitName ?? i.business_unit_name ?? i.BUSINESS_UNIT_NAME ??
-        i.operatingUnit ?? i.org_name ?? i.orgName ?? '';
-
-      const apArGlItems: SysTxn[] = systxnsResult.status === 'fulfilled' && systxnsResult.value.status === 'success'
-        ? (systxnsResult.value.items ?? []).map((i: any) => ({
-            ...i,
-            txnId:              i.txnId              ?? i.txn_id              ?? i.TXN_ID              ?? 0,
-            txnNumber:          i.txnNumber          ?? i.txn_number          ?? i.TXN_NUMBER          ?? '',
-            txnDate:            i.txnDate            ?? i.txn_date            ?? i.TXN_DATE            ?? '',
-            amount:             i.amount             ?? i.AMOUNT              ?? 0,
-            currencyCode:       i.currencyCode       ?? i.currency_code       ?? i.CURRENCY_CODE       ?? '',
-            businessUnit:       resolveBusinessUnit(i),
-            source:             i.source             ?? i.SOURCE              ?? '',
-            txnStatus:          i.txnStatus          ?? i.txn_status          ?? i.TXN_STATUS          ?? '',
-            reference:          i.reference          ?? i.REFERENCE           ?? '',
-            payee:              i.payee              ?? i.PAYEE               ?? '',
-            supplierNumber:     i.supplierNumber     ?? i.supplier_number     ?? i.SUPPLIER_NUMBER     ?? '',
-            paymentMethod:      i.paymentMethod      ?? i.payment_method      ?? i.PAYMENT_METHOD      ?? '',
-            paymentType:        i.paymentType        ?? i.payment_type        ?? i.PAYMENT_TYPE        ?? '',
-            clearingDate:       i.clearingDate       ?? i.clearing_date       ?? i.CLEARING_DATE       ?? '',
-            customerName:       i.customerName       ?? i.customer_name       ?? i.CUSTOMER_NAME       ?? '',
-            customerNumber:     i.customerNumber     ?? i.customer_number     ?? i.CUSTOMER_NUMBER     ?? '',
-            receiptMethod:      i.receiptMethod      ?? i.receipt_method      ?? i.RECEIPT_METHOD      ?? '',
-            accountCode:        i.accountCode        ?? i.account_code        ?? i.ACCOUNT_CODE        ?? '',
-            accountDescription: i.accountDescription ?? i.account_description ?? i.ACCOUNT_DESCRIPTION ?? '',
-            journalCategory:    i.journalCategory    ?? i.journal_category    ?? i.JOURNAL_CATEGORY    ?? '',
-            lineDescription:    i.lineDescription    ?? i.line_description    ?? i.LINE_DESCRIPTION    ?? '',
-            reconciledFlag:     resolveReconFlag(i),
-            bankAccountName:    i.bankAccountName    ?? i.bank_account_name   ?? i.BANK_ACCOUNT_NAME   ?? '',
-          })) as SysTxn[]
-        : [];
-
-      const extItems: SysTxn[] = extResult.status === 'fulfilled'
-        ? (() => {
-            const data = extResult.value;
-            const items = Array.isArray(data) ? data : (data.items ?? []);
-            return items.map((i: any) => ({
-              txnId:          i.externalTransactionId ?? 0,
-              txnNumber:      String(i.externalTransactionId ?? ''),
-              txnDate:        i.transactionDate ?? '',
-              amount:         i.amount          ?? 0,
-              currencyCode:   i.currencyCode    ?? '',
-              businessUnit:   i.businessUnitName ?? '',
-              bankAccountName: i.bankAccountName ?? '',
-              source:         i.source          ?? 'ORA_MAN',
-              txnStatus:      i.status          ?? '',
-              reconciledFlag: i.reconciledFlag  ?? i.RECONCILED_FLAG ?? (i.status === 'REC' ? 'Y' : 'N'),
-              payee:          i.description     ?? '',
-              reference:      i.description     ?? '',
-              assetAccountCombination:  i.assetAccountCombination  ?? '',
-              offsetAccountCombination: i.offsetAccountCombination ?? '',
-              createdBy:    i.createdBy    ?? '',
-              creationDate: i.creationDate ?? '',
-            })) as SysTxn[];
-          })()
-        : [];
-
-      // Map GL journal lines (bank transfer sides) — each line is one reconcilable record
-      const rawBtGl = btGlResult.status === 'fulfilled'
-        ? (btGlResult.value?.items ?? (Array.isArray(btGlResult.value) ? btGlResult.value : []))
-        : [];
-      const btItems: SysTxn[] = rawBtGl.map((i: any): SysTxn => ({
-        txnId:          (i.jeHeaderId ?? 0) * 100000 + (i.jeLineNumber ?? 0),
-        txnNumber:      i.sourceNumber ?? String(i.jeHeaderId ?? ''),
-        txnDate:        i.accountingDate ?? '',
-        amount:         (i.enteredDr ?? 0) > 0 ? (i.enteredDr ?? 0) : (i.enteredCr ?? 0),
-        currencyCode:   i.currencyCode ?? '',
-        businessUnit:   i.businessUnit ?? '',
-        bankAccountName: i.bankAccountName ?? '',
-        source:         'GL_BANK_TRANSFER',
-        txnStatus:      '',
-        reconciledFlag: i.reconciledFlag ?? 'N',
-        reference:      i.sourceNumber ?? '',
-        payee:          i.bankAccountName ?? i.description ?? '',
-        lineDescription: i.description ?? '',
-        journalCategory: i.jeCategory  ?? '',
-        jeHeaderId:     i.jeHeaderId,
-        jeLineNumber:   i.jeLineNumber,
-      }));
-
-      setSysTxns([...apArGlItems, ...extItems, ...btItems]);
-      setLoadingSys(false);
-      return;
-    }
 
     try {
       const res  = await fetch(`${APEX_BASE}/cash/reconciliation/systxns?${q.toString()}`);
       const data = await parseApexJson(res);
-      const inferFlag = (i: any): string => {
-        const raw = i.reconciledFlag ?? i.reconciled_flag ?? i.RECONCILED_FLAG;
-        if (raw !== undefined && raw !== null && raw !== '') return String(raw);
-        return (cmFilter ?? 'UNRECONCILED') === 'RECONCILED' ? 'Y' : 'N';
-      };
-      const inferBU = (i: any): string =>
-        i.businessUnit ?? i.business_unit ?? i.BUSINESS_UNIT ??
-        i.businessUnitName ?? i.business_unit_name ?? i.BUSINESS_UNIT_NAME ??
-        i.operatingUnit ?? i.org_name ?? i.orgName ?? '';
-
       if (data.status === 'success') {
-        setSysTxns((data.items ?? []).map((i: any) => ({
-          ...i,
-          txnId:              i.txnId              ?? i.txn_id              ?? i.TXN_ID              ?? 0,
-          txnNumber:          i.txnNumber          ?? i.txn_number          ?? i.TXN_NUMBER          ?? '',
-          txnDate:            i.txnDate            ?? i.txn_date            ?? i.TXN_DATE            ?? '',
-          amount:             i.amount             ?? i.AMOUNT              ?? 0,
-          currencyCode:       i.currencyCode       ?? i.currency_code       ?? i.CURRENCY_CODE       ?? '',
-          businessUnit:       inferBU(i),
-          source:             i.source             ?? i.SOURCE              ?? '',
-          txnStatus:          i.txnStatus          ?? i.txn_status          ?? i.TXN_STATUS          ?? '',
-          reference:          i.reference          ?? i.REFERENCE           ?? '',
-          payee:              i.payee              ?? i.PAYEE               ?? '',
-          supplierNumber:     i.supplierNumber     ?? i.supplier_number     ?? i.SUPPLIER_NUMBER     ?? '',
-          paymentMethod:      i.paymentMethod      ?? i.payment_method      ?? i.PAYMENT_METHOD      ?? '',
-          paymentType:        i.paymentType        ?? i.payment_type        ?? i.PAYMENT_TYPE        ?? '',
-          clearingDate:       i.clearingDate       ?? i.clearing_date       ?? i.CLEARING_DATE       ?? '',
-          customerName:       i.customerName       ?? i.customer_name       ?? i.CUSTOMER_NAME       ?? '',
-          customerNumber:     i.customerNumber     ?? i.customer_number     ?? i.CUSTOMER_NUMBER     ?? '',
-          receiptMethod:      i.receiptMethod      ?? i.receipt_method      ?? i.RECEIPT_METHOD      ?? '',
-          accountCode:        i.accountCode        ?? i.account_code        ?? i.ACCOUNT_CODE        ?? '',
-          accountDescription: i.accountDescription ?? i.account_description ?? i.ACCOUNT_DESCRIPTION ?? '',
-          journalCategory:    i.journalCategory    ?? i.journal_category    ?? i.JOURNAL_CATEGORY    ?? '',
-          lineDescription:    i.lineDescription    ?? i.line_description    ?? i.LINE_DESCRIPTION    ?? '',
-          reconciledFlag:     inferFlag(i),
-          bankAccountName:    i.bankAccountName    ?? i.bank_account_name   ?? i.BANK_ACCOUNT_NAME   ?? '',
-        })) as SysTxn[]);
+        setSysTxns((data.items ?? []).map((i: any): SysTxn => ({
+          txnId:           i.txnId            ?? 0,
+          txnNumber:       i.txnNumber        ?? '',
+          txnDate:         i.txnDate          ?? '',
+          amount:          i.amount           ?? 0,
+          currencyCode:    i.currencyCode     ?? '',
+          businessUnit:    i.businessUnit     ?? '',
+          bankAccountName: i.bankAccountName  ?? '',
+          source:          i.source           ?? '',
+          txnStatus:       i.status           ?? '',
+          reference:       i.reference        ?? '',
+          reconciledFlag:  i.reconciledFlag   ?? 'N',
+          // AP Payment fields
+          payee:           i.counterpartyName ?? '',
+          supplierNumber:  i.counterpartyNumber ?? '',
+          paymentMethod:   i.paymentMethod    ?? '',
+          clearingDate:    i.clearingDate     ?? '',
+          // Bank Transfer / GL fields
+          lineDescription: i.description     ?? '',
+          jeHeaderId:      i.jeHeaderId,
+          jeLineNumber:    i.jeLineNumber,
+          accountCode:     i.accountCombination ?? '',
+          // External transaction fields
+          assetAccountCombination:  i.accountCombination ?? '',
+          createdBy:       i.createdBy        ?? '',
+          creationDate:    i.creationDate     ?? '',
+        })));
       } else {
         msgApi.error(data.message ?? 'Failed to load system transactions');
       }
@@ -1178,50 +1002,22 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const [apiModal, setApiModal]   = useState(false);
   const [apiCopied, setApiCopied] = useState(false);
 
-  const buildSysTxnsUrl = useCallback((txnType: string) => {
+  const buildSysTxnsUrl = useCallback((source?: string) => {
     const effectiveDateFrom = lastParams?.dateFrom ?? sysDateFrom;
     const effectiveDateTo   = lastParams?.dateTo   ?? sysDateTo;
     const q = new URLSearchParams();
-    if (lastParams?.bankAccount)  q.set('bank_account',  lastParams.bankAccount);
-    if (lastParams?.businessUnit) q.set('business_unit', lastParams.businessUnit);
-    if (effectiveDateFrom)        q.set('date_from',     effectiveDateFrom.format('YYYY-MM-DD'));
-    if (effectiveDateTo)          q.set('date_to',       effectiveDateTo.format('YYYY-MM-DD'));
-    if (lastParams?.amountMin != null) q.set('amount_min', String(lastParams.amountMin));
-    if (lastParams?.amountMax != null) q.set('amount_max', String(lastParams.amountMax));
-    if (lastParams?.reference)    q.set('reference',     lastParams.reference);
-    if (txnType && txnType !== 'ALL') q.set('txn_type', txnType);
-    if (sysReconFilter === 'RECONCILED') q.set('reconciled', 'Y');
-    else if (sysReconFilter !== 'ALL')   q.set('reconciled', 'N');
+    if (lastParams?.bankAccount)       q.set('bank_account',  lastParams.bankAccount);
+    if (lastParams?.businessUnit)      q.set('business_unit', lastParams.businessUnit);
+    if (effectiveDateFrom)             q.set('date_from',     effectiveDateFrom.format('YYYY-MM-DD'));
+    if (effectiveDateTo)               q.set('date_to',       effectiveDateTo.format('YYYY-MM-DD'));
+    if (lastParams?.amountMin != null) q.set('amount_min',    String(lastParams.amountMin));
+    if (lastParams?.amountMax != null) q.set('amount_max',    String(lastParams.amountMax));
+    if (lastParams?.reference)         q.set('reference',     lastParams.reference);
+    if (source && source !== 'ALL')    q.set('source',        source);
+    q.set('recon_status', sysReconFilter === 'ALL' ? 'ALL' : sysReconFilter);
     q.set('row_limit', '500');
     return `${APEX_BASE}/cash/reconciliation/systxns?${q.toString()}`;
   }, [lastParams, sysDateFrom, sysDateTo, sysReconFilter]);
-
-  const buildExtTxnUrl = useCallback(() => {
-    const effectiveDateFrom = lastParams?.dateFrom ?? sysDateFrom;
-    const effectiveDateTo   = lastParams?.dateTo   ?? sysDateTo;
-    const q = new URLSearchParams();
-    if (lastParams?.bankAccount)  q.set('bank_account',  lastParams.bankAccount);
-    if (lastParams?.businessUnit) q.set('business_unit', lastParams.businessUnit);
-    if (effectiveDateFrom)        q.set('date_from',     effectiveDateFrom.format('YYYY-MM-DD'));
-    if (effectiveDateTo)          q.set('date_to',       effectiveDateTo.format('YYYY-MM-DD'));
-    if (lastParams?.reference)    q.set('reference',     lastParams.reference);
-    if (sysReconFilter !== 'ALL') q.set('recon_status',  sysReconFilter);
-    q.set('row_limit', '500');
-    return `${EXT_TXN_URL}?${q.toString()}`;
-  }, [lastParams, sysDateFrom, sysDateTo, sysReconFilter]);
-
-  const buildBankTransfersUrl = useCallback(() => {
-    const effectiveDateFrom = lastParams?.dateFrom ?? sysDateFrom;
-    const effectiveDateTo   = lastParams?.dateTo   ?? sysDateTo;
-    const q = new URLSearchParams();
-    if (lastParams?.bankAccount)  q.set('bank_account',  lastParams.bankAccount);
-    if (lastParams?.businessUnit) q.set('business_unit', lastParams.businessUnit);
-    q.set('account_class', 'BANK_ASSET');
-    if (effectiveDateFrom)        q.set('date_from',     effectiveDateFrom.format('YYYY-MM-DD'));
-    if (effectiveDateTo)          q.set('date_to',       effectiveDateTo.format('YYYY-MM-DD'));
-    q.set('row_limit', '500');
-    return `${APEX_BASE}/gl/journals/banktxn-lines?${q.toString()}`;
-  }, [lastParams, sysDateFrom, sysDateTo]);
 
   // When CM records finish loading, auto-select all pending linked transactions
   useEffect(() => {
@@ -2846,26 +2642,16 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         </div>
 
         {txnSourceFilter === 'ALL' ? (
-          /* ── ALL mode: 3 concurrent API calls ── */
+          /* ── ALL mode: single unified endpoint ── */
           <div>
             <Text style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 10 }}>
-              When <strong>All</strong> is selected, three APIs are called concurrently via <code>Promise.allSettled</code>:
+              All sources (AP Payments, External Transactions, Bank Transfers) are returned by a single
+              endpoint backed by the <code>RR_V_BANK_RECON_SYSTXNS</code> view.
             </Text>
-            {([
-              { tag: 'geekblue', label: '1 — AP / AR / GL System Transactions', url: buildSysTxnsUrl('ALL') },
-              { tag: 'cyan',     label: '2 — External (CM) Transactions',       url: buildExtTxnUrl() },
-              { tag: 'orange',   label: '3 — Bank Account Transfers',           url: buildBankTransfersUrl() },
-            ] as { tag: string; label: string; url: string }[]).map(({ tag, label, url }) => (
-              <div key={label} style={{ marginBottom: 12 }}>
-                <Space style={{ marginBottom: 4 }}>
-                  <Tag color={tag} style={{ fontSize: 11, margin: 0 }}>{label}</Tag>
-                  <Button size="small" type="link" icon={<CopyOutlined />} style={{ padding: 0, fontSize: 11, height: 18 }} onClick={() => handleCopyUrl(url)}>Copy</Button>
-                </Space>
-                <div style={{ background: '#0d1117', borderRadius: 5, padding: '8px 10px', fontFamily: 'monospace', fontSize: 10, wordBreak: 'break-all', color: '#79c0ff' }}>
-                  {url}
-                </div>
-              </div>
-            ))}
+            <div style={{ background: '#0d1117', borderRadius: 5, padding: '8px 10px', fontFamily: 'monospace', fontSize: 10, wordBreak: 'break-all', color: '#79c0ff', marginBottom: 8 }}>
+              {buildSysTxnsUrl('ALL')}
+            </div>
+            <Button size="small" type="link" icon={<CopyOutlined />} style={{ padding: 0, fontSize: 11, height: 18 }} onClick={() => handleCopyUrl(buildSysTxnsUrl('ALL'))}>Copy URL</Button>
           </div>
         ) : (
           /* ── Single-source mode ── */
@@ -2911,9 +2697,9 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
             {/* Full URL */}
             <Text style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 4 }}>Full URL (with current filters)</Text>
             <div style={{ background: '#0d1117', borderRadius: 6, padding: '10px 12px', fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: '#79c0ff', position: 'relative' }}>
-              {txnSourceFilter === 'CM' ? buildExtTxnUrl() : buildSysTxnsUrl(txnSourceFilter)}
+              {buildSysTxnsUrl(txnSourceFilter === 'CM' ? 'EXTERNAL_TXN' : txnSourceFilter)}
               <Button size="small" icon={<CopyOutlined />}
-                onClick={() => handleCopyUrl(txnSourceFilter === 'CM' ? buildExtTxnUrl() : buildSysTxnsUrl(txnSourceFilter))}
+                onClick={() => handleCopyUrl(buildSysTxnsUrl(txnSourceFilter === 'CM' ? 'EXTERNAL_TXN' : txnSourceFilter))}
                 style={{ position: 'absolute', top: 6, right: 6, backgroundColor: apiCopied ? REDWOOD.success : '#30363d', borderColor: apiCopied ? REDWOOD.success : '#484f58', color: '#fff', fontSize: 11 }}
               >
                 {apiCopied ? 'Copied!' : 'Copy'}
