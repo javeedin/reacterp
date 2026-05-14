@@ -2607,11 +2607,22 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       defaultSortOrder: 'descend',
     },
     {
-      title: 'From CCY',
-      dataIndex: 'fromCurrencyCode',
-      key: 'ccy',
-      width: 90,
-      render: (val: string) => val ? <Tag style={{ fontSize: 11, margin: 0 }}>{val}</Tag> : <Text type="secondary">—</Text>,
+      title: 'Flow',
+      key: 'flow',
+      width: 120,
+      render: (_: any, r: TransferRecord) => {
+        const from = r.fromCurrencyCode;
+        const to   = r.toCurrencyCode;
+        if (!from && !to) return <Text type="secondary">—</Text>;
+        const same = from === to;
+        return (
+          <Space size={3}>
+            <Tag style={{ fontSize: 11, margin: 0 }}>{from || '—'}</Tag>
+            <SwapOutlined style={{ fontSize: 10, color: same ? REDWOOD.neutral300 : REDWOOD.info }} />
+            <Tag style={{ fontSize: 11, margin: 0, background: same ? undefined : '#e6f4ff', borderColor: same ? undefined : REDWOOD.info, color: same ? undefined : REDWOOD.info }}>{to || '—'}</Tag>
+          </Space>
+        );
+      },
       filters: [...new Set(transfers.map(t => t.fromCurrencyCode).filter(Boolean))].map(c => ({ text: c, value: c })),
       onFilter: (val, rec) => rec.fromCurrencyCode === val,
     },
