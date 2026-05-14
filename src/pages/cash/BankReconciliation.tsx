@@ -1014,6 +1014,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       const btGlQ = new URLSearchParams();
       if (params.bankAccount)  btGlQ.set('bank_account',  params.bankAccount);
       if (params.businessUnit) btGlQ.set('business_unit', params.businessUnit);
+      btGlQ.set('account_class', 'BANK_ASSET');   // only the bank movement line, not clearing
       if (effectiveDateFrom)   btGlQ.set('date_from',    effectiveDateFrom.format('YYYY-MM-DD'));
       if (effectiveDateTo)     btGlQ.set('date_to',      effectiveDateTo.format('YYYY-MM-DD'));
       if (rf === 'RECONCILED') btGlQ.set('reconciled', 'Y');
@@ -1213,6 +1214,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     const q = new URLSearchParams();
     if (lastParams?.bankAccount)  q.set('bank_account',  lastParams.bankAccount);
     if (lastParams?.businessUnit) q.set('business_unit', lastParams.businessUnit);
+    q.set('account_class', 'BANK_ASSET');
     if (effectiveDateFrom)        q.set('date_from',     effectiveDateFrom.format('YYYY-MM-DD'));
     if (effectiveDateTo)          q.set('date_to',       effectiveDateTo.format('YYYY-MM-DD'));
     q.set('row_limit', '500');
