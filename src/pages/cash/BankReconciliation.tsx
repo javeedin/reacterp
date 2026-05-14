@@ -1070,15 +1070,20 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       ...(lastParams ?? {}),
       statementId: String(stmt.statementId),
     };
-    // Try to match the statement's bank account against the loaded bank account options
-    // (which use account number as value). Fall back to stripping the currency suffix.
+    // Use the account NAME (label) for filtering — all source tables store the name,
+    // not the account number. Match from the loaded bank accounts list by number or label,
+    // then fall back to stripping the account number prefix + currency suffix from the
+    // statement's bankAccountName (e.g. "90030200023049 SB-BUILDERS MERCHANTS(AED)" → "SB-BUILDERS MERCHANTS").
     const matchedAcct = bankAccounts.find(a =>
       a.value === stmt.bankAccountName ||
       (a.bankAccountNumber && stmt.bankAccountName.includes(a.bankAccountNumber)) ||
       stmt.bankAccountName.includes(a.label)
     );
-    const bankAccountFilter = matchedAcct?.value
-      ?? stmt.bankAccountName.replace(/\s*\([A-Z]{3}\)\s*$/, '').trim();
+    const bankAccountFilter = matchedAcct?.label
+      ?? stmt.bankAccountName
+           .replace(/\s*\([A-Z]{3}\)\s*$/, '')  // strip "(AED)" / "(USD)" suffix
+           .replace(/^\d+\s+/, '')               // strip leading account number "90030200023049 "
+           .trim();
 
     const txnParams: SearchParams = {
       ...(lastParams ?? {}),
