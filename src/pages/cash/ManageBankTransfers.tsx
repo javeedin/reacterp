@@ -271,6 +271,7 @@ const TransferForm: React.FC<{
   const [cashClearingOpen, setCashClearingOpen] = useState(false);
   const [previewAcctOpen, setPreviewAcctOpen]   = useState(false);
   const [acctCreating,    setAcctCreating]      = useState(false);
+  const [localAccounted,  setLocalAccounted]    = useState(false);
   const watchedPaymentCcy  = Form.useWatch('paymentCurrencyCode', form);
   const watchedAmount      = Form.useWatch('paymentAmount', form);
   const watchedRate        = Form.useWatch('conversionRate', form);
@@ -1141,25 +1142,26 @@ const TransferForm: React.FC<{
               </Popconfirm>
             )}
             <Button onClick={onCancel}>{isEdit ? 'Close' : 'Cancel'}</Button>
-            {isAccounted ? (
+            {(isAccounted || localAccounted) ? (
               <Button
                 icon={<EyeOutlined />}
                 onClick={() => initialValues?.bankAccountTransferId && onViewAccounting?.(initialValues.bankAccountTransferId)}
                 style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
+                disabled={localAccounted && !initialValues?.bankAccountTransferId}
               >
-                View Accounting
+                {localAccounted ? 'Accounting Created' : 'View Accounting'}
               </Button>
             ) : (
               <Tooltip title={
-                !isEdit ? 'Save the transfer first before creating accounting' :
+                (!isEdit && !savedId) ? 'Save the transfer first before creating accounting' :
                 !cashClearingAcct ? 'Select a cash clearing account first' :
                 (!selectedFromAcct || !selectedToAcct) ? 'Select both bank accounts first' : undefined
               }>
                 <Button
                   icon={<AccountBookOutlined />}
                   onClick={() => setPreviewAcctOpen(true)}
-                  disabled={!isEdit || !selectedFromAcct || !selectedToAcct || !cashClearingAcct}
-                  style={{ color: !isEdit ? undefined : REDWOOD.info, borderColor: !isEdit ? undefined : REDWOOD.info }}
+                  disabled={(!isEdit && !savedId) || !selectedFromAcct || !selectedToAcct || !cashClearingAcct}
+                  style={{ color: (!isEdit && !savedId) ? undefined : REDWOOD.info, borderColor: (!isEdit && !savedId) ? undefined : REDWOOD.info }}
                 >
                   Preview Accounting
                 </Button>
@@ -1703,7 +1705,7 @@ END;
           <Space>
             <Button onClick={() => setPreviewAcctOpen(false)}>Close</Button>
             <Button type="primary" loading={acctCreating}
-              disabled={isAccounted || !cashClearingAcct || !selectedFromAcct || !selectedToAcct}
+              disabled={isAccounted || localAccounted || !cashClearingAcct || !selectedFromAcct || !selectedToAcct}
               style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
               onClick={async () => {
                 const values = form.getFieldsValue();
@@ -1896,6 +1898,15 @@ END;
                     aedValue, pmtAmt, j2currency, j2Rate, 'BANKTFR-RECEIPT',
                   );
 
+                  // Update accountingFlag in DB so the record is marked as accounted
+                  const acctId = initialValues?.bankAccountTransferId ?? savedId;
+                  if (acctId) {
+                    await fetch(`${APEX_BASE}/cash/banktransfers/${acctId}/acctflag?updated_by=SYSTEM`, {
+                      method: 'PUT', headers: { Accept: 'application/json' },
+                    }).catch(() => {});
+                  }
+
+                  setLocalAccounted(true);
                   message.success('Accounting journals created successfully');
                   setPreviewAcctOpen(false);
                 } catch (e: any) {
