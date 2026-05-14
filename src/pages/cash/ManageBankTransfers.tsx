@@ -1046,7 +1046,7 @@ const TransferForm: React.FC<{
             {!isEdit && !savedId && (
               <Button type="primary" loading={saving} onClick={handleSubmit}
                 style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
-                Create Transfer
+                Save Transfer
               </Button>
             )}
             {!isEdit && savedId && (
@@ -2777,7 +2777,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
                 <Button size="small" icon={<PlusOutlined />} type="primary"
                   style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
                   onClick={openCreate}>
-                  Create Transfer
+                  Save Transfer
                 </Button>
               </Space>
             </div>
@@ -2897,7 +2897,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
               </Button>
               <Button icon={<PlusOutlined />} type="primary" onClick={openCreate}
                 style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
-                Create Transfer
+                Save Transfer
               </Button>
             </Space>
           </div>
