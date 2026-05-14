@@ -1252,7 +1252,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const buildTxnSideCall = (sysTxn: SysTxn, line: StmtLine): { url: string; body: object; label: string } => {
     const today = new Date().toISOString().slice(0, 10);
     const isBankTransfer = sysTxn.source === 'BANK_TRANSFER' || sysTxn.source === 'GL_BANK_TRANSFER';
-    const isExternal     = ['ORA_MAN', 'ORA_BAT', 'ORA_STA'].includes(sysTxn.source);
+    const isExternal     = ['ORA_MAN', 'ORA_BAT', 'ORA_STA', 'EXTERNAL_TXN'].includes(sysTxn.source);
 
     // Path param: bank_transfer_id for BANK_TRANSFER; txnId for all others
     const pathId = isBankTransfer ? sysTxn.txnNumber : sysTxn.txnId;
