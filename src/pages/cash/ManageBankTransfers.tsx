@@ -311,18 +311,44 @@ const TransferForm: React.FC<{
 
   const handleDelete = async () => {
     if (!initialValues?.bankAccountTransferId) return;
+    const deleteUrl = `${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}`;
     setDeleting(true);
     try {
-      const res = await fetch(`${APEX_BASE}/cash/banktransfers/${initialValues.bankAccountTransferId}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (data.status === 'success') {
+      const res  = await fetch(deleteUrl, { method: 'DELETE' });
+      const text = await res.text();
+      let data: any = {};
+      try { data = JSON.parse(text); } catch { /* not JSON */ }
+      if (res.ok && data.status === 'success') {
         message.success('Transfer deleted.');
         onSave();
       } else {
-        message.error(data.message || 'Delete failed.');
+        Modal.error({
+          title: `Delete failed — HTTP ${res.status}`,
+          content: (
+            <div>
+              <div style={{ marginBottom: 8, fontSize: 12, color: '#666' }}>
+                <strong>URL:</strong> DELETE {deleteUrl}
+              </div>
+              <pre style={{ background: '#f5f5f5', padding: 8, borderRadius: 4, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 200, overflow: 'auto' }}>
+                {text || '(empty response)'}
+              </pre>
+            </div>
+          ),
+          width: 560,
+        });
       }
     } catch (e: any) {
-      message.error('Network error: ' + e.message);
+      Modal.error({
+        title: 'Delete — Network Error',
+        content: (
+          <div>
+            <div style={{ marginBottom: 8, fontSize: 12, color: '#666' }}>
+              <strong>URL:</strong> DELETE {deleteUrl}
+            </div>
+            <pre style={{ fontSize: 11 }}>{e.message}</pre>
+          </div>
+        ),
+      });
     } finally { setDeleting(false); }
   };
 
