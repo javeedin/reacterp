@@ -26,6 +26,7 @@ import {
   Descriptions,
   Alert,
   Progress,
+  Switch,
 } from 'antd';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import { postJournal, updateJournal, getLookupValues } from '../../services/manage-journals.service';
@@ -176,6 +177,8 @@ interface JournalLine {
   conversionRateType?: string;
   conversionDate?: string;
   accountDescription?: string;
+  reference1?: string; reference2?: string; reference3?: string; reference4?: string; reference5?: string;
+  reference6?: string; reference7?: string; reference8?: string; reference9?: string; reference10?: string;
 }
 
 interface JournalRecord {
@@ -339,6 +342,7 @@ const ManageJournals: React.FC = () => {
   const [tabSaving, setTabSaving] = useState<Record<string, boolean>>({});
   const [tabPosting, setTabPosting] = useState<Record<string, boolean>>({});
   const [selectedLinesByTab, setSelectedLinesByTab] = useState<Record<string, number[]>>({});
+  const [showReferencesByTab, setShowReferencesByTab] = useState<Record<string, boolean>>({});
   const [tabGetUrlCopied, setTabGetUrlCopied] = useState<Record<string, boolean>>({});
   const [journalApiModalVisible, setJournalApiModalVisible] = useState(false);
   const [journalApiTabKey, setJournalApiTabKey] = useState<string | null>(null);
@@ -2641,6 +2645,14 @@ const ManageJournals: React.FC = () => {
               {isEditable && lines.length > 0 && (
                 <Text type="secondary" style={{ fontSize: 11 }}>{lines.length} line{lines.length !== 1 ? 's' : ''}</Text>
               )}
+              <Space size={6}>
+                <Typography.Text style={{ fontSize: 11, color: '#666' }}>Show References</Typography.Text>
+                <Switch
+                  size="small"
+                  checked={!!showReferencesByTab[tabKey]}
+                  onChange={v => setShowReferencesByTab(prev => ({ ...prev, [tabKey]: v }))}
+                />
+              </Space>
             </Space>
             {isEditable && (
               <Space size="small">
@@ -2788,6 +2800,16 @@ const ManageJournals: React.FC = () => {
                   </Button>
                 ),
               }] : []),
+              ...(showReferencesByTab[tabKey] ? [1,2,3,4,5,6,7,8,9,10].map(n => ({
+                title: `Ref ${n}`,
+                dataIndex: `reference${n}`,
+                key: `reference${n}`,
+                width: 140,
+                ellipsis: true,
+                render: (val: string) => val
+                  ? <Tooltip title={val}><span style={{ fontSize: 11 }}>{val}</span></Tooltip>
+                  : <span style={{ color: '#bbb' }}>—</span>,
+              })) : []),
               ...(isEditable ? [{
                 title: '',
                 key: 'deleteLine',
