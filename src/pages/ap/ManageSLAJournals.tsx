@@ -639,6 +639,7 @@ const ManageSLAJournals: React.FC = () => {
           >
             View GL Journal
           </Button>
+          {r.accountingStatus !== 'POSTED' && (
           <Button
             size="small"
             icon={<SendOutlined />}
@@ -653,6 +654,7 @@ const ManageSLAJournals: React.FC = () => {
           >
             Post to GL
           </Button>
+          )}
         </Space>
       ),
     },
