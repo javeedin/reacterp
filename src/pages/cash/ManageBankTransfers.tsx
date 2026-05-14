@@ -2113,16 +2113,22 @@ const AccountingApiTesterModal: React.FC<{
     }
   };
 
-  // method pill colours — background / text pairs
-  const METHOD_STYLE: Record<string, { bg: string; color: string }> = {
-    GET:    { bg: '#e6f4ea', color: '#1d7b4d' },
-    POST:   { bg: '#fff3e0', color: '#c74634' },
-    PUT:    { bg: '#f0e6ff', color: '#6b21a8' },
-    DELETE: { bg: '#fde8e7', color: '#b91c1c' },
+  const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
+
+  const toggle = (key: string) =>
+    setExpanded(prev => { const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s; });
+
+  const runTest = async (step: typeof steps[0]) => {
+    // auto-expand so the user sees the response
+    setExpanded(prev => new Set(prev).add(step.key));
+    await testStep(step);
   };
-  // left-border accent per method
-  const METHOD_BORDER: Record<string, string> = {
-    GET: '#1d7b4d', POST: '#c74634', PUT: '#6b21a8', DELETE: '#b91c1c',
+
+  const METHOD_COLOR: Record<string, { bg: string; text: string; border: string }> = {
+    GET:    { bg: '#e8f5e9', text: '#2e7d32', border: '#81c784' },
+    POST:   { bg: '#fff3e0', text: '#e65100', border: '#ffb74d' },
+    PUT:    { bg: '#ede7f6', text: '#4527a0', border: '#9575cd' },
+    DELETE: { bg: '#fce4ec', text: '#b71c1c', border: '#ef9a9a' },
   };
 
   return (
@@ -2133,150 +2139,164 @@ const AccountingApiTesterModal: React.FC<{
         <Space>
           <ApiOutlined style={{ color: REDWOOD.info }} />
           <span style={{ fontWeight: 700, fontSize: 15 }}>Accounting API Tester</span>
-          <Tag color="purple" style={{ fontSize: 10, fontWeight: 600 }}>DEBUG</Tag>
+          <Tag color="purple" style={{ fontSize: 10, fontWeight: 600, marginLeft: 4 }}>DEBUG</Tag>
         </Space>
       }
-      footer={<Button onClick={onClose}>Close</Button>}
-      width={1020}
+      footer={
+        <Space>
+          <Button onClick={() => setExpanded(new Set(steps.map(s => s.key)))}>Expand All</Button>
+          <Button onClick={() => setExpanded(new Set())}>Collapse All</Button>
+          <Button type="primary" onClick={onClose}>Close</Button>
+        </Space>
+      }
+      width={1060}
       style={{ top: 16 }}
       destroyOnClose
     >
-      {/* ── Transfer selector bar ─────────────────────────────── */}
-      <div style={{ background: '#f8f9fb', border: '1px solid #e5e7eb', borderRadius: 10, padding: '14px 18px', marginBottom: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <Text strong style={{ fontSize: 13, color: '#374151', whiteSpace: 'nowrap' }}>Select Transfer:</Text>
-          <Select
-            style={{ flex: '1 1 380px', maxWidth: 480 }}
-            placeholder="Pick a transfer to debug…"
-            value={selectedId}
-            onChange={resetForTransfer}
-            showSearch
-            optionFilterProp="label"
-            options={transfers.map(t => ({
-              value: t.bankAccountTransferId,
-              label: `#${t.bankAccountTransferNumber} — ${t.fromBankAccountName} → ${t.toBankAccountName} (${t.transactionDate?.split('T')[0] ?? '?'})${t.businessUnit ? ` [${t.businessUnit}]` : ''}`,
-            }))}
-          />
+      {/* ── Transfer selector ───────────────────────────────────── */}
+      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '14px 18px', marginBottom: 14 }}>
+        <Row gutter={[12, 8]} align="middle">
+          <Col flex="none"><Text strong style={{ color: '#374151' }}>Transfer:</Text></Col>
+          <Col flex="1 1 380px">
+            <Select
+              style={{ width: '100%' }}
+              placeholder="Pick a transfer to debug…"
+              value={selectedId}
+              onChange={resetForTransfer}
+              showSearch
+              optionFilterProp="label"
+              options={transfers.map(t => ({
+                value: t.bankAccountTransferId,
+                label: `#${t.bankAccountTransferNumber} — ${t.fromBankAccountName} → ${t.toBankAccountName} (${t.transactionDate?.split('T')[0] ?? '?'})${t.businessUnit ? ` [${t.businessUnit}]` : ''}`,
+              }))}
+            />
+          </Col>
           {txn && (
-            <Space size={6} wrap>
-              <Tag color="blue" style={{ fontWeight: 600 }}>{txn.fromCurrencyCode || '?'} → {txn.toCurrencyCode || '?'}</Tag>
-              <Tag color="geekblue">{d?.periodName}</Tag>
-              {txn.cashClearingAccount
-                ? <Tag color="green" style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' }}>Clearing: {txn.cashClearingAccount}</Tag>
-                : <Tag color="red">⚠ No clearing account</Tag>}
-              {ledger
-                ? <Tag color="cyan">Ledger: {ledger.ledgerName} (ID {ledger.ledgerId})</Tag>
-                : <Tag color="default" style={{ color: '#6b7280' }}>Ledger: run Step 3</Tag>}
-            </Space>
+            <Col flex="none">
+              <Space size={6} wrap>
+                <Tag color="blue" style={{ fontWeight: 600 }}>{txn.fromCurrencyCode || '?'} → {txn.toCurrencyCode || '?'}</Tag>
+                <Tag color="geekblue">{d?.periodName}</Tag>
+                {txn.cashClearingAccount
+                  ? <Tag color="green">✓ Clearing: {txn.cashClearingAccount}</Tag>
+                  : <Tag color="error">⚠ No clearing account</Tag>}
+                {ledger
+                  ? <Tag color="cyan">Ledger: {ledger.ledgerName} ({ledger.ledgerId})</Tag>
+                  : <Tag>Ledger: run Step 3</Tag>}
+              </Space>
+            </Col>
           )}
-        </div>
+        </Row>
       </div>
 
       {!txn && (
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={<Text style={{ color: '#9ca3af' }}>Select a transfer above to see all 14 API steps</Text>}
-          style={{ padding: '40px 0' }}
-        />
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description="Select a transfer above, then expand any step to see its URL and payload"
+          style={{ padding: '48px 0' }} />
       )}
 
       {txn && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '66vh', overflowY: 'auto', paddingRight: 2 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '70vh', overflowY: 'auto', paddingRight: 4 }}>
           {steps.map((step, idx) => {
-            const r      = results[step.key];
-            const tested = r != null;
-            const ok     = tested && !r.loading && r.status != null && r.status >= 200 && r.status < 300;
-            const fail   = tested && !r.loading && r.status != null && (r.status < 200 || r.status >= 300);
-            const mStyle = METHOD_STYLE[step.method] ?? { bg: '#f3f4f6', color: '#374151' };
-            const accentColor = ok ? '#1d7b4d' : fail ? '#c74634' : METHOD_BORDER[step.method] ?? '#9ca3af';
+            const r        = results[step.key];
+            const isOpen   = expanded.has(step.key);
+            const ok       = r != null && !r.loading && r.status != null && r.status >= 200 && r.status < 300;
+            const fail     = r != null && !r.loading && r.status != null && (r.status < 200 || r.status >= 300);
+            const mc       = METHOD_COLOR[step.method] ?? { bg: '#f1f5f9', text: '#475569', border: '#cbd5e1' };
+            const hasPayload = 'payload' in step;
+
+            // Header row accent
+            const headerBg    = ok ? '#f0fdf4' : fail ? '#fff5f5' : isOpen ? '#f0f4ff' : '#f8fafc';
+            const borderLeft  = ok ? '#22c55e' : fail ? '#ef4444' : mc.border;
 
             return (
-              <div
-                key={step.key}
-                style={{
-                  border: '1px solid #e5e7eb',
-                  borderLeft: `4px solid ${accentColor}`,
-                  borderRadius: 8,
-                  overflow: 'hidden',
-                  background: '#ffffff',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-                  transition: 'border-color 0.25s',
-                }}
-              >
-                {/* ── Row: number + badge + label + status + Test ── */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: ok ? '#f0fdf4' : fail ? '#fff5f5' : '#fafafa', borderBottom: '1px solid #f0f0f0' }}>
-                  {/* Step number */}
-                  <div style={{ minWidth: 26, height: 26, borderRadius: '50%', background: accentColor, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
+              <div key={step.key} style={{ border: '1px solid #e2e8f0', borderLeft: `4px solid ${borderLeft}`, borderRadius: 8, overflow: 'hidden', background: '#fff', boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow 0.2s' }}>
+
+                {/* ── Clickable header row ── */}
+                <div
+                  onClick={() => toggle(step.key)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', background: headerBg, cursor: 'pointer', userSelect: 'none' }}
+                >
+                  {/* Step circle */}
+                  <div style={{ width: 28, height: 28, borderRadius: '50%', background: borderLeft, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
                     {idx + 1}
                   </div>
 
-                  {/* Method badge */}
-                  <span style={{ background: mStyle.bg, color: mStyle.color, border: `1px solid ${mStyle.color}30`, borderRadius: 4, padding: '1px 7px', fontSize: 11, fontWeight: 700, letterSpacing: 0.5, flexShrink: 0 }}>
+                  {/* Method pill */}
+                  <span style={{ background: mc.bg, color: mc.text, border: `1px solid ${mc.border}`, borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700, letterSpacing: 0.6, flexShrink: 0 }}>
                     {step.method}
                   </span>
 
                   {/* Label */}
-                  <Text strong style={{ flex: 1, fontSize: 13, color: '#1f2937' }}>{step.label}</Text>
+                  <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{step.label}</span>
 
-                  {/* HTTP status badge */}
-                  {r && !r.loading && r.status != null && (
-                    <Tag color={ok ? 'success' : 'error'} style={{ fontWeight: 600, margin: 0 }}>
-                      HTTP {r.status}
-                    </Tag>
-                  )}
+                  {/* Badges */}
                   {r?.loading && <Tag color="processing" style={{ margin: 0 }}>Running…</Tag>}
+                  {!r?.loading && r?.status != null && (
+                    <Tag color={ok ? 'success' : 'error'} style={{ fontWeight: 700, margin: 0 }}>HTTP {r.status}</Tag>
+                  )}
+                  {!hasPayload && <Tag style={{ margin: 0, background: '#f1f5f9', color: '#64748b', border: 'none', fontSize: 10 }}>GET</Tag>}
+                  <Text style={{ fontSize: 11, color: '#94a3b8', marginRight: 4 }}>{isOpen ? '▲ collapse' : '▼ expand'}</Text>
 
-                  {/* Test button */}
+                  {/* Test button — stop propagation so click doesn't toggle collapse */}
                   <Button
                     size="small"
                     type="primary"
                     loading={r?.loading}
-                    onClick={() => testStep(step)}
-                    style={{ background: REDWOOD.info, borderColor: REDWOOD.info, fontWeight: 600, flexShrink: 0 }}
+                    onClick={e => { e.stopPropagation(); runTest(step); }}
+                    style={{ background: REDWOOD.info, borderColor: REDWOOD.info, fontWeight: 600, flexShrink: 0, minWidth: 56 }}
                   >
                     Test
                   </Button>
                 </div>
 
-                {/* ── URL bar ── */}
-                <div style={{ padding: '7px 14px 7px 54px', background: '#f9fafb', borderBottom: '1px solid #f0f0f0' }}>
-                  <Text copyable={{ text: step.url }} style={{ fontSize: 11, color: REDWOOD.info, fontFamily: 'monospace', wordBreak: 'break-all' }}>
-                    {step.url}
-                  </Text>
-                </div>
+                {/* ── Expanded content ── */}
+                {isOpen && (
+                  <div style={{ borderTop: '1px solid #e2e8f0' }}>
 
-                {/* ── Payload editor (POST / PUT) ── */}
-                {'payload' in step && (
-                  <div style={{ padding: '8px 14px 10px 54px', background: '#fff' }}>
-                    <Text style={{ fontSize: 11, color: '#6b7280', display: 'block', marginBottom: 4, fontWeight: 600 }}>Request Body (editable):</Text>
-                    <Input.TextArea
-                      value={payloads[step.key] ?? ''}
-                      onChange={e => setPayloads(prev => ({ ...prev, [step.key]: e.target.value }))}
-                      autoSize={{ minRows: 3, maxRows: 16 }}
-                      style={{ fontFamily: 'monospace', fontSize: 11, background: '#f8f9fb', color: '#1f2937', borderColor: '#d1d5db', borderRadius: 6, resize: 'vertical' }}
-                    />
-                  </div>
-                )}
+                    {/* URL */}
+                    <div style={{ padding: '10px 16px 10px 58px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                      <Text style={{ fontSize: 11, color: '#64748b', fontWeight: 600, display: 'block', marginBottom: 4 }}>Endpoint URL</Text>
+                      <Text copyable={{ text: step.url }} style={{ fontSize: 12, color: REDWOOD.info, fontFamily: 'monospace', wordBreak: 'break-all', display: 'block' }}>
+                        {step.url}
+                      </Text>
+                    </div>
 
-                {/* ── Response ── */}
-                {r && !r.loading && (
-                  <div style={{ padding: '8px 14px 10px 54px', background: ok ? '#f0fdf4' : '#fff5f5', borderTop: `1px solid ${ok ? '#bbf7d0' : '#fecaca'}` }}>
-                    {r.error
-                      ? <Text style={{ color: REDWOOD.error, fontSize: 12 }}>Network error: {r.error}</Text>
-                      : (
-                        <pre style={{
-                          margin: 0, fontSize: 11, fontFamily: 'monospace',
-                          color: ok ? '#14532d' : '#7f1d1d',
-                          background: ok ? '#dcfce7' : '#fee2e2',
-                          border: `1px solid ${ok ? '#bbf7d0' : '#fecaca'}`,
-                          borderRadius: 6, padding: '8px 10px',
-                          whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-                          maxHeight: 240, overflowY: 'auto',
-                        }}>
-                          {r.body}
-                        </pre>
-                      )
-                    }
+                    {/* Payload editor */}
+                    {hasPayload && (
+                      <div style={{ padding: '10px 16px 12px 58px', background: '#fff', borderBottom: '1px solid #e2e8f0' }}>
+                        <Text style={{ fontSize: 11, color: '#64748b', fontWeight: 600, display: 'block', marginBottom: 6 }}>Request Body (editable JSON)</Text>
+                        <Input.TextArea
+                          value={payloads[step.key] ?? ''}
+                          onChange={e => setPayloads(prev => ({ ...prev, [step.key]: e.target.value }))}
+                          autoSize={{ minRows: 4, maxRows: 20 }}
+                          style={{ fontFamily: 'monospace', fontSize: 11.5, background: '#f8fafc', color: '#1e293b', borderColor: '#cbd5e1', borderRadius: 6 }}
+                        />
+                      </div>
+                    )}
+
+                    {/* Response */}
+                    {r && !r.loading && (
+                      <div style={{ padding: '10px 16px 12px 58px', background: ok ? '#f0fdf4' : fail ? '#fff5f5' : '#fff' }}>
+                        <Text style={{ fontSize: 11, color: '#64748b', fontWeight: 600, display: 'block', marginBottom: 6 }}>
+                          Response {r.status != null ? `— HTTP ${r.status}` : ''}
+                        </Text>
+                        {r.error
+                          ? <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, padding: '8px 12px' }}>
+                              <Text style={{ color: '#991b1b', fontSize: 12 }}>Network error: {r.error}</Text>
+                            </div>
+                          : <pre style={{ margin: 0, fontSize: 12, fontFamily: 'monospace', color: ok ? '#14532d' : '#7f1d1d', background: ok ? '#dcfce7' : '#fee2e2', border: `1px solid ${ok ? '#86efac' : '#fca5a5'}`, borderRadius: 6, padding: '10px 12px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 320, overflowY: 'auto' }}>
+                              {r.body}
+                            </pre>
+                        }
+                      </div>
+                    )}
+
+                    {/* Placeholder when not yet tested */}
+                    {!r && (
+                      <div style={{ padding: '12px 16px 14px 58px', background: '#fafafa' }}>
+                        <Text style={{ fontSize: 12, color: '#94a3b8' }}>Click <strong>Test</strong> to fire this request and see the live response.</Text>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
