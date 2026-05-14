@@ -346,21 +346,28 @@ const StatementSelector: React.FC<StatementSelectorProps> = ({
       title: 'Statement #',
       dataIndex: 'statementNumber',
       key: 'statementNumber',
-      width: 140,
+      width: 130,
       ellipsis: true,
+    },
+    {
+      title: 'Bank Account',
+      dataIndex: 'bankAccountName',
+      key: 'bankAccountName',
+      ellipsis: true,
+      render: (v: string) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text>,
     },
     {
       title: 'Date',
       dataIndex: 'statementDate',
       key: 'statementDate',
-      width: 110,
+      width: 100,
       render: (v: string) => fmtDate(v),
     },
     {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
-      width: 130,
+      width: 120,
       render: (v: string) => {
         const color = v === 'RECONCILED' ? 'green' : v === 'PARTIALLY_RECONCILED' ? 'orange' : 'blue';
         return v ? <Tag color={color} style={{ margin: 0 }}>{v.replace(/_/g, ' ')}</Tag> : '—';
@@ -370,7 +377,7 @@ const StatementSelector: React.FC<StatementSelectorProps> = ({
       title: 'Opening Bal',
       dataIndex: 'openingBalance',
       key: 'openingBalance',
-      width: 120,
+      width: 110,
       align: 'right',
       render: (v: number) => fmtAmount(v),
     },
@@ -378,7 +385,7 @@ const StatementSelector: React.FC<StatementSelectorProps> = ({
       title: 'Closing Bal',
       dataIndex: 'closingBalance',
       key: 'closingBalance',
-      width: 120,
+      width: 110,
       align: 'right',
       render: (v: number) => fmtAmount(v),
     },
@@ -386,7 +393,7 @@ const StatementSelector: React.FC<StatementSelectorProps> = ({
       title: 'Lines',
       dataIndex: 'lineCount',
       key: 'lineCount',
-      width: 70,
+      width: 60,
       align: 'center',
       render: (v: number) => v ?? '—',
     },
@@ -1063,16 +1070,17 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       ...(lastParams ?? {}),
       statementId: String(stmt.statementId),
     };
-    // For sys txns: only apply dates if the user explicitly set them in the search panel.
-    // Do NOT fall back to stmtDate — that would restrict to a single day and hide most transactions.
+    // Always use the selected statement's bank account for system transactions.
+    // Date range: only apply if explicitly set in the search panel (don't restrict to a single stmt day).
     const txnParams: SearchParams = {
       ...(lastParams ?? {}),
+      bankAccount: stmt.bankAccountName,
       dateFrom: lastParams?.dateFrom ?? null,
       dateTo:   lastParams?.dateTo   ?? null,
     };
     fetchStmtLines(lineParams, stmtReconFilter);
     fetchSysTxns(txnParams, txnSourceFilter, sysReconFilter);
-  }, [lastParams, fetchStmtLines, fetchSysTxns, txnSourceFilter, stmtReconFilter, cmReconFilter]);
+  }, [lastParams, fetchStmtLines, fetchSysTxns, txnSourceFilter, stmtReconFilter, sysReconFilter]);
 
   const handleReset = useCallback(() => {
     setStatements([]);
