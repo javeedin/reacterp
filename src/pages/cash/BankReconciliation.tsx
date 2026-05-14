@@ -1070,18 +1070,26 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       ...(lastParams ?? {}),
       statementId: String(stmt.statementId),
     };
-    // Always use the selected statement's bank account for system transactions.
-    // Update lastParams so the API inspector URL and all subsequent refreshes also carry it.
+    // Try to match the statement's bank account against the loaded bank account options
+    // (which use account number as value). Fall back to stripping the currency suffix.
+    const matchedAcct = bankAccounts.find(a =>
+      a.value === stmt.bankAccountName ||
+      (a.bankAccountNumber && stmt.bankAccountName.includes(a.bankAccountNumber)) ||
+      stmt.bankAccountName.includes(a.label)
+    );
+    const bankAccountFilter = matchedAcct?.value
+      ?? stmt.bankAccountName.replace(/\s*\([A-Z]{3}\)\s*$/, '').trim();
+
     const txnParams: SearchParams = {
       ...(lastParams ?? {}),
-      bankAccount: stmt.bankAccountName,
+      bankAccount: bankAccountFilter,
       dateFrom: lastParams?.dateFrom ?? null,
       dateTo:   lastParams?.dateTo   ?? null,
     };
     setLastParams(txnParams);
     fetchStmtLines(lineParams, stmtReconFilter);
     fetchSysTxns(txnParams, txnSourceFilter, sysReconFilter);
-  }, [lastParams, fetchStmtLines, fetchSysTxns, txnSourceFilter, stmtReconFilter, sysReconFilter]);
+  }, [lastParams, bankAccounts, fetchStmtLines, fetchSysTxns, txnSourceFilter, stmtReconFilter, sysReconFilter]);
 
   const handleReset = useCallback(() => {
     setStatements([]);
