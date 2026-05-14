@@ -237,7 +237,7 @@ const TransferForm: React.FC<{
   buBankMap: Record<string, string[]>;
   bankAccountAssetMap: Record<string, string>;
   buCompanyMap: Record<string, string>;
-  onSave: (created?: { bankAccountTransferId: number; bankAccountTransferNumber: string }) => void;
+  onSave: (created?: { bankAccountTransferId: number; bankAccountTransferNumber: string; record?: Partial<TransferRecord> }) => void;
   onCancel: () => void;
 }> = ({ initialValues, bankAccounts, businessUnits, bankCurrencyMap, buBankMap, bankAccountAssetMap, buCompanyMap, onSave, onCancel }) => {
   const [form] = Form.useForm();
@@ -469,7 +469,30 @@ const TransferForm: React.FC<{
         message.success(isEdit ? 'Transfer updated.' : 'Transfer created.');
         if (!isEdit && data.bankAccountTransferId) {
           setSavedId(data.bankAccountTransferId);
-          onSave({ bankAccountTransferId: data.bankAccountTransferId, bankAccountTransferNumber: String(data.bankAccountTransferNumber ?? '') });
+          const createdRecord: Partial<TransferRecord> = {
+            bankAccountTransferId:     data.bankAccountTransferId,
+            bankAccountTransferNumber: String(data.bankAccountTransferNumber ?? ''),
+            transactionDate:           values.transactionDate?.format('YYYY-MM-DD'),
+            fromBankAccountName:       values.fromBankAccountName,
+            toBankAccountName:         values.toBankAccountName,
+            paymentAmount:             values.paymentAmount,
+            fromCurrencyCode:          fromCurrency,
+            toCurrencyCode:            toCurrency,
+            paymentCurrencyCode:       values.paymentCurrencyCode ?? '',
+            conversionRate:            values.conversionRate ?? null,
+            conversionRateDate:        values.conversionRateDate?.format('YYYY-MM-DD') ?? null,
+            conversionRateType:        values.conversionRateType ?? '',
+            funcConversionRate:        values.funcConversionRate ?? null,
+            businessUnit:              values.businessUnit ?? '',
+            paymentMethod:             values.paymentMethod ?? '',
+            paymentProfileName:        values.paymentProfileName ?? '',
+            memo:                      values.memo ?? '',
+            isSettledWithIbyFlag:      values.isSettledWithIbyFlag ? 'Y' : 'N',
+            cashClearingAccount:       cashClearingAcct || '',
+            accountingFlag:            'N',
+            reconciledFlag:            'N',
+          };
+          onSave({ bankAccountTransferId: data.bankAccountTransferId, bankAccountTransferNumber: String(data.bankAccountTransferNumber ?? ''), record: createdRecord });
         } else {
           onSave();
         }
@@ -2175,31 +2198,22 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
     if (activeTab === key) setActiveTab('search');
   };
 
-  const handleSaved = async (created?: { bankAccountTransferId: number; bankAccountTransferNumber: string }) => {
+  const handleSaved = (created?: { bankAccountTransferId: number; bankAccountTransferNumber: string; record?: Partial<TransferRecord> }) => {
     loadLovs();
     handleSearch();
-    if (created) {
-      // Fetch the newly created record and open it as an edit tab, replacing the create tab
-      try {
-        const res = await fetch(`${APEX_BASE}/cash/banktransfers/${created.bankAccountTransferId}`, { headers: { Accept: 'application/json' } });
-        const data = res.ok ? await res.json() : null;
-        const record: TransferRecord | null = data?.items?.[0] ?? data ?? null;
-        if (record?.bankAccountTransferId) {
-          const key = newTabKey();
-          setEditTabs(prev => [
-            ...prev.filter(t => t.key !== 'create'),
-            { key, label: <span><EditOutlined /> #{record.bankAccountTransferNumber}</span>, record },
-          ]);
-          setActiveTab(key);
-        }
-      } catch {
-        // If fetch fails just close the create tab
-        setEditTabs(prev => prev.filter(t => t.key !== 'create'));
-        setActiveTab('search');
-      }
+    if (created?.record) {
+      const key = newTabKey();
+      setEditTabs(prev => [
+        ...prev.filter(t => t.key !== 'create'),
+        { key, label: <span><EditOutlined /> #{created.bankAccountTransferNumber}</span>, record: created.record as TransferRecord },
+      ]);
+      setActiveTab(key);
+    } else if (created) {
+      setEditTabs(prev => prev.filter(t => t.key !== 'create'));
+      setActiveTab('search');
     }
   };
-  const handleEditSaved = (_created?: { bankAccountTransferId: number; bankAccountTransferNumber: string }) => { loadLovs(); handleSearch(); };
+  const handleEditSaved = (_created?: { bankAccountTransferId: number; bankAccountTransferNumber: string; record?: Partial<TransferRecord> }) => { loadLovs(); handleSearch(); };
 
   // ── Create Accounting ─────────────────────────────────────────────────────
   const openCreateAccountingModal = (forTransfers?: TransferRecord[]) => {
