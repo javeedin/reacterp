@@ -264,7 +264,7 @@ const SearchPanel: React.FC<SearchPanelProps> = ({
                   <Form.Item
                     name="bankAccount"
                     label={<Text style={{ fontWeight: 600 }}>Bank Account</Text>}
-                    rules={[{ required: true, message: 'Bank account is required' }]}
+                    rules={[]}
                     style={{ marginBottom: 0 }}
                   >
                     <Select
@@ -1249,10 +1249,6 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   }, []);
 
   const handleSearch = useCallback((params: SearchParams) => {
-    if (!params.bankAccount) {
-      msgApi.warning('Please select a bank account');
-      return;
-    }
     setLastParams(params);
     setSelectedStatement(null);
     setSelectedStmtKeys([]);
@@ -1260,7 +1256,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     setStmtLines([]);
     setSysTxns([]);
     fetchStatements(params);
-  }, [fetchStatements, msgApi]);
+  }, [fetchStatements]);
 
   const handleSelectStatement = useCallback((stmt: BankStatement) => {
     setSelectedStatement(stmt);
@@ -2692,7 +2688,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                 size="small"
                 type="primary"
                 icon={<SearchOutlined />}
-                disabled={!lastParams?.bankAccount}
+                disabled={!lastParams}
                 style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary, flexShrink: 0 }}
                 onClick={() => {
                   if (lastParams) fetchSysTxns({ ...lastParams, dateFrom: sysDateFrom, dateTo: sysDateTo }, txnSourceFilter, sysReconFilter);
@@ -3760,12 +3756,8 @@ const ReconciledTab: React.FC<ReconciledTabProps> = ({ bankAccounts, businessUni
   }, [msgApi]);
 
   const handleSearch = useCallback((params: SearchParams) => {
-    if (!params.bankAccount) {
-      msgApi.warning('Please select a bank account');
-      return;
-    }
     fetchReconLines(params);
-  }, [fetchReconLines, msgApi]);
+  }, [fetchReconLines]);
 
   const handleReset = useCallback(() => {
     setReconLines([]);
