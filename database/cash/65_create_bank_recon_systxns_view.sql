@@ -90,32 +90,34 @@ UNION ALL
     -- REFERENCE3 = accounting_class  REFERENCE4 = business_unit
     -- REFERENCE5 = event_type        REFERENCE7 = bank_account_name
     SELECT
-        'BANK_TRANSFER'                         AS SOURCE,
+        'BANK_TRANSFER'                                  AS SOURCE,
         TO_CHAR(l.JE_HEADER_ID) || '-' || TO_CHAR(l.JE_LINE_NUMBER)
-                                                AS TXN_ID,
-        l.REFERENCE1                            AS TXN_NUMBER,
-        l.REFERENCE2                            AS REFERENCE,
-        TRUNC(b.CREATION_DATE)                  AS TXN_DATE,
-        NVL(l.ENTERED_DR, l.ENTERED_CR)         AS AMOUNT,
+                                                         AS TXN_ID,
+        l.REFERENCE1                                     AS TXN_NUMBER,
+        l.REFERENCE2                                     AS REFERENCE,
+        TRUNC(NVL(h.DEFAULT_EFFECTIVE_DATE, b.CREATION_DATE))
+                                                         AS TXN_DATE,
+        NVL(l.ENTERED_DR, l.ENTERED_CR)                 AS AMOUNT,
         l.CURRENCY_CODE,
         b.STATUS,
-        l.REFERENCE7                            AS BANK_ACCOUNT_NAME,
-        l.REFERENCE4                            AS BUSINESS_UNIT,
-        NULL                                    AS COUNTERPARTY_NAME,
-        NULL                                    AS COUNTERPARTY_NUMBER,
-        NULL                                    AS PAYMENT_METHOD,
-        NULL                                    AS CLEARING_DATE,
-        NVL(l.RECONCILED_FLAG, 'N')             AS RECONCILED_FLAG,
+        l.REFERENCE7                                     AS BANK_ACCOUNT_NAME,
+        l.REFERENCE4                                     AS BUSINESS_UNIT,
+        NULL                                             AS COUNTERPARTY_NAME,
+        NULL                                             AS COUNTERPARTY_NUMBER,
+        NULL                                             AS PAYMENT_METHOD,
+        NULL                                             AS CLEARING_DATE,
+        NVL(l.RECONCILED_FLAG, 'N')                     AS RECONCILED_FLAG,
         l.DESCRIPTION,
-        l.REFERENCE3                            AS ACCOUNTING_CLASS,
+        l.REFERENCE3                                     AS ACCOUNTING_CLASS,
         l.JE_HEADER_ID,
         l.JE_LINE_NUMBER,
         l.ACCOUNT_COMBINATION,
-        NULL                                    AS TRANSFER_ID,
+        NULL                                             AS TRANSFER_ID,
         l.CREATED_BY,
         l.CREATION_DATE
     FROM RR_GL_JE_LINES_ALL    l
-    JOIN RR_GL_JOURNAL_BATCHES b ON b.JE_BATCH_ID = l.BATCH_ID
+    JOIN RR_GL_JE_HEADERS      h ON h.JE_HEADER_ID = l.JE_HEADER_ID
+    JOIN RR_GL_JOURNAL_BATCHES b ON b.JE_BATCH_ID  = l.BATCH_ID
     WHERE l.REFERENCE3 = 'BANK_ASSET'
 /
 
