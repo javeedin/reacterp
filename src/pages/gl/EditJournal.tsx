@@ -1522,7 +1522,7 @@ const EditJournal: React.FC = () => {
                 gap: 12,
               }}
             >
-              <Text strong style={{ fontSize: 11 }}>Journal Lines</Text>
+              <Text strong style={{ fontSize: 11 }}>Journal Lines / References</Text>
               <Space size={6}>
                 <Typography.Text style={{ fontSize: 11, color: '#666' }}>Show References</Typography.Text>
                 <Switch size="small" checked={showReferences} onChange={setShowReferences} />
