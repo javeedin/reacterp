@@ -2652,6 +2652,30 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       },
     },
     {
+      title: 'Func. Amount',
+      key: 'funcAmount',
+      width: 120,
+      align: 'right' as const,
+      render: (_: any, r: TransferRecord) => {
+        const pmt = r.paymentAmount ?? 0;
+        let aed: number;
+        if (!r.toCurrencyCode || r.toCurrencyCode === 'AED') {
+          aed = pmt;
+        } else if (r.funcConversionRate) {
+          aed = Math.round(pmt * r.funcConversionRate * 100) / 100;
+        } else {
+          return <Text type="secondary">—</Text>;
+        }
+        return (
+          <Tooltip title="AED equivalent of payment amount">
+            <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>
+              {aed.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </Text>
+          </Tooltip>
+        );
+      },
+    },
+    {
       title: 'Transfer Date',
       dataIndex: 'transactionDate',
       key: 'txnDate',
