@@ -2115,11 +2115,15 @@ const AccountingApiTesterModal: React.FC<{
 
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
 
+  // Expand all steps whenever the transfer changes (or steps are first built)
+  React.useEffect(() => {
+    if (steps.length > 0) setExpanded(new Set(steps.map(s => s.key)));
+  }, [steps.length, selectedId]);
+
   const toggle = (key: string) =>
     setExpanded(prev => { const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s; });
 
   const runTest = async (step: typeof steps[0]) => {
-    // auto-expand so the user sees the response
     setExpanded(prev => new Set(prev).add(step.key));
     await testStep(step);
   };
@@ -2149,8 +2153,8 @@ const AccountingApiTesterModal: React.FC<{
           <Button type="primary" onClick={onClose}>Close</Button>
         </Space>
       }
-      width={1060}
-      style={{ top: 16 }}
+      width={1100}
+      style={{ top: 12 }}
       destroyOnClose
     >
       {/* ── Transfer selector ───────────────────────────────────── */}
@@ -2195,7 +2199,7 @@ const AccountingApiTesterModal: React.FC<{
       )}
 
       {txn && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '70vh', overflowY: 'auto', paddingRight: 4 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxHeight: '72vh', overflowY: 'auto', paddingRight: 6 }}>
           {steps.map((step, idx) => {
             const r        = results[step.key];
             const isOpen   = expanded.has(step.key);
@@ -2254,37 +2258,37 @@ const AccountingApiTesterModal: React.FC<{
                   <div style={{ borderTop: '1px solid #e2e8f0' }}>
 
                     {/* URL */}
-                    <div style={{ padding: '10px 16px 10px 58px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                      <Text style={{ fontSize: 11, color: '#64748b', fontWeight: 600, display: 'block', marginBottom: 4 }}>Endpoint URL</Text>
-                      <Text copyable={{ text: step.url }} style={{ fontSize: 12, color: REDWOOD.info, fontFamily: 'monospace', wordBreak: 'break-all', display: 'block' }}>
+                    <div style={{ padding: '12px 20px 12px 20px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                      <Text style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', marginBottom: 6 }}>Endpoint URL</Text>
+                      <Text copyable={{ text: step.url }} style={{ fontSize: 12, color: REDWOOD.info, fontFamily: 'monospace', wordBreak: 'break-all', display: 'block', lineHeight: 1.7 }}>
                         {step.url}
                       </Text>
                     </div>
 
                     {/* Payload editor */}
                     {hasPayload && (
-                      <div style={{ padding: '10px 16px 12px 58px', background: '#fff', borderBottom: '1px solid #e2e8f0' }}>
-                        <Text style={{ fontSize: 11, color: '#64748b', fontWeight: 600, display: 'block', marginBottom: 6 }}>Request Body (editable JSON)</Text>
+                      <div style={{ padding: '14px 20px 16px 20px', background: '#fff', borderBottom: '1px solid #e2e8f0' }}>
+                        <Text style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', marginBottom: 8 }}>Request Body (editable JSON)</Text>
                         <Input.TextArea
                           value={payloads[step.key] ?? ''}
                           onChange={e => setPayloads(prev => ({ ...prev, [step.key]: e.target.value }))}
-                          autoSize={{ minRows: 4, maxRows: 20 }}
-                          style={{ fontFamily: 'monospace', fontSize: 11.5, background: '#f8fafc', color: '#1e293b', borderColor: '#cbd5e1', borderRadius: 6 }}
+                          autoSize={{ minRows: 5, maxRows: 24 }}
+                          style={{ fontFamily: 'monospace', fontSize: 12, background: '#f8fafc', color: '#1e293b', borderColor: '#cbd5e1', borderRadius: 6, lineHeight: 1.6 }}
                         />
                       </div>
                     )}
 
                     {/* Response */}
                     {r && !r.loading && (
-                      <div style={{ padding: '10px 16px 12px 58px', background: ok ? '#f0fdf4' : fail ? '#fff5f5' : '#fff' }}>
-                        <Text style={{ fontSize: 11, color: '#64748b', fontWeight: 600, display: 'block', marginBottom: 6 }}>
-                          Response {r.status != null ? `— HTTP ${r.status}` : ''}
+                      <div style={{ padding: '14px 20px 16px 20px', background: ok ? '#f0fdf4' : fail ? '#fff5f5' : '#fff' }}>
+                        <Text style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', marginBottom: 8 }}>
+                          Response — HTTP {r.status}
                         </Text>
                         {r.error
-                          ? <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, padding: '8px 12px' }}>
+                          ? <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, padding: '10px 14px' }}>
                               <Text style={{ color: '#991b1b', fontSize: 12 }}>Network error: {r.error}</Text>
                             </div>
-                          : <pre style={{ margin: 0, fontSize: 12, fontFamily: 'monospace', color: ok ? '#14532d' : '#7f1d1d', background: ok ? '#dcfce7' : '#fee2e2', border: `1px solid ${ok ? '#86efac' : '#fca5a5'}`, borderRadius: 6, padding: '10px 12px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 320, overflowY: 'auto' }}>
+                          : <pre style={{ margin: 0, fontSize: 12, fontFamily: 'monospace', lineHeight: 1.6, color: ok ? '#14532d' : '#7f1d1d', background: ok ? '#dcfce7' : '#fee2e2', border: `1px solid ${ok ? '#86efac' : '#fca5a5'}`, borderRadius: 6, padding: '12px 14px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 360, overflowY: 'auto' }}>
                               {r.body}
                             </pre>
                         }
@@ -2293,8 +2297,8 @@ const AccountingApiTesterModal: React.FC<{
 
                     {/* Placeholder when not yet tested */}
                     {!r && (
-                      <div style={{ padding: '12px 16px 14px 58px', background: '#fafafa' }}>
-                        <Text style={{ fontSize: 12, color: '#94a3b8' }}>Click <strong>Test</strong> to fire this request and see the live response.</Text>
+                      <div style={{ padding: '14px 20px 16px 20px', background: '#fafafa' }}>
+                        <Text style={{ fontSize: 12, color: '#94a3b8' }}>Click <strong>Test</strong> to fire this request and see the live response here.</Text>
                       </div>
                     )}
                   </div>
