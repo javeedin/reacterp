@@ -1517,9 +1517,16 @@ const EditJournal: React.FC = () => {
                 padding: '8px 12px',
                 background: REDWOOD.neutral100,
                 borderBottom: `1px solid ${REDWOOD.neutral200}`,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
               }}
             >
               <Text strong style={{ fontSize: 11 }}>Journal Lines</Text>
+              <Space size={6}>
+                <Typography.Text style={{ fontSize: 11, color: '#666' }}>Show References</Typography.Text>
+                <Switch size="small" checked={showReferences} onChange={setShowReferences} />
+              </Space>
             </div>
 
             {/* Lines Toolbar */}
@@ -1558,10 +1565,6 @@ const EditJournal: React.FC = () => {
                 </Tooltip>
                 <Button size="small" style={{ fontSize: 10 }}>Detach</Button>
                 <Button size="small" style={{ fontSize: 10 }}>Wrap</Button>
-              </Space>
-              <Space size={6}>
-                <Typography.Text style={{ fontSize: 11, color: '#666' }}>Show References</Typography.Text>
-                <Switch size="small" checked={showReferences} onChange={setShowReferences} />
               </Space>
             </div>
 
