@@ -3,7 +3,7 @@ import dayjs, { type Dayjs } from 'dayjs';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
   DatePicker, InputNumber, Checkbox, Row, Col, Space, Tag, Tooltip, Tabs,
-  message, Spin, Empty, Divider, Badge, Collapse, Modal, Upload, Popconfirm, Alert,
+  message, Spin, Empty, Divider, Badge, Collapse, Modal, Upload, Popconfirm, Alert, Switch,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -1977,6 +1977,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
   const [viewAcctSourceId, setViewAcctSourceId] = useState<number | null>(null);
   const [viewAcctLines, setViewAcctLines]     = useState<any[]>([]);
   const [viewAcctLoading, setViewAcctLoading] = useState(false);
+  const [showEntered, setShowEntered]         = useState(false);
 
   const modulePrefix = module === 'ap' ? '/ap' : '/cash';
 
@@ -3147,8 +3148,16 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
         title={<Space><EyeOutlined style={{ color: REDWOOD.success }} />Accounting Journals — Transfer #{viewAcctSourceId}</Space>}
         open={viewAcctOpen}
         onCancel={() => setViewAcctOpen(false)}
-        footer={<Button onClick={() => setViewAcctOpen(false)}>Close</Button>}
-        width={920}
+        footer={
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Space>
+              <Text style={{ fontSize: 12 }}>Show Entered</Text>
+              <Switch size="small" checked={showEntered} onChange={setShowEntered} />
+            </Space>
+            <Button onClick={() => setViewAcctOpen(false)}>Close</Button>
+          </div>
+        }
+        width={showEntered ? 1100 : 820}
         destroyOnClose
       >
         {viewAcctLoading ? (
@@ -3203,16 +3212,18 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
                       { title: 'Line Description', key: 'desc',
                         render: (_: any, l: any) =>
                           <Text style={{ fontSize: 12 }}>{l.description ?? '—'}</Text> },
-                      { title: 'Entered Dr', key: 'eDr', width: 120, align: 'right' as const,
-                        render: (_: any, l: any) => {
-                          const v = l.enteredDr ?? 0;
-                          return v > 0 ? <Text style={{ fontWeight: 600 }}>{fmtAmount(v, l.currencyCode)}</Text> : <Text type="secondary">—</Text>;
-                        }},
-                      { title: 'Entered Cr', key: 'eCr', width: 120, align: 'right' as const,
-                        render: (_: any, l: any) => {
-                          const v = l.enteredCr ?? 0;
-                          return v > 0 ? <Text style={{ fontWeight: 600 }}>{fmtAmount(v, l.currencyCode)}</Text> : <Text type="secondary">—</Text>;
-                        }},
+                      ...(showEntered ? [
+                        { title: 'Entered Dr', key: 'eDr', width: 130, align: 'right' as const,
+                          render: (_: any, l: any) => {
+                            const v = l.enteredDr ?? 0;
+                            return v > 0 ? <Text style={{ fontWeight: 600 }}>{fmtAmount(v, l.currencyCode)}</Text> : <Text type="secondary">—</Text>;
+                          }},
+                        { title: 'Entered Cr', key: 'eCr', width: 130, align: 'right' as const,
+                          render: (_: any, l: any) => {
+                            const v = l.enteredCr ?? 0;
+                            return v > 0 ? <Text style={{ fontWeight: 600 }}>{fmtAmount(v, l.currencyCode)}</Text> : <Text type="secondary">—</Text>;
+                          }},
+                      ] : []),
                       { title: 'Accounted Dr', key: 'aDr', width: 120, align: 'right' as const,
                         render: (_: any, l: any) => {
                           const v = l.accountedDr ?? 0;
