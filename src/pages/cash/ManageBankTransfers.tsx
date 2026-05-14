@@ -323,12 +323,23 @@ const TransferForm: React.FC<{
 
   // Fetch the latest BMS exchange rate whenever the currency pair changes
   useEffect(() => {
-    if (!fromCurrency || !toCurrency || fromCurrency === toCurrency) {
+    if (!fromCurrency || !toCurrency) {
       setBmsRateInfo(null);
       return;
     }
+    // Same currency — rate is always 1, no need to fetch
+    if (fromCurrency === toCurrency) {
+      setBmsRateInfo(null);
+      if (!initialValues?.conversionRate) {
+        form.setFieldsValue({ conversionRate: 1 });
+      }
+      return;
+    }
     setBmsRateLoading(true);
-    fetch(`${APEX_BASE}/currencies/bmsrate?source_cur=${fromCurrency}&target_cur=${toCurrency}`)
+    // Rate direction: how much from-currency per 1 payment-currency unit
+    // so that fromAmount = paymentAmount × rate is correct
+    // paymentCurrency = toCurrency (follows to account)
+    fetch(`${APEX_BASE}/currencies/bmsrate?source_cur=${toCurrency}&target_cur=${fromCurrency}`)
       .then(r => r.json())
       .then(data => {
         if (data.status === 'ok') {
@@ -381,6 +392,11 @@ const TransferForm: React.FC<{
   const handleSubmit = async () => {
     let values: any;
     try { values = await form.validateFields(); } catch { return; }
+
+    if (!cashClearingAcct) {
+      message.error('Cash Clearing Account is required before saving.');
+      return;
+    }
 
     setSaving(true);
     try {
@@ -778,13 +794,21 @@ const TransferForm: React.FC<{
                 </div>
               )}
             </Form.Item>
-            <Form.Item label="Cash Clearing Account" labelCol={{ span: 4 }} wrapperCol={{ span: 20 }} style={{ marginBottom: 4 }}>
+            <Form.Item
+              label="Cash Clearing Account"
+              labelCol={{ span: 4 }} wrapperCol={{ span: 20 }}
+              style={{ marginBottom: 4 }}
+              required
+              validateStatus={!isReadOnly && !cashClearingAcct ? 'error' : ''}
+              help={!isReadOnly && !cashClearingAcct ? 'Cash Clearing Account is required' : undefined}
+            >
               <Input.Group compact style={{ display: 'flex' }}>
                 <Input
                   value={cashClearingAcct}
                   readOnly
                   placeholder="Select clearing account combination"
-                  style={{ flex: 1, fontFamily: 'monospace', fontSize: 12, cursor: 'pointer' }}
+                  style={{ flex: 1, fontFamily: 'monospace', fontSize: 12, cursor: 'pointer',
+                    borderColor: !isReadOnly && !cashClearingAcct ? REDWOOD.error : undefined }}
                   onClick={() => !isReadOnly && setCashClearingOpen(true)}
                 />
                 <Button
