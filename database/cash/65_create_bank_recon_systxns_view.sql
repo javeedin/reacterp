@@ -87,8 +87,9 @@ UNION ALL
 
     -- ── Bank Transfers (GL Journal Lines — BANK_ASSET lines only) ────────────
     -- REFERENCE1 = bank_transfer_id  REFERENCE2 = transfer_number
-    -- REFERENCE3 = accounting_class  REFERENCE4 = business_unit
-    -- REFERENCE5 = event_type        REFERENCE7 = bank_account_name
+    -- REFERENCE3 = accounting_class  (may be blank in existing data)
+    -- REFERENCE4 = business_unit     REFERENCE5 = event_type (BANKTFR-DISBURSE|BANKTFR-RECEIPT)
+    -- REFERENCE7 = bank_account_name (only set on the bank asset lines, not clearing lines)
     SELECT
         'BANK_TRANSFER'                                  AS SOURCE,
         TO_CHAR(l.JE_HEADER_ID) || '-' || TO_CHAR(l.JE_LINE_NUMBER)
@@ -118,7 +119,8 @@ UNION ALL
     FROM RR_GL_JE_LINES_ALL    l
     JOIN RR_GL_JE_HEADERS      h ON h.JE_HEADER_ID = l.JE_HEADER_ID
     JOIN RR_GL_JOURNAL_BATCHES b ON b.JE_BATCH_ID  = l.BATCH_ID
-    WHERE l.REFERENCE3 = 'BANK_ASSET'
+    WHERE l.REFERENCE5 IN ('BANKTFR-DISBURSE', 'BANKTFR-RECEIPT')
+      AND l.REFERENCE7 IS NOT NULL
 /
 
 
