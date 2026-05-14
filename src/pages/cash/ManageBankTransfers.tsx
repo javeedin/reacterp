@@ -2016,6 +2016,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
 
   // ── Search ────────────────────────────────────────────────────────────────
   const handleSearch = useCallback(async () => {
+    try { await searchForm.validateFields(['businessUnit']); } catch { return; }
     const values = searchForm.getFieldsValue();
     const params = new URLSearchParams();
     if (values.dateFrom) params.set('date_from', (values.dateFrom as Dayjs).format('YYYY-MM-DD'));
@@ -2738,8 +2739,8 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       <Form form={searchForm} layout="horizontal" labelCol={{ span: 8 }} wrapperCol={{ span: 16 }}>
         <Row gutter={24}>
           <Col xs={24} sm={12} lg={8}>
-            <Form.Item label="Business Unit" name="businessUnit">
-              <Select showSearch allowClear placeholder="Any" options={businessUnits} optionFilterProp="label"
+            <Form.Item label="Business Unit" name="businessUnit" rules={[{ required: true, message: 'Business Unit is required' }]}>
+              <Select showSearch allowClear placeholder="Select BU" options={businessUnits} optionFilterProp="label"
                 onChange={(v) => setSearchBu(v ?? undefined)}
                 onClear={() => setSearchBu(undefined)}
               />
