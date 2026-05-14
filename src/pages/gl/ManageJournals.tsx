@@ -581,22 +581,59 @@ const ManageJournals: React.FC = () => {
   };
 
   // Open journal in a new tab
-  const openJournalTab = (journal: JournalRecord) => {
+  const openJournalTab = async (journal: JournalRecord) => {
     const tabKey = `journal-${journal.jeHeaderId}`;
 
     // Check if tab is already open
     const existingTab = openJournalTabs.find(tab => tab.key === tabKey);
     if (existingTab) {
-      // Just switch to existing tab
       setActiveTabKey(tabKey);
       return;
     }
+
+    // Fetch lines with reference columns from the lines endpoint
+    let fetchedLines: JournalLine[] = journal.lines || [];
+    try {
+      const linesRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/${journal.jeHeaderId}/lines`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (linesRes.ok) {
+        const linesData = await linesRes.json();
+        const items = linesData.items ?? (Array.isArray(linesData) ? linesData : []);
+        if (items.length > 0) {
+          fetchedLines = items.map((l: any) => ({
+            lineId:            l.lineId ?? l.lineNum ?? 0,
+            lineNum:           l.lineNum ?? l.JE_LINE_NUMBER ?? 0,
+            account:           l.account ?? l.ACCOUNT_COMBINATION ?? '',
+            accountDescription: l.accountDescription ?? '',
+            description:       l.description ?? '',
+            enteredDr:         l.enteredDr ?? 0,
+            enteredCr:         l.enteredCr ?? 0,
+            accountedDr:       l.accountedDr ?? 0,
+            accountedCr:       l.accountedCr ?? 0,
+            currency:          l.currency ?? l.currencyCode ?? '',
+            reference1:  l.reference1  ?? undefined,
+            reference2:  l.reference2  ?? undefined,
+            reference3:  l.reference3  ?? undefined,
+            reference4:  l.reference4  ?? undefined,
+            reference5:  l.reference5  ?? undefined,
+            reference6:  l.reference6  ?? undefined,
+            reference7:  l.reference7  ?? undefined,
+            reference8:  l.reference8  ?? undefined,
+            reference9:  l.reference9  ?? undefined,
+            reference10: l.reference10 ?? undefined,
+          }));
+        }
+      }
+    } catch { /* use existing lines if fetch fails */ }
+
+    const journalWithLines = { ...journal, lines: fetchedLines };
 
     // Initialize editable state for unposted journals
     if (journal.statusMeaning !== 'Posted') {
       setEditableLines(prev => ({
         ...prev,
-        [tabKey]: JSON.parse(JSON.stringify(journal.lines || [])),
+        [tabKey]: JSON.parse(JSON.stringify(fetchedLines)),
       }));
       setEditableJournalFields(prev => ({
         ...prev,
@@ -612,7 +649,7 @@ const ManageJournals: React.FC = () => {
     }
 
     // Add new tab (store the search URL that produced this journal)
-    setOpenJournalTabs(prev => [...prev, { key: tabKey, journal, sourceUrl: lastSearchUrl || undefined }]);
+    setOpenJournalTabs(prev => [...prev, { key: tabKey, journal: journalWithLines, sourceUrl: lastSearchUrl || undefined }]);
     setActiveTabKey(tabKey);
   };
 
