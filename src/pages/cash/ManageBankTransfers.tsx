@@ -1852,19 +1852,30 @@ END;
 // ────────────────────────────────────────────────────────────────────────────
 // ── API Inspector Panel ──────────────────────────────────────────────────────
 const ApiInspectorPanel: React.FC<{ apexBase: string; lastApiUrl: string }> = ({ apexBase, lastApiUrl }) => {
-  const [results, setResults] = React.useState<Record<string, { loading: boolean; status?: number; body?: string; error?: string }>>({});
+  const [results, setResults]     = React.useState<Record<string, { loading: boolean; status?: number; body?: string; error?: string }>>({});
+  const [deleteId, setDeleteId]   = React.useState('');
 
   const endpoints = [
-    { key: 'bu',   label: 'Business Units LOV',   color: 'blue',    url: `${apexBase}/gl/businessunits` },
-    { key: 'ba',   label: 'Bank Accounts LOV',     color: 'cyan',    url: `${apexBase}/banks/bankaccounts` },
-    { key: 'list', label: 'Bank Transfers (last search)', color: 'green', url: lastApiUrl || `${apexBase}/cash/banktransfers` },
-    { key: 'post', label: 'POST — Create/Sync',    color: 'orange',  url: `${apexBase}/cash/banktransfers`, method: 'POST' },
+    { key: 'bu',     label: 'Business Units LOV',         color: 'blue',   url: `${apexBase}/gl/businessunits` },
+    { key: 'ba',     label: 'Bank Accounts LOV',           color: 'cyan',   url: `${apexBase}/banks/bankaccounts` },
+    { key: 'list',   label: 'Bank Transfers (last search)', color: 'green',  url: lastApiUrl || `${apexBase}/cash/banktransfers` },
+    { key: 'post',   label: 'POST — Create/Sync',          color: 'orange', url: `${apexBase}/cash/banktransfers`, method: 'POST' },
+    { key: 'delete', label: 'DELETE — Delete Transfer',    color: 'red',    url: `${apexBase}/cash/banktransfers/${deleteId || ':transferId'}`, method: 'DELETE' },
   ];
 
   const test = async (key: string, url: string, method = 'GET') => {
+    if (key === 'delete' && !deleteId.trim()) {
+      setResults(prev => ({ ...prev, [key]: { loading: false, error: 'Enter a Transfer ID above before testing DELETE.' } }));
+      return;
+    }
     setResults(prev => ({ ...prev, [key]: { loading: true } }));
     try {
-      const res = await fetch(url, method === 'POST' ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"items":[]}' } : {});
+      const opts: RequestInit = method === 'POST'
+        ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"items":[]}' }
+        : method === 'DELETE'
+          ? { method: 'DELETE' }
+          : {};
+      const res  = await fetch(url, opts);
       const text = await res.text();
       let pretty = text;
       try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch {}
@@ -1885,7 +1896,17 @@ const ApiInspectorPanel: React.FC<{ apexBase: string; lastApiUrl: string }> = ({
                 <Tag color={ep.color} style={{ margin: 0, fontSize: 10, flexShrink: 0 }}>{ep.method ?? 'GET'}</Tag>
                 <Text style={{ color: '#8b949e', fontSize: 11, flexShrink: 0 }}>{ep.label}</Text>
               </div>
+              {ep.key === 'delete' && (
+                <Input
+                  size="small"
+                  placeholder="Transfer ID"
+                  value={deleteId}
+                  onChange={e => { setDeleteId(e.target.value); setResults(prev => ({ ...prev, delete: undefined as any })); }}
+                  style={{ width: 130, fontSize: 11, background: '#0d1117', color: '#c9d1d9', borderColor: '#444' }}
+                />
+              )}
               <Button size="small" loading={r?.loading}
+                danger={ep.key === 'delete'}
                 style={{ fontSize: 11, flexShrink: 0 }}
                 onClick={() => test(ep.key, ep.url, ep.method)}>
                 Test
