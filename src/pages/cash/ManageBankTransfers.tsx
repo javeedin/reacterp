@@ -63,6 +63,7 @@ interface TransferRecord {
   paymentStatus: string;
   paymentMethod: string;
   paymentProfileName: string;
+  paymentDocumentNumber?: string;
   businessUnit: string;
   paymentFile: number;
   fromExternalTrxId: number;
@@ -295,6 +296,7 @@ const TransferForm: React.FC<{
         businessUnit: initialValues.businessUnit,
         paymentMethod: initialValues.paymentMethod,
         paymentProfileName: initialValues.paymentProfileName,
+        paymentDocumentNumber: initialValues.paymentDocumentNumber,
         memo: initialValues.memo,
         paymentCurrencyCode: initialValues.paymentCurrencyCode ?? '',
       });
@@ -533,6 +535,7 @@ const TransferForm: React.FC<{
       PaymentStatus:             initialValues?.paymentStatus ?? '',
       PaymentMethod:             values.paymentMethod ?? '',
       PaymentProfileName:        values.paymentProfileName ?? '',
+      PaymentDocumentNumber:     values.paymentDocumentNumber ?? null,
       Businessunit:              values.businessUnit ?? '',
       IsSettledWithIbyFlag:      values.isSettledWithIbyFlag ? 'true' : 'false',
       CashClearingAccount:       cashClearingAcct || null,
@@ -1053,6 +1056,10 @@ const TransferForm: React.FC<{
                   <Option key={p} value={p}>{p}</Option>
                 ))}
               </Select>
+            </Form.Item>
+
+            <Form.Item label="Payment Document No." name="paymentDocumentNumber" style={fs}>
+              <Input placeholder="Enter payment document number" disabled={isReadOnly || !buSelected} />
             </Form.Item>
 
             <Form.Item label="Memo" name="memo" style={fs}>
