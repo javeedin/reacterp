@@ -1753,7 +1753,7 @@ END;
                   await createAccounting({
                     header: {
                       moduleName: 'CM', sourceTable: 'BANK_ACCOUNT_TRANSFERS',
-                      sourceId: initialValues?.bankAccountTransferId ?? 0,
+                      sourceId: initialValues?.bankAccountTransferId ?? savedId ?? 0,
                       sourceNumber: transferNumber,
                       sourceType: 'Bank Transfer', eventTypeCode: 'BANK_TRANSFER_DISBURSE',
                       eventDate: today, accountingDate: today, periodName: period,
@@ -1783,7 +1783,7 @@ END;
                   await createAccounting({
                     header: {
                       moduleName: 'CM', sourceTable: 'BANK_ACCOUNT_TRANSFERS',
-                      sourceId: initialValues?.bankAccountTransferId ?? 0,
+                      sourceId: initialValues?.bankAccountTransferId ?? savedId ?? 0,
                       sourceNumber: transferNumber,
                       sourceType: 'Bank Transfer', eventTypeCode: 'BANK_TRANSFER_RECEIPT',
                       eventDate: today, accountingDate: today, periodName: period,
@@ -2019,8 +2019,8 @@ const AccountingApiTesterModal: React.FC<{
     const lineBase     = (ref5: string, ccy: string, rate: number) => ({ statAmount: null, currencyConversionDate: txnDate, currencyConversionRate: rate, userCurrencyConversionType: 'Corporate', chartOfAccountsName: 'Chart of Accounts', reference1: String(id), reference2: String(num), reference4: bu, reference5: ref5, createdBy: currentUser, currencyCode: ccy });
 
     const glDisbPayload = {
-      batch:  { ...commonBatch, batchName: `BANKTFR-${num}-DISBURSE`, batchDescription: `Bank Transfer ${num} — Disbursement`, controlTotal: aedValue, runningTotalDr: aedValue, runningTotalCr: aedValue },
-      header: { ...commonHdr,   journalName: `BANKTFR-${num}-DISBURSE`, description: `Bank Transfer ${num} — Disbursement`, currencyCode: j1currency, currencyConversionRate: j1Rate, runningTotalDr: aedValue, runningTotalCr: aedValue },
+      batch:  { ...commonBatch, batchName: `BANKTFR-${num}-DISBURSE`, batchDescription: `Bank Transfer ${num} — Disbursement`, controlTotal: aedValue, runningTotalDr: fromAmt, runningTotalCr: fromAmt },
+      header: { ...commonHdr,   journalName: `BANKTFR-${num}-DISBURSE`, description: `Bank Transfer ${num} — Disbursement`, currencyCode: j1currency, currencyConversionRate: j1Rate, runningTotalDr: fromAmt, runningTotalCr: fromAmt },
       lines: [
         { ...lineBase('BANKTFR-DISBURSE', j1currency, j1Rate), accountCombination: clearingAcct, enteredDr: fromAmt, enteredCr: null, accountedDr: aedValue, accountedCr: null, description: `Cash Clearing DR – ${txn.fromBankAccountName}`, accountingClass: 'CASH_CLEARING', reference3: 'CASH_CLEARING' },
         { ...lineBase('BANKTFR-DISBURSE', j1currency, j1Rate), accountCombination: fromAsset,    enteredDr: null, enteredCr: fromAmt, accountedDr: null, accountedCr: aedValue, description: `From Bank CR – ${txn.fromBankAccountName}`,    accountingClass: 'BANK_ASSET',    reference3: 'BANK_ASSET', reference7: txn.fromBankAccountName },
@@ -2028,8 +2028,8 @@ const AccountingApiTesterModal: React.FC<{
     };
 
     const glRcptPayload = {
-      batch:  { ...commonBatch, batchName: `BANKTFR-${num}-RECEIPT`, batchDescription: `Bank Transfer ${num} — Receipt`, controlTotal: aedValue, runningTotalDr: aedValue, runningTotalCr: aedValue },
-      header: { ...commonHdr,   journalName: `BANKTFR-${num}-RECEIPT`, description: `Bank Transfer ${num} — Receipt`, currencyCode: j2currency, currencyConversionRate: j2Rate, runningTotalDr: aedValue, runningTotalCr: aedValue },
+      batch:  { ...commonBatch, batchName: `BANKTFR-${num}-RECEIPT`, batchDescription: `Bank Transfer ${num} — Receipt`, controlTotal: aedValue, runningTotalDr: pmtAmt, runningTotalCr: pmtAmt },
+      header: { ...commonHdr,   journalName: `BANKTFR-${num}-RECEIPT`, description: `Bank Transfer ${num} — Receipt`, currencyCode: j2currency, currencyConversionRate: j2Rate, runningTotalDr: pmtAmt, runningTotalCr: pmtAmt },
       lines: [
         { ...lineBase('BANKTFR-RECEIPT', j2currency, j2Rate), accountCombination: toAsset,      enteredDr: pmtAmt, enteredCr: null, accountedDr: aedValue, accountedCr: null, description: `To Bank DR – ${txn.toBankAccountName}`,         accountingClass: 'BANK_ASSET',    reference3: 'BANK_ASSET', reference7: txn.toBankAccountName },
         { ...lineBase('BANKTFR-RECEIPT', j2currency, j2Rate), accountCombination: clearingAcct, enteredDr: null, enteredCr: pmtAmt, accountedDr: null, accountedCr: aedValue, description: `Cash Clearing CR – ${txn.toBankAccountName}`, accountingClass: 'CASH_CLEARING', reference3: 'CASH_CLEARING' },
