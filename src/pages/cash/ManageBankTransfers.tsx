@@ -2048,7 +2048,7 @@ const AccountingApiTesterModal: React.FC<{
     setPayloads(prev => {
       const next = { ...prev };
       steps.forEach(s => {
-        if (s.payload !== undefined && ['gl_post_d', 'gl_post_r', 'sla_post_d', 'sla_post_r'].includes(s.key)) {
+        if (s.payload !== undefined && ['gl_create_d', 'gl_create_r', 'gl_post_d', 'gl_post_r', 'sla_post_d', 'sla_post_r'].includes(s.key)) {
           next[s.key] = s.payload;
         }
       });
@@ -2068,9 +2068,46 @@ const AccountingApiTesterModal: React.FC<{
   };
 
   const testStep = async (step: { key: string; method: string; url: string; payload?: string }) => {
+    // Resolve ledger — auto-fetch if not loaded yet, required for GL create steps
+    let resolvedLedger = ledger;
+    if (!resolvedLedger && ['gl_create_d', 'gl_create_r', 'sla_create_d', 'sla_create_r'].includes(step.key) && txn?.businessUnit) {
+      setResults(prev => ({ ...prev, ledger: { loading: true } }));
+      try {
+        const apexBase = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp';
+        const ledgerRes = await fetch(`${apexBase}/gl/getledgername?P_BUSINESS_UNIT_NAME=${encodeURIComponent(txn.businessUnit)}`, { headers: { Accept: 'application/json' } });
+        if (ledgerRes.ok) {
+          const ledgerData = await ledgerRes.json();
+          const item = ledgerData?.items?.[0];
+          if (item) {
+            resolvedLedger = { ledgerId: item.ledger_id, ledgerName: item.ledger_name, currency: item.currency_code || 'AED' };
+            setLedger(resolvedLedger);
+            setResults(prev => ({ ...prev, ledger: { loading: false, status: 200, body: JSON.stringify(ledgerData, null, 2) } }));
+          } else {
+            setResults(prev => ({ ...prev, ledger: { loading: false, status: 200, body: 'No ledger found' } }));
+            message.error('Could not find ledger for this business unit. Cannot create GL journal.');
+            return;
+          }
+        }
+      } catch {
+        setResults(prev => ({ ...prev, ledger: { loading: false, status: 500, body: 'Failed to auto-fetch ledger' } }));
+        message.error('Failed to fetch ledger. Cannot create GL journal.');
+        return;
+      }
+    }
+
     setResults(prev => ({ ...prev, [step.key]: { loading: true } }));
     try {
-      const body = payloads[step.key] ?? '{}';
+      let body = payloads[step.key] ?? '{}';
+      // If we just fetched the ledger, patch it into the GL create payload before POSTing
+      // (React state hasn't re-rendered yet so payloads[step.key] still has the placeholder)
+      if (resolvedLedger && resolvedLedger !== ledger && ['gl_create_d', 'gl_create_r'].includes(step.key)) {
+        try {
+          const parsed = JSON.parse(body);
+          if (parsed.batch) parsed.batch.ledgerName = resolvedLedger.ledgerName;
+          if (parsed.header) parsed.header.ledgerName = resolvedLedger.ledgerName;
+          body = JSON.stringify(parsed);
+        } catch {}
+      }
       const opts: RequestInit = step.method === 'GET'
         ? { headers: { Accept: 'application/json' } }
         : { method: step.method, headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body };
