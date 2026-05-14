@@ -3410,6 +3410,11 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
               <Button icon={<DownloadOutlined />} onClick={exportToExcel} disabled={transfers.length === 0}>
                 Export to Excel
               </Button>
+              <Button icon={<ApiOutlined />}
+                style={{ color: '#9d4edd', borderColor: '#9d4edd', fontWeight: 600 }}
+                onClick={() => setApiTesterOpen(true)}>
+                Debug
+              </Button>
               <Button icon={<PlusOutlined />} type="primary" onClick={openCreate}
                 style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
                 Create Transfer
