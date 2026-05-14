@@ -185,6 +185,7 @@ export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResu
       reference3:               l.accountingClass || null,
       reference4:               businessUnit || null,
       reference5:               ref5,
+      reference7:               l.reference7 || null,
       createdBy,
     };
     }),
