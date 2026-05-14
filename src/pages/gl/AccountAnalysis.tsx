@@ -25,6 +25,7 @@ import {
   Modal,
   Checkbox,
   DatePicker,
+  Switch,
 } from 'antd';
 import {
   HomeOutlined,
@@ -284,6 +285,7 @@ const AccountAnalysis: React.FC = () => {
 
   // Pivot view options
   const [showDrCrColumns, setShowDrCrColumns] = useState(false);
+  const [showEntered, setShowEntered] = useState(false);
 
   // Segment filters for pivot
   const [segmentFilters, setSegmentFilters] = useState<SegmentFilter[]>([
@@ -1798,7 +1800,7 @@ const AccountAnalysis: React.FC = () => {
           },
         ],
       },
-      {
+      ...(showEntered ? [{
         title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Entered</span>,
         onHeaderCell: () => ({ style: groupBorderLeft }),
         children: [
@@ -1829,7 +1831,7 @@ const AccountAnalysis: React.FC = () => {
               fmtBalance(runningBalances[index]?.entered ?? 0),
           },
         ],
-      },
+      }] : []),
       {
         title: '',
         key: 'drillDown',
@@ -2102,6 +2104,10 @@ const AccountAnalysis: React.FC = () => {
               >
                 Export
               </Button>
+              <Space size={4}>
+                <Typography.Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Show Entered</Typography.Text>
+                <Switch size="small" checked={showEntered} onChange={setShowEntered} />
+              </Space>
             </Space>
           </div>
 
@@ -2136,19 +2142,23 @@ const AccountAnalysis: React.FC = () => {
                       {/* Accounted Balance */}
                       {/* @ts-expect-error antd6 SummaryCell lacks style */}
                       <Table.Summary.Cell index={11} align="right" style={groupBorderRight} />
-                      {/* Entered Dr */}
-                      {/* @ts-expect-error antd6 SummaryCell lacks style */}
-                      <Table.Summary.Cell index={12} align="right" style={groupBorderLeft}>
-                        <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(gridTotals.enteredDr)}</Text>
-                      </Table.Summary.Cell>
-                      {/* Entered Cr */}
-                      <Table.Summary.Cell index={13} align="right">
-                        <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.enteredCr)}</Text>
-                      </Table.Summary.Cell>
-                      {/* Entered Balance */}
-                      {/* @ts-expect-error antd6 SummaryCell lacks style */}
-                      <Table.Summary.Cell index={14} align="right" style={groupBorderRight} />
-                      <Table.Summary.Cell index={15} />
+                      {showEntered && (
+                        <>
+                          {/* Entered Dr */}
+                          {/* @ts-expect-error antd6 SummaryCell lacks style */}
+                          <Table.Summary.Cell index={12} align="right" style={groupBorderLeft}>
+                            <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(gridTotals.enteredDr)}</Text>
+                          </Table.Summary.Cell>
+                          {/* Entered Cr */}
+                          <Table.Summary.Cell index={13} align="right">
+                            <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.enteredCr)}</Text>
+                          </Table.Summary.Cell>
+                          {/* Entered Balance */}
+                          {/* @ts-expect-error antd6 SummaryCell lacks style */}
+                          <Table.Summary.Cell index={14} align="right" style={groupBorderRight} />
+                        </>
+                      )}
+                      <Table.Summary.Cell index={showEntered ? 15 : 12} />
                     </Table.Summary.Row>
                   </Table.Summary>
                 ) : null
