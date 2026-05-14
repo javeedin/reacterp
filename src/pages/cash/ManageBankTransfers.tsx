@@ -239,7 +239,8 @@ const TransferForm: React.FC<{
   buCompanyMap: Record<string, string>;
   onSave: (created?: { bankAccountTransferId: number; bankAccountTransferNumber: string; record?: Partial<TransferRecord> }) => void;
   onCancel: () => void;
-}> = ({ initialValues, bankAccounts, businessUnits, bankCurrencyMap, buBankMap, bankAccountAssetMap, buCompanyMap, onSave, onCancel }) => {
+  onViewAccounting?: (id: number) => void;
+}> = ({ initialValues, bankAccounts, businessUnits, bankCurrencyMap, buBankMap, bankAccountAssetMap, buCompanyMap, onSave, onCancel, onViewAccounting }) => {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -1121,21 +1122,30 @@ const TransferForm: React.FC<{
               </Popconfirm>
             )}
             <Button onClick={onCancel}>{isEdit ? 'Close' : 'Cancel'}</Button>
-            <Tooltip title={
-              !isEdit ? 'Save the transfer first before creating accounting' :
-              isAccounted ? 'Accounting has already been created for this transfer' :
-              !cashClearingAcct ? 'Select a cash clearing account first' :
-              (!selectedFromAcct || !selectedToAcct) ? 'Select both bank accounts first' : undefined
-            }>
+            {isAccounted ? (
               <Button
-                icon={<AccountBookOutlined />}
-                onClick={() => setPreviewAcctOpen(true)}
-                disabled={!isEdit || isAccounted || !selectedFromAcct || !selectedToAcct || !cashClearingAcct}
-                style={{ color: (!isEdit || isAccounted) ? undefined : REDWOOD.info, borderColor: (!isEdit || isAccounted) ? undefined : REDWOOD.info }}
+                icon={<EyeOutlined />}
+                onClick={() => initialValues?.bankAccountTransferId && onViewAccounting?.(initialValues.bankAccountTransferId)}
+                style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
               >
-                {isAccounted ? 'Accounted' : 'Preview Accounting'}
+                View Accounting
               </Button>
-            </Tooltip>
+            ) : (
+              <Tooltip title={
+                !isEdit ? 'Save the transfer first before creating accounting' :
+                !cashClearingAcct ? 'Select a cash clearing account first' :
+                (!selectedFromAcct || !selectedToAcct) ? 'Select both bank accounts first' : undefined
+              }>
+                <Button
+                  icon={<AccountBookOutlined />}
+                  onClick={() => setPreviewAcctOpen(true)}
+                  disabled={!isEdit || !selectedFromAcct || !selectedToAcct || !cashClearingAcct}
+                  style={{ color: !isEdit ? undefined : REDWOOD.info, borderColor: !isEdit ? undefined : REDWOOD.info }}
+                >
+                  Preview Accounting
+                </Button>
+              </Tooltip>
+            )}
             {!isEdit && !savedId && (
               <Button type="primary" loading={saving} onClick={handleSubmit}
                 style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
@@ -2215,18 +2225,63 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
   };
   const handleEditSaved = (_created?: { bankAccountTransferId: number; bankAccountTransferNumber: string; record?: Partial<TransferRecord> }) => { loadLovs(); handleSearch(); };
 
+  // ── View Accounting (shared handler) ─────────────────────────────────────
+  const openViewAccounting = async (record: Pick<TransferRecord, 'bankAccountTransferId' | 'bankAccountTransferNumber'>) => {
+    setViewAcctSourceId(record.bankAccountTransferId);
+    setViewAcctLines([]);
+    setViewAcctLoading(true);
+    setViewAcctOpen(true);
+    try {
+      const { getLinesByHeaderId } = await import('../../services/sla.service');
+      const hdrsUrl = `${APEX_BASE}/sla/journals?sourceTable=BANK_ACCOUNT_TRANSFERS&sourceNumber=${encodeURIComponent(String(record.bankAccountTransferNumber))}&moduleName=CM&limit=20`;
+      const hdrsRes = await fetch(hdrsUrl);
+      const hdrsData = hdrsRes.ok ? await hdrsRes.json() : { items: [] };
+      const headers = (hdrsData.items ?? []).filter(
+        (h: any) => String(h.sourceNumber) === String(record.bankAccountTransferNumber)
+      );
+      const allLines: any[] = [];
+      for (const hdr of headers) {
+        const linesResult = await getLinesByHeaderId(hdr.headerId);
+        (linesResult.items ?? []).forEach((l: any) => allLines.push({
+          ...l,
+          headerId: hdr.headerId,
+          eventTypeCode: hdr.eventTypeCode,
+          periodName: hdr.periodName,
+          currencyCode: l.currencyCode || hdr.currencyCode,
+        }));
+      }
+      setViewAcctLines(allLines);
+    } catch { setViewAcctLines([]); }
+    finally { setViewAcctLoading(false); }
+  };
+
   // ── Create Accounting ─────────────────────────────────────────────────────
-  const openCreateAccountingModal = (forTransfers?: TransferRecord[]) => {
+  const openCreateAccountingModal = async (forTransfers?: TransferRecord[]) => {
     const selected = forTransfers ?? transfers.filter(t => selectedRowKeys.includes(t.bankAccountTransferId));
-    const rows: TransferAcctRow[] = selected.map(t => {
-      const alreadyAccounted = t.accountingFlag === 'Y';
+
+    // Check GL lines for each transfer upfront to detect duplicates not yet reflected in accountingFlag
+    const glChecks = await Promise.allSettled(
+      selected.map(t =>
+        fetch(`${APEX_BASE}/gl/journals/banktxn-lines?bank_account=${encodeURIComponent(t.fromBankAccountName)}&account_class=BANK_ASSET&row_limit=5`)
+          .then(r => r.json())
+          .then(d => {
+            const items: any[] = d.items ?? [];
+            return items.some(i => String(i.sourceNumber) === String(t.bankAccountTransferNumber));
+          })
+          .catch(() => false)
+      )
+    );
+
+    const rows: TransferAcctRow[] = selected.map((t, idx) => {
+      const alreadyInGL   = glChecks[idx].status === 'fulfilled' && glChecks[idx].value === true;
+      const alreadyAccounted = t.accountingFlag === 'Y' || alreadyInGL;
       const fromAsset    = bankAccountAssetMap[t.fromBankAccountName] || '';
       const toAsset      = bankAccountAssetMap[t.toBankAccountName]   || '';
       const clearingAcct = t.cashClearingAccount || '';
       const date = t.transactionDate || dayjs().format('YYYY-MM-DD');
       let status: TransferAcctRow['status'] = 'pending';
       let msg: string | undefined;
-      if (alreadyAccounted) { status = 'skipped'; msg = 'Already accounted — skipped'; }
+      if (alreadyAccounted) { status = 'skipped'; msg = alreadyInGL ? 'GL journals already exist — skipped' : 'Already accounted — skipped'; }
       else if (!fromAsset || !toAsset) { status = 'error'; msg = `Missing asset account for ${!fromAsset ? t.fromBankAccountName : t.toBankAccountName}`; }
       else if (!clearingAcct) { status = 'error'; msg = 'No cash clearing account — open the record and set it first'; }
       return {
@@ -2775,36 +2830,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
             <Tooltip title="View Accounting">
               <Button type="text" size="small" icon={<EyeOutlined />}
                 style={{ color: REDWOOD.success }}
-                onClick={async () => {
-                  setViewAcctSourceId(record.bankAccountTransferId);
-                  setViewAcctLines([]);
-                  setViewAcctLoading(true);
-                  setViewAcctOpen(true);
-                  try {
-                    const { getLinesByHeaderId } = await import('../../services/sla.service');
-                    // Step 1: get all headers for this transfer (exact sourceTable, sourceNumber)
-                    const hdrsUrl = `${APEX_BASE}/sla/journals?sourceTable=BANK_ACCOUNT_TRANSFERS&sourceNumber=${encodeURIComponent(String(record.bankAccountTransferNumber))}&moduleName=CM&limit=20`;
-                    const hdrsRes = await fetch(hdrsUrl);
-                    const hdrsData = hdrsRes.ok ? await hdrsRes.json() : { items: [] };
-                    const headers = (hdrsData.items ?? []).filter(
-                      (h: any) => String(h.sourceNumber) === String(record.bankAccountTransferNumber)
-                    );
-                    // Step 2: fetch lines for each header individually
-                    const allLines: any[] = [];
-                    for (const hdr of headers) {
-                      const linesResult = await getLinesByHeaderId(hdr.headerId);
-                      (linesResult.items ?? []).forEach((l: any) => allLines.push({
-                        ...l,
-                        headerId: hdr.headerId,
-                        eventTypeCode: hdr.eventTypeCode,
-                        periodName: hdr.periodName,
-                        currencyCode: l.currencyCode || hdr.currencyCode,
-                      }));
-                    }
-                    setViewAcctLines(allLines);
-                  } catch { setViewAcctLines([]); }
-                  finally { setViewAcctLoading(false); }
-                }} />
+                onClick={() => openViewAccounting(record)} />
             </Tooltip>
           ) : (
             <Tooltip title="Create Accounting (2 journals)">
@@ -3027,6 +3053,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
           buCompanyMap={buCompanyMap}
           onSave={handleEditSaved}
           onCancel={() => closeTab(t.key)}
+          onViewAccounting={id => openViewAccounting({ bankAccountTransferId: id, bankAccountTransferNumber: t.record?.bankAccountTransferNumber ?? 0 })}
         />
       ),
     })),
