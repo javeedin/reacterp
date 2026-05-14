@@ -52,6 +52,7 @@ interface TransferRecord {
   fromAmount: number;
   conversionRate: number;
   conversionRateDate?: string;
+  funcConversionRate?: number;
   fromBankAccountName: string;
   toBankAccountName: string;
   fromCurrencyCode: string;
@@ -262,6 +263,7 @@ const TransferForm: React.FC<{
   const [toCurrency, setToCurrency] = useState<string>(initialValues?.toCurrencyCode ?? '');
   const [bmsRateInfo, setBmsRateInfo] = useState<{ rate: number; date: string; sourceCur: string; targetCur: string } | null>(null);
   const [bmsRateLoading, setBmsRateLoading] = useState(false);
+  const [funcRate, setFuncRate] = useState<number | null>(initialValues?.funcConversionRate ?? null);
   const [cashClearingAcct, setCashClearingAcct] = useState<string>(initialValues?.cashClearingAccount ?? '');
   const [cashClearingDesc, setCashClearingDesc] = useState<string>('');
   const [cashClearingOpen, setCashClearingOpen] = useState(false);
@@ -285,6 +287,7 @@ const TransferForm: React.FC<{
         conversionRate: initialValues.conversionRate,
         conversionRateDate: initialValues.conversionRateDate
           ? dayjs(initialValues.conversionRateDate) : undefined,
+        funcConversionRate: initialValues.funcConversionRate,
         isSettledWithIbyFlag: initialValues.isSettledWithIbyFlag === 'Y',
         businessUnit: initialValues.businessUnit,
         paymentMethod: initialValues.paymentMethod,
@@ -294,9 +297,11 @@ const TransferForm: React.FC<{
       });
       setFromCurrency(initialValues.fromCurrencyCode ?? '');
       setToCurrency(initialValues.toCurrencyCode ?? '');
+      setFuncRate(initialValues.funcConversionRate ?? null);
       setEditMode(false);
     } else {
       form.resetFields();
+      setFuncRate(null);
       form.setFieldsValue({ transactionDate: dayjs(), isSettledWithIbyFlag: true, conversionRateType: 'Corporate' });
       setFromCurrency('');
       setToCurrency('');
@@ -358,6 +363,25 @@ const TransferForm: React.FC<{
       .catch(() => setBmsRateInfo(null))
       .finally(() => setBmsRateLoading(false));
   }, [fromCurrency, toCurrency]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch functional currency rate (paymentCurrency → AED) whenever payment currency changes.
+  // Used for GL accounted amounts when both sides are in a foreign currency.
+  useEffect(() => {
+    if (!toCurrency || toCurrency === 'AED') {
+      setFuncRate(toCurrency === 'AED' ? 1 : null);
+      if (!initialValues?.funcConversionRate) form.setFieldsValue({ funcConversionRate: toCurrency === 'AED' ? 1 : undefined });
+      return;
+    }
+    fetch(`${APEX_BASE}/currencies/bmsrate?source_cur=${toCurrency}&target_cur=AED`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.status === 'ok') {
+          setFuncRate(data.rate);
+          if (!initialValues?.funcConversionRate) form.setFieldsValue({ funcConversionRate: data.rate });
+        }
+      })
+      .catch(() => {});
+  }, [toCurrency]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load attachments once when the transfer ID becomes available
   const transferId = initialValues?.bankAccountTransferId;
@@ -445,6 +469,7 @@ const TransferForm: React.FC<{
       ConversionRateType:        values.conversionRateType ?? '',
       ConversionRate:            values.conversionRate ?? null,
       ConversionRateDate:        values.conversionRateDate?.format('YYYY-MM-DD') ?? null,
+      FuncConversionRate:        values.funcConversionRate ?? null,
       Status:                    'Completed',
       PaymentStatus:             initialValues?.paymentStatus ?? '',
       PaymentMethod:             values.paymentMethod ?? '',
@@ -914,6 +939,16 @@ const TransferForm: React.FC<{
             <Form.Item label="Rate Date" name="conversionRateDate" style={fs}>
               <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isReadOnly || !buSelected} />
             </Form.Item>
+
+            <Form.Item label="Func. Conv. Rate" name="funcConversionRate" style={fs}
+              tooltip="Rate from payment currency to AED (functional currency). Used for GL accounted amounts.">
+              <InputNumber style={{ width: '100%' }} min={0} precision={6} disabled={isReadOnly || !buSelected} />
+            </Form.Item>
+            {toCurrency && toCurrency !== 'AED' && funcRate !== null && (
+              <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: -10, marginBottom: 8 }}>
+                BMS: 1 {toCurrency} = {funcRate} AED
+              </div>
+            )}
           </Col>
 
           {/* Right column */}
@@ -1586,7 +1621,8 @@ END;
               onClick={async () => {
                 const values = form.getFieldsValue();
                 const pmtAmt = values.paymentAmount ?? 0;
-                const rate   = values.conversionRate ?? 1;
+                const rate         = values.conversionRate ?? 1;
+                const funcConvRate = values.funcConversionRate ?? rate;
                 const fromAsset = bankAccountAssetMap[selectedFromAcct] || '';
                 const toAsset   = bankAccountAssetMap[selectedToAcct]   || '';
                 setAcctCreating(true);
@@ -1598,7 +1634,7 @@ END;
 
                   // Journal 1: DR Cash Clearing / CR From Bank (From currency)
                   const j1currency = fromCurrency || 'AED';
-                  const j1Rate     = j1currency === 'AED' ? 1 : (rate || 1);
+                  const j1Rate     = j1currency === 'AED' ? 1 : funcConvRate;
                   await createAccounting({
                     header: {
                       moduleName: 'CM', sourceTable: 'BANK_ACCOUNT_TRANSFERS',
@@ -1630,7 +1666,7 @@ END;
 
                   // Journal 2: DR To Bank / CR Cash Clearing (To currency)
                   const j2currency = toCurrency || 'AED';
-                  const j2Rate     = j2currency === 'AED' ? 1 : (rate || 1);
+                  const j2Rate     = j2currency === 'AED' ? 1 : funcConvRate;
                   const isCross2   = j2currency !== j1currency;
                   const toAmt      = !isCross2
                     ? pmtAmt
@@ -1682,12 +1718,13 @@ END;
       >
         {(() => {
           const values = form.getFieldsValue();
-          const pmtAmt = values.paymentAmount ?? 0;
-          const rate   = values.conversionRate ?? 1;
+          const pmtAmt       = values.paymentAmount ?? 0;
+          const rate         = values.conversionRate ?? 1;
+          const funcConvRate = values.funcConversionRate ?? rate;
           const j1currency = fromCurrency || 'AED';
-          const j1Rate     = j1currency === 'AED' ? 1 : (rate || 1);
+          const j1Rate     = j1currency === 'AED' ? 1 : funcConvRate;
           const j2currency = toCurrency || 'AED';
-          const j2Rate     = j2currency === 'AED' ? 1 : (rate || 1);
+          const j2Rate     = j2currency === 'AED' ? 1 : funcConvRate;
           const isCross    = j1currency !== j2currency;
           const toAmt      = !isCross
             ? pmtAmt
@@ -2164,16 +2201,16 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
         const clearingAcct = txn.cashClearingAccount || '';
         const pmtAmt       = Math.abs(txn.paymentAmount ?? 0);
         const rate         = txn.conversionRate || 1;
+        const funcConvRate = txn.funcConversionRate || rate;
 
         // Resolve currencies — DB fields may be NULL for synced transfers, fall back to bankCurrencyMap
         const j1currency = txn.fromCurrencyCode || bankCurrencyMap[txn.fromBankAccountName] || 'AED';
         const j2currency = txn.toCurrencyCode   || bankCurrencyMap[txn.toBankAccountName]   || 'AED';
         const isCross    = j1currency !== j2currency;
 
-        // Exchange rates: the stored conversionRate is always "foreign units per 1 AED" direction
-        // if j1 is functional (AED), rate applies to j2; otherwise rate applies to j1.
-        const j1Rate = j1currency === 'AED' ? 1 : rate;
-        const j2Rate = j2currency === 'AED' ? 1 : rate;
+        // Use funcConversionRate (payment→AED) for accounted amounts; falls back to conversionRate
+        const j1Rate = j1currency === 'AED' ? 1 : funcConvRate;
+        const j2Rate = j2currency === 'AED' ? 1 : funcConvRate;
 
         // toAmt = amount the TO bank receives in its own currency
         // When j1 is foreign and j2 is AED: toAmt = pmtAmt (foreign) × rate = AED equivalent
