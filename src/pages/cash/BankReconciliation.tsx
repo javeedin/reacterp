@@ -1251,57 +1251,31 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   // ── Reconcile API Log ────────────────────────────────────────────────────
   const buildTxnSideCall = (sysTxn: SysTxn, line: StmtLine): { url: string; body: object; label: string } => {
     const today = new Date().toISOString().slice(0, 10);
-    if (sysTxn.source === 'BANK_TRANSFER' || sysTxn.source === 'GL_BANK_TRANSFER') {
-      // txnNumber = REFERENCE1 = bank_account_transfer_id
-      return {
-        url:   `${APEX_BASE}/cash/reconciliation/bank_transfers/${sysTxn.txnNumber}`,
-        body:  {
+    const isBankTransfer = sysTxn.source === 'BANK_TRANSFER' || sysTxn.source === 'GL_BANK_TRANSFER';
+    const isExternal     = ['ORA_MAN', 'ORA_BAT', 'ORA_STA'].includes(sysTxn.source);
+
+    // Path param: bank_transfer_id for BANK_TRANSFER; txnId for all others
+    const pathId = isBankTransfer ? sysTxn.txnNumber : sysTxn.txnId;
+
+    return {
+      url:  `${APEX_BASE}/cash/reconciliation/systxns/${pathId}`,
+      body: {
+        source:        sysTxn.source,
+        reconciledDate: today,
+        statementId:   line.statementId,
+        stmtLineId:    line.lineId,
+        ...(isBankTransfer ? {
+          transferId:    sysTxn.txnNumber,
           jeHeaderId:    sysTxn.jeHeaderId,
           jeLineNumber:  sysTxn.jeLineNumber,
-          reconciledDate: today,
-          statementId:   line.statementId,
-          stmtLineId:    line.lineId,
-        },
-        label: 'Bank Transfer',
-      };
-    }
-    if (sysTxn.source === 'ORA_MAN' || sysTxn.source === 'ORA_BAT' || sysTxn.source === 'ORA_STA') {
-      return {
-        url:   `${EXT_TXN_URL}/${sysTxn.txnId}`,
-        body:  {
-          reconciledFlag:  'Y',
-          reconciledDate:  today,
-          statementId:     line.statementId,
-          stmtLineId:      line.lineId,
-        },
-        label: 'External Transaction',
-      };
-    }
-    if (sysTxn.source === 'AP_PAYMENT') {
-      return {
-        url:   `${APEX_BASE}/cash/reconciliation/ap_payments/${sysTxn.txnId}`,
-        body:  { reconciledFlag: 'Y', reconciledDate: today, paymentStatus: 'CLEARED', statementId: line.statementId, stmtLineId: line.lineId },
-        label: 'AP Payment',
-      };
-    }
-    if (sysTxn.source === 'AR_RECEIPT') {
-      return {
-        url:   `${APEX_BASE}/cash/reconciliation/ar_receipts/${sysTxn.txnId}`,
-        body:  { reconciledFlag: 'Y', reconciledDate: today, receiptStatus: 'CLEARED', statementId: line.statementId, stmtLineId: line.lineId },
-        label: 'AR Receipt',
-      };
-    }
-    if (sysTxn.source === 'GL_JOURNAL') {
-      return {
-        url:   `${APEX_BASE}/cash/reconciliation/gl_journals/${sysTxn.txnId}`,
-        body:  { reconciledFlag: 'Y', reconciledDate: today, statementId: line.statementId, stmtLineId: line.lineId },
-        label: 'GL Journal',
-      };
-    }
-    return {
-      url:   `${APEX_BASE}/cash/reconciliation/systxns/${sysTxn.txnId}`,
-      body:  { reconciledFlag: 'Y', reconciledDate: today, statementId: line.statementId, stmtLineId: line.lineId },
-      label: sysTxn.source || 'System Txn',
+        } : {}),
+        ...(sysTxn.source === 'AP_PAYMENT' ? { paymentStatus: 'CLEARED' } : {}),
+      },
+      label: isBankTransfer ? 'Bank Transfer' :
+             sysTxn.source === 'AP_PAYMENT'  ? 'AP Payment' :
+             isExternal                       ? 'External Transaction' :
+             sysTxn.source === 'AR_RECEIPT'  ? 'AR Receipt' :
+             sysTxn.source || 'System Txn',
     };
   };
 
