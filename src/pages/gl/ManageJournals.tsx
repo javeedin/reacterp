@@ -2837,16 +2837,28 @@ const ManageJournals: React.FC = () => {
                   </Button>
                 ),
               }] : []),
-              ...(showReferencesByTab[tabKey] ? [1,2,3,4,5,6,7,8,9,10].map(n => ({
-                title: `Ref ${n}`,
-                dataIndex: `reference${n}`,
-                key: `reference${n}`,
-                width: 140,
-                ellipsis: true,
-                render: (val: string) => val
-                  ? <Tooltip title={val}><span style={{ fontSize: 11 }}>{val}</span></Tooltip>
-                  : <span style={{ color: '#bbb' }}>—</span>,
-              })) : []),
+              ...(showReferencesByTab[tabKey] ? [
+                ...[1,2,3,4,5,6,7,8,9,10].map(n => ({
+                  title: `Ref ${n}`,
+                  dataIndex: `reference${n}`,
+                  key: `reference${n}`,
+                  width: 140,
+                  ellipsis: true,
+                  render: (val: string) => val
+                    ? <Tooltip title={val}><span style={{ fontSize: 11 }}>{val}</span></Tooltip>
+                    : <span style={{ color: '#bbb' }}>—</span>,
+                })),
+                {
+                  title: 'Acct. Class',
+                  dataIndex: 'reference3',
+                  key: 'accountingClass',
+                  width: 160,
+                  ellipsis: true,
+                  render: (val: string) => val
+                    ? <Tag style={{ fontSize: 10 }}>{val}</Tag>
+                    : <span style={{ color: '#bbb' }}>—</span>,
+                },
+              ] : []),
               ...(isEditable ? [{
                 title: '',
                 key: 'deleteLine',
