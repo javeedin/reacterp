@@ -1071,13 +1071,14 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       statementId: String(stmt.statementId),
     };
     // Always use the selected statement's bank account for system transactions.
-    // Date range: only apply if explicitly set in the search panel (don't restrict to a single stmt day).
+    // Update lastParams so the API inspector URL and all subsequent refreshes also carry it.
     const txnParams: SearchParams = {
       ...(lastParams ?? {}),
       bankAccount: stmt.bankAccountName,
       dateFrom: lastParams?.dateFrom ?? null,
       dateTo:   lastParams?.dateTo   ?? null,
     };
+    setLastParams(txnParams);
     fetchStmtLines(lineParams, stmtReconFilter);
     fetchSysTxns(txnParams, txnSourceFilter, sysReconFilter);
   }, [lastParams, fetchStmtLines, fetchSysTxns, txnSourceFilter, stmtReconFilter, sysReconFilter]);
