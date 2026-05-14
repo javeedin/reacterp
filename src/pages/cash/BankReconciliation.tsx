@@ -975,8 +975,8 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       const data = await parseApexJson(res);
       if (data.status === 'success') {
         setSysTxns((data.items ?? []).map((i: any): SysTxn => ({
-          txnId:           i.txnId            ?? 0,
-          txnNumber:       i.txnNumber        ?? '',
+          txnId:           Number(i.txnId)    || 0,
+          txnNumber:       i.txnNumber        || String(i.txnId ?? '') || '',
           txnDate:         i.txnDate          ?? '',
           amount:          i.amount           ?? 0,
           currencyCode:    i.currencyCode     ?? '',
