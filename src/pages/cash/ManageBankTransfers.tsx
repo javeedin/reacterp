@@ -321,6 +321,7 @@ const TransferForm: React.FC<{
       if (res.ok && data.status === 'success') {
         message.success('Transfer deleted.');
         onSave();
+        onCancel();
       } else {
         Modal.error({
           title: `Delete failed — HTTP ${res.status}`,
