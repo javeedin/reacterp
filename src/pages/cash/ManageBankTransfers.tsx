@@ -3032,10 +3032,23 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
           );
         })()}
         {acctProgress.map(r => {
-          const rate    = transfers.find(t => t.bankAccountTransferId === r.transferId)?.conversionRate || 1;
-          const j1Rate  = r.fromCurrency === 'AED' ? 1 : rate;
-          const j2Rate  = r.toCurrency   === 'AED' ? 1 : rate;
-          const toAmt   = r.toCurrency === r.fromCurrency ? r.amount : Math.round(r.amount * j1Rate * 100) / 100;
+          const txn          = transfers.find(t => t.bankAccountTransferId === r.transferId);
+          const rate         = txn?.conversionRate || 1;
+          const funcConvRate = txn?.funcConversionRate || rate;
+          const j1currency   = r.fromCurrency || 'AED';
+          const j2currency   = r.toCurrency   || 'AED';
+          const isCross      = j1currency !== j2currency;
+          const pmtAmt       = r.amount; // paymentAmount is in payment/toCurrency
+          const fromAmt      = isCross
+            ? (txn?.fromAmount != null ? Math.abs(txn.fromAmount) : Math.round(pmtAmt * rate * 100) / 100)
+            : pmtAmt;
+          const aedValue     = j1currency === 'AED'
+            ? fromAmt
+            : j2currency === 'AED'
+              ? pmtAmt
+              : Math.round(pmtAmt * funcConvRate * 100) / 100;
+          const j1Rate       = j1currency === 'AED' ? 1 : (fromAmt > 0 ? Math.round(aedValue / fromAmt * 1e6) / 1e6 : 1);
+          const j2Rate       = j2currency === 'AED' ? 1 : (pmtAmt  > 0 ? Math.round(aedValue / pmtAmt  * 1e6) / 1e6 : 1);
           const statusEl = (() => {
             if (r.status === 'pending') return <Tag color="default">Pending</Tag>;
             if (r.status === 'running') return <Tag icon={<SyncOutlined spin />} color="processing">Running…</Tag>;
@@ -3077,16 +3090,16 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
                     <Text style={{ fontSize: 11, fontWeight: 600, color: REDWOOD.info, display: 'block', marginBottom: 4 }}>
                       Journal 1 — Disbursement ({r.fromCurrency})
                     </Text>
-                    {acctLine(true,  r.clearingAccount, 'Cash Clearing Account',  r.amount, r.fromCurrency, Math.round(r.amount * j1Rate * 100) / 100)}
-                    {acctLine(false, r.fromAsset,       r.fromBankName,           r.amount, r.fromCurrency, Math.round(r.amount * j1Rate * 100) / 100)}
+                    {acctLine(true,  r.clearingAccount, 'Cash Clearing Account',  fromAmt, j1currency, aedValue)}
+                    {acctLine(false, r.fromAsset,       r.fromBankName,           fromAmt, j1currency, aedValue)}
                   </div>
                   {/* Journal 2 */}
                   <div>
                     <Text style={{ fontSize: 11, fontWeight: 600, color: REDWOOD.success, display: 'block', marginBottom: 4 }}>
-                      Journal 2 — Receipt ({r.toCurrency})
+                      Journal 2 — Receipt ({j2currency})
                     </Text>
-                    {acctLine(true,  r.toAsset,         r.toBankName,             toAmt, r.toCurrency, Math.round(toAmt * j2Rate * 100) / 100)}
-                    {acctLine(false, r.clearingAccount, 'Cash Clearing Account',  toAmt, r.toCurrency, Math.round(toAmt * j2Rate * 100) / 100)}
+                    {acctLine(true,  r.toAsset,         r.toBankName,             pmtAmt, j2currency, aedValue)}
+                    {acctLine(false, r.clearingAccount, 'Cash Clearing Account',  pmtAmt, j2currency, aedValue)}
                   </div>
                 </div>
               )}
