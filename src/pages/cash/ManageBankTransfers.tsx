@@ -417,6 +417,11 @@ const TransferForm: React.FC<{
     let values: any;
     try { values = await form.validateFields(); } catch { return; }
 
+    if (values.fromBankAccountName && values.toBankAccountName && values.fromBankAccountName === values.toBankAccountName) {
+      message.error('From Account and To Account cannot be the same.');
+      return;
+    }
+
     if (!cashClearingAcct) {
       message.error('Cash Clearing Account is required before saving.');
       return;
@@ -795,7 +800,10 @@ const TransferForm: React.FC<{
 
             <Form.Item label="To Account" labelCol={{ span: 4 }} wrapperCol={{ span: 20 }} style={{ marginBottom: 4 }}>
               <div style={{ display: 'flex', gap: 0 }}>
-                <Form.Item name="toBankAccountName" noStyle rules={[{ required: true, message: 'To Account is required' }]}>
+                <Form.Item name="toBankAccountName" noStyle rules={[
+                  { required: true, message: 'To Account is required' },
+                  { validator: (_, v) => v && v === selectedFromAcct ? Promise.reject('To Account cannot be the same as From Account') : Promise.resolve() },
+                ]}>
                   <Select showSearch placeholder={fromCurrency && fromCurrency !== 'AED' ? `AED or ${fromCurrency} accounts` : 'Select bank account'}
                     optionFilterProp="label" options={filteredToAccounts}
                     style={{ borderRadius: '6px 0 0 6px', flex: 1 }} disabled={isReadOnly || !buSelected}
