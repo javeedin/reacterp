@@ -1757,7 +1757,7 @@ END;
                   const doJournal = async (
                     slaPayload: Parameters<typeof createAccounting>[0],
                     glJournalName: string,
-                    glLines: Array<{ accountCombination: string; enteredDr: number | null; enteredCr: number | null; accountedDr: number | null; accountedCr: number | null; currencyCode: string; description: string; accountingClass: string }>,
+                    glLines: Array<{ accountCombination: string; enteredDr: number | null; enteredCr: number | null; accountedDr: number | null; accountedCr: number | null; currencyCode: string; description: string; accountingClass: string; reference7?: string }>,
                     glAedAmount: number,
                     glEnteredAmount: number,
                     glCurrency: string,
@@ -1864,7 +1864,7 @@ END;
                     j1Name,
                     [
                       { accountCombination: cashClearingAcct, enteredDr: fromAmt, enteredCr: null, accountedDr: aedValue, accountedCr: null, currencyCode: j1currency, description: `Cash Clearing DR – ${selectedFromAcct}`, accountingClass: 'CASH_CLEARING' },
-                      { accountCombination: fromAsset,        enteredDr: null, enteredCr: fromAmt, accountedDr: null, accountedCr: aedValue, currencyCode: j1currency, description: `From Bank CR – ${selectedFromAcct}`,    accountingClass: 'BANK_ASSET' },
+                      { accountCombination: fromAsset,        enteredDr: null, enteredCr: fromAmt, accountedDr: null, accountedCr: aedValue, currencyCode: j1currency, description: `From Bank CR – ${selectedFromAcct}`,    accountingClass: 'BANK_ASSET', reference7: selectedFromAcct },
                     ],
                     aedValue, fromAmt, j1currency, j1Rate, 'BANKTFR-DISBURSE',
                   );
@@ -1890,7 +1890,7 @@ END;
                     },
                     j2Name,
                     [
-                      { accountCombination: toAsset,          enteredDr: pmtAmt, enteredCr: null, accountedDr: aedValue, accountedCr: null, currencyCode: j2currency, description: `To Bank DR – ${selectedToAcct}`,       accountingClass: 'BANK_ASSET' },
+                      { accountCombination: toAsset,          enteredDr: pmtAmt, enteredCr: null, accountedDr: aedValue, accountedCr: null, currencyCode: j2currency, description: `To Bank DR – ${selectedToAcct}`,       accountingClass: 'BANK_ASSET', reference7: selectedToAcct },
                       { accountCombination: cashClearingAcct, enteredDr: null, enteredCr: pmtAmt, accountedDr: null, accountedCr: aedValue, currencyCode: j2currency, description: `Cash Clearing CR – ${selectedToAcct}`, accountingClass: 'CASH_CLEARING' },
                     ],
                     aedValue, pmtAmt, j2currency, j2Rate, 'BANKTFR-RECEIPT',
