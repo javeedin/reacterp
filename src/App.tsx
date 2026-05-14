@@ -87,6 +87,7 @@ const ClaudeKeySettings       = lazy(() => import('./pages/admin/ClaudeKeySettin
 const RagAssistant            = lazy(() => import('./pages/admin/RagAssistant'));
 const CashModule              = lazy(() => import('./pages/cash/CashModule'));
 const ManageBankTransfers     = lazy(() => import('./pages/cash/ManageBankTransfers'));
+const AccountingDebugPage     = lazy(() => import('./pages/cash/AccountingDebugPage'));
 const ManageExternalTransactions = lazy(() => import('./pages/cash/ManageExternalTransactions'));
 const ManageBankStatements    = lazy(() => import('./pages/cash/ManageBankStatements'));
 const BankReconciliation      = lazy(() => import('./pages/cash/BankReconciliation'));
@@ -249,6 +250,7 @@ function App() {
               {/* Cash Management */}
               <Route path="cash" element={<CashModule />} />
               <Route path="cash/bank-transfers" element={<ManageBankTransfers module="cash" />} />
+              <Route path="cash/bank-transfers/debug" element={<AccountingDebugPage />} />
               {/* AP Bank Transfers (same page, AP context) */}
               <Route path="ap/bank-transfers" element={<ManageBankTransfers module="ap" />} />
               {/* External Cash Transactions */}

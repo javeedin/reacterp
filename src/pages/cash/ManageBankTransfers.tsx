@@ -13,7 +13,7 @@ import {
   PrinterOutlined, PaperClipOutlined, UploadOutlined, EyeOutlined, DeleteOutlined,
   AccountBookOutlined, CheckCircleOutlined, SyncOutlined, LockOutlined,
 } from '@ant-design/icons';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import jsPDF from 'jspdf';
@@ -2407,6 +2407,7 @@ interface TabItem { key: string; label: React.ReactNode; record?: TransferRecord
 const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'cash' }) => {
   const { user } = useAuth();
   const currentUser = user?.email ?? user?.username ?? 'SYSTEM';
+  const navigate = useNavigate();
   const { addSessionEntry } = useGlValidation();
 
   // ── State ─────────────────────────────────────────────────────────────────
@@ -3502,7 +3503,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
               </Button>
               <Button icon={<ApiOutlined />}
                 style={{ color: '#9d4edd', borderColor: '#9d4edd', fontWeight: 600 }}
-                onClick={() => setApiTesterOpen(true)}>
+                onClick={() => navigate('/cash/bank-transfers/debug')}>
                 Debug
               </Button>
               <Button icon={<PlusOutlined />} type="primary" onClick={openCreate}
