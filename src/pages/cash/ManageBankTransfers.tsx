@@ -471,7 +471,7 @@ const TransferForm: React.FC<{
           setSavedId(data.bankAccountTransferId);
           const createdRecord: Partial<TransferRecord> = {
             bankAccountTransferId:     data.bankAccountTransferId,
-            bankAccountTransferNumber: String(data.bankAccountTransferNumber ?? ''),
+            bankAccountTransferNumber: Number(data.bankAccountTransferNumber ?? 0),
             transactionDate:           values.transactionDate?.format('YYYY-MM-DD'),
             fromBankAccountName:       values.fromBankAccountName,
             toBankAccountName:         values.toBankAccountName,
@@ -1490,9 +1490,9 @@ END;
                               const respBody = (() => { try { return JSON.stringify(JSON.parse(t), null, 2); } catch { return t; } })();
                               setAttApiLog(prev => [...prev.slice(-9), {
                                 dir: 'POST upload',
-                                url: uploadUrl,
+                                url: baseUrl,
                                 status: res.status,
-                                body: `━━ REQUEST ━━\nFile: ${file.name}  |  size: ${file.size} bytes (raw binary — no base64)\nPOST ${uploadUrl}\n\n━━ SERVER RESPONSE (HTTP ${res.status}) ━━\n${respBody}`,
+                                body: `━━ REQUEST ━━\nFile: ${file.name}  |  size: ${file.size} bytes (raw binary — no base64)\nPOST ${baseUrl}\n\n━━ SERVER RESPONSE (HTTP ${res.status}) ━━\n${respBody}`,
                               }]);
                               if (res.ok) message.success(`POST succeeded — check the log for bodyLen / contentLength`);
                               else message.error(`POST failed — HTTP ${res.status}. Check the log.`);
@@ -2309,7 +2309,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
         const postGlAndSla = async (
           slaPayload: Parameters<typeof createAccounting>[0],
           glJournalName: string,
-          glLines: Array<{ accountCombination: string; enteredDr: number | null; enteredCr: number | null; accountedDr: number | null; accountedCr: number | null; currencyCode: string; description: string; accountingClass: string }>,
+          glLines: Array<{ accountCombination: string; enteredDr: number | null; enteredCr: number | null; accountedDr: number | null; accountedCr: number | null; currencyCode: string; description: string; accountingClass: string; reference7?: string }>,
           glAmount: number,
           glCurrency: string,
           existingSla: Awaited<ReturnType<typeof checkAccountingExists>>,
@@ -2446,20 +2446,18 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
                   accountCombination: clearingAcct, enteredDr: fromAmt, enteredCr: 0,
                   accountedDr: aedValue, accountedCr: 0,
                   currencyCode: j1currency, exchangeRate: j1Rate,
-                  reference7: txn.fromBankAccountName,
                   description: `Cash Clearing DR – ${txn.fromBankAccountName}` },
                 { lineNumber: 2, lineType: 'CR', accountingClass: 'BANK_ASSET',
                   accountCombination: fromAsset, enteredDr: 0, enteredCr: fromAmt,
                   accountedDr: 0, accountedCr: aedValue,
                   currencyCode: j1currency, exchangeRate: j1Rate,
-                  reference7: txn.fromBankAccountName,
                   description: `From Bank CR – ${txn.fromBankAccountName}` },
               ],
             },
             j1Name,
             [
-              { accountCombination: clearingAcct, enteredDr: fromAmt, enteredCr: null, accountedDr: aedValue, accountedCr: null, currencyCode: j1currency, description: `Cash Clearing DR – ${txn.fromBankAccountName}`, accountingClass: 'CASH_CLEARING' },
-              { accountCombination: fromAsset,    enteredDr: null, enteredCr: fromAmt, accountedDr: null, accountedCr: aedValue, currencyCode: j1currency, description: `From Bank CR – ${txn.fromBankAccountName}`,    accountingClass: 'BANK_ASSET' },
+              { accountCombination: clearingAcct, enteredDr: fromAmt, enteredCr: null, accountedDr: aedValue, accountedCr: null, currencyCode: j1currency, description: `Cash Clearing DR – ${txn.fromBankAccountName}`, accountingClass: 'CASH_CLEARING', reference7: txn.fromBankAccountName },
+              { accountCombination: fromAsset,    enteredDr: null, enteredCr: fromAmt, accountedDr: null, accountedCr: aedValue, currencyCode: j1currency, description: `From Bank CR – ${txn.fromBankAccountName}`,    accountingClass: 'BANK_ASSET',    reference7: txn.fromBankAccountName },
             ],
             aedValue, j1currency, existingDisburse, 'BANKTFR-DISBURSE',
           );
@@ -2486,20 +2484,18 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
                   accountCombination: toAsset, enteredDr: pmtAmt, enteredCr: 0,
                   accountedDr: aedValue, accountedCr: 0,
                   currencyCode: j2currency, exchangeRate: j2Rate,
-                  reference7: txn.toBankAccountName,
                   description: `To Bank DR – ${txn.toBankAccountName}` },
                 { lineNumber: 2, lineType: 'CR', accountingClass: 'CASH_CLEARING',
                   accountCombination: clearingAcct, enteredDr: 0, enteredCr: pmtAmt,
                   accountedDr: 0, accountedCr: aedValue,
                   currencyCode: j2currency, exchangeRate: j2Rate,
-                  reference7: txn.toBankAccountName,
                   description: `Cash Clearing CR – ${txn.toBankAccountName}` },
               ],
             },
             j2Name,
             [
-              { accountCombination: toAsset,      enteredDr: pmtAmt, enteredCr: null, accountedDr: aedValue, accountedCr: null, currencyCode: j2currency, description: `To Bank DR – ${txn.toBankAccountName}`,         accountingClass: 'BANK_ASSET' },
-              { accountCombination: clearingAcct, enteredDr: null, enteredCr: pmtAmt, accountedDr: null, accountedCr: aedValue, currencyCode: j2currency, description: `Cash Clearing CR – ${txn.toBankAccountName}`, accountingClass: 'CASH_CLEARING' },
+              { accountCombination: toAsset,      enteredDr: pmtAmt, enteredCr: null, accountedDr: aedValue, accountedCr: null, currencyCode: j2currency, description: `To Bank DR – ${txn.toBankAccountName}`,         accountingClass: 'BANK_ASSET',    reference7: txn.toBankAccountName },
+              { accountCombination: clearingAcct, enteredDr: null, enteredCr: pmtAmt, accountedDr: null, accountedCr: aedValue, currencyCode: j2currency, description: `Cash Clearing CR – ${txn.toBankAccountName}`, accountingClass: 'CASH_CLEARING', reference7: txn.toBankAccountName },
             ],
             aedValue, j2currency, existingReceipt, 'BANKTFR-RECEIPT',
           );
@@ -2940,7 +2936,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
                 {selectedRowKeys.length > 0 && (
                   <Button size="small" icon={<AccountBookOutlined />}
                     style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
-                    onClick={openCreateAccountingModal}>
+                    onClick={() => openCreateAccountingModal()}>
                     Create Accounting ({selectedRowKeys.length})
                   </Button>
                 )}

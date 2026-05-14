@@ -283,6 +283,7 @@ export interface LedgerInfo {
   ledgerId: number;
   ledgerName: string;
   legalEntity?: string;
+  currency?: string;
 }
 
 /**

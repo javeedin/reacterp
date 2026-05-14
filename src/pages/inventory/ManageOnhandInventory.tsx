@@ -406,7 +406,7 @@ const OnhandDetailPage: React.FC<{ items: RawOnhand[]; onClose?: () => void }> =
         </Row>
 
         {/* Lines breakdown */}
-        <Divider orientation="left" style={{ fontSize: 12, color: REDWOOD.neutral600 }}>
+        <Divider style={{ fontSize: 12, color: REDWOOD.neutral600 }}>
           Storage Locations ({items.length})
         </Divider>
         <Table
