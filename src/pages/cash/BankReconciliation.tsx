@@ -935,6 +935,13 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   }, [msgApi]);
 
   const fetchSysTxns = useCallback(async (params: SearchParams, txnType?: string, cmFilter?: string) => {
+    // bank_account is required by the endpoint — skip fetch and clear if not provided
+    if (!params.bankAccount) {
+      setSysTxns([]);
+      setLoadingSys(false);
+      return;
+    }
+
     setLoadingSys(true);
 
     const effectiveDateFrom = params.dateFrom ?? sysDateFrom;
@@ -943,7 +950,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
 
     // Single unified endpoint — RR_V_BANK_RECON_SYSTXNS covers AP + External + Bank Transfers
     const q = new URLSearchParams();
-    if (params.bankAccount)       q.set('bank_account',  params.bankAccount);
+    q.set('bank_account', params.bankAccount);  // always present — checked above
     if (params.businessUnit)      q.set('business_unit', params.businessUnit);
     if (effectiveDateFrom)        q.set('date_from',     effectiveDateFrom.format('YYYY-MM-DD'));
     if (effectiveDateTo)          q.set('date_to',       effectiveDateTo.format('YYYY-MM-DD'));
@@ -2507,7 +2514,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                 emptyText: (
                   <Empty
                     image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description="No unreconciled system transactions"
+                    description={lastParams?.bankAccount ? 'No system transactions found' : 'Select a bank account to load system transactions'}
                   />
                 ),
               }}
