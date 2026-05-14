@@ -1911,6 +1911,317 @@ END;
 
 // ────────────────────────────────────────────────────────────────────────────
 // ── API Inspector Panel ──────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Accounting API Tester — Debug Modal
+// Shows every REST call in the Create Accounting flow with editable payloads
+// and live Test buttons so each step can be verified individually.
+// ─────────────────────────────────────────────────────────────────────────────
+const AccountingApiTesterModal: React.FC<{
+  open: boolean;
+  onClose: () => void;
+  transfers: TransferRecord[];
+  apexBase: string;
+  currentUser: string;
+  bankAccountAssetMap: Record<string, string>;
+  bankCurrencyMap: Record<string, string>;
+}> = ({ open, onClose, transfers, apexBase, currentUser, bankAccountAssetMap, bankCurrencyMap }) => {
+  const [selectedId, setSelectedId]   = React.useState<number | null>(null);
+  const [ledger,     setLedger]       = React.useState<{ ledgerId: number; ledgerName: string; currency: string } | null>(null);
+  const [payloads,   setPayloads]     = React.useState<Record<string, string>>({});
+  const [results,    setResults]      = React.useState<Record<string, { loading: boolean; status?: number; body?: string; error?: string }>>({});
+  const [batchIds,   setBatchIds]     = React.useState<{ disburse: number | null; receipt: number | null }>({ disburse: null, receipt: null });
+  const [slaIds,     setSlaIds]       = React.useState<{ disburse: number | null; receipt: number | null }>({ disburse: null, receipt: null });
+  const [headerIds,  setHeaderIds]    = React.useState<{ disburse: number | null; receipt: number | null }>({ disburse: null, receipt: null });
+
+  const txn = transfers.find(t => t.bankAccountTransferId === selectedId) ?? null;
+
+  // Derived amounts — same logic as runCreateAccounting
+  const d = React.useMemo(() => {
+    if (!txn) return null;
+    const pmtAmt       = Math.abs(txn.paymentAmount ?? 0);
+    const rate         = txn.conversionRate || 1;
+    const funcConvRate = txn.funcConversionRate || rate;
+    const j1currency   = txn.fromCurrencyCode || bankCurrencyMap[txn.fromBankAccountName] || 'AED';
+    const j2currency   = txn.toCurrencyCode   || bankCurrencyMap[txn.toBankAccountName]   || 'AED';
+    const isCross      = j1currency !== j2currency;
+    const fromAmt      = isCross ? (txn.fromAmount != null ? Math.abs(txn.fromAmount) : Math.round(pmtAmt * rate * 100) / 100) : pmtAmt;
+    const aedValue     = j1currency === 'AED' ? fromAmt : j2currency === 'AED' ? pmtAmt : Math.round(pmtAmt * funcConvRate * 100) / 100;
+    const j1Rate       = j1currency === 'AED' ? 1 : (fromAmt > 0 ? Math.round(aedValue / fromAmt * 1e6) / 1e6 : 1);
+    const j2Rate       = j2currency === 'AED' ? 1 : (pmtAmt  > 0 ? Math.round(aedValue / pmtAmt  * 1e6) / 1e6 : 1);
+    const clearingAcct = txn.cashClearingAccount || '⚠️ MISSING — cashClearingAccount is blank';
+    const fromAsset    = bankAccountAssetMap[txn.fromBankAccountName] || '⚠️ MISSING — no asset account for fromBank';
+    const toAsset      = bankAccountAssetMap[txn.toBankAccountName]   || '⚠️ MISSING — no asset account for toBank';
+    const txnDate      = txn.transactionDate ? txn.transactionDate.split('T')[0] : new Date().toISOString().split('T')[0];
+    const periodName   = derivePeriodName(new Date(txn.transactionDate || Date.now()));
+    return { pmtAmt, j1currency, j2currency, fromAmt, aedValue, j1Rate, j2Rate, clearingAcct, fromAsset, toAsset, txnDate, periodName };
+  }, [txn, bankAccountAssetMap, bankCurrencyMap]);
+
+  // Build all steps whenever txn / ledger / batchIds / slaIds change
+  const steps = React.useMemo(() => {
+    if (!txn || !d) return [];
+    const { pmtAmt, j1currency, j2currency, fromAmt, aedValue, j1Rate, j2Rate, clearingAcct, fromAsset, toAsset, txnDate, periodName } = d;
+    const ledgerId   = ledger?.ledgerId   ?? 0;
+    const ledgerName = ledger?.ledgerName ?? '(run Step 3 first to get ledger)';
+    const ledgerCcy  = ledger?.currency   ?? 'AED';
+    const id  = txn.bankAccountTransferId;
+    const num = txn.bankAccountTransferNumber;
+    const bu  = txn.businessUnit || '';
+
+    const commonHeader = { moduleName: 'CM', sourceTable: 'BANK_ACCOUNT_TRANSFERS', sourceId: id, sourceNumber: String(num), sourceType: 'Bank Transfer', ledgerId, ledgerName, ledgerCurrency: ledgerCcy, exchangeRateType: 'Corporate', businessUnit: bu, createdBy: currentUser };
+
+    const slaDisbPayload = {
+      header: { ...commonHeader, eventTypeCode: 'BANK_TRANSFER_DISBURSE', eventDate: txnDate, accountingDate: txnDate, periodName, currencyCode: j1currency, exchangeRate: j1Rate, description: `Bank Transfer ${num} — Disbursement` },
+      lines: [
+        { lineNumber: 1, lineType: 'DR', accountingClass: 'CASH_CLEARING', accountCombination: clearingAcct, enteredDr: fromAmt, enteredCr: 0, accountedDr: aedValue, accountedCr: 0, currencyCode: j1currency, exchangeRate: j1Rate, description: `Cash Clearing DR – ${txn.fromBankAccountName}` },
+        { lineNumber: 2, lineType: 'CR', accountingClass: 'BANK_ASSET',    accountCombination: fromAsset,    enteredDr: 0, enteredCr: fromAmt, accountedDr: 0, accountedCr: aedValue, currencyCode: j1currency, exchangeRate: j1Rate, description: `From Bank CR – ${txn.fromBankAccountName}` },
+      ],
+    };
+
+    const slaRcptPayload = {
+      header: { ...commonHeader, eventTypeCode: 'BANK_TRANSFER_RECEIPT', eventDate: txnDate, accountingDate: txnDate, periodName, currencyCode: j2currency, exchangeRate: j2Rate, description: `Bank Transfer ${num} — Receipt` },
+      lines: [
+        { lineNumber: 1, lineType: 'DR', accountingClass: 'BANK_ASSET',    accountCombination: toAsset,      enteredDr: pmtAmt, enteredCr: 0, accountedDr: aedValue, accountedCr: 0, currencyCode: j2currency, exchangeRate: j2Rate, description: `To Bank DR – ${txn.toBankAccountName}` },
+        { lineNumber: 2, lineType: 'CR', accountingClass: 'CASH_CLEARING', accountCombination: clearingAcct, enteredDr: 0, enteredCr: pmtAmt, accountedDr: 0, accountedCr: aedValue, currencyCode: j2currency, exchangeRate: j2Rate, description: `Cash Clearing CR – ${txn.toBankAccountName}` },
+      ],
+    };
+
+    const commonBatch  = { ledgerName, ledgerId, status: 'NEW', accountingPeriod: periodName, batchSource: 'Cash Management', createdBy: currentUser };
+    const commonHdr    = { ledgerId, ledgerName, jeCategory: 'Cash Management', jeSource: 'Cash Management', periodName, status: 'NEW', currencyConversionType: 'Corporate', currencyConversionDate: txnDate, defaultEffectiveDate: txnDate, createdBy: currentUser };
+    const lineBase     = (ref5: string, ccy: string, rate: number) => ({ statAmount: null, currencyConversionDate: txnDate, currencyConversionRate: rate, userCurrencyConversionType: 'Corporate', chartOfAccountsName: 'Chart of Accounts', reference1: String(id), reference2: String(num), reference4: bu, reference5: ref5, createdBy: currentUser, currencyCode: ccy });
+
+    const glDisbPayload = {
+      batch:  { ...commonBatch, batchName: `BANKTFR-${num}-DISBURSE`, batchDescription: `Bank Transfer ${num} — Disbursement`, controlTotal: aedValue, runningTotalDr: aedValue, runningTotalCr: aedValue },
+      header: { ...commonHdr,   journalName: `BANKTFR-${num}-DISBURSE`, description: `Bank Transfer ${num} — Disbursement`, currencyCode: j1currency, currencyConversionRate: j1Rate, runningTotalDr: aedValue, runningTotalCr: aedValue },
+      lines: [
+        { ...lineBase('BANKTFR-DISBURSE', j1currency, j1Rate), accountCombination: clearingAcct, enteredDr: fromAmt, enteredCr: null, accountedDr: aedValue, accountedCr: null, description: `Cash Clearing DR – ${txn.fromBankAccountName}`, accountingClass: 'CASH_CLEARING', reference3: 'CASH_CLEARING' },
+        { ...lineBase('BANKTFR-DISBURSE', j1currency, j1Rate), accountCombination: fromAsset,    enteredDr: null, enteredCr: fromAmt, accountedDr: null, accountedCr: aedValue, description: `From Bank CR – ${txn.fromBankAccountName}`,    accountingClass: 'BANK_ASSET',    reference3: 'BANK_ASSET', reference7: txn.fromBankAccountName },
+      ],
+    };
+
+    const glRcptPayload = {
+      batch:  { ...commonBatch, batchName: `BANKTFR-${num}-RECEIPT`, batchDescription: `Bank Transfer ${num} — Receipt`, controlTotal: aedValue, runningTotalDr: aedValue, runningTotalCr: aedValue },
+      header: { ...commonHdr,   journalName: `BANKTFR-${num}-RECEIPT`, description: `Bank Transfer ${num} — Receipt`, currencyCode: j2currency, currencyConversionRate: j2Rate, runningTotalDr: aedValue, runningTotalCr: aedValue },
+      lines: [
+        { ...lineBase('BANKTFR-RECEIPT', j2currency, j2Rate), accountCombination: toAsset,      enteredDr: pmtAmt, enteredCr: null, accountedDr: aedValue, accountedCr: null, description: `To Bank DR – ${txn.toBankAccountName}`,         accountingClass: 'BANK_ASSET',    reference3: 'BANK_ASSET', reference7: txn.toBankAccountName },
+        { ...lineBase('BANKTFR-RECEIPT', j2currency, j2Rate), accountCombination: clearingAcct, enteredDr: null, enteredCr: pmtAmt, accountedDr: null, accountedCr: aedValue, description: `Cash Clearing CR – ${txn.toBankAccountName}`, accountingClass: 'CASH_CLEARING', reference3: 'CASH_CLEARING' },
+      ],
+    };
+
+    const dBatch  = batchIds.disburse;
+    const rBatch  = batchIds.receipt;
+    const dSla    = slaIds.disburse;
+    const rSla    = slaIds.receipt;
+    const dHeader = headerIds.disburse;
+    const rHeader = headerIds.receipt;
+
+    return [
+      { key: 'sla_exists_d', label: 'Check SLA Exists — DISBURSE',      method: 'GET'  as const, url: `${apexBase}/sla/accounting/exists?sourceTable=BANK_ACCOUNT_TRANSFERS&sourceId=${id}&eventType=BANK_TRANSFER_DISBURSE` },
+      { key: 'sla_exists_r', label: 'Check SLA Exists — RECEIPT',        method: 'GET'  as const, url: `${apexBase}/sla/accounting/exists?sourceTable=BANK_ACCOUNT_TRANSFERS&sourceId=${id}&eventType=BANK_TRANSFER_RECEIPT` },
+      { key: 'ledger',       label: 'Fetch Ledger (Business Unit)',       method: 'GET'  as const, url: `${apexBase}/gl/getledgername?P_BUSINESS_UNIT_NAME=${encodeURIComponent(bu)}` },
+      { key: 'gl_check_d',   label: 'Check GL Journal — DISBURSE',        method: 'GET'  as const, url: `${apexBase}/gl/journals/check?reference1=${id}&reference2=${num}&reference5=BANKTFR-DISBURSE` },
+      { key: 'gl_check_r',   label: 'Check GL Journal — RECEIPT',          method: 'GET'  as const, url: `${apexBase}/gl/journals/check?reference1=${id}&reference2=${num}&reference5=BANKTFR-RECEIPT` },
+      { key: 'sla_create_d', label: 'Create SLA Accounting — DISBURSE',   method: 'POST' as const, url: `${apexBase}/sla/accounting/create`,  payload: JSON.stringify(slaDisbPayload, null, 2) },
+      { key: 'sla_create_r', label: 'Create SLA Accounting — RECEIPT',    method: 'POST' as const, url: `${apexBase}/sla/accounting/create`,  payload: JSON.stringify(slaRcptPayload, null, 2) },
+      { key: 'gl_create_d',  label: 'Create GL Journal — DISBURSE',        method: 'POST' as const, url: `${apexBase}/journals/create`,         payload: JSON.stringify(glDisbPayload,  null, 2) },
+      { key: 'gl_create_r',  label: 'Create GL Journal — RECEIPT',          method: 'POST' as const, url: `${apexBase}/journals/create`,         payload: JSON.stringify(glRcptPayload,  null, 2) },
+      { key: 'gl_post_d',    label: `Post GL Batch — DISBURSE${dBatch ? ` (batchId=${dBatch})` : ' ⚠️ test Step 8 first'}`, method: 'PUT' as const, url: `${apexBase}/gl/journals/${dBatch ?? '{BATCH_ID_FROM_STEP_8}'}/post`, payload: '{}' },
+      { key: 'gl_post_r',    label: `Post GL Batch — RECEIPT${rBatch  ? ` (batchId=${rBatch})`  : ' ⚠️ test Step 9 first'}`, method: 'PUT' as const, url: `${apexBase}/gl/journals/${rBatch  ?? '{BATCH_ID_FROM_STEP_9}'}/post`, payload: '{}' },
+      { key: 'sla_post_d',   label: `Stamp SLA Posted — DISBURSE${dSla ? ` (headerId=${dSla})` : ' ⚠️ test Step 6 first'}`,  method: 'POST' as const, url: `${apexBase}/sla/accounting/post`, payload: JSON.stringify({ headerId: dSla ?? 0, glBatchId: dBatch ?? 0, glBatchName: `BANKTFR-${num}-DISBURSE`, glHeaderId: dHeader ?? 0, postedBy: currentUser }, null, 2) },
+      { key: 'sla_post_r',   label: `Stamp SLA Posted — RECEIPT${rSla  ? ` (headerId=${rSla})`  : ' ⚠️ test Step 7 first'}`,  method: 'POST' as const, url: `${apexBase}/sla/accounting/post`, payload: JSON.stringify({ headerId: rSla  ?? 0, glBatchId: rBatch  ?? 0, glBatchName: `BANKTFR-${num}-RECEIPT`,  glHeaderId: rHeader ?? 0, postedBy: currentUser }, null, 2) },
+      { key: 'acct_flag',    label: 'Update Accounting Flag (Y)',          method: 'PUT'  as const, url: `${apexBase}/cash/banktransfers/${id}/acctflag?updated_by=${encodeURIComponent(currentUser)}`, payload: '{}' },
+    ];
+  }, [txn, d, ledger, batchIds, slaIds, headerIds, apexBase, currentUser]);
+
+  // Sync payload textareas when steps rebuild (but don't overwrite user edits)
+  const initializedRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    const key = `${selectedId}`;
+    if (initializedRef.current === key) return; // already seeded for this transfer
+    initializedRef.current = key;
+    const initial: Record<string, string> = {};
+    steps.forEach(s => { if (s.payload !== undefined) initial[s.key] = s.payload; });
+    setPayloads(initial);
+  }, [steps, selectedId]);
+
+  // Re-seed payloads that depend on batchIds / slaIds / ledger when those change
+  React.useEffect(() => {
+    setPayloads(prev => {
+      const next = { ...prev };
+      steps.forEach(s => {
+        if (s.payload !== undefined && ['gl_post_d', 'gl_post_r', 'sla_post_d', 'sla_post_r'].includes(s.key)) {
+          next[s.key] = s.payload;
+        }
+      });
+      return next;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batchIds, slaIds, headerIds, ledger]);
+
+  const resetForTransfer = (id: number | null) => {
+    setSelectedId(id);
+    setResults({});
+    setLedger(null);
+    setBatchIds({ disburse: null, receipt: null });
+    setSlaIds({ disburse: null, receipt: null });
+    setHeaderIds({ disburse: null, receipt: null });
+    initializedRef.current = null;
+  };
+
+  const testStep = async (step: { key: string; method: string; url: string; payload?: string }) => {
+    setResults(prev => ({ ...prev, [step.key]: { loading: true } }));
+    try {
+      const body = payloads[step.key] ?? '{}';
+      const opts: RequestInit = step.method === 'GET'
+        ? { headers: { Accept: 'application/json' } }
+        : { method: step.method, headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body };
+      const res  = await fetch(step.url, opts);
+      const text = await res.text();
+      let pretty = text;
+      try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch {}
+      setResults(prev => ({ ...prev, [step.key]: { loading: false, status: res.status, body: pretty.slice(0, 4000) + (pretty.length > 4000 ? '\n…(truncated)' : '') } }));
+
+      if (!res.ok) return;
+      try {
+        const data = JSON.parse(text);
+        // Ledger
+        if (step.key === 'ledger') {
+          const item = data?.items?.[0];
+          if (item) setLedger({ ledgerId: item.ledger_id, ledgerName: item.ledger_name, currency: item.currency_code || 'AED' });
+        }
+        // SLA exists
+        if (step.key === 'sla_exists_d' && data.headerId) setSlaIds(prev => ({ ...prev, disburse: data.headerId }));
+        if (step.key === 'sla_exists_r' && data.headerId) setSlaIds(prev => ({ ...prev, receipt:  data.headerId }));
+        // SLA create
+        if (step.key === 'sla_create_d' && data.headerId) setSlaIds(prev => ({ ...prev, disburse: data.headerId }));
+        if (step.key === 'sla_create_r' && data.headerId) setSlaIds(prev => ({ ...prev, receipt:  data.headerId }));
+        // GL create — capture batchId + headerId
+        if (step.key === 'gl_create_d') {
+          const bid = data.jeBatchId ?? data.je_batch_id ?? data.batchId ?? null;
+          const hid = data.jeHeaderId ?? data.je_header_id ?? data.headerId ?? null;
+          if (bid) setBatchIds(prev => ({ ...prev, disburse: bid }));
+          if (hid) setHeaderIds(prev => ({ ...prev, disburse: hid }));
+        }
+        if (step.key === 'gl_create_r') {
+          const bid = data.jeBatchId ?? data.je_batch_id ?? data.batchId ?? null;
+          const hid = data.jeHeaderId ?? data.je_header_id ?? data.headerId ?? null;
+          if (bid) setBatchIds(prev => ({ ...prev, receipt: bid }));
+          if (hid) setHeaderIds(prev => ({ ...prev, receipt: hid }));
+        }
+      } catch {}
+    } catch (e: any) {
+      setResults(prev => ({ ...prev, [step.key]: { loading: false, error: e.message } }));
+    }
+  };
+
+  const methodBg = (m: string) => ({ GET: '#1a7f37', POST: '#9a3412', PUT: '#6b21a8', DELETE: '#b91c1c' }[m] ?? '#444');
+
+  return (
+    <Modal
+      open={open}
+      onCancel={onClose}
+      title={<Space><ApiOutlined style={{ color: REDWOOD.info }} />Accounting API Tester — Debug</Space>}
+      footer={<Button onClick={onClose}>Close</Button>}
+      width={980}
+      style={{ top: 20 }}
+      destroyOnClose
+    >
+      {/* Transfer selector */}
+      <div style={{ background: '#0d1117', border: '1px solid #2d333b', borderRadius: 8, padding: '12px 16px', marginBottom: 14 }}>
+        <Space wrap>
+          <Text style={{ color: '#8b949e', fontSize: 12 }}>Transfer:</Text>
+          <Select
+            style={{ width: 420 }}
+            placeholder="Select a transfer to test..."
+            value={selectedId}
+            onChange={resetForTransfer}
+            showSearch
+            optionFilterProp="label"
+            options={transfers.map(t => ({
+              value: t.bankAccountTransferId,
+              label: `#${t.bankAccountTransferNumber} — ${t.fromBankAccountName} → ${t.toBankAccountName} (${t.transactionDate?.split('T')[0] ?? '?'}) ${t.businessUnit ? `[${t.businessUnit}]` : ''}`,
+            }))}
+          />
+          {txn && (
+            <Space size={4}>
+              <Tag color="blue">{txn.fromCurrencyCode || '?'} → {txn.toCurrencyCode || '?'}</Tag>
+              <Tag color="purple">{d?.periodName}</Tag>
+              {txn.cashClearingAccount
+                ? <Tag color="green">Clearing: {txn.cashClearingAccount}</Tag>
+                : <Tag color="red">⚠️ No clearing account</Tag>}
+              {ledger
+                ? <Tag color="cyan">Ledger: {ledger.ledgerName} ({ledger.ledgerId})</Tag>
+                : <Tag color="default">Ledger: (test Step 3)</Tag>}
+            </Space>
+          )}
+        </Space>
+      </div>
+
+      {!txn && <Empty description="Select a transfer above to see all API steps" style={{ padding: 40 }} />}
+
+      {txn && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: '68vh', overflowY: 'auto', paddingRight: 4 }}>
+          {steps.map((step, idx) => {
+            const r   = results[step.key];
+            const ok  = r?.status != null && r.status >= 200 && r.status < 300;
+            const err = r?.status != null && (r.status < 200 || r.status >= 300);
+            return (
+              <div key={step.key} style={{ border: `1px solid ${r ? (ok ? '#238636' : err ? '#da3633' : '#2d333b') : '#2d333b'}`, borderRadius: 6, overflow: 'hidden', transition: 'border-color 0.2s' }}>
+                {/* Step header */}
+                <div style={{ background: '#161b22', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Text style={{ color: '#6e7681', fontSize: 11, minWidth: 22, textAlign: 'right' }}>{idx + 1}.</Text>
+                  <Tag style={{ margin: 0, fontSize: 10, fontWeight: 700, background: methodBg(step.method), borderColor: methodBg(step.method), color: '#fff', letterSpacing: 0.5 }}>{step.method}</Tag>
+                  <Text style={{ color: '#e6edf3', fontSize: 12, flex: 1 }}>{step.label}</Text>
+                  {r && !r.loading && (
+                    <Tag color={ok ? 'success' : 'error'} style={{ fontSize: 10, margin: 0 }}>HTTP {r.status}</Tag>
+                  )}
+                  <Button
+                    size="small"
+                    loading={r?.loading}
+                    onClick={() => testStep(step)}
+                    style={{ fontSize: 11, background: '#238636', borderColor: '#238636', color: '#fff', flexShrink: 0 }}
+                  >
+                    Test
+                  </Button>
+                </div>
+
+                {/* URL bar */}
+                <div style={{ background: '#0d1117', padding: '5px 12px', borderTop: '1px solid #2d333b' }}>
+                  <Text copyable={{ text: step.url }} style={{ color: '#58a6ff', fontSize: 11, wordBreak: 'break-all', display: 'block', fontFamily: 'monospace' }}>
+                    {step.url}
+                  </Text>
+                </div>
+
+                {/* Payload editor (POST / PUT) */}
+                {'payload' in step && (
+                  <div style={{ background: '#0d1117', borderTop: '1px solid #2d333b', padding: '6px 12px' }}>
+                    <Text style={{ color: '#6e7681', fontSize: 10, display: 'block', marginBottom: 4 }}>Body (editable JSON):</Text>
+                    <Input.TextArea
+                      value={payloads[step.key] ?? ''}
+                      onChange={e => setPayloads(prev => ({ ...prev, [step.key]: e.target.value }))}
+                      autoSize={{ minRows: 2, maxRows: 14 }}
+                      style={{ fontFamily: 'monospace', fontSize: 11, background: '#010409', color: '#c9d1d9', borderColor: '#30363d', resize: 'vertical' }}
+                    />
+                  </div>
+                )}
+
+                {/* Response */}
+                {r && !r.loading && (
+                  <div style={{ background: '#010409', borderTop: `1px solid ${ok ? '#238636' : '#da3633'}`, padding: '8px 12px' }}>
+                    {r.error
+                      ? <Text style={{ color: '#f85149', fontSize: 11 }}>Network error: {r.error}</Text>
+                      : <pre style={{ color: ok ? '#3fb950' : '#f85149', fontSize: 11, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 220, overflow: 'auto' }}>{r.body}</pre>
+                    }
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Modal>
+  );
+};
+
 const ApiInspectorPanel: React.FC<{ apexBase: string; lastApiUrl: string }> = ({ apexBase, lastApiUrl }) => {
   const [results, setResults]     = React.useState<Record<string, { loading: boolean; status?: number; body?: string; error?: string }>>({});
   const [deleteId, setDeleteId]   = React.useState('');
@@ -2029,6 +2340,7 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
   // ── Create Accounting state ───────────────────────────────────────────────
   const [selectedRowKeys, setSelectedRowKeys] = useState<number[]>([]);
   const [acctModalOpen, setAcctModalOpen]     = useState(false);
+  const [apiTesterOpen, setApiTesterOpen]     = useState(false);
   const [acctProgress, setAcctProgress]       = useState<TransferAcctRow[]>([]);
   const [acctRunning, setAcctRunning]         = useState(false);
   const [acctDone, setAcctDone]               = useState(false);
@@ -2973,6 +3285,13 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
                   <Button size="small" icon={<ApiOutlined />} onClick={() => setShowApiModal(true)}
                     style={{ color: REDWOOD.info }} />
                 </Tooltip>
+                <Tooltip title="Debug: open Accounting API Tester">
+                  <Button size="small" icon={<ApiOutlined />}
+                    style={{ color: '#9d4edd', borderColor: '#9d4edd', fontWeight: 600, fontSize: 11 }}
+                    onClick={() => setApiTesterOpen(true)}>
+                    Debug
+                  </Button>
+                </Tooltip>
                 <Button size="small" icon={<ReloadOutlined />} onClick={handleSearch} loading={loading}>Refresh</Button>
               </Space>
             </div>
@@ -3338,6 +3657,17 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
           </>
         )}
       </Modal>
+
+      {/* ── Accounting API Tester (Debug) ─────────────────────────── */}
+      <AccountingApiTesterModal
+        open={apiTesterOpen}
+        onClose={() => setApiTesterOpen(false)}
+        transfers={transfers}
+        apexBase={APEX_BASE}
+        currentUser={currentUser}
+        bankAccountAssetMap={bankAccountAssetMap}
+        bankCurrencyMap={bankCurrencyMap}
+      />
     </Layout>
   );
 };
