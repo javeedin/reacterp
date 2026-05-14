@@ -1251,11 +1251,18 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   // ── Reconcile API Log ────────────────────────────────────────────────────
   const buildTxnSideCall = (sysTxn: SysTxn, line: StmtLine): { url: string; body: object; label: string } => {
     const today = new Date().toISOString().slice(0, 10);
-    if (sysTxn.source === 'GL_BANK_TRANSFER') {
+    if (sysTxn.source === 'BANK_TRANSFER' || sysTxn.source === 'GL_BANK_TRANSFER') {
+      // txnNumber = REFERENCE1 = bank_account_transfer_id
       return {
-        url:   `${APEX_BASE}/gl/journals/lines/${sysTxn.jeHeaderId}/${sysTxn.jeLineNumber}/reconcile`,
-        body:  { reconciled: 'Y', updatedBy: 'SYSTEM' },
-        label: 'Bank Transfer (GL)',
+        url:   `${APEX_BASE}/cash/reconciliation/bank_transfers/${sysTxn.txnNumber}`,
+        body:  {
+          jeHeaderId:    sysTxn.jeHeaderId,
+          jeLineNumber:  sysTxn.jeLineNumber,
+          reconciledDate: today,
+          statementId:   line.statementId,
+          stmtLineId:    line.lineId,
+        },
+        label: 'Bank Transfer',
       };
     }
     if (sysTxn.source === 'ORA_MAN' || sysTxn.source === 'ORA_BAT' || sysTxn.source === 'ORA_STA') {
