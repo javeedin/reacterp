@@ -80,7 +80,7 @@ interface SysTxn {
   bankAccountName?: string;
   reconciledFlag?: string;
   txnStatus?: string;
-  source: 'AP_PAYMENT' | 'AR_RECEIPT' | 'GL_JOURNAL' | string;
+  source: 'AP_PAYMENT' | 'AR_RECEIPT' | 'GL_JOURNAL' | 'GL_BANK_TRANSFER' | string;
   // AP Payment
   payee?: string;
   supplierNumber?: string;
@@ -91,11 +91,13 @@ interface SysTxn {
   customerName?: string;
   customerNumber?: string;
   receiptMethod?: string;
-  // GL Journal
+  // GL Journal / GL Bank Transfer
   accountCode?: string;
   accountDescription?: string;
   journalCategory?: string;
   lineDescription?: string;
+  jeHeaderId?: number;
+  jeLineNumber?: number;
   // External Transaction (CM)
   assetAccountCombination?: string;
   offsetAccountCombination?: string;
@@ -1006,25 +1008,23 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       if (rf !== 'ALL') extQ.set('recon_status', rf);
       extQ.set('row_limit', '500');
 
-      // Build bank transfers queries — need two fetches because the SQL uses AND logic
-      // for from_account/to_account; a given bank account appears on either side, not both.
-      const btBase = new URLSearchParams();
-      if (effectiveDateFrom) btBase.set('date_from', effectiveDateFrom.format('YYYY-MM-DD'));
-      if (effectiveDateTo)   btBase.set('date_to',   effectiveDateTo.format('YYYY-MM-DD'));
-      btBase.set('row_limit', '200');
+      // Build bank transfer lines query — fetch from GL journal lines tagged with
+      // REFERENCE7 = bank account name.  Each side of a transfer is a separate GL line,
+      // so FROM-bank and TO-bank appear as independent reconciliation records.
+      const btGlQ = new URLSearchParams();
+      if (params.bankAccount)  btGlQ.set('bank_account', params.bankAccount);
+      if (effectiveDateFrom)   btGlQ.set('date_from',    effectiveDateFrom.format('YYYY-MM-DD'));
+      if (effectiveDateTo)     btGlQ.set('date_to',      effectiveDateTo.format('YYYY-MM-DD'));
+      if (rf === 'RECONCILED') btGlQ.set('reconciled', 'Y');
+      else if (rf !== 'ALL')   btGlQ.set('reconciled', 'N');
+      btGlQ.set('row_limit', '500');
 
-      const btFromQ = new URLSearchParams(btBase);
-      const btToQ   = new URLSearchParams(btBase);
-      if (params.bankAccount) {
-        btFromQ.set('from_account', params.bankAccount);
-        btToQ.set('to_account',     params.bankAccount);
-      }
-
-      const [systxnsResult, extResult, btFromResult, btToResult] = await Promise.allSettled([
+      const [systxnsResult, extResult, btGlResult] = await Promise.allSettled([
         fetch(`${APEX_BASE}/cash/reconciliation/systxns?${q.toString()}`).then(r => parseApexJson(r)),
         fetch(`${EXT_TXN_URL}?${extQ.toString()}`).then(r => parseApexJson(r)),
-        fetch(`${APEX_BASE}/cash/banktransfers?${btFromQ.toString()}`).then(r => parseApexJson(r)),
-        fetch(`${APEX_BASE}/cash/banktransfers?${btToQ.toString()}`).then(r => parseApexJson(r)),
+        params.bankAccount
+          ? fetch(`${APEX_BASE}/gl/journals/banktxn-lines?${btGlQ.toString()}`).then(r => parseApexJson(r))
+          : Promise.resolve({ status: 'success', items: [] }),
       ]);
 
       const resolveReconFlag = (i: any): string => {
@@ -1091,36 +1091,28 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           })()
         : [];
 
-      const mapBtItem = (i: any): SysTxn => ({
-        txnId:          i.bankAccountTransferId ?? 0,
-        txnNumber:      String(i.bankAccountTransferNumber ?? i.bankAccountTransferId ?? ''),
-        txnDate:        i.transactionDate ?? '',
-        amount:         i.paymentAmount ?? 0,
-        currencyCode:   i.fromCurrencyCode ?? i.paymentCurrencyCode ?? '',
-        businessUnit:   i.businessUnit ?? '',
-        bankAccountName: i.fromBankAccountName ?? '',
-        source:         'BANK_TRANSFER',
-        txnStatus:      i.status ?? '',
-        reconciledFlag: i.reconciledFlag ?? (i.paymentStatus === 'Reconciled' || i.paymentStatus === 'RECONCILED' ? 'Y' : 'N'),
-        reference:      String(i.bankAccountTransferNumber ?? ''),
-        payee:          i.toBankAccountName ?? '',
-      });
-      const rawBtFrom = btFromResult.status === 'fulfilled'
-        ? (Array.isArray(btFromResult.value) ? btFromResult.value : (btFromResult.value?.items ?? []))
+      // Map GL journal lines (bank transfer sides) — each line is one reconcilable record
+      const rawBtGl = btGlResult.status === 'fulfilled'
+        ? (btGlResult.value?.items ?? (Array.isArray(btGlResult.value) ? btGlResult.value : []))
         : [];
-      const rawBtTo   = btToResult.status === 'fulfilled'
-        ? (Array.isArray(btToResult.value)   ? btToResult.value   : (btToResult.value?.items   ?? []))
-        : [];
-      // Deduplicate by bankAccountTransferId so transfers that match both sides appear once
-      const seenBt = new Set<number>();
-      const btItems: SysTxn[] = [...rawBtFrom, ...rawBtTo]
-        .filter((i: any) => {
-          const id = i.bankAccountTransferId ?? 0;
-          if (seenBt.has(id)) return false;
-          seenBt.add(id);
-          return true;
-        })
-        .map(mapBtItem);
+      const btItems: SysTxn[] = rawBtGl.map((i: any): SysTxn => ({
+        txnId:          (i.jeHeaderId ?? 0) * 100000 + (i.jeLineNumber ?? 0),
+        txnNumber:      i.sourceNumber ?? String(i.jeHeaderId ?? ''),
+        txnDate:        i.accountingDate ?? '',
+        amount:         i.enteredDr ?? i.enteredCr ?? 0,
+        currencyCode:   i.currencyCode ?? '',
+        businessUnit:   '',
+        bankAccountName: i.bankAccountName ?? '',
+        source:         'GL_BANK_TRANSFER',
+        txnStatus:      '',
+        reconciledFlag: i.reconciledFlag ?? 'N',
+        reference:      i.sourceNumber ?? '',
+        payee:          i.description  ?? '',
+        lineDescription: i.description ?? '',
+        journalCategory: i.jeCategory  ?? '',
+        jeHeaderId:     i.jeHeaderId,
+        jeLineNumber:   i.jeLineNumber,
+      }));
 
       setSysTxns([...apArGlItems, ...extItems, ...btItems]);
       setLoadingSys(false);
@@ -1218,15 +1210,11 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     const effectiveDateFrom = lastParams?.dateFrom ?? sysDateFrom;
     const effectiveDateTo   = lastParams?.dateTo   ?? sysDateTo;
     const q = new URLSearchParams();
-    if (lastParams?.bankAccount) {
-      q.set('from_account', lastParams.bankAccount);
-      q.set('to_account',   lastParams.bankAccount);
-    }
-    if (lastParams?.businessUnit) q.set('business_unit', lastParams.businessUnit);
-    if (effectiveDateFrom)        q.set('date_from',     effectiveDateFrom.format('YYYY-MM-DD'));
-    if (effectiveDateTo)          q.set('date_to',       effectiveDateTo.format('YYYY-MM-DD'));
-    q.set('row_limit', '200');
-    return `${APEX_BASE}/cash/banktransfers?${q.toString()}`;
+    if (lastParams?.bankAccount)  q.set('bank_account', lastParams.bankAccount);
+    if (effectiveDateFrom)        q.set('date_from',    effectiveDateFrom.format('YYYY-MM-DD'));
+    if (effectiveDateTo)          q.set('date_to',      effectiveDateTo.format('YYYY-MM-DD'));
+    q.set('row_limit', '500');
+    return `${APEX_BASE}/gl/journals/banktxn-lines?${q.toString()}`;
   }, [lastParams, sysDateFrom, sysDateTo]);
 
   // When CM records finish loading, auto-select all pending linked transactions
@@ -1434,11 +1422,11 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   // ── Reconcile API Log ────────────────────────────────────────────────────
   const buildTxnSideCall = (sysTxn: SysTxn, line: StmtLine): { url: string; body: object; label: string } => {
     const today = new Date().toISOString().slice(0, 10);
-    if (sysTxn.source === 'BANK_TRANSFER') {
+    if (sysTxn.source === 'GL_BANK_TRANSFER') {
       return {
-        url:   `${APEX_BASE}/cash/banktransfers`,
-        body:  { items: [{ BankAccountTransferId: sysTxn.txnId, PaymentStatus: 'Reconciled', ReconciledFlag: 'Y', ReconciledDate: today, LastUpdatedBy: 'SYSTEM', LastUpdateDate: new Date().toISOString() }] },
-        label: 'Bank Transfer',
+        url:   `${APEX_BASE}/gl/journals/lines/${sysTxn.jeHeaderId}/${sysTxn.jeLineNumber}/reconcile`,
+        body:  { reconciled: 'Y', updatedBy: 'SYSTEM' },
+        label: 'Bank Transfer (GL)',
       };
     }
     if (sysTxn.source === 'ORA_MAN' || sysTxn.source === 'ORA_BAT' || sysTxn.source === 'ORA_STA') {
