@@ -51,6 +51,7 @@ interface TransferRecord {
   paymentAmount: number;
   fromAmount: number;
   conversionRate: number;
+  conversionRateDate?: string;
   fromBankAccountName: string;
   toBankAccountName: string;
   fromCurrencyCode: string;
@@ -279,8 +280,10 @@ const TransferForm: React.FC<{
         toBankAccountName: initialValues.toBankAccountName,
         transactionDate: initialValues.transactionDate ? dayjs(initialValues.transactionDate) : dayjs(),
         paymentAmount: initialValues.paymentAmount,
-        conversionRateType: initialValues.conversionRateType,
+        conversionRateType: initialValues.conversionRateType ?? 'Corporate',
         conversionRate: initialValues.conversionRate,
+        conversionRateDate: initialValues.conversionRateDate
+          ? dayjs(initialValues.conversionRateDate) : undefined,
         isSettledWithIbyFlag: initialValues.isSettledWithIbyFlag === 'Y',
         businessUnit: initialValues.businessUnit,
         paymentMethod: initialValues.paymentMethod,
@@ -293,7 +296,7 @@ const TransferForm: React.FC<{
       setEditMode(false);
     } else {
       form.resetFields();
-      form.setFieldsValue({ transactionDate: dayjs(), isSettledWithIbyFlag: true });
+      form.setFieldsValue({ transactionDate: dayjs(), isSettledWithIbyFlag: true, conversionRateType: 'Corporate' });
       setFromCurrency('');
       setToCurrency('');
       setEditMode(false);
@@ -331,7 +334,10 @@ const TransferForm: React.FC<{
           setBmsRateInfo({ rate: data.rate, date: data.refreshDate, sourceCur: data.sourceCur, targetCur: data.targetCur });
           // Auto-fill only when creating a new transfer (no existing rate)
           if (!initialValues?.conversionRate) {
-            form.setFieldsValue({ conversionRate: data.rate });
+            form.setFieldsValue({
+              conversionRate: data.rate,
+              conversionRateDate: dayjs(data.refreshDate),
+            });
           }
         } else {
           setBmsRateInfo(null);
@@ -420,6 +426,7 @@ const TransferForm: React.FC<{
       PaymentCurrencyCode:       values.paymentCurrencyCode ?? '',
       ConversionRateType:        values.conversionRateType ?? '',
       ConversionRate:            values.conversionRate ?? null,
+      ConversionRateDate:        values.conversionRateDate?.format('YYYY-MM-DD') ?? null,
       Status:                    'Completed',
       PaymentStatus:             initialValues?.paymentStatus ?? '',
       PaymentMethod:             values.paymentMethod ?? '',
@@ -864,7 +871,7 @@ const TransferForm: React.FC<{
                   size="small"
                   type="link"
                   style={{ fontSize: 11, padding: '0 4px', height: 'auto' }}
-                  onClick={() => form.setFieldsValue({ conversionRate: bmsRateInfo.rate })}
+                  onClick={() => form.setFieldsValue({ conversionRate: bmsRateInfo.rate, conversionRateDate: dayjs(bmsRateInfo.date) })}
                 >
                   Apply
                 </Button>
@@ -875,6 +882,10 @@ const TransferForm: React.FC<{
                 Required: {fromCurrency} → {toCurrency} cross-currency transfer
               </div>
             )}
+
+            <Form.Item label="Rate Date" name="conversionRateDate" style={fs}>
+              <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={isReadOnly || !buSelected} />
+            </Form.Item>
           </Col>
 
           {/* Right column */}

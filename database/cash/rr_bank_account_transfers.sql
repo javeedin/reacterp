@@ -90,6 +90,7 @@ BEGIN
                 from_external_trx_id         NUMBER          PATH '$.FromExternalTrxId',
                 to_external_trx_id           NUMBER          PATH '$.ToExternalTrxId',
                 conversion_rate              NUMBER          PATH '$.ConversionRate',
+                conversion_rate_date         VARCHAR2(30)    PATH '$.ConversionRateDate',
                 from_bank_account_name       VARCHAR2(360)   PATH '$.FromBankAccountName',
                 to_bank_account_name         VARCHAR2(360)   PATH '$.ToBankAccountName',
                 from_currency_code           VARCHAR2(15)    PATH '$.FromCurrencyCode',
@@ -131,6 +132,7 @@ BEGIN
                 rec.from_external_trx_id         AS from_external_trx_id,
                 rec.to_external_trx_id           AS to_external_trx_id,
                 rec.conversion_rate              AS conversion_rate,
+                TO_DATE(rec.conversion_rate_date, 'YYYY-MM-DD') AS conversion_rate_date,
                 rec.from_bank_account_name       AS from_bank_account_name,
                 rec.to_bank_account_name         AS to_bank_account_name,
                 rec.from_currency_code           AS from_currency_code,
@@ -163,6 +165,7 @@ BEGIN
                 tgt.FROM_EXTERNAL_TRX_ID         = src.from_external_trx_id,
                 tgt.TO_EXTERNAL_TRX_ID           = src.to_external_trx_id,
                 tgt.CONVERSION_RATE              = src.conversion_rate,
+                tgt.CONVERSION_RATE_DATE         = src.conversion_rate_date,
                 tgt.FROM_BANK_ACCOUNT_NAME       = src.from_bank_account_name,
                 tgt.TO_BANK_ACCOUNT_NAME         = src.to_bank_account_name,
                 tgt.FROM_CURRENCY_CODE           = src.from_currency_code,
@@ -188,7 +191,7 @@ BEGIN
                 TRANSACTION_DATE, MEMO,
                 PAYMENT_REQUEST_ID, PAYMENT_AMOUNT, FROM_AMOUNT,
                 FROM_EXTERNAL_TRX_ID, TO_EXTERNAL_TRX_ID,
-                CONVERSION_RATE, FROM_BANK_ACCOUNT_NAME, TO_BANK_ACCOUNT_NAME,
+                CONVERSION_RATE, CONVERSION_RATE_DATE, FROM_BANK_ACCOUNT_NAME, TO_BANK_ACCOUNT_NAME,
                 FROM_CURRENCY_CODE, TO_CURRENCY_CODE, PAYMENT_CURRENCY_CODE,
                 CONVERSION_RATE_TYPE, STATUS, PAYMENT_STATUS, PAYMENT_METHOD,
                 PAYMENT_PROFILE_NAME, BUSINESS_UNIT, PAYMENT_FILE,
@@ -200,7 +203,7 @@ BEGIN
                 src.transaction_date, src.memo,
                 src.payment_request_id, src.payment_amount, src.from_amount,
                 src.from_external_trx_id, src.to_external_trx_id,
-                src.conversion_rate, src.from_bank_account_name, src.to_bank_account_name,
+                src.conversion_rate, src.conversion_rate_date, src.from_bank_account_name, src.to_bank_account_name,
                 src.from_currency_code, src.to_currency_code, src.payment_currency_code,
                 src.conversion_rate_type, src.status, src.payment_status, src.payment_method,
                 src.payment_profile_name, src.business_unit, src.payment_file,
@@ -308,6 +311,7 @@ DECLARE
                FROM_EXTERNAL_TRX_ID,
                TO_EXTERNAL_TRX_ID,
                CONVERSION_RATE,
+               TO_CHAR(CONVERSION_RATE_DATE, 'YYYY-MM-DD')          AS CONVERSION_RATE_DATE,
                FROM_BANK_ACCOUNT_NAME,
                TO_BANK_ACCOUNT_NAME,
                FROM_CURRENCY_CODE,
@@ -372,6 +376,7 @@ BEGIN
         APEX_JSON.WRITE('fromExternalTrxId',         r.FROM_EXTERNAL_TRX_ID);
         APEX_JSON.WRITE('toExternalTrxId',           r.TO_EXTERNAL_TRX_ID);
         APEX_JSON.WRITE('conversionRate',            r.CONVERSION_RATE);
+        APEX_JSON.WRITE('conversionRateDate',        r.CONVERSION_RATE_DATE);
         APEX_JSON.WRITE('fromBankAccountName',       r.FROM_BANK_ACCOUNT_NAME);
         APEX_JSON.WRITE('toBankAccountName',         r.TO_BANK_ACCOUNT_NAME);
         APEX_JSON.WRITE('fromCurrencyCode',          r.FROM_CURRENCY_CODE);
