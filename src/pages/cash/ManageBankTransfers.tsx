@@ -2393,11 +2393,17 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
             onClick={() => openEdit(record)}>
             {val ?? '—'}
           </Button>
-          {record.businessUnit && (
-            <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 1 }}>{record.businessUnit}</div>
-          )}
         </div>
       ),
+    },
+    {
+      title: 'BU',
+      dataIndex: 'businessUnit',
+      key: 'businessUnit',
+      width: 140,
+      render: (val: string) => val
+        ? <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{val}</Text>
+        : <Text type="secondary">—</Text>,
     },
     {
       title: 'From Account',
@@ -2422,32 +2428,30 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       ),
     },
     {
-      title: 'Pmt Currency',
-      dataIndex: 'paymentCurrencyCode',
-      key: 'paymentCurrencyCode',
-      width: 90,
-      render: (v: string) => v ? <Tag style={{ margin: 0, fontSize: 11 }}>{v}</Tag> : <Text type="secondary">—</Text>,
-    },
-    {
       title: 'Transfer Amt',
       dataIndex: 'paymentAmount',
       key: 'paymentAmount',
-      width: 140,
+      width: 160,
       align: 'right' as const,
       render: (v: number, r: TransferRecord) => {
         const isCross = r.fromAmount && r.fromCurrencyCode && r.paymentCurrencyCode
           && r.fromCurrencyCode !== r.paymentCurrencyCode;
-        return (
-          <div style={{ lineHeight: 1.4 }}>
-            <Text style={{ fontWeight: 500, color: REDWOOD.neutral900 }}>
-              {fmtAmount(v, r.paymentCurrencyCode)}
-            </Text>
-            {isCross && (
-              <div style={{ fontSize: 11, color: REDWOOD.info }}>
-                {fmtAmount(r.fromAmount, r.fromCurrencyCode)}
+        if (isCross) {
+          return (
+            <div style={{ lineHeight: 1.6, textAlign: 'right' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
+                <Text style={{ fontSize: 10, color: REDWOOD.neutral600 }}>FROM</Text>
+                <Text style={{ fontWeight: 600 }}>{fmtAmount(r.fromAmount, r.fromCurrencyCode)}</Text>
               </div>
-            )}
-          </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
+                <Text style={{ fontSize: 10, color: REDWOOD.neutral600 }}>PMT</Text>
+                <Text style={{ color: REDWOOD.info }}>{fmtAmount(v, r.paymentCurrencyCode)}</Text>
+              </div>
+            </div>
+          );
+        }
+        return (
+          <Text style={{ fontWeight: 600 }}>{fmtAmount(v, r.paymentCurrencyCode)}</Text>
         );
       },
     },
@@ -2477,23 +2481,11 @@ const ManageBankTransfers: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = 'c
       defaultSortOrder: 'descend',
     },
     {
-      title: 'Amount',
-      key: 'amount',
-      width: 140,
-      align: 'right',
-      render: (_, r) => (
-        <Text style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
-          {new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(r.paymentAmount ?? 0)}
-        </Text>
-      ),
-      sorter: (a, b) => (a.paymentAmount ?? 0) - (b.paymentAmount ?? 0),
-    },
-    {
-      title: 'Currency',
+      title: 'From CCY',
       dataIndex: 'fromCurrencyCode',
       key: 'ccy',
-      width: 80,
-      render: (val: string) => val ? <Tag style={{ fontSize: 11 }}>{val}</Tag> : <Text type="secondary">—</Text>,
+      width: 90,
+      render: (val: string) => val ? <Tag style={{ fontSize: 11, margin: 0 }}>{val}</Tag> : <Text type="secondary">—</Text>,
       filters: [...new Set(transfers.map(t => t.fromCurrencyCode).filter(Boolean))].map(c => ({ text: c, value: c })),
       onFilter: (val, rec) => rec.fromCurrencyCode === val,
     },
