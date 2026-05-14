@@ -39,6 +39,13 @@ export interface GlPostingLine {
   accountCombination: string;
   accountingClass:    string | null;
   legalEntity:        string | null;
+  // Reference columns (reference1-5 mapped internally; 6-10 passed through as-is)
+  reference6?:        string | null;
+  reference7?:        string | null;  // bank account name for bank transfer recon
+  reference8?:        string | null;
+  reference9?:        string | null;
+  reference10?:       string | null;
+  reconciledFlag?:    string | null;
   [key: string]: any;
 }
 
@@ -185,7 +192,12 @@ export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResu
       reference3:               l.accountingClass || null,
       reference4:               businessUnit || null,
       reference5:               ref5,
-      reference7:               l.reference7 || null,
+      reference6:               l.reference6  || null,
+      reference7:               l.reference7  || null,
+      reference8:               l.reference8  || null,
+      reference9:               l.reference9  || null,
+      reference10:              l.reference10 || null,
+      reconciledFlag:           l.reconciledFlag || 'N',
       createdBy,
     };
     }),
