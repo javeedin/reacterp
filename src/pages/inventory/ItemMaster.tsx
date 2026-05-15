@@ -263,15 +263,15 @@ const SearchPanel: React.FC<{
     return Array.from(set).sort().map(v => ({ label: v, value: v }));
   }, [allData]);
 
-  const handleSearch = () => {
+  const runSearch = useCallback((data: ItemRow[]) => {
     const vals = form.getFieldsValue();
-    const filtered = allData.filter(row => {
+    const filtered = data.filter(row => {
       if (vals.itemNumber) {
         const q = vals.itemNumber.toLowerCase();
         if (!row.item_number.toLowerCase().includes(q) && !(row.old_item_code || '').toLowerCase().includes(q)) return false;
       }
       if (vals.description) {
-        if (!row.description.toLowerCase().includes(vals.description.toLowerCase())) return false;
+        if (!(row.description || '').toLowerCase().includes(vals.description.toLowerCase())) return false;
       }
       if (vals.status && row.inventory_item_status_code !== vals.status) return false;
       if (vals.org && row.organization_code !== vals.org) return false;
@@ -281,7 +281,9 @@ const SearchPanel: React.FC<{
     });
     setResults(filtered);
     setSearched(true);
-  };
+  }, [form]);
+
+  const handleSearch = () => runSearch(allData);
 
   const handleReset = () => {
     form.resetFields();
@@ -393,7 +395,7 @@ const SearchPanel: React.FC<{
           </div>
         }
       >
-        <Form form={form} layout="vertical" onFinish={handleSearch}>
+        <Form form={form} layout="vertical" onFinish={handleSearch} onKeyDown={e => { if (e.key === 'Enter') handleSearch(); }}>
           <Row gutter={[16, 0]}>
             <Col xs={24} sm={12} md={6}>
               <Form.Item name="itemNumber" label={<Text style={{ fontSize: 12 }}>Item Number</Text>} style={{ marginBottom: 12 }}>
@@ -429,8 +431,8 @@ const SearchPanel: React.FC<{
           <div style={{ display: 'flex', gap: 8 }}>
             <Button
               type="primary"
-              htmlType="submit"
               icon={<SearchOutlined />}
+              onClick={handleSearch}
               style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary, fontWeight: 600 }}
             >
               Search
