@@ -18,50 +18,53 @@ const { Text } = Typography;
 const APEX_BASE = APEX_DB_CONFIG.baseUrl;
 
 const REDWOOD = {
-  primary:   '#C74634',
-  success:   '#1D7B4D',
-  info:      '#0572CE',
-  warning:   '#A86C00',
-  neutral600:'#6B6B6B',
+  primary:    '#C74634',
+  success:    '#1D7B4D',
+  info:       '#0572CE',
+  warning:    '#A86C00',
+  error:      '#C74634',
+  neutral600: '#6B6B6B',
 };
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface ReconRow {
-  slaHeaderId:      number;
-  sourceTable:      string;
-  sourceId:         number;
-  sourceNumber:     string;
-  eventTypeCode:    string;
-  accountingDate:   string;
-  periodName:       string;
-  businessUnit:     string;
-  ledgerName:       string;
-  currencyCode:     string;
-  accountingStatus: string;
-  postingStatus:    string;
-  glHeaderId:       number | null;
-  postedDate:       string | null;
-  slaEnteredDr:     number;
-  slaEnteredCr:     number;
-  slaLineCount:     number;
-  glJournalName:    string | null;
-  glBatchStatus:    string | null;
-  glEnteredDr:      number;
-  glEnteredCr:      number;
-  glLineCount:      number;
-  glDrAccount:      string | null;
-  glCrAccount:      string | null;
-  apAmount:         number | null;
-  apNumber:         string | null;
-  apDate:           string | null;
-  apStatus:         string | null;
-  apSupplier:       string | null;
-  apVsSlaDiff:      number;
-  slaVsGlDiff:      number;
-  apMatchesSla:     boolean;
-  slaMatchesGl:     boolean;
-  isFullyBalanced:  boolean;
+  // AP source (always present)
+  sourceTable:     string;
+  sourceId:        number;
+  apNumber:        string;
+  apAmount:        number | null;
+  apDate:          string | null;
+  apStatus:        string | null;
+  apSupplier:      string | null;
+  businessUnit:    string;
+  apCurrency:      string | null;
+  // SLA (LEFT JOIN — may be zero)
+  slaCount:        number;
+  slaExists:       boolean;
+  slaStatus:       string | null;
+  slaPeriodName:   string | null;
+  ledgerName:      string | null;
+  slaCurrency:     string | null;
+  slaEnteredDr:    number;
+  slaEnteredCr:    number;
+  slaLineCount:    number;
+  // GL (scalar subqueries — may be zero)
+  glCount:         number;
+  glExists:        boolean;
+  glHeaderId:      number | null;
+  glJournalName:   string | null;
+  glBatchStatus:   string | null;
+  glEnteredDr:     number;
+  glEnteredCr:     number;
+  glDrAccount:     string | null;
+  glCrAccount:     string | null;
+  // Three-way derived
+  apVsSlaDiff:     number;
+  slaVsGlDiff:     number;
+  apMatchesSla:    boolean;
+  slaMatchesGl:    boolean;
+  isFullyBalanced: boolean;
 }
 
 interface Summary {
@@ -71,14 +74,15 @@ interface Summary {
   glTotalDr:       number;
   apVsSlaDiff:     number;
   slaVsGlDiff:     number;
+  noSlaCount:      number;
+  noGlCount:       number;
   isFullyBalanced: boolean;
 }
 
 const SOURCE_TABLE_OPTIONS = [
-  { value: 'AP_INVOICES',               label: 'AP Invoices' },
-  { value: 'AP_PAYMENTS',               label: 'AP Payments' },
-  { value: 'RR_AP_APPLIED_PREPAYMENTS', label: 'Prepayment Applications' },
-  { value: 'CE_BANK_ACCT_TRANSFERS',    label: 'Bank Transfers (CE)' },
+  { value: 'AP_INVOICES',                label: 'AP Invoices' },
+  { value: 'AP_PAYMENTS',                label: 'AP Payments' },
+  { value: 'RR_BANK_ACCOUNT_TRANSFERS',  label: 'Bank Transfers' },
 ];
 
 const STATUS_OPTIONS = [
@@ -91,26 +95,12 @@ const STATUS_OPTIONS = [
 const fmt = (n: number | null | undefined, digits = 2) =>
   n == null ? '–' : n.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
-function BalanceTag({ row }: { row: ReconRow }) {
-  if (row.isFullyBalanced)
-    return <Tag icon={<CheckCircleOutlined />} color="success" style={{ fontSize: 11 }}>Balanced</Tag>;
-  if (row.apMatchesSla && !row.slaMatchesGl)
-    return (
-      <Tooltip title={`SLA→GL gap: ${fmt(row.slaVsGlDiff)}`}>
-        <Tag icon={<WarningOutlined />} color="warning" style={{ fontSize: 11 }}>SLA↛GL</Tag>
-      </Tooltip>
-    );
-  if (!row.apMatchesSla && row.slaMatchesGl)
-    return (
-      <Tooltip title={`AP→SLA gap: ${fmt(row.apVsSlaDiff)}`}>
-        <Tag icon={<WarningOutlined />} color="orange" style={{ fontSize: 11 }}>AP↛SLA</Tag>
-      </Tooltip>
-    );
-  return (
-    <Tooltip title={`AP→SLA: ${fmt(row.apVsSlaDiff)} | SLA→GL: ${fmt(row.slaVsGlDiff)}`}>
-      <Tag icon={<CloseCircleOutlined />} color="error" style={{ fontSize: 11 }}>Both Gaps</Tag>
-    </Tooltip>
-  );
+// Three-way status indicator — ✓ green or ✗ red
+function StatusTick({ exists, tooltip }: { exists: boolean; tooltip?: string }) {
+  const icon = exists
+    ? <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 16 }} />
+    : <CloseCircleOutlined style={{ color: REDWOOD.error,   fontSize: 16 }} />;
+  return tooltip ? <Tooltip title={tooltip}>{icon}</Tooltip> : icon;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -124,11 +114,10 @@ export default function APGLReconcile() {
   const [summary, setSummary]             = useState<Summary | null>(null);
   const [loading, setLoading]             = useState(false);
   const [error, setError]                 = useState<string | null>(null);
-  const [filter, setFilter]               = useState<'ALL' | 'BALANCED' | 'UNBALANCED'>('ALL');
+  const [filter, setFilter]               = useState<'ALL' | 'OK' | 'MISSING_SLA' | 'MISSING_GL' | 'GAP'>('ALL');
   const [lastCalledUrl, setLastCalledUrl] = useState<string>('');
   const [apiModalOpen, setApiModalOpen]   = useState(false);
 
-  // ── Derived API URL (updates as form values change) ──────────────────────────
   const previewUrl = useMemo(() => {
     const values = form.getFieldsValue();
     const [dateFrom, dateTo] = values.dateRange
@@ -149,12 +138,11 @@ export default function APGLReconcile() {
     try {
       const res  = await fetch(`${APEX_BASE}/gl/businessunits`);
       const data = await res.json();
-      // ORDS json/collection returns lowercase snake_case field names
       const names: string[] = (data.items ?? [])
         .map((b: any) => b.business_unit_name ?? b.BUSINESS_UNIT_NAME ?? b.businessUnitName)
         .filter(Boolean);
       setBusinessUnits(names);
-    } catch { /* silently ignore */ } finally { setBuLoading(false); }
+    } catch { /* ignore */ } finally { setBuLoading(false); }
   }, [businessUnits.length]);
 
   const handleSearch = async (values: any) => {
@@ -182,6 +170,8 @@ export default function APGLReconcile() {
       const bool = (v: any) => v === true || v === 'true';
       setRows((data.items ?? []).map((r: any) => ({
         ...r,
+        slaExists:       bool(r.slaExists),
+        glExists:        bool(r.glExists),
         apMatchesSla:    bool(r.apMatchesSla),
         slaMatchesGl:    bool(r.slaMatchesGl),
         isFullyBalanced: bool(r.isFullyBalanced),
@@ -192,43 +182,81 @@ export default function APGLReconcile() {
     } finally { setLoading(false); }
   };
 
-  const unbalancedCount = rows.filter(r => !r.isFullyBalanced).length;
   const displayed = rows.filter(r => {
-    if (filter === 'BALANCED')   return r.isFullyBalanced;
-    if (filter === 'UNBALANCED') return !r.isFullyBalanced;
+    if (filter === 'OK')          return r.isFullyBalanced;
+    if (filter === 'MISSING_SLA') return !r.slaExists;
+    if (filter === 'MISSING_GL')  return !r.glExists;
+    if (filter === 'GAP')         return r.slaExists && r.glExists && !r.isFullyBalanced;
     return true;
   });
 
+  const missingSlaCount = rows.filter(r => !r.slaExists).length;
+  const missingGlCount  = rows.filter(r => !r.glExists).length;
+  const gapCount        = rows.filter(r => r.slaExists && r.glExists && !r.isFullyBalanced).length;
+  const okCount         = rows.filter(r => r.isFullyBalanced).length;
+
+  const sourceLabel = (t: string) =>
+    SOURCE_TABLE_OPTIONS.find(o => o.value === t)?.label ?? t;
+
   const columns: ColumnsType<ReconRow> = [
+    // ── Three tick columns ───────────────────────────────────────────────────
     {
-      title: 'Balance',
-      key: 'balance',
-      width: 95,
+      title: () => <Tooltip title="AP transaction exists"><span>AP</span></Tooltip>,
+      key: 'apTick',
+      width: 48,
+      align: 'center',
       fixed: 'left',
-      render: (_, r) => <BalanceTag row={r} />,
+      render: () => <StatusTick exists tooltip="Found in AP tables" />,
     },
     {
-      title: 'Source',
-      key: 'sourceTable',
-      width: 140,
-      render: (_, r) => {
-        const label = SOURCE_TABLE_OPTIONS.find(o => o.value === r.sourceTable)?.label ?? r.sourceTable;
-        return <Text style={{ fontSize: 11 }}>{label}</Text>;
-      },
-    },
-    // ── AP leg ──────────────────────────────────────────────────────────────
-    {
-      title: 'AP Transaction #',
-      key: 'apNumber',
-      width: 140,
+      title: () => <Tooltip title="SLA accounting entry exists"><span>SLA</span></Tooltip>,
+      key: 'slaTick',
+      width: 48,
+      align: 'center',
+      fixed: 'left',
       render: (_, r) => (
-        <Text code style={{ fontSize: 11 }}>{r.apNumber ?? r.sourceNumber ?? '—'}</Text>
+        <StatusTick
+          exists={r.slaExists}
+          tooltip={r.slaExists
+            ? `SLA found — status: ${r.slaStatus ?? 'N/A'}`
+            : 'No SLA accounting entry (unposted / not yet accounted)'}
+        />
       ),
     },
     {
-      title: 'Supplier',
+      title: () => <Tooltip title="GL journal entry exists"><span>GL</span></Tooltip>,
+      key: 'glTick',
+      width: 48,
+      align: 'center',
+      fixed: 'left',
+      render: (_, r) => (
+        <StatusTick
+          exists={r.glExists}
+          tooltip={r.glExists
+            ? `GL found — ${r.glBatchStatus === 'P' ? 'Posted' : (r.glBatchStatus ?? 'N/A')}`
+            : 'No GL journal entry'}
+        />
+      ),
+    },
+    // ── Source ───────────────────────────────────────────────────────────────
+    {
+      title: 'Source',
+      key: 'sourceTable',
+      width: 130,
+      fixed: 'left',
+      render: (_, r) => <Text style={{ fontSize: 11 }}>{sourceLabel(r.sourceTable)}</Text>,
+    },
+    // ── AP leg ───────────────────────────────────────────────────────────────
+    {
+      title: 'AP Transaction #',
+      dataIndex: 'apNumber',
+      width: 150,
+      render: v => <Text code style={{ fontSize: 11 }}>{v ?? '—'}</Text>,
+    },
+    {
+      title: 'Supplier / Memo',
       dataIndex: 'apSupplier',
-      width: 160,
+      width: 170,
       render: v => <Text style={{ fontSize: 11 }} ellipsis={{ tooltip: v }}>{v ?? '—'}</Text>,
     },
     {
@@ -239,7 +267,7 @@ export default function APGLReconcile() {
     {
       title: 'AP Status',
       dataIndex: 'apStatus',
-      width: 100,
+      width: 105,
       render: v => v ? <Tag style={{ fontSize: 10 }}>{v}</Tag> : <Text type="secondary">—</Text>,
     },
     {
@@ -248,31 +276,18 @@ export default function APGLReconcile() {
       width: 120,
       align: 'right',
       render: (v, r) => (
-        <Text style={{ fontSize: 11, color: !r.apMatchesSla && v != null ? REDWOOD.warning : undefined }}>
+        <Text style={{ fontSize: 11, fontFamily: 'monospace', color: r.slaExists && !r.apMatchesSla ? REDWOOD.warning : undefined }}>
           {fmt(v)}
         </Text>
       ),
     },
-    // ── AP↔SLA check ────────────────────────────────────────────────────────
-    {
-      title: 'AP↔SLA',
-      key: 'apVsSla',
-      width: 75,
-      align: 'center',
-      render: (_, r) => r.apAmount == null
-        ? <Text type="secondary" style={{ fontSize: 10 }}>N/A</Text>
-        : r.apMatchesSla
-          ? <CheckCircleOutlined style={{ color: REDWOOD.success }} />
-          : <Tooltip title={`Diff: ${fmt(r.apVsSlaDiff)}`}>
-              <WarningOutlined style={{ color: REDWOOD.warning }} />
-            </Tooltip>,
-    },
-    // ── SLA leg ─────────────────────────────────────────────────────────────
+    // ── SLA leg ──────────────────────────────────────────────────────────────
     {
       title: 'SLA Status',
-      dataIndex: 'accountingStatus',
+      dataIndex: 'slaStatus',
       width: 95,
-      render: v => {
+      render: (v, r) => {
+        if (!r.slaExists) return <Text type="secondary" style={{ fontSize: 10 }}>—</Text>;
         const color = v === 'POSTED' ? 'success' : v === 'FINAL' ? 'processing' : v === 'DRAFT' ? 'default' : 'error';
         return <Tag color={color} style={{ fontSize: 10 }}>{v}</Tag>;
       },
@@ -282,35 +297,40 @@ export default function APGLReconcile() {
       dataIndex: 'slaEnteredDr',
       width: 120,
       align: 'right',
-      render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{fmt(v)}</Text>,
+      render: (v, r) => r.slaExists
+        ? <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{fmt(v)}</Text>
+        : <Text type="secondary">—</Text>,
     },
     {
       title: 'SLA CR',
       dataIndex: 'slaEnteredCr',
       width: 120,
       align: 'right',
-      render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{fmt(v)}</Text>,
+      render: (v, r) => r.slaExists
+        ? <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{fmt(v)}</Text>
+        : <Text type="secondary">—</Text>,
     },
-    // ── SLA↔GL check ────────────────────────────────────────────────────────
+    // ── Amount gap AP↔SLA ────────────────────────────────────────────────────
     {
-      title: 'SLA↔GL',
-      key: 'slaVsGl',
+      title: 'AP↔SLA',
+      key: 'apVsSla',
       width: 75,
       align: 'center',
-      render: (_, r) => r.glHeaderId == null
-        ? <Tooltip title="No GL journal"><CloseCircleOutlined style={{ color: '#ff4d4f' }} /></Tooltip>
-        : r.slaMatchesGl
+      render: (_, r) => {
+        if (!r.slaExists) return <Text type="secondary" style={{ fontSize: 10 }}>—</Text>;
+        return r.apMatchesSla
           ? <CheckCircleOutlined style={{ color: REDWOOD.success }} />
-          : <Tooltip title={`Diff: ${fmt(r.slaVsGlDiff)}`}>
+          : <Tooltip title={`Amount gap: ${fmt(r.apVsSlaDiff)}`}>
               <WarningOutlined style={{ color: REDWOOD.warning }} />
-            </Tooltip>,
+            </Tooltip>;
+      },
     },
-    // ── GL leg ──────────────────────────────────────────────────────────────
+    // ── GL leg ───────────────────────────────────────────────────────────────
     {
       title: 'GL Journal',
       dataIndex: 'glJournalName',
       width: 180,
-      render: v => v
+      render: (v, r) => r.glExists
         ? <Text style={{ fontSize: 11 }} ellipsis={{ tooltip: v }}>{v}</Text>
         : <Text type="secondary">—</Text>,
     },
@@ -318,7 +338,7 @@ export default function APGLReconcile() {
       title: 'GL DR Account',
       dataIndex: 'glDrAccount',
       width: 170,
-      render: v => v
+      render: (v, r) => r.glExists && v
         ? <Text code style={{ fontSize: 10 }} ellipsis={{ tooltip: v }}>{v}</Text>
         : <Text type="secondary">—</Text>,
     },
@@ -326,7 +346,7 @@ export default function APGLReconcile() {
       title: 'GL CR Account',
       dataIndex: 'glCrAccount',
       width: 170,
-      render: v => v
+      render: (v, r) => r.glExists && v
         ? <Text code style={{ fontSize: 10 }} ellipsis={{ tooltip: v }}>{v}</Text>
         : <Text type="secondary">—</Text>,
     },
@@ -334,9 +354,9 @@ export default function APGLReconcile() {
       title: 'GL Status',
       dataIndex: 'glBatchStatus',
       width: 90,
-      render: v => v
+      render: (v, r) => r.glExists
         ? <Tag color={v === 'P' ? 'success' : 'default'} style={{ fontSize: 10 }}>
-            {v === 'P' ? 'Posted' : v}
+            {v === 'P' ? 'Posted' : (v ?? '?')}
           </Tag>
         : <Text type="secondary">—</Text>,
     },
@@ -345,28 +365,48 @@ export default function APGLReconcile() {
       dataIndex: 'glEnteredDr',
       width: 120,
       align: 'right',
-      render: (v, r) => (
-        <Text style={{ fontSize: 11, fontFamily: 'monospace', color: !r.slaMatchesGl && r.glHeaderId != null ? REDWOOD.warning : undefined }}>
-          {fmt(v)}
-        </Text>
-      ),
+      render: (v, r) => r.glExists
+        ? <Text style={{ fontSize: 11, fontFamily: 'monospace', color: !r.slaMatchesGl ? REDWOOD.warning : undefined }}>
+            {fmt(v)}
+          </Text>
+        : <Text type="secondary">—</Text>,
     },
     {
       title: 'GL CR',
       dataIndex: 'glEnteredCr',
       width: 120,
       align: 'right',
-      render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{fmt(v)}</Text>,
+      render: (v, r) => r.glExists
+        ? <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{fmt(v)}</Text>
+        : <Text type="secondary">—</Text>,
     },
+    // ── SLA↔GL gap ──────────────────────────────────────────────────────────
+    {
+      title: 'SLA↔GL',
+      key: 'slaVsGl',
+      width: 75,
+      align: 'center',
+      render: (_, r) => {
+        if (!r.slaExists || !r.glExists) return <Text type="secondary" style={{ fontSize: 10 }}>—</Text>;
+        return r.slaMatchesGl
+          ? <CheckCircleOutlined style={{ color: REDWOOD.success }} />
+          : <Tooltip title={`Amount gap: ${fmt(r.slaVsGlDiff)}`}>
+              <WarningOutlined style={{ color: REDWOOD.warning }} />
+            </Tooltip>;
+      },
+    },
+    // ── Period / Currency ────────────────────────────────────────────────────
     {
       title: 'Period',
-      dataIndex: 'periodName',
+      dataIndex: 'slaPeriodName',
       width: 90,
+      render: v => v ?? <Text type="secondary">—</Text>,
     },
     {
       title: 'Currency',
-      dataIndex: 'currencyCode',
+      key: 'currency',
       width: 80,
+      render: (_, r) => r.apCurrency ?? r.slaCurrency ?? '—',
     },
   ];
 
@@ -405,10 +445,10 @@ export default function APGLReconcile() {
           </Form.Item>
 
           <Form.Item name="sourceTable" label="Source">
-            <Select placeholder="All" allowClear style={{ width: 190 }} options={SOURCE_TABLE_OPTIONS} />
+            <Select placeholder="All" allowClear style={{ width: 175 }} options={SOURCE_TABLE_OPTIONS} />
           </Form.Item>
 
-          <Form.Item name="accountingStatus" label="Acctg Status">
+          <Form.Item name="accountingStatus" label="SLA Status">
             <Select placeholder="All" allowClear style={{ width: 120 }} options={STATUS_OPTIONS} />
           </Form.Item>
 
@@ -440,15 +480,18 @@ export default function APGLReconcile() {
       {summary && (
         <Row gutter={12} style={{ marginBottom: 16 }}>
           {[
-            { title: 'Total Rows',   value: summary.totalRows,      color: undefined },
-            { title: 'AP Total',     value: fmt(summary.apTotalDr), color: undefined },
-            { title: 'SLA Total DR', value: fmt(summary.slaTotalDr),color: undefined },
-            { title: 'GL Total DR',  value: fmt(summary.glTotalDr), color: undefined },
-            { title: 'AP↔SLA Gap',  value: fmt(summary.apVsSlaDiff),  color: summary.apVsSlaDiff  > 0.01 ? REDWOOD.warning : REDWOOD.success },
-            { title: 'SLA↔GL Gap',  value: fmt(summary.slaVsGlDiff),  color: summary.slaVsGlDiff > 0.01 ? REDWOOD.warning : REDWOOD.success },
-            { title: 'Unbalanced',   value: unbalancedCount,           color: unbalancedCount > 0 ? REDWOOD.warning : REDWOOD.success },
-            { title: 'Overall',      value: summary.isFullyBalanced ? 'Balanced' : 'Has Gaps',
-              color: summary.isFullyBalanced ? REDWOOD.success : REDWOOD.warning },
+            { title: 'Total AP Txns',  value: summary.totalRows,      color: undefined },
+            { title: 'AP Total',       value: fmt(summary.apTotalDr), color: undefined },
+            { title: 'SLA Total DR',   value: fmt(summary.slaTotalDr),color: undefined },
+            { title: 'GL Total DR',    value: fmt(summary.glTotalDr), color: undefined },
+            { title: 'No SLA Entry',   value: summary.noSlaCount,
+              color: summary.noSlaCount  > 0 ? REDWOOD.error   : REDWOOD.success },
+            { title: 'No GL Entry',    value: summary.noGlCount,
+              color: summary.noGlCount   > 0 ? REDWOOD.error   : REDWOOD.success },
+            { title: 'AP↔SLA Gap',    value: fmt(summary.apVsSlaDiff),
+              color: summary.apVsSlaDiff > 0.01 ? REDWOOD.warning : REDWOOD.success },
+            { title: 'SLA↔GL Gap',    value: fmt(summary.slaVsGlDiff),
+              color: summary.slaVsGlDiff > 0.01 ? REDWOOD.warning : REDWOOD.success },
           ].map(s => (
             <Col span={3} key={s.title}>
               <Card size="small">
@@ -478,9 +521,11 @@ export default function APGLReconcile() {
               value={filter}
               onChange={v => setFilter(v as any)}
               options={[
-                { label: `All (${rows.length})`,                        value: 'ALL' },
-                { label: `Balanced (${rows.length - unbalancedCount})`, value: 'BALANCED' },
-                { label: `With Gaps (${unbalancedCount})`,              value: 'UNBALANCED' },
+                { label: `All (${rows.length})`,            value: 'ALL' },
+                { label: `OK (${okCount})`,                 value: 'OK' },
+                { label: `No SLA (${missingSlaCount})`,     value: 'MISSING_SLA' },
+                { label: `No GL (${missingGlCount})`,       value: 'MISSING_GL' },
+                { label: `Amount Gap (${gapCount})`,        value: 'GAP' },
               ]}
             />
           )
@@ -489,12 +534,16 @@ export default function APGLReconcile() {
         <Table<ReconRow>
           dataSource={displayed}
           columns={columns}
-          rowKey="slaHeaderId"
+          rowKey={r => `${r.sourceTable}_${r.sourceId}`}
           loading={loading}
           size="small"
-          scroll={{ x: 2450 }}
+          scroll={{ x: 2400 }}
           pagination={{ pageSize: 50, showSizeChanger: true, showTotal: t => `${t} rows` }}
-          rowClassName={r => r.isFullyBalanced ? '' : 'row-warning'}
+          rowClassName={r =>
+            !r.slaExists || !r.glExists ? 'row-missing'
+            : !r.isFullyBalanced ? 'row-warning'
+            : ''
+          }
         />
       </Card>
 
@@ -517,16 +566,11 @@ export default function APGLReconcile() {
               style={{ fontFamily: 'monospace', fontSize: 12 }}
             />
             <Tooltip title="Copy">
-              <Button
-                icon={<CopyOutlined />}
-                onClick={() => navigator.clipboard.writeText(`${APEX_BASE}/gl/businessunits`)}
-              />
+              <Button icon={<CopyOutlined />}
+                onClick={() => navigator.clipboard.writeText(`${APEX_BASE}/gl/businessunits`)} />
             </Tooltip>
-            <Button
-              type="primary"
-              style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
-              onClick={() => window.open(`${APEX_BASE}/gl/businessunits`, '_blank')}
-            >
+            <Button type="primary" style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+              onClick={() => window.open(`${APEX_BASE}/gl/businessunits`, '_blank')}>
               Test
             </Button>
           </Space.Compact>
@@ -543,16 +587,11 @@ export default function APGLReconcile() {
               style={{ fontFamily: 'monospace', fontSize: 12 }}
             />
             <Tooltip title="Copy">
-              <Button
-                icon={<CopyOutlined />}
-                onClick={() => navigator.clipboard.writeText(lastCalledUrl || previewUrl)}
-              />
+              <Button icon={<CopyOutlined />}
+                onClick={() => navigator.clipboard.writeText(lastCalledUrl || previewUrl)} />
             </Tooltip>
-            <Button
-              type="primary"
-              style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
-              onClick={() => window.open(lastCalledUrl || previewUrl, '_blank')}
-            >
+            <Button type="primary" style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+              onClick={() => window.open(lastCalledUrl || previewUrl, '_blank')}>
               Test
             </Button>
           </Space.Compact>
@@ -564,7 +603,10 @@ export default function APGLReconcile() {
         </div>
       </Modal>
 
-      <style>{`.row-warning td { background-color: #fff7e6 !important; }`}</style>
+      <style>{`
+        .row-missing td { background-color: #fff1f0 !important; }
+        .row-warning td { background-color: #fff7e6 !important; }
+      `}</style>
     </div>
   );
 }
