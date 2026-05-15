@@ -719,6 +719,110 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     setExtTxnOpen(true);
   }, [stmtLines, selectedStmtKeys, selectedStatement, bankAccounts, businessUnits, extTxnForm]);
 
+  // Create external transaction for the reconciliation difference
+  // Opens the same modal pre-filled with the gap amount and correct direction:
+  //   difference > 0  (stmt > sys) → Money In  (DR) → positive amount
+  //   difference < 0  (stmt < sys) → Money Out (CR) → negative amount
+  const openDiffExtTxnModal = useCallback(async () => {
+    const selectedLines = stmtLines.filter(l => selectedStmtKeys.includes(l.lineId));
+    const firstLine     = selectedLines[0];
+
+    extTxnForm.resetFields();
+    setExtTxnPayload(null);
+    setExtTxnResponse(null);
+    setExtTxnRawError('');
+    setExtAssetDesc('');
+    setExtOffsetDesc('');
+    setExtTxnCreatedId(null);
+    setExtAcctRunning(false);
+    setExtAcctResult(null);
+
+    const dir: 'DR' | 'CR' = difference >= 0 ? 'DR' : 'CR';
+    setExtTxnDirection(dir);
+    setExtTxnAssetAcct('');
+    setExtTxnOffsetAcct('');
+    setExtTxnMode('single');
+    setExtTxnLines([{
+      key:           0,
+      amount:        difference,
+      description:   'Reconciliation difference',
+      offsetAccount: '',
+      offsetDesc:    '',
+    }]);
+
+    const stmtNum = selectedStatement?.statementNumber || `S${selectedStatement?.statementId || ''}`;
+    const lineTag = selectedLines.length === 1
+      ? `L${selectedLines[0].lineId}`
+      : `L${selectedLines.map(l => l.lineId).join(',')}`;
+    const autoRef = `Diff:${stmtNum}-${lineTag}`;
+    setExtBankAccounts([]);
+
+    // Resolve BU and cash account (same logic as openExtTxnModal)
+    const matchedAcct = bankAccounts.find(a =>
+      a.label === selectedStatement?.bankAccountName ||
+      a.bankAccountNumber === selectedStatement?.bankAccountName ||
+      a.value  === selectedStatement?.bankAccountName
+    );
+    const legalEntity = matchedAcct?.legalEntityName || '';
+    const matchedBU   = businessUnits.find(b =>
+      b.legalEntityName && legalEntity &&
+      b.legalEntityName.toLowerCase() === legalEntity.toLowerCase()
+    );
+
+    let cashAccountCombination = '';
+    let matchedBankName = selectedStatement?.bankAccountName || '';
+    try {
+      const res  = await fetch(BANK_ACCOUNTS_URL, { headers: { Accept: 'application/json' } });
+      const data = await res.json();
+      const all  = (data.items || []) as any[];
+      const filtered = all.filter(i =>
+        !legalEntity || (i.legal_entity_name || '').toLowerCase() === legalEntity.toLowerCase()
+      );
+      const seen = new Set<string>();
+      const opts = filtered
+        .map((i: any) => ({
+          name:        i.bank_account_name  || i.bankAccountName  || '',
+          cashAccount: i.cash_account_combination || '',
+          currency:    i.currency_code || '',
+        }))
+        .filter(a => a.name && !seen.has(a.name) && seen.add(a.name));
+      setExtBankAccounts(opts);
+
+      const match = opts.find(o =>
+        o.name === selectedStatement?.bankAccountName ||
+        selectedStatement?.bankAccountName?.includes(o.name) ||
+        o.name?.includes(selectedStatement?.bankAccountName || '')
+      );
+      if (match) {
+        matchedBankName        = match.name;
+        cashAccountCombination = match.cashAccount;
+        if (cashAccountCombination) {
+          try {
+            const r    = await validateAccountCode(cashAccountCombination);
+            const seg4 = Object.values(r.segmentDetails)[3];
+            setExtAssetDesc((seg4 as any)?.description || '');
+          } catch { /* ignore */ }
+        }
+      }
+    } catch { /* ignore */ }
+
+    extTxnForm.setFieldsValue({
+      bankAccountName:         matchedBankName,
+      businessUnitName:        matchedBU?.value || matchedBU?.label || '',
+      amount:                  difference,
+      transactionDate:         firstLine?.transactionDate ? dayjs(firstLine.transactionDate) : dayjs(),
+      currencyCode:            selectedStatement?.currencyCode || 'AED',
+      referenceText:           autoRef,
+      description:             `Reconciliation difference`,
+      transactionType:         'MISC',
+      assetAccountCombination: cashAccountCombination,
+      transactionDirection:    dir,
+    });
+    if (cashAccountCombination) setExtTxnAssetAcct(cashAccountCombination);
+
+    setExtTxnOpen(true);
+  }, [stmtLines, selectedStmtKeys, selectedStatement, bankAccounts, businessUnits, extTxnForm, difference]);
+
   // Submit external transaction
   const handleExtTxnSubmit = async (values: any) => {
     if (!values.referenceText?.trim()) { msgApi.error('Reference is required'); return; }
@@ -2545,14 +2649,32 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
               <Divider type="vertical" />
               <Text style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
                 Difference:{' '}
-                <strong
-                  style={{
-                    color: difference === 0 ? REDWOOD.success : REDWOOD.error,
-                  }}
-                >
+                <strong style={{ color: difference === 0 ? REDWOOD.success : REDWOOD.error }}>
                   {fmtAmount(difference)}
                 </strong>
               </Text>
+              {selectedStmtKeys.length > 0 && selectedSysKeys.length > 0 && Math.abs(difference) > 0.001 && (
+                <>
+                  <Divider type="vertical" />
+                  <Tooltip title={`Create ${difference > 0 ? 'Money In (DR)' : 'Money Out (CR)'} external transaction for the ${fmtAmount(Math.abs(difference))} difference`}>
+                    <Button
+                      size="small"
+                      icon={<PlusOutlined />}
+                      style={{
+                        fontSize: 11,
+                        background: REDWOOD.primary,
+                        color: '#fff',
+                        borderColor: REDWOOD.primary,
+                      }}
+                      onClick={openDiffExtTxnModal}
+                    >
+                      Create Diff Txn&nbsp;
+                      {difference > 0 ? '▲' : '▼'}&nbsp;
+                      {fmtAmount(Math.abs(difference))}
+                    </Button>
+                  </Tooltip>
+                </>
+              )}
             </div>
           </Card>
         </div>
