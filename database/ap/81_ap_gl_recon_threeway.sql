@@ -216,7 +216,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_RECON_PKG AS
             '  NVL(gll.GL_LINE_COUNT,0)        GL_LINE_COUNT,' ||
             -- AP transaction fields (COALESCE between invoice and payment)
             '  COALESCE(inv.INVOICE_AMOUNT,   pmt.PAYMENT_AMOUNT)   AP_AMOUNT,' ||
-            '  COALESCE(inv.INVOICE_NUMBER,   pmt.CHECK_NUMBER)      AP_NUMBER,' ||
+            '  COALESCE(inv.INVOICE_NUMBER,   pmt.PAYMENT_NUMBER)     AP_NUMBER,' ||
             '  COALESCE(TO_CHAR(inv.INVOICE_DATE,''YYYY-MM-DD''),' ||
             '           TO_CHAR(pmt.PAYMENT_DATE,''YYYY-MM-DD''))    AP_DATE,' ||
             '  COALESCE(inv.VALIDATION_STATUS, pmt.PAYMENT_STATUS)   AP_STATUS,' ||
@@ -259,7 +259,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AP_RECON_PKG AS
             '  gh.RUNNING_TOTAL_ACCOUNTED_DR, gh.RUNNING_TOTAL_ACCOUNTED_CR,' ||
             '  gll.GL_LINE_COUNT,' ||
             '  inv.INVOICE_AMOUNT, inv.INVOICE_NUMBER, inv.INVOICE_DATE, inv.VALIDATION_STATUS, inv.SUPPLIER,' ||
-            '  pmt.PAYMENT_AMOUNT, pmt.CHECK_NUMBER, pmt.PAYMENT_DATE, pmt.PAYMENT_STATUS, pmt.THIRD_PARTY_SUPPLIER' ||
+            '  pmt.PAYMENT_AMOUNT, pmt.PAYMENT_NUMBER, pmt.PAYMENT_DATE, pmt.PAYMENT_STATUS, pmt.THIRD_PARTY_SUPPLIER' ||
             ' ORDER BY h.ACCOUNTING_DATE DESC, h.HEADER_ID DESC' ||
             ' OFFSET ' || NVL(p_offset, 0) || ' ROWS' ||
             ' FETCH NEXT ' || NVL(p_limit, 500) || ' ROWS ONLY';
