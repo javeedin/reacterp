@@ -3,30 +3,37 @@ import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
-  DatePicker, Row, Col, Space, Modal, InputNumber, Descriptions, Collapse,
-  message, Spin, Tooltip,
+  DatePicker, Row, Col, Space, Modal, InputNumber, Tabs, Checkbox,
+  Spin, Tooltip, Tag, Divider, Badge,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { TableRowSelection } from 'antd/es/table/interface';
 import {
-  HomeOutlined, ShoppingCartOutlined, PlusOutlined, DeleteOutlined,
-  EditOutlined, SaveOutlined, CloseOutlined, SearchOutlined, ApiOutlined,
+  HomeOutlined, PlusOutlined, DeleteOutlined, EditOutlined,
+  SaveOutlined, CloseOutlined, SearchOutlined, ApiOutlined,
+  UserOutlined, CalendarOutlined, DollarOutlined, ShopOutlined,
+  BuildOutlined, FileTextOutlined, CheckCircleOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
+import { message } from 'antd';
 
 const { Content } = Layout;
-const { Text } = Typography;
+const { Text, Title } = Typography;
 const { Option } = Select;
 
 const FUSION_BASE = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05';
-const ORDS_BASE = 'https://g827cd88c3cfc03-mitsumioracledb.adb.me-dubai-1.oraclecloudapps.com/ords/test/FUSIONCLIENTERP';
+const ORDS_BASE   = 'https://g827cd88c3cfc03-mitsumioracledb.adb.me-dubai-1.oraclecloudapps.com/ords/test/FUSIONCLIENTERP';
 const AUTH_HEADER = 'Basic ' + btoa('emparun:Fusion@1234');
 const FUSION_HDRS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
-const REDWOOD = {
-  primary: '#C74634', primaryDark: '#A33B2C', primaryLight: '#E85D4A',
-  success: '#1D7B4D', warning: '#D4A800', info: '#0572CE', error: '#D93025',
-  neutral100: '#F7F7F7', neutral200: '#E5E5E5', neutral300: '#C7C7C7',
-  neutral600: '#6B6B6B', neutral900: '#1A1A1A', surface: '#FFFFFF', teal: '#00918A',
+
+const C = {
+  red: '#C74634', redDark: '#A33B2C',
+  green: '#1D7B4D', blue: '#0572CE',
+  orange: '#D4A800', teal: '#00918A',
+  bg: '#F4F5F7', surface: '#FFFFFF',
+  border: '#DFE1E6', borderDark: '#C1C7D0',
+  text: '#172B4D', textMid: '#5E6C84', textLight: '#97A0AF',
+  rowAlt: '#FAFBFC',
 };
 
 const fetchLOV = async (url: string, auth = true): Promise<any[]> => {
@@ -48,40 +55,34 @@ const fetchLOV = async (url: string, auth = true): Promise<any[]> => {
 const generatePONumber = (docType: string): string => {
   const seq = parseInt(sessionStorage.getItem('po_seq') ?? '0', 10) + 1;
   sessionStorage.setItem('po_seq', String(seq));
-  const date = dayjs().format('DDMMYYYY');
-  return `${docType}${date}${String(seq).padStart(4, '0')}`;
+  return `${docType}${dayjs().format('DDMMYYYY')}${String(seq).padStart(4, '0')}`;
 };
 
-const formatNumber = (val: number): string =>
-  new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
+const fmt = (v: number) =>
+  new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
 
+/* ─── Types ─────────────────────────────────────────── */
 interface POHeader {
-  poNumber: string;
-  docType: string;
-  orderDate: Dayjs;
-  procurementBU: string;
-  billTo: string;
-  currency: string;
-  supplierId: string;
-  supplierName: string;
-  supplierSite: string;
-  shipToOrg: string;
-  subinventory: string;
-  noteToSupplier?: string;
+  poNumber: string; docType: string; orderDate: Dayjs;
+  status: string; buyer: string;
+  procurementBU: string; requisitioningBU: string; billToBU: string;
+  currency: string; description: string;
+  supplierId: string; supplierName: string; supplierSite: string;
+  supplierContact: string; communicationMethod: string; communicationEmail: string;
+  billToLocation: string; shipToLocation: string;
+  shipToOrg: string; subinventory: string;
+  paymentTerms: string; shippingMethod: string; freightTerms: string; fob: string;
+  payOnReceipt: boolean; confirmingOrder: boolean;
+  noteToSupplier: string; noteToReceiver: string;
 }
 
 interface POLine {
-  key: string;
-  itemNumber: string;
-  description: string;
-  uom: string;
-  qty: number;
-  price: number;
-  taxPct: number;
-  needBy: Dayjs | null;
-  lineTotal: number;
-  taxAmount: number;
-  netTotal: number;
+  key: string; lineNum: number;
+  itemNumber: string; description: string; uom: string;
+  qty: number; price: number; taxPct: number;
+  needBy: Dayjs | null; promisedDate: Dayjs | null;
+  lineTotal: number; taxAmount: number; netTotal: number;
+  chargeAccount: string; destinationType: string;
 }
 
 const computeLine = (line: Omit<POLine, 'lineTotal' | 'taxAmount' | 'netTotal'>): POLine => {
@@ -90,16 +91,32 @@ const computeLine = (line: Omit<POLine, 'lineTotal' | 'taxAmount' | 'netTotal'>)
   return { ...line, lineTotal, taxAmount, netTotal: lineTotal + taxAmount };
 };
 
-const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div style={{
-    fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
-    color: REDWOOD.neutral600, borderBottom: `2px solid ${REDWOOD.neutral200}`,
-    paddingBottom: 4, marginBottom: 12,
-  }}>
-    {children}
+/* ─── Info tile (small label + value) ───────────────── */
+const InfoTile: React.FC<{ label: string; value: React.ReactNode; icon?: React.ReactNode }> = ({ label, value, icon }) => (
+  <div style={{ marginBottom: 14 }}>
+    <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: C.textLight, marginBottom: 2 }}>
+      {icon && <span style={{ marginRight: 4 }}>{icon}</span>}{label}
+    </div>
+    <div style={{ fontSize: 13, color: C.text, minHeight: 22 }}>{value ?? '—'}</div>
   </div>
 );
 
+/* ─── Inline editable field ─────────────────────────── */
+const InlineEdit: React.FC<{ value: string; onChange: (v: string) => void; placeholder?: string }> = ({ value, onChange, placeholder }) => (
+  <Input size="small" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder ?? '—'}
+    variant="borderless"
+    style={{ padding: 0, fontSize: 13, color: value ? C.blue : C.textLight, width: '100%' }} />
+);
+
+/* ─── Section header inside card ────────────────────── */
+const SectionHead: React.FC<{ title: string; icon?: React.ReactNode; color?: string }> = ({ title, icon, color = C.blue }) => (
+  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, paddingBottom: 8, borderBottom: `2px solid ${color}` }}>
+    {icon && <span style={{ color, fontSize: 14 }}>{icon}</span>}
+    <Text strong style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em', color: C.textMid }}>{title}</Text>
+  </div>
+);
+
+/* ═══════════════════════════════════════════════════════ */
 const CreatePurchaseOrder: React.FC = () => {
   const navigate = useNavigate();
   const [headerForm] = Form.useForm();
@@ -112,7 +129,6 @@ const CreatePurchaseOrder: React.FC = () => {
   const [addItemOpen, setAddItemOpen] = useState(false);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
-  const [headerCollapseOpen, setHeaderCollapseOpen] = useState<string[]>(['header']);
 
   const [busUnits, setBusUnits] = useState<any[]>([]);
   const [currencies, setCurrencies] = useState<any[]>([]);
@@ -124,47 +140,35 @@ const CreatePurchaseOrder: React.FC = () => {
   const [itemsLoading, setItemsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedItemKeys, setSelectedItemKeys] = useState<string[]>([]);
+  const [lovLoading, setLovLoading] = useState(false);
+  const [sitesLoading, setSitesLoading] = useState(false);
+  const [initConfirmLoading, setInitConfirmLoading] = useState(false);
 
-  // Supplier popup state
   const [supplierModalOpen, setSupplierModalOpen] = useState(false);
   const [supplierSearch, setSupplierSearch] = useState('');
   const [supplierResults, setSupplierResults] = useState<any[]>([]);
   const [suppliersLoading, setSuppliersLoading] = useState(false);
   const [selectedSupplier, setSelectedSupplier] = useState<any>(null);
   const [supplierSites, setSupplierSites] = useState<any[]>([]);
-  const [sitesLoading, setSitesLoading] = useState(false);
   const [supplierApiUrl, setSupplierApiUrl] = useState('');
   const [supplierApiModalOpen, setSupplierApiModalOpen] = useState(false);
 
-  const [lovLoading, setLovLoading] = useState(false);
-  const [orgsLoading, setOrgsLoading] = useState(false);
-  const [subLoading, setSubLoading] = useState(false);
-  const [initConfirmLoading, setInitConfirmLoading] = useState(false);
-
-  useEffect(() => {
-    if (showInitModal) {
-      loadInitLOVs();
-    }
-  }, [showInitModal]);
+  useEffect(() => { if (showInitModal) loadInitLOVs(); }, [showInitModal]);
 
   const loadInitLOVs = async () => {
     setLovLoading(true);
     try {
-      const [buItems, ccyItems, orgItems, subItems] = await Promise.allSettled([
+      const [buRes, ccyRes, orgRes, subRes] = await Promise.allSettled([
         fetchLOV(`${FUSION_BASE}/finBusinessUnitsLOV`),
         fetch(`${FUSION_BASE}/currencies?limit=500`, { headers: FUSION_HDRS }).then(r => r.json()).then(d => d.items ?? []),
         fetchLOV(`${FUSION_BASE}/inventoryOrganizations`),
-        fetch(`${ORDS_BASE}/inventory/inventorywarehousesubinventory`, {}).then(r => r.json()).then(d => d.items ?? (Array.isArray(d) ? d : [])),
+        fetch(`${ORDS_BASE}/inventory/inventorywarehousesubinventory`).then(r => r.json()).then(d => d.items ?? (Array.isArray(d) ? d : [])),
       ]);
-      if (buItems.status === 'fulfilled') setBusUnits(buItems.value);
-      if (ccyItems.status === 'fulfilled') setCurrencies(ccyItems.value);
-      if (orgItems.status === 'fulfilled') setInventoryOrgs(orgItems.value);
-      if (subItems.status === 'fulfilled') setAllSubinventories(subItems.value);
-    } catch {
-      /* non-blocking */
-    } finally {
-      setLovLoading(false);
-    }
+      if (buRes.status === 'fulfilled') setBusUnits(buRes.value);
+      if (ccyRes.status === 'fulfilled') setCurrencies(ccyRes.value);
+      if (orgRes.status === 'fulfilled') setInventoryOrgs(orgRes.value);
+      if (subRes.status === 'fulfilled') setAllSubinventories(subRes.value);
+    } finally { setLovLoading(false); }
   };
 
   const handleSupplierSearch = useCallback(async (term: string) => {
@@ -176,11 +180,7 @@ const CreatePurchaseOrder: React.FC = () => {
       const r = await fetch(url, { headers: FUSION_HDRS });
       const d = await r.json();
       setSupplierResults(d.items ?? []);
-    } catch {
-      /* ignore */
-    } finally {
-      setSuppliersLoading(false);
-    }
+    } catch { /* ignore */ } finally { setSuppliersLoading(false); }
   }, []);
 
   const loadSupplierSites = async (supplierId: string) => {
@@ -189,23 +189,10 @@ const CreatePurchaseOrder: React.FC = () => {
     if (!supplierId) return;
     setSitesLoading(true);
     try {
-      const r = await fetch(
-        `${FUSION_BASE}/suppliers/${supplierId}/child/sites?limit=100`,
-        { headers: FUSION_HDRS }
-      );
+      const r = await fetch(`${FUSION_BASE}/suppliers/${supplierId}/child/sites?limit=100`, { headers: FUSION_HDRS });
       const d = await r.json();
       setSupplierSites(d.items ?? []);
-    } catch {
-      /* ignore */
-    } finally {
-      setSitesLoading(false);
-    }
-  };
-
-  const handleOpenSupplierModal = () => {
-    setSupplierModalOpen(true);
-    setSupplierSearch('');
-    setSupplierResults([]);
+    } catch { /* ignore */ } finally { setSitesLoading(false); }
   };
 
   const handleSelectSupplier = async (supplier: any) => {
@@ -216,325 +203,212 @@ const CreatePurchaseOrder: React.FC = () => {
 
   const handleShipToOrgChange = (orgCode: string) => {
     headerForm.setFieldValue('subinventory', undefined);
-    const filtered = allSubinventories.filter((s: any) => s.warehouse_code === orgCode);
-    setSubinventories(filtered);
+    setSubinventories(allSubinventories.filter((s: any) => s.warehouse_code === orgCode));
   };
 
   const handleInitSubmit = async () => {
-    if (!selectedSupplier) {
-      message.error('Please select a supplier');
-      return;
-    }
+    if (!selectedSupplier) { message.error('Please select a supplier'); return; }
     setInitConfirmLoading(true);
     try {
-      const vals = await headerForm.validateFields();
-      const poNumber = generatePONumber(vals.docType);
+      const v = await headerForm.validateFields();
       setHeader({
-        poNumber,
-        docType: vals.docType,
-        orderDate: vals.orderDate,
-        procurementBU: vals.procurementBU,
-        billTo: vals.billTo,
-        currency: vals.currency,
-        supplierId: String(selectedSupplier.SupplierId),
-        supplierName: selectedSupplier.Supplier ?? String(selectedSupplier.SupplierId),
-        supplierSite: vals.supplierSite ?? '',
-        shipToOrg: vals.shipToOrg,
-        subinventory: vals.subinventory ?? '',
-        noteToSupplier: vals.noteToSupplier,
+        poNumber: generatePONumber(v.docType),
+        docType: v.docType, orderDate: v.orderDate,
+        status: 'Incomplete', buyer: 'Current User',
+        procurementBU: v.procurementBU, requisitioningBU: v.procurementBU, billToBU: v.billTo,
+        currency: v.currency, description: '',
+        supplierId: String(selectedSupplier.SupplierId), supplierName: selectedSupplier.Supplier ?? '',
+        supplierSite: v.supplierSite ?? '', supplierContact: '',
+        communicationMethod: 'E-Mail', communicationEmail: '',
+        billToLocation: v.procurementBU, shipToLocation: v.shipToOrg,
+        shipToOrg: v.shipToOrg, subinventory: v.subinventory ?? '',
+        paymentTerms: '', shippingMethod: '', freightTerms: '', fob: '',
+        payOnReceipt: false, confirmingOrder: false,
+        noteToSupplier: v.noteToSupplier ?? '', noteToReceiver: '',
       });
       setShowInitModal(false);
-    } catch {
-      /* validation error — keep modal open */
-    } finally {
-      setInitConfirmLoading(false);
-    }
+    } catch { /* validation */ } finally { setInitConfirmLoading(false); }
   };
 
-  const handleEditHeader = () => {
-    if (!header) return;
-    headerForm.setFieldsValue({
-      procurementBU: header.procurementBU,
-      billTo: header.billTo,
-      orderDate: header.orderDate,
-      docType: header.docType,
-      currency: header.currency,
-      supplierId: header.supplierId,
-      supplierSite: header.supplierSite,
-      shipToOrg: header.shipToOrg,
-      subinventory: header.subinventory,
-      noteToSupplier: header.noteToSupplier,
-    });
-    setShowInitModal(true);
-  };
+  const patch = (p: Partial<POHeader>) => setHeader(prev => prev ? { ...prev, ...p } : prev);
 
   const handleNeedByAllChange = (date: Dayjs | null) => {
     setNeedByAll(date);
     setLines(prev => prev.map(l => computeLine({ ...l, needBy: date })));
   };
 
-  const handleLineChange = (key: string, field: keyof POLine, value: any) => {
-    setLines(prev => prev.map(l => {
-      if (l.key !== key) return l;
-      return computeLine({ ...l, [field]: value });
-    }));
-  };
+  const handleLineChange = (key: string, field: keyof POLine, value: any) =>
+    setLines(prev => prev.map(l => l.key !== key ? l : computeLine({ ...l, [field]: value })));
 
-  const handleDeleteLine = (key: string) => {
-    setLines(prev => prev.filter(l => l.key !== key));
-  };
+  const handleDeleteLine = (key: string) =>
+    setLines(prev => prev.filter(l => l.key !== key).map((l, i) => ({ ...l, lineNum: i + 1 })));
 
-  const subtotal = lines.reduce((s, l) => s + l.lineTotal, 0);
-  const totalTax = lines.reduce((s, l) => s + l.taxAmount, 0);
+  const subtotal  = lines.reduce((s, l) => s + l.lineTotal, 0);
+  const totalTax  = lines.reduce((s, l) => s + l.taxAmount, 0);
   const grandTotal = lines.reduce((s, l) => s + l.netTotal, 0);
 
   const openAddItem = async () => {
     if (!header) return;
-    setAddItemOpen(true);
-    setSearchTerm('');
-    setSelectedItemKeys([]);
-    setItemsLoading(true);
+    setAddItemOpen(true); setSearchTerm(''); setSelectedItemKeys([]); setItemsLoading(true);
     try {
-      const r = await fetch(
-        `${ORDS_BASE}/inventory/itemmaster?org=${header.shipToOrg}&limit=500`,
-        {}
-      );
+      const r = await fetch(`${ORDS_BASE}/inventory/itemmaster?org=${header.shipToOrg}&limit=500`);
       const d = await r.json();
       setItems(d.items ?? (Array.isArray(d) ? d : []));
-    } catch {
-      setItems([]);
-    } finally {
-      setItemsLoading(false);
-    }
+    } catch { setItems([]); } finally { setItemsLoading(false); }
   };
 
   const existingItemNumbers = new Set(lines.map(l => l.itemNumber));
-
   const filteredItems = items.filter(item => {
     if (!searchTerm) return true;
     const t = searchTerm.toLowerCase();
-    return (
-      String(item.item_number ?? '').toLowerCase().includes(t) ||
-      String(item.description ?? '').toLowerCase().includes(t)
-    );
+    return String(item.item_number ?? '').toLowerCase().includes(t) ||
+      String(item.description ?? '').toLowerCase().includes(t);
   });
 
   const handleAddItems = () => {
-    const toAdd = items.filter(item => selectedItemKeys.includes(String(item.item_number)) && !existingItemNumbers.has(String(item.item_number)));
-    const newLines: POLine[] = toAdd.map(item => computeLine({
-      key: `${item.item_number}-${Date.now()}-${Math.random()}`,
-      itemNumber: String(item.item_number ?? ''),
-      description: String(item.description ?? ''),
+    const toAdd = items.filter(item =>
+      selectedItemKeys.includes(String(item.item_number)) &&
+      !existingItemNumbers.has(String(item.item_number)));
+    const base = lines.length;
+    setLines(prev => [...prev, ...toAdd.map((item, i) => computeLine({
+      key: `${item.item_number}-${Date.now()}-${i}`,
+      lineNum: base + i + 1,
+      itemNumber: String(item.item_number ?? ''), description: String(item.description ?? ''),
       uom: String(item.primary_uom_code ?? item.uom ?? ''),
-      qty: 1,
-      price: parseFloat(item.item_price) || 0,
-      taxPct: defaultTaxPct,
-      needBy: needByAll,
-    }));
-    setLines(prev => [...prev, ...newLines]);
+      qty: 1, price: parseFloat(item.item_price) || 0, taxPct: defaultTaxPct,
+      needBy: needByAll, promisedDate: null, chargeAccount: '', destinationType: 'Inventory',
+    }))]);
     setAddItemOpen(false);
   };
 
-  const handleSave = () => {
-    if (!header) return;
-    setSaveModalOpen(true);
-  };
-
-  const itemTableColumns: ColumnsType<any> = [
-    {
-      title: 'Item Number', dataIndex: 'item_number', width: 140,
-      render: v => <Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.info }}>{v ?? '—'}</Text>,
-    },
-    {
-      title: 'Description', dataIndex: 'description', ellipsis: true,
-      render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text>,
-    },
+  /* ─── Column defs ─────────────────────────────────── */
+  const itemTableCols: ColumnsType<any> = [
+    { title: 'Item Number', dataIndex: 'item_number', width: 140, render: v => <Text style={{ fontSize: 12, fontWeight: 600, color: C.blue }}>{v ?? '—'}</Text> },
+    { title: 'Description', dataIndex: 'description', ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
     { title: 'UOM', dataIndex: 'primary_uom_code', width: 70, align: 'center' as const, render: v => v ?? '—' },
-    { title: 'Status', dataIndex: 'inventory_item_status_code', width: 90, render: (v: any) => v ?? '—' },
-    {
-      title: 'Price', dataIndex: 'item_price', width: 100, align: 'right' as const,
-      render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{v != null ? formatNumber(parseFloat(v) || 0) : '—'}</Text>,
-    },
+    { title: 'Status', dataIndex: 'inventory_item_status_code', width: 90, render: v => v ?? '—' },
+    { title: 'Price', dataIndex: 'item_price', width: 100, align: 'right' as const, render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{v != null ? fmt(parseFloat(v) || 0) : '—'}</Text> },
     { title: 'Brand', dataIndex: 'attr1', width: 100, ellipsis: true, render: v => v ?? '—' },
     { title: 'Category', dataIndex: 'attr5', width: 100, ellipsis: true, render: v => v ?? '—' },
   ];
 
-  const rowSelection: TableRowSelection<any> = {
+  const rowSel: TableRowSelection<any> = {
     selectedRowKeys: selectedItemKeys,
     onChange: keys => setSelectedItemKeys(keys as string[]),
-    getCheckboxProps: record => ({
-      disabled: existingItemNumbers.has(String(record.item_number)),
-    }),
+    getCheckboxProps: r => ({ disabled: existingItemNumbers.has(String(r.item_number)) }),
   };
 
-  const lineColumns: ColumnsType<POLine> = [
-    {
-      title: '#', width: 46, align: 'center' as const,
-      render: (_v: any, _r: POLine, idx: number) => <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>{idx + 1}</Text>,
-    },
-    {
-      title: 'Item Number', dataIndex: 'itemNumber', width: 130,
-      render: v => <Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.info }}>{v}</Text>,
-    },
-    {
-      title: 'Description', dataIndex: 'description', ellipsis: true,
-      render: v => <Text style={{ fontSize: 12 }}>{v}</Text>,
-    },
-    { title: 'UOM', dataIndex: 'uom', width: 70, align: 'center' as const },
-    {
-      title: 'Qty', dataIndex: 'qty', width: 90, align: 'right' as const,
-      render: (v, record) => (
-        <InputNumber
-          size="small"
-          value={v}
-          min={0}
-          precision={4}
-          style={{ width: 80 }}
-          onChange={val => handleLineChange(record.key, 'qty', val ?? 0)}
-        />
-      ),
-    },
-    {
-      title: 'Unit Price', dataIndex: 'price', width: 110, align: 'right' as const,
-      render: (v, record) => (
-        <InputNumber
-          size="small"
-          value={v}
-          min={0}
-          precision={4}
-          style={{ width: 100 }}
-          onChange={val => handleLineChange(record.key, 'price', val ?? 0)}
-        />
-      ),
-    },
-    {
-      title: 'Line Total', dataIndex: 'lineTotal', width: 110, align: 'right' as const,
-      render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{formatNumber(v)}</Text>,
-    },
-    {
-      title: 'Tax %', dataIndex: 'taxPct', width: 90, align: 'right' as const,
-      render: (v, record) => (
-        <InputNumber
-          size="small"
-          value={v}
-          min={0}
-          max={100}
-          precision={2}
-          style={{ width: 80 }}
-          onChange={val => handleLineChange(record.key, 'taxPct', val ?? 0)}
-        />
-      ),
-    },
-    {
-      title: 'Tax Amount', dataIndex: 'taxAmount', width: 110, align: 'right' as const,
-      render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{formatNumber(v)}</Text>,
-    },
-    {
-      title: 'Net Total', dataIndex: 'netTotal', width: 120, align: 'right' as const,
-      render: v => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: REDWOOD.primary }}>{formatNumber(v)}</Text>,
-    },
-    {
-      title: 'Need By', dataIndex: 'needBy', width: 140,
-      render: (v, record) => (
-        <DatePicker
-          size="small"
-          value={v}
-          onChange={date => handleLineChange(record.key, 'needBy', date)}
-          style={{ width: 130 }}
-          format="D-MMM-YYYY"
-        />
-      ),
-    },
-    {
-      title: '', key: 'actions', width: 50, align: 'center' as const,
-      render: (_v: any, record: POLine) => (
-        <Tooltip title="Remove line">
-          <Button
-            type="text"
-            size="small"
-            icon={<DeleteOutlined />}
-            danger
-            onClick={() => handleDeleteLine(record.key)}
-          />
-        </Tooltip>
-      ),
-    },
+  const lineCols: ColumnsType<POLine> = [
+    { title: '#', dataIndex: 'lineNum', width: 46, align: 'center' as const, render: v => <Text style={{ color: C.textMid, fontSize: 12 }}>{v}</Text> },
+    { title: 'Item', dataIndex: 'itemNumber', width: 130, render: v => <Text style={{ fontWeight: 600, color: C.blue, fontSize: 12 }}>{v}</Text> },
+    { title: 'Description', dataIndex: 'description', ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v}</Text> },
+    { title: 'UOM', dataIndex: 'uom', width: 60, align: 'center' as const },
+    { title: 'Qty', dataIndex: 'qty', width: 90, align: 'right' as const, render: (v, r) => <InputNumber size="small" value={v} min={0} precision={4} style={{ width: 80 }} onChange={val => handleLineChange(r.key, 'qty', val ?? 0)} /> },
+    { title: 'Unit Price', dataIndex: 'price', width: 110, align: 'right' as const, render: (v, r) => <InputNumber size="small" value={v} min={0} precision={4} style={{ width: 100 }} onChange={val => handleLineChange(r.key, 'price', val ?? 0)} /> },
+    { title: 'Amount', dataIndex: 'lineTotal', width: 110, align: 'right' as const, render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{fmt(v)}</Text> },
+    { title: 'Tax %', dataIndex: 'taxPct', width: 80, align: 'right' as const, render: (v, r) => <InputNumber size="small" value={v} min={0} max={100} precision={2} style={{ width: 70 }} onChange={val => handleLineChange(r.key, 'taxPct', val ?? 0)} /> },
+    { title: 'Tax Amt', dataIndex: 'taxAmount', width: 100, align: 'right' as const, render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{fmt(v)}</Text> },
+    { title: 'Net Total', dataIndex: 'netTotal', width: 120, align: 'right' as const, render: v => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: C.red }}>{fmt(v)}</Text> },
+    { title: 'Need By', dataIndex: 'needBy', width: 135, render: (v, r) => <DatePicker size="small" value={v} onChange={d => handleLineChange(r.key, 'needBy', d)} style={{ width: 125 }} format="D-MMM-YYYY" /> },
+    { title: '', key: 'del', width: 46, align: 'center' as const, render: (_: any, r: POLine) => <Tooltip title="Remove"><Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={() => handleDeleteLine(r.key)} /></Tooltip> },
   ];
 
+  const scheduleCols: ColumnsType<POLine> = [
+    { title: 'Line', dataIndex: 'lineNum', width: 50, align: 'center' as const },
+    { title: 'Description', dataIndex: 'description', ellipsis: true },
+    { title: 'Schedule', width: 70, align: 'center' as const, render: () => 1 },
+    { title: 'Location', width: 130, render: () => header?.shipToOrg ?? '—' },
+    { title: 'Requested Delivery Date', dataIndex: 'needBy', width: 175, render: (v, r) => <DatePicker size="small" value={v} onChange={d => handleLineChange(r.key, 'needBy', d)} style={{ width: 160 }} format="D-MMM-YYYY" /> },
+    { title: 'Promised Delivery Date', dataIndex: 'promisedDate', width: 170, render: (v, r) => <DatePicker size="small" value={v} onChange={d => handleLineChange(r.key, 'promisedDate', d)} style={{ width: 155 }} format="D-MMM-YYYY" /> },
+    { title: 'Qty', dataIndex: 'qty', width: 70, align: 'right' as const, render: v => fmt(v) },
+    { title: 'UOM', dataIndex: 'uom', width: 60, align: 'center' as const },
+    { title: 'Price', dataIndex: 'price', width: 100, align: 'right' as const, render: v => fmt(v) },
+    { title: 'Ordered', dataIndex: 'lineTotal', width: 110, align: 'right' as const, render: v => <Text style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(v)}</Text> },
+    { title: 'Status', width: 90, render: () => <Tag color="orange">Incomplete</Tag> },
+  ];
+
+  const distCols: ColumnsType<POLine> = [
+    { title: 'Line', dataIndex: 'lineNum', width: 50, align: 'center' as const },
+    { title: 'Sch', width: 50, align: 'center' as const, render: () => 1 },
+    { title: 'Description', dataIndex: 'description', ellipsis: true },
+    { title: 'Dist', width: 50, align: 'center' as const, render: () => 1 },
+    { title: 'Status', width: 90, render: () => <Tag color="orange">Incomplete</Tag> },
+    { title: 'Destination Type', dataIndex: 'destinationType', width: 130, render: (v, r) => <Select size="small" value={v} style={{ width: 120 }} onChange={val => handleLineChange(r.key, 'destinationType', val)}><Option value="Inventory">Inventory</Option><Option value="Expense">Expense</Option></Select> },
+    { title: 'Deliver-to Location', width: 140, render: () => header?.subinventory || header?.shipToOrg || '—' },
+    { title: 'Qty', dataIndex: 'qty', width: 70, align: 'right' as const, render: v => fmt(v) },
+    { title: 'UOM', dataIndex: 'uom', width: 60, align: 'center' as const },
+    { title: 'Ordered', dataIndex: 'lineTotal', width: 110, align: 'right' as const, render: v => fmt(v) },
+    { title: 'PO Charge Account', dataIndex: 'chargeAccount', width: 210, render: (v, r) => <Input size="small" value={v} placeholder="e.g. 001-2050000-VLA-000" onChange={e => handleLineChange(r.key, 'chargeAccount', e.target.value)} /> },
+  ];
+
+  /* ─── Summary box component ─────────────────────── */
+  const SummaryBox = () => (
+    <div style={{ background: 'linear-gradient(135deg, #1a1f36 0%, #252d4a 100%)', borderRadius: 10, padding: '20px 24px', color: '#fff' }}>
+      <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.5)', marginBottom: 16 }}>Order Summary</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>Ordered</span>
+          <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 15, fontWeight: 600 }}>{fmt(subtotal)}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>Total Tax</span>
+          <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 15, fontWeight: 600, color: '#FFB84D' }}>{fmt(totalTax)}</span>
+        </div>
+        <div style={{ borderTop: '1px solid rgba(255,255,255,0.15)', paddingTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>Total</span>
+          <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 20, fontWeight: 700, color: '#5BE5C3' }}>{fmt(grandTotal)}</span>
+        </div>
+        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', textAlign: 'right', marginTop: -4 }}>{header?.currency}</div>
+      </div>
+    </div>
+  );
+
+  /* ═══════════════════════════════════════════════════ */
   return (
-    <Layout style={{ minHeight: 'calc(100vh - 64px)', background: REDWOOD.neutral100 }}>
+    <Layout style={{ minHeight: 'calc(100vh - 64px)', background: C.bg }}>
       <Content>
 
-        {/* Init Modal */}
-        <Modal
-          open={showInitModal}
-          title={<span style={{ fontWeight: 700 }}>New Purchase Order — Header</span>}
-          width={700}
-          closable={false}
-          maskClosable={false}
+        {/* ── Init Modal ──────────────────────────────── */}
+        <Modal open={showInitModal} title={<Text strong style={{ fontSize: 15 }}>New Purchase Order</Text>}
+          width={720} closable={false} maskClosable={false}
           footer={
             <Space>
               <Button onClick={() => navigate('/procurement')}>Cancel</Button>
-              <Button
-                type="primary"
-                loading={initConfirmLoading}
-                onClick={handleInitSubmit}
-                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-              >
+              <Button type="primary" loading={initConfirmLoading} onClick={handleInitSubmit}
+                style={{ background: C.red, borderColor: C.red, fontWeight: 600 }}>
                 Create PO
               </Button>
             </Space>
-          }
-        >
+          }>
           {lovLoading ? (
-            <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
-              <Spin tip="Loading LOVs…" />
-            </div>
+            <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}><Spin tip="Loading…" /></div>
           ) : (
             <Form form={headerForm} layout="vertical" initialValues={{ orderDate: dayjs() }}>
-              <Row gutter={[12, 0]}>
+              <Divider orientation="left" plain style={{ fontSize: 12, color: C.textMid }}>Organization & Order</Divider>
+              <Row gutter={[16, 0]}>
                 <Col xs={24} sm={12}>
-                  <Form.Item name="procurementBU" label="Procurement BU" rules={[{ required: true, message: 'Required' }]}>
-                    <Select
-                      showSearch
-                      allowClear
-                      placeholder="Select Procurement BU"
-                      optionFilterProp="children"
-                      onChange={(value) => headerForm.setFieldValue('billTo', value)}
-                    >
-                      {busUnits.map(bu => (
-                        <Option key={bu.BusinessUnitId ?? bu.BusinessUnitName} value={bu.BusinessUnitName}>
-                          {bu.BusinessUnitName}
-                        </Option>
-                      ))}
+                  <Form.Item name="procurementBU" label="Procurement BU" rules={[{ required: true }]}>
+                    <Select showSearch allowClear placeholder="Select Procurement BU" optionFilterProp="children"
+                      onChange={v => headerForm.setFieldValue('billTo', v)}>
+                      {busUnits.map(bu => <Option key={bu.BusinessUnitId ?? bu.BusinessUnitName} value={bu.BusinessUnitName}>{bu.BusinessUnitName}</Option>)}
                     </Select>
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={12}>
-                  <Form.Item name="billTo" label="Bill To" rules={[{ required: true, message: 'Required' }]}>
+                  <Form.Item name="billTo" label="Bill To BU" rules={[{ required: true }]}>
                     <Select showSearch allowClear placeholder="Select Bill To" optionFilterProp="children">
-                      {busUnits.map(bu => (
-                        <Option key={`bt-${bu.BusinessUnitId ?? bu.BusinessUnitName}`} value={bu.BusinessUnitName}>
-                          {bu.BusinessUnitName}
-                        </Option>
-                      ))}
+                      {busUnits.map(bu => <Option key={`bt-${bu.BusinessUnitId ?? bu.BusinessUnitName}`} value={bu.BusinessUnitName}>{bu.BusinessUnitName}</Option>)}
                     </Select>
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12}>
-                  <Form.Item name="orderDate" label="Order Date" rules={[{ required: true, message: 'Required' }]}>
+                <Col xs={24} sm={8}>
+                  <Form.Item name="orderDate" label="Order Date" rules={[{ required: true }]}>
                     <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12}>
-                  <Form.Item name="docType" label="Document Type" rules={[{ required: true, message: 'Required' }]}>
-                    <Select
-                      showSearch
-                      allowClear
-                      placeholder="Select or type custom…"
-                      optionFilterProp="children"
-                      mode={undefined}
-                    >
+                <Col xs={24} sm={8}>
+                  <Form.Item name="docType" label="Document Type" rules={[{ required: true }]}>
+                    <Select showSearch allowClear placeholder="Select type" optionFilterProp="children">
                       <Option value="LPON">LPON</Option>
                       <Option value="IPON">IPON</Option>
                       <Option value="STANDARD">STANDARD</Option>
@@ -542,98 +416,63 @@ const CreatePurchaseOrder: React.FC = () => {
                     </Select>
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12}>
-                  <Form.Item name="currency" label="Currency" rules={[{ required: true, message: 'Required' }]}>
-                    <Select
-                      showSearch
-                      allowClear
-                      placeholder="Select or type currency code"
-                      filterOption={false}
-                      onSearch={val => setCurrencyInput(val)}
-                      onBlur={() => setCurrencyInput('')}
-                    >
-                      {currencyInput.trim() && !currencies.find(c =>
-                        c.CurrencyCode.toLowerCase() === currencyInput.trim().toLowerCase()
-                      ) && (
+                <Col xs={24} sm={8}>
+                  <Form.Item name="currency" label="Currency" rules={[{ required: true }]}>
+                    <Select showSearch allowClear placeholder="Select or type currency" filterOption={false}
+                      onSearch={val => setCurrencyInput(val)} onBlur={() => setCurrencyInput('')}>
+                      {currencyInput.trim() && !currencies.find(c => c.CurrencyCode.toLowerCase() === currencyInput.trim().toLowerCase()) && (
                         <Option key={`__custom__${currencyInput}`} value={currencyInput.trim().toUpperCase()}>
-                          <span style={{ color: REDWOOD.info, fontStyle: 'italic' }}>
-                            Use: {currencyInput.trim().toUpperCase()}
-                          </span>
+                          <span style={{ color: C.blue, fontStyle: 'italic' }}>Use: {currencyInput.trim().toUpperCase()}</span>
                         </Option>
                       )}
-                      {currencies
-                        .filter(c => !currencyInput.trim() ||
-                          c.CurrencyCode.toLowerCase().includes(currencyInput.toLowerCase()) ||
-                          (c.Name ?? '').toLowerCase().includes(currencyInput.toLowerCase())
-                        )
-                        .map(c => (
-                          <Option key={c.CurrencyCode} value={c.CurrencyCode}>
-                            {c.CurrencyCode}{c.Name ? ` — ${c.Name}` : ''}
-                          </Option>
-                        ))
-                      }
+                      {currencies.filter(c => !currencyInput.trim() ||
+                        c.CurrencyCode.toLowerCase().includes(currencyInput.toLowerCase()) ||
+                        (c.Name ?? '').toLowerCase().includes(currencyInput.toLowerCase())
+                      ).map(c => <Option key={c.CurrencyCode} value={c.CurrencyCode}>{c.CurrencyCode}{c.Name ? ` — ${c.Name}` : ''}</Option>)}
                     </Select>
                   </Form.Item>
                 </Col>
+              </Row>
+              <Divider orientation="left" plain style={{ fontSize: 12, color: C.textMid }}>Supplier</Divider>
+              <Row gutter={[16, 0]}>
                 <Col xs={24} sm={12}>
-                  <Form.Item
-                    label="Supplier"
-                    required
-                    validateStatus={selectedSupplier ? '' : undefined}
-                  >
+                  <Form.Item label="Supplier" required>
                     <Space>
-                      <Button icon={<SearchOutlined />} onClick={handleOpenSupplierModal}>
+                      <Button icon={<SearchOutlined />}
+                        onClick={() => { setSupplierModalOpen(true); setSupplierSearch(''); setSupplierResults([]); }}>
                         Select Supplier
                       </Button>
-                      {selectedSupplier && (
-                        <Text strong style={{ color: REDWOOD.info }}>{selectedSupplier.Supplier}</Text>
-                      )}
+                      {selectedSupplier && <Tag color="blue" style={{ fontSize: 12 }}>{selectedSupplier.Supplier}</Tag>}
                     </Space>
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={12}>
                   <Form.Item name="supplierSite" label="Supplier Site">
                     <Select showSearch allowClear placeholder="Select supplier site" loading={sitesLoading} optionFilterProp="children">
-                      {supplierSites.map(ss => (
-                        <Option key={ss.SupplierSiteId ?? ss.SupplierSite} value={ss.SupplierSite}>
-                          {ss.SupplierSite}
-                        </Option>
-                      ))}
+                      {supplierSites.map(ss => <Option key={ss.SupplierSiteId ?? ss.SupplierSite} value={ss.SupplierSite}>{ss.SupplierSite}</Option>)}
                     </Select>
                   </Form.Item>
                 </Col>
+              </Row>
+              <Divider orientation="left" plain style={{ fontSize: 12, color: C.textMid }}>Ship To</Divider>
+              <Row gutter={[16, 0]}>
                 <Col xs={24} sm={12}>
-                  <Form.Item name="shipToOrg" label="Ship To Organization" rules={[{ required: true, message: 'Required' }]}>
-                    <Select
-                      showSearch
-                      allowClear
-                      placeholder="Select organization"
-                      optionFilterProp="children"
-                      loading={orgsLoading}
-                      onChange={handleShipToOrgChange}
-                    >
-                      {inventoryOrgs.map(org => (
-                        <Option key={org.OrganizationCode} value={org.OrganizationCode}>
-                          {org.OrganizationCode}{org.OrganizationName ? ` — ${org.OrganizationName}` : ''}
-                        </Option>
-                      ))}
+                  <Form.Item name="shipToOrg" label="Ship To Organization" rules={[{ required: true }]}>
+                    <Select showSearch allowClear placeholder="Select organization" optionFilterProp="children" onChange={handleShipToOrgChange}>
+                      {inventoryOrgs.map(org => <Option key={org.OrganizationCode} value={org.OrganizationCode}>{org.OrganizationCode}{org.OrganizationName ? ` — ${org.OrganizationName}` : ''}</Option>)}
                     </Select>
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={12}>
                   <Form.Item name="subinventory" label="Subinventory">
-                    <Select showSearch allowClear placeholder="Select subinventory" loading={subLoading} optionFilterProp="children">
-                      {subinventories.map(sub => (
-                        <Option key={sub.subinventory_code} value={sub.subinventory_code}>
-                          {sub.subinventory_code}
-                        </Option>
-                      ))}
+                    <Select showSearch allowClear placeholder="Select subinventory" optionFilterProp="children">
+                      {subinventories.map(sub => <Option key={sub.subinventory_code} value={sub.subinventory_code}>{sub.subinventory_code}</Option>)}
                     </Select>
                   </Form.Item>
                 </Col>
                 <Col xs={24}>
                   <Form.Item name="noteToSupplier" label="Note to Supplier">
-                    <Input.TextArea rows={2} placeholder="Optional note to supplier" />
+                    <Input.TextArea rows={2} placeholder="Optional note…" />
                   </Form.Item>
                 </Col>
               </Row>
@@ -641,376 +480,296 @@ const CreatePurchaseOrder: React.FC = () => {
           )}
         </Modal>
 
+        {/* ── Main PO Page ─────────────────────────────── */}
         {header && (
           <>
-            {/* Breadcrumb */}
-            <div style={{ padding: '12px 24px', background: REDWOOD.surface, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
-              <Breadcrumb items={[
+            {/* Page header bar */}
+            <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, padding: '12px 24px' }}>
+              <Breadcrumb style={{ marginBottom: 6 }} items={[
                 { title: <Link to="/home"><HomeOutlined /> Home</Link> },
                 { title: <Link to="/procurement">Procurement</Link> },
                 { title: <Link to="/procurement/purchase-orders">Purchase Orders</Link> },
-                { title: `Create: ${header.poNumber}` },
               ]} />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                <Space align="center" size={10}>
+                  <Title level={5} style={{ margin: 0, color: C.text }}>{header.poNumber}</Title>
+                  <Tag color="orange" style={{ fontSize: 11, fontWeight: 600 }}>{header.status}</Tag>
+                  <Tag color="geekblue" style={{ fontSize: 11 }}>{header.docType}</Tag>
+                </Space>
+                <Space>
+                  <Button danger onClick={() => setDiscardConfirmOpen(true)}>Discard</Button>
+                  <Button type="primary" icon={<SaveOutlined />} onClick={() => setSaveModalOpen(true)}
+                    style={{ background: C.red, borderColor: C.red, fontWeight: 600 }}>
+                    Save Purchase Order
+                  </Button>
+                </Space>
+              </div>
             </div>
 
             <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-              {/* Header Card */}
-              <Collapse
-                activeKey={headerCollapseOpen}
-                onChange={keys => setHeaderCollapseOpen(typeof keys === 'string' ? [keys] : keys as string[])}
-                style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
-                items={[
+              {/* ── Header info ─────────────────────────── */}
+              <Row gutter={16}>
+                {/* Left — PO & BU info */}
+                <Col xs={24} lg={8}>
+                  <Card size="small" style={{ borderRadius: 10, height: '100%', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
+                    title={<SectionHead title="General" icon={<BuildOutlined />} color={C.blue} />}
+                    extra={<Tooltip title="Edit header"><Button size="small" type="text" icon={<EditOutlined />} style={{ color: C.blue }} onClick={() => setShowInitModal(true)} /></Tooltip>}>
+                    <InfoTile label="Procurement BU" value={<Text strong>{header.procurementBU}</Text>} />
+                    <InfoTile label="Requisitioning BU" value={header.requisitioningBU} />
+                    <InfoTile label="Bill-to BU" value={header.billToBU} />
+                    <InfoTile label="Order Date" icon={<CalendarOutlined />} value={header.orderDate.format('D-MMM-YYYY')} />
+                    <InfoTile label="Currency" icon={<DollarOutlined />} value={<Tag color="purple" style={{ fontWeight: 700 }}>{header.currency}</Tag>} />
+                    <InfoTile label="Buyer" icon={<UserOutlined />} value={header.buyer} />
+                    <InfoTile label="Description"
+                      value={<InlineEdit value={header.description} onChange={v => patch({ description: v })} placeholder="Enter description…" />} />
+                  </Card>
+                </Col>
+
+                {/* Middle — Supplier info */}
+                <Col xs={24} lg={8}>
+                  <Card size="small" style={{ borderRadius: 10, height: '100%', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
+                    title={<SectionHead title="Supplier" icon={<ShopOutlined />} color={C.teal} />}>
+                    <InfoTile label="Supplier Name" value={<Text strong style={{ color: C.blue, fontSize: 13 }}>{header.supplierName}</Text>} />
+                    <InfoTile label="Supplier Site" value={header.supplierSite || <Text style={{ color: C.textLight }}>—</Text>} />
+                    <InfoTile label="Contact"
+                      value={<InlineEdit value={header.supplierContact} onChange={v => patch({ supplierContact: v })} placeholder="Enter contact…" />} />
+                    <InfoTile label="Communication Method"
+                      value={
+                        <Select size="small" value={header.communicationMethod} style={{ width: 130 }}
+                          onChange={v => patch({ communicationMethod: v })}>
+                          <Option value="E-Mail">E-Mail</Option>
+                          <Option value="Fax">Fax</Option>
+                          <Option value="Print">Print</Option>
+                        </Select>
+                      } />
+                    <InfoTile label="Communication Email"
+                      value={<InlineEdit value={header.communicationEmail} onChange={v => patch({ communicationEmail: v })} placeholder="Enter email…" />} />
+                    <InfoTile label="Bill-to Location"
+                      value={<InlineEdit value={header.billToLocation} onChange={v => patch({ billToLocation: v })} />} />
+                    <InfoTile label="Ship-to Location"
+                      value={<InlineEdit value={header.shipToLocation} onChange={v => patch({ shipToLocation: v })} />} />
+                  </Card>
+                </Col>
+
+                {/* Right — Summary + ship-to */}
+                <Col xs={24} lg={8}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%' }}>
+                    <SummaryBox />
+                    <Card size="small" style={{ borderRadius: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.08)', flex: 1 }}
+                      title={<SectionHead title="Ship To" icon={<FileTextOutlined />} color={C.green} />}>
+                      <InfoTile label="Organization" value={<Text strong>{header.shipToOrg}</Text>} />
+                      <InfoTile label="Subinventory" value={header.subinventory || <Text style={{ color: C.textLight }}>—</Text>} />
+                      <InfoTile label="Source Agreement"
+                        value={<InlineEdit value="" onChange={() => {}} placeholder="—" />} />
+                      <InfoTile label="Supplier Order"
+                        value={<InlineEdit value="" onChange={() => {}} placeholder="—" />} />
+                    </Card>
+                  </div>
+                </Col>
+              </Row>
+
+              {/* ── Terms & Notes ───────────────────────── */}
+              <Card size="small" style={{ borderRadius: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+                <Tabs size="small" defaultActiveKey="terms" items={[
                   {
-                    key: 'header',
-                    label: (
-                      <Space>
-                        <ShoppingCartOutlined style={{ color: REDWOOD.primary }} />
-                        <Text strong>Purchase Order Header — {header.poNumber}</Text>
-                      </Space>
-                    ),
-                    extra: (
-                      <Tooltip title="Edit header fields">
-                        <Button
-                          size="small"
-                          type="text"
-                          icon={<EditOutlined />}
-                          style={{ color: REDWOOD.info }}
-                          onClick={e => { e.stopPropagation(); handleEditHeader(); }}
-                        />
-                      </Tooltip>
-                    ),
+                    key: 'terms', label: 'Terms',
                     children: (
-                      <Descriptions
-                        bordered
-                        size="small"
-                        column={4}
-                        labelStyle={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.04em' }}
-                        contentStyle={{ fontSize: 13, color: REDWOOD.neutral900 }}
-                      >
-                        <Descriptions.Item label="PO Number" span={2}>
-                          <Text strong style={{ color: REDWOOD.primary }}>{header.poNumber}</Text>
-                        </Descriptions.Item>
-                        <Descriptions.Item label="Document Type">{header.docType}</Descriptions.Item>
-                        <Descriptions.Item label="Order Date">{header.orderDate.format('D-MMM-YYYY')}</Descriptions.Item>
-                        <Descriptions.Item label="Procurement BU">{header.procurementBU}</Descriptions.Item>
-                        <Descriptions.Item label="Bill To">{header.billTo}</Descriptions.Item>
-                        <Descriptions.Item label="Currency">{header.currency}</Descriptions.Item>
-                        <Descriptions.Item label="Supplier">
-                          <Text strong>{header.supplierName}</Text>
-                        </Descriptions.Item>
-                        <Descriptions.Item label="Supplier Site">{header.supplierSite || '—'}</Descriptions.Item>
-                        <Descriptions.Item label="Ship To Org">{header.shipToOrg}</Descriptions.Item>
-                        <Descriptions.Item label="Subinventory">{header.subinventory || '—'}</Descriptions.Item>
-                        {header.noteToSupplier && (
-                          <Descriptions.Item label="Note to Supplier" span={4}>
-                            {header.noteToSupplier}
-                          </Descriptions.Item>
-                        )}
-                      </Descriptions>
+                      <Row gutter={[32, 0]}>
+                        <Col xs={24} md={8}>
+                          <InfoTile label="Required Acknowledgment" value={
+                            <Select size="small" defaultValue="None" style={{ width: 130 }}>
+                              <Option value="None">None</Option>
+                              <Option value="Required">Required</Option>
+                            </Select>
+                          } />
+                          <InfoTile label="Payment Terms"
+                            value={<InlineEdit value={header.paymentTerms} onChange={v => patch({ paymentTerms: v })} placeholder="e.g. CR30D" />} />
+                        </Col>
+                        <Col xs={24} md={8}>
+                          <InfoTile label="Shipping Method"
+                            value={<InlineEdit value={header.shippingMethod} onChange={v => patch({ shippingMethod: v })} placeholder="—" />} />
+                          <InfoTile label="Freight Terms"
+                            value={<InlineEdit value={header.freightTerms} onChange={v => patch({ freightTerms: v })} placeholder="—" />} />
+                          <InfoTile label="FOB"
+                            value={<InlineEdit value={header.fob} onChange={v => patch({ fob: v })} placeholder="—" />} />
+                        </Col>
+                        <Col xs={24} md={8}>
+                          <InfoTile label="Pay on Receipt"
+                            value={<Checkbox checked={header.payOnReceipt} onChange={e => patch({ payOnReceipt: e.target.checked })}><Text style={{ fontSize: 13 }}>Yes</Text></Checkbox>} />
+                          <InfoTile label="Confirming Order"
+                            value={<Checkbox checked={header.confirmingOrder} onChange={e => patch({ confirmingOrder: e.target.checked })}><Text style={{ fontSize: 13 }}>Yes</Text></Checkbox>} />
+                        </Col>
+                      </Row>
                     ),
                   },
-                ]}
-              />
+                  {
+                    key: 'notes', label: 'Notes & Attachments',
+                    children: (
+                      <Row gutter={[24, 0]}>
+                        <Col xs={24} md={12}>
+                          <Text style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: C.textLight }}>Note to Supplier</Text>
+                          <Input.TextArea rows={3} value={header.noteToSupplier}
+                            onChange={e => patch({ noteToSupplier: e.target.value })} placeholder="Note to supplier…" style={{ marginTop: 4 }} />
+                        </Col>
+                        <Col xs={24} md={12}>
+                          <Text style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: C.textLight }}>Note to Receiver</Text>
+                          <Input.TextArea rows={3} value={header.noteToReceiver}
+                            onChange={e => patch({ noteToReceiver: e.target.value })} placeholder="Note to receiver…" style={{ marginTop: 4 }} />
+                        </Col>
+                      </Row>
+                    ),
+                  },
+                ]} />
+              </Card>
 
-              {/* Lines Section */}
-              <Card
-                style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
-                styles={{ body: { padding: 0 } }}
+              {/* ── Lines ───────────────────────────────── */}
+              <Card size="small" style={{ borderRadius: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
                 title={
-                  <div style={{ padding: '12px 16px 0' }}>
-                    <SectionLabel>Order Lines</SectionLabel>
-                  </div>
+                  <Space wrap>
+                    <Button type="primary" size="small" icon={<PlusOutlined />} onClick={openAddItem}
+                      style={{ background: C.green, borderColor: C.green }}>Add Item</Button>
+                    <Divider type="vertical" />
+                    <Text style={{ fontSize: 12, color: C.textMid }}>Need By for All:</Text>
+                    <DatePicker size="small" value={needByAll} onChange={handleNeedByAllChange} format="D-MMM-YYYY" placeholder="Pick date" style={{ width: 130 }} />
+                    <Text style={{ fontSize: 12, color: C.textMid }}>Default Tax %:</Text>
+                    <InputNumber size="small" value={defaultTaxPct} min={0} max={100} precision={2} style={{ width: 72 }} onChange={val => setDefaultTaxPct(val ?? 0)} />
+                  </Space>
                 }
               >
-                {/* Toolbar */}
-                <div style={{
-                  padding: '10px 16px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  flexWrap: 'wrap',
-                  gap: 10,
-                  borderBottom: `1px solid ${REDWOOD.neutral200}`,
-                }}>
-                  <Button
-                    type="primary"
-                    icon={<PlusOutlined />}
-                    onClick={openAddItem}
-                    style={{ background: REDWOOD.success, borderColor: REDWOOD.success, fontWeight: 600 }}
-                  >
-                    Add Item
-                  </Button>
-                  <Space wrap>
-                    <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Set Need By for All:</Text>
-                    <DatePicker
-                      size="small"
-                      value={needByAll}
-                      onChange={handleNeedByAllChange}
-                      format="D-MMM-YYYY"
-                      placeholder="Pick date"
-                      style={{ width: 140 }}
-                    />
-                    <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Default Tax %:</Text>
-                    <InputNumber
-                      size="small"
-                      value={defaultTaxPct}
-                      min={0}
-                      max={100}
-                      precision={2}
-                      style={{ width: 80 }}
-                      onChange={val => setDefaultTaxPct(val ?? 0)}
-                    />
-                  </Space>
-                </div>
-
-                <Table
-                  columns={lineColumns}
-                  dataSource={lines}
-                  rowKey="key"
-                  size="small"
-                  bordered
-                  pagination={false}
-                  scroll={{ x: 1100 }}
-                  locale={{ emptyText: <div style={{ padding: 32, color: REDWOOD.neutral600, textAlign: 'center' }}>No lines added yet. Click "Add Item" to begin.</div> }}
-                  rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''}
+                <Tabs size="small" defaultActiveKey="lines"
+                  items={[
+                    {
+                      key: 'lines',
+                      label: <Badge count={lines.length} size="small" offset={[6, 0]} color={C.blue}><span style={{ paddingRight: 8 }}>Lines</span></Badge>,
+                      children: (
+                        <Table columns={lineCols} dataSource={lines} rowKey="key" size="small" bordered
+                          pagination={false} scroll={{ x: 1100 }}
+                          rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''}
+                          locale={{ emptyText: <div style={{ padding: 28, color: C.textLight, textAlign: 'center' }}>No lines yet. Click "Add Item" to begin.</div> }}
+                          summary={() => lines.length > 0 ? (
+                            <Table.Summary.Row style={{ background: '#EBF0FA', fontWeight: 600 }}>
+                              <Table.Summary.Cell index={0} colSpan={6} />
+                              <Table.Summary.Cell index={6} align="right"><Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(subtotal)}</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={7} />
+                              <Table.Summary.Cell index={8} align="right"><Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(totalTax)}</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={9} align="right"><Text strong style={{ fontVariantNumeric: 'tabular-nums', color: C.red }}>{fmt(grandTotal)}</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={10} colSpan={2} />
+                            </Table.Summary.Row>
+                          ) : null}
+                        />
+                      ),
+                    },
+                    {
+                      key: 'schedules', label: 'Schedules',
+                      children: (
+                        <Table columns={scheduleCols} dataSource={lines} rowKey="key" size="small" bordered
+                          pagination={false} scroll={{ x: 900 }} rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''}
+                          locale={{ emptyText: <div style={{ padding: 28, color: C.textLight, textAlign: 'center' }}>No schedules yet.</div> }} />
+                      ),
+                    },
+                    {
+                      key: 'distributions', label: 'Distributions',
+                      children: (
+                        <Table columns={distCols} dataSource={lines} rowKey="key" size="small" bordered
+                          pagination={false} scroll={{ x: 1000 }} rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''}
+                          locale={{ emptyText: <div style={{ padding: 28, color: C.textLight, textAlign: 'center' }}>No distributions yet.</div> }} />
+                      ),
+                    },
+                  ]}
                 />
               </Card>
 
-              {/* Totals Card */}
-              <Card
-                style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
-                styles={{ body: { padding: '12px 20px' } }}
-              >
-                <Row justify="end">
-                  <Col>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
-                      <div style={{ display: 'flex', gap: 24, alignItems: 'center' }}>
-                        <Text style={{ fontSize: 12, color: REDWOOD.neutral600, minWidth: 100, textAlign: 'right' }}>Subtotal</Text>
-                        <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 14, minWidth: 130, textAlign: 'right' }}>
-                          {formatNumber(subtotal)}
-                        </Text>
-                      </div>
-                      <div style={{ display: 'flex', gap: 24, alignItems: 'center' }}>
-                        <Text style={{ fontSize: 12, color: REDWOOD.neutral600, minWidth: 100, textAlign: 'right' }}>Total Tax</Text>
-                        <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 14, minWidth: 130, textAlign: 'right' }}>
-                          {formatNumber(totalTax)}
-                        </Text>
-                      </div>
-                      <div style={{ borderTop: `2px solid ${REDWOOD.neutral200}`, paddingTop: 6, display: 'flex', gap: 24, alignItems: 'center' }}>
-                        <Text strong style={{ fontSize: 13, minWidth: 100, textAlign: 'right' }}>Grand Total</Text>
-                        <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 18, color: REDWOOD.primary, minWidth: 130, textAlign: 'right' }}>
-                          {formatNumber(grandTotal)}
-                        </Text>
-                      </div>
-                    </div>
-                  </Col>
-                </Row>
-              </Card>
-
-              {/* Action Buttons */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-                <Button
-                  danger
-                  onClick={() => setDiscardConfirmOpen(true)}
-                >
-                  Discard
-                </Button>
-                <Button
-                  type="primary"
-                  icon={<SaveOutlined />}
-                  onClick={handleSave}
-                  style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary, fontWeight: 600 }}
-                >
-                  Save Purchase Order
-                </Button>
-              </div>
             </div>
           </>
         )}
 
-        {/* Supplier Search Modal */}
-        <Modal
-          open={supplierModalOpen}
-          title={
-            <Space>
-              <span>Search Supplier</span>
-              <Tooltip title="Show last API call">
-                <Button
-                  size="small"
-                  type="text"
-                  icon={<ApiOutlined style={{ color: supplierApiUrl ? REDWOOD.info : REDWOOD.neutral300 }} />}
-                  onClick={() => supplierApiUrl && setSupplierApiModalOpen(true)}
-                />
-              </Tooltip>
-            </Space>
-          }
-          width={700}
-          onCancel={() => setSupplierModalOpen(false)}
-          footer={<Button onClick={() => setSupplierModalOpen(false)}>Close</Button>}
-        >
+        {/* ── Supplier Search Modal ────────────────────── */}
+        <Modal open={supplierModalOpen}
+          title={<Space><span>Search Supplier</span>
+            <Tooltip title="Show last API call">
+              <Button size="small" type="text" icon={<ApiOutlined style={{ color: supplierApiUrl ? C.blue : C.textLight }} />}
+                onClick={() => supplierApiUrl && setSupplierApiModalOpen(true)} />
+            </Tooltip></Space>}
+          width={700} onCancel={() => setSupplierModalOpen(false)}
+          footer={<Button onClick={() => setSupplierModalOpen(false)}>Close</Button>}>
           <Space.Compact style={{ width: '100%', marginBottom: 12 }}>
-            <Input
-              placeholder="Type supplier name to search…"
-              value={supplierSearch}
-              onChange={e => setSupplierSearch(e.target.value)}
-              onPressEnter={() => handleSupplierSearch(supplierSearch)}
-              allowClear
-            />
-            <Button
-              type="primary"
-              icon={<SearchOutlined />}
-              loading={suppliersLoading}
+            <Input placeholder="Type supplier name to search…" value={supplierSearch}
+              onChange={e => setSupplierSearch(e.target.value)} onPressEnter={() => handleSupplierSearch(supplierSearch)} allowClear />
+            <Button type="primary" icon={<SearchOutlined />} loading={suppliersLoading}
               onClick={() => handleSupplierSearch(supplierSearch)}
-              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-            >
-              Search
-            </Button>
+              style={{ background: C.red, borderColor: C.red }}>Search</Button>
           </Space.Compact>
-          <Table
-            dataSource={supplierResults}
-            rowKey={r => String(r.SupplierId)}
-            size="small"
-            bordered
-            loading={suppliersLoading}
-            pagination={{ pageSize: 8, showSizeChanger: false }}
+          <Table dataSource={supplierResults} rowKey={r => String(r.SupplierId)} size="small" bordered
+            loading={suppliersLoading} pagination={{ pageSize: 8, showSizeChanger: false }}
             locale={{ emptyText: 'Enter a name and click Search' }}
-            onRow={record => ({
-              onClick: () => handleSelectSupplier(record),
-              style: { cursor: 'pointer' },
-            })}
+            onRow={record => ({ onClick: () => handleSelectSupplier(record), style: { cursor: 'pointer' } })}
             columns={[
-              {
-                title: 'Supplier Number',
-                dataIndex: 'SupplierNumber',
-                width: 140,
-                render: v => <Text style={{ fontSize: 12, fontWeight: 600 }}>{v ?? '—'}</Text>,
-              },
-              {
-                title: 'Supplier Name',
-                dataIndex: 'Supplier',
-                render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text>,
-              },
-              {
-                title: 'Type',
-                dataIndex: 'SupplierType',
-                width: 120,
-                render: v => v ?? '—',
-              },
-            ]}
-          />
+              { title: 'Supplier Number', dataIndex: 'SupplierNumber', width: 140, render: v => <Text style={{ fontSize: 12, fontWeight: 600 }}>{v ?? '—'}</Text> },
+              { title: 'Supplier Name', dataIndex: 'Supplier', render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+              { title: 'Type', dataIndex: 'SupplierType', width: 120, render: v => v ?? '—' },
+            ]} />
         </Modal>
 
-        {/* Supplier API URL Modal */}
-        <Modal
-          open={supplierApiModalOpen}
-          title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>Supplier API Call</span></Space>}
-          width={620}
-          onCancel={() => setSupplierApiModalOpen(false)}
-          footer={<Button onClick={() => setSupplierApiModalOpen(false)}>Close</Button>}
-        >
-          <div style={{ background: REDWOOD.neutral100, borderRadius: 6, padding: 12, wordBreak: 'break-all' }}>
+        <Modal open={supplierApiModalOpen}
+          title={<Space><ApiOutlined style={{ color: C.blue }} /><span>Supplier API Call</span></Space>}
+          width={620} onCancel={() => setSupplierApiModalOpen(false)}
+          footer={<Button onClick={() => setSupplierApiModalOpen(false)}>Close</Button>}>
+          <div style={{ background: C.bg, borderRadius: 6, padding: 12, wordBreak: 'break-all' }}>
             <Text copyable style={{ fontFamily: 'monospace', fontSize: 12 }}>{supplierApiUrl}</Text>
           </div>
         </Modal>
 
-        {/* Add Item Modal */}
-        <Modal
-          open={addItemOpen}
-          title={`Add Items — ${header?.shipToOrg ?? ''}`}
-          width={900}
+        {/* ── Add Item Modal ───────────────────────────── */}
+        <Modal open={addItemOpen} title={`Add Items — ${header?.shipToOrg ?? ''}`} width={920}
           onCancel={() => setAddItemOpen(false)}
-          footer={
-            <Space>
-              <Button onClick={() => setAddItemOpen(false)} icon={<CloseOutlined />}>Cancel</Button>
-              <Button
-                type="primary"
-                onClick={handleAddItems}
-                disabled={selectedItemKeys.filter(k => !existingItemNumbers.has(k)).length === 0}
-                style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
-              >
-                Add {selectedItemKeys.filter(k => !existingItemNumbers.has(k)).length > 0
-                  ? `${selectedItemKeys.filter(k => !existingItemNumbers.has(k)).length} `
-                  : ''}Selected Items
-              </Button>
-            </Space>
-          }
-        >
+          footer={<Space>
+            <Button onClick={() => setAddItemOpen(false)} icon={<CloseOutlined />}>Cancel</Button>
+            <Button type="primary" onClick={handleAddItems}
+              disabled={selectedItemKeys.filter(k => !existingItemNumbers.has(k)).length === 0}
+              style={{ background: C.green, borderColor: C.green }}>
+              {selectedItemKeys.filter(k => !existingItemNumbers.has(k)).length > 0
+                ? `Add ${selectedItemKeys.filter(k => !existingItemNumbers.has(k)).length} Item(s)` : 'Add Selected Items'}
+            </Button>
+          </Space>}>
           <div style={{ marginBottom: 12 }}>
-            <Input
-              placeholder="Search by item number or description…"
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              allowClear
-            />
+            <Input placeholder="Search by item number or description…" value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)} allowClear prefix={<SearchOutlined style={{ color: C.textLight }} />} />
           </div>
           {itemsLoading ? (
-            <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
-              <Spin tip="Loading items…" />
-            </div>
+            <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Spin tip="Loading items…" /></div>
           ) : (
-            <Table
-              columns={itemTableColumns}
-              dataSource={filteredItems}
-              rowKey={r => String(r.item_number)}
-              size="small"
-              bordered
-              pagination={{ pageSize: 10, showSizeChanger: false }}
-              scroll={{ x: 700 }}
-              rowSelection={rowSelection}
-              rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''}
-            />
+            <Table columns={itemTableCols} dataSource={filteredItems} rowKey={r => String(r.item_number)}
+              size="small" bordered pagination={{ pageSize: 10, showSizeChanger: false }} scroll={{ x: 700 }}
+              rowSelection={rowSel} rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''} />
           )}
         </Modal>
 
-        {/* Save Success Modal */}
-        <Modal
-          open={saveModalOpen}
-          title="Purchase Order Saved"
-          onCancel={() => setSaveModalOpen(false)}
-          footer={
-            <Space>
-              <Button onClick={() => setSaveModalOpen(false)}>Stay on Page</Button>
-              <Button
-                type="primary"
-                onClick={() => { setSaveModalOpen(false); navigate('/procurement/purchase-orders'); }}
-                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-              >
-                Go to Search
-              </Button>
-            </Space>
-          }
-        >
-          <div style={{ textAlign: 'center', padding: '16px 0' }}>
-            <div style={{ fontSize: 32, marginBottom: 12 }}>✓</div>
-            <Text strong style={{ fontSize: 16, display: 'block' }}>
-              Purchase Order <Text style={{ color: REDWOOD.primary }}>{header?.poNumber}</Text> has been saved.
-            </Text>
-            <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
-              {lines.length} line{lines.length !== 1 ? 's' : ''} · Grand Total: {formatNumber(grandTotal)} {header?.currency}
-            </Text>
+        {/* ── Save Modal ──────────────────────────────── */}
+        <Modal open={saveModalOpen} title={null} onCancel={() => setSaveModalOpen(false)}
+          footer={<Space>
+            <Button onClick={() => setSaveModalOpen(false)}>Stay on Page</Button>
+            <Button type="primary" onClick={() => { setSaveModalOpen(false); navigate('/procurement/purchase-orders'); }}
+              style={{ background: C.red, borderColor: C.red }}>Go to List</Button>
+          </Space>}>
+          <div style={{ textAlign: 'center', padding: '24px 0' }}>
+            <CheckCircleOutlined style={{ fontSize: 48, color: C.green, marginBottom: 12 }} />
+            <Title level={4} style={{ margin: 0 }}>Purchase Order Saved</Title>
+            <Text strong style={{ color: C.red, fontSize: 15 }}>{header?.poNumber}</Text>
+            <div style={{ marginTop: 8 }}>
+              <Text type="secondary">{lines.length} line{lines.length !== 1 ? 's' : ''} · Grand Total: </Text>
+              <Text strong style={{ color: C.teal }}>{fmt(grandTotal)} {header?.currency}</Text>
+            </div>
           </div>
         </Modal>
 
-        {/* Discard Confirm Modal */}
-        <Modal
-          open={discardConfirmOpen}
-          title="Discard Purchase Order?"
-          onCancel={() => setDiscardConfirmOpen(false)}
-          footer={
-            <Space>
-              <Button onClick={() => setDiscardConfirmOpen(false)}>Cancel</Button>
-              <Button
-                danger
-                type="primary"
-                onClick={() => { setDiscardConfirmOpen(false); navigate('/procurement/purchase-orders'); }}
-              >
-                Discard
-              </Button>
-            </Space>
-          }
-        >
-          <Text>All unsaved changes will be lost. Are you sure you want to discard this purchase order?</Text>
+        {/* ── Discard Modal ───────────────────────────── */}
+        <Modal open={discardConfirmOpen} title="Discard Purchase Order?" onCancel={() => setDiscardConfirmOpen(false)}
+          footer={<Space>
+            <Button onClick={() => setDiscardConfirmOpen(false)}>Cancel</Button>
+            <Button danger type="primary" onClick={() => { setDiscardConfirmOpen(false); navigate('/procurement/purchase-orders'); }}>Discard</Button>
+          </Space>}>
+          <Text>All unsaved changes will be lost. Are you sure?</Text>
         </Modal>
 
       </Content>
