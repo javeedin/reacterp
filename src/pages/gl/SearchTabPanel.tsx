@@ -614,15 +614,23 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
       null,
     ]);
     totalRow.font = { bold: true, size: 10 };
-    totalRow.fill = totalFill;
-    [10, 11, 12, 13, 14, 15].forEach(c => {
+    for (let c = 1; c <= 16; c++) {
       const cell = totalRow.getCell(c);
-      cell.numFmt = numFmt;
-      cell.fill = c <= 12
-        ? { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB8CCE4' } }   // blue tint for Accounted
-        : { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB7E1CD' } };  // green tint for Entered
-    });
-    totalRow.getCell(1).font = { bold: true, size: 10 };
+      cell.font = { bold: true, size: 10 };
+      if (c >= 10 && c <= 12) {
+        cell.numFmt = numFmt;
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB8CCE4' } };
+      } else if (c >= 13 && c <= 15) {
+        cell.numFmt = numFmt;
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB7E1CD' } };
+      } else {
+        cell.fill = totalFill;
+      }
+      cell.border = {
+        top: { style: 'medium', color: { argb: 'FF808080' } },
+        bottom: { style: 'medium', color: { argb: 'FF808080' } },
+      };
+    }
 
     ws.columns.forEach((col, i) => {
       const widths = [28, 24, 30, 10, 12, 28, 14, 16, 8, 14, 14, 14, 12, 12, 14, 12];
