@@ -218,6 +218,7 @@ SELECT
     bu.LOCATION_ID,
     bu.MANAGER_ID,
     bu.LEGAL_ENTITY_ID,
+    bu.LEGAL_ENTITY_NAME,
     bu.PROFIT_CENTER_FLAG,
     -- COMPANY: use stored value if set, otherwise derive from first segment
     -- of LIABILITY_DISTRIBUTION on a site assignment for this BU
@@ -275,6 +276,7 @@ SELECT
     bu.LOCATION_ID,
     bu.MANAGER_ID,
     bu.LEGAL_ENTITY_ID,
+    bu.LEGAL_ENTITY_NAME,
     bu.PROFIT_CENTER_FLAG,
     NVL(
         bu.COMPANY,
