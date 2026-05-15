@@ -4,7 +4,7 @@ import type { Dayjs } from 'dayjs';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
   DatePicker, Row, Col, Space, Modal, InputNumber, Tabs, Checkbox,
-  Spin, Tooltip, Tag, Divider, Badge,
+  Spin, Tooltip, Tag, Divider, Badge, Progress, Alert,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { TableRowSelection } from 'antd/es/table/interface';
@@ -152,6 +152,11 @@ const CreatePurchaseOrder: React.FC = () => {
   const [sitesLoading, setSitesLoading] = useState(false);
   const [initConfirmLoading, setInitConfirmLoading] = useState(false);
 
+  // QOH
+  const [qohData, setQohData] = useState<Record<string, any>>({});
+  const [qohLoading, setQohLoading] = useState(false);
+  const [qohProgress, setQohProgress] = useState({ done: 0, total: 0 });
+
   const [supplierModalOpen, setSupplierModalOpen] = useState(false);
   const [supplierSearch, setSupplierSearch] = useState('');
   const [supplierResults, setSupplierResults] = useState<any[]>([]);
@@ -243,6 +248,34 @@ const CreatePurchaseOrder: React.FC = () => {
   };
 
   const patch = (p: Partial<POHeader>) => setHeader(prev => prev ? { ...prev, ...p } : prev);
+
+  const queryQOH = async () => {
+    if (!header || lines.length === 0) return;
+    setQohLoading(true);
+    setQohData({});
+    setQohProgress({ done: 0, total: lines.length });
+    const result: Record<string, any> = {};
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      try {
+        const q = [`OrganizationCode='${header.shipToOrg}'`, `ItemNumber='${line.itemNumber}'`];
+        if (header.subinventory) q.push(`SubinventoryCode='${header.subinventory}'`);
+        const url = `${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(q.join(';'))}&limit=10`;
+        const r = await fetch(url, { headers: FUSION_HDRS });
+        const d = await r.json();
+        const items: any[] = d.items ?? [];
+        // sum across all locators
+        const onhand = items.reduce((s: number, it: any) =>
+          s + (parseFloat(it.PrimaryOnhandQuantity ?? it.OnhandQuantity ?? 0) || 0), 0);
+        result[line.itemNumber] = { onhand, items, url };
+      } catch {
+        result[line.itemNumber] = { onhand: null, items: [], error: true };
+      }
+      setQohProgress({ done: i + 1, total: lines.length });
+      setQohData({ ...result });
+    }
+    setQohLoading(false);
+  };
 
   const handleNeedByAllChange = (date: Dayjs | null) => {
     setNeedByAll(date);
@@ -787,6 +820,137 @@ const CreatePurchaseOrder: React.FC = () => {
                         <Table columns={distCols} dataSource={lines} rowKey="key" size="small" bordered
                           pagination={false} scroll={{ x: 1000 }} rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''}
                           locale={{ emptyText: <div style={{ padding: 28, color: C.textLight, textAlign: 'center' }}>No distributions yet.</div> }} />
+                      ),
+                    },
+                    {
+                      key: 'qoh',
+                      label: 'Check On Hand',
+                      children: (
+                        <div>
+                          {/* Toolbar */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+                            <Button
+                              type="primary"
+                              icon={<SearchOutlined />}
+                              loading={qohLoading}
+                              disabled={lines.length === 0}
+                              onClick={queryQOH}
+                              style={{ background: C.teal, borderColor: C.teal, fontWeight: 600 }}
+                            >
+                              Query QOH
+                            </Button>
+                            {header && (
+                              <Text style={{ fontSize: 12, color: C.textMid }}>
+                                Org: <Text strong>{header.shipToOrg}</Text>
+                                {header.subinventory && <> · Sub: <Text strong>{header.subinventory}</Text></>}
+                              </Text>
+                            )}
+                            {qohLoading && qohProgress.total > 0 && (
+                              <div style={{ flex: 1, maxWidth: 300 }}>
+                                <Progress
+                                  percent={Math.round((qohProgress.done / qohProgress.total) * 100)}
+                                  size="small"
+                                  status="active"
+                                  format={() => `${qohProgress.done} / ${qohProgress.total}`}
+                                />
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Results table */}
+                          {lines.length === 0 ? (
+                            <div style={{ padding: 28, textAlign: 'center', color: C.textLight }}>Add lines first, then click Query QOH.</div>
+                          ) : (
+                            <Table
+                              size="small"
+                              bordered
+                              pagination={false}
+                              rowKey="key"
+                              dataSource={lines}
+                              rowClassName={(r, i) => {
+                                const q = qohData[r.itemNumber];
+                                if (q && q.onhand !== null && q.onhand < r.qty) return 'qoh-low';
+                                return i % 2 !== 0 ? 'po-row-alt' : '';
+                              }}
+                              columns={[
+                                { title: '#', dataIndex: 'lineNum', width: 46, align: 'center' as const, render: v => <Text style={{ color: C.textMid, fontSize: 12 }}>{v}</Text> },
+                                { title: 'Item Number', dataIndex: 'itemNumber', width: 150, render: v => <Text style={{ fontWeight: 600, fontSize: 12 }}>{v}</Text> },
+                                { title: 'Description', dataIndex: 'description', ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v}</Text> },
+                                { title: 'UOM', dataIndex: 'uom', width: 65, align: 'center' as const },
+                                {
+                                  title: 'PO Qty', dataIndex: 'qty', width: 90, align: 'right' as const,
+                                  render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{fmt(v)}</Text>,
+                                },
+                                {
+                                  title: 'On Hand Qty', width: 130, align: 'right' as const,
+                                  render: (_: any, r: POLine) => {
+                                    const q = qohData[r.itemNumber];
+                                    if (!q && !qohLoading) return <Text style={{ color: C.textLight, fontSize: 12 }}>—</Text>;
+                                    if (!q && qohLoading) return <Spin size="small" />;
+                                    if (q.error) return <Text style={{ color: C.red, fontSize: 12 }}>Error</Text>;
+                                    return (
+                                      <Text strong style={{
+                                        fontVariantNumeric: 'tabular-nums', fontSize: 13,
+                                        color: q.onhand === 0 ? C.red : q.onhand < r.qty ? C.orange : C.green,
+                                      }}>
+                                        {fmt(q.onhand)}
+                                      </Text>
+                                    );
+                                  },
+                                },
+                                {
+                                  title: 'Status', width: 110, align: 'center' as const,
+                                  render: (_: any, r: POLine) => {
+                                    const q = qohData[r.itemNumber];
+                                    if (!q) return null;
+                                    if (q.error) return <Tag color="error">API Error</Tag>;
+                                    if (q.onhand === 0) return <Tag color="red">Out of Stock</Tag>;
+                                    if (q.onhand < r.qty) return <Tag color="orange">Low Stock</Tag>;
+                                    return <Tag color="green">Available</Tag>;
+                                  },
+                                },
+                                {
+                                  title: 'Difference', width: 110, align: 'right' as const,
+                                  render: (_: any, r: POLine) => {
+                                    const q = qohData[r.itemNumber];
+                                    if (!q || q.onhand === null) return null;
+                                    const diff = q.onhand - r.qty;
+                                    return (
+                                      <Text style={{
+                                        fontVariantNumeric: 'tabular-nums', fontSize: 12,
+                                        color: diff < 0 ? C.red : C.green, fontWeight: 600,
+                                      }}>
+                                        {diff >= 0 ? '+' : ''}{fmt(diff)}
+                                      </Text>
+                                    );
+                                  },
+                                },
+                              ]}
+                              summary={() => {
+                                const queried = lines.filter(l => qohData[l.itemNumber] && !qohData[l.itemNumber].error);
+                                if (queried.length === 0) return null;
+                                const lowCount = queried.filter(l => qohData[l.itemNumber].onhand < l.qty).length;
+                                const okCount = queried.filter(l => qohData[l.itemNumber].onhand >= l.qty).length;
+                                return (
+                                  <Table.Summary.Row style={{ background: '#F0F7FF' }}>
+                                    <Table.Summary.Cell index={0} colSpan={4}>
+                                      <Text style={{ fontSize: 11, color: C.textMid }}>
+                                        {queried.length} item{queried.length !== 1 ? 's' : ''} queried
+                                      </Text>
+                                    </Table.Summary.Cell>
+                                    <Table.Summary.Cell index={4} colSpan={4} align="right">
+                                      <Space size={16}>
+                                        <Text style={{ fontSize: 11, color: C.green }}>✓ {okCount} available</Text>
+                                        {lowCount > 0 && <Text style={{ fontSize: 11, color: C.orange }}>⚠ {lowCount} low/out</Text>}
+                                      </Space>
+                                    </Table.Summary.Cell>
+                                  </Table.Summary.Row>
+                                );
+                              }}
+                            />
+                          )}
+                          <style>{`.qoh-low { background: #FFF8F0 !important; }`}</style>
+                        </div>
                       ),
                     },
                   ]}
