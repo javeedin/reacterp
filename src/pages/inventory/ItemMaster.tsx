@@ -169,6 +169,7 @@ const ItemMaster: React.FC = () => {
   const [totalCount, setTotalCount] = useState<number | null>(null);
   const [paramsOpen, setParamsOpen] = useState(true);
   const [exporting, setExporting]   = useState(false);
+  const [tableFilter, setTableFilter] = useState('');
 
   // attribute drawer
   const [drawer, setDrawer] = useState<{ open: boolean; label: string; values: { value: string; count: number }[] }>({
@@ -258,7 +259,8 @@ const ItemMaster: React.FC = () => {
     setFetchPage(0);
     setFetchCount(0);
     setTotalCount(null);
-    setParamsOpen(false);   // collapse params panel when search starts
+    setTableFilter('');
+    setParamsOpen(false);
 
     const url = buildUrl(vals);
     setLastUrl(url);
@@ -678,17 +680,29 @@ const ItemMaster: React.FC = () => {
             <Space>
               <Text strong style={{ fontSize: 13 }}>Results</Text>
               <Tag style={{ borderRadius: 10 }} color="blue">
-                {results.length.toLocaleString()} items
+                {tableFilter
+                  ? `${results.filter(r => {
+                      const q = tableFilter.toLowerCase();
+                      return (r.item_number||'').toLowerCase().includes(q)
+                          || (r.description||'').toLowerCase().includes(q)
+                          || (r.attribute1||'').toLowerCase().includes(q)
+                          || (r.attribute2||'').toLowerCase().includes(q)
+                          || (r.attribute5||'').toLowerCase().includes(q);
+                    }).length.toLocaleString()} of ${results.length.toLocaleString()}`
+                  : results.length.toLocaleString()
+                } items
               </Tag>
             </Space>
             <Space size={8}>
-              <Text
-                type="secondary"
-                style={{ fontSize: 10, fontFamily: 'monospace', maxWidth: 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}
-                title={lastUrl}
-              >
-                {lastUrl}
-              </Text>
+              <Input
+                placeholder="Filter results..."
+                prefix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />}
+                value={tableFilter}
+                onChange={e => setTableFilter(e.target.value)}
+                allowClear
+                style={{ width: 220 }}
+                size="small"
+              />
               <Button
                 icon={<DownloadOutlined />}
                 loading={exporting}
@@ -700,7 +714,16 @@ const ItemMaster: React.FC = () => {
             </Space>
           </div>
           <Table
-            dataSource={results}
+            dataSource={tableFilter ? results.filter(r => {
+              const q = tableFilter.toLowerCase();
+              return (r.item_number||'').toLowerCase().includes(q)
+                  || (r.description||'').toLowerCase().includes(q)
+                  || (r.attribute1||'').toLowerCase().includes(q)
+                  || (r.attribute2||'').toLowerCase().includes(q)
+                  || (r.attribute5||'').toLowerCase().includes(q)
+                  || (r.organization_code||'').toLowerCase().includes(q)
+                  || (r.barcode||'').toLowerCase().includes(q);
+            }) : results}
             columns={columns}
             rowKey={(r, i) => r.inventory_item_id || String(i)}
             size="small"
