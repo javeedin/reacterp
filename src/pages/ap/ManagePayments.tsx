@@ -67,7 +67,7 @@ import {
   FormOutlined,
   SendOutlined,
 } from '@ant-design/icons';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import FloatingMenu from '../../components/FloatingMenu';
 import Autopilot from '../../components/Autopilot';
@@ -422,6 +422,7 @@ const mapApexToPaymentRecord = (item: any, index: number): PaymentRecord => ({
 });
 
 const ManagePayments: React.FC = () => {
+  const navigate = useNavigate();
   const [form] = Form.useForm();
   const [createPaymentForm] = Form.useForm();
   const watchedConversionRate = Form.useWatch('conversionRate', createPaymentForm);
@@ -2435,11 +2436,12 @@ const ManagePayments: React.FC = () => {
         } catch { /* non-critical */ }
       }
       setViewAcctData(result);
-      // Filter to only lines that belong to this payment (AP_PAYMENTS / checkId)
-      // Guards against endpoints returning broader data than requested
+      // Filter to only lines that belong to this specific payment (AP_PAYMENTS + checkId)
       const paymentLines = (allLinesData.items || []).filter((line: any) => {
-        const st = (line.sourceTable || line.SOURCE_TABLE || '').toUpperCase();
-        return !st || st === 'AP_PAYMENTS';
+        const st  = (line.sourceTable || line.SOURCE_TABLE || '').toUpperCase();
+        const sid = line.sourceId ?? line.SOURCE_ID;
+        return (!st || st === 'AP_PAYMENTS')
+            && (!sid || String(sid) === String(record.checkId));
       });
       // Group lines by headerId to build per-event sections (Payment, Void, etc.)
       const eventsMap = new Map<number, { headerId: number; eventTypeCode: string; accountingStatus: string; accountingDate: string; lines: any[] }>();
@@ -4025,7 +4027,7 @@ const ManagePayments: React.FC = () => {
             >
               Create Payment
             </Button>
-            <Button type="primary" style={{ background: REDWOOD.primary }}>
+            <Button type="default" onClick={() => navigate('/ap')}>
               Done
             </Button>
           </Space>
