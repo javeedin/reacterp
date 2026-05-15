@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
 import {
@@ -10,7 +10,7 @@ import type { ColumnsType } from 'antd/es/table';
 import type { TableRowSelection } from 'antd/es/table/interface';
 import {
   HomeOutlined, ShoppingCartOutlined, PlusOutlined, DeleteOutlined,
-  EditOutlined, SaveOutlined, CloseOutlined,
+  EditOutlined, SaveOutlined, CloseOutlined, SearchOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -116,8 +116,7 @@ const CreatePurchaseOrder: React.FC = () => {
 
   const [busUnits, setBusUnits] = useState<any[]>([]);
   const [currencies, setCurrencies] = useState<any[]>([]);
-  const [suppliers, setSuppliers] = useState<any[]>([]);
-  const [supplierSites, setSupplierSites] = useState<any[]>([]);
+  const [currencyInput, setCurrencyInput] = useState('');
   const [inventoryOrgs, setInventoryOrgs] = useState<any[]>([]);
   const [subinventories, setSubinventories] = useState<any[]>([]);
   const [allSubinventories, setAllSubinventories] = useState<any[]>([]);
@@ -126,14 +125,19 @@ const CreatePurchaseOrder: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedItemKeys, setSelectedItemKeys] = useState<string[]>([]);
 
-  const [lovLoading, setLovLoading] = useState(false);
+  // Supplier popup state
+  const [supplierModalOpen, setSupplierModalOpen] = useState(false);
+  const [supplierSearch, setSupplierSearch] = useState('');
+  const [supplierResults, setSupplierResults] = useState<any[]>([]);
   const [suppliersLoading, setSuppliersLoading] = useState(false);
+  const [selectedSupplier, setSelectedSupplier] = useState<any>(null);
+  const [supplierSites, setSupplierSites] = useState<any[]>([]);
   const [sitesLoading, setSitesLoading] = useState(false);
+
+  const [lovLoading, setLovLoading] = useState(false);
   const [orgsLoading, setOrgsLoading] = useState(false);
   const [subLoading, setSubLoading] = useState(false);
   const [initConfirmLoading, setInitConfirmLoading] = useState(false);
-
-  const supplierSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (showInitModal) {
@@ -161,27 +165,24 @@ const CreatePurchaseOrder: React.FC = () => {
     }
   };
 
-  const handleSupplierSearch = useCallback((term: string) => {
+  const handleSupplierSearch = useCallback(async (term: string) => {
     if (!term || term.length < 2) return;
-    if (supplierSearchTimeout.current) clearTimeout(supplierSearchTimeout.current);
-    supplierSearchTimeout.current = setTimeout(async () => {
-      setSuppliersLoading(true);
-      try {
-        const r = await fetch(
-          `${FUSION_BASE}/suppliers?q=Supplier+like+"${encodeURIComponent(term)}*"&limit=20`,
-          { headers: FUSION_HDRS }
-        );
-        const d = await r.json();
-        setSuppliers(d.items ?? []);
-      } catch {
-        /* ignore */
-      } finally {
-        setSuppliersLoading(false);
-      }
-    }, 400);
+    setSuppliersLoading(true);
+    try {
+      const r = await fetch(
+        `${FUSION_BASE}/suppliers?q=Supplier+like+"${encodeURIComponent(term)}*"&limit=20`,
+        { headers: FUSION_HDRS }
+      );
+      const d = await r.json();
+      setSupplierResults(d.items ?? []);
+    } catch {
+      /* ignore */
+    } finally {
+      setSuppliersLoading(false);
+    }
   }, []);
 
-  const handleSupplierChange = async (supplierId: string) => {
+  const loadSupplierSites = async (supplierId: string) => {
     headerForm.setFieldValue('supplierSite', undefined);
     setSupplierSites([]);
     if (!supplierId) return;
@@ -200,6 +201,18 @@ const CreatePurchaseOrder: React.FC = () => {
     }
   };
 
+  const handleOpenSupplierModal = () => {
+    setSupplierModalOpen(true);
+    setSupplierSearch('');
+    setSupplierResults([]);
+  };
+
+  const handleSelectSupplier = async (supplier: any) => {
+    setSelectedSupplier(supplier);
+    setSupplierModalOpen(false);
+    await loadSupplierSites(String(supplier.SupplierId));
+  };
+
   const handleShipToOrgChange = (orgCode: string) => {
     headerForm.setFieldValue('subinventory', undefined);
     const filtered = allSubinventories.filter((s: any) => s.warehouse_code === orgCode);
@@ -207,10 +220,13 @@ const CreatePurchaseOrder: React.FC = () => {
   };
 
   const handleInitSubmit = async () => {
+    if (!selectedSupplier) {
+      message.error('Please select a supplier');
+      return;
+    }
     setInitConfirmLoading(true);
     try {
       const vals = await headerForm.validateFields();
-      const supplierObj = suppliers.find(s => String(s.SupplierId) === String(vals.supplierId));
       const poNumber = generatePONumber(vals.docType);
       setHeader({
         poNumber,
@@ -219,8 +235,8 @@ const CreatePurchaseOrder: React.FC = () => {
         procurementBU: vals.procurementBU,
         billTo: vals.billTo,
         currency: vals.currency,
-        supplierId: String(vals.supplierId),
-        supplierName: supplierObj?.Supplier ?? String(vals.supplierId),
+        supplierId: String(selectedSupplier.SupplierId),
+        supplierName: selectedSupplier.Supplier ?? String(selectedSupplier.SupplierId),
         supplierSite: vals.supplierSite ?? '',
         shipToOrg: vals.shipToOrg,
         subinventory: vals.subinventory ?? '',
@@ -478,7 +494,13 @@ const CreatePurchaseOrder: React.FC = () => {
               <Row gutter={[12, 0]}>
                 <Col xs={24} sm={12}>
                   <Form.Item name="procurementBU" label="Procurement BU" rules={[{ required: true, message: 'Required' }]}>
-                    <Select showSearch allowClear placeholder="Select Procurement BU" optionFilterProp="children">
+                    <Select
+                      showSearch
+                      allowClear
+                      placeholder="Select Procurement BU"
+                      optionFilterProp="children"
+                      onChange={(value) => headerForm.setFieldValue('billTo', value)}
+                    >
                       {busUnits.map(bu => (
                         <Option key={bu.BusinessUnitId ?? bu.BusinessUnitName} value={bu.BusinessUnitName}>
                           {bu.BusinessUnitName}
@@ -521,33 +543,51 @@ const CreatePurchaseOrder: React.FC = () => {
                 </Col>
                 <Col xs={24} sm={12}>
                   <Form.Item name="currency" label="Currency" rules={[{ required: true, message: 'Required' }]}>
-                    <Select showSearch allowClear placeholder="Select currency" optionFilterProp="children">
-                      {currencies.map(c => (
-                        <Option key={c.CurrencyCode} value={c.CurrencyCode}>
-                          {c.CurrencyCode}{c.Name ? ` — ${c.Name}` : ''}
+                    <Select
+                      showSearch
+                      allowClear
+                      placeholder="Select or type currency code"
+                      filterOption={false}
+                      onSearch={val => setCurrencyInput(val)}
+                      onBlur={() => setCurrencyInput('')}
+                    >
+                      {currencyInput.trim() && !currencies.find(c =>
+                        c.CurrencyCode.toLowerCase() === currencyInput.trim().toLowerCase()
+                      ) && (
+                        <Option key={`__custom__${currencyInput}`} value={currencyInput.trim().toUpperCase()}>
+                          <span style={{ color: REDWOOD.info, fontStyle: 'italic' }}>
+                            Use: {currencyInput.trim().toUpperCase()}
+                          </span>
                         </Option>
-                      ))}
+                      )}
+                      {currencies
+                        .filter(c => !currencyInput.trim() ||
+                          c.CurrencyCode.toLowerCase().includes(currencyInput.toLowerCase()) ||
+                          (c.Name ?? '').toLowerCase().includes(currencyInput.toLowerCase())
+                        )
+                        .map(c => (
+                          <Option key={c.CurrencyCode} value={c.CurrencyCode}>
+                            {c.CurrencyCode}{c.Name ? ` — ${c.Name}` : ''}
+                          </Option>
+                        ))
+                      }
                     </Select>
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={12}>
-                  <Form.Item name="supplierId" label="Supplier" rules={[{ required: true, message: 'Required' }]}>
-                    <Select
-                      showSearch
-                      allowClear
-                      placeholder="Type to search supplier…"
-                      filterOption={false}
-                      onSearch={handleSupplierSearch}
-                      onChange={handleSupplierChange}
-                      loading={suppliersLoading}
-                      notFoundContent={suppliersLoading ? <Spin size="small" /> : 'Type to search'}
-                    >
-                      {suppliers.map(s => (
-                        <Option key={s.SupplierId} value={String(s.SupplierId)}>
-                          {s.Supplier}
-                        </Option>
-                      ))}
-                    </Select>
+                  <Form.Item
+                    label="Supplier"
+                    required
+                    validateStatus={selectedSupplier ? '' : undefined}
+                  >
+                    <Space>
+                      <Button icon={<SearchOutlined />} onClick={handleOpenSupplierModal}>
+                        Select Supplier
+                      </Button>
+                      {selectedSupplier && (
+                        <Text strong style={{ color: REDWOOD.info }}>{selectedSupplier.Supplier}</Text>
+                      )}
+                    </Space>
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={12}>
@@ -787,6 +827,66 @@ const CreatePurchaseOrder: React.FC = () => {
             </div>
           </>
         )}
+
+        {/* Supplier Search Modal */}
+        <Modal
+          open={supplierModalOpen}
+          title="Search Supplier"
+          width={700}
+          onCancel={() => setSupplierModalOpen(false)}
+          footer={<Button onClick={() => setSupplierModalOpen(false)}>Close</Button>}
+        >
+          <Space.Compact style={{ width: '100%', marginBottom: 12 }}>
+            <Input
+              placeholder="Type supplier name to search…"
+              value={supplierSearch}
+              onChange={e => setSupplierSearch(e.target.value)}
+              onPressEnter={() => handleSupplierSearch(supplierSearch)}
+              allowClear
+            />
+            <Button
+              type="primary"
+              icon={<SearchOutlined />}
+              loading={suppliersLoading}
+              onClick={() => handleSupplierSearch(supplierSearch)}
+              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+            >
+              Search
+            </Button>
+          </Space.Compact>
+          <Table
+            dataSource={supplierResults}
+            rowKey={r => String(r.SupplierId)}
+            size="small"
+            bordered
+            loading={suppliersLoading}
+            pagination={{ pageSize: 8, showSizeChanger: false }}
+            locale={{ emptyText: 'Enter a name and click Search' }}
+            onRow={record => ({
+              onClick: () => handleSelectSupplier(record),
+              style: { cursor: 'pointer' },
+            })}
+            columns={[
+              {
+                title: 'Supplier Number',
+                dataIndex: 'SupplierNumber',
+                width: 140,
+                render: v => <Text style={{ fontSize: 12, fontWeight: 600 }}>{v ?? '—'}</Text>,
+              },
+              {
+                title: 'Supplier Name',
+                dataIndex: 'Supplier',
+                render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text>,
+              },
+              {
+                title: 'Type',
+                dataIndex: 'SupplierType',
+                width: 120,
+                render: v => v ?? '—',
+              },
+            ]}
+          />
+        </Modal>
 
         {/* Add Item Modal */}
         <Modal
