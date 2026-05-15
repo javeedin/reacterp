@@ -206,6 +206,10 @@ const CreatePurchaseOrder: React.FC = () => {
   const handleSelectSupplier = async (supplier: any) => {
     setSelectedSupplier(supplier);
     setSupplierModalOpen(false);
+    // update header if PO already created (inline edit mode)
+    if (header) {
+      patch({ supplierId: String(supplier.SupplierId), supplierName: supplier.Supplier ?? '', supplierSite: '' });
+    }
     await loadSupplierSites(String(supplier.SupplierId));
   };
 
@@ -530,12 +534,6 @@ const CreatePurchaseOrder: React.FC = () => {
                     </div>
                     <Tag color="purple" style={{ fontWeight: 700, fontSize: 12 }}>{header.currency}</Tag>
                   </div>
-                  <Tooltip title="Edit header">
-                    <Button size="small" icon={<EditOutlined />} onClick={() => setShowInitModal(true)}
-                      style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff' }}>
-                      Edit
-                    </Button>
-                  </Tooltip>
                 </div>
 
                 {/* Three zones */}
@@ -546,11 +544,44 @@ const CreatePurchaseOrder: React.FC = () => {
                     <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: C.blue, marginBottom: 12 }}>
                       Organization
                     </div>
-                    <FieldPair label="Procurement BU" value={<strong>{header.procurementBU}</strong>} />
-                    <FieldPair label="Requisitioning BU" value={header.requisitioningBU} />
-                    <FieldPair label="Bill-to BU" value={header.billToBU} />
-                    <FieldPair label="Ship-to Org" value={<strong>{header.shipToOrg}</strong>} />
-                    <FieldPair label="Subinventory" value={header.subinventory || '—'} />
+                    <FieldPair label="Procurement BU" value={
+                      <Select size="small" variant="borderless" showSearch optionFilterProp="children"
+                        value={header.procurementBU} style={{ width: '100%', marginLeft: -7 }}
+                        onChange={v => patch({ procurementBU: v, requisitioningBU: v })}>
+                        {busUnits.map(bu => <Option key={bu.BusinessUnitId ?? bu.BusinessUnitName} value={bu.BusinessUnitName}>{bu.BusinessUnitName}</Option>)}
+                      </Select>
+                    } />
+                    <FieldPair label="Requisitioning BU" value={
+                      <Select size="small" variant="borderless" showSearch optionFilterProp="children"
+                        value={header.requisitioningBU} style={{ width: '100%', marginLeft: -7 }}
+                        onChange={v => patch({ requisitioningBU: v })}>
+                        {busUnits.map(bu => <Option key={`rq-${bu.BusinessUnitId ?? bu.BusinessUnitName}`} value={bu.BusinessUnitName}>{bu.BusinessUnitName}</Option>)}
+                      </Select>
+                    } />
+                    <FieldPair label="Bill-to BU" value={
+                      <Select size="small" variant="borderless" showSearch optionFilterProp="children"
+                        value={header.billToBU} style={{ width: '100%', marginLeft: -7 }}
+                        onChange={v => patch({ billToBU: v })}>
+                        {busUnits.map(bu => <Option key={`bt-${bu.BusinessUnitId ?? bu.BusinessUnitName}`} value={bu.BusinessUnitName}>{bu.BusinessUnitName}</Option>)}
+                      </Select>
+                    } />
+                    <FieldPair label="Ship-to Org" value={
+                      <Select size="small" variant="borderless" showSearch optionFilterProp="children"
+                        value={header.shipToOrg} style={{ width: '100%', marginLeft: -7 }}
+                        onChange={v => {
+                          patch({ shipToOrg: v, subinventory: '', shipToLocation: v });
+                          setSubinventories(allSubinventories.filter((s: any) => s.warehouse_code === v));
+                        }}>
+                        {inventoryOrgs.map(org => <Option key={org.OrganizationCode} value={org.OrganizationCode}>{org.OrganizationCode}{org.OrganizationName ? ` — ${org.OrganizationName}` : ''}</Option>)}
+                      </Select>
+                    } />
+                    <FieldPair label="Subinventory" value={
+                      <Select size="small" variant="borderless" showSearch optionFilterProp="children" allowClear
+                        value={header.subinventory || undefined} style={{ width: '100%', marginLeft: -7 }}
+                        onChange={v => patch({ subinventory: v ?? '' })}>
+                        {subinventories.map(sub => <Option key={sub.subinventory_code} value={sub.subinventory_code}>{sub.subinventory_code}</Option>)}
+                      </Select>
+                    } />
                     <FieldPair label="Description"
                       value={<InlineEdit value={header.description} onChange={v => patch({ description: v })} placeholder="Enter description…" />} />
                   </div>
@@ -561,13 +592,27 @@ const CreatePurchaseOrder: React.FC = () => {
                       Supplier
                     </div>
                     <FieldPair label="Supplier"
-                      value={<Text strong style={{ color: C.blue, fontSize: 13 }}>{header.supplierName}</Text>} />
-                    <FieldPair label="Site" value={header.supplierSite || '—'} />
+                      value={
+                        <Space size={6}>
+                          <Text strong style={{ color: C.blue, fontSize: 13 }}>{header.supplierName}</Text>
+                          <Button type="link" size="small" style={{ padding: 0, fontSize: 11, height: 'auto' }}
+                            onClick={() => { setSupplierModalOpen(true); setSupplierSearch(''); setSupplierResults([]); }}>
+                            Change
+                          </Button>
+                        </Space>
+                      } />
+                    <FieldPair label="Site" value={
+                      <Select size="small" variant="borderless" showSearch optionFilterProp="children" allowClear
+                        value={header.supplierSite || undefined} loading={sitesLoading} style={{ width: '100%', marginLeft: -7 }}
+                        onChange={v => patch({ supplierSite: v ?? '' })}>
+                        {supplierSites.map(ss => <Option key={ss.SupplierSiteId ?? ss.SupplierSite} value={ss.SupplierSite}>{ss.SupplierSite}</Option>)}
+                      </Select>
+                    } />
                     <FieldPair label="Contact"
                       value={<InlineEdit value={header.supplierContact} onChange={v => patch({ supplierContact: v })} placeholder="—" />} />
                     <FieldPair label="Comm. Method"
                       value={
-                        <Select size="small" value={header.communicationMethod} style={{ width: 120 }} variant="borderless"
+                        <Select size="small" value={header.communicationMethod} style={{ width: 120, marginLeft: -7 }} variant="borderless"
                           onChange={v => patch({ communicationMethod: v })}>
                           <Option value="E-Mail">E-Mail</Option>
                           <Option value="Fax">Fax</Option>
@@ -603,6 +648,22 @@ const CreatePurchaseOrder: React.FC = () => {
                       <Text style={{ fontSize: 11, color: C.textLight, textAlign: 'right', marginTop: -4 }}>{header.currency}</Text>
                     </div>
                     <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 12, paddingTop: 12 }}>
+                      <FieldPair label="Currency" value={
+                        <Select size="small" variant="borderless" showSearch allowClear filterOption={false}
+                          value={header.currency} style={{ width: '100%', marginLeft: -7 }}
+                          onSearch={val => setCurrencyInput(val)} onBlur={() => setCurrencyInput('')}
+                          onChange={v => patch({ currency: v })}>
+                          {currencyInput.trim() && !currencies.find(c => c.CurrencyCode.toLowerCase() === currencyInput.trim().toLowerCase()) && (
+                            <Option key={`__custom__${currencyInput}`} value={currencyInput.trim().toUpperCase()}>
+                              <span style={{ color: C.blue, fontStyle: 'italic' }}>Use: {currencyInput.trim().toUpperCase()}</span>
+                            </Option>
+                          )}
+                          {currencies.filter(c => !currencyInput.trim() ||
+                            c.CurrencyCode.toLowerCase().includes(currencyInput.toLowerCase()) ||
+                            (c.Name ?? '').toLowerCase().includes(currencyInput.toLowerCase())
+                          ).map(c => <Option key={c.CurrencyCode} value={c.CurrencyCode}>{c.CurrencyCode}{c.Name ? ` — ${c.Name}` : ''}</Option>)}
+                        </Select>
+                      } />
                       <FieldPair label="Source Agreement"
                         value={<InlineEdit value="" onChange={() => {}} placeholder="—" />} />
                       <FieldPair label="Supplier Order"
