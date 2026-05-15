@@ -2525,6 +2525,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       externalTransactionId: undefined as any,  // omit so form treats as new creation
       transactionId:         undefined as any,
       transactionDirection:  newDir,
+      amount:                -(record.amount ?? 0),  // negate: +ve In → -ve Out and vice-versa
       referenceText:         `Reverse:${origRef}`,
       paymentDocument:       origDoc ? `Reverse:${origDoc}` : record.paymentDocument,
       accountingFlag:        'N',
