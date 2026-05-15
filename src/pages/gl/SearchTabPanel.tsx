@@ -4,7 +4,7 @@ import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import {
   Button, Select, Input, Table, Space, Tooltip, Row, Col, Tag,
-  Spin, Empty, message, Modal, DatePicker, Typography, Divider,
+  Spin, Empty, message, Modal, DatePicker, Typography, Divider, Switch,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -168,6 +168,7 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
   // Pivot modal
   const [pivotVisible, setPivotVisible] = useState(false);
   const [groupByAccount, setGroupByAccount] = useState(false);
+  const [showEntered, setShowEntered] = useState(false);
   const [gridFilter, setGridFilter] = useState('');
   const [pivotSegsBefore, setPivotSegsBefore] = useState<string[]>([]);
   const [pivotSegsAfter,  setPivotSegsAfter]  = useState<string[]>([]);
@@ -702,6 +703,29 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
       render: (v: string, r: JournalLineSegment) => r.isGroupHeader ? null : v },
     { title: 'Currency',  dataIndex: 'currencyCode',       key: 'currencyCode',       width: 90,
       render: (v: string, r: JournalLineSegment) => r.isGroupHeader ? null : v },
+    // Entered group — shown first when toggle is ON
+    ...(showEntered ? [{
+      title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Entered</span>,
+      onHeaderCell: () => ({ style: groupBorderLeft }),
+      children: [
+        { title: 'Dr', dataIndex: 'enteredDr', key: 'enteredDr', width: 120, align: 'right' as const,
+          ...headerStyle(groupBorderLeft),
+          render: (v: number, r: JournalLineSegment) => r.isGroupHeader
+            ? <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(r.groupEnteredDr ?? 0)}</Text>
+            : <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span> },
+        { title: 'Cr', dataIndex: 'enteredCr', key: 'enteredCr', width: 120, align: 'right' as const,
+          render: (v: number, r: JournalLineSegment) => r.isGroupHeader
+            ? <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(r.groupEnteredCr ?? 0)}</Text>
+            : <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span> },
+        { title: 'Balance', key: 'enteredRunning', width: 130, align: 'right' as const,
+          ...headerStyle(groupBorderRight),
+          render: (_: any, r: JournalLineSegment, index: number) => {
+            if (r.isGroupHeader) return fmtBalance((r.groupEnteredDr ?? 0) - (r.groupEnteredCr ?? 0));
+            return fmtBalance(groupedBalanceMap[index]?.entered ?? 0);
+          }},
+      ],
+    }] : []),
+    // Accounted group — always shown
     {
       title: <span style={{ color: '#1677ff', fontWeight: 600 }}>Accounted</span>,
       onHeaderCell: () => ({ style: groupBorderLeft }),
@@ -720,27 +744,6 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
           render: (_: any, r: JournalLineSegment, index: number) => {
             if (r.isGroupHeader) return fmtBalance((r.groupDr ?? 0) - (r.groupCr ?? 0));
             return fmtBalance(groupedBalanceMap[index]?.accounted ?? 0);
-          }},
-      ],
-    },
-    {
-      title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Entered</span>,
-      onHeaderCell: () => ({ style: groupBorderLeft }),
-      children: [
-        { title: 'Dr', dataIndex: 'enteredDr', key: 'enteredDr', width: 120, align: 'right' as const,
-          ...headerStyle(groupBorderLeft),
-          render: (v: number, r: JournalLineSegment) => r.isGroupHeader
-            ? <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(r.groupEnteredDr ?? 0)}</Text>
-            : <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span> },
-        { title: 'Cr', dataIndex: 'enteredCr', key: 'enteredCr', width: 120, align: 'right' as const,
-          render: (v: number, r: JournalLineSegment) => r.isGroupHeader
-            ? <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(r.groupEnteredCr ?? 0)}</Text>
-            : <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span> },
-        { title: 'Balance', key: 'enteredRunning', width: 130, align: 'right' as const,
-          ...headerStyle(groupBorderRight),
-          render: (_: any, r: JournalLineSegment, index: number) => {
-            if (r.isGroupHeader) return fmtBalance((r.groupEnteredDr ?? 0) - (r.groupEnteredCr ?? 0));
-            return fmtBalance(groupedBalanceMap[index]?.entered ?? 0);
           }},
       ],
     },
@@ -986,6 +989,19 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
             )}
           </Space>
           <Space size={6}>
+            <Button
+              size="small"
+              onClick={() => setShowEntered(v => !v)}
+              style={{
+                fontSize: 11,
+                ...(showEntered
+                  ? { background: '#f6ffed', borderColor: '#52c41a', color: '#52c41a', fontWeight: 600 }
+                  : {}),
+              }}
+            >
+              <Switch size="small" checked={showEntered} style={{ marginRight: 5, pointerEvents: 'none' }} />
+              Entered
+            </Button>
             <Button
               size="small"
               icon={<FilterOutlined />}
