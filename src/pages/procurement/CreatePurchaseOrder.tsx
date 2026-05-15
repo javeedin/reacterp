@@ -113,7 +113,7 @@ const InfoTile: React.FC<{ label: string; value: React.ReactNode; icon?: React.R
 const InlineEdit: React.FC<{ value: string; onChange: (v: string) => void; placeholder?: string }> = ({ value, onChange, placeholder }) => (
   <Input size="small" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder ?? '—'}
     variant="borderless"
-    style={{ padding: 0, fontSize: 13, color: value ? C.blue : C.textLight, width: '100%' }} />
+    style={{ padding: 0, fontSize: 13, color: value ? C.text : C.textLight, width: '100%' }} />
 );
 
 /* ─── Section header inside card ────────────────────── */
@@ -546,28 +546,28 @@ const CreatePurchaseOrder: React.FC = () => {
                     </div>
                     <FieldPair label="Procurement BU" value={
                       <Select size="small" variant="borderless" showSearch optionFilterProp="children"
-                        value={header.procurementBU} style={{ width: '100%', marginLeft: -7 }}
+                        value={header.procurementBU} style={{ width: '100%', marginLeft: -7, color: C.text }}
                         onChange={v => patch({ procurementBU: v, requisitioningBU: v })}>
                         {busUnits.map(bu => <Option key={bu.BusinessUnitId ?? bu.BusinessUnitName} value={bu.BusinessUnitName}>{bu.BusinessUnitName}</Option>)}
                       </Select>
                     } />
                     <FieldPair label="Requisitioning BU" value={
                       <Select size="small" variant="borderless" showSearch optionFilterProp="children"
-                        value={header.requisitioningBU} style={{ width: '100%', marginLeft: -7 }}
+                        value={header.requisitioningBU} style={{ width: '100%', marginLeft: -7, color: C.text }}
                         onChange={v => patch({ requisitioningBU: v })}>
                         {busUnits.map(bu => <Option key={`rq-${bu.BusinessUnitId ?? bu.BusinessUnitName}`} value={bu.BusinessUnitName}>{bu.BusinessUnitName}</Option>)}
                       </Select>
                     } />
                     <FieldPair label="Bill-to BU" value={
                       <Select size="small" variant="borderless" showSearch optionFilterProp="children"
-                        value={header.billToBU} style={{ width: '100%', marginLeft: -7 }}
+                        value={header.billToBU} style={{ width: '100%', marginLeft: -7, color: C.text }}
                         onChange={v => patch({ billToBU: v })}>
                         {busUnits.map(bu => <Option key={`bt-${bu.BusinessUnitId ?? bu.BusinessUnitName}`} value={bu.BusinessUnitName}>{bu.BusinessUnitName}</Option>)}
                       </Select>
                     } />
                     <FieldPair label="Ship-to Org" value={
                       <Select size="small" variant="borderless" showSearch optionFilterProp="children"
-                        value={header.shipToOrg} style={{ width: '100%', marginLeft: -7 }}
+                        value={header.shipToOrg} style={{ width: '100%', marginLeft: -7, color: C.text }}
                         onChange={v => {
                           patch({ shipToOrg: v, subinventory: '', shipToLocation: v });
                           setSubinventories(allSubinventories.filter((s: any) => s.warehouse_code === v));
@@ -577,7 +577,7 @@ const CreatePurchaseOrder: React.FC = () => {
                     } />
                     <FieldPair label="Subinventory" value={
                       <Select size="small" variant="borderless" showSearch optionFilterProp="children" allowClear
-                        value={header.subinventory || undefined} style={{ width: '100%', marginLeft: -7 }}
+                        value={header.subinventory || undefined} style={{ width: '100%', marginLeft: -7, color: C.text }}
                         onChange={v => patch({ subinventory: v ?? '' })}>
                         {subinventories.map(sub => <Option key={sub.subinventory_code} value={sub.subinventory_code}>{sub.subinventory_code}</Option>)}
                       </Select>
@@ -594,7 +594,7 @@ const CreatePurchaseOrder: React.FC = () => {
                     <FieldPair label="Supplier"
                       value={
                         <Space size={6}>
-                          <Text strong style={{ color: C.blue, fontSize: 13 }}>{header.supplierName}</Text>
+                          <Text strong style={{ color: C.text, fontSize: 13 }}>{header.supplierName}</Text>
                           <Button type="link" size="small" style={{ padding: 0, fontSize: 11, height: 'auto' }}
                             onClick={() => { setSupplierModalOpen(true); setSupplierSearch(''); setSupplierResults([]); }}>
                             Change
@@ -603,7 +603,7 @@ const CreatePurchaseOrder: React.FC = () => {
                       } />
                     <FieldPair label="Site" value={
                       <Select size="small" variant="borderless" showSearch optionFilterProp="children" allowClear
-                        value={header.supplierSite || undefined} loading={sitesLoading} style={{ width: '100%', marginLeft: -7 }}
+                        value={header.supplierSite || undefined} loading={sitesLoading} style={{ width: '100%', marginLeft: -7, color: C.text }}
                         onChange={v => patch({ supplierSite: v ?? '' })}>
                         {supplierSites.map(ss => <Option key={ss.SupplierSiteId ?? ss.SupplierSite} value={ss.SupplierSite}>{ss.SupplierSite}</Option>)}
                       </Select>
@@ -612,7 +612,7 @@ const CreatePurchaseOrder: React.FC = () => {
                       value={<InlineEdit value={header.supplierContact} onChange={v => patch({ supplierContact: v })} placeholder="—" />} />
                     <FieldPair label="Comm. Method"
                       value={
-                        <Select size="small" value={header.communicationMethod} style={{ width: 120, marginLeft: -7 }} variant="borderless"
+                        <Select size="small" value={header.communicationMethod} style={{ width: 120, marginLeft: -7, color: C.text }} variant="borderless"
                           onChange={v => patch({ communicationMethod: v })}>
                           <Option value="E-Mail">E-Mail</Option>
                           <Option value="Fax">Fax</Option>
@@ -650,7 +650,7 @@ const CreatePurchaseOrder: React.FC = () => {
                     <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 12, paddingTop: 12 }}>
                       <FieldPair label="Currency" value={
                         <Select size="small" variant="borderless" showSearch allowClear filterOption={false}
-                          value={header.currency} style={{ width: '100%', marginLeft: -7 }}
+                          value={header.currency} style={{ width: '100%', marginLeft: -7, color: C.text }}
                           onSearch={val => setCurrencyInput(val)} onBlur={() => setCurrencyInput('')}
                           onChange={v => patch({ currency: v })}>
                           {currencyInput.trim() && !currencies.find(c => c.CurrencyCode.toLowerCase() === currencyInput.trim().toLowerCase()) && (
