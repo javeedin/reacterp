@@ -29,7 +29,7 @@ const FUSION_HDRS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
 const C = {
   red: '#C74634', redDark: '#A33B2C',
   green: '#1D7B4D', blue: '#0572CE',
-  orange: '#D4A800', teal: '#00918A',
+  orange: '#D4A800', teal: '#00918A', purple: '#6B21A8',
   bg: '#F4F5F7', surface: '#FFFFFF',
   border: '#DFE1E6', borderDark: '#C1C7D0',
   text: '#172B4D', textMid: '#5E6C84', textLight: '#97A0AF',
@@ -90,6 +90,14 @@ const computeLine = (line: Omit<POLine, 'lineTotal' | 'taxAmount' | 'netTotal'>)
   const taxAmount = lineTotal * line.taxPct / 100;
   return { ...line, lineTotal, taxAmount, netTotal: lineTotal + taxAmount };
 };
+
+/* ─── Compact field pair (label : value on one row) ─── */
+const FieldPair: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
+  <div style={{ display: 'flex', alignItems: 'center', marginBottom: 7, gap: 6, minHeight: 24 }}>
+    <span style={{ fontSize: 11, color: C.textLight, minWidth: 110, flexShrink: 0 }}>{label}</span>
+    <span style={{ fontSize: 13, color: C.text, flex: 1 }}>{value}</span>
+  </div>
+);
 
 /* ─── Info tile (small label + value) ───────────────── */
 const InfoTile: React.FC<{ label: string; value: React.ReactNode; icon?: React.ReactNode }> = ({ label, value, icon }) => (
@@ -347,26 +355,6 @@ const CreatePurchaseOrder: React.FC = () => {
   ];
 
   /* ─── Summary box component ─────────────────────── */
-  const SummaryBox = () => (
-    <div style={{ background: 'linear-gradient(135deg, #1a1f36 0%, #252d4a 100%)', borderRadius: 10, padding: '20px 24px', color: '#fff' }}>
-      <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.5)', marginBottom: 16 }}>Order Summary</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>Ordered</span>
-          <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 15, fontWeight: 600 }}>{fmt(subtotal)}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>Total Tax</span>
-          <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 15, fontWeight: 600, color: '#FFB84D' }}>{fmt(totalTax)}</span>
-        </div>
-        <div style={{ borderTop: '1px solid rgba(255,255,255,0.15)', paddingTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>Total</span>
-          <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 20, fontWeight: 700, color: '#5BE5C3' }}>{fmt(grandTotal)}</span>
-        </div>
-        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', textAlign: 'right', marginTop: -4 }}>{header?.currency}</div>
-      </div>
-    </div>
-  );
 
   /* ═══════════════════════════════════════════════════ */
   return (
@@ -513,66 +501,116 @@ const CreatePurchaseOrder: React.FC = () => {
 
             <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-              {/* ── Header info ─────────────────────────── */}
-              <Row gutter={16}>
-                {/* Left — PO & BU info */}
-                <Col xs={24} lg={8}>
-                  <Card size="small" style={{ borderRadius: 10, height: '100%', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
-                    title={<SectionHead title="General" icon={<BuildOutlined />} color={C.blue} />}
-                    extra={<Tooltip title="Edit header"><Button size="small" type="text" icon={<EditOutlined />} style={{ color: C.blue }} onClick={() => setShowInitModal(true)} /></Tooltip>}>
-                    <InfoTile label="Procurement BU" value={<Text strong>{header.procurementBU}</Text>} />
-                    <InfoTile label="Requisitioning BU" value={header.requisitioningBU} />
-                    <InfoTile label="Bill-to BU" value={header.billToBU} />
-                    <InfoTile label="Order Date" icon={<CalendarOutlined />} value={header.orderDate.format('D-MMM-YYYY')} />
-                    <InfoTile label="Currency" icon={<DollarOutlined />} value={<Tag color="purple" style={{ fontWeight: 700 }}>{header.currency}</Tag>} />
-                    <InfoTile label="Buyer" icon={<UserOutlined />} value={header.buyer} />
-                    <InfoTile label="Description"
-                      value={<InlineEdit value={header.description} onChange={v => patch({ description: v })} placeholder="Enter description…" />} />
-                  </Card>
-                </Col>
+              {/* ── Header card ─────────────────────────── */}
+              <div style={{
+                background: C.surface, borderRadius: 10,
+                boxShadow: '0 1px 6px rgba(0,0,0,0.09)',
+                overflow: 'hidden',
+                border: `1px solid ${C.border}`,
+              }}>
+                {/* Document banner — top strip */}
+                <div style={{
+                  background: 'linear-gradient(90deg, #1a2340 0%, #1e3a5f 100%)',
+                  padding: '14px 20px',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                    <div>
+                      <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Purchase Order</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#fff', letterSpacing: '0.02em' }}>{header.poNumber}</div>
+                    </div>
+                    <div style={{ width: 1, height: 32, background: 'rgba(255,255,255,0.15)' }} />
+                    <Tag color="orange" style={{ fontWeight: 700, fontSize: 11 }}>{header.status}</Tag>
+                    <Tag color="geekblue" style={{ fontSize: 11 }}>{header.docType}</Tag>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'rgba(255,255,255,0.55)', fontSize: 12 }}>
+                      <CalendarOutlined /> {header.orderDate.format('D-MMM-YYYY')}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'rgba(255,255,255,0.55)', fontSize: 12 }}>
+                      <UserOutlined /> {header.buyer}
+                    </div>
+                    <Tag color="purple" style={{ fontWeight: 700, fontSize: 12 }}>{header.currency}</Tag>
+                  </div>
+                  <Tooltip title="Edit header">
+                    <Button size="small" icon={<EditOutlined />} onClick={() => setShowInitModal(true)}
+                      style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff' }}>
+                      Edit
+                    </Button>
+                  </Tooltip>
+                </div>
 
-                {/* Middle — Supplier info */}
-                <Col xs={24} lg={8}>
-                  <Card size="small" style={{ borderRadius: 10, height: '100%', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
-                    title={<SectionHead title="Supplier" icon={<ShopOutlined />} color={C.teal} />}>
-                    <InfoTile label="Supplier Name" value={<Text strong style={{ color: C.blue, fontSize: 13 }}>{header.supplierName}</Text>} />
-                    <InfoTile label="Supplier Site" value={header.supplierSite || <Text style={{ color: C.textLight }}>—</Text>} />
-                    <InfoTile label="Contact"
-                      value={<InlineEdit value={header.supplierContact} onChange={v => patch({ supplierContact: v })} placeholder="Enter contact…" />} />
-                    <InfoTile label="Communication Method"
+                {/* Three zones */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 280px' }}>
+
+                  {/* Zone 1 — Organization */}
+                  <div style={{ padding: '16px 20px', borderRight: `1px solid ${C.border}` }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: C.blue, marginBottom: 12 }}>
+                      Organization
+                    </div>
+                    <FieldPair label="Procurement BU" value={<strong>{header.procurementBU}</strong>} />
+                    <FieldPair label="Requisitioning BU" value={header.requisitioningBU} />
+                    <FieldPair label="Bill-to BU" value={header.billToBU} />
+                    <FieldPair label="Ship-to Org" value={<strong>{header.shipToOrg}</strong>} />
+                    <FieldPair label="Subinventory" value={header.subinventory || '—'} />
+                    <FieldPair label="Description"
+                      value={<InlineEdit value={header.description} onChange={v => patch({ description: v })} placeholder="Enter description…" />} />
+                  </div>
+
+                  {/* Zone 2 — Supplier */}
+                  <div style={{ padding: '16px 20px', borderRight: `1px solid ${C.border}` }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: C.teal, marginBottom: 12 }}>
+                      Supplier
+                    </div>
+                    <FieldPair label="Supplier"
+                      value={<Text strong style={{ color: C.blue, fontSize: 13 }}>{header.supplierName}</Text>} />
+                    <FieldPair label="Site" value={header.supplierSite || '—'} />
+                    <FieldPair label="Contact"
+                      value={<InlineEdit value={header.supplierContact} onChange={v => patch({ supplierContact: v })} placeholder="—" />} />
+                    <FieldPair label="Comm. Method"
                       value={
-                        <Select size="small" value={header.communicationMethod} style={{ width: 130 }}
+                        <Select size="small" value={header.communicationMethod} style={{ width: 120 }} variant="borderless"
                           onChange={v => patch({ communicationMethod: v })}>
                           <Option value="E-Mail">E-Mail</Option>
                           <Option value="Fax">Fax</Option>
                           <Option value="Print">Print</Option>
                         </Select>
                       } />
-                    <InfoTile label="Communication Email"
-                      value={<InlineEdit value={header.communicationEmail} onChange={v => patch({ communicationEmail: v })} placeholder="Enter email…" />} />
-                    <InfoTile label="Bill-to Location"
+                    <FieldPair label="Email"
+                      value={<InlineEdit value={header.communicationEmail} onChange={v => patch({ communicationEmail: v })} placeholder="—" />} />
+                    <FieldPair label="Bill-to Location"
                       value={<InlineEdit value={header.billToLocation} onChange={v => patch({ billToLocation: v })} />} />
-                    <InfoTile label="Ship-to Location"
+                    <FieldPair label="Ship-to Location"
                       value={<InlineEdit value={header.shipToLocation} onChange={v => patch({ shipToLocation: v })} />} />
-                  </Card>
-                </Col>
-
-                {/* Right — Summary + ship-to */}
-                <Col xs={24} lg={8}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%' }}>
-                    <SummaryBox />
-                    <Card size="small" style={{ borderRadius: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.08)', flex: 1 }}
-                      title={<SectionHead title="Ship To" icon={<FileTextOutlined />} color={C.green} />}>
-                      <InfoTile label="Organization" value={<Text strong>{header.shipToOrg}</Text>} />
-                      <InfoTile label="Subinventory" value={header.subinventory || <Text style={{ color: C.textLight }}>—</Text>} />
-                      <InfoTile label="Source Agreement"
-                        value={<InlineEdit value="" onChange={() => {}} placeholder="—" />} />
-                      <InfoTile label="Supplier Order"
-                        value={<InlineEdit value="" onChange={() => {}} placeholder="—" />} />
-                    </Card>
                   </div>
-                </Col>
-              </Row>
+
+                  {/* Zone 3 — Financials */}
+                  <div style={{ padding: '16px 20px', background: '#FAFBFF' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: C.red, marginBottom: 12 }}>
+                      Order Totals
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text style={{ fontSize: 12, color: C.textMid }}>Ordered</Text>
+                        <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 13, fontWeight: 600 }}>{fmt(subtotal)}</Text>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text style={{ fontSize: 12, color: C.textMid }}>Total Tax</Text>
+                        <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 13, color: C.orange }}>{fmt(totalTax)}</Text>
+                      </div>
+                      <div style={{ borderTop: `2px solid ${C.border}`, paddingTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text strong style={{ fontSize: 13 }}>Total</Text>
+                        <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 18, color: C.red }}>{fmt(grandTotal)}</Text>
+                      </div>
+                      <Text style={{ fontSize: 11, color: C.textLight, textAlign: 'right', marginTop: -4 }}>{header.currency}</Text>
+                    </div>
+                    <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 12, paddingTop: 12 }}>
+                      <FieldPair label="Source Agreement"
+                        value={<InlineEdit value="" onChange={() => {}} placeholder="—" />} />
+                      <FieldPair label="Supplier Order"
+                        value={<InlineEdit value="" onChange={() => {}} placeholder="—" />} />
+                    </div>
+                  </div>
+                </div>
+              </div>
 
               {/* ── Terms & Notes ───────────────────────── */}
               <Card size="small" style={{ borderRadius: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
