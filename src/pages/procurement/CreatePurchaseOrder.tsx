@@ -550,7 +550,7 @@ const CreatePurchaseOrder: React.FC = () => {
               }}>
                 {/* Document banner — top strip */}
                 <div style={{
-                  background: 'linear-gradient(90deg, #1a2340 0%, #1e3a5f 100%)',
+                  background: 'linear-gradient(90deg, #2D2D2D 0%, #3C3C3C 100%)',
                   padding: '14px 20px',
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10,
                 }}>
@@ -561,22 +561,27 @@ const CreatePurchaseOrder: React.FC = () => {
                     </div>
                     <div style={{ width: 1, height: 32, background: 'rgba(255,255,255,0.15)' }} />
                     <Tag color="orange" style={{ fontWeight: 700, fontSize: 11 }}>{header.status}</Tag>
-                    <Tag color="geekblue" style={{ fontSize: 11 }}>{header.docType}</Tag>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'rgba(255,255,255,0.55)', fontSize: 12 }}>
+                    <Tag style={{ fontWeight: 600, fontSize: 11, background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff' }}>{header.docType}</Tag>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'rgba(255,255,255,0.60)', fontSize: 12 }}>
                       <CalendarOutlined /> {header.orderDate.format('D-MMM-YYYY')}
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'rgba(255,255,255,0.55)', fontSize: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'rgba(255,255,255,0.60)', fontSize: 12 }}>
                       <UserOutlined /> {header.buyer}
                     </div>
-                    <Tag color="purple" style={{ fontWeight: 700, fontSize: 12 }}>{header.currency}</Tag>
+                    <Tag style={{ fontWeight: 700, fontSize: 12, background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff' }}>{header.currency}</Tag>
                   </div>
                 </div>
 
                 {/* Three zones */}
                 <style>{`
                   .po-header-zone .ant-select-selection-item,
-                  .po-header-zone .ant-select-selector {
+                  .po-header-zone .ant-select-selector,
+                  .po-header-zone .ant-select-arrow,
+                  .po-header-zone .ant-select-clear {
                     color: #333333 !important;
+                  }
+                  .po-header-zone .ant-btn-link {
+                    color: #C74634 !important;
                   }
                 `}</style>
                 <div className="po-header-zone" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 280px' }}>
@@ -637,7 +642,7 @@ const CreatePurchaseOrder: React.FC = () => {
                       value={
                         <Space size={6}>
                           <Text strong style={{ color: C.text, fontSize: 13 }}>{header.supplierName}</Text>
-                          <Button type="link" size="small" style={{ padding: 0, fontSize: 11, height: 'auto' }}
+                          <Button type="link" size="small" style={{ padding: 0, fontSize: 11, height: 'auto', color: C.red }}
                             onClick={() => { setSupplierModalOpen(true); setSupplierSearch(''); setSupplierResults([]); }}>
                             Change
                           </Button>
