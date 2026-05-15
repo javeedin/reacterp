@@ -55,6 +55,7 @@ const CreateAccounting        = lazy(() => import('./pages/ap/CreateAccounting')
 const PrepaymentApplications  = lazy(() => import('./pages/ap/PrepaymentApplications'));
 const ManageMultiperiod       = lazy(() => import('./pages/ap/ManageMultiperiod'));
 const CheckMigration          = lazy(() => import('./pages/ap/CheckMigration'));
+const APGLReconcile           = lazy(() => import('./pages/ap/APGLReconcile'));
 const ManageSuppliers         = lazy(() => import('./pages/suppliers/ManageSuppliers'));
 const SupplierBalance         = lazy(() => import('./pages/suppliers/SupplierBalance'));
 const ManageOnhandInventory   = lazy(() => import('./pages/inventory/ManageOnhandInventory'));
@@ -196,6 +197,7 @@ function App() {
               <Route path="ap/prepayment-applications" element={<PrepaymentApplications />} />
               <Route path="ap/multiperiod" element={<ManageMultiperiod />} />
               <Route path="ap/check-migration" element={<CheckMigration />} />
+              <Route path="ap/gl-reconcile" element={<APGLReconcile />} />
               <Route path="ap/reports" element={<APReports />} />
               <Route path="ap/distribution-combinations" element={<ManageDistCombinations />} />
               <Route path="ap/*" element={<APModule />} />
