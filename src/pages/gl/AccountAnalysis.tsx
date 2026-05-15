@@ -2088,6 +2088,22 @@ const AccountAnalysis: React.FC = () => {
               )}
             </Space>
             <Space size={6}>
+              <Tooltip title={showEntered ? 'Hide Entered amounts' : 'Show Entered amounts alongside Accounted'}>
+                <Button
+                  size="small"
+                  onClick={() => setShowEntered(v => !v)}
+                  style={{
+                    fontSize: 11,
+                    borderColor: showEntered ? '#52c41a' : undefined,
+                    color:       showEntered ? '#52c41a' : undefined,
+                    background:  showEntered ? '#f6ffed' : undefined,
+                    fontWeight:  showEntered ? 600 : undefined,
+                  }}
+                >
+                  <Switch size="small" checked={showEntered} style={{ marginRight: 5, pointerEvents: 'none' }} />
+                  Entered
+                </Button>
+              </Tooltip>
               <Button
                 size="small"
                 icon={<PieChartOutlined />}
@@ -2106,22 +2122,6 @@ const AccountAnalysis: React.FC = () => {
               >
                 Export
               </Button>
-              <Tooltip title={showEntered ? 'Hide Entered amounts' : 'Show Entered amounts alongside Accounted'}>
-                <Button
-                  size="small"
-                  onClick={() => setShowEntered(v => !v)}
-                  style={{
-                    fontSize: 11,
-                    borderColor: showEntered ? '#52c41a' : undefined,
-                    color:       showEntered ? '#52c41a' : undefined,
-                    background:  showEntered ? '#f6ffed' : undefined,
-                    fontWeight:  showEntered ? 600 : undefined,
-                  }}
-                >
-                  <Switch size="small" checked={showEntered} style={{ marginRight: 5, pointerEvents: 'none' }} />
-                  Entered
-                </Button>
-              </Tooltip>
             </Space>
           </div>
 
