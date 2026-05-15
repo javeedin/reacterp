@@ -169,7 +169,7 @@ const CreatePurchaseOrder: React.FC = () => {
 
   const handleSupplierSearch = useCallback(async (term: string) => {
     if (!term || term.length < 2) return;
-    const url = `${FUSION_BASE}/suppliers?q=Supplier+like+"${encodeURIComponent(term)}*"&limit=20`;
+    const url = `${FUSION_BASE}/suppliers?q=Supplier LIKE '*${term}*'&limit=20`;
     setSupplierApiUrl(url);
     setSuppliersLoading(true);
     try {
