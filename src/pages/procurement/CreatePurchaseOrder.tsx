@@ -367,7 +367,8 @@ const CreatePurchaseOrder: React.FC = () => {
 
         {/* ── Init Modal ──────────────────────────────── */}
         <Modal open={showInitModal} title={<Text strong style={{ fontSize: 15 }}>New Purchase Order</Text>}
-          width={720} closable={false} maskClosable={false}
+          width={680} closable={false} maskClosable={false}
+          styles={{ body: { padding: '12px 20px' } }}
           footer={
             <Space>
               <Button onClick={() => navigate('/procurement')}>Cancel</Button>
@@ -378,12 +379,14 @@ const CreatePurchaseOrder: React.FC = () => {
             </Space>
           }>
           {lovLoading ? (
-            <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}><Spin tip="Loading…" /></div>
+            <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}><Spin tip="Loading…" /></div>
           ) : (
-            <Form form={headerForm} layout="vertical" initialValues={{ orderDate: dayjs() }}>
-              <Divider orientation="left" plain style={{ fontSize: 12, color: C.textMid }}>Organization & Order</Divider>
-              <Row gutter={[16, 0]}>
-                <Col xs={24} sm={12}>
+            <Form form={headerForm} layout="vertical" size="small" initialValues={{ orderDate: dayjs() }}
+              style={{ '--form-item-margin-bottom': '8px' } as React.CSSProperties}>
+              <style>{`.ant-form-item { margin-bottom: 8px !important; }`}</style>
+              <Divider orientation="left" plain style={{ fontSize: 11, color: C.textMid, margin: '4px 0 8px' }}>Organization & Order</Divider>
+              <Row gutter={[12, 0]}>
+                <Col span={12}>
                   <Form.Item name="procurementBU" label="Procurement BU" rules={[{ required: true }]}>
                     <Select showSearch allowClear placeholder="Select Procurement BU" optionFilterProp="children"
                       onChange={v => headerForm.setFieldValue('billTo', v)}>
@@ -391,19 +394,19 @@ const CreatePurchaseOrder: React.FC = () => {
                     </Select>
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12}>
+                <Col span={12}>
                   <Form.Item name="billTo" label="Bill To BU" rules={[{ required: true }]}>
                     <Select showSearch allowClear placeholder="Select Bill To" optionFilterProp="children">
                       {busUnits.map(bu => <Option key={`bt-${bu.BusinessUnitId ?? bu.BusinessUnitName}`} value={bu.BusinessUnitName}>{bu.BusinessUnitName}</Option>)}
                     </Select>
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={8}>
+                <Col span={8}>
                   <Form.Item name="orderDate" label="Order Date" rules={[{ required: true }]}>
                     <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={8}>
+                <Col span={8}>
                   <Form.Item name="docType" label="Document Type" rules={[{ required: true }]}>
                     <Select showSearch allowClear placeholder="Select type" optionFilterProp="children">
                       <Option value="LPON">LPON</Option>
@@ -413,7 +416,7 @@ const CreatePurchaseOrder: React.FC = () => {
                     </Select>
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={8}>
+                <Col span={8}>
                   <Form.Item name="currency" label="Currency" rules={[{ required: true }]}>
                     <Select showSearch allowClear placeholder="Select or type currency" filterOption={false}
                       onSearch={val => setCurrencyInput(val)} onBlur={() => setCurrencyInput('')}>
@@ -430,12 +433,12 @@ const CreatePurchaseOrder: React.FC = () => {
                   </Form.Item>
                 </Col>
               </Row>
-              <Divider orientation="left" plain style={{ fontSize: 12, color: C.textMid }}>Supplier</Divider>
-              <Row gutter={[16, 0]}>
-                <Col xs={24} sm={12}>
+              <Divider orientation="left" plain style={{ fontSize: 11, color: C.textMid, margin: '4px 0 8px' }}>Supplier</Divider>
+              <Row gutter={[12, 0]}>
+                <Col span={12}>
                   <Form.Item label="Supplier" required>
                     <Space>
-                      <Button icon={<SearchOutlined />}
+                      <Button size="small" icon={<SearchOutlined />}
                         onClick={() => { setSupplierModalOpen(true); setSupplierSearch(''); setSupplierResults([]); }}>
                         Select Supplier
                       </Button>
@@ -443,7 +446,7 @@ const CreatePurchaseOrder: React.FC = () => {
                     </Space>
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12}>
+                <Col span={12}>
                   <Form.Item name="supplierSite" label="Supplier Site">
                     <Select showSearch allowClear placeholder="Select supplier site" loading={sitesLoading} optionFilterProp="children">
                       {supplierSites.map(ss => <Option key={ss.SupplierSiteId ?? ss.SupplierSite} value={ss.SupplierSite}>{ss.SupplierSite}</Option>)}
@@ -451,23 +454,23 @@ const CreatePurchaseOrder: React.FC = () => {
                   </Form.Item>
                 </Col>
               </Row>
-              <Divider orientation="left" plain style={{ fontSize: 12, color: C.textMid }}>Ship To</Divider>
-              <Row gutter={[16, 0]}>
-                <Col xs={24} sm={12}>
+              <Divider orientation="left" plain style={{ fontSize: 11, color: C.textMid, margin: '4px 0 8px' }}>Ship To</Divider>
+              <Row gutter={[12, 0]}>
+                <Col span={12}>
                   <Form.Item name="shipToOrg" label="Ship To Organization" rules={[{ required: true }]}>
                     <Select showSearch allowClear placeholder="Select organization" optionFilterProp="children" onChange={handleShipToOrgChange}>
                       {inventoryOrgs.map(org => <Option key={org.OrganizationCode} value={org.OrganizationCode}>{org.OrganizationCode}{org.OrganizationName ? ` — ${org.OrganizationName}` : ''}</Option>)}
                     </Select>
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12}>
+                <Col span={12}>
                   <Form.Item name="subinventory" label="Subinventory">
                     <Select showSearch allowClear placeholder="Select subinventory" optionFilterProp="children">
                       {subinventories.map(sub => <Option key={sub.subinventory_code} value={sub.subinventory_code}>{sub.subinventory_code}</Option>)}
                     </Select>
                   </Form.Item>
                 </Col>
-                <Col xs={24}>
+                <Col span={24}>
                   <Form.Item name="noteToSupplier" label="Note to Supplier">
                     <Input.TextArea rows={2} placeholder="Optional note…" />
                   </Form.Item>
