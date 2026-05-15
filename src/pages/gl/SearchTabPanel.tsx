@@ -587,10 +587,13 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
     ws.getRow(rowIdx).height = 16;
     rowIdx++;
     let runAccounted = 0, runEntered = 0;
+    let totalAccDr = 0, totalAccCr = 0, totalEntDr = 0, totalEntCr = 0;
     data.forEach(row => {
       const accBalance = (row.accountedDr || 0) - (row.accountedCr || 0);
       const entBalance = (row.enteredDr   || 0) - (row.enteredCr   || 0);
       runAccounted += accBalance; runEntered += entBalance;
+      totalAccDr += row.accountedDr || 0; totalAccCr += row.accountedCr || 0;
+      totalEntDr += row.enteredDr   || 0; totalEntCr += row.enteredCr   || 0;
       const rowData = [
         row.concatenatedSegments, row.accountDescription,
         row.jeLineDescription, row.defaultPeriodName, row.accountingDate,
@@ -602,6 +605,25 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
       const exRow = ws.addRow(rowData);
       [10, 11, 12, 13, 14, 15].forEach(c => { if (exRow.getCell(c).value != null) exRow.getCell(c).numFmt = numFmt; });
     });
+
+    // ── Totals row ────────────────────────────────────────────────────────────
+    const totalRow = ws.addRow([
+      'TOTAL', null, null, null, null, null, null, null, null,
+      totalAccDr, totalAccCr, totalAccDr - totalAccCr,
+      totalEntDr, totalEntCr, totalEntDr - totalEntCr,
+      null,
+    ]);
+    totalRow.font = { bold: true, size: 10 };
+    totalRow.fill = totalFill;
+    [10, 11, 12, 13, 14, 15].forEach(c => {
+      const cell = totalRow.getCell(c);
+      cell.numFmt = numFmt;
+      cell.fill = c <= 12
+        ? { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB8CCE4' } }   // blue tint for Accounted
+        : { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB7E1CD' } };  // green tint for Entered
+    });
+    totalRow.getCell(1).font = { bold: true, size: 10 };
+
     ws.columns.forEach((col, i) => {
       const widths = [28, 24, 30, 10, 12, 28, 14, 16, 8, 14, 14, 14, 12, 12, 14, 12];
       col.width = widths[i] || 14;
