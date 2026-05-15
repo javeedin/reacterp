@@ -1865,6 +1865,13 @@ const ManagePayments: React.FC = () => {
       width: 180,
     },
     {
+      title: 'Check ID',
+      dataIndex: 'checkId',
+      key: 'checkId',
+      width: 150,
+      render: (val: number) => val ? <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#888' }}>{val}</span> : null,
+    },
+    {
       title: 'Actions',
       key: 'rowActions',
       width: 90,
