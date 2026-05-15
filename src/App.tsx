@@ -108,6 +108,7 @@ const OracleFusion            = lazy(() => import('./pages/oracle/OracleFusion')
 const ManageRevaluation       = lazy(() => import('./pages/gl/ManageRevaluation'));
 const ProcurementModule       = lazy(() => import('./pages/procurement').then(m => ({ default: m.ProcurementModule })));
 const ManagePurchaseOrders    = lazy(() => import('./pages/procurement').then(m => ({ default: m.ManagePurchaseOrders })));
+const CreatePurchaseOrder     = lazy(() => import('./pages/procurement').then(m => ({ default: m.CreatePurchaseOrder })));
 
 // Placeholder component for modules under development
 const ComingSoon = ({ moduleName }: { moduleName: string }) => (
@@ -219,6 +220,7 @@ function App() {
               <Route path="om/*" element={<OrderManagementModule />} />
               <Route path="procurement/suppliers" element={<ManageSuppliers />} />
               <Route path="procurement/purchase-orders" element={<ManagePurchaseOrders />} />
+              <Route path="procurement/create-po" element={<CreatePurchaseOrder />} />
               <Route path="procurement/business-units" element={<BusinessUnits />} />
               <Route path="procurement/legal-entities" element={<LegalEntities />} />
               <Route path="ap/suppliers" element={<ManageSuppliers />} />
