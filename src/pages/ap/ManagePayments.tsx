@@ -183,6 +183,8 @@ interface PaymentRecord {
   currency?: string;
   checkDate?: string;
   legalEntityName?: string;
+  // true = record came from APEX (synced Oracle Fusion payment) → read-only
+  isSynced?: boolean;
 }
 
 // Tab item interface
@@ -354,6 +356,7 @@ const mapFusionToPaymentRecord = (item: any, index: number): PaymentRecord => ({
   city: item.City || '',
   country: item.Country || '',
   relatedInvoicesHref: item.links?.find((l: any) => l.name === 'relatedInvoices')?.href || '',
+  isSynced: false,  // Fusion direct — can edit/void/create accounting
 });
 
 // Map APEX API response to PaymentRecord
@@ -415,6 +418,7 @@ const mapApexToPaymentRecord = (item: any, index: number): PaymentRecord => ({
   city: item.City || '',
   country: item.Country || '',
   relatedInvoicesHref: '',
+  isSynced: true,  // APEX synced Oracle payment — read-only
 });
 
 const ManagePayments: React.FC = () => {
@@ -1865,9 +1869,26 @@ const ManagePayments: React.FC = () => {
       width: 90,
       fixed: 'right',
       render: (_, record: PaymentRecord) => {
-        const isVoided   = record.paymentStatus === 'Voided';
-        const isCleared  = !!(record.clearingDate || record.clearingAmount || record.reconciled);
-        const canVoid    = !isVoided && !isCleared;
+        const isVoided  = record.paymentStatus === 'Voided';
+        const isCleared = !!(record.clearingDate || record.clearingAmount || record.reconciled);
+        const canVoid   = !isVoided && !isCleared;
+
+        // Synced Oracle payments are read-only: view accounting + view details only
+        if (record.isSynced) {
+          return (
+            <Space size={2}>
+              <Tooltip title="View Accounting">
+                <Button type="link" size="small" icon={<FormOutlined />}
+                  onClick={() => handleViewAccounting(record)} />
+              </Tooltip>
+              <Tooltip title="View Details">
+                <Button type="link" size="small" icon={<FileTextOutlined />}
+                  onClick={() => openPaymentTab(record)} />
+              </Tooltip>
+            </Space>
+          );
+        }
+
         return (
           <Space size={2}>
             <Tooltip title={isVoided ? 'Already voided' : isCleared ? 'Cleared — cannot void' : 'Void Payment'}>
@@ -1882,29 +1903,17 @@ const ManagePayments: React.FC = () => {
             </Tooltip>
             {record.accountingStatus !== 'Accounted' && (
               <Tooltip title="Create Accounting">
-                <Button
-                  type="link"
-                  size="small"
-                  icon={<AccountBookOutlined />}
-                  onClick={() => handleCreateAccounting(record)}
-                />
+                <Button type="link" size="small" icon={<AccountBookOutlined />}
+                  onClick={() => handleCreateAccounting(record)} />
               </Tooltip>
             )}
             <Tooltip title="View / Post Accounting">
-              <Button
-                type="link"
-                size="small"
-                icon={<FormOutlined />}
-                onClick={() => handleViewAccounting(record)}
-              />
+              <Button type="link" size="small" icon={<FormOutlined />}
+                onClick={() => handleViewAccounting(record)} />
             </Tooltip>
             <Tooltip title="View Details">
-              <Button
-                type="link"
-                size="small"
-                icon={<FileTextOutlined />}
-                onClick={() => openPaymentTab(record)}
-              />
+              <Button type="link" size="small" icon={<FileTextOutlined />}
+                onClick={() => openPaymentTab(record)} />
             </Tooltip>
           </Space>
         );
@@ -2426,9 +2435,15 @@ const ManagePayments: React.FC = () => {
         } catch { /* non-critical */ }
       }
       setViewAcctData(result);
-      // Group all lines by headerId to build per-event sections (one section per event type)
+      // Filter to only lines that belong to this payment (AP_PAYMENTS / checkId)
+      // Guards against endpoints returning broader data than requested
+      const paymentLines = (allLinesData.items || []).filter((line: any) => {
+        const st = (line.sourceTable || line.SOURCE_TABLE || '').toUpperCase();
+        return !st || st === 'AP_PAYMENTS';
+      });
+      // Group lines by headerId to build per-event sections (Payment, Void, etc.)
       const eventsMap = new Map<number, { headerId: number; eventTypeCode: string; accountingStatus: string; accountingDate: string; lines: any[] }>();
-      for (const line of (allLinesData.items || [])) {
+      for (const line of paymentLines) {
         const hid = line.headerId as number;
         if (!eventsMap.has(hid)) {
           eventsMap.set(hid, {
@@ -5133,7 +5148,9 @@ const ManagePayments: React.FC = () => {
         open={viewAcctOpen}
         onCancel={() => setViewAcctOpen(false)}
         footer={
-          viewAcctData?.found && viewAcctData.accountingStatus === 'DRAFT' ? (
+          viewAcctData?.found &&
+          viewAcctData.accountingStatus === 'DRAFT' &&
+          !viewAcctRecord?.isSynced ? (
             <Button
               type="primary"
               icon={<SendOutlined />}
