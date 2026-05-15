@@ -12,7 +12,7 @@ import {
   SwapOutlined, DownloadOutlined, CheckCircleOutlined, SyncOutlined,
   AccountBookOutlined, EyeOutlined, UploadOutlined, PaperClipOutlined, DeleteOutlined,
   LockOutlined, PrinterOutlined, FilePdfOutlined, QuestionCircleOutlined,
-  ArrowUpOutlined, ArrowDownOutlined,
+  ArrowUpOutlined, ArrowDownOutlined, RollbackOutlined, CopyOutlined,
 } from '@ant-design/icons';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -2515,6 +2515,51 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     setActiveTabKey(key);
   };
 
+  const openReverseTab = (record: ExternalTxnRecord) => {
+    const origDir  = record.transactionDirection ?? (record.amount >= 0 ? 'DR' : 'CR');
+    const newDir   = origDir === 'DR' ? 'CR' : 'DR';
+    const origRef  = record.referenceText   || String(record.transactionId ?? record.externalTransactionId);
+    const origDoc  = record.paymentDocument || '';
+    const reversed: Partial<ExternalTxnRecord> = {
+      ...record,
+      externalTransactionId: undefined as any,  // omit so form treats as new creation
+      transactionId:         undefined as any,
+      transactionDirection:  newDir,
+      referenceText:         `Reverse:${origRef}`,
+      paymentDocument:       origDoc ? `Reverse:${origDoc}` : record.paymentDocument,
+      accountingFlag:        'N',
+      status:                'UNR',
+      creationDate:          undefined as any,
+      lastUpdateDate:        undefined as any,
+      syncDate:              undefined as any,
+    };
+    const key   = newTabKey();
+    const label = `Reverse: Txn #${record.transactionId ?? record.externalTransactionId}`;
+    setTabs(prev => [...prev, { key, label, record: reversed as ExternalTxnRecord }]);
+    setActiveTabKey(key);
+  };
+
+  const openCopyTab = (record: ExternalTxnRecord) => {
+    const origRef = record.referenceText   || String(record.transactionId ?? record.externalTransactionId);
+    const origDoc = record.paymentDocument || '';
+    const copied: Partial<ExternalTxnRecord> = {
+      ...record,
+      externalTransactionId: undefined as any,
+      transactionId:         undefined as any,
+      referenceText:         `Copy:${origRef}`,
+      paymentDocument:       origDoc ? `Copy:${origDoc}` : record.paymentDocument,
+      accountingFlag:        'N',
+      status:                'UNR',
+      creationDate:          undefined as any,
+      lastUpdateDate:        undefined as any,
+      syncDate:              undefined as any,
+    };
+    const key   = newTabKey();
+    const label = `Copy: Txn #${record.transactionId ?? record.externalTransactionId}`;
+    setTabs(prev => [...prev, { key, label, record: copied as ExternalTxnRecord }]);
+    setActiveTabKey(key);
+  };
+
   const closeTab = (key: string) => {
     setTabs(prev => prev.filter(t => t.key !== key));
     if (activeTabKey === key) setActiveTabKey('search');
@@ -2659,10 +2704,20 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   // ── Table columns ─────────────────────────────────────────────────────────
   const columns: ColumnsType<ExternalTxnRecord> = [
     {
-      title: 'Actions', key: 'actions', width: 100, align: 'center', fixed: 'left',
+      title: 'Actions', key: 'actions', width: 140, align: 'center', fixed: 'left',
       render: (_, r) => (
         <Space size={2}>
           <Tooltip title="Edit"><Button type="text" size="small" icon={<EditOutlined />} onClick={() => openEditTab(r)} /></Tooltip>
+          <Tooltip title="Reverse — create opposite-direction entry">
+            <Button type="text" size="small" icon={<RollbackOutlined />}
+              style={{ color: REDWOOD.warning }}
+              onClick={() => openReverseTab(r)} />
+          </Tooltip>
+          <Tooltip title="Copy — duplicate this transaction">
+            <Button type="text" size="small" icon={<CopyOutlined />}
+              style={{ color: REDWOOD.neutral600 }}
+              onClick={() => openCopyTab(r)} />
+          </Tooltip>
           <Tooltip title="Print Voucher">
             <Button type="text" size="small" icon={<PrinterOutlined />}
               style={{ color: REDWOOD.info }}
