@@ -533,7 +533,7 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
     const totalFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } };
     const white = { argb: 'FFFFFFFF' };
     const numFmt = '#,##0.00';
-    const COLS = 15;
+    const COLS = 16;
     const mergeFull = (row: number) => ws.mergeCells(row, 1, row, COLS);
     mergeFull(1);
     const titleCell = ws.getCell('A1');
@@ -575,6 +575,7 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
       { label: 'Acctd Balance', fill: accHeaderFill },
       { label: 'Ent Dr',        fill: entHeaderFill },
       { label: 'Ent Cr',        fill: entHeaderFill },
+      { label: 'Ent Balance',   fill: entHeaderFill },
       { label: 'JE Header ID',  fill: columnHeaderFill },
     ];
     colHeaders.forEach((h, i) => {
@@ -596,13 +597,13 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
         row.batchName, row.userJeSourceName, row.userJeCategoryName,
         row.currencyCode, row.accountedDr || null, row.accountedCr || null,
         runAccounted, row.enteredDr || null, row.enteredCr || null,
-        row.jeHeaderId || null,
+        runEntered, row.jeHeaderId || null,
       ];
       const exRow = ws.addRow(rowData);
-      [10, 11, 12, 13, 14].forEach(c => { if (exRow.getCell(c).value != null) exRow.getCell(c).numFmt = numFmt; });
+      [10, 11, 12, 13, 14, 15].forEach(c => { if (exRow.getCell(c).value != null) exRow.getCell(c).numFmt = numFmt; });
     });
     ws.columns.forEach((col, i) => {
-      const widths = [28, 24, 30, 10, 12, 28, 14, 16, 8, 14, 14, 14, 12, 12, 12];
+      const widths = [28, 24, 30, 10, 12, 28, 14, 16, 8, 14, 14, 14, 12, 12, 14, 12];
       col.width = widths[i] || 14;
     });
     const buf = await wb.xlsx.writeBuffer();
