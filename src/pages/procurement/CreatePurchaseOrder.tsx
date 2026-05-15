@@ -284,7 +284,12 @@ const CreatePurchaseOrder: React.FC = () => {
   /* ─── Column defs ─────────────────────────────────── */
   const itemTableCols: ColumnsType<any> = [
     { title: 'Item Number', dataIndex: 'item_number', width: 140, render: v => <Text style={{ fontSize: 12, fontWeight: 600, color: C.blue }}>{v ?? '—'}</Text> },
-    { title: 'Description', dataIndex: 'description', ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    {
+      title: 'Description', dataIndex: 'description',
+      render: v => (
+        <Text style={{ fontSize: 12, whiteSpace: 'normal', wordBreak: 'break-word' }}>{v ?? '—'}</Text>
+      ),
+    },
     { title: 'UOM', dataIndex: 'primary_uom_code', width: 70, align: 'center' as const, render: v => v ?? '—' },
     { title: 'Status', dataIndex: 'inventory_item_status_code', width: 90, render: v => v ?? '—' },
     { title: 'Price', dataIndex: 'item_price', width: 100, align: 'right' as const, render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{v != null ? fmt(parseFloat(v) || 0) : '—'}</Text> },
