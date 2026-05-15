@@ -3926,7 +3926,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         cashClearingAccountCombination:  item.cash_clearing_account_combination || '',
       }));
       const filtered = legalEntityName
-        ? all.filter((a: any) => a.legalEntityName === legalEntityName)
+        ? all.filter((a: any) => a.legalEntityName.trim().toLowerCase() === legalEntityName.trim().toLowerCase())
         : all;
       setPayInFullBankAccounts(filtered);
       if (filtered.length === 0)
