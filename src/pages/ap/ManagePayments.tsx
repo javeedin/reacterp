@@ -1,6 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import dayjs from 'dayjs';
 import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import {
   Layout,
   Card,
@@ -767,6 +769,8 @@ const ManagePayments: React.FC = () => {
   const [confirmedPaymentNumber, setConfirmedPaymentNumber] = useState<string>('');
   const [confirmedCheckId, setConfirmedCheckId]             = useState<number | null>(null);
   const [savePaymentLoading, setSavePaymentLoading]         = useState(false);
+  const [newPaymentVoucherUrl, setNewPaymentVoucherUrl]     = useState<string | null>(null);
+  const [newPaymentVoucherOpen, setNewPaymentVoucherOpen]   = useState(false);
 
   type ConfirmStepKey = 'payment' | 'installments' | 'link' | 'sla' | 'gl';
   interface ConfirmStep { label: string; status: 'idle' | 'running' | 'success' | 'error'; detail?: string }
@@ -779,6 +783,143 @@ const ManagePayments: React.FC = () => {
   });
   const setConfStep = (key: ConfirmStepKey, upd: Partial<ConfirmStep>) =>
     setConfirmSteps(prev => ({ ...prev, [key]: { ...prev[key], ...upd } }));
+
+  const generateNewPaymentVoucherPdf = () => {
+    const fv     = createPaymentForm.getFieldsValue();
+    const doc    = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageW  = doc.internal.pageSize.getWidth();
+    const fmt    = (v: any) => (v != null && v !== '') ? String(v) : '—';
+    const fmtAmt = (v: any) => v != null ? Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
+    const fmtDt  = (v: any) => {
+      if (!v) return '—';
+      try { return new Date(v instanceof Object ? v.toDate?.() ?? v : v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
+      catch { return String(v); }
+    };
+    const totalAmt = (invoicesToPay || []).reduce((s: number, r: any) => s + (Number(r.paymentAmount) || 0), 0);
+
+    // Header bar
+    doc.setFillColor(191, 70, 0);
+    doc.rect(0, 0, pageW, 20, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('PAYMENT VOUCHER', 14, 13);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Printed: ${new Date().toLocaleString()}`, pageW - 14, 13, { align: 'right' });
+    doc.setTextColor(0, 0, 0);
+
+    let y = 28;
+
+    // Payment number + check id
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(191, 70, 0);
+    doc.text(`Payment #${confirmedPaymentNumber || '(New)'}`, 14, y);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(60, 60, 60);
+    if (confirmedCheckId) doc.text(`Check ID: ${confirmedCheckId}`, 14, y + 6);
+    doc.setTextColor(0, 0, 0);
+    y += 14;
+
+    // Section 1: Payee & Organisation
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text('Payee & Organisation', 14, y);
+    y += 2;
+    autoTable(doc, {
+      startY: y,
+      body: [
+        ['Business Unit', fmt(fv.businessUnit),    'Payee',        fmt(fv.payee)],
+        ['Supplier #',    fmt(fv.supplierNumber),   'Payee Site',   fmt(fv.payeeSite)],
+        ['Bank Account',  fmt(fv.disbursementBankAccount), 'Pay Process Profile', fmt(fv.paymentProcessProfile)],
+      ],
+      styles: { fontSize: 9, cellPadding: 2.5 },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 40, fillColor: [245, 245, 245] }, 2: { fontStyle: 'bold', cellWidth: 40, fillColor: [245, 245, 245] } },
+      margin: { left: 14, right: 14 },
+    });
+    y = (doc as any).lastAutoTable.finalY + 6;
+
+    // Section 2: Payment Details
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text('Payment Details', 14, y);
+    y += 2;
+    autoTable(doc, {
+      startY: y,
+      body: [
+        ['Payment Date',   fmtDt(fv.paymentDate),    'Payment Method', fmt(fv.paymentMethod)],
+        ['Payment Currency', fmt(fv.currency || 'AED'), 'Conv. Rate',  fmt(fv.conversionRate)],
+        ['Conv. Rate Type', fmt(fv.conversionRateType), 'Conv. Date', fmtDt(fv.conversionDate)],
+        ['Maturity Date',  fmtDt(fv.maturityDate),    'Voucher #',    fmt(fv.voucherNumber)],
+        ['Description',    fmt(fv.paymentDescription), 'Document Cat.', fmt(fv.documentCategory)],
+      ],
+      styles: { fontSize: 9, cellPadding: 2.5 },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 40, fillColor: [245, 245, 245] }, 2: { fontStyle: 'bold', cellWidth: 40, fillColor: [245, 245, 245] } },
+      margin: { left: 14, right: 14 },
+    });
+    y = (doc as any).lastAutoTable.finalY + 6;
+
+    // Section 3: Invoices to Pay
+    if ((invoicesToPay || []).length > 0) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.text('Invoices to Pay', 14, y);
+      y += 2;
+      autoTable(doc, {
+        startY: y,
+        head: [['Invoice #', 'Inst.', 'Currency', 'Invoice Amt', 'Payment Amt', 'Discount']],
+        body: (invoicesToPay || []).map((r: any) => [
+          r.invoiceNumber || r.invoiceId,
+          r.installmentNumber || 1,
+          r.invoiceCurrency || fv.currency || 'AED',
+          fmtAmt(r.invoiceAmount),
+          fmtAmt(r.paymentAmount),
+          fmtAmt(r.discountTaken || 0),
+        ]),
+        foot: [['', '', '', '', fmtAmt(totalAmt), '']],
+        styles: { fontSize: 8, cellPadding: 2 },
+        headStyles: { fillColor: [58, 58, 58], textColor: 255 },
+        footStyles: { fillColor: [230, 230, 230], fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [249, 249, 249] },
+        columnStyles: { 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' } },
+        margin: { left: 14, right: 14 },
+      });
+      y = (doc as any).lastAutoTable.finalY + 6;
+    }
+
+    // Signature block
+    if (y > 240) { doc.addPage(); y = 20; }
+    const sigY = Math.max(y + 10, 250);
+    const sigW = (pageW - 28 - 20) / 3;
+    doc.setDrawColor(200, 200, 200);
+    ['Prepared By', 'Reviewed By', 'Approved By'].forEach((label, i) => {
+      const sx = 14 + i * (sigW + 10);
+      doc.line(sx, sigY, sx + sigW, sigY);
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100);
+      doc.text(label, sx + sigW / 2, sigY + 5, { align: 'center' });
+    });
+
+    // Footer
+    const pageCount = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(150);
+      doc.text(`Page ${i} of ${pageCount}`, pageW / 2, 290, { align: 'center' });
+      doc.text('Generated by ReactERP', 14, 290);
+      doc.setTextColor(0);
+    }
+
+    const blob = doc.output('blob');
+    const url  = URL.createObjectURL(blob);
+    setNewPaymentVoucherUrl(url);
+    setNewPaymentVoucherOpen(true);
+  };
 
   const handleConfirmPaymentClick = async () => {
     try { await createPaymentForm.validateFields(); } catch { message.warning('Please fill in all required fields'); return; }
@@ -5091,6 +5232,11 @@ const ManagePayments: React.FC = () => {
               View Accounting
             </Button>
           )}
+          {paymentConfirmed && (
+            <Button icon={<PrinterOutlined />} onClick={generateNewPaymentVoucherPdf}>
+              Print Voucher
+            </Button>
+          )}
           {!paymentConfirmed && (
             <Button
               type="primary"
@@ -5104,6 +5250,40 @@ const ManagePayments: React.FC = () => {
             </Button>
           )}
         </div>
+      </Modal>
+
+      {/* ── New Payment Voucher PDF Preview ── */}
+      <Modal
+        open={newPaymentVoucherOpen}
+        onCancel={() => { setNewPaymentVoucherOpen(false); if (newPaymentVoucherUrl) URL.revokeObjectURL(newPaymentVoucherUrl); setNewPaymentVoucherUrl(null); }}
+        title={<Space><PrinterOutlined style={{ color: REDWOOD.primary }} /><span>Payment Voucher — PDF Preview</span></Space>}
+        width={860}
+        footer={
+          <Space>
+            <Button
+              icon={<PrinterOutlined />}
+              type="primary"
+              style={{ background: REDWOOD.primary }}
+              onClick={() => {
+                if (newPaymentVoucherUrl) {
+                  const a = document.createElement('a');
+                  a.href = newPaymentVoucherUrl;
+                  a.download = `payment-voucher-${confirmedPaymentNumber || 'new'}.pdf`;
+                  a.click();
+                }
+              }}
+            >
+              Download PDF
+            </Button>
+            <Button onClick={() => { setNewPaymentVoucherOpen(false); if (newPaymentVoucherUrl) URL.revokeObjectURL(newPaymentVoucherUrl); setNewPaymentVoucherUrl(null); }}>
+              Close
+            </Button>
+          </Space>
+        }
+      >
+        {newPaymentVoucherUrl && (
+          <iframe src={newPaymentVoucherUrl} style={{ width: '100%', height: '75vh', border: 'none' }} title="Payment Voucher Preview" />
+        )}
       </Modal>
 
       {/* ── Payment Accounting Results Modal ─────────────────────────────── */}
