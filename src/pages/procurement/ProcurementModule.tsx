@@ -3,6 +3,7 @@ import { Layout, Breadcrumb, Typography, Card, Row, Col, Input, Button, Form, Al
 import {
   HomeOutlined, ShoppingCartOutlined, TeamOutlined, AppstoreOutlined,
   DatabaseOutlined, CheckCircleOutlined, LockOutlined,
+  ApartmentOutlined, BankOutlined, SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -14,6 +15,7 @@ const REDWOOD = {
   success: '#1D7B4D', warning: '#D4A800', info: '#0572CE', error: '#D93025',
   neutral100: '#F7F7F7', neutral200: '#E5E5E5', neutral300: '#C7C7C7',
   neutral600: '#6B6B6B', neutral900: '#1A1A1A', surface: '#FFFFFF',
+  teal: '#00918A',
 };
 
 const CORRECT_PASSWORD = 'MIT12345';
@@ -59,6 +61,38 @@ const procurementItems: MenuItemType[] = [
     description: 'View current on-hand stock levels by item and location',
     color: REDWOOD.success,
     path: '/inventory/onhand',
+  },
+  {
+    key: 'subinventories',
+    icon: <ApartmentOutlined />,
+    label: 'Subinventories',
+    description: 'Warehouse and subinventory hierarchy by business unit',
+    color: REDWOOD.teal,
+    path: '/inventory/subinventories',
+  },
+  {
+    key: 'business-units',
+    icon: <BankOutlined />,
+    label: 'Business Units',
+    description: 'Oracle Fusion business units',
+    color: REDWOOD.info,
+    path: '/procurement/business-units',
+  },
+  {
+    key: 'legal-entities',
+    icon: <SafetyCertificateOutlined />,
+    label: 'Legal Entities',
+    description: 'Legal entity setup and configuration',
+    color: REDWOOD.warning,
+    path: '/procurement/legal-entities',
+  },
+  {
+    key: 'item-master',
+    icon: <AppstoreOutlined />,
+    label: 'Item Master',
+    description: 'Item catalog with attributes, pricing and flags',
+    color: REDWOOD.success,
+    path: '/inventory/items',
   },
 ];
 

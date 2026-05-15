@@ -59,6 +59,10 @@ const APGLReconcile           = lazy(() => import('./pages/ap/APGLReconcile'));
 const ManageSuppliers         = lazy(() => import('./pages/suppliers/ManageSuppliers'));
 const SupplierBalance         = lazy(() => import('./pages/suppliers/SupplierBalance'));
 const ManageOnhandInventory   = lazy(() => import('./pages/inventory/ManageOnhandInventory'));
+const Subinventories          = lazy(() => import('./pages/inventory/Subinventories'));
+const BusinessUnits           = lazy(() => import('./pages/procurement').then(m => ({ default: m.BusinessUnits })));
+const LegalEntities           = lazy(() => import('./pages/procurement').then(m => ({ default: m.LegalEntities })));
+const ItemMaster              = lazy(() => import('./pages/inventory/ItemMaster'));
 const OrderManagementModule   = lazy(() => import('./pages/orders/OrderManagementModule'));
 const ManageSalesOrders       = lazy(() => import('./pages/orders/ManageSalesOrders'));
 const SyncData                = lazy(() => import('./pages/sync/SyncData'));
@@ -206,6 +210,8 @@ function App() {
               <Route path="ar/invoices/:id" element={<ARInvoiceDetail />} />
               <Route path="ar/*" element={<ARModule />} />
               <Route path="inventory/onhand" element={<ManageOnhandInventory />} />
+              <Route path="inventory/subinventories" element={<Subinventories />} />
+              <Route path="inventory/items" element={<ItemMaster />} />
               <Route path="inventory/*" element={<ComingSoon moduleName="Inventory" />} />
               <Route path="om" element={<OrderManagementModule />} />
               <Route path="om/orders" element={<ManageSalesOrders />} />
@@ -213,6 +219,8 @@ function App() {
               <Route path="om/*" element={<OrderManagementModule />} />
               <Route path="procurement/suppliers" element={<ManageSuppliers />} />
               <Route path="procurement/purchase-orders" element={<ManagePurchaseOrders />} />
+              <Route path="procurement/business-units" element={<BusinessUnits />} />
+              <Route path="procurement/legal-entities" element={<LegalEntities />} />
               <Route path="ap/suppliers" element={<ManageSuppliers />} />
               <Route path="suppliers/manage" element={<ManageSuppliers />} />
               <Route path="suppliers/balance/:supplierNumber" element={<SupplierBalance />} />
