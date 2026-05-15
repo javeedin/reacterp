@@ -152,10 +152,16 @@ const CreatePurchaseOrder: React.FC = () => {
   const [sitesLoading, setSitesLoading] = useState(false);
   const [initConfirmLoading, setInitConfirmLoading] = useState(false);
 
-  // QOH
+  // QOH (per-line)
   const [qohData, setQohData] = useState<Record<string, any>>({});
   const [qohLoading, setQohLoading] = useState(false);
   const [qohProgress, setQohProgress] = useState({ done: 0, total: 0 });
+
+  // Org QOH
+  const [orgQohRows, setOrgQohRows] = useState<any[]>([]);
+  const [orgQohLoading, setOrgQohLoading] = useState(false);
+  const [orgQohFetched, setOrgQohFetched] = useState(false);
+  const [orgQohFilter, setOrgQohFilter] = useState('');
 
   const [supplierModalOpen, setSupplierModalOpen] = useState(false);
   const [supplierSearch, setSupplierSearch] = useState('');
@@ -275,6 +281,25 @@ const CreatePurchaseOrder: React.FC = () => {
       setQohData({ ...result });
     }
     setQohLoading(false);
+  };
+
+  const queryOrgQOH = async () => {
+    if (!header?.shipToOrg) { message.warning('Set Ship-to Organization first'); return; }
+    setOrgQohLoading(true);
+    setOrgQohFetched(false);
+    setOrgQohRows([]);
+    try {
+      const qParts = [`OrganizationCode='${header.shipToOrg}'`];
+      if (header.subinventory) qParts.push(`SubinventoryCode='${header.subinventory}'`);
+      const baseUrl = `${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(qParts.join(';'))}&limit=500`;
+      const rows = await fetchLOV(baseUrl);
+      setOrgQohRows(rows);
+      setOrgQohFetched(true);
+    } catch {
+      message.error('Failed to fetch org on-hand balances');
+    } finally {
+      setOrgQohLoading(false);
+    }
   };
 
   const handleNeedByAllChange = (date: Dayjs | null) => {
@@ -570,6 +595,18 @@ const CreatePurchaseOrder: React.FC = () => {
                     </div>
                     <Tag style={{ fontWeight: 700, fontSize: 12, background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff' }}>{header.currency}</Tag>
                   </div>
+                  <Button
+                    size="small"
+                    icon={<SearchOutlined />}
+                    loading={orgQohLoading}
+                    onClick={() => { queryOrgQOH(); }}
+                    style={{
+                      background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.3)',
+                      color: '#fff', fontWeight: 600, fontSize: 12,
+                    }}
+                  >
+                    Org On Hand
+                  </Button>
                 </div>
 
                 {/* Three zones */}
@@ -955,6 +992,113 @@ const CreatePurchaseOrder: React.FC = () => {
                             />
                           )}
                           <style>{`.qoh-low { background: #FFF8F0 !important; }`}</style>
+                        </div>
+                      ),
+                    },
+                    {
+                      key: 'org-qoh',
+                      label: 'Onhand in Organization',
+                      children: (
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+                            <Button
+                              type="primary"
+                              icon={<SearchOutlined />}
+                              loading={orgQohLoading}
+                              onClick={queryOrgQOH}
+                              style={{ background: C.purple, borderColor: C.purple, fontWeight: 600 }}
+                            >
+                              Fetch Org On Hand
+                            </Button>
+                            {header && (
+                              <Text style={{ fontSize: 12, color: C.textMid }}>
+                                Org: <Text strong>{header.shipToOrg || '—'}</Text>
+                                {header.subinventory && <> · Sub: <Text strong>{header.subinventory}</Text></>}
+                              </Text>
+                            )}
+                            {orgQohFetched && (
+                              <Text style={{ fontSize: 12, color: C.textMid }}>
+                                {orgQohRows.length} record{orgQohRows.length !== 1 ? 's' : ''} found
+                              </Text>
+                            )}
+                            {orgQohFetched && orgQohRows.length > 0 && (
+                              <Input
+                                size="small"
+                                placeholder="Filter by item / subinventory…"
+                                value={orgQohFilter}
+                                onChange={e => setOrgQohFilter(e.target.value)}
+                                allowClear
+                                prefix={<SearchOutlined style={{ color: C.textLight }} />}
+                                style={{ width: 240 }}
+                              />
+                            )}
+                          </div>
+                          {!orgQohFetched ? (
+                            <div style={{ padding: 28, textAlign: 'center', color: C.textLight }}>
+                              Click "Fetch Org On Hand" to load all balances for the selected organization.
+                            </div>
+                          ) : (
+                            <Table
+                              size="small"
+                              bordered
+                              rowKey={(r, i) => `${r.ItemNumber}-${r.SubinventoryCode}-${i}`}
+                              dataSource={(() => {
+                                const f = orgQohFilter.toLowerCase();
+                                return f
+                                  ? orgQohRows.filter(r =>
+                                      String(r.ItemNumber ?? '').toLowerCase().includes(f) ||
+                                      String(r.ItemDescription ?? '').toLowerCase().includes(f) ||
+                                      String(r.SubinventoryCode ?? '').toLowerCase().includes(f) ||
+                                      String(r.LocatorSegments ?? r.Locator ?? '').toLowerCase().includes(f)
+                                    )
+                                  : orgQohRows;
+                              })()}
+                              pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `${t} records` }}
+                              scroll={{ x: 900 }}
+                              rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''}
+                              columns={[
+                                {
+                                  title: 'Item Number', dataIndex: 'ItemNumber', width: 160,
+                                  render: v => <Text style={{ fontWeight: 600, fontSize: 12, color: C.text }}>{v ?? '—'}</Text>,
+                                },
+                                {
+                                  title: 'Description', dataIndex: 'ItemDescription', ellipsis: true,
+                                  render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text>,
+                                },
+                                {
+                                  title: 'Subinventory', dataIndex: 'SubinventoryCode', width: 140,
+                                  render: v => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag>,
+                                },
+                                {
+                                  title: 'Locator', width: 140, ellipsis: true,
+                                  render: (_, r) => <Text style={{ fontSize: 11, color: C.textMid }}>{r.LocatorSegments ?? r.Locator ?? '—'}</Text>,
+                                },
+                                {
+                                  title: 'On Hand Qty', dataIndex: 'PrimaryOnhandQuantity', width: 120, align: 'right' as const,
+                                  sorter: (a, b) => (parseFloat(a.PrimaryOnhandQuantity ?? 0) || 0) - (parseFloat(b.PrimaryOnhandQuantity ?? 0) || 0),
+                                  render: v => {
+                                    const n = parseFloat(v ?? 0) || 0;
+                                    return (
+                                      <Text strong style={{
+                                        fontVariantNumeric: 'tabular-nums', fontSize: 13,
+                                        color: n === 0 ? C.red : n < 10 ? C.orange : C.green,
+                                      }}>
+                                        {fmt(n)}
+                                      </Text>
+                                    );
+                                  },
+                                },
+                                {
+                                  title: 'Reserved Qty', dataIndex: 'ReservedQuantity', width: 120, align: 'right' as const,
+                                  render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: C.textMid }}>{fmt(parseFloat(v ?? 0) || 0)}</Text>,
+                                },
+                                {
+                                  title: 'UOM', dataIndex: 'PrimaryUomCode', width: 70, align: 'center' as const,
+                                  render: v => <Text style={{ fontSize: 11 }}>{v ?? '—'}</Text>,
+                                },
+                              ]}
+                            />
+                          )}
                         </div>
                       ),
                     },
