@@ -1768,38 +1768,7 @@ const AccountAnalysis: React.FC = () => {
       { title: 'Source', dataIndex: 'userJeSourceName', key: 'userJeSourceName', width: 100 },
       { title: 'Category', dataIndex: 'userJeCategoryName', key: 'userJeCategoryName', width: 120 },
       { title: 'Currency', dataIndex: 'currencyCode', key: 'currencyCode', width: 90 },
-      {
-        title: <span style={{ color: '#1677ff', fontWeight: 600 }}>Accounted</span>,
-        onHeaderCell: () => ({ style: groupBorderLeft }),
-        children: [
-          {
-            title: 'Dr',
-            dataIndex: 'accountedDr',
-            key: 'accountedDr',
-            width: 120,
-            align: 'right' as const,
-            ...headerStyle(groupBorderLeft),
-            render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span>,
-          },
-          {
-            title: 'Cr',
-            dataIndex: 'accountedCr',
-            key: 'accountedCr',
-            width: 120,
-            align: 'right' as const,
-            render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span>,
-          },
-          {
-            title: 'Balance',
-            key: 'accountedRunning',
-            width: 130,
-            align: 'right' as const,
-            ...headerStyle(groupBorderRight),
-            render: (_: any, __: JournalLineSegment, index: number) =>
-              fmtBalance(runningBalances[index]?.accounted ?? 0),
-          },
-        ],
-      },
+      // Entered group shown FIRST when toggle is on
       ...(showEntered ? [{
         title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Entered</span>,
         onHeaderCell: () => ({ style: groupBorderLeft }),
@@ -1832,6 +1801,39 @@ const AccountAnalysis: React.FC = () => {
           },
         ],
       }] : []),
+      // Accounted group always shown
+      {
+        title: <span style={{ color: '#1677ff', fontWeight: 600 }}>Accounted</span>,
+        onHeaderCell: () => ({ style: groupBorderLeft }),
+        children: [
+          {
+            title: 'Dr',
+            dataIndex: 'accountedDr',
+            key: 'accountedDr',
+            width: 120,
+            align: 'right' as const,
+            ...headerStyle(groupBorderLeft),
+            render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span>,
+          },
+          {
+            title: 'Cr',
+            dataIndex: 'accountedCr',
+            key: 'accountedCr',
+            width: 120,
+            align: 'right' as const,
+            render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span>,
+          },
+          {
+            title: 'Balance',
+            key: 'accountedRunning',
+            width: 130,
+            align: 'right' as const,
+            ...headerStyle(groupBorderRight),
+            render: (_: any, __: JournalLineSegment, index: number) =>
+              fmtBalance(runningBalances[index]?.accounted ?? 0),
+          },
+        ],
+      },
       {
         title: '',
         key: 'drillDown',
@@ -2104,10 +2106,22 @@ const AccountAnalysis: React.FC = () => {
               >
                 Export
               </Button>
-              <Space size={4}>
-                <Typography.Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Show Entered</Typography.Text>
-                <Switch size="small" checked={showEntered} onChange={setShowEntered} />
-              </Space>
+              <Tooltip title={showEntered ? 'Hide Entered amounts' : 'Show Entered amounts alongside Accounted'}>
+                <Button
+                  size="small"
+                  onClick={() => setShowEntered(v => !v)}
+                  style={{
+                    fontSize: 11,
+                    borderColor: showEntered ? '#52c41a' : undefined,
+                    color:       showEntered ? '#52c41a' : undefined,
+                    background:  showEntered ? '#f6ffed' : undefined,
+                    fontWeight:  showEntered ? 600 : undefined,
+                  }}
+                >
+                  <Switch size="small" checked={showEntered} style={{ marginRight: 5, pointerEvents: 'none' }} />
+                  Entered
+                </Button>
+              </Tooltip>
             </Space>
           </div>
 
@@ -2130,34 +2144,30 @@ const AccountAnalysis: React.FC = () => {
                       <Table.Summary.Cell index={0} colSpan={9}>
                         <Text strong style={{ fontSize: 10 }}>Totals</Text>
                       </Table.Summary.Cell>
-                      {/* Accounted Dr */}
-                      {/* @ts-expect-error antd6 SummaryCell lacks style */}
-                      <Table.Summary.Cell index={9} align="right" style={groupBorderLeft}>
-                        <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(gridTotals.accountedDr)}</Text>
-                      </Table.Summary.Cell>
-                      {/* Accounted Cr */}
-                      <Table.Summary.Cell index={10} align="right">
-                        <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.accountedCr)}</Text>
-                      </Table.Summary.Cell>
-                      {/* Accounted Balance */}
-                      {/* @ts-expect-error antd6 SummaryCell lacks style */}
-                      <Table.Summary.Cell index={11} align="right" style={groupBorderRight} />
+                      {/* Entered Dr/Cr/Balance — shown first when toggle is on */}
                       {showEntered && (
                         <>
-                          {/* Entered Dr */}
                           {/* @ts-expect-error antd6 SummaryCell lacks style */}
-                          <Table.Summary.Cell index={12} align="right" style={groupBorderLeft}>
+                          <Table.Summary.Cell index={9} align="right" style={groupBorderLeft}>
                             <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(gridTotals.enteredDr)}</Text>
                           </Table.Summary.Cell>
-                          {/* Entered Cr */}
-                          <Table.Summary.Cell index={13} align="right">
+                          <Table.Summary.Cell index={10} align="right">
                             <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.enteredCr)}</Text>
                           </Table.Summary.Cell>
-                          {/* Entered Balance */}
                           {/* @ts-expect-error antd6 SummaryCell lacks style */}
-                          <Table.Summary.Cell index={14} align="right" style={groupBorderRight} />
+                          <Table.Summary.Cell index={11} align="right" style={groupBorderRight} />
                         </>
                       )}
+                      {/* Accounted Dr/Cr/Balance — always shown */}
+                      {/* @ts-expect-error antd6 SummaryCell lacks style */}
+                      <Table.Summary.Cell index={showEntered ? 12 : 9} align="right" style={groupBorderLeft}>
+                        <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(gridTotals.accountedDr)}</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={showEntered ? 13 : 10} align="right">
+                        <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.accountedCr)}</Text>
+                      </Table.Summary.Cell>
+                      {/* @ts-expect-error antd6 SummaryCell lacks style */}
+                      <Table.Summary.Cell index={showEntered ? 14 : 11} align="right" style={groupBorderRight} />
                       <Table.Summary.Cell index={showEntered ? 15 : 12} />
                     </Table.Summary.Row>
                   </Table.Summary>
