@@ -2,12 +2,13 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
   Layout, Breadcrumb, Typography, Card, Table, Input, Row, Col, Spin, Alert,
   Tag, Select, Drawer, List, Badge, Tabs, Button, Form, Descriptions,
-  Space, Progress,
+  Space, Progress, Modal, message, Tooltip,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, AppstoreOutlined, SearchOutlined, CloseOutlined,
   EditOutlined, ReloadOutlined, TagsOutlined, StopOutlined,
+  ApiOutlined, CopyOutlined, CheckCircleOutlined, ExclamationCircleOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 
@@ -235,6 +236,12 @@ const SearchPanel: React.FC<{
   const [form] = Form.useForm<SearchParams>();
   const [searched, setSearched] = useState(false);
   const [results, setResults] = useState<ItemRow[]>([]);
+  const [apiOpen, setApiOpen] = useState(false);
+  const [apiLoading, setApiLoading] = useState(false);
+  const [apiResponse, setApiResponse] = useState<any>(null);
+  const [apiError, setApiError] = useState('');
+
+  const testUrl = `${ORDS_BASE}/inventory/itemmaster?limit=5&offset=0`;
 
   const orgOptions = useMemo(() => {
     const set = new Set(allData.map(r => r.organization_code).filter(Boolean));
@@ -356,6 +363,35 @@ const SearchPanel: React.FC<{
       <Card
         style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 16 }}
         styles={{ body: { padding: '16px 20px 12px' } }}
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Space>
+              <SearchOutlined style={{ color: REDWOOD.primary }} />
+              <Text strong style={{ fontSize: 13 }}>Search Parameters</Text>
+            </Space>
+            <Space size={8}>
+              {allData.length > 0 ? (
+                <Tag icon={<CheckCircleOutlined />} color="success" style={{ borderRadius: 10, fontSize: 11 }}>
+                  {allData.length.toLocaleString()} items loaded
+                </Tag>
+              ) : (
+                <Tag icon={<ExclamationCircleOutlined />} color="warning" style={{ borderRadius: 10, fontSize: 11 }}>
+                  No data loaded
+                </Tag>
+              )}
+              <Tooltip title="API Debug — view endpoint and test">
+                <Button
+                  size="small"
+                  icon={<ApiOutlined />}
+                  onClick={() => { setApiResponse(null); setApiError(''); setApiOpen(true); }}
+                  style={{ fontSize: 11, color: REDWOOD.info, borderColor: REDWOOD.info }}
+                >
+                  API
+                </Button>
+              </Tooltip>
+            </Space>
+          </div>
+        }
       >
         <Form form={form} layout="vertical" onFinish={handleSearch}>
           <Row gutter={[16, 0]}>
@@ -434,6 +470,101 @@ const SearchPanel: React.FC<{
           />
         </Card>
       )}
+
+      {/* API Debug Modal */}
+      <Modal
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /> API Debug — Item Master</Space>}
+        open={apiOpen}
+        onCancel={() => setApiOpen(false)}
+        footer={<Button onClick={() => setApiOpen(false)}>Close</Button>}
+        width={720}
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size={16}>
+          <div>
+            <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>
+              Full data URL (paginated):
+            </div>
+            <div style={{
+              background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`,
+              borderRadius: 6, padding: '8px 12px', fontFamily: 'monospace',
+              fontSize: 12, wordBreak: 'break-all', color: REDWOOD.neutral900,
+            }}>
+              {`${ORDS_BASE}/inventory/itemmaster?limit=500&offset=0`}
+            </div>
+            <Space style={{ marginTop: 6 }}>
+              <Button size="small" icon={<CopyOutlined />} onClick={() => {
+                navigator.clipboard.writeText(`${ORDS_BASE}/inventory/itemmaster?limit=500&offset=0`);
+                message.success('URL copied!');
+              }}>Copy</Button>
+            </Space>
+          </div>
+
+          <div>
+            <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 6 }}>
+              Test endpoint (first 5 items):
+            </div>
+            <div style={{
+              background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`,
+              borderRadius: 6, padding: '8px 12px', fontFamily: 'monospace',
+              fontSize: 12, wordBreak: 'break-all', color: REDWOOD.neutral900, marginBottom: 8,
+            }}>
+              {testUrl}
+            </div>
+            <Button
+              type="primary"
+              icon={<ApiOutlined />}
+              loading={apiLoading}
+              onClick={async () => {
+                setApiLoading(true);
+                setApiResponse(null);
+                setApiError('');
+                try {
+                  const res = await fetch(testUrl, { method: 'GET', headers: { Accept: 'application/json' } });
+                  const text = await res.text();
+                  let parsed: any;
+                  try { parsed = JSON.parse(text); } catch { parsed = text; }
+                  setApiResponse({ status: res.status, ok: res.ok, body: parsed });
+                } catch (err: any) {
+                  setApiError(err.message);
+                } finally {
+                  setApiLoading(false);
+                }
+              }}
+              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+            >
+              Test API
+            </Button>
+          </div>
+
+          {apiError && (
+            <Alert type="error" message="Request failed" description={apiError} />
+          )}
+
+          {apiResponse && (
+            <div>
+              <div style={{ marginBottom: 6 }}>
+                <Tag color={apiResponse.ok ? 'success' : 'error'} style={{ fontSize: 12 }}>
+                  HTTP {apiResponse.status}
+                </Tag>
+                {apiResponse.ok && (
+                  <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+                    {Array.isArray(apiResponse.body?.items)
+                      ? `${apiResponse.body.items.length} items in this page · hasMore: ${String(apiResponse.body.hasMore)} · count: ${apiResponse.body.count ?? 'n/a'}`
+                      : 'Response received'}
+                  </Text>
+                )}
+              </div>
+              <div style={{
+                background: '#1e1e1e', borderRadius: 6, padding: '10px 14px',
+                fontFamily: 'monospace', fontSize: 11, color: '#d4d4d4',
+                maxHeight: 320, overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+              }}>
+                {JSON.stringify(apiResponse.body, null, 2)}
+              </div>
+            </div>
+          )}
+        </Space>
+      </Modal>
     </div>
   );
 };
