@@ -32,7 +32,7 @@ const C = {
   orange: '#D4A800', teal: '#00918A', purple: '#6B21A8',
   bg: '#F4F5F7', surface: '#FFFFFF',
   border: '#DFE1E6', borderDark: '#C1C7D0',
-  text: '#172B4D', textMid: '#5E6C84', textLight: '#97A0AF',
+  text: '#333333', textMid: '#666666', textLight: '#999999',
   rowAlt: '#FAFBFC',
 };
 
@@ -540,7 +540,13 @@ const CreatePurchaseOrder: React.FC = () => {
                 </div>
 
                 {/* Three zones */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 280px' }}>
+                <style>{`
+                  .po-header-zone .ant-select-selection-item,
+                  .po-header-zone .ant-select-selector {
+                    color: #333333 !important;
+                  }
+                `}</style>
+                <div className="po-header-zone" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 280px' }}>
 
                   {/* Zone 1 — Organization */}
                   <div style={{ padding: '16px 20px', borderRight: `1px solid ${C.border}` }}>
