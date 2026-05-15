@@ -5146,7 +5146,33 @@ const ManagePayments: React.FC = () => {
 
       {/* View Accounting Modal */}
       <Modal
-        title={`Accounting Entries — Payment ${viewAcctRecord?.paymentNumber ?? ''}`}
+        title={
+          <Space>
+            <span>Accounting Entries — Payment {viewAcctRecord?.paymentNumber ?? ''}</span>
+            <Popover
+              title={<Space><ApiOutlined style={{ color: '#1677ff' }} /><span>API Calls</span></Space>}
+              content={
+                <div style={{ fontFamily: 'monospace', fontSize: 12, maxWidth: 520 }}>
+                  <div style={{ marginBottom: 6 }}>
+                    <Tag color="blue">GET</Tag>
+                    <span style={{ wordBreak: 'break-all' }}>
+                      {APEX_DB_CONFIG.baseUrl}/sla/accounting?sourceTable=AP_PAYMENTS&amp;sourceId={viewAcctRecord?.checkId ?? '…'}
+                    </span>
+                  </div>
+                  <div>
+                    <Tag color="blue">GET</Tag>
+                    <span style={{ wordBreak: 'break-all' }}>
+                      {APEX_DB_CONFIG.baseUrl}/sla/journals/lines?sourceId={viewAcctRecord?.checkId ?? '…'}&amp;sourceTable=AP_PAYMENTS&amp;moduleName=AP&amp;limit=500
+                    </span>
+                  </div>
+                </div>
+              }
+              trigger="click"
+            >
+              <ApiOutlined style={{ color: '#1677ff', cursor: 'pointer', fontSize: 15 }} />
+            </Popover>
+          </Space>
+        }
         open={viewAcctOpen}
         onCancel={() => setViewAcctOpen(false)}
         footer={
