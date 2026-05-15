@@ -760,7 +760,7 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
         ),
     },
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [groupByAccount, groupedBalanceMap, onOpenAccountTab, selectedPeriods]);
+  ], [groupByAccount, groupedBalanceMap, onOpenAccountTab, selectedPeriods, showEntered]);
 
   // Memoize filtered display data — stable reference prevents Ant Design Table re-rendering all rows
   const { displayData, filterMatchCount } = useMemo(() => {
@@ -1000,7 +1000,7 @@ export const SearchTabPanel: React.FC<SearchTabPanelProps> = ({ ledgerOptions, o
               }}
             >
               <Switch size="small" checked={showEntered} style={{ marginRight: 5, pointerEvents: 'none' }} />
-              Entered
+              Show Entered
             </Button>
             <Button
               size="small"
