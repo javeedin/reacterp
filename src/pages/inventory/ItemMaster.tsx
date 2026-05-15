@@ -2,15 +2,17 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Input, Row, Col,
   Tag, Select, Drawer, List, Badge, Tabs, Button, Form, Descriptions,
-  Space, Alert, Modal, message, Tooltip, Spin,
+  Space, Alert, Modal, message, Tooltip, Spin, Collapse, Progress,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, AppstoreOutlined, SearchOutlined, CloseOutlined,
   EditOutlined, ReloadOutlined, TagsOutlined, StopOutlined,
-  ApiOutlined, CopyOutlined,
+  ApiOutlined, CopyOutlined, DownloadOutlined, DownOutlined, UpOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -157,11 +159,16 @@ const ItemMaster: React.FC = () => {
   const [orgsError, setOrgsError] = useState('');
 
   // search
-  const [searching, setSearching] = useState(false);
+  const [searching, setSearching]   = useState(false);
   const [searchError, setSearchError] = useState('');
-  const [results, setResults]     = useState<ItemRow[]>([]);
-  const [searched, setSearched]   = useState(false);
-  const [lastUrl, setLastUrl]     = useState('');
+  const [results, setResults]       = useState<ItemRow[]>([]);
+  const [searched, setSearched]     = useState(false);
+  const [lastUrl, setLastUrl]       = useState('');
+  const [fetchPage, setFetchPage]   = useState(0);
+  const [fetchCount, setFetchCount] = useState(0);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
+  const [paramsOpen, setParamsOpen] = useState(true);
+  const [exporting, setExporting]   = useState(false);
 
   // attribute drawer
   const [drawer, setDrawer] = useState<{ open: boolean; label: string; values: { value: string; count: number }[] }>({
@@ -248,6 +255,10 @@ const ItemMaster: React.FC = () => {
     abortRef.current = ctrl;
     setSearching(true);
     setSearchError('');
+    setFetchPage(0);
+    setFetchCount(0);
+    setTotalCount(null);
+    setParamsOpen(false);   // collapse params panel when search starts
 
     const url = buildUrl(vals);
     setLastUrl(url);
@@ -255,6 +266,7 @@ const ItemMaster: React.FC = () => {
     try {
       const all: ItemRow[] = [];
       let offset = 0;
+      let page = 1;
       while (true) {
         if (ctrl.signal.aborted) break;
         const pageUrl = buildUrl(vals, 500, offset);
@@ -263,8 +275,12 @@ const ItemMaster: React.FC = () => {
         const d = await r.json();
         const items: ItemRow[] = d.items ?? (Array.isArray(d) ? d : []);
         all.push(...items);
+        if (d.count != null) setTotalCount(d.count);
+        setFetchPage(page);
+        setFetchCount(all.length);
         if (!d.hasMore || items.length < 500) break;
         offset += 500;
+        page++;
       }
       setResults(all);
       setSearched(true);
@@ -283,7 +299,108 @@ const ItemMaster: React.FC = () => {
     setSearched(false);
     setSearchError('');
     setLastUrl('');
+    setParamsOpen(true);
   };
+
+  // ── Export to Excel ──────────────────────────────────────────────────────────
+  const handleExport = useCallback(async () => {
+    if (!results.length) return;
+    setExporting(true);
+    try {
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Item Master');
+
+      const headerFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF203864' } };
+      const white  = { argb: 'FFFFFFFF' };
+      const numFmt = '#,##0.00';
+
+      const cols = [
+        'Item Number', 'Description', 'Old Item Code', 'Barcode',
+        'Org Code', 'Inv Org Code', 'UOM', 'Status',
+        'Price', 'Sales Account',
+        'Inv Flag', 'Stock Flag', 'Asset Flag',
+        'Brand', 'Type', 'RMA', 'Rep Status', 'Category',
+        'Attr 6', 'Attr 7', 'Attr 8', 'Attr 9', 'Attr 10',
+        'Instance',
+      ];
+
+      // Title row
+      ws.mergeCells(1, 1, 1, cols.length);
+      const titleCell = ws.getCell(1, 1);
+      titleCell.value = `Item Master — ${form.getFieldValue('org') ?? ''}`;
+      titleCell.font = { bold: true, size: 13, color: white };
+      titleCell.fill = headerFill;
+      titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws.getRow(1).height = 22;
+
+      // Filter summary row
+      ws.mergeCells(2, 1, 2, cols.length);
+      const vals = form.getFieldsValue();
+      const filters = [
+        vals.itemNumber  && `Item: ${vals.itemNumber}`,
+        vals.description && `Desc: ${vals.description}`,
+        vals.status      && `Status: ${vals.status}`,
+        vals.search      && `Search: ${vals.search}`,
+      ].filter(Boolean).join('  |  ');
+      ws.getCell(2, 1).value = filters || 'All items';
+      ws.getCell(2, 1).font = { italic: true, size: 10, color: { argb: 'FF444444' } };
+      ws.getCell(2, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF3FA' } };
+      ws.getRow(2).height = 16;
+
+      // Stats row
+      ws.mergeCells(3, 1, 3, cols.length);
+      ws.getCell(3, 1).value = `Exported: ${new Date().toLocaleString()}  |  Records: ${results.length.toLocaleString()}`;
+      ws.getCell(3, 1).font = { size: 10, color: { argb: 'FF666666' } };
+      ws.getCell(3, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF3FA' } };
+
+      // Column headers
+      cols.forEach((label, i) => {
+        const cell = ws.getCell(4, i + 1);
+        cell.value = label;
+        cell.fill = headerFill;
+        cell.font = { bold: true, size: 10, color: white };
+        cell.alignment = { horizontal: 'center' };
+        cell.border = { bottom: { style: 'thin', color: { argb: 'FFFFFFFF' } } };
+      });
+      ws.getRow(4).height = 16;
+
+      // Data rows
+      const evenFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF7F7F7' } };
+      results.forEach((row, idx) => {
+        const r = ws.addRow([
+          row.item_number, row.description, row.old_item_code, row.barcode ?? '',
+          row.organization_code, row.inventory_org_code ?? '', row.primary_uom_code,
+          row.inventory_item_status_code,
+          row.item_price?.trim() ? parseFloat(row.item_price) : null,
+          row.sales_account?.trim() ?? '',
+          row.inventory_item_flag, row.stock_enabled_flag, row.inventory_asset_flag,
+          row.attribute1, row.attribute2, row.attribute3, row.attribute4, row.attribute5,
+          row.attribute6, row.attribute7, row.attribute8, row.attribute9, row.attribute10,
+          row.instance_name ?? '',
+        ]);
+        r.font = { size: 10 };
+        if (idx % 2 === 1) r.fill = evenFill;
+        // price column (col 9)
+        const priceCell = r.getCell(9);
+        if (priceCell.value != null) priceCell.numFmt = numFmt;
+      });
+
+      // Column widths
+      const widths = [16, 40, 16, 14, 10, 12, 8, 12, 10, 16, 9, 9, 9, 14, 12, 10, 12, 12, 10, 10, 10, 10, 10, 14];
+      ws.columns.forEach((col, i) => { col.width = widths[i] ?? 12; });
+
+      // Freeze header rows
+      ws.views = [{ state: 'frozen', xSplit: 0, ySplit: 4, activeCell: 'A5' }];
+
+      const buf = await wb.xlsx.writeBuffer();
+      const org = form.getFieldValue('org') ?? 'items';
+      saveAs(new Blob([buf]), `ItemMaster_${org}_${new Date().toISOString().slice(0,10)}.xlsx`);
+    } catch (e: any) {
+      message.error(`Export failed: ${e.message}`);
+    } finally {
+      setExporting(false);
+    }
+  }, [results, form]);
 
   // ── Attribute drawer ─────────────────────────────────────────────────────────
   const openDrawer = (attrKey: string) => {
@@ -402,131 +519,149 @@ const ItemMaster: React.FC = () => {
         </Row>
       )}
 
-      {/* Search form */}
-      <Card
-        style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 16 }}
-        styles={{ body: { padding: '16px 20px 12px' } }}
-        title={
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      {/* Search form — collapsible */}
+      <Collapse
+        activeKey={paramsOpen ? ['params'] : []}
+        onChange={keys => setParamsOpen(keys.includes('params'))}
+        style={{ marginBottom: 16, borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
+        items={[{
+          key: 'params',
+          label: (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+              <Space>
+                <SearchOutlined style={{ color: REDWOOD.primary }} />
+                <Text strong style={{ fontSize: 13 }}>Search Parameters</Text>
+                {!paramsOpen && searched && (
+                  <Tag color="blue" style={{ borderRadius: 10, fontSize: 11 }}>
+                    {results.length.toLocaleString()} results loaded
+                  </Tag>
+                )}
+              </Space>
+              <Space size={6} onClick={e => e.stopPropagation()}>
+                <Tooltip title="View API endpoint and test">
+                  <Button size="small" icon={<ApiOutlined />}
+                    onClick={() => { setApiResponse(null); setApiError(''); setApiOpen(true); }}
+                    style={{ fontSize: 11, color: REDWOOD.info, borderColor: REDWOOD.info }}>
+                    API
+                  </Button>
+                </Tooltip>
+              </Space>
+            </div>
+          ),
+          children: (
+            <>
+              {orgsError && (
+                <Alert type="warning" message={`Could not load organizations: ${orgsError}`}
+                  style={{ marginBottom: 12 }} closable />
+              )}
+              <Form form={form} layout="vertical">
+                <Row gutter={[16, 0]}>
+                  {/* Organization — mandatory */}
+                  <Col xs={24} sm={12} md={6}>
+                    <Form.Item
+                      name="org"
+                      label={
+                        <Space size={4}>
+                          <Text style={{ fontSize: 12 }}>Organization</Text>
+                          <Tag color="error" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>required</Tag>
+                        </Space>
+                      }
+                      style={{ marginBottom: 12 }}
+                    >
+                      <Select
+                        placeholder={orgsLoading ? 'Loading...' : 'Select organization'}
+                        options={orgs}
+                        loading={orgsLoading}
+                        showSearch
+                        allowClear
+                        filterOption={(input, opt) =>
+                          (opt?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                        }
+                        style={{ width: '100%' }}
+                        notFoundContent={orgsLoading ? <Spin size="small" /> : 'No organizations found'}
+                      />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} sm={12} md={6}>
+                    <Form.Item name="itemNumber" label={<Text style={{ fontSize: 12 }}>Item Number</Text>} style={{ marginBottom: 12 }}>
+                      <Input placeholder="Partial match" allowClear />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} sm={12} md={6}>
+                    <Form.Item name="description" label={<Text style={{ fontSize: 12 }}>Description</Text>} style={{ marginBottom: 12 }}>
+                      <Input placeholder="Partial match" allowClear />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} sm={12} md={6}>
+                    <Form.Item name="search" label={<Text style={{ fontSize: 12 }}>Universal Search</Text>} style={{ marginBottom: 12 }}>
+                      <Input placeholder="Searches all fields" allowClear />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} sm={8} md={4}>
+                    <Form.Item name="status" label={<Text style={{ fontSize: 12 }}>Status</Text>} style={{ marginBottom: 12 }}>
+                      <Select placeholder="Any" options={statusOptions} allowClear />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} sm={8} md={4}>
+                    <Form.Item name="barcode" label={<Text style={{ fontSize: 12 }}>Barcode</Text>} style={{ marginBottom: 12 }}>
+                      <Input placeholder="Exact barcode" allowClear />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} sm={8} md={4}>
+                    <Form.Item name="attr1" label={<Text style={{ fontSize: 12 }}>Brand (Attr 1)</Text>} style={{ marginBottom: 12 }}>
+                      <Input placeholder="e.g. EMC" allowClear />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} sm={8} md={4}>
+                    <Form.Item name="attr5" label={<Text style={{ fontSize: 12 }}>Category (Attr 5)</Text>} style={{ marginBottom: 12 }}>
+                      <Input placeholder="e.g. NORMAL" allowClear />
+                    </Form.Item>
+                  </Col>
+                </Row>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <Button
+                    type="primary"
+                    icon={<SearchOutlined />}
+                    onClick={handleSearch}
+                    disabled={searching}
+                    style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary, fontWeight: 600, minWidth: 100 }}
+                  >
+                    Search
+                  </Button>
+                  <Button icon={<ReloadOutlined />} onClick={handleReset} disabled={searching}>
+                    Clear
+                  </Button>
+                </div>
+              </Form>
+            </>
+          ),
+        }]}
+      />
+
+      {/* Fetch progress */}
+      {searching && (
+        <Card style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 16 }}
+          styles={{ body: { padding: '14px 20px' } }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
             <Space>
-              <SearchOutlined style={{ color: REDWOOD.primary }} />
-              <Text strong style={{ fontSize: 13 }}>Search Parameters</Text>
-            </Space>
-            <Tooltip title="View API endpoint and test">
-              <Button size="small" icon={<ApiOutlined />}
-                onClick={() => { setApiResponse(null); setApiError(''); setApiOpen(true); }}
-                style={{ fontSize: 11, color: REDWOOD.info, borderColor: REDWOOD.info }}>
-                API
-              </Button>
-            </Tooltip>
-          </div>
-        }
-      >
-        {orgsError && (
-          <Alert type="warning" message={`Could not load organizations: ${orgsError}`}
-            style={{ marginBottom: 12 }} closable />
-        )}
-        <Form form={form} layout="vertical">
-          <Row gutter={[16, 0]}>
-            {/* Organization — mandatory */}
-            <Col xs={24} sm={12} md={6}>
-              <Form.Item
-                name="org"
-                label={
-                  <Space size={4}>
-                    <Text style={{ fontSize: 12 }}>Organization</Text>
-                    <Tag color="error" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>required</Tag>
-                  </Space>
-                }
-                style={{ marginBottom: 12 }}
-              >
-                <Select
-                  placeholder={orgsLoading ? 'Loading...' : 'Select organization'}
-                  options={orgs}
-                  loading={orgsLoading}
-                  showSearch
-                  allowClear
-                  filterOption={(input, opt) =>
-                    (opt?.label ?? '').toLowerCase().includes(input.toLowerCase())
-                  }
-                  style={{ width: '100%' }}
-                  notFoundContent={orgsLoading ? <Spin size="small" /> : 'No organizations found'}
-                />
-              </Form.Item>
-            </Col>
-
-            {/* Item Number */}
-            <Col xs={24} sm={12} md={6}>
-              <Form.Item name="itemNumber" label={<Text style={{ fontSize: 12 }}>Item Number</Text>} style={{ marginBottom: 12 }}>
-                <Input placeholder="e.g. 005049573 (partial match)" allowClear />
-              </Form.Item>
-            </Col>
-
-            {/* Description */}
-            <Col xs={24} sm={12} md={6}>
-              <Form.Item name="description" label={<Text style={{ fontSize: 12 }}>Description</Text>} style={{ marginBottom: 12 }}>
-                <Input placeholder="Partial description..." allowClear />
-              </Form.Item>
-            </Col>
-
-            {/* Universal search */}
-            <Col xs={24} sm={12} md={6}>
-              <Form.Item name="search" label={<Text style={{ fontSize: 12 }}>Universal Search</Text>} style={{ marginBottom: 12 }}>
-                <Input placeholder="Searches all fields..." allowClear />
-              </Form.Item>
-            </Col>
-
-            {/* Status */}
-            <Col xs={24} sm={8} md={4}>
-              <Form.Item name="status" label={<Text style={{ fontSize: 12 }}>Status</Text>} style={{ marginBottom: 12 }}>
-                <Select placeholder="Any" options={statusOptions} allowClear />
-              </Form.Item>
-            </Col>
-
-            {/* Barcode */}
-            <Col xs={24} sm={8} md={4}>
-              <Form.Item name="barcode" label={<Text style={{ fontSize: 12 }}>Barcode</Text>} style={{ marginBottom: 12 }}>
-                <Input placeholder="Exact barcode" allowClear />
-              </Form.Item>
-            </Col>
-
-            {/* Brand (attr1) */}
-            <Col xs={24} sm={8} md={4}>
-              <Form.Item name="attr1" label={<Text style={{ fontSize: 12 }}>Brand (Attr 1)</Text>} style={{ marginBottom: 12 }}>
-                <Input placeholder="e.g. EMC" allowClear />
-              </Form.Item>
-            </Col>
-
-            {/* Category (attr5) */}
-            <Col xs={24} sm={8} md={4}>
-              <Form.Item name="attr5" label={<Text style={{ fontSize: 12 }}>Category (Attr 5)</Text>} style={{ marginBottom: 12 }}>
-                <Input placeholder="e.g. NORMAL" allowClear />
-              </Form.Item>
-            </Col>
-          </Row>
-
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <Button
-              type="primary"
-              icon={searching ? <Spin size="small" /> : <SearchOutlined />}
-              onClick={handleSearch}
-              disabled={searching}
-              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary, fontWeight: 600, minWidth: 100 }}
-            >
-              {searching ? 'Searching...' : 'Search'}
-            </Button>
-            {searching
-              ? <Button danger icon={<StopOutlined />} onClick={handleCancel}>Cancel</Button>
-              : <Button icon={<ReloadOutlined />} onClick={handleReset}>Clear</Button>
-            }
-            {searched && !searching && (
-              <Text type="secondary" style={{ fontSize: 12, marginLeft: 4 }}>
-                {results.length.toLocaleString()} result{results.length !== 1 ? 's' : ''}
+              <Spin size="small" />
+              <Text strong style={{ fontSize: 13 }}>
+                Fetching page {fetchPage} — {fetchCount.toLocaleString()} items loaded
+                {totalCount ? ` of ${totalCount.toLocaleString()}` : ''}
               </Text>
-            )}
+            </Space>
+            <Button danger size="small" icon={<StopOutlined />} onClick={handleCancel}>
+              Cancel
+            </Button>
           </div>
-        </Form>
-      </Card>
+          <Progress
+            percent={totalCount && totalCount > 0 ? Math.min(Math.round((fetchCount / totalCount) * 100), 99) : undefined}
+            status="active"
+            strokeColor={REDWOOD.primary}
+            format={p => totalCount ? `${p}%` : `Page ${fetchPage}`}
+          />
+        </Card>
+      )}
 
       {searchError && (
         <Alert type="error" message={searchError} style={{ marginBottom: 16 }} closable
@@ -536,13 +671,32 @@ const ItemMaster: React.FC = () => {
       {/* Results */}
       {searched && !searching && (
         <Card style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }} styles={{ body: { padding: 0 } }}>
-          <div style={{ padding: '10px 16px', borderBottom: `1px solid ${REDWOOD.neutral200}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text strong style={{ fontSize: 13 }}>Results</Text>
+          <div style={{
+            padding: '10px 16px', borderBottom: `1px solid ${REDWOOD.neutral200}`,
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          }}>
+            <Space>
+              <Text strong style={{ fontSize: 13 }}>Results</Text>
+              <Tag style={{ borderRadius: 10 }} color="blue">
+                {results.length.toLocaleString()} items
+              </Tag>
+            </Space>
             <Space size={8}>
-              <Text type="secondary" style={{ fontSize: 11, fontFamily: 'monospace', maxWidth: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <Text
+                type="secondary"
+                style={{ fontSize: 10, fontFamily: 'monospace', maxWidth: 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}
+                title={lastUrl}
+              >
                 {lastUrl}
               </Text>
-              <Text type="secondary" style={{ fontSize: 12 }}>{results.length.toLocaleString()} items</Text>
+              <Button
+                icon={<DownloadOutlined />}
+                loading={exporting}
+                onClick={handleExport}
+                style={{ color: REDWOOD.success, borderColor: REDWOOD.success, fontWeight: 600 }}
+              >
+                Export Excel
+              </Button>
             </Space>
           </div>
           <Table
@@ -554,7 +708,7 @@ const ItemMaster: React.FC = () => {
             scroll={{ x: 1400 }}
             pagination={{
               pageSize: 100, showSizeChanger: true,
-              pageSizeOptions: ['50', '100', '250'],
+              pageSizeOptions: ['50', '100', '250', '500'],
               showTotal: t => `${t.toLocaleString()} records`,
             }}
           />
