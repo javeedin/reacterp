@@ -535,6 +535,9 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
   }, []);
 
+  // ── Selection difference — kept in state so useCallback hooks can depend on it ──
+  const [difference, setDifference] = useState(0);
+
   // ── Create External Transaction modal ──────────────────────────────────────
   const [extTxnOpen, setExtTxnOpen]               = useState(false);
   const [extTxnForm]                              = Form.useForm();
@@ -2146,6 +2149,16 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     );
   })();
 
+  // Keep `difference` state in sync with current selections
+  const _stmtSel = sumSelected(stmtLines, selectedStmtKeys);
+  const _sysSel  = sumSelected(filteredSysTxns, selectedSysKeys);
+  useEffect(() => {
+    setDifference(_stmtSel - _sysSel);
+  }, [_stmtSel, _sysSel]);
+
+  const stmtSelectedAmount = _stmtSel;
+  const sysSelectedAmount  = _sysSel;
+
   const exportToExcel = useCallback(async () => {
     if (!lastParams) { msgApi.warning('Run a search first before exporting'); return; }
     setExporting(true);
@@ -2258,10 +2271,6 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     selectedRowKeys: selectedSysKeys,
     onChange: (keys) => setSelectedSysKeys(keys),
   };
-
-  const stmtSelectedAmount = sumSelected(stmtLines, selectedStmtKeys);
-  const sysSelectedAmount  = sumSelected(filteredSysTxns, selectedSysKeys);
-  const difference         = stmtSelectedAmount - sysSelectedAmount;
 
   const canReconcile = selectedStmtKeys.length > 0 && selectedSysKeys.length > 0;
 
