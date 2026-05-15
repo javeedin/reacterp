@@ -10,7 +10,7 @@ import type { ColumnsType } from 'antd/es/table';
 import type { TableRowSelection } from 'antd/es/table/interface';
 import {
   HomeOutlined, ShoppingCartOutlined, PlusOutlined, DeleteOutlined,
-  EditOutlined, SaveOutlined, CloseOutlined, SearchOutlined,
+  EditOutlined, SaveOutlined, CloseOutlined, SearchOutlined, ApiOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -133,6 +133,8 @@ const CreatePurchaseOrder: React.FC = () => {
   const [selectedSupplier, setSelectedSupplier] = useState<any>(null);
   const [supplierSites, setSupplierSites] = useState<any[]>([]);
   const [sitesLoading, setSitesLoading] = useState(false);
+  const [supplierApiUrl, setSupplierApiUrl] = useState('');
+  const [supplierApiModalOpen, setSupplierApiModalOpen] = useState(false);
 
   const [lovLoading, setLovLoading] = useState(false);
   const [orgsLoading, setOrgsLoading] = useState(false);
@@ -167,12 +169,11 @@ const CreatePurchaseOrder: React.FC = () => {
 
   const handleSupplierSearch = useCallback(async (term: string) => {
     if (!term || term.length < 2) return;
+    const url = `${FUSION_BASE}/suppliers?q=Supplier+like+"${encodeURIComponent(term)}*"&limit=20`;
+    setSupplierApiUrl(url);
     setSuppliersLoading(true);
     try {
-      const r = await fetch(
-        `${FUSION_BASE}/suppliers?q=Supplier+like+"${encodeURIComponent(term)}*"&limit=20`,
-        { headers: FUSION_HDRS }
-      );
+      const r = await fetch(url, { headers: FUSION_HDRS });
       const d = await r.json();
       setSupplierResults(d.items ?? []);
     } catch {
@@ -831,7 +832,19 @@ const CreatePurchaseOrder: React.FC = () => {
         {/* Supplier Search Modal */}
         <Modal
           open={supplierModalOpen}
-          title="Search Supplier"
+          title={
+            <Space>
+              <span>Search Supplier</span>
+              <Tooltip title="Show last API call">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<ApiOutlined style={{ color: supplierApiUrl ? REDWOOD.info : REDWOOD.neutral300 }} />}
+                  onClick={() => supplierApiUrl && setSupplierApiModalOpen(true)}
+                />
+              </Tooltip>
+            </Space>
+          }
           width={700}
           onCancel={() => setSupplierModalOpen(false)}
           footer={<Button onClick={() => setSupplierModalOpen(false)}>Close</Button>}
@@ -886,6 +899,19 @@ const CreatePurchaseOrder: React.FC = () => {
               },
             ]}
           />
+        </Modal>
+
+        {/* Supplier API URL Modal */}
+        <Modal
+          open={supplierApiModalOpen}
+          title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>Supplier API Call</span></Space>}
+          width={620}
+          onCancel={() => setSupplierApiModalOpen(false)}
+          footer={<Button onClick={() => setSupplierApiModalOpen(false)}>Close</Button>}
+        >
+          <div style={{ background: REDWOOD.neutral100, borderRadius: 6, padding: 12, wordBreak: 'break-all' }}>
+            <Text copyable style={{ fontFamily: 'monospace', fontSize: 12 }}>{supplierApiUrl}</Text>
+          </div>
         </Modal>
 
         {/* Add Item Modal */}
