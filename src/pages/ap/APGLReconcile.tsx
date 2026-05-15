@@ -1,11 +1,12 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import {
   Card, Form, Select, DatePicker, Button, Table, Tag, Statistic, Row, Col,
-  Space, Typography, Alert, Segmented, Tooltip,
+  Space, Typography, Alert, Segmented, Tooltip, Modal, Input,
 } from 'antd';
 import {
   SearchOutlined, ReloadOutlined,
   CheckCircleOutlined, WarningOutlined, CloseCircleOutlined,
+  ApiOutlined, CopyOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
@@ -15,6 +16,14 @@ const { RangePicker } = DatePicker;
 const { Text } = Typography;
 
 const APEX_BASE = APEX_DB_CONFIG.baseUrl;
+
+const REDWOOD = {
+  primary:   '#C74634',
+  success:   '#1D7B4D',
+  info:      '#0572CE',
+  warning:   '#A86C00',
+  neutral600:'#6B6B6B',
+};
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -33,23 +42,19 @@ interface ReconRow {
   postingStatus:    string;
   glHeaderId:       number | null;
   postedDate:       string | null;
-  // SLA
   slaEnteredDr:     number;
   slaEnteredCr:     number;
   slaLineCount:     number;
-  // GL
   glJournalName:    string | null;
   glBatchStatus:    string | null;
   glEnteredDr:      number;
   glEnteredCr:      number;
   glLineCount:      number;
-  // AP (originating transaction)
   apAmount:         number | null;
   apNumber:         string | null;
   apDate:           string | null;
   apStatus:         string | null;
   apSupplier:       string | null;
-  // Three-way balance
   apVsSlaDiff:      number;
   slaVsGlDiff:      number;
   apMatchesSla:     boolean;
@@ -67,8 +72,6 @@ interface Summary {
   isFullyBalanced: boolean;
 }
 
-interface BusinessUnit { businessUnitName: string; }
-
 const SOURCE_TABLE_OPTIONS = [
   { value: 'AP_INVOICES',               label: 'AP Invoices' },
   { value: 'AP_PAYMENTS',               label: 'AP Payments' },
@@ -85,7 +88,6 @@ const STATUS_OPTIONS = [
 const fmt = (n: number | null | undefined, digits = 2) =>
   n == null ? '–' : n.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
-// Three-way status tag: fully balanced / partial gap / full gap
 function BalanceTag({ row }: { row: ReconRow }) {
   if (row.isFullyBalanced)
     return <Tag icon={<CheckCircleOutlined />} color="success" style={{ fontSize: 11 }}>Balanced</Tag>;
@@ -112,13 +114,31 @@ function BalanceTag({ row }: { row: ReconRow }) {
 
 export default function APGLReconcile() {
   const [form] = Form.useForm();
-  const [businessUnits, setBusinessUnits] = useState<BusinessUnit[]>([]);
+
+  const [businessUnits, setBusinessUnits] = useState<string[]>([]);
   const [buLoading, setBuLoading]         = useState(false);
   const [rows, setRows]                   = useState<ReconRow[]>([]);
   const [summary, setSummary]             = useState<Summary | null>(null);
   const [loading, setLoading]             = useState(false);
   const [error, setError]                 = useState<string | null>(null);
   const [filter, setFilter]               = useState<'ALL' | 'BALANCED' | 'UNBALANCED'>('ALL');
+  const [lastCalledUrl, setLastCalledUrl] = useState<string>('');
+  const [apiModalOpen, setApiModalOpen]   = useState(false);
+
+  // ── Derived API URL (updates as form values change) ──────────────────────────
+  const previewUrl = useMemo(() => {
+    const values = form.getFieldsValue();
+    const [dateFrom, dateTo] = values.dateRange
+      ? [values.dateRange[0]?.format('YYYY-MM-DD'), values.dateRange[1]?.format('YYYY-MM-DD')]
+      : [null, null];
+    const params = new URLSearchParams({ moduleName: 'AP', limit: '2000' });
+    if (values.businessUnit)     params.set('businessUnit',    values.businessUnit);
+    if (dateFrom)                params.set('dateFrom',         dateFrom);
+    if (dateTo)                  params.set('dateTo',           dateTo);
+    if (values.sourceTable)      params.set('sourceTable',      values.sourceTable);
+    if (values.accountingStatus) params.set('accountingStatus', values.accountingStatus);
+    return `${APEX_BASE}/ap/reconciliation?${params}`;
+  }, [form]);
 
   const loadBUs = useCallback(async () => {
     if (businessUnits.length > 0) return;
@@ -126,9 +146,11 @@ export default function APGLReconcile() {
     try {
       const res  = await fetch(`${APEX_BASE}/gl/businessunits`);
       const data = await res.json();
-      setBusinessUnits((data.items ?? []).map((b: any) => ({
-        businessUnitName: b.BUSINESS_UNIT_NAME ?? b.businessUnitName,
-      })));
+      // ORDS json/collection returns lowercase snake_case field names
+      const names: string[] = (data.items ?? [])
+        .map((b: any) => b.business_unit_name ?? b.BUSINESS_UNIT_NAME ?? b.businessUnitName)
+        .filter(Boolean);
+      setBusinessUnits(names);
     } catch { /* silently ignore */ } finally { setBuLoading(false); }
   }, [businessUnits.length]);
 
@@ -147,7 +169,10 @@ export default function APGLReconcile() {
       if (values.sourceTable)      params.set('sourceTable',      values.sourceTable);
       if (values.accountingStatus) params.set('accountingStatus', values.accountingStatus);
 
-      const res  = await fetch(`${APEX_BASE}/ap/reconciliation?${params}`);
+      const url = `${APEX_BASE}/ap/reconciliation?${params}`;
+      setLastCalledUrl(url);
+
+      const res  = await fetch(url);
       const data = await res.json();
       if (data.error) throw new Error(data.message ?? 'API error');
 
@@ -194,9 +219,7 @@ export default function APGLReconcile() {
       key: 'apNumber',
       width: 140,
       render: (_, r) => (
-        <Text code style={{ fontSize: 11 }}>
-          {r.apNumber ?? r.sourceNumber ?? '—'}
-        </Text>
+        <Text code style={{ fontSize: 11 }}>{r.apNumber ?? r.sourceNumber ?? '—'}</Text>
       ),
     },
     {
@@ -222,12 +245,12 @@ export default function APGLReconcile() {
       width: 120,
       align: 'right',
       render: (v, r) => (
-        <Text style={{ fontSize: 11, color: !r.apMatchesSla && v != null ? '#fa8c16' : undefined }}>
+        <Text style={{ fontSize: 11, color: !r.apMatchesSla && v != null ? REDWOOD.warning : undefined }}>
           {fmt(v)}
         </Text>
       ),
     },
-    // ── AP→SLA check ────────────────────────────────────────────────────────
+    // ── AP↔SLA check ────────────────────────────────────────────────────────
     {
       title: 'AP↔SLA',
       key: 'apVsSla',
@@ -236,9 +259,9 @@ export default function APGLReconcile() {
       render: (_, r) => r.apAmount == null
         ? <Text type="secondary" style={{ fontSize: 10 }}>N/A</Text>
         : r.apMatchesSla
-          ? <CheckCircleOutlined style={{ color: '#52c41a' }} />
+          ? <CheckCircleOutlined style={{ color: REDWOOD.success }} />
           : <Tooltip title={`Diff: ${fmt(r.apVsSlaDiff)}`}>
-              <WarningOutlined style={{ color: '#fa8c16' }} />
+              <WarningOutlined style={{ color: REDWOOD.warning }} />
             </Tooltip>,
     },
     // ── SLA leg ─────────────────────────────────────────────────────────────
@@ -256,16 +279,16 @@ export default function APGLReconcile() {
       dataIndex: 'slaEnteredDr',
       width: 120,
       align: 'right',
-      render: v => <Text style={{ fontSize: 11 }}>{fmt(v)}</Text>,
+      render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{fmt(v)}</Text>,
     },
     {
       title: 'SLA CR',
       dataIndex: 'slaEnteredCr',
       width: 120,
       align: 'right',
-      render: v => <Text style={{ fontSize: 11 }}>{fmt(v)}</Text>,
+      render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{fmt(v)}</Text>,
     },
-    // ── SLA→GL check ────────────────────────────────────────────────────────
+    // ── SLA↔GL check ────────────────────────────────────────────────────────
     {
       title: 'SLA↔GL',
       key: 'slaVsGl',
@@ -274,9 +297,9 @@ export default function APGLReconcile() {
       render: (_, r) => r.glHeaderId == null
         ? <Tooltip title="No GL journal"><CloseCircleOutlined style={{ color: '#ff4d4f' }} /></Tooltip>
         : r.slaMatchesGl
-          ? <CheckCircleOutlined style={{ color: '#52c41a' }} />
+          ? <CheckCircleOutlined style={{ color: REDWOOD.success }} />
           : <Tooltip title={`Diff: ${fmt(r.slaVsGlDiff)}`}>
-              <WarningOutlined style={{ color: '#fa8c16' }} />
+              <WarningOutlined style={{ color: REDWOOD.warning }} />
             </Tooltip>,
     },
     // ── GL leg ──────────────────────────────────────────────────────────────
@@ -304,7 +327,7 @@ export default function APGLReconcile() {
       width: 120,
       align: 'right',
       render: (v, r) => (
-        <Text style={{ fontSize: 11, color: !r.slaMatchesGl && r.glHeaderId != null ? '#fa8c16' : undefined }}>
+        <Text style={{ fontSize: 11, fontFamily: 'monospace', color: !r.slaMatchesGl && r.glHeaderId != null ? REDWOOD.warning : undefined }}>
           {fmt(v)}
         </Text>
       ),
@@ -314,17 +337,25 @@ export default function APGLReconcile() {
       dataIndex: 'glEnteredCr',
       width: 120,
       align: 'right',
-      render: v => <Text style={{ fontSize: 11 }}>{fmt(v)}</Text>,
+      render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{fmt(v)}</Text>,
     },
     {
       title: 'Period',
       dataIndex: 'periodName',
       width: 90,
     },
+    {
+      title: 'Currency',
+      dataIndex: 'currencyCode',
+      width: 80,
+    },
   ];
+
+  // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
     <div style={{ padding: '16px 20px' }}>
+
       {/* Search form */}
       <Card size="small" style={{ marginBottom: 16 }}>
         <Form
@@ -332,15 +363,21 @@ export default function APGLReconcile() {
           layout="inline"
           onFinish={handleSearch}
           initialValues={{ dateRange: [dayjs().startOf('month'), dayjs()] }}
+          onValuesChange={() => form.validateFields().catch(() => {})}
         >
           <Form.Item name="businessUnit" label="Business Unit" style={{ minWidth: 280 }}>
             <Select
               placeholder="Select business unit"
-              allowClear showSearch loading={buLoading} onFocus={loadBUs}
+              allowClear
+              showSearch
+              loading={buLoading}
+              onFocus={loadBUs}
               filterOption={(input, opt) =>
-                (opt?.label as string ?? '').toLowerCase().includes(input.toLowerCase())
+                String(opt?.label ?? '').toLowerCase().includes(input.toLowerCase())
               }
-              options={businessUnits.map(b => ({ value: b.businessUnitName, label: b.businessUnitName }))}
+              options={businessUnits.map(name => ({ value: name, label: name }))}
+              dropdownStyle={{ minWidth: 320 }}
+              optionFilterProp="label"
             />
           </Form.Item>
 
@@ -364,10 +401,13 @@ export default function APGLReconcile() {
               <Button icon={<ReloadOutlined />} onClick={() => {
                 form.resetFields();
                 form.setFieldValue('dateRange', [dayjs().startOf('month'), dayjs()]);
-                setRows([]); setSummary(null); setError(null);
+                setRows([]); setSummary(null); setError(null); setLastCalledUrl('');
               }}>
                 Reset
               </Button>
+              <Tooltip title="View API endpoints">
+                <Button icon={<ApiOutlined />} onClick={() => setApiModalOpen(true)} />
+              </Tooltip>
             </Space>
           </Form.Item>
         </Form>
@@ -381,27 +421,30 @@ export default function APGLReconcile() {
       {summary && (
         <Row gutter={12} style={{ marginBottom: 16 }}>
           {[
-            { title: 'Total Rows',      value: summary.totalRows,               color: undefined },
-            { title: 'AP Total',        value: fmt(summary.apTotalDr),           color: undefined },
-            { title: 'SLA Total DR',    value: fmt(summary.slaTotalDr),          color: undefined },
-            { title: 'GL Total DR',     value: fmt(summary.glTotalDr),           color: undefined },
-            { title: 'AP↔SLA Gap',     value: fmt(summary.apVsSlaDiff),         color: summary.apVsSlaDiff  > 0.01 ? '#fa8c16' : '#52c41a' },
-            { title: 'SLA↔GL Gap',     value: fmt(summary.slaVsGlDiff),         color: summary.slaVsGlDiff > 0.01 ? '#fa8c16' : '#52c41a' },
-            { title: 'Unbalanced',      value: unbalancedCount,                  color: unbalancedCount > 0 ? '#fa8c16' : '#52c41a' },
-            { title: 'Overall',         value: summary.isFullyBalanced ? 'Balanced' : 'Has Gaps',
-              color: summary.isFullyBalanced ? '#52c41a' : '#fa8c16' },
+            { title: 'Total Rows',   value: summary.totalRows,      color: undefined },
+            { title: 'AP Total',     value: fmt(summary.apTotalDr), color: undefined },
+            { title: 'SLA Total DR', value: fmt(summary.slaTotalDr),color: undefined },
+            { title: 'GL Total DR',  value: fmt(summary.glTotalDr), color: undefined },
+            { title: 'AP↔SLA Gap',  value: fmt(summary.apVsSlaDiff),  color: summary.apVsSlaDiff  > 0.01 ? REDWOOD.warning : REDWOOD.success },
+            { title: 'SLA↔GL Gap',  value: fmt(summary.slaVsGlDiff),  color: summary.slaVsGlDiff > 0.01 ? REDWOOD.warning : REDWOOD.success },
+            { title: 'Unbalanced',   value: unbalancedCount,           color: unbalancedCount > 0 ? REDWOOD.warning : REDWOOD.success },
+            { title: 'Overall',      value: summary.isFullyBalanced ? 'Balanced' : 'Has Gaps',
+              color: summary.isFullyBalanced ? REDWOOD.success : REDWOOD.warning },
           ].map(s => (
             <Col span={3} key={s.title}>
               <Card size="small">
-                <Statistic title={s.title} value={s.value}
-                  valueStyle={s.color ? { color: s.color, fontSize: 16 } : { fontSize: 16 }} />
+                <Statistic
+                  title={s.title}
+                  value={s.value}
+                  valueStyle={s.color ? { color: s.color, fontSize: 15 } : { fontSize: 15 }}
+                />
               </Card>
             </Col>
           ))}
         </Row>
       )}
 
-      {/* Filter + table */}
+      {/* Table */}
       <Card
         size="small"
         title={
@@ -435,6 +478,72 @@ export default function APGLReconcile() {
           rowClassName={r => r.isFullyBalanced ? '' : 'row-warning'}
         />
       </Card>
+
+      {/* API Modal */}
+      <Modal
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /> API Endpoints</Space>}
+        open={apiModalOpen}
+        onCancel={() => setApiModalOpen(false)}
+        footer={null}
+        width={780}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 6, fontWeight: 600 }}>
+            GET — Business Units
+          </div>
+          <Space.Compact style={{ width: '100%' }}>
+            <Input
+              value={`${APEX_BASE}/gl/businessunits`}
+              readOnly
+              style={{ fontFamily: 'monospace', fontSize: 12 }}
+            />
+            <Tooltip title="Copy">
+              <Button
+                icon={<CopyOutlined />}
+                onClick={() => navigator.clipboard.writeText(`${APEX_BASE}/gl/businessunits`)}
+              />
+            </Tooltip>
+            <Button
+              type="primary"
+              style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+              onClick={() => window.open(`${APEX_BASE}/gl/businessunits`, '_blank')}
+            >
+              Test
+            </Button>
+          </Space.Compact>
+        </div>
+
+        <div>
+          <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 6, fontWeight: 600 }}>
+            GET — AP Reconciliation (last called / current form)
+          </div>
+          <Space.Compact style={{ width: '100%' }}>
+            <Input
+              value={lastCalledUrl || previewUrl}
+              readOnly
+              style={{ fontFamily: 'monospace', fontSize: 12 }}
+            />
+            <Tooltip title="Copy">
+              <Button
+                icon={<CopyOutlined />}
+                onClick={() => navigator.clipboard.writeText(lastCalledUrl || previewUrl)}
+              />
+            </Tooltip>
+            <Button
+              type="primary"
+              style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+              onClick={() => window.open(lastCalledUrl || previewUrl, '_blank')}
+            >
+              Test
+            </Button>
+          </Space.Compact>
+          {!lastCalledUrl && (
+            <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 4 }}>
+              Preview URL — click Search to see the actual called URL
+            </div>
+          )}
+        </div>
+      </Modal>
 
       <style>{`.row-warning td { background-color: #fff7e6 !important; }`}</style>
     </div>
