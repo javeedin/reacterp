@@ -4,6 +4,42 @@
 --           in the JSON so the React client can filter
 --           accounting lines to a single payment.
 --
+-- Must update the SPEC first, then the BODY.
+-- ============================================================
+
+-- ── Step 0: Update package specification ─────────────────────────────────────
+CREATE OR REPLACE PACKAGE RR_SLA_JOURNALS_PKG AS
+
+    FUNCTION get_headers(
+        p_accounting_status  VARCHAR2 DEFAULT NULL,
+        p_module_name        VARCHAR2 DEFAULT NULL,
+        p_source_table       VARCHAR2 DEFAULT NULL,
+        p_event_type_code    VARCHAR2 DEFAULT NULL,
+        p_period_name        VARCHAR2 DEFAULT NULL,
+        p_source_number      VARCHAR2 DEFAULT NULL,
+        p_date_from          VARCHAR2 DEFAULT NULL,
+        p_date_to            VARCHAR2 DEFAULT NULL,
+        p_limit              NUMBER   DEFAULT 500
+    ) RETURN CLOB;
+
+    FUNCTION get_lines(
+        p_header_id           NUMBER   DEFAULT NULL,
+        p_accounting_status   VARCHAR2 DEFAULT NULL,
+        p_module_name         VARCHAR2 DEFAULT NULL,
+        p_line_type           VARCHAR2 DEFAULT NULL,
+        p_accounting_class    VARCHAR2 DEFAULT NULL,
+        p_account_combination VARCHAR2 DEFAULT NULL,
+        p_source_number       VARCHAR2 DEFAULT NULL,
+        p_source_id           NUMBER   DEFAULT NULL,   -- NEW
+        p_source_table        VARCHAR2 DEFAULT NULL,   -- NEW
+        p_date_from           VARCHAR2 DEFAULT NULL,
+        p_date_to             VARCHAR2 DEFAULT NULL,
+        p_limit               NUMBER   DEFAULT 500
+    ) RETURN CLOB;
+
+END RR_SLA_JOURNALS_PKG;
+/
+--
 -- Changes vs current body:
 --   get_lines:
 --     + param  p_source_id    NUMBER   DEFAULT NULL
