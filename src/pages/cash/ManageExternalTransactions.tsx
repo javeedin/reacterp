@@ -516,6 +516,17 @@ const ExternalTxnForm: React.FC<{
     const missingOffset = extTxnLines.filter(l => !l.offsetAccount);
     if (missingOffset.length > 0) { message.error('All lines must have an offset account'); return; }
 
+    const dir = values.transactionDirection ?? txnDirection;
+    const signViolation = extTxnLines.find(l => l.amount != null && (dir === 'DR' ? l.amount < 0 : l.amount > 0));
+    if (signViolation) {
+      message.error(
+        dir === 'DR'
+          ? 'Money In (DR) requires a positive (+ve) amount'
+          : 'Money Out (CR) requires a negative (−ve) amount'
+      );
+      return;
+    }
+
     setSaving(true);
 
     if (isEdit) {
