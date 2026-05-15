@@ -50,6 +50,8 @@ interface ReconRow {
   glEnteredDr:      number;
   glEnteredCr:      number;
   glLineCount:      number;
+  glDrAccount:      string | null;
+  glCrAccount:      string | null;
   apAmount:         number | null;
   apNumber:         string | null;
   apDate:           string | null;
@@ -76,6 +78,7 @@ const SOURCE_TABLE_OPTIONS = [
   { value: 'AP_INVOICES',               label: 'AP Invoices' },
   { value: 'AP_PAYMENTS',               label: 'AP Payments' },
   { value: 'RR_AP_APPLIED_PREPAYMENTS', label: 'Prepayment Applications' },
+  { value: 'CE_BANK_ACCT_TRANSFERS',    label: 'Bank Transfers (CE)' },
 ];
 
 const STATUS_OPTIONS = [
@@ -131,7 +134,7 @@ export default function APGLReconcile() {
     const [dateFrom, dateTo] = values.dateRange
       ? [values.dateRange[0]?.format('YYYY-MM-DD'), values.dateRange[1]?.format('YYYY-MM-DD')]
       : [null, null];
-    const params = new URLSearchParams({ moduleName: 'AP', limit: '2000' });
+    const params = new URLSearchParams({ limit: '2000' });
     if (values.businessUnit)     params.set('businessUnit',    values.businessUnit);
     if (dateFrom)                params.set('dateFrom',         dateFrom);
     if (dateTo)                  params.set('dateTo',           dateTo);
@@ -162,7 +165,7 @@ export default function APGLReconcile() {
         ? [values.dateRange[0].format('YYYY-MM-DD'), values.dateRange[1].format('YYYY-MM-DD')]
         : [null, null];
 
-      const params = new URLSearchParams({ moduleName: 'AP', limit: '2000' });
+      const params = new URLSearchParams({ limit: '2000' });
       if (values.businessUnit)     params.set('businessUnit',    values.businessUnit);
       if (dateFrom)                params.set('dateFrom',         dateFrom);
       if (dateTo)                  params.set('dateTo',           dateTo);
@@ -309,6 +312,22 @@ export default function APGLReconcile() {
       width: 180,
       render: v => v
         ? <Text style={{ fontSize: 11 }} ellipsis={{ tooltip: v }}>{v}</Text>
+        : <Text type="secondary">—</Text>,
+    },
+    {
+      title: 'GL DR Account',
+      dataIndex: 'glDrAccount',
+      width: 170,
+      render: v => v
+        ? <Text code style={{ fontSize: 10 }} ellipsis={{ tooltip: v }}>{v}</Text>
+        : <Text type="secondary">—</Text>,
+    },
+    {
+      title: 'GL CR Account',
+      dataIndex: 'glCrAccount',
+      width: 170,
+      render: v => v
+        ? <Text code style={{ fontSize: 10 }} ellipsis={{ tooltip: v }}>{v}</Text>
         : <Text type="secondary">—</Text>,
     },
     {
@@ -473,7 +492,7 @@ export default function APGLReconcile() {
           rowKey="slaHeaderId"
           loading={loading}
           size="small"
-          scroll={{ x: 2100 }}
+          scroll={{ x: 2450 }}
           pagination={{ pageSize: 50, showSizeChanger: true, showTotal: t => `${t} rows` }}
           rowClassName={r => r.isFullyBalanced ? '' : 'row-warning'}
         />
