@@ -333,7 +333,7 @@ const CreatePurchaseOrder: React.FC = () => {
       render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text>,
     },
     { title: 'UOM', dataIndex: 'primary_uom_code', width: 70, align: 'center' as const, render: v => v ?? '—' },
-    { title: 'Status', dataIndex: 'item_status', width: 90, render: v => v ?? '—' },
+    { title: 'Status', dataIndex: 'inventory_item_status_code', width: 90, render: (v: any) => v ?? '—' },
     {
       title: 'Price', dataIndex: 'item_price', width: 100, align: 'right' as const,
       render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{v != null ? formatNumber(parseFloat(v) || 0) : '—'}</Text>,

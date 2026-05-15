@@ -53,6 +53,7 @@ const procurementItems: MenuItemType[] = [
     label: 'Items',
     description: 'Manage item master, categories and attributes',
     color: REDWOOD.warning,
+    path: '/inventory/items',
   },
   {
     key: 'on-hand-inventory',

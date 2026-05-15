@@ -15,7 +15,7 @@ import {
   DollarOutlined, FileTextOutlined, DownOutlined, FilePdfOutlined,
   HistoryOutlined,
 } from '@ant-design/icons';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -883,6 +883,7 @@ ${po.NoteToSupplier ? `<div class="sec">Notes</div><div class="fv">${po.NoteToSu
 
 // ── Search Tab ───────────────────────────────────────────────────────────────
 const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
+  const navigate = useNavigate();
   const [form] = Form.useForm();
   const [data, setData]             = useState<RawPO[]>([]);
   const [loading, setLoading]       = useState(false);
@@ -1024,6 +1025,14 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
               Search
             </Button>
             <Button icon={<ReloadOutlined />} onClick={handleReset}>Reset</Button>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => navigate('/procurement/create-po')}
+              style={{ background: '#1D7B4D', borderColor: '#1D7B4D', borderRadius: 6, fontWeight: 600 }}
+            >
+              + Create PO
+            </Button>
             <Tooltip title="API Inspector — view web service URL and test it">
               <Button icon={<ApiOutlined />} onClick={() => { setApiResult(null); setApiOpen(true); }}
                 style={{ marginLeft: 'auto', borderColor: REDWOOD.info, color: REDWOOD.info }}>
