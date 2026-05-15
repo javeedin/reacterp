@@ -1,49 +1,56 @@
 -- ============================================================
--- Patch 86: Add SOURCE_ID to get_lines JSON output so the
---           React client can filter lines by sourceId on the
---           client side when grouping accounting events.
--- Without this, getAccountingLinesBySourceId() returns lines
--- for ALL payments (not just the requested checkId) because
--- the client-side filter sees sourceId=undefined and lets
--- all lines through.
+-- Patch 86: Add p_source_id / p_source_table params to
+--           get_lines and return h.source_id + h.event_type_code
+--           in the JSON so the React client can filter
+--           accounting lines to a single payment.
+--
+-- Changes vs current body:
+--   get_lines:
+--     + param  p_source_id    NUMBER   DEFAULT NULL
+--     + param  p_source_table VARCHAR2 DEFAULT NULL
+--     + var    v_src_id  NUMBER
+--     + var    v_event_type VARCHAR2(60)
+--     + SELECT h.source_id,   (after h.source_number)
+--     + SELECT h.event_type_code  (at end of select list)
+--     + FETCH INTO gets v_src_id, v_event_type in matching positions
+--     + WHERE  AND h.source_id    = p_source_id    (when not null)
+--     + WHERE  AND h.source_table = p_source_table (when not null)
+--     + JSON   "sourceId", "eventTypeCode"
 -- ============================================================
 
 CREATE OR REPLACE PACKAGE BODY RR_SLA_JOURNALS_PKG AS
 
     -- -----------------------------------------------------------------------
-    -- jstr / jnum helpers
+    -- Private helpers
     -- -----------------------------------------------------------------------
-    FUNCTION jstr(p IN VARCHAR2) RETURN VARCHAR2 IS
-        v VARCHAR2(32767) := p;
+    FUNCTION esc(p IN VARCHAR2) RETURN VARCHAR2 IS
     BEGIN
-        IF v IS NULL THEN RETURN 'null'; END IF;
-        v := REPLACE(v, '\',  '\\');
-        v := REPLACE(v, '"',  '\"');
-        v := REPLACE(v, CHR(10), '\n');
-        v := REPLACE(v, CHR(13), '\r');
-        v := REPLACE(v, CHR(9),  '\t');
-        RETURN '"' || v || '"';
-    END jstr;
+        RETURN REPLACE(REPLACE(p, CHR(92), CHR(92)||CHR(92)), '"', CHR(92)||'"');
+    END;
+
+    FUNCTION jstr(p IN VARCHAR2) RETURN VARCHAR2 IS
+    BEGIN
+        RETURN CASE WHEN p IS NULL THEN 'null' ELSE '"' || esc(p) || '"' END;
+    END;
 
     FUNCTION jnum(p IN NUMBER) RETURN VARCHAR2 IS
     BEGIN
-        IF p IS NULL THEN RETURN 'null'; END IF;
-        RETURN TO_CHAR(p);
-    END jnum;
+        RETURN CASE WHEN p IS NULL THEN 'null' ELSE TO_CHAR(p) END;
+    END;
 
     -- -----------------------------------------------------------------------
     -- get_headers  (unchanged)
     -- -----------------------------------------------------------------------
     FUNCTION get_headers(
-        p_accounting_status   VARCHAR2 DEFAULT NULL,
-        p_module_name         VARCHAR2 DEFAULT NULL,
-        p_source_table        VARCHAR2 DEFAULT NULL,
-        p_event_type_code     VARCHAR2 DEFAULT NULL,
-        p_period_name         VARCHAR2 DEFAULT NULL,
-        p_source_number       VARCHAR2 DEFAULT NULL,
-        p_date_from           VARCHAR2 DEFAULT NULL,
-        p_date_to             VARCHAR2 DEFAULT NULL,
-        p_limit               NUMBER   DEFAULT 500
+        p_accounting_status  VARCHAR2 DEFAULT NULL,
+        p_module_name        VARCHAR2 DEFAULT NULL,
+        p_source_table       VARCHAR2 DEFAULT NULL,
+        p_event_type_code    VARCHAR2 DEFAULT NULL,
+        p_period_name        VARCHAR2 DEFAULT NULL,
+        p_source_number      VARCHAR2 DEFAULT NULL,
+        p_date_from          VARCHAR2 DEFAULT NULL,
+        p_date_to            VARCHAR2 DEFAULT NULL,
+        p_limit              NUMBER   DEFAULT 500
     ) RETURN CLOB IS
 
         v_sql    CLOB;
@@ -51,16 +58,19 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_JOURNALS_PKG AS
         v_result CLOB := '{"items":[';
         v_sep    VARCHAR2(1) := '';
 
-        v_header_id   NUMBER;  v_module      VARCHAR2(60);  v_src_table   VARCHAR2(60);
-        v_src_id      NUMBER;  v_src_number  VARCHAR2(100); v_src_type    VARCHAR2(60);
-        v_event_type  VARCHAR2(60); v_acct_date VARCHAR2(20); v_period    VARCHAR2(20);
-        v_ledger_id   NUMBER;  v_ledger_name VARCHAR2(200); v_currency    VARCHAR2(15);
-        v_bu          VARCHAR2(100); v_le         VARCHAR2(100); v_desc   VARCHAR2(500);
-        v_acct_status VARCHAR2(20); v_post_status VARCHAR2(20);
-        v_gl_batch_id NUMBER; v_gl_batch_name VARCHAR2(200); v_gl_header_id NUMBER;
-        v_created_by  VARCHAR2(100); v_creation_date VARCHAR2(30);
-        v_posted_by   VARCHAR2(100); v_posted_date   VARCHAR2(30);
-        v_line_count  NUMBER;
+        v_header_id      NUMBER;       v_module       VARCHAR2(60);
+        v_src_table      VARCHAR2(60); v_src_id       NUMBER;
+        v_src_number     VARCHAR2(100);v_src_type     VARCHAR2(60);
+        v_event_type     VARCHAR2(60); v_acct_date    VARCHAR2(20);
+        v_period         VARCHAR2(15); v_ledger_id    NUMBER;
+        v_ledger_name    VARCHAR2(100);v_currency     VARCHAR2(15);
+        v_bu             VARCHAR2(100);v_le           VARCHAR2(100);
+        v_desc           VARCHAR2(500);v_acct_status  VARCHAR2(20);
+        v_post_status    VARCHAR2(20); v_gl_batch_id  NUMBER;
+        v_gl_batch_name  VARCHAR2(200);v_gl_header_id NUMBER;
+        v_created_by     VARCHAR2(100);v_creation_date VARCHAR2(30);
+        v_posted_by      VARCHAR2(100);v_posted_date  VARCHAR2(30);
+        v_line_count     NUMBER;
 
     BEGIN
         v_sql :=
@@ -149,10 +159,17 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_JOURNALS_PKG AS
         CLOSE v_cur;
 
         RETURN v_result || ']}';
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF v_cur%ISOPEN THEN CLOSE v_cur; END IF;
+            RETURN '{"error":true,"message":"' || REPLACE(SQLERRM,'"','\"') || '"}';
     END get_headers;
 
+
     -- -----------------------------------------------------------------------
-    -- get_lines  — now returns h.source_id so client-side filtering works
+    -- get_lines  — added p_source_id, p_source_table params;
+    --              h.source_id and h.event_type_code now in SELECT + JSON
     -- -----------------------------------------------------------------------
     FUNCTION get_lines(
         p_header_id           NUMBER   DEFAULT NULL,
@@ -162,8 +179,8 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_JOURNALS_PKG AS
         p_accounting_class    VARCHAR2 DEFAULT NULL,
         p_account_combination VARCHAR2 DEFAULT NULL,
         p_source_number       VARCHAR2 DEFAULT NULL,
-        p_source_id           NUMBER   DEFAULT NULL,
-        p_source_table        VARCHAR2 DEFAULT NULL,
+        p_source_id           NUMBER   DEFAULT NULL,   -- NEW
+        p_source_table        VARCHAR2 DEFAULT NULL,   -- NEW
         p_date_from           VARCHAR2 DEFAULT NULL,
         p_date_to             VARCHAR2 DEFAULT NULL,
         p_limit               NUMBER   DEFAULT 500
@@ -180,12 +197,12 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_JOURNALS_PKG AS
         v_ent_cr      NUMBER;        v_acc_dr      NUMBER;
         v_acc_cr      NUMBER;        v_currency    VARCHAR2(15);
         v_desc        VARCHAR2(500); v_src_number  VARCHAR2(100);
-        v_src_id      NUMBER;        v_src_table   VARCHAR2(60);
-        v_acct_date   VARCHAR2(20);
+        v_src_id      NUMBER;        -- NEW
+        v_src_table   VARCHAR2(60);  v_acct_date   VARCHAR2(20);
         v_acct_status VARCHAR2(20);  v_bu          VARCHAR2(100);
         v_le          VARCHAR2(100); v_module      VARCHAR2(60);
         v_party_type  VARCHAR2(30);  v_acct_desc   VARCHAR2(200);
-        v_event_type  VARCHAR2(60);
+        v_event_type  VARCHAR2(60);  -- NEW
 
     BEGIN
         v_sql :=
@@ -273,6 +290,7 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_JOURNALS_PKG AS
                 ',"businessUnit":'     || jstr(v_bu)         ||
                 ',"legalEntity":'      || jstr(v_le)         ||
                 ',"moduleName":'       || jstr(v_module)     ||
+                ',"partyType":'        || jstr(v_party_type) ||
                 ',"accountDescription":'|| jstr(v_acct_desc) ||
                 ',"eventTypeCode":'    || jstr(v_event_type) ||
                 '}';
@@ -281,7 +299,63 @@ CREATE OR REPLACE PACKAGE BODY RR_SLA_JOURNALS_PKG AS
         CLOSE v_cur;
 
         RETURN v_result || ']}';
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF v_cur%ISOPEN THEN CLOSE v_cur; END IF;
+            RETURN '{"error":true,"message":"' || REPLACE(SQLERRM,'"','\"') || '"}';
     END get_lines;
 
 END RR_SLA_JOURNALS_PKG;
+/
+
+
+-- ── Rebuild the ORDS GET handler to expose sourceId + sourceTable params ─────
+BEGIN
+    BEGIN
+        ORDS.DELETE_HANDLER(
+            p_module_name => 'reerp',
+            p_pattern     => 'sla/journals/lines',
+            p_method      => 'GET'
+        );
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+
+    ORDS.DEFINE_HANDLER(
+        p_module_name => 'reerp',
+        p_pattern     => 'sla/journals/lines',
+        p_method      => 'GET',
+        p_source_type => 'plsql/block',
+        p_comments    => 'Query SLA lines — delegates to RR_SLA_JOURNALS_PKG.get_lines',
+        p_source      =>
+'DECLARE
+  v_result CLOB;
+BEGIN
+  v_result := RR_SLA_JOURNALS_PKG.get_lines(
+    p_header_id           => TO_NUMBER(:headerId),
+    p_accounting_status   => :accountingStatus,
+    p_module_name         => :moduleName,
+    p_line_type           => :lineType,
+    p_accounting_class    => :accountingClass,
+    p_account_combination => :accountCombination,
+    p_source_number       => :sourceNumber,
+    p_source_id           => TO_NUMBER(:sourceId),
+    p_source_table        => :sourceTable,
+    p_date_from           => :dateFrom,
+    p_date_to             => :dateTo,
+    p_limit               => TO_NUMBER(:limit)
+  );
+  :status_code := 200;
+  OWA_UTIL.MIME_HEADER(''application/json'', TRUE);
+  HTP.PRN(v_result);
+EXCEPTION
+  WHEN OTHERS THEN
+    :status_code := 500;
+    OWA_UTIL.MIME_HEADER(''application/json'', TRUE);
+    HTP.PRN(''{"error":true,"message":"'' || REPLACE(SQLERRM,''"'',''\\"'') || ''"}'' );
+END;'
+    );
+    COMMIT;
+    DBMS_OUTPUT.PUT_LINE('Patch 86 applied: get_lines now returns sourceId + eventTypeCode');
+END;
 /
