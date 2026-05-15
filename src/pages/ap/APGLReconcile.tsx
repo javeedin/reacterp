@@ -9,7 +9,7 @@ import {
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
-import { APEX_DB_CONFIG } from '../../config/apexConfig';
+import { APEX_DB_CONFIG } from '../../config/api.config';
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
