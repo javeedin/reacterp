@@ -8,7 +8,7 @@ import {
   HomeOutlined, BarChartOutlined, DollarOutlined,
   ClockCircleOutlined, PlayCircleOutlined, FileExcelOutlined,
   FilePdfOutlined, TeamOutlined, SearchOutlined,
-  ApiOutlined, CopyOutlined,
+  ApiOutlined, CopyOutlined, FileTextOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -71,13 +71,46 @@ const REPORTS: ReportDef[] = [
   {
     key: 'aging-report',
     label: 'Supplier Balance Aging Report',
-    description: 'Outstanding payables aged by invoice date buckets as at a selected date',
+    description: 'Outstanding payables aged by overdue period per supplier — click a row to drill down to invoices',
     icon: <ClockCircleOutlined />,
     color: REDWOOD.warning,
     hasSupplierFilter: true,
     hasDateFilter: false,
     hasAgingDate: true,
   },
+  {
+    key: 'aging-by-invoice',
+    label: 'Supplier Aging by Invoice',
+    description: 'Outstanding payables aged by overdue period, one row per invoice',
+    icon: <FileTextOutlined />,
+    color: '#7B5EA7',
+    hasSupplierFilter: true,
+    hasDateFilter: false,
+    hasAgingDate: true,
+  },
+];
+
+// ─── Drill-down invoice columns (shown when expanding an aging-report row) ────
+const AGING_DRILL_COLUMNS = [
+  { title: 'Invoice #',      dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 150 },
+  { title: 'Invoice Date',   dataIndex: 'invoiceDate',   key: 'invoiceDate',   width: 110 },
+  { title: 'Due Date',       dataIndex: 'dueDate',       key: 'dueDate',       width: 110 },
+  { title: 'Invoice Amount', dataIndex: 'invoiceAmount', key: 'invoiceAmount', width: 140, align: 'right' as const,
+    render: (v: number) => <Text>{fmt(v)}</Text> },
+  { title: 'Amount Paid',    dataIndex: 'amountPaid',    key: 'amountPaid',    width: 120, align: 'right' as const,
+    render: (v: number) => <Text style={{ color: REDWOOD.success }}>{fmt(v)}</Text> },
+  { title: 'Unpaid Amount',  dataIndex: 'unpaidAmount',  key: 'unpaidAmount',  width: 130, align: 'right' as const,
+    render: (v: number) => <Text strong style={{ color: v > 0 ? REDWOOD.primary : undefined }}>{fmt(v)}</Text> },
+  { title: '1 Month Overdue',    dataIndex: 'months1',    key: 'months1',    width: 120, align: 'right' as const,
+    render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.warning : undefined }}>{fmt(v)}</Text> },
+  { title: '2 Months Overdue',   dataIndex: 'months2',    key: 'months2',    width: 130, align: 'right' as const,
+    render: (v: number) => <Text style={{ color: v > 0 ? '#D46B08' : undefined }}>{fmt(v)}</Text> },
+  { title: '3 Months Overdue',   dataIndex: 'months3',    key: 'months3',    width: 130, align: 'right' as const,
+    render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.primary : undefined }}>{fmt(v)}</Text> },
+  { title: 'Over 3 Months',      dataIndex: 'over3months', key: 'over3months', width: 130, align: 'right' as const,
+    render: (v: number) => <Text strong style={{ color: v > 0 ? '#8B0000' : undefined }}>{fmt(v)}</Text> },
+  { title: 'Unallocated',        dataIndex: 'unallocated', key: 'unallocated', width: 120, align: 'right' as const,
+    render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.neutral600 : undefined }}>{fmt(v)}</Text> },
 ];
 
 // ─── Column definitions per report ───────────────────────────────────────────
@@ -117,22 +150,41 @@ const COLUMNS: Record<string, any[]> = {
     { title: 'Bank Account',     dataIndex: 'bankAccountName', key: 'bankAccountName', ellipsis: true },
   ],
   'aging-report': [
-    { title: 'Supplier #',    dataIndex: 'supplierNumber', key: 'supplierNumber', width: 120 },
-    { title: 'Supplier Name', dataIndex: 'supplier',       key: 'supplier',       width: 200 },
-    { title: 'Current',       dataIndex: 'current',        key: 'current',        width: 110, align: 'right' as const,
-      render: (v: number) => <Text style={{ color: REDWOOD.success }}>{fmt(v)}</Text> },
-    { title: '1–30 Days',     dataIndex: 'days30',         key: 'days30',         width: 100, align: 'right' as const,
-      render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.warning : undefined }}>{fmt(v)}</Text> },
-    { title: '31–60 Days',    dataIndex: 'days60',         key: 'days60',         width: 100, align: 'right' as const,
-      render: (v: number) => <Text style={{ color: v > 0 ? '#D46B08' : undefined }}>{fmt(v)}</Text> },
-    { title: '61–90 Days',    dataIndex: 'days90',         key: 'days90',         width: 100, align: 'right' as const,
-      render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.primary : undefined }}>{fmt(v)}</Text> },
-    { title: '91–120 Days',   dataIndex: 'days120',        key: 'days120',        width: 110, align: 'right' as const,
-      render: (v: number) => <Text style={{ color: v > 0 ? '#C74634' : undefined }}>{fmt(v)}</Text> },
-    { title: '120+ Days',     dataIndex: 'days120plus',    key: 'days120plus',    width: 110, align: 'right' as const,
-      render: (v: number) => <Text strong style={{ color: v > 0 ? '#8B0000' : undefined }}>{fmt(v)}</Text> },
-    { title: 'Total',         dataIndex: 'total',          key: 'total',          width: 130, align: 'right' as const,
+    { title: 'Supplier',          dataIndex: 'supplier',       key: 'supplier',       width: 220 },
+    { title: 'Invoice Amount',    dataIndex: 'invoiceAmount',  key: 'invoiceAmount',  width: 140, align: 'right' as const,
+      render: (v: number) => <Text>{fmt(v)}</Text> },
+    { title: 'Unpaid Amount',     dataIndex: 'unpaidAmount',   key: 'unpaidAmount',   width: 140, align: 'right' as const,
       render: (v: number) => <Text strong>{fmt(v)}</Text> },
+    { title: '1 Month Overdue',   dataIndex: 'months1',        key: 'months1',        width: 130, align: 'right' as const,
+      render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.warning : undefined }}>{fmt(v)}</Text> },
+    { title: '2 Months Overdue',  dataIndex: 'months2',        key: 'months2',        width: 130, align: 'right' as const,
+      render: (v: number) => <Text style={{ color: v > 0 ? '#D46B08' : undefined }}>{fmt(v)}</Text> },
+    { title: '3 Months Overdue',  dataIndex: 'months3',        key: 'months3',        width: 130, align: 'right' as const,
+      render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.primary : undefined }}>{fmt(v)}</Text> },
+    { title: 'Over 3 Months Overdue', dataIndex: 'over3months', key: 'over3months',   width: 150, align: 'right' as const,
+      render: (v: number) => <Text strong style={{ color: v > 0 ? '#8B0000' : undefined }}>{fmt(v)}</Text> },
+    { title: 'Unallocated Amount', dataIndex: 'unallocated',   key: 'unallocated',    width: 140, align: 'right' as const,
+      render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.neutral600 : undefined }}>{fmt(v)}</Text> },
+  ],
+  'aging-by-invoice': [
+    { title: 'Supplier',          dataIndex: 'supplier',       key: 'supplier',       width: 200 },
+    { title: 'Invoice #',         dataIndex: 'invoiceNumber',  key: 'invoiceNumber',  width: 150 },
+    { title: 'Invoice Date',      dataIndex: 'invoiceDate',    key: 'invoiceDate',    width: 110 },
+    { title: 'Due Date',          dataIndex: 'dueDate',        key: 'dueDate',        width: 110 },
+    { title: 'Invoice Amount',    dataIndex: 'invoiceAmount',  key: 'invoiceAmount',  width: 140, align: 'right' as const,
+      render: (v: number) => <Text>{fmt(v)}</Text> },
+    { title: 'Unpaid Amount',     dataIndex: 'unpaidAmount',   key: 'unpaidAmount',   width: 130, align: 'right' as const,
+      render: (v: number) => <Text strong>{fmt(v)}</Text> },
+    { title: '1 Month Overdue',   dataIndex: 'months1',        key: 'months1',        width: 130, align: 'right' as const,
+      render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.warning : undefined }}>{fmt(v)}</Text> },
+    { title: '2 Months Overdue',  dataIndex: 'months2',        key: 'months2',        width: 130, align: 'right' as const,
+      render: (v: number) => <Text style={{ color: v > 0 ? '#D46B08' : undefined }}>{fmt(v)}</Text> },
+    { title: '3 Months Overdue',  dataIndex: 'months3',        key: 'months3',        width: 130, align: 'right' as const,
+      render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.primary : undefined }}>{fmt(v)}</Text> },
+    { title: 'Over 3 Months Overdue', dataIndex: 'over3months', key: 'over3months',   width: 150, align: 'right' as const,
+      render: (v: number) => <Text strong style={{ color: v > 0 ? '#8B0000' : undefined }}>{fmt(v)}</Text> },
+    { title: 'Unallocated Amount', dataIndex: 'unallocated',   key: 'unallocated',    width: 140, align: 'right' as const,
+      render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.neutral600 : undefined }}>{fmt(v)}</Text> },
   ],
 };
 
@@ -140,10 +192,14 @@ const COLUMNS: Record<string, any[]> = {
 const fmt = (v: number) =>
   Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-const daysDiff = (dateStr: string) => {
-  if (!dateStr) return 0;
-  return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
-};
+// Categorise an outstanding balance into aging buckets based on days overdue
+const agingBuckets = (age: number, bal: number) => ({
+  months1:    age >= 1  && age <= 30  ? bal : 0,
+  months2:    age >= 31 && age <= 60  ? bal : 0,
+  months3:    age >= 61 && age <= 90  ? bal : 0,
+  over3months: age > 90               ? bal : 0,
+  unallocated: age <= 0               ? bal : 0,
+});
 
 // ─── Per-tab report panel (fully isolated state) ──────────────────────────────
 const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({ report, businessUnits }) => {
@@ -160,7 +216,7 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
     if (!gridSearch.trim()) return rows;
     const q = gridSearch.toLowerCase();
     return rows.filter(r =>
-      Object.values(r).some(v => String(v ?? '').toLowerCase().includes(q))
+      Object.values(r).some(v => typeof v !== 'object' && String(v ?? '').toLowerCase().includes(q))
     );
   }, [rows, gridSearch]);
 
@@ -188,7 +244,6 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
   };
 
   const fetchSupplierBalance = async (bu: string, supplierNum: string) => {
-    // Step 1: get supplier list (filtered by BU / supplier number)
     const p = new URLSearchParams();
     if (bu)          p.set('P_BUSINESS_UNIT', bu);
     if (supplierNum) p.set('supplier_number', supplierNum);
@@ -200,7 +255,6 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
     const listData = JSON.parse(await listRes.text() || '{}');
     const suppliers: any[] = Array.isArray(listData) ? listData : (listData.items || []);
 
-    // Step 2: fetch balance summary for each supplier in parallel via PKG_SUPPLIER_BALANCE
     const results = await Promise.allSettled(
       suppliers.map(async (s: any) => {
         const sn = s.supplier_number || '';
@@ -256,11 +310,33 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
     }));
   };
 
+  // Build per-invoice aging row (shared by both aging reports)
+  const buildInvoiceAgingRow = (inv: any, supplierName: string, asAt: Date, idx: number) => {
+    const invDate = new Date(inv.invoice_date || inv.terms_date || '');
+    if (isNaN(invDate.getTime())) return null;
+    const invAmt   = Number(inv.invoice_amount || 0);
+    const paid     = Number(inv.amount_paid || 0);
+    const bal      = Number(inv.amount_remaining ?? (invAmt - paid));
+    if (bal <= 0) return null;
+    const age  = Math.floor((asAt.getTime() - invDate.getTime()) / 86400000);
+    const bkts = agingBuckets(age, bal);
+    return {
+      key:           `${inv.invoice_number || idx}-${idx}`,
+      supplier:      supplierName,
+      invoiceNumber: inv.invoice_number || inv.invoice_num || '',
+      invoiceDate:   (inv.invoice_date || '').slice(0, 10),
+      dueDate:       (inv.due_date || inv.terms_date || '').slice(0, 10),
+      invoiceAmount: invAmt,
+      amountPaid:    paid,
+      unpaidAmount:  bal,
+      ...bkts,
+    };
+  };
+
   const fetchAgingReport = async (bu: string, supplierNum: string, asAtDate: string) => {
     const asAt = asAtDate ? new Date(asAtDate) : new Date();
     asAt.setHours(0, 0, 0, 0);
 
-    // Step 1: get supplier list
     const p = new URLSearchParams();
     if (bu)          p.set('P_BUSINESS_UNIT', bu);
     if (supplierNum) p.set('supplier_number', supplierNum);
@@ -273,41 +349,97 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
     const listData = JSON.parse(await listRes.text() || '{}');
     const suppliers: any[] = Array.isArray(listData) ? listData : (listData.items || []);
 
-    // Step 2: fetch unpaid invoices per supplier in parallel
     const results = await Promise.allSettled(
       suppliers.map(async (s: any) => {
-        const sn = s.supplier_number || '';
+        const sn    = s.supplier_number || '';
+        const sName = s.supplier || sn;
         if (!sn) return null;
         const r = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${encodeURIComponent(sn)}?status=Unpaid&limit=1000`);
         if (!r.ok) return null;
         const d = JSON.parse(await r.text() || '{}');
         const invoices: any[] = Array.isArray(d) ? d : (d.items || d.invoices || []);
 
-        const row = { key: sn, supplierNumber: sn, supplier: s.supplier || sn,
-          current: 0, days30: 0, days60: 0, days90: 0, days120: 0, days120plus: 0, total: 0 };
+        const row: any = {
+          key: sn, supplierNumber: sn, supplier: sName,
+          invoiceAmount: 0, unpaidAmount: 0,
+          months1: 0, months2: 0, months3: 0, over3months: 0, unallocated: 0,
+          _invoices: [] as any[],
+        };
 
-        for (const inv of invoices) {
+        for (let i = 0; i < invoices.length; i++) {
+          const inv     = invoices[i];
           const invDate = new Date(inv.invoice_date || inv.terms_date || '');
-          if (isNaN(invDate.getTime()) || invDate > asAt) continue;
-          const bal = Number(inv.amount_remaining ?? (Number(inv.invoice_amount || 0) - Number(inv.amount_paid || 0)));
+          if (isNaN(invDate.getTime())) continue;
+          const invAmt = Number(inv.invoice_amount || 0);
+          const paid   = Number(inv.amount_paid || 0);
+          const bal    = Number(inv.amount_remaining ?? (invAmt - paid));
           if (bal <= 0) continue;
-          const age = Math.floor((asAt.getTime() - invDate.getTime()) / 86400000);
-          if      (age <= 0)   row.current    += bal;
-          else if (age <= 30)  row.days30     += bal;
-          else if (age <= 60)  row.days60     += bal;
-          else if (age <= 90)  row.days90     += bal;
-          else if (age <= 120) row.days120    += bal;
-          else                 row.days120plus += bal;
-          row.total += bal;
+          const age  = Math.floor((asAt.getTime() - invDate.getTime()) / 86400000);
+          const bkts = agingBuckets(age, bal);
+
+          row.invoiceAmount += invAmt;
+          row.unpaidAmount  += bal;
+          row.months1       += bkts.months1;
+          row.months2       += bkts.months2;
+          row.months3       += bkts.months3;
+          row.over3months   += bkts.over3months;
+          row.unallocated   += bkts.unallocated;
+
+          row._invoices.push({
+            key:           `${sn}-${i}`,
+            supplier:      sName,
+            invoiceNumber: inv.invoice_number || inv.invoice_num || '',
+            invoiceDate:   (inv.invoice_date || '').slice(0, 10),
+            dueDate:       (inv.due_date || inv.terms_date || '').slice(0, 10),
+            invoiceAmount: invAmt,
+            amountPaid:    paid,
+            unpaidAmount:  bal,
+            ...bkts,
+          });
         }
-        return row.total > 0 ? row : null;
+        return row.unpaidAmount > 0 ? row : null;
       })
     );
 
     return results
       .filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled' && r.value !== null)
       .map(r => r.value)
-      .sort((a, b) => b.total - a.total);
+      .sort((a, b) => b.unpaidAmount - a.unpaidAmount);
+  };
+
+  const fetchAgingByInvoice = async (bu: string, supplierNum: string, asAtDate: string) => {
+    const asAt = asAtDate ? new Date(asAtDate) : new Date();
+    asAt.setHours(0, 0, 0, 0);
+
+    const p = new URLSearchParams();
+    if (bu)          p.set('P_BUSINESS_UNIT', bu);
+    if (supplierNum) p.set('supplier_number', supplierNum);
+    const listUrl = `${APEX_DB_CONFIG.baseUrl}/suppliers${p.toString() ? '?' + p : ''}`;
+    const invoicePattern = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/{supplierNumber}?status=Unpaid`;
+    setApiUrls([listUrl, invoicePattern]);
+
+    const listRes = await fetch(listUrl);
+    if (!listRes.ok) throw new Error(`HTTP ${listRes.status}`);
+    const listData = JSON.parse(await listRes.text() || '{}');
+    const suppliers: any[] = Array.isArray(listData) ? listData : (listData.items || []);
+
+    const results = await Promise.allSettled(
+      suppliers.map(async (s: any) => {
+        const sn = s.supplier_number || '';
+        if (!sn) return [];
+        const r = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${encodeURIComponent(sn)}?status=Unpaid&limit=1000`);
+        if (!r.ok) return [];
+        const d = JSON.parse(await r.text() || '{}');
+        const invoices: any[] = Array.isArray(d) ? d : (d.items || d.invoices || []);
+        return invoices
+          .map((inv, i) => buildInvoiceAgingRow(inv, s.supplier || sn, asAt, i))
+          .filter(Boolean);
+      })
+    );
+
+    return results
+      .flatMap((r): any[] => r.status === 'fulfilled' ? r.value : [])
+      .sort((a, b) => b.unpaidAmount - a.unpaidAmount);
   };
 
   const handleRun = async () => {
@@ -320,6 +452,7 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
       if (report.key === 'supplier-balance')   result = await fetchSupplierBalance(bu, sn);
       if (report.key === 'payment-register')   result = await fetchPaymentRegister(bu, sn, dateFrom, dateTo);
       if (report.key === 'aging-report')       result = await fetchAgingReport(bu, sn, asAtDate);
+      if (report.key === 'aging-by-invoice')   result = await fetchAgingByInvoice(bu, sn, asAtDate);
       setRows(result); setHasRun(true);
       result.length === 0 ? message.info('No data found.') : message.success(`${result.length} records loaded.`);
     } catch (e: any) {
@@ -331,7 +464,12 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
 
   const exportExcel = () => {
     const cols = COLUMNS[report.key];
-    const ws = XLSX.utils.json_to_sheet(rows.map(r => {
+    const exportRows = report.key === 'aging-report'
+      ? rows.flatMap(r => r._invoices?.length
+          ? r._invoices.map((inv: any) => ({ ...r, ...inv }))
+          : [r])
+      : rows;
+    const ws = XLSX.utils.json_to_sheet(exportRows.map(r => {
       const obj: any = {};
       cols.forEach(c => { obj[c.title] = r[c.dataIndex as string] ?? ''; });
       return obj;
@@ -360,6 +498,46 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
   };
 
   const columns = COLUMNS[report.key];
+
+  // Aging summary fields for both aging reports
+  const AGING_FIELDS = ['invoiceAmount', 'unpaidAmount', 'months1', 'months2', 'months3', 'over3months', 'unallocated'] as const;
+
+  const agingSummary = () => {
+    const totals = AGING_FIELDS.reduce((acc, f) => {
+      acc[f] = filteredRows.reduce((s, r) => s + (r[f] || 0), 0);
+      return acc;
+    }, {} as Record<string, number>);
+    const unpaid = totals.unpaidAmount || 1;
+    const pct = (v: number) => unpaid > 0 ? ((v / unpaid) * 100).toFixed(2) + '%' : '0.00%';
+    return (
+      <Table.Summary>
+        <Table.Summary.Row style={{ background: '#f0f5ff' }}>
+          <Table.Summary.Cell index={0} colSpan={report.key === 'aging-by-invoice' ? 4 : 1}>
+            <Text strong>Total for Report</Text>
+          </Table.Summary.Cell>
+          {AGING_FIELDS.map((f, i) => (
+            <Table.Summary.Cell key={f} index={(report.key === 'aging-by-invoice' ? 4 : 1) + i} align="right">
+              <Text strong style={{ color: f === 'unpaidAmount' ? REDWOOD.primary : undefined }}>
+                {fmt(totals[f])}
+              </Text>
+            </Table.Summary.Cell>
+          ))}
+        </Table.Summary.Row>
+        <Table.Summary.Row style={{ background: '#fafafa' }}>
+          <Table.Summary.Cell index={0} colSpan={report.key === 'aging-by-invoice' ? 4 : 1}>
+            <Text type="secondary" style={{ fontSize: 11 }}>% of Unpaid</Text>
+          </Table.Summary.Cell>
+          {AGING_FIELDS.map((f, i) => (
+            <Table.Summary.Cell key={f} index={(report.key === 'aging-by-invoice' ? 4 : 1) + i} align="right">
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                {f === 'invoiceAmount' ? '' : pct(totals[f])}
+              </Text>
+            </Table.Summary.Cell>
+          ))}
+        </Table.Summary.Row>
+      </Table.Summary>
+    );
+  };
 
   return (
     <div style={{ padding: '16px 0' }}>
@@ -439,6 +617,48 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
             description={<Text type="secondary">Set parameters and click Run Report</Text>}
             style={{ padding: '40px 0' }} />
+        ) : report.key === 'aging-report' ? (
+          <Table
+            dataSource={filteredRows}
+            columns={columns}
+            rowKey="key"
+            size="small"
+            scroll={{ x: 'max-content', y: 400 }}
+            pagination={{ pageSize: 50, showSizeChanger: true, showTotal: t => `${t} suppliers` }}
+            expandable={{
+              expandedRowRender: (record: any) => (
+                <div style={{ margin: '0 0 8px 32px' }}>
+                  <Text strong style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 6 }}>
+                    Invoices — {record.supplier}
+                  </Text>
+                  <Table
+                    dataSource={record._invoices || []}
+                    columns={AGING_DRILL_COLUMNS}
+                    rowKey="key"
+                    size="small"
+                    pagination={false}
+                    scroll={{ x: 'max-content' }}
+                    summary={() => {
+                      const invs: any[] = record._invoices || [];
+                      if (invs.length === 0) return null;
+                      return (
+                        <Table.Summary.Row style={{ background: '#f6ffed' }}>
+                          <Table.Summary.Cell index={0} colSpan={3}><Text strong style={{ fontSize: 11 }}>Subtotal</Text></Table.Summary.Cell>
+                          {(['invoiceAmount', 'amountPaid', 'unpaidAmount', 'months1', 'months2', 'months3', 'over3months', 'unallocated'] as const).map((f, i) => (
+                            <Table.Summary.Cell key={f} index={3 + i} align="right">
+                              <Text strong style={{ fontSize: 11 }}>{fmt(invs.reduce((s, r) => s + (r[f] || 0), 0))}</Text>
+                            </Table.Summary.Cell>
+                          ))}
+                        </Table.Summary.Row>
+                      );
+                    }}
+                  />
+                </div>
+              ),
+              rowExpandable: (record: any) => (record._invoices || []).length > 0,
+            }}
+            summary={agingSummary}
+          />
         ) : (
           <Table dataSource={filteredRows} columns={columns} rowKey="key" size="small"
             scroll={{ x: 'max-content', y: 440 }}
@@ -453,18 +673,8 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
                   <Table.Summary.Cell index={5} align="right"><Text strong style={{ color: REDWOOD.primary }}>{fmt(filteredRows.reduce((s, r) => s + (r.outstanding || 0), 0))}</Text></Table.Summary.Cell>
                   <Table.Summary.Cell index={6} />
                 </Table.Summary.Row>
-              ) : report.key === 'aging-report' ? () => (
-                <Table.Summary.Row>
-                  <Table.Summary.Cell index={0} colSpan={2}><Text strong>Total</Text></Table.Summary.Cell>
-                  {(['current', 'days30', 'days60', 'days90', 'days120', 'days120plus', 'total'] as const).map((f, i) => (
-                    <Table.Summary.Cell key={f} index={i + 2} align="right">
-                      <Text strong style={{ color: f === 'total' ? REDWOOD.primary : undefined }}>
-                        {fmt(filteredRows.reduce((s, r) => s + (r[f] || 0), 0))}
-                      </Text>
-                    </Table.Summary.Cell>
-                  ))}
-                </Table.Summary.Row>
-              ) : report.key === 'payment-register' ? () => (
+              ) : report.key === 'aging-by-invoice' ? agingSummary
+              : report.key === 'payment-register' ? () => (
                 <Table.Summary.Row>
                   <Table.Summary.Cell index={0} colSpan={3}><Text strong>Total</Text></Table.Summary.Cell>
                   <Table.Summary.Cell index={3} align="right"><Text strong>{fmt(filteredRows.reduce((s, r) => s + (r.paymentAmount || 0), 0))}</Text></Table.Summary.Cell>
@@ -488,7 +698,7 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
           <div key={i} style={{ marginBottom: 12 }}>
             {apiUrls.length > 1 && (
               <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                {i === 0 ? 'Step 1 — Supplier List' : `Step 2 — Balance Summary (per supplier)`}
+                {i === 0 ? 'Step 1 — Supplier List' : `Step 2 — Invoices (per supplier)`}
               </Text>
             )}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
