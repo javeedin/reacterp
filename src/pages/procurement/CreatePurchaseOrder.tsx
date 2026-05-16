@@ -449,7 +449,7 @@ const CreatePurchaseOrder: React.FC = () => {
             <Form form={headerForm} layout="vertical" size="small" initialValues={{ orderDate: dayjs() }}
               style={{ '--form-item-margin-bottom': '8px' } as React.CSSProperties}>
               <style>{`.ant-form-item { margin-bottom: 8px !important; }`}</style>
-              <Divider orientation="left" plain style={{ fontSize: 11, color: C.textMid, margin: '4px 0 8px' }}>Organization & Order</Divider>
+              <Divider orientation={"left" as any} plain style={{ fontSize: 11, color: C.textMid, margin: '4px 0 8px' }}>Organization & Order</Divider>
               <Row gutter={[12, 0]}>
                 <Col span={12}>
                   <Form.Item name="procurementBU" label="Procurement BU" rules={[{ required: true }]}>
@@ -498,7 +498,7 @@ const CreatePurchaseOrder: React.FC = () => {
                   </Form.Item>
                 </Col>
               </Row>
-              <Divider orientation="left" plain style={{ fontSize: 11, color: C.textMid, margin: '4px 0 8px' }}>Supplier</Divider>
+              <Divider orientation={"left" as any} plain style={{ fontSize: 11, color: C.textMid, margin: '4px 0 8px' }}>Supplier</Divider>
               <Row gutter={[12, 0]}>
                 <Col span={12}>
                   <Form.Item label="Supplier" required>
@@ -519,7 +519,7 @@ const CreatePurchaseOrder: React.FC = () => {
                   </Form.Item>
                 </Col>
               </Row>
-              <Divider orientation="left" plain style={{ fontSize: 11, color: C.textMid, margin: '4px 0 8px' }}>Ship To</Divider>
+              <Divider orientation={"left" as any} plain style={{ fontSize: 11, color: C.textMid, margin: '4px 0 8px' }}>Ship To</Divider>
               <Row gutter={[12, 0]}>
                 <Col span={12}>
                   <Form.Item name="shipToOrg" label="Ship To Organization" rules={[{ required: true }]}>
