@@ -238,6 +238,12 @@ interface RelatedInvoice {
   totalSettled: number;       // amountApplied + discountTaken
 }
 
+interface CategoryInvoice {
+  invoiceNumber: string;
+  description: string;
+  amount: number;
+}
+
 interface CategoryData {
   name: string;
   amount: number;
@@ -254,6 +260,7 @@ interface AnalyticsData {
   trend: TrendData[];
   totalAmount: number;
   totalCount: number;
+  invoicesByCategory: Record<string, CategoryInvoice[]>;
 }
 
 // Helper function to format date
@@ -608,6 +615,9 @@ const ManageSuppliers: React.FC = () => {
   const [analyticsLoadingMap, setAnalyticsLoadingMap] = useState<Record<string, boolean>>({});
   const [pdfPreviewVisible, setPdfPreviewVisible] = useState(false);
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string>('');
+  const [catDrillVisible, setCatDrillVisible] = useState(false);
+  const [catDrillCategory, setCatDrillCategory] = useState<string>('');
+  const [catDrillInvoices, setCatDrillInvoices] = useState<CategoryInvoice[]>([]);
 
   // API Info Modal state
   const [apiModalVisible, setApiModalVisible] = useState(false);
@@ -963,15 +973,21 @@ const ManageSuppliers: React.FC = () => {
 
       // Category aggregation
       const catMap: Record<string, { amount: number; count: number }> = {};
+      const invBycat: Record<string, CategoryInvoice[]> = {};
       // Monthly trend
       const trendMap: Record<string, number> = {};
 
       items.forEach(item => {
         const amt  = Number(item.invoice_amount || 0);
         const cat  = detectCategory(item.description || '');
-        if (!catMap[cat]) catMap[cat] = { amount: 0, count: 0 };
+        if (!catMap[cat]) { catMap[cat] = { amount: 0, count: 0 }; invBycat[cat] = []; }
         catMap[cat].amount += amt;
         catMap[cat].count  += 1;
+        invBycat[cat].push({
+          invoiceNumber: item.invoice_number || '',
+          description:   item.description   || '',
+          amount:        amt,
+        });
 
         const raw = item.invoice_date || '';
         const d   = raw ? new Date(raw) : null;
@@ -992,7 +1008,7 @@ const ManageSuppliers: React.FC = () => {
       const totalAmount = categories.reduce((s, c) => s + c.amount, 0);
       const totalCount  = categories.reduce((s, c) => s + c.count,  0);
 
-      setAnalyticsDataMap(prev => ({ ...prev, [tabKey]: { categories, trend, totalAmount, totalCount } }));
+      setAnalyticsDataMap(prev => ({ ...prev, [tabKey]: { categories, trend, totalAmount, totalCount, invoicesByCategory: invBycat } }));
     } catch (err) {
       message.error('Failed to load analytics data');
     } finally {
@@ -2325,17 +2341,25 @@ const ManageSuppliers: React.FC = () => {
                         </Row>
 
                         {/* Category data table */}
-                        <Card size="small" title={<Text strong>Category Detail</Text>}>
+                        <Card size="small" title={<Text strong>Category Detail</Text>} extra={<Text type="secondary" style={{ fontSize: 11 }}>Click a row to see invoices</Text>}>
                           <Table
                             size="small"
                             pagination={false}
                             dataSource={analyticsData.categories.map((c, i) => ({ ...c, key: i }))}
+                            onRow={(record: CategoryData) => ({
+                              onClick: () => {
+                                setCatDrillCategory(record.name);
+                                setCatDrillInvoices(analyticsData.invoicesByCategory[record.name] || []);
+                                setCatDrillVisible(true);
+                              },
+                              style: { cursor: 'pointer' },
+                            })}
                             columns={[
                               { title: 'Category', dataIndex: 'name', key: 'name',
                                 render: (v: string, _: any, i: number) => (
                                   <Space>
                                     <div style={{ width: 12, height: 12, borderRadius: 2, background: CHART_COLORS[i % CHART_COLORS.length] }} />
-                                    {v}
+                                    <a style={{ color: REDWOOD.info }}>{v}</a>
                                   </Space>
                                 )
                               },
@@ -2369,6 +2393,46 @@ const ManageSuppliers: React.FC = () => {
             ]}
           />
         </Card>
+
+        {/* Category Invoice Drilldown Modal */}
+        <Modal
+          title={
+            <Space>
+              <FileTextOutlined style={{ color: REDWOOD.info }} />
+              <span>Invoices — {catDrillCategory}</span>
+              <Tag color="blue">{catDrillInvoices.length}</Tag>
+            </Space>
+          }
+          open={catDrillVisible}
+          onCancel={() => setCatDrillVisible(false)}
+          footer={[<Button key="close" onClick={() => setCatDrillVisible(false)}>Close</Button>]}
+          width={700}
+        >
+          <Table
+            size="small"
+            pagination={{ pageSize: 10, showTotal: t => `${t} invoices`, size: 'small' }}
+            dataSource={catDrillInvoices.map((inv, i) => ({ ...inv, key: i }))}
+            columns={[
+              { title: 'Invoice #', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 150,
+                render: (v: string) => <Text style={{ color: REDWOOD.info, fontWeight: 500 }}>{v || '—'}</Text> },
+              { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true,
+                render: (v: string) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text> },
+              { title: 'Amount (AED)', dataIndex: 'amount', key: 'amount', width: 150, align: 'right' as const,
+                render: (v: number) => <Text strong style={{ fontFamily: 'monospace' }}>{v.toLocaleString('en-AE', { minimumFractionDigits: 2 })}</Text> },
+            ]}
+            summary={() => {
+              const total = catDrillInvoices.reduce((s, r) => s + r.amount, 0);
+              return (
+                <Table.Summary.Row style={{ background: '#f0f5ff' }}>
+                  <Table.Summary.Cell index={0} colSpan={2}><Text strong>Total</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={2} align="right">
+                    <Text strong style={{ fontFamily: 'monospace' }}>{total.toLocaleString('en-AE', { minimumFractionDigits: 2 })}</Text>
+                  </Table.Summary.Cell>
+                </Table.Summary.Row>
+              );
+            }}
+          />
+        </Modal>
 
         {/* PDF Preview Modal */}
         <Modal
