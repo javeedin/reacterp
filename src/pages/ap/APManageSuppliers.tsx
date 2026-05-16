@@ -942,7 +942,7 @@ const ManageSuppliers: React.FC = () => {
     if (/electric|water|gas|utility|utilities|dewa|sewa/.test(d)) return 'Utilities';
     if (/maintenance|repair|service|cleaning|janitorial/.test(d)) return 'Maintenance';
     if (/legal|audit|consult|accounting|advisory|professional/.test(d)) return 'Professional Services';
-    if (/software|hardware|it|tech|license|subscription|cloud|server/.test(d)) return 'IT & Technology';
+    if (/software|hardware|\bit\b|tech|license|subscription|cloud|server|network|hosting|saas/.test(d)) return 'IT & Technology';
     if (/salary|payroll|hr|human resource|benefit|bonus|staff/.test(d)) return 'HR & Payroll';
     if (/transport|freight|shipping|logistics|courier|delivery/.test(d)) return 'Transport & Logistics';
     if (/marketing|advertising|promotion|media|campaign/.test(d)) return 'Marketing';
