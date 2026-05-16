@@ -9,6 +9,7 @@ import {
   ClockCircleOutlined, PlayCircleOutlined, FileExcelOutlined,
   FilePdfOutlined, TeamOutlined, SearchOutlined,
   ApiOutlined, CopyOutlined, FileTextOutlined,
+  MenuFoldOutlined, MenuUnfoldOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -502,6 +503,21 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
   // Aging summary fields for both aging reports
   const AGING_FIELDS = ['invoiceAmount', 'unpaidAmount', 'months1', 'months2', 'months3', 'over3months', 'unallocated'] as const;
 
+  // For aging-report: label spans Supplier+InvoiceAmount cols (indices 0-1), numbers start at index 2
+  // For aging-by-invoice: label spans Supplier+Invoice#+InvoiceDate+DueDate cols (indices 0-3), numbers at 4
+  const agingLabelSpan  = report.key === 'aging-by-invoice' ? 4 : 2;
+  const agingStartIndex = agingLabelSpan;
+  // AGING_FIELDS minus invoiceAmount when label spans it for aging-report (we still show it)
+  // Fields rendered as number cells:
+  // aging-report:      [invoiceAmount skipped in label span] → start from unpaidAmount onward
+  // Actually we skip invoiceAmount from the number cells when the label already spans 2 cols
+  // Simpler: for aging-report colSpan=2 means we drop the invoiceAmount cell and show it merged
+  // → just keep all 7 fields but for aging-report merge Supplier+InvoiceAmount into the label cell
+  //   and only render 6 number cells (unpaidAmount..unallocated)
+  const agingNumberFields = report.key === 'aging-by-invoice'
+    ? AGING_FIELDS
+    : (['unpaidAmount', 'months1', 'months2', 'months3', 'over3months', 'unallocated'] as const);
+
   const agingSummary = () => {
     const totals = AGING_FIELDS.reduce((acc, f) => {
       acc[f] = filteredRows.reduce((s, r) => s + (r[f] || 0), 0);
@@ -509,27 +525,32 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
     }, {} as Record<string, number>);
     const unpaid = totals.unpaidAmount || 1;
     const pct = (v: number) => unpaid > 0 ? ((v / unpaid) * 100).toFixed(2) + '%' : '0.00%';
+
     return (
       <Table.Summary>
         <Table.Summary.Row style={{ background: '#f0f5ff' }}>
-          <Table.Summary.Cell index={0} colSpan={report.key === 'aging-by-invoice' ? 4 : 1}>
-            <Text strong>Total for Report</Text>
+          <Table.Summary.Cell index={0} colSpan={agingLabelSpan}>
+            <Text strong style={{ whiteSpace: 'nowrap' }}>
+              {report.key === 'aging-report'
+                ? `Total for Report   ${fmt(totals.invoiceAmount)}`
+                : 'Total for Report'}
+            </Text>
           </Table.Summary.Cell>
-          {AGING_FIELDS.map((f, i) => (
-            <Table.Summary.Cell key={f} index={(report.key === 'aging-by-invoice' ? 4 : 1) + i} align="right">
-              <Text strong style={{ color: f === 'unpaidAmount' ? REDWOOD.primary : undefined }}>
+          {agingNumberFields.map((f, i) => (
+            <Table.Summary.Cell key={f} index={agingStartIndex + i} align="right">
+              <Text strong style={{ color: f === 'unpaidAmount' ? REDWOOD.primary : undefined, whiteSpace: 'nowrap' }}>
                 {fmt(totals[f])}
               </Text>
             </Table.Summary.Cell>
           ))}
         </Table.Summary.Row>
         <Table.Summary.Row style={{ background: '#fafafa' }}>
-          <Table.Summary.Cell index={0} colSpan={report.key === 'aging-by-invoice' ? 4 : 1}>
-            <Text type="secondary" style={{ fontSize: 11 }}>% of Unpaid</Text>
+          <Table.Summary.Cell index={0} colSpan={agingLabelSpan}>
+            <Text type="secondary" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>% of Unpaid</Text>
           </Table.Summary.Cell>
-          {AGING_FIELDS.map((f, i) => (
-            <Table.Summary.Cell key={f} index={(report.key === 'aging-by-invoice' ? 4 : 1) + i} align="right">
-              <Text type="secondary" style={{ fontSize: 11 }}>
+          {agingNumberFields.map((f, i) => (
+            <Table.Summary.Cell key={f} index={agingStartIndex + i} align="right">
+              <Text type="secondary" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
                 {f === 'invoiceAmount' ? '' : pct(totals[f])}
               </Text>
             </Table.Summary.Cell>
@@ -743,6 +764,7 @@ const APReports: React.FC = () => {
   const [reportSearch, setReportSearch] = useState('');
   const [tabs, setTabs] = useState<TabEntry[]>([]);
   const [activeTab, setActiveTab] = useState<string>('');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
     fetch(`${APEX_DB_CONFIG.baseUrl}/gl/businessunits`)
@@ -801,85 +823,134 @@ const APReports: React.FC = () => {
 
           {/* ── Left panel: report list ── */}
           <div style={{
-            width: 260, flexShrink: 0, background: REDWOOD.surface,
+            width: sidebarCollapsed ? 44 : 260,
+            flexShrink: 0, background: REDWOOD.surface,
             borderRight: `1px solid ${REDWOOD.neutral200}`,
             display: 'flex', flexDirection: 'column', overflow: 'hidden',
+            transition: 'width 0.2s ease',
           }}>
             {/* Header */}
-            <div style={{ padding: '16px 14px 10px', borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
-              <Space align="center" style={{ marginBottom: 10 }}>
-                <div style={{
-                  width: 32, height: 32, borderRadius: 8,
-                  background: `linear-gradient(135deg, ${REDWOOD.reportGreen} 0%, #0D5C36 100%)`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  <BarChartOutlined style={{ fontSize: 16, color: '#fff' }} />
-                </div>
-                <div>
-                  <Text strong style={{ fontSize: 14, display: 'block', lineHeight: 1.2 }}>Reports</Text>
-                  <Text type="secondary" style={{ fontSize: 11 }}>Payables Module</Text>
-                </div>
-              </Space>
-              <Input
-                prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
-                placeholder="Search reports..."
-                size="small"
-                allowClear
-                value={reportSearch}
-                onChange={e => setReportSearch(e.target.value)}
-                style={{ borderRadius: 6 }}
-              />
+            <div style={{
+              padding: sidebarCollapsed ? '12px 6px' : '12px 14px 10px',
+              borderBottom: `1px solid ${REDWOOD.neutral200}`,
+              display: 'flex', alignItems: 'center',
+              justifyContent: sidebarCollapsed ? 'center' : 'space-between',
+              gap: 8, minHeight: 52,
+            }}>
+              {!sidebarCollapsed && (
+                <Space align="center" size={8} style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    width: 28, height: 28, borderRadius: 7, flexShrink: 0,
+                    background: `linear-gradient(135deg, ${REDWOOD.reportGreen} 0%, #0D5C36 100%)`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <BarChartOutlined style={{ fontSize: 14, color: '#fff' }} />
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <Text strong style={{ fontSize: 13, display: 'block', lineHeight: 1.2 }}>Reports</Text>
+                    <Text type="secondary" style={{ fontSize: 11 }}>Payables Module</Text>
+                  </div>
+                </Space>
+              )}
+              <Tooltip title={sidebarCollapsed ? 'Expand panel' : 'Collapse panel'} placement="right">
+                <Button
+                  type="text" size="small"
+                  icon={sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+                  onClick={() => setSidebarCollapsed(v => !v)}
+                  style={{ color: REDWOOD.neutral600, flexShrink: 0 }}
+                />
+              </Tooltip>
             </div>
 
-            {/* Report list */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px' }}>
-              {filteredReports.length === 0 ? (
-                <Text type="secondary" style={{ fontSize: 12, padding: '12px 6px', display: 'block' }}>
-                  No reports match your search.
-                </Text>
-              ) : filteredReports.map(r => (
-                <div
-                  key={r.key}
-                  onClick={() => openReport(r)}
-                  style={{
-                    padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
-                    marginBottom: 4, transition: 'all 0.15s',
-                    border: `1px solid transparent`,
-                  }}
-                  onMouseEnter={e => {
-                    (e.currentTarget as HTMLDivElement).style.background = `${r.color}10`;
-                    (e.currentTarget as HTMLDivElement).style.borderColor = `${r.color}30`;
-                  }}
-                  onMouseLeave={e => {
-                    (e.currentTarget as HTMLDivElement).style.background = 'transparent';
-                    (e.currentTarget as HTMLDivElement).style.borderColor = 'transparent';
-                  }}
-                >
-                  <Space align="start" size={10}>
-                    <div style={{
-                      width: 30, height: 30, borderRadius: 6, flexShrink: 0,
-                      background: `${r.color}18`,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      color: r.color, fontSize: 14,
-                    }}>
+            {!sidebarCollapsed && (
+              <>
+                {/* Search */}
+                <div style={{ padding: '8px 10px 4px' }}>
+                  <Input
+                    prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
+                    placeholder="Search reports..."
+                    size="small"
+                    allowClear
+                    value={reportSearch}
+                    onChange={e => setReportSearch(e.target.value)}
+                    style={{ borderRadius: 6 }}
+                  />
+                </div>
+
+                {/* Report list */}
+                <div style={{ flex: 1, overflowY: 'auto', padding: '4px 8px' }}>
+                  {filteredReports.length === 0 ? (
+                    <Text type="secondary" style={{ fontSize: 12, padding: '12px 6px', display: 'block' }}>
+                      No reports match your search.
+                    </Text>
+                  ) : filteredReports.map(r => (
+                    <div
+                      key={r.key}
+                      onClick={() => openReport(r)}
+                      style={{
+                        padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
+                        marginBottom: 4, transition: 'all 0.15s',
+                        border: `1px solid transparent`,
+                      }}
+                      onMouseEnter={e => {
+                        (e.currentTarget as HTMLDivElement).style.background = `${r.color}10`;
+                        (e.currentTarget as HTMLDivElement).style.borderColor = `${r.color}30`;
+                      }}
+                      onMouseLeave={e => {
+                        (e.currentTarget as HTMLDivElement).style.background = 'transparent';
+                        (e.currentTarget as HTMLDivElement).style.borderColor = 'transparent';
+                      }}
+                    >
+                      <Space align="start" size={10}>
+                        <div style={{
+                          width: 30, height: 30, borderRadius: 6, flexShrink: 0,
+                          background: `${r.color}18`,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          color: r.color, fontSize: 14,
+                        }}>
+                          {r.icon}
+                        </div>
+                        <div>
+                          <Text strong style={{ fontSize: 12, color: REDWOOD.neutral900, display: 'block', lineHeight: 1.3 }}>
+                            {r.label}
+                          </Text>
+                          <Text type="secondary" style={{ fontSize: 11, lineHeight: 1.3 }}>{r.description}</Text>
+                        </div>
+                      </Space>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ padding: '10px 14px', borderTop: `1px solid ${REDWOOD.neutral200}` }}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    Click a report to open it in a new tab
+                  </Text>
+                </div>
+              </>
+            )}
+
+            {/* Collapsed: icon-only list */}
+            {sidebarCollapsed && (
+              <div style={{ flex: 1, overflowY: 'auto', padding: '6px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                {REPORTS.map(r => (
+                  <Tooltip key={r.key} title={r.label} placement="right">
+                    <div
+                      onClick={() => openReport(r)}
+                      style={{
+                        width: 32, height: 32, borderRadius: 7, cursor: 'pointer',
+                        background: `${r.color}18`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: r.color, fontSize: 15, transition: 'all 0.15s',
+                      }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = `${r.color}35`; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = `${r.color}18`; }}
+                    >
                       {r.icon}
                     </div>
-                    <div>
-                      <Text strong style={{ fontSize: 12, color: REDWOOD.neutral900, display: 'block', lineHeight: 1.3 }}>
-                        {r.label}
-                      </Text>
-                      <Text type="secondary" style={{ fontSize: 11, lineHeight: 1.3 }}>{r.description}</Text>
-                    </div>
-                  </Space>
-                </div>
-              ))}
-            </div>
-
-            <div style={{ padding: '10px 14px', borderTop: `1px solid ${REDWOOD.neutral200}` }}>
-              <Text type="secondary" style={{ fontSize: 11 }}>
-                Click a report to open it in a new tab
-              </Text>
-            </div>
+                  </Tooltip>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* ── Right panel: tabs ── */}
