@@ -304,6 +304,7 @@ const TrialBalance: React.FC = () => {
   // Multi-year RE rollforward
   const [reYearFrom,      setReYearFrom]      = useState<number | null>(null);
   const [reYearTo,        setReYearTo]        = useState<number | null>(null);
+  const [reYearCompany,   setReYearCompany]   = useState<string | null>(null);
   const [reYearRows,      setReYearRows]      = useState<{
     year: number; lastPeriod: string;
     revenue: number; expenses: number; netPL: number;
@@ -4621,7 +4622,9 @@ const TrialBalance: React.FC = () => {
           + `&limit=10000`;
         const res = await fetch(url, { headers: { Accept: 'application/json' } });
         const d = await res.json();
-        const items: RrTBRecord[] = d.items ?? [];
+        const allItems: RrTBRecord[] = d.items ?? [];
+        // Apply company filter client-side (same as the YTD TB tab does)
+        const items = reYearCompany ? allItems.filter(r => r.company === reYearCompany) : allItems;
 
         const revenue  = items.filter(r => r.account_type === 'R').reduce((s, r) => s + (r.closing || 0), 0);
         const expenses = items.filter(r => r.account_type === 'E').reduce((s, r) => s + (r.closing || 0), 0);
@@ -4829,7 +4832,7 @@ const TrialBalance: React.FC = () => {
           <span style={{ color: '#722ed1', fontWeight: 600, fontSize: 13 }}>Multi-Year Retained Earnings Rollforward</span>
         </Divider>
 
-        <Row gutter={8} align="middle" style={{ marginBottom: 12 }}>
+        <Row gutter={8} align="middle" style={{ marginBottom: 12, flexWrap: 'wrap', rowGap: 8 }}>
           <Col>
             <span style={{ fontSize: 12, marginRight: 4 }}>From Year:</span>
             <Select
@@ -4837,7 +4840,7 @@ const TrialBalance: React.FC = () => {
               style={{ width: 100 }}
               placeholder="From"
               value={reYearFrom ?? undefined}
-              onChange={(v: number) => setReYearFrom(v)}
+              onChange={(v: number) => { setReYearFrom(v); setReYearRows([]); }}
               options={[...new Set(periods.filter(p => p.ledger_name === reCalcTab?.ledgerName).map(p => p.period_year))].sort((a, b) => a - b).map(y => ({ label: String(y), value: y }))}
             />
           </Col>
@@ -4848,27 +4851,50 @@ const TrialBalance: React.FC = () => {
               style={{ width: 100 }}
               placeholder="To"
               value={reYearTo ?? undefined}
-              onChange={(v: number) => setReYearTo(v)}
+              onChange={(v: number) => { setReYearTo(v); setReYearRows([]); }}
               options={[...new Set(periods.filter(p => p.ledger_name === reCalcTab?.ledgerName).map(p => p.period_year))].sort((a, b) => a - b).map(y => ({ label: String(y), value: y }))}
+            />
+          </Col>
+          <Col>
+            <span style={{ fontSize: 12, marginRight: 4 }}>Company:</span>
+            <Select
+              size="small"
+              allowClear
+              placeholder="All companies"
+              style={{ width: 160 }}
+              value={reYearCompany ?? undefined}
+              onChange={(v: string | undefined) => { setReYearCompany(v ?? null); setReYearRows([]); }}
+              options={[
+                ...([...new Set(tab.rrData.map(r => r.company).filter(Boolean))].sort().map(c => ({ label: c, value: c }))),
+              ]}
             />
           </Col>
           <Col>
             <Button
               size="small"
               type="primary"
-              style={{ background: '#722ed1', borderColor: '#722ed1' }}
+              style={{ background: '#722ed1', borderColor: '#722ed1', fontWeight: 600 }}
               loading={reYearLoading}
+              disabled={!reYearFrom || !reYearTo}
               onClick={calcMultiYearRE}
             >
               Calculate
             </Button>
           </Col>
           {reYearProgress && (
-            <Col>
+            <Col flex="1">
               <Text style={{ fontSize: 11, color: REDWOOD.textSecondary }}>{reYearProgress}</Text>
             </Col>
           )}
         </Row>
+        {reYearCompany && (
+          <div style={{ marginBottom: 8 }}>
+            <Text style={{ fontSize: 11, color: REDWOOD.textSecondary }}>
+              Filtering by company: <Text strong style={{ color: '#722ed1' }}>{reYearCompany}</Text>
+              {' '}— amounts reflect only this company's accounts.
+            </Text>
+          </div>
+        )}
 
         {reYearError && (
           <Alert type="error" showIcon message={reYearError} style={{ marginBottom: 12 }} />
@@ -5248,7 +5274,18 @@ const TrialBalance: React.FC = () => {
               size="small"
               icon={<CalculatorOutlined />}
               style={{ borderColor: '#722ed1', color: '#722ed1' }}
-              onClick={() => { setReCalcTab(tab); setReCalcVisible(true); }}
+              onClick={() => {
+                setReCalcTab(tab);
+                setReCalcVisible(true);
+                setReYearRows([]);
+                setReYearError(null);
+                setReYearCompany(null);
+                // Auto-set range: earliest available year → current tab's year
+                const ledgerYears = [...new Set(periods.filter(p => p.ledger_name === tab.ledgerName).map(p => p.period_year))].sort((a, b) => a - b);
+                const tabYear = periods.find(p => tab.periodName.includes(p.period_name_id))?.period_year ?? (ledgerYears[ledgerYears.length - 1] ?? null);
+                setReYearFrom(ledgerYears[0] ?? null);
+                setReYearTo(tabYear);
+              }}
             >
               Retained Earnings
             </Button>
