@@ -1963,7 +1963,20 @@ const ManageSuppliers: React.FC = () => {
                       <Button icon={<ReloadOutlined />} onClick={() => fetchBalancePayments(tab.supplier.supplierNumber, tabKey)} loading={paymentsLoading}>Refresh</Button>
                       <Text type="secondary" style={{ marginLeft: 16 }}>Click payment number to view related invoices</Text>
                     </div>
-                    <Table columns={paymentColumns} dataSource={payments} loading={paymentsLoading} scroll={{ x: 800 }} pagination={{ pageSize: 10, showTotal: (total) => `${total} payments` }} size="small" />
+                    <Table
+                      columns={paymentColumns}
+                      dataSource={payments}
+                      loading={paymentsLoading}
+                      scroll={{ x: 800 }}
+                      size="small"
+                      rowKey="key"
+                      pagination={{
+                        defaultPageSize: 20,
+                        showSizeChanger: true,
+                        pageSizeOptions: ['10', '20', '50', '100'],
+                        showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} payments`,
+                      }}
+                    />
                   </div>
                 ),
               },
