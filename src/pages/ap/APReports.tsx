@@ -249,32 +249,44 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
     if (bu)          p.set('P_BUSINESS_UNIT', bu);
     if (supplierNum) p.set('supplier_number', supplierNum);
     const listUrl = `${APEX_DB_CONFIG.baseUrl}/suppliers${p.toString() ? '?' + p : ''}`;
-    const summaryPattern = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/summary/{supplierNumber}`;
-    setApiUrls([listUrl, summaryPattern]);
+    const invoicePattern = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/{supplierNumber}?status=Unpaid`;
+    setApiUrls([listUrl, invoicePattern]);
     const listRes = await fetch(listUrl);
     if (!listRes.ok) throw new Error(`HTTP ${listRes.status}`);
     const listData = JSON.parse(await listRes.text() || '{}');
     const suppliers: any[] = Array.isArray(listData) ? listData : (listData.items || []);
 
+    // Compute outstanding from actual unpaid invoice amount_remaining (same method as aging report)
     const results = await Promise.allSettled(
       suppliers.map(async (s: any) => {
         const sn = s.supplier_number || '';
         if (!sn) return null;
-        const r = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers/balance/summary/${encodeURIComponent(sn)}`);
+        const r = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${encodeURIComponent(sn)}?status=Unpaid&limit=1000`);
         if (!r.ok) return null;
         const d = JSON.parse(await r.text() || '{}');
-        const bs = d.balance_summary || d;
-        const outstanding = Number(bs.balance ?? bs.outstanding_balance ?? 0);
+        const invoices: any[] = Array.isArray(d) ? d : (d.items || d.invoices || []);
+        if (invoices.length === 0) return null;
+
+        let invoiceAmount = 0;
+        let outstanding   = 0;
+        for (const inv of invoices) {
+          const invAmt = Number(inv.invoice_amount || 0);
+          const bal    = Number(inv.amount_remaining ?? (invAmt - Number(inv.amount_paid || 0)));
+          if (bal <= 0) continue;
+          invoiceAmount += invAmt;
+          outstanding   += bal;
+        }
         if (outstanding <= 0) return null;
+
         return {
-          key:          sn,
+          key:           sn,
           supplierNumber: sn,
-          supplier:     s.supplier || s.supplier_name || sn,
-          invoiceCount: Number(bs.total_invoices ?? 0),
-          invoiceAmount: Number(bs.total_invoice_amount ?? 0),
-          amountPaid:   Number(bs.total_payment_amount ?? bs.total_paid ?? 0),
+          supplier:      s.supplier || s.supplier_name || sn,
+          invoiceCount:  invoices.filter(inv => Number(inv.amount_remaining ?? 0) > 0).length,
+          invoiceAmount,
+          amountPaid:    invoiceAmount - outstanding,
           outstanding,
-          currency:     bs.currency || 'AED',
+          currency:      invoices[0]?.currency || invoices[0]?.invoice_currency || 'AED',
         };
       })
     );
