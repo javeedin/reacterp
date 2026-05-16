@@ -37,6 +37,7 @@ interface ReportDef {
   color: string;
   hasSupplierFilter: boolean;
   hasDateFilter: boolean;
+  hasAgingDate?: boolean;
 }
 
 const REPORTS: ReportDef[] = [
@@ -70,11 +71,12 @@ const REPORTS: ReportDef[] = [
   {
     key: 'aging-report',
     label: 'Supplier Balance Aging Report',
-    description: 'Outstanding payables aged by due date buckets',
+    description: 'Outstanding payables aged by invoice date buckets as at a selected date',
     icon: <ClockCircleOutlined />,
     color: REDWOOD.warning,
     hasSupplierFilter: true,
     hasDateFilter: false,
+    hasAgingDate: true,
   },
 ];
 
@@ -117,15 +119,17 @@ const COLUMNS: Record<string, any[]> = {
   'aging-report': [
     { title: 'Supplier #',    dataIndex: 'supplierNumber', key: 'supplierNumber', width: 120 },
     { title: 'Supplier Name', dataIndex: 'supplier',       key: 'supplier',       width: 200 },
-    { title: 'Current',       dataIndex: 'current',        key: 'current',        width: 120, align: 'right' as const,
+    { title: 'Current',       dataIndex: 'current',        key: 'current',        width: 110, align: 'right' as const,
       render: (v: number) => <Text style={{ color: REDWOOD.success }}>{fmt(v)}</Text> },
-    { title: '1–30 Days',     dataIndex: 'days30',         key: 'days30',         width: 110, align: 'right' as const,
+    { title: '1–30 Days',     dataIndex: 'days30',         key: 'days30',         width: 100, align: 'right' as const,
       render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.warning : undefined }}>{fmt(v)}</Text> },
-    { title: '31–60 Days',    dataIndex: 'days60',         key: 'days60',         width: 110, align: 'right' as const,
+    { title: '31–60 Days',    dataIndex: 'days60',         key: 'days60',         width: 100, align: 'right' as const,
       render: (v: number) => <Text style={{ color: v > 0 ? '#D46B08' : undefined }}>{fmt(v)}</Text> },
-    { title: '61–90 Days',    dataIndex: 'days90',         key: 'days90',         width: 110, align: 'right' as const,
+    { title: '61–90 Days',    dataIndex: 'days90',         key: 'days90',         width: 100, align: 'right' as const,
       render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.primary : undefined }}>{fmt(v)}</Text> },
-    { title: '90+ Days',      dataIndex: 'days90plus',     key: 'days90plus',     width: 110, align: 'right' as const,
+    { title: '91–120 Days',   dataIndex: 'days120',        key: 'days120',        width: 110, align: 'right' as const,
+      render: (v: number) => <Text style={{ color: v > 0 ? '#C74634' : undefined }}>{fmt(v)}</Text> },
+    { title: '120+ Days',     dataIndex: 'days120plus',    key: 'days120plus',    width: 110, align: 'right' as const,
       render: (v: number) => <Text strong style={{ color: v > 0 ? '#8B0000' : undefined }}>{fmt(v)}</Text> },
     { title: 'Total',         dataIndex: 'total',          key: 'total',          width: 130, align: 'right' as const,
       render: (v: number) => <Text strong>{fmt(v)}</Text> },
@@ -252,48 +256,70 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
     }));
   };
 
-  const fetchAgingReport = async (bu: string, supplierNum: string) => {
+  const fetchAgingReport = async (bu: string, supplierNum: string, asAtDate: string) => {
+    const asAt = asAtDate ? new Date(asAtDate) : new Date();
+    asAt.setHours(0, 0, 0, 0);
+
+    // Step 1: get supplier list
     const p = new URLSearchParams();
-    if (bu)          p.set('business_unit', bu);
+    if (bu)          p.set('P_BUSINESS_UNIT', bu);
     if (supplierNum) p.set('supplier_number', supplierNum);
-    p.set('limit', '500');
-    const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice?${p}`;
-    setApiUrls([url]);
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = JSON.parse(await res.text() || '{}');
-    const items: any[] = (Array.isArray(data) ? data : (data.items || [])).filter(
-      (it: any) => (it.paid_status || '').toUpperCase() !== 'PAID'
+    const listUrl = `${APEX_DB_CONFIG.baseUrl}/suppliers${p.toString() ? '?' + p : ''}`;
+    const invoicePattern = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/{supplierNumber}?status=Unpaid`;
+    setApiUrls([listUrl, invoicePattern]);
+
+    const listRes = await fetch(listUrl);
+    if (!listRes.ok) throw new Error(`HTTP ${listRes.status}`);
+    const listData = JSON.parse(await listRes.text() || '{}');
+    const suppliers: any[] = Array.isArray(listData) ? listData : (listData.items || []);
+
+    // Step 2: fetch unpaid invoices per supplier in parallel
+    const results = await Promise.allSettled(
+      suppliers.map(async (s: any) => {
+        const sn = s.supplier_number || '';
+        if (!sn) return null;
+        const r = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${encodeURIComponent(sn)}?status=Unpaid&limit=1000`);
+        if (!r.ok) return null;
+        const d = JSON.parse(await r.text() || '{}');
+        const invoices: any[] = Array.isArray(d) ? d : (d.items || d.invoices || []);
+
+        const row = { key: sn, supplierNumber: sn, supplier: s.supplier || sn,
+          current: 0, days30: 0, days60: 0, days90: 0, days120: 0, days120plus: 0, total: 0 };
+
+        for (const inv of invoices) {
+          const invDate = new Date(inv.invoice_date || inv.terms_date || '');
+          if (isNaN(invDate.getTime()) || invDate > asAt) continue;
+          const bal = Number(inv.amount_remaining ?? (Number(inv.invoice_amount || 0) - Number(inv.amount_paid || 0)));
+          if (bal <= 0) continue;
+          const age = Math.floor((asAt.getTime() - invDate.getTime()) / 86400000);
+          if      (age <= 0)   row.current    += bal;
+          else if (age <= 30)  row.days30     += bal;
+          else if (age <= 60)  row.days60     += bal;
+          else if (age <= 90)  row.days90     += bal;
+          else if (age <= 120) row.days120    += bal;
+          else                 row.days120plus += bal;
+          row.total += bal;
+        }
+        return row.total > 0 ? row : null;
+      })
     );
-    const map = new Map<string, any>();
-    for (const it of items) {
-      const sKey = it.supplier_number || it.supplier || 'Unknown';
-      const bal = Number(it.invoice_amount || 0) - Number(it.amount_paid || 0);
-      if (bal <= 0) continue;
-      const age = daysDiff(it.terms_date || it.invoice_date || '');
-      const ex = map.get(sKey) || { key: sKey, supplierNumber: it.supplier_number || '',
-        supplier: it.supplier || '', current: 0, days30: 0, days60: 0, days90: 0, days90plus: 0, total: 0 };
-      if (age <= 0)       ex.current    += bal;
-      else if (age <= 30) ex.days30     += bal;
-      else if (age <= 60) ex.days60     += bal;
-      else if (age <= 90) ex.days90     += bal;
-      else                ex.days90plus += bal;
-      ex.total += bal;
-      map.set(sKey, ex);
-    }
-    return Array.from(map.values()).sort((a, b) => b.total - a.total);
+
+    return results
+      .filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled' && r.value !== null)
+      .map(r => r.value)
+      .sort((a, b) => b.total - a.total);
   };
 
   const handleRun = async () => {
-    const { businessUnit: bu = '', supplierNumber: sn = '', supplierName: snm = '', dateFrom = '', dateTo = '' } = form.getFieldsValue();
+    const { businessUnit: bu = '', supplierNumber: sn = '', supplierName: snm = '', dateFrom = '', dateTo = '', asAtDate = '' } = form.getFieldsValue();
     setLoading(true); setRows([]); setGridSearch('');
-    reportTitle.current = `${report.label}${bu ? ' — ' + bu : ''}`;
+    reportTitle.current = `${report.label}${bu ? ' — ' + bu : ''}${asAtDate ? ' @ ' + asAtDate : ''}`;
     try {
       let result: any[] = [];
       if (report.key === 'suppliers-listing')  result = await fetchSuppliersListing(bu, sn, snm);
       if (report.key === 'supplier-balance')   result = await fetchSupplierBalance(bu, sn);
       if (report.key === 'payment-register')   result = await fetchPaymentRegister(bu, sn, dateFrom, dateTo);
-      if (report.key === 'aging-report')       result = await fetchAgingReport(bu, sn);
+      if (report.key === 'aging-report')       result = await fetchAgingReport(bu, sn, asAtDate);
       setRows(result); setHasRun(true);
       result.length === 0 ? message.info('No data found.') : message.success(`${result.length} records loaded.`);
     } catch (e: any) {
@@ -361,6 +387,12 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
             <Form.Item label="Date From" name="dateFrom"><Input type="date" style={{ width: 140 }} /></Form.Item>
             <Form.Item label="Date To" name="dateTo"><Input type="date" style={{ width: 140 }} /></Form.Item>
           </>)}
+          {report.hasAgingDate && (
+            <Form.Item label={<span style={{ fontWeight: 600 }}>As at Date</span>} name="asAtDate"
+              tooltip="Aging is calculated relative to this date. Defaults to today if left blank.">
+              <Input type="date" style={{ width: 150 }} />
+            </Form.Item>
+          )}
         </Form>
       </Card>
 
@@ -424,9 +456,11 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
               ) : report.key === 'aging-report' ? () => (
                 <Table.Summary.Row>
                   <Table.Summary.Cell index={0} colSpan={2}><Text strong>Total</Text></Table.Summary.Cell>
-                  {(['current', 'days30', 'days60', 'days90', 'days90plus', 'total'] as const).map((f, i) => (
+                  {(['current', 'days30', 'days60', 'days90', 'days120', 'days120plus', 'total'] as const).map((f, i) => (
                     <Table.Summary.Cell key={f} index={i + 2} align="right">
-                      <Text strong>{fmt(filteredRows.reduce((s, r) => s + (r[f] || 0), 0))}</Text>
+                      <Text strong style={{ color: f === 'total' ? REDWOOD.primary : undefined }}>
+                        {fmt(filteredRows.reduce((s, r) => s + (r[f] || 0), 0))}
+                      </Text>
                     </Table.Summary.Cell>
                   ))}
                 </Table.Summary.Row>
