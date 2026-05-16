@@ -301,6 +301,17 @@ const TrialBalance: React.FC = () => {
   // Retained Earnings calculator
   const [reCalcVisible, setReCalcVisible] = useState(false);
   const [reCalcTab,     setReCalcTab]     = useState<TabData | null>(null);
+  // Multi-year RE rollforward
+  const [reYearFrom,      setReYearFrom]      = useState<number | null>(null);
+  const [reYearTo,        setReYearTo]        = useState<number | null>(null);
+  const [reYearRows,      setReYearRows]      = useState<{
+    year: number; lastPeriod: string;
+    revenue: number; expenses: number; netPL: number;
+    reBalance: number; cumulativeRE: number;
+  }[]>([]);
+  const [reYearLoading,   setReYearLoading]   = useState(false);
+  const [reYearProgress,  setReYearProgress]  = useState('');
+  const [reYearError,     setReYearError]     = useState<string | null>(null);
   const [revalPreviewRows,     setRevalPreviewRows]     = useState<
     { lineNum: number; combo: string; desc: string; comment: string; dr: number; cr: number }[]
   >([]);
@@ -4572,6 +4583,62 @@ const TrialBalance: React.FC = () => {
     );
   };
 
+  // ── Multi-Year Retained Earnings rollforward ─────────────────
+  const calcMultiYearRE = async () => {
+    if (!reCalcTab || !reYearFrom || !reYearTo || reYearFrom > reYearTo) {
+      message.warning('Select a valid year range'); return;
+    }
+    setReYearLoading(true);
+    setReYearRows([]);
+    setReYearError(null);
+
+    const ledger = reCalcTab.ledgerName;
+    const yearRange: number[] = [];
+    for (let y = reYearFrom; y <= reYearTo; y++) yearRange.push(y);
+
+    const rows: { year: number; lastPeriod: string; revenue: number; expenses: number; netPL: number; reBalance: number; cumulativeRE: number }[] = [];
+    let cumulativeRE = 0;
+
+    for (let i = 0; i < yearRange.length; i++) {
+      const year = yearRange[i];
+      setReYearProgress(`Fetching year ${year} (${i + 1}/${yearRange.length})…`);
+
+      // Find the last period of this year
+      const yearPeriods = periods
+        .filter(p => p.period_year === year && p.ledger_name === ledger)
+        .sort((a, b) => b.period_number - a.period_number);
+
+      if (yearPeriods.length === 0) {
+        rows.push({ year, lastPeriod: '—', revenue: 0, expenses: 0, netPL: 0, reBalance: 0, cumulativeRE });
+        continue;
+      }
+
+      const lastPeriod = yearPeriods[0];
+      try {
+        const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceStandard}`
+          + `?ledger_name=${encodeURIComponent(ledger)}`
+          + `&period_name=${encodeURIComponent(lastPeriod.period_name_id)}`
+          + `&limit=10000`;
+        const res = await fetch(url, { headers: { Accept: 'application/json' } });
+        const d = await res.json();
+        const items: RrTBRecord[] = d.items ?? [];
+
+        const revenue  = items.filter(r => r.account_type === 'R').reduce((s, r) => s + (r.closing || 0), 0);
+        const expenses = items.filter(r => r.account_type === 'E').reduce((s, r) => s + (r.closing || 0), 0);
+        const netPL    = -(revenue + expenses); // positive = profit
+        const reAcct   = items.filter(r => r.account === RE_ACCOUNT).reduce((s, r) => s + (r.closing || 0), 0);
+        cumulativeRE  += netPL;
+        rows.push({ year, lastPeriod: lastPeriod.period_name_id, revenue, expenses, netPL, reBalance: reAcct, cumulativeRE });
+      } catch (_err) {
+        rows.push({ year, lastPeriod: lastPeriod.period_name_id, revenue: 0, expenses: 0, netPL: 0, reBalance: 0, cumulativeRE });
+      }
+    }
+
+    setReYearRows(rows);
+    setReYearProgress('');
+    setReYearLoading(false);
+  };
+
   // ── Render: Retained Earnings calculator popup ───────────────
   const RE_ACCOUNT = '3112100';
 
@@ -4756,6 +4823,171 @@ const TrialBalance: React.FC = () => {
             />
           ),
         }]} />
+
+        {/* Multi-Year Retained Earnings Rollforward */}
+        <Divider style={{ marginTop: 20, marginBottom: 12 }}>
+          <span style={{ color: '#722ed1', fontWeight: 600, fontSize: 13 }}>Multi-Year Retained Earnings Rollforward</span>
+        </Divider>
+
+        <Row gutter={8} align="middle" style={{ marginBottom: 12 }}>
+          <Col>
+            <span style={{ fontSize: 12, marginRight: 4 }}>From Year:</span>
+            <Select
+              size="small"
+              style={{ width: 100 }}
+              placeholder="From"
+              value={reYearFrom ?? undefined}
+              onChange={(v: number) => setReYearFrom(v)}
+              options={[...new Set(periods.filter(p => p.ledger_name === reCalcTab?.ledgerName).map(p => p.period_year))].sort((a, b) => a - b).map(y => ({ label: String(y), value: y }))}
+            />
+          </Col>
+          <Col>
+            <span style={{ fontSize: 12, marginRight: 4 }}>To Year:</span>
+            <Select
+              size="small"
+              style={{ width: 100 }}
+              placeholder="To"
+              value={reYearTo ?? undefined}
+              onChange={(v: number) => setReYearTo(v)}
+              options={[...new Set(periods.filter(p => p.ledger_name === reCalcTab?.ledgerName).map(p => p.period_year))].sort((a, b) => a - b).map(y => ({ label: String(y), value: y }))}
+            />
+          </Col>
+          <Col>
+            <Button
+              size="small"
+              type="primary"
+              style={{ background: '#722ed1', borderColor: '#722ed1' }}
+              loading={reYearLoading}
+              onClick={calcMultiYearRE}
+            >
+              Calculate
+            </Button>
+          </Col>
+          {reYearProgress && (
+            <Col>
+              <Text style={{ fontSize: 11, color: REDWOOD.textSecondary }}>{reYearProgress}</Text>
+            </Col>
+          )}
+        </Row>
+
+        {reYearError && (
+          <Alert type="error" showIcon message={reYearError} style={{ marginBottom: 12 }} />
+        )}
+
+        {reYearRows.length > 0 && (() => {
+          const totalRevenue  = reYearRows.reduce((s, r) => s + r.revenue,  0);
+          const totalExpenses = reYearRows.reduce((s, r) => s + r.expenses, 0);
+          const totalNetPL    = reYearRows.reduce((s, r) => s + r.netPL,    0);
+
+          const multiYearCols = [
+            {
+              title: 'Year',
+              dataIndex: 'year',
+              key: 'year',
+              width: 70,
+              render: (v: number) => (
+                <Text style={{ fontFamily: 'monospace', fontWeight: 700 }}>{v}</Text>
+              ),
+            },
+            {
+              title: 'Last Period',
+              dataIndex: 'lastPeriod',
+              key: 'lastPeriod',
+              width: 130,
+              render: (v: string) => <Tag style={{ fontSize: 10 }}>{v}</Tag>,
+            },
+            {
+              title: 'Revenue',
+              dataIndex: 'revenue',
+              key: 'revenue',
+              align: 'right' as const,
+              width: 120,
+              render: (v: number) => (
+                <Text style={{ fontFamily: 'monospace', color: '#237804' }}>{fmtN(v)}</Text>
+              ),
+            },
+            {
+              title: 'Expenses',
+              dataIndex: 'expenses',
+              key: 'expenses',
+              align: 'right' as const,
+              width: 120,
+              render: (v: number) => (
+                <Text style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmtN(v)}</Text>
+              ),
+            },
+            {
+              title: 'Net P&L',
+              dataIndex: 'netPL',
+              key: 'netPL',
+              align: 'right' as const,
+              width: 130,
+              render: (v: number) => (
+                <Space size={4}>
+                  <Text style={{ fontFamily: 'monospace', color: v >= 0 ? '#237804' : REDWOOD.primary }}>
+                    {fmtN(v)}
+                  </Text>
+                  <Tag color={v >= 0 ? 'success' : 'error'} style={{ fontSize: 10, marginLeft: 2 }}>
+                    {v >= 0 ? '▲' : '▼'}
+                  </Tag>
+                </Space>
+              ),
+            },
+            {
+              title: `RE Acct (${RE_ACCOUNT})`,
+              dataIndex: 'reBalance',
+              key: 'reBalance',
+              align: 'right' as const,
+              width: 140,
+              render: (v: number) => fmtSigned(v),
+            },
+            {
+              title: 'Cumulative Net P&L',
+              dataIndex: 'cumulativeRE',
+              key: 'cumulativeRE',
+              align: 'right' as const,
+              width: 150,
+              render: (v: number) => (
+                <Text style={{ fontFamily: 'monospace', fontWeight: 700, color: '#722ed1' }}>{fmtN(v)}</Text>
+              ),
+            },
+          ];
+
+          return (
+            <Table
+              dataSource={reYearRows.map(r => ({ ...r, key: r.year }))}
+              columns={multiYearCols}
+              size="small"
+              bordered
+              pagination={false}
+              scroll={{ x: 900 }}
+              summary={() => (
+                <Table.Summary>
+                  <Table.Summary.Row style={{ background: '#f9f0ff' }}>
+                    <Table.Summary.Cell index={0} colSpan={2} align="right">
+                      <Text strong style={{ fontSize: 12 }}>Totals</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={2} align="right">
+                      <Text strong style={{ fontFamily: 'monospace', color: '#237804' }}>{fmtN(totalRevenue)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={3} align="right">
+                      <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmtN(totalExpenses)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={4} align="right">
+                      <Text strong style={{ fontFamily: 'monospace', color: totalNetPL >= 0 ? '#237804' : REDWOOD.primary }}>{fmtN(totalNetPL)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={5} />
+                    <Table.Summary.Cell index={6} align="right">
+                      <Text strong style={{ fontFamily: 'monospace', color: '#722ed1' }}>
+                        {reYearRows.length > 0 ? fmtN(reYearRows[reYearRows.length - 1].cumulativeRE) : '0.00'}
+                      </Text>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              )}
+            />
+          );
+        })()}
       </Modal>
     );
   };
