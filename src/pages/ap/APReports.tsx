@@ -180,28 +180,24 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
 
   const fetchSupplierBalance = async (bu: string, supplierNum: string) => {
     const p = new URLSearchParams();
-    if (bu)          p.set('business_unit', bu);
+    if (bu)          p.set('P_BUSINESS_UNIT', bu);
     if (supplierNum) p.set('supplier_number', supplierNum);
-    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/createinvoice${p.toString() ? '?' + p : ''}`);
+    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/invoices/outstanding-by-supplier${p.toString() ? '?' + p : ''}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = JSON.parse(await res.text() || '{}');
     const items: any[] = Array.isArray(data) ? data : (data.items || []);
-    const map = new Map<string, any>();
-    for (const it of items) {
-      const sKey = it.supplier_number || it.supplier || 'Unknown';
-      const amt = Number(it.invoice_amount || 0);
-      const paid = Number(it.amount_paid || 0);
-      const ex = map.get(sKey);
-      if (ex) {
-        ex.invoiceCount += 1; ex.invoiceAmount += amt;
-        ex.amountPaid += paid; ex.outstanding += amt - paid;
-      } else {
-        map.set(sKey, { key: sKey, supplierNumber: it.supplier_number || '', supplier: it.supplier || '',
-          invoiceCount: 1, invoiceAmount: amt, amountPaid: paid, outstanding: amt - paid,
-          currency: it.invoice_currency || 'AED' });
-      }
-    }
-    return Array.from(map.values()).sort((a, b) => b.outstanding - a.outstanding);
+    return items
+      .map((it: any) => ({
+        key:           it.supplier_number || it.supplier_name || String(Math.random()),
+        supplierNumber: it.supplier_number        || '',
+        supplier:       it.supplier_name          || '',
+        invoiceCount:   Number(it.invoice_count   ?? 0),
+        invoiceAmount:  Number(it.total_invoice_amount ?? 0),
+        amountPaid:     Number(it.total_paid      ?? 0),
+        outstanding:    Number(it.outstanding_amount  ?? 0),
+        currency:       it.currency               || 'AED',
+      }))
+      .sort((a, b) => b.outstanding - a.outstanding);
   };
 
   const fetchPaymentRegister = async (bu: string, supplierNum: string, dateFrom: string, dateTo: string) => {
