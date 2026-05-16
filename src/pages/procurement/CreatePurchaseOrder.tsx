@@ -266,15 +266,17 @@ const CreatePurchaseOrder: React.FC = () => {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       try {
-        const q = [`OrganizationCode='${header.shipToOrg}'`, `ItemNumber='${line.itemNumber}'`];
-        if (header.subinventory) q.push(`SubinventoryCode='${header.subinventory}'`);
-        const url = `${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(q.join(';'))}&limit=10`;
+        // Same format as ManageOnhandInventory — no quotes around values
+        const qParts = [`OrganizationCode=${header.shipToOrg}`, `ItemNumber=${line.itemNumber}`];
+        if (header.subinventory) qParts.push(`SubinventoryCode=${header.subinventory}`);
+        const urlParams = new URLSearchParams({ q: qParts.join(';'), limit: '50' });
+        const url = `${FUSION_BASE}/inventoryOnhandBalances?${urlParams}`;
         const r = await fetch(url, { headers: FUSION_HDRS });
         const d = await r.json();
         const items: any[] = d.items ?? [];
-        // sum across all locators
+        // PrimaryQuantity is the correct field name (verified from ManageOnhandInventory)
         const onhand = items.reduce((s: number, it: any) =>
-          s + (parseFloat(it.PrimaryOnhandQuantity ?? it.OnhandQuantity ?? 0) || 0), 0);
+          s + (parseFloat(it.PrimaryQuantity ?? it.PrimaryOnhandQuantity ?? it.OnhandQuantity ?? 0) || 0), 0);
         result[line.itemNumber] = { onhand, items, url };
       } catch {
         result[line.itemNumber] = { onhand: null, items: [], error: true };
@@ -291,9 +293,11 @@ const CreatePurchaseOrder: React.FC = () => {
     setOrgQohFetched(false);
     setOrgQohRows([]);
     try {
-      const qParts = [`OrganizationCode='${header.shipToOrg}'`];
-      if (header.subinventory) qParts.push(`SubinventoryCode='${header.subinventory}'`);
-      const baseUrl = `${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(qParts.join(';'))}&limit=500`;
+      // Same format as ManageOnhandInventory — no quotes around values
+      const qParts = [`OrganizationCode=${header.shipToOrg}`];
+      if (header.subinventory) qParts.push(`SubinventoryCode=${header.subinventory}`);
+      const params = new URLSearchParams({ q: qParts.join(';'), limit: '500', totalResults: 'true' });
+      const baseUrl = `${FUSION_BASE}/inventoryOnhandBalances?${params}`;
       setOrgQohApiUrl(baseUrl);
       const rows = await fetchLOV(baseUrl);
       setOrgQohRows(rows);
@@ -1049,100 +1053,68 @@ const CreatePurchaseOrder: React.FC = () => {
                               Click "Fetch Org On Hand" to load all balances for the selected organization.
                             </div>
                           ) : (() => {
-                            // Detect actual field names from first record
-                            const first = orgQohRows[0] ?? {};
-                            const keys = Object.keys(first);
-                            const pickQty = (r: any) => {
-                              const candidates = ['PrimaryOnhandQuantity','OnhandQuantity','onhandQuantity',
-                                'primaryOnhandQuantity','QuantityOnHand','quantityOnhand','Quantity','quantity'];
-                              for (const k of candidates) if (r[k] != null) return parseFloat(r[k]) || 0;
-                              return 0;
-                            };
-                            const pickReserved = (r: any) => {
-                              const candidates = ['ReservedQuantity','reservedQuantity','PrimaryReservedQuantity','primaryReservedQuantity'];
-                              for (const k of candidates) if (r[k] != null) return parseFloat(r[k]) || 0;
-                              return 0;
-                            };
-                            const pickItem = (r: any) => r.ItemNumber ?? r.itemNumber ?? r.ITEM_NUMBER ?? '—';
-                            const pickDesc = (r: any) => r.ItemDescription ?? r.itemDescription ?? r.ITEM_DESCRIPTION ?? r.Description ?? '—';
-                            const pickSub = (r: any) => r.SubinventoryCode ?? r.subinventoryCode ?? r.SUBINVENTORY_CODE ?? '—';
-                            const pickUom = (r: any) => r.PrimaryUomCode ?? r.primaryUomCode ?? r.UOM ?? r.uom ?? '—';
-                            const pickLocator = (r: any) => r.LocatorSegments ?? r.locatorSegments ?? r.Locator ?? r.locator ?? '—';
-
                             const f = orgQohFilter.toLowerCase();
                             const displayRows = f
                               ? orgQohRows.filter(r =>
-                                  String(pickItem(r)).toLowerCase().includes(f) ||
-                                  String(pickDesc(r)).toLowerCase().includes(f) ||
-                                  String(pickSub(r)).toLowerCase().includes(f) ||
-                                  String(pickLocator(r)).toLowerCase().includes(f)
+                                  String(r.ItemNumber ?? '').toLowerCase().includes(f) ||
+                                  String(r.ItemDescription ?? '').toLowerCase().includes(f) ||
+                                  String(r.SubinventoryCode ?? '').toLowerCase().includes(f) ||
+                                  String(r.Locator ?? '').toLowerCase().includes(f)
                                 )
                               : orgQohRows;
-
                             return (
-                              <>
-                                {/* Debug strip — shows actual API field names */}
-                                {keys.length > 0 && (
-                                  <div style={{ marginBottom: 10, padding: '6px 10px', background: '#F5F5F5', borderRadius: 6, fontSize: 11, color: C.textMid }}>
-                                    <Text style={{ fontSize: 11, color: C.textLight }}>API fields: </Text>
-                                    {keys.map(k => (
-                                      <Tooltip key={k} title={`${k}: ${JSON.stringify(first[k])}`}>
-                                        <Tag style={{ fontSize: 10, cursor: 'default', marginBottom: 2 }}>{k}</Tag>
-                                      </Tooltip>
-                                    ))}
-                                  </div>
-                                )}
-                                <Table
-                                  size="small"
-                                  bordered
-                                  rowKey={(r, i) => `${pickItem(r)}-${pickSub(r)}-${i}`}
-                                  dataSource={displayRows}
-                                  pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `${t} records` }}
-                                  scroll={{ x: 900 }}
-                                  rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''}
-                                  columns={[
-                                    {
-                                      title: 'Item Number', width: 160,
-                                      render: r => <Text style={{ fontWeight: 600, fontSize: 12, color: C.text }}>{pickItem(r)}</Text>,
+                              <Table
+                                size="small"
+                                bordered
+                                rowKey={(_, i) => String(i)}
+                                dataSource={displayRows}
+                                pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `${t} records` }}
+                                scroll={{ x: 1000 }}
+                                rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''}
+                                columns={[
+                                  {
+                                    title: 'Item Number', dataIndex: 'ItemNumber', width: 160,
+                                    render: v => <Text style={{ fontWeight: 700, fontSize: 12, fontFamily: 'monospace', color: C.blue }}>{v ?? '—'}</Text>,
+                                  },
+                                  {
+                                    title: 'Description', dataIndex: 'ItemDescription', ellipsis: true,
+                                    render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text>,
+                                  },
+                                  {
+                                    title: 'Subinventory', dataIndex: 'SubinventoryCode', width: 130,
+                                    render: v => <Tag color="cyan" style={{ fontWeight: 600 }}>{v ?? '—'}</Tag>,
+                                  },
+                                  {
+                                    title: 'Locator', dataIndex: 'Locator', width: 130, ellipsis: true,
+                                    render: v => <Text style={{ fontSize: 11, color: C.textMid }}>{v ?? '—'}</Text>,
+                                  },
+                                  {
+                                    title: 'On Hand Qty', dataIndex: 'PrimaryQuantity', width: 120, align: 'right' as const,
+                                    sorter: (a: any, b: any) => (a.PrimaryQuantity ?? 0) - (b.PrimaryQuantity ?? 0),
+                                    render: v => {
+                                      const n = parseFloat(v ?? 0) || 0;
+                                      return (
+                                        <Tag color={n > 100 ? 'green' : n > 0 ? 'blue' : 'default'}
+                                          style={{ fontWeight: 700, minWidth: 48, textAlign: 'center' }}>
+                                          {n}
+                                        </Tag>
+                                      );
                                     },
-                                    {
-                                      title: 'Description', ellipsis: true,
-                                      render: r => <Text style={{ fontSize: 12 }}>{pickDesc(r)}</Text>,
-                                    },
-                                    {
-                                      title: 'Subinventory', width: 140,
-                                      render: r => <Tag style={{ fontSize: 11 }}>{pickSub(r)}</Tag>,
-                                    },
-                                    {
-                                      title: 'Locator', width: 140, ellipsis: true,
-                                      render: r => <Text style={{ fontSize: 11, color: C.textMid }}>{pickLocator(r)}</Text>,
-                                    },
-                                    {
-                                      title: 'On Hand Qty', width: 120, align: 'right' as const,
-                                      sorter: (a, b) => pickQty(a) - pickQty(b),
-                                      render: r => {
-                                        const n = pickQty(r);
-                                        return (
-                                          <Text strong style={{
-                                            fontVariantNumeric: 'tabular-nums', fontSize: 13,
-                                            color: n === 0 ? C.red : n < 10 ? C.orange : C.green,
-                                          }}>
-                                            {fmt(n)}
-                                          </Text>
-                                        );
-                                      },
-                                    },
-                                    {
-                                      title: 'Reserved Qty', width: 120, align: 'right' as const,
-                                      render: r => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: C.textMid }}>{fmt(pickReserved(r))}</Text>,
-                                    },
-                                    {
-                                      title: 'UOM', width: 70, align: 'center' as const,
-                                      render: r => <Text style={{ fontSize: 11 }}>{pickUom(r)}</Text>,
-                                    },
-                                  ]}
-                                />
-                              </>
+                                  },
+                                  {
+                                    title: 'Consigned', dataIndex: 'ConsignedQuantity', width: 100, align: 'right' as const,
+                                    render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: C.textMid }}>{v ?? 0}</Text>,
+                                  },
+                                  {
+                                    title: 'UOM', dataIndex: 'PrimaryUOMCode', width: 65, align: 'center' as const,
+                                    render: v => <Text style={{ fontSize: 11 }}>{v ?? '—'}</Text>,
+                                  },
+                                  {
+                                    title: 'Status', dataIndex: 'MaterialStatus', width: 90,
+                                    render: v => <Tag color={v === 'Active' ? 'green' : 'default'}>{v ?? '—'}</Tag>,
+                                  },
+                                ]}
+                              />
                             );
                           })()}
                         </div>
