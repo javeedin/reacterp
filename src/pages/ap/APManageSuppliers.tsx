@@ -224,7 +224,10 @@ interface RelatedInvoice {
   invoiceId: number;
   invoiceNumber: string;
   invoiceAmount: number;
-  amountApplied: number;
+  amountApplied: number;      // cash paid (AMOUNT_PAID_INVOICE_CURRENCY)
+  discountTaken: number;      // discount settled at payment time
+  discountLost: number;
+  totalSettled: number;       // amountApplied + discountTaken
 }
 
 // Helper function to format date
@@ -870,19 +873,28 @@ const ManageSuppliers: React.FC = () => {
     setDrilldownLoading(true);
 
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/${payment.checkId}/related-invoices`;
+      // Use the dedicated payment-invoices endpoint from PKG_SUPPLIER_BALANCE
+      // which returns amount_paid_invoice_currency + discount_taken + discount_lost
+      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/payment-invoices/${payment.checkId}`;
       const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
       const data = await response.json();
-      const items: any[] = data.items || data.invoices || [];
-      setRelatedInvoices(items.map((item: any, index: number) => ({
-        key:           item.invoice_id?.toString() || index.toString(),
-        invoiceId:     item.invoice_id,
-        invoiceNumber: item.invoice_number  || '',
-        invoiceAmount: Number(item.invoice_amount  || 0),
-        amountApplied: Number(item.amount_applied  || item.amount_paid || 0),
-      })));
+      const items: any[] = data.invoices || data.items || [];
+      setRelatedInvoices(items.map((item: any, index: number) => {
+        const cash     = Number(item.amount_paid_invoice_currency || item.amount_applied || 0);
+        const discount = Number(item.discount_taken || 0);
+        return {
+          key:           item.invoice_id?.toString() || index.toString(),
+          invoiceId:     item.invoice_id,
+          invoiceNumber: item.invoice_number || '',
+          invoiceAmount: Number(item.invoice_amount || 0),
+          amountApplied: cash,
+          discountTaken: discount,
+          discountLost:  Number(item.discount_lost || 0),
+          totalSettled:  cash + discount,
+        };
+      }));
     } catch (error) {
       console.error('Error fetching drilldown:', error);
       message.error('Failed to load related invoices');
@@ -2284,15 +2296,37 @@ const ManageSuppliers: React.FC = () => {
           <Card title="Related Invoices" size="small">
             <Table
               columns={[
-                { title: 'Invoice Number', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 150 },
-                { title: 'Invoice Amount', dataIndex: 'invoiceAmount', key: 'invoiceAmount', width: 140, align: 'right' as const, render: (amt: number) => formatCurrency(amt) },
-                { title: 'Amount Applied', dataIndex: 'amountApplied', key: 'amountApplied', width: 140, align: 'right' as const, render: (amt: number) => <Text style={{ color: REDWOOD.success }}>{formatCurrency(amt)}</Text> },
+                { title: 'Invoice #',       dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 150 },
+                { title: 'Invoice Amount',  dataIndex: 'invoiceAmount', key: 'invoiceAmount', width: 130, align: 'right' as const,
+                  render: (amt: number) => formatCurrency(amt) },
+                { title: 'Cash Applied',    dataIndex: 'amountApplied', key: 'amountApplied', width: 130, align: 'right' as const,
+                  render: (amt: number) => <Text style={{ color: REDWOOD.success }}>{formatCurrency(amt)}</Text> },
+                { title: 'Discount Taken',  dataIndex: 'discountTaken', key: 'discountTaken', width: 130, align: 'right' as const,
+                  render: (amt: number) => <Text style={{ color: amt > 0 ? REDWOOD.warning : REDWOOD.neutral600 }}>{formatCurrency(amt)}</Text> },
+                { title: 'Total Settled',   dataIndex: 'totalSettled',  key: 'totalSettled',  width: 130, align: 'right' as const,
+                  render: (amt: number) => <Text strong style={{ color: REDWOOD.success }}>{formatCurrency(amt)}</Text> },
               ]}
               dataSource={relatedInvoices}
               loading={drilldownLoading}
               pagination={false}
               size="small"
               locale={{ emptyText: 'No related invoices found' }}
+              summary={() => {
+                if (relatedInvoices.length === 0) return null;
+                const totInv  = relatedInvoices.reduce((s, r) => s + r.invoiceAmount, 0);
+                const totCash = relatedInvoices.reduce((s, r) => s + r.amountApplied, 0);
+                const totDisc = relatedInvoices.reduce((s, r) => s + r.discountTaken, 0);
+                const totSett = relatedInvoices.reduce((s, r) => s + r.totalSettled,  0);
+                return (
+                  <Table.Summary.Row style={{ background: '#f6ffed' }}>
+                    <Table.Summary.Cell index={0}><Text strong style={{ fontSize: 11 }}>Total</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={1} align="right"><Text strong style={{ fontSize: 11 }}>{formatCurrency(totInv)}</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={2} align="right"><Text strong style={{ color: REDWOOD.success, fontSize: 11 }}>{formatCurrency(totCash)}</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={3} align="right"><Text strong style={{ color: REDWOOD.warning, fontSize: 11 }}>{formatCurrency(totDisc)}</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={4} align="right"><Text strong style={{ color: REDWOOD.success, fontSize: 11 }}>{formatCurrency(totSett)}</Text></Table.Summary.Cell>
+                  </Table.Summary.Row>
+                );
+              }}
             />
           </Card>
         </Modal>
