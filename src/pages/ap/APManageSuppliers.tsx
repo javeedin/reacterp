@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Layout,
   Card,
@@ -52,10 +52,15 @@ import {
   CreditCardOutlined,
   ExclamationCircleOutlined,
   CalendarOutlined,
+  FileExcelOutlined,
+  EditOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
+import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
 import FloatingMenu from '../../components/FloatingMenu';
 import Autopilot from '../../components/Autopilot';
+import InvoiceDetail from './InvoiceDetail';
 import type { ColumnsType } from 'antd/es/table';
 
 const { Content } = Layout;
@@ -318,14 +323,234 @@ const mapFusionToSupplierDetail = (item: any): SupplierDetail => ({
   preferredFunctionalCurrency: item.PreferredFunctionalCurrency || '',
 });
 
+// ── InvoicesTabContent ──────────────────────────────────────────────────────
+// Defined OUTSIDE ManageSuppliers so its type identity is stable across
+// parent re-renders, preventing full remount when parent state changes.
+interface InvoicesTabContentProps {
+  invoices: InvoiceRecord[];
+  invoicesLoading: boolean;
+  supplierNumber: string;
+  apiUrl: string;
+  onExport: (rows: InvoiceRecord[]) => void;
+  onRefresh: () => void;
+  onEdit: (invoice: InvoiceRecord) => void;
+}
+
+const InvoicesTabContent: React.FC<InvoicesTabContentProps> = ({
+  invoices, invoicesLoading, apiUrl, onExport, onRefresh, onEdit,
+}) => {
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'unpaid'>('all');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
+  const fmt = (amt: number, currency = 'AED') =>
+    new Intl.NumberFormat('en-AE', { style: 'currency', currency, minimumFractionDigits: 2 }).format(amt);
+
+  // Totals over ALL invoices (not just filtered) for the summary cards
+  const totals = React.useMemo(() => ({
+    count:     invoices.length,
+    amount:    invoices.reduce((s, r) => s + (r.invoiceAmount   || 0), 0),
+    paid:      invoices.reduce((s, r) => s + (r.amountPaid      || 0), 0),
+    balance:   invoices.reduce((s, r) => s + (r.amountRemaining || 0), 0),
+    currency:  invoices[0]?.currency || 'AED',
+    paidCount:   invoices.filter(r => (r.amountRemaining || 0) <= 0).length,
+    unpaidCount: invoices.filter(r => (r.amountRemaining || 0) >  0).length,
+  }), [invoices]);
+
+  const filtered = React.useMemo(() => {
+    let rows = invoices;
+    if (statusFilter === 'paid')   rows = rows.filter(r => (r.amountRemaining || 0) <= 0);
+    if (statusFilter === 'unpaid') rows = rows.filter(r => (r.amountRemaining || 0) >  0);
+    if (search) {
+      const q = search.toLowerCase();
+      rows = rows.filter(r =>
+        (r.invoiceNumber || '').toLowerCase().includes(q) ||
+        (r.description   || '').toLowerCase().includes(q) ||
+        (r.invoiceStatus || '').toLowerCase().includes(q) ||
+        String(r.invoiceAmount).includes(q)
+      );
+    }
+    return rows;
+  }, [invoices, statusFilter, search]);
+
+  React.useEffect(() => { setPage(1); }, [search, statusFilter]);
+
+  const fmtNum = (n: number) =>
+    new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+
+  const columns = React.useMemo(() => [
+    { title: 'Invoice #', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 130,
+      render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+    { title: 'Date', dataIndex: 'invoiceDate', key: 'invoiceDate', width: 100,
+      render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+    {
+      title: 'Amount', dataIndex: 'invoiceAmount', key: 'invoiceAmount', width: 120, align: 'right' as const,
+      render: (amt: number, r: InvoiceRecord) => <Text strong style={{ fontSize: 11 }}>{fmt(amt, r.currency)}</Text>
+    },
+    {
+      title: 'Paid', dataIndex: 'amountPaid', key: 'amountPaid', width: 120, align: 'right' as const,
+      render: (amt: number, r: InvoiceRecord) => <Text style={{ color: REDWOOD.success, fontSize: 11 }}>{fmt(amt, r.currency)}</Text>
+    },
+    {
+      title: 'Balance', dataIndex: 'amountRemaining', key: 'amountRemaining', width: 120, align: 'right' as const,
+      render: (amt: number, r: InvoiceRecord) => <Text style={{ color: amt > 0 ? REDWOOD.error : REDWOOD.success, fontSize: 11 }}>{fmt(amt, r.currency)}</Text>
+    },
+    {
+      title: 'Status', dataIndex: 'invoiceStatus', key: 'invoiceStatus', width: 90,
+      render: (status: string) => {
+        const color = status === 'PAID' ? 'green' : status === 'CANCELLED' ? 'default' : status === 'HOLD' ? 'orange' : 'blue';
+        return <Tag color={color} style={{ fontSize: 10 }}>{status || '-'}</Tag>;
+      }
+    },
+    { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true,
+      render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+    {
+      title: '', key: 'actions', width: 40, fixed: 'right' as const,
+      render: (_: any, record: InvoiceRecord) => (
+        <Tooltip title="View / Edit Invoice">
+          <Button type="text" size="small" icon={<EditOutlined />} style={{ color: REDWOOD.info }} onClick={() => onEdit(record)} />
+        </Tooltip>
+      ),
+    },
+  ], [onEdit]);
+
+  return (
+    <div>
+      {/* Totals row */}
+      {invoices.length > 0 && (
+        <Row gutter={12} style={{ marginBottom: 12 }}>
+          <Col span={6}>
+            <Card size="small" style={{ background: '#f0f5ff', borderColor: '#adc6ff' }}>
+              <Statistic title={<Text style={{ fontSize: 11 }}>Total Invoices</Text>} value={totals.count} valueStyle={{ fontSize: 16 }} />
+            </Card>
+          </Col>
+          <Col span={6}>
+            <Card size="small" style={{ background: '#f0f5ff', borderColor: '#adc6ff' }}>
+              <Statistic title={<Text style={{ fontSize: 11 }}>Invoice Amount</Text>} value={totals.amount} precision={2} suffix={totals.currency} valueStyle={{ fontSize: 15 }} />
+            </Card>
+          </Col>
+          <Col span={6}>
+            <Card size="small" style={{ background: '#f6ffed', borderColor: '#b7eb8f' }}>
+              <Statistic title={<Text style={{ fontSize: 11 }}>Total Paid</Text>} value={totals.paid} precision={2} suffix={totals.currency} valueStyle={{ fontSize: 15, color: REDWOOD.success }} />
+            </Card>
+          </Col>
+          <Col span={6}>
+            <Card size="small" style={{ background: totals.balance > 0 ? '#fff2f0' : '#f6ffed', borderColor: totals.balance > 0 ? '#ffccc7' : '#b7eb8f' }}>
+              <Statistic title={<Text style={{ fontSize: 11 }}>Outstanding Balance</Text>} value={totals.balance} precision={2} suffix={totals.currency} valueStyle={{ fontSize: 15, color: totals.balance > 0 ? REDWOOD.error : REDWOOD.success }} />
+            </Card>
+          </Col>
+        </Row>
+      )}
+
+      {/* Status filter + search toolbar */}
+      <Row gutter={8} style={{ marginBottom: 12 }} align="middle" justify="space-between">
+        <Col>
+          <Space>
+            {(['all', 'paid', 'unpaid'] as const).map(s => (
+              <Button
+                key={s}
+                size="small"
+                type={statusFilter === s ? 'primary' : 'default'}
+                onClick={() => setStatusFilter(s)}
+                style={statusFilter === s ? { background: s === 'paid' ? REDWOOD.success : s === 'unpaid' ? REDWOOD.error : REDWOOD.info } : {}}
+              >
+                {s === 'all' ? `All (${totals.count})` : s === 'paid' ? `Paid (${totals.paidCount})` : `Unpaid (${totals.unpaidCount})`}
+              </Button>
+            ))}
+          </Space>
+        </Col>
+        <Col>
+          <Space>
+            <Input
+              placeholder="Search invoice #, description..."
+              prefix={<SearchOutlined />}
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              allowClear
+              size="small"
+              style={{ width: 240 }}
+            />
+            <Text type="secondary" style={{ fontSize: 12 }}>{filtered.length} rows</Text>
+            <Button icon={<FileExcelOutlined />} size="small" style={{ color: '#1D7B4D', borderColor: '#1D7B4D' }} onClick={() => onExport(filtered)}>Excel</Button>
+            <Button icon={<ReloadOutlined />} size="small" onClick={onRefresh} loading={invoicesLoading}>Refresh</Button>
+            <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>{apiUrl}</span>} placement="bottomRight">
+              <ApiOutlined style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 14 }} />
+            </Tooltip>
+          </Space>
+        </Col>
+      </Row>
+
+      <Table
+        columns={columns}
+        dataSource={filtered}
+        loading={invoicesLoading}
+        scroll={{ x: 900 }}
+        size="small"
+        rowKey="key"
+        pagination={{
+          current: page,
+          pageSize,
+          showSizeChanger: true,
+          pageSizeOptions: ['10', '20', '50', '100'],
+          showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} invoices`,
+          onChange: (p, s) => { setPage(p); setPageSize(s); },
+        }}
+        summary={() => {
+          if (invoicesLoading || filtered.length === 0) return null;
+          const fAmt  = filtered.reduce((s, r) => s + (r.invoiceAmount   || 0), 0);
+          const fPaid = filtered.reduce((s, r) => s + (r.amountPaid      || 0), 0);
+          const fBal  = filtered.reduce((s, r) => s + (r.amountRemaining || 0), 0);
+          const label = filtered.length !== invoices.length ? `Filtered (${filtered.length})` : `Total (${filtered.length})`;
+          return (
+            <Table.Summary fixed>
+              <Table.Summary.Row style={{ background: '#fff7e6', fontWeight: 600 }}>
+                <Table.Summary.Cell index={0} colSpan={2}>
+                  <Text strong style={{ color: '#d46b08', fontSize: 11 }}>{label}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={2} align="right">
+                  <Text strong style={{ color: '#d46b08', fontFamily: 'monospace', fontSize: 11 }}>{fmtNum(fAmt)}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={3} align="right">
+                  <Text strong style={{ color: REDWOOD.success, fontFamily: 'monospace', fontSize: 11 }}>{fmtNum(fPaid)}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={4} align="right">
+                  <Text strong style={{ color: fBal > 0 ? REDWOOD.error : REDWOOD.success, fontFamily: 'monospace', fontSize: 11 }}>{fmtNum(fBal)}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={5} colSpan={3} />
+              </Table.Summary.Row>
+            </Table.Summary>
+          );
+        }}
+      />
+    </div>
+  );
+};
+
 const ManageSuppliers: React.FC = () => {
   const [form] = Form.useForm();
+  const selectedBU = Form.useWatch('businessUnit', form);
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
+  const [gridFilter, setGridFilter] = useState('');
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+
+  // Compute filtered suppliers at component level so changes always propagate
+  const filteredSuppliers = React.useMemo(() => {
+    const q = gridFilter.trim().toLowerCase();
+    if (!q) return suppliers;
+    return suppliers.filter(r =>
+      (r.supplier              || '').toLowerCase().includes(q) ||
+      (r.supplierNumber        || '').toLowerCase().includes(q) ||
+      (r.alternateName         || '').toLowerCase().includes(q) ||
+      (r.supplierType          || '').toLowerCase().includes(q) ||
+      (r.status                || '').toLowerCase().includes(q) ||
+      (r.taxRegistrationNumber || '').toLowerCase().includes(q)
+    );
+  }, [suppliers, gridFilter]);
   const [searchCollapsed, setSearchCollapsed] = useState(false);
-  const [dataSource, setDataSource] = useState<'fusion' | 'apex'>('apex');
+  const dataSource = 'apex';
 
   // Tab management state
   const [activeTab, setActiveTab] = useState('search');
@@ -334,6 +559,7 @@ const ManageSuppliers: React.FC = () => {
   // Balance tab state - stored per tab key
   const [balanceDataMap, setBalanceDataMap] = useState<Record<string, BalanceData | null>>({});
   const [invoicesMap, setInvoicesMap] = useState<Record<string, InvoiceRecord[]>>({});
+  const [invoicesUrlMap, setInvoicesUrlMap] = useState<Record<string, string>>({});
   const [paymentsMap, setPaymentsMap] = useState<Record<string, PaymentRecord[]>>({});
   const [balanceLoadingMap, setBalanceLoadingMap] = useState<Record<string, boolean>>({});
   const [invoicesLoadingMap, setInvoicesLoadingMap] = useState<Record<string, boolean>>({});
@@ -342,12 +568,95 @@ const ManageSuppliers: React.FC = () => {
   // Payment drilldown modal
   const [drilldownVisible, setDrilldownVisible] = useState(false);
   const [drilldownPayment, setDrilldownPayment] = useState<PaymentRecord | null>(null);
+  const [editInvoiceVisible, setEditInvoiceVisible] = useState(false);
+  const [editInvoice, setEditInvoice] = useState<InvoiceRecord | null>(null);
+  const [editInvoiceSaving, setEditInvoiceSaving] = useState(false);
   const [relatedInvoices, setRelatedInvoices] = useState<RelatedInvoice[]>([]);
   const [drilldownLoading, setDrilldownLoading] = useState(false);
 
   // API Info Modal state
   const [apiModalVisible, setApiModalVisible] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+
+  // Supplier LOV modal state
+  const [lovVisible, setLovVisible] = useState(false);
+  const [lovSearch, setLovSearch] = useState('');
+  const [lovResults, setLovResults] = useState<{ supplierNumber: string; supplier: string }[]>([]);
+  const [lovLoading, setLovLoading] = useState(false);
+  // Cache — load once, filter client-side on every subsequent open
+  const lovCacheRef = useRef<{ supplierNumber: string; supplier: string }[]>([]);
+
+  const displayedLovResults = React.useMemo(() => {
+    const q = lovSearch.trim().toLowerCase();
+    const rows = q
+      ? lovResults.filter(r =>
+          (r.supplierNumber || '').toLowerCase().includes(q) ||
+          (r.supplier       || '').toLowerCase().includes(q)
+        )
+      : lovResults;
+    return rows.map((r, i) => ({ ...r, key: i }));
+  }, [lovSearch, lovResults]);
+
+  const openLov = async () => {
+    setLovSearch('');
+    setLovVisible(true);
+    if (lovCacheRef.current.length > 0) {
+      // Already loaded — use cache, no API call
+      setLovResults(lovCacheRef.current);
+      return;
+    }
+    // First open — fetch all suppliers and cache them
+    setLovLoading(true);
+    try {
+      const items = await fetchAllApexSuppliers(new URLSearchParams());
+      const mapped = items.map((item: any) => ({
+        supplierNumber: item.supplier_number || '',
+        supplier: item.supplier || '',
+      }));
+      lovCacheRef.current = mapped;
+      setLovResults(mapped);
+    } catch { /* ignore */ }
+    finally { setLovLoading(false); }
+  };
+
+  // Fetch ALL pages from the APEX suppliers endpoint (no artificial limit)
+  const fetchAllApexSuppliers = async (extraParams: URLSearchParams): Promise<any[]> => {
+    const PAGE = 100;
+    let offset = 0;
+    let all: any[] = [];
+    while (true) {
+      const p = new URLSearchParams(extraParams);
+      p.set('limit', String(PAGE));
+      p.set('offset', String(offset));
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers?${p.toString()}`);
+      if (!res.ok) break;
+      const data = await res.json();
+      const items: any[] = Array.isArray(data) ? data : (data.items || []);
+      all = [...all, ...items];
+      if (!data.hasMore || items.length < PAGE) break;
+      offset += PAGE;
+    }
+    return all;
+  };
+
+
+  const onLovPick = (row: { supplierNumber: string; supplier: string }) => {
+    form.setFieldsValue({ supplierNumber: row.supplierNumber, supplier: row.supplier });
+    setLovVisible(false);
+  };
+
+  // Business Unit options — fetched from RR_GL_BUSINESS_UNITS via GET /gl/businessunits
+  const [businessUnits, setBusinessUnits] = useState<string[]>([]);
+  useEffect(() => {
+    fetch(`${APEX_DB_CONFIG.baseUrl}/gl/businessunits`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        const items: any[] = Array.isArray(data) ? data : (data.items || []);
+        setBusinessUnits(items.map((i: any) => i.business_unit_name || '').filter(Boolean));
+      })
+      .catch(() => {});
+  }, []);
 
   // API Configuration for this page
   const PAGE_APIS = {
@@ -445,53 +754,35 @@ const ManageSuppliers: React.FC = () => {
   // Fetch balance dashboard data
   const fetchBalanceDashboard = async (supplierNumber: string): Promise<BalanceData | null> => {
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/dashboard/${supplierNumber}`;
-      console.log('Fetching balance dashboard:', url);
+      const enc = encodeURIComponent(supplierNumber);
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers/balance/dashboard/${enc}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = await res.json();
+      if (d.success !== 'true') throw new Error(d.error || 'Dashboard error');
 
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log('Balance dashboard response:', data);
-
-      if (data.success === 'false') {
-        throw new Error(data.error || 'Failed to load balance data');
-      }
+      const sup = d.supplier || {};
+      const bs  = d.balance_summary || {};
 
       return {
         supplier: {
-          supplierId: data.supplier?.supplier_id || 0,
-          supplierNumber: data.supplier?.supplier_number || supplierNumber,
-          supplierName: data.supplier?.supplier_name || '',
-          supplierType: data.supplier?.supplier_type || null,
-          status: data.supplier?.status || 'Active',
-          taxRegistrationNumber: data.supplier?.tax_registration_number || null,
-          creationDate: data.supplier?.creation_date || null,
-          address: data.supplier?.address ? {
-            addressLine1: data.supplier.address.address_line_1 || '',
-            addressLine2: data.supplier.address.address_line_2 || '',
-            city: data.supplier.address.city || '',
-            state: data.supplier.address.state || '',
-            postalCode: data.supplier.address.postal_code || '',
-            country: data.supplier.address.country || '',
-          } : null,
+          supplierId:            sup.supplier_id    || 0,
+          supplierNumber:        sup.supplier_number || supplierNumber,
+          supplierName:          sup.supplier_name   || '',
+          supplierType:          sup.supplier_type   || null,
+          status:                sup.status          || 'Active',
+          taxRegistrationNumber: sup.tax_registration_number || null,
+          creationDate:          sup.creation_date   || null,
+          address:               null,
         },
         balanceSummary: {
-          totalInvoices: data.balance_summary?.total_invoices || 0,
-          totalInvoiceAmount: data.balance_summary?.total_invoice_amount || 0,
-          totalPayments: data.balance_summary?.total_payments || 0,
-          totalPaymentAmount: data.balance_summary?.total_payment_amount || 0,
-          balance: data.balance_summary?.balance || 0,
-          currency: data.balance_summary?.currency || 'AED',
+          totalInvoices:      bs.total_invoices       || 0,
+          totalInvoiceAmount: bs.total_invoice_amount || 0,
+          totalPayments:      bs.total_payments       || 0,
+          totalPaymentAmount: bs.total_payment_amount || 0,
+          balance:            bs.balance              || 0,
+          currency:           bs.currency             || 'AED',
         },
-        agingReport: (data.aging_report || []).map((item: any) => ({
-          bucket: item.bucket || '',
-          amount: item.amount || 0,
-          invoiceCount: item.invoice_count || 0,
-          percentage: item.percentage || 0,
-        })),
+        agingReport: d.aging_report || [],
       };
     } catch (error) {
       console.error('Error fetching balance dashboard:', error);
@@ -504,25 +795,25 @@ const ManageSuppliers: React.FC = () => {
   const fetchBalanceInvoices = async (supplierNumber: string, tabKey: string) => {
     setInvoicesLoadingMap(prev => ({ ...prev, [tabKey]: true }));
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${supplierNumber}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${encodeURIComponent(supplierNumber)}?limit=500`;
+      setInvoicesUrlMap(prev => ({ ...prev, [tabKey]: url }));
       const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
-      const items = data.invoices || [];
+      const items: any[] = data.invoices || data.items || [];
       setInvoicesMap(prev => ({
         ...prev,
         [tabKey]: items.map((item: any, index: number) => ({
-          key: item.invoice_id?.toString() || index.toString(),
-          invoiceId: item.invoice_id,
-          invoiceNumber: item.invoice_number || '',
-          invoiceDate: item.invoice_date || '',
-          invoiceAmount: item.invoice_amount || 0,
-          amountPaid: item.amount_paid || 0,
-          amountRemaining: item.amount_remaining || 0,
-          invoiceStatus: item.invoice_status || '',
-          currency: item.currency || 'AED',
-          description: item.description || '',
+          key:            item.invoice_id?.toString() || index.toString(),
+          invoiceId:      item.invoice_id,
+          invoiceNumber:  item.invoice_number  || '',
+          invoiceDate:    item.invoice_date    || '',
+          invoiceAmount:  Number(item.invoice_amount   || 0),
+          amountPaid:     Number(item.amount_paid      || 0),
+          amountRemaining: Number(item.amount_remaining ?? 0),
+          invoiceStatus:  item.invoice_status || item.validation_status || '',
+          currency:       item.currency || item.invoice_currency || 'AED',
+          description:    item.description || '',
         })),
       }));
     } catch (error) {
@@ -537,25 +828,24 @@ const ManageSuppliers: React.FC = () => {
   const fetchBalancePayments = async (supplierNumber: string, tabKey: string) => {
     setPaymentsLoadingMap(prev => ({ ...prev, [tabKey]: true }));
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/payments/${supplierNumber}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments?supplier_number=${encodeURIComponent(supplierNumber)}&limit=500`;
       const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
-      const items = data.payments || [];
+      const items: any[] = data.items || [];
       setPaymentsMap(prev => ({
         ...prev,
         [tabKey]: items.map((item: any, index: number) => ({
-          key: item.payment_id?.toString() || index.toString(),
-          paymentId: item.payment_id,
-          checkId: item.check_id,
-          paymentNumber: item.payment_number || '',
-          paymentDate: item.payment_date || '',
-          paymentAmount: item.payment_amount || 0,
-          paymentStatus: item.payment_status || '',
-          paymentMethod: item.payment_method || '',
-          currency: item.currency || 'AED',
-          bankAccountName: item.bank_account_name || '',
+          key:           item.CheckId?.toString() || item.check_id?.toString() || index.toString(),
+          paymentId:     item.CheckId   || item.check_id,
+          checkId:       item.CheckId   || item.check_id,
+          paymentNumber: item.PaymentNumber || item.payment_number || '',
+          paymentDate:   item.PaymentDate   || item.payment_date   || '',
+          paymentAmount: Number(item.PaymentAmount  || item.payment_amount  || 0),
+          paymentStatus: item.PaymentStatus || item.payment_status || '',
+          paymentMethod: item.PaymentMethod || item.payment_method || '',
+          currency:      item.PaymentCurrency || item.payment_currency || 'AED',
+          bankAccountName: item.BankAccountName || item.bank_account_name || '',
         })),
       }));
     } catch (error) {
@@ -573,18 +863,18 @@ const ManageSuppliers: React.FC = () => {
     setDrilldownLoading(true);
 
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/payment-invoices/${payment.checkId}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/${payment.checkId}/related-invoices`;
       const response = await fetch(url);
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
       const data = await response.json();
-      const items = data.invoices || [];
+      const items: any[] = data.items || data.invoices || [];
       setRelatedInvoices(items.map((item: any, index: number) => ({
-        key: item.invoice_id?.toString() || index.toString(),
-        invoiceId: item.invoice_id,
-        invoiceNumber: item.invoice_number || '',
-        invoiceAmount: item.invoice_amount || 0,
-        amountApplied: item.amount_applied || 0,
+        key:           item.invoice_id?.toString() || index.toString(),
+        invoiceId:     item.invoice_id,
+        invoiceNumber: item.invoice_number  || '',
+        invoiceAmount: Number(item.invoice_amount  || 0),
+        amountApplied: Number(item.amount_applied  || item.amount_paid || 0),
       })));
     } catch (error) {
       console.error('Error fetching drilldown:', error);
@@ -610,21 +900,11 @@ const ManageSuppliers: React.FC = () => {
       key: tabKey,
       label: record.supplier,
       supplier: record,
-      loading: dataSource === 'fusion',
+      loading: false,
       tabType: 'detail',
     };
     setOpenTabs([...openTabs, newTab]);
     setActiveTab(tabKey);
-
-    // Fetch detail if Fusion mode
-    if (dataSource === 'fusion') {
-      const detail = await fetchSupplierDetail(record.supplierId);
-      setOpenTabs((prevTabs) =>
-        prevTabs.map((tab) =>
-          tab.key === tabKey ? { ...tab, detail: detail || undefined, loading: false } : tab
-        )
-      );
-    }
   };
 
   // Open supplier balance in new tab
@@ -687,69 +967,23 @@ const ManageSuppliers: React.FC = () => {
   const handleSearch = async () => {
     setLoading(true);
     try {
-      let proxyUrl: string;
-      let mapFunction: (item: any, index: number) => SupplierRecord;
-
       // Get form values
       const formValues = form.getFieldsValue();
       const supplierNumber = formValues.supplierNumber?.trim();
       const supplierName = formValues.supplier?.trim();
+      const businessUnit = formValues.businessUnit?.trim();
 
-      let headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      // APEX API - fetch all pages
+      const apexParams = new URLSearchParams();
+      if (supplierNumber) apexParams.set('supplier_number', supplierNumber);
+      if (businessUnit)   apexParams.set('P_BUSINESS_UNIT', businessUnit);
 
-      if (dataSource === 'fusion') {
-        // Fusion API - direct URL
-        let queryParams = 'limit=25&onlyData=true';
+      const items = await fetchAllApexSuppliers(apexParams);
 
-        // Build query filters
-        const filters: string[] = [];
-        if (supplierNumber) {
-          filters.push(`SupplierNumber=${supplierNumber}`);
-        }
-        if (supplierName) {
-          filters.push(`Supplier LIKE *${supplierName}*`);
-        }
-
-        // Add q parameter if filters exist
-        if (filters.length > 0) {
-          queryParams += `&q=${encodeURIComponent(filters.join(';'))}`;
-        }
-
-        proxyUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/suppliers?${queryParams}`;
-        headers['Authorization'] = `Basic ${FUSION_AUTH}`;
-        mapFunction = mapFusionToSupplierRecord;
-      } else {
-        // APEX API - direct URL
-        let queryParams = '';
-        if (supplierNumber) {
-          queryParams = `?supplier_number=${encodeURIComponent(supplierNumber)}`;
-        } else if (supplierName) {
-          queryParams = `?supplier=${encodeURIComponent(supplierName)}`;
-        }
-        proxyUrl = `${APEX_DB_CONFIG.baseUrl}/suppliers${queryParams}`;
-        mapFunction = mapApexToSupplierRecord;
-      }
-
-      console.log('Fetching suppliers from:', proxyUrl);
-
-      const response = await fetch(proxyUrl, {
-        method: 'GET',
-        headers,
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log('API Response:', data);
-
-      const items = data.items || data || [];
-
-      if (Array.isArray(items) && items.length > 0) {
-        const mappedSuppliers = items.slice(0, 25).map(mapFunction);
+      if (items.length > 0) {
+        const mappedSuppliers = items.map(mapApexToSupplierRecord);
         setSuppliers(mappedSuppliers);
-        message.success(`Found ${mappedSuppliers.length} suppliers from ${dataSource === 'fusion' ? 'Fusion' : 'APEX'}`);
+        message.success(`Found ${mappedSuppliers.length} supplier(s)`);
       } else {
         setSuppliers([]);
         message.info('No suppliers found');
@@ -766,6 +1000,29 @@ const ManageSuppliers: React.FC = () => {
   const handleReset = () => {
     form.resetFields();
     setSuppliers([]);
+  };
+
+  const exportSuppliersToExcel = () => {
+    const rows = filteredSuppliers.map(r => ({
+      'Supplier Number':          r.supplierNumber,
+      'Supplier Name':            r.supplier,
+      'Alternate Name':           r.alternateName,
+      'Business Relationship':    r.businessRelationship,
+      'Parent Supplier':          r.parentSupplier,
+      'Supplier Type':            r.supplierType,
+      'Tax Organization Type':    r.taxOrganizationType,
+      'Taxpayer ID':              r.taxpayerId,
+      'Tax Registration Number':  r.taxRegistrationNumber,
+      'D-U-N-S Number':           r.dunsNumber,
+      'Status':                   r.status,
+      'Creation Date':            r.creationDate,
+      'Inactive Since':           r.inactiveSince,
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Suppliers');
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    saveAs(new Blob([buf], { type: 'application/octet-stream' }), `Suppliers_${new Date().toISOString().slice(0,10)}.xlsx`);
   };
 
   // Table columns
@@ -896,15 +1153,69 @@ const ManageSuppliers: React.FC = () => {
             <Form form={form} layout="horizontal" labelCol={{ span: 10 }} wrapperCol={{ span: 14 }} size="small">
               <Row gutter={16}>
                 <Col span={8}>
+                  <Form.Item label="Business Unit" name="businessUnit" style={{ marginBottom: 8 }}>
+                    <Space.Compact style={{ width: '100%' }}>
+                      <Select
+                        placeholder="Select business unit..."
+                        allowClear
+                        size="small"
+                        showSearch
+                        style={{ flex: 1 }}
+                        filterOption={(input, option) =>
+                          String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+                        }
+                      >
+                        {businessUnits.map(bu => (
+                          <Option key={bu} value={bu}>{bu}</Option>
+                        ))}
+                      </Select>
+                      {selectedBU && (
+                        <Tooltip title={`Copy: ${selectedBU}`}>
+                          <Button
+                            size="small"
+                            icon={<CopyOutlined />}
+                            onClick={() => {
+                              navigator.clipboard.writeText(selectedBU);
+                              message.success('Business unit name copied');
+                            }}
+                          />
+                        </Tooltip>
+                      )}
+                    </Space.Compact>
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
                   <Form.Item label="Supplier Number" name="supplierNumber" style={{ marginBottom: 8 }}>
-                    <Input placeholder="e.g. A022" size="small" />
+                    <Input
+                      size="small"
+                      placeholder="e.g. A022"
+                      suffix={
+                        <SearchOutlined
+                          style={{ color: REDWOOD.info, cursor: 'pointer' }}
+                          onClick={() => openLov()}
+                        />
+                      }
+                      onPressEnter={() => openLov()}
+                    />
                   </Form.Item>
                 </Col>
                 <Col span={8}>
                   <Form.Item label="Supplier" name="supplier" style={{ marginBottom: 8 }}>
-                    <Input placeholder="" size="small" />
+                    <Input
+                      size="small"
+                      placeholder="Type name or click 🔍"
+                      suffix={
+                        <SearchOutlined
+                          style={{ color: REDWOOD.info, cursor: 'pointer' }}
+                          onClick={handleSearch}
+                        />
+                      }
+                      onPressEnter={handleSearch}
+                    />
                   </Form.Item>
                 </Col>
+              </Row>
+              <Row gutter={16}>
                 <Col span={8}>
                   <Form.Item label="Supplier Type" name="supplierType" style={{ marginBottom: 8 }}>
                     <Select placeholder="" allowClear size="small">
@@ -914,8 +1225,6 @@ const ManageSuppliers: React.FC = () => {
                     </Select>
                   </Form.Item>
                 </Col>
-              </Row>
-              <Row gutter={16}>
                 <Col span={8}>
                   <Form.Item label="Taxpayer ID" name="taxpayerId" style={{ marginBottom: 8 }}>
                     <Input placeholder="" size="small" />
@@ -930,11 +1239,6 @@ const ManageSuppliers: React.FC = () => {
                       <Option value="Partnership">Partnership</Option>
                     </Select>
                   </Form.Item>
-                </Col>
-                <Col span={8}>
-                  <div style={{ textAlign: 'right', paddingTop: 4 }}>
-                    <Text type="secondary" style={{ fontSize: 11 }}>** At least one is required</Text>
-                  </div>
                 </Col>
               </Row>
               <Row gutter={16}>
@@ -996,28 +1300,13 @@ const ManageSuppliers: React.FC = () => {
       >
         <Row justify="space-between" align="middle">
           <Col>
-            <Space size="large">
-              <Text strong>Data Source:</Text>
-              <Space>
-                <CloudOutlined style={{ color: dataSource === 'fusion' ? REDWOOD.info : REDWOOD.neutral600 }} />
-                <Text style={{ color: dataSource === 'fusion' ? REDWOOD.info : REDWOOD.neutral600 }}>Fusion</Text>
-                <Switch
-                  checked={dataSource === 'apex'}
-                  onChange={(checked) => {
-                    setDataSource(checked ? 'apex' : 'fusion');
-                    setSuppliers([]);
-                  }}
-                  style={{ margin: '0 8px' }}
-                />
-                <DatabaseOutlined style={{ color: dataSource === 'apex' ? REDWOOD.success : REDWOOD.neutral600 }} />
-                <Text style={{ color: dataSource === 'apex' ? REDWOOD.success : REDWOOD.neutral600 }}>APEX</Text>
-              </Space>
+            <Space>
+              <DatabaseOutlined style={{ color: REDWOOD.success }} />
+              <Text style={{ color: REDWOOD.success }}>APEX Database</Text>
             </Space>
           </Col>
           <Col>
-            <Text type="secondary">
-              {dataSource === 'fusion' ? 'Fetching live data from Oracle Fusion' : 'Fetching synced data from APEX database'}
-            </Text>
+            <Text type="secondary">Fetching synced data from APEX database</Text>
           </Col>
         </Row>
       </Card>
@@ -1027,17 +1316,31 @@ const ManageSuppliers: React.FC = () => {
         title={
           <Space>
             <Text strong>Search Results</Text>
-            {suppliers.length > 0 && (
-              <Text type="secondary">({suppliers.length} records)</Text>
-            )}
+            <Text type="secondary">
+              {gridFilter.trim() ? `${filteredSuppliers.length} / ${suppliers.length}` : suppliers.length} records
+            </Text>
           </Space>
         }
-        style={{
-          borderRadius: 8,
-          border: `1px solid ${REDWOOD.neutral200}`,
-        }}
+        style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
         extra={
           <Space>
+            <Input
+              placeholder="Filter results..."
+              prefix={<SearchOutlined />}
+              value={gridFilter}
+              onChange={e => setGridFilter(e.target.value)}
+              allowClear
+              size="small"
+              style={{ width: 220 }}
+            />
+            <Button
+              size="small"
+              icon={<FileExcelOutlined />}
+              onClick={exportSuppliersToExcel}
+              disabled={filteredSuppliers.length === 0}
+            >
+              Export
+            </Button>
             <Button size="small" icon={<PlusOutlined />} type="primary">
               Register Supplier
             </Button>
@@ -1046,13 +1349,15 @@ const ManageSuppliers: React.FC = () => {
       >
         <Table
           columns={columns}
-          dataSource={suppliers}
+          dataSource={filteredSuppliers}
+          rowKey="key"
           rowSelection={rowSelection}
           loading={loading}
           scroll={{ x: 1550 }}
           pagination={{
-            pageSize: 25,
+            pageSize: 50,
             showSizeChanger: true,
+            pageSizeOptions: ['25', '50', '100', '200'],
             showTotal: (total) => `${total} suppliers`,
           }}
           size="small"
@@ -1425,6 +1730,36 @@ const ManageSuppliers: React.FC = () => {
     }
   };
 
+  // Export invoices for a tab to Excel
+  const exportInvoicesToExcel = async (tabKey: string, supplierNumber: string, rows: InvoiceRecord[]) => {
+    if (!rows.length) { message.warning('No data to export'); return; }
+    const exportRows = rows.map(r => ({
+      'Invoice Number':   r.invoiceNumber,
+      'Invoice Date':     r.invoiceDate,
+      'Invoice Amount':   r.invoiceAmount,
+      'Amount Paid':      r.amountPaid,
+      'Balance Due':      r.amountRemaining,
+      'Currency':         r.currency,
+      'Status':           r.invoiceStatus,
+      'Description':      r.description,
+    }));
+    const ws = XLSX.utils.json_to_sheet(exportRows);
+    ws['!cols'] = [{ wch: 30 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 10 }, { wch: 12 }, { wch: 60 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `Invoices`);
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const filename = `Invoices_${supplierNumber}.xlsx`;
+    const eAPI = (window as any).electronAPI;
+    if (eAPI?.openExcel) {
+      await eAPI.openExcel(buf, filename);
+      message.success('Excel opened');
+    } else {
+      saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), filename);
+      message.success('Exported to Excel');
+    }
+  };
+
+
   // Render supplier balance tab content
   const renderSupplierBalanceTab = (tab: SupplierTab) => {
     const tabKey = tab.key;
@@ -1452,29 +1787,6 @@ const ManageSuppliers: React.FC = () => {
     }
 
     const { supplier, balanceSummary, agingReport } = balanceData;
-
-    // Invoice columns
-    const invoiceColumns = [
-      { title: 'Invoice Number', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 140 },
-      { title: 'Invoice Date', dataIndex: 'invoiceDate', key: 'invoiceDate', width: 110 },
-      {
-        title: 'Amount', dataIndex: 'invoiceAmount', key: 'invoiceAmount', width: 130, align: 'right' as const,
-        render: (amt: number) => <Text strong>{formatCurrency(amt)}</Text>
-      },
-      {
-        title: 'Paid', dataIndex: 'amountPaid', key: 'amountPaid', width: 130, align: 'right' as const,
-        render: (amt: number) => <Text style={{ color: REDWOOD.success }}>{formatCurrency(amt)}</Text>
-      },
-      {
-        title: 'Balance', dataIndex: 'amountRemaining', key: 'amountRemaining', width: 130, align: 'right' as const,
-        render: (amt: number) => <Text style={{ color: amt > 0 ? REDWOOD.error : REDWOOD.success }}>{formatCurrency(amt)}</Text>
-      },
-      {
-        title: 'Status', dataIndex: 'invoiceStatus', key: 'invoiceStatus', width: 100,
-        render: (status: string) => <Tag>{status || '-'}</Tag>
-      },
-      { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
-    ];
 
     // Payment columns
     const paymentColumns = [
@@ -1624,12 +1936,15 @@ const ManageSuppliers: React.FC = () => {
                 key: 'invoices',
                 label: <Space><FileTextOutlined />Invoices ({invoices.length})</Space>,
                 children: (
-                  <div>
-                    <div style={{ marginBottom: 16 }}>
-                      <Button icon={<ReloadOutlined />} onClick={() => fetchBalanceInvoices(tab.supplier.supplierNumber, tabKey)} loading={invoicesLoading}>Refresh</Button>
-                    </div>
-                    <Table columns={invoiceColumns} dataSource={invoices} loading={invoicesLoading} scroll={{ x: 900 }} pagination={{ pageSize: 10, showTotal: (total) => `${total} invoices` }} size="small" />
-                  </div>
+                  <InvoicesTabContent
+                    invoices={invoices}
+                    invoicesLoading={!!invoicesLoading}
+                    supplierNumber={tab.supplier.supplierNumber}
+                    apiUrl={invoicesUrlMap[tabKey] || `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${tab.supplier.supplierNumber}?limit=500`}
+                    onExport={rows => exportInvoicesToExcel(tabKey, tab.supplier.supplierNumber, rows)}
+                    onRefresh={() => fetchBalanceInvoices(tab.supplier.supplierNumber, tabKey)}
+                    onEdit={record => { setEditInvoice({ ...record }); setEditInvoiceVisible(true); }}
+                  />
                 ),
               },
               {
@@ -1738,6 +2053,53 @@ const ManageSuppliers: React.FC = () => {
           }}
         />
 
+        {/* Supplier LOV Modal */}
+        <Modal
+          title={
+            <Space>
+              <SearchOutlined style={{ color: REDWOOD.info }} />
+              <span>Supplier List of Values</span>
+              {!lovLoading && lovResults.length > 0 && (
+                <Tag color="blue">{lovResults.length} suppliers</Tag>
+              )}
+            </Space>
+          }
+          open={lovVisible}
+          onCancel={() => setLovVisible(false)}
+          footer={null}
+          width={680}
+          destroyOnClose
+        >
+          <Input
+            placeholder="Search by supplier number or name..."
+            prefix={<SearchOutlined />}
+            value={lovSearch}
+            onChange={e => setLovSearch(e.target.value)}
+            allowClear
+            autoFocus
+            style={{ marginBottom: 12 }}
+          />
+          <Table
+            size="small"
+            loading={lovLoading}
+            dataSource={displayedLovResults}
+            pagination={{ pageSize: 10, showTotal: t => `${t} of ${lovResults.length} suppliers`, size: 'small' }}
+            locale={{ emptyText: 'Type to search suppliers' }}
+            onRow={row => ({
+              onClick: () => onLovPick(row),
+              style: { cursor: 'pointer' },
+            })}
+            columns={[
+              { title: 'Supplier Number', dataIndex: 'supplierNumber', key: 'supplierNumber', width: 160,
+                render: (v: string) => <Text style={{ color: REDWOOD.info, fontWeight: 500 }}>{v}</Text> },
+              { title: 'Supplier Name', dataIndex: 'supplier', key: 'supplier' },
+            ]}
+          />
+          <div style={{ marginTop: 8 }}>
+            <Text type="secondary" style={{ fontSize: 11 }}>Click a row to select</Text>
+          </div>
+        </Modal>
+
         {/* API Info Modal */}
         <Modal
           title={
@@ -1755,102 +2117,6 @@ const ManageSuppliers: React.FC = () => {
           ]}
           width={900}
         >
-          <div style={{ marginBottom: 16 }}>
-            <Tag color="blue" style={{ marginRight: 8 }}>
-              Current Mode: {dataSource === 'fusion' ? 'Fusion' : 'APEX'}
-            </Tag>
-            <Text type="secondary">
-              Switch between Fusion and APEX using the toggle on the search page
-            </Text>
-          </div>
-
-          {/* Fusion APIs */}
-          <Card
-            size="small"
-            title={
-              <Space>
-                <CloudOutlined style={{ color: REDWOOD.info }} />
-                <Text strong>Fusion APIs</Text>
-                <Tag color={dataSource === 'fusion' ? 'green' : 'default'}>
-                  {dataSource === 'fusion' ? 'Active' : 'Inactive'}
-                </Tag>
-              </Space>
-            }
-            style={{ marginBottom: 16 }}
-          >
-            {PAGE_APIS.fusion.map((api, index) => (
-              <div
-                key={index}
-                style={{
-                  padding: '12px',
-                  background: REDWOOD.neutral100,
-                  borderRadius: 6,
-                  marginBottom: index < PAGE_APIS.fusion.length - 1 ? 12 : 0,
-                }}
-              >
-                <Row justify="space-between" align="middle" style={{ marginBottom: 8 }}>
-                  <Col>
-                    <Space>
-                      <Tag color="blue">{api.method}</Tag>
-                      <Text strong>{api.name}</Text>
-                    </Space>
-                  </Col>
-                </Row>
-                <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
-                  {api.description}
-                </Text>
-                <div style={{ marginBottom: 8 }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>Proxy URL:</Text>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <code
-                      style={{
-                        background: '#f5f5f5',
-                        padding: '4px 8px',
-                        borderRadius: 4,
-                        fontSize: 12,
-                        flex: 1,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                    >
-                      {api.proxyUrl}{api.params ? `?${api.params}` : ''}
-                    </code>
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={copiedUrl === api.proxyUrl ? <CheckOutlined /> : <CopyOutlined />}
-                      onClick={() => copyToClipboard(api.proxyUrl + (api.params ? `?${api.params}` : ''))}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <Text type="secondary" style={{ fontSize: 12 }}>Actual URL:</Text>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <code
-                      style={{
-                        background: '#e6f7ff',
-                        padding: '4px 8px',
-                        borderRadius: 4,
-                        fontSize: 12,
-                        flex: 1,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                    >
-                      {api.actualUrl}{api.params ? `?${api.params}` : ''}
-                    </code>
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={copiedUrl === api.actualUrl ? <CheckOutlined /> : <CopyOutlined />}
-                      onClick={() => copyToClipboard(api.actualUrl + (api.params ? `?${api.params}` : ''))}
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </Card>
-
           {/* APEX APIs */}
           <Card
             size="small"
@@ -1858,9 +2124,7 @@ const ManageSuppliers: React.FC = () => {
               <Space>
                 <DatabaseOutlined style={{ color: REDWOOD.success }} />
                 <Text strong>APEX APIs</Text>
-                <Tag color={dataSource === 'apex' ? 'green' : 'default'}>
-                  {dataSource === 'apex' ? 'Active' : 'Inactive'}
-                </Tag>
+                <Tag color="green">Active</Tag>
               </Space>
             }
           >
@@ -1987,6 +2251,54 @@ const ManageSuppliers: React.FC = () => {
             />
           </Card>
         </Modal>
+        {/* Edit Invoice Modal — full InvoiceDetail (header + lines) */}
+        <Modal
+          title={
+            <Space>
+              <EditOutlined style={{ color: REDWOOD.info }} />
+              <span>Invoice: {editInvoice?.invoiceNumber}</span>
+            </Space>
+          }
+          open={editInvoiceVisible}
+          onCancel={() => { setEditInvoiceVisible(false); setEditInvoice(null); }}
+          footer={null}
+          width="95vw"
+          style={{ top: 20 }}
+          styles={{ body: { padding: 0, maxHeight: 'calc(100vh - 120px)', overflowY: 'auto' } }}
+          destroyOnClose
+        >
+          {editInvoice && (() => {
+            // Find the supplier name from the active balance tab
+            const activeBalanceTab = openTabs.find(t => t.tabType === 'balance' && t.key === activeTab);
+            const supplierName = activeBalanceTab
+              ? balanceDataMap[activeBalanceTab.key]?.supplier?.supplierName || activeBalanceTab.supplier.supplier
+              : '';
+            return (
+              <InvoiceDetail
+                invoice={{
+                  invoiceId: editInvoice.invoiceId,
+                  invoiceNumber: editInvoice.invoiceNumber,
+                  invoiceDate: editInvoice.invoiceDate,
+                  invoiceType: 'Standard',
+                  supplierOrParty: supplierName,
+                  supplierSite: '',
+                  invoiceAmount: editInvoice.invoiceAmount,
+                  unpaidAmount: editInvoice.amountRemaining,
+                  appliedPrepayments: 0,
+                  invoiceCurrency: editInvoice.currency,
+                  businessUnit: '',
+                  validationStatus: editInvoice.invoiceStatus || 'Never validated',
+                  approvalStatus: '',
+                  holdPaidStatus: editInvoice.amountRemaining <= 0 ? 'Paid' : 'Not paid',
+                  notes: editInvoice.description,
+                  syncStatus: 'SYNCED',
+                }}
+                onClose={() => { setEditInvoiceVisible(false); setEditInvoice(null); }}
+              />
+            );
+          })()}
+        </Modal>
+
         <FloatingMenu />
         <Autopilot module="ap" />
       </Content>
@@ -1995,4 +2307,3 @@ const ManageSuppliers: React.FC = () => {
 };
 
 export default ManageSuppliers;
-export { ManageSuppliers as APManageSuppliers };
