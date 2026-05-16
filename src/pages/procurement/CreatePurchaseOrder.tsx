@@ -91,6 +91,27 @@ const computeLine = (line: Omit<POLine, 'lineTotal' | 'taxAmount' | 'netTotal'>)
   return { ...line, lineTotal, taxAmount, netTotal: lineTotal + taxAmount };
 };
 
+/* ─── Acquisition Cost types ────────────────────────── */
+const ACQ_CHARGE_TYPES = [
+  'Freight', 'Insurance', 'Customs Duty', 'Local Handling',
+  'Port Charges', 'Inspection', 'Brokerage', 'Survey', 'Quarantine', 'Other',
+];
+const ACQ_APPORTION_OPTIONS = [
+  { value: 'value', label: 'By Value' },
+  { value: 'qty',   label: 'By Quantity' },
+  { value: 'equal', label: 'Equal' },
+  { value: 'manual', label: 'Manual' },
+];
+
+interface AcqCharge {
+  key: string;
+  chargeType: string;
+  description: string;
+  amount: number;
+  apportionBasis: 'value' | 'qty' | 'equal' | 'manual';
+  manualAmounts: Record<string, number>; // lineKey → allocated amount
+}
+
 /* ─── Compact field pair (label : value on one row) ─── */
 const FieldPair: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
   <div style={{ display: 'flex', alignItems: 'center', marginBottom: 7, gap: 6, minHeight: 24 }}>
@@ -164,6 +185,9 @@ const CreatePurchaseOrder: React.FC = () => {
   const [orgQohFilter, setOrgQohFilter] = useState('');
   const [orgQohApiUrl, setOrgQohApiUrl] = useState('');
   const [orgQohApiModalOpen, setOrgQohApiModalOpen] = useState(false);
+
+  // Acquisition Cost
+  const [acqCharges, setAcqCharges] = useState<AcqCharge[]>([]);
 
   const [supplierModalOpen, setSupplierModalOpen] = useState(false);
   const [supplierSearch, setSupplierSearch] = useState('');
@@ -320,9 +344,44 @@ const CreatePurchaseOrder: React.FC = () => {
   const handleDeleteLine = (key: string) =>
     setLines(prev => prev.filter(l => l.key !== key).map((l, i) => ({ ...l, lineNum: i + 1 })));
 
-  const subtotal  = lines.reduce((s, l) => s + l.lineTotal, 0);
-  const totalTax  = lines.reduce((s, l) => s + l.taxAmount, 0);
-  const grandTotal = lines.reduce((s, l) => s + l.netTotal, 0);
+  const subtotal   = lines.reduce((s, l) => s + l.lineTotal, 0);
+  const totalTax   = lines.reduce((s, l) => s + l.taxAmount, 0);
+  const grandTotal = lines.reduce((s, l) => s + l.netTotal,  0);
+
+  /* ─── Acquisition cost helpers ─────────────────────── */
+  const addAcqCharge = () => setAcqCharges(prev => [...prev, {
+    key: `acq-${Date.now()}`, chargeType: 'Freight', description: '', amount: 0,
+    apportionBasis: 'value', manualAmounts: {},
+  }]);
+
+  const updateAcqCharge = (key: string, field: keyof AcqCharge, value: any) =>
+    setAcqCharges(prev => prev.map(c => c.key === key ? { ...c, [field]: value } : c));
+
+  const deleteAcqCharge = (key: string) =>
+    setAcqCharges(prev => prev.filter(c => c.key !== key));
+
+  const updateManualAmount = (chargeKey: string, lineKey: string, amount: number) =>
+    setAcqCharges(prev => prev.map(c => c.key === chargeKey
+      ? { ...c, manualAmounts: { ...c.manualAmounts, [lineKey]: amount } }
+      : c));
+
+  /* ─── Apportion engine ─────────────────────────────── */
+  const totalV = subtotal;
+  const totalQ = lines.reduce((s, l) => s + l.qty, 0);
+  const acqResults = lines.map(line => {
+    const chargeAmounts: Record<string, number> = {};
+    acqCharges.forEach(c => {
+      if      (c.apportionBasis === 'manual') chargeAmounts[c.key] = c.manualAmounts[line.key] ?? 0;
+      else if (c.apportionBasis === 'equal')  chargeAmounts[c.key] = lines.length > 0 ? c.amount / lines.length : 0;
+      else if (c.apportionBasis === 'value')  chargeAmounts[c.key] = totalV > 0 ? (line.lineTotal / totalV) * c.amount : 0;
+      else                                    chargeAmounts[c.key] = totalQ > 0 ? (line.qty      / totalQ) * c.amount : 0;
+    });
+    const totalCharges    = Object.values(chargeAmounts).reduce((s, v) => s + v, 0);
+    const landedCost      = line.lineTotal + totalCharges;
+    const landedUnitPrice = line.qty > 0 ? landedCost / line.qty : 0;
+    const pctChange       = line.price > 0 ? ((landedUnitPrice - line.price) / line.price) * 100 : 0;
+    return { ...line, chargeAmounts, totalCharges, landedCost, landedUnitPrice, pctChange };
+  });
 
   const openAddItem = async () => {
     if (!header) return;
@@ -1117,6 +1176,233 @@ const CreatePurchaseOrder: React.FC = () => {
                               />
                             );
                           })()}
+                        </div>
+                      ),
+                    },
+                    /* ── Acquisition Cost tab ────────────────── */
+                    {
+                      key: 'acq-cost',
+                      label: (
+                        <Badge count={acqCharges.length} size="small" offset={[6, 0]} color={C.orange}>
+                          <span style={{ paddingRight: acqCharges.length ? 8 : 0 }}>Acquisition Cost</span>
+                        </Badge>
+                      ),
+                      children: (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+                          {/* ── Charge entry ── */}
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                              <div>
+                                <Text strong style={{ fontSize: 13 }}>Charges</Text>
+                                <Text style={{ fontSize: 11, color: C.textLight, marginLeft: 8 }}>
+                                  Add freight, insurance, customs duties and other charges
+                                </Text>
+                              </div>
+                              <Button size="small" type="primary" icon={<PlusOutlined />}
+                                style={{ background: C.orange, borderColor: C.orange, fontWeight: 600 }}
+                                onClick={addAcqCharge}>
+                                Add Charge
+                              </Button>
+                            </div>
+
+                            {acqCharges.length === 0 ? (
+                              <div style={{ padding: '24px 0', textAlign: 'center', color: C.textLight,
+                                border: `1px dashed ${C.border}`, borderRadius: 8 }}>
+                                No charges yet. Click "Add Charge" to add freight, insurance or other costs.
+                              </div>
+                            ) : (
+                              <Table size="small" bordered dataSource={acqCharges} rowKey="key" pagination={false}
+                                columns={[
+                                  {
+                                    title: 'Charge Type', dataIndex: 'chargeType', width: 160,
+                                    render: (v, r: AcqCharge) => (
+                                      <Select size="small" value={v} style={{ width: '100%' }}
+                                        onChange={val => updateAcqCharge(r.key, 'chargeType', val)}>
+                                        {ACQ_CHARGE_TYPES.map(t => <Option key={t} value={t}>{t}</Option>)}
+                                      </Select>
+                                    ),
+                                  },
+                                  {
+                                    title: 'Description', dataIndex: 'description',
+                                    render: (v, r: AcqCharge) => (
+                                      <Input size="small" value={v} placeholder="Optional description"
+                                        onChange={e => updateAcqCharge(r.key, 'description', e.target.value)} />
+                                    ),
+                                  },
+                                  {
+                                    title: `Amount (${header?.currency ?? ''})`, dataIndex: 'amount',
+                                    width: 160, align: 'right' as const,
+                                    render: (v, r: AcqCharge) => (
+                                      <InputNumber size="small" value={v} min={0} precision={2}
+                                        style={{ width: '100%' }}
+                                        onChange={val => updateAcqCharge(r.key, 'amount', val ?? 0)} />
+                                    ),
+                                  },
+                                  {
+                                    title: 'Apportion By', dataIndex: 'apportionBasis', width: 150,
+                                    render: (v, r: AcqCharge) => (
+                                      <Select size="small" value={v} style={{ width: '100%' }}
+                                        onChange={val => updateAcqCharge(r.key, 'apportionBasis', val)}>
+                                        {ACQ_APPORTION_OPTIONS.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
+                                      </Select>
+                                    ),
+                                  },
+                                  {
+                                    title: '', key: 'del', width: 46, align: 'center' as const,
+                                    render: (_: any, r: AcqCharge) => (
+                                      <Tooltip title="Remove"><Button type="text" size="small" danger
+                                        icon={<DeleteOutlined />} onClick={() => deleteAcqCharge(r.key)} /></Tooltip>
+                                    ),
+                                  },
+                                ]}
+                                summary={() => (
+                                  <Table.Summary.Row style={{ background: '#FFF8F0', fontWeight: 600 }}>
+                                    <Table.Summary.Cell index={0} colSpan={2}>
+                                      <Text strong style={{ fontSize: 12 }}>Total Charges</Text>
+                                    </Table.Summary.Cell>
+                                    <Table.Summary.Cell index={2} align="right">
+                                      <Text strong style={{ color: C.orange, fontVariantNumeric: 'tabular-nums', fontSize: 14 }}>
+                                        {fmt(acqCharges.reduce((s, c) => s + c.amount, 0))}
+                                      </Text>
+                                    </Table.Summary.Cell>
+                                    <Table.Summary.Cell index={3} colSpan={2} />
+                                  </Table.Summary.Row>
+                                )}
+                              />
+                            )}
+                          </div>
+
+                          {/* ── Allocation results grid ── */}
+                          {lines.length > 0 && acqCharges.length > 0 && (
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                                <Text strong style={{ fontSize: 13 }}>Allocated Cost per Line</Text>
+                                <Tag color="orange" style={{ fontSize: 11 }}>
+                                  Total Charges: {fmt(acqCharges.reduce((s, c) => s + c.amount, 0))} {header?.currency}
+                                </Tag>
+                                <Tag color="teal" style={{ fontSize: 11 }}>
+                                  Total Landed: {fmt(acqResults.reduce((s: number, r: any) => s + r.landedCost, 0))} {header?.currency}
+                                </Tag>
+                              </div>
+                              <Table
+                                size="small" bordered
+                                rowKey="key"
+                                dataSource={acqResults}
+                                pagination={false}
+                                scroll={{ x: 'max-content' }}
+                                rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''}
+                                columns={[
+                                  {
+                                    title: '#', dataIndex: 'lineNum', width: 46, align: 'center' as const,
+                                    render: v => <Text style={{ color: C.textMid, fontSize: 12 }}>{v}</Text>,
+                                    fixed: 'left' as const,
+                                  },
+                                  {
+                                    title: 'Item', dataIndex: 'itemNumber', width: 140, fixed: 'left' as const,
+                                    render: v => <Text style={{ fontWeight: 700, color: C.blue, fontSize: 12, fontFamily: 'monospace' }}>{v}</Text>,
+                                  },
+                                  {
+                                    title: 'Description', dataIndex: 'description', width: 180, ellipsis: true,
+                                    render: v => <Text style={{ fontSize: 12 }}>{v}</Text>,
+                                  },
+                                  { title: 'UOM', dataIndex: 'uom', width: 60, align: 'center' as const },
+                                  {
+                                    title: 'Qty', dataIndex: 'qty', width: 80, align: 'right' as const,
+                                    render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{fmt(v)}</Text>,
+                                  },
+                                  {
+                                    title: 'Unit Price', dataIndex: 'price', width: 110, align: 'right' as const,
+                                    render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{fmt(v)}</Text>,
+                                  },
+                                  {
+                                    title: 'Line Total', dataIndex: 'lineTotal', width: 120, align: 'right' as const,
+                                    render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{fmt(v)}</Text>,
+                                  },
+                                  // Dynamic column per charge
+                                  ...acqCharges.map((charge, ci) => ({
+                                    key: charge.key,
+                                    width: 140,
+                                    align: 'right' as const,
+                                    title: (
+                                      <div>
+                                        <div style={{ fontWeight: 600, fontSize: 12 }}>{charge.chargeType}</div>
+                                        <div style={{ fontSize: 10, color: C.textLight, fontWeight: 400 }}>
+                                          {ACQ_APPORTION_OPTIONS.find(o => o.value === charge.apportionBasis)?.label}
+                                          {charge.apportionBasis !== 'manual' && (
+                                            <span style={{ marginLeft: 4, color: C.orange }}>({fmt(charge.amount)})</span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ),
+                                    render: (_: any, row: any) => charge.apportionBasis === 'manual' ? (
+                                      <InputNumber size="small" min={0} precision={2} style={{ width: 120 }}
+                                        value={charge.manualAmounts[row.key] ?? 0}
+                                        onChange={val => updateManualAmount(charge.key, row.key, val ?? 0)} />
+                                    ) : (
+                                      <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: C.orange }}>
+                                        {fmt(row.chargeAmounts[charge.key] ?? 0)}
+                                      </Text>
+                                    ),
+                                  })),
+                                  {
+                                    title: 'Total Charges', dataIndex: 'totalCharges', width: 130, align: 'right' as const,
+                                    render: v => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: C.orange }}>{fmt(v)}</Text>,
+                                  },
+                                  {
+                                    title: 'Landed Cost', dataIndex: 'landedCost', width: 130, align: 'right' as const,
+                                    render: v => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 13, color: C.teal }}>{fmt(v)}</Text>,
+                                  },
+                                  {
+                                    title: 'Landed Unit Price', dataIndex: 'landedUnitPrice', width: 145, align: 'right' as const,
+                                    render: v => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 13, color: C.green }}>{fmt(v)}</Text>,
+                                  },
+                                  {
+                                    title: '% Change', dataIndex: 'pctChange', width: 90, align: 'right' as const,
+                                    render: (v: number) => (
+                                      <Tag color={v === 0 ? 'default' : v > 0 ? 'orange' : 'green'} style={{ fontWeight: 600, fontSize: 11 }}>
+                                        {v >= 0 ? '+' : ''}{v.toFixed(2)}%
+                                      </Tag>
+                                    ),
+                                  },
+                                ]}
+                                summary={() => {
+                                  const totalChargesSum = acqResults.reduce((s: number, r: any) => s + r.totalCharges, 0);
+                                  const totalLanded     = acqResults.reduce((s: number, r: any) => s + r.landedCost, 0);
+                                  return (
+                                    <Table.Summary.Row style={{ background: '#EBF0FA', fontWeight: 600 }}>
+                                      <Table.Summary.Cell index={0} colSpan={6} align="right">
+                                        <Text strong style={{ fontSize: 12 }}>Total</Text>
+                                      </Table.Summary.Cell>
+                                      <Table.Summary.Cell index={6} align="right">
+                                        <Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(subtotal)}</Text>
+                                      </Table.Summary.Cell>
+                                      {acqCharges.map((charge, i) => (
+                                        <Table.Summary.Cell key={charge.key} index={7 + i} align="right">
+                                          <Text strong style={{ fontVariantNumeric: 'tabular-nums', color: C.orange }}>
+                                            {fmt(acqResults.reduce((s: number, r: any) => s + (r.chargeAmounts[charge.key] ?? 0), 0))}
+                                          </Text>
+                                        </Table.Summary.Cell>
+                                      ))}
+                                      <Table.Summary.Cell index={7 + acqCharges.length} align="right">
+                                        <Text strong style={{ fontVariantNumeric: 'tabular-nums', color: C.orange }}>{fmt(totalChargesSum)}</Text>
+                                      </Table.Summary.Cell>
+                                      <Table.Summary.Cell index={8 + acqCharges.length} align="right">
+                                        <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 14, color: C.teal }}>{fmt(totalLanded)}</Text>
+                                      </Table.Summary.Cell>
+                                      <Table.Summary.Cell index={9 + acqCharges.length} colSpan={2} />
+                                    </Table.Summary.Row>
+                                  );
+                                }}
+                              />
+                            </div>
+                          )}
+
+                          {lines.length === 0 && (
+                            <div style={{ padding: 28, textAlign: 'center', color: C.textLight }}>
+                              Add line items first, then define charges to allocate.
+                            </div>
+                          )}
                         </div>
                       ),
                     },
