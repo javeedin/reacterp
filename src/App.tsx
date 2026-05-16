@@ -57,6 +57,7 @@ const ManageMultiperiod       = lazy(() => import('./pages/ap/ManageMultiperiod'
 const CheckMigration          = lazy(() => import('./pages/ap/CheckMigration'));
 const APGLReconcile           = lazy(() => import('./pages/ap/APGLReconcile'));
 const ManageSuppliers         = lazy(() => import('./pages/suppliers/ManageSuppliers'));
+const APManageSuppliers       = lazy(() => import('./pages/ap/APManageSuppliers'));
 const SupplierBalance         = lazy(() => import('./pages/suppliers/SupplierBalance'));
 const ManageOnhandInventory   = lazy(() => import('./pages/inventory/ManageOnhandInventory'));
 const Subinventories          = lazy(() => import('./pages/inventory/Subinventories'));
@@ -223,7 +224,7 @@ function App() {
               <Route path="procurement/create-po" element={<CreatePurchaseOrder />} />
               <Route path="procurement/business-units" element={<BusinessUnits />} />
               <Route path="procurement/legal-entities" element={<LegalEntities />} />
-              <Route path="ap/suppliers" element={<ManageSuppliers />} />
+              <Route path="ap/suppliers" element={<APManageSuppliers />} />
               <Route path="suppliers/manage" element={<ManageSuppliers />} />
               <Route path="suppliers/balance/:supplierNumber" element={<SupplierBalance />} />
               <Route path="procurement/*" element={<ProcurementModule />} />
