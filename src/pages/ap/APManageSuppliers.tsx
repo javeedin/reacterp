@@ -1959,9 +1959,34 @@ const ManageSuppliers: React.FC = () => {
                 label: <Space><CreditCardOutlined />Payments ({payments.length})</Space>,
                 children: (
                   <div>
-                    <div style={{ marginBottom: 16 }}>
+                    <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       <Button icon={<ReloadOutlined />} onClick={() => fetchBalancePayments(tab.supplier.supplierNumber, tabKey)} loading={paymentsLoading}>Refresh</Button>
-                      <Text type="secondary" style={{ marginLeft: 16 }}>Click payment number to view related invoices</Text>
+                      <Button
+                        icon={<FileExcelOutlined />}
+                        disabled={payments.length === 0}
+                        style={{ color: '#1D7B4D', borderColor: '#1D7B4D' }}
+                        onClick={() => {
+                          const exportRows = payments.map(p => ({
+                            'Payment #':      p.paymentNumber,
+                            'Payment Date':   p.paymentDate,
+                            'Amount':         p.paymentAmount,
+                            'Currency':       p.currency,
+                            'Status':         p.paymentStatus,
+                            'Method':         p.paymentMethod,
+                            'Bank Account':   p.bankAccountName,
+                          }));
+                          const ws = XLSX.utils.json_to_sheet(exportRows);
+                          const wb = XLSX.utils.book_new();
+                          XLSX.utils.book_append_sheet(wb, ws, 'Payments');
+                          saveAs(
+                            new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })], { type: 'application/octet-stream' }),
+                            `Payments_${tab.supplier.supplierNumber}_${new Date().toISOString().slice(0, 10)}.xlsx`
+                          );
+                        }}
+                      >
+                        Excel
+                      </Button>
+                      <Text type="secondary">Click payment number to view related invoices</Text>
                     </div>
                     <Table
                       columns={paymentColumns}
