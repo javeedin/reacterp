@@ -53,11 +53,19 @@ import {
   ExclamationCircleOutlined,
   CalendarOutlined,
   FileExcelOutlined,
+  FilePdfOutlined,
+  BarChartOutlined,
   EditOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
+import {
+  PieChart, Pie, Cell, BarChart, Bar, LineChart, Line,
+  XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, Legend, ResponsiveContainer,
+} from 'recharts';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import FloatingMenu from '../../components/FloatingMenu';
 import Autopilot from '../../components/Autopilot';
 import InvoiceDetail from './InvoiceDetail';
@@ -228,6 +236,24 @@ interface RelatedInvoice {
   discountTaken: number;      // discount settled at payment time
   discountLost: number;
   totalSettled: number;       // amountApplied + discountTaken
+}
+
+interface CategoryData {
+  name: string;
+  amount: number;
+  count: number;
+}
+
+interface TrendData {
+  month: string;
+  amount: number;
+}
+
+interface AnalyticsData {
+  categories: CategoryData[];
+  trend: TrendData[];
+  totalAmount: number;
+  totalCount: number;
 }
 
 // Helper function to format date
@@ -577,6 +603,12 @@ const ManageSuppliers: React.FC = () => {
   const [relatedInvoices, setRelatedInvoices] = useState<RelatedInvoice[]>([]);
   const [drilldownLoading, setDrilldownLoading] = useState(false);
 
+  // Analytics tab state
+  const [analyticsDataMap, setAnalyticsDataMap] = useState<Record<string, AnalyticsData | null>>({});
+  const [analyticsLoadingMap, setAnalyticsLoadingMap] = useState<Record<string, boolean>>({});
+  const [pdfPreviewVisible, setPdfPreviewVisible] = useState(false);
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string>('');
+
   // API Info Modal state
   const [apiModalVisible, setApiModalVisible] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
@@ -901,6 +933,136 @@ const ManageSuppliers: React.FC = () => {
     } finally {
       setDrilldownLoading(false);
     }
+  };
+
+  // Detect invoice category from description keywords
+  const detectCategory = (description: string): string => {
+    const d = (description || '').toLowerCase();
+    if (/rent|lease|tenancy|office space/.test(d))        return 'Rent & Lease';
+    if (/electric|water|gas|utility|utilities|dewa|sewa/.test(d)) return 'Utilities';
+    if (/maintenance|repair|service|cleaning|janitorial/.test(d)) return 'Maintenance';
+    if (/legal|audit|consult|accounting|advisory|professional/.test(d)) return 'Professional Services';
+    if (/software|hardware|it|tech|license|subscription|cloud|server/.test(d)) return 'IT & Technology';
+    if (/salary|payroll|hr|human resource|benefit|bonus|staff/.test(d)) return 'HR & Payroll';
+    if (/transport|freight|shipping|logistics|courier|delivery/.test(d)) return 'Transport & Logistics';
+    if (/marketing|advertising|promotion|media|campaign/.test(d)) return 'Marketing';
+    if (/insurance|premium|policy|cover/.test(d)) return 'Insurance';
+    if (/training|course|seminar|workshop|education/.test(d)) return 'Training';
+    return 'Others';
+  };
+
+  // Fetch and compute analytics data
+  const fetchAnalyticsData = async (supplierNumber: string, tabKey: string) => {
+    setAnalyticsLoadingMap(prev => ({ ...prev, [tabKey]: true }));
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${encodeURIComponent(supplierNumber)}?status=All&limit=1000`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const items: any[] = data.invoices || data.items || [];
+
+      // Category aggregation
+      const catMap: Record<string, { amount: number; count: number }> = {};
+      // Monthly trend
+      const trendMap: Record<string, number> = {};
+
+      items.forEach(item => {
+        const amt  = Number(item.invoice_amount || 0);
+        const cat  = detectCategory(item.description || '');
+        if (!catMap[cat]) catMap[cat] = { amount: 0, count: 0 };
+        catMap[cat].amount += amt;
+        catMap[cat].count  += 1;
+
+        const raw = item.invoice_date || '';
+        const d   = raw ? new Date(raw) : null;
+        if (d && !isNaN(d.getTime())) {
+          const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+          trendMap[key] = (trendMap[key] || 0) + amt;
+        }
+      });
+
+      const categories: CategoryData[] = Object.entries(catMap)
+        .map(([name, v]) => ({ name, amount: v.amount, count: v.count }))
+        .sort((a, b) => b.amount - a.amount);
+
+      const trend: TrendData[] = Object.entries(trendMap)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([month, amount]) => ({ month, amount }));
+
+      const totalAmount = categories.reduce((s, c) => s + c.amount, 0);
+      const totalCount  = categories.reduce((s, c) => s + c.count,  0);
+
+      setAnalyticsDataMap(prev => ({ ...prev, [tabKey]: { categories, trend, totalAmount, totalCount } }));
+    } catch (err) {
+      message.error('Failed to load analytics data');
+    } finally {
+      setAnalyticsLoadingMap(prev => ({ ...prev, [tabKey]: false }));
+    }
+  };
+
+  // Export analytics data to Excel
+  const exportAnalyticsExcel = (tabKey: string, supplierNumber: string) => {
+    const ad = analyticsDataMap[tabKey];
+    if (!ad) { message.warning('No analytics data to export'); return; }
+    const catRows = ad.categories.map(c => ({
+      'Category': c.name,
+      'Invoice Count': c.count,
+      'Total Amount (AED)': c.amount,
+      '% of Total': ad.totalAmount > 0 ? ((c.amount / ad.totalAmount) * 100).toFixed(2) + '%' : '0%',
+    }));
+    const trendRows = ad.trend.map(t => ({ 'Month': t.month, 'Total Amount (AED)': t.amount }));
+    const wb = XLSX.utils.book_new();
+    const wsCat = XLSX.utils.json_to_sheet(catRows);
+    wsCat['!cols'] = [{ wch: 30 }, { wch: 15 }, { wch: 20 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(wb, wsCat, 'Category Breakdown');
+    const wsTrend = XLSX.utils.json_to_sheet(trendRows);
+    wsTrend['!cols'] = [{ wch: 12 }, { wch: 20 }];
+    XLSX.utils.book_append_sheet(wb, wsTrend, 'Monthly Trend');
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    saveAs(new Blob([buf], { type: 'application/octet-stream' }), `Analytics_${supplierNumber}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    message.success('Analytics exported to Excel');
+  };
+
+  // Export analytics data to PDF and show preview
+  const exportAnalyticsPdf = (tabKey: string, supplierNumber: string, supplierName: string) => {
+    const ad = analyticsDataMap[tabKey];
+    if (!ad) { message.warning('No analytics data to export'); return; }
+    const doc = new jsPDF();
+    doc.setFontSize(16);
+    doc.text(`Supplier Analytics Report`, 14, 20);
+    doc.setFontSize(11);
+    doc.text(`Supplier: ${supplierName} (${supplierNumber})`, 14, 30);
+    doc.text(`Generated: ${new Date().toLocaleDateString()}`, 14, 37);
+    doc.setFontSize(13);
+    doc.text('Invoice Category Breakdown', 14, 48);
+    autoTable(doc, {
+      startY: 52,
+      head: [['Category', 'Count', 'Amount (AED)', '% of Total']],
+      body: ad.categories.map(c => [
+        c.name,
+        c.count.toString(),
+        c.amount.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
+        ad.totalAmount > 0 ? ((c.amount / ad.totalAmount) * 100).toFixed(1) + '%' : '0%',
+      ]),
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [199, 70, 52] },
+    });
+    const afterCat = (doc as any).lastAutoTable.finalY + 10;
+    doc.setFontSize(13);
+    doc.text('Monthly Expense Trend', 14, afterCat);
+    autoTable(doc, {
+      startY: afterCat + 4,
+      head: [['Month', 'Amount (AED)']],
+      body: ad.trend.map(t => [
+        t.month,
+        t.amount.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
+      ]),
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [5, 114, 206] },
+    });
+    const pdfBlob = doc.output('bloburl');
+    setPdfPreviewUrl(pdfBlob as unknown as string);
+    setPdfPreviewVisible(true);
   };
 
   // Open supplier detail in new tab
@@ -1835,7 +1997,12 @@ const ManageSuppliers: React.FC = () => {
       } else if (key === 'payments' && payments.length === 0 && !paymentsLoading) {
         fetchBalancePayments(tab.supplier.supplierNumber, tabKey);
       }
+      // analytics: do NOT auto-load — user must click Refresh
     };
+
+    const analyticsData    = analyticsDataMap[tabKey] || null;
+    const analyticsLoading = analyticsLoadingMap[tabKey] || false;
+    const CHART_COLORS = ['#C74634','#0572CE','#1D7B4D','#D4A800','#8B5CF6','#06B6D4','#F59E0B','#EF4444','#10B981','#6366F1','#84CC16'];
 
     return (
       <div style={{ padding: '0 24px 24px' }}>
@@ -2013,13 +2180,221 @@ const ManageSuppliers: React.FC = () => {
                         pageSizeOptions: ['10', '20', '50', '100'],
                         showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} payments`,
                       }}
+                      summary={() => {
+                        if (!payments.length) return null;
+                        const total = payments.reduce((s, p) => s + (p.paymentAmount || 0), 0);
+                        return (
+                          <Table.Summary fixed>
+                            <Table.Summary.Row style={{ background: '#f6ffed', fontWeight: 600 }}>
+                              <Table.Summary.Cell index={0} colSpan={2}>
+                                <Text strong style={{ fontSize: 11 }}>Total ({payments.length} payments)</Text>
+                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={2} align="right">
+                                <Text strong style={{ color: REDWOOD.success, fontFamily: 'monospace' }}>{formatCurrency(total)}</Text>
+                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={3} colSpan={3} />
+                            </Table.Summary.Row>
+                          </Table.Summary>
+                        );
+                      }}
                     />
+                  </div>
+                ),
+              },
+              {
+                key: 'analytics',
+                label: <Space><BarChartOutlined />Analytics</Space>,
+                children: (
+                  <div>
+                    {/* Toolbar */}
+                    <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <Button
+                        type="primary"
+                        icon={<ReloadOutlined />}
+                        loading={analyticsLoading}
+                        style={{ background: REDWOOD.primary }}
+                        onClick={() => fetchAnalyticsData(tab.supplier.supplierNumber, tabKey)}
+                      >
+                        Refresh
+                      </Button>
+                      <Button
+                        icon={<FileExcelOutlined />}
+                        disabled={!analyticsData}
+                        style={{ color: '#1D7B4D', borderColor: '#1D7B4D' }}
+                        onClick={() => exportAnalyticsExcel(tabKey, tab.supplier.supplierNumber)}
+                      >
+                        Excel
+                      </Button>
+                      <Button
+                        icon={<FilePdfOutlined />}
+                        disabled={!analyticsData}
+                        style={{ color: REDWOOD.error, borderColor: REDWOOD.error }}
+                        onClick={() => exportAnalyticsPdf(tabKey, tab.supplier.supplierNumber, supplier.supplierName)}
+                      >
+                        PDF / Preview
+                      </Button>
+                      {analyticsData && (
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          {analyticsData.totalCount} invoices · AED {analyticsData.totalAmount.toLocaleString('en-AE', { minimumFractionDigits: 2 })}
+                        </Text>
+                      )}
+                    </div>
+
+                    {!analyticsData && !analyticsLoading && (
+                      <div style={{ textAlign: 'center', padding: 60, color: REDWOOD.neutral600 }}>
+                        <BarChartOutlined style={{ fontSize: 48, marginBottom: 12 }} />
+                        <div>Click <b>Refresh</b> to load invoice analytics</div>
+                      </div>
+                    )}
+
+                    {analyticsLoading && (
+                      <div style={{ textAlign: 'center', padding: 60 }}>
+                        <Spin size="large" tip="Computing analytics..." />
+                      </div>
+                    )}
+
+                    {analyticsData && !analyticsLoading && (
+                      <div>
+                        <Row gutter={16} style={{ marginBottom: 24 }}>
+                          {/* Pie chart */}
+                          <Col span={10}>
+                            <Card size="small" title={<Text strong>Category Breakdown (Pie)</Text>}>
+                              <ResponsiveContainer width="100%" height={280}>
+                                <PieChart>
+                                  <Pie
+                                    data={analyticsData.categories}
+                                    dataKey="amount"
+                                    nameKey="name"
+                                    cx="50%"
+                                    cy="50%"
+                                    outerRadius={100}
+                                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                                    labelLine={false}
+                                  >
+                                    {analyticsData.categories.map((_, i) => (
+                                      <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                                    ))}
+                                  </Pie>
+                                  <RTooltip formatter={(val: number) => [`AED ${val.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`, 'Amount']} />
+                                  <Legend />
+                                </PieChart>
+                              </ResponsiveContainer>
+                            </Card>
+                          </Col>
+
+                          {/* Bar chart */}
+                          <Col span={14}>
+                            <Card size="small" title={<Text strong>Category Comparison (Bar)</Text>}>
+                              <ResponsiveContainer width="100%" height={280}>
+                                <BarChart data={analyticsData.categories} margin={{ top: 5, right: 20, left: 20, bottom: 60 }}>
+                                  <CartesianGrid strokeDasharray="3 3" />
+                                  <XAxis dataKey="name" angle={-35} textAnchor="end" tick={{ fontSize: 10 }} interval={0} />
+                                  <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
+                                  <RTooltip formatter={(val: number) => [`AED ${val.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`, 'Amount']} />
+                                  <Bar dataKey="amount" radius={[4, 4, 0, 0]}>
+                                    {analyticsData.categories.map((_, i) => (
+                                      <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                                    ))}
+                                  </Bar>
+                                </BarChart>
+                              </ResponsiveContainer>
+                            </Card>
+                          </Col>
+                        </Row>
+
+                        {/* Line chart trend */}
+                        <Row gutter={16} style={{ marginBottom: 24 }}>
+                          <Col span={24}>
+                            <Card size="small" title={<Text strong>Monthly Expense Trend</Text>}>
+                              {analyticsData.trend.length === 0 ? (
+                                <div style={{ textAlign: 'center', padding: 20, color: REDWOOD.neutral600 }}>No date data available</div>
+                              ) : (
+                                <ResponsiveContainer width="100%" height={240}>
+                                  <LineChart data={analyticsData.trend} margin={{ top: 5, right: 20, left: 20, bottom: 5 }}>
+                                    <CartesianGrid strokeDasharray="3 3" />
+                                    <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                                    <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
+                                    <RTooltip formatter={(val: number) => [`AED ${val.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`, 'Amount']} />
+                                    <Legend />
+                                    <Line type="monotone" dataKey="amount" stroke={REDWOOD.primary} strokeWidth={2} dot={{ r: 4 }} name="Invoice Amount" />
+                                  </LineChart>
+                                </ResponsiveContainer>
+                              )}
+                            </Card>
+                          </Col>
+                        </Row>
+
+                        {/* Category data table */}
+                        <Card size="small" title={<Text strong>Category Detail</Text>}>
+                          <Table
+                            size="small"
+                            pagination={false}
+                            dataSource={analyticsData.categories.map((c, i) => ({ ...c, key: i }))}
+                            columns={[
+                              { title: 'Category', dataIndex: 'name', key: 'name',
+                                render: (v: string, _: any, i: number) => (
+                                  <Space>
+                                    <div style={{ width: 12, height: 12, borderRadius: 2, background: CHART_COLORS[i % CHART_COLORS.length] }} />
+                                    {v}
+                                  </Space>
+                                )
+                              },
+                              { title: 'Invoice Count', dataIndex: 'count', key: 'count', align: 'right' as const, width: 120 },
+                              { title: 'Total Amount (AED)', dataIndex: 'amount', key: 'amount', align: 'right' as const, width: 180,
+                                render: (v: number) => <Text strong style={{ fontFamily: 'monospace' }}>{v.toLocaleString('en-AE', { minimumFractionDigits: 2 })}</Text>
+                              },
+                              { title: '% of Total', key: 'pct', align: 'right' as const, width: 100,
+                                render: (_: any, r: CategoryData) => (
+                                  <Text>{analyticsData.totalAmount > 0 ? ((r.amount / analyticsData.totalAmount) * 100).toFixed(1) : '0'}%</Text>
+                                )
+                              },
+                            ]}
+                            summary={() => (
+                              <Table.Summary.Row style={{ background: '#f0f5ff' }}>
+                                <Table.Summary.Cell index={0}><Text strong>Total</Text></Table.Summary.Cell>
+                                <Table.Summary.Cell index={1} align="right"><Text strong>{analyticsData.totalCount}</Text></Table.Summary.Cell>
+                                <Table.Summary.Cell index={2} align="right">
+                                  <Text strong style={{ fontFamily: 'monospace' }}>{analyticsData.totalAmount.toLocaleString('en-AE', { minimumFractionDigits: 2 })}</Text>
+                                </Table.Summary.Cell>
+                                <Table.Summary.Cell index={3} align="right"><Text strong>100%</Text></Table.Summary.Cell>
+                              </Table.Summary.Row>
+                            )}
+                          />
+                        </Card>
+                      </div>
+                    )}
                   </div>
                 ),
               },
             ]}
           />
         </Card>
+
+        {/* PDF Preview Modal */}
+        <Modal
+          title={<Space><FilePdfOutlined style={{ color: REDWOOD.error }} />PDF Preview</Space>}
+          open={pdfPreviewVisible}
+          onCancel={() => { setPdfPreviewVisible(false); setPdfPreviewUrl(''); }}
+          footer={[
+            <Button key="download" type="primary" icon={<FilePdfOutlined />} style={{ background: REDWOOD.error }}
+              onClick={() => {
+                const a = document.createElement('a');
+                a.href = pdfPreviewUrl;
+                a.download = `Analytics_${tab.supplier.supplierNumber}_${new Date().toISOString().slice(0, 10)}.pdf`;
+                a.click();
+              }}>
+              Download PDF
+            </Button>,
+            <Button key="close" onClick={() => { setPdfPreviewVisible(false); setPdfPreviewUrl(''); }}>Close</Button>,
+          ]}
+          width="80vw"
+          style={{ top: 20 }}
+          styles={{ body: { padding: 0, height: 'calc(80vh - 100px)' } }}
+        >
+          {pdfPreviewUrl && (
+            <iframe src={pdfPreviewUrl} style={{ width: '100%', height: '100%', border: 'none', minHeight: 500 }} title="PDF Preview" />
+          )}
+        </Modal>
       </div>
     );
   };
