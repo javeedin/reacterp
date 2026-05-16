@@ -245,56 +245,34 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
   };
 
   const fetchSupplierBalance = async (bu: string, supplierNum: string) => {
+    // Use the dedicated outstanding-by-supplier endpoint — single call, server-computes
+    // outstanding_amount as SUM(GREATEST(0, invoice_amount - payments - prepayments))
+    // per unpaid invoice, grouped by supplier. Much more accurate and efficient than
+    // fetching invoices per supplier and computing on the frontend.
     const p = new URLSearchParams();
     if (bu)          p.set('P_BUSINESS_UNIT', bu);
-    if (supplierNum) p.set('supplier_number', supplierNum);
-    const listUrl = `${APEX_DB_CONFIG.baseUrl}/suppliers${p.toString() ? '?' + p : ''}`;
-    const invoicePattern = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/{supplierNumber}?status=Unpaid`;
-    setApiUrls([listUrl, invoicePattern]);
-    const listRes = await fetch(listUrl);
-    if (!listRes.ok) throw new Error(`HTTP ${listRes.status}`);
-    const listData = JSON.parse(await listRes.text() || '{}');
-    const suppliers: any[] = Array.isArray(listData) ? listData : (listData.items || []);
+    const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/outstanding-by-supplier${p.toString() ? '?' + p : ''}`;
+    setApiUrls([url]);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = JSON.parse(await res.text() || '{}');
+    const items: any[] = Array.isArray(data) ? data : (data.items || []);
 
-    // Compute outstanding from actual unpaid invoice amount_remaining (same method as aging report)
-    const results = await Promise.allSettled(
-      suppliers.map(async (s: any) => {
-        const sn = s.supplier_number || '';
-        if (!sn) return null;
-        const r = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${encodeURIComponent(sn)}?status=Unpaid&limit=1000`);
-        if (!r.ok) return null;
-        const d = JSON.parse(await r.text() || '{}');
-        const invoices: any[] = Array.isArray(d) ? d : (d.items || d.invoices || []);
-        if (invoices.length === 0) return null;
+    // Optional client-side filter by supplier number if specified
+    const filtered = supplierNum
+      ? items.filter(it => String(it.supplier_number || '').toLowerCase().includes(supplierNum.toLowerCase()))
+      : items;
 
-        let invoiceAmount = 0;
-        let outstanding   = 0;
-        for (const inv of invoices) {
-          const invAmt = Number(inv.invoice_amount || 0);
-          const bal    = Number(inv.amount_remaining ?? (invAmt - Number(inv.amount_paid || 0)));
-          if (bal <= 0) continue;
-          invoiceAmount += invAmt;
-          outstanding   += bal;
-        }
-        if (outstanding <= 0) return null;
-
-        return {
-          key:           sn,
-          supplierNumber: sn,
-          supplier:      s.supplier || s.supplier_name || sn,
-          invoiceCount:  invoices.filter(inv => Number(inv.amount_remaining ?? 0) > 0).length,
-          invoiceAmount,
-          amountPaid:    invoiceAmount - outstanding,
-          outstanding,
-          currency:      invoices[0]?.currency || invoices[0]?.invoice_currency || 'AED',
-        };
-      })
-    );
-
-    return results
-      .filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled' && r.value !== null)
-      .map(r => r.value)
-      .sort((a, b) => b.outstanding - a.outstanding);
+    return filtered.map((it: any) => ({
+      key:           it.supplier_number || '',
+      supplierNumber: it.supplier_number || '',
+      supplier:      it.supplier_name   || it.supplier_number || '',
+      invoiceCount:  Number(it.invoice_count       || 0),
+      invoiceAmount: Number(it.total_invoice_amount || 0),
+      amountPaid:    Number(it.total_paid           || 0),
+      outstanding:   Number(it.outstanding_amount   || 0),
+      currency:      'AED',
+    }));
   };
 
   const fetchPaymentRegister = async (bu: string, supplierNum: string, dateFrom: string, dateTo: string) => {

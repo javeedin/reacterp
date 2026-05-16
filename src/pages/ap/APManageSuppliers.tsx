@@ -755,12 +755,7 @@ const ManageSuppliers: React.FC = () => {
   const fetchBalanceDashboard = async (supplierNumber: string): Promise<BalanceData | null> => {
     try {
       const enc = encodeURIComponent(supplierNumber);
-
-      // Fetch dashboard and unpaid invoices in parallel
-      const [res, invRes] = await Promise.all([
-        fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers/balance/dashboard/${enc}`),
-        fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${enc}?status=Unpaid&limit=1000`),
-      ]);
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers/balance/dashboard/${enc}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json();
       if (d.success !== 'true') throw new Error(d.error || 'Dashboard error');
@@ -768,22 +763,12 @@ const ManageSuppliers: React.FC = () => {
       const sup = d.supplier || {};
       const bs  = d.balance_summary || {};
 
-      // Compute outstanding balance from actual unpaid invoice balances
-      // (more accurate than total_invoice_amount − total_payment_amount which
-      //  can include cancelled invoices or mismatched prepayments)
-      let accurateBalance = Number(bs.balance || 0);
-      if (invRes.ok) {
-        const invData = await invRes.json();
-        const invItems: any[] = invData.invoices || invData.items || [];
-        if (invItems.length > 0) {
-          accurateBalance = invItems.reduce((sum, inv) => {
-            const bal = Number(
-              inv.amount_remaining ?? (Number(inv.invoice_amount || 0) - Number(inv.amount_paid || 0))
-            );
-            return sum + Math.max(0, bal);
-          }, 0);
-        }
-      }
+      // Use total_outstanding from the aging_report buckets already in the dashboard response.
+      // This is the server-computed correct outstanding: sum of (INVOICE_AMOUNT - actual_payments)
+      // per unpaid invoice, grouped into aging buckets — more accurate than bs.balance which is
+      // total_invoice_amount minus total_payment_amount and can include paid/partially-matched invoices.
+      const agingBuckets: any[] = d.aging_report || [];
+      const totalOutstanding = agingBuckets.reduce((sum, b) => sum + Number(b.amount || 0), 0);
 
       return {
         supplier: {
@@ -801,10 +786,10 @@ const ManageSuppliers: React.FC = () => {
           totalInvoiceAmount: bs.total_invoice_amount || 0,
           totalPayments:      bs.total_payments       || 0,
           totalPaymentAmount: bs.total_payment_amount || 0,
-          balance:            accurateBalance,
+          balance:            totalOutstanding,
           currency:           bs.currency             || 'AED',
         },
-        agingReport: d.aging_report || [],
+        agingReport: agingBuckets,
       };
     } catch (error) {
       console.error('Error fetching balance dashboard:', error);
