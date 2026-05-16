@@ -2,12 +2,13 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Layout, Typography, Card, Breadcrumb, Space, Tabs,
   Form, Select, Input, Button, Table, Tag, Spin,
-  Tooltip, message, Empty,
+  Tooltip, message, Empty, Modal,
 } from 'antd';
 import {
   HomeOutlined, BarChartOutlined, DollarOutlined,
   ClockCircleOutlined, PlayCircleOutlined, FileExcelOutlined,
   FilePdfOutlined, TeamOutlined, SearchOutlined,
+  ApiOutlined, CopyOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -148,6 +149,8 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
   const [hasRun, setHasRun] = useState(false);
   const [gridSearch, setGridSearch] = useState('');
   const reportTitle = useRef('');
+  const [apiUrls, setApiUrls] = useState<string[]>([]);
+  const [apiModalOpen, setApiModalOpen] = useState(false);
 
   const filteredRows = useMemo(() => {
     if (!gridSearch.trim()) return rows;
@@ -162,7 +165,9 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
     if (bu)           p.set('P_BUSINESS_UNIT', bu);
     if (supplierNum)  p.set('supplier_number', supplierNum);
     if (supplierName) p.set('supplier', supplierName);
-    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers${p.toString() ? '?' + p : ''}`);
+    const url = `${APEX_DB_CONFIG.baseUrl}/suppliers${p.toString() ? '?' + p : ''}`;
+    setApiUrls([url]);
+    const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = JSON.parse(await res.text() || '{}');
     const items: any[] = Array.isArray(data) ? data : (data.items || []);
@@ -183,7 +188,10 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
     const p = new URLSearchParams();
     if (bu)          p.set('P_BUSINESS_UNIT', bu);
     if (supplierNum) p.set('supplier_number', supplierNum);
-    const listRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers${p.toString() ? '?' + p : ''}`);
+    const listUrl = `${APEX_DB_CONFIG.baseUrl}/suppliers${p.toString() ? '?' + p : ''}`;
+    const summaryPattern = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/summary/{supplierNumber}`;
+    setApiUrls([listUrl, summaryPattern]);
+    const listRes = await fetch(listUrl);
     if (!listRes.ok) throw new Error(`HTTP ${listRes.status}`);
     const listData = JSON.parse(await listRes.text() || '{}');
     const suppliers: any[] = Array.isArray(listData) ? listData : (listData.items || []);
@@ -225,7 +233,9 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
     if (dateFrom)    p.set('date_from', dateFrom);
     if (dateTo)      p.set('date_to', dateTo);
     p.set('limit', '500');
-    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments?${p}`);
+    const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments?${p}`;
+    setApiUrls([url]);
+    const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = JSON.parse(await res.text() || '{}');
     const items: any[] = Array.isArray(data) ? data : (data.items || data.payments || []);
@@ -247,7 +257,9 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
     if (bu)          p.set('business_unit', bu);
     if (supplierNum) p.set('supplier_number', supplierNum);
     p.set('limit', '500');
-    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/createinvoice?${p}`);
+    const url = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoice?${p}`;
+    setApiUrls([url]);
+    const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = JSON.parse(await res.text() || '{}');
     const items: any[] = (Array.isArray(data) ? data : (data.items || [])).filter(
@@ -363,6 +375,13 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
           <Tooltip title="Export to PDF">
             <Button icon={<FilePdfOutlined />} onClick={exportPdf} disabled={rows.length === 0} danger>PDF</Button>
           </Tooltip>
+          {apiUrls.length > 0 && (
+            <Tooltip title="View API">
+              <Button icon={<ApiOutlined />} size="small"
+                style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
+                onClick={() => setApiModalOpen(true)} />
+            </Tooltip>
+          )}
         </Space>
         {hasRun && (
           <Space>
@@ -422,6 +441,48 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
           />
         )}
       </Spin>
+
+      {/* API URL modal */}
+      <Modal
+        open={apiModalOpen}
+        onCancel={() => setApiModalOpen(false)}
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} />API Endpoints — {report.label}</Space>}
+        footer={<Button onClick={() => setApiModalOpen(false)}>Close</Button>}
+        width={720}
+      >
+        {apiUrls.map((url, i) => (
+          <div key={i} style={{ marginBottom: 12 }}>
+            {apiUrls.length > 1 && (
+              <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                {i === 0 ? 'Step 1 — Supplier List' : `Step 2 — Balance Summary (per supplier)`}
+              </Text>
+            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+              <div style={{ flex: 1, background: '#f5f5f5', border: '1px solid #e0e0e0', borderRadius: 6, padding: '8px 12px', fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all', color: REDWOOD.neutral900 }}>
+                {url}
+              </div>
+              <Tooltip title="Copy">
+                <Button size="small" icon={<CopyOutlined />}
+                  onClick={() => { navigator.clipboard.writeText(url); message.success('Copied'); }} />
+              </Tooltip>
+            </div>
+            {url.includes('?') && (
+              <div style={{ marginTop: 6, paddingLeft: 12 }}>
+                {url.split('?')[1].split('&').map((p, j) => {
+                  const [k, v] = p.split('=');
+                  return (
+                    <div key={j} style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
+                      <Text code style={{ fontSize: 11 }}>{decodeURIComponent(k)}</Text>
+                      {' = '}
+                      <Text style={{ fontSize: 11, color: REDWOOD.info }}>{decodeURIComponent(v || '')}</Text>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ))}
+      </Modal>
     </div>
   );
 };
