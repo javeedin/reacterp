@@ -179,24 +179,42 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
   };
 
   const fetchSupplierBalance = async (bu: string, supplierNum: string) => {
+    // Step 1: get supplier list (filtered by BU / supplier number)
     const p = new URLSearchParams();
     if (bu)          p.set('P_BUSINESS_UNIT', bu);
     if (supplierNum) p.set('supplier_number', supplierNum);
-    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/invoices/outstanding-by-supplier${p.toString() ? '?' + p : ''}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = JSON.parse(await res.text() || '{}');
-    const items: any[] = Array.isArray(data) ? data : (data.items || []);
-    return items
-      .map((it: any) => ({
-        key:           it.supplier_number || it.supplier_name || String(Math.random()),
-        supplierNumber: it.supplier_number        || '',
-        supplier:       it.supplier_name          || '',
-        invoiceCount:   Number(it.invoice_count   ?? 0),
-        invoiceAmount:  Number(it.total_invoice_amount ?? 0),
-        amountPaid:     Number(it.total_paid      ?? 0),
-        outstanding:    Number(it.outstanding_amount  ?? 0),
-        currency:       it.currency               || 'AED',
-      }))
+    const listRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers${p.toString() ? '?' + p : ''}`);
+    if (!listRes.ok) throw new Error(`HTTP ${listRes.status}`);
+    const listData = JSON.parse(await listRes.text() || '{}');
+    const suppliers: any[] = Array.isArray(listData) ? listData : (listData.items || []);
+
+    // Step 2: fetch balance summary for each supplier in parallel via PKG_SUPPLIER_BALANCE
+    const results = await Promise.allSettled(
+      suppliers.map(async (s: any) => {
+        const sn = s.supplier_number || '';
+        if (!sn) return null;
+        const r = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers/balance/summary/${encodeURIComponent(sn)}`);
+        if (!r.ok) return null;
+        const d = JSON.parse(await r.text() || '{}');
+        const bs = d.balance_summary || d;
+        const outstanding = Number(bs.balance ?? bs.outstanding_balance ?? 0);
+        if (outstanding <= 0) return null;
+        return {
+          key:          sn,
+          supplierNumber: sn,
+          supplier:     s.supplier || s.supplier_name || sn,
+          invoiceCount: Number(bs.total_invoices ?? 0),
+          invoiceAmount: Number(bs.total_invoice_amount ?? 0),
+          amountPaid:   Number(bs.total_payment_amount ?? bs.total_paid ?? 0),
+          outstanding,
+          currency:     bs.currency || 'AED',
+        };
+      })
+    );
+
+    return results
+      .filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled' && r.value !== null)
+      .map(r => r.value)
       .sort((a, b) => b.outstanding - a.outstanding);
   };
 
