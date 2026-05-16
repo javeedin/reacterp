@@ -162,6 +162,8 @@ const CreatePurchaseOrder: React.FC = () => {
   const [orgQohLoading, setOrgQohLoading] = useState(false);
   const [orgQohFetched, setOrgQohFetched] = useState(false);
   const [orgQohFilter, setOrgQohFilter] = useState('');
+  const [orgQohApiUrl, setOrgQohApiUrl] = useState('');
+  const [orgQohApiModalOpen, setOrgQohApiModalOpen] = useState(false);
 
   const [supplierModalOpen, setSupplierModalOpen] = useState(false);
   const [supplierSearch, setSupplierSearch] = useState('');
@@ -292,6 +294,7 @@ const CreatePurchaseOrder: React.FC = () => {
       const qParts = [`OrganizationCode='${header.shipToOrg}'`];
       if (header.subinventory) qParts.push(`SubinventoryCode='${header.subinventory}'`);
       const baseUrl = `${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(qParts.join(';'))}&limit=500`;
+      setOrgQohApiUrl(baseUrl);
       const rows = await fetchLOV(baseUrl);
       setOrgQohRows(rows);
       setOrgQohFetched(true);
@@ -1010,6 +1013,14 @@ const CreatePurchaseOrder: React.FC = () => {
                             >
                               Fetch Org On Hand
                             </Button>
+                            <Tooltip title={orgQohApiUrl ? 'Show API URL' : 'No API call yet'}>
+                              <Button
+                                size="small"
+                                type="text"
+                                icon={<ApiOutlined style={{ color: orgQohApiUrl ? C.blue : C.textLight, fontSize: 16 }} />}
+                                onClick={() => orgQohApiUrl && setOrgQohApiModalOpen(true)}
+                              />
+                            </Tooltip>
                             {header && (
                               <Text style={{ fontSize: 12, color: C.textMid }}>
                                 Org: <Text strong>{header.shipToOrg || '—'}</Text>
@@ -1178,6 +1189,28 @@ const CreatePurchaseOrder: React.FC = () => {
           footer={<Button onClick={() => setSupplierApiModalOpen(false)}>Close</Button>}>
           <div style={{ background: C.bg, borderRadius: 6, padding: 12, wordBreak: 'break-all' }}>
             <Text copyable style={{ fontFamily: 'monospace', fontSize: 12 }}>{supplierApiUrl}</Text>
+          </div>
+        </Modal>
+
+        <Modal open={orgQohApiModalOpen}
+          title={<Space><ApiOutlined style={{ color: C.blue }} /><span>Org On Hand API Call</span></Space>}
+          width={720} onCancel={() => setOrgQohApiModalOpen(false)}
+          footer={<Button onClick={() => setOrgQohApiModalOpen(false)}>Close</Button>}>
+          <div style={{ marginBottom: 8 }}>
+            <Text style={{ fontSize: 12, color: C.textMid }}>
+              The <Text code>fetchLOV</Text> helper appends <Text code>&amp;offset=N</Text> and paginates until <Text code>hasMore</Text> is false.
+              The base URL (first page) is:
+            </Text>
+          </div>
+          <div style={{ background: C.bg, borderRadius: 6, padding: 12, wordBreak: 'break-all' }}>
+            <Text copyable style={{ fontFamily: 'monospace', fontSize: 12 }}>{orgQohApiUrl}</Text>
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <Text style={{ fontSize: 11, color: C.textLight }}>
+              Decoded query: <Text code style={{ fontSize: 11 }}>
+                {orgQohApiUrl ? decodeURIComponent(orgQohApiUrl.split('?q=')[1]?.split('&')[0] ?? '') : ''}
+              </Text>
+            </Text>
           </div>
         </Modal>
 
