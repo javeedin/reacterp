@@ -2186,7 +2186,7 @@ const AccountAnalysis: React.FC = () => {
                           <Table.Summary.Cell index={15} />{/* DrillDown */}
                         </>
                       ) : (
-                        <Table.Summary.Cell index={12} />{/* DrillDown */}
+                        <Table.Summary.Cell index={12} />
                       )}
                     </Table.Summary.Row>
                   </Table.Summary>
