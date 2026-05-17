@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Layout, Typography, Card, Breadcrumb, Space, Tabs,
   Form, Select, Input, Button, Table, Tag, Spin,
@@ -9,7 +9,7 @@ import {
   ClockCircleOutlined, PlayCircleOutlined, FileExcelOutlined,
   FilePdfOutlined, TeamOutlined, SearchOutlined,
   ApiOutlined, CopyOutlined, FileTextOutlined,
-  MenuFoldOutlined, MenuUnfoldOutlined, BookOutlined,
+  MenuFoldOutlined, MenuUnfoldOutlined, BookOutlined, LockOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -229,7 +229,54 @@ const agingBuckets = (age: number, bal: number) => ({
 });
 
 // ─── Per-tab report panel (fully isolated state) ──────────────────────────────
-const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({ report, businessUnits }) => {
+// ─── Account Picker Modal ─────────────────────────────────────────────────────
+const AccountPickerModal: React.FC<{
+  open: boolean;
+  onClose: () => void;
+  onSelect: (account: string, description: string) => void;
+  options: { account: string; description: string }[];
+  loading: boolean;
+}> = ({ open, onClose, onSelect, options, loading }) => {
+  const [q, setQ] = useState('');
+  const filtered = useMemo(() => {
+    const lq = q.toLowerCase();
+    return q ? options.filter(o => o.account.toLowerCase().includes(lq) || o.description.toLowerCase().includes(lq)) : options;
+  }, [options, q]);
+  const close = () => { onClose(); setQ(''); };
+  return (
+    <Modal open={open} onCancel={close} footer={null}
+      title={<Space><SearchOutlined style={{ color: '#0572CE' }} />Select Account</Space>} width={620}>
+      <Input prefix={<SearchOutlined />} placeholder="Search code or description…"
+        allowClear size="small" value={q} onChange={e => setQ(e.target.value)}
+        style={{ marginBottom: 8 }} autoFocus />
+      <div onClick={() => { onSelect('', ''); close(); }}
+        style={{ padding: '7px 12px', cursor: 'pointer', borderBottom: '1px solid #E5E5E5',
+          background: '#fafafa', fontSize: 12, color: '#6B6B6B' }}
+        onMouseEnter={e => (e.currentTarget.style.background = '#e6f4ff')}
+        onMouseLeave={e => (e.currentTarget.style.background = '#fafafa')}>
+        — All Accounts —
+      </div>
+      <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+        {loading && <div style={{ padding: 24, textAlign: 'center' }}><Spin size="small" /></div>}
+        {!loading && filtered.map(o => (
+          <div key={o.account} onClick={() => { onSelect(o.account, o.description); close(); }}
+            style={{ padding: '7px 12px', cursor: 'pointer', borderBottom: '1px solid #E5E5E5',
+              display: 'flex', gap: 10, alignItems: 'center' }}
+            onMouseEnter={e => (e.currentTarget.style.background = '#e6f4ff')}
+            onMouseLeave={e => (e.currentTarget.style.background = '')}>
+            <Text code style={{ fontSize: 11, minWidth: 130 }}>{o.account}</Text>
+            <Text style={{ fontSize: 12, flex: 1 }}>{o.description}</Text>
+          </div>
+        ))}
+        {!loading && filtered.length === 0 && (
+          <div style={{ padding: 24, textAlign: 'center', color: '#6B6B6B' }}>No accounts found</div>
+        )}
+      </div>
+    </Modal>
+  );
+};
+
+const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; company: string }[] }> = ({ report, businessUnits }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<any[]>([]);
@@ -240,6 +287,19 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
   const [apiModalOpen, setApiModalOpen] = useState(false);
   const [reconData, setReconData] = useState<ReconResult | null>(null);
   const [periodOptions, setPeriodOptions] = useState<string[]>([]);
+
+  // ── Payables-ledger-recon specific state ──────────────────────────────────
+  const [allPeriods, setAllPeriods]         = useState<{ period_name_id: string; period_year: number; period_number: number }[]>([]);
+  const [calPeriodsLoading, setCalPeriodsLoading] = useState(false);
+  const [selectedYear, setSelectedYear]     = useState<number | null>(null);
+  const [selectedPeriod, setSelectedPeriod] = useState('');
+  const [company, setCompany]               = useState('');
+  const [companyLocked, setCompanyLocked]   = useState(false);
+  const [accountOptions, setAccountOptions] = useState<{ account: string; description: string }[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(false);
+  const [accountPickerOpen, setAccountPickerOpen] = useState(false);
+  const [selectedAccount, setSelectedAccount] = useState('');
+  const [selectedAccountDesc, setSelectedAccountDesc] = useState('');
 
   useEffect(() => {
     if (!report.hasPeriodFilter) return;
@@ -254,6 +314,90 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
         setPeriodOptions([...new Set(names)] as string[]);
       }).catch(() => {});
   }, [report.hasPeriodFilter]);
+
+  // Load calendar periods (year+period LOV) for payables-ledger-recon
+  useEffect(() => {
+    if (report.key !== 'payables-ledger-recon') return;
+    setCalPeriodsLoading(true);
+    fetch(`${APEX_DB_CONFIG.baseUrl}/gl/getledgername`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        const ledgers: string[] = (data.items || []).map((i: any) => i.ledger_name).filter(Boolean);
+        if (!ledgers.length) return;
+        return fetch(`${APEX_DB_CONFIG.baseUrl}/periodsstatus/create?ledger_name=${encodeURIComponent(ledgers[0])}`)
+          .then(r => r.ok ? r.json() : null)
+          .then(pd => {
+            if (!pd) return;
+            const items = (pd.items || [])
+              .filter((i: any) => i.period_year && (i.period_name_id || i.period_name))
+              .map((i: any) => ({
+                period_name_id: String(i.period_name_id || i.period_name),
+                period_year: Number(i.period_year),
+                period_number: Number(i.period_number || 0),
+              }));
+            setAllPeriods(items);
+            if (!items.length) return;
+            const latestYear = Math.max(...items.map((p: any) => p.period_year));
+            setSelectedYear(latestYear);
+            const inYear = items.filter((p: any) => p.period_year === latestYear)
+              .sort((a: any, b: any) => b.period_number - a.period_number);
+            if (inYear.length) setSelectedPeriod(inYear[0].period_name_id);
+          });
+      })
+      .catch(() => {})
+      .finally(() => setCalPeriodsLoading(false));
+  }, [report.key]);
+
+  // Load account LOV for payables-ledger-recon
+  useEffect(() => {
+    if (report.key !== 'payables-ledger-recon') return;
+    setAccountsLoading(true);
+    fetch(`${APEX_DB_CONFIG.baseUrl}/glaccountslist`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        setAccountOptions(
+          (data.items || [])
+            .map((i: any) => ({
+              account: String(i.account || i.ACCOUNT || ''),
+              description: String(i.description || i.DESCRIPTION || ''),
+            }))
+            .filter((i: any) => i.account)
+        );
+      })
+      .catch(() => {})
+      .finally(() => setAccountsLoading(false));
+  }, [report.key]);
+
+  const calYears = useMemo(
+    () => [...new Set(allPeriods.map(p => p.period_year))].sort((a, b) => b - a),
+    [allPeriods],
+  );
+  const periodsForYear = useMemo(() => {
+    if (!selectedYear) return [];
+    return allPeriods
+      .filter(p => p.period_year === selectedYear)
+      .sort((a, b) => a.period_number - b.period_number);
+  }, [allPeriods, selectedYear]);
+
+  // Auto-select latest period when year changes
+  useEffect(() => {
+    if (periodsForYear.length) {
+      setSelectedPeriod(periodsForYear[periodsForYear.length - 1].period_name_id);
+    }
+  }, [periodsForYear]);
+
+  // BU → company auto-populate via onValuesChange
+  const handleFormValuesChange = useCallback((changedValues: any) => {
+    if ('businessUnit' in changedValues) {
+      const buName: string | undefined = changedValues.businessUnit;
+      if (!buName) { setCompany(''); setCompanyLocked(false); return; }
+      const bu = businessUnits.find(b => b.name === buName);
+      if (bu?.company) { setCompany(bu.company); setCompanyLocked(true); }
+      else { setCompany(''); setCompanyLocked(false); }
+    }
+  }, [businessUnits]);
 
   const filteredRows = useMemo(() => {
     if (!gridSearch.trim()) return rows;
@@ -491,12 +635,15 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
   };
 
   const handleRun = async () => {
-    const { businessUnit: bu = '', supplierNumber: sn = '', supplierName: snm = '', dateFrom = '', dateTo = '', asAtDate = '', period = '', company = '', account = '' } = form.getFieldsValue();
+    const { businessUnit: bu = '', supplierNumber: sn = '', supplierName: snm = '', dateFrom = '', dateTo = '', asAtDate = '' } = form.getFieldsValue();
+    const period  = report.key === 'payables-ledger-recon' ? selectedPeriod : (form.getFieldValue('period') || '');
+    const account = report.key === 'payables-ledger-recon' ? selectedAccount : (form.getFieldValue('account') || '');
+    const resolvedCompany = report.key === 'payables-ledger-recon' ? company : (form.getFieldValue('company') || '');
     setLoading(true); setRows([]); setReconData(null); setGridSearch('');
     reportTitle.current = `${report.label}${bu ? ' — ' + bu : ''}${period ? ' — ' + period : ''}${asAtDate ? ' @ ' + asAtDate : ''}`;
     try {
       if (report.key === 'payables-ledger-recon') {
-        const result = await fetchPayablesLedgerRecon(bu, company, account, period);
+        const result = await fetchPayablesLedgerRecon(bu, resolvedCompany, account, period);
         setReconData(result); setHasRun(true);
         message.success('Reconciliation loaded.');
       } else {
@@ -761,11 +908,15 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
       {/* Parameters */}
       <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 14 }}
         styles={{ body: { padding: '12px 16px' } }}>
-        <Form form={form} layout="inline" size="small">
+        <Form form={form} layout="inline" size="small" onValuesChange={handleFormValuesChange}>
           <Form.Item label="Business Unit" name="businessUnit">
             <Select placeholder="All Business Units" allowClear showSearch style={{ width: 200 }}
               filterOption={(i, o) => String(o?.value ?? '').toLowerCase().includes(i.toLowerCase())}>
-              {businessUnits.map(bu => <Option key={bu} value={bu}>{bu}</Option>)}
+              {businessUnits.map(b => (
+                <Option key={b.name} value={b.name}>
+                  {b.company ? `${b.name}  (${b.company})` : b.name}
+                </Option>
+              ))}
             </Select>
           </Form.Item>
           {report.hasSupplierFilter && (<>
@@ -786,7 +937,7 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
               <Input type="date" style={{ width: 150 }} />
             </Form.Item>
           )}
-          {report.hasPeriodFilter && (
+          {report.hasPeriodFilter && report.key !== 'payables-ledger-recon' && (
             <Form.Item label={<span style={{ fontWeight: 600 }}>Period</span>} name="period"
               tooltip="GL accounting period, e.g. Jan-2024">
               <Select showSearch allowClear placeholder="e.g. Jan-2024" style={{ width: 140 }}
@@ -795,15 +946,91 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
               </Select>
             </Form.Item>
           )}
-          {report.hasCompanyFilter && (
+          {report.key === 'payables-ledger-recon' && (
+            <>
+              <Form.Item label={<span style={{ fontWeight: 600 }}>Year</span>}>
+                <Select
+                  placeholder="Year"
+                  value={selectedYear ?? undefined}
+                  loading={calPeriodsLoading}
+                  onChange={(v: number) => { setSelectedYear(v); setSelectedPeriod(''); }}
+                  style={{ width: 90 }}
+                  allowClear
+                >
+                  {calYears.map(y => <Option key={y} value={y}>{y}</Option>)}
+                </Select>
+              </Form.Item>
+              <Form.Item label={<span style={{ fontWeight: 600 }}>Period</span>}>
+                <Select
+                  placeholder="Period"
+                  value={selectedPeriod || undefined}
+                  loading={calPeriodsLoading}
+                  onChange={setSelectedPeriod}
+                  style={{ width: 120 }}
+                  showSearch
+                  allowClear
+                >
+                  {periodsForYear.map(p => <Option key={p.period_name_id} value={p.period_name_id}>{p.period_name_id}</Option>)}
+                </Select>
+              </Form.Item>
+            </>
+          )}
+          {report.hasCompanyFilter && report.key !== 'payables-ledger-recon' && (
             <Form.Item label="Company" name="company" tooltip="GL Company segment (e.g. 01)">
               <Input placeholder="e.g. 01" style={{ width: 100 }} allowClear />
             </Form.Item>
           )}
-          {report.hasAccountFilter && (
+          {report.key === 'payables-ledger-recon' && (
+            <Form.Item label={
+              <Space size={4}>
+                <span>Company</span>
+                {companyLocked && <LockOutlined style={{ fontSize: 10, color: '#6B6B6B' }} />}
+              </Space>
+            }>
+              <Input
+                value={company}
+                onChange={e => { if (!companyLocked) setCompany(e.target.value); }}
+                disabled={companyLocked}
+                placeholder="Auto from BU"
+                style={{
+                  width: 100,
+                  background: companyLocked ? '#F7F7F7' : undefined,
+                  color: companyLocked ? '#0572CE' : undefined,
+                  fontWeight: companyLocked ? 600 : undefined,
+                  fontFamily: 'monospace',
+                }}
+              />
+            </Form.Item>
+          )}
+          {report.hasAccountFilter && report.key !== 'payables-ledger-recon' && (
             <Form.Item label={<span style={{ fontWeight: 600 }}>GL Account</span>} name="account"
               tooltip="AP liability account segment (e.g. 21100)">
               <Input placeholder="e.g. 21100" style={{ width: 120 }} allowClear />
+            </Form.Item>
+          )}
+          {report.key === 'payables-ledger-recon' && (
+            <Form.Item label={<span style={{ fontWeight: 600 }}>GL Account</span>}>
+              <Input.Group compact style={{ display: 'flex' }}>
+                <Input
+                  readOnly
+                  value={selectedAccount
+                    ? `${selectedAccount}${selectedAccountDesc ? '  –  ' + selectedAccountDesc : ''}`
+                    : ''}
+                  placeholder="Click to select…"
+                  style={{ width: 200, cursor: 'pointer', background: selectedAccount ? '#f0f5ff' : undefined }}
+                  onClick={() => setAccountPickerOpen(true)}
+                />
+                <Button
+                  loading={accountsLoading}
+                  onClick={() => setAccountPickerOpen(true)}
+                  style={{ borderLeft: 0 }}
+                >
+                  LOV
+                </Button>
+                {selectedAccount && (
+                  <Button onClick={() => { setSelectedAccount(''); setSelectedAccountDesc(''); }}>✕</Button>
+                )}
+              </Input.Group>
             </Form.Item>
           )}
         </Form>
@@ -927,6 +1154,15 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
         )}
       </Spin>
 
+      {/* Account Picker for payables-ledger-recon */}
+      <AccountPickerModal
+        open={accountPickerOpen}
+        onClose={() => setAccountPickerOpen(false)}
+        onSelect={(acct, desc) => { setSelectedAccount(acct); setSelectedAccountDesc(desc); }}
+        options={accountOptions}
+        loading={accountsLoading}
+      />
+
       {/* API URL modal */}
       <Modal
         open={apiModalOpen}
@@ -980,7 +1216,7 @@ interface TabEntry {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 const APReports: React.FC = () => {
-  const [businessUnits, setBusinessUnits] = useState<string[]>([]);
+  const [businessUnits, setBusinessUnits] = useState<{ name: string; company: string }[]>([]);
   const [reportSearch, setReportSearch] = useState('');
   const [tabs, setTabs] = useState<TabEntry[]>([]);
   const [activeTab, setActiveTab] = useState<string>('');
@@ -992,7 +1228,14 @@ const APReports: React.FC = () => {
       .then(data => {
         if (!data) return;
         const items: any[] = Array.isArray(data) ? data : (data.items || []);
-        setBusinessUnits(items.map((i: any) => i.business_unit_name || '').filter(Boolean));
+        setBusinessUnits(
+          items
+            .filter((i: any) => i.business_unit_name || i.BUSINESS_UNIT_NAME)
+            .map((i: any) => ({
+              name: String(i.business_unit_name || i.BUSINESS_UNIT_NAME || ''),
+              company: String(i.company || i.COMPANY || i.company_code || i.COMPANY_CODE || ''),
+            }))
+        );
       }).catch(() => {});
   }, []);
 
