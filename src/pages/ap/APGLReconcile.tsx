@@ -1,19 +1,18 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import {
-  Card, Form, Select, DatePicker, Button, Table, Tag, Statistic, Row, Col,
-  Space, Typography, Alert, Segmented, Tooltip, Modal, Input,
+  Card, Form, Select, Button, Table, Tag, Statistic, Row, Col,
+  Space, Typography, Alert, Segmented, Tooltip, Modal, Input, Badge,
 } from 'antd';
 import {
   SearchOutlined, ReloadOutlined,
   CheckCircleOutlined, WarningOutlined, CloseCircleOutlined,
-  ApiOutlined, CopyOutlined,
+  ApiOutlined, CopyOutlined, LockOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import dayjs from 'dayjs';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 
-const { RangePicker } = DatePicker;
 const { Text } = Typography;
+const { Option } = Select;
 
 const APEX_BASE = APEX_DB_CONFIG.baseUrl;
 
@@ -23,13 +22,14 @@ const REDWOOD = {
   info:       '#0572CE',
   warning:    '#A86C00',
   error:      '#C74634',
+  neutral100: '#F8F8F8',
+  neutral200: '#E0E0E0',
   neutral600: '#6B6B6B',
 };
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface ReconRow {
-  // AP source (always present)
   sourceTable:     string;
   sourceId:        number;
   apNumber:        string;
@@ -39,7 +39,6 @@ interface ReconRow {
   apSupplier:      string | null;
   businessUnit:    string;
   apCurrency:      string | null;
-  // SLA (LEFT JOIN — may be zero)
   slaCount:        number;
   slaExists:       boolean;
   slaStatus:       string | null;
@@ -49,7 +48,6 @@ interface ReconRow {
   slaEnteredDr:    number;
   slaEnteredCr:    number;
   slaLineCount:    number;
-  // GL (scalar subqueries — may be zero)
   glCount:         number;
   glExists:        boolean;
   glHeaderId:      number | null;
@@ -59,7 +57,6 @@ interface ReconRow {
   glEnteredCr:     number;
   glDrAccount:     string | null;
   glCrAccount:     string | null;
-  // Three-way derived
   apVsSlaDiff:     number;
   slaVsGlDiff:     number;
   apMatchesSla:    boolean;
@@ -79,6 +76,22 @@ interface Summary {
   isFullyBalanced: boolean;
 }
 
+interface BUOption {
+  name:    string;
+  company: string;
+}
+
+interface PeriodInfo {
+  period_name_id: string;
+  period_year:    number;
+  period_number:  number;
+}
+
+interface AccountOption {
+  account:     string;
+  description: string;
+}
+
 const SOURCE_TABLE_OPTIONS = [
   { value: 'AP_INVOICES',                label: 'AP Invoices' },
   { value: 'AP_PAYMENTS',                label: 'AP Payments' },
@@ -95,7 +108,6 @@ const STATUS_OPTIONS = [
 const fmt = (n: number | null | undefined, digits = 2) =>
   n == null ? '–' : n.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
-// Three-way status indicator — ✓ green or ✗ red
 function StatusTick({ exists, tooltip }: { exists: boolean; tooltip?: string }) {
   const icon = exists
     ? <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 16 }} />
@@ -108,8 +120,23 @@ function StatusTick({ exists, tooltip }: { exists: boolean; tooltip?: string }) 
 export default function APGLReconcile() {
   const [form] = Form.useForm();
 
-  const [businessUnits, setBusinessUnits] = useState<string[]>([]);
-  const [buLoading, setBuLoading]         = useState(false);
+  // ── BU / company ─────────────────────────────────────────────────────────────
+  const [buObjects, setBuObjects]     = useState<BUOption[]>([]);
+  const [buLoading, setBuLoading]     = useState(false);
+  const [company, setCompany]         = useState('');
+  const [companyLocked, setCompanyLocked] = useState(false);
+
+  // ── Periods / calendar ────────────────────────────────────────────────────────
+  const [allPeriods, setAllPeriods]       = useState<PeriodInfo[]>([]);
+  const [periodsLoading, setPeriodsLoading] = useState(false);
+  const [selectedYear, setSelectedYear]   = useState<number | null>(null);
+  const [selectedPeriod, setSelectedPeriod] = useState('');
+
+  // ── Account LOV ───────────────────────────────────────────────────────────────
+  const [accountOptions, setAccountOptions] = useState<AccountOption[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(false);
+
+  // ── Grid state ────────────────────────────────────────────────────────────────
   const [rows, setRows]                   = useState<ReconRow[]>([]);
   const [summary, setSummary]             = useState<Summary | null>(null);
   const [loading, setLoading]             = useState(false);
@@ -118,46 +145,135 @@ export default function APGLReconcile() {
   const [lastCalledUrl, setLastCalledUrl] = useState<string>('');
   const [apiModalOpen, setApiModalOpen]   = useState(false);
 
+  // ── Load business units on mount ──────────────────────────────────────────────
+  useEffect(() => {
+    setBuLoading(true);
+    fetch(`${APEX_BASE}/gl/businessunits`)
+      .then(r => r.json())
+      .then(data => {
+        const items: BUOption[] = (data.items ?? [])
+          .filter((i: any) => i.business_unit_name)
+          .map((i: any) => ({
+            name:    String(i.business_unit_name),
+            company: String(i.company || ''),
+          }));
+        setBuObjects(items);
+      })
+      .catch(() => {})
+      .finally(() => setBuLoading(false));
+  }, []);
+
+  // ── Load periods via ledger (calendar webservice) on mount ────────────────────
+  useEffect(() => {
+    setPeriodsLoading(true);
+    fetch(`${APEX_BASE}/getledgername`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        const ledgers: string[] = (data.items || []).map((i: any) => i.ledger_name).filter(Boolean);
+        if (!ledgers.length) return;
+        return fetch(`${APEX_BASE}/periodsstatus/create?ledger_name=${encodeURIComponent(ledgers[0])}`)
+          .then(r => r.ok ? r.json() : null)
+          .then(pd => {
+            if (!pd) return;
+            const items: PeriodInfo[] = (pd.items || [])
+              .filter((i: any) => i.period_year && (i.period_name_id || i.period_name))
+              .map((i: any) => ({
+                period_name_id: String(i.period_name_id || i.period_name),
+                period_year:    Number(i.period_year),
+                period_number:  Number(i.period_number || 0),
+              }));
+            setAllPeriods(items);
+            if (!items.length) return;
+            const latestYear = Math.max(...items.map(p => p.period_year));
+            setSelectedYear(latestYear);
+            const inYear = items
+              .filter(p => p.period_year === latestYear)
+              .sort((a, b) => b.period_number - a.period_number);
+            if (inYear.length) setSelectedPeriod(inYear[0].period_name_id);
+          });
+      })
+      .catch(() => {})
+      .finally(() => setPeriodsLoading(false));
+  }, []);
+
+  // ── Derived period lists ──────────────────────────────────────────────────────
+  const years = useMemo(
+    () => [...new Set(allPeriods.map(p => p.period_year))].sort((a, b) => b - a),
+    [allPeriods],
+  );
+
+  const periodsForYear = useMemo(() => {
+    if (!selectedYear) return [];
+    return allPeriods
+      .filter(p => p.period_year === selectedYear)
+      .sort((a, b) => a.period_number - b.period_number);
+  }, [allPeriods, selectedYear]);
+
+  // Auto-select latest period when year changes
+  useEffect(() => {
+    if (periodsForYear.length) {
+      setSelectedPeriod(periodsForYear[periodsForYear.length - 1].period_name_id);
+    }
+  }, [periodsForYear]);
+
+  // ── Load account LOV (lazy) ───────────────────────────────────────────────────
+  const loadAccounts = useCallback(async () => {
+    if (accountOptions.length > 0) return;
+    setAccountsLoading(true);
+    try {
+      const res = await fetch(`${APEX_BASE}/glaccountslist`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setAccountOptions(
+        (data.items || [])
+          .map((i: any) => ({ account: i.account || '', description: i.description || '' }))
+          .filter((i: AccountOption) => i.account),
+      );
+    } catch { /* silent */ } finally { setAccountsLoading(false); }
+  }, [accountOptions.length]);
+
+  // ── Handle BU selection → auto-populate + lock company ───────────────────────
+  const onBuChange = useCallback((buName: string | undefined) => {
+    if (!buName) {
+      setCompany('');
+      setCompanyLocked(false);
+      return;
+    }
+    const bu = buObjects.find(b => b.name === buName);
+    if (bu?.company) {
+      setCompany(bu.company);
+      setCompanyLocked(true);
+    } else {
+      setCompany('');
+      setCompanyLocked(false);
+    }
+  }, [buObjects]);
+
+  // ── Preview URL ───────────────────────────────────────────────────────────────
   const previewUrl = useMemo(() => {
     const values = form.getFieldsValue();
-    const [dateFrom, dateTo] = values.dateRange
-      ? [values.dateRange[0]?.format('YYYY-MM-DD'), values.dateRange[1]?.format('YYYY-MM-DD')]
-      : [null, null];
     const params = new URLSearchParams({ limit: '2000' });
     if (values.businessUnit)     params.set('businessUnit',    values.businessUnit);
-    if (dateFrom)                params.set('dateFrom',         dateFrom);
-    if (dateTo)                  params.set('dateTo',           dateTo);
-    if (values.sourceTable)      params.set('sourceTable',      values.sourceTable);
+    if (selectedPeriod)          params.set('period_name',     selectedPeriod);
+    if (values.account)          params.set('account',         values.account);
+    if (company)                 params.set('company',         company);
+    if (values.sourceTable)      params.set('sourceTable',     values.sourceTable);
     if (values.accountingStatus) params.set('accountingStatus', values.accountingStatus);
     return `${APEX_BASE}/ap/reconciliation?${params}`;
-  }, [form]);
+  }, [form, selectedPeriod, company]);
 
-  const loadBUs = useCallback(async () => {
-    if (businessUnits.length > 0) return;
-    setBuLoading(true);
-    try {
-      const res  = await fetch(`${APEX_BASE}/gl/businessunits`);
-      const data = await res.json();
-      const names: string[] = (data.items ?? [])
-        .map((b: any) => b.business_unit_name ?? b.BUSINESS_UNIT_NAME ?? b.businessUnitName)
-        .filter(Boolean);
-      setBusinessUnits(names);
-    } catch { /* ignore */ } finally { setBuLoading(false); }
-  }, [businessUnits.length]);
-
+  // ── Search ────────────────────────────────────────────────────────────────────
   const handleSearch = async (values: any) => {
     setError(null);
     setLoading(true);
     try {
-      const [dateFrom, dateTo] = values.dateRange
-        ? [values.dateRange[0].format('YYYY-MM-DD'), values.dateRange[1].format('YYYY-MM-DD')]
-        : [null, null];
-
       const params = new URLSearchParams({ limit: '2000' });
       if (values.businessUnit)     params.set('businessUnit',    values.businessUnit);
-      if (dateFrom)                params.set('dateFrom',         dateFrom);
-      if (dateTo)                  params.set('dateTo',           dateTo);
-      if (values.sourceTable)      params.set('sourceTable',      values.sourceTable);
+      if (selectedPeriod)          params.set('period_name',     selectedPeriod);
+      if (values.account)          params.set('account',         values.account);
+      if (company)                 params.set('company',         company);
+      if (values.sourceTable)      params.set('sourceTable',     values.sourceTable);
       if (values.accountingStatus) params.set('accountingStatus', values.accountingStatus);
 
       const url = `${APEX_BASE}/ap/reconciliation?${params}`;
@@ -182,6 +298,16 @@ export default function APGLReconcile() {
     } finally { setLoading(false); }
   };
 
+  const handleReset = () => {
+    form.resetFields();
+    setCompany('');
+    setCompanyLocked(false);
+    setRows([]); setSummary(null); setError(null); setLastCalledUrl('');
+    // Re-apply latest period
+    if (periodsForYear.length) setSelectedPeriod(periodsForYear[periodsForYear.length - 1].period_name_id);
+  };
+
+  // ── Filtered rows ─────────────────────────────────────────────────────────────
   const displayed = rows.filter(r => {
     if (filter === 'OK')          return r.isFullyBalanced;
     if (filter === 'MISSING_SLA') return !r.slaExists;
@@ -198,22 +324,16 @@ export default function APGLReconcile() {
   const sourceLabel = (t: string) =>
     SOURCE_TABLE_OPTIONS.find(o => o.value === t)?.label ?? t;
 
+  // ── Columns ───────────────────────────────────────────────────────────────────
   const columns: ColumnsType<ReconRow> = [
-    // ── Three tick columns ───────────────────────────────────────────────────
     {
       title: () => <Tooltip title="AP transaction exists"><span>AP</span></Tooltip>,
-      key: 'apTick',
-      width: 48,
-      align: 'center',
-      fixed: 'left',
+      key: 'apTick', width: 48, align: 'center', fixed: 'left',
       render: () => <StatusTick exists tooltip="Found in AP tables" />,
     },
     {
       title: () => <Tooltip title="SLA accounting entry exists"><span>SLA</span></Tooltip>,
-      key: 'slaTick',
-      width: 48,
-      align: 'center',
-      fixed: 'left',
+      key: 'slaTick', width: 48, align: 'center', fixed: 'left',
       render: (_, r) => (
         <StatusTick
           exists={r.slaExists}
@@ -225,10 +345,7 @@ export default function APGLReconcile() {
     },
     {
       title: () => <Tooltip title="GL journal entry exists"><span>GL</span></Tooltip>,
-      key: 'glTick',
-      width: 48,
-      align: 'center',
-      fixed: 'left',
+      key: 'glTick', width: 48, align: 'center', fixed: 'left',
       render: (_, r) => (
         <StatusTick
           exists={r.glExists}
@@ -238,54 +355,33 @@ export default function APGLReconcile() {
         />
       ),
     },
-    // ── Source ───────────────────────────────────────────────────────────────
     {
-      title: 'Source',
-      key: 'sourceTable',
-      width: 130,
-      fixed: 'left',
+      title: 'Source', key: 'sourceTable', width: 130, fixed: 'left',
       render: (_, r) => <Text style={{ fontSize: 11 }}>{sourceLabel(r.sourceTable)}</Text>,
     },
-    // ── AP leg ───────────────────────────────────────────────────────────────
     {
-      title: 'AP Transaction #',
-      dataIndex: 'apNumber',
-      width: 150,
+      title: 'AP Transaction #', dataIndex: 'apNumber', width: 150,
       render: v => <Text code style={{ fontSize: 11 }}>{v ?? '—'}</Text>,
     },
     {
-      title: 'Supplier / Memo',
-      dataIndex: 'apSupplier',
-      width: 170,
+      title: 'Supplier / Memo', dataIndex: 'apSupplier', width: 170,
       render: v => <Text style={{ fontSize: 11 }} ellipsis={{ tooltip: v }}>{v ?? '—'}</Text>,
     },
+    { title: 'AP Date',   dataIndex: 'apDate',   width: 100 },
     {
-      title: 'AP Date',
-      dataIndex: 'apDate',
-      width: 100,
-    },
-    {
-      title: 'AP Status',
-      dataIndex: 'apStatus',
-      width: 105,
+      title: 'AP Status', dataIndex: 'apStatus', width: 105,
       render: v => v ? <Tag style={{ fontSize: 10 }}>{v}</Tag> : <Text type="secondary">—</Text>,
     },
     {
-      title: 'AP Amount',
-      dataIndex: 'apAmount',
-      width: 120,
-      align: 'right',
+      title: 'AP Amount', dataIndex: 'apAmount', width: 120, align: 'right',
       render: (v, r) => (
         <Text style={{ fontSize: 11, fontFamily: 'monospace', color: r.slaExists && !r.apMatchesSla ? REDWOOD.warning : undefined }}>
           {fmt(v)}
         </Text>
       ),
     },
-    // ── SLA leg ──────────────────────────────────────────────────────────────
     {
-      title: 'SLA Status',
-      dataIndex: 'slaStatus',
-      width: 95,
+      title: 'SLA Status', dataIndex: 'slaStatus', width: 95,
       render: (v, r) => {
         if (!r.slaExists) return <Text type="secondary" style={{ fontSize: 10 }}>—</Text>;
         const color = v === 'POSTED' ? 'success' : v === 'FINAL' ? 'processing' : v === 'DRAFT' ? 'default' : 'error';
@@ -293,29 +389,19 @@ export default function APGLReconcile() {
       },
     },
     {
-      title: 'SLA DR',
-      dataIndex: 'slaEnteredDr',
-      width: 120,
-      align: 'right',
+      title: 'SLA DR', dataIndex: 'slaEnteredDr', width: 120, align: 'right',
       render: (v, r) => r.slaExists
         ? <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{fmt(v)}</Text>
         : <Text type="secondary">—</Text>,
     },
     {
-      title: 'SLA CR',
-      dataIndex: 'slaEnteredCr',
-      width: 120,
-      align: 'right',
+      title: 'SLA CR', dataIndex: 'slaEnteredCr', width: 120, align: 'right',
       render: (v, r) => r.slaExists
         ? <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{fmt(v)}</Text>
         : <Text type="secondary">—</Text>,
     },
-    // ── Amount gap AP↔SLA ────────────────────────────────────────────────────
     {
-      title: 'AP↔SLA',
-      key: 'apVsSla',
-      width: 75,
-      align: 'center',
+      title: 'AP↔SLA', key: 'apVsSla', width: 75, align: 'center',
       render: (_, r) => {
         if (!r.slaExists) return <Text type="secondary" style={{ fontSize: 10 }}>—</Text>;
         return r.apMatchesSla
@@ -325,35 +411,26 @@ export default function APGLReconcile() {
             </Tooltip>;
       },
     },
-    // ── GL leg ───────────────────────────────────────────────────────────────
     {
-      title: 'GL Journal',
-      dataIndex: 'glJournalName',
-      width: 180,
+      title: 'GL Journal', dataIndex: 'glJournalName', width: 180,
       render: (v, r) => r.glExists
         ? <Text style={{ fontSize: 11 }} ellipsis={{ tooltip: v }}>{v}</Text>
         : <Text type="secondary">—</Text>,
     },
     {
-      title: 'GL DR Account',
-      dataIndex: 'glDrAccount',
-      width: 170,
+      title: 'GL DR Account', dataIndex: 'glDrAccount', width: 170,
       render: (v, r) => r.glExists && v
         ? <Text code style={{ fontSize: 10 }} ellipsis={{ tooltip: v }}>{v}</Text>
         : <Text type="secondary">—</Text>,
     },
     {
-      title: 'GL CR Account',
-      dataIndex: 'glCrAccount',
-      width: 170,
+      title: 'GL CR Account', dataIndex: 'glCrAccount', width: 170,
       render: (v, r) => r.glExists && v
         ? <Text code style={{ fontSize: 10 }} ellipsis={{ tooltip: v }}>{v}</Text>
         : <Text type="secondary">—</Text>,
     },
     {
-      title: 'GL Status',
-      dataIndex: 'glBatchStatus',
-      width: 90,
+      title: 'GL Status', dataIndex: 'glBatchStatus', width: 90,
       render: (v, r) => r.glExists
         ? <Tag color={v === 'P' ? 'success' : 'default'} style={{ fontSize: 10 }}>
             {v === 'P' ? 'Posted' : (v ?? '?')}
@@ -361,10 +438,7 @@ export default function APGLReconcile() {
         : <Text type="secondary">—</Text>,
     },
     {
-      title: 'GL DR',
-      dataIndex: 'glEnteredDr',
-      width: 120,
-      align: 'right',
+      title: 'GL DR', dataIndex: 'glEnteredDr', width: 120, align: 'right',
       render: (v, r) => r.glExists
         ? <Text style={{ fontSize: 11, fontFamily: 'monospace', color: !r.slaMatchesGl ? REDWOOD.warning : undefined }}>
             {fmt(v)}
@@ -372,20 +446,13 @@ export default function APGLReconcile() {
         : <Text type="secondary">—</Text>,
     },
     {
-      title: 'GL CR',
-      dataIndex: 'glEnteredCr',
-      width: 120,
-      align: 'right',
+      title: 'GL CR', dataIndex: 'glEnteredCr', width: 120, align: 'right',
       render: (v, r) => r.glExists
         ? <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{fmt(v)}</Text>
         : <Text type="secondary">—</Text>,
     },
-    // ── SLA↔GL gap ──────────────────────────────────────────────────────────
     {
-      title: 'SLA↔GL',
-      key: 'slaVsGl',
-      width: 75,
-      align: 'center',
+      title: 'SLA↔GL', key: 'slaVsGl', width: 75, align: 'center',
       render: (_, r) => {
         if (!r.slaExists || !r.glExists) return <Text type="secondary" style={{ fontSize: 10 }}>—</Text>;
         return r.slaMatchesGl
@@ -395,80 +462,148 @@ export default function APGLReconcile() {
             </Tooltip>;
       },
     },
-    // ── Period / Currency ────────────────────────────────────────────────────
     {
-      title: 'Period',
-      dataIndex: 'slaPeriodName',
-      width: 90,
+      title: 'Period', dataIndex: 'slaPeriodName', width: 90,
       render: v => v ?? <Text type="secondary">—</Text>,
     },
     {
-      title: 'Currency',
-      key: 'currency',
-      width: 80,
+      title: 'Currency', key: 'currency', width: 80,
       render: (_, r) => r.apCurrency ?? r.slaCurrency ?? '—',
     },
   ];
 
   // ── Render ────────────────────────────────────────────────────────────────────
-
   return (
     <div style={{ padding: '16px 20px' }}>
 
       {/* Search form */}
-      <Card size="small" style={{ marginBottom: 16 }}>
-        <Form
-          form={form}
-          layout="inline"
-          onFinish={handleSearch}
-          initialValues={{ dateRange: [dayjs().startOf('month'), dayjs()] }}
-          onValuesChange={() => form.validateFields().catch(() => {})}
-        >
-          <Form.Item name="businessUnit" label="Business Unit" style={{ minWidth: 280 }}>
-            <Select
-              placeholder="Select business unit"
-              allowClear
-              showSearch
-              loading={buLoading}
-              onFocus={loadBUs}
-              filterOption={(input, opt) =>
-                String(opt?.label ?? '').toLowerCase().includes(input.toLowerCase())
-              }
-              options={businessUnits.map(name => ({ value: name, label: name }))}
-              dropdownStyle={{ minWidth: 320 }}
-              optionFilterProp="label"
-            />
-          </Form.Item>
+      <Card size="small" style={{ marginBottom: 16, borderRadius: 10 }}>
+        <Form form={form} layout="vertical" onFinish={handleSearch}>
 
-          <Form.Item name="dateRange" label="Date Range">
-            <RangePicker format="YYYY-MM-DD" style={{ width: 240 }} />
-          </Form.Item>
+          {/* Row 1: BU, Company, Account */}
+          <Row gutter={12}>
+            <Col xs={24} sm={8}>
+              <Form.Item name="businessUnit" label="Business Unit" style={{ marginBottom: 10 }}>
+                <Select
+                  placeholder="Select business unit"
+                  allowClear
+                  showSearch
+                  loading={buLoading}
+                  optionFilterProp="label"
+                  onChange={onBuChange}
+                  options={buObjects.map(b => ({ value: b.name, label: b.name }))}
+                  dropdownStyle={{ minWidth: 320 }}
+                />
+              </Form.Item>
+            </Col>
 
-          <Form.Item name="sourceTable" label="Source">
-            <Select placeholder="All" allowClear style={{ width: 175 }} options={SOURCE_TABLE_OPTIONS} />
-          </Form.Item>
+            <Col xs={24} sm={4}>
+              <Form.Item label={
+                <Space size={4}>
+                  <span>Company</span>
+                  {companyLocked && <LockOutlined style={{ fontSize: 10, color: REDWOOD.neutral600 }} />}
+                </Space>
+              } style={{ marginBottom: 10 }}>
+                <Input
+                  value={company}
+                  onChange={e => { if (!companyLocked) setCompany(e.target.value); }}
+                  disabled={companyLocked}
+                  placeholder="Auto from BU"
+                  style={{
+                    background: companyLocked ? REDWOOD.neutral100 : undefined,
+                    color: companyLocked ? REDWOOD.info : undefined,
+                    fontWeight: companyLocked ? 600 : undefined,
+                    fontFamily: 'monospace',
+                    cursor: companyLocked ? 'not-allowed' : undefined,
+                  }}
+                />
+              </Form.Item>
+            </Col>
 
-          <Form.Item name="accountingStatus" label="SLA Status">
-            <Select placeholder="All" allowClear style={{ width: 120 }} options={STATUS_OPTIONS} />
-          </Form.Item>
+            <Col xs={24} sm={12}>
+              <Form.Item name="account" label="Account" style={{ marginBottom: 10 }}>
+                <Select
+                  placeholder="Select account (LOV)"
+                  allowClear
+                  showSearch
+                  loading={accountsLoading}
+                  onFocus={loadAccounts}
+                  optionFilterProp="label"
+                  filterOption={(input, opt) =>
+                    String(opt?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                  }
+                  options={accountOptions.map(a => ({
+                    value: a.account,
+                    label: `${a.account}${a.description ? ' – ' + a.description : ''}`,
+                  }))}
+                  dropdownStyle={{ minWidth: 400 }}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
 
-          <Form.Item>
-            <Space>
-              <Button type="primary" htmlType="submit" icon={<SearchOutlined />} loading={loading}>
-                Search
-              </Button>
-              <Button icon={<ReloadOutlined />} onClick={() => {
-                form.resetFields();
-                form.setFieldValue('dateRange', [dayjs().startOf('month'), dayjs()]);
-                setRows([]); setSummary(null); setError(null); setLastCalledUrl('');
-              }}>
-                Reset
-              </Button>
-              <Tooltip title="View API endpoints">
-                <Button icon={<ApiOutlined />} onClick={() => setApiModalOpen(true)} />
-              </Tooltip>
-            </Space>
-          </Form.Item>
+          {/* Row 2: Year, Period, Source, Status, buttons */}
+          <Row gutter={12} align="bottom">
+            <Col xs={12} sm={4}>
+              <Form.Item label="Year" style={{ marginBottom: 0 }}>
+                <Select
+                  placeholder="Year"
+                  value={selectedYear ?? undefined}
+                  loading={periodsLoading}
+                  onChange={v => { setSelectedYear(v); setSelectedPeriod(''); }}
+                  allowClear
+                  style={{ width: '100%' }}
+                >
+                  {years.map(y => <Option key={y} value={y}>{y}</Option>)}
+                </Select>
+              </Form.Item>
+            </Col>
+
+            <Col xs={12} sm={5}>
+              <Form.Item label="Period" style={{ marginBottom: 0 }}>
+                <Select
+                  placeholder="Select period"
+                  value={selectedPeriod || undefined}
+                  loading={periodsLoading}
+                  onChange={setSelectedPeriod}
+                  allowClear
+                  showSearch
+                  style={{ width: '100%' }}
+                >
+                  {periodsForYear.map(p => (
+                    <Option key={p.period_name_id} value={p.period_name_id}>{p.period_name_id}</Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+
+            <Col xs={12} sm={5}>
+              <Form.Item name="sourceTable" label="Source" style={{ marginBottom: 0 }}>
+                <Select placeholder="All" allowClear options={SOURCE_TABLE_OPTIONS} />
+              </Form.Item>
+            </Col>
+
+            <Col xs={12} sm={4}>
+              <Form.Item name="accountingStatus" label="SLA Status" style={{ marginBottom: 0 }}>
+                <Select placeholder="All" allowClear options={STATUS_OPTIONS} />
+              </Form.Item>
+            </Col>
+
+            <Col xs={24} sm={6} style={{ display: 'flex', alignItems: 'flex-end' }}>
+              <Form.Item style={{ marginBottom: 0, width: '100%' }}>
+                <Space>
+                  <Button type="primary" htmlType="submit" icon={<SearchOutlined />} loading={loading}
+                    style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
+                    Search
+                  </Button>
+                  <Button icon={<ReloadOutlined />} onClick={handleReset}>Reset</Button>
+                  <Tooltip title="View API endpoints">
+                    <Button icon={<ApiOutlined />} onClick={() => setApiModalOpen(true)} />
+                  </Tooltip>
+                </Space>
+              </Form.Item>
+            </Col>
+          </Row>
         </Form>
       </Card>
 
@@ -512,6 +647,7 @@ export default function APGLReconcile() {
         title={
           <Space>
             <span>AP ↔ SLA ↔ GL Reconciliation</span>
+            {selectedPeriod && <Badge count={selectedPeriod} color={REDWOOD.info} />}
             {rows.length > 0 && <Tag>{rows.length} rows</Tag>}
           </Space>
         }
@@ -553,38 +689,38 @@ export default function APGLReconcile() {
         open={apiModalOpen}
         onCancel={() => setApiModalOpen(false)}
         footer={null}
-        width={780}
+        width={820}
       >
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 6, fontWeight: 600 }}>
-            GET — Business Units
+        {[
+          { label: 'Business Units',       url: `${APEX_BASE}/gl/businessunits` },
+          { label: 'Ledger Names',          url: `${APEX_BASE}/getledgername` },
+          { label: 'Periods (calendar)',    url: `${APEX_BASE}/periodsstatus/create?ledger_name=<ledger>` },
+          { label: 'Account LOV',           url: `${APEX_BASE}/glaccountslist` },
+        ].map(({ label, url }) => (
+          <div key={label} style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 5, fontWeight: 600 }}>{label}</div>
+            <Space.Compact style={{ width: '100%' }}>
+              <Input value={url} readOnly style={{ fontFamily: 'monospace', fontSize: 11 }} />
+              <Tooltip title="Copy">
+                <Button icon={<CopyOutlined />} onClick={() => navigator.clipboard.writeText(url)} />
+              </Tooltip>
+              <Button type="primary" style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+                onClick={() => window.open(url, '_blank')}>
+                Test
+              </Button>
+            </Space.Compact>
           </div>
-          <Space.Compact style={{ width: '100%' }}>
-            <Input
-              value={`${APEX_BASE}/gl/businessunits`}
-              readOnly
-              style={{ fontFamily: 'monospace', fontSize: 12 }}
-            />
-            <Tooltip title="Copy">
-              <Button icon={<CopyOutlined />}
-                onClick={() => navigator.clipboard.writeText(`${APEX_BASE}/gl/businessunits`)} />
-            </Tooltip>
-            <Button type="primary" style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
-              onClick={() => window.open(`${APEX_BASE}/gl/businessunits`, '_blank')}>
-              Test
-            </Button>
-          </Space.Compact>
-        </div>
+        ))}
 
-        <div>
-          <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 6, fontWeight: 600 }}>
-            GET — AP Reconciliation (last called / current form)
+        <div style={{ borderTop: `1px solid ${REDWOOD.neutral200}`, paddingTop: 12, marginTop: 4 }}>
+          <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 5, fontWeight: 600 }}>
+            AP Reconciliation (last called / current form)
           </div>
           <Space.Compact style={{ width: '100%' }}>
             <Input
               value={lastCalledUrl || previewUrl}
               readOnly
-              style={{ fontFamily: 'monospace', fontSize: 12 }}
+              style={{ fontFamily: 'monospace', fontSize: 11 }}
             />
             <Tooltip title="Copy">
               <Button icon={<CopyOutlined />}
@@ -597,7 +733,21 @@ export default function APGLReconcile() {
           </Space.Compact>
           {!lastCalledUrl && (
             <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 4 }}>
-              Preview URL — click Search to see the actual called URL
+              Preview — click Search to see the actual called URL
+            </div>
+          )}
+          {(lastCalledUrl || previewUrl).includes('?') && (
+            <div style={{ marginTop: 8, paddingLeft: 4 }}>
+              {(lastCalledUrl || previewUrl).split('?')[1].split('&').map((part, i) => {
+                const [k, v] = part.split('=');
+                return (
+                  <div key={i} style={{ fontSize: 11, marginBottom: 2 }}>
+                    <Text code style={{ fontSize: 11 }}>{decodeURIComponent(k)}</Text>
+                    {' = '}
+                    <Text style={{ fontSize: 11, color: REDWOOD.info }}>{decodeURIComponent(v || '')}</Text>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
