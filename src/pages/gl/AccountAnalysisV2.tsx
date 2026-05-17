@@ -1640,29 +1640,52 @@ const AAPanel: React.FC = () => {
   // ── Export ────────────────────────────────────────────────────────────────────
   const exportExcel = async () => {
     if (!filteredData.length) { message.warning('No data to export'); return; }
+
+    const isComboBreak = appliedGroupBy === 'concatenatedSegments';
+    const isGrouped    = !!(appliedGroupBy && appliedGroupBy !== 'concatenatedSegments');
+
     const wb = new ExcelJS.Workbook();
     wb.creator = 'ReactERP'; wb.created = new Date();
     const ws = wb.addWorksheet('Account Analysis');
-    const white = { argb: 'FFFFFFFF' };
-    const numFmt = '#,##0.00';
-    const NCOLS = showEntered ? 16 : 13;
-    const mergeFull = (r: number) => ws.mergeCells(r, 1, r, NCOLS);
-    const hdrFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC74634' } };
-    const fltFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0D6' } };
-    const colFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3D3D3D' } };
-    const totFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } };
-    const altFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } };
-    const accHdrFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A5FCC' } };
-    const entHdrFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF389E0D' } };
-    const entFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9F7BE' } };
-    const accFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD6E4FF' } };
 
+    const white: ExcelJS.Color      = { argb: 'FFFFFFFF' };
+    const numFmt                    = '#,##0.00';
+    const hdrFill: ExcelJS.Fill     = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC74634' } };
+    const fltFill: ExcelJS.Fill     = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0D6' } };
+    const colFill: ExcelJS.Fill     = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3D3D3D' } };
+    const totFill: ExcelJS.Fill     = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } };
+    const altFill: ExcelJS.Fill     = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } };
+    const accHdrFill: ExcelJS.Fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A5FCC' } };
+    const entHdrFill: ExcelJS.Fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF389E0D' } };
+    const entFill: ExcelJS.Fill     = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9F7BE' } };
+    const accFill: ExcelJS.Fill     = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD6E4FF' } };
+    const brkHdrFill: ExcelJS.Fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F0FF' } };
+    const openFill: ExcelJS.Fill    = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } };
+    const closeFill: ExcelJS.Fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFBE6' } };
+
+    // ── Column layout ──────────────────────────────────────────────────────────
+    // Flat / combo-break: 9 desc cols + [3 entered] + 3 accounted + 1 jeHeaderId
+    const NCOLS_FLAT = showEntered ? 16 : 13;
+    // Combo-break rows skip account/desc cols → 7 desc + [3 entered] + 3 accounted
+    const NCOLS_BRK  = showEntered ? 13 : 10;
+    // Grouped summary: group + count + [3 entered] + 3 accounted
+    const NCOLS_GRP  = showEntered ? 8 : 5;
+
+    const NCOLS = isGrouped ? NCOLS_GRP : isComboBreak ? NCOLS_BRK : NCOLS_FLAT;
+    const mergeFull = (r: number) => ws.mergeCells(r, 1, r, NCOLS);
+
+    // ── Title ──────────────────────────────────────────────────────────────────
     mergeFull(1);
+    const titleSuffix = isComboBreak
+      ? ' — By Full Combination'
+      : isGrouped ? ` — By ${GROUP_BY_OPTIONS.find(o => o.value === appliedGroupBy)?.label || appliedGroupBy}` : '';
     const tc = ws.getCell('A1');
-    tc.value = 'Account Analysis'; tc.font = { bold: true, size: 13, color: white };
+    tc.value = `Account Analysis${titleSuffix}`;
+    tc.font = { bold: true, size: 13, color: white };
     tc.fill = hdrFill; tc.alignment = { horizontal: 'center', vertical: 'middle' };
     ws.getRow(1).height = 22;
 
+    // ── Filter summary ─────────────────────────────────────────────────────────
     const activeSegs = Object.entries(segFilters).map(([k, v]) => {
       const def = SEGMENT_DEFS.find(d => d.key === k);
       return `${def?.label || k}: ${segLabels[k] || v}`;
@@ -1686,94 +1709,219 @@ const AAPanel: React.FC = () => {
       vc.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
       ws.getRow(ri).height = 16; ri++;
     }
-    ri++;
+    ri++; // blank spacer
 
-    ws.getRow(ri).height = 16;
-    for (let c = 1; c <= 9; c++) ws.getCell(ri, c).fill = colFill;
-    let col = 10;
-    if (showEntered) {
-      ws.mergeCells(ri, col, ri, col + 2);
-      const ec = ws.getCell(ri, col);
-      ec.value = 'Entered'; ec.font = { bold: true, size: 10, color: { argb: 'FF52C41A' } };
-      ec.fill = entFill; ec.alignment = { horizontal: 'center', vertical: 'middle' };
-      col += 3;
-    }
-    ws.mergeCells(ri, col, ri, col + 2);
-    const ac = ws.getCell(ri, col);
-    ac.value = `Accounted (${functionalCcy})`; ac.font = { bold: true, size: 10, color: { argb: 'FF1677FF' } };
-    ac.fill = accFill; ac.alignment = { horizontal: 'center', vertical: 'middle' };
-    col += 3; ws.getCell(ri, col).fill = colFill; ri++;
-
-    const descHdrs = ['Account', 'Account Description', 'Line Description', 'Period', 'Acctg Date', 'Batch', 'Source', 'Category', 'Currency'];
-    const entHdrs  = showEntered ? ['Ent Dr', 'Ent Cr', 'Ent Balance'] : [];
-    const accHdrs  = [`Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Balance (${functionalCcy})`];
-    const hdrs = [...descHdrs, ...entHdrs, ...accHdrs, 'JE Header ID'];
-    const widths = [28, 28, 32, 12, 14, 28, 14, 16, 10, ...(showEntered ? [16, 16, 16] : []), 16, 16, 16, 14];
-    ws.getRow(ri).height = 18;
-    hdrs.forEach((h, i) => {
-      const cell = ws.getCell(ri, i + 1);
-      cell.value = h;
-      const isEnt = showEntered && i >= 9 && i <= 11;
-      const accStart = showEntered ? 12 : 9;
-      const isAcc = i >= accStart && i <= accStart + 2;
-      cell.fill = isEnt ? entHdrFill : isAcc ? accHdrFill : colFill;
-      cell.font = { bold: true, size: 10, color: white };
-      cell.alignment = { horizontal: (isEnt || isAcc) ? 'right' : 'left', vertical: 'middle', indent: 1 };
-      cell.border = { bottom: { style: 'thin', color: { argb: 'FF888888' } } };
-      ws.getColumn(i + 1).width = widths[i] || 14;
-    });
-    ri++;
-
-    let accRun = 0; let entRun = 0;
-    const dataStartRow = ri;
-    filteredData.forEach((r, idx) => {
-      accRun += (r.accountedDr || 0) - (r.accountedCr || 0);
-      entRun += (r.enteredDr   || 0) - (r.enteredCr   || 0);
-      const isAlt = idx % 2 === 1;
-      ws.getRow(ri).height = 15;
-      const vals: (string | number)[] = [
-        r.concatenatedSegments || '', r.accountDescription || '', r.jeLineDescription || '',
-        r.defaultPeriodName || '', (r.accountingDate || '').slice(0, 10),
-        r.batchName || '', r.userJeSourceName || '', r.userJeCategoryName || '', r.currencyCode || '',
-        ...(showEntered ? [r.enteredDr || 0, r.enteredCr || 0, entRun] : []),
-        r.accountedDr || 0, r.accountedCr || 0, accRun, r.jeHeaderId,
-      ];
-      vals.forEach((v, i) => {
+    // ══════════════════════════════════════════════════════════════════════════
+    // MODE A: GROUPED SUMMARY
+    // ══════════════════════════════════════════════════════════════════════════
+    if (isGrouped) {
+      const groupLabel = GROUP_BY_OPTIONS.find(o => o.value === appliedGroupBy)?.label || appliedGroupBy;
+      const ghCols = showEntered
+        ? [groupLabel, 'Count', 'Ent Dr', 'Ent Cr', 'Ent Balance', `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Balance (${functionalCcy})`]
+        : [groupLabel, 'Count', `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Balance (${functionalCcy})`];
+      const ghWidths = showEntered ? [36, 10, 16, 16, 16, 16, 16, 16] : [36, 10, 16, 16, 16];
+      ws.getRow(ri).height = 18;
+      ghCols.forEach((h, i) => {
         const cell = ws.getCell(ri, i + 1);
-        cell.value = v; cell.font = { size: 10 };
-        if (isAlt) cell.fill = altFill;
-        const isNumeric = i >= 9;
-        cell.alignment = { horizontal: isNumeric ? 'right' : 'left', vertical: 'middle', indent: 1 };
-        if (isNumeric) cell.numFmt = numFmt;
-        const isEntBal = showEntered && i === 11;
-        const isAccBal = i === (showEntered ? 14 : 11);
-        if (isEntBal || isAccBal) {
-          const bal = isEntBal ? entRun : accRun;
-          cell.font = { size: 10, bold: true, color: { argb: bal < 0 ? 'FFC41C00' : 'FF237804' } };
-        }
+        cell.value = h; cell.font = { bold: true, size: 10, color: white };
+        const isEnt = showEntered && i >= 2 && i <= 4;
+        const isAcc = i >= (showEntered ? 5 : 2);
+        cell.fill = isEnt ? entHdrFill : isAcc ? accHdrFill : colFill;
+        cell.alignment = { horizontal: i > 0 ? 'right' : 'left', vertical: 'middle', indent: 1 };
+        cell.border = { bottom: { style: 'thin', color: { argb: 'FF888888' } } };
+        ws.getColumn(i + 1).width = ghWidths[i];
+      });
+      const dataStartRow = ++ri;
+      groupedData.forEach((g, idx) => {
+        ws.getRow(ri).height = 15;
+        const fill = g.isTotals ? totFill : idx % 2 === 1 ? altFill : undefined;
+        const gVals = showEntered
+          ? [g.groupValue, g.count, g.totalEntDr, g.totalEntCr, g.entBalance, g.totalAccDr, g.totalAccCr, g.accBalance]
+          : [g.groupValue, g.count, g.totalAccDr, g.totalAccCr, g.accBalance];
+        gVals.forEach((v, i) => {
+          const cell = ws.getCell(ri, i + 1);
+          cell.value = v as any;
+          if (fill) cell.fill = fill;
+          cell.alignment = { horizontal: i > 0 ? 'right' : 'left', vertical: 'middle', indent: 1 };
+          if (i > 1) cell.numFmt = numFmt;
+          const entBalIdx = showEntered ? 4 : -1;
+          const accBalIdx = showEntered ? 7 : 4;
+          const isBal = i === entBalIdx || i === accBalIdx;
+          const bal = i === entBalIdx ? g.entBalance : g.accBalance;
+          cell.font = isBal
+            ? { size: 10, bold: true, color: { argb: bal < 0 ? 'FFC41C00' : 'FF237804' } }
+            : { size: 10, bold: !!g.isTotals };
+        });
+        ri++;
+      });
+      ws.views = [{ state: 'frozen', xSplit: 0, ySplit: dataStartRow - 1 }];
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // SHARED HELPER: column-group header row + column header row (flat & combo)
+    // ══════════════════════════════════════════════════════════════════════════
+    const writeDetailColHeaders = (nDescCols: number) => {
+      // row 1: Entered / Accounted group spans
+      ws.getRow(ri).height = 16;
+      for (let c = 1; c <= nDescCols; c++) ws.getCell(ri, c).fill = colFill;
+      let col = nDescCols + 1;
+      if (showEntered) {
+        ws.mergeCells(ri, col, ri, col + 2);
+        const ec = ws.getCell(ri, col);
+        ec.value = 'Entered'; ec.font = { bold: true, size: 10, color: { argb: 'FF52C41A' } };
+        ec.fill = entFill; ec.alignment = { horizontal: 'center', vertical: 'middle' };
+        col += 3;
+      }
+      ws.mergeCells(ri, col, ri, col + 2);
+      const ac = ws.getCell(ri, col);
+      ac.value = `Accounted (${functionalCcy})`; ac.font = { bold: true, size: 10, color: { argb: 'FF1677FF' } };
+      ac.fill = accFill; ac.alignment = { horizontal: 'center', vertical: 'middle' };
+      col += 3; ws.getCell(ri, col).fill = colFill; ri++;
+    };
+
+    const writeDetailColNames = (names: string[], widths: number[]) => {
+      ws.getRow(ri).height = 18;
+      names.forEach((h, i) => {
+        const cell = ws.getCell(ri, i + 1);
+        cell.value = h;
+        const descEnd = names.length - (showEntered ? 7 : 4) - 1; // last desc col index (0-based)
+        const isEnt = showEntered && i > descEnd && i <= descEnd + 3;
+        const isAcc = i > descEnd + (showEntered ? 3 : 0) && i <= descEnd + (showEntered ? 6 : 3);
+        cell.fill = isEnt ? entHdrFill : isAcc ? accHdrFill : colFill;
+        cell.font = { bold: true, size: 10, color: white };
+        cell.alignment = { horizontal: (isEnt || isAcc) ? 'right' : 'left', vertical: 'middle', indent: 1 };
+        cell.border = { bottom: { style: 'thin', color: { argb: 'FF888888' } } };
+        ws.getColumn(i + 1).width = widths[i] || 14;
       });
       ri++;
-    });
+    };
 
-    ws.mergeCells(ri, 1, ri, 9);
-    const tl = ws.getCell(ri, 1);
-    tl.value = `Totals  (${filteredData.length} lines)`; tl.font = { bold: true, size: 10 };
-    tl.fill = totFill; tl.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
-    const tVals = showEntered
-      ? [gridTotals.entDr, gridTotals.entCr, finalRunning.ent, gridTotals.accDr, gridTotals.accCr, finalRunning.acc]
-      : [gridTotals.accDr, gridTotals.accCr, finalRunning.acc];
-    tVals.forEach((v, i) => {
-      const cell = ws.getCell(ri, 10 + i);
-      cell.value = v; cell.font = { bold: true, size: 10 };
-      cell.fill = totFill; cell.numFmt = numFmt;
-      cell.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
-    });
-    ws.getCell(ri, 10 + tVals.length).fill = totFill;
-    ws.views = [{ state: 'frozen', xSplit: 0, ySplit: dataStartRow - 1 }];
-    ws.autoFilter = { from: { row: dataStartRow - 1, column: 1 }, to: { row: ri, column: NCOLS } };
+    // Write a single data row (flat or break detail)
+    const writeDetailRow = (r: any, idx: number, showJeId: boolean) => {
+      const isSpec = r.isOpeningBalance || r.isClosingBalance || r.isTotals;
+      const fill = r.isOpeningBalance ? openFill
+        : r.isClosingBalance ? closeFill
+        : r.isTotals ? totFill
+        : idx % 2 === 1 ? altFill : undefined;
+
+      const accBal = r.isTotals ? (r._accBal ?? 0) : r.isOpeningBalance || r.isClosingBalance
+        ? (r.accountedDr || 0) - (r.accountedCr || 0) : (r._accRun ?? 0);
+      const entBal = r.isTotals ? (r._entBal ?? 0) : r.isOpeningBalance || r.isClosingBalance
+        ? (r.enteredDr || 0) - (r.enteredCr || 0) : (r._entRun ?? 0);
+
+      const vals: (string | number)[] = [
+        ...(showJeId
+          ? [r.concatenatedSegments || '', r.accountDescription || ''] : []),
+        r.jeLineDescription || '',
+        isSpec ? '' : (r.defaultPeriodName || ''),
+        isSpec ? '' : ((r.accountingDate || '').slice(0, 10)),
+        isSpec ? '' : (r.batchName || ''),
+        isSpec ? '' : (r.userJeSourceName || ''),
+        isSpec ? '' : (r.userJeCategoryName || ''),
+        isSpec ? '' : (r.currencyCode || ''),
+        ...(showEntered ? [
+          isSpec ? '' : (r.enteredDr || 0),
+          isSpec ? '' : (r.enteredCr || 0),
+          entBal,
+        ] : []),
+        isSpec ? '' : (r.accountedDr || 0),
+        isSpec ? '' : (r.accountedCr || 0),
+        accBal,
+        ...(showJeId ? [isSpec ? '' : (r.jeHeaderId || '')] : []),
+      ];
+      const descColCount = showJeId ? 9 : 7;
+      ws.getRow(ri).height = 15;
+      vals.forEach((v, i) => {
+        const cell = ws.getCell(ri, i + 1);
+        cell.value = v as any;
+        if (fill) cell.fill = fill;
+        const isNumeric = i >= descColCount;
+        cell.alignment = { horizontal: isNumeric ? 'right' : 'left', vertical: 'middle', indent: 1 };
+        if (isNumeric && v !== '') cell.numFmt = numFmt;
+        const entBalCol = showEntered ? descColCount + 2 : -1;
+        const accBalCol = showEntered ? descColCount + 5 : descColCount + 2;
+        const isBal = i === entBalCol || i === accBalCol;
+        const bal = i === entBalCol ? entBal : accBal;
+        cell.font = isBal
+          ? { size: 10, bold: r.isTotals || r.isOpeningBalance || r.isClosingBalance, color: { argb: bal < 0 ? 'FFC41C00' : 'FF237804' } }
+          : { size: 10, bold: isSpec };
+      });
+      ri++;
+    };
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // MODE B: FLAT DETAIL
+    // ══════════════════════════════════════════════════════════════════════════
+    if (!isGrouped && !isComboBreak) {
+      writeDetailColHeaders(9);
+      const descHdrs = ['Account', 'Account Description', 'Line Description', 'Period', 'Acctg Date', 'Batch', 'Source', 'Category', 'Currency'];
+      const entHdrs  = showEntered ? ['Ent Dr', 'Ent Cr', 'Ent Balance'] : [];
+      const accHdrs  = [`Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Balance (${functionalCcy})`];
+      const hdrs     = [...descHdrs, ...entHdrs, ...accHdrs, 'JE Header ID'];
+      const widths   = [28, 28, 32, 12, 14, 28, 14, 16, 10, ...(showEntered ? [16, 16, 16] : []), 16, 16, 16, 14];
+      writeDetailColNames(hdrs, widths);
+      const dataStartRow = ri;
+      // pass rowsWithBal which has _accRun/_entRun; totals row already appended in tableData
+      tableData.forEach((r, idx) => writeDetailRow(r as any, idx, true));
+      ws.views = [{ state: 'frozen', xSplit: 0, ySplit: dataStartRow - 1 }];
+      ws.autoFilter = { from: { row: dataStartRow - 1, column: 1 }, to: { row: ri - 1, column: NCOLS_FLAT } };
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // MODE C: COMBO-BREAK (Full Combination grouping)
+    // ══════════════════════════════════════════════════════════════════════════
+    if (isComboBreak) {
+      if (!comboBreaks.length) { message.warning('No combo-break data — apply the group first'); return; }
+      // Column group + name headers (7 desc cols, no account/desc since those are in section header)
+      writeDetailColHeaders(7);
+      const descHdrs = ['Line Description', 'Period', 'Acctg Date', 'Batch', 'Source', 'Category', 'Currency'];
+      const entHdrs  = showEntered ? ['Ent Dr', 'Ent Cr', 'Ent Balance'] : [];
+      const accHdrs  = [`Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Balance (${functionalCcy})`];
+      const hdrs     = [...descHdrs, ...entHdrs, ...accHdrs];
+      const widths   = [32, 12, 14, 28, 14, 16, 10, ...(showEntered ? [16, 16, 16] : []), 16, 16, 16];
+      writeDetailColNames(hdrs, widths);
+
+      comboBreaks.forEach(brk => {
+        // Section header row
+        mergeFull(ri);
+        const sh = ws.getCell(ri, 1);
+        sh.value = `${brk.combo}${brk.description ? '   —   ' + brk.description : ''}   (${brk.linesWithBal.length} line${brk.linesWithBal.length !== 1 ? 's' : ''})`;
+        sh.font = { bold: true, size: 11, color: { argb: 'FF1A5FCC' } };
+        sh.fill = brkHdrFill;
+        sh.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+        sh.border = { left: { style: 'medium', color: { argb: 'FF1677FF' } } };
+        ws.getRow(ri).height = 19; ri++;
+
+        // Build brkData identical to what the table shows on screen
+        const lastLine = brk.linesWithBal[brk.linesWithBal.length - 1];
+        const ptdTotRow: any = {
+          key: `${brk.combo}-ptd`, jeLineDescription: 'PTD Total',
+          enteredDr: brk.ptdEntDr, enteredCr: brk.ptdEntCr,
+          accountedDr: brk.ptdAccDr, accountedCr: brk.ptdAccCr,
+          isTotals: true,
+          _accBal: lastLine ? lastLine._accRun : 0,
+          _entBal: lastLine ? lastLine._entRun : 0,
+        };
+        const brkData: any[] = [
+          ...(brk.openingRow ? [brk.openingRow] : []),
+          ...brk.linesWithBal,
+          ptdTotRow,
+          ...(brk.closingRow ? [brk.closingRow] : []),
+        ];
+
+        brkData.forEach((r, idx) => writeDetailRow(r, idx, false));
+
+        // Blank spacer between combos
+        ws.getRow(ri).height = 8; ri++;
+      });
+    }
 
     const buf = await wb.xlsx.writeBuffer();
-    saveAs(new Blob([buf], { type: 'application/octet-stream' }), `account_analysis_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    const suffix = isComboBreak ? '_by_combination' : isGrouped ? `_by_${appliedGroupBy}` : '';
+    saveAs(
+      new Blob([buf], { type: 'application/octet-stream' }),
+      `account_analysis${suffix}_${new Date().toISOString().slice(0, 10)}.xlsx`
+    );
     message.success('Excel file downloaded');
   };
 
