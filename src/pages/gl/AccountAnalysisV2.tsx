@@ -520,7 +520,7 @@ const TBPanel: React.FC = () => {
       const data = await res.json();
       const items: any[] = data.items || [];
       if (items.length) {
-        const ccy = items[0].currency_code || items[0].ledger_currency || 'AED';
+        const ccy = items[0].ledger_currency || items[0].functional_currency || items[0].ledger_ccy || 'AED';
         setFunctionalCcy(ccy);
       }
       setTbData(items.map((i: any, idx: number) => ({ ...i, key: `tb-${idx}` })));
