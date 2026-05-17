@@ -1,40 +1,35 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Layout, Typography, Card, Row, Col, Select, Button, Spin,
-  Divider, Input, Tag, Space, Alert, Breadcrumb, Statistic,
+  Divider, Input, Tag, Space, Alert, Breadcrumb, Statistic, Tooltip,
 } from 'antd';
 import {
   HomeOutlined, RobotOutlined, SendOutlined, LineChartOutlined,
   ThunderboltOutlined, WarningOutlined, BulbOutlined, SyncOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 
 const { Content } = Layout;
-const { Title, Text, Paragraph } = Typography;
+const { Title, Text } = Typography;
 const { TextArea } = Input;
 
-const BASE = APEX_DB_CONFIG.baseUrl;
+const BASE  = APEX_DB_CONFIG.baseUrl;
 const MODEL = 'claude-haiku-4-5';
 
+// ── Fetch active Claude key from admin settings ────────────────────────────────
 async function fetchActiveKey(): Promise<string> {
-  const res = await fetch(`${BASE}/settings/claudekey`);
+  const res  = await fetch(`${BASE}/settings/claudekey`);
   const data = await res.json();
   if (data.status === 'success' && data.apiKey) return data.apiKey as string;
-  throw new Error(data.message || 'No active Claude API key found. Go to Administration → Claude AI Key Settings to add one.');
+  throw new Error(
+    data.message ||
+    'No active Claude API key found. Go to Administration → Claude AI Key Settings to add one.',
+  );
 }
 
-interface Period { periodName: string; startDate: string; endDate: string; }
-interface GlBalance {
-  account: string;
-  company: string;
-  openingBalance: number;
-  periodActivity: number;
-  closingBalance: number;
-}
-interface ChatMessage { role: 'user' | 'assistant'; content: string; }
-
-// ── Claude streaming helper ────────────────────────────────────────────────────
+// ── Claude streaming via browser fetch / SSE ──────────────────────────────────
 async function streamClaude(
   apiKey: string,
   messages: { role: string; content: string }[],
@@ -60,15 +55,14 @@ async function streamClaude(
   });
 
   if (!res.ok) {
-    const err = await res.text();
-    onChunk(`⚠️ API error ${res.status}: ${err}`);
+    onChunk(`⚠️ API error ${res.status}: ${await res.text()}`);
     onDone();
     return;
   }
 
-  const reader = res.body!.getReader();
+  const reader  = res.body!.getReader();
   const decoder = new TextDecoder();
-  let buffer = '';
+  let buffer    = '';
 
   while (true) {
     const { done, value } = await reader.read();
@@ -85,15 +79,14 @@ async function streamClaude(
         if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
           onChunk(evt.delta.text);
         }
-      } catch { /* ignore parse errors */ }
+      } catch { /* ignore */ }
     }
   }
   onDone();
 }
 
-// ── Format helpers ─────────────────────────────────────────────────────────────
+// ── Formatting ────────────────────────────────────────────────────────────────
 function fmt(v: number) {
-  if (v == null) return '0.00';
   const abs = Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return v < 0 ? `(${abs})` : abs;
 }
@@ -103,119 +96,167 @@ You analyse period balances, identify anomalies, and provide concise, actionable
 Always structure your output clearly with headers and bullet points.
 Currency is AED. Use professional finance language.`;
 
-// ── Main Component ─────────────────────────────────────────────────────────────
-const GLFinancialIntelligence: React.FC = () => {
-  const [periods, setPeriods] = useState<Period[]>([]);
-  const [selectedPeriod, setSelectedPeriod] = useState<string>('');
-  const [balances, setBalances] = useState<GlBalance[]>([]);
-  const [loadingPeriods, setLoadingPeriods] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [analysisText, setAnalysisText] = useState('');
-  const [keyError, setKeyError] = useState('');
+// ── Types ─────────────────────────────────────────────────────────────────────
+interface TBRow {
+  account:        string;
+  company:        string;
+  accountType:    string;
+  description:    string;
+  openingBalance: number;
+  periodActivity: number;
+  closingBalance: number;
+}
+interface ChatMessage { role: 'user' | 'assistant'; content: string; }
 
+// ── Component ─────────────────────────────────────────────────────────────────
+const GLFinancialIntelligence: React.FC = () => {
+  // ── Selectors ───────────────────────────────────────────────────────────────
+  const [ledgers,        setLedgers]        = useState<string[]>([]);
+  const [companies,      setCompanies]      = useState<string[]>([]);
+  const [periods,        setPeriods]        = useState<string[]>([]);
+  const [ledger,         setLedger]         = useState('');
+  const [company,        setCompany]        = useState('');
+  const [period,         setPeriod]         = useState('');
+  const [loadingLedgers, setLoadingLedgers] = useState(false);
+  const [loadingPeriods, setLoadingPeriods] = useState(false);
+
+  // ── Analysis ─────────────────────────────────────────────────────────────────
+  const [tbData,        setTbData]        = useState<TBRow[]>([]);
+  const [analyzing,     setAnalyzing]     = useState(false);
+  const [analysisText,  setAnalysisText]  = useState('');
+  const [keyError,      setKeyError]      = useState('');
+
+  // ── Chat ─────────────────────────────────────────────────────────────────────
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [chatInput, setChatInput] = useState('');
-  const [chatLoading, setChatLoading] = useState(false);
+  const [chatInput,    setChatInput]    = useState('');
+  const [chatLoading,  setChatLoading]  = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Load periods on mount
+  // ── Load ledgers on mount ────────────────────────────────────────────────────
   useEffect(() => {
-    setLoadingPeriods(true);
-    fetch(`${BASE}/gl/fiscalperiods`)
+    setLoadingLedgers(true);
+    fetch(`${BASE}/${APEX_DB_CONFIG.endpoints.getLedgerName}`)
       .then(r => r.json())
       .then(d => {
-        const items: Period[] = (d.items ?? d ?? []).map((p: Record<string, unknown>) => ({
-          periodName: (p.PERIOD_NAME ?? p.periodName ?? '') as string,
-          startDate: (p.START_DATE ?? p.startDate ?? '') as string,
-          endDate: (p.END_DATE ?? p.endDate ?? '') as string,
-        }));
-        setPeriods(items);
-        if (items.length > 0) setSelectedPeriod(items[0].periodName);
+        const names: string[] = (d.items ?? []).map((r: Record<string, unknown>) => r.ledger_name as string).filter(Boolean);
+        setLedgers(names);
+        if (names.length > 0) setLedger(names[0]);
       })
-      .catch(() => {/* silent */})
-      .finally(() => setLoadingPeriods(false));
+      .catch(() => {})
+      .finally(() => setLoadingLedgers(false));
   }, []);
+
+  // ── When ledger changes → load periods + companies ───────────────────────────
+  const loadPeriodsAndCompanies = useCallback(async (l: string) => {
+    if (!l) return;
+    setLoadingPeriods(true);
+    try {
+      const [pRes, cRes] = await Promise.all([
+        fetch(`${BASE}/${APEX_DB_CONFIG.endpoints.rrTrialBalancePeriods}?ledger_name=${encodeURIComponent(l)}`),
+        fetch(`${BASE}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceCompanies}?ledger_name=${encodeURIComponent(l)}`),
+      ]);
+      const pData = await pRes.json();
+      const cData = await cRes.json();
+
+      const pNames: string[] = (pData.items ?? []).map((r: Record<string, unknown>) => r.period_name as string).filter(Boolean);
+      const cNames: string[] = (cData.items ?? []).map((r: Record<string, unknown>) => r.company as string).filter(Boolean);
+
+      setPeriods(pNames);
+      setCompanies(cNames);
+      if (pNames.length > 0) setPeriod(pNames[0]);
+      setCompany('');
+    } catch { /* silent */ }
+    finally { setLoadingPeriods(false); }
+  }, []);
+
+  useEffect(() => {
+    if (ledger) loadPeriodsAndCompanies(ledger);
+  }, [ledger, loadPeriodsAndCompanies]);
 
   useEffect(() => {
     if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages, chatLoading]);
 
-  // ── Fetch GL balances for selected period ────────────────────────────────────
-  async function fetchBalances(period: string): Promise<GlBalance[]> {
-    const url = `${BASE}/gl/balances?P_PERIOD=${encodeURIComponent(period)}&limit=200`;
-    const res = await fetch(url);
+  // ── Fetch trial balance data ──────────────────────────────────────────────────
+  async function fetchTBData(): Promise<TBRow[]> {
+    const params = new URLSearchParams({ ledger_name: ledger, limit: '10000' });
+    if (period)  params.set('period_name', period);
+    if (company) params.set('company', company);
+    const res  = await fetch(`${BASE}/${APEX_DB_CONFIG.endpoints.rrTrialBalance}?${params}`);
     const data = await res.json();
-    const rows = data.items ?? data ?? [];
-    return rows.map((r: Record<string, unknown>) => ({
-      account: (r.ACCOUNT ?? r.account ?? '') as string,
-      company: (r.COMPANY ?? r.company ?? '') as string,
-      openingBalance: Number(r.OPENING_BALANCE ?? r.openingBalance ?? 0),
-      periodActivity: Number(r.PERIOD_ACTIVITY ?? r.periodActivity ?? 0),
-      closingBalance: Number(r.CLOSING_BALANCE ?? r.closingBalance ?? 0),
+    return (data.items ?? []).map((r: Record<string, unknown>) => ({
+      account:        (r.ACCOUNT        ?? r.account        ?? '') as string,
+      company:        (r.COMPANY        ?? r.company        ?? '') as string,
+      accountType:    (r.ACCOUNT_TYPE   ?? r.account_type   ?? '') as string,
+      description:    (r.DESCRIPTION    ?? r.description    ?? '') as string,
+      openingBalance: Number(r.OPENING_BALANCE ?? r.opening_balance ?? 0),
+      periodActivity: Number(r.PERIOD_ACTIVITY ?? r.period_activity ?? 0),
+      closingBalance: Number(r.CLOSING_BALANCE ?? r.closing_balance ?? 0),
     }));
   }
 
   // ── Analyse period ────────────────────────────────────────────────────────────
   async function handleAnalyse() {
-    if (!selectedPeriod) return;
+    if (!ledger || !period) return;
     setAnalyzing(true);
     setAnalysisText('');
     setKeyError('');
 
     let apiKey = '';
-    try {
-      apiKey = await fetchActiveKey();
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setKeyError(msg);
-      setAnalyzing(false);
-      return;
-    }
+    try { apiKey = await fetchActiveKey(); }
+    catch (e: unknown) { setKeyError(e instanceof Error ? e.message : String(e)); setAnalyzing(false); return; }
 
-    let data: GlBalance[] = [];
-    try {
-      data = await fetchBalances(selectedPeriod);
-      setBalances(data);
-    } catch {
-      setAnalysisText('⚠️ Could not load GL balances. Check ORDS connectivity.');
-      setAnalyzing(false);
-      return;
-    }
+    let rows: TBRow[] = [];
+    try { rows = await fetchTBData(); setTbData(rows); }
+    catch { setAnalysisText('⚠️ Could not load GL data. Check ORDS connectivity.'); setAnalyzing(false); return; }
 
-    const totalDebit = data.filter(b => b.periodActivity > 0).reduce((s, b) => s + b.periodActivity, 0);
-    const totalCredit = data.filter(b => b.periodActivity < 0).reduce((s, b) => s + Math.abs(b.periodActivity), 0);
-    const topMovers = [...data]
+    const byType = rows.reduce<Record<string, { opening: number; activity: number; closing: number }>>((acc, r) => {
+      const t = r.accountType || 'Unknown';
+      if (!acc[t]) acc[t] = { opening: 0, activity: 0, closing: 0 };
+      acc[t].opening  += r.openingBalance;
+      acc[t].activity += r.periodActivity;
+      acc[t].closing  += r.closingBalance;
+      return acc;
+    }, {});
+
+    const topMovers = [...rows]
       .sort((a, b) => Math.abs(b.periodActivity) - Math.abs(a.periodActivity))
-      .slice(0, 10);
+      .slice(0, 12);
 
-    const prompt = `Analyse the following Oracle Fusion GL period data for period "${selectedPeriod}" (currency AED).
+    const totalActivity = rows.reduce((s, r) => s + r.periodActivity, 0);
 
-## Summary
-- Total accounts with activity: ${data.length}
-- Period debits total: AED ${fmt(totalDebit)}
-- Period credits total: AED ${fmt(totalCredit)}
-- Net period activity: AED ${fmt(totalDebit - totalCredit)}
+    const prompt = `Analyse the following Oracle Fusion GL trial balance data.
 
-## Top 10 accounts by activity magnitude
-${topMovers.map(b =>
-  `Account ${b.account} | Opening: ${fmt(b.openingBalance)} | Activity: ${fmt(b.periodActivity)} | Closing: ${fmt(b.closingBalance)}`
+Ledger: ${ledger}
+Company: ${company || 'All companies'}
+Period: ${period}
+Currency: AED
+Total accounts with activity: ${rows.length}
+Net period activity: AED ${fmt(totalActivity)}
+
+## Balance by account type
+${Object.entries(byType).map(([t, v]) =>
+  `${t}: Opening ${fmt(v.opening)} | Activity ${fmt(v.activity)} | Closing ${fmt(v.closing)}`
+).join('\n')}
+
+## Top 12 accounts by period activity magnitude
+${topMovers.map(r =>
+  `${r.account} (${r.accountType}) ${r.description ? '– ' + r.description : ''} | Opening: ${fmt(r.openingBalance)} | Activity: ${fmt(r.periodActivity)} | Closing: ${fmt(r.closingBalance)}`
 ).join('\n')}
 
 Please provide:
-1. **Period Overview** – a brief narrative of the period's financial activity
-2. **Key Movements** – highlight the most significant account movements and their likely business reasons
-3. **Anomalies & Risks** – flag any unusual patterns (e.g., accounts with very large swings, credits in expense accounts, or debits in liability accounts)
-4. **Recommendations** – 3–5 specific actions the finance team should consider`;
+1. **Period Overview** – brief narrative of the period's financial activity
+2. **Key Movements** – significant account movements and their likely business meaning
+3. **Balance Sheet & P&L Health** – comment on asset, liability, equity, revenue, and expense balances
+4. **Anomalies & Risks** – unusual patterns (large swings, sign reversals, unexpected account types)
+5. **Recommendations** – 3–5 specific actions for the finance team`;
 
     let result = '';
     await streamClaude(
       apiKey,
       [{ role: 'user', content: prompt }],
       SYSTEM_FINANCE,
-      chunk => {
-        result += chunk;
-        setAnalysisText(result);
-      },
+      chunk => { result += chunk; setAnalysisText(result); },
       () => setAnalyzing(false),
     );
   }
@@ -228,32 +269,26 @@ Please provide:
     setKeyError('');
 
     let apiKey = '';
-    try {
-      apiKey = await fetchActiveKey();
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setKeyError(msg);
-      return;
-    }
+    try { apiKey = await fetchActiveKey(); }
+    catch (e: unknown) { setKeyError(e instanceof Error ? e.message : String(e)); return; }
 
     const userMsg: ChatMessage = { role: 'user', content: q };
     setChatMessages(prev => [...prev, userMsg]);
     setChatLoading(true);
 
-    const contextNote = balances.length > 0
-      ? `The user has already loaded GL data for period "${selectedPeriod}" (${balances.length} account rows).`
-      : 'No GL data has been loaded yet for this session.';
+    const ctx = tbData.length > 0
+      ? `GL data loaded — Ledger: ${ledger}, Company: ${company || 'All'}, Period: ${period}, ${tbData.length} account rows.`
+      : 'No GL data loaded yet.';
 
     const history = [...chatMessages, userMsg].map(m => ({ role: m.role, content: m.content }));
 
     let reply = '';
-    const replyMsg: ChatMessage = { role: 'assistant', content: '' };
-    setChatMessages(prev => [...prev, replyMsg]);
+    setChatMessages(prev => [...prev, { role: 'assistant', content: '' }]);
 
     await streamClaude(
       apiKey,
       history,
-      `${SYSTEM_FINANCE}\n\nContext: ${contextNote}`,
+      `${SYSTEM_FINANCE}\n\nContext: ${ctx}`,
       chunk => {
         reply += chunk;
         setChatMessages(prev => {
@@ -266,18 +301,21 @@ Please provide:
     );
   }
 
-  // ── KPI cards derived from balances ──────────────────────────────────────────
-  const totalActivity = balances.reduce((s, b) => s + b.periodActivity, 0);
-  const anomalyCount = balances.filter(b => {
-    const swing = Math.abs(b.periodActivity);
-    const base = Math.abs(b.openingBalance) || 1;
-    return swing / base > 2 && swing > 100000;
+  // ── KPI summary ───────────────────────────────────────────────────────────────
+  const totalActivity = tbData.reduce((s, r) => s + r.periodActivity, 0);
+  const anomalyCount  = tbData.filter(r => {
+    const swing = Math.abs(r.periodActivity);
+    const base  = Math.abs(r.openingBalance) || 1;
+    return swing / base > 2 && swing > 100_000;
   }).length;
+
+  const canAnalyse = !!ledger && !!period;
 
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <Layout style={{ minHeight: '100vh', background: '#f0f2f5' }}>
       <Content style={{ padding: '24px' }}>
+
         <Breadcrumb style={{ marginBottom: 16 }} items={[
           { title: <Link to="/home"><HomeOutlined /> Home</Link> },
           { title: <Link to="/gl">General Ledger</Link> },
@@ -293,53 +331,83 @@ Please provide:
           }}>
             <RobotOutlined style={{ fontSize: 24, color: '#fff' }} />
           </div>
-          <div>
+          <div style={{ flex: 1 }}>
             <Title level={3} style={{ margin: 0 }}>Financial Intelligence</Title>
-            <Text type="secondary">AI-powered GL analysis · Powered by Claude {MODEL}</Text>
+            <Text type="secondary">AI-powered GL analysis · Claude {MODEL}</Text>
           </div>
-          <Tag color="purple" style={{ marginLeft: 'auto' }}>Beta</Tag>
+          <Tag color="purple">Beta</Tag>
+          <Tooltip title="Claude AI Key Settings">
+            <Link to="/admin/claude-key">
+              <Button icon={<SettingOutlined />} style={{ color: '#764ba2', borderColor: '#764ba2' }}>
+                AI Key
+              </Button>
+            </Link>
+          </Tooltip>
         </div>
 
+        {/* ── Key error banner ── */}
         {keyError && (
           <Alert
-            type="warning"
-            showIcon
-            icon={<WarningOutlined />}
+            type="warning" showIcon icon={<WarningOutlined />}
             message="Claude API key not available"
-            description={
-              <span>
-                {keyError}&nbsp;
-                <Link to="/admin/claude-key">Go to Claude AI Key Settings →</Link>
-              </span>
-            }
-            closable
-            onClose={() => setKeyError('')}
+            description={<span>{keyError}&nbsp;<Link to="/admin/claude-key">Go to Claude AI Key Settings →</Link></span>}
+            closable onClose={() => setKeyError('')}
             style={{ marginBottom: 24 }}
           />
         )}
 
-        {/* ── Period selector + Analyse ── */}
+        {/* ── Filter bar ── */}
         <Card style={{ marginBottom: 24, borderRadius: 12 }}>
-          <Row gutter={16} align="middle">
+          <Row gutter={12} align="middle" wrap>
             <Col>
-              <Text strong>Accounting Period</Text>
+              <Text strong style={{ fontSize: 13 }}>Ledger</Text>
             </Col>
             <Col flex="200px">
               <Select
                 style={{ width: '100%' }}
-                placeholder="Select period"
-                loading={loadingPeriods}
-                value={selectedPeriod || undefined}
-                onChange={setSelectedPeriod}
-                options={periods.map(p => ({ value: p.periodName, label: p.periodName }))}
+                placeholder="Select ledger"
+                loading={loadingLedgers}
+                value={ledger || undefined}
+                onChange={v => { setLedger(v); setCompany(''); setPeriod(''); setTbData([]); setAnalysisText(''); }}
+                options={ledgers.map(l => ({ value: l, label: l }))}
               />
             </Col>
+
+            <Col>
+              <Text strong style={{ fontSize: 13 }}>Company</Text>
+            </Col>
+            <Col flex="160px">
+              <Select
+                style={{ width: '100%' }}
+                placeholder="All companies"
+                allowClear
+                loading={loadingPeriods}
+                value={company || undefined}
+                onChange={v => setCompany(v ?? '')}
+                options={companies.map(c => ({ value: c, label: c }))}
+              />
+            </Col>
+
+            <Col>
+              <Text strong style={{ fontSize: 13 }}>Period</Text>
+            </Col>
+            <Col flex="160px">
+              <Select
+                style={{ width: '100%' }}
+                placeholder="Select period"
+                loading={loadingPeriods}
+                value={period || undefined}
+                onChange={setPeriod}
+                options={periods.map(p => ({ value: p, label: p }))}
+              />
+            </Col>
+
             <Col>
               <Button
                 type="primary"
                 icon={analyzing ? <SyncOutlined spin /> : <ThunderboltOutlined />}
                 loading={analyzing}
-                disabled={!selectedPeriod}
+                disabled={!canAnalyse}
                 onClick={handleAnalyse}
                 style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', border: 'none' }}
               >
@@ -349,14 +417,14 @@ Please provide:
           </Row>
         </Card>
 
-        {/* ── KPI row (shown after analysis) ── */}
-        {balances.length > 0 && (
+        {/* ── KPI row ── */}
+        {tbData.length > 0 && (
           <Row gutter={16} style={{ marginBottom: 24 }}>
             <Col xs={24} sm={8}>
               <Card style={{ borderRadius: 12, textAlign: 'center' }}>
                 <Statistic
                   title="Accounts with Activity"
-                  value={balances.length}
+                  value={tbData.length}
                   prefix={<LineChartOutlined />}
                   valueStyle={{ color: '#667eea' }}
                 />
@@ -388,11 +456,11 @@ Please provide:
         )}
 
         <Row gutter={24}>
-          {/* ── AI Analysis Panel ── */}
+          {/* ── AI Analysis panel ── */}
           <Col xs={24} lg={14}>
             <Card
               title={<Space><BulbOutlined style={{ color: '#667eea' }} /><span>Period Analysis</span></Space>}
-              style={{ borderRadius: 12, minHeight: 400 }}
+              style={{ borderRadius: 12, minHeight: 440 }}
             >
               {analyzing && !analysisText && (
                 <div style={{ textAlign: 'center', padding: 48 }}>
@@ -403,36 +471,39 @@ Please provide:
               {!analyzing && !analysisText && (
                 <div style={{ textAlign: 'center', padding: 48, color: '#bbb' }}>
                   <RobotOutlined style={{ fontSize: 48, marginBottom: 16 }} />
-                  <div>Select a period and click <strong>Analyse Period</strong> to generate AI insights</div>
+                  <div>Select a <strong>Ledger</strong>, <strong>Company</strong>, and <strong>Period</strong>, then click <strong>Analyse Period</strong></div>
                 </div>
               )}
               {analysisText && (
-                <div style={{
-                  fontFamily: 'inherit', whiteSpace: 'pre-wrap', lineHeight: 1.8,
-                  fontSize: 14, color: '#1a1a1a',
-                }}>
+                <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.8, fontSize: 14, color: '#1a1a1a' }}>
                   {analysisText}
-                  {analyzing && <span style={{ display: 'inline-block', width: 2, height: 14, background: '#667eea', animation: 'blink 1s step-end infinite', marginLeft: 2 }} />}
+                  {analyzing && (
+                    <span style={{
+                      display: 'inline-block', width: 2, height: 14,
+                      background: '#667eea', marginLeft: 2,
+                      animation: 'blink 1s step-end infinite',
+                    }} />
+                  )}
                 </div>
               )}
             </Card>
           </Col>
 
-          {/* ── AI Chat Panel ── */}
+          {/* ── AI Chat panel ── */}
           <Col xs={24} lg={10}>
             <Card
               title={<Space><RobotOutlined style={{ color: '#764ba2' }} /><span>Ask the AI</span></Space>}
-              style={{ borderRadius: 12, minHeight: 400 }}
-              bodyStyle={{ display: 'flex', flexDirection: 'column', height: 520 }}
+              style={{ borderRadius: 12, minHeight: 440 }}
+              styles={{ body: { display: 'flex', flexDirection: 'column', height: 540 } }}
             >
               {/* Messages */}
-              <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0', marginBottom: 12 }}>
+              <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 8 }}>
                 {chatMessages.length === 0 && (
                   <div style={{ color: '#bbb', textAlign: 'center', paddingTop: 40 }}>
                     <RobotOutlined style={{ fontSize: 32, marginBottom: 8 }} />
                     <div>Ask anything about your GL data</div>
                     <div style={{ fontSize: 12, marginTop: 8 }}>
-                      e.g. "Why is account 21100 showing a large credit?" or "Summarise the period activity"
+                      e.g. "Why is account 21100 showing a large credit?" or "Summarise period activity"
                     </div>
                   </div>
                 )}
@@ -450,9 +521,7 @@ Please provide:
                         ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
                         : '#f5f5f5',
                       color: m.role === 'user' ? '#fff' : '#1a1a1a',
-                      fontSize: 13,
-                      lineHeight: 1.6,
-                      whiteSpace: 'pre-wrap',
+                      fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap',
                     }}>
                       {m.content || <Spin size="small" />}
                     </div>
@@ -461,15 +530,14 @@ Please provide:
                 <div ref={chatEndRef} />
               </div>
 
-              <Divider style={{ margin: '0 0 12px' }} />
+              <Divider style={{ margin: '8px 0 12px' }} />
 
-              {/* Input */}
               <div style={{ display: 'flex', gap: 8 }}>
                 <TextArea
                   value={chatInput}
                   onChange={e => setChatInput(e.target.value)}
                   onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); handleChatSend(); } }}
-                  placeholder="Ask a financial question… (Enter to send, Shift+Enter for newline)"
+                  placeholder="Ask a financial question… (Enter to send)"
                   autoSize={{ minRows: 1, maxRows: 4 }}
                   style={{ flex: 1, borderRadius: 8 }}
                   disabled={chatLoading}
@@ -490,9 +558,7 @@ Please provide:
           </Col>
         </Row>
 
-        <style>{`
-          @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-        `}</style>
+        <style>{`@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }`}</style>
       </Content>
     </Layout>
   );
