@@ -6,16 +6,17 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
-  HomeOutlined, SearchOutlined, ClearOutlined, BarChartOutlined,
+  HomeOutlined, SearchOutlined, ClearOutlined,
   FileExcelOutlined, AuditOutlined, ReloadOutlined,
-  ApiOutlined, CopyOutlined, BookOutlined, BankOutlined, DownOutlined,
+  ApiOutlined, CopyOutlined, BookOutlined, DownOutlined,
+  FilterOutlined, PlusOutlined, CloseOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 
 const { Content } = Layout;
-const { Title, Text } = Typography;
+const { Text } = Typography;
 const { Option } = Select;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -39,9 +40,26 @@ const parsePeriod = (p: string): number => {
   return (2000 + parseInt(y || '0', 10)) * 100 + (MONTH_MAP[m] ?? 0);
 };
 
+// ─── Segment definitions ──────────────────────────────────────────────────────
+interface SegmentDef {
+  key: string;         // API param name
+  label: string;       // display name
+  color: string;       // tag colour
+  valueKey: string;    // key in segmentValues map
+}
+const SEGMENT_DEFS: SegmentDef[] = [
+  { key: 'company',      label: 'Company',         color: 'blue',    valueKey: 'companies'      },
+  { key: 'lob',          label: 'LOB',             color: 'cyan',    valueKey: 'lobs'           },
+  { key: 'department',   label: 'Department',      color: 'purple',  valueKey: 'departments'    },
+  { key: 'sub_account',  label: 'Sub-Account',     color: 'orange',  valueKey: 'subAccounts'    },
+  { key: 'analysis',     label: 'Analysis',        color: 'geekblue',valueKey: 'analyses'       },
+  { key: 'intercompany', label: 'Intercompany',    color: 'magenta', valueKey: 'intercompanies' },
+  { key: 'je_source',    label: 'Journal Source',  color: 'volcano', valueKey: 'sources'        },
+  { key: 'je_category',  label: 'Journal Category',color: 'gold',   valueKey: 'categories'     },
+];
+
 // ─── Interfaces ───────────────────────────────────────────────────────────────
-interface CompanyOption  { value: string; meaning: string; }
-interface AccountOption  { account: string; description: string; account_type: string; }
+interface AccountOption { account: string; description: string; account_type: string; }
 
 interface JournalLine {
   key: string;
@@ -75,129 +93,69 @@ const FmtBal: React.FC<{ v: number; size?: number }> = ({ v, size = 12 }) =>
     ? <Text strong style={{ fontSize: size, color: REDWOOD.primary }}>{fmtN(Math.abs(v))} Cr</Text>
     : <Text strong style={{ fontSize: size, color: REDWOOD.success }}>{fmtN(v)}</Text>;
 
-// ─── Company Picker Modal ──────────────────────────────────────────────────────
-interface CompanyPickerProps {
-  open: boolean;
-  onClose: () => void;
-  onSelect: (v: string, meaning: string) => void;
-  options: CompanyOption[];
-}
-const CompanyPicker: React.FC<CompanyPickerProps> = ({ open, onClose, onSelect, options }) => {
-  const [search, setSearch] = useState('');
-  const filtered = useMemo(() => {
-    if (!search.trim()) return options;
-    const q = search.toLowerCase();
-    return options.filter(o =>
-      o.value.toLowerCase().includes(q) || o.meaning.toLowerCase().includes(q)
-    );
-  }, [options, search]);
-
-  return (
-    <Modal
-      open={open} onCancel={onClose} footer={null}
-      title={<Space><BankOutlined style={{ color: REDWOOD.info }} />Select Company</Space>}
-      width={520}
+// ─── ClickField helper (company/account picker trigger) ───────────────────────
+const ClickField: React.FC<{
+  label: string; placeholder: string; onClick: () => void; onClear?: () => void;
+}> = ({ label, placeholder, onClick, onClear }) => (
+  <div style={{ display: 'flex', gap: 4 }}>
+    <div
+      onClick={onClick}
+      style={{
+        flex: 1, height: 24, padding: '0 8px', border: `1px solid #d9d9d9`, borderRadius: 6,
+        background: REDWOOD.surface, cursor: 'pointer', display: 'flex',
+        alignItems: 'center', justifyContent: 'space-between', fontSize: 12,
+        color: label ? REDWOOD.neutral900 : REDWOOD.neutral600, userSelect: 'none',
+        transition: 'border-color 0.2s', overflow: 'hidden',
+      }}
+      onMouseEnter={e => (e.currentTarget.style.borderColor = REDWOOD.info)}
+      onMouseLeave={e => (e.currentTarget.style.borderColor = '#d9d9d9')}
     >
-      <Input
-        prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
-        placeholder="Search code or name…" allowClear size="small"
-        value={search} onChange={e => setSearch(e.target.value)}
-        style={{ marginBottom: 10 }}
-      />
-      <div style={{ maxHeight: 380, overflowY: 'auto' }}>
-        {/* All companies option */}
-        <div
-          onClick={() => { onSelect('', ''); onClose(); setSearch(''); }}
-          style={{
-            padding: '8px 12px', cursor: 'pointer', borderBottom: `1px solid ${REDWOOD.neutral200}`,
-            display: 'flex', gap: 12, alignItems: 'center', background: '#fafafa',
-          }}
-          onMouseEnter={e => (e.currentTarget.style.background = '#e6f4ff')}
-          onMouseLeave={e => (e.currentTarget.style.background = '#fafafa')}
-        >
-          <Text type="secondary" style={{ fontSize: 12, width: 80 }}>— All —</Text>
-          <Text type="secondary" style={{ fontSize: 12 }}>All Companies</Text>
-        </div>
-        {filtered.map(o => (
-          <div
-            key={o.value}
-            onClick={() => { onSelect(o.value, o.meaning); onClose(); setSearch(''); }}
-            style={{
-              padding: '8px 12px', cursor: 'pointer', borderBottom: `1px solid ${REDWOOD.neutral200}`,
-              display: 'flex', gap: 12, alignItems: 'center',
-            }}
-            onMouseEnter={e => (e.currentTarget.style.background = '#e6f4ff')}
-            onMouseLeave={e => (e.currentTarget.style.background = '')}
-          >
-            <Tag color="blue" style={{ fontSize: 11, minWidth: 60, textAlign: 'center', margin: 0 }}>{o.value}</Tag>
-            <Text style={{ fontSize: 12 }}>{o.meaning}</Text>
-          </div>
-        ))}
-        {filtered.length === 0 && (
-          <div style={{ padding: 24, textAlign: 'center', color: REDWOOD.neutral600 }}>
-            No companies found
-          </div>
-        )}
-      </div>
-    </Modal>
-  );
-};
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {label || placeholder}
+      </span>
+      <DownOutlined style={{ fontSize: 9, color: REDWOOD.neutral600, flexShrink: 0, marginLeft: 4 }} />
+    </div>
+    {label && onClear && (
+      <Button size="small" type="text" style={{ padding: '0 4px', height: 24 }} onClick={onClear}>✕</Button>
+    )}
+  </div>
+);
 
-// ─── Account Picker Modal ─────────────────────────────────────────────────────
+// ─── Account Picker ───────────────────────────────────────────────────────────
 interface AccountPickerProps {
-  open: boolean;
-  onClose: () => void;
+  open: boolean; onClose: () => void;
   onSelect: (account: string, description: string) => void;
-  options: AccountOption[];
-  loading: boolean;
+  options: AccountOption[]; loading: boolean;
 }
 const AccountPicker: React.FC<AccountPickerProps> = ({ open, onClose, onSelect, options, loading }) => {
-  const [search, setSearch] = useState('');
+  const [q, setQ] = useState('');
   const filtered = useMemo(() => {
-    if (!search.trim()) return options;
-    const q = search.toLowerCase();
-    return options.filter(o =>
-      o.account.toLowerCase().includes(q) || o.description.toLowerCase().includes(q)
-    );
-  }, [options, search]);
-
+    if (!q.trim()) return options;
+    const lq = q.toLowerCase();
+    return options.filter(o => o.account.toLowerCase().includes(lq) || o.description.toLowerCase().includes(lq));
+  }, [options, q]);
   const typeColor: Record<string, string> = { A: 'gold', L: 'volcano', E: 'green', R: 'blue', O: 'purple' };
   const typeLabel: Record<string, string> = { A: 'Asset', L: 'Liability', E: 'Expense', R: 'Revenue', O: 'OE' };
-
   return (
-    <Modal
-      open={open} onCancel={() => { onClose(); setSearch(''); }} footer={null}
-      title={<Space><SearchOutlined style={{ color: REDWOOD.info }} />Select Account</Space>}
-      width={640}
-    >
-      <Input
-        prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
-        placeholder="Search account number or description…" allowClear size="small"
-        value={search} onChange={e => setSearch(e.target.value)}
-        style={{ marginBottom: 10 }}
-        autoFocus
-      />
-      {/* All accounts option */}
+    <Modal open={open} onCancel={() => { onClose(); setQ(''); }} footer={null}
+      title={<Space><SearchOutlined style={{ color: REDWOOD.info }} />Select Account</Space>} width={640}>
+      <Input prefix={<SearchOutlined />} placeholder="Search code or description…" allowClear size="small"
+        value={q} onChange={e => setQ(e.target.value)} style={{ marginBottom: 8 }} autoFocus />
       <div
-        onClick={() => { onSelect('', ''); onClose(); setSearch(''); }}
-        style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: `1px solid ${REDWOOD.neutral200}`,
-          display: 'flex', gap: 12, alignItems: 'center', background: '#fafafa' }}
+        onClick={() => { onSelect('', ''); onClose(); setQ(''); }}
+        style={{ padding: '7px 12px', cursor: 'pointer', borderBottom: `1px solid ${REDWOOD.neutral200}`,
+          background: '#fafafa', fontSize: 12, color: REDWOOD.neutral600 }}
         onMouseEnter={e => (e.currentTarget.style.background = '#e6f4ff')}
         onMouseLeave={e => (e.currentTarget.style.background = '#fafafa')}
-      >
-        <Text type="secondary" style={{ fontSize: 12, width: 140 }}>— All Accounts —</Text>
-      </div>
+      >— All Accounts —</div>
       <div style={{ maxHeight: 380, overflowY: 'auto' }}>
         {loading && <div style={{ padding: 24, textAlign: 'center' }}><Spin size="small" /></div>}
         {!loading && filtered.map(o => (
-          <div
-            key={o.account}
-            onClick={() => { onSelect(o.account, o.description); onClose(); setSearch(''); }}
+          <div key={o.account} onClick={() => { onSelect(o.account, o.description); onClose(); setQ(''); }}
             style={{ padding: '7px 12px', cursor: 'pointer', borderBottom: `1px solid ${REDWOOD.neutral200}`,
-              display: 'flex', gap: 12, alignItems: 'center' }}
+              display: 'flex', gap: 10, alignItems: 'center' }}
             onMouseEnter={e => (e.currentTarget.style.background = '#e6f4ff')}
-            onMouseLeave={e => (e.currentTarget.style.background = '')}
-          >
+            onMouseLeave={e => (e.currentTarget.style.background = '')}>
             <Text code style={{ fontSize: 11, minWidth: 140 }}>{o.account}</Text>
             <Text style={{ fontSize: 12, flex: 1 }}>{o.description}</Text>
             {o.account_type && (
@@ -215,32 +173,182 @@ const AccountPicker: React.FC<AccountPickerProps> = ({ open, onClose, onSelect, 
   );
 };
 
+// ─── Segment Filter Picker ────────────────────────────────────────────────────
+interface SegmentPickerProps {
+  open: boolean;
+  onClose: () => void;
+  segmentValues: Record<string, string[]>;
+  companyOptions: { value: string; meaning: string }[];
+  existing: Record<string, string>;
+  onAdd: (key: string, value: string, label?: string) => void;
+  loading: boolean;
+}
+const SegmentPicker: React.FC<SegmentPickerProps> = ({
+  open, onClose, segmentValues, companyOptions, existing, onAdd, loading,
+}) => {
+  const [selectedSeg, setSelectedSeg] = useState<SegmentDef | null>(null);
+  const [q, setQ] = useState('');
+
+  const getValues = (seg: SegmentDef): { value: string; label: string }[] => {
+    if (seg.key === 'company') {
+      return companyOptions.map(c => ({ value: c.value, label: `${c.value} – ${c.meaning}` }));
+    }
+    return (segmentValues[seg.valueKey] || []).map(v => ({ value: v, label: v }));
+  };
+
+  const values = selectedSeg ? getValues(selectedSeg) : [];
+  const filtered = q.trim()
+    ? values.filter(v => v.label.toLowerCase().includes(q.toLowerCase()))
+    : values;
+
+  const handleSegClick = (seg: SegmentDef) => {
+    setSelectedSeg(seg); setQ('');
+  };
+  const handleValueClick = (val: string, label?: string) => {
+    if (selectedSeg) {
+      onAdd(selectedSeg.key, val, label);
+      setSelectedSeg(null); setQ('');
+    }
+  };
+
+  return (
+    <Modal
+      open={open}
+      onCancel={() => { onClose(); setSelectedSeg(null); setQ(''); }}
+      footer={null}
+      title={<Space><FilterOutlined style={{ color: REDWOOD.info }} />
+        {selectedSeg ? (
+          <Space>
+            <Button size="small" type="text" icon={<CloseOutlined />}
+              onClick={() => { setSelectedSeg(null); setQ(''); }}
+              style={{ padding: '0 4px' }} />
+            <span>{selectedSeg.label} — Choose Value</span>
+          </Space>
+        ) : 'Add Segment Filter'}
+      </Space>}
+      width={560}
+    >
+      {!selectedSeg ? (
+        // Step 1: choose segment
+        <div>
+          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 10 }}>
+            Select a segment to filter by:
+          </Text>
+          {loading && <div style={{ padding: 24, textAlign: 'center' }}><Spin size="small" /></div>}
+          <Row gutter={[8, 8]}>
+            {SEGMENT_DEFS.map(seg => (
+              <Col key={seg.key} xs={12} sm={8}>
+                <div
+                  onClick={() => handleSegClick(seg)}
+                  style={{
+                    padding: '10px 14px', borderRadius: 8, cursor: 'pointer',
+                    border: `1px solid ${existing[seg.key] ? REDWOOD.info : REDWOOD.neutral200}`,
+                    background: existing[seg.key] ? '#e6f4ff' : REDWOOD.surface,
+                    display: 'flex', flexDirection: 'column', gap: 4,
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.borderColor = REDWOOD.info)}
+                  onMouseLeave={e => (e.currentTarget.style.borderColor = existing[seg.key] ? REDWOOD.info : REDWOOD.neutral200)}
+                >
+                  <Tag color={seg.color} style={{ fontSize: 10, margin: 0, width: 'fit-content' }}>{seg.label}</Tag>
+                  {existing[seg.key] && (
+                    <Text style={{ fontSize: 11, color: REDWOOD.info }}>✓ {existing[seg.key]}</Text>
+                  )}
+                  {!existing[seg.key] && (
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      {(segmentValues[seg.valueKey] || []).length || (seg.key === 'company' ? companyOptions.length : 0)} values
+                    </Text>
+                  )}
+                </div>
+              </Col>
+            ))}
+          </Row>
+        </div>
+      ) : (
+        // Step 2: choose value
+        <div>
+          <Input prefix={<SearchOutlined />} placeholder={`Search ${selectedSeg.label} values…`}
+            allowClear size="small" value={q} onChange={e => setQ(e.target.value)}
+            style={{ marginBottom: 8 }} autoFocus />
+          {/* Clear filter option */}
+          {existing[selectedSeg.key] && (
+            <div
+              onClick={() => { onAdd(selectedSeg.key, '', ''); setSelectedSeg(null); setQ(''); }}
+              style={{ padding: '7px 12px', cursor: 'pointer', borderBottom: `1px solid ${REDWOOD.neutral200}`,
+                background: '#fff7e6', fontSize: 12, color: '#d46b08', fontWeight: 500 }}
+              onMouseEnter={e => (e.currentTarget.style.background = '#ffe7ba')}
+              onMouseLeave={e => (e.currentTarget.style.background = '#fff7e6')}
+            >✕ Clear filter for {selectedSeg.label}</div>
+          )}
+          <div style={{ maxHeight: 380, overflowY: 'auto' }}>
+            {filtered.length === 0 && (
+              <div style={{ padding: 24, textAlign: 'center', color: REDWOOD.neutral600 }}>No values found</div>
+            )}
+            {filtered.map(v => (
+              <div key={v.value}
+                onClick={() => handleValueClick(v.value, v.label)}
+                style={{
+                  padding: '8px 12px', cursor: 'pointer', borderBottom: `1px solid ${REDWOOD.neutral200}`,
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  background: existing[selectedSeg.key] === v.value ? '#e6f4ff' : '',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = '#e6f4ff')}
+                onMouseLeave={e => (e.currentTarget.style.background = existing[selectedSeg.key] === v.value ? '#e6f4ff' : '')}
+              >
+                {selectedSeg.key === 'company' ? (
+                  <>
+                    <Tag color="blue" style={{ fontSize: 11, minWidth: 56, textAlign: 'center', margin: 0 }}>
+                      {v.value}
+                    </Tag>
+                    <Text style={{ fontSize: 12 }}>{v.label.split(' – ')[1]}</Text>
+                  </>
+                ) : (
+                  <Text style={{ fontSize: 12 }}>{v.label}</Text>
+                )}
+                {existing[selectedSeg.key] === v.value && (
+                  <Tag color="blue" style={{ fontSize: 10, margin: 0, marginLeft: 'auto' }}>Selected</Tag>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+};
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 const AccountAnalysisV2: React.FC = () => {
-  // Parameters
+  // ── Parameters ──────────────────────────────────────────────────────────────
   const [ledger, setLedger]               = useState('');
   const [ledgerOptions, setLedgerOptions] = useState<string[]>([]);
   const [ledgersLoading, setLedgersLoading] = useState(false);
-
-  const [company, setCompany]             = useState('');
-  const [companyMeaning, setCompanyMeaning] = useState('');
-  const [companyOptions, setCompanyOptions] = useState<CompanyOption[]>([]);
-  const [companyPickerOpen, setCompanyPickerOpen] = useState(false);
-
-  const [accountOptions, setAccountOptions]   = useState<AccountOption[]>([]);
-  const [accountsLoading, setAccountsLoading] = useState(false);
-  const [accountPickerOpen, setAccountPickerOpen] = useState(false);
-  const [accountDesc, setAccountDesc]         = useState('');
 
   const [periods, setPeriods]             = useState<string[]>([]);
   const [allPeriods, setAllPeriods]       = useState<string[]>([]);
   const [periodsLoading, setPeriodsLoading] = useState(false);
 
   const [account, setAccount]             = useState('');
-  const [jeSource, setJeSource]           = useState('');
-  const [jeCategory, setJeCategory]       = useState('');
+  const [accountDesc, setAccountDesc]     = useState('');
+  const [accountOptions, setAccountOptions]   = useState<AccountOption[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(false);
+  const [accountPickerOpen, setAccountPickerOpen] = useState(false);
 
-  // Grid state
+  // segment filters: { company: '101', lob: 'RETAIL', ... }
+  const [segFilters, setSegFilters]       = useState<Record<string, string>>({});
+  // labels for display (company has "101 – Name" style)
+  const [segLabels, setSegLabels]         = useState<Record<string, string>>({});
+
+  // segment LOV data
+  const [segmentValues, setSegmentValues] = useState<Record<string, string[]>>({
+    companies: [], lobs: [], departments: [], subAccounts: [],
+    analyses: [], intercompanies: [], sources: [], categories: [],
+  });
+  const [companyOptions, setCompanyOptions] = useState<{ value: string; meaning: string }[]>([]);
+  const [segValuesLoading, setSegValuesLoading] = useState(false);
+  const [segPickerOpen, setSegPickerOpen] = useState(false);
+
+  // ── Grid state ──────────────────────────────────────────────────────────────
   const [loading, setLoading]             = useState(false);
   const [rows, setRows]                   = useState<JournalLine[]>([]);
   const [hasSearched, setHasSearched]     = useState(false);
@@ -248,15 +356,15 @@ const AccountAnalysisV2: React.FC = () => {
   const [gridSearch, setGridSearch]       = useState('');
   const [functionalCcy, setFunctionalCcy] = useState('AED');
 
-  // Balance state
+  // ── Balance state ────────────────────────────────────────────────────────────
   const [openingBal, setOpeningBal] = useState<{ acc: number; ent: number } | null>(null);
   const [closingBal, setClosingBal] = useState<{ acc: number; ent: number } | null>(null);
 
-  // API modal
+  // ── API modal ────────────────────────────────────────────────────────────────
   const [apiUrl, setApiUrl]               = useState('');
   const [apiModalOpen, setApiModalOpen]   = useState(false);
 
-  // ── Load ledgers ────────────────────────────────────────────────────────────
+  // ── Load ledgers ─────────────────────────────────────────────────────────────
   useEffect(() => {
     setLedgersLoading(true);
     fetch(`${API_BASE}/getledgername`)
@@ -264,71 +372,64 @@ const AccountAnalysisV2: React.FC = () => {
       .then(data => {
         if (!data) return;
         const names: string[] = [
-          ...new Set(
-            (data.items || [])
-              .map((i: any) => i.ledger_name)
-              .filter(Boolean) as string[]
-          ),
+          ...new Set((data.items || []).map((i: any) => i.ledger_name).filter(Boolean) as string[]),
         ];
         setLedgerOptions(names);
-        if (names.length > 0 && !ledger) setLedger(names[0]);
+        if (names.length > 0) setLedger(names[0]);
       })
       .catch(() => {})
       .finally(() => setLedgersLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Load company LOV ────────────────────────────────────────────────────────
-  useEffect(() => {
-    fetch(COMPANY_LOV_URL)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (!data) return;
-        const items: CompanyOption[] = (data.items || []).map((i: any) => ({
-          value:   i.value   || i.VALUE   || '',
+  // ── Load segment values (lazy: when picker opens, or when ledger changes) ────
+  const loadSegmentValues = useCallback(async (ldg: string) => {
+    if (!ldg) return;
+    setSegValuesLoading(true);
+    try {
+      // company LOV
+      const compRes = await fetch(COMPANY_LOV_URL);
+      if (compRes.ok) {
+        const cd = await compRes.json();
+        setCompanyOptions((cd.items || []).map((i: any) => ({
+          value: i.value || i.VALUE || '',
           meaning: i.meaning || i.MEANING || '',
-        })).filter((i: CompanyOption) => i.value);
-        setCompanyOptions(items);
-      })
-      .catch(() => {});
+        })).filter((c: any) => c.value));
+      }
+      // other segments
+      const segRes = await fetch(`${API_BASE}/segment-values?ledger_name=${encodeURIComponent(ldg)}`);
+      if (segRes.ok) {
+        const sd = await segRes.json();
+        setSegmentValues(prev => ({
+          ...prev,
+          lobs:           sd.lobs           || [],
+          departments:    sd.departments    || [],
+          subAccounts:    sd.subAccounts    || [],
+          analyses:       sd.analyses       || [],
+          intercompanies: sd.intercompanies || [],
+          sources:        sd.sources        || [],
+          categories:     sd.categories     || [],
+        }));
+      }
+    } catch { /* silent */ } finally {
+      setSegValuesLoading(false);
+    }
   }, []);
 
-  // ── Load account LOV (lazy — fetch once on first picker open) ───────────────
-  const loadAccounts = useCallback(async () => {
-    if (accountOptions.length > 0) return; // already loaded
-    setAccountsLoading(true);
-    try {
-      const res = await fetch(ACCOUNTS_LOV_URL);
-      if (!res.ok) return;
-      const data = await res.json();
-      const items: AccountOption[] = (data.items || []).map((i: any) => ({
-        account:      i.account      || i.ACCOUNT      || '',
-        description:  i.description  || i.DESCRIPTION  || '',
-        account_type: i.account_type || i.ACCOUNT_TYPE || '',
-      })).filter((i: AccountOption) => i.account);
-      setAccountOptions(items);
-    } catch { /* silent */ } finally {
-      setAccountsLoading(false);
-    }
-  }, [accountOptions.length]);
+  // reload segments when ledger changes (needed for value counts in picker)
+  useEffect(() => { if (ledger) loadSegmentValues(ledger); }, [ledger, loadSegmentValues]);
 
-  // ── Load periods when ledger changes ────────────────────────────────────────
+  // ── Load periods ─────────────────────────────────────────────────────────────
   const loadPeriods = useCallback(async (ldg: string) => {
     if (!ldg) return;
-    setPeriodsLoading(true);
-    setPeriods([]);
+    setPeriodsLoading(true); setPeriods([]);
     try {
-      const res = await fetch(
-        `${APEX_BASE}/periodsstatus/create?ledger_name=${encodeURIComponent(ldg)}`,
-      );
+      const res = await fetch(`${APEX_BASE}/periodsstatus/create?ledger_name=${encodeURIComponent(ldg)}`);
       if (!res.ok) return;
       const data = await res.json();
-      const items: any[] = data.items || [];
-      const names = [
-        ...new Set(
-          items.map((i: any) => i.period_name || i.period_name_id || '').filter(Boolean)
-        ),
-      ] as string[];
+      const names = [...new Set(
+        (data.items || []).map((i: any) => i.period_name || i.period_name_id || '').filter(Boolean)
+      )] as string[];
       names.sort((a, b) => parsePeriod(b) - parsePeriod(a));
       setAllPeriods(names);
     } catch { /* silent */ } finally {
@@ -338,7 +439,25 @@ const AccountAnalysisV2: React.FC = () => {
 
   useEffect(() => { if (ledger) loadPeriods(ledger); }, [ledger, loadPeriods]);
 
-  // ── Fetch opening/closing balance ───────────────────────────────────────────
+  // ── Load account LOV (lazy) ──────────────────────────────────────────────────
+  const loadAccounts = useCallback(async () => {
+    if (accountOptions.length > 0) return;
+    setAccountsLoading(true);
+    try {
+      const res = await fetch(ACCOUNTS_LOV_URL);
+      if (!res.ok) return;
+      const data = await res.json();
+      setAccountOptions((data.items || []).map((i: any) => ({
+        account:      i.account      || i.ACCOUNT      || '',
+        description:  i.description  || i.DESCRIPTION  || '',
+        account_type: i.account_type || i.ACCOUNT_TYPE || '',
+      })).filter((i: AccountOption) => i.account));
+    } catch { /* silent */ } finally {
+      setAccountsLoading(false);
+    }
+  }, [accountOptions.length]);
+
+  // ── Fetch opening/closing balance ────────────────────────────────────────────
   const fetchBalanceRow = useCallback(async (acct: string, co: string, period: string, isOpen: boolean) => {
     const p = new URLSearchParams({ ledger_name: ledger, period_name: period, account: acct });
     if (co) p.set('company', co);
@@ -363,18 +482,16 @@ const AccountAnalysisV2: React.FC = () => {
       concatenatedSegments: acct,
       accountDescription: items[0].account_desc || '',
       jeLineDescription: isOpen ? 'Opening Balance' : 'Closing Balance',
-      defaultPeriodName: period,
-      accountingDate: '', batchName: '', userJeSourceName: '', userJeCategoryName: '',
+      defaultPeriodName: period, accountingDate: '', batchName: '',
+      userJeSourceName: '', userJeCategoryName: '',
       currencyCode: items[0].currency_code || 'AED',
       enteredDr: ent.dr, enteredCr: ent.cr,
       accountedDr: acc.dr, accountedCr: acc.cr,
-      jeHeaderId: 0,
-      isOpeningBalance: isOpen,
-      isClosingBalance: !isOpen,
+      jeHeaderId: 0, isOpeningBalance: isOpen, isClosingBalance: !isOpen,
     } as JournalLine;
   }, [ledger]);
 
-  // ── Search ──────────────────────────────────────────────────────────────────
+  // ── Search ───────────────────────────────────────────────────────────────────
   const handleSearch = useCallback(async () => {
     if (!periods.length) { message.warning('Select at least one period'); return; }
     setLoading(true); setHasSearched(true); setRows([]);
@@ -382,10 +499,9 @@ const AccountAnalysisV2: React.FC = () => {
     try {
       const p = new URLSearchParams({ ledger_name: ledger });
       p.set('period_names', periods.join(','));
-      if (company)    p.set('company', company);
-      if (account)    p.set('account', account);
-      if (jeSource)   p.set('je_source', jeSource);
-      if (jeCategory) p.set('je_category', jeCategory);
+      if (account) p.set('account', account);
+      // append all segment filters
+      Object.entries(segFilters).forEach(([k, v]) => { if (v) p.set(k, v); });
       const url = `${API_BASE}/accountanalysis?${p}`;
       setApiUrl(url);
 
@@ -399,20 +515,17 @@ const AccountAnalysisV2: React.FC = () => {
             const dk = `${item.jeHeaderId ?? item.je_header_id}-${item.jeLineNumber ?? item.je_line_number}`;
             if (seen.has(dk)) return [];
             seen.add(dk);
-            // account combination — try all known field names then fall back to segment concatenation
             const combo =
               item.accountCombination ||
               item.account_combination ||
               item.concatenatedSegments ||
-              (item.company && item.account
+              (item.company
                 ? [item.company, item.lob, item.department, item.account,
-                   item.subAccount || item.sub_account,
-                   item.analysis, item.intercompany].filter(Boolean).join('-')
+                   item.subAccount || item.sub_account, item.analysis, item.intercompany]
+                   .filter(Boolean).join('-')
                 : '');
-            // functional currency — take from ledger_currency field if present
             const fccy = item.ledger_currency || item.functional_currency || '';
             if (fccy) setFunctionalCcy(fccy);
-
             return [{
               key: `row-${idx}`,
               concatenatedSegments: combo,
@@ -438,9 +551,10 @@ const AccountAnalysisV2: React.FC = () => {
       let openRow: JournalLine | null = null;
       let closeRow: JournalLine | null = null;
       if (account && sortedPeriods.length) {
+        const co = segFilters['company'] || '';
         [openRow, closeRow] = await Promise.all([
-          fetchBalanceRow(account, company, sortedPeriods[0], true),
-          fetchBalanceRow(account, company, sortedPeriods[sortedPeriods.length - 1], false),
+          fetchBalanceRow(account, co, sortedPeriods[0], true),
+          fetchBalanceRow(account, co, sortedPeriods[sortedPeriods.length - 1], false),
         ]);
       }
 
@@ -449,10 +563,8 @@ const AccountAnalysisV2: React.FC = () => {
         ...items,
         ...(closeRow ? [closeRow] : []),
       ];
-
       if (openRow)  setOpeningBal({ acc: openRow.accountedDr  - openRow.accountedCr,  ent: openRow.enteredDr  - openRow.enteredCr  });
       if (closeRow) setClosingBal({ acc: closeRow.accountedDr - closeRow.accountedCr, ent: closeRow.enteredDr - closeRow.enteredCr });
-
       setRows(allRows);
       message.success(`${allRows.length} records loaded`);
     } catch (e: any) {
@@ -460,17 +572,33 @@ const AccountAnalysisV2: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [ledger, periods, company, account, jeSource, jeCategory, fetchBalanceRow]);
+  }, [ledger, periods, account, segFilters, fetchBalanceRow]);
 
-  // ── Derived data ────────────────────────────────────────────────────────────
+  // ── Segment filter helpers ───────────────────────────────────────────────────
+  const addSegFilter = (key: string, value: string, label?: string) => {
+    setSegFilters(prev => {
+      const next = { ...prev };
+      if (value) next[key] = value; else delete next[key];
+      return next;
+    });
+    setSegLabels(prev => {
+      const next = { ...prev };
+      if (value && label) next[key] = label; else delete next[key];
+      return next;
+    });
+  };
+
+  const removeSegFilter = (key: string) => {
+    setSegFilters(prev => { const n = { ...prev }; delete n[key]; return n; });
+    setSegLabels(prev => { const n = { ...prev }; delete n[key]; return n; });
+  };
+
+  // ── Derived data ─────────────────────────────────────────────────────────────
   const dataRows = useMemo(() => rows.filter(r => !r.isClosingBalance), [rows]);
-
   const filteredData = useMemo(() => {
     if (!gridSearch.trim()) return dataRows;
     const q = gridSearch.toLowerCase();
-    return dataRows.filter(r =>
-      Object.values(r).some(v => String(v ?? '').toLowerCase().includes(q))
-    );
+    return dataRows.filter(r => Object.values(r).some(v => String(v ?? '').toLowerCase().includes(q)));
   }, [dataRows, gridSearch]);
 
   const runningBals = useMemo(() => {
@@ -513,19 +641,15 @@ const AccountAnalysisV2: React.FC = () => {
 
   const tableData = totalsRow ? [...filteredData, totalsRow] : filteredData;
 
-  // ── Column definitions ──────────────────────────────────────────────────────
+  // ── Columns ──────────────────────────────────────────────────────────────────
   const columns = useMemo((): ColumnsType<JournalLine> => {
     const isTot     = (r: JournalLine) => !!r.isTotals;
     const isSpecial = (r: JournalLine) => !!(r.isOpeningBalance || r.isClosingBalance || r.isTotals);
 
-    // Entered amount columns — placed FIRST when toggle on
     const enteredCols: ColumnsType<JournalLine> = showEntered ? [
       {
         title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Ent Dr</span>,
-        dataIndex: 'enteredDr',
-        key: 'entDr',
-        width: 130,
-        align: 'right',
+        dataIndex: 'enteredDr', key: 'entDr', width: 130, align: 'right',
         render: (v: number, r: JournalLine) => (
           <span style={{ fontSize: 10, color: v > 0 ? REDWOOD.success : undefined, fontWeight: isTot(r) ? 700 : undefined }}>
             {v > 0 ? fmtN(v) : ''}
@@ -534,10 +658,7 @@ const AccountAnalysisV2: React.FC = () => {
       },
       {
         title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Ent Cr</span>,
-        dataIndex: 'enteredCr',
-        key: 'entCr',
-        width: 130,
-        align: 'right',
+        dataIndex: 'enteredCr', key: 'entCr', width: 130, align: 'right',
         render: (v: number, r: JournalLine) => (
           <span style={{ fontSize: 10, color: v > 0 ? REDWOOD.primary : undefined, fontWeight: isTot(r) ? 700 : undefined }}>
             {v > 0 ? fmtN(v) : ''}
@@ -546,9 +667,7 @@ const AccountAnalysisV2: React.FC = () => {
       },
       {
         title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Ent Balance</span>,
-        key: 'entBal',
-        width: 140,
-        align: 'right',
+        key: 'entBal', width: 140, align: 'right',
         render: (_: any, record: JournalLine, index: number) => {
           if (isTot(record)) return <FmtBal v={record._entBal ?? 0} size={10} />;
           const v = runningBals[index]?.ent ?? 0;
@@ -561,12 +680,8 @@ const AccountAnalysisV2: React.FC = () => {
 
     return [
       {
-        title: 'Account',
-        dataIndex: 'concatenatedSegments',
-        key: 'account',
-        width: 220,
-        fixed: 'left',
-        ellipsis: true,
+        title: 'Account', dataIndex: 'concatenatedSegments', key: 'account',
+        width: 220, fixed: 'left', ellipsis: true,
         render: (_text: string, record: JournalLine) => {
           if (isTot(record)) return <Text strong style={{ fontSize: 11 }}>Total for Report</Text>;
           if (record.isOpeningBalance) return <Text strong style={{ fontSize: 10, color: REDWOOD.warning }}>Opening Balance</Text>;
@@ -575,11 +690,7 @@ const AccountAnalysisV2: React.FC = () => {
         },
       },
       {
-        title: 'Line Description',
-        dataIndex: 'jeLineDescription',
-        key: 'lineDesc',
-        width: 200,
-        ellipsis: true,
+        title: 'Line Description', dataIndex: 'jeLineDescription', key: 'lineDesc', width: 200, ellipsis: true,
         render: (text: string, record: JournalLine) =>
           isTot(record) ? null : (
             <Tooltip title={text}>
@@ -588,57 +699,35 @@ const AccountAnalysisV2: React.FC = () => {
           ),
       },
       {
-        title: 'Period',
-        dataIndex: 'defaultPeriodName',
-        key: 'period',
-        width: 80,
+        title: 'Period', dataIndex: 'defaultPeriodName', key: 'period', width: 80,
         render: (v: string, r: JournalLine) => isTot(r) ? null : <span style={{ fontSize: 10 }}>{v}</span>,
       },
       {
-        title: 'Acctg Date',
-        dataIndex: 'accountingDate',
-        key: 'acctgDate',
-        width: 100,
+        title: 'Acctg Date', dataIndex: 'accountingDate', key: 'acctgDate', width: 100,
         render: (v: string, r: JournalLine) => isTot(r) ? null : <span style={{ fontSize: 10 }}>{(v || '').slice(0, 10)}</span>,
       },
       {
-        title: 'Batch',
-        dataIndex: 'batchName',
-        key: 'batch',
-        width: 160,
-        ellipsis: true,
+        title: 'Batch', dataIndex: 'batchName', key: 'batch', width: 160, ellipsis: true,
         render: (v: string, r: JournalLine) => isTot(r) ? null : <span style={{ fontSize: 10 }}>{v}</span>,
       },
       {
-        title: 'Source',
-        dataIndex: 'userJeSourceName',
-        key: 'source',
-        width: 110,
+        title: 'Source', dataIndex: 'userJeSourceName', key: 'source', width: 110,
         render: (v: string, r: JournalLine) => isTot(r) ? null : <span style={{ fontSize: 10 }}>{v}</span>,
       },
       {
-        title: 'Category',
-        dataIndex: 'userJeCategoryName',
-        key: 'category',
-        width: 120,
+        title: 'Category', dataIndex: 'userJeCategoryName', key: 'category', width: 120,
         render: (v: string, r: JournalLine) => isTot(r) ? null : <span style={{ fontSize: 10 }}>{v}</span>,
       },
       {
-        title: 'Currency',
-        dataIndex: 'currencyCode',
-        key: 'currency',
-        width: 80,
+        title: 'Currency', dataIndex: 'currencyCode', key: 'currency', width: 80,
         render: (v: string, r: JournalLine) => isTot(r) ? null : <Tag style={{ fontSize: 9 }}>{v}</Tag>,
       },
-      // ── Entered first (when toggle on) ──────────────────────────────────────
+      // Entered first
       ...enteredCols,
-      // ── Accounted (always visible, comes after Entered) ─────────────────────
+      // Accounted
       {
         title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Acc Dr ({functionalCcy})</span>,
-        dataIndex: 'accountedDr',
-        key: 'accDr',
-        width: 150,
-        align: 'right',
+        dataIndex: 'accountedDr', key: 'accDr', width: 150, align: 'right',
         render: (v: number, r: JournalLine) => (
           <span style={{ fontSize: 10, color: v > 0 ? REDWOOD.success : undefined, fontWeight: isTot(r) ? 700 : undefined }}>
             {v > 0 ? fmtN(v) : ''}
@@ -647,10 +736,7 @@ const AccountAnalysisV2: React.FC = () => {
       },
       {
         title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Acc Cr ({functionalCcy})</span>,
-        dataIndex: 'accountedCr',
-        key: 'accCr',
-        width: 150,
-        align: 'right',
+        dataIndex: 'accountedCr', key: 'accCr', width: 150, align: 'right',
         render: (v: number, r: JournalLine) => (
           <span style={{ fontSize: 10, color: v > 0 ? REDWOOD.primary : undefined, fontWeight: isTot(r) ? 700 : undefined }}>
             {v > 0 ? fmtN(v) : ''}
@@ -659,9 +745,7 @@ const AccountAnalysisV2: React.FC = () => {
       },
       {
         title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Acc Balance ({functionalCcy})</span>,
-        key: 'accBal',
-        width: 140,
-        align: 'right',
+        key: 'accBal', width: 160, align: 'right',
         render: (_: any, record: JournalLine, index: number) => {
           if (isTot(record)) return <FmtBal v={record._accBal ?? 0} size={10} />;
           const v = runningBals[index]?.acc ?? 0;
@@ -671,10 +755,7 @@ const AccountAnalysisV2: React.FC = () => {
         },
       },
       {
-        title: '',
-        key: 'drill',
-        width: 36,
-        fixed: 'right',
+        title: '', key: 'drill', width: 36, fixed: 'right',
         render: (_: any, record: JournalLine) =>
           isTot(record) ? null : (
             <Tooltip title={`Journal ${record.jeHeaderId}`}>
@@ -686,47 +767,46 @@ const AccountAnalysisV2: React.FC = () => {
     ];
   }, [showEntered, runningBals, functionalCcy]);
 
-  // ── Export (ExcelJS — same rich format as Account Analysis v1) ───────────────
+  // ── Export ───────────────────────────────────────────────────────────────────
   const exportExcel = async () => {
     if (!filteredData.length) { message.warning('No data to export'); return; }
     const wb = new ExcelJS.Workbook();
-    wb.creator = 'ReactERP';
-    wb.created = new Date();
+    wb.creator = 'ReactERP'; wb.created = new Date();
     const ws = wb.addWorksheet('Account Analysis');
+    const white = { argb: 'FFFFFFFF' };
+    const numFmt = '#,##0.00';
+    const NCOLS = showEntered ? 16 : 13;
+    const mergeFull = (r: number) => ws.mergeCells(r, 1, r, NCOLS);
 
-    const white       = { argb: 'FFFFFFFF' };
-    const numFmt      = '#,##0.00';
-    const NCOLS       = showEntered ? 16 : 13; // descriptive(8) + ent(3)? + acc(3) + jeHdr(1) + date(1)
-    const mergeFull   = (r: number) => ws.mergeCells(r, 1, r, NCOLS);
-
-    // fills
-    const hdrFill: ExcelJS.Fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC74634' } };
-    const fltFill: ExcelJS.Fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0D6' } };
-    const colFill: ExcelJS.Fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3D3D3D' } };
-    const accFill: ExcelJS.Fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD6E4FF' } };
-    const entFill: ExcelJS.Fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9F7BE' } };
-    const totFill: ExcelJS.Fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } };
-    const altFill: ExcelJS.Fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } };
+    const hdrFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC74634' } };
+    const fltFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0D6' } };
+    const colFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3D3D3D' } };
+    const accFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD6E4FF' } };
+    const entFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9F7BE' } };
+    const totFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } };
+    const altFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } };
     const accHdrFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A5FCC' } };
     const entHdrFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF389E0D' } };
 
     // title
     mergeFull(1);
-    const titleCell = ws.getCell('A1');
-    titleCell.value = 'Account Analysis';
-    titleCell.font = { bold: true, size: 13, color: white };
-    titleCell.fill = hdrFill;
-    titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    const tc = ws.getCell('A1');
+    tc.value = 'Account Analysis'; tc.font = { bold: true, size: 13, color: white };
+    tc.fill = hdrFill; tc.alignment = { horizontal: 'center', vertical: 'middle' };
     ws.getRow(1).height = 22;
 
     // filter rows
+    const activeSegs = Object.entries(segFilters).map(([k, v]) => {
+      const def = SEGMENT_DEFS.find(d => d.key === k);
+      return `${def?.label || k}: ${segLabels[k] || v}`;
+    });
     const fRows: [string, string][] = [
-      ['Ledger',   ledger || '—'],
-      ['Company',  company ? `${company}${companyMeaning ? ' – ' + companyMeaning : ''}` : '—'],
-      ['Periods',  periods.length ? periods.join(', ') : '—'],
-      ['Account',  account ? `${account}${accountDesc ? ' – ' + accountDesc : ''}` : '—'],
-      ['Exported', new Date().toLocaleString()],
-      ['Records',  String(filteredData.length)],
+      ['Ledger',    ledger || '—'],
+      ['Account',   account ? `${account}${accountDesc ? ' – ' + accountDesc : ''}` : '—'],
+      ['Periods',   periods.length ? periods.join(', ') : '—'],
+      ['Filters',   activeSegs.length ? activeSegs.join(' | ') : '—'],
+      ['Exported',  new Date().toLocaleString()],
+      ['Records',   String(filteredData.length)],
     ];
     let ri = 2;
     for (const [lbl, val] of fRows) {
@@ -737,14 +817,13 @@ const AccountAnalysisV2: React.FC = () => {
       lc.fill = fltFill;
       lc.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
       vc.alignment = { horizontal: 'left',  vertical: 'middle', indent: 1 };
-      ws.getRow(ri).height = 16;
-      ri++;
+      ws.getRow(ri).height = 16; ri++;
     }
-    ri++; // blank separator
+    ri++;
 
-    // group header row (Entered | Accounted bands)
+    // group header
     ws.getRow(ri).height = 16;
-    for (let c = 1; c <= 9; c++) ws.getCell(ri, c).fill = colFill; // descriptive + date
+    for (let c = 1; c <= 9; c++) ws.getCell(ri, c).fill = colFill;
     let col = 10;
     if (showEntered) {
       ws.mergeCells(ri, col, ri, col + 2);
@@ -758,16 +837,15 @@ const AccountAnalysisV2: React.FC = () => {
     ac.value = `Accounted (${functionalCcy})`; ac.font = { bold: true, size: 10, color: { argb: 'FF1677FF' } };
     ac.fill = accFill; ac.alignment = { horizontal: 'center', vertical: 'middle' };
     col += 3;
-    ws.getCell(ri, col).fill = colFill; // JE Hdr
+    ws.getCell(ri, col).fill = colFill;
     ri++;
 
     // column headers
     const descHdrs = ['Account', 'Account Description', 'Line Description', 'Period', 'Acctg Date', 'Batch', 'Source', 'Category', 'Currency'];
-    const entHdrs  = showEntered ? [`Ent Dr`, `Ent Cr`, `Ent Balance`] : [];
+    const entHdrs  = showEntered ? ['Ent Dr', 'Ent Cr', 'Ent Balance'] : [];
     const accHdrs  = [`Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Balance (${functionalCcy})`];
-    const hdrs     = [...descHdrs, ...entHdrs, ...accHdrs, 'JE Header ID'];
-    const widths   = [28, 28, 32, 12, 14, 28, 14, 16, 10, ...(showEntered ? [16, 16, 16] : []), 16, 16, 16, 14];
-
+    const hdrs = [...descHdrs, ...entHdrs, ...accHdrs, 'JE Header ID'];
+    const widths = [28, 28, 32, 12, 14, 28, 14, 16, 10, ...(showEntered ? [16, 16, 16] : []), 16, 16, 16, 14];
     const hRow = ws.getRow(ri); hRow.height = 18;
     hdrs.forEach((h, i) => {
       const cell = ws.getCell(ri, i + 1);
@@ -790,8 +868,7 @@ const AccountAnalysisV2: React.FC = () => {
       accRun += (r.accountedDr || 0) - (r.accountedCr || 0);
       entRun += (r.enteredDr   || 0) - (r.enteredCr   || 0);
       const isAlt = idx % 2 === 1;
-      const row = ws.getRow(ri); row.height = 15;
-
+      ws.getRow(ri).height = 15;
       const vals: (string | number)[] = [
         r.concatenatedSegments || '',
         r.accountDescription || '',
@@ -806,19 +883,13 @@ const AccountAnalysisV2: React.FC = () => {
         r.accountedDr || 0, r.accountedCr || 0, accRun,
         r.jeHeaderId,
       ];
-      const accStart = showEntered ? 9 : 9;   // 0-based
-      const accBalIdx = showEntered ? 11 : 11;
-      const entBalIdx = showEntered ? 11 : -1; // only when shown, accBalance shifts
-
       vals.forEach((v, i) => {
         const cell = ws.getCell(ri, i + 1);
-        cell.value = v;
-        cell.font = { size: 10 };
+        cell.value = v; cell.font = { size: 10 };
         if (isAlt) cell.fill = altFill;
         const isNumeric = i >= 9;
         cell.alignment = { horizontal: isNumeric ? 'right' : 'left', vertical: 'middle', indent: 1 };
         if (isNumeric) cell.numFmt = numFmt;
-        // colour balance columns
         const isEntBal = showEntered && i === 11;
         const isAccBal = i === (showEntered ? 14 : 11);
         if (isEntBal || isAccBal) {
@@ -830,7 +901,7 @@ const AccountAnalysisV2: React.FC = () => {
     });
 
     // totals row
-    const tRow = ws.getRow(ri); tRow.height = 16;
+    ws.getRow(ri).height = 16;
     ws.mergeCells(ri, 1, ri, 9);
     const tl = ws.getCell(ri, 1);
     tl.value = `Totals  (${filteredData.length} lines)`;
@@ -847,7 +918,6 @@ const AccountAnalysisV2: React.FC = () => {
     });
     ws.getCell(ri, 10 + tVals.length).fill = totFill;
 
-    // freeze & auto-filter
     ws.views = [{ state: 'frozen', xSplit: 0, ySplit: dataStartRow - 1 }];
     ws.autoFilter = { from: { row: dataStartRow - 1, column: 1 }, to: { row: ri, column: NCOLS } };
 
@@ -856,12 +926,13 @@ const AccountAnalysisV2: React.FC = () => {
     message.success('Excel file downloaded');
   };
 
-  // ── Company display label ───────────────────────────────────────────────────
-  const companyDisplayLabel = company
-    ? `${company}${companyMeaning ? ' – ' + companyMeaning : ''}`
-    : 'All Companies';
+  // ── Active filter chips ───────────────────────────────────────────────────────
+  const activeFilters = Object.entries(segFilters).filter(([, v]) => v);
+  const accountLabel = account
+    ? `${account}${accountDesc ? ' – ' + accountDesc : ''}`
+    : '';
 
-  // ─── Render ────────────────────────────────────────────────────────────────
+  // ─── Render ──────────────────────────────────────────────────────────────────
   return (
     <Layout style={{ minHeight: 'calc(100vh - 64px)', background: REDWOOD.neutral100 }}>
       <Content>
@@ -877,8 +948,7 @@ const AccountAnalysisV2: React.FC = () => {
         <div style={{ padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
 
           {/* ── Parameter Card ── */}
-          <Card
-            size="small"
+          <Card size="small"
             styles={{ body: { padding: '14px 16px' } }}
             style={{ borderRadius: 10, border: `1px solid ${REDWOOD.neutral200}`, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}
           >
@@ -886,45 +956,30 @@ const AccountAnalysisV2: React.FC = () => {
               <BookOutlined style={{ color: REDWOOD.info, fontSize: 16 }} />
               <Text strong style={{ fontSize: 14 }}>Search Parameters</Text>
             </div>
-            <Row gutter={[12, 8]}>
+
+            {/* Row 1: Ledger / Account / Period / Buttons */}
+            <Row gutter={[12, 8]} align="bottom">
               {/* Ledger */}
-              <Col xs={24} sm={12} md={6}>
+              <Col xs={24} sm={12} md={5}>
                 <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 3, fontWeight: 500 }}>
                   Ledger *
                   {ledgersLoading && <ReloadOutlined spin style={{ marginLeft: 4, fontSize: 10 }} />}
                 </div>
-                <Select
-                  value={ledger || undefined}
-                  onChange={v => { setLedger(v); setPeriods([]); }}
-                  style={{ width: '100%' }} size="small" showSearch
-                  loading={ledgersLoading}
-                  placeholder={ledgersLoading ? 'Loading…' : 'Select ledger'}
-                >
+                <Select value={ledger || undefined} onChange={v => { setLedger(v); setPeriods([]); }}
+                  style={{ width: '100%' }} size="small" showSearch loading={ledgersLoading}
+                  placeholder={ledgersLoading ? 'Loading…' : 'Select ledger'}>
                   {ledgerOptions.map(l => <Option key={l} value={l}>{l}</Option>)}
                 </Select>
               </Col>
 
-              {/* Company — popup picker */}
-              <Col xs={24} sm={12} md={6}>
-                <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 3, fontWeight: 500 }}>Company</div>
-                <div
-                  onClick={() => setCompanyPickerOpen(true)}
-                  style={{
-                    height: 24, padding: '0 8px', border: `1px solid #d9d9d9`, borderRadius: 6,
-                    background: REDWOOD.surface, cursor: 'pointer', display: 'flex', alignItems: 'center',
-                    justifyContent: 'space-between', fontSize: 12,
-                    color: company ? REDWOOD.neutral900 : REDWOOD.neutral600,
-                    userSelect: 'none',
-                    transition: 'border-color 0.2s',
-                  }}
-                  onMouseEnter={e => (e.currentTarget.style.borderColor = REDWOOD.info)}
-                  onMouseLeave={e => (e.currentTarget.style.borderColor = '#d9d9d9')}
-                >
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {companyDisplayLabel}
-                  </span>
-                  <DownOutlined style={{ fontSize: 9, color: REDWOOD.neutral600, flexShrink: 0, marginLeft: 4 }} />
-                </div>
+              {/* Account */}
+              <Col xs={24} sm={12} md={7}>
+                <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 3, fontWeight: 500 }}>Account</div>
+                <ClickField
+                  label={accountLabel} placeholder="All Accounts"
+                  onClick={() => { loadAccounts(); setAccountPickerOpen(true); }}
+                  onClear={() => { setAccount(''); setAccountDesc(''); }}
+                />
               </Col>
 
               {/* Period(s) */}
@@ -933,82 +988,68 @@ const AccountAnalysisV2: React.FC = () => {
                   Period(s) *
                   {periodsLoading && <ReloadOutlined spin style={{ marginLeft: 4, fontSize: 10 }} />}
                 </div>
-                <Select
-                  mode="multiple" value={periods} onChange={setPeriods}
+                <Select mode="multiple" value={periods} onChange={setPeriods}
                   style={{ width: '100%' }} size="small" showSearch allowClear
-                  placeholder="Select periods" maxTagCount={3}
-                  loading={periodsLoading}
-                >
+                  placeholder="Select periods" maxTagCount={3} loading={periodsLoading}>
                   {allPeriods.map(p => <Option key={p} value={p}>{p}</Option>)}
                 </Select>
               </Col>
 
-              {/* Account — LOV picker */}
-              <Col xs={24} sm={12} md={6}>
-                <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 3, fontWeight: 500 }}>Account</div>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <div
-                    onClick={() => { loadAccounts(); setAccountPickerOpen(true); }}
-                    style={{
-                      flex: 1, height: 24, padding: '0 8px', border: `1px solid #d9d9d9`, borderRadius: 6,
-                      background: REDWOOD.surface, cursor: 'pointer', display: 'flex', alignItems: 'center',
-                      justifyContent: 'space-between', fontSize: 12,
-                      color: account ? REDWOOD.neutral900 : REDWOOD.neutral600,
-                      userSelect: 'none', transition: 'border-color 0.2s', overflow: 'hidden',
-                    }}
-                    onMouseEnter={e => (e.currentTarget.style.borderColor = REDWOOD.info)}
-                    onMouseLeave={e => (e.currentTarget.style.borderColor = '#d9d9d9')}
-                  >
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {account
-                        ? <><Text code style={{ fontSize: 11 }}>{account}</Text>{accountDesc ? ` – ${accountDesc}` : ''}</>
-                        : 'All Accounts'}
-                    </span>
-                    <DownOutlined style={{ fontSize: 9, color: REDWOOD.neutral600, flexShrink: 0, marginLeft: 4 }} />
-                  </div>
-                  {account && (
-                    <Button size="small" type="text" style={{ padding: '0 4px', height: 24 }}
-                      onClick={() => { setAccount(''); setAccountDesc(''); }}>✕</Button>
-                  )}
-                </div>
-              </Col>
-
-              {/* Journal Source */}
-              <Col xs={24} sm={12} md={5}>
-                <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 3, fontWeight: 500 }}>Journal Source</div>
-                <Input
-                  value={jeSource} onChange={e => setJeSource(e.target.value)}
-                  size="small" placeholder="Optional" allowClear
-                />
-              </Col>
-
-              {/* Journal Category */}
-              <Col xs={24} sm={12} md={5}>
-                <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 3, fontWeight: 500 }}>Journal Category</div>
-                <Input
-                  value={jeCategory} onChange={e => setJeCategory(e.target.value)}
-                  size="small" placeholder="Optional" allowClear
-                />
-              </Col>
-
               {/* Buttons */}
-              <Col xs={24} sm={12} md={4} style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
-                <Button
-                  type="primary" icon={<SearchOutlined />} size="small" loading={loading}
+              <Col xs={24} sm={12} md={4} style={{ display: 'flex', gap: 6 }}>
+                <Button type="primary" icon={<SearchOutlined />} size="small" loading={loading}
                   onClick={handleSearch}
-                  style={{ background: REDWOOD.info, borderColor: REDWOOD.info, flex: 1 }}
-                >
+                  style={{ background: REDWOOD.info, borderColor: REDWOOD.info, flex: 1 }}>
                   Search
                 </Button>
                 <Button icon={<ClearOutlined />} size="small" onClick={() => {
                   setRows([]); setHasSearched(false); setPeriods([]);
-                  setAccount(''); setAccountDesc(''); setCompany(''); setCompanyMeaning('');
-                  setJeSource(''); setJeCategory('');
-                }}>
-                  Clear
-                </Button>
+                  setAccount(''); setAccountDesc('');
+                  setSegFilters({}); setSegLabels({});
+                }} />
               </Col>
             </Row>
+
+            {/* Row 2: Segment Filters */}
+            <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, fontWeight: 500 }}>
+                <FilterOutlined style={{ marginRight: 4 }} />Segment Filters:
+              </Text>
+
+              {/* Active filter chips */}
+              {activeFilters.map(([key, val]) => {
+                const def = SEGMENT_DEFS.find(d => d.key === key);
+                return (
+                  <Tag
+                    key={key}
+                    color={def?.color || 'default'}
+                    closable
+                    onClose={() => removeSegFilter(key)}
+                    style={{ fontSize: 11, margin: 0 }}
+                  >
+                    <span style={{ opacity: 0.8 }}>{def?.label}: </span>
+                    <strong>{segLabels[key] || val}</strong>
+                  </Tag>
+                );
+              })}
+
+              {/* Add filter button */}
+              <Button
+                size="small" type="dashed" icon={<PlusOutlined />}
+                onClick={() => setSegPickerOpen(true)}
+                style={{ fontSize: 11, height: 24, color: REDWOOD.info, borderColor: REDWOOD.info }}
+              >
+                Add Filter
+              </Button>
+
+              {activeFilters.length > 0 && (
+                <Button size="small" type="text"
+                  onClick={() => { setSegFilters({}); setSegLabels({}); }}
+                  style={{ fontSize: 11, height: 24, color: REDWOOD.primary }}>
+                  Clear All
+                </Button>
+              )}
+            </div>
           </Card>
 
           {/* ── Toolbar ── */}
@@ -1028,12 +1069,10 @@ const AccountAnalysisV2: React.FC = () => {
                 </Space>
               </Space>
               <Space>
-                <Input
-                  prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
+                <Input prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
                   placeholder="Filter results…" size="small" allowClear
                   value={gridSearch} onChange={e => setGridSearch(e.target.value)}
-                  style={{ width: 200, borderRadius: 6 }}
-                />
+                  style={{ width: 200, borderRadius: 6 }} />
                 <Tooltip title="View API URL">
                   <Button size="small" icon={<ApiOutlined />}
                     style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
@@ -1049,15 +1088,12 @@ const AccountAnalysisV2: React.FC = () => {
           <Spin spinning={loading}>
             {hasSearched && (
               <Table<JournalLine>
-                dataSource={tableData}
-                columns={columns}
-                rowKey="key"
-                size="small"
+                dataSource={tableData} columns={columns} rowKey="key" size="small"
                 scroll={{ x: 'max-content', y: 480 }}
                 pagination={{ pageSize: 50, showSizeChanger: true, showTotal: t => `${t} records` }}
                 className="aa-v2-grid"
                 rowClassName={record =>
-                  record.isTotals        ? 'aa-totals-row'  :
+                  record.isTotals ? 'aa-totals-row' :
                   record.isOpeningBalance ? 'aa-opening-row' :
                   record.isClosingBalance ? 'aa-closing-row' : ''
                 }
@@ -1065,18 +1101,14 @@ const AccountAnalysisV2: React.FC = () => {
             )}
           </Spin>
 
-          {/* ── Balance Summary Cards ── */}
+          {/* ── Balance Summary ── */}
           {hasSearched && rows.length > 0 && (
             <Row gutter={12}>
-              {/* Entered (when toggle on) — shown first */}
               {showEntered && (
                 <Col xs={24} md={12}>
-                  <Card size="small"
-                    styles={{ body: { padding: '10px 16px' } }}
+                  <Card size="small" styles={{ body: { padding: '10px 16px' } }}
                     style={{ borderRadius: 8, border: '1px solid #b7eb8f', background: '#f6ffed' }}>
-                    <Text strong style={{ fontSize: 11, color: '#52c41a', display: 'block', marginBottom: 8 }}>
-                      Entered Balance
-                    </Text>
+                    <Text strong style={{ fontSize: 11, color: '#52c41a', display: 'block', marginBottom: 8 }}>Entered Balance</Text>
                     <Row gutter={0}>
                       {[
                         { label: 'Opening Balance', v: openingBal?.ent ?? 0 },
@@ -1096,14 +1128,11 @@ const AccountAnalysisV2: React.FC = () => {
                   </Card>
                 </Col>
               )}
-
-              {/* Accounted — always shown, after Entered */}
               <Col xs={24} md={showEntered ? 12 : 24}>
-                <Card size="small"
-                  styles={{ body: { padding: '10px 16px' } }}
+                <Card size="small" styles={{ body: { padding: '10px 16px' } }}
                   style={{ borderRadius: 8, border: '1px solid #adc6ff', background: '#f0f5ff' }}>
                   <Text strong style={{ fontSize: 11, color: '#1677ff', display: 'block', marginBottom: 8 }}>
-                    Accounted Balance
+                    Accounted Balance ({functionalCcy})
                   </Text>
                   <Row gutter={0}>
                     {[
@@ -1128,21 +1157,17 @@ const AccountAnalysisV2: React.FC = () => {
         </div>
       </Content>
 
-      {/* Account Picker Modal */}
-      <AccountPicker
-        open={accountPickerOpen}
-        onClose={() => setAccountPickerOpen(false)}
-        options={accountOptions}
-        loading={accountsLoading}
-        onSelect={(val, desc) => { setAccount(val); setAccountDesc(desc); }}
-      />
+      {/* Account Picker */}
+      <AccountPicker open={accountPickerOpen} onClose={() => setAccountPickerOpen(false)}
+        options={accountOptions} loading={accountsLoading}
+        onSelect={(val, desc) => { setAccount(val); setAccountDesc(desc); }} />
 
-      {/* Company Picker Modal */}
-      <CompanyPicker
-        open={companyPickerOpen}
-        onClose={() => setCompanyPickerOpen(false)}
-        options={companyOptions}
-        onSelect={(val, meaning) => { setCompany(val); setCompanyMeaning(meaning); }}
+      {/* Segment Filter Picker */}
+      <SegmentPicker
+        open={segPickerOpen} onClose={() => setSegPickerOpen(false)}
+        segmentValues={segmentValues} companyOptions={companyOptions}
+        existing={segFilters} loading={segValuesLoading}
+        onAdd={addSegFilter}
       />
 
       {/* API URL modal */}
@@ -1177,16 +1202,10 @@ const AccountAnalysisV2: React.FC = () => {
 
       <style>{`
         .aa-v2-grid .ant-table-tbody > tr.aa-totals-row > td {
-          background: #f0f0f0 !important;
-          border-top: 2px solid #d9d9d9 !important;
-          font-weight: 700;
+          background: #f0f0f0 !important; border-top: 2px solid #d9d9d9 !important; font-weight: 700;
         }
-        .aa-v2-grid .ant-table-tbody > tr.aa-opening-row > td {
-          background: #fffbe6 !important;
-        }
-        .aa-v2-grid .ant-table-tbody > tr.aa-closing-row > td {
-          background: #f6ffed !important;
-        }
+        .aa-v2-grid .ant-table-tbody > tr.aa-opening-row > td { background: #fffbe6 !important; }
+        .aa-v2-grid .ant-table-tbody > tr.aa-closing-row > td { background: #f6ffed !important; }
       `}</style>
     </Layout>
   );
