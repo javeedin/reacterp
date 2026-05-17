@@ -1251,6 +1251,25 @@ const AAPanel: React.FC = () => {
     }
   }, []);
 
+  // ── Segment filter helpers ────────────────────────────────────────────────────
+  const addSegFilter = (key: string, value: string, label?: string) => {
+    setSegFilters(prev => { const n = { ...prev }; if (value) n[key] = value; else delete n[key]; return n; });
+    setSegLabels(prev => { const n = { ...prev }; if (value && label) n[key] = label; else delete n[key]; return n; });
+  };
+  const removeSegFilter = (key: string) => {
+    setSegFilters(prev => { const n = { ...prev }; delete n[key]; return n; });
+    setSegLabels(prev => { const n = { ...prev }; delete n[key]; return n; });
+  };
+
+  // ── Derived data ──────────────────────────────────────────────────────────────
+  const dataRows = useMemo(() => rows.filter(r => !r.isClosingBalance), [rows]);
+
+  const filteredData = useMemo(() => {
+    if (!gridSearch.trim()) return dataRows;
+    const q = gridSearch.toLowerCase();
+    return dataRows.filter(r => Object.values(r).some(v => String(v ?? '').toLowerCase().includes(q)));
+  }, [dataRows, gridSearch]);
+
   // ── Apply / Clear group ───────────────────────────────────────────────────────
   const applyGroup = useCallback(async () => {
     if (!groupBy) return;
@@ -1312,25 +1331,6 @@ const AAPanel: React.FC = () => {
     setComboBreaks([]);
   }, []);
 
-  // ── Segment filter helpers ────────────────────────────────────────────────────
-  const addSegFilter = (key: string, value: string, label?: string) => {
-    setSegFilters(prev => { const n = { ...prev }; if (value) n[key] = value; else delete n[key]; return n; });
-    setSegLabels(prev => { const n = { ...prev }; if (value && label) n[key] = label; else delete n[key]; return n; });
-  };
-  const removeSegFilter = (key: string) => {
-    setSegFilters(prev => { const n = { ...prev }; delete n[key]; return n; });
-    setSegLabels(prev => { const n = { ...prev }; delete n[key]; return n; });
-  };
-
-  // ── Derived data ──────────────────────────────────────────────────────────────
-  const dataRows = useMemo(() => rows.filter(r => !r.isClosingBalance), [rows]);
-
-  const filteredData = useMemo(() => {
-    if (!gridSearch.trim()) return dataRows;
-    const q = gridSearch.toLowerCase();
-    return dataRows.filter(r => Object.values(r).some(v => String(v ?? '').toLowerCase().includes(q)));
-  }, [dataRows, gridSearch]);
-
   const rowsWithBal = useMemo(() => {
     let accRun = 0; let entRun = 0;
     return filteredData.map(r => {
@@ -1363,7 +1363,7 @@ const AAPanel: React.FC = () => {
     const ptdLines = filteredData.filter(r => !r.isOpeningBalance && !r.isClosingBalance && !r.isTotals);
     const map = new Map<string, GroupedRow>();
     ptdLines.forEach(r => {
-      const val = getGroupVal(r, groupBy) || '(blank)';
+      const val = getGroupVal(r as any, groupBy) || '(blank)';
       if (!map.has(val)) {
         map.set(val, { key: `grp-${val}`, groupValue: val, count: 0, lines: [],
           totalEntDr: 0, totalEntCr: 0, totalAccDr: 0, totalAccCr: 0, accBalance: 0, entBalance: 0 });
