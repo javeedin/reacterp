@@ -1,15 +1,15 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Layout, Typography, Card, Breadcrumb, Space, Select, Input,
   Button, Table, Tag, Spin, Tooltip, message, Switch, Row, Col,
-  Divider, Badge, Modal,
+  Divider, Badge, Modal, Tabs, Radio,
 } from 'antd';
 import type { ColumnsType, ExpandableConfig } from 'antd/es/table';
 import {
   HomeOutlined, SearchOutlined, ClearOutlined,
   FileExcelOutlined, AuditOutlined, ReloadOutlined,
   ApiOutlined, CopyOutlined, BookOutlined, DownOutlined,
-  FilterOutlined, PlusOutlined, GroupOutlined,
+  FilterOutlined, PlusOutlined, GroupOutlined, BarChartOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import ExcelJS from 'exceljs';
@@ -53,17 +53,22 @@ const SEGMENT_DEFS: SegmentDef[] = [
   { key: 'je_category',  label: 'Journal Category', color: 'gold',     valueKey: 'categories'     },
 ];
 
-// Group-by options
 const GROUP_BY_OPTIONS = [
-  { value: 'defaultPeriodName',  label: 'Period'          },
-  { value: 'concatenatedSegments', label: 'Account'       },
-  { value: 'batchName',          label: 'Batch'           },
-  { value: 'userJeSourceName',   label: 'Journal Source'  },
-  { value: 'userJeCategoryName', label: 'Journal Category'},
-  { value: 'currencyCode',       label: 'Currency'        },
+  { value: 'defaultPeriodName',    label: 'Period'           },
+  { value: 'concatenatedSegments', label: 'Account'          },
+  { value: 'batchName',            label: 'Batch'            },
+  { value: 'userJeSourceName',     label: 'Journal Source'   },
+  { value: 'userJeCategoryName',   label: 'Journal Category' },
+  { value: 'currencyCode',         label: 'Currency'         },
 ];
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
+interface PeriodInfo {
+  period_name_id: string;
+  period_year: number;
+  period_number: number;
+}
+
 interface AccountOption { account: string; description: string; account_type: string; }
 
 interface JournalLine {
@@ -320,61 +325,31 @@ const DrillModal: React.FC<{
   }), { entDr: 0, entCr: 0, accDr: 0, accCr: 0 }), [lines]);
 
   const drillCols: ColumnsType<any> = [
-    {
-      title: '#', key: 'lineNo', width: 44,
-      render: (_: any, r: any) => <span style={{ fontSize: 10, color: REDWOOD.neutral600 }}>
-        {r.je_line_number || r.jeLineNumber || ''}
-      </span>,
-    },
-    {
-      title: 'Account', key: 'acct', width: 190,
+    { title: '#', key: 'lineNo', width: 44,
+      render: (_: any, r: any) => <span style={{ fontSize: 10, color: REDWOOD.neutral600 }}>{r.je_line_number || r.jeLineNumber || ''}</span> },
+    { title: 'Account', key: 'acct', width: 190,
       render: (_: any, r: any) => {
         const combo = r.account_combination || r.accountCombination || r.concatenatedSegments ||
           [r.company, r.lob, r.department, r.account, r.sub_account || r.subAccount, r.analysis, r.intercompany]
             .filter(Boolean).join('-');
         return <Text code style={{ fontSize: 10 }}>{combo || '—'}</Text>;
-      },
-    },
-    {
-      title: 'Description', key: 'desc', ellipsis: true,
+      } },
+    { title: 'Description', key: 'desc', ellipsis: true,
       render: (_: any, r: any) => (
         <Tooltip title={r.description || r.je_line_description || ''}>
           <span style={{ fontSize: 10 }}>{r.description || r.je_line_description || '—'}</span>
         </Tooltip>
-      ),
-    },
-    {
-      title: 'Ent Dr', key: 'entDr', width: 120, align: 'right',
-      render: (_: any, r: any) => {
-        const v = Number(r.entered_dr || r.enteredDr || 0);
-        return v ? <span style={{ fontSize: 10, color: REDWOOD.success }}>{fmtN(v)}</span> : null;
-      },
-    },
-    {
-      title: 'Ent Cr', key: 'entCr', width: 120, align: 'right',
-      render: (_: any, r: any) => {
-        const v = Number(r.entered_cr || r.enteredCr || 0);
-        return v ? <span style={{ fontSize: 10, color: REDWOOD.primary }}>{fmtN(v)}</span> : null;
-      },
-    },
-    {
-      title: `Acc Dr (${functionalCcy})`, key: 'accDr', width: 130, align: 'right',
-      render: (_: any, r: any) => {
-        const v = Number(r.accounted_dr || r.accountedDr || 0);
-        return v ? <span style={{ fontSize: 10, color: REDWOOD.success }}>{fmtN(v)}</span> : null;
-      },
-    },
-    {
-      title: `Acc Cr (${functionalCcy})`, key: 'accCr', width: 130, align: 'right',
-      render: (_: any, r: any) => {
-        const v = Number(r.accounted_cr || r.accountedCr || 0);
-        return v ? <span style={{ fontSize: 10, color: REDWOOD.primary }}>{fmtN(v)}</span> : null;
-      },
-    },
-    {
-      title: 'Ccy', key: 'ccy', width: 60,
-      render: (_: any, r: any) => <Tag style={{ fontSize: 9 }}>{r.currency_code || r.currencyCode || ''}</Tag>,
-    },
+      ) },
+    { title: 'Ent Dr', key: 'entDr', width: 120, align: 'right',
+      render: (_: any, r: any) => { const v = Number(r.entered_dr || r.enteredDr || 0); return v ? <span style={{ fontSize: 10, color: REDWOOD.success }}>{fmtN(v)}</span> : null; } },
+    { title: 'Ent Cr', key: 'entCr', width: 120, align: 'right',
+      render: (_: any, r: any) => { const v = Number(r.entered_cr || r.enteredCr || 0); return v ? <span style={{ fontSize: 10, color: REDWOOD.primary }}>{fmtN(v)}</span> : null; } },
+    { title: `Acc Dr (${functionalCcy})`, key: 'accDr', width: 130, align: 'right',
+      render: (_: any, r: any) => { const v = Number(r.accounted_dr || r.accountedDr || 0); return v ? <span style={{ fontSize: 10, color: REDWOOD.success }}>{fmtN(v)}</span> : null; } },
+    { title: `Acc Cr (${functionalCcy})`, key: 'accCr', width: 130, align: 'right',
+      render: (_: any, r: any) => { const v = Number(r.accounted_cr || r.accountedCr || 0); return v ? <span style={{ fontSize: 10, color: REDWOOD.primary }}>{fmtN(v)}</span> : null; } },
+    { title: 'Ccy', key: 'ccy', width: 60,
+      render: (_: any, r: any) => <Tag style={{ fontSize: 9 }}>{r.currency_code || r.currencyCode || ''}</Tag> },
   ];
 
   return (
@@ -426,8 +401,360 @@ const DrillModal: React.FC<{
   );
 };
 
-// ─── Main Component ───────────────────────────────────────────────────────────
-const AccountAnalysisV2: React.FC = () => {
+// ─── Trial Balance Panel ──────────────────────────────────────────────────────
+const TBPanel: React.FC = () => {
+  const [ledger, setLedger]               = useState('');
+  const [ledgerOptions, setLedgerOptions] = useState<string[]>([]);
+  const [ledgersLoading, setLedgersLoading] = useState(false);
+  const [company, setCompany]             = useState('');
+  const [companyOptions, setCompanyOptions] = useState<{ value: string; meaning: string }[]>([]);
+  const [companyLoading, setCompanyLoading] = useState(false);
+  const [allPeriods, setAllPeriods]       = useState<PeriodInfo[]>([]);
+  const [periodsLoading, setPeriodsLoading] = useState(false);
+  const [selectedYear, setSelectedYear]   = useState<number | null>(null);
+  const [selectedPeriod, setSelectedPeriod] = useState('');
+  const [ptdYtd, setPtdYtd]               = useState<'PTD' | 'YTD'>('PTD');
+  const [showEntered, setShowEntered]     = useState(false);
+  const [tbData, setTbData]               = useState<any[]>([]);
+  const [loading, setLoading]             = useState(false);
+  const [hasSearched, setHasSearched]     = useState(false);
+  const [functionalCcy, setFunctionalCcy] = useState('AED');
+  const [gridSearch, setGridSearch]       = useState('');
+
+  // Load ledgers
+  useEffect(() => {
+    setLedgersLoading(true);
+    fetch(`${API_BASE}/getledgername`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        const names = [...new Set(
+          (data.items || []).map((i: any) => i.ledger_name).filter(Boolean) as string[]
+        )];
+        setLedgerOptions(names);
+        if (names.length) setLedger(names[0]);
+      })
+      .catch(() => {})
+      .finally(() => setLedgersLoading(false));
+  }, []);
+
+  // Load company LOV
+  useEffect(() => {
+    setCompanyLoading(true);
+    fetch(COMPANY_LOV_URL)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        setCompanyOptions(
+          (data.items || [])
+            .map((i: any) => ({ value: i.value || i.VALUE || '', meaning: i.meaning || i.MEANING || '' }))
+            .filter((c: any) => c.value)
+        );
+      })
+      .catch(() => {})
+      .finally(() => setCompanyLoading(false));
+  }, []);
+
+  // Load periods when ledger changes
+  useEffect(() => {
+    if (!ledger) return;
+    setPeriodsLoading(true);
+    setAllPeriods([]);
+    setSelectedYear(null);
+    setSelectedPeriod('');
+    fetch(`${APEX_BASE}/periodsstatus/create?ledger_name=${encodeURIComponent(ledger)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        const items: PeriodInfo[] = (data.items || [])
+          .filter((i: any) => i.period_year && (i.period_name_id || i.period_name))
+          .map((i: any) => ({
+            period_name_id: i.period_name_id || i.period_name || '',
+            period_year: Number(i.period_year),
+            period_number: Number(i.period_number || 0),
+          }));
+        setAllPeriods(items);
+        if (items.length) {
+          const latestYear = Math.max(...items.map(p => p.period_year));
+          setSelectedYear(latestYear);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setPeriodsLoading(false));
+  }, [ledger]);
+
+  // Years derived from periods
+  const years = useMemo(() =>
+    [...new Set(allPeriods.map(p => p.period_year))].sort((a, b) => b - a),
+  [allPeriods]);
+
+  // Periods for selected year, sorted by period_number
+  const periodsForYear = useMemo(() => {
+    if (!selectedYear) return [];
+    return allPeriods
+      .filter(p => p.period_year === selectedYear)
+      .sort((a, b) => a.period_number - b.period_number);
+  }, [allPeriods, selectedYear]);
+
+  // Auto-select latest period when year changes
+  useEffect(() => {
+    if (periodsForYear.length) {
+      setSelectedPeriod(periodsForYear[periodsForYear.length - 1].period_name_id);
+    } else {
+      setSelectedPeriod('');
+    }
+  }, [periodsForYear]);
+
+  // Search
+  const handleSearch = useCallback(async () => {
+    if (!ledger || !selectedPeriod) { message.warning('Select ledger and period'); return; }
+    setLoading(true); setHasSearched(true); setTbData([]);
+    try {
+      const p = new URLSearchParams({ ledger_name: ledger, period_name: selectedPeriod });
+      if (company) p.set('company', company);
+      const res = await fetch(`${API_BASE}/rr-trialbalance/standard?${p}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const items: any[] = data.items || [];
+      if (items.length) {
+        const ccy = items[0].currency_code || items[0].ledger_currency || 'AED';
+        setFunctionalCcy(ccy);
+      }
+      setTbData(items.map((i: any, idx: number) => ({ ...i, key: `tb-${idx}` })));
+      message.success(`${items.length} accounts loaded`);
+    } catch (e: any) {
+      message.error(`Failed: ${e.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [ledger, selectedPeriod, company]);
+
+  // Filtered data
+  const filteredData = useMemo(() => {
+    if (!gridSearch.trim()) return tbData;
+    const q = gridSearch.toLowerCase();
+    return tbData.filter(r =>
+      (r.account_combination || '').toLowerCase().includes(q) ||
+      (r.account_desc || '').toLowerCase().includes(q)
+    );
+  }, [tbData, gridSearch]);
+
+  // Totals
+  const totals = useMemo(() => filteredData.reduce((acc, r) => ({
+    opening:    acc.opening    + Number(ptdYtd === 'PTD' ? (r.opening    || 0) : (r.ytd_opening    || 0)),
+    debit:      acc.debit      + Number(ptdYtd === 'PTD' ? (r.debit      || 0) : (r.ytd_debit      || 0)),
+    credit:     acc.credit     + Number(ptdYtd === 'PTD' ? (r.credit     || 0) : (r.ytd_credit     || 0)),
+    closing:    acc.closing    + Number(r.closing || 0),
+    entOpening: acc.entOpening + Number(ptdYtd === 'PTD' ? (r.entered_opening || 0) : (r.ytd_entered_opening || 0)),
+    entDebit:   acc.entDebit   + Number(ptdYtd === 'PTD' ? (r.entered_debit   || 0) : (r.ytd_entered_debit   || 0)),
+    entCredit:  acc.entCredit  + Number(ptdYtd === 'PTD' ? (r.entered_credit  || 0) : (r.ytd_entered_credit  || 0)),
+    entClosing: acc.entClosing + Number(r.entered_closing || 0),
+  }), { opening: 0, debit: 0, credit: 0, closing: 0, entOpening: 0, entDebit: 0, entCredit: 0, entClosing: 0 }),
+  [filteredData, ptdYtd]);
+
+  // Columns
+  const columns = useMemo((): ColumnsType<any> => {
+    const typeColor: Record<string, string> = { A: 'gold', L: 'volcano', E: 'green', R: 'blue', O: 'purple' };
+
+    const entCols: ColumnsType<any> = showEntered ? [
+      { title: <span style={{ color: '#52c41a', fontWeight: 600 }}>{ptdYtd === 'PTD' ? 'Ent Opening' : 'YTD Ent Opening'}</span>,
+        key: 'entOpening', width: 140, align: 'right' as const,
+        render: (_: any, r: any) => <FmtBal v={Number(ptdYtd === 'PTD' ? (r.entered_opening || 0) : (r.ytd_entered_opening || 0))} size={10} /> },
+      { title: <span style={{ color: '#52c41a', fontWeight: 600 }}>{ptdYtd === 'PTD' ? 'Ent Debit' : 'YTD Ent Dr'}</span>,
+        key: 'entDebit', width: 130, align: 'right' as const,
+        render: (_: any, r: any) => { const v = Number(ptdYtd === 'PTD' ? (r.entered_debit || 0) : (r.ytd_entered_debit || 0)); return v ? <DrCell v={v} /> : null; } },
+      { title: <span style={{ color: '#52c41a', fontWeight: 600 }}>{ptdYtd === 'PTD' ? 'Ent Credit' : 'YTD Ent Cr'}</span>,
+        key: 'entCredit', width: 130, align: 'right' as const,
+        render: (_: any, r: any) => { const v = Number(ptdYtd === 'PTD' ? (r.entered_credit || 0) : (r.ytd_entered_credit || 0)); return v ? <CrCell v={v} /> : null; } },
+      ...(ptdYtd === 'PTD' ? [{ title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Ent Closing</span>,
+        key: 'entClosing', width: 130, align: 'right' as const,
+        render: (_: any, r: any) => <FmtBal v={Number(r.entered_closing || 0)} size={10} /> }] : []),
+    ] : [];
+
+    const accCols: ColumnsType<any> = ptdYtd === 'PTD' ? [
+      { title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Opening ({functionalCcy})</span>,
+        key: 'opening', width: 150, align: 'right' as const,
+        render: (_: any, r: any) => <FmtBal v={Number(r.opening || 0)} size={10} /> },
+      { title: <span style={{ color: REDWOOD.success, fontWeight: 600 }}>Debit ({functionalCcy})</span>,
+        key: 'debit', width: 140, align: 'right' as const,
+        render: (_: any, r: any) => { const v = Number(r.debit || 0); return v ? <DrCell v={v} /> : null; } },
+      { title: <span style={{ color: REDWOOD.primary, fontWeight: 600 }}>Credit ({functionalCcy})</span>,
+        key: 'credit', width: 140, align: 'right' as const,
+        render: (_: any, r: any) => { const v = Number(r.credit || 0); return v ? <CrCell v={v} /> : null; } },
+      { title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Closing ({functionalCcy})</span>,
+        key: 'closing', width: 150, align: 'right' as const,
+        render: (_: any, r: any) => <FmtBal v={Number(r.closing || 0)} size={10} /> },
+    ] : [
+      { title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>YTD Opening ({functionalCcy})</span>,
+        key: 'ytdOpening', width: 160, align: 'right' as const,
+        render: (_: any, r: any) => <FmtBal v={Number(r.ytd_opening || 0)} size={10} /> },
+      { title: <span style={{ color: REDWOOD.success, fontWeight: 600 }}>YTD Debit ({functionalCcy})</span>,
+        key: 'ytdDebit', width: 150, align: 'right' as const,
+        render: (_: any, r: any) => { const v = Number(r.ytd_debit || 0); return v ? <DrCell v={v} /> : null; } },
+      { title: <span style={{ color: REDWOOD.primary, fontWeight: 600 }}>YTD Credit ({functionalCcy})</span>,
+        key: 'ytdCredit', width: 150, align: 'right' as const,
+        render: (_: any, r: any) => { const v = Number(r.ytd_credit || 0); return v ? <CrCell v={v} /> : null; } },
+    ];
+
+    return [
+      { title: 'Account', key: 'account', width: 200, fixed: 'left', ellipsis: true,
+        render: (_: any, r: any) => <Text code style={{ fontSize: 10 }}>{r.account_combination || r.account || '—'}</Text> },
+      { title: 'Description', key: 'desc', ellipsis: true,
+        render: (_: any, r: any) => (
+          <Tooltip title={r.account_desc}>
+            <span style={{ fontSize: 11 }}>{r.account_desc || '—'}</span>
+          </Tooltip>
+        ) },
+      { title: 'Type', key: 'type', width: 60,
+        render: (_: any, r: any) => {
+          const t = r.account_type || '';
+          return t ? <Tag color={typeColor[t] || 'default'} style={{ fontSize: 9 }}>{t}</Tag> : null;
+        } },
+      ...entCols,
+      ...accCols,
+    ];
+  }, [showEntered, ptdYtd, functionalCcy]);
+
+  const summaryItems = ptdYtd === 'PTD'
+    ? [
+        { label: 'Opening',       v: totals.opening,  color: undefined },
+        { label: 'Total Debit',   v: totals.debit,    color: REDWOOD.success },
+        { label: 'Total Credit',  v: totals.credit,   color: REDWOOD.primary },
+        { label: 'Closing',       v: totals.closing,  color: undefined },
+      ]
+    : [
+        { label: 'YTD Opening',   v: totals.opening,  color: undefined },
+        { label: 'YTD Debit',     v: totals.debit,    color: REDWOOD.success },
+        { label: 'YTD Credit',    v: totals.credit,   color: REDWOOD.primary },
+      ];
+
+  return (
+    <div style={{ padding: '16px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* Parameter card */}
+      <Card size="small" styles={{ body: { padding: '14px 16px' } }}
+        style={{ borderRadius: 10, border: `1px solid ${REDWOOD.neutral200}`, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <BarChartOutlined style={{ color: REDWOOD.info, fontSize: 16 }} />
+          <Text strong style={{ fontSize: 14 }}>Trial Balance Parameters</Text>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+            <Radio.Group value={ptdYtd} onChange={e => setPtdYtd(e.target.value)} size="small" buttonStyle="solid">
+              <Radio.Button value="PTD">PTD</Radio.Button>
+              <Radio.Button value="YTD">YTD</Radio.Button>
+            </Radio.Group>
+            <Space size={6}>
+              <Switch size="small" checked={showEntered} onChange={setShowEntered}
+                style={{ background: showEntered ? '#52c41a' : undefined }} />
+              <Text style={{ fontSize: 12, color: showEntered ? '#52c41a' : REDWOOD.neutral600, fontWeight: showEntered ? 600 : undefined }}>
+                Show Entered
+              </Text>
+            </Space>
+          </div>
+        </div>
+        <Row gutter={[12, 8]} align="bottom">
+          <Col xs={24} sm={12} md={5}>
+            <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 3, fontWeight: 500 }}>
+              Ledger * {ledgersLoading && <ReloadOutlined spin style={{ marginLeft: 4, fontSize: 10 }} />}
+            </div>
+            <Select value={ledger || undefined} onChange={v => { setLedger(v); setSelectedYear(null); setSelectedPeriod(''); }}
+              style={{ width: '100%' }} size="small" showSearch loading={ledgersLoading}
+              placeholder="Select ledger">
+              {ledgerOptions.map(l => <Option key={l} value={l}>{l}</Option>)}
+            </Select>
+          </Col>
+          <Col xs={24} sm={12} md={5}>
+            <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 3, fontWeight: 500 }}>Company</div>
+            <Select value={company || undefined} onChange={v => setCompany(v || '')} allowClear
+              style={{ width: '100%' }} size="small" showSearch loading={companyLoading}
+              placeholder="All Companies">
+              {companyOptions.map(c => <Option key={c.value} value={c.value}>{c.value} – {c.meaning}</Option>)}
+            </Select>
+          </Col>
+          <Col xs={24} sm={12} md={4}>
+            <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 3, fontWeight: 500 }}>
+              Year {periodsLoading && <ReloadOutlined spin style={{ marginLeft: 4, fontSize: 10 }} />}
+            </div>
+            <Select value={selectedYear || undefined} onChange={v => { setSelectedYear(v); setSelectedPeriod(''); }}
+              style={{ width: '100%' }} size="small" placeholder="Select year">
+              {years.map(y => <Option key={y} value={y}>{y}</Option>)}
+            </Select>
+          </Col>
+          <Col xs={24} sm={12} md={5}>
+            <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 3, fontWeight: 500 }}>Period *</div>
+            <Select value={selectedPeriod || undefined} onChange={v => setSelectedPeriod(v || '')}
+              style={{ width: '100%' }} size="small" showSearch placeholder="Select period">
+              {periodsForYear.map(p => <Option key={p.period_name_id} value={p.period_name_id}>{p.period_name_id}</Option>)}
+            </Select>
+          </Col>
+          <Col xs={24} sm={12} md={5} style={{ display: 'flex', gap: 6 }}>
+            <Button type="primary" icon={<SearchOutlined />} size="small" loading={loading}
+              onClick={handleSearch}
+              style={{ background: REDWOOD.info, borderColor: REDWOOD.info, flex: 1 }}>Search</Button>
+            <Button icon={<ClearOutlined />} size="small" onClick={() => {
+              setTbData([]); setHasSearched(false); setGridSearch(''); setCompany('');
+            }} />
+          </Col>
+        </Row>
+      </Card>
+
+      {/* Toolbar */}
+      {hasSearched && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <Space>
+            <Badge count={filteredData.length} color={REDWOOD.info} overflowCount={9999}>
+              <Text type="secondary" style={{ fontSize: 12 }}>accounts</Text>
+            </Badge>
+            <Divider type="vertical" />
+            <Tag color={ptdYtd === 'PTD' ? 'blue' : 'orange'}>{ptdYtd}</Tag>
+            <Tag>{selectedPeriod}</Tag>
+          </Space>
+          <Input prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
+            placeholder="Filter accounts…" size="small" allowClear
+            value={gridSearch} onChange={e => setGridSearch(e.target.value)}
+            style={{ width: 220, borderRadius: 6 }} />
+        </div>
+      )}
+
+      {/* Table */}
+      <Spin spinning={loading}>
+        {hasSearched && (
+          <Table
+            dataSource={filteredData}
+            columns={columns}
+            rowKey="key"
+            size="small"
+            scroll={{ x: 'max-content', y: 500 }}
+            pagination={{ pageSize: 50, showSizeChanger: true, showTotal: t => `${t} accounts` }}
+            className="aa-v2-grid"
+          />
+        )}
+      </Spin>
+
+      {/* Totals summary card */}
+      {hasSearched && filteredData.length > 0 && (
+        <Card size="small" styles={{ body: { padding: '10px 16px' } }}
+          style={{ borderRadius: 8, border: '1px solid #adc6ff', background: '#f0f5ff' }}>
+          <Text strong style={{ fontSize: 11, color: '#1677ff', display: 'block', marginBottom: 8 }}>
+            {ptdYtd} Summary — {selectedPeriod} ({functionalCcy})
+          </Text>
+          <Row gutter={0}>
+            {summaryItems.map((item, i) => (
+              <Col key={i} flex="1" style={{ textAlign: 'center', padding: '4px 12px',
+                borderRight: i < summaryItems.length - 1 ? '1px solid #adc6ff' : undefined }}>
+                <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>{item.label}</Text>
+                {item.color
+                  ? <Text strong style={{ fontSize: 14, color: item.color }}>{fmtN(item.v)}</Text>
+                  : <FmtBal v={item.v} size={14} bold />}
+              </Col>
+            ))}
+          </Row>
+        </Card>
+      )}
+    </div>
+  );
+};
+
+// ─── Account Analysis Panel ───────────────────────────────────────────────────
+const AAPanel: React.FC = () => {
   // Parameters
   const [ledger, setLedger]                   = useState('');
   const [ledgerOptions, setLedgerOptions]     = useState<string[]>([]);
@@ -488,7 +815,6 @@ const AccountAnalysisV2: React.FC = () => {
       })
       .catch(() => {})
       .finally(() => setLedgersLoading(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Load segment values ───────────────────────────────────────────────────────
@@ -723,7 +1049,6 @@ const AccountAnalysisV2: React.FC = () => {
   // ── Grouped data ──────────────────────────────────────────────────────────────
   const groupedData = useMemo((): GroupedRow[] => {
     if (!groupBy) return [];
-    // only group PTD lines (exclude opening/closing)
     const ptdLines = filteredData.filter(r => !r.isOpeningBalance && !r.isClosingBalance && !r.isTotals);
     const map = new Map<string, GroupedRow>();
     ptdLines.forEach(r => {
@@ -733,29 +1058,21 @@ const AccountAnalysisV2: React.FC = () => {
           totalEntDr: 0, totalEntCr: 0, totalAccDr: 0, totalAccCr: 0, accBalance: 0, entBalance: 0 });
       }
       const g = map.get(val)!;
-      g.lines.push(r);
-      g.count++;
-      g.totalEntDr += r.enteredDr;
-      g.totalEntCr += r.enteredCr;
-      g.totalAccDr += r.accountedDr;
-      g.totalAccCr += r.accountedCr;
-      g.accBalance  = g.totalAccDr - g.totalAccCr;
-      g.entBalance  = g.totalEntDr - g.totalEntCr;
+      g.lines.push(r); g.count++;
+      g.totalEntDr += r.enteredDr; g.totalEntCr += r.enteredCr;
+      g.totalAccDr += r.accountedDr; g.totalAccCr += r.accountedCr;
+      g.accBalance = g.totalAccDr - g.totalAccCr;
+      g.entBalance = g.totalEntDr - g.totalEntCr;
     });
     const result = Array.from(map.values());
-    // sort by group value (period sort if grouping by period)
     if (groupBy === 'defaultPeriodName') {
       result.sort((a, b) => parsePeriod(a.groupValue) - parsePeriod(b.groupValue));
     } else {
       result.sort((a, b) => a.groupValue.localeCompare(b.groupValue));
     }
-    // totals row
     if (result.length > 0) {
       result.push({
-        key: '__gtotals__',
-        groupValue: 'Grand Total',
-        count: ptdLines.length,
-        lines: [],
+        key: '__gtotals__', groupValue: 'Grand Total', count: ptdLines.length, lines: [],
         totalEntDr: gridTotals.entDr, totalEntCr: gridTotals.entCr,
         totalAccDr: gridTotals.accDr, totalAccCr: gridTotals.accCr,
         accBalance: gridTotals.accDr - gridTotals.accCr,
@@ -793,8 +1110,7 @@ const AccountAnalysisV2: React.FC = () => {
         key: 'entBal', width: 140, align: 'right',
         render: (_: any, record: JournalLine, index: number) => {
           if (isTot(record)) return <FmtBal v={record._entBal ?? 0} size={10} bold />;
-          const v = runningBals[index]?.ent ?? 0;
-          return <FmtBal v={v} size={10} bold={isSpecial(record)} />;
+          return <FmtBal v={runningBals[index]?.ent ?? 0} size={10} bold={isSpecial(record)} />;
         } },
     ] : [];
 
@@ -881,7 +1197,7 @@ const AccountAnalysisV2: React.FC = () => {
     ];
   }, [showEntered, functionalCcy, groupLabel]);
 
-  // Sub-table for expanded group rows (individual lines, no line description)
+  // Sub-table for expanded group rows
   const expandedRowRender = useCallback((group: GroupedRow) => {
     const subCols: ColumnsType<JournalLine> = [
       { title: 'Account', dataIndex: 'concatenatedSegments', key: 'acct', width: 200, ellipsis: true,
@@ -938,16 +1254,15 @@ const AccountAnalysisV2: React.FC = () => {
     const numFmt = '#,##0.00';
     const NCOLS = showEntered ? 16 : 13;
     const mergeFull = (r: number) => ws.mergeCells(r, 1, r, NCOLS);
-
     const hdrFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC74634' } };
     const fltFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0D6' } };
     const colFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3D3D3D' } };
-    const accFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD6E4FF' } };
-    const entFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9F7BE' } };
     const totFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } };
     const altFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } };
     const accHdrFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A5FCC' } };
     const entHdrFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF389E0D' } };
+    const entFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9F7BE' } };
+    const accFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD6E4FF' } };
 
     mergeFull(1);
     const tc = ws.getCell('A1');
@@ -1072,213 +1387,199 @@ const AccountAnalysisV2: React.FC = () => {
   const activeFilters = Object.entries(segFilters).filter(([, v]) => v);
   const accountLabel  = account ? `${account}${accountDesc ? ' – ' + accountDesc : ''}` : '';
 
-  // ─── Render ───────────────────────────────────────────────────────────────────
   return (
-    <Layout style={{ minHeight: 'calc(100vh - 64px)', background: REDWOOD.neutral100 }}>
-      <Content>
-        <div style={{ padding: '12px 24px', background: REDWOOD.surface, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
-          <Breadcrumb items={[
-            { title: <Link to="/home"><HomeOutlined /> Home</Link> },
-            { title: <Link to="/gl">General Ledger</Link> },
-            { title: 'Account Analysis V2' },
-          ]} />
+    <div style={{ padding: '16px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* Parameter Card */}
+      <Card size="small" styles={{ body: { padding: '14px 16px' } }}
+        style={{ borderRadius: 10, border: `1px solid ${REDWOOD.neutral200}`, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <BookOutlined style={{ color: REDWOOD.info, fontSize: 16 }} />
+          <Text strong style={{ fontSize: 14 }}>Search Parameters</Text>
         </div>
-
-        <div style={{ padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-
-          {/* ── Parameter Card ── */}
-          <Card size="small" styles={{ body: { padding: '14px 16px' } }}
-            style={{ borderRadius: 10, border: `1px solid ${REDWOOD.neutral200}`, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <BookOutlined style={{ color: REDWOOD.info, fontSize: 16 }} />
-              <Text strong style={{ fontSize: 14 }}>Search Parameters</Text>
+        <Row gutter={[12, 8]} align="bottom">
+          <Col xs={24} sm={12} md={5}>
+            <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 3, fontWeight: 500 }}>
+              Ledger * {ledgersLoading && <ReloadOutlined spin style={{ marginLeft: 4, fontSize: 10 }} />}
             </div>
-            <Row gutter={[12, 8]} align="bottom">
-              <Col xs={24} sm={12} md={5}>
-                <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 3, fontWeight: 500 }}>
-                  Ledger * {ledgersLoading && <ReloadOutlined spin style={{ marginLeft: 4, fontSize: 10 }} />}
-                </div>
-                <Select value={ledger || undefined} onChange={v => { setLedger(v); setPeriods([]); }}
-                  style={{ width: '100%' }} size="small" showSearch loading={ledgersLoading}
-                  placeholder={ledgersLoading ? 'Loading…' : 'Select ledger'}>
-                  {ledgerOptions.map(l => <Option key={l} value={l}>{l}</Option>)}
-                </Select>
-              </Col>
-              <Col xs={24} sm={12} md={7}>
-                <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 3, fontWeight: 500 }}>Account</div>
-                <ClickField label={accountLabel} placeholder="All Accounts"
-                  onClick={() => { loadAccounts(); setAccountPickerOpen(true); }}
-                  onClear={() => { setAccount(''); setAccountDesc(''); }} />
-              </Col>
-              <Col xs={24} sm={12} md={8}>
-                <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 3, fontWeight: 500 }}>
-                  Period(s) * {periodsLoading && <ReloadOutlined spin style={{ marginLeft: 4, fontSize: 10 }} />}
-                </div>
-                <Select mode="multiple" value={periods} onChange={setPeriods}
-                  style={{ width: '100%' }} size="small" showSearch allowClear
-                  placeholder="Select periods" maxTagCount={3} loading={periodsLoading}>
-                  {allPeriods.map(p => <Option key={p} value={p}>{p}</Option>)}
-                </Select>
-              </Col>
-              <Col xs={24} sm={12} md={4} style={{ display: 'flex', gap: 6 }}>
-                <Button type="primary" icon={<SearchOutlined />} size="small" loading={loading}
-                  onClick={handleSearch}
-                  style={{ background: REDWOOD.info, borderColor: REDWOOD.info, flex: 1 }}>Search</Button>
-                <Button icon={<ClearOutlined />} size="small" onClick={() => {
-                  setRows([]); setHasSearched(false); setPeriods([]);
-                  setAccount(''); setAccountDesc(''); setSegFilters({}); setSegLabels({});
-                }} />
-              </Col>
-            </Row>
+            <Select value={ledger || undefined} onChange={v => { setLedger(v); setPeriods([]); }}
+              style={{ width: '100%' }} size="small" showSearch loading={ledgersLoading}
+              placeholder={ledgersLoading ? 'Loading…' : 'Select ledger'}>
+              {ledgerOptions.map(l => <Option key={l} value={l}>{l}</Option>)}
+            </Select>
+          </Col>
+          <Col xs={24} sm={12} md={7}>
+            <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 3, fontWeight: 500 }}>Account</div>
+            <ClickField label={accountLabel} placeholder="All Accounts"
+              onClick={() => { loadAccounts(); setAccountPickerOpen(true); }}
+              onClear={() => { setAccount(''); setAccountDesc(''); }} />
+          </Col>
+          <Col xs={24} sm={12} md={8}>
+            <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 3, fontWeight: 500 }}>
+              Period(s) * {periodsLoading && <ReloadOutlined spin style={{ marginLeft: 4, fontSize: 10 }} />}
+            </div>
+            <Select mode="multiple" value={periods} onChange={setPeriods}
+              style={{ width: '100%' }} size="small" showSearch allowClear
+              placeholder="Select periods" maxTagCount={3} loading={periodsLoading}>
+              {allPeriods.map(p => <Option key={p} value={p}>{p}</Option>)}
+            </Select>
+          </Col>
+          <Col xs={24} sm={12} md={4} style={{ display: 'flex', gap: 6 }}>
+            <Button type="primary" icon={<SearchOutlined />} size="small" loading={loading}
+              onClick={handleSearch}
+              style={{ background: REDWOOD.info, borderColor: REDWOOD.info, flex: 1 }}>Search</Button>
+            <Button icon={<ClearOutlined />} size="small" onClick={() => {
+              setRows([]); setHasSearched(false); setPeriods([]);
+              setAccount(''); setAccountDesc(''); setSegFilters({}); setSegLabels({});
+            }} />
+          </Col>
+        </Row>
 
-            {/* Segment Filter row */}
-            <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
-              <Text style={{ fontSize: 11, color: REDWOOD.neutral600, fontWeight: 500 }}>
-                <FilterOutlined style={{ marginRight: 4 }} />Segment Filters:
+        {/* Segment Filter row */}
+        <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+          <Text style={{ fontSize: 11, color: REDWOOD.neutral600, fontWeight: 500 }}>
+            <FilterOutlined style={{ marginRight: 4 }} />Segment Filters:
+          </Text>
+          {activeFilters.map(([key, val]) => {
+            const def = SEGMENT_DEFS.find(d => d.key === key);
+            return (
+              <Tag key={key} color={def?.color || 'default'} closable
+                onClose={() => removeSegFilter(key)} style={{ fontSize: 11, margin: 0 }}>
+                <span style={{ opacity: 0.8 }}>{def?.label}: </span>
+                <strong>{segLabels[key] || val}</strong>
+              </Tag>
+            );
+          })}
+          <Button size="small" type="dashed" icon={<PlusOutlined />}
+            onClick={() => setSegPickerOpen(true)}
+            style={{ fontSize: 11, height: 24, color: REDWOOD.info, borderColor: REDWOOD.info }}>
+            Add Filter
+          </Button>
+          {activeFilters.length > 0 && (
+            <Button size="small" type="text"
+              onClick={() => { setSegFilters({}); setSegLabels({}); }}
+              style={{ fontSize: 11, height: 24, color: REDWOOD.primary }}>Clear All</Button>
+          )}
+        </div>
+      </Card>
+
+      {/* Toolbar */}
+      {hasSearched && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+          <Space wrap>
+            <Badge count={filteredData.length} color={REDWOOD.info} overflowCount={9999}>
+              <Text type="secondary" style={{ fontSize: 12 }}>records</Text>
+            </Badge>
+            <Divider type="vertical" />
+            <Space size={6}>
+              <Switch size="small" checked={showEntered} onChange={setShowEntered}
+                style={{ background: showEntered ? '#52c41a' : undefined }} />
+              <Text style={{ fontSize: 12, color: showEntered ? '#52c41a' : REDWOOD.neutral600, fontWeight: showEntered ? 600 : undefined }}>
+                Show Entered
               </Text>
-              {activeFilters.map(([key, val]) => {
-                const def = SEGMENT_DEFS.find(d => d.key === key);
-                return (
-                  <Tag key={key} color={def?.color || 'default'} closable
-                    onClose={() => removeSegFilter(key)} style={{ fontSize: 11, margin: 0 }}>
-                    <span style={{ opacity: 0.8 }}>{def?.label}: </span>
-                    <strong>{segLabels[key] || val}</strong>
-                  </Tag>
-                );
-              })}
-              <Button size="small" type="dashed" icon={<PlusOutlined />}
-                onClick={() => setSegPickerOpen(true)}
-                style={{ fontSize: 11, height: 24, color: REDWOOD.info, borderColor: REDWOOD.info }}>
-                Add Filter
-              </Button>
-              {activeFilters.length > 0 && (
-                <Button size="small" type="text"
-                  onClick={() => { setSegFilters({}); setSegLabels({}); }}
-                  style={{ fontSize: 11, height: 24, color: REDWOOD.primary }}>Clear All</Button>
-              )}
-            </div>
-          </Card>
-
-          {/* ── Toolbar ── */}
-          {hasSearched && (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-              <Space wrap>
-                <Badge count={filteredData.length} color={REDWOOD.info} overflowCount={9999}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>records</Text>
-                </Badge>
-                <Divider type="vertical" />
-                <Space size={6}>
-                  <Switch size="small" checked={showEntered} onChange={setShowEntered}
-                    style={{ background: showEntered ? '#52c41a' : undefined }} />
-                  <Text style={{ fontSize: 12, color: showEntered ? '#52c41a' : REDWOOD.neutral600, fontWeight: showEntered ? 600 : undefined }}>
-                    Show Entered
-                  </Text>
-                </Space>
-                <Divider type="vertical" />
-                <Space size={6}>
-                  <GroupOutlined style={{ color: REDWOOD.neutral600, fontSize: 13 }} />
-                  <Select value={groupBy || undefined} allowClear placeholder="Group by…"
-                    style={{ width: 170 }} size="small"
-                    onChange={v => setGroupBy(v || '')}
-                    onClear={() => setGroupBy('')}>
-                    {GROUP_BY_OPTIONS.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
-                  </Select>
-                </Space>
-              </Space>
-              <Space>
-                <Input prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
-                  placeholder="Filter results…" size="small" allowClear
-                  value={gridSearch} onChange={e => setGridSearch(e.target.value)}
-                  style={{ width: 200, borderRadius: 6 }} />
-                <Tooltip title="View API URL">
-                  <Button size="small" icon={<ApiOutlined />}
-                    style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
-                    onClick={() => setApiModalOpen(true)} />
-                </Tooltip>
-                <Button size="small" icon={<FileExcelOutlined />} onClick={exportExcel}
-                  disabled={!filteredData.length}>Excel</Button>
-              </Space>
-            </div>
-          )}
-
-          {/* ── Grid ── */}
-          <Spin spinning={loading}>
-            {hasSearched && !groupBy && (
-              <Table<JournalLine>
-                dataSource={tableData} columns={flatColumns} rowKey="key" size="small"
-                scroll={{ x: 'max-content', y: 480 }}
-                pagination={{ pageSize: 50, showSizeChanger: true, showTotal: t => `${t} records` }}
-                className="aa-v2-grid"
-                rowClassName={r => r.isTotals ? 'aa-totals-row' : r.isOpeningBalance ? 'aa-opening-row' : r.isClosingBalance ? 'aa-closing-row' : ''}
-              />
-            )}
-            {hasSearched && !!groupBy && (
-              <Table<GroupedRow>
-                dataSource={groupedData} columns={groupColumns} rowKey="key" size="small"
-                scroll={{ x: 'max-content', y: 480 }}
-                pagination={false}
-                className="aa-v2-grid"
-                expandable={expandable}
-                rowClassName={r => r.isTotals ? 'aa-totals-row' : ''}
-              />
-            )}
-          </Spin>
-
-          {/* ── Balance Summary ── */}
-          {hasSearched && rows.length > 0 && (
-            <Row gutter={12}>
-              {showEntered && (
-                <Col xs={24} md={12}>
-                  <Card size="small" styles={{ body: { padding: '10px 16px' } }}
-                    style={{ borderRadius: 8, border: '1px solid #b7eb8f', background: '#f6ffed' }}>
-                    <Text strong style={{ fontSize: 11, color: '#52c41a', display: 'block', marginBottom: 8 }}>Entered Balance</Text>
-                    <Row gutter={0}>
-                      {[
-                        { label: 'Opening Balance', v: openingBal?.ent ?? 0 },
-                        { label: 'PTD Debits',      v: ptdTotals.entDr, color: REDWOOD.success },
-                        { label: 'PTD Credits',     v: ptdTotals.entCr, color: REDWOOD.primary },
-                        { label: 'Closing Balance', v: closingBal?.ent ?? 0 },
-                      ].map((item, i, arr) => (
-                        <Col key={i} flex="1" style={{ textAlign: 'center', padding: '4px 12px',
-                          borderRight: i < arr.length - 1 ? '1px solid #b7eb8f' : undefined }}>
-                          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>{item.label}</Text>
-                          {item.color
-                            ? <Text strong style={{ fontSize: 14, color: item.color }}>{fmtN(item.v)}</Text>
-                            : <FmtBal v={item.v} size={14} bold />}
-                        </Col>
-                      ))}
-                    </Row>
-                  </Card>
-                </Col>
-              )}
-              <Col xs={24} md={showEntered ? 12 : 24}>
-                <Card size="small" styles={{ body: { padding: '10px 16px' } }}
-                  style={{ borderRadius: 8, border: '1px solid #adc6ff', background: '#f0f5ff' }}>
-                  <Text strong style={{ fontSize: 11, color: '#1677ff', display: 'block', marginBottom: 8 }}>
-                    Accounted Balance ({functionalCcy})
-                  </Text>
-                  <Row gutter={0}>
-                    {[
-                      { label: 'Opening Balance', v: openingBal?.acc ?? 0 },
-                      { label: 'PTD Debits',      v: ptdTotals.accDr, color: REDWOOD.success },
-                      { label: 'PTD Credits',     v: ptdTotals.accCr, color: REDWOOD.primary },
-                      { label: 'Closing Balance', v: closingBal?.acc ?? 0 },
-                    ].map((item, i, arr) => (
-                      <Col key={i} flex="1" style={{ textAlign: 'center', padding: '4px 12px',
-                        borderRight: i < arr.length - 1 ? '1px solid #adc6ff' : undefined }}>
-                        <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>{item.label}</Text>
-                        {item.color
-                          ? <Text strong style={{ fontSize: 14, color: item.color }}>{fmtN(item.v)}</Text>
-                          : <FmtBal v={item.v} size={14} bold />}
-                      </Col>
-                    ))}
-                  </Row>
-                </Card>
-              </Col>
-            </Row>
-          )}
+            </Space>
+            <Divider type="vertical" />
+            <Space size={6}>
+              <GroupOutlined style={{ color: REDWOOD.neutral600, fontSize: 13 }} />
+              <Select value={groupBy || undefined} allowClear placeholder="Group by…"
+                style={{ width: 170 }} size="small"
+                onChange={v => setGroupBy(v || '')}
+                onClear={() => setGroupBy('')}>
+                {GROUP_BY_OPTIONS.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
+              </Select>
+            </Space>
+          </Space>
+          <Space>
+            <Input prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
+              placeholder="Filter results…" size="small" allowClear
+              value={gridSearch} onChange={e => setGridSearch(e.target.value)}
+              style={{ width: 200, borderRadius: 6 }} />
+            <Tooltip title="View API URL">
+              <Button size="small" icon={<ApiOutlined />}
+                style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
+                onClick={() => setApiModalOpen(true)} />
+            </Tooltip>
+            <Button size="small" icon={<FileExcelOutlined />} onClick={exportExcel}
+              disabled={!filteredData.length}>Excel</Button>
+          </Space>
         </div>
-      </Content>
+      )}
+
+      {/* Grid */}
+      <Spin spinning={loading}>
+        {hasSearched && !groupBy && (
+          <Table<JournalLine>
+            dataSource={tableData} columns={flatColumns} rowKey="key" size="small"
+            scroll={{ x: 'max-content', y: 480 }}
+            pagination={{ pageSize: 50, showSizeChanger: true, showTotal: t => `${t} records` }}
+            className="aa-v2-grid"
+            rowClassName={r => r.isTotals ? 'aa-totals-row' : r.isOpeningBalance ? 'aa-opening-row' : r.isClosingBalance ? 'aa-closing-row' : ''}
+          />
+        )}
+        {hasSearched && !!groupBy && (
+          <Table<GroupedRow>
+            dataSource={groupedData} columns={groupColumns} rowKey="key" size="small"
+            scroll={{ x: 'max-content', y: 480 }}
+            pagination={false}
+            className="aa-v2-grid"
+            expandable={expandable}
+            rowClassName={r => r.isTotals ? 'aa-totals-row' : ''}
+          />
+        )}
+      </Spin>
+
+      {/* Balance Summary */}
+      {hasSearched && rows.length > 0 && (
+        <Row gutter={12}>
+          {showEntered && (
+            <Col xs={24} md={12}>
+              <Card size="small" styles={{ body: { padding: '10px 16px' } }}
+                style={{ borderRadius: 8, border: '1px solid #b7eb8f', background: '#f6ffed' }}>
+                <Text strong style={{ fontSize: 11, color: '#52c41a', display: 'block', marginBottom: 8 }}>Entered Balance</Text>
+                <Row gutter={0}>
+                  {[
+                    { label: 'Opening Balance', v: openingBal?.ent ?? 0 },
+                    { label: 'PTD Debits',      v: ptdTotals.entDr, color: REDWOOD.success },
+                    { label: 'PTD Credits',     v: ptdTotals.entCr, color: REDWOOD.primary },
+                    { label: 'Closing Balance', v: closingBal?.ent ?? 0 },
+                  ].map((item, i, arr) => (
+                    <Col key={i} flex="1" style={{ textAlign: 'center', padding: '4px 12px',
+                      borderRight: i < arr.length - 1 ? '1px solid #b7eb8f' : undefined }}>
+                      <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>{item.label}</Text>
+                      {(item as any).color
+                        ? <Text strong style={{ fontSize: 14, color: (item as any).color }}>{fmtN(item.v)}</Text>
+                        : <FmtBal v={item.v} size={14} bold />}
+                    </Col>
+                  ))}
+                </Row>
+              </Card>
+            </Col>
+          )}
+          <Col xs={24} md={showEntered ? 12 : 24}>
+            <Card size="small" styles={{ body: { padding: '10px 16px' } }}
+              style={{ borderRadius: 8, border: '1px solid #adc6ff', background: '#f0f5ff' }}>
+              <Text strong style={{ fontSize: 11, color: '#1677ff', display: 'block', marginBottom: 8 }}>
+                Accounted Balance ({functionalCcy})
+              </Text>
+              <Row gutter={0}>
+                {[
+                  { label: 'Opening Balance', v: openingBal?.acc ?? 0 },
+                  { label: 'PTD Debits',      v: ptdTotals.accDr, color: REDWOOD.success },
+                  { label: 'PTD Credits',     v: ptdTotals.accCr, color: REDWOOD.primary },
+                  { label: 'Closing Balance', v: closingBal?.acc ?? 0 },
+                ].map((item, i, arr) => (
+                  <Col key={i} flex="1" style={{ textAlign: 'center', padding: '4px 12px',
+                    borderRight: i < arr.length - 1 ? '1px solid #adc6ff' : undefined }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>{item.label}</Text>
+                    {(item as any).color
+                      ? <Text strong style={{ fontSize: 14, color: (item as any).color }}>{fmtN(item.v)}</Text>
+                      : <FmtBal v={item.v} size={14} bold />}
+                  </Col>
+                ))}
+              </Row>
+            </Card>
+          </Col>
+        </Row>
+      )}
 
       {/* Modals */}
       <AccountPicker open={accountPickerOpen} onClose={() => setAccountPickerOpen(false)}
@@ -1321,6 +1622,84 @@ const AccountAnalysisV2: React.FC = () => {
           </div>
         )}
       </Modal>
+    </div>
+  );
+};
+
+// ─── Tab definition ───────────────────────────────────────────────────────────
+interface TabDef { key: string; label: string; }
+
+// ─── Main Component (Tab Wrapper) ─────────────────────────────────────────────
+const AccountAnalysisV2: React.FC = () => {
+  const [tabs, setTabs]       = useState<TabDef[]>([
+    { key: 'tb',   label: 'Trial Balance'    },
+    { key: 'aa-0', label: 'Account Analysis' },
+  ]);
+  const [activeKey, setActiveKey] = useState('tb');
+  const nextKeyRef = useRef(1);
+
+  const addAnalysisTab = () => {
+    const key = `aa-${nextKeyRef.current++}`;
+    setTabs(prev => [...prev, { key, label: 'Account Analysis' }]);
+    setActiveKey(key);
+  };
+
+  const onEdit = (
+    targetKey: React.MouseEvent | React.KeyboardEvent | string,
+    action: 'add' | 'remove'
+  ) => {
+    if (action === 'remove' && typeof targetKey === 'string' && targetKey !== 'tb') {
+      setTabs(prev => {
+        const next = prev.filter(t => t.key !== targetKey);
+        if (activeKey === targetKey) {
+          setActiveKey(next[next.length - 1]?.key || 'tb');
+        }
+        return next;
+      });
+    }
+  };
+
+  return (
+    <Layout style={{ minHeight: 'calc(100vh - 64px)', background: REDWOOD.neutral100 }}>
+      <Content>
+        <div style={{ padding: '12px 24px', background: REDWOOD.surface, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+          <Breadcrumb items={[
+            { title: <Link to="/home"><HomeOutlined /> Home</Link> },
+            { title: <Link to="/gl">General Ledger</Link> },
+            { title: 'Account Analysis V2' },
+          ]} />
+        </div>
+
+        <div style={{ padding: '0 24px' }}>
+          <Tabs
+            type="editable-card"
+            hideAdd
+            activeKey={activeKey}
+            onChange={setActiveKey}
+            onEdit={onEdit}
+            tabBarExtraContent={{
+              right: (
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={addAnalysisTab}
+                  style={{ margin: '8px 0 8px 8px', background: REDWOOD.info, borderColor: REDWOOD.info }}>
+                  New Analysis
+                </Button>
+              ),
+            }}
+            items={tabs.map(tab => ({
+              key: tab.key,
+              label: tab.key === 'tb'
+                ? <Space size={4}><BarChartOutlined />Trial Balance</Space>
+                : <Space size={4}><BookOutlined />Account Analysis</Space>,
+              closable: tab.key !== 'tb',
+              children: tab.key === 'tb' ? <TBPanel /> : <AAPanel />,
+            }))}
+          />
+        </div>
+      </Content>
 
       <style>{`
         .aa-v2-grid .ant-table-tbody > tr.aa-totals-row > td {
