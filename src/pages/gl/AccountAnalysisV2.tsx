@@ -447,7 +447,10 @@ const TBPanel: React.FC = () => {
         if (!data) return;
         setCompanyOptions(
           (data.items || [])
-            .map((i: any) => ({ value: i.value || i.VALUE || '', meaning: i.meaning || i.MEANING || '' }))
+            .map((i: any) => ({
+              value: i.value || i.VALUE || '',
+              meaning: i.meaning || i.MEANING || i.description || i.DESCRIPTION || i.name || i.NAME || '',
+            }))
             .filter((c: any) => c.value)
         );
       })
@@ -559,73 +562,257 @@ const TBPanel: React.FC = () => {
     const entCols: ColumnsType<any> = showEntered ? [
       { title: <span style={{ color: '#52c41a', fontWeight: 600 }}>{ptdYtd === 'PTD' ? 'Ent Opening' : 'YTD Ent Opening'}</span>,
         key: 'entOpening', width: 140, align: 'right' as const,
-        render: (_: any, r: any) => <FmtBal v={Number(ptdYtd === 'PTD' ? (r.entered_opening || 0) : (r.ytd_entered_opening || 0))} size={10} /> },
-      { title: <span style={{ color: '#52c41a', fontWeight: 600 }}>{ptdYtd === 'PTD' ? 'Ent Debit' : 'YTD Ent Dr'}</span>,
+        render: (_: any, r: any) => <FmtBal v={Number(ptdYtd === 'PTD' ? (r.entered_opening || 0) : (r.ytd_entered_opening || 0))} size={10} bold={r.isTotals} /> },
+      { title: <span style={{ color: '#52c41a', fontWeight: 600 }}>{ptdYtd === 'PTD' ? 'Ent Dr' : 'YTD Ent Dr'}</span>,
         key: 'entDebit', width: 130, align: 'right' as const,
-        render: (_: any, r: any) => { const v = Number(ptdYtd === 'PTD' ? (r.entered_debit || 0) : (r.ytd_entered_debit || 0)); return v ? <DrCell v={v} /> : null; } },
-      { title: <span style={{ color: '#52c41a', fontWeight: 600 }}>{ptdYtd === 'PTD' ? 'Ent Credit' : 'YTD Ent Cr'}</span>,
+        render: (_: any, r: any) => { const v = Number(ptdYtd === 'PTD' ? (r.entered_debit || 0) : (r.ytd_entered_debit || 0)); return v ? <DrCell v={v} bold={r.isTotals} /> : null; } },
+      { title: <span style={{ color: '#52c41a', fontWeight: 600 }}>{ptdYtd === 'PTD' ? 'Ent Cr' : 'YTD Ent Cr'}</span>,
         key: 'entCredit', width: 130, align: 'right' as const,
-        render: (_: any, r: any) => { const v = Number(ptdYtd === 'PTD' ? (r.entered_credit || 0) : (r.ytd_entered_credit || 0)); return v ? <CrCell v={v} /> : null; } },
+        render: (_: any, r: any) => { const v = Number(ptdYtd === 'PTD' ? (r.entered_credit || 0) : (r.ytd_entered_credit || 0)); return v ? <CrCell v={v} bold={r.isTotals} /> : null; } },
       ...(ptdYtd === 'PTD' ? [{ title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Ent Closing</span>,
         key: 'entClosing', width: 130, align: 'right' as const,
-        render: (_: any, r: any) => <FmtBal v={Number(r.entered_closing || 0)} size={10} /> }] : []),
+        render: (_: any, r: any) => <FmtBal v={Number(r.entered_closing || 0)} size={10} bold={r.isTotals} /> }] : []),
     ] : [];
 
     const accCols: ColumnsType<any> = ptdYtd === 'PTD' ? [
       { title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Opening ({functionalCcy})</span>,
         key: 'opening', width: 150, align: 'right' as const,
-        render: (_: any, r: any) => <FmtBal v={Number(r.opening || 0)} size={10} /> },
-      { title: <span style={{ color: REDWOOD.success, fontWeight: 600 }}>Debit ({functionalCcy})</span>,
-        key: 'debit', width: 140, align: 'right' as const,
-        render: (_: any, r: any) => { const v = Number(r.debit || 0); return v ? <DrCell v={v} /> : null; } },
-      { title: <span style={{ color: REDWOOD.primary, fontWeight: 600 }}>Credit ({functionalCcy})</span>,
-        key: 'credit', width: 140, align: 'right' as const,
-        render: (_: any, r: any) => { const v = Number(r.credit || 0); return v ? <CrCell v={v} /> : null; } },
+        render: (_: any, r: any) => <FmtBal v={Number(r.opening || 0)} size={10} bold={r.isTotals} /> },
+      { title: <span style={{ color: REDWOOD.success, fontWeight: 600 }}>Acct Dr ({functionalCcy})</span>,
+        key: 'debit', width: 150, align: 'right' as const,
+        render: (_: any, r: any) => { const v = Number(r.debit || 0); return v ? <DrCell v={v} bold={r.isTotals} /> : null; } },
+      { title: <span style={{ color: REDWOOD.primary, fontWeight: 600 }}>Acct Cr ({functionalCcy})</span>,
+        key: 'credit', width: 150, align: 'right' as const,
+        render: (_: any, r: any) => { const v = Number(r.credit || 0); return v ? <CrCell v={v} bold={r.isTotals} /> : null; } },
       { title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Closing ({functionalCcy})</span>,
         key: 'closing', width: 150, align: 'right' as const,
-        render: (_: any, r: any) => <FmtBal v={Number(r.closing || 0)} size={10} /> },
+        render: (_: any, r: any) => <FmtBal v={Number(r.closing || 0)} size={10} bold={r.isTotals} /> },
     ] : [
       { title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>YTD Opening ({functionalCcy})</span>,
         key: 'ytdOpening', width: 160, align: 'right' as const,
-        render: (_: any, r: any) => <FmtBal v={Number(r.ytd_opening || 0)} size={10} /> },
-      { title: <span style={{ color: REDWOOD.success, fontWeight: 600 }}>YTD Debit ({functionalCcy})</span>,
-        key: 'ytdDebit', width: 150, align: 'right' as const,
-        render: (_: any, r: any) => { const v = Number(r.ytd_debit || 0); return v ? <DrCell v={v} /> : null; } },
-      { title: <span style={{ color: REDWOOD.primary, fontWeight: 600 }}>YTD Credit ({functionalCcy})</span>,
-        key: 'ytdCredit', width: 150, align: 'right' as const,
-        render: (_: any, r: any) => { const v = Number(r.ytd_credit || 0); return v ? <CrCell v={v} /> : null; } },
+        render: (_: any, r: any) => <FmtBal v={Number(r.ytd_opening || 0)} size={10} bold={r.isTotals} /> },
+      { title: <span style={{ color: REDWOOD.success, fontWeight: 600 }}>YTD Acct Dr ({functionalCcy})</span>,
+        key: 'ytdDebit', width: 160, align: 'right' as const,
+        render: (_: any, r: any) => { const v = Number(r.ytd_debit || 0); return v ? <DrCell v={v} bold={r.isTotals} /> : null; } },
+      { title: <span style={{ color: REDWOOD.primary, fontWeight: 600 }}>YTD Acct Cr ({functionalCcy})</span>,
+        key: 'ytdCredit', width: 160, align: 'right' as const,
+        render: (_: any, r: any) => { const v = Number(r.ytd_credit || 0); return v ? <CrCell v={v} bold={r.isTotals} /> : null; } },
+      { title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>YTD Closing ({functionalCcy})</span>,
+        key: 'ytdClosing', width: 160, align: 'right' as const,
+        render: (_: any, r: any) => <FmtBal v={Number(r.closing || 0)} size={10} bold={r.isTotals} /> },
     ];
 
     return [
       { title: 'Account', key: 'account', width: 200, fixed: 'left', ellipsis: true,
-        render: (_: any, r: any) => <Text code style={{ fontSize: 10 }}>{r.account_combination || r.account || '—'}</Text> },
+        render: (_: any, r: any) => r.isTotals
+          ? <Text strong style={{ fontSize: 11 }}>Total ({filteredData.length} accounts)</Text>
+          : <Text code style={{ fontSize: 10 }}>{r.account_combination || r.account || '—'}</Text> },
       { title: 'Description', key: 'desc', ellipsis: true,
-        render: (_: any, r: any) => (
+        render: (_: any, r: any) => r.isTotals ? null : (
           <Tooltip title={r.account_desc}>
             <span style={{ fontSize: 11 }}>{r.account_desc || '—'}</span>
           </Tooltip>
         ) },
-      { title: 'Type', key: 'type', width: 60,
+      { title: 'Type', key: 'type', width: 55,
         render: (_: any, r: any) => {
+          if (r.isTotals) return null;
           const t = r.account_type || '';
           return t ? <Tag color={typeColor[t] || 'default'} style={{ fontSize: 9 }}>{t}</Tag> : null;
         } },
+      { title: 'Ccy', key: 'currency', width: 60,
+        render: (_: any, r: any) => r.isTotals ? null : (
+          r.currency_code ? <Tag style={{ fontSize: 9 }}>{r.currency_code}</Tag> : null
+        ) },
       ...entCols,
       ...accCols,
     ];
-  }, [showEntered, ptdYtd, functionalCcy]);
+  }, [showEntered, ptdYtd, functionalCcy, filteredData.length]);
+
+  // Totals row injected at bottom of table (avoids Table.Summary alignment issues)
+  const totalsRow = filteredData.length > 0 ? {
+    key: '__tb_totals__', isTotals: true,
+    opening: totals.opening, debit: totals.debit, credit: totals.credit, closing: totals.closing,
+    ytd_opening: totals.opening, ytd_debit: totals.debit, ytd_credit: totals.credit,
+    entered_opening: totals.entOpening, entered_debit: totals.entDebit,
+    entered_credit: totals.entCredit, entered_closing: totals.entClosing,
+    ytd_entered_opening: totals.entOpening, ytd_entered_debit: totals.entDebit,
+    ytd_entered_credit: totals.entCredit,
+  } : null;
+  const tableData = totalsRow ? [...filteredData, totalsRow] : filteredData;
+
+  // Excel export for Trial Balance
+  const exportTBExcel = async () => {
+    if (!filteredData.length) { message.warning('No data to export'); return; }
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'ReactERP'; wb.created = new Date();
+    const ws = wb.addWorksheet('Trial Balance');
+    const white = { argb: 'FFFFFFFF' };
+    const numFmt = '#,##0.00';
+    const entColCount = showEntered ? (ptdYtd === 'PTD' ? 4 : 3) : 0;
+    const accColCount = 4; // always 4: opening, dr, cr, closing
+    const baseColCount = 4; // Account, Description, Type, Currency
+    const NCOLS = baseColCount + entColCount + accColCount;
+    const mergeFull = (r: number) => ws.mergeCells(r, 1, r, NCOLS);
+
+    const hdrFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC74634' } };
+    const fltFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0D6' } };
+    const colFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3D3D3D' } };
+    const totFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } };
+    const altFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } };
+    const accHdrFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A5FCC' } };
+    const entHdrFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF389E0D' } };
+    const entFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9F7BE' } };
+    const accFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD6E4FF' } };
+
+    // Title row
+    mergeFull(1);
+    const tc = ws.getCell('A1');
+    tc.value = 'Trial Balance';
+    tc.font = { bold: true, size: 13, color: white };
+    tc.fill = hdrFill; tc.alignment = { horizontal: 'center', vertical: 'middle' };
+    ws.getRow(1).height = 22;
+
+    // Filter rows
+    const coName = company ? (companyOptions.find(c => c.value === company)?.meaning || company) : 'All Companies';
+    const fRows: [string, string][] = [
+      ['Ledger',   ledger || '—'],
+      ['Company',  coName],
+      ['Period',   selectedPeriod || '—'],
+      ['Mode',     ptdYtd],
+      ['Currency', functionalCcy],
+      ['Exported', new Date().toLocaleString()],
+      ['Records',  String(filteredData.length)],
+    ];
+    let ri = 2;
+    for (const [lbl, val] of fRows) {
+      ws.mergeCells(ri, 1, ri, 3); ws.mergeCells(ri, 4, ri, NCOLS);
+      const lc = ws.getCell(ri, 1); const vc = ws.getCell(ri, 4);
+      lc.value = lbl; vc.value = val;
+      lc.font = { bold: true, size: 10 }; vc.font = { size: 10 };
+      lc.fill = fltFill;
+      lc.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
+      vc.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+      ws.getRow(ri).height = 16; ri++;
+    }
+    ri++;
+
+    // Group header row
+    ws.getRow(ri).height = 16;
+    for (let c = 1; c <= baseColCount; c++) ws.getCell(ri, c).fill = colFill;
+    let col = baseColCount + 1;
+    if (showEntered) {
+      ws.mergeCells(ri, col, ri, col + entColCount - 1);
+      const ec = ws.getCell(ri, col);
+      ec.value = 'Entered (Transaction Currency)';
+      ec.font = { bold: true, size: 10, color: { argb: 'FF52C41A' } };
+      ec.fill = entFill; ec.alignment = { horizontal: 'center', vertical: 'middle' };
+      col += entColCount;
+    }
+    ws.mergeCells(ri, col, ri, col + accColCount - 1);
+    const ac = ws.getCell(ri, col);
+    ac.value = `${ptdYtd} Accounted (${functionalCcy})`;
+    ac.font = { bold: true, size: 10, color: { argb: 'FF1677FF' } };
+    ac.fill = accFill; ac.alignment = { horizontal: 'center', vertical: 'middle' };
+    ri++;
+
+    // Column header row
+    const entHdrs = showEntered
+      ? ptdYtd === 'PTD'
+        ? ['Ent Opening', 'Ent Dr', 'Ent Cr', 'Ent Closing']
+        : ['YTD Ent Opening', 'YTD Ent Dr', 'YTD Ent Cr']
+      : [];
+    const accHdrs = ptdYtd === 'PTD'
+      ? [`Opening (${functionalCcy})`, `Acct Dr (${functionalCcy})`, `Acct Cr (${functionalCcy})`, `Closing (${functionalCcy})`]
+      : [`YTD Opening (${functionalCcy})`, `YTD Acct Dr (${functionalCcy})`, `YTD Acct Cr (${functionalCcy})`, `YTD Closing (${functionalCcy})`];
+    const hdrs = ['Account', 'Description', 'Type', 'Currency', ...entHdrs, ...accHdrs];
+    const widths = [30, 40, 10, 10, ...Array(entColCount).fill(16), ...Array(accColCount).fill(20)];
+    ws.getRow(ri).height = 18;
+    hdrs.forEach((h, i) => {
+      const cell = ws.getCell(ri, i + 1);
+      cell.value = h;
+      const isEnt = i >= baseColCount && i < baseColCount + entColCount;
+      const isAcc = i >= baseColCount + entColCount;
+      cell.fill = isEnt ? entHdrFill : isAcc ? accHdrFill : colFill;
+      cell.font = { bold: true, size: 10, color: white };
+      cell.alignment = { horizontal: isAcc || isEnt ? 'right' : 'left', vertical: 'middle', indent: 1 };
+      cell.border = { bottom: { style: 'thin', color: { argb: 'FF888888' } } };
+      ws.getColumn(i + 1).width = widths[i] || 14;
+    });
+    ri++;
+
+    const dataStartRow = ri;
+    filteredData.forEach((r, idx) => {
+      const isAlt = idx % 2 === 1;
+      ws.getRow(ri).height = 15;
+      const entVals = showEntered
+        ? ptdYtd === 'PTD'
+          ? [r.entered_opening || 0, r.entered_debit || 0, r.entered_credit || 0, r.entered_closing || 0]
+          : [r.ytd_entered_opening || 0, r.ytd_entered_debit || 0, r.ytd_entered_credit || 0]
+        : [];
+      const accVals = ptdYtd === 'PTD'
+        ? [r.opening || 0, r.debit || 0, r.credit || 0, r.closing || 0]
+        : [r.ytd_opening || 0, r.ytd_debit || 0, r.ytd_credit || 0, r.closing || 0];
+      const vals: (string | number)[] = [
+        r.account_combination || r.account || '',
+        r.account_desc || '',
+        r.account_type || '',
+        r.currency_code || '',
+        ...entVals,
+        ...accVals,
+      ];
+      vals.forEach((v, i) => {
+        const cell = ws.getCell(ri, i + 1);
+        cell.value = v; cell.font = { size: 10 };
+        if (isAlt) cell.fill = altFill;
+        const isNum = i >= baseColCount;
+        cell.alignment = { horizontal: isNum ? 'right' : 'left', vertical: 'middle', indent: 1 };
+        if (isNum) cell.numFmt = numFmt;
+      });
+      ri++;
+    });
+
+    // Totals row
+    ws.mergeCells(ri, 1, ri, baseColCount);
+    const tl = ws.getCell(ri, 1);
+    tl.value = `Total (${filteredData.length} accounts)`;
+    tl.font = { bold: true, size: 10 }; tl.fill = totFill;
+    tl.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
+    const entTotVals = showEntered
+      ? ptdYtd === 'PTD'
+        ? [totals.entOpening, totals.entDebit, totals.entCredit, totals.entClosing]
+        : [totals.entOpening, totals.entDebit, totals.entCredit]
+      : [];
+    const accTotVals = [totals.opening, totals.debit, totals.credit, totals.closing];
+    [...entTotVals, ...accTotVals].forEach((v, i) => {
+      const cell = ws.getCell(ri, baseColCount + 1 + i);
+      cell.value = v; cell.font = { bold: true, size: 10 };
+      cell.fill = totFill; cell.numFmt = numFmt;
+      cell.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
+    });
+
+    ws.views = [{ state: 'frozen', xSplit: 0, ySplit: dataStartRow - 1 }];
+    ws.autoFilter = { from: { row: dataStartRow - 1, column: 1 }, to: { row: ri, column: NCOLS } };
+
+    const buf = await wb.xlsx.writeBuffer();
+    saveAs(
+      new Blob([buf], { type: 'application/octet-stream' }),
+      `trial_balance_${selectedPeriod}_${new Date().toISOString().slice(0, 10)}.xlsx`
+    );
+    message.success('Excel downloaded');
+  };
 
   const summaryItems = ptdYtd === 'PTD'
     ? [
         { label: 'Opening',       v: totals.opening,  color: undefined },
-        { label: 'Total Debit',   v: totals.debit,    color: REDWOOD.success },
-        { label: 'Total Credit',  v: totals.credit,   color: REDWOOD.primary },
+        { label: 'Acct Dr',       v: totals.debit,    color: REDWOOD.success },
+        { label: 'Acct Cr',       v: totals.credit,   color: REDWOOD.primary },
         { label: 'Closing',       v: totals.closing,  color: undefined },
       ]
     : [
         { label: 'YTD Opening',   v: totals.opening,  color: undefined },
-        { label: 'YTD Debit',     v: totals.debit,    color: REDWOOD.success },
-        { label: 'YTD Credit',    v: totals.credit,   color: REDWOOD.primary },
+        { label: 'YTD Acct Dr',   v: totals.debit,    color: REDWOOD.success },
+        { label: 'YTD Acct Cr',   v: totals.credit,   color: REDWOOD.primary },
+        { label: 'YTD Closing',   v: totals.closing,  color: undefined },
       ];
 
   return (
@@ -666,7 +853,11 @@ const TBPanel: React.FC = () => {
             <Select value={company || undefined} onChange={v => setCompany(v || '')} allowClear
               style={{ width: '100%' }} size="small" showSearch loading={companyLoading}
               placeholder="All Companies">
-              {companyOptions.map(c => <Option key={c.value} value={c.value}>{c.value} – {c.meaning}</Option>)}
+              {companyOptions.map(c => (
+                <Option key={c.value} value={c.value}>
+                  {c.meaning ? `${c.value} – ${c.meaning}` : c.value}
+                </Option>
+              ))}
             </Select>
           </Col>
           <Col xs={24} sm={12} md={4}>
@@ -707,10 +898,14 @@ const TBPanel: React.FC = () => {
             <Tag color={ptdYtd === 'PTD' ? 'blue' : 'orange'}>{ptdYtd}</Tag>
             <Tag>{selectedPeriod}</Tag>
           </Space>
-          <Input prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
-            placeholder="Filter accounts…" size="small" allowClear
-            value={gridSearch} onChange={e => setGridSearch(e.target.value)}
-            style={{ width: 220, borderRadius: 6 }} />
+          <Space>
+            <Input prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
+              placeholder="Filter accounts…" size="small" allowClear
+              value={gridSearch} onChange={e => setGridSearch(e.target.value)}
+              style={{ width: 220, borderRadius: 6 }} />
+            <Button size="small" icon={<FileExcelOutlined />} onClick={exportTBExcel}
+              disabled={!filteredData.length}>Excel</Button>
+          </Space>
         </div>
       )}
 
@@ -718,13 +913,14 @@ const TBPanel: React.FC = () => {
       <Spin spinning={loading}>
         {hasSearched && (
           <Table
-            dataSource={filteredData}
+            dataSource={tableData}
             columns={columns}
             rowKey="key"
             size="small"
             scroll={{ x: 'max-content', y: 500 }}
-            pagination={{ pageSize: 50, showSizeChanger: true, showTotal: t => `${t} accounts` }}
+            pagination={{ pageSize: 50, showSizeChanger: true, showTotal: () => `${filteredData.length} accounts` }}
             className="aa-v2-grid"
+            rowClassName={(r: any) => r.isTotals ? 'aa-totals-row' : ''}
           />
         )}
       </Spin>
