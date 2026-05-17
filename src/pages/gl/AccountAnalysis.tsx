@@ -2145,18 +2145,25 @@ const AccountAnalysis: React.FC = () => {
                   v < 0
                     ? <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(Math.abs(v))} Cr</Text>
                     : <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(v)}</Text>;
+                // Render one explicit cell per leaf column — no colSpan/index tricks
+                // Static columns: 0=Account(fixed-left) 1=Desc 2=LineDesc 3=Period 4=AcctgDate 5=Batch 6=Source 7=Category 8=Currency
+                // When showEntered=true:  9-11=Entered(Dr/Cr/Bal)  12-14=Accounted(Dr/Cr/Bal)  15=DrillDown(fixed-right)
+                // When showEntered=false: 9-11=Accounted(Dr/Cr/Bal)  12=DrillDown(fixed-right)
                 return (
                   <Table.Summary fixed>
                     <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-                      {/* Fixed-left column gets the label alone — DO NOT colSpan across fixed boundary */}
-                      <Table.Summary.Cell index={0}>
-                        <Text strong style={{ fontSize: 10 }}>Totals</Text>
-                      </Table.Summary.Cell>
-                      {/* Scrollable static columns 1-8: blank */}
-                      <Table.Summary.Cell index={1} colSpan={8} />
-                      {/* Entered Dr / Cr / Balance — only when toggle is on */}
-                      {showEntered && (
+                      <Table.Summary.Cell index={0}><Text strong style={{ fontSize: 10 }}>Totals</Text></Table.Summary.Cell>
+                      <Table.Summary.Cell index={1} />{/* Description */}
+                      <Table.Summary.Cell index={2} />{/* Line Description */}
+                      <Table.Summary.Cell index={3} />{/* Period */}
+                      <Table.Summary.Cell index={4} />{/* Acctg Date */}
+                      <Table.Summary.Cell index={5} />{/* Batch */}
+                      <Table.Summary.Cell index={6} />{/* Source */}
+                      <Table.Summary.Cell index={7} />{/* Category */}
+                      <Table.Summary.Cell index={8} />{/* Currency */}
+                      {showEntered ? (
                         <>
+                          {/* Entered group */}
                           {/* @ts-expect-error antd6 SummaryCell lacks style */}
                           <Table.Summary.Cell index={9} align="right" style={groupBorderLeft}>
                             <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(gridTotals.enteredDr)}</Text>
@@ -2165,24 +2172,34 @@ const AccountAnalysis: React.FC = () => {
                             <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.enteredCr)}</Text>
                           </Table.Summary.Cell>
                           {/* @ts-expect-error antd6 SummaryCell lacks style */}
-                          <Table.Summary.Cell index={11} align="right" style={groupBorderRight}>
-                            {fmtTot(entBal)}
+                          <Table.Summary.Cell index={11} align="right" style={groupBorderRight}>{fmtTot(entBal)}</Table.Summary.Cell>
+                          {/* Accounted group */}
+                          {/* @ts-expect-error antd6 SummaryCell lacks style */}
+                          <Table.Summary.Cell index={12} align="right" style={groupBorderLeft}>
+                            <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(gridTotals.accountedDr)}</Text>
                           </Table.Summary.Cell>
+                          <Table.Summary.Cell index={13} align="right">
+                            <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.accountedCr)}</Text>
+                          </Table.Summary.Cell>
+                          {/* @ts-expect-error antd6 SummaryCell lacks style */}
+                          <Table.Summary.Cell index={14} align="right" style={groupBorderRight}>{fmtTot(accBal)}</Table.Summary.Cell>
+                          <Table.Summary.Cell index={15} />{/* DrillDown */}
+                        </>
+                      ) : (
+                        <>
+                          {/* Accounted group only */}
+                          {/* @ts-expect-error antd6 SummaryCell lacks style */}
+                          <Table.Summary.Cell index={9} align="right" style={groupBorderLeft}>
+                            <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(gridTotals.accountedDr)}</Text>
+                          </Table.Summary.Cell>
+                          <Table.Summary.Cell index={10} align="right">
+                            <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.accountedCr)}</Text>
+                          </Table.Summary.Cell>
+                          {/* @ts-expect-error antd6 SummaryCell lacks style */}
+                          <Table.Summary.Cell index={11} align="right" style={groupBorderRight}>{fmtTot(accBal)}</Table.Summary.Cell>
+                          <Table.Summary.Cell index={12} />{/* DrillDown */}
                         </>
                       )}
-                      {/* Accounted Dr / Cr / Balance — always shown */}
-                      {/* @ts-expect-error antd6 SummaryCell lacks style */}
-                      <Table.Summary.Cell index={showEntered ? 12 : 9} align="right" style={groupBorderLeft}>
-                        <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(gridTotals.accountedDr)}</Text>
-                      </Table.Summary.Cell>
-                      <Table.Summary.Cell index={showEntered ? 13 : 10} align="right">
-                        <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.accountedCr)}</Text>
-                      </Table.Summary.Cell>
-                      {/* @ts-expect-error antd6 SummaryCell lacks style */}
-                      <Table.Summary.Cell index={showEntered ? 14 : 11} align="right" style={groupBorderRight}>
-                        {fmtTot(accBal)}
-                      </Table.Summary.Cell>
-                      <Table.Summary.Cell index={showEntered ? 15 : 12} />
                     </Table.Summary.Row>
                   </Table.Summary>
                 );
