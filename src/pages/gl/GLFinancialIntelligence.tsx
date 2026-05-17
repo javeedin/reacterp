@@ -184,15 +184,23 @@ const GLFinancialIntelligence: React.FC = () => {
     if (company) params.set('company', company);
     const res  = await fetch(`${BASE}/${APEX_DB_CONFIG.endpoints.rrTrialBalance}?${params}`);
     const data = await res.json();
-    return (data.items ?? []).map((r: Record<string, unknown>) => ({
-      account:        (r.ACCOUNT        ?? r.account        ?? '') as string,
-      company:        (r.COMPANY        ?? r.company        ?? '') as string,
-      accountType:    (r.ACCOUNT_TYPE   ?? r.account_type   ?? '') as string,
-      description:    (r.DESCRIPTION    ?? r.description    ?? '') as string,
-      openingBalance: Number(r.OPENING_BALANCE ?? r.opening_balance ?? 0),
-      periodActivity: Number(r.PERIOD_ACTIVITY ?? r.period_activity ?? 0),
-      closingBalance: Number(r.CLOSING_BALANCE ?? r.closing_balance ?? 0),
-    }));
+    return (data.items ?? []).map((r: Record<string, unknown>) => {
+      const openDr = Number(r.opening_dr ?? 0);
+      const openCr = Number(r.opening_cr ?? 0);
+      const ptdDr  = Number(r.ptd_dr  ?? 0);
+      const ptdCr  = Number(r.ptd_cr  ?? 0);
+      const closDr = Number(r.closing_dr ?? 0);
+      const closCr = Number(r.closing_cr ?? 0);
+      return {
+        account:        (r.account        ?? '') as string,
+        company:        (r.company        ?? '') as string,
+        accountType:    (r.account_type   ?? '') as string,
+        description:    (r.account_desc   ?? '') as string,
+        openingBalance: openDr - openCr,
+        periodActivity: ptdDr  - ptdCr,
+        closingBalance: closDr - closCr,
+      };
+    });
   }
 
   // ── Analyse period ────────────────────────────────────────────────────────────
