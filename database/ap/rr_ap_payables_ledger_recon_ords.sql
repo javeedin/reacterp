@@ -18,8 +18,8 @@
 --   RR_AP_PAYMENTS_RELATED_INVOICES – payment ↔ invoice link
 --   RR_AP_APPLIED_PREPAYMENTS       – prepayment applications
 --   RR_GL_BALANCES                  – GL opening/closing balances
---   RR_GL_LINES_ALL                 – GL journal lines
---   RR_GL_HEADERS                   – GL journal headers
+--   RR_GL_JE_LINES_ALL              – GL journal lines
+--   RR_GL_JE_HEADERS                – GL journal headers
 --
 -- Period dates are derived by parsing P_PERIOD ('Mon-YY' format) — no
 -- RR_GL_FISCAL_PERIODS dependency.
@@ -184,7 +184,7 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN NULL;
   END;
 
-  -- ── 8. AP vs non-AP GL activity from RR_GL_LINES_ALL + RR_GL_HEADERS ──────
+  -- ── 8. AP vs non-AP GL activity from RR_GL_JE_LINES_ALL + RR_GL_JE_HEADERS ──
   -- AP invoice categories: 'Purchase Invoices', 'Payables Invoices', 'Payables', 'Invoices'
   -- AP payment categories: 'Payments', 'AP Payments', 'Cash Payments', 'Supplier Payments'
   BEGIN
@@ -202,8 +202,8 @@ BEGIN
         ELSE 0
       END), 0)
     INTO l_gl_ap_inv, l_gl_ap_pay
-    FROM RR_GL_LINES_ALL l
-    JOIN RR_GL_HEADERS   h ON h.JE_HEADER_ID = l.JE_HEADER_ID
+    FROM RR_GL_JE_LINES_ALL l
+    JOIN RR_GL_JE_HEADERS   h ON h.JE_HEADER_ID = l.JE_HEADER_ID
     WHERE UPPER(h.PERIOD_NAME) = UPPER(:P_PERIOD)
     AND   UPPER(h.USER_JE_CATEGORY_NAME)
             IN ('PURCHASE INVOICES','PAYABLES INVOICES','PAYABLES','INVOICES',

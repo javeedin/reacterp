@@ -10,6 +10,7 @@ import {
   FilePdfOutlined, TeamOutlined, SearchOutlined,
   ApiOutlined, CopyOutlined, FileTextOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined, BookOutlined, LockOutlined,
+  ZoomInOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -300,6 +301,14 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState('');
   const [selectedAccountDesc, setSelectedAccountDesc] = useState('');
+
+  // ── Drill-down state ───────────────────────────────────────────────────────
+  const [drillOpen, setDrillOpen]       = useState(false);
+  const [drillTitle, setDrillTitle]     = useState('');
+  const [drillLoading, setDrillLoading] = useState(false);
+  const [drillRows, setDrillRows]       = useState<any[]>([]);
+  const [drillCols, setDrillCols]       = useState<any[]>([]);
+  const reconParamsRef = useRef<{ bu: string; company: string; account: string; period: string }>({ bu: '', company: '', account: '', period: '' });
 
   useEffect(() => {
     if (!report.hasPeriodFilter) return;
@@ -634,6 +643,53 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
     return data as ReconResult;
   };
 
+  const fetchDrilldown = useCallback(async (title: string, endpoint: string, extraParams: Record<string, string> = {}) => {
+    const p = reconParamsRef.current;
+    const qs = new URLSearchParams();
+    if (p.period)  qs.set('P_PERIOD', p.period);
+    if (p.bu)      qs.set('P_BUSINESS_UNIT', p.bu);
+    if (p.company) qs.set('P_COMPANY', p.company);
+    if (p.account) qs.set('P_ACCOUNT', p.account);
+    Object.entries(extraParams).forEach(([k, v]) => qs.set(k, v));
+    const url = `${APEX_DB_CONFIG.baseUrl}/ap/reports/payables-ledger-recon/${endpoint}?${qs}`;
+    setDrillTitle(title);
+    setDrillOpen(true);
+    setDrillLoading(true);
+    setDrillRows([]);
+    setDrillCols([]);
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      const items: any[] = data.items || (Array.isArray(data) ? data : []);
+      if (!items.length) { setDrillRows([]); return; }
+      // Build columns from first row keys
+      const cols = Object.keys(items[0]).map(k => ({
+        title: k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+        dataIndex: k,
+        key: k,
+        ellipsis: true,
+        render: (v: any) => {
+          if (v === null || v === undefined) return '—';
+          if (typeof v === 'number') {
+            const abs = Math.abs(v);
+            const s = abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            return <span style={{ fontFamily: 'monospace', color: v < 0 ? '#C74634' : undefined }}>{v < 0 ? `(${s})` : s}</span>;
+          }
+          return String(v);
+        },
+      }));
+      setDrillCols(cols);
+      setDrillRows(items.map((r, i) => ({ ...r, _key: i })));
+    } catch (e: any) {
+      message.error(`Drill-down failed: ${e.message}`);
+      setDrillOpen(false);
+    } finally {
+      setDrillLoading(false);
+    }
+  }, []);
+
   const handleRun = async () => {
     const { businessUnit: bu = '', supplierNumber: sn = '', supplierName: snm = '', dateFrom = '', dateTo = '', asAtDate = '' } = form.getFieldsValue();
     const period  = report.key === 'payables-ledger-recon' ? selectedPeriod : (form.getFieldValue('period') || '');
@@ -645,6 +701,7 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
       if (report.key === 'payables-ledger-recon') {
         const result = await fetchPayablesLedgerRecon(bu, resolvedCompany, account, period);
         setReconData(result); setHasRun(true);
+        reconParamsRef.current = { bu, company: resolvedCompany, account, period };
         message.success('Reconciliation loaded.');
       } else {
         let result: any[] = [];
@@ -677,21 +734,21 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
     const diff = (p: number | null, a: number | null) =>
       p !== null && a !== null ? p + a : null;
     return [
-      { label: 'Accounting Begin Balance',            payables: null,           accounting: d.gl_opening,        difference: null,                       bold: false },
-      { label: '(Non-Payables Begin Balance)',        payables: null,           accounting: d.gl_opening - d.gl_ap_invoices - d.gl_ap_payments + d.gl_non_ap_journals, difference: null, bold: false, italic: true, indent: true },
-      { label: 'Payables Begin Balance',              payables: d.payables_begin, accounting: d.gl_opening,      difference: diff(d.payables_begin, d.gl_opening),          bold: true },
-      { label: 'Invoices',                            payables: d.payables_invoices, accounting: d.gl_ap_invoices, difference: diff(d.payables_invoices, d.gl_ap_invoices), bold: false },
-      { label: 'Payments',                            payables: d.payables_payments, accounting: d.gl_ap_payments, difference: diff(d.payables_payments, d.gl_ap_payments), bold: false },
-      { label: 'Prepayments',                         payables: d.payables_prepay, accounting: 0,                difference: diff(d.payables_prepay, 0),                    bold: false },
-      { label: 'Payables Variance',                   payables: d.payables_variance, accounting: d.payables_variance, difference: 0,                                        bold: false, variance: true },
-      { label: 'Payables End Balance',                payables: d.payables_end, accounting: d.gl_closing,        difference: diff(d.payables_end, d.gl_closing),            bold: true },
-      { label: 'Non-Payables Begin Balance',          payables: null,           accounting: d.gl_opening - d.gl_ap_invoices - d.gl_ap_payments + d.gl_non_ap_journals, difference: null, bold: false },
-      { label: 'Non-Payables Journals',               payables: null,           accounting: d.gl_non_ap_journals, difference: null,                                         bold: false },
-      { label: 'Other Accounting',                    payables: null,           accounting: 0,                   difference: null,                                          bold: false },
-      { label: '(Not Transferred to General Ledger)', payables: null,           accounting: d.gl_not_transferred, difference: null,                                         bold: false, italic: true, indent: true },
-      { label: '(Not Posted in General Ledger)',      payables: null,           accounting: d.gl_not_posted,     difference: null,                                          bold: false, italic: true, indent: true },
-      { label: 'Accounting Variance',                 payables: null,           accounting: d.accounting_variance, difference: null,                                        bold: false, variance: true },
-      { label: 'Accounting End Balance',              payables: null,           accounting: d.gl_closing,        difference: null,                                          bold: true },
+      { rowKey: 'acct_begin',    label: 'Accounting Begin Balance',            payables: null,           accounting: d.gl_opening,        difference: null,                                          bold: false },
+      { rowKey: 'non_pay_begin', label: '(Non-Payables Begin Balance)',        payables: null,           accounting: d.gl_opening - d.gl_ap_invoices - d.gl_ap_payments + d.gl_non_ap_journals, difference: null, bold: false, italic: true, indent: true },
+      { rowKey: 'pay_begin',     label: 'Payables Begin Balance',              payables: d.payables_begin, accounting: d.gl_opening,      difference: diff(d.payables_begin, d.gl_opening),          bold: true },
+      { rowKey: 'invoices',      label: 'Invoices',                            payables: d.payables_invoices, accounting: d.gl_ap_invoices, difference: diff(d.payables_invoices, d.gl_ap_invoices), bold: false },
+      { rowKey: 'payments',      label: 'Payments',                            payables: d.payables_payments, accounting: d.gl_ap_payments, difference: diff(d.payables_payments, d.gl_ap_payments), bold: false },
+      { rowKey: 'prepayments',   label: 'Prepayments',                         payables: d.payables_prepay, accounting: 0,                difference: diff(d.payables_prepay, 0),                    bold: false },
+      { rowKey: 'pay_variance',  label: 'Payables Variance',                   payables: d.payables_variance, accounting: d.payables_variance, difference: 0,                                        bold: false, variance: true },
+      { rowKey: 'pay_end',       label: 'Payables End Balance',                payables: d.payables_end, accounting: d.gl_closing,        difference: diff(d.payables_end, d.gl_closing),            bold: true },
+      { rowKey: 'non_pay_begin2',label: 'Non-Payables Begin Balance',          payables: null,           accounting: d.gl_opening - d.gl_ap_invoices - d.gl_ap_payments + d.gl_non_ap_journals, difference: null, bold: false },
+      { rowKey: 'non_pay_jnls',  label: 'Non-Payables Journals',               payables: null,           accounting: d.gl_non_ap_journals, difference: null,                                         bold: false },
+      { rowKey: 'other_acct',    label: 'Other Accounting',                    payables: null,           accounting: 0,                   difference: null,                                          bold: false },
+      { rowKey: 'not_trans',     label: '(Not Transferred to General Ledger)', payables: null,           accounting: d.gl_not_transferred, difference: null,                                         bold: false, italic: true, indent: true },
+      { rowKey: 'not_posted',    label: '(Not Posted in General Ledger)',      payables: null,           accounting: d.gl_not_posted,     difference: null,                                          bold: false, italic: true, indent: true },
+      { rowKey: 'acct_variance', label: 'Accounting Variance',                 payables: null,           accounting: d.accounting_variance, difference: null,                                        bold: false, variance: true },
+      { rowKey: 'acct_end',      label: 'Accounting End Balance',              payables: null,           accounting: d.gl_closing,        difference: null,                                          bold: true },
     ];
   };
 
@@ -703,6 +760,23 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
     };
     const thLabelStyle: React.CSSProperties = { ...thStyle, textAlign: 'left', width: '40%' };
     const tdBase: React.CSSProperties = { padding: '6px 12px', fontSize: 12, borderBottom: '1px solid #e8e8e8', fontFamily: 'monospace' };
+
+    // Returns [endpoint, extraParams, title] or null
+    const getDrill = (rowKey: string, side: 'payables' | 'accounting'): [string, Record<string,string>, string] | null => {
+      if (side === 'payables') {
+        if (rowKey === 'pay_begin')  return ['ap-invoices', { P_DATE_FILTER: 'before' }, 'AP Invoices — Before Period (Begin Balance)'];
+        if (rowKey === 'invoices')   return ['ap-invoices', { P_DATE_FILTER: 'in' },     'AP Invoices — Period'];
+        if (rowKey === 'payments')   return ['ap-payments', {},                           'AP Payments — Period'];
+        if (rowKey === 'pay_end')    return ['ap-invoices', { P_DATE_FILTER: 'end' },     'AP Invoices — End Balance'];
+      } else {
+        if (rowKey === 'acct_begin' || rowKey === 'pay_begin')   return ['gl-balances', {}, 'GL Balances — Opening'];
+        if (rowKey === 'invoices')   return ['gl-lines', { P_CAT_TYPE: 'ap-inv' },  'GL Journal Lines — AP Invoices'];
+        if (rowKey === 'payments')   return ['gl-lines', { P_CAT_TYPE: 'ap-pay' },  'GL Journal Lines — AP Payments'];
+        if (rowKey === 'non_pay_jnls') return ['gl-lines', { P_CAT_TYPE: 'non-ap' }, 'GL Journal Lines — Non-AP'];
+        if (rowKey === 'acct_end' || rowKey === 'pay_end')   return ['gl-balances', {}, 'GL Balances — Closing'];
+      }
+      return null;
+    };
 
     return (
       <div style={{ overflowX: 'auto' }}>
@@ -754,8 +828,26 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
                   )}
                   <tr>
                     <td style={labelStyle}>{row.label}</td>
-                    <td style={numStyle(row.payables)}>{row.payables !== null ? fmtRecon(row.payables) : ''}</td>
-                    <td style={numStyle(row.accounting, (row as any).variance)}>{row.accounting !== null ? fmtRecon(row.accounting) : ''}</td>
+                    <td style={{ ...numStyle(row.payables), position: 'relative' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
+                        {row.payables !== null ? fmtRecon(row.payables) : ''}
+                        {(() => { const d = getDrill((row as any).rowKey, 'payables'); return d && row.payables !== null && row.payables !== 0 ? (
+                          <Tooltip title={d[2]}><Button type="link" size="small" icon={<ZoomInOutlined style={{ fontSize: 11 }} />}
+                            style={{ padding: 0, height: 'auto', color: REDWOOD.info, opacity: 0.7 }}
+                            onClick={() => fetchDrilldown(d[2], d[0], d[1])} /></Tooltip>
+                        ) : null; })()}
+                      </span>
+                    </td>
+                    <td style={{ ...numStyle(row.accounting, (row as any).variance), position: 'relative' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
+                        {row.accounting !== null ? fmtRecon(row.accounting) : ''}
+                        {(() => { const d = getDrill((row as any).rowKey, 'accounting'); return d && row.accounting !== null && row.accounting !== 0 ? (
+                          <Tooltip title={d[2]}><Button type="link" size="small" icon={<ZoomInOutlined style={{ fontSize: 11 }} />}
+                            style={{ padding: 0, height: 'auto', color: REDWOOD.info, opacity: 0.7 }}
+                            onClick={() => fetchDrilldown(d[2], d[0], d[1])} /></Tooltip>
+                        ) : null; })()}
+                      </span>
+                    </td>
                     <td style={diffStyle(row.difference)}>{row.difference !== null ? fmtRecon(row.difference) : ''}</td>
                   </tr>
                 </React.Fragment>
@@ -1153,6 +1245,32 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
           />
         )}
       </Spin>
+
+      {/* Drill-down modal */}
+      <Modal
+        open={drillOpen}
+        onCancel={() => setDrillOpen(false)}
+        title={<Space><ZoomInOutlined style={{ color: REDWOOD.info }} />{drillTitle}</Space>}
+        footer={<Button onClick={() => setDrillOpen(false)}>Close</Button>}
+        width={1100}
+        styles={{ body: { padding: '12px 0' } }}
+      >
+        <Spin spinning={drillLoading}>
+          {drillRows.length === 0 && !drillLoading ? (
+            <Empty description="No transactions found" style={{ padding: 32 }} />
+          ) : (
+            <Table
+              dataSource={drillRows}
+              columns={drillCols}
+              rowKey="_key"
+              size="small"
+              scroll={{ x: true, y: 420 }}
+              pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `${t} records` }}
+              style={{ fontSize: 12 }}
+            />
+          )}
+        </Spin>
+      </Modal>
 
       {/* Account Picker for payables-ledger-recon */}
       <AccountPickerModal
