@@ -1292,24 +1292,23 @@ const AAPanel: React.FC = () => {
       const firstP = sortedP[0] || '';
       const lastP  = sortedP[sortedP.length - 1] || '';
 
-      // Per-combo API call: use the user's account filter + each combo's own segment
-      // values so the trial balance endpoint returns data for exactly that combination.
+      // Per-combo API call: parse every segment from the combo string and pass them
+      // all to the trial balance endpoint so only that exact combination is returned.
+      // Combo format: company(0)-lob(1)-dept(2)-account(3)-subAcct(4)-analysis(5)-interco(6)
+      const COMBO_PARAM_NAMES = ['company', 'lob', 'department', null /* account at 3 */, 'sub_account', 'analysis', 'intercompany'];
+
       const fetchComboBalance = async (
-        lines: JournalLine[], period: string, isOpen: boolean
+        combo: string, period: string, isOpen: boolean
       ): Promise<JournalLine | null> => {
         if (!period) return null;
+        const parts = combo.split('-');
         const p = new URLSearchParams({ ledger_name: ledger, period_name: period });
-        // Natural account from user's filter
-        if (account) p.set('account', account);
-        // Inherit global segment filters first, then override with combo-specific values
-        Object.entries(segFilters).forEach(([k, v]) => { if (v) p.set(k, v); });
-        const r0 = lines[0];
-        if (r0.segCompany)  p.set('company',      r0.segCompany);
-        if (r0.segLob)      p.set('lob',           r0.segLob);
-        if (r0.segDept)     p.set('department',    r0.segDept);
-        if (r0.segSubAcct)  p.set('sub_account',   r0.segSubAcct);
-        if (r0.segAnalysis) p.set('analysis',      r0.segAnalysis);
-        if (r0.segInterco)  p.set('intercompany',  r0.segInterco);
+        // Natural account is at position 3 in the combo string
+        p.set('account', parts[3] || account || '');
+        // Pass every other segment by position to scope the TB query to this exact combo
+        COMBO_PARAM_NAMES.forEach((paramName, idx) => {
+          if (paramName && parts[idx]) p.set(paramName, parts[idx]);
+        });
         try {
           const res = await fetch(`${API_BASE}/rr-trialbalance/standard?${p}`);
           if (!res.ok) return null;
@@ -1326,7 +1325,6 @@ const AAPanel: React.FC = () => {
             cr: !isDebitNormal && amt > 0 ? amt : (isDebitNormal && amt < 0 ? Math.abs(amt) : 0),
           });
           const acc = toDrCr(accAmt); const ent = toDrCr(entAmt);
-          const combo = r0.concatenatedSegments;
           return {
             key: `${combo}-${isOpen ? 'open' : 'close'}`,
             concatenatedSegments: combo,
@@ -1344,8 +1342,8 @@ const AAPanel: React.FC = () => {
       const breaks: ComboBreak[] = await Promise.all(
         Array.from(map.entries()).map(async ([combo, lines]) => {
           const [openRow, closeRow] = await Promise.all([
-            fetchComboBalance(lines, firstP, true),
-            fetchComboBalance(lines, lastP,  false),
+            fetchComboBalance(combo, firstP, true),
+            fetchComboBalance(combo, lastP,  false),
           ]);
           const openAcc = openRow ? openRow.accountedDr - openRow.accountedCr : 0;
           const openEnt = openRow ? openRow.enteredDr   - openRow.enteredCr   : 0;
