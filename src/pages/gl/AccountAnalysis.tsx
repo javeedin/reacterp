@@ -2137,14 +2137,24 @@ const AccountAnalysis: React.FC = () => {
                 record.isOpeningBalance ? 'opening-balance-row' : ''
               }
               locale={{ emptyText: <Empty description="Click Search to load data" /> }}
-              summary={() =>
-                searchData.length > 0 ? (
+              summary={() => {
+                if (searchData.length === 0) return null;
+                const entBal = gridTotals.enteredDr - gridTotals.enteredCr;
+                const accBal = gridTotals.accountedDr - gridTotals.accountedCr;
+                const fmtTot = (v: number) =>
+                  v < 0
+                    ? <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(Math.abs(v))} Cr</Text>
+                    : <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(v)}</Text>;
+                return (
                   <Table.Summary fixed>
                     <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-                      <Table.Summary.Cell index={0} colSpan={9}>
+                      {/* Fixed-left column gets the label alone — DO NOT colSpan across fixed boundary */}
+                      <Table.Summary.Cell index={0}>
                         <Text strong style={{ fontSize: 10 }}>Totals</Text>
                       </Table.Summary.Cell>
-                      {/* Entered Dr/Cr/Balance — shown first when toggle is on */}
+                      {/* Scrollable static columns 1-8: blank */}
+                      <Table.Summary.Cell index={1} colSpan={8} />
+                      {/* Entered Dr / Cr / Balance — only when toggle is on */}
                       {showEntered && (
                         <>
                           {/* @ts-expect-error antd6 SummaryCell lacks style */}
@@ -2155,10 +2165,12 @@ const AccountAnalysis: React.FC = () => {
                             <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.enteredCr)}</Text>
                           </Table.Summary.Cell>
                           {/* @ts-expect-error antd6 SummaryCell lacks style */}
-                          <Table.Summary.Cell index={11} align="right" style={groupBorderRight} />
+                          <Table.Summary.Cell index={11} align="right" style={groupBorderRight}>
+                            {fmtTot(entBal)}
+                          </Table.Summary.Cell>
                         </>
                       )}
-                      {/* Accounted Dr/Cr/Balance — always shown */}
+                      {/* Accounted Dr / Cr / Balance — always shown */}
                       {/* @ts-expect-error antd6 SummaryCell lacks style */}
                       <Table.Summary.Cell index={showEntered ? 12 : 9} align="right" style={groupBorderLeft}>
                         <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(gridTotals.accountedDr)}</Text>
@@ -2167,12 +2179,14 @@ const AccountAnalysis: React.FC = () => {
                         <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.accountedCr)}</Text>
                       </Table.Summary.Cell>
                       {/* @ts-expect-error antd6 SummaryCell lacks style */}
-                      <Table.Summary.Cell index={showEntered ? 14 : 11} align="right" style={groupBorderRight} />
+                      <Table.Summary.Cell index={showEntered ? 14 : 11} align="right" style={groupBorderRight}>
+                        {fmtTot(accBal)}
+                      </Table.Summary.Cell>
                       <Table.Summary.Cell index={showEntered ? 15 : 12} />
                     </Table.Summary.Row>
                   </Table.Summary>
-                ) : null
-              }
+                );
+              }}
             />
           </Spin>
 
