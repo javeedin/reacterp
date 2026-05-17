@@ -1,12 +1,12 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Card, Form, Select, Button, Table, Tag, Statistic, Row, Col,
-  Space, Typography, Alert, Segmented, Tooltip, Modal, Input, Badge,
+  Space, Typography, Alert, Segmented, Tooltip, Modal, Input, Badge, Spin,
 } from 'antd';
 import {
   SearchOutlined, ReloadOutlined,
   CheckCircleOutlined, WarningOutlined, CloseCircleOutlined,
-  ApiOutlined, CopyOutlined, LockOutlined,
+  ApiOutlined, CopyOutlined, LockOutlined, BookOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { APEX_DB_CONFIG } from '../../config/api.config';
@@ -115,6 +115,55 @@ function StatusTick({ exists, tooltip }: { exists: boolean; tooltip?: string }) 
   return tooltip ? <Tooltip title={tooltip}>{icon}</Tooltip> : icon;
 }
 
+// ── AccountPicker modal (same UX as Account Analysis) ─────────────────────────
+const AccountPicker: React.FC<{
+  open: boolean;
+  onClose: () => void;
+  onSelect: (account: string, description: string) => void;
+  options: AccountOption[];
+  loading: boolean;
+}> = ({ open, onClose, onSelect, options, loading }) => {
+  const [q, setQ] = useState('');
+  const filtered = useMemo(() => {
+    const lq = q.toLowerCase();
+    return q
+      ? options.filter(o => o.account.toLowerCase().includes(lq) || o.description.toLowerCase().includes(lq))
+      : options;
+  }, [options, q]);
+  const close = () => { onClose(); setQ(''); };
+  return (
+    <Modal open={open} onCancel={close} footer={null}
+      title={<Space><SearchOutlined style={{ color: REDWOOD.info }} />Select Account</Space>} width={640}>
+      <Input prefix={<SearchOutlined />} placeholder="Search code or description…"
+        allowClear size="small" value={q} onChange={e => setQ(e.target.value)}
+        style={{ marginBottom: 8 }} autoFocus />
+      <div onClick={() => { onSelect('', ''); close(); }}
+        style={{ padding: '7px 12px', cursor: 'pointer', borderBottom: `1px solid ${REDWOOD.neutral200}`,
+          background: '#fafafa', fontSize: 12, color: REDWOOD.neutral600 }}
+        onMouseEnter={e => (e.currentTarget.style.background = '#e6f4ff')}
+        onMouseLeave={e => (e.currentTarget.style.background = '#fafafa')}>
+        — All Accounts —
+      </div>
+      <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+        {loading && <div style={{ padding: 24, textAlign: 'center' }}><Spin size="small" /></div>}
+        {!loading && filtered.map(o => (
+          <div key={o.account} onClick={() => { onSelect(o.account, o.description); close(); }}
+            style={{ padding: '7px 12px', cursor: 'pointer', borderBottom: `1px solid ${REDWOOD.neutral200}`,
+              display: 'flex', gap: 10, alignItems: 'center' }}
+            onMouseEnter={e => (e.currentTarget.style.background = '#e6f4ff')}
+            onMouseLeave={e => (e.currentTarget.style.background = '')}>
+            <Text code style={{ fontSize: 11, minWidth: 130 }}>{o.account}</Text>
+            <Text style={{ fontSize: 12, flex: 1 }}>{o.description}</Text>
+          </div>
+        ))}
+        {!loading && filtered.length === 0 && (
+          <div style={{ padding: 24, textAlign: 'center', color: REDWOOD.neutral600 }}>No accounts found</div>
+        )}
+      </div>
+    </Modal>
+  );
+};
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export default function APGLReconcile() {
@@ -133,8 +182,11 @@ export default function APGLReconcile() {
   const [selectedPeriod, setSelectedPeriod] = useState('');
 
   // ── Account LOV ───────────────────────────────────────────────────────────────
-  const [accountOptions, setAccountOptions] = useState<AccountOption[]>([]);
+  const [accountOptions, setAccountOptions]   = useState<AccountOption[]>([]);
   const [accountsLoading, setAccountsLoading] = useState(false);
+  const [accountPickerOpen, setAccountPickerOpen] = useState(false);
+  const [selectedAccount, setSelectedAccount] = useState('');
+  const [selectedAccountDesc, setSelectedAccountDesc] = useState('');
 
   // ── Grid state ────────────────────────────────────────────────────────────────
   const [rows, setRows]                   = useState<ReconRow[]>([]);
@@ -144,6 +196,22 @@ export default function APGLReconcile() {
   const [filter, setFilter]               = useState<'ALL' | 'OK' | 'MISSING_SLA' | 'MISSING_GL' | 'GAP'>('ALL');
   const [lastCalledUrl, setLastCalledUrl] = useState<string>('');
   const [apiModalOpen, setApiModalOpen]   = useState(false);
+
+  // ── BU API debug modal ────────────────────────────────────────────────────────
+  const [buDebugOpen, setBuDebugOpen]       = useState(false);
+  const [buRawItems, setBuRawItems]         = useState<any[]>([]);
+  const [buDebugLoading, setBuDebugLoading] = useState(false);
+
+  const openBuDebug = useCallback(async () => {
+    setBuDebugOpen(true);
+    if (buRawItems.length > 0) return;
+    setBuDebugLoading(true);
+    try {
+      const res  = await fetch(`${APEX_BASE}/gl/businessunits`);
+      const data = await res.json();
+      setBuRawItems(data.items ?? []);
+    } catch { /* silent */ } finally { setBuDebugLoading(false); }
+  }, [buRawItems.length]);
 
   // ── Load business units on mount ──────────────────────────────────────────────
   useEffect(() => {
@@ -271,12 +339,12 @@ export default function APGLReconcile() {
     const params = new URLSearchParams({ limit: '2000' });
     if (values.businessUnit)     params.set('businessUnit',    values.businessUnit);
     if (selectedPeriod)          params.set('period_name',     selectedPeriod);
-    if (values.account)          params.set('account',         values.account);
+    if (selectedAccount)         params.set('account',         selectedAccount);
     if (company)                 params.set('company',         company);
     if (values.sourceTable)      params.set('sourceTable',     values.sourceTable);
     if (values.accountingStatus) params.set('accountingStatus', values.accountingStatus);
     return `${APEX_BASE}/ap/reconciliation?${params}`;
-  }, [form, selectedPeriod, company]);
+  }, [form, selectedPeriod, selectedAccount, company]);
 
   // ── Search ────────────────────────────────────────────────────────────────────
   const handleSearch = async (values: any) => {
@@ -286,7 +354,7 @@ export default function APGLReconcile() {
       const params = new URLSearchParams({ limit: '2000' });
       if (values.businessUnit)     params.set('businessUnit',    values.businessUnit);
       if (selectedPeriod)          params.set('period_name',     selectedPeriod);
-      if (values.account)          params.set('account',         values.account);
+      if (selectedAccount)         params.set('account',         selectedAccount);
       if (company)                 params.set('company',         company);
       if (values.sourceTable)      params.set('sourceTable',     values.sourceTable);
       if (values.accountingStatus) params.set('accountingStatus', values.accountingStatus);
@@ -315,8 +383,8 @@ export default function APGLReconcile() {
 
   const handleReset = () => {
     form.resetFields();
-    setCompany('');
-    setCompanyLocked(false);
+    setCompany(''); setCompanyLocked(false);
+    setSelectedAccount(''); setSelectedAccountDesc('');
     setRows([]); setSummary(null); setError(null); setLastCalledUrl('');
     // Re-apply latest period
     if (periodsForYear.length) setSelectedPeriod(periodsForYear[periodsForYear.length - 1].period_name_id);
@@ -498,7 +566,20 @@ export default function APGLReconcile() {
           {/* Row 1: BU, Company, Account */}
           <Row gutter={12}>
             <Col xs={24} sm={8}>
-              <Form.Item name="businessUnit" label="Business Unit" style={{ marginBottom: 10 }}>
+              <Form.Item style={{ marginBottom: 10 }}
+                label={
+                  <Space size={6}>
+                    <span>Business Unit</span>
+                    <Tooltip title="Inspect Business Units API response">
+                      <ApiOutlined
+                        style={{ fontSize: 12, color: REDWOOD.info, cursor: 'pointer' }}
+                        onClick={e => { e.preventDefault(); openBuDebug(); }}
+                      />
+                    </Tooltip>
+                  </Space>
+                }
+                name="businessUnit"
+              >
                 <Select
                   placeholder="Select business unit"
                   allowClear
@@ -531,29 +612,35 @@ export default function APGLReconcile() {
                     color: companyLocked ? REDWOOD.info : undefined,
                     fontWeight: companyLocked ? 600 : undefined,
                     fontFamily: 'monospace',
-                    cursor: companyLocked ? 'not-allowed' : undefined,
                   }}
                 />
               </Form.Item>
             </Col>
 
             <Col xs={24} sm={12}>
-              <Form.Item name="account" label="Account" style={{ marginBottom: 10 }}>
-                <Select
-                  placeholder="Select account (LOV)"
-                  allowClear
-                  showSearch
-                  loading={accountsLoading}
-                  optionFilterProp="label"
-                  filterOption={(input, opt) =>
-                    String(opt?.label ?? '').toLowerCase().includes(input.toLowerCase())
-                  }
-                  options={accountOptions.map(a => ({
-                    value: a.account,
-                    label: `${a.account}${a.description ? ' – ' + a.description : ''}`,
-                  }))}
-                  dropdownStyle={{ minWidth: 400 }}
-                />
+              <Form.Item label="Account" style={{ marginBottom: 10 }}>
+                <Input.Group compact style={{ display: 'flex' }}>
+                  <Input
+                    readOnly
+                    value={selectedAccount
+                      ? `${selectedAccount}${selectedAccountDesc ? '  –  ' + selectedAccountDesc : ''}`
+                      : ''}
+                    placeholder="Click to select account…"
+                    style={{ flex: 1, cursor: 'pointer', background: selectedAccount ? '#f0f5ff' : undefined }}
+                    onClick={() => setAccountPickerOpen(true)}
+                  />
+                  <Button
+                    icon={<BookOutlined />}
+                    loading={accountsLoading}
+                    onClick={() => setAccountPickerOpen(true)}
+                    style={{ borderLeft: 0 }}
+                  >
+                    LOV
+                  </Button>
+                  {selectedAccount && (
+                    <Button onClick={() => { setSelectedAccount(''); setSelectedAccountDesc(''); }}>✕</Button>
+                  )}
+                </Input.Group>
               </Form.Item>
             </Col>
           </Row>
@@ -767,6 +854,52 @@ export default function APGLReconcile() {
             </div>
           )}
         </div>
+      </Modal>
+
+      {/* Account Picker Modal */}
+      <AccountPicker
+        open={accountPickerOpen}
+        onClose={() => setAccountPickerOpen(false)}
+        onSelect={(acct, desc) => { setSelectedAccount(acct); setSelectedAccountDesc(desc); }}
+        options={accountOptions}
+        loading={accountsLoading}
+      />
+
+      {/* BU API Debug Modal */}
+      <Modal
+        open={buDebugOpen}
+        onCancel={() => setBuDebugOpen(false)}
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} />Business Units — Raw API Response</Space>}
+        footer={<Button onClick={() => setBuDebugOpen(false)}>Close</Button>}
+        width={820}
+      >
+        <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 8 }}>
+          <Text code style={{ fontSize: 11 }}>{APEX_BASE}/gl/businessunits</Text>
+          {' — '}showing all fields returned per item so you can confirm the company field name.
+        </div>
+        {buDebugLoading && <div style={{ padding: 24, textAlign: 'center' }}><Spin /></div>}
+        {!buDebugLoading && buRawItems.length === 0 && (
+          <Alert type="warning" message="No items returned or API error" />
+        )}
+        {!buDebugLoading && buRawItems.length > 0 && (
+          <div style={{ maxHeight: 440, overflowY: 'auto' }}>
+            {buRawItems.slice(0, 20).map((item, idx) => (
+              <div key={idx} style={{ marginBottom: 10, padding: '8px 12px',
+                background: idx % 2 === 0 ? '#fafafa' : '#fff',
+                border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6 }}>
+                {Object.entries(item).map(([k, v]) => (
+                  <div key={k} style={{ display: 'flex', gap: 8, marginBottom: 2, fontSize: 11 }}>
+                    <Text code style={{ fontSize: 10, minWidth: 180, color: REDWOOD.info }}>{k}</Text>
+                    <Text style={{ fontSize: 11 }}>{String(v ?? '—')}</Text>
+                  </div>
+                ))}
+              </div>
+            ))}
+            {buRawItems.length > 20 && (
+              <Text type="secondary" style={{ fontSize: 11 }}>…and {buRawItems.length - 20} more items</Text>
+            )}
+          </div>
+        )}
       </Modal>
 
       <style>{`
