@@ -9,7 +9,7 @@ import {
   ClockCircleOutlined, PlayCircleOutlined, FileExcelOutlined,
   FilePdfOutlined, TeamOutlined, SearchOutlined,
   ApiOutlined, CopyOutlined, FileTextOutlined,
-  MenuFoldOutlined, MenuUnfoldOutlined,
+  MenuFoldOutlined, MenuUnfoldOutlined, BookOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -29,6 +29,17 @@ const REDWOOD = {
   surface: '#FFFFFF', reportGreen: '#1D7B4D',
 };
 
+// ─── Payables to Ledger Reconciliation result ─────────────────────────────────
+interface ReconResult {
+  period: string; period_start: string; period_end: string; currency: string;
+  payables_begin: number; payables_invoices: number; payables_payments: number;
+  payables_prepay: number; payables_end: number;
+  gl_opening: number; gl_closing: number;
+  gl_ap_invoices: number; gl_ap_payments: number;
+  gl_non_ap_journals: number; gl_not_transferred: number;
+  gl_not_posted: number; payables_variance: number; accounting_variance: number;
+}
+
 // ─── Report definitions ───────────────────────────────────────────────────────
 interface ReportDef {
   key: string;
@@ -39,6 +50,9 @@ interface ReportDef {
   hasSupplierFilter: boolean;
   hasDateFilter: boolean;
   hasAgingDate?: boolean;
+  hasPeriodFilter?: boolean;
+  hasCompanyFilter?: boolean;
+  hasAccountFilter?: boolean;
 }
 
 const REPORTS: ReportDef[] = [
@@ -88,6 +102,18 @@ const REPORTS: ReportDef[] = [
     hasSupplierFilter: true,
     hasDateFilter: false,
     hasAgingDate: true,
+  },
+  {
+    key: 'payables-ledger-recon',
+    label: 'Payables to Ledger Reconciliation',
+    description: 'Reconciles AP subledger begin/end balances and period activity against the selected GL account',
+    icon: <BookOutlined />,
+    color: '#5B6AF5',
+    hasSupplierFilter: false,
+    hasDateFilter: false,
+    hasPeriodFilter: true,
+    hasCompanyFilter: true,
+    hasAccountFilter: true,
   },
 ];
 
@@ -212,6 +238,22 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
   const reportTitle = useRef('');
   const [apiUrls, setApiUrls] = useState<string[]>([]);
   const [apiModalOpen, setApiModalOpen] = useState(false);
+  const [reconData, setReconData] = useState<ReconResult | null>(null);
+  const [periodOptions, setPeriodOptions] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!report.hasPeriodFilter) return;
+    fetch(`${APEX_DB_CONFIG.baseUrl}/gl/fiscalperiods`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        const items: any[] = Array.isArray(data) ? data : (data.items || []);
+        const names = items
+          .map((i: any) => i.period_name || i.PERIOD_NAME || '')
+          .filter(Boolean);
+        setPeriodOptions([...new Set(names)] as string[]);
+      }).catch(() => {});
+  }, [report.hasPeriodFilter]);
 
   const filteredRows = useMemo(() => {
     if (!gridSearch.trim()) return rows;
@@ -433,19 +475,40 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
       .sort((a, b) => b.unpaidAmount - a.unpaidAmount);
   };
 
+  const fetchPayablesLedgerRecon = async (bu: string, company: string, account: string, period: string) => {
+    const p = new URLSearchParams();
+    if (bu)      p.set('P_BUSINESS_UNIT', bu);
+    if (company) p.set('P_COMPANY', company);
+    if (account) p.set('P_ACCOUNT', account);
+    if (period)  p.set('P_PERIOD', period);
+    const url = `${APEX_DB_CONFIG.baseUrl}/ap/reports/payables-ledger-recon?${p}`;
+    setApiUrls([url]);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    return data as ReconResult;
+  };
+
   const handleRun = async () => {
-    const { businessUnit: bu = '', supplierNumber: sn = '', supplierName: snm = '', dateFrom = '', dateTo = '', asAtDate = '' } = form.getFieldsValue();
-    setLoading(true); setRows([]); setGridSearch('');
-    reportTitle.current = `${report.label}${bu ? ' — ' + bu : ''}${asAtDate ? ' @ ' + asAtDate : ''}`;
+    const { businessUnit: bu = '', supplierNumber: sn = '', supplierName: snm = '', dateFrom = '', dateTo = '', asAtDate = '', period = '', company = '', account = '' } = form.getFieldsValue();
+    setLoading(true); setRows([]); setReconData(null); setGridSearch('');
+    reportTitle.current = `${report.label}${bu ? ' — ' + bu : ''}${period ? ' — ' + period : ''}${asAtDate ? ' @ ' + asAtDate : ''}`;
     try {
-      let result: any[] = [];
-      if (report.key === 'suppliers-listing')  result = await fetchSuppliersListing(bu, sn, snm);
-      if (report.key === 'supplier-balance')   result = await fetchSupplierBalance(bu, sn);
-      if (report.key === 'payment-register')   result = await fetchPaymentRegister(bu, sn, dateFrom, dateTo);
-      if (report.key === 'aging-report')       result = await fetchAgingReport(bu, sn, asAtDate);
-      if (report.key === 'aging-by-invoice')   result = await fetchAgingByInvoice(bu, sn, asAtDate);
-      setRows(result); setHasRun(true);
-      result.length === 0 ? message.info('No data found.') : message.success(`${result.length} records loaded.`);
+      if (report.key === 'payables-ledger-recon') {
+        const result = await fetchPayablesLedgerRecon(bu, company, account, period);
+        setReconData(result); setHasRun(true);
+        message.success('Reconciliation loaded.');
+      } else {
+        let result: any[] = [];
+        if (report.key === 'suppliers-listing')  result = await fetchSuppliersListing(bu, sn, snm);
+        if (report.key === 'supplier-balance')   result = await fetchSupplierBalance(bu, sn);
+        if (report.key === 'payment-register')   result = await fetchPaymentRegister(bu, sn, dateFrom, dateTo);
+        if (report.key === 'aging-report')       result = await fetchAgingReport(bu, sn, asAtDate);
+        if (report.key === 'aging-by-invoice')   result = await fetchAgingByInvoice(bu, sn, asAtDate);
+        setRows(result); setHasRun(true);
+        result.length === 0 ? message.info('No data found.') : message.success(`${result.length} records loaded.`);
+      }
     } catch (e: any) {
       message.error(`Report failed: ${e.message}`);
     } finally {
@@ -453,7 +516,128 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
     }
   };
 
+  // ── Recon helpers ──────────────────────────────────────────────────────────
+  // Show negative numbers in (parentheses), positive as-is
+  const fmtRecon = (v: number | null | undefined): string => {
+    if (v === null || v === undefined) return '';
+    const abs = Math.abs(v);
+    const s = abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return v < 0 ? `(${s})` : s;
+  };
+
+  // Build the 15 reconciliation rows from a ReconResult
+  const buildReconRows = (d: ReconResult) => {
+    const diff = (p: number | null, a: number | null) =>
+      p !== null && a !== null ? p + a : null;
+    return [
+      { label: 'Accounting Begin Balance',            payables: null,           accounting: d.gl_opening,        difference: null,                       bold: false },
+      { label: '(Non-Payables Begin Balance)',        payables: null,           accounting: d.gl_opening - d.gl_ap_invoices - d.gl_ap_payments + d.gl_non_ap_journals, difference: null, bold: false, italic: true, indent: true },
+      { label: 'Payables Begin Balance',              payables: d.payables_begin, accounting: d.gl_opening,      difference: diff(d.payables_begin, d.gl_opening),          bold: true },
+      { label: 'Invoices',                            payables: d.payables_invoices, accounting: d.gl_ap_invoices, difference: diff(d.payables_invoices, d.gl_ap_invoices), bold: false },
+      { label: 'Payments',                            payables: d.payables_payments, accounting: d.gl_ap_payments, difference: diff(d.payables_payments, d.gl_ap_payments), bold: false },
+      { label: 'Prepayments',                         payables: d.payables_prepay, accounting: 0,                difference: diff(d.payables_prepay, 0),                    bold: false },
+      { label: 'Payables Variance',                   payables: d.payables_variance, accounting: d.payables_variance, difference: 0,                                        bold: false, variance: true },
+      { label: 'Payables End Balance',                payables: d.payables_end, accounting: d.gl_closing,        difference: diff(d.payables_end, d.gl_closing),            bold: true },
+      { label: 'Non-Payables Begin Balance',          payables: null,           accounting: d.gl_opening - d.gl_ap_invoices - d.gl_ap_payments + d.gl_non_ap_journals, difference: null, bold: false },
+      { label: 'Non-Payables Journals',               payables: null,           accounting: d.gl_non_ap_journals, difference: null,                                         bold: false },
+      { label: 'Other Accounting',                    payables: null,           accounting: 0,                   difference: null,                                          bold: false },
+      { label: '(Not Transferred to General Ledger)', payables: null,           accounting: d.gl_not_transferred, difference: null,                                         bold: false, italic: true, indent: true },
+      { label: '(Not Posted in General Ledger)',      payables: null,           accounting: d.gl_not_posted,     difference: null,                                          bold: false, italic: true, indent: true },
+      { label: 'Accounting Variance',                 payables: null,           accounting: d.accounting_variance, difference: null,                                        bold: false, variance: true },
+      { label: 'Accounting End Balance',              payables: null,           accounting: d.gl_closing,        difference: null,                                          bold: true },
+    ];
+  };
+
+  const renderReconReport = (d: ReconResult) => {
+    const reconRows = buildReconRows(d);
+    const thStyle: React.CSSProperties = {
+      background: '#C74634', color: '#fff', fontWeight: 700, fontSize: 12,
+      padding: '8px 12px', textAlign: 'right', borderBottom: '2px solid #a33b2c',
+    };
+    const thLabelStyle: React.CSSProperties = { ...thStyle, textAlign: 'left', width: '40%' };
+    const tdBase: React.CSSProperties = { padding: '6px 12px', fontSize: 12, borderBottom: '1px solid #e8e8e8', fontFamily: 'monospace' };
+
+    return (
+      <div style={{ overflowX: 'auto' }}>
+        <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 8 }}>
+          Period: <strong>{d.period}</strong> &nbsp;|&nbsp;
+          {d.period_start} – {d.period_end} &nbsp;|&nbsp; Currency: <strong>{d.currency}</strong>
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+          <thead>
+            <tr>
+              <th style={thLabelStyle}>Description</th>
+              <th style={{ ...thStyle, width: '20%' }}>Payables Amount ({d.currency})</th>
+              <th style={{ ...thStyle, width: '20%' }}>Accounting Amount ({d.currency})</th>
+              <th style={{ ...thStyle, width: '20%' }}>Difference ({d.currency})</th>
+            </tr>
+          </thead>
+          <tbody>
+            {reconRows.map((row, i) => {
+              const isSection = i === 8; // blank separator before Non-Payables
+              const rowBg = (row as any).bold ? '#f0f5ff' : (i % 2 === 0 ? '#fafafa' : '#fff');
+              const labelStyle: React.CSSProperties = {
+                ...tdBase, textAlign: 'left', fontFamily: 'inherit',
+                fontWeight: (row as any).bold ? 700 : 400,
+                fontStyle: (row as any).italic ? 'italic' : 'normal',
+                paddingLeft: (row as any).indent ? 28 : 12,
+                background: rowBg,
+              };
+              const numStyle = (v: number | null, isVariance?: boolean): React.CSSProperties => ({
+                ...tdBase, textAlign: 'right', background: rowBg,
+                color: v === null ? 'transparent'
+                     : isVariance && Math.abs(v) < 0.005 ? REDWOOD.error
+                     : v < 0 ? REDWOOD.error
+                     : v > 0 && isVariance ? REDWOOD.warning
+                     : REDWOOD.neutral900,
+                fontWeight: (row as any).bold ? 700 : 400,
+              });
+              const diffStyle = (v: number | null): React.CSSProperties => ({
+                ...tdBase, textAlign: 'right', background: rowBg,
+                color: v === null ? 'transparent'
+                     : Math.abs(v) < 0.005 ? REDWOOD.error
+                     : v < 0 ? REDWOOD.error
+                     : REDWOOD.warning,
+                fontWeight: (row as any).bold ? 700 : 400,
+              });
+              return (
+                <React.Fragment key={i}>
+                  {isSection && (
+                    <tr><td colSpan={4} style={{ padding: 0, height: 4, background: REDWOOD.neutral200 }} /></tr>
+                  )}
+                  <tr>
+                    <td style={labelStyle}>{row.label}</td>
+                    <td style={numStyle(row.payables)}>{row.payables !== null ? fmtRecon(row.payables) : ''}</td>
+                    <td style={numStyle(row.accounting, (row as any).variance)}>{row.accounting !== null ? fmtRecon(row.accounting) : ''}</td>
+                    <td style={diffStyle(row.difference)}>{row.difference !== null ? fmtRecon(row.difference) : ''}</td>
+                  </tr>
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
   const exportExcel = () => {
+    if (report.key === 'payables-ledger-recon' && reconData) {
+      const d = reconData;
+      const reconRows = buildReconRows(d);
+      const exportRows = reconRows.map(r => ({
+        'Description':               r.label,
+        'Payables Amount (AED)':     r.payables  !== null ? r.payables  : '',
+        'Accounting Amount (AED)':   r.accounting !== null ? r.accounting : '',
+        'Difference (AED)':          r.difference !== null ? r.difference : '',
+      }));
+      const ws = XLSX.utils.json_to_sheet(exportRows);
+      ws['!cols'] = [{ wch: 44 }, { wch: 22 }, { wch: 22 }, { wch: 22 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, `Recon ${d.period}`.slice(0, 31));
+      saveAs(new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })], { type: 'application/octet-stream' }),
+        `payables_ledger_recon_${d.period}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      return;
+    }
     const cols = COLUMNS[report.key];
     const exportRows = report.key === 'aging-report'
       ? rows.flatMap(r => r._invoices?.length
@@ -473,18 +657,38 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
 
   const exportPdf = () => {
     const doc = new jsPDF('landscape', 'mm', 'a4');
-    const cols = COLUMNS[report.key];
     doc.setFontSize(14); doc.setTextColor(30, 30, 30); doc.text(reportTitle.current, 14, 16);
     doc.setFontSize(9);  doc.setTextColor(100);
-    doc.text(`Generated: ${new Date().toLocaleString()}   Records: ${rows.length}`, 14, 22);
-    autoTable(doc, {
-      startY: 28,
-      head: [cols.map(c => c.title)],
-      body: rows.map(r => cols.map(c => { const v = r[c.dataIndex as string]; return typeof v === 'number' ? fmt(v) : (v ?? ''); })),
-      styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: [199, 70, 52], textColor: 255, fontStyle: 'bold' },
-      alternateRowStyles: { fillColor: [247, 247, 247] },
-    });
+    if (report.key === 'payables-ledger-recon' && reconData) {
+      const d = reconData;
+      doc.text(`Period: ${d.period}  (${d.period_start} – ${d.period_end})   Generated: ${new Date().toLocaleString()}`, 14, 22);
+      const reconRows = buildReconRows(d);
+      autoTable(doc, {
+        startY: 28,
+        head: [['Description', `Payables Amount (${d.currency})`, `Accounting Amount (${d.currency})`, `Difference (${d.currency})`]],
+        body: reconRows.map(r => [
+          r.label,
+          r.payables  !== null ? fmtRecon(r.payables)   : '',
+          r.accounting !== null ? fmtRecon(r.accounting) : '',
+          r.difference !== null ? fmtRecon(r.difference) : '',
+        ]),
+        styles: { fontSize: 8, cellPadding: 2, halign: 'right' },
+        columnStyles: { 0: { halign: 'left', fontStyle: 'normal' } },
+        headStyles: { fillColor: [91, 106, 245], textColor: 255, fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [247, 247, 247] },
+      });
+    } else {
+      const cols = COLUMNS[report.key];
+      doc.text(`Generated: ${new Date().toLocaleString()}   Records: ${rows.length}`, 14, 22);
+      autoTable(doc, {
+        startY: 28,
+        head: [cols.map(c => c.title)],
+        body: rows.map(r => cols.map(c => { const v = r[c.dataIndex as string]; return typeof v === 'number' ? fmt(v) : (v ?? ''); })),
+        styles: { fontSize: 8, cellPadding: 2 },
+        headStyles: { fillColor: [199, 70, 52], textColor: 255, fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [247, 247, 247] },
+      });
+    }
     doc.save(`${report.key}_${new Date().toISOString().slice(0, 10)}.pdf`);
   };
 
@@ -582,6 +786,26 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
               <Input type="date" style={{ width: 150 }} />
             </Form.Item>
           )}
+          {report.hasPeriodFilter && (
+            <Form.Item label={<span style={{ fontWeight: 600 }}>Period</span>} name="period"
+              tooltip="GL accounting period, e.g. Jan-2024">
+              <Select showSearch allowClear placeholder="e.g. Jan-2024" style={{ width: 140 }}
+                filterOption={(i, o) => String(o?.value ?? '').toLowerCase().includes(i.toLowerCase())}>
+                {periodOptions.map(p => <Option key={p} value={p}>{p}</Option>)}
+              </Select>
+            </Form.Item>
+          )}
+          {report.hasCompanyFilter && (
+            <Form.Item label="Company" name="company" tooltip="GL Company segment (e.g. 01)">
+              <Input placeholder="e.g. 01" style={{ width: 100 }} allowClear />
+            </Form.Item>
+          )}
+          {report.hasAccountFilter && (
+            <Form.Item label={<span style={{ fontWeight: 600 }}>GL Account</span>} name="account"
+              tooltip="AP liability account segment (e.g. 21100)">
+              <Input placeholder="e.g. 21100" style={{ width: 120 }} allowClear />
+            </Form.Item>
+          )}
         </Form>
       </Card>
 
@@ -591,10 +815,10 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
           <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleRun} loading={loading}
             style={{ background: report.color, borderColor: report.color }}>Run Report</Button>
           <Tooltip title="Export to Excel">
-            <Button icon={<FileExcelOutlined />} onClick={exportExcel} disabled={rows.length === 0}>Excel</Button>
+            <Button icon={<FileExcelOutlined />} onClick={exportExcel} disabled={rows.length === 0 && !reconData}>Excel</Button>
           </Tooltip>
           <Tooltip title="Export to PDF">
-            <Button icon={<FilePdfOutlined />} onClick={exportPdf} disabled={rows.length === 0} danger>PDF</Button>
+            <Button icon={<FilePdfOutlined />} onClick={exportPdf} disabled={rows.length === 0 && !reconData} danger>PDF</Button>
           </Tooltip>
           {apiUrls.length > 0 && (
             <Tooltip title="View API">
@@ -628,6 +852,12 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: string[] }> = ({
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
             description={<Text type="secondary">Set parameters and click Run Report</Text>}
             style={{ padding: '40px 0' }} />
+        ) : report.key === 'payables-ledger-recon' ? (
+          reconData
+            ? <div style={{ background: REDWOOD.surface, borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, padding: 16 }}>
+                {renderReconReport(reconData)}
+              </div>
+            : <Empty description="No reconciliation data" />
         ) : report.key === 'aging-report' ? (
           <Table
             dataSource={filteredRows}
