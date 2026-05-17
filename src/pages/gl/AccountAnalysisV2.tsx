@@ -110,6 +110,7 @@ interface JournalLine {
   segCompany?: string;
   segLob?: string;
   segDept?: string;
+  segAccount?: string;
   segSubAcct?: string;
   segAnalysis?: string;
   segInterco?: string;
@@ -1197,11 +1198,12 @@ const AAPanel: React.FC = () => {
               accountedDr: Number(item.accountedDr || item.accounted_dr || 0),
               accountedCr: Number(item.accountedCr || item.accounted_cr || 0),
               jeHeaderId:  Number(item.jeHeaderId  || item.je_header_id || 0),
-              segCompany:  String(item.company  || item.COMPANY  || ''),
-              segLob:      String(item.lob      || item.LOB      || ''),
-              segDept:     String(item.department || item.DEPARTMENT || item.dept || ''),
-              segSubAcct:  String(item.subAccount || item.sub_account || item.SUB_ACCOUNT || ''),
-              segAnalysis: String(item.analysis || item.ANALYSIS || ''),
+              segCompany:  String(item.company      || item.COMPANY      || ''),
+              segLob:      String(item.lob          || item.LOB          || ''),
+              segDept:     String(item.department   || item.DEPARTMENT   || item.dept || ''),
+              segAccount:  String(item.account      || item.ACCOUNT      || ''),
+              segSubAcct:  String(item.subAccount   || item.sub_account  || item.SUB_ACCOUNT || ''),
+              segAnalysis: String(item.analysis     || item.ANALYSIS     || ''),
               segInterco:  String(item.intercompany || item.INTERCOMPANY || item.interco || ''),
             } as JournalLine];
           });
@@ -1292,80 +1294,95 @@ const AAPanel: React.FC = () => {
       const firstP = sortedP[0] || '';
       const lastP  = sortedP[sortedP.length - 1] || '';
 
-      // Per-combo API call: parse every segment from the combo string and pass them
-      // all to the trial balance endpoint so only that exact combination is returned.
-      // Combo format: company(0)-lob(1)-dept(2)-account(3)-subAcct(4)-analysis(5)-interco(6)
-      const COMBO_PARAM_NAMES = ['company', 'lob', 'department', null /* account at 3 */, 'sub_account', 'analysis', 'intercompany'];
+      // Build a normalised 7-segment key from a TB response row.
+      // The TB account_combination may have extra segments (future1/future2) so we
+      // use the individual segment fields when available, falling back to the first
+      // 7 dash-parts of account_combination.
+      const tbSegKey = (i: any): string =>
+        (i.company !== undefined || i.account !== undefined)
+          ? [i.company || '', i.lob || '', i.department || '', i.account || '',
+             i.subAccount || i.sub_account || '', i.analysis || '', i.intercompany || ''].join('-')
+          : (i.account_combination || '').split('-').slice(0, 7).join('-');
 
-      const fetchComboBalance = async (
-        combo: string, period: string, isOpen: boolean
-      ): Promise<JournalLine | null> => {
-        if (!period) return null;
-        const parts = combo.split('-');
+      // Fetch TB for a period; pass the user's account + segment filters so the
+      // response is scoped but still returns ALL combinations for that account.
+      const fetchTBMap = async (period: string): Promise<Map<string, any>> => {
+        if (!period) return new Map();
         const p = new URLSearchParams({ ledger_name: ledger, period_name: period });
-        // Natural account is at position 3 in the combo string
-        p.set('account', parts[3] || account || '');
-        // Pass every other segment by position to scope the TB query to this exact combo
-        COMBO_PARAM_NAMES.forEach((paramName, idx) => {
-          if (paramName && parts[idx]) p.set(paramName, parts[idx]);
-        });
+        if (account) p.set('account', account);
+        Object.entries(segFilters).forEach(([k, v]) => { if (v) p.set(k, v); });
         try {
           const res = await fetch(`${API_BASE}/rr-trialbalance/standard?${p}`);
-          if (!res.ok) return null;
+          if (!res.ok) return new Map();
           const data = await res.json();
-          const items: any[] = data.items || [];
-          if (!items.length) return null;
-          const accAmt = items.reduce((s: number, i: any) => s + Number(isOpen ? (i.opening || 0) : (i.closing || 0)), 0);
-          const entAmt = items.reduce((s: number, i: any) => s + Number(isOpen ? (i.entered_opening || 0) : (i.entered_closing || 0)), 0);
-          if (accAmt === 0 && entAmt === 0) return null;
-          const accountType = items[0].account_type || '';
-          const isDebitNormal = accountType === 'A' || accountType === 'E';
-          const toDrCr = (amt: number) => ({
-            dr: isDebitNormal && amt > 0 ? amt : (!isDebitNormal && amt < 0 ? Math.abs(amt) : 0),
-            cr: !isDebitNormal && amt > 0 ? amt : (isDebitNormal && amt < 0 ? Math.abs(amt) : 0),
+          const m = new Map<string, any>();
+          (data.items || []).forEach((i: any) => {
+            const k = tbSegKey(i);
+            if (k) m.set(k, i);
           });
-          const acc = toDrCr(accAmt); const ent = toDrCr(entAmt);
-          return {
-            key: `${combo}-${isOpen ? 'open' : 'close'}`,
-            concatenatedSegments: combo,
-            accountDescription: items[0].account_desc || items[0].description || '',
-            jeLineDescription: isOpen ? 'Opening Balance' : 'Closing Balance',
-            defaultPeriodName: period, accountingDate: '', batchName: '',
-            userJeSourceName: '', userJeCategoryName: '',
-            currencyCode: items[0].currency_code || '',
-            enteredDr: ent.dr, enteredCr: ent.cr, accountedDr: acc.dr, accountedCr: acc.cr,
-            jeHeaderId: 0, isOpeningBalance: isOpen, isClosingBalance: !isOpen,
-          } as JournalLine;
-        } catch { return null; }
+          return m;
+        } catch { return new Map(); }
       };
 
-      const breaks: ComboBreak[] = await Promise.all(
-        Array.from(map.entries()).map(async ([combo, lines]) => {
-          const [openRow, closeRow] = await Promise.all([
-            fetchComboBalance(combo, firstP, true),
-            fetchComboBalance(combo, lastP,  false),
-          ]);
-          const openAcc = openRow ? openRow.accountedDr - openRow.accountedCr : 0;
-          const openEnt = openRow ? openRow.enteredDr   - openRow.enteredCr   : 0;
-          let accRun = openAcc, entRun = openEnt;
-          const linesWithBal: ComboBreakLine[] = lines.map(r => {
-            accRun += r.accountedDr - r.accountedCr;
-            entRun += r.enteredDr   - r.enteredCr;
-            return { ...r, _accRun: accRun, _entRun: entRun };
-          });
-          return {
-            combo,
-            description: lines[0]?.accountDescription || openRow?.accountDescription || '',
-            openingRow: openRow,
-            closingRow: closeRow,
-            linesWithBal,
-            ptdAccDr: lines.reduce((s, r) => s + r.accountedDr, 0),
-            ptdAccCr: lines.reduce((s, r) => s + r.accountedCr, 0),
-            ptdEntDr: lines.reduce((s, r) => s + r.enteredDr,   0),
-            ptdEntCr: lines.reduce((s, r) => s + r.enteredCr,   0),
-          };
-        })
-      );
+      const [openMap, closeMap] = await Promise.all([
+        fetchTBMap(firstP),
+        firstP !== lastP ? fetchTBMap(lastP) : fetchTBMap(firstP),
+      ]);
+
+      const buildBalRow = (combo: string, tbRow: any, isOpen: boolean, period: string): JournalLine | null => {
+        if (!tbRow) return null;
+        const accAmt = Number(isOpen ? (tbRow.opening || 0) : (tbRow.closing || 0));
+        const entAmt = Number(isOpen ? (tbRow.entered_opening || 0) : (tbRow.entered_closing || 0));
+        if (accAmt === 0 && entAmt === 0) return null;
+        const accountType = tbRow.account_type || '';
+        const isDebitNormal = accountType === 'A' || accountType === 'E';
+        const toDrCr = (amt: number) => ({
+          dr: isDebitNormal && amt > 0 ? amt : (!isDebitNormal && amt < 0 ? Math.abs(amt) : 0),
+          cr: !isDebitNormal && amt > 0 ? amt : (isDebitNormal && amt < 0 ? Math.abs(amt) : 0),
+        });
+        const acc = toDrCr(accAmt); const ent = toDrCr(entAmt);
+        return {
+          key: `${combo}-${isOpen ? 'open' : 'close'}`,
+          concatenatedSegments: combo,
+          accountDescription: tbRow.account_desc || tbRow.description || '',
+          jeLineDescription: isOpen ? 'Opening Balance' : 'Closing Balance',
+          defaultPeriodName: period, accountingDate: '', batchName: '',
+          userJeSourceName: '', userJeCategoryName: '',
+          currencyCode: tbRow.currency_code || '',
+          enteredDr: ent.dr, enteredCr: ent.cr, accountedDr: acc.dr, accountedCr: acc.cr,
+          jeHeaderId: 0, isOpeningBalance: isOpen, isClosingBalance: !isOpen,
+        } as JournalLine;
+      };
+
+      const breaks: ComboBreak[] = Array.from(map.entries()).map(([combo, lines]) => {
+        // Build the same 7-segment key from the journal line's stored segment fields
+        const r0 = lines[0];
+        const comboKey = [
+          r0.segCompany || '', r0.segLob || '', r0.segDept  || '',
+          r0.segAccount || '', r0.segSubAcct || '', r0.segAnalysis || '', r0.segInterco || '',
+        ].join('-');
+        const openRow  = buildBalRow(combo, openMap.get(comboKey)  || null, true,  firstP);
+        const closeRow = buildBalRow(combo, closeMap.get(comboKey) || null, false, lastP);
+        const openAcc = openRow ? openRow.accountedDr - openRow.accountedCr : 0;
+        const openEnt = openRow ? openRow.enteredDr   - openRow.enteredCr   : 0;
+        let accRun = openAcc, entRun = openEnt;
+        const linesWithBal: ComboBreakLine[] = lines.map(r => {
+          accRun += r.accountedDr - r.accountedCr;
+          entRun += r.enteredDr   - r.enteredCr;
+          return { ...r, _accRun: accRun, _entRun: entRun };
+        });
+        return {
+          combo,
+          description: lines[0]?.accountDescription || openRow?.accountDescription || '',
+          openingRow: openRow,
+          closingRow: closeRow,
+          linesWithBal,
+          ptdAccDr: lines.reduce((s, r) => s + r.accountedDr, 0),
+          ptdAccCr: lines.reduce((s, r) => s + r.accountedCr, 0),
+          ptdEntDr: lines.reduce((s, r) => s + r.enteredDr,   0),
+          ptdEntCr: lines.reduce((s, r) => s + r.enteredCr,   0),
+        };
+      });
       breaks.sort((a, b) => a.combo.localeCompare(b.combo));
       setComboBreaks(breaks);
     } finally {
