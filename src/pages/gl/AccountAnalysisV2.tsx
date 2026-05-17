@@ -1028,6 +1028,7 @@ const AAPanel: React.FC = () => {
   const [appliedGroupBy, setAppliedGroupBy]   = useState('');
   const [comboBreaks, setComboBreaks]         = useState<ComboBreak[]>([]);
   const [breakLoading, setBreakLoading]       = useState(false);
+  const [tbApiUrls, setTbApiUrls]             = useState<string[]>([]);
 
   // Balance state
   const [openingBal, setOpeningBal]           = useState<{ acc: number; ent: number } | null>(null);
@@ -1281,6 +1282,7 @@ const AAPanel: React.FC = () => {
       return;
     }
     setBreakLoading(true);
+    setTbApiUrls([]);
     try {
       const ptdLines = filteredData.filter(r => !r.isOpeningBalance && !r.isClosingBalance);
       const map = new Map<string, JournalLine[]>();
@@ -1294,31 +1296,31 @@ const AAPanel: React.FC = () => {
       const firstP = sortedP[0] || '';
       const lastP  = sortedP[sortedP.length - 1] || '';
 
-      // Build a normalised 7-segment key from a TB response row.
-      // The TB account_combination may have extra segments (future1/future2) so we
-      // use the individual segment fields when available, falling back to the first
-      // 7 dash-parts of account_combination.
-      const tbSegKey = (i: any): string =>
-        (i.company !== undefined || i.account !== undefined)
-          ? [i.company || '', i.lob || '', i.department || '', i.account || '',
-             i.subAccount || i.sub_account || '', i.analysis || '', i.intercompany || ''].join('-')
-          : (i.account_combination || '').split('-').slice(0, 7).join('-');
-
-      // Fetch TB for a period; pass the user's account + segment filters so the
-      // response is scoped but still returns ALL combinations for that account.
+      // Fetch TB for a period and return a map keyed by every truncation of
+      // account_combination so journal combos (which may have fewer segments than
+      // the TB's extra future1/future2 segments) match directly via combo string.
       const fetchTBMap = async (period: string): Promise<Map<string, any>> => {
         if (!period) return new Map();
         const p = new URLSearchParams({ ledger_name: ledger, period_name: period });
         if (account) p.set('account', account);
         Object.entries(segFilters).forEach(([k, v]) => { if (v) p.set(k, v); });
+        const url = `${API_BASE}/rr-trialbalance/standard?${p}`;
+        setTbApiUrls(prev => [...new Set([...prev, url])]);
         try {
-          const res = await fetch(`${API_BASE}/rr-trialbalance/standard?${p}`);
+          const res = await fetch(url);
           if (!res.ok) return new Map();
           const data = await res.json();
           const m = new Map<string, any>();
           (data.items || []).forEach((i: any) => {
-            const k = tbSegKey(i);
-            if (k) m.set(k, i);
+            const full = (i.account_combination || '').trim();
+            if (!full) return;
+            m.set(full, i);
+            const parts = full.split('-');
+            // Store every prefix length so any journal combo length will match
+            for (let n = 4; n < parts.length; n++) {
+              const k = parts.slice(0, n).join('-');
+              if (!m.has(k)) m.set(k, i);
+            }
           });
           return m;
         } catch { return new Map(); }
@@ -1355,14 +1357,10 @@ const AAPanel: React.FC = () => {
       };
 
       const breaks: ComboBreak[] = Array.from(map.entries()).map(([combo, lines]) => {
-        // Build the same 7-segment key from the journal line's stored segment fields
-        const r0 = lines[0];
-        const comboKey = [
-          r0.segCompany || '', r0.segLob || '', r0.segDept  || '',
-          r0.segAccount || '', r0.segSubAcct || '', r0.segAnalysis || '', r0.segInterco || '',
-        ].join('-');
-        const openRow  = buildBalRow(combo, openMap.get(comboKey)  || null, true,  firstP);
-        const closeRow = buildBalRow(combo, closeMap.get(comboKey) || null, false, lastP);
+        // Match using the journal's concatenatedSegments directly; the TB map stores
+        // every prefix length so this will hit even if TB has extra future segments.
+        const openRow  = buildBalRow(combo, openMap.get(combo)  || null, true,  firstP);
+        const closeRow = buildBalRow(combo, closeMap.get(combo) || null, false, lastP);
         const openAcc = openRow ? openRow.accountedDr - openRow.accountedCr : 0;
         const openEnt = openRow ? openRow.enteredDr   - openRow.enteredCr   : 0;
         let accRun = openAcc, entRun = openEnt;
@@ -2056,8 +2054,10 @@ const AAPanel: React.FC = () => {
 
       <Modal open={apiModalOpen} onCancel={() => setApiModalOpen(false)}
         title={<Space><ApiOutlined style={{ color: REDWOOD.info }} />API Endpoint</Space>}
-        footer={<Button onClick={() => setApiModalOpen(false)}>Close</Button>} width={680}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        footer={<Button onClick={() => setApiModalOpen(false)}>Close</Button>} width={720}>
+        {/* Main account-analysis URL */}
+        <Text strong style={{ fontSize: 12 }}>Account Analysis</Text>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
           <div style={{ flex: 1, background: '#f5f5f5', border: '1px solid #e0e0e0', borderRadius: 6,
             padding: '8px 12px', fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>
             {apiUrl}
@@ -2068,7 +2068,7 @@ const AAPanel: React.FC = () => {
           </Tooltip>
         </div>
         {apiUrl.includes('?') && (
-          <div style={{ marginTop: 10, paddingLeft: 4 }}>
+          <div style={{ marginTop: 6, paddingLeft: 4 }}>
             {apiUrl.split('?')[1].split('&').map((part, i) => {
               const [k, v] = part.split('=');
               return (
@@ -2080,6 +2080,44 @@ const AAPanel: React.FC = () => {
               );
             })}
           </div>
+        )}
+        {/* TB balance calls shown only when combo-break group is applied */}
+        {appliedGroupBy === 'concatenatedSegments' && tbApiUrls.length > 0 && (
+          <>
+            <Divider style={{ margin: '12px 0 8px' }} />
+            <Text strong style={{ fontSize: 12 }}>Trial Balance (Opening / Closing Balance)</Text>
+            {tbApiUrls.map((url, idx) => (
+              <div key={idx} style={{ marginTop: 6 }}>
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  {idx === 0 ? 'Opening period' : 'Closing period'}
+                </Text>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                  <div style={{ flex: 1, background: '#f5f5f5', border: '1px solid #e0e0e0', borderRadius: 6,
+                    padding: '6px 10px', fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
+                    {url}
+                  </div>
+                  <Tooltip title="Copy">
+                    <Button size="small" icon={<CopyOutlined />}
+                      onClick={() => { navigator.clipboard.writeText(url); message.success('Copied'); }} />
+                  </Tooltip>
+                </div>
+                {url.includes('?') && (
+                  <div style={{ marginTop: 4, paddingLeft: 4 }}>
+                    {url.split('?')[1].split('&').map((part, j) => {
+                      const [k, v] = part.split('=');
+                      return (
+                        <div key={j} style={{ fontSize: 10, marginBottom: 1 }}>
+                          <Text code style={{ fontSize: 10 }}>{decodeURIComponent(k)}</Text>
+                          {' = '}
+                          <Text style={{ fontSize: 10, color: REDWOOD.info }}>{decodeURIComponent(v || '')}</Text>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ))}
+          </>
         )}
       </Modal>
     </div>
