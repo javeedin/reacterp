@@ -1768,40 +1768,7 @@ const AccountAnalysis: React.FC = () => {
       { title: 'Source', dataIndex: 'userJeSourceName', key: 'userJeSourceName', width: 100 },
       { title: 'Category', dataIndex: 'userJeCategoryName', key: 'userJeCategoryName', width: 120 },
       { title: 'Currency', dataIndex: 'currencyCode', key: 'currencyCode', width: 90 },
-      // Entered group shown FIRST when toggle is on
-      ...(showEntered ? [{
-        title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Entered</span>,
-        onHeaderCell: () => ({ style: groupBorderLeft }),
-        children: [
-          {
-            title: 'Dr',
-            dataIndex: 'enteredDr',
-            key: 'enteredDr',
-            width: 120,
-            align: 'right' as const,
-            ...headerStyle(groupBorderLeft),
-            render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span>,
-          },
-          {
-            title: 'Cr',
-            dataIndex: 'enteredCr',
-            key: 'enteredCr',
-            width: 120,
-            align: 'right' as const,
-            render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span>,
-          },
-          {
-            title: 'Balance',
-            key: 'enteredRunning',
-            width: 130,
-            align: 'right' as const,
-            ...headerStyle(groupBorderRight),
-            render: (_: any, __: JournalLineSegment, index: number) =>
-              fmtBalance(runningBalances[index]?.entered ?? 0),
-          },
-        ],
-      }] : []),
-      // Accounted group always shown
+      // Accounted group — always shown first (indices 9-11), never shifts
       {
         title: <span style={{ color: '#1677ff', fontWeight: 600 }}>Accounted</span>,
         onHeaderCell: () => ({ style: groupBorderLeft }),
@@ -1834,6 +1801,39 @@ const AccountAnalysis: React.FC = () => {
           },
         ],
       },
+      // Entered group — shown AFTER Accounted (indices 12-14) only when toggle is on
+      ...(showEntered ? [{
+        title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Entered</span>,
+        onHeaderCell: () => ({ style: groupBorderLeft }),
+        children: [
+          {
+            title: 'Dr',
+            dataIndex: 'enteredDr',
+            key: 'enteredDr',
+            width: 120,
+            align: 'right' as const,
+            ...headerStyle(groupBorderLeft),
+            render: (v: number) => <span style={{ color: REDWOOD.success }}>{formatNumber(v)}</span>,
+          },
+          {
+            title: 'Cr',
+            dataIndex: 'enteredCr',
+            key: 'enteredCr',
+            width: 120,
+            align: 'right' as const,
+            render: (v: number) => <span style={{ color: REDWOOD.primary }}>{formatNumber(v)}</span>,
+          },
+          {
+            title: 'Balance',
+            key: 'enteredRunning',
+            width: 130,
+            align: 'right' as const,
+            ...headerStyle(groupBorderRight),
+            render: (_: any, __: JournalLineSegment, index: number) =>
+              fmtBalance(runningBalances[index]?.entered ?? 0),
+          },
+        ],
+      }] : []),
       {
         title: '',
         key: 'drillDown',
@@ -2161,44 +2161,32 @@ const AccountAnalysis: React.FC = () => {
                       <Table.Summary.Cell index={6} />{/* Source */}
                       <Table.Summary.Cell index={7} />{/* Category */}
                       <Table.Summary.Cell index={8} />{/* Currency */}
+                      {/* Accounted group — always at indices 9-11, never shifts */}
+                      {/* @ts-expect-error antd6 SummaryCell lacks style */}
+                      <Table.Summary.Cell index={9} align="right" style={groupBorderLeft}>
+                        <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(gridTotals.accountedDr)}</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={10} align="right">
+                        <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.accountedCr)}</Text>
+                      </Table.Summary.Cell>
+                      {/* @ts-expect-error antd6 SummaryCell lacks style */}
+                      <Table.Summary.Cell index={11} align="right" style={groupBorderRight}>{fmtTot(accBal)}</Table.Summary.Cell>
+                      {/* Entered group — only when toggle is on, always at indices 12-14 */}
                       {showEntered ? (
                         <>
-                          {/* Entered group */}
                           {/* @ts-expect-error antd6 SummaryCell lacks style */}
-                          <Table.Summary.Cell index={9} align="right" style={groupBorderLeft}>
+                          <Table.Summary.Cell index={12} align="right" style={groupBorderLeft}>
                             <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(gridTotals.enteredDr)}</Text>
                           </Table.Summary.Cell>
-                          <Table.Summary.Cell index={10} align="right">
+                          <Table.Summary.Cell index={13} align="right">
                             <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.enteredCr)}</Text>
                           </Table.Summary.Cell>
                           {/* @ts-expect-error antd6 SummaryCell lacks style */}
-                          <Table.Summary.Cell index={11} align="right" style={groupBorderRight}>{fmtTot(entBal)}</Table.Summary.Cell>
-                          {/* Accounted group */}
-                          {/* @ts-expect-error antd6 SummaryCell lacks style */}
-                          <Table.Summary.Cell index={12} align="right" style={groupBorderLeft}>
-                            <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(gridTotals.accountedDr)}</Text>
-                          </Table.Summary.Cell>
-                          <Table.Summary.Cell index={13} align="right">
-                            <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.accountedCr)}</Text>
-                          </Table.Summary.Cell>
-                          {/* @ts-expect-error antd6 SummaryCell lacks style */}
-                          <Table.Summary.Cell index={14} align="right" style={groupBorderRight}>{fmtTot(accBal)}</Table.Summary.Cell>
+                          <Table.Summary.Cell index={14} align="right" style={groupBorderRight}>{fmtTot(entBal)}</Table.Summary.Cell>
                           <Table.Summary.Cell index={15} />{/* DrillDown */}
                         </>
                       ) : (
-                        <>
-                          {/* Accounted group only */}
-                          {/* @ts-expect-error antd6 SummaryCell lacks style */}
-                          <Table.Summary.Cell index={9} align="right" style={groupBorderLeft}>
-                            <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{formatNumber(gridTotals.accountedDr)}</Text>
-                          </Table.Summary.Cell>
-                          <Table.Summary.Cell index={10} align="right">
-                            <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{formatNumber(gridTotals.accountedCr)}</Text>
-                          </Table.Summary.Cell>
-                          {/* @ts-expect-error antd6 SummaryCell lacks style */}
-                          <Table.Summary.Cell index={11} align="right" style={groupBorderRight}>{fmtTot(accBal)}</Table.Summary.Cell>
-                          <Table.Summary.Cell index={12} />{/* DrillDown */}
-                        </>
+                        <Table.Summary.Cell index={12} />{/* DrillDown */}
                       )}
                     </Table.Summary.Row>
                   </Table.Summary>
