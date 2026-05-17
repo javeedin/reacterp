@@ -152,10 +152,16 @@ export default function APGLReconcile() {
       .then(r => r.json())
       .then(data => {
         const items: BUOption[] = (data.items ?? [])
-          .filter((i: any) => i.business_unit_name)
+          .filter((i: any) => i.business_unit_name || i.BUSINESS_UNIT_NAME)
           .map((i: any) => ({
-            name:    String(i.business_unit_name),
-            company: String(i.company || ''),
+            name: String(i.business_unit_name || i.BUSINESS_UNIT_NAME || ''),
+            // try every casing / naming the APEX endpoint may use
+            company: String(
+              i.company      || i.COMPANY      ||
+              i.company_code || i.COMPANY_CODE ||
+              i.companyCode  || i.COMPANY_ID   ||
+              ''
+            ),
           }));
         setBuObjects(items);
       })
@@ -238,19 +244,24 @@ export default function APGLReconcile() {
   }, []);
 
   // ── Handle BU selection → auto-populate + lock company ───────────────────────
-  const onBuChange = useCallback((buName: string | undefined) => {
-    if (!buName) {
-      setCompany('');
-      setCompanyLocked(false);
-      return;
-    }
-    const bu = buObjects.find(b => b.name === buName);
-    if (bu?.company) {
-      setCompany(bu.company);
-      setCompanyLocked(true);
-    } else {
-      setCompany('');
-      setCompanyLocked(false);
+  // NOTE: must use Form onValuesChange, not Select onChange — Form.Item with a
+  // name prop clones the child and replaces its onChange with its own handler.
+  const handleFormValuesChange = useCallback((changedValues: any) => {
+    if ('businessUnit' in changedValues) {
+      const buName: string | undefined = changedValues.businessUnit;
+      if (!buName) {
+        setCompany('');
+        setCompanyLocked(false);
+        return;
+      }
+      const bu = buObjects.find(b => b.name === buName);
+      if (bu?.company) {
+        setCompany(bu.company);
+        setCompanyLocked(true);
+      } else {
+        setCompany('');
+        setCompanyLocked(false);
+      }
     }
   }, [buObjects]);
 
@@ -482,7 +493,7 @@ export default function APGLReconcile() {
 
       {/* Search form */}
       <Card size="small" style={{ marginBottom: 16, borderRadius: 10 }}>
-        <Form form={form} layout="vertical" onFinish={handleSearch}>
+        <Form form={form} layout="vertical" onFinish={handleSearch} onValuesChange={handleFormValuesChange}>
 
           {/* Row 1: BU, Company, Account */}
           <Row gutter={12}>
@@ -494,9 +505,11 @@ export default function APGLReconcile() {
                   showSearch
                   loading={buLoading}
                   optionFilterProp="label"
-                  onChange={onBuChange}
-                  options={buObjects.map(b => ({ value: b.name, label: b.name }))}
-                  dropdownStyle={{ minWidth: 320 }}
+                  options={buObjects.map(b => ({
+                    value: b.name,
+                    label: b.company ? `${b.name}  (${b.company})` : b.name,
+                  }))}
+                  dropdownStyle={{ minWidth: 360 }}
                 />
               </Form.Item>
             </Col>
