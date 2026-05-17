@@ -2219,7 +2219,8 @@ const AccountAnalysis: React.FC = () => {
                 </Row>
               </div>
 
-              {/* ── Entered section ── */}
+              {/* ── Entered section — only when toggle is on ── */}
+              {showEntered && (
               <div style={{
                 padding: '10px 16px',
                 background: '#f6ffed',
@@ -2258,6 +2259,7 @@ const AccountAnalysis: React.FC = () => {
                   </Col>
                 </Row>
               </div>
+              )}
             </div>
           )}
         </div>
