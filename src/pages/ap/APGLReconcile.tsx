@@ -166,7 +166,7 @@ export default function APGLReconcile() {
   // ── Load periods via ledger (calendar webservice) on mount ────────────────────
   useEffect(() => {
     setPeriodsLoading(true);
-    fetch(`${APEX_BASE}/getledgername`)
+    fetch(`${APEX_BASE}/gl/getledgername`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data) return;
@@ -217,21 +217,25 @@ export default function APGLReconcile() {
     }
   }, [periodsForYear]);
 
-  // ── Load account LOV (lazy) ───────────────────────────────────────────────────
-  const loadAccounts = useCallback(async () => {
-    if (accountOptions.length > 0) return;
+  // ── Load account LOV on mount ─────────────────────────────────────────────────
+  useEffect(() => {
     setAccountsLoading(true);
-    try {
-      const res = await fetch(`${APEX_BASE}/glaccountslist`);
-      if (!res.ok) return;
-      const data = await res.json();
-      setAccountOptions(
-        (data.items || [])
-          .map((i: any) => ({ account: i.account || '', description: i.description || '' }))
-          .filter((i: AccountOption) => i.account),
-      );
-    } catch { /* silent */ } finally { setAccountsLoading(false); }
-  }, [accountOptions.length]);
+    fetch(`${APEX_BASE}/glaccountslist`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        setAccountOptions(
+          (data.items || [])
+            .map((i: any) => ({
+              account:     String(i.account     || i.ACCOUNT     || ''),
+              description: String(i.description || i.DESCRIPTION || ''),
+            }))
+            .filter((i: AccountOption) => i.account),
+        );
+      })
+      .catch(() => {})
+      .finally(() => setAccountsLoading(false));
+  }, []);
 
   // ── Handle BU selection → auto-populate + lock company ───────────────────────
   const onBuChange = useCallback((buName: string | undefined) => {
@@ -527,7 +531,6 @@ export default function APGLReconcile() {
                   allowClear
                   showSearch
                   loading={accountsLoading}
-                  onFocus={loadAccounts}
                   optionFilterProp="label"
                   filterOption={(input, opt) =>
                     String(opt?.label ?? '').toLowerCase().includes(input.toLowerCase())
@@ -693,7 +696,7 @@ export default function APGLReconcile() {
       >
         {[
           { label: 'Business Units',       url: `${APEX_BASE}/gl/businessunits` },
-          { label: 'Ledger Names',          url: `${APEX_BASE}/getledgername` },
+          { label: 'Ledger Names',          url: `${APEX_BASE}/gl/getledgername` },
           { label: 'Periods (calendar)',    url: `${APEX_BASE}/periodsstatus/create?ledger_name=<ledger>` },
           { label: 'Account LOV',           url: `${APEX_BASE}/glaccountslist` },
         ].map(({ label, url }) => (
