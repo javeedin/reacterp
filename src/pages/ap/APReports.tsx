@@ -755,8 +755,8 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
   const renderReconReport = (d: ReconResult) => {
     const reconRows = buildReconRows(d);
     const thStyle: React.CSSProperties = {
-      background: '#C74634', color: '#fff', fontWeight: 700, fontSize: 12,
-      padding: '8px 12px', textAlign: 'right', borderBottom: '2px solid #a33b2c',
+      background: '#F0F0F0', color: '#333', fontWeight: 700, fontSize: 12,
+      padding: '8px 12px', textAlign: 'right', borderBottom: '2px solid #d0d0d0',
     };
     const thLabelStyle: React.CSSProperties = { ...thStyle, textAlign: 'left', width: '40%' };
     const tdBase: React.CSSProperties = { padding: '6px 12px', fontSize: 12, borderBottom: '1px solid #e8e8e8', fontFamily: 'monospace' };
