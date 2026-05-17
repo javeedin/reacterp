@@ -107,6 +107,7 @@ const MyTickets               = lazy(() => import('./pages/support/MyTickets'));
 const TrainingModule          = lazy(() => import('./pages/training/TrainingModule'));
 const OracleFusion            = lazy(() => import('./pages/oracle/OracleFusion'));
 const ManageRevaluation       = lazy(() => import('./pages/gl/ManageRevaluation'));
+const GLFinancialIntelligence = lazy(() => import('./pages/gl/GLFinancialIntelligence'));
 const ProcurementModule       = lazy(() => import('./pages/procurement').then(m => ({ default: m.ProcurementModule })));
 const ManagePurchaseOrders    = lazy(() => import('./pages/procurement').then(m => ({ default: m.ManagePurchaseOrders })));
 const CreatePurchaseOrder     = lazy(() => import('./pages/procurement').then(m => ({ default: m.CreatePurchaseOrder })));
@@ -183,6 +184,7 @@ function App() {
               <Route path="gl/journal-reconciliation" element={<JournalReconciliation />} />
               <Route path="gl/categories" element={<GLManageCategories />} />
               <Route path="gl/revaluation" element={<ManageRevaluation />} />
+              <Route path="gl/financial-intelligence" element={<GLFinancialIntelligence />} />
               {/* Fixed Assets */}
               <Route path="fa"             element={<FAModule />} />
               <Route path="fa/assets"       element={<ManageAssets />} />

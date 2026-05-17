@@ -26,6 +26,7 @@ import {
   SyncOutlined,
   WarningOutlined,
   TagsOutlined,
+  RobotOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import Autopilot from '../../components/Autopilot';
@@ -83,6 +84,7 @@ const reportMenuItems: MenuItemType[] = [
   { key: 'journal-report', icon: <FileTextOutlined />, label: 'Journal Report', description: 'Posted journals listing', color: REDWOOD.taskBlue },
   { key: 'account-analysis', icon: <FundOutlined />, label: 'Account Analysis', description: 'Account detail analysis', color: REDWOOD.warning, path: '/gl/account-analysis' },
   { key: 'gl-balances', icon: <BarChartOutlined />, label: 'GL Balances', description: 'General ledger balances', color: REDWOOD.primary },
+  { key: 'financial-intelligence', icon: <RobotOutlined />, label: 'Financial Intelligence', description: 'AI-powered GL analysis & chat', color: '#764ba2', path: '/gl/financial-intelligence' },
 ];
 
 // Setup menu items
