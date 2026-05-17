@@ -11,7 +11,7 @@ import {
   ApiOutlined, CopyOutlined, BookOutlined, BankOutlined, DownOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 
 const { Content } = Layout;
@@ -19,9 +19,10 @@ const { Title, Text } = Typography;
 const { Option } = Select;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const API_BASE  = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/gl';
-const APEX_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp';
-const COMPANY_LOV_URL = `${APEX_BASE}/valuesets/getvalues/BUIMERC_FIN_GLB_COA_CO`;
+const API_BASE         = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/gl';
+const APEX_BASE        = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp';
+const COMPANY_LOV_URL  = `${APEX_BASE}/valuesets/getvalues/BUIMERC_FIN_GLB_COA_CO`;
+const ACCOUNTS_LOV_URL = `${APEX_BASE}/glaccountslist`;
 
 const REDWOOD = {
   primary: '#C74634', success: '#1D7B4D', warning: '#D4A800',
@@ -39,7 +40,8 @@ const parsePeriod = (p: string): number => {
 };
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
-interface CompanyOption { value: string; meaning: string; }
+interface CompanyOption  { value: string; meaning: string; }
+interface AccountOption  { account: string; description: string; account_type: string; }
 
 interface JournalLine {
   key: string;
@@ -141,6 +143,78 @@ const CompanyPicker: React.FC<CompanyPickerProps> = ({ open, onClose, onSelect, 
   );
 };
 
+// ─── Account Picker Modal ─────────────────────────────────────────────────────
+interface AccountPickerProps {
+  open: boolean;
+  onClose: () => void;
+  onSelect: (account: string, description: string) => void;
+  options: AccountOption[];
+  loading: boolean;
+}
+const AccountPicker: React.FC<AccountPickerProps> = ({ open, onClose, onSelect, options, loading }) => {
+  const [search, setSearch] = useState('');
+  const filtered = useMemo(() => {
+    if (!search.trim()) return options;
+    const q = search.toLowerCase();
+    return options.filter(o =>
+      o.account.toLowerCase().includes(q) || o.description.toLowerCase().includes(q)
+    );
+  }, [options, search]);
+
+  const typeColor: Record<string, string> = { A: 'gold', L: 'volcano', E: 'green', R: 'blue', O: 'purple' };
+  const typeLabel: Record<string, string> = { A: 'Asset', L: 'Liability', E: 'Expense', R: 'Revenue', O: 'OE' };
+
+  return (
+    <Modal
+      open={open} onCancel={() => { onClose(); setSearch(''); }} footer={null}
+      title={<Space><SearchOutlined style={{ color: REDWOOD.info }} />Select Account</Space>}
+      width={640}
+    >
+      <Input
+        prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
+        placeholder="Search account number or description…" allowClear size="small"
+        value={search} onChange={e => setSearch(e.target.value)}
+        style={{ marginBottom: 10 }}
+        autoFocus
+      />
+      {/* All accounts option */}
+      <div
+        onClick={() => { onSelect('', ''); onClose(); setSearch(''); }}
+        style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: `1px solid ${REDWOOD.neutral200}`,
+          display: 'flex', gap: 12, alignItems: 'center', background: '#fafafa' }}
+        onMouseEnter={e => (e.currentTarget.style.background = '#e6f4ff')}
+        onMouseLeave={e => (e.currentTarget.style.background = '#fafafa')}
+      >
+        <Text type="secondary" style={{ fontSize: 12, width: 140 }}>— All Accounts —</Text>
+      </div>
+      <div style={{ maxHeight: 380, overflowY: 'auto' }}>
+        {loading && <div style={{ padding: 24, textAlign: 'center' }}><Spin size="small" /></div>}
+        {!loading && filtered.map(o => (
+          <div
+            key={o.account}
+            onClick={() => { onSelect(o.account, o.description); onClose(); setSearch(''); }}
+            style={{ padding: '7px 12px', cursor: 'pointer', borderBottom: `1px solid ${REDWOOD.neutral200}`,
+              display: 'flex', gap: 12, alignItems: 'center' }}
+            onMouseEnter={e => (e.currentTarget.style.background = '#e6f4ff')}
+            onMouseLeave={e => (e.currentTarget.style.background = '')}
+          >
+            <Text code style={{ fontSize: 11, minWidth: 140 }}>{o.account}</Text>
+            <Text style={{ fontSize: 12, flex: 1 }}>{o.description}</Text>
+            {o.account_type && (
+              <Tag color={typeColor[o.account_type] || 'default'} style={{ fontSize: 10, margin: 0 }}>
+                {typeLabel[o.account_type] || o.account_type}
+              </Tag>
+            )}
+          </div>
+        ))}
+        {!loading && filtered.length === 0 && (
+          <div style={{ padding: 24, textAlign: 'center', color: REDWOOD.neutral600 }}>No accounts found</div>
+        )}
+      </div>
+    </Modal>
+  );
+};
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 const AccountAnalysisV2: React.FC = () => {
   // Parameters
@@ -152,6 +226,11 @@ const AccountAnalysisV2: React.FC = () => {
   const [companyMeaning, setCompanyMeaning] = useState('');
   const [companyOptions, setCompanyOptions] = useState<CompanyOption[]>([]);
   const [companyPickerOpen, setCompanyPickerOpen] = useState(false);
+
+  const [accountOptions, setAccountOptions]   = useState<AccountOption[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(false);
+  const [accountPickerOpen, setAccountPickerOpen] = useState(false);
+  const [accountDesc, setAccountDesc]         = useState('');
 
   const [periods, setPeriods]             = useState<string[]>([]);
   const [allPeriods, setAllPeriods]       = useState<string[]>([]);
@@ -167,6 +246,7 @@ const AccountAnalysisV2: React.FC = () => {
   const [hasSearched, setHasSearched]     = useState(false);
   const [showEntered, setShowEntered]     = useState(false);
   const [gridSearch, setGridSearch]       = useState('');
+  const [functionalCcy, setFunctionalCcy] = useState('AED');
 
   // Balance state
   const [openingBal, setOpeningBal] = useState<{ acc: number; ent: number } | null>(null);
@@ -212,6 +292,25 @@ const AccountAnalysisV2: React.FC = () => {
       })
       .catch(() => {});
   }, []);
+
+  // ── Load account LOV (lazy — fetch once on first picker open) ───────────────
+  const loadAccounts = useCallback(async () => {
+    if (accountOptions.length > 0) return; // already loaded
+    setAccountsLoading(true);
+    try {
+      const res = await fetch(ACCOUNTS_LOV_URL);
+      if (!res.ok) return;
+      const data = await res.json();
+      const items: AccountOption[] = (data.items || []).map((i: any) => ({
+        account:      i.account      || i.ACCOUNT      || '',
+        description:  i.description  || i.DESCRIPTION  || '',
+        account_type: i.account_type || i.ACCOUNT_TYPE || '',
+      })).filter((i: AccountOption) => i.account);
+      setAccountOptions(items);
+    } catch { /* silent */ } finally {
+      setAccountsLoading(false);
+    }
+  }, [accountOptions.length]);
 
   // ── Load periods when ledger changes ────────────────────────────────────────
   const loadPeriods = useCallback(async (ldg: string) => {
@@ -297,19 +396,33 @@ const AccountAnalysisV2: React.FC = () => {
           const data = await res.json();
           const seen = new Set<string>();
           items = (data.items || []).flatMap((item: any, idx: number) => {
-            const dk = `${item.je_header_id}-${item.je_line_number}`;
+            const dk = `${item.jeHeaderId ?? item.je_header_id}-${item.jeLineNumber ?? item.je_line_number}`;
             if (seen.has(dk)) return [];
             seen.add(dk);
+            // account combination — try all known field names then fall back to segment concatenation
+            const combo =
+              item.accountCombination ||
+              item.account_combination ||
+              item.concatenatedSegments ||
+              (item.company && item.account
+                ? [item.company, item.lob, item.department, item.account,
+                   item.subAccount || item.sub_account,
+                   item.analysis, item.intercompany].filter(Boolean).join('-')
+                : '');
+            // functional currency — take from ledger_currency field if present
+            const fccy = item.ledger_currency || item.functional_currency || '';
+            if (fccy) setFunctionalCcy(fccy);
+
             return [{
               key: `row-${idx}`,
-              concatenatedSegments: item.accountCombination || item.account_combination || '',
+              concatenatedSegments: combo,
               accountDescription:   item.accountDescription || item.account_description || '',
-              jeLineDescription:    item.description || item.DESCRIPTION || '',
+              jeLineDescription:    item.description || item.DESCRIPTION || item.je_line_description || '',
               defaultPeriodName:    item.defaultPeriodName || item.period_name || '',
               accountingDate:       item.accountingDate || item.accounting_date || '',
               batchName:            item.batchName || item.batch_name || '',
-              userJeSourceName:     item.userJeSourceName || item.je_source_name || '',
-              userJeCategoryName:   item.userJeCategoryName || item.je_category_name || '',
+              userJeSourceName:     item.userJeSourceName || item.je_source_name || item.user_je_source_name || '',
+              userJeCategoryName:   item.userJeCategoryName || item.je_category_name || item.user_je_category_name || '',
               currencyCode:         item.currencyCode || item.currency_code || 'AED',
               enteredDr:   Number(item.enteredDr   || item.entered_dr   || 0),
               enteredCr:   Number(item.enteredCr   || item.entered_cr   || 0),
@@ -521,10 +634,10 @@ const AccountAnalysisV2: React.FC = () => {
       ...enteredCols,
       // ── Accounted (always visible, comes after Entered) ─────────────────────
       {
-        title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Acc Dr</span>,
+        title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Acc Dr ({functionalCcy})</span>,
         dataIndex: 'accountedDr',
         key: 'accDr',
-        width: 130,
+        width: 150,
         align: 'right',
         render: (v: number, r: JournalLine) => (
           <span style={{ fontSize: 10, color: v > 0 ? REDWOOD.success : undefined, fontWeight: isTot(r) ? 700 : undefined }}>
@@ -533,10 +646,10 @@ const AccountAnalysisV2: React.FC = () => {
         ),
       },
       {
-        title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Acc Cr</span>,
+        title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Acc Cr ({functionalCcy})</span>,
         dataIndex: 'accountedCr',
         key: 'accCr',
-        width: 130,
+        width: 150,
         align: 'right',
         render: (v: number, r: JournalLine) => (
           <span style={{ fontSize: 10, color: v > 0 ? REDWOOD.primary : undefined, fontWeight: isTot(r) ? 700 : undefined }}>
@@ -545,7 +658,7 @@ const AccountAnalysisV2: React.FC = () => {
         ),
       },
       {
-        title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Acc Balance</span>,
+        title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Acc Balance ({functionalCcy})</span>,
         key: 'accBal',
         width: 140,
         align: 'right',
@@ -571,29 +684,176 @@ const AccountAnalysisV2: React.FC = () => {
           ),
       },
     ];
-  }, [showEntered, runningBals]);
+  }, [showEntered, runningBals, functionalCcy]);
 
-  // ── Export ─────────────────────────────────────────────────────────────────
-  const exportExcel = () => {
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(filteredData.map(r => ({
-      Account:    r.concatenatedSegments,
-      'Line Desc': r.jeLineDescription,
-      Period:     r.defaultPeriodName,
-      Date:       r.accountingDate,
-      Batch:      r.batchName,
-      Source:     r.userJeSourceName,
-      Category:   r.userJeCategoryName,
-      Currency:   r.currencyCode,
-      ...(showEntered ? { 'Ent Dr': r.enteredDr || '', 'Ent Cr': r.enteredCr || '' } : {}),
-      'Acc Dr': r.accountedDr || '',
-      'Acc Cr': r.accountedCr || '',
-    })));
-    XLSX.utils.book_append_sheet(wb, ws, 'Account Analysis');
-    saveAs(
-      new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })], { type: 'application/octet-stream' }),
-      `account_analysis_${new Date().toISOString().slice(0, 10)}.xlsx`,
-    );
+  // ── Export (ExcelJS — same rich format as Account Analysis v1) ───────────────
+  const exportExcel = async () => {
+    if (!filteredData.length) { message.warning('No data to export'); return; }
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'ReactERP';
+    wb.created = new Date();
+    const ws = wb.addWorksheet('Account Analysis');
+
+    const white       = { argb: 'FFFFFFFF' };
+    const numFmt      = '#,##0.00';
+    const NCOLS       = showEntered ? 16 : 13; // descriptive(8) + ent(3)? + acc(3) + jeHdr(1) + date(1)
+    const mergeFull   = (r: number) => ws.mergeCells(r, 1, r, NCOLS);
+
+    // fills
+    const hdrFill: ExcelJS.Fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC74634' } };
+    const fltFill: ExcelJS.Fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0D6' } };
+    const colFill: ExcelJS.Fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3D3D3D' } };
+    const accFill: ExcelJS.Fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD6E4FF' } };
+    const entFill: ExcelJS.Fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9F7BE' } };
+    const totFill: ExcelJS.Fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } };
+    const altFill: ExcelJS.Fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } };
+    const accHdrFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A5FCC' } };
+    const entHdrFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF389E0D' } };
+
+    // title
+    mergeFull(1);
+    const titleCell = ws.getCell('A1');
+    titleCell.value = 'Account Analysis';
+    titleCell.font = { bold: true, size: 13, color: white };
+    titleCell.fill = hdrFill;
+    titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    ws.getRow(1).height = 22;
+
+    // filter rows
+    const fRows: [string, string][] = [
+      ['Ledger',   ledger || '—'],
+      ['Company',  company ? `${company}${companyMeaning ? ' – ' + companyMeaning : ''}` : '—'],
+      ['Periods',  periods.length ? periods.join(', ') : '—'],
+      ['Account',  account ? `${account}${accountDesc ? ' – ' + accountDesc : ''}` : '—'],
+      ['Exported', new Date().toLocaleString()],
+      ['Records',  String(filteredData.length)],
+    ];
+    let ri = 2;
+    for (const [lbl, val] of fRows) {
+      ws.mergeCells(ri, 1, ri, 3); ws.mergeCells(ri, 4, ri, NCOLS);
+      const lc = ws.getCell(ri, 1); const vc = ws.getCell(ri, 4);
+      lc.value = lbl; vc.value = val;
+      lc.font = { bold: true, size: 10 }; vc.font = { size: 10 };
+      lc.fill = fltFill;
+      lc.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
+      vc.alignment = { horizontal: 'left',  vertical: 'middle', indent: 1 };
+      ws.getRow(ri).height = 16;
+      ri++;
+    }
+    ri++; // blank separator
+
+    // group header row (Entered | Accounted bands)
+    ws.getRow(ri).height = 16;
+    for (let c = 1; c <= 9; c++) ws.getCell(ri, c).fill = colFill; // descriptive + date
+    let col = 10;
+    if (showEntered) {
+      ws.mergeCells(ri, col, ri, col + 2);
+      const ec = ws.getCell(ri, col);
+      ec.value = 'Entered'; ec.font = { bold: true, size: 10, color: { argb: 'FF52C41A' } };
+      ec.fill = entFill; ec.alignment = { horizontal: 'center', vertical: 'middle' };
+      col += 3;
+    }
+    ws.mergeCells(ri, col, ri, col + 2);
+    const ac = ws.getCell(ri, col);
+    ac.value = `Accounted (${functionalCcy})`; ac.font = { bold: true, size: 10, color: { argb: 'FF1677FF' } };
+    ac.fill = accFill; ac.alignment = { horizontal: 'center', vertical: 'middle' };
+    col += 3;
+    ws.getCell(ri, col).fill = colFill; // JE Hdr
+    ri++;
+
+    // column headers
+    const descHdrs = ['Account', 'Account Description', 'Line Description', 'Period', 'Acctg Date', 'Batch', 'Source', 'Category', 'Currency'];
+    const entHdrs  = showEntered ? [`Ent Dr`, `Ent Cr`, `Ent Balance`] : [];
+    const accHdrs  = [`Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Balance (${functionalCcy})`];
+    const hdrs     = [...descHdrs, ...entHdrs, ...accHdrs, 'JE Header ID'];
+    const widths   = [28, 28, 32, 12, 14, 28, 14, 16, 10, ...(showEntered ? [16, 16, 16] : []), 16, 16, 16, 14];
+
+    const hRow = ws.getRow(ri); hRow.height = 18;
+    hdrs.forEach((h, i) => {
+      const cell = ws.getCell(ri, i + 1);
+      cell.value = h;
+      const isEnt = showEntered && i >= 9 && i <= 11;
+      const accStart = showEntered ? 12 : 9;
+      const isAcc = i >= accStart && i <= accStart + 2;
+      cell.fill = isEnt ? entHdrFill : isAcc ? accHdrFill : colFill;
+      cell.font = { bold: true, size: 10, color: white };
+      cell.alignment = { horizontal: (isEnt || isAcc) ? 'right' : 'left', vertical: 'middle', indent: 1 };
+      cell.border = { bottom: { style: 'thin', color: { argb: 'FF888888' } } };
+      ws.getColumn(i + 1).width = widths[i] || 14;
+    });
+    ri++;
+
+    // data rows
+    let accRun = 0; let entRun = 0;
+    const dataStartRow = ri;
+    filteredData.forEach((r, idx) => {
+      accRun += (r.accountedDr || 0) - (r.accountedCr || 0);
+      entRun += (r.enteredDr   || 0) - (r.enteredCr   || 0);
+      const isAlt = idx % 2 === 1;
+      const row = ws.getRow(ri); row.height = 15;
+
+      const vals: (string | number)[] = [
+        r.concatenatedSegments || '',
+        r.accountDescription || '',
+        r.jeLineDescription || '',
+        r.defaultPeriodName || '',
+        (r.accountingDate || '').slice(0, 10),
+        r.batchName || '',
+        r.userJeSourceName || '',
+        r.userJeCategoryName || '',
+        r.currencyCode || '',
+        ...(showEntered ? [r.enteredDr || 0, r.enteredCr || 0, entRun] : []),
+        r.accountedDr || 0, r.accountedCr || 0, accRun,
+        r.jeHeaderId,
+      ];
+      const accStart = showEntered ? 9 : 9;   // 0-based
+      const accBalIdx = showEntered ? 11 : 11;
+      const entBalIdx = showEntered ? 11 : -1; // only when shown, accBalance shifts
+
+      vals.forEach((v, i) => {
+        const cell = ws.getCell(ri, i + 1);
+        cell.value = v;
+        cell.font = { size: 10 };
+        if (isAlt) cell.fill = altFill;
+        const isNumeric = i >= 9;
+        cell.alignment = { horizontal: isNumeric ? 'right' : 'left', vertical: 'middle', indent: 1 };
+        if (isNumeric) cell.numFmt = numFmt;
+        // colour balance columns
+        const isEntBal = showEntered && i === 11;
+        const isAccBal = i === (showEntered ? 14 : 11);
+        if (isEntBal || isAccBal) {
+          const bal = isEntBal ? entRun : accRun;
+          cell.font = { size: 10, bold: true, color: { argb: bal < 0 ? 'FFC41C00' : 'FF237804' } };
+        }
+      });
+      ri++;
+    });
+
+    // totals row
+    const tRow = ws.getRow(ri); tRow.height = 16;
+    ws.mergeCells(ri, 1, ri, 9);
+    const tl = ws.getCell(ri, 1);
+    tl.value = `Totals  (${filteredData.length} lines)`;
+    tl.font = { bold: true, size: 10 }; tl.fill = totFill;
+    tl.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
+    const tVals = showEntered
+      ? [gridTotals.entDr, gridTotals.entCr, finalRunning.ent, gridTotals.accDr, gridTotals.accCr, finalRunning.acc]
+      : [gridTotals.accDr, gridTotals.accCr, finalRunning.acc];
+    tVals.forEach((v, i) => {
+      const cell = ws.getCell(ri, 10 + i);
+      cell.value = v; cell.font = { bold: true, size: 10 };
+      cell.fill = totFill; cell.numFmt = numFmt;
+      cell.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
+    });
+    ws.getCell(ri, 10 + tVals.length).fill = totFill;
+
+    // freeze & auto-filter
+    ws.views = [{ state: 'frozen', xSplit: 0, ySplit: dataStartRow - 1 }];
+    ws.autoFilter = { from: { row: dataStartRow - 1, column: 1 }, to: { row: ri, column: NCOLS } };
+
+    const buf = await wb.xlsx.writeBuffer();
+    saveAs(new Blob([buf], { type: 'application/octet-stream' }), `account_analysis_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    message.success('Excel file downloaded');
   };
 
   // ── Company display label ───────────────────────────────────────────────────
@@ -683,14 +943,34 @@ const AccountAnalysisV2: React.FC = () => {
                 </Select>
               </Col>
 
-              {/* Account */}
-              <Col xs={24} sm={12} md={4}>
+              {/* Account — LOV picker */}
+              <Col xs={24} sm={12} md={6}>
                 <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 3, fontWeight: 500 }}>Account</div>
-                <Input
-                  value={account} onChange={e => setAccount(e.target.value)}
-                  size="small" placeholder="e.g. 01-00-00-..." allowClear
-                  prefix={<SearchOutlined style={{ fontSize: 10, color: REDWOOD.neutral600 }} />}
-                />
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <div
+                    onClick={() => { loadAccounts(); setAccountPickerOpen(true); }}
+                    style={{
+                      flex: 1, height: 24, padding: '0 8px', border: `1px solid #d9d9d9`, borderRadius: 6,
+                      background: REDWOOD.surface, cursor: 'pointer', display: 'flex', alignItems: 'center',
+                      justifyContent: 'space-between', fontSize: 12,
+                      color: account ? REDWOOD.neutral900 : REDWOOD.neutral600,
+                      userSelect: 'none', transition: 'border-color 0.2s', overflow: 'hidden',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.borderColor = REDWOOD.info)}
+                    onMouseLeave={e => (e.currentTarget.style.borderColor = '#d9d9d9')}
+                  >
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {account
+                        ? <><Text code style={{ fontSize: 11 }}>{account}</Text>{accountDesc ? ` – ${accountDesc}` : ''}</>
+                        : 'All Accounts'}
+                    </span>
+                    <DownOutlined style={{ fontSize: 9, color: REDWOOD.neutral600, flexShrink: 0, marginLeft: 4 }} />
+                  </div>
+                  {account && (
+                    <Button size="small" type="text" style={{ padding: '0 4px', height: 24 }}
+                      onClick={() => { setAccount(''); setAccountDesc(''); }}>✕</Button>
+                  )}
+                </div>
               </Col>
 
               {/* Journal Source */}
@@ -722,7 +1002,7 @@ const AccountAnalysisV2: React.FC = () => {
                 </Button>
                 <Button icon={<ClearOutlined />} size="small" onClick={() => {
                   setRows([]); setHasSearched(false); setPeriods([]);
-                  setAccount(''); setCompany(''); setCompanyMeaning('');
+                  setAccount(''); setAccountDesc(''); setCompany(''); setCompanyMeaning('');
                   setJeSource(''); setJeCategory('');
                 }}>
                   Clear
@@ -847,6 +1127,15 @@ const AccountAnalysisV2: React.FC = () => {
           )}
         </div>
       </Content>
+
+      {/* Account Picker Modal */}
+      <AccountPicker
+        open={accountPickerOpen}
+        onClose={() => setAccountPickerOpen(false)}
+        options={accountOptions}
+        loading={accountsLoading}
+        onSelect={(val, desc) => { setAccount(val); setAccountDesc(desc); }}
+      />
 
       {/* Company Picker Modal */}
       <CompanyPicker
