@@ -1218,12 +1218,12 @@ const AAPanel: React.FC = () => {
     return dataRows.filter(r => Object.values(r).some(v => String(v ?? '').toLowerCase().includes(q)));
   }, [dataRows, gridSearch]);
 
-  const runningBals = useMemo(() => {
+  const rowsWithBal = useMemo(() => {
     let accRun = 0; let entRun = 0;
     return filteredData.map(r => {
       accRun += (r.accountedDr || 0) - (r.accountedCr || 0);
       entRun += (r.enteredDr   || 0) - (r.enteredCr   || 0);
-      return { acc: accRun, ent: entRun };
+      return { ...r, _accRun: accRun, _entRun: entRun };
     });
   }, [filteredData]);
 
@@ -1240,7 +1240,9 @@ const AAPanel: React.FC = () => {
       entDr: acc.entDr + r.enteredDr,   entCr: acc.entCr + r.enteredCr,
     }), { accDr: 0, accCr: 0, entDr: 0, entCr: 0 }), [filteredData]);
 
-  const finalRunning = runningBals[runningBals.length - 1] ?? { acc: 0, ent: 0 };
+  const finalRunning = rowsWithBal.length > 0
+    ? { acc: rowsWithBal[rowsWithBal.length - 1]._accRun, ent: rowsWithBal[rowsWithBal.length - 1]._entRun }
+    : { acc: 0, ent: 0 };
 
   // ── Grouped data ──────────────────────────────────────────────────────────────
   const groupedData = useMemo((): GroupedRow[] => {
@@ -1280,7 +1282,7 @@ const AAPanel: React.FC = () => {
   }, [groupBy, filteredData, gridTotals]);
 
   // ── Flat table data ───────────────────────────────────────────────────────────
-  const totalsRow: JournalLine | null = filteredData.length > 0 ? {
+  const totalsRow: JournalLine | null = rowsWithBal.length > 0 ? {
     key: '__totals__', concatenatedSegments: '', accountDescription: '',
     jeLineDescription: 'Total for Report', defaultPeriodName: '', accountingDate: '',
     batchName: '', userJeSourceName: '', userJeCategoryName: '', currencyCode: '',
@@ -1288,7 +1290,7 @@ const AAPanel: React.FC = () => {
     accountedDr: gridTotals.accDr, accountedCr: gridTotals.accCr,
     jeHeaderId: 0, isTotals: true, _entBal: finalRunning.ent, _accBal: finalRunning.acc,
   } : null;
-  const tableData = totalsRow ? [...filteredData, totalsRow] : filteredData;
+  const tableData = totalsRow ? [...rowsWithBal, totalsRow] : rowsWithBal;
 
   // ── Flat columns ──────────────────────────────────────────────────────────────
   const flatColumns = useMemo((): ColumnsType<JournalLine> => {
@@ -1304,9 +1306,9 @@ const AAPanel: React.FC = () => {
         render: (v: number, r: JournalLine) => <CrCell v={v} bold={isTot(r)} /> },
       { title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Ent Balance</span>,
         key: 'entBal', width: 140, align: 'right',
-        render: (_: any, record: JournalLine, index: number) => {
+        render: (_: any, record: JournalLine) => {
           if (isTot(record)) return <FmtBal v={record._entBal ?? 0} size={10} bold />;
-          return <FmtBal v={runningBals[index]?.ent ?? 0} size={10} bold={isSpecial(record)} />;
+          return <FmtBal v={(record as any)._entRun ?? 0} size={10} bold={isSpecial(record)} />;
         } },
     ] : [];
 
@@ -1343,9 +1345,9 @@ const AAPanel: React.FC = () => {
         render: (v: number, r: JournalLine) => <CrCell v={v} bold={isTot(r)} /> },
       { title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Acc Balance ({functionalCcy})</span>,
         key: 'accBal', width: 160, align: 'right',
-        render: (_: any, record: JournalLine, index: number) => {
+        render: (_: any, record: JournalLine) => {
           if (isTot(record)) return <FmtBal v={record._accBal ?? 0} size={10} bold />;
-          return <FmtBal v={runningBals[index]?.acc ?? 0} size={10} bold={isSpecial(record)} />;
+          return <FmtBal v={(record as any)._accRun ?? 0} size={10} bold={isSpecial(record)} />;
         } },
       { title: '', key: 'drill', width: 36, fixed: 'right',
         render: (_: any, record: JournalLine) =>
@@ -1356,7 +1358,7 @@ const AAPanel: React.FC = () => {
             </Tooltip>
           ) },
     ];
-  }, [showEntered, runningBals, functionalCcy, openDrill]);
+  }, [showEntered, functionalCcy, openDrill]);
 
   // ── Group-by columns ──────────────────────────────────────────────────────────
   const groupLabel = GROUP_BY_OPTIONS.find(o => o.value === groupBy)?.label || groupBy;

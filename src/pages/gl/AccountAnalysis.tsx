@@ -2127,6 +2127,7 @@ const AccountAnalysis: React.FC = () => {
 
           <Spin spinning={loading}>
             <Table
+              key={showEntered ? 'entered' : 'no-entered'}
               columns={searchColumns}
               dataSource={searchData}
               pagination={{ pageSize: searchPageSize, size: 'small', showSizeChanger: true, pageSizeOptions: ['10','20','50','100','200'], onShowSizeChange: (_current, size) => setSearchPageSize(size), onChange: (_page, size) => size && setSearchPageSize(size), showTotal: (total) => `Total ${total} records` }}
