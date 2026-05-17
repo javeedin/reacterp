@@ -13,7 +13,7 @@
 --   P_PERIOD         – GL period name    (e.g. 'Mar-26')
 --
 -- Tables used:
---   XXAP_INVOICES_STG               – AP invoice headers (staging from Fusion)
+--   RR_AP_INVOICES_ALL              – AP invoice headers
 --   RR_AP_PAYMENTS_ALL              – AP payments
 --   RR_AP_PAYMENTS_RELATED_INVOICES – payment ↔ invoice link
 --   RR_AP_APPLIED_PREPAYMENTS       – prepayment applications
@@ -116,7 +116,7 @@ BEGIN
     - NVL(prep_sub.total_applied, 0)
   ), 0)
   INTO l_p_begin
-  FROM XXAP_INVOICES_STG i
+  FROM RR_AP_INVOICES_ALL i
   LEFT JOIN (
     SELECT ri.INVOICE_ID,
            SUM(NVL(ri.AMOUNT_PAID_INVOICE_CURRENCY, 0)
@@ -144,7 +144,7 @@ BEGIN
   -- ── 3. Period Invoices ─────────────────────────────────────────────────────
   SELECT NVL(SUM(NVL(INVOICE_AMOUNT, 0)), 0)
   INTO   l_p_invoices
-  FROM   XXAP_INVOICES_STG
+  FROM   RR_AP_INVOICES_ALL
   WHERE  INVOICE_DATE >= l_period_start
   AND    INVOICE_DATE <= l_period_end
   AND    NVL(CANCELED_FLAG,  'N')        != 'Y'
