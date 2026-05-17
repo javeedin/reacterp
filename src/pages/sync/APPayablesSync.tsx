@@ -1,13 +1,13 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   Modal, Layout, Tabs, Button, Table, Space, Tag, Spin,
-  Alert, Tooltip, Typography, Badge, Divider, Input, message, Select,
+  Alert, Tooltip, Typography, Badge, Divider, Input, message, Select, Progress,
 } from 'antd';
 import {
   AuditOutlined, CloudDownloadOutlined, FileExcelOutlined,
   SyncOutlined, InfoCircleOutlined, SearchOutlined,
   CheckCircleOutlined, ClockCircleOutlined, ApiOutlined, CopyOutlined,
-  UnorderedListOutlined, TableOutlined, CloudUploadOutlined,
+  UnorderedListOutlined, TableOutlined, CloudUploadOutlined, StopOutlined,
 } from '@ant-design/icons';
 import { ORACLE_SOAP_CONFIG } from '../../config/api.config';
 import { callSoapBip, insertToApex } from '../../services/sync-http';
@@ -17,8 +17,9 @@ import { saveAs } from 'file-saver';
 const { Sider, Content } = Layout;
 const { Text } = Typography;
 
-const AP_BASE_PATH = '/Custom/FA_REPORTS/ReERPAPreports';
-const AP_COLOR     = '#1677ff';
+const AP_BASE_PATH  = '/Custom/FA_REPORTS/ReERPAPreports';
+const AP_COLOR      = '#1677ff';
+const BATCH_SIZE    = 500;
 
 const APEX_ENDPOINT_MAP: Record<string, string> = {
   AP_INVOICES_ALL_BIP:          'ap/raw-invoices',
@@ -36,8 +37,16 @@ const AP_REPORTS = [
   { id: 'AP_SYSTEM_PARAMETERS_ALL_BIP', label: 'AP_SYSTEM_PARAMETERS_ALL', description: 'Payables system configuration by OU' },
 ];
 
+interface BatchProgress {
+  batch: number;       // current batch number (1-based)
+  rowsFetched: number; // rows accumulated so far
+  startedAt: number;   // Date.now() when fetch started
+}
+
 interface TabState {
   loading: boolean;
+  batchProgress: BatchProgress | null;
+  cancelled: boolean;
   error: string | null;
   rawErrorDetail: string | null;
   columns: string[];
@@ -76,24 +85,21 @@ const buildSoapEnvelope = (
 
 const parseGenericXml = (xmlString: string): { columns: string[]; rows: Record<string, string>[] } => {
   if (!xmlString.trim()) return { columns: [], rows: [] };
-
   const parser = new DOMParser();
-  const doc = parser.parseFromString(xmlString, 'text/xml');
+  const doc    = parser.parseFromString(xmlString, 'text/xml');
 
   let elements: NodeListOf<Element> | Element[] = doc.querySelectorAll('G_1');
-
   if (elements.length === 0) {
-    const root = doc.documentElement;
+    const root       = doc.documentElement;
     const childCounts = new Map<string, number>();
     Array.from(root.children).forEach(c => childCounts.set(c.tagName, (childCounts.get(c.tagName) || 0) + 1));
     let best = { tag: '', count: 0 };
     childCounts.forEach((count, tag) => { if (count > best.count) best = { tag, count }; });
     if (best.tag) elements = doc.querySelectorAll(best.tag);
   }
-
   if (elements.length === 0) return { columns: [], rows: [] };
 
-  const colSet = new Set<string>();
+  const colSet   = new Set<string>();
   const colOrder: string[] = [];
   Array.from(elements).slice(0, 5).forEach(el => {
     Array.from(el.children).forEach(c => {
@@ -103,9 +109,7 @@ const parseGenericXml = (xmlString: string): { columns: string[]; rows: Record<s
 
   const rows: Record<string, string>[] = Array.from(elements).map(el => {
     const row: Record<string, string> = {};
-    colOrder.forEach(col => {
-      row[col] = el.querySelector(col)?.textContent?.trim() || '';
-    });
+    colOrder.forEach(col => { row[col] = el.querySelector(col)?.textContent?.trim() || ''; });
     return row;
   });
 
@@ -119,13 +123,16 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
   const [activeTab, setActiveTab]   = useState<string>('');
   const [tabStates, setTabStates]   = useState<Record<string, TabState>>({});
   const [sideSearch, setSideSearch] = useState('');
-  const [colModal, setColModal]         = useState<{ reportId: string; columns: string[] } | null>(null);
-  const [colCopyFmt, setColCopyFmt]     = useState<'list' | 'ddl' | 'insert' | 'select'>('list');
-  const [apiExpanded, setApiExpanded]   = useState<Record<string, boolean>>({});
-  const [fetchingAll, setFetchingAll]   = useState(false);
+  const [colModal, setColModal]     = useState<{ reportId: string; columns: string[] } | null>(null);
+  const [colCopyFmt, setColCopyFmt] = useState<'list' | 'ddl' | 'insert' | 'select'>('list');
+  const [apiExpanded, setApiExpanded] = useState<Record<string, boolean>>({});
+  const [fetchingAll, setFetchingAll] = useState(false);
   const [fetchAllProgress, setFetchAllProgress] = useState<{ done: number; total: number } | null>(null);
-  const [tabSyncing, setTabSyncing]     = useState<Record<string, boolean>>({});
+  const [tabSyncing, setTabSyncing]   = useState<Record<string, boolean>>({});
   const [tabSyncResult, setTabSyncResult] = useState<Record<string, { success: boolean; message?: string; error?: string } | null>>({});
+
+  // Cancel flags per report — set to true to stop the batch loop
+  const cancelFlags = useRef<Record<string, boolean>>({});
 
   const openReport = (reportId: string) => {
     if (!openTabs.includes(reportId)) setOpenTabs(prev => [...prev, reportId]);
@@ -133,17 +140,32 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
   };
 
   const closeTab = (reportId: string) => {
+    cancelFlags.current[reportId] = true;
     const newTabs = openTabs.filter(t => t !== reportId);
     setOpenTabs(newTabs);
     if (activeTab === reportId) setActiveTab(newTabs[newTabs.length - 1] || '');
     setTabStates(prev => { const n = { ...prev }; delete n[reportId]; return n; });
   };
 
+  const cancelFetch = (reportId: string) => {
+    cancelFlags.current[reportId] = true;
+  };
+
+  // ── Core batch-loop fetch ──────────────────────────────────────────────────
   const fetchReport = useCallback(async (reportId: string) => {
     const reportPath = `${AP_BASE_PATH}/${reportId}.xdo`;
     const env        = ORACLE_SOAP_CONFIG.prod;
-    const envelope   = buildSoapEnvelope(reportPath, {}, env.username, env.password);
-    const displayEnvelope = envelope.replace(
+    const startedAt  = Date.now();
+
+    // Reset cancel flag and init tab state
+    cancelFlags.current[reportId] = false;
+
+    const firstEnvelope = buildSoapEnvelope(
+      reportPath,
+      { P_START_ROW: '1', P_END_ROW: String(BATCH_SIZE) },
+      env.username, env.password,
+    );
+    const displayEnvelope = firstEnvelope.replace(
       /<v2:password>[^<]*<\/v2:password>/,
       '<v2:password>••••••••</v2:password>',
     );
@@ -151,37 +173,97 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
     setTabStates(prev => ({
       ...prev,
       [reportId]: {
-        loading: true, error: null, rawErrorDetail: null,
+        loading: true, cancelled: false, error: null, rawErrorDetail: null,
         columns: [], rows: [], duration: null, gridSearch: '',
-        rawEnvelope: displayEnvelope,
-        soapUrl: env.baseUrl,
+        rawEnvelope: displayEnvelope, soapUrl: env.baseUrl,
+        batchProgress: { batch: 1, rowsFetched: 0, startedAt },
       },
     }));
 
-    const result = await callSoapBip(env.baseUrl, envelope);
+    let allRows: Record<string, string>[] = [];
+    let allColumns: string[] = [];
+    let batchNum   = 1;
+    let hasMore    = true;
 
-    if (!result.success || !result.decodedXml) {
+    while (hasMore) {
+      // Check cancel
+      if (cancelFlags.current[reportId]) {
+        setTabStates(prev => ({
+          ...prev,
+          [reportId]: {
+            ...prev[reportId],
+            loading: false,
+            cancelled: true,
+            rows: allRows,
+            columns: allColumns,
+            duration: Date.now() - startedAt,
+            batchProgress: null,
+          },
+        }));
+        message.warning(`${reportId}: fetch cancelled (${allRows.length} rows retrieved)`);
+        return;
+      }
+
+      const startRow = (batchNum - 1) * BATCH_SIZE + 1;
+      const endRow   = batchNum * BATCH_SIZE;
+
+      const envelope = buildSoapEnvelope(
+        reportPath,
+        { P_START_ROW: String(startRow), P_END_ROW: String(endRow) },
+        env.username, env.password,
+      );
+
+      // Update progress
       setTabStates(prev => ({
         ...prev,
         [reportId]: {
           ...prev[reportId],
-          loading: false,
-          error: result.error || 'SOAP call failed — no data returned',
-          rawErrorDetail: (result as any).details || null,
-          duration: result.duration ?? null,
+          batchProgress: { batch: batchNum, rowsFetched: allRows.length, startedAt },
         },
       }));
-      return;
+
+      const result = await callSoapBip(env.baseUrl, envelope);
+
+      if (!result.success || !result.decodedXml) {
+        setTabStates(prev => ({
+          ...prev,
+          [reportId]: {
+            ...prev[reportId],
+            loading: false, batchProgress: null,
+            error: result.error || 'SOAP call failed — no data returned',
+            rawErrorDetail: (result as any).details || null,
+            duration: Date.now() - startedAt,
+            rows: allRows,
+            columns: allColumns,
+          },
+        }));
+        return;
+      }
+
+      const { columns, rows } = parseGenericXml(result.decodedXml);
+
+      if (columns.length > 0 && allColumns.length === 0) {
+        allColumns = columns;
+      }
+
+      allRows = [...allRows, ...rows];
+
+      // Fewer rows than batch size means we've reached the last page
+      if (rows.length < BATCH_SIZE) {
+        hasMore = false;
+      } else {
+        batchNum++;
+      }
     }
 
-    const { columns, rows } = parseGenericXml(result.decodedXml);
     setTabStates(prev => ({
       ...prev,
       [reportId]: {
         ...prev[reportId],
-        loading: false, error: null, rawErrorDetail: null,
-        columns, rows,
-        duration: result.duration ?? null,
+        loading: false, batchProgress: null, cancelled: false, error: null,
+        columns: allColumns,
+        rows: allRows,
+        duration: Date.now() - startedAt,
       },
     }));
   }, []);
@@ -191,7 +273,7 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
     const rows     = tabStates[reportId]?.rows;
     if (!endpoint || !rows?.length) return;
 
-    setTabSyncing(prev   => ({ ...prev, [reportId]: true }));
+    setTabSyncing(prev    => ({ ...prev, [reportId]: true }));
     setTabSyncResult(prev => ({ ...prev, [reportId]: null }));
 
     try {
@@ -225,49 +307,7 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
     for (let i = 0; i < AP_REPORTS.length; i++) {
       const { id } = AP_REPORTS[i];
       setActiveTab(id);
-
-      const reportPath = `${AP_BASE_PATH}/${id}.xdo`;
-      const env        = ORACLE_SOAP_CONFIG.prod;
-      const envelope   = buildSoapEnvelope(reportPath, {}, env.username, env.password);
-      const displayEnv = envelope.replace(
-        /<v2:password>[^<]*<\/v2:password>/,
-        '<v2:password>••••••••</v2:password>',
-      );
-
-      setTabStates(prev => ({
-        ...prev,
-        [id]: {
-          loading: true, error: null, rawErrorDetail: null,
-          columns: [], rows: [], duration: null, gridSearch: '',
-          rawEnvelope: displayEnv, soapUrl: env.baseUrl,
-        },
-      }));
-
-      const result = await callSoapBip(env.baseUrl, envelope);
-
-      if (!result.success || !result.decodedXml) {
-        setTabStates(prev => ({
-          ...prev,
-          [id]: {
-            ...prev[id],
-            loading: false,
-            error: result.error || 'SOAP call failed',
-            rawErrorDetail: (result as any).details || null,
-            duration: result.duration ?? null,
-          },
-        }));
-      } else {
-        const { columns, rows } = parseGenericXml(result.decodedXml);
-        setTabStates(prev => ({
-          ...prev,
-          [id]: {
-            ...prev[id],
-            loading: false, error: null, rawErrorDetail: null,
-            columns, rows, duration: result.duration ?? null,
-          },
-        }));
-      }
-
+      await fetchReport(id);
       setFetchAllProgress({ done: i + 1, total: AP_REPORTS.length });
     }
 
@@ -300,8 +340,8 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
   const exportToExcel = (reportId: string) => {
     const state = tabStates[reportId];
     if (!state?.rows.length) return;
-    const ws = XLSX.utils.json_to_sheet(state.rows);
-    const wb = XLSX.utils.book_new();
+    const ws  = XLSX.utils.json_to_sheet(state.rows);
+    const wb  = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, reportId.slice(0, 31));
     const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
     const eAPI = (window as any).electronAPI;
@@ -317,14 +357,11 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
 
   const buildColCopyText = (reportId: string, columns: string[], fmt: typeof colCopyFmt): string => {
     switch (fmt) {
-      case 'list':
-        return columns.join('\n');
+      case 'list':   return columns.join('\n');
       case 'ddl':
         return [
           `CREATE TABLE RR_AP_${reportId.replace('_BIP', '')} (`,
-          columns.map((c, i) =>
-            `  ${c.padEnd(40)} VARCHAR2(400)${i < columns.length - 1 ? ',' : ''}`
-          ).join('\n'),
+          columns.map((c, i) => `  ${c.padEnd(40)} VARCHAR2(400)${i < columns.length - 1 ? ',' : ''}`).join('\n'),
           `);`,
         ].join('\n');
       case 'insert':
@@ -337,21 +374,62 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
         ].join('\n');
       case 'select':
         return `SELECT\n  ${columns.join(',\n  ')}\nFROM RR_AP_${reportId.replace('_BIP', '')};`;
-      default:
-        return columns.join('\n');
+      default: return columns.join('\n');
     }
   };
 
+  // ── Batch progress panel ───────────────────────────────────────────────────
+  const renderBatchProgress = (reportId: string, bp: BatchProgress) => {
+    const elapsed = ((Date.now() - bp.startedAt) / 1000).toFixed(1);
+    const rps     = bp.startedAt && bp.rowsFetched > 0
+      ? (bp.rowsFetched / ((Date.now() - bp.startedAt) / 1000)).toFixed(0)
+      : '—';
+
+    return (
+      <div style={{
+        background: '#e6f4ff', border: '1px solid #91caff', borderRadius: 8,
+        padding: '16px 20px', marginBottom: 16,
+      }}>
+        <Space style={{ marginBottom: 10 }} size={16}>
+          <SyncOutlined spin style={{ fontSize: 20, color: AP_COLOR }} />
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 14, color: AP_COLOR }}>
+              Fetching batch {bp.batch} — {bp.rowsFetched.toLocaleString()} rows retrieved
+            </div>
+            <div style={{ fontSize: 12, color: '#595959', marginTop: 2 }}>
+              Rows {((bp.batch - 1) * BATCH_SIZE + 1).toLocaleString()} – {(bp.batch * BATCH_SIZE).toLocaleString()}
+              &nbsp;·&nbsp;{elapsed}s elapsed
+              &nbsp;·&nbsp;~{rps} rows/s
+            </div>
+          </div>
+          <Button
+            size="small"
+            danger
+            icon={<StopOutlined />}
+            onClick={() => cancelFetch(reportId)}
+          >
+            Cancel
+          </Button>
+        </Space>
+        <Progress
+          percent={Math.min(100, bp.batch * 2)}
+          status="active"
+          strokeColor={AP_COLOR}
+          showInfo={false}
+          style={{ marginBottom: 0 }}
+        />
+        <div style={{ marginTop: 6, fontSize: 11, color: '#8c8c8c' }}>
+          Each batch = {BATCH_SIZE} rows · Loop continues until a batch returns fewer than {BATCH_SIZE} rows
+        </div>
+      </div>
+    );
+  };
+
+  // ── Column modal ───────────────────────────────────────────────────────────
   const renderColModal = () => {
     if (!colModal) return null;
     const { reportId, columns } = colModal;
     const copyText = buildColCopyText(reportId, columns, colCopyFmt);
-    const fmtOptions = [
-      { value: 'list',   label: 'Plain List' },
-      { value: 'ddl',    label: 'CREATE TABLE DDL' },
-      { value: 'insert', label: 'INSERT INTO template' },
-      { value: 'select', label: 'SELECT statement' },
-    ];
     return (
       <Modal
         open
@@ -373,29 +451,28 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
             onChange={v => setColCopyFmt(v)}
             size="small"
             style={{ width: 200 }}
-            options={fmtOptions}
+            options={[
+              { value: 'list',   label: 'Plain List' },
+              { value: 'ddl',    label: 'CREATE TABLE DDL' },
+              { value: 'insert', label: 'INSERT INTO template' },
+              { value: 'select', label: 'SELECT statement' },
+            ]}
           />
           <Button
-            icon={<CopyOutlined />}
-            size="small"
-            type="primary"
+            icon={<CopyOutlined />} size="small" type="primary"
             onClick={() => { navigator.clipboard.writeText(copyText); message.success('Copied!'); }}
-          >
-            Copy
-          </Button>
+          >Copy</Button>
         </Space>
         <pre style={{
-          background: '#1e1e1e', color: '#9cdcfe',
-          borderRadius: 6, padding: '10px 14px',
-          fontSize: 11, maxHeight: 260, overflow: 'auto',
-          whiteSpace: 'pre', marginBottom: 16, lineHeight: 1.6,
+          background: '#1e1e1e', color: '#9cdcfe', borderRadius: 6,
+          padding: '10px 14px', fontSize: 11, maxHeight: 260,
+          overflow: 'auto', whiteSpace: 'pre', marginBottom: 16, lineHeight: 1.6,
         }}>
           {copyText}
         </pre>
         <Divider style={{ margin: '8px 0 12px' }} />
         <div style={{ marginBottom: 6, fontSize: 12, color: '#595959', fontWeight: 600 }}>
-          <TableOutlined style={{ marginRight: 4 }} />
-          All {columns.length} columns:
+          <TableOutlined style={{ marginRight: 4 }} />All {columns.length} columns:
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxHeight: 300, overflowY: 'auto' }}>
           {columns.map((col, i) => (
@@ -405,33 +482,31 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
               onClick={() => { navigator.clipboard.writeText(col); message.success(`Copied: ${col}`); }}
               title="Click to copy"
             >
-              <span style={{ color: '#8c8c8c', marginRight: 4 }}>{i + 1}.</span>
-              {col}
+              <span style={{ color: '#8c8c8c', marginRight: 4 }}>{i + 1}.</span>{col}
             </Tag>
           ))}
         </div>
-        <div style={{ marginTop: 8, fontSize: 11, color: '#aaa' }}>
-          Click any column tag to copy its name individually.
-        </div>
+        <div style={{ marginTop: 8, fontSize: 11, color: '#aaa' }}>Click any column tag to copy its name.</div>
       </Modal>
     );
   };
 
+  // ── SOAP API info panel ────────────────────────────────────────────────────
   const renderApiPanel = (reportId: string) => {
     const state      = tabStates[reportId];
     const reportPath = `${AP_BASE_PATH}/${reportId}.xdo`;
     const soapUrl    = state?.soapUrl || ORACLE_SOAP_CONFIG.prod.baseUrl;
     const envelope   = state?.rawEnvelope || buildSoapEnvelope(
-      reportPath, {},
+      reportPath,
+      { P_START_ROW: '1', P_END_ROW: String(BATCH_SIZE) },
       ORACLE_SOAP_CONFIG.prod.username, '••••••••',
     );
     const expanded = apiExpanded[reportId] ?? false;
-    const toggle   = () => setApiExpanded(prev => ({ ...prev, [reportId]: !prev[reportId] }));
 
     return (
       <div style={{ marginBottom: 12 }}>
         <div
-          onClick={toggle}
+          onClick={() => setApiExpanded(prev => ({ ...prev, [reportId]: !prev[reportId] }))}
           style={{
             display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
             padding: '5px 10px', borderRadius: 6,
@@ -442,6 +517,7 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
           <ApiOutlined style={{ fontSize: 13 }} />
           <span style={{ fontWeight: 600 }}>API Info — SOAP Payload</span>
           <Tag color="blue" style={{ marginLeft: 4, fontSize: 10 }}>POST</Tag>
+          <Tag color="cyan" style={{ fontSize: 10 }}>Batch {BATCH_SIZE}/call</Tag>
           <code style={{ flex: 1, fontSize: 10, color: '#595959', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {soapUrl}
           </code>
@@ -467,7 +543,7 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
               </div>
             </div>
             <div style={{ marginBottom: 6 }}>
-              <Text type="secondary" style={{ fontSize: 11 }}>Report Path (reportAbsolutePath)</Text>
+              <Text type="secondary" style={{ fontSize: 11 }}>Report Path · Parameters: P_START_ROW, P_END_ROW (batch size {BATCH_SIZE})</Text>
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 6, marginTop: 2,
                 background: '#fff', border: '1px solid #e0e0e0', borderRadius: 4, padding: '4px 8px',
@@ -481,7 +557,7 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
             </div>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                <Text type="secondary" style={{ fontSize: 11 }}>Full XML Payload (password masked)</Text>
+                <Text type="secondary" style={{ fontSize: 11 }}>Sample XML (Batch 1 — rows 1–{BATCH_SIZE}, password masked)</Text>
                 <Tooltip title="Copy XML">
                   <CopyOutlined style={{ cursor: 'pointer', color: '#595959', fontSize: 12 }}
                     onClick={() => { navigator.clipboard.writeText(envelope); message.success('XML copied'); }} />
@@ -490,9 +566,8 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
               <pre style={{
                 margin: 0, padding: '8px 10px',
                 background: '#1e1e1e', color: '#9cdcfe',
-                borderRadius: 4, fontSize: 10,
-                maxHeight: 260, overflow: 'auto',
-                whiteSpace: 'pre', wordBreak: 'normal', lineHeight: 1.5,
+                borderRadius: 4, fontSize: 10, maxHeight: 260,
+                overflow: 'auto', whiteSpace: 'pre', lineHeight: 1.5,
               }}>
                 {envelope}
               </pre>
@@ -503,6 +578,7 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
     );
   };
 
+  // ── Success grid + toolbar ─────────────────────────────────────────────────
   const renderSuccessContent = (reportId: string, report: typeof AP_REPORTS[0], state: TabState) => {
     const search   = state.gridSearch.toLowerCase();
     const filtered = search
@@ -510,13 +586,11 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
       : state.rows;
 
     const tableCols = state.columns.map(col => ({
-      title: col,
-      dataIndex: col,
-      key: col,
-      width: 140,
-      ellipsis: true,
+      title: col, dataIndex: col, key: col, width: 140, ellipsis: true,
       render: (v: string) => (
-        <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{v || <span style={{ color: '#d9d9d9' }}>—</span>}</Text>
+        <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>
+          {v || <span style={{ color: '#d9d9d9' }}>—</span>}
+        </Text>
       ),
     }));
 
@@ -563,9 +637,7 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
           )}
           <Input.Search
             placeholder="Search grid…"
-            allowClear
-            size="small"
-            style={{ width: 200 }}
+            allowClear size="small" style={{ width: 200 }}
             value={state.gridSearch}
             onChange={e => setTabStates(prev => ({
               ...prev, [reportId]: { ...prev[reportId], gridSearch: e.target.value },
@@ -580,6 +652,9 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
             <Tag icon={<CheckCircleOutlined />} color="green">
               {filtered.length.toLocaleString()} / {state.rows.length.toLocaleString()} rows
             </Tag>
+          )}
+          {state.cancelled && (
+            <Tag color="orange">Cancelled — partial data</Tag>
           )}
         </Space>
 
@@ -599,9 +674,7 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
 
         <div style={{ marginBottom: 8, fontSize: 11, color: '#8c8c8c', fontFamily: 'monospace' }}>
           <InfoCircleOutlined style={{ marginRight: 4 }} />
-          {AP_BASE_PATH}/{reportId}.xdo
-          {' · '}
-          {report.description}
+          {AP_BASE_PATH}/{reportId}.xdo · {report.description}
         </div>
 
         <Table
@@ -609,7 +682,7 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
           rowKey="_key"
           columns={tableCols}
           size="small"
-          scroll={{ x: state.columns.length * 140, y: 420 }}
+          scroll={{ x: state.columns.length * 140, y: 400 }}
           pagination={{ pageSize: 100, showSizeChanger: true, showQuickJumper: true }}
           bordered
         />
@@ -617,6 +690,7 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
     );
   };
 
+  // ── Tab content dispatcher ─────────────────────────────────────────────────
   const renderTabContent = (reportId: string) => {
     const report = AP_REPORTS.find(r => r.id === reportId)!;
     const state  = tabStates[reportId];
@@ -627,13 +701,14 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
           {renderApiPanel(reportId)}
           <div style={{ padding: 32, textAlign: 'center' }}>
             <AuditOutlined style={{ fontSize: 48, color: '#d9d9d9', marginBottom: 16 }} />
-            <div style={{ color: '#8c8c8c', marginBottom: 24 }}>
+            <div style={{ color: '#8c8c8c', marginBottom: 8 }}>
               Click <strong>Fetch Data</strong> to run the BIP report
             </div>
+            <div style={{ color: '#aaa', fontSize: 12, marginBottom: 24 }}>
+              Fetches {BATCH_SIZE} rows per SOAP call, loops until all records are retrieved
+            </div>
             <Button
-              type="primary"
-              icon={<CloudDownloadOutlined />}
-              size="large"
+              type="primary" icon={<CloudDownloadOutlined />} size="large"
               style={{ background: AP_COLOR, borderColor: AP_COLOR }}
               onClick={() => fetchReport(reportId)}
             >
@@ -644,22 +719,44 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
       );
     }
 
-    if (state.loading) {
+    if (state.loading && state.batchProgress) {
       return (
         <div>
           {renderApiPanel(reportId)}
-          <div style={{ padding: 48, textAlign: 'center' }}>
-            <Spin size="large" />
-            <div style={{ marginTop: 16, color: '#8c8c8c' }}>Running SOAP call to Oracle BI Publisher…</div>
-          </div>
+          {renderBatchProgress(reportId, state.batchProgress)}
+          {state.rows.length > 0 && (
+            <div style={{ opacity: 0.5, pointerEvents: 'none' }}>
+              <div style={{ marginBottom: 8, fontSize: 11, color: '#8c8c8c' }}>
+                Preview of rows fetched so far ({state.rows.length.toLocaleString()}):
+              </div>
+              <Table
+                dataSource={state.rows.slice(0, 50).map((r, i) => ({ ...r, _key: i }))}
+                rowKey="_key"
+                columns={state.columns.slice(0, 8).map(col => ({
+                  title: col, dataIndex: col, key: col, width: 120, ellipsis: true,
+                }))}
+                size="small"
+                scroll={{ x: 960, y: 280 }}
+                pagination={false}
+                bordered
+              />
+            </div>
+          )}
         </div>
       );
     }
 
     if (state.error) {
       return (
-        <div style={{ padding: 0 }}>
+        <div>
           {renderApiPanel(reportId)}
+          {state.rows.length > 0 && (
+            <Alert
+              type="warning" showIcon
+              message={`Partial data available — ${state.rows.length.toLocaleString()} rows fetched before error`}
+              style={{ marginBottom: 10 }}
+            />
+          )}
           <Alert
             type="error" showIcon
             message={`SOAP Call Failed — ${state.error}`}
@@ -668,7 +765,7 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
                 ? <pre style={{ fontSize: 11, maxHeight: 120, overflow: 'auto', whiteSpace: 'pre-wrap', marginTop: 8 }}>
                     {state.rawErrorDetail}
                   </pre>
-                : 'Check the XML payload above — verify the report path exists in Oracle BIP and credentials are correct.'
+                : 'Verify the report path exists in Oracle BIP and credentials are correct.'
             }
             style={{ marginBottom: 12 }}
           />
@@ -695,12 +792,18 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
   const tabItems = openTabs.map(id => {
     const report = AP_REPORTS.find(r => r.id === id)!;
     const state  = tabStates[id];
+    const bp     = state?.batchProgress;
     return {
       key: id,
       closable: true,
       label: (
         <span style={{ fontSize: 12 }}>
-          {state?.loading && <SyncOutlined spin style={{ marginRight: 4 }} />}
+          {state?.loading && <SyncOutlined spin style={{ marginRight: 4, color: AP_COLOR }} />}
+          {bp && (
+            <Tag color="processing" style={{ fontSize: 9, padding: '0 3px', lineHeight: '14px', marginRight: 4 }}>
+              B{bp.batch}
+            </Tag>
+          )}
           {state?.rows.length && !state.loading
             ? <Badge count={state.rows.length} size="small" style={{ marginRight: 4, backgroundColor: '#52c41a' }} />
             : null}
@@ -725,13 +828,12 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
             <AuditOutlined style={{ color: AP_COLOR, fontSize: 18 }} />
             <span style={{ fontWeight: 700 }}>Payables — BIP Reports</span>
             <Tag color="blue">{AP_REPORTS.length} Reports</Tag>
+            <Tag color="cyan" style={{ fontSize: 11 }}>Batch size: {BATCH_SIZE}</Tag>
             <Tag color="geekblue" style={{ fontFamily: 'monospace', fontSize: 11 }}>{AP_BASE_PATH}</Tag>
 
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
               {fetchAllProgress && fetchingAll && (
-                <Tag color="processing">
-                  {fetchAllProgress.done} / {fetchAllProgress.total}
-                </Tag>
+                <Tag color="processing">{fetchAllProgress.done} / {fetchAllProgress.total}</Tag>
               )}
               <Button
                 type="primary"
@@ -759,19 +861,13 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
         <Layout style={{ height: '100%', background: '#fff' }}>
           <Sider
             width={260}
-            style={{
-              background: '#fafafa',
-              borderRight: '1px solid #f0f0f0',
-              height: '100%',
-              overflowY: 'auto',
-            }}
+            style={{ background: '#fafafa', borderRight: '1px solid #f0f0f0', height: '100%', overflowY: 'auto' }}
           >
             <div style={{ padding: '12px 12px 8px' }}>
               <Input
                 prefix={<SearchOutlined style={{ color: '#aaa' }} />}
                 placeholder="Search reports…"
-                size="small"
-                allowClear
+                size="small" allowClear
                 value={sideSearch}
                 onChange={e => setSideSearch(e.target.value)}
               />
@@ -782,14 +878,14 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
               const isOpen   = openTabs.includes(report.id);
               const state    = tabStates[report.id];
               const isActive = activeTab === report.id;
+              const bp       = state?.batchProgress;
 
               return (
                 <div
                   key={report.id}
                   onClick={() => openReport(report.id)}
                   style={{
-                    padding: '8px 12px',
-                    cursor: 'pointer',
+                    padding: '8px 12px', cursor: 'pointer',
                     background: isActive ? '#e6f4ff' : isOpen ? '#f6ffed' : 'transparent',
                     borderLeft: isActive ? `3px solid ${AP_COLOR}` : isOpen ? '3px solid #52c41a' : '3px solid transparent',
                     borderBottom: '1px solid #f5f5f5',
@@ -797,16 +893,18 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Text
-                      style={{ fontFamily: 'monospace', fontSize: 11, fontWeight: isActive ? 700 : 500 }}
-                      ellipsis
-                    >
+                    <Text style={{ fontFamily: 'monospace', fontSize: 11, fontWeight: isActive ? 700 : 500 }} ellipsis>
                       {report.label}
                     </Text>
                     {state?.loading && <SyncOutlined spin style={{ fontSize: 10, color: AP_COLOR }} />}
+                    {bp && (
+                      <Tag color="processing" style={{ fontSize: 9, padding: '0 3px', lineHeight: '14px', marginLeft: 'auto' }}>
+                        {bp.rowsFetched.toLocaleString()}…
+                      </Tag>
+                    )}
                     {state?.rows.length && !state.loading
                       ? <Tag color="green" style={{ fontSize: 9, padding: '0 3px', lineHeight: '14px', marginLeft: 'auto' }}>
-                          {state.rows.length}
+                          {state.rows.length.toLocaleString()}
                         </Tag>
                       : null}
                     {state?.error && <Tag color="red" style={{ fontSize: 9, padding: '0 3px', lineHeight: '14px', marginLeft: 'auto' }}>ERR</Tag>}
@@ -830,9 +928,7 @@ const APPayablesSync: React.FC<Props> = ({ open, onClose }) => {
                 hideAdd
                 activeKey={activeTab}
                 onChange={setActiveTab}
-                onEdit={(key, action) => {
-                  if (action === 'remove') closeTab(key as string);
-                }}
+                onEdit={(key, action) => { if (action === 'remove') closeTab(key as string); }}
                 items={tabItems}
                 style={{ height: '100%' }}
               />
