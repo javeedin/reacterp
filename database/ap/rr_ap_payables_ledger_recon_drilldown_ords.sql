@@ -2,12 +2,12 @@
 -- Drill-down ORDS handlers for Payables-to-Ledger Reconciliation
 --
 -- Module  : reerp
--- Patterns under: ap/reports/payables-ledger-recon/
+-- Patterns (all new — no existing endpoints overwritten):
 --
---   ap-invoices  – AP invoice rows  (P_DATE_FILTER: before / in / end)
---   ap-payments  – AP payment rows in the period
---   gl-lines     – GL journal lines (P_CAT_TYPE: ap-inv / ap-pay / non-ap)
---   gl-balances  – GL balance rows by account/company
+--   aprecon/ap-invoices  – AP invoice rows  (P_DATE_FILTER: before / in / end)
+--   aprecon/ap-payments  – AP payment rows in the period
+--   aprecon/gl-lines     – GL journal lines (P_CAT_TYPE: ap-inv / ap-pay / non-ap)
+--   aprecon/gl-balances  – GL balance rows by account/company
 --
 -- All handlers:
 --   • Parse P_PERIOD ('Mon-YY') to real dates in PL/SQL — no table lookup
@@ -23,7 +23,7 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 BEGIN
     ORDS.DELETE_TEMPLATE(p_module_name => 'reerp',
-                         p_pattern     => 'ap/reports/payables-ledger-recon/ap-invoices');
+                         p_pattern     => 'aprecon/ap-invoices');
     COMMIT;
 EXCEPTION WHEN OTHERS THEN NULL;
 END;
@@ -31,7 +31,7 @@ END;
 BEGIN
     ORDS.DEFINE_TEMPLATE(
         p_module_name => 'reerp',
-        p_pattern     => 'ap/reports/payables-ledger-recon/ap-invoices',
+        p_pattern     => 'aprecon/ap-invoices',
         p_comments    => 'Drill-down: AP invoices (before / in / end period)'
     );
     COMMIT;
@@ -40,7 +40,7 @@ END;
 BEGIN
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'reerp',
-        p_pattern        => 'ap/reports/payables-ledger-recon/ap-invoices',
+        p_pattern        => 'aprecon/ap-invoices',
         p_method         => 'GET',
         p_source_type    => 'plsql/block',
         p_items_per_page => 0,
@@ -133,7 +133,7 @@ END;
 -- ─────────────────────────────────────────────────────────────────────────────
 BEGIN
     ORDS.DELETE_TEMPLATE(p_module_name => 'reerp',
-                         p_pattern     => 'ap/reports/payables-ledger-recon/ap-payments');
+                         p_pattern     => 'aprecon/ap-payments');
     COMMIT;
 EXCEPTION WHEN OTHERS THEN NULL;
 END;
@@ -141,7 +141,7 @@ END;
 BEGIN
     ORDS.DEFINE_TEMPLATE(
         p_module_name => 'reerp',
-        p_pattern     => 'ap/reports/payables-ledger-recon/ap-payments',
+        p_pattern     => 'aprecon/ap-payments',
         p_comments    => 'Drill-down: AP payments in period'
     );
     COMMIT;
@@ -150,7 +150,7 @@ END;
 BEGIN
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'reerp',
-        p_pattern        => 'ap/reports/payables-ledger-recon/ap-payments',
+        p_pattern        => 'aprecon/ap-payments',
         p_method         => 'GET',
         p_source_type    => 'plsql/block',
         p_items_per_page => 0,
@@ -239,7 +239,7 @@ END;
 -- ─────────────────────────────────────────────────────────────────────────────
 BEGIN
     ORDS.DELETE_TEMPLATE(p_module_name => 'reerp',
-                         p_pattern     => 'ap/reports/payables-ledger-recon/gl-lines');
+                         p_pattern     => 'aprecon/gl-lines');
     COMMIT;
 EXCEPTION WHEN OTHERS THEN NULL;
 END;
@@ -247,7 +247,7 @@ END;
 BEGIN
     ORDS.DEFINE_TEMPLATE(
         p_module_name => 'reerp',
-        p_pattern     => 'ap/reports/payables-ledger-recon/gl-lines',
+        p_pattern     => 'aprecon/gl-lines',
         p_comments    => 'Drill-down: GL journal lines for the period'
     );
     COMMIT;
@@ -256,7 +256,7 @@ END;
 BEGIN
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'reerp',
-        p_pattern        => 'ap/reports/payables-ledger-recon/gl-lines',
+        p_pattern        => 'aprecon/gl-lines',
         p_method         => 'GET',
         p_source_type    => 'plsql/block',
         p_items_per_page => 0,
@@ -348,7 +348,7 @@ END;
 -- ─────────────────────────────────────────────────────────────────────────────
 BEGIN
     ORDS.DELETE_TEMPLATE(p_module_name => 'reerp',
-                         p_pattern     => 'ap/reports/payables-ledger-recon/gl-balances');
+                         p_pattern     => 'aprecon/gl-balances');
     COMMIT;
 EXCEPTION WHEN OTHERS THEN NULL;
 END;
@@ -356,7 +356,7 @@ END;
 BEGIN
     ORDS.DEFINE_TEMPLATE(
         p_module_name => 'reerp',
-        p_pattern     => 'ap/reports/payables-ledger-recon/gl-balances',
+        p_pattern     => 'aprecon/gl-balances',
         p_comments    => 'Drill-down: GL balance breakdown by account'
     );
     COMMIT;
@@ -365,7 +365,7 @@ END;
 BEGIN
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'reerp',
-        p_pattern        => 'ap/reports/payables-ledger-recon/gl-balances',
+        p_pattern        => 'aprecon/gl-balances',
         p_method         => 'GET',
         p_source_type    => 'plsql/block',
         p_items_per_page => 0,

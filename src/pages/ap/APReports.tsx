@@ -651,7 +651,7 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
     if (p.company) qs.set('P_COMPANY', p.company);
     if (p.account) qs.set('P_ACCOUNT', p.account);
     Object.entries(extraParams).forEach(([k, v]) => qs.set(k, v));
-    const url = `${APEX_DB_CONFIG.baseUrl}/ap/reports/payables-ledger-recon/${endpoint}?${qs}`;
+    const url = `${APEX_DB_CONFIG.baseUrl}/aprecon/${endpoint}?${qs}`;
     setDrillTitle(title);
     setDrillOpen(true);
     setDrillLoading(true);
