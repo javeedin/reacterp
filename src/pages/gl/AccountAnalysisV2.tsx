@@ -4,12 +4,12 @@ import {
   Button, Table, Tag, Spin, Tooltip, message, Switch, Row, Col,
   Divider, Badge, Modal,
 } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
+import type { ColumnsType, ExpandableConfig } from 'antd/es/table';
 import {
   HomeOutlined, SearchOutlined, ClearOutlined,
   FileExcelOutlined, AuditOutlined, ReloadOutlined,
   ApiOutlined, CopyOutlined, BookOutlined, DownOutlined,
-  FilterOutlined, PlusOutlined, CloseOutlined,
+  FilterOutlined, PlusOutlined, GroupOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import ExcelJS from 'exceljs';
@@ -35,27 +35,32 @@ const MONTH_MAP: Record<string, number> = {
   Jan:1, Feb:2, Mar:3, Apr:4, May:5, Jun:6,
   Jul:7, Aug:8, Sep:9, Oct:10, Nov:11, Dec:12,
 };
-const parsePeriod = (p: string): number => {
+const parsePeriod = (p: string) => {
   const [m, y] = p.split('-');
   return (2000 + parseInt(y || '0', 10)) * 100 + (MONTH_MAP[m] ?? 0);
 };
 
 // ─── Segment definitions ──────────────────────────────────────────────────────
-interface SegmentDef {
-  key: string;         // API param name
-  label: string;       // display name
-  color: string;       // tag colour
-  valueKey: string;    // key in segmentValues map
-}
+interface SegmentDef { key: string; label: string; color: string; valueKey: string; }
 const SEGMENT_DEFS: SegmentDef[] = [
-  { key: 'company',      label: 'Company',         color: 'blue',    valueKey: 'companies'      },
-  { key: 'lob',          label: 'LOB',             color: 'cyan',    valueKey: 'lobs'           },
-  { key: 'department',   label: 'Department',      color: 'purple',  valueKey: 'departments'    },
-  { key: 'sub_account',  label: 'Sub-Account',     color: 'orange',  valueKey: 'subAccounts'    },
-  { key: 'analysis',     label: 'Analysis',        color: 'geekblue',valueKey: 'analyses'       },
-  { key: 'intercompany', label: 'Intercompany',    color: 'magenta', valueKey: 'intercompanies' },
-  { key: 'je_source',    label: 'Journal Source',  color: 'volcano', valueKey: 'sources'        },
-  { key: 'je_category',  label: 'Journal Category',color: 'gold',   valueKey: 'categories'     },
+  { key: 'company',      label: 'Company',          color: 'blue',     valueKey: 'companies'      },
+  { key: 'lob',          label: 'LOB',              color: 'cyan',     valueKey: 'lobs'           },
+  { key: 'department',   label: 'Department',       color: 'purple',   valueKey: 'departments'    },
+  { key: 'sub_account',  label: 'Sub-Account',      color: 'orange',   valueKey: 'subAccounts'    },
+  { key: 'analysis',     label: 'Analysis',         color: 'geekblue', valueKey: 'analyses'       },
+  { key: 'intercompany', label: 'Intercompany',     color: 'magenta',  valueKey: 'intercompanies' },
+  { key: 'je_source',    label: 'Journal Source',   color: 'volcano',  valueKey: 'sources'        },
+  { key: 'je_category',  label: 'Journal Category', color: 'gold',     valueKey: 'categories'     },
+];
+
+// Group-by options
+const GROUP_BY_OPTIONS = [
+  { value: 'defaultPeriodName',  label: 'Period'          },
+  { value: 'concatenatedSegments', label: 'Account'       },
+  { value: 'batchName',          label: 'Batch'           },
+  { value: 'userJeSourceName',   label: 'Journal Source'  },
+  { value: 'userJeCategoryName', label: 'Journal Category'},
+  { value: 'currencyCode',       label: 'Currency'        },
 ];
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
@@ -84,22 +89,41 @@ interface JournalLine {
   _accBal?: number;
 }
 
+interface GroupedRow {
+  key: string;
+  groupValue: string;
+  count: number;
+  lines: JournalLine[];
+  totalEntDr: number;
+  totalEntCr: number;
+  totalAccDr: number;
+  totalAccCr: number;
+  accBalance: number;
+  entBalance: number;
+  isTotals?: boolean;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmtN = (v: number) =>
   Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-const FmtBal: React.FC<{ v: number; size?: number }> = ({ v, size = 12 }) =>
+const FmtBal: React.FC<{ v: number; size?: number; bold?: boolean }> = ({ v, size = 12, bold }) =>
   v < 0
-    ? <Text strong style={{ fontSize: size, color: REDWOOD.primary }}>{fmtN(Math.abs(v))} Cr</Text>
-    : <Text strong style={{ fontSize: size, color: REDWOOD.success }}>{fmtN(v)}</Text>;
+    ? <Text strong={bold} style={{ fontSize: size, color: REDWOOD.primary }}>{fmtN(Math.abs(v))} Cr</Text>
+    : <Text strong={bold} style={{ fontSize: size, color: REDWOOD.success }}>{fmtN(v)}</Text>;
 
-// ─── ClickField helper (company/account picker trigger) ───────────────────────
-const ClickField: React.FC<{
-  label: string; placeholder: string; onClick: () => void; onClear?: () => void;
-}> = ({ label, placeholder, onClick, onClear }) => (
+const DrCell: React.FC<{ v: number; bold?: boolean }> = ({ v, bold }) =>
+  v > 0 ? <span style={{ fontSize: 10, color: REDWOOD.success, fontWeight: bold ? 700 : undefined }}>{fmtN(v)}</span> : null;
+
+const CrCell: React.FC<{ v: number; bold?: boolean }> = ({ v, bold }) =>
+  v > 0 ? <span style={{ fontSize: 10, color: REDWOOD.primary, fontWeight: bold ? 700 : undefined }}>{fmtN(v)}</span> : null;
+
+// ─── ClickField ───────────────────────────────────────────────────────────────
+const ClickField: React.FC<{ label: string; placeholder: string; onClick: () => void; onClear?: () => void }> = ({
+  label, placeholder, onClick, onClear,
+}) => (
   <div style={{ display: 'flex', gap: 4 }}>
-    <div
-      onClick={onClick}
+    <div onClick={onClick}
       style={{
         flex: 1, height: 24, padding: '0 8px', border: `1px solid #d9d9d9`, borderRadius: 6,
         background: REDWOOD.surface, cursor: 'pointer', display: 'flex',
@@ -122,36 +146,33 @@ const ClickField: React.FC<{
 );
 
 // ─── Account Picker ───────────────────────────────────────────────────────────
-interface AccountPickerProps {
+const AccountPicker: React.FC<{
   open: boolean; onClose: () => void;
-  onSelect: (account: string, description: string) => void;
+  onSelect: (a: string, d: string) => void;
   options: AccountOption[]; loading: boolean;
-}
-const AccountPicker: React.FC<AccountPickerProps> = ({ open, onClose, onSelect, options, loading }) => {
+}> = ({ open, onClose, onSelect, options, loading }) => {
   const [q, setQ] = useState('');
   const filtered = useMemo(() => {
-    if (!q.trim()) return options;
     const lq = q.toLowerCase();
-    return options.filter(o => o.account.toLowerCase().includes(lq) || o.description.toLowerCase().includes(lq));
+    return q ? options.filter(o => o.account.toLowerCase().includes(lq) || o.description.toLowerCase().includes(lq)) : options;
   }, [options, q]);
   const typeColor: Record<string, string> = { A: 'gold', L: 'volcano', E: 'green', R: 'blue', O: 'purple' };
   const typeLabel: Record<string, string> = { A: 'Asset', L: 'Liability', E: 'Expense', R: 'Revenue', O: 'OE' };
+  const close = () => { onClose(); setQ(''); };
   return (
-    <Modal open={open} onCancel={() => { onClose(); setQ(''); }} footer={null}
+    <Modal open={open} onCancel={close} footer={null}
       title={<Space><SearchOutlined style={{ color: REDWOOD.info }} />Select Account</Space>} width={640}>
       <Input prefix={<SearchOutlined />} placeholder="Search code or description…" allowClear size="small"
         value={q} onChange={e => setQ(e.target.value)} style={{ marginBottom: 8 }} autoFocus />
-      <div
-        onClick={() => { onSelect('', ''); onClose(); setQ(''); }}
+      <div onClick={() => { onSelect('', ''); close(); }}
         style={{ padding: '7px 12px', cursor: 'pointer', borderBottom: `1px solid ${REDWOOD.neutral200}`,
           background: '#fafafa', fontSize: 12, color: REDWOOD.neutral600 }}
         onMouseEnter={e => (e.currentTarget.style.background = '#e6f4ff')}
-        onMouseLeave={e => (e.currentTarget.style.background = '#fafafa')}
-      >— All Accounts —</div>
+        onMouseLeave={e => (e.currentTarget.style.background = '#fafafa')}>— All Accounts —</div>
       <div style={{ maxHeight: 380, overflowY: 'auto' }}>
         {loading && <div style={{ padding: 24, textAlign: 'center' }}><Spin size="small" /></div>}
         {!loading && filtered.map(o => (
-          <div key={o.account} onClick={() => { onSelect(o.account, o.description); onClose(); setQ(''); }}
+          <div key={o.account} onClick={() => { onSelect(o.account, o.description); close(); }}
             style={{ padding: '7px 12px', cursor: 'pointer', borderBottom: `1px solid ${REDWOOD.neutral200}`,
               display: 'flex', gap: 10, alignItems: 'center' }}
             onMouseEnter={e => (e.currentTarget.style.background = '#e6f4ff')}
@@ -174,138 +195,105 @@ const AccountPicker: React.FC<AccountPickerProps> = ({ open, onClose, onSelect, 
 };
 
 // ─── Segment Filter Picker ────────────────────────────────────────────────────
-interface SegmentPickerProps {
-  open: boolean;
-  onClose: () => void;
+const SegmentPicker: React.FC<{
+  open: boolean; onClose: () => void;
   segmentValues: Record<string, string[]>;
   companyOptions: { value: string; meaning: string }[];
   existing: Record<string, string>;
   onAdd: (key: string, value: string, label?: string) => void;
   loading: boolean;
-}
-const SegmentPicker: React.FC<SegmentPickerProps> = ({
-  open, onClose, segmentValues, companyOptions, existing, onAdd, loading,
-}) => {
-  const [selectedSeg, setSelectedSeg] = useState<SegmentDef | null>(null);
-  const [q, setQ] = useState('');
+}> = ({ open, onClose, segmentValues, companyOptions, existing, onAdd, loading }) => {
+  const [sel, setSel] = useState<SegmentDef | null>(null);
+  const [q, setQ]     = useState('');
 
-  const getValues = (seg: SegmentDef): { value: string; label: string }[] => {
-    if (seg.key === 'company') {
-      return companyOptions.map(c => ({ value: c.value, label: `${c.value} – ${c.meaning}` }));
-    }
-    return (segmentValues[seg.valueKey] || []).map(v => ({ value: v, label: v }));
-  };
+  const getValues = (seg: SegmentDef) =>
+    seg.key === 'company'
+      ? companyOptions.map(c => ({ value: c.value, label: `${c.value} – ${c.meaning}` }))
+      : (segmentValues[seg.valueKey] || []).map(v => ({ value: v, label: v }));
 
-  const values = selectedSeg ? getValues(selectedSeg) : [];
-  const filtered = q.trim()
-    ? values.filter(v => v.label.toLowerCase().includes(q.toLowerCase()))
-    : values;
-
-  const handleSegClick = (seg: SegmentDef) => {
-    setSelectedSeg(seg); setQ('');
-  };
-  const handleValueClick = (val: string, label?: string) => {
-    if (selectedSeg) {
-      onAdd(selectedSeg.key, val, label);
-      setSelectedSeg(null); setQ('');
-    }
-  };
+  const vals = sel ? getValues(sel) : [];
+  const filtered = q ? vals.filter(v => v.label.toLowerCase().includes(q.toLowerCase())) : vals;
+  const close = () => { onClose(); setSel(null); setQ(''); };
 
   return (
-    <Modal
-      open={open}
-      onCancel={() => { onClose(); setSelectedSeg(null); setQ(''); }}
-      footer={null}
-      title={<Space><FilterOutlined style={{ color: REDWOOD.info }} />
-        {selectedSeg ? (
-          <Space>
-            <Button size="small" type="text" icon={<CloseOutlined />}
-              onClick={() => { setSelectedSeg(null); setQ(''); }}
-              style={{ padding: '0 4px' }} />
-            <span>{selectedSeg.label} — Choose Value</span>
-          </Space>
-        ) : 'Add Segment Filter'}
-      </Space>}
-      width={560}
-    >
-      {!selectedSeg ? (
-        // Step 1: choose segment
+    <Modal open={open} onCancel={close} footer={null} width={560}
+      title={
+        <Space>
+          <FilterOutlined style={{ color: REDWOOD.info }} />
+          {sel ? (
+            <Space>
+              <Button size="small" type="text" onClick={() => { setSel(null); setQ(''); }}
+                style={{ padding: '0 4px' }}>← Back</Button>
+              <span>{sel.label} — Choose Value</span>
+            </Space>
+          ) : 'Add Segment Filter'}
+        </Space>
+      }>
+      {!sel ? (
         <div>
           <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 10 }}>
             Select a segment to filter by:
           </Text>
           {loading && <div style={{ padding: 24, textAlign: 'center' }}><Spin size="small" /></div>}
           <Row gutter={[8, 8]}>
-            {SEGMENT_DEFS.map(seg => (
-              <Col key={seg.key} xs={12} sm={8}>
-                <div
-                  onClick={() => handleSegClick(seg)}
-                  style={{
-                    padding: '10px 14px', borderRadius: 8, cursor: 'pointer',
-                    border: `1px solid ${existing[seg.key] ? REDWOOD.info : REDWOOD.neutral200}`,
-                    background: existing[seg.key] ? '#e6f4ff' : REDWOOD.surface,
-                    display: 'flex', flexDirection: 'column', gap: 4,
-                    transition: 'all 0.15s',
-                  }}
-                  onMouseEnter={e => (e.currentTarget.style.borderColor = REDWOOD.info)}
-                  onMouseLeave={e => (e.currentTarget.style.borderColor = existing[seg.key] ? REDWOOD.info : REDWOOD.neutral200)}
-                >
-                  <Tag color={seg.color} style={{ fontSize: 10, margin: 0, width: 'fit-content' }}>{seg.label}</Tag>
-                  {existing[seg.key] && (
-                    <Text style={{ fontSize: 11, color: REDWOOD.info }}>✓ {existing[seg.key]}</Text>
-                  )}
-                  {!existing[seg.key] && (
-                    <Text type="secondary" style={{ fontSize: 11 }}>
-                      {(segmentValues[seg.valueKey] || []).length || (seg.key === 'company' ? companyOptions.length : 0)} values
-                    </Text>
-                  )}
-                </div>
-              </Col>
-            ))}
+            {SEGMENT_DEFS.map(seg => {
+              const cnt = seg.key === 'company' ? companyOptions.length : (segmentValues[seg.valueKey] || []).length;
+              return (
+                <Col key={seg.key} xs={12} sm={8}>
+                  <div onClick={() => { setSel(seg); setQ(''); }}
+                    style={{
+                      padding: '10px 14px', borderRadius: 8, cursor: 'pointer',
+                      border: `1px solid ${existing[seg.key] ? REDWOOD.info : REDWOOD.neutral200}`,
+                      background: existing[seg.key] ? '#e6f4ff' : REDWOOD.surface,
+                      display: 'flex', flexDirection: 'column', gap: 4, transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.borderColor = REDWOOD.info)}
+                    onMouseLeave={e => (e.currentTarget.style.borderColor = existing[seg.key] ? REDWOOD.info : REDWOOD.neutral200)}>
+                    <Tag color={seg.color} style={{ fontSize: 10, margin: 0, width: 'fit-content' }}>{seg.label}</Tag>
+                    {existing[seg.key]
+                      ? <Text style={{ fontSize: 11, color: REDWOOD.info }}>✓ {existing[seg.key]}</Text>
+                      : <Text type="secondary" style={{ fontSize: 11 }}>{cnt} values</Text>}
+                  </div>
+                </Col>
+              );
+            })}
           </Row>
         </div>
       ) : (
-        // Step 2: choose value
         <div>
-          <Input prefix={<SearchOutlined />} placeholder={`Search ${selectedSeg.label} values…`}
-            allowClear size="small" value={q} onChange={e => setQ(e.target.value)}
-            style={{ marginBottom: 8 }} autoFocus />
-          {/* Clear filter option */}
-          {existing[selectedSeg.key] && (
-            <div
-              onClick={() => { onAdd(selectedSeg.key, '', ''); setSelectedSeg(null); setQ(''); }}
+          <Input prefix={<SearchOutlined />} placeholder={`Search ${sel.label}…`} allowClear size="small"
+            value={q} onChange={e => setQ(e.target.value)} style={{ marginBottom: 8 }} autoFocus />
+          {existing[sel.key] && (
+            <div onClick={() => { onAdd(sel.key, '', ''); setSel(null); setQ(''); }}
               style={{ padding: '7px 12px', cursor: 'pointer', borderBottom: `1px solid ${REDWOOD.neutral200}`,
                 background: '#fff7e6', fontSize: 12, color: '#d46b08', fontWeight: 500 }}
               onMouseEnter={e => (e.currentTarget.style.background = '#ffe7ba')}
-              onMouseLeave={e => (e.currentTarget.style.background = '#fff7e6')}
-            >✕ Clear filter for {selectedSeg.label}</div>
+              onMouseLeave={e => (e.currentTarget.style.background = '#fff7e6')}>
+              ✕ Clear filter for {sel.label}
+            </div>
           )}
           <div style={{ maxHeight: 380, overflowY: 'auto' }}>
             {filtered.length === 0 && (
               <div style={{ padding: 24, textAlign: 'center', color: REDWOOD.neutral600 }}>No values found</div>
             )}
             {filtered.map(v => (
-              <div key={v.value}
-                onClick={() => handleValueClick(v.value, v.label)}
+              <div key={v.value} onClick={() => { onAdd(sel.key, v.value, v.label); setSel(null); setQ(''); close(); }}
                 style={{
                   padding: '8px 12px', cursor: 'pointer', borderBottom: `1px solid ${REDWOOD.neutral200}`,
                   display: 'flex', alignItems: 'center', gap: 8,
-                  background: existing[selectedSeg.key] === v.value ? '#e6f4ff' : '',
+                  background: existing[sel.key] === v.value ? '#e6f4ff' : '',
                 }}
                 onMouseEnter={e => (e.currentTarget.style.background = '#e6f4ff')}
-                onMouseLeave={e => (e.currentTarget.style.background = existing[selectedSeg.key] === v.value ? '#e6f4ff' : '')}
-              >
-                {selectedSeg.key === 'company' ? (
+                onMouseLeave={e => (e.currentTarget.style.background = existing[sel.key] === v.value ? '#e6f4ff' : '')}>
+                {sel.key === 'company' ? (
                   <>
-                    <Tag color="blue" style={{ fontSize: 11, minWidth: 56, textAlign: 'center', margin: 0 }}>
-                      {v.value}
-                    </Tag>
+                    <Tag color="blue" style={{ fontSize: 11, minWidth: 56, textAlign: 'center', margin: 0 }}>{v.value}</Tag>
                     <Text style={{ fontSize: 12 }}>{v.label.split(' – ')[1]}</Text>
                   </>
                 ) : (
                   <Text style={{ fontSize: 12 }}>{v.label}</Text>
                 )}
-                {existing[selectedSeg.key] === v.value && (
+                {existing[sel.key] === v.value && (
                   <Tag color="blue" style={{ fontSize: 10, margin: 0, marginLeft: 'auto' }}>Selected</Tag>
                 )}
               </div>
@@ -317,52 +305,173 @@ const SegmentPicker: React.FC<SegmentPickerProps> = ({
   );
 };
 
+// ─── Drill-Down Modal ─────────────────────────────────────────────────────────
+const DrillModal: React.FC<{
+  open: boolean; onClose: () => void;
+  record: JournalLine | null;
+  lines: any[]; loading: boolean;
+  functionalCcy: string;
+}> = ({ open, onClose, record, lines, loading, functionalCcy }) => {
+  const totals = useMemo(() => lines.reduce((acc, l) => ({
+    entDr: acc.entDr + Number(l.entered_dr || l.enteredDr || 0),
+    entCr: acc.entCr + Number(l.entered_cr || l.enteredCr || 0),
+    accDr: acc.accDr + Number(l.accounted_dr || l.accountedDr || 0),
+    accCr: acc.accCr + Number(l.accounted_cr || l.accountedCr || 0),
+  }), { entDr: 0, entCr: 0, accDr: 0, accCr: 0 }), [lines]);
+
+  const drillCols: ColumnsType<any> = [
+    {
+      title: '#', key: 'lineNo', width: 44,
+      render: (_: any, r: any) => <span style={{ fontSize: 10, color: REDWOOD.neutral600 }}>
+        {r.je_line_number || r.jeLineNumber || ''}
+      </span>,
+    },
+    {
+      title: 'Account', key: 'acct', width: 190,
+      render: (_: any, r: any) => {
+        const combo = r.account_combination || r.accountCombination || r.concatenatedSegments ||
+          [r.company, r.lob, r.department, r.account, r.sub_account || r.subAccount, r.analysis, r.intercompany]
+            .filter(Boolean).join('-');
+        return <Text code style={{ fontSize: 10 }}>{combo || '—'}</Text>;
+      },
+    },
+    {
+      title: 'Description', key: 'desc', ellipsis: true,
+      render: (_: any, r: any) => (
+        <Tooltip title={r.description || r.je_line_description || ''}>
+          <span style={{ fontSize: 10 }}>{r.description || r.je_line_description || '—'}</span>
+        </Tooltip>
+      ),
+    },
+    {
+      title: 'Ent Dr', key: 'entDr', width: 120, align: 'right',
+      render: (_: any, r: any) => {
+        const v = Number(r.entered_dr || r.enteredDr || 0);
+        return v ? <span style={{ fontSize: 10, color: REDWOOD.success }}>{fmtN(v)}</span> : null;
+      },
+    },
+    {
+      title: 'Ent Cr', key: 'entCr', width: 120, align: 'right',
+      render: (_: any, r: any) => {
+        const v = Number(r.entered_cr || r.enteredCr || 0);
+        return v ? <span style={{ fontSize: 10, color: REDWOOD.primary }}>{fmtN(v)}</span> : null;
+      },
+    },
+    {
+      title: `Acc Dr (${functionalCcy})`, key: 'accDr', width: 130, align: 'right',
+      render: (_: any, r: any) => {
+        const v = Number(r.accounted_dr || r.accountedDr || 0);
+        return v ? <span style={{ fontSize: 10, color: REDWOOD.success }}>{fmtN(v)}</span> : null;
+      },
+    },
+    {
+      title: `Acc Cr (${functionalCcy})`, key: 'accCr', width: 130, align: 'right',
+      render: (_: any, r: any) => {
+        const v = Number(r.accounted_cr || r.accountedCr || 0);
+        return v ? <span style={{ fontSize: 10, color: REDWOOD.primary }}>{fmtN(v)}</span> : null;
+      },
+    },
+    {
+      title: 'Ccy', key: 'ccy', width: 60,
+      render: (_: any, r: any) => <Tag style={{ fontSize: 9 }}>{r.currency_code || r.currencyCode || ''}</Tag>,
+    },
+  ];
+
+  return (
+    <Modal open={open} onCancel={onClose} footer={null} width={1100} style={{ top: 20 }}
+      title={
+        <Space wrap>
+          <AuditOutlined style={{ color: REDWOOD.info }} />
+          <Text strong>Journal Lines</Text>
+          {record && (
+            <>
+              <Tag color="geekblue">{record.batchName || `JE #${record.jeHeaderId}`}</Tag>
+              <Tag color="blue">ID: {record.jeHeaderId}</Tag>
+              <Tag>{record.defaultPeriodName}</Tag>
+              <Tag>{record.userJeSourceName}</Tag>
+            </>
+          )}
+          <Tag color={lines.length ? 'green' : 'default'}>{lines.length} lines</Tag>
+        </Space>
+      }>
+      <Spin spinning={loading}>
+        <Table dataSource={lines.map((l, i) => ({ ...l, key: i }))}
+          columns={drillCols} size="small" pagination={false}
+          scroll={{ x: 900, y: 420 }}
+          summary={() => lines.length === 0 ? null : (
+            <Table.Summary fixed>
+              <Table.Summary.Row>
+                <Table.Summary.Cell index={0} colSpan={3}>
+                  <Text strong style={{ fontSize: 11 }}>Total</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={3} align="right">
+                  <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{totals.entDr ? fmtN(totals.entDr) : ''}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={4} align="right">
+                  <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{totals.entCr ? fmtN(totals.entCr) : ''}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={5} align="right">
+                  <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{totals.accDr ? fmtN(totals.accDr) : ''}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={6} align="right">
+                  <Text strong style={{ fontSize: 10, color: REDWOOD.primary }}>{totals.accCr ? fmtN(totals.accCr) : ''}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={7} />
+              </Table.Summary.Row>
+            </Table.Summary>
+          )}
+        />
+      </Spin>
+    </Modal>
+  );
+};
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 const AccountAnalysisV2: React.FC = () => {
-  // ── Parameters ──────────────────────────────────────────────────────────────
-  const [ledger, setLedger]               = useState('');
-  const [ledgerOptions, setLedgerOptions] = useState<string[]>([]);
-  const [ledgersLoading, setLedgersLoading] = useState(false);
-
-  const [periods, setPeriods]             = useState<string[]>([]);
-  const [allPeriods, setAllPeriods]       = useState<string[]>([]);
-  const [periodsLoading, setPeriodsLoading] = useState(false);
-
-  const [account, setAccount]             = useState('');
-  const [accountDesc, setAccountDesc]     = useState('');
+  // Parameters
+  const [ledger, setLedger]                   = useState('');
+  const [ledgerOptions, setLedgerOptions]     = useState<string[]>([]);
+  const [ledgersLoading, setLedgersLoading]   = useState(false);
+  const [periods, setPeriods]                 = useState<string[]>([]);
+  const [allPeriods, setAllPeriods]           = useState<string[]>([]);
+  const [periodsLoading, setPeriodsLoading]   = useState(false);
+  const [account, setAccount]                 = useState('');
+  const [accountDesc, setAccountDesc]         = useState('');
   const [accountOptions, setAccountOptions]   = useState<AccountOption[]>([]);
   const [accountsLoading, setAccountsLoading] = useState(false);
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
-
-  // segment filters: { company: '101', lob: 'RETAIL', ... }
-  const [segFilters, setSegFilters]       = useState<Record<string, string>>({});
-  // labels for display (company has "101 – Name" style)
-  const [segLabels, setSegLabels]         = useState<Record<string, string>>({});
-
-  // segment LOV data
-  const [segmentValues, setSegmentValues] = useState<Record<string, string[]>>({
+  const [segFilters, setSegFilters]           = useState<Record<string, string>>({});
+  const [segLabels, setSegLabels]             = useState<Record<string, string>>({});
+  const [segmentValues, setSegmentValues]     = useState<Record<string, string[]>>({
     companies: [], lobs: [], departments: [], subAccounts: [],
     analyses: [], intercompanies: [], sources: [], categories: [],
   });
-  const [companyOptions, setCompanyOptions] = useState<{ value: string; meaning: string }[]>([]);
+  const [companyOptions, setCompanyOptions]   = useState<{ value: string; meaning: string }[]>([]);
   const [segValuesLoading, setSegValuesLoading] = useState(false);
-  const [segPickerOpen, setSegPickerOpen] = useState(false);
+  const [segPickerOpen, setSegPickerOpen]     = useState(false);
 
-  // ── Grid state ──────────────────────────────────────────────────────────────
-  const [loading, setLoading]             = useState(false);
-  const [rows, setRows]                   = useState<JournalLine[]>([]);
-  const [hasSearched, setHasSearched]     = useState(false);
-  const [showEntered, setShowEntered]     = useState(false);
-  const [gridSearch, setGridSearch]       = useState('');
-  const [functionalCcy, setFunctionalCcy] = useState('AED');
+  // Grid state
+  const [loading, setLoading]                 = useState(false);
+  const [rows, setRows]                       = useState<JournalLine[]>([]);
+  const [hasSearched, setHasSearched]         = useState(false);
+  const [showEntered, setShowEntered]         = useState(false);
+  const [gridSearch, setGridSearch]           = useState('');
+  const [functionalCcy, setFunctionalCcy]     = useState('AED');
+  const [groupBy, setGroupBy]                 = useState('');
 
-  // ── Balance state ────────────────────────────────────────────────────────────
-  const [openingBal, setOpeningBal] = useState<{ acc: number; ent: number } | null>(null);
-  const [closingBal, setClosingBal] = useState<{ acc: number; ent: number } | null>(null);
+  // Balance state
+  const [openingBal, setOpeningBal]           = useState<{ acc: number; ent: number } | null>(null);
+  const [closingBal, setClosingBal]           = useState<{ acc: number; ent: number } | null>(null);
 
-  // ── API modal ────────────────────────────────────────────────────────────────
-  const [apiUrl, setApiUrl]               = useState('');
-  const [apiModalOpen, setApiModalOpen]   = useState(false);
+  // Drill-down state
+  const [drillRecord, setDrillRecord]         = useState<JournalLine | null>(null);
+  const [drillLines, setDrillLines]           = useState<any[]>([]);
+  const [drillLoading, setDrillLoading]       = useState(false);
+  const [drillOpen, setDrillOpen]             = useState(false);
+
+  // API modal
+  const [apiUrl, setApiUrl]                   = useState('');
+  const [apiModalOpen, setApiModalOpen]       = useState(false);
 
   // ── Load ledgers ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -371,9 +480,9 @@ const AccountAnalysisV2: React.FC = () => {
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data) return;
-        const names: string[] = [
-          ...new Set((data.items || []).map((i: any) => i.ledger_name).filter(Boolean) as string[]),
-        ];
+        const names: string[] = [...new Set(
+          (data.items || []).map((i: any) => i.ledger_name).filter(Boolean) as string[]
+        )];
         setLedgerOptions(names);
         if (names.length > 0) setLedger(names[0]);
       })
@@ -382,33 +491,29 @@ const AccountAnalysisV2: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Load segment values (lazy: when picker opens, or when ledger changes) ────
+  // ── Load segment values ───────────────────────────────────────────────────────
   const loadSegmentValues = useCallback(async (ldg: string) => {
     if (!ldg) return;
     setSegValuesLoading(true);
     try {
-      // company LOV
-      const compRes = await fetch(COMPANY_LOV_URL);
+      const [compRes, segRes] = await Promise.all([
+        fetch(COMPANY_LOV_URL),
+        fetch(`${API_BASE}/segment-values?ledger_name=${encodeURIComponent(ldg)}`),
+      ]);
       if (compRes.ok) {
         const cd = await compRes.json();
-        setCompanyOptions((cd.items || []).map((i: any) => ({
-          value: i.value || i.VALUE || '',
-          meaning: i.meaning || i.MEANING || '',
-        })).filter((c: any) => c.value));
+        setCompanyOptions((cd.items || [])
+          .map((i: any) => ({ value: i.value || i.VALUE || '', meaning: i.meaning || i.MEANING || '' }))
+          .filter((c: any) => c.value));
       }
-      // other segments
-      const segRes = await fetch(`${API_BASE}/segment-values?ledger_name=${encodeURIComponent(ldg)}`);
       if (segRes.ok) {
         const sd = await segRes.json();
         setSegmentValues(prev => ({
           ...prev,
-          lobs:           sd.lobs           || [],
-          departments:    sd.departments    || [],
-          subAccounts:    sd.subAccounts    || [],
-          analyses:       sd.analyses       || [],
-          intercompanies: sd.intercompanies || [],
-          sources:        sd.sources        || [],
-          categories:     sd.categories     || [],
+          lobs: sd.lobs || [], departments: sd.departments || [],
+          subAccounts: sd.subAccounts || [], analyses: sd.analyses || [],
+          intercompanies: sd.intercompanies || [], sources: sd.sources || [],
+          categories: sd.categories || [],
         }));
       }
     } catch { /* silent */ } finally {
@@ -416,10 +521,9 @@ const AccountAnalysisV2: React.FC = () => {
     }
   }, []);
 
-  // reload segments when ledger changes (needed for value counts in picker)
   useEffect(() => { if (ledger) loadSegmentValues(ledger); }, [ledger, loadSegmentValues]);
 
-  // ── Load periods ─────────────────────────────────────────────────────────────
+  // ── Load periods ──────────────────────────────────────────────────────────────
   const loadPeriods = useCallback(async (ldg: string) => {
     if (!ldg) return;
     setPeriodsLoading(true); setPeriods([]);
@@ -432,14 +536,12 @@ const AccountAnalysisV2: React.FC = () => {
       )] as string[];
       names.sort((a, b) => parsePeriod(b) - parsePeriod(a));
       setAllPeriods(names);
-    } catch { /* silent */ } finally {
-      setPeriodsLoading(false);
-    }
+    } catch { /* silent */ } finally { setPeriodsLoading(false); }
   }, []);
 
   useEffect(() => { if (ledger) loadPeriods(ledger); }, [ledger, loadPeriods]);
 
-  // ── Load account LOV (lazy) ──────────────────────────────────────────────────
+  // ── Load account LOV (lazy) ───────────────────────────────────────────────────
   const loadAccounts = useCallback(async () => {
     if (accountOptions.length > 0) return;
     setAccountsLoading(true);
@@ -447,17 +549,13 @@ const AccountAnalysisV2: React.FC = () => {
       const res = await fetch(ACCOUNTS_LOV_URL);
       if (!res.ok) return;
       const data = await res.json();
-      setAccountOptions((data.items || []).map((i: any) => ({
-        account:      i.account      || i.ACCOUNT      || '',
-        description:  i.description  || i.DESCRIPTION  || '',
-        account_type: i.account_type || i.ACCOUNT_TYPE || '',
-      })).filter((i: AccountOption) => i.account));
-    } catch { /* silent */ } finally {
-      setAccountsLoading(false);
-    }
+      setAccountOptions((data.items || [])
+        .map((i: any) => ({ account: i.account || '', description: i.description || '', account_type: i.account_type || '' }))
+        .filter((i: AccountOption) => i.account));
+    } catch { /* silent */ } finally { setAccountsLoading(false); }
   }, [accountOptions.length]);
 
-  // ── Fetch opening/closing balance ────────────────────────────────────────────
+  // ── Opening/closing balance ───────────────────────────────────────────────────
   const fetchBalanceRow = useCallback(async (acct: string, co: string, period: string, isOpen: boolean) => {
     const p = new URLSearchParams({ ledger_name: ledger, period_name: period, account: acct });
     if (co) p.set('company', co);
@@ -475,23 +573,19 @@ const AccountAnalysisV2: React.FC = () => {
       dr: isDebitNormal && amt > 0 ? amt : (!isDebitNormal && amt < 0 ? Math.abs(amt) : 0),
       cr: !isDebitNormal && amt > 0 ? amt : (isDebitNormal && amt < 0 ? Math.abs(amt) : 0),
     });
-    const acc = toDrCr(accAmt);
-    const ent = toDrCr(entAmt);
+    const acc = toDrCr(accAmt); const ent = toDrCr(entAmt);
     return {
       key: isOpen ? 'opening-balance' : 'closing-balance',
-      concatenatedSegments: acct,
-      accountDescription: items[0].account_desc || '',
+      concatenatedSegments: acct, accountDescription: items[0].account_desc || '',
       jeLineDescription: isOpen ? 'Opening Balance' : 'Closing Balance',
       defaultPeriodName: period, accountingDate: '', batchName: '',
-      userJeSourceName: '', userJeCategoryName: '',
-      currencyCode: items[0].currency_code || 'AED',
-      enteredDr: ent.dr, enteredCr: ent.cr,
-      accountedDr: acc.dr, accountedCr: acc.cr,
+      userJeSourceName: '', userJeCategoryName: '', currencyCode: items[0].currency_code || 'AED',
+      enteredDr: ent.dr, enteredCr: ent.cr, accountedDr: acc.dr, accountedCr: acc.cr,
       jeHeaderId: 0, isOpeningBalance: isOpen, isClosingBalance: !isOpen,
     } as JournalLine;
   }, [ledger]);
 
-  // ── Search ───────────────────────────────────────────────────────────────────
+  // ── Search ────────────────────────────────────────────────────────────────────
   const handleSearch = useCallback(async () => {
     if (!periods.length) { message.warning('Select at least one period'); return; }
     setLoading(true); setHasSearched(true); setRows([]);
@@ -500,7 +594,6 @@ const AccountAnalysisV2: React.FC = () => {
       const p = new URLSearchParams({ ledger_name: ledger });
       p.set('period_names', periods.join(','));
       if (account) p.set('account', account);
-      // append all segment filters
       Object.entries(segFilters).forEach(([k, v]) => { if (v) p.set(k, v); });
       const url = `${API_BASE}/accountanalysis?${p}`;
       setApiUrl(url);
@@ -515,15 +608,9 @@ const AccountAnalysisV2: React.FC = () => {
             const dk = `${item.jeHeaderId ?? item.je_header_id}-${item.jeLineNumber ?? item.je_line_number}`;
             if (seen.has(dk)) return [];
             seen.add(dk);
-            const combo =
-              item.accountCombination ||
-              item.account_combination ||
-              item.concatenatedSegments ||
-              (item.company
-                ? [item.company, item.lob, item.department, item.account,
-                   item.subAccount || item.sub_account, item.analysis, item.intercompany]
-                   .filter(Boolean).join('-')
-                : '');
+            const combo = item.accountCombination || item.account_combination || item.concatenatedSegments ||
+              (item.company ? [item.company, item.lob, item.department, item.account,
+                item.subAccount || item.sub_account, item.analysis, item.intercompany].filter(Boolean).join('-') : '');
             const fccy = item.ledger_currency || item.functional_currency || '';
             if (fccy) setFunctionalCcy(fccy);
             return [{
@@ -545,7 +632,7 @@ const AccountAnalysisV2: React.FC = () => {
             } as JournalLine];
           });
         }
-      } catch { /* treat as empty */ }
+      } catch { /* empty */ }
 
       const sortedPeriods = [...periods].sort((a, b) => parsePeriod(a) - parsePeriod(b));
       let openRow: JournalLine | null = null;
@@ -557,13 +644,12 @@ const AccountAnalysisV2: React.FC = () => {
           fetchBalanceRow(account, co, sortedPeriods[sortedPeriods.length - 1], false),
         ]);
       }
-
       const allRows: JournalLine[] = [
         ...(openRow  ? [openRow]  : []),
         ...items,
         ...(closeRow ? [closeRow] : []),
       ];
-      if (openRow)  setOpeningBal({ acc: openRow.accountedDr  - openRow.accountedCr,  ent: openRow.enteredDr  - openRow.enteredCr  });
+      if (openRow)  setOpeningBal({ acc: openRow.accountedDr  - openRow.accountedCr,  ent: openRow.enteredDr  - openRow.enteredCr });
       if (closeRow) setClosingBal({ acc: closeRow.accountedDr - closeRow.accountedCr, ent: closeRow.enteredDr - closeRow.enteredCr });
       setRows(allRows);
       message.success(`${allRows.length} records loaded`);
@@ -574,27 +660,36 @@ const AccountAnalysisV2: React.FC = () => {
     }
   }, [ledger, periods, account, segFilters, fetchBalanceRow]);
 
-  // ── Segment filter helpers ───────────────────────────────────────────────────
-  const addSegFilter = (key: string, value: string, label?: string) => {
-    setSegFilters(prev => {
-      const next = { ...prev };
-      if (value) next[key] = value; else delete next[key];
-      return next;
-    });
-    setSegLabels(prev => {
-      const next = { ...prev };
-      if (value && label) next[key] = label; else delete next[key];
-      return next;
-    });
-  };
+  // ── Drill-down ────────────────────────────────────────────────────────────────
+  const openDrill = useCallback(async (record: JournalLine) => {
+    setDrillRecord(record);
+    setDrillLines([]);
+    setDrillOpen(true);
+    setDrillLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/journals/${record.jeHeaderId}/lines`);
+      const data = await res.json();
+      setDrillLines(data.items || []);
+    } catch {
+      message.error('Failed to load journal lines');
+    } finally {
+      setDrillLoading(false);
+    }
+  }, []);
 
+  // ── Segment filter helpers ────────────────────────────────────────────────────
+  const addSegFilter = (key: string, value: string, label?: string) => {
+    setSegFilters(prev => { const n = { ...prev }; if (value) n[key] = value; else delete n[key]; return n; });
+    setSegLabels(prev => { const n = { ...prev }; if (value && label) n[key] = label; else delete n[key]; return n; });
+  };
   const removeSegFilter = (key: string) => {
     setSegFilters(prev => { const n = { ...prev }; delete n[key]; return n; });
     setSegLabels(prev => { const n = { ...prev }; delete n[key]; return n; });
   };
 
-  // ── Derived data ─────────────────────────────────────────────────────────────
+  // ── Derived data ──────────────────────────────────────────────────────────────
   const dataRows = useMemo(() => rows.filter(r => !r.isClosingBalance), [rows]);
+
   const filteredData = useMemo(() => {
     if (!gridSearch.trim()) return dataRows;
     const q = gridSearch.toLowerCase();
@@ -615,159 +710,225 @@ const AccountAnalysisV2: React.FC = () => {
     .reduce((acc, r) => ({
       accDr: acc.accDr + r.accountedDr, accCr: acc.accCr + r.accountedCr,
       entDr: acc.entDr + r.enteredDr,   entCr: acc.entCr + r.enteredCr,
-    }), { accDr: 0, accCr: 0, entDr: 0, entCr: 0 }),
-  [filteredData]);
+    }), { accDr: 0, accCr: 0, entDr: 0, entCr: 0 }), [filteredData]);
 
   const gridTotals = useMemo(() => filteredData
     .reduce((acc, r) => ({
       accDr: acc.accDr + r.accountedDr, accCr: acc.accCr + r.accountedCr,
       entDr: acc.entDr + r.enteredDr,   entCr: acc.entCr + r.enteredCr,
-    }), { accDr: 0, accCr: 0, entDr: 0, entCr: 0 }),
-  [filteredData]);
+    }), { accDr: 0, accCr: 0, entDr: 0, entCr: 0 }), [filteredData]);
 
   const finalRunning = runningBals[runningBals.length - 1] ?? { acc: 0, ent: 0 };
 
+  // ── Grouped data ──────────────────────────────────────────────────────────────
+  const groupedData = useMemo((): GroupedRow[] => {
+    if (!groupBy) return [];
+    // only group PTD lines (exclude opening/closing)
+    const ptdLines = filteredData.filter(r => !r.isOpeningBalance && !r.isClosingBalance && !r.isTotals);
+    const map = new Map<string, GroupedRow>();
+    ptdLines.forEach(r => {
+      const val = String((r as any)[groupBy] || '(blank)');
+      if (!map.has(val)) {
+        map.set(val, { key: `grp-${val}`, groupValue: val, count: 0, lines: [],
+          totalEntDr: 0, totalEntCr: 0, totalAccDr: 0, totalAccCr: 0, accBalance: 0, entBalance: 0 });
+      }
+      const g = map.get(val)!;
+      g.lines.push(r);
+      g.count++;
+      g.totalEntDr += r.enteredDr;
+      g.totalEntCr += r.enteredCr;
+      g.totalAccDr += r.accountedDr;
+      g.totalAccCr += r.accountedCr;
+      g.accBalance  = g.totalAccDr - g.totalAccCr;
+      g.entBalance  = g.totalEntDr - g.totalEntCr;
+    });
+    const result = Array.from(map.values());
+    // sort by group value (period sort if grouping by period)
+    if (groupBy === 'defaultPeriodName') {
+      result.sort((a, b) => parsePeriod(a.groupValue) - parsePeriod(b.groupValue));
+    } else {
+      result.sort((a, b) => a.groupValue.localeCompare(b.groupValue));
+    }
+    // totals row
+    if (result.length > 0) {
+      result.push({
+        key: '__gtotals__',
+        groupValue: 'Grand Total',
+        count: ptdLines.length,
+        lines: [],
+        totalEntDr: gridTotals.entDr, totalEntCr: gridTotals.entCr,
+        totalAccDr: gridTotals.accDr, totalAccCr: gridTotals.accCr,
+        accBalance: gridTotals.accDr - gridTotals.accCr,
+        entBalance: gridTotals.entDr - gridTotals.entCr,
+        isTotals: true,
+      });
+    }
+    return result;
+  }, [groupBy, filteredData, gridTotals]);
+
+  // ── Flat table data ───────────────────────────────────────────────────────────
   const totalsRow: JournalLine | null = filteredData.length > 0 ? {
-    key: '__totals__',
-    concatenatedSegments: '', accountDescription: '',
-    jeLineDescription: 'Total for Report',
-    defaultPeriodName: '', accountingDate: '', batchName: '',
-    userJeSourceName: '', userJeCategoryName: '', currencyCode: '',
+    key: '__totals__', concatenatedSegments: '', accountDescription: '',
+    jeLineDescription: 'Total for Report', defaultPeriodName: '', accountingDate: '',
+    batchName: '', userJeSourceName: '', userJeCategoryName: '', currencyCode: '',
     enteredDr: gridTotals.entDr, enteredCr: gridTotals.entCr,
     accountedDr: gridTotals.accDr, accountedCr: gridTotals.accCr,
-    jeHeaderId: 0, isTotals: true,
-    _entBal: finalRunning.ent, _accBal: finalRunning.acc,
+    jeHeaderId: 0, isTotals: true, _entBal: finalRunning.ent, _accBal: finalRunning.acc,
   } : null;
-
   const tableData = totalsRow ? [...filteredData, totalsRow] : filteredData;
 
-  // ── Columns ──────────────────────────────────────────────────────────────────
-  const columns = useMemo((): ColumnsType<JournalLine> => {
+  // ── Flat columns ──────────────────────────────────────────────────────────────
+  const flatColumns = useMemo((): ColumnsType<JournalLine> => {
     const isTot     = (r: JournalLine) => !!r.isTotals;
     const isSpecial = (r: JournalLine) => !!(r.isOpeningBalance || r.isClosingBalance || r.isTotals);
 
-    const enteredCols: ColumnsType<JournalLine> = showEntered ? [
-      {
-        title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Ent Dr</span>,
+    const entCols: ColumnsType<JournalLine> = showEntered ? [
+      { title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Ent Dr</span>,
         dataIndex: 'enteredDr', key: 'entDr', width: 130, align: 'right',
-        render: (v: number, r: JournalLine) => (
-          <span style={{ fontSize: 10, color: v > 0 ? REDWOOD.success : undefined, fontWeight: isTot(r) ? 700 : undefined }}>
-            {v > 0 ? fmtN(v) : ''}
-          </span>
-        ),
-      },
-      {
-        title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Ent Cr</span>,
+        render: (v: number, r: JournalLine) => <DrCell v={v} bold={isTot(r)} /> },
+      { title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Ent Cr</span>,
         dataIndex: 'enteredCr', key: 'entCr', width: 130, align: 'right',
-        render: (v: number, r: JournalLine) => (
-          <span style={{ fontSize: 10, color: v > 0 ? REDWOOD.primary : undefined, fontWeight: isTot(r) ? 700 : undefined }}>
-            {v > 0 ? fmtN(v) : ''}
-          </span>
-        ),
-      },
-      {
-        title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Ent Balance</span>,
+        render: (v: number, r: JournalLine) => <CrCell v={v} bold={isTot(r)} /> },
+      { title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Ent Balance</span>,
         key: 'entBal', width: 140, align: 'right',
         render: (_: any, record: JournalLine, index: number) => {
-          if (isTot(record)) return <FmtBal v={record._entBal ?? 0} size={10} />;
+          if (isTot(record)) return <FmtBal v={record._entBal ?? 0} size={10} bold />;
           const v = runningBals[index]?.ent ?? 0;
-          return v < 0
-            ? <span style={{ fontSize: 10, color: REDWOOD.primary, fontWeight: isSpecial(record) ? 700 : undefined }}>{fmtN(Math.abs(v))} Cr</span>
-            : <span style={{ fontSize: 10, color: REDWOOD.success, fontWeight: isSpecial(record) ? 700 : undefined }}>{fmtN(v)}</span>;
-        },
-      },
+          return <FmtBal v={v} size={10} bold={isSpecial(record)} />;
+        } },
     ] : [];
 
     return [
-      {
-        title: 'Account', dataIndex: 'concatenatedSegments', key: 'account',
-        width: 220, fixed: 'left', ellipsis: true,
-        render: (_text: string, record: JournalLine) => {
-          if (isTot(record)) return <Text strong style={{ fontSize: 11 }}>Total for Report</Text>;
-          if (record.isOpeningBalance) return <Text strong style={{ fontSize: 10, color: REDWOOD.warning }}>Opening Balance</Text>;
-          if (record.isClosingBalance) return <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>Closing Balance</Text>;
-          return <Text style={{ fontSize: 10, color: REDWOOD.info }}>{_text || '—'}</Text>;
-        },
-      },
-      {
-        title: 'Line Description', dataIndex: 'jeLineDescription', key: 'lineDesc', width: 200, ellipsis: true,
-        render: (text: string, record: JournalLine) =>
-          isTot(record) ? null : (
-            <Tooltip title={text}>
-              <span style={{ fontSize: 10, fontWeight: isSpecial(record) ? 600 : undefined }}>{text || '—'}</span>
-            </Tooltip>
-          ),
-      },
-      {
-        title: 'Period', dataIndex: 'defaultPeriodName', key: 'period', width: 80,
-        render: (v: string, r: JournalLine) => isTot(r) ? null : <span style={{ fontSize: 10 }}>{v}</span>,
-      },
-      {
-        title: 'Acctg Date', dataIndex: 'accountingDate', key: 'acctgDate', width: 100,
-        render: (v: string, r: JournalLine) => isTot(r) ? null : <span style={{ fontSize: 10 }}>{(v || '').slice(0, 10)}</span>,
-      },
-      {
-        title: 'Batch', dataIndex: 'batchName', key: 'batch', width: 160, ellipsis: true,
-        render: (v: string, r: JournalLine) => isTot(r) ? null : <span style={{ fontSize: 10 }}>{v}</span>,
-      },
-      {
-        title: 'Source', dataIndex: 'userJeSourceName', key: 'source', width: 110,
-        render: (v: string, r: JournalLine) => isTot(r) ? null : <span style={{ fontSize: 10 }}>{v}</span>,
-      },
-      {
-        title: 'Category', dataIndex: 'userJeCategoryName', key: 'category', width: 120,
-        render: (v: string, r: JournalLine) => isTot(r) ? null : <span style={{ fontSize: 10 }}>{v}</span>,
-      },
-      {
-        title: 'Currency', dataIndex: 'currencyCode', key: 'currency', width: 80,
-        render: (v: string, r: JournalLine) => isTot(r) ? null : <Tag style={{ fontSize: 9 }}>{v}</Tag>,
-      },
-      // Entered first
-      ...enteredCols,
-      // Accounted
-      {
-        title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Acc Dr ({functionalCcy})</span>,
+      { title: 'Account', dataIndex: 'concatenatedSegments', key: 'account', width: 220, fixed: 'left', ellipsis: true,
+        render: (_: string, r: JournalLine) => {
+          if (isTot(r)) return <Text strong style={{ fontSize: 11 }}>Total for Report</Text>;
+          if (r.isOpeningBalance) return <Text strong style={{ fontSize: 10, color: REDWOOD.warning }}>Opening Balance</Text>;
+          if (r.isClosingBalance) return <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>Closing Balance</Text>;
+          return <Text style={{ fontSize: 10, color: REDWOOD.info }}>{_ || '—'}</Text>;
+        } },
+      { title: 'Line Description', dataIndex: 'jeLineDescription', key: 'lineDesc', width: 200, ellipsis: true,
+        render: (t: string, r: JournalLine) => isTot(r) ? null : (
+          <Tooltip title={t}><span style={{ fontSize: 10, fontWeight: isSpecial(r) ? 600 : undefined }}>{t || '—'}</span></Tooltip>
+        ) },
+      { title: 'Period', dataIndex: 'defaultPeriodName', key: 'period', width: 80,
+        render: (v: string, r: JournalLine) => isTot(r) ? null : <span style={{ fontSize: 10 }}>{v}</span> },
+      { title: 'Acctg Date', dataIndex: 'accountingDate', key: 'acctgDate', width: 100,
+        render: (v: string, r: JournalLine) => isTot(r) ? null : <span style={{ fontSize: 10 }}>{(v || '').slice(0, 10)}</span> },
+      { title: 'Batch', dataIndex: 'batchName', key: 'batch', width: 160, ellipsis: true,
+        render: (v: string, r: JournalLine) => isTot(r) ? null : <span style={{ fontSize: 10 }}>{v}</span> },
+      { title: 'Source', dataIndex: 'userJeSourceName', key: 'source', width: 110,
+        render: (v: string, r: JournalLine) => isTot(r) ? null : <span style={{ fontSize: 10 }}>{v}</span> },
+      { title: 'Category', dataIndex: 'userJeCategoryName', key: 'category', width: 120,
+        render: (v: string, r: JournalLine) => isTot(r) ? null : <span style={{ fontSize: 10 }}>{v}</span> },
+      { title: 'Currency', dataIndex: 'currencyCode', key: 'currency', width: 80,
+        render: (v: string, r: JournalLine) => isTot(r) ? null : <Tag style={{ fontSize: 9 }}>{v}</Tag> },
+      ...entCols,
+      { title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Acc Dr ({functionalCcy})</span>,
         dataIndex: 'accountedDr', key: 'accDr', width: 150, align: 'right',
-        render: (v: number, r: JournalLine) => (
-          <span style={{ fontSize: 10, color: v > 0 ? REDWOOD.success : undefined, fontWeight: isTot(r) ? 700 : undefined }}>
-            {v > 0 ? fmtN(v) : ''}
-          </span>
-        ),
-      },
-      {
-        title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Acc Cr ({functionalCcy})</span>,
+        render: (v: number, r: JournalLine) => <DrCell v={v} bold={isTot(r)} /> },
+      { title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Acc Cr ({functionalCcy})</span>,
         dataIndex: 'accountedCr', key: 'accCr', width: 150, align: 'right',
-        render: (v: number, r: JournalLine) => (
-          <span style={{ fontSize: 10, color: v > 0 ? REDWOOD.primary : undefined, fontWeight: isTot(r) ? 700 : undefined }}>
-            {v > 0 ? fmtN(v) : ''}
-          </span>
-        ),
-      },
-      {
-        title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Acc Balance ({functionalCcy})</span>,
+        render: (v: number, r: JournalLine) => <CrCell v={v} bold={isTot(r)} /> },
+      { title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Acc Balance ({functionalCcy})</span>,
         key: 'accBal', width: 160, align: 'right',
         render: (_: any, record: JournalLine, index: number) => {
-          if (isTot(record)) return <FmtBal v={record._accBal ?? 0} size={10} />;
-          const v = runningBals[index]?.acc ?? 0;
-          return v < 0
-            ? <span style={{ fontSize: 10, color: REDWOOD.primary, fontWeight: isSpecial(record) ? 700 : undefined }}>{fmtN(Math.abs(v))} Cr</span>
-            : <span style={{ fontSize: 10, color: REDWOOD.success, fontWeight: isSpecial(record) ? 700 : undefined }}>{fmtN(v)}</span>;
-        },
-      },
-      {
-        title: '', key: 'drill', width: 36, fixed: 'right',
+          if (isTot(record)) return <FmtBal v={record._accBal ?? 0} size={10} bold />;
+          return <FmtBal v={runningBals[index]?.acc ?? 0} size={10} bold={isSpecial(record)} />;
+        } },
+      { title: '', key: 'drill', width: 36, fixed: 'right',
         render: (_: any, record: JournalLine) =>
-          isTot(record) ? null : (
-            <Tooltip title={`Journal ${record.jeHeaderId}`}>
-              <Button type="text" size="small"
+          isTot(record) || record.isOpeningBalance || record.isClosingBalance ? null : (
+            <Tooltip title="View journal lines">
+              <Button type="text" size="small" onClick={() => openDrill(record)}
                 icon={<AuditOutlined style={{ color: REDWOOD.info, fontSize: 13 }} />} />
             </Tooltip>
-          ),
-      },
+          ) },
     ];
-  }, [showEntered, runningBals, functionalCcy]);
+  }, [showEntered, runningBals, functionalCcy, openDrill]);
 
-  // ── Export ───────────────────────────────────────────────────────────────────
+  // ── Group-by columns ──────────────────────────────────────────────────────────
+  const groupLabel = GROUP_BY_OPTIONS.find(o => o.value === groupBy)?.label || groupBy;
+
+  const groupColumns = useMemo((): ColumnsType<GroupedRow> => {
+    const entCols: ColumnsType<GroupedRow> = showEntered ? [
+      { title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Ent Dr</span>,
+        key: 'entDr', width: 140, align: 'right',
+        render: (_: any, r: GroupedRow) => <DrCell v={r.totalEntDr} bold={r.isTotals} /> },
+      { title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Ent Cr</span>,
+        key: 'entCr', width: 140, align: 'right',
+        render: (_: any, r: GroupedRow) => <CrCell v={r.totalEntCr} bold={r.isTotals} /> },
+      { title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Ent Balance</span>,
+        key: 'entBal', width: 150, align: 'right',
+        render: (_: any, r: GroupedRow) => <FmtBal v={r.entBalance} size={10} bold={r.isTotals} /> },
+    ] : [];
+    return [
+      { title: groupLabel, key: 'groupValue', fixed: 'left', width: 240,
+        render: (_: any, r: GroupedRow) => r.isTotals
+          ? <Text strong style={{ fontSize: 11 }}>Grand Total</Text>
+          : <Text style={{ fontSize: 11, fontWeight: 600 }}>{r.groupValue}</Text> },
+      { title: 'Lines', key: 'count', width: 70, align: 'center',
+        render: (_: any, r: GroupedRow) => r.isTotals ? null : <Tag style={{ fontSize: 10 }}>{r.count}</Tag> },
+      ...entCols,
+      { title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Acc Dr ({functionalCcy})</span>,
+        key: 'accDr', width: 150, align: 'right',
+        render: (_: any, r: GroupedRow) => <DrCell v={r.totalAccDr} bold={r.isTotals} /> },
+      { title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Acc Cr ({functionalCcy})</span>,
+        key: 'accCr', width: 150, align: 'right',
+        render: (_: any, r: GroupedRow) => <CrCell v={r.totalAccCr} bold={r.isTotals} /> },
+      { title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Acc Balance ({functionalCcy})</span>,
+        key: 'accBal', width: 160, align: 'right',
+        render: (_: any, r: GroupedRow) => <FmtBal v={r.accBalance} size={10} bold={r.isTotals} /> },
+    ];
+  }, [showEntered, functionalCcy, groupLabel]);
+
+  // Sub-table for expanded group rows (individual lines, no line description)
+  const expandedRowRender = useCallback((group: GroupedRow) => {
+    const subCols: ColumnsType<JournalLine> = [
+      { title: 'Account', dataIndex: 'concatenatedSegments', key: 'acct', width: 200, ellipsis: true,
+        render: (v: string) => <Text style={{ fontSize: 10, color: REDWOOD.info }}>{v || '—'}</Text> },
+      { title: 'Acctg Date', dataIndex: 'accountingDate', key: 'date', width: 95,
+        render: (v: string) => <span style={{ fontSize: 10 }}>{(v || '').slice(0, 10)}</span> },
+      { title: 'Batch', dataIndex: 'batchName', key: 'batch', ellipsis: true,
+        render: (v: string) => <span style={{ fontSize: 10 }}>{v}</span> },
+      { title: 'Source', dataIndex: 'userJeSourceName', key: 'source', width: 100,
+        render: (v: string) => <span style={{ fontSize: 10 }}>{v}</span> },
+      { title: 'Category', dataIndex: 'userJeCategoryName', key: 'cat', width: 110,
+        render: (v: string) => <span style={{ fontSize: 10 }}>{v}</span> },
+      { title: 'Ccy', dataIndex: 'currencyCode', key: 'ccy', width: 60,
+        render: (v: string) => <Tag style={{ fontSize: 9 }}>{v}</Tag> },
+      ...(showEntered ? [
+        { title: 'Ent Dr', dataIndex: 'enteredDr', key: 'entDr', width: 120, align: 'right' as const,
+          render: (v: number) => <DrCell v={v} /> },
+        { title: 'Ent Cr', dataIndex: 'enteredCr', key: 'entCr', width: 120, align: 'right' as const,
+          render: (v: number) => <CrCell v={v} /> },
+      ] : []),
+      { title: `Acc Dr (${functionalCcy})`, dataIndex: 'accountedDr', key: 'accDr', width: 130, align: 'right' as const,
+        render: (v: number) => <DrCell v={v} /> },
+      { title: `Acc Cr (${functionalCcy})`, dataIndex: 'accountedCr', key: 'accCr', width: 130, align: 'right' as const,
+        render: (v: number) => <CrCell v={v} /> },
+      { title: '', key: 'drill', width: 36, fixed: 'right' as const,
+        render: (_: any, r: JournalLine) => (
+          <Tooltip title="View journal lines">
+            <Button type="text" size="small" onClick={() => openDrill(r)}
+              icon={<AuditOutlined style={{ color: REDWOOD.info, fontSize: 12 }} />} />
+          </Tooltip>
+        ) },
+    ];
+    return (
+      <Table dataSource={group.lines.map((l, i) => ({ ...l, key: `${group.key}-${i}` }))}
+        columns={subCols} size="small" pagination={false}
+        scroll={{ x: 900 }}
+        className="aa-v2-subgrid"
+        style={{ margin: '4px 16px 4px 0' }} />
+    );
+  }, [showEntered, functionalCcy, openDrill]);
+
+  const expandable: ExpandableConfig<GroupedRow> = useMemo(() => ({
+    expandedRowRender,
+    rowExpandable: (r: GroupedRow) => !r.isTotals && r.lines.length > 0,
+  }), [expandedRowRender]);
+
+  // ── Export ────────────────────────────────────────────────────────────────────
   const exportExcel = async () => {
     if (!filteredData.length) { message.warning('No data to export'); return; }
     const wb = new ExcelJS.Workbook();
@@ -788,25 +949,23 @@ const AccountAnalysisV2: React.FC = () => {
     const accHdrFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A5FCC' } };
     const entHdrFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF389E0D' } };
 
-    // title
     mergeFull(1);
     const tc = ws.getCell('A1');
     tc.value = 'Account Analysis'; tc.font = { bold: true, size: 13, color: white };
     tc.fill = hdrFill; tc.alignment = { horizontal: 'center', vertical: 'middle' };
     ws.getRow(1).height = 22;
 
-    // filter rows
     const activeSegs = Object.entries(segFilters).map(([k, v]) => {
       const def = SEGMENT_DEFS.find(d => d.key === k);
       return `${def?.label || k}: ${segLabels[k] || v}`;
     });
     const fRows: [string, string][] = [
-      ['Ledger',    ledger || '—'],
-      ['Account',   account ? `${account}${accountDesc ? ' – ' + accountDesc : ''}` : '—'],
-      ['Periods',   periods.length ? periods.join(', ') : '—'],
-      ['Filters',   activeSegs.length ? activeSegs.join(' | ') : '—'],
-      ['Exported',  new Date().toLocaleString()],
-      ['Records',   String(filteredData.length)],
+      ['Ledger',   ledger || '—'],
+      ['Account',  account ? `${account}${accountDesc ? ' – ' + accountDesc : ''}` : '—'],
+      ['Periods',  periods.length ? periods.join(', ') : '—'],
+      ['Filters',  activeSegs.length ? activeSegs.join(' | ') : '—'],
+      ['Exported', new Date().toLocaleString()],
+      ['Records',  String(filteredData.length)],
     ];
     let ri = 2;
     for (const [lbl, val] of fRows) {
@@ -816,12 +975,11 @@ const AccountAnalysisV2: React.FC = () => {
       lc.font = { bold: true, size: 10 }; vc.font = { size: 10 };
       lc.fill = fltFill;
       lc.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
-      vc.alignment = { horizontal: 'left',  vertical: 'middle', indent: 1 };
+      vc.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
       ws.getRow(ri).height = 16; ri++;
     }
     ri++;
 
-    // group header
     ws.getRow(ri).height = 16;
     for (let c = 1; c <= 9; c++) ws.getCell(ri, c).fill = colFill;
     let col = 10;
@@ -836,17 +994,14 @@ const AccountAnalysisV2: React.FC = () => {
     const ac = ws.getCell(ri, col);
     ac.value = `Accounted (${functionalCcy})`; ac.font = { bold: true, size: 10, color: { argb: 'FF1677FF' } };
     ac.fill = accFill; ac.alignment = { horizontal: 'center', vertical: 'middle' };
-    col += 3;
-    ws.getCell(ri, col).fill = colFill;
-    ri++;
+    col += 3; ws.getCell(ri, col).fill = colFill; ri++;
 
-    // column headers
     const descHdrs = ['Account', 'Account Description', 'Line Description', 'Period', 'Acctg Date', 'Batch', 'Source', 'Category', 'Currency'];
     const entHdrs  = showEntered ? ['Ent Dr', 'Ent Cr', 'Ent Balance'] : [];
     const accHdrs  = [`Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Balance (${functionalCcy})`];
     const hdrs = [...descHdrs, ...entHdrs, ...accHdrs, 'JE Header ID'];
     const widths = [28, 28, 32, 12, 14, 28, 14, 16, 10, ...(showEntered ? [16, 16, 16] : []), 16, 16, 16, 14];
-    const hRow = ws.getRow(ri); hRow.height = 18;
+    ws.getRow(ri).height = 18;
     hdrs.forEach((h, i) => {
       const cell = ws.getCell(ri, i + 1);
       cell.value = h;
@@ -861,7 +1016,6 @@ const AccountAnalysisV2: React.FC = () => {
     });
     ri++;
 
-    // data rows
     let accRun = 0; let entRun = 0;
     const dataStartRow = ri;
     filteredData.forEach((r, idx) => {
@@ -870,18 +1024,11 @@ const AccountAnalysisV2: React.FC = () => {
       const isAlt = idx % 2 === 1;
       ws.getRow(ri).height = 15;
       const vals: (string | number)[] = [
-        r.concatenatedSegments || '',
-        r.accountDescription || '',
-        r.jeLineDescription || '',
-        r.defaultPeriodName || '',
-        (r.accountingDate || '').slice(0, 10),
-        r.batchName || '',
-        r.userJeSourceName || '',
-        r.userJeCategoryName || '',
-        r.currencyCode || '',
+        r.concatenatedSegments || '', r.accountDescription || '', r.jeLineDescription || '',
+        r.defaultPeriodName || '', (r.accountingDate || '').slice(0, 10),
+        r.batchName || '', r.userJeSourceName || '', r.userJeCategoryName || '', r.currencyCode || '',
         ...(showEntered ? [r.enteredDr || 0, r.enteredCr || 0, entRun] : []),
-        r.accountedDr || 0, r.accountedCr || 0, accRun,
-        r.jeHeaderId,
+        r.accountedDr || 0, r.accountedCr || 0, accRun, r.jeHeaderId,
       ];
       vals.forEach((v, i) => {
         const cell = ws.getCell(ri, i + 1);
@@ -900,13 +1047,10 @@ const AccountAnalysisV2: React.FC = () => {
       ri++;
     });
 
-    // totals row
-    ws.getRow(ri).height = 16;
     ws.mergeCells(ri, 1, ri, 9);
     const tl = ws.getCell(ri, 1);
-    tl.value = `Totals  (${filteredData.length} lines)`;
-    tl.font = { bold: true, size: 10 }; tl.fill = totFill;
-    tl.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
+    tl.value = `Totals  (${filteredData.length} lines)`; tl.font = { bold: true, size: 10 };
+    tl.fill = totFill; tl.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
     const tVals = showEntered
       ? [gridTotals.entDr, gridTotals.entCr, finalRunning.ent, gridTotals.accDr, gridTotals.accCr, finalRunning.acc]
       : [gridTotals.accDr, gridTotals.accCr, finalRunning.acc];
@@ -917,7 +1061,6 @@ const AccountAnalysisV2: React.FC = () => {
       cell.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
     });
     ws.getCell(ri, 10 + tVals.length).fill = totFill;
-
     ws.views = [{ state: 'frozen', xSplit: 0, ySplit: dataStartRow - 1 }];
     ws.autoFilter = { from: { row: dataStartRow - 1, column: 1 }, to: { row: ri, column: NCOLS } };
 
@@ -926,17 +1069,13 @@ const AccountAnalysisV2: React.FC = () => {
     message.success('Excel file downloaded');
   };
 
-  // ── Active filter chips ───────────────────────────────────────────────────────
   const activeFilters = Object.entries(segFilters).filter(([, v]) => v);
-  const accountLabel = account
-    ? `${account}${accountDesc ? ' – ' + accountDesc : ''}`
-    : '';
+  const accountLabel  = account ? `${account}${accountDesc ? ' – ' + accountDesc : ''}` : '';
 
-  // ─── Render ──────────────────────────────────────────────────────────────────
+  // ─── Render ───────────────────────────────────────────────────────────────────
   return (
     <Layout style={{ minHeight: 'calc(100vh - 64px)', background: REDWOOD.neutral100 }}>
       <Content>
-        {/* Breadcrumb */}
         <div style={{ padding: '12px 24px', background: REDWOOD.surface, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
           <Breadcrumb items={[
             { title: <Link to="/home"><HomeOutlined /> Home</Link> },
@@ -948,22 +1087,16 @@ const AccountAnalysisV2: React.FC = () => {
         <div style={{ padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
 
           {/* ── Parameter Card ── */}
-          <Card size="small"
-            styles={{ body: { padding: '14px 16px' } }}
-            style={{ borderRadius: 10, border: `1px solid ${REDWOOD.neutral200}`, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}
-          >
+          <Card size="small" styles={{ body: { padding: '14px 16px' } }}
+            style={{ borderRadius: 10, border: `1px solid ${REDWOOD.neutral200}`, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
               <BookOutlined style={{ color: REDWOOD.info, fontSize: 16 }} />
               <Text strong style={{ fontSize: 14 }}>Search Parameters</Text>
             </div>
-
-            {/* Row 1: Ledger / Account / Period / Buttons */}
             <Row gutter={[12, 8]} align="bottom">
-              {/* Ledger */}
               <Col xs={24} sm={12} md={5}>
                 <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 3, fontWeight: 500 }}>
-                  Ledger *
-                  {ledgersLoading && <ReloadOutlined spin style={{ marginLeft: 4, fontSize: 10 }} />}
+                  Ledger * {ledgersLoading && <ReloadOutlined spin style={{ marginLeft: 4, fontSize: 10 }} />}
                 </div>
                 <Select value={ledger || undefined} onChange={v => { setLedger(v); setPeriods([]); }}
                   style={{ width: '100%' }} size="small" showSearch loading={ledgersLoading}
@@ -971,22 +1104,15 @@ const AccountAnalysisV2: React.FC = () => {
                   {ledgerOptions.map(l => <Option key={l} value={l}>{l}</Option>)}
                 </Select>
               </Col>
-
-              {/* Account */}
               <Col xs={24} sm={12} md={7}>
                 <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 3, fontWeight: 500 }}>Account</div>
-                <ClickField
-                  label={accountLabel} placeholder="All Accounts"
+                <ClickField label={accountLabel} placeholder="All Accounts"
                   onClick={() => { loadAccounts(); setAccountPickerOpen(true); }}
-                  onClear={() => { setAccount(''); setAccountDesc(''); }}
-                />
+                  onClear={() => { setAccount(''); setAccountDesc(''); }} />
               </Col>
-
-              {/* Period(s) */}
               <Col xs={24} sm={12} md={8}>
                 <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 3, fontWeight: 500 }}>
-                  Period(s) *
-                  {periodsLoading && <ReloadOutlined spin style={{ marginLeft: 4, fontSize: 10 }} />}
+                  Period(s) * {periodsLoading && <ReloadOutlined spin style={{ marginLeft: 4, fontSize: 10 }} />}
                 </div>
                 <Select mode="multiple" value={periods} onChange={setPeriods}
                   style={{ width: '100%' }} size="small" showSearch allowClear
@@ -994,60 +1120,41 @@ const AccountAnalysisV2: React.FC = () => {
                   {allPeriods.map(p => <Option key={p} value={p}>{p}</Option>)}
                 </Select>
               </Col>
-
-              {/* Buttons */}
               <Col xs={24} sm={12} md={4} style={{ display: 'flex', gap: 6 }}>
                 <Button type="primary" icon={<SearchOutlined />} size="small" loading={loading}
                   onClick={handleSearch}
-                  style={{ background: REDWOOD.info, borderColor: REDWOOD.info, flex: 1 }}>
-                  Search
-                </Button>
+                  style={{ background: REDWOOD.info, borderColor: REDWOOD.info, flex: 1 }}>Search</Button>
                 <Button icon={<ClearOutlined />} size="small" onClick={() => {
                   setRows([]); setHasSearched(false); setPeriods([]);
-                  setAccount(''); setAccountDesc('');
-                  setSegFilters({}); setSegLabels({});
+                  setAccount(''); setAccountDesc(''); setSegFilters({}); setSegLabels({});
                 }} />
               </Col>
             </Row>
 
-            {/* Row 2: Segment Filters */}
+            {/* Segment Filter row */}
             <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
               <Text style={{ fontSize: 11, color: REDWOOD.neutral600, fontWeight: 500 }}>
                 <FilterOutlined style={{ marginRight: 4 }} />Segment Filters:
               </Text>
-
-              {/* Active filter chips */}
               {activeFilters.map(([key, val]) => {
                 const def = SEGMENT_DEFS.find(d => d.key === key);
                 return (
-                  <Tag
-                    key={key}
-                    color={def?.color || 'default'}
-                    closable
-                    onClose={() => removeSegFilter(key)}
-                    style={{ fontSize: 11, margin: 0 }}
-                  >
+                  <Tag key={key} color={def?.color || 'default'} closable
+                    onClose={() => removeSegFilter(key)} style={{ fontSize: 11, margin: 0 }}>
                     <span style={{ opacity: 0.8 }}>{def?.label}: </span>
                     <strong>{segLabels[key] || val}</strong>
                   </Tag>
                 );
               })}
-
-              {/* Add filter button */}
-              <Button
-                size="small" type="dashed" icon={<PlusOutlined />}
+              <Button size="small" type="dashed" icon={<PlusOutlined />}
                 onClick={() => setSegPickerOpen(true)}
-                style={{ fontSize: 11, height: 24, color: REDWOOD.info, borderColor: REDWOOD.info }}
-              >
+                style={{ fontSize: 11, height: 24, color: REDWOOD.info, borderColor: REDWOOD.info }}>
                 Add Filter
               </Button>
-
               {activeFilters.length > 0 && (
                 <Button size="small" type="text"
                   onClick={() => { setSegFilters({}); setSegLabels({}); }}
-                  style={{ fontSize: 11, height: 24, color: REDWOOD.primary }}>
-                  Clear All
-                </Button>
+                  style={{ fontSize: 11, height: 24, color: REDWOOD.primary }}>Clear All</Button>
               )}
             </div>
           </Card>
@@ -1055,7 +1162,7 @@ const AccountAnalysisV2: React.FC = () => {
           {/* ── Toolbar ── */}
           {hasSearched && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-              <Space>
+              <Space wrap>
                 <Badge count={filteredData.length} color={REDWOOD.info} overflowCount={9999}>
                   <Text type="secondary" style={{ fontSize: 12 }}>records</Text>
                 </Badge>
@@ -1066,6 +1173,16 @@ const AccountAnalysisV2: React.FC = () => {
                   <Text style={{ fontSize: 12, color: showEntered ? '#52c41a' : REDWOOD.neutral600, fontWeight: showEntered ? 600 : undefined }}>
                     Show Entered
                   </Text>
+                </Space>
+                <Divider type="vertical" />
+                <Space size={6}>
+                  <GroupOutlined style={{ color: REDWOOD.neutral600, fontSize: 13 }} />
+                  <Select value={groupBy || undefined} allowClear placeholder="Group by…"
+                    style={{ width: 170 }} size="small"
+                    onChange={v => setGroupBy(v || '')}
+                    onClear={() => setGroupBy('')}>
+                    {GROUP_BY_OPTIONS.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
+                  </Select>
                 </Space>
               </Space>
               <Space>
@@ -1086,17 +1203,23 @@ const AccountAnalysisV2: React.FC = () => {
 
           {/* ── Grid ── */}
           <Spin spinning={loading}>
-            {hasSearched && (
+            {hasSearched && !groupBy && (
               <Table<JournalLine>
-                dataSource={tableData} columns={columns} rowKey="key" size="small"
+                dataSource={tableData} columns={flatColumns} rowKey="key" size="small"
                 scroll={{ x: 'max-content', y: 480 }}
                 pagination={{ pageSize: 50, showSizeChanger: true, showTotal: t => `${t} records` }}
                 className="aa-v2-grid"
-                rowClassName={record =>
-                  record.isTotals ? 'aa-totals-row' :
-                  record.isOpeningBalance ? 'aa-opening-row' :
-                  record.isClosingBalance ? 'aa-closing-row' : ''
-                }
+                rowClassName={r => r.isTotals ? 'aa-totals-row' : r.isOpeningBalance ? 'aa-opening-row' : r.isClosingBalance ? 'aa-closing-row' : ''}
+              />
+            )}
+            {hasSearched && !!groupBy && (
+              <Table<GroupedRow>
+                dataSource={groupedData} columns={groupColumns} rowKey="key" size="small"
+                scroll={{ x: 'max-content', y: 480 }}
+                pagination={false}
+                className="aa-v2-grid"
+                expandable={expandable}
+                rowClassName={r => r.isTotals ? 'aa-totals-row' : ''}
               />
             )}
           </Spin>
@@ -1121,7 +1244,7 @@ const AccountAnalysisV2: React.FC = () => {
                           <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>{item.label}</Text>
                           {item.color
                             ? <Text strong style={{ fontSize: 14, color: item.color }}>{fmtN(item.v)}</Text>
-                            : <FmtBal v={item.v} size={14} />}
+                            : <FmtBal v={item.v} size={14} bold />}
                         </Col>
                       ))}
                     </Row>
@@ -1146,7 +1269,7 @@ const AccountAnalysisV2: React.FC = () => {
                         <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>{item.label}</Text>
                         {item.color
                           ? <Text strong style={{ fontSize: 14, color: item.color }}>{fmtN(item.v)}</Text>
-                          : <FmtBal v={item.v} size={14} />}
+                          : <FmtBal v={item.v} size={14} bold />}
                       </Col>
                     ))}
                   </Row>
@@ -1157,20 +1280,19 @@ const AccountAnalysisV2: React.FC = () => {
         </div>
       </Content>
 
-      {/* Account Picker */}
+      {/* Modals */}
       <AccountPicker open={accountPickerOpen} onClose={() => setAccountPickerOpen(false)}
         options={accountOptions} loading={accountsLoading}
         onSelect={(val, desc) => { setAccount(val); setAccountDesc(desc); }} />
 
-      {/* Segment Filter Picker */}
-      <SegmentPicker
-        open={segPickerOpen} onClose={() => setSegPickerOpen(false)}
+      <SegmentPicker open={segPickerOpen} onClose={() => setSegPickerOpen(false)}
         segmentValues={segmentValues} companyOptions={companyOptions}
-        existing={segFilters} loading={segValuesLoading}
-        onAdd={addSegFilter}
-      />
+        existing={segFilters} loading={segValuesLoading} onAdd={addSegFilter} />
 
-      {/* API URL modal */}
+      <DrillModal open={drillOpen} onClose={() => setDrillOpen(false)}
+        record={drillRecord} lines={drillLines} loading={drillLoading}
+        functionalCcy={functionalCcy} />
+
       <Modal open={apiModalOpen} onCancel={() => setApiModalOpen(false)}
         title={<Space><ApiOutlined style={{ color: REDWOOD.info }} />API Endpoint</Space>}
         footer={<Button onClick={() => setApiModalOpen(false)}>Close</Button>} width={680}>
@@ -1206,6 +1328,8 @@ const AccountAnalysisV2: React.FC = () => {
         }
         .aa-v2-grid .ant-table-tbody > tr.aa-opening-row > td { background: #fffbe6 !important; }
         .aa-v2-grid .ant-table-tbody > tr.aa-closing-row > td { background: #f6ffed !important; }
+        .aa-v2-subgrid .ant-table { background: #fafafa; }
+        .aa-v2-subgrid .ant-table-thead > tr > th { background: #f0f0f0 !important; font-size: 10px; }
       `}</style>
     </Layout>
   );
