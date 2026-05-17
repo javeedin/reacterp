@@ -4,7 +4,7 @@ import {
   Button, Table, Tag, Spin, Tooltip, message, Switch, Row, Col,
   Divider, Badge, Modal, Tabs, Radio,
 } from 'antd';
-import type { ColumnsType, ExpandableConfig } from 'antd/es/table';
+import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, SearchOutlined, ClearOutlined,
   FileExcelOutlined, AuditOutlined, ReloadOutlined,
@@ -53,13 +53,34 @@ const SEGMENT_DEFS: SegmentDef[] = [
   { key: 'je_category',  label: 'Journal Category', color: 'gold',     valueKey: 'categories'     },
 ];
 
-const GROUP_BY_OPTIONS = [
-  { value: 'defaultPeriodName',    label: 'Period'           },
-  { value: 'concatenatedSegments', label: 'Account'          },
-  { value: 'batchName',            label: 'Batch'            },
-  { value: 'userJeSourceName',     label: 'Journal Source'   },
-  { value: 'userJeCategoryName',   label: 'Journal Category' },
-  { value: 'currencyCode',         label: 'Currency'         },
+const SEG_IDX: Record<string, number> = {
+  segCompany: 0, segLob: 1, segDept: 2, segSubAcct: 3, segAnalysis: 4, segInterco: 5,
+};
+
+const getGroupVal = (r: { concatenatedSegments: string; [k: string]: unknown }, field: string): string => {
+  const direct = String(r[field] || '');
+  if (direct) return direct;
+  if (field in SEG_IDX) {
+    const parts = r.concatenatedSegments.split('-');
+    return parts[SEG_IDX[field]] || '';
+  }
+  return '';
+};
+
+const GROUP_BY_OPTIONS: { value: string; label: string; group?: string }[] = [
+  { value: '',                      label: 'Full Combination (Detail)'        },
+  { value: 'defaultPeriodName',     label: 'Period',           group: 'Field' },
+  { value: 'concatenatedSegments',  label: 'Account',          group: 'Field' },
+  { value: 'batchName',             label: 'Batch',            group: 'Field' },
+  { value: 'userJeSourceName',      label: 'Journal Source',   group: 'Field' },
+  { value: 'userJeCategoryName',    label: 'Journal Category', group: 'Field' },
+  { value: 'currencyCode',          label: 'Currency',         group: 'Field' },
+  { value: 'segCompany',            label: 'Company',          group: 'Segment' },
+  { value: 'segLob',                label: 'LOB',              group: 'Segment' },
+  { value: 'segDept',               label: 'Department',       group: 'Segment' },
+  { value: 'segSubAcct',            label: 'Sub-Account',      group: 'Segment' },
+  { value: 'segAnalysis',           label: 'Analysis',         group: 'Segment' },
+  { value: 'segInterco',            label: 'Intercompany',     group: 'Segment' },
 ];
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
@@ -87,6 +108,12 @@ interface JournalLine {
   accountedDr: number;
   accountedCr: number;
   jeHeaderId: number;
+  segCompany?: string;
+  segLob?: string;
+  segDept?: string;
+  segSubAcct?: string;
+  segAnalysis?: string;
+  segInterco?: string;
   isOpeningBalance?: boolean;
   isClosingBalance?: boolean;
   isTotals?: boolean;
@@ -1151,6 +1178,12 @@ const AAPanel: React.FC = () => {
               accountedDr: Number(item.accountedDr || item.accounted_dr || 0),
               accountedCr: Number(item.accountedCr || item.accounted_cr || 0),
               jeHeaderId:  Number(item.jeHeaderId  || item.je_header_id || 0),
+              segCompany:  String(item.company  || item.COMPANY  || ''),
+              segLob:      String(item.lob      || item.LOB      || ''),
+              segDept:     String(item.department || item.DEPARTMENT || item.dept || ''),
+              segSubAcct:  String(item.subAccount || item.sub_account || item.SUB_ACCOUNT || ''),
+              segAnalysis: String(item.analysis || item.ANALYSIS || ''),
+              segInterco:  String(item.intercompany || item.INTERCOMPANY || item.interco || ''),
             } as JournalLine];
           });
         }
@@ -1250,7 +1283,7 @@ const AAPanel: React.FC = () => {
     const ptdLines = filteredData.filter(r => !r.isOpeningBalance && !r.isClosingBalance && !r.isTotals);
     const map = new Map<string, GroupedRow>();
     ptdLines.forEach(r => {
-      const val = String((r as any)[groupBy] || '(blank)');
+      const val = getGroupVal(r, groupBy) || '(blank)';
       if (!map.has(val)) {
         map.set(val, { key: `grp-${val}`, groupValue: val, count: 0, lines: [],
           totalEntDr: 0, totalEntCr: 0, totalAccDr: 0, totalAccCr: 0, accBalance: 0, entBalance: 0 });
@@ -1395,52 +1428,6 @@ const AAPanel: React.FC = () => {
     ];
   }, [showEntered, functionalCcy, groupLabel]);
 
-  // Sub-table for expanded group rows
-  const expandedRowRender = useCallback((group: GroupedRow) => {
-    const subCols: ColumnsType<JournalLine> = [
-      { title: 'Account', dataIndex: 'concatenatedSegments', key: 'acct', width: 200, ellipsis: true,
-        render: (v: string) => <Text style={{ fontSize: 10, color: REDWOOD.info }}>{v || '—'}</Text> },
-      { title: 'Acctg Date', dataIndex: 'accountingDate', key: 'date', width: 95,
-        render: (v: string) => <span style={{ fontSize: 10 }}>{(v || '').slice(0, 10)}</span> },
-      { title: 'Batch', dataIndex: 'batchName', key: 'batch', ellipsis: true,
-        render: (v: string) => <span style={{ fontSize: 10 }}>{v}</span> },
-      { title: 'Source', dataIndex: 'userJeSourceName', key: 'source', width: 100,
-        render: (v: string) => <span style={{ fontSize: 10 }}>{v}</span> },
-      { title: 'Category', dataIndex: 'userJeCategoryName', key: 'cat', width: 110,
-        render: (v: string) => <span style={{ fontSize: 10 }}>{v}</span> },
-      { title: 'Ccy', dataIndex: 'currencyCode', key: 'ccy', width: 60,
-        render: (v: string) => <Tag style={{ fontSize: 9 }}>{v}</Tag> },
-      ...(showEntered ? [
-        { title: 'Ent Dr', dataIndex: 'enteredDr', key: 'entDr', width: 120, align: 'right' as const,
-          render: (v: number) => <DrCell v={v} /> },
-        { title: 'Ent Cr', dataIndex: 'enteredCr', key: 'entCr', width: 120, align: 'right' as const,
-          render: (v: number) => <CrCell v={v} /> },
-      ] : []),
-      { title: `Acc Dr (${functionalCcy})`, dataIndex: 'accountedDr', key: 'accDr', width: 130, align: 'right' as const,
-        render: (v: number) => <DrCell v={v} /> },
-      { title: `Acc Cr (${functionalCcy})`, dataIndex: 'accountedCr', key: 'accCr', width: 130, align: 'right' as const,
-        render: (v: number) => <CrCell v={v} /> },
-      { title: '', key: 'drill', width: 36, fixed: 'right' as const,
-        render: (_: any, r: JournalLine) => (
-          <Tooltip title="View journal lines">
-            <Button type="text" size="small" onClick={() => openDrill(r)}
-              icon={<AuditOutlined style={{ color: REDWOOD.info, fontSize: 12 }} />} />
-          </Tooltip>
-        ) },
-    ];
-    return (
-      <Table dataSource={group.lines.map((l, i) => ({ ...l, key: `${group.key}-${i}` }))}
-        columns={subCols} size="small" pagination={false}
-        scroll={{ x: 900 }}
-        className="aa-v2-subgrid"
-        style={{ margin: '4px 16px 4px 0' }} />
-    );
-  }, [showEntered, functionalCcy, openDrill]);
-
-  const expandable: ExpandableConfig<GroupedRow> = useMemo(() => ({
-    expandedRowRender,
-    rowExpandable: (r: GroupedRow) => !r.isTotals && r.lines.length > 0,
-  }), [expandedRowRender]);
 
   // ── Export ────────────────────────────────────────────────────────────────────
   const exportExcel = async () => {
@@ -1678,11 +1665,17 @@ const AAPanel: React.FC = () => {
             <Divider type="vertical" />
             <Space size={6}>
               <GroupOutlined style={{ color: REDWOOD.neutral600, fontSize: 13 }} />
-              <Select value={groupBy || undefined} allowClear placeholder="Group by…"
-                style={{ width: 170 }} size="small"
-                onChange={v => setGroupBy(v || '')}
-                onClear={() => setGroupBy('')}>
-                {GROUP_BY_OPTIONS.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
+              <Select value={groupBy} style={{ width: 200 }} size="small"
+                onChange={v => setGroupBy(v ?? '')}>
+                <Option key="" value="">Full Combination (Detail)</Option>
+                <Select.OptGroup label="Group by Field">
+                  {GROUP_BY_OPTIONS.filter(o => o.group === 'Field').map(o =>
+                    <Option key={o.value} value={o.value}>{o.label}</Option>)}
+                </Select.OptGroup>
+                <Select.OptGroup label="Group by Segment">
+                  {GROUP_BY_OPTIONS.filter(o => o.group === 'Segment').map(o =>
+                    <Option key={o.value} value={o.value}>{o.label}</Option>)}
+                </Select.OptGroup>
               </Select>
             </Space>
           </Space>
@@ -1704,7 +1697,7 @@ const AAPanel: React.FC = () => {
 
       {/* Grid */}
       <Spin spinning={loading}>
-        {hasSearched && !groupBy && (
+        {hasSearched && groupBy === '' && (
           <Table<JournalLine>
             dataSource={tableData} columns={flatColumns} rowKey="key" size="small"
             scroll={{ x: 'max-content', y: 480 }}
@@ -1713,13 +1706,12 @@ const AAPanel: React.FC = () => {
             rowClassName={r => r.isTotals ? 'aa-totals-row' : r.isOpeningBalance ? 'aa-opening-row' : r.isClosingBalance ? 'aa-closing-row' : ''}
           />
         )}
-        {hasSearched && !!groupBy && (
+        {hasSearched && groupBy !== '' && (
           <Table<GroupedRow>
             dataSource={groupedData} columns={groupColumns} rowKey="key" size="small"
             scroll={{ x: 'max-content', y: 480 }}
-            pagination={false}
+            pagination={{ pageSize: 50, showSizeChanger: true, showTotal: t => `${t} rows` }}
             className="aa-v2-grid"
-            expandable={expandable}
             rowClassName={r => r.isTotals ? 'aa-totals-row' : ''}
           />
         )}
