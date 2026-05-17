@@ -1287,43 +1287,89 @@ const AAPanel: React.FC = () => {
         if (!map.has(k)) map.set(k, []);
         map.get(k)!.push(r);
       });
+
       const sortedP = [...periods].sort((a, b) => parsePeriod(a) - parsePeriod(b));
       const firstP = sortedP[0] || '';
       const lastP  = sortedP[sortedP.length - 1] || '';
-      const co = segFilters['company'] || '';
-      const breaks: ComboBreak[] = await Promise.all(
-        Array.from(map.entries()).map(async ([combo, lines]) => {
-          const [openRow, closeRow] = await Promise.all([
-            firstP ? fetchBalanceRow(combo, co, firstP, true)  : Promise.resolve(null),
-            lastP  ? fetchBalanceRow(combo, co, lastP,  false) : Promise.resolve(null),
-          ]);
-          const openAcc = openRow ? openRow.accountedDr - openRow.accountedCr : 0;
-          const openEnt = openRow ? openRow.enteredDr   - openRow.enteredCr   : 0;
-          let accRun = openAcc, entRun = openEnt;
-          const linesWithBal: ComboBreakLine[] = lines.map(r => {
-            accRun += r.accountedDr - r.accountedCr;
-            entRun += r.enteredDr   - r.enteredCr;
-            return { ...r, _accRun: accRun, _entRun: entRun };
+
+      // Fetch trial balance in bulk for both boundary periods (2 calls total).
+      // Match each combo by concatenatedSegments field instead of calling per-combo.
+      const fetchTBMap = async (period: string): Promise<Map<string, any>> => {
+        if (!period) return new Map();
+        const p = new URLSearchParams({ ledger_name: ledger, period_name: period });
+        Object.entries(segFilters).forEach(([k, v]) => { if (v) p.set(k, v); });
+        try {
+          const res = await fetch(`${API_BASE}/rr-trialbalance/standard?${p}`);
+          if (!res.ok) return new Map();
+          const data = await res.json();
+          const m = new Map<string, any>();
+          (data.items || []).forEach((i: any) => {
+            const key = i.concatenatedSegments || i.account_combination || i.concatenated_segments || '';
+            if (key) m.set(key, i);
           });
-          return {
-            combo,
-            description: lines[0]?.accountDescription || '',
-            openingRow: openRow,
-            closingRow: closeRow,
-            linesWithBal,
-            ptdAccDr: lines.reduce((s, r) => s + r.accountedDr, 0),
-            ptdAccCr: lines.reduce((s, r) => s + r.accountedCr, 0),
-            ptdEntDr: lines.reduce((s, r) => s + r.enteredDr,   0),
-            ptdEntCr: lines.reduce((s, r) => s + r.enteredCr,   0),
-          };
-        })
-      );
+          return m;
+        } catch { return new Map(); }
+      };
+
+      const [openTB, closeTB] = await Promise.all([
+        fetchTBMap(firstP),
+        firstP !== lastP ? fetchTBMap(lastP) : fetchTBMap(firstP),
+      ]);
+
+      const buildBalRow = (combo: string, tbRow: any, isOpen: boolean, period: string): JournalLine | null => {
+        if (!tbRow) return null;
+        const accAmt = Number(isOpen ? (tbRow.opening || 0) : (tbRow.closing || 0));
+        const entAmt = Number(isOpen ? (tbRow.entered_opening || 0) : (tbRow.entered_closing || tbRow.entered_closing_balance || 0));
+        if (accAmt === 0 && entAmt === 0) return null;
+        const accountType = tbRow.account_type || '';
+        const isDebitNormal = accountType === 'A' || accountType === 'E';
+        const toDrCr = (amt: number) => ({
+          dr: isDebitNormal && amt > 0 ? amt : (!isDebitNormal && amt < 0 ? Math.abs(amt) : 0),
+          cr: !isDebitNormal && amt > 0 ? amt : (isDebitNormal && amt < 0 ? Math.abs(amt) : 0),
+        });
+        const acc = toDrCr(accAmt); const ent = toDrCr(entAmt);
+        return {
+          key: `${combo}-${isOpen ? 'open' : 'close'}`,
+          concatenatedSegments: combo,
+          accountDescription: tbRow.account_desc || tbRow.description || '',
+          jeLineDescription: isOpen ? 'Opening Balance' : 'Closing Balance',
+          defaultPeriodName: period, accountingDate: '', batchName: '',
+          userJeSourceName: '', userJeCategoryName: '',
+          currencyCode: tbRow.currency_code || tbRow.ledger_currency || '',
+          enteredDr: ent.dr, enteredCr: ent.cr, accountedDr: acc.dr, accountedCr: acc.cr,
+          jeHeaderId: 0, isOpeningBalance: isOpen, isClosingBalance: !isOpen,
+        } as JournalLine;
+      };
+
+      const breaks: ComboBreak[] = Array.from(map.entries()).map(([combo, lines]) => {
+        const openRow  = buildBalRow(combo, openTB.get(combo)  || null, true,  firstP);
+        const closeRow = buildBalRow(combo, closeTB.get(combo) || null, false, lastP);
+        const openAcc = openRow ? openRow.accountedDr - openRow.accountedCr : 0;
+        const openEnt = openRow ? openRow.enteredDr   - openRow.enteredCr   : 0;
+        let accRun = openAcc, entRun = openEnt;
+        const linesWithBal: ComboBreakLine[] = lines.map(r => {
+          accRun += r.accountedDr - r.accountedCr;
+          entRun += r.enteredDr   - r.enteredCr;
+          return { ...r, _accRun: accRun, _entRun: entRun };
+        });
+        return {
+          combo,
+          description: lines[0]?.accountDescription || openRow?.accountDescription || '',
+          openingRow: openRow,
+          closingRow: closeRow,
+          linesWithBal,
+          ptdAccDr: lines.reduce((s, r) => s + r.accountedDr, 0),
+          ptdAccCr: lines.reduce((s, r) => s + r.accountedCr, 0),
+          ptdEntDr: lines.reduce((s, r) => s + r.enteredDr,   0),
+          ptdEntCr: lines.reduce((s, r) => s + r.enteredCr,   0),
+        };
+      });
       breaks.sort((a, b) => a.combo.localeCompare(b.combo));
       setComboBreaks(breaks);
     } finally {
       setBreakLoading(false);
     }
-  }, [groupBy, filteredData, periods, segFilters, fetchBalanceRow]);
+  }, [groupBy, filteredData, periods, segFilters, ledger]);
 
   const clearGroup = useCallback(() => {
     setGroupBy('');
