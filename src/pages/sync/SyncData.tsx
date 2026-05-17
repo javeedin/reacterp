@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useRef } from 'react';
 import FixedAssetsSync from './FixedAssetsSync';
+import APPayablesSync from './APPayablesSync';
 import {
   Layout,
   Card,
@@ -183,6 +184,7 @@ const SyncData: React.FC = () => {
   const [selectedObject, setSelectedObject] = useState<SyncObjectConfig | null>(null);
   const [, setApiType] = useState<ApiType>('REST');
   const [faModalOpen, setFaModalOpen] = useState(false);
+  const [apModalOpen, setApModalOpen] = useState(false);
 
   // API-driven select options cache: paramKey → { loading, items }
   const [apiSelectOptions, setApiSelectOptions] = useState<Record<string, { loading: boolean; items: { label: string; value: string; subLabel?: string; count?: number }[] }>>({});
@@ -3540,6 +3542,26 @@ const SyncData: React.FC = () => {
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 13 }}>Fixed Assets</div>
                     <div style={{ fontSize: 11, color: '#8c8c8c' }}>26 BIP Reports</div>
+                  </div>
+                </Space>
+              </Card>
+              <Card
+                hoverable
+                size="small"
+                onClick={() => setApModalOpen(true)}
+                style={{
+                  width: 200, borderRadius: 10,
+                  border: '1px solid #91caff',
+                  background: 'linear-gradient(135deg, #e6f4ff 0%, #bae0ff 100%)',
+                  cursor: 'pointer',
+                }}
+                bodyStyle={{ padding: '12px 16px' }}
+              >
+                <Space>
+                  <span style={{ fontSize: 22 }}>📄</span>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 13 }}>Payables</div>
+                    <div style={{ fontSize: 11, color: '#8c8c8c' }}>5 BIP Reports</div>
                   </div>
                 </Space>
               </Card>
@@ -7866,6 +7888,7 @@ const SyncData: React.FC = () => {
 
     {/* ── Fixed Assets BIP Reports Modal ────────────────────────────── */}
     <FixedAssetsSync open={faModalOpen} onClose={() => setFaModalOpen(false)} />
+    <APPayablesSync  open={apModalOpen} onClose={() => setApModalOpen(false)} />
 
     {/* ── GL Journals Step-Debug Modal ──────────────────────────────── */}
     <Modal
