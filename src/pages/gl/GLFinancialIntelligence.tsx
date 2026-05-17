@@ -15,8 +15,14 @@ const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
 
 const BASE = APEX_DB_CONFIG.baseUrl;
-const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY as string;
 const MODEL = 'claude-haiku-4-5';
+
+async function fetchActiveKey(): Promise<string> {
+  const res = await fetch(`${BASE}/settings/claudekey`);
+  const data = await res.json();
+  if (data.status === 'success' && data.apiKey) return data.apiKey as string;
+  throw new Error(data.message || 'No active Claude API key found. Go to Administration → Claude AI Key Settings to add one.');
+}
 
 interface Period { periodName: string; startDate: string; endDate: string; }
 interface GlBalance {
@@ -30,20 +36,16 @@ interface ChatMessage { role: 'user' | 'assistant'; content: string; }
 
 // ── Claude streaming helper ────────────────────────────────────────────────────
 async function streamClaude(
+  apiKey: string,
   messages: { role: string; content: string }[],
   systemPrompt: string,
   onChunk: (text: string) => void,
   onDone: () => void,
 ) {
-  if (!ANTHROPIC_KEY) {
-    onChunk('⚠️ No Anthropic API key configured. Please set VITE_ANTHROPIC_API_KEY in your .env file.');
-    onDone();
-    return;
-  }
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
-      'x-api-key': ANTHROPIC_KEY,
+      'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true',
       'content-type': 'application/json',
@@ -109,6 +111,7 @@ const GLFinancialIntelligence: React.FC = () => {
   const [loadingPeriods, setLoadingPeriods] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisText, setAnalysisText] = useState('');
+  const [keyError, setKeyError] = useState('');
 
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
@@ -157,6 +160,17 @@ const GLFinancialIntelligence: React.FC = () => {
     if (!selectedPeriod) return;
     setAnalyzing(true);
     setAnalysisText('');
+    setKeyError('');
+
+    let apiKey = '';
+    try {
+      apiKey = await fetchActiveKey();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setKeyError(msg);
+      setAnalyzing(false);
+      return;
+    }
 
     let data: GlBalance[] = [];
     try {
@@ -195,6 +209,7 @@ Please provide:
 
     let result = '';
     await streamClaude(
+      apiKey,
       [{ role: 'user', content: prompt }],
       SYSTEM_FINANCE,
       chunk => {
@@ -210,6 +225,17 @@ Please provide:
     const q = chatInput.trim();
     if (!q || chatLoading) return;
     setChatInput('');
+    setKeyError('');
+
+    let apiKey = '';
+    try {
+      apiKey = await fetchActiveKey();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setKeyError(msg);
+      return;
+    }
+
     const userMsg: ChatMessage = { role: 'user', content: q };
     setChatMessages(prev => [...prev, userMsg]);
     setChatLoading(true);
@@ -225,6 +251,7 @@ Please provide:
     setChatMessages(prev => [...prev, replyMsg]);
 
     await streamClaude(
+      apiKey,
       history,
       `${SYSTEM_FINANCE}\n\nContext: ${contextNote}`,
       chunk => {
@@ -273,13 +300,20 @@ Please provide:
           <Tag color="purple" style={{ marginLeft: 'auto' }}>Beta</Tag>
         </div>
 
-        {!ANTHROPIC_KEY && (
+        {keyError && (
           <Alert
             type="warning"
             showIcon
             icon={<WarningOutlined />}
-            message="API Key not configured"
-            description="Set VITE_ANTHROPIC_API_KEY in your .env file and restart the dev server to enable AI features."
+            message="Claude API key not available"
+            description={
+              <span>
+                {keyError}&nbsp;
+                <Link to="/admin/claude-key">Go to Claude AI Key Settings →</Link>
+              </span>
+            }
+            closable
+            onClose={() => setKeyError('')}
             style={{ marginBottom: 24 }}
           />
         )}
