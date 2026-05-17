@@ -20,6 +20,7 @@ const APEX_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapp
 const PAGE_MAP: Record<string, { module: string; pageName: string }> = {
   '/gl/manage-journals':          { module: 'General Ledger',   pageName: 'Manage Journals' },
   '/gl/account-analysis':         { module: 'General Ledger',   pageName: 'Account Analysis' },
+  '/gl/account-analysis-v2':      { module: 'General Ledger',   pageName: 'Account Analysis V2' },
   '/gl/chart-of-accounts':        { module: 'General Ledger',   pageName: 'Chart of Accounts' },
   '/gl/manage-structures':        { module: 'General Ledger',   pageName: 'Manage Structures' },
   '/gl/coa-segments':             { module: 'General Ledger',   pageName: 'COA Segments' },

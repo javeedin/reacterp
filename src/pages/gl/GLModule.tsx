@@ -83,6 +83,7 @@ const reportMenuItems: MenuItemType[] = [
   { key: 'income-statement', icon: <LineChartOutlined />, label: 'Income Statement', description: 'Profit and loss report', color: REDWOOD.success },
   { key: 'journal-report', icon: <FileTextOutlined />, label: 'Journal Report', description: 'Posted journals listing', color: REDWOOD.taskBlue },
   { key: 'account-analysis', icon: <FundOutlined />, label: 'Account Analysis', description: 'Account detail analysis', color: REDWOOD.warning, path: '/gl/account-analysis' },
+  { key: 'account-analysis-v2', icon: <FundOutlined />, label: 'Account Analysis V2', description: 'Redesigned account analysis', color: REDWOOD.warning, path: '/gl/account-analysis-v2' },
   { key: 'gl-balances', icon: <BarChartOutlined />, label: 'GL Balances', description: 'General ledger balances', color: REDWOOD.primary },
   { key: 'financial-intelligence', icon: <RobotOutlined />, label: 'Financial Intelligence', description: 'AI-powered GL analysis & chat', color: '#764ba2', path: '/gl/financial-intelligence' },
 ];

@@ -27,6 +27,7 @@ const ManageJournals          = lazy(() => import('./pages/gl/ManageJournals'));
 const EditJournal             = lazy(() => import('./pages/gl/EditJournal'));
 const CreateJournal           = lazy(() => import('./pages/gl/CreateJournal'));
 const AccountAnalysis         = lazy(() => import('./pages/gl/AccountAnalysis'));
+const AccountAnalysisV2       = lazy(() => import('./pages/gl/AccountAnalysisV2'));
 const ChartOfAccounts         = lazy(() => import('./pages/gl/ChartOfAccounts'));
 const ChartOfAccountsEdit     = lazy(() => import('./pages/gl/ChartOfAccountsEdit'));
 const ManageStructures        = lazy(() => import('./pages/gl/ManageStructures'));
@@ -166,6 +167,7 @@ function App() {
               <Route path="gl" element={<GLModule />} />
               <Route path="gl/manage-journals" element={<ManageJournals />} />
               <Route path="gl/account-analysis" element={<AccountAnalysis />} />
+              <Route path="gl/account-analysis-v2" element={<AccountAnalysisV2 />} />
               <Route path="gl/chart-of-accounts" element={<ChartOfAccounts />} />
               <Route path="gl/chart-of-accounts/:id/edit" element={<ChartOfAccountsEdit />} />
               <Route path="gl/manage-structures" element={<ManageStructures />} />
