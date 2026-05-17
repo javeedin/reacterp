@@ -68,9 +68,8 @@ const getGroupVal = (r: { concatenatedSegments: string; [k: string]: unknown }, 
 };
 
 const GROUP_BY_OPTIONS: { value: string; label: string; group?: string }[] = [
-  { value: '',                      label: 'Full Combination (Detail)'        },
+  { value: 'concatenatedSegments',  label: 'Full Combination', group: 'Combination' },
   { value: 'defaultPeriodName',     label: 'Period',           group: 'Field' },
-  { value: 'concatenatedSegments',  label: 'Account',          group: 'Field' },
   { value: 'batchName',             label: 'Batch',            group: 'Field' },
   { value: 'userJeSourceName',      label: 'Journal Source',   group: 'Field' },
   { value: 'userJeCategoryName',    label: 'Journal Category', group: 'Field' },
@@ -133,6 +132,23 @@ interface GroupedRow {
   accBalance: number;
   entBalance: number;
   isTotals?: boolean;
+}
+
+interface ComboBreakLine extends JournalLine {
+  _accRun: number;
+  _entRun: number;
+}
+
+interface ComboBreak {
+  combo: string;
+  description: string;
+  openingRow: JournalLine | null;
+  closingRow: JournalLine | null;
+  linesWithBal: ComboBreakLine[];
+  ptdAccDr: number;
+  ptdAccCr: number;
+  ptdEntDr: number;
+  ptdEntCr: number;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -1008,6 +1024,9 @@ const AAPanel: React.FC = () => {
   const [gridSearch, setGridSearch]           = useState('');
   const [functionalCcy, setFunctionalCcy]     = useState('AED');
   const [groupBy, setGroupBy]                 = useState('');
+  const [appliedGroupBy, setAppliedGroupBy]   = useState('');
+  const [comboBreaks, setComboBreaks]         = useState<ComboBreak[]>([]);
+  const [breakLoading, setBreakLoading]       = useState(false);
 
   // Balance state
   const [openingBal, setOpeningBal]           = useState<{ acc: number; ent: number } | null>(null);
@@ -1232,6 +1251,67 @@ const AAPanel: React.FC = () => {
     }
   }, []);
 
+  // ── Apply / Clear group ───────────────────────────────────────────────────────
+  const applyGroup = useCallback(async () => {
+    if (!groupBy) return;
+    setAppliedGroupBy(groupBy);
+    if (groupBy !== 'concatenatedSegments') {
+      setComboBreaks([]);
+      return;
+    }
+    setBreakLoading(true);
+    try {
+      const ptdLines = filteredData.filter(r => !r.isOpeningBalance && !r.isClosingBalance);
+      const map = new Map<string, JournalLine[]>();
+      ptdLines.forEach(r => {
+        const k = r.concatenatedSegments || '(blank)';
+        if (!map.has(k)) map.set(k, []);
+        map.get(k)!.push(r);
+      });
+      const sortedP = [...periods].sort((a, b) => parsePeriod(a) - parsePeriod(b));
+      const firstP = sortedP[0] || '';
+      const lastP  = sortedP[sortedP.length - 1] || '';
+      const co = segFilters['company'] || '';
+      const breaks: ComboBreak[] = await Promise.all(
+        Array.from(map.entries()).map(async ([combo, lines]) => {
+          const [openRow, closeRow] = await Promise.all([
+            firstP ? fetchBalanceRow(combo, co, firstP, true)  : Promise.resolve(null),
+            lastP  ? fetchBalanceRow(combo, co, lastP,  false) : Promise.resolve(null),
+          ]);
+          const openAcc = openRow ? openRow.accountedDr - openRow.accountedCr : 0;
+          const openEnt = openRow ? openRow.enteredDr   - openRow.enteredCr   : 0;
+          let accRun = openAcc, entRun = openEnt;
+          const linesWithBal: ComboBreakLine[] = lines.map(r => {
+            accRun += r.accountedDr - r.accountedCr;
+            entRun += r.enteredDr   - r.enteredCr;
+            return { ...r, _accRun: accRun, _entRun: entRun };
+          });
+          return {
+            combo,
+            description: lines[0]?.accountDescription || '',
+            openingRow: openRow,
+            closingRow: closeRow,
+            linesWithBal,
+            ptdAccDr: lines.reduce((s, r) => s + r.accountedDr, 0),
+            ptdAccCr: lines.reduce((s, r) => s + r.accountedCr, 0),
+            ptdEntDr: lines.reduce((s, r) => s + r.enteredDr,   0),
+            ptdEntCr: lines.reduce((s, r) => s + r.enteredCr,   0),
+          };
+        })
+      );
+      breaks.sort((a, b) => a.combo.localeCompare(b.combo));
+      setComboBreaks(breaks);
+    } finally {
+      setBreakLoading(false);
+    }
+  }, [groupBy, filteredData, periods, segFilters, fetchBalanceRow]);
+
+  const clearGroup = useCallback(() => {
+    setGroupBy('');
+    setAppliedGroupBy('');
+    setComboBreaks([]);
+  }, []);
+
   // ── Segment filter helpers ────────────────────────────────────────────────────
   const addSegFilter = (key: string, value: string, label?: string) => {
     setSegFilters(prev => { const n = { ...prev }; if (value) n[key] = value; else delete n[key]; return n; });
@@ -1428,6 +1508,71 @@ const AAPanel: React.FC = () => {
     ];
   }, [showEntered, functionalCcy, groupLabel]);
 
+
+  // ── Break line columns ────────────────────────────────────────────────────────
+  const breakLineCols = useMemo((): ColumnsType<ComboBreakLine | JournalLine> => {
+    const isSpec = (r: JournalLine) => !!(r.isOpeningBalance || r.isClosingBalance || r.isTotals);
+    const entCols: ColumnsType<ComboBreakLine | JournalLine> = showEntered ? [
+      { title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Ent Dr</span>,
+        dataIndex: 'enteredDr', key: 'bEntDr', width: 120, align: 'right',
+        render: (v: number, r: JournalLine) => isSpec(r) ? null : <DrCell v={v} /> },
+      { title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Ent Cr</span>,
+        dataIndex: 'enteredCr', key: 'bEntCr', width: 120, align: 'right',
+        render: (v: number, r: JournalLine) => isSpec(r) ? null : <CrCell v={v} /> },
+      { title: <span style={{ color: '#52c41a', fontWeight: 600 }}>Ent Bal</span>,
+        key: 'bEntBal', width: 130, align: 'right',
+        render: (_: any, r: any) => {
+          if (r.isOpeningBalance || r.isClosingBalance)
+            return <FmtBal v={r.enteredDr - r.enteredCr} size={10} bold />;
+          if (r.isTotals) return <FmtBal v={r._entBal ?? 0} size={10} bold />;
+          return <FmtBal v={r._entRun ?? 0} size={10} bold={false} />;
+        } },
+    ] : [];
+    return [
+      { title: 'Description', dataIndex: 'jeLineDescription', key: 'bDesc', ellipsis: true, width: 200,
+        render: (v: string, r: JournalLine) => {
+          if (r.isOpeningBalance) return <Text strong style={{ fontSize: 10, color: REDWOOD.warning }}>Opening Balance</Text>;
+          if (r.isClosingBalance) return <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>Closing Balance</Text>;
+          if (r.isTotals)        return <Text strong style={{ fontSize: 10 }}>PTD Total</Text>;
+          return <Tooltip title={v}><span style={{ fontSize: 10 }}>{v || '—'}</span></Tooltip>;
+        } },
+      { title: 'Period', dataIndex: 'defaultPeriodName', key: 'bPeriod', width: 80,
+        render: (v: string, r: JournalLine) => isSpec(r) ? null : <span style={{ fontSize: 10 }}>{v}</span> },
+      { title: 'Acctg Date', dataIndex: 'accountingDate', key: 'bDate', width: 100,
+        render: (v: string, r: JournalLine) => isSpec(r) ? null : <span style={{ fontSize: 10 }}>{(v || '').slice(0, 10)}</span> },
+      { title: 'Batch', dataIndex: 'batchName', key: 'bBatch', ellipsis: true, width: 160,
+        render: (v: string, r: JournalLine) => isSpec(r) ? null : <span style={{ fontSize: 10 }}>{v}</span> },
+      { title: 'Source', dataIndex: 'userJeSourceName', key: 'bSrc', width: 110,
+        render: (v: string, r: JournalLine) => isSpec(r) ? null : <span style={{ fontSize: 10 }}>{v}</span> },
+      { title: 'Category', dataIndex: 'userJeCategoryName', key: 'bCat', width: 120,
+        render: (v: string, r: JournalLine) => isSpec(r) ? null : <span style={{ fontSize: 10 }}>{v}</span> },
+      { title: 'Ccy', dataIndex: 'currencyCode', key: 'bCcy', width: 70,
+        render: (v: string, r: JournalLine) => isSpec(r) ? null : <Tag style={{ fontSize: 9 }}>{v}</Tag> },
+      ...entCols,
+      { title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Acc Dr ({functionalCcy})</span>,
+        dataIndex: 'accountedDr', key: 'bAccDr', width: 140, align: 'right',
+        render: (v: number, r: JournalLine) => isSpec(r) ? null : <DrCell v={v} /> },
+      { title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Acc Cr ({functionalCcy})</span>,
+        dataIndex: 'accountedCr', key: 'bAccCr', width: 140, align: 'right',
+        render: (v: number, r: JournalLine) => isSpec(r) ? null : <CrCell v={v} /> },
+      { title: <span style={{ color: REDWOOD.info, fontWeight: 600 }}>Acc Balance ({functionalCcy})</span>,
+        key: 'bAccBal', width: 150, align: 'right',
+        render: (_: any, r: any) => {
+          if (r.isOpeningBalance || r.isClosingBalance)
+            return <FmtBal v={r.accountedDr - r.accountedCr} size={10} bold />;
+          if (r.isTotals) return <FmtBal v={r._accBal ?? 0} size={10} bold />;
+          return <FmtBal v={r._accRun ?? 0} size={10} bold={false} />;
+        } },
+      { title: '', key: 'bDrill', width: 36, fixed: 'right' as const,
+        render: (_: any, r: JournalLine) =>
+          isSpec(r) ? null : (
+            <Tooltip title="View journal lines">
+              <Button type="text" size="small" onClick={() => openDrill(r)}
+                icon={<AuditOutlined style={{ color: REDWOOD.info, fontSize: 12 }} />} />
+            </Tooltip>
+          ) },
+    ];
+  }, [showEntered, functionalCcy, openDrill]);
 
   // ── Export ────────────────────────────────────────────────────────────────────
   const exportExcel = async () => {
@@ -1665,9 +1810,14 @@ const AAPanel: React.FC = () => {
             <Divider type="vertical" />
             <Space size={6}>
               <GroupOutlined style={{ color: REDWOOD.neutral600, fontSize: 13 }} />
-              <Select value={groupBy} style={{ width: 200 }} size="small"
-                onChange={v => setGroupBy(v ?? '')}>
-                <Option key="" value="">Full Combination (Detail)</Option>
+              <Select value={groupBy || undefined} allowClear placeholder="Group by…"
+                style={{ width: 190 }} size="small"
+                onChange={v => setGroupBy(v ?? '')}
+                onClear={() => setGroupBy('')}>
+                <Select.OptGroup label="Combination">
+                  {GROUP_BY_OPTIONS.filter(o => o.group === 'Combination').map(o =>
+                    <Option key={o.value} value={o.value}>{o.label}</Option>)}
+                </Select.OptGroup>
                 <Select.OptGroup label="Group by Field">
                   {GROUP_BY_OPTIONS.filter(o => o.group === 'Field').map(o =>
                     <Option key={o.value} value={o.value}>{o.label}</Option>)}
@@ -1677,6 +1827,15 @@ const AAPanel: React.FC = () => {
                     <Option key={o.value} value={o.value}>{o.label}</Option>)}
                 </Select.OptGroup>
               </Select>
+              <Button size="small" type="primary" ghost
+                disabled={!groupBy || !hasSearched}
+                onClick={applyGroup}
+                style={{ fontSize: 11, height: 24 }}>Apply Group</Button>
+              {appliedGroupBy && (
+                <Button size="small" danger ghost
+                  onClick={clearGroup}
+                  style={{ fontSize: 11, height: 24 }}>Clear Group</Button>
+              )}
             </Space>
           </Space>
           <Space>
@@ -1696,8 +1855,8 @@ const AAPanel: React.FC = () => {
       )}
 
       {/* Grid */}
-      <Spin spinning={loading}>
-        {hasSearched && groupBy === '' && (
+      <Spin spinning={loading || breakLoading}>
+        {hasSearched && !appliedGroupBy && (
           <Table<JournalLine>
             dataSource={tableData} columns={flatColumns} rowKey="key" size="small"
             scroll={{ x: 'max-content', y: 480 }}
@@ -1706,7 +1865,53 @@ const AAPanel: React.FC = () => {
             rowClassName={r => r.isTotals ? 'aa-totals-row' : r.isOpeningBalance ? 'aa-opening-row' : r.isClosingBalance ? 'aa-closing-row' : ''}
           />
         )}
-        {hasSearched && groupBy !== '' && (
+        {hasSearched && appliedGroupBy === 'concatenatedSegments' && !breakLoading && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {comboBreaks.map(brk => {
+              const ptdTotRow = {
+                key: `${brk.combo}-ptd`,
+                concatenatedSegments: brk.combo, accountDescription: '', jeLineDescription: 'PTD Total',
+                defaultPeriodName: '', accountingDate: '', batchName: '',
+                userJeSourceName: '', userJeCategoryName: '', currencyCode: '',
+                enteredDr: brk.ptdEntDr, enteredCr: brk.ptdEntCr,
+                accountedDr: brk.ptdAccDr, accountedCr: brk.ptdAccCr,
+                jeHeaderId: 0, isTotals: true,
+                _accBal: brk.linesWithBal.length > 0 ? brk.linesWithBal[brk.linesWithBal.length - 1]._accRun : 0,
+                _entBal: brk.linesWithBal.length > 0 ? brk.linesWithBal[brk.linesWithBal.length - 1]._entRun : 0,
+              } as JournalLine;
+              const brkData: (ComboBreakLine | JournalLine)[] = [
+                ...(brk.openingRow ? [brk.openingRow] : []),
+                ...brk.linesWithBal,
+                ptdTotRow,
+                ...(brk.closingRow ? [brk.closingRow] : []),
+              ];
+              return (
+                <div key={brk.combo}>
+                  <div style={{ background: REDWOOD.neutral100, borderLeft: `4px solid ${REDWOOD.info}`,
+                    padding: '6px 12px', marginBottom: 4, borderRadius: '4px 4px 0 0',
+                    display: 'flex', alignItems: 'baseline', gap: 12 }}>
+                    <Text strong style={{ fontSize: 12, color: REDWOOD.info, fontFamily: 'monospace' }}>{brk.combo}</Text>
+                    {brk.description && (
+                      <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{brk.description}</Text>
+                    )}
+                    <Text type="secondary" style={{ fontSize: 11, marginLeft: 'auto' }}>{brk.linesWithBal.length} line{brk.linesWithBal.length !== 1 ? 's' : ''}</Text>
+                  </div>
+                  <Table<ComboBreakLine | JournalLine>
+                    dataSource={brkData} columns={breakLineCols as any}
+                    rowKey={(r: any) => r.key || Math.random().toString()}
+                    size="small" pagination={false}
+                    scroll={{ x: 'max-content' }}
+                    className="aa-v2-grid"
+                    rowClassName={(r: any) =>
+                      r.isTotals ? 'aa-totals-row' : r.isOpeningBalance ? 'aa-opening-row' : r.isClosingBalance ? 'aa-closing-row' : ''
+                    }
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {hasSearched && appliedGroupBy && appliedGroupBy !== 'concatenatedSegments' && (
           <Table<GroupedRow>
             dataSource={groupedData} columns={groupColumns} rowKey="key" size="small"
             scroll={{ x: 'max-content', y: 480 }}
