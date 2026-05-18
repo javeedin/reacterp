@@ -2013,6 +2013,20 @@ const ManagePayments: React.FC = () => {
       render: (val: number) => val ? <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#888' }}>{val}</span> : null,
     },
     {
+      title: 'Fusion Sync',
+      dataIndex: 'isSynced',
+      key: 'isSynced',
+      width: 120,
+      render: (synced: boolean) => synced
+        ? <Tag color="purple" style={{ fontSize: 11 }}>Fusion Synced</Tag>
+        : <Tag color="default" style={{ fontSize: 11, color: '#888' }}>Local</Tag>,
+      filters: [
+        { text: 'Fusion Synced', value: true },
+        { text: 'Local', value: false },
+      ],
+      onFilter: (value, record) => record.isSynced === value,
+    },
+    {
       title: 'Actions',
       key: 'rowActions',
       width: 90,
