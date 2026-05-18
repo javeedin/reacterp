@@ -1321,7 +1321,21 @@ const AAPanel: React.FC = () => {
   const filteredData = useMemo(() => {
     if (!gridSearch.trim()) return dataRows;
     const q = gridSearch.toLowerCase();
-    return dataRows.filter(r => Object.values(r).some(v => String(v ?? '').toLowerCase().includes(q)));
+    return dataRows.filter(r =>
+      (r.concatenatedSegments  || '').toLowerCase().includes(q) ||
+      (r.accountDescription    || '').toLowerCase().includes(q) ||
+      (r.jeLineDescription     || '').toLowerCase().includes(q) ||
+      (r.defaultPeriodName     || '').toLowerCase().includes(q) ||
+      (r.accountingDate        || '').toLowerCase().includes(q) ||
+      (r.batchName             || '').toLowerCase().includes(q) ||
+      (r.userJeSourceName      || '').toLowerCase().includes(q) ||
+      (r.userJeCategoryName    || '').toLowerCase().includes(q) ||
+      (r.currencyCode          || '').toLowerCase().includes(q) ||
+      (r.approvalStatus        || '').toLowerCase().includes(q) ||
+      (r.segCompany            || '').toLowerCase().includes(q) ||
+      (r.segAccount            || '').toLowerCase().includes(q) ||
+      (r.segSubAcct            || '').toLowerCase().includes(q)
+    );
   }, [dataRows, gridSearch]);
 
   // ── Apply / Clear group ───────────────────────────────────────────────────────
