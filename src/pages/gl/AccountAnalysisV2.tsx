@@ -1331,7 +1331,6 @@ const AAPanel: React.FC = () => {
       (r.userJeSourceName      || '').toLowerCase().includes(q) ||
       (r.userJeCategoryName    || '').toLowerCase().includes(q) ||
       (r.currencyCode          || '').toLowerCase().includes(q) ||
-      (r.approvalStatus        || '').toLowerCase().includes(q) ||
       (r.segCompany            || '').toLowerCase().includes(q) ||
       (r.segAccount            || '').toLowerCase().includes(q) ||
       (r.segSubAcct            || '').toLowerCase().includes(q)
@@ -1584,10 +1583,6 @@ const AAPanel: React.FC = () => {
         render: (v: string, r: JournalLine) => isTot(r) ? null : <span style={{ fontSize: 10 }}>{v}</span> },
       { title: 'Category', dataIndex: 'userJeCategoryName', key: 'category', width: 120,
         render: (v: string, r: JournalLine) => isTot(r) ? null : <span style={{ fontSize: 10 }}>{v}</span> },
-      { title: 'Status', dataIndex: 'approvalStatus', key: 'status', width: 80,
-        render: (v: string, r: JournalLine) => isTot(r) || isSpecial(r) ? null : (
-          <Tag color={v === 'Posted' ? 'success' : v ? 'warning' : 'default'} style={{ fontSize: 9 }}>{v || '—'}</Tag>
-        ) },
       { title: 'Currency', dataIndex: 'currencyCode', key: 'currency', width: 80,
         render: (v: string, r: JournalLine) => isTot(r) ? null : <Tag style={{ fontSize: 9 }}>{v}</Tag> },
       ...entCols,
@@ -1687,10 +1682,6 @@ const AAPanel: React.FC = () => {
         render: (v: string, r: JournalLine) => isSpec(r) ? null : <span style={{ fontSize: 10 }}>{v}</span> },
       { title: 'Category', dataIndex: 'userJeCategoryName', key: 'bCat', width: 120,
         render: (v: string, r: JournalLine) => isSpec(r) ? null : <span style={{ fontSize: 10 }}>{v}</span> },
-      { title: 'Status', dataIndex: 'approvalStatus', key: 'bStatus', width: 80,
-        render: (v: string, r: JournalLine) => isSpec(r) ? null : (
-          <Tag color={v === 'Posted' ? 'success' : v ? 'warning' : 'default'} style={{ fontSize: 9 }}>{v || '—'}</Tag>
-        ) },
       { title: 'Ccy', dataIndex: 'currencyCode', key: 'bCcy', width: 70,
         render: (v: string, r: JournalLine) => isSpec(r) ? null : <Tag style={{ fontSize: 9 }}>{v}</Tag> },
       ...entCols,
@@ -2055,15 +2046,15 @@ const AAPanel: React.FC = () => {
     const balW   = showEntered ? 22 : 14;   // balance column (slightly wider)
 
     if (isComboBreak) {
-      // Fixed columns: Batch(26) Source(16) Status(13) Ccy(8) = 63
-      const fixedW   = 26 + 16 + 13 + 8;
+      // Fixed columns: Batch(26) Source(16) Ccy(8) = 50
+      const fixedW   = 26 + 16 + 8;
       const numCols  = showEntered ? 6 : 3;  // Ent Dr+Cr+Bal + Acc Dr+Cr+Bal  OR  Acc Dr+Cr+Bal
       const numTotal = numCols * numW + (balW - numW); // last col wider by (balW-numW)
       const lineDescW = usableW - fixedW - numTotal;
 
       const headers = showEntered
-        ? ['Line Description', 'Batch', 'Source', 'Status', 'Ccy', 'Ent Dr', 'Ent Cr', 'Ent Bal', `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`]
-        : ['Line Description', 'Batch', 'Source', 'Status', 'Ccy', `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`];
+        ? ['Line Description', 'Batch', 'Source', 'Ccy', 'Ent Dr', 'Ent Cr', 'Ent Bal', `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`]
+        : ['Line Description', 'Batch', 'Source', 'Ccy', `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`];
 
       let startY = 22;
       comboBreaks.forEach((brk, bi) => {
@@ -2076,7 +2067,7 @@ const AAPanel: React.FC = () => {
 
         const lastLine  = brk.linesWithBal[brk.linesWithBal.length - 1];
         const ptdTot: any = {
-          jeLineDescription: 'PTD Total', batchName: '', userJeSourceName: '', approvalStatus: '', currencyCode: '',
+          jeLineDescription: 'PTD Total', batchName: '', userJeSourceName: '', currencyCode: '',
           enteredDr: brk.ptdEntDr, enteredCr: brk.ptdEntCr,
           accountedDr: brk.ptdAccDr, accountedCr: brk.ptdAccCr,
           isTotals: true,
@@ -2096,7 +2087,7 @@ const AAPanel: React.FC = () => {
             : r.isClosingBalance ? 'Closing Balance'
             : r.isTotals ? 'PTD Total' : (r.jeLineDescription || '');
           const base = [lineLabel, special ? '' : (r.batchName||''), special ? '' : (r.userJeSourceName||''),
-                        special ? '' : (r.approvalStatus||''), special ? '' : (r.currencyCode||'')];
+                        special ? '' : (r.currencyCode||'')];
           const entCols = showEntered ? [fmtN(r.enteredDr||0), fmtN(r.enteredCr||0), fmtN(r._entRun??0)] : [];
           const accCols = [fmtN(r.accountedDr||0), fmtN(r.accountedCr||0), fmtN(r._accRun??0)];
           return [...base, ...entCols, ...accCols];
@@ -2105,9 +2096,9 @@ const AAPanel: React.FC = () => {
         const lastIdx = headers.length - 1;
         const colStyles: any = {
           0: { cellWidth: lineDescW, overflow: 'linebreak' },
-          1: { cellWidth: 26 }, 2: { cellWidth: 16 }, 3: { cellWidth: 13 }, 4: { cellWidth: 8 },
+          1: { cellWidth: 26 }, 2: { cellWidth: 16 }, 3: { cellWidth: 8 },
         };
-        for (let i = 5; i <= lastIdx; i++) {
+        for (let i = 4; i <= lastIdx; i++) {
           colStyles[i] = { halign: 'right', cellWidth: i === lastIdx ? balW : numW };
           if (i === lastIdx) colStyles[i].fontStyle = 'bold';
         }
@@ -2136,23 +2127,23 @@ const AAPanel: React.FC = () => {
       });
       const totRow: any = {
         concatenatedSegments: 'Total for Report',
-        jeLineDescription: '', batchName: '', userJeSourceName: '', approvalStatus: '', currencyCode: '',
+        jeLineDescription: '', batchName: '', userJeSourceName: '', currencyCode: '',
         enteredDr: gridTotals.entDr, enteredCr: gridTotals.entCr,
         accountedDr: gridTotals.accDr, accountedCr: gridTotals.accCr,
         isTotals: true, _accRun: accRun, _entRun: entRun,
       };
       const pdfRows = [...flatRows, totRow];
 
-      // Fixed columns: Account(32) LineDesc(auto) Batch(26) Source(16) Status(13) Ccy(8)
+      // Fixed columns: Account(32) LineDesc(auto) Batch(26) Source(16) Ccy(8)
       const acctW   = 32;
-      const fixedW  = acctW + 26 + 16 + 13 + 8;
+      const fixedW  = acctW + 26 + 16 + 8;
       const numCols = showEntered ? 6 : 3;
       const numTotal = numCols * numW + (balW - numW);
       const lineDescW = usableW - fixedW - numTotal;
 
       const headers = showEntered
-        ? ['Account', 'Line Description', 'Batch', 'Source', 'Status', 'Ccy', 'Ent Dr', 'Ent Cr', 'Ent Bal', `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`]
-        : ['Account', 'Line Description', 'Batch', 'Source', 'Status', 'Ccy', `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`];
+        ? ['Account', 'Line Description', 'Batch', 'Source', 'Ccy', 'Ent Dr', 'Ent Cr', 'Ent Bal', `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`]
+        : ['Account', 'Line Description', 'Batch', 'Source', 'Ccy', `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`];
 
       const body = pdfRows.map(r => {
         const special = r.isOpeningBalance || r.isClosingBalance || r.isTotals;
@@ -2161,8 +2152,7 @@ const AAPanel: React.FC = () => {
           : r.isClosingBalance ? 'Closing Balance'
           : r.concatenatedSegments || '';
         const base = [acctLabel, special ? '' : (r.jeLineDescription||''), special ? '' : (r.batchName||''),
-                      special ? '' : (r.userJeSourceName||''), special ? '' : (r.approvalStatus||''),
-                      special ? '' : (r.currencyCode||'')];
+                      special ? '' : (r.userJeSourceName||''), special ? '' : (r.currencyCode||'')];
         const entCols = showEntered ? [fmtN(r.enteredDr||0), fmtN(r.enteredCr||0), fmtN(r._entRun??0)] : [];
         const accCols = [fmtN(r.accountedDr||0), fmtN(r.accountedCr||0), fmtN(r._accRun??0)];
         return [...base, ...entCols, ...accCols];
@@ -2172,9 +2162,9 @@ const AAPanel: React.FC = () => {
       const colStyles: any = {
         0: { cellWidth: acctW },
         1: { cellWidth: lineDescW, overflow: 'linebreak' },
-        2: { cellWidth: 26 }, 3: { cellWidth: 16 }, 4: { cellWidth: 13 }, 5: { cellWidth: 8 },
+        2: { cellWidth: 26 }, 3: { cellWidth: 16 }, 4: { cellWidth: 8 },
       };
-      for (let i = 6; i <= lastIdx; i++) {
+      for (let i = 5; i <= lastIdx; i++) {
         colStyles[i] = { halign: 'right', cellWidth: i === lastIdx ? balW : numW };
         if (i === lastIdx) colStyles[i].fontStyle = 'bold';
       }
