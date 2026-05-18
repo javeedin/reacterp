@@ -379,7 +379,8 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
                 l_invoice_date := safe_to_date(rec.INVOICE_DATE);
                 l_unpaid_amt := rec.INVOICE_AMOUNT - rec.AMOUNT_PAID;
 
-                IF l_invoice_date IS NOT NULL AND l_unpaid_amt > 0 THEN
+                -- Include credit notes (l_unpaid_amt < 0): they reduce the aging bucket totals
+                IF l_invoice_date IS NOT NULL AND l_unpaid_amt <> 0 THEN
                     l_days_old := TRUNC(SYSDATE) - TRUNC(l_invoice_date);
 
                     IF l_days_old <= 0 THEN
@@ -476,9 +477,18 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
                     i.INVOICE_DATE,
                     NVL(i.INVOICE_AMOUNT, 0)                                              AS INVOICE_AMOUNT,
                     NVL(pay_sum.total_paid, 0) + NVL(prep_sum.total_applied, 0)           AS AMOUNT_PAID,
-                    GREATEST(0, NVL(i.INVOICE_AMOUNT, 0)
-                                - NVL(pay_sum.total_paid,    0)
-                                - NVL(prep_sum.total_applied, 0))                         AS BALANCE_DUE,
+                    -- Credit notes (invoice_amount < 0) retain their negative balance so open
+                    -- credits are visible; GREATEST(0) is only used for positive invoices.
+                    CASE
+                        WHEN NVL(i.INVOICE_AMOUNT, 0) < 0 THEN
+                            NVL(i.INVOICE_AMOUNT, 0)
+                            - NVL(pay_sum.total_paid,     0)
+                            - NVL(prep_sum.total_applied, 0)
+                        ELSE
+                            GREATEST(0, NVL(i.INVOICE_AMOUNT, 0)
+                                        - NVL(pay_sum.total_paid,    0)
+                                        - NVL(prep_sum.total_applied, 0))
+                    END                                                                    AS BALANCE_DUE,
                     i.INVOICE_CURRENCY,
                     i.INVOICE_TYPE,
                     SUBSTR(i.DESCRIPTION, 1, 4000)                                        AS DESCRIPTION,
@@ -955,7 +965,8 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
                 l_invoice_date := safe_to_date(rec.INVOICE_DATE);
                 l_unpaid_amt := rec.INVOICE_AMOUNT - rec.AMOUNT_PAID;
 
-                IF l_invoice_date IS NOT NULL AND l_unpaid_amt > 0 THEN
+                -- Include credit notes (l_unpaid_amt < 0): they reduce the aging bucket totals
+                IF l_invoice_date IS NOT NULL AND l_unpaid_amt <> 0 THEN
                     l_days_old := TRUNC(SYSDATE) - TRUNC(l_invoice_date);
 
                     IF l_days_old <= 0 THEN

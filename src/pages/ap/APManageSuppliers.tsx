@@ -390,14 +390,14 @@ const InvoicesTabContent: React.FC<InvoicesTabContentProps> = ({
     paid:      invoices.reduce((s, r) => s + (r.amountPaid      || 0), 0),
     balance:   invoices.reduce((s, r) => s + (r.amountRemaining || 0), 0),
     currency:  invoices[0]?.currency || 'AED',
-    paidCount:   invoices.filter(r => (r.amountRemaining || 0) <= 0).length,
-    unpaidCount: invoices.filter(r => (r.amountRemaining || 0) >  0).length,
+    paidCount:   invoices.filter(r => (r.amountRemaining || 0) === 0).length,
+    unpaidCount: invoices.filter(r => (r.amountRemaining || 0) !== 0).length,
   }), [invoices]);
 
   const filtered = React.useMemo(() => {
     let rows = invoices;
-    if (statusFilter === 'paid')   rows = rows.filter(r => (r.amountRemaining || 0) <= 0);
-    if (statusFilter === 'unpaid') rows = rows.filter(r => (r.amountRemaining || 0) >  0);
+    if (statusFilter === 'paid')   rows = rows.filter(r => (r.amountRemaining || 0) === 0);
+    if (statusFilter === 'unpaid') rows = rows.filter(r => (r.amountRemaining || 0) !== 0);
     if (search) {
       const q = search.toLowerCase();
       rows = rows.filter(r =>
@@ -429,8 +429,12 @@ const InvoicesTabContent: React.FC<InvoicesTabContentProps> = ({
       render: (amt: number, r: InvoiceRecord) => <Text style={{ color: REDWOOD.success, fontSize: 11 }}>{fmt(amt, r.currency)}</Text>
     },
     {
-      title: 'Balance', dataIndex: 'amountRemaining', key: 'amountRemaining', width: 120, align: 'right' as const,
-      render: (amt: number, r: InvoiceRecord) => <Text style={{ color: amt > 0 ? REDWOOD.error : REDWOOD.success, fontSize: 11 }}>{fmt(amt, r.currency)}</Text>
+      title: 'Balance', dataIndex: 'amountRemaining', key: 'amountRemaining', width: 140, align: 'right' as const,
+      render: (amt: number, r: InvoiceRecord) => (
+        amt < 0
+          ? <Text style={{ color: REDWOOD.warning, fontSize: 11 }}>{`(${fmt(Math.abs(amt), r.currency)}) `}<span style={{ fontSize: 9 }}>credit</span></Text>
+          : <Text style={{ color: amt > 0 ? REDWOOD.error : REDWOOD.success, fontSize: 11 }}>{fmt(amt, r.currency)}</Text>
+      )
     },
     {
       title: 'Status', dataIndex: 'invoiceStatus', key: 'invoiceStatus', width: 90,
@@ -2807,7 +2811,7 @@ const ManageSuppliers: React.FC = () => {
                   businessUnit: '',
                   validationStatus: editInvoice.invoiceStatus || 'Never validated',
                   approvalStatus: '',
-                  holdPaidStatus: editInvoice.amountRemaining <= 0 ? 'Paid' : 'Not paid',
+                  holdPaidStatus: editInvoice.amountRemaining === 0 ? 'Paid' : 'Not paid',
                   notes: editInvoice.description,
                   syncStatus: 'SYNCED',
                 }}

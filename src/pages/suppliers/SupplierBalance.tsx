@@ -307,9 +307,12 @@ const SupplierBalance: React.FC = () => {
       render: (v: number, r: InvoiceRecord) => <Text strong>{formatCurrency(v, r.currency)}</Text> },
     { title: 'Paid', dataIndex: 'amountPaid', key: 'amountPaid', width: 140, align: 'right',
       render: (v: number, r: InvoiceRecord) => <Text style={{ color: REDWOOD.success }}>{formatCurrency(v, r.currency)}</Text> },
-    { title: 'Balance', dataIndex: 'amountRemaining', key: 'amountRemaining', width: 140, align: 'right',
-      render: (v: number, r: InvoiceRecord) =>
-        <Text style={{ color: v > 0 ? REDWOOD.error : REDWOOD.success }}>{formatCurrency(v, r.currency)}</Text> },
+    { title: 'Balance / Open Credit', dataIndex: 'amountRemaining', key: 'amountRemaining', width: 160, align: 'right',
+      render: (v: number, r: InvoiceRecord) => (
+        v < 0
+          ? <Text style={{ color: REDWOOD.warning }}>{`(${formatCurrency(Math.abs(v), r.currency)}) `}<span style={{ fontSize: 10 }}>credit</span></Text>
+          : <Text style={{ color: v > 0 ? REDWOOD.error : REDWOOD.success }}>{formatCurrency(v, r.currency)}</Text>
+      ) },
     { title: 'Status', dataIndex: 'paidStatus', key: 'paidStatus', width: 110,
       render: (v: string) => <Tag color={v === 'Paid' ? 'green' : v === 'Partially Paid' ? 'orange' : 'default'}>{v || '-'}</Tag> },
     { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
@@ -341,7 +344,11 @@ const SupplierBalance: React.FC = () => {
     { title: 'Amount Applied', dataIndex: 'amountPaid', key: 'amountPaid', width: 140, align: 'right',
       render: (v: number) => <Text style={{ color: REDWOOD.success }}>{formatCurrency(v)}</Text> },
     { title: 'Remaining', dataIndex: 'amountRemaining', key: 'amountRemaining', width: 140, align: 'right',
-      render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.warning : REDWOOD.success }}>{formatCurrency(v)}</Text> },
+      render: (v: number) => (
+        v < 0
+          ? <Text style={{ color: REDWOOD.warning }}>{`(${formatCurrency(Math.abs(v))}) `}<span style={{ fontSize: 10 }}>credit</span></Text>
+          : <Text style={{ color: v > 0 ? REDWOOD.warning : REDWOOD.success }}>{formatCurrency(v)}</Text>
+      ) },
   ];
 
   // ── Supplier header ────────────────────────────────────────────────────────
