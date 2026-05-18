@@ -242,18 +242,17 @@ const ExternalTxnForm: React.FC<{
     }
   }, [watchedCurrency, form]);
 
-  // Fetch BMS rate when currency is foreign — auto-fills rate only on new records
-  useEffect(() => {
-    if (!watchedCurrency || watchedCurrency === 'AED') return;
+  // Fetch BMS rate and optionally auto-apply to form fields
+  const fetchAndApplyBmsRate = useCallback((currency: string, apply: boolean) => {
+    if (!currency || currency === 'AED') return;
     setBmsRateLoading(true);
     setBmsRate(null);
-    fetch(`${APEX_BASE}/currencies/bmsrate?source_cur=${watchedCurrency}&target_cur=AED`)
+    fetch(`${APEX_BASE}/currencies/bmsrate?source_cur=${currency}&target_cur=AED`)
       .then(r => r.json())
       .then(data => {
         if (data.status === 'ok') {
           setBmsRate({ rate: data.rate, inverseRate: data.inverseRate, rateType: data.rateType, rateDate: data.rateDate });
-          // Auto-fill only for new transactions (no existing rate loaded)
-          if (!isEdit && !initialValues?.bankConversionRate) {
+          if (apply) {
             form.setFieldsValue({ bankConversionRate: data.rate, bankConversionRateType: data.rateType || 'Corporate' });
             setInverseRateVal(data.inverseRate);
           }
@@ -261,6 +260,13 @@ const ExternalTxnForm: React.FC<{
       })
       .catch(() => {})
       .finally(() => setBmsRateLoading(false));
+  }, [form]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch BMS rate when currency is foreign — auto-fills rate only on new records
+  useEffect(() => {
+    if (!watchedCurrency || watchedCurrency === 'AED') return;
+    // Auto-apply only for new transactions (no existing rate loaded)
+    fetchAndApplyBmsRate(watchedCurrency, !isEdit && !initialValues?.bankConversionRate);
   }, [watchedCurrency]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync inverse rate display when watchedRate changes externally (e.g. on edit load)
@@ -1073,6 +1079,18 @@ const ExternalTxnForm: React.FC<{
                   <Select variant="borderless"
                     placeholder={isForeignCurrency ? 'Required' : 'Optional'}
                     allowClear disabled={isEdit || !bankSelected || saved}
+                    onChange={(val: string | undefined) => {
+                      if (val === 'Corporate') {
+                        // Re-fetch and apply BMS rate
+                        if (watchedCurrency && watchedCurrency !== 'AED') {
+                          fetchAndApplyBmsRate(watchedCurrency, true);
+                        }
+                      } else {
+                        // User / Spot / cleared — let user enter manually
+                        form.setFieldsValue({ bankConversionRate: undefined });
+                        setInverseRateVal(undefined);
+                      }
+                    }}
                   >
                     <Option value="Corporate">Corporate</Option>
                     <Option value="Spot">Spot</Option>
