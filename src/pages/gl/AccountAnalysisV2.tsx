@@ -73,7 +73,7 @@ const GROUP_BY_OPTIONS: { value: string; label: string; group?: string }[] = [
   { value: 'batchName',             label: 'Batch',            group: 'Field' },
   { value: 'userJeSourceName',      label: 'Journal Source',   group: 'Field' },
   { value: 'userJeCategoryName',    label: 'Journal Category', group: 'Field' },
-  { value: 'currencyCode',          label: 'Currency',         group: 'Field' },
+  { value: 'currencyCode',          label: 'Full Combination + Currency', group: 'Combination' },
   { value: 'segCompany',            label: 'Company',          group: 'Segment' },
   { value: 'segLob',                label: 'LOB',              group: 'Segment' },
   { value: 'segDept',               label: 'Department',       group: 'Segment' },
@@ -1277,17 +1277,20 @@ const AAPanel: React.FC = () => {
   const applyGroup = useCallback(async () => {
     if (!groupBy) return;
     setAppliedGroupBy(groupBy);
-    if (groupBy !== 'concatenatedSegments') {
+    if (groupBy !== 'concatenatedSegments' && groupBy !== 'currencyCode') {
       setComboBreaks([]);
       return;
     }
+    const byCurrency = groupBy === 'currencyCode';
     setBreakLoading(true);
     setTbApiUrls([]);
     try {
       const ptdLines = filteredData.filter(r => !r.isOpeningBalance && !r.isClosingBalance);
       const map = new Map<string, JournalLine[]>();
       ptdLines.forEach(r => {
-        const k = r.concatenatedSegments || '(blank)';
+        const k = byCurrency
+          ? `${r.concatenatedSegments || '(blank)'}||${r.currencyCode || 'AED'}`
+          : r.concatenatedSegments || '(blank)';
         if (!map.has(k)) map.set(k, []);
         map.get(k)!.push(r);
       });
@@ -1314,12 +1317,16 @@ const AAPanel: React.FC = () => {
           (data.items || []).forEach((i: any) => {
             const full = (i.account_combination || '').trim();
             if (!full) return;
+            const ccy = (i.currency_code || '').trim();
             m.set(full, i);
+            // Also index by combo||currency for currency-mode lookups
+            if (ccy) m.set(`${full}||${ccy}`, i);
             const parts = full.split('-');
             // Store every prefix length so any journal combo length will match
             for (let n = 4; n < parts.length; n++) {
               const k = parts.slice(0, n).join('-');
               if (!m.has(k)) m.set(k, i);
+              if (ccy && !m.has(`${k}||${ccy}`)) m.set(`${k}||${ccy}`, i);
             }
           });
           return m;
@@ -1357,10 +1364,12 @@ const AAPanel: React.FC = () => {
       };
 
       const breaks: ComboBreak[] = Array.from(map.entries()).map(([combo, lines]) => {
-        // Match using the journal's concatenatedSegments directly; the TB map stores
-        // every prefix length so this will hit even if TB has extra future segments.
-        const openRow  = buildBalRow(combo, openMap.get(combo)  || null, true,  firstP);
-        const closeRow = buildBalRow(combo, closeMap.get(combo) || null, false, lastP);
+        // For currency mode the key is "combo||ccy" — look up TB by that key first,
+        // then fall back to just combo so we still get the balance when the TB has no
+        // per-currency row (functional currency only).
+        const tbKey = byCurrency ? combo : combo;
+        const openRow  = buildBalRow(combo, openMap.get(tbKey)  || openMap.get(combo.split('||')[0])  || null, true,  firstP);
+        const closeRow = buildBalRow(combo, closeMap.get(tbKey) || closeMap.get(combo.split('||')[0]) || null, false, lastP);
         const openAcc = openRow ? openRow.accountedDr - openRow.accountedCr : 0;
         const openEnt = openRow ? openRow.enteredDr   - openRow.enteredCr   : 0;
         let accRun = openAcc, entRun = openEnt;
@@ -1641,8 +1650,8 @@ const AAPanel: React.FC = () => {
   const exportExcel = async () => {
     if (!filteredData.length) { message.warning('No data to export'); return; }
 
-    const isComboBreak = appliedGroupBy === 'concatenatedSegments';
-    const isGrouped    = !!(appliedGroupBy && appliedGroupBy !== 'concatenatedSegments');
+    const isComboBreak = appliedGroupBy === 'concatenatedSegments' || appliedGroupBy === 'currencyCode';
+    const isGrouped    = !!(appliedGroupBy && !isComboBreak);
 
     const wb = new ExcelJS.Workbook();
     wb.creator = 'ReactERP'; wb.created = new Date();
@@ -1677,7 +1686,7 @@ const AAPanel: React.FC = () => {
     // ── Title ──────────────────────────────────────────────────────────────────
     mergeFull(1);
     const titleSuffix = isComboBreak
-      ? ' — By Full Combination'
+      ? (appliedGroupBy === 'currencyCode' ? ' — By Full Combination + Currency' : ' — By Full Combination')
       : isGrouped ? ` — By ${GROUP_BY_OPTIONS.find(o => o.value === appliedGroupBy)?.label || appliedGroupBy}` : '';
     const tc = ws.getCell('A1');
     tc.value = `Account Analysis${titleSuffix}`;
@@ -2076,7 +2085,7 @@ const AAPanel: React.FC = () => {
             rowClassName={r => r.isTotals ? 'aa-totals-row' : r.isOpeningBalance ? 'aa-opening-row' : r.isClosingBalance ? 'aa-closing-row' : ''}
           />
         )}
-        {hasSearched && appliedGroupBy === 'concatenatedSegments' && !breakLoading && (
+        {hasSearched && (appliedGroupBy === 'concatenatedSegments' || appliedGroupBy === 'currencyCode') && !breakLoading && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {comboBreaks.map(brk => {
               const ptdTotRow = {
@@ -2101,7 +2110,14 @@ const AAPanel: React.FC = () => {
                   <div style={{ background: REDWOOD.neutral100, borderLeft: `4px solid ${REDWOOD.info}`,
                     padding: '6px 12px', marginBottom: 4, borderRadius: '4px 4px 0 0',
                     display: 'flex', alignItems: 'baseline', gap: 12 }}>
-                    <Text strong style={{ fontSize: 12, color: REDWOOD.info, fontFamily: 'monospace' }}>{brk.combo}</Text>
+                    <Text strong style={{ fontSize: 12, color: REDWOOD.info, fontFamily: 'monospace' }}>
+                      {appliedGroupBy === 'currencyCode' && brk.combo.includes('||')
+                        ? brk.combo.split('||')[0]
+                        : brk.combo}
+                    </Text>
+                    {appliedGroupBy === 'currencyCode' && brk.combo.includes('||') && (
+                      <Tag color="blue" style={{ fontSize: 11, fontWeight: 600 }}>{brk.combo.split('||')[1]}</Tag>
+                    )}
                     {brk.description && (
                       <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{brk.description}</Text>
                     )}
@@ -2122,7 +2138,7 @@ const AAPanel: React.FC = () => {
             })}
           </div>
         )}
-        {hasSearched && appliedGroupBy && appliedGroupBy !== 'concatenatedSegments' && (
+        {hasSearched && appliedGroupBy && appliedGroupBy !== 'concatenatedSegments' && appliedGroupBy !== 'currencyCode' && (
           <Table<GroupedRow>
             dataSource={groupedData} columns={groupColumns} rowKey="key" size="small"
             scroll={{ x: 'max-content', y: 480 }}
@@ -2230,7 +2246,7 @@ const AAPanel: React.FC = () => {
           </div>
         )}
         {/* TB balance calls shown only when combo-break group is applied */}
-        {appliedGroupBy === 'concatenatedSegments' && tbApiUrls.length > 0 && (
+        {(appliedGroupBy === 'concatenatedSegments' || appliedGroupBy === 'currencyCode') && tbApiUrls.length > 0 && (
           <>
             <Divider style={{ margin: '12px 0 8px' }} />
             <Text strong style={{ fontSize: 12 }}>Trial Balance (Opening / Closing Balance)</Text>
