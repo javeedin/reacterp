@@ -1098,21 +1098,36 @@ const ExternalTxnForm: React.FC<{
                 <Form.Item name="bankConversionRate"
                   rules={[{ required: isForeignCurrency, message: 'Required' }]}
                   extra={isForeignCurrency && (
-                    bmsRateLoading
-                      ? <Text type="secondary" style={{ fontSize: 10 }}>Fetching BMS rate…</Text>
-                      : bmsRate
-                        ? <Text
-                            style={{ fontSize: 10, color: REDWOOD.info, cursor: (!isEdit && !saved) ? 'pointer' : 'default' }}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      {bmsRateLoading
+                        ? <Text type="secondary" style={{ fontSize: 10 }}>Fetching BMS rate…</Text>
+                        : bmsRate
+                          ? <Text
+                              style={{ fontSize: 10, color: REDWOOD.info, cursor: (!isEdit && !saved) ? 'pointer' : 'default' }}
+                              onClick={() => {
+                                if (isEdit || saved) return;
+                                form.setFieldsValue({ bankConversionRate: bmsRate.rate, bankConversionRateType: 'Corporate' });
+                                setInverseRateVal(Math.round((1 / bmsRate.rate) * 1000000) / 1000000);
+                              }}
+                            >
+                              BMS rate: <strong>{bmsRate.rate}</strong> as of {bmsRate.date}
+                              {(!isEdit && !saved) && <span style={{ marginLeft: 4, color: REDWOOD.info }}>(click to apply)</span>}
+                            </Text>
+                          : null}
+                      {watchedCurrency && watchedCurrency !== 'AED' && (
+                        <Tooltip title={`${APEX_BASE}/currencies/bmsrate?source_cur=${watchedCurrency}&target_cur=AED`}>
+                          <Button
+                            type="text" size="small"
+                            icon={<ApiOutlined style={{ fontSize: 11, color: REDWOOD.info }} />}
+                            style={{ padding: '0 2px', height: 16, lineHeight: '16px' }}
                             onClick={() => {
-                              if (isEdit || saved) return;
-                              form.setFieldsValue({ bankConversionRate: bmsRate.rate, bankConversionRateType: 'Corporate' });
-                              setInverseRateVal(Math.round((1 / bmsRate.rate) * 1000000) / 1000000);
+                              const url = `${APEX_BASE}/currencies/bmsrate?source_cur=${watchedCurrency}&target_cur=AED`;
+                              navigator.clipboard.writeText(url).then(() => message.success('API URL copied'));
                             }}
-                          >
-                            BMS rate: <strong>{bmsRate.rate}</strong> as of {bmsRate.date}
-                            {(!isEdit && !saved) && <span style={{ marginLeft: 4, color: REDWOOD.info }}>(click to apply)</span>}
-                          </Text>
-                        : null
+                          />
+                        </Tooltip>
+                      )}
+                    </div>
                   )}
                 >
                   <InputNumber
