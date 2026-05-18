@@ -127,6 +127,7 @@ interface PivotDataRow {
   subAccount: string;
   analysis: string;
   intercompany: string;
+  currencyCode?: string;
   concatenatedSegments: string;
   [key: string]: string | number;
 }
@@ -286,6 +287,8 @@ const AccountAnalysis: React.FC = () => {
   // Pivot view options
   const [showDrCrColumns, setShowDrCrColumns] = useState(false);
   const [showEntered, setShowEntered] = useState(false);
+  // Per-currency opening balances keyed by `${account}||${currencyCode}`
+  const [currencyOpenings, setCurrencyOpenings] = useState<Map<string, { accountedDr: number; accountedCr: number }>>(new Map());
 
   // Segment filters for pivot
   const [segmentFilters, setSegmentFilters] = useState<SegmentFilter[]>([
@@ -296,6 +299,7 @@ const AccountAnalysis: React.FC = () => {
     { segment: 'subAccount', label: 'Sub Account', values: [], selected: null, isDropped: false },
     { segment: 'analysis', label: 'Analysis', values: [], selected: null, isDropped: false },
     { segment: 'intercompany', label: 'Intercompany', values: [], selected: null, isDropped: false },
+    { segment: 'currencyCode', label: 'Currency', values: [], selected: null, isDropped: false },
   ]);
 
   // Floating panel state
@@ -485,6 +489,44 @@ const AccountAnalysis: React.FC = () => {
       })
       .catch(() => {});
   }, []);
+
+  // Populate per-currency opening balances when currencyCode is a grouping dimension in the all-accounts pivot
+  useEffect(() => {
+    const currencyIsGrouped =
+      allAccountsPivotSegmentsBefore.includes('currencyCode') ||
+      allAccountsPivotSegmentsAfter.includes('currencyCode');
+
+    if (!currencyIsGrouped || searchData.length === 0) {
+      setCurrencyOpenings(new Map());
+      return;
+    }
+
+    // Collect unique (account, company) pairs
+    const uniquePairs = new Map<string, { account: string; company: string }>();
+    for (const row of searchData) {
+      const k = `${row.account}||${row.company}`;
+      if (!uniquePairs.has(k)) uniquePairs.set(k, { account: row.account, company: row.company });
+    }
+
+    // Use the earliest selected period (or first period in data) as the opening balance period
+    const earliestPeriod = selectedPeriods.length > 0 ? selectedPeriods[0] : (searchData[0]?.defaultPeriodName || '');
+
+    const fetch_ = async () => {
+      const newMap = new Map<string, { accountedDr: number; accountedCr: number }>();
+      await Promise.all(
+        Array.from(uniquePairs.values()).map(async ({ account, company }) => {
+          const byCurrency = await fetchOpeningByCurrency(account, company, earliestPeriod);
+          for (const [ccy, vals] of byCurrency) {
+            newMap.set(`${account}||${ccy}`, { accountedDr: vals.accountedDr, accountedCr: vals.accountedCr });
+          }
+        })
+      );
+      setCurrencyOpenings(newMap);
+    };
+
+    fetch_().catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchData, allAccountsPivotSegmentsBefore, allAccountsPivotSegmentsAfter]);
 
   // Fetch accounts list from APEX glaccountslist endpoint
   const fetchAccounts = useCallback(async () => {
@@ -849,6 +891,56 @@ const AccountAnalysis: React.FC = () => {
   // Kept as alias so existing call sites work
   const fetchOpeningBalance = async (account: string, company: string, period: string) =>
     (await fetchBalanceRows(account, company, period)).opening;
+
+  // Fetch opening balance broken down per currency for the all-accounts pivot
+  const fetchOpeningByCurrency = async (
+    account: string,
+    company: string,
+    period: string
+  ): Promise<Map<string, { accountedDr: number; accountedCr: number; enteredDr: number; enteredCr: number }>> => {
+    const result = new Map<string, { accountedDr: number; accountedCr: number; enteredDr: number; enteredCr: number }>();
+    try {
+      let tryPeriod = period;
+      let allItems: any[] = [];
+      for (let attempt = 0; attempt < 24; attempt++) {
+        const params = new URLSearchParams();
+        params.append('ledger_name', selectedLedger);
+        params.append('period_name', tryPeriod);
+        params.append('account', account);
+        if (company) params.append('company', company);
+        const url = `${API_BASE_URL}/rr-trialbalance/standard?${params.toString()}`;
+        const resp = await fetch(url);
+        if (resp.ok) {
+          const data = await resp.json();
+          allItems = (data.items || []).filter((i: any) => String(i.account) === String(account));
+        }
+        if (allItems.length > 0) break;
+        tryPeriod = getPreviousPeriod(tryPeriod);
+      }
+      for (const item of allItems) {
+        const ccy = item.currency_code || 'AED';
+        const accountType = item.account_type || '';
+        const isDebitNormal = accountType === 'A' || accountType === 'E';
+        const openAmt = Number(item.opening || 0);
+        const entOpenAmt = Number(item.entered_opening || 0);
+        const toDrCr = (amt: number) => ({
+          dr: isDebitNormal && amt > 0 ? amt : (!isDebitNormal && amt < 0 ? Math.abs(amt) : 0),
+          cr: !isDebitNormal && amt > 0 ? amt : (isDebitNormal && amt < 0 ? Math.abs(amt) : 0),
+        });
+        const acc = toDrCr(openAmt);
+        const ent = toDrCr(entOpenAmt);
+        if (!result.has(ccy)) {
+          result.set(ccy, { accountedDr: 0, accountedCr: 0, enteredDr: 0, enteredCr: 0 });
+        }
+        const r = result.get(ccy)!;
+        r.accountedDr += acc.dr;
+        r.accountedCr += acc.cr;
+        r.enteredDr += ent.dr;
+        r.enteredCr += ent.cr;
+      }
+    } catch { /* silent */ }
+    return result;
+  };
 
   // Fetch account data for drill-down
   const fetchAccountData = async (account: string, company: string, selectedPeriods: string[]): Promise<JournalLineSegment[]> => {
@@ -1342,6 +1434,7 @@ const AccountAnalysis: React.FC = () => {
           subAccount: row.subAccount,
           analysis: row.analysis,
           intercompany: row.intercompany,
+          currencyCode: row.currencyCode,
           concatenatedSegments: key,
         };
         pivotMap.set(key, pivotRow);
@@ -1417,6 +1510,7 @@ const AccountAnalysis: React.FC = () => {
           subAccount: row.subAccount,
           analysis: row.analysis,
           intercompany: row.intercompany,
+          currencyCode: row.currencyCode,
           concatenatedSegments: key,
         };
         pivotMap.set(key, pivotRow);
@@ -2687,6 +2781,9 @@ const AccountAnalysis: React.FC = () => {
   const renderAllAccountsPivotTab = () => {
     const allPivotData = generateAllAccountsPivotData();
     const totals = calculateTotals(searchData);
+    const currencyIsGrouped =
+      allAccountsPivotSegmentsBefore.includes('currencyCode') ||
+      allAccountsPivotSegmentsAfter.includes('currencyCode');
 
     // Dynamic columns for all accounts pivot
     const allAccountsPivotColumns: ColumnsType<PivotDataRow> = [
@@ -2766,6 +2863,20 @@ const AccountAnalysis: React.FC = () => {
           },
         ],
       })),
+      // Opening Balance column — only shown when currency is a grouping dimension
+      ...(currencyIsGrouped ? [{
+        title: 'Opening Bal',
+        key: 'openingBal',
+        width: 120,
+        align: 'right' as const,
+        render: (_: any, record: PivotDataRow) => {
+          const k = `${record.account}||${record.currencyCode}`;
+          const ob = currencyOpenings.get(k);
+          if (!ob) return <span style={{ color: '#bbb' }}>—</span>;
+          const bal = ob.accountedDr - ob.accountedCr;
+          return <span style={{ color: bal >= 0 ? REDWOOD.success : REDWOOD.primary }}>{formatNumber(bal)}</span>;
+        },
+      }] : []),
       // Total Balance column only
       {
         title: 'Total Balance',
