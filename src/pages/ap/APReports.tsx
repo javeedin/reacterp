@@ -519,79 +519,74 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
     };
   };
 
+  // Shared helper: fetch all outstanding invoices from the single aging-data endpoint
+  // (reads RR_AP_INVOICES_ALL directly — not gated by RR_SUPPLIER_MASTER, so suppliers
+  //  missing from the master still appear in the aging)
+  const fetchAgingInvoices = async (bu: string, supplierNum: string): Promise<any[]> => {
+    const p = new URLSearchParams();
+    if (bu)          p.set('P_BUSINESS_UNIT', bu);
+    if (supplierNum) p.set('supplier_number',  supplierNum);
+    const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/aging-data${p.toString() ? '?' + p : ''}`;
+    setApiUrls([url]);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = JSON.parse(await res.text() || '{}');
+    return Array.isArray(data) ? data : (data.items || []);
+  };
+
   const fetchAgingReport = async (bu: string, supplierNum: string, asAtDate: string) => {
     const asAt = asAtDate ? new Date(asAtDate) : new Date();
     asAt.setHours(0, 0, 0, 0);
 
-    const p = new URLSearchParams();
-    if (bu)          p.set('P_BUSINESS_UNIT', bu);
-    if (supplierNum) p.set('supplier_number', supplierNum);
-    const listUrl = `${APEX_DB_CONFIG.baseUrl}/suppliers${p.toString() ? '?' + p : ''}`;
-    const invoicePattern = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/{supplierNumber}?status=All`;
-    setApiUrls([listUrl, invoicePattern]);
+    const allInvoices = await fetchAgingInvoices(bu, supplierNum);
 
-    const listRes = await fetch(listUrl);
-    if (!listRes.ok) throw new Error(`HTTP ${listRes.status}`);
-    const listData = JSON.parse(await listRes.text() || '{}');
-    const suppliers: any[] = Array.isArray(listData) ? listData : (listData.items || []);
+    // Group invoices by supplier
+    const supplierMap = new Map<string, any>();
+    allInvoices.forEach((inv: any, i: number) => {
+      const sn    = inv.supplier_number || '';
+      const sName = inv.supplier_name   || sn;
+      const invDate = new Date(inv.invoice_date || '');
+      if (!sn || isNaN(invDate.getTime())) return;
 
-    const results = await Promise.allSettled(
-      suppliers.map(async (s: any) => {
-        const sn    = s.supplier_number || '';
-        const sName = s.supplier || sn;
-        if (!sn) return null;
-        // Use status=All so partially-paid invoices are included regardless of stored PAID_STATUS;
-        // client-side bal <= 0 check below handles excluding fully-paid invoices.
-        const r = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${encodeURIComponent(sn)}?status=All&limit=1000`);
-        if (!r.ok) return null;
-        const d = JSON.parse(await r.text() || '{}');
-        const invoices: any[] = Array.isArray(d) ? d : (d.items || d.invoices || []);
+      const invAmt = Number(inv.invoice_amount  || 0);
+      const paid   = Number(inv.amount_paid     || 0);
+      const bal    = Number(inv.amount_remaining ?? (invAmt - paid));
+      if (bal <= 0) return;
 
-        const row: any = {
+      const age  = Math.floor((asAt.getTime() - invDate.getTime()) / 86400000);
+      const bkts = agingBuckets(age, bal);
+
+      if (!supplierMap.has(sn)) {
+        supplierMap.set(sn, {
           key: sn, supplierNumber: sn, supplier: sName,
           invoiceAmount: 0, unpaidAmount: 0,
           months1: 0, months2: 0, months3: 0, over3months: 0, unallocated: 0,
           _invoices: [] as any[],
-        };
+        });
+      }
+      const row = supplierMap.get(sn)!;
+      row.invoiceAmount += invAmt;
+      row.unpaidAmount  += bal;
+      row.months1       += bkts.months1;
+      row.months2       += bkts.months2;
+      row.months3       += bkts.months3;
+      row.over3months   += bkts.over3months;
+      row.unallocated   += bkts.unallocated;
+      row._invoices.push({
+        key:           `${sn}-${i}`,
+        supplier:      sName,
+        invoiceNumber: inv.invoice_number || '',
+        invoiceDate:   (inv.invoice_date  || '').slice(0, 10),
+        dueDate:       (inv.due_date      || '').slice(0, 10),
+        invoiceAmount: invAmt,
+        amountPaid:    paid,
+        unpaidAmount:  bal,
+        ...bkts,
+      });
+    });
 
-        for (let i = 0; i < invoices.length; i++) {
-          const inv     = invoices[i];
-          const invDate = new Date(inv.invoice_date || inv.terms_date || '');
-          if (isNaN(invDate.getTime())) continue;
-          const invAmt = Number(inv.invoice_amount || 0);
-          const paid   = Number(inv.amount_paid || 0);
-          const bal    = Number(inv.amount_remaining ?? (invAmt - paid));
-          if (bal <= 0) continue;
-          const age  = Math.floor((asAt.getTime() - invDate.getTime()) / 86400000);
-          const bkts = agingBuckets(age, bal);
-
-          row.invoiceAmount += invAmt;
-          row.unpaidAmount  += bal;
-          row.months1       += bkts.months1;
-          row.months2       += bkts.months2;
-          row.months3       += bkts.months3;
-          row.over3months   += bkts.over3months;
-          row.unallocated   += bkts.unallocated;
-
-          row._invoices.push({
-            key:           `${sn}-${i}`,
-            supplier:      sName,
-            invoiceNumber: inv.invoice_number || inv.invoice_num || '',
-            invoiceDate:   (inv.invoice_date || '').slice(0, 10),
-            dueDate:       (inv.due_date || inv.terms_date || '').slice(0, 10),
-            invoiceAmount: invAmt,
-            amountPaid:    paid,
-            unpaidAmount:  bal,
-            ...bkts,
-          });
-        }
-        return row.unpaidAmount > 0 ? row : null;
-      })
-    );
-
-    return results
-      .filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled' && r.value !== null)
-      .map(r => r.value)
+    return [...supplierMap.values()]
+      .filter(r => r.unpaidAmount > 0)
       .sort((a, b) => b.unpaidAmount - a.unpaidAmount);
   };
 
@@ -599,35 +594,12 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
     const asAt = asAtDate ? new Date(asAtDate) : new Date();
     asAt.setHours(0, 0, 0, 0);
 
-    const p = new URLSearchParams();
-    if (bu)          p.set('P_BUSINESS_UNIT', bu);
-    if (supplierNum) p.set('supplier_number', supplierNum);
-    const listUrl = `${APEX_DB_CONFIG.baseUrl}/suppliers${p.toString() ? '?' + p : ''}`;
-    const invoicePattern = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/{supplierNumber}?status=All`;
-    setApiUrls([listUrl, invoicePattern]);
+    const allInvoices = await fetchAgingInvoices(bu, supplierNum);
 
-    const listRes = await fetch(listUrl);
-    if (!listRes.ok) throw new Error(`HTTP ${listRes.status}`);
-    const listData = JSON.parse(await listRes.text() || '{}');
-    const suppliers: any[] = Array.isArray(listData) ? listData : (listData.items || []);
-
-    const results = await Promise.allSettled(
-      suppliers.map(async (s: any) => {
-        const sn = s.supplier_number || '';
-        if (!sn) return [];
-        const r = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${encodeURIComponent(sn)}?status=All&limit=1000`);
-        if (!r.ok) return [];
-        const d = JSON.parse(await r.text() || '{}');
-        const invoices: any[] = Array.isArray(d) ? d : (d.items || d.invoices || []);
-        return invoices
-          .map((inv, i) => buildInvoiceAgingRow(inv, s.supplier || sn, asAt, i))
-          .filter(Boolean);
-      })
-    );
-
-    return results
-      .flatMap((r): any[] => r.status === 'fulfilled' ? r.value : [])
-      .sort((a, b) => b.unpaidAmount - a.unpaidAmount);
+    return allInvoices
+      .map((inv: any, i: number) => buildInvoiceAgingRow(inv, inv.supplier_name || inv.supplier_number || '', asAt, i))
+      .filter(Boolean)
+      .sort((a: any, b: any) => b.unpaidAmount - a.unpaidAmount);
   };
 
   const fetchPayablesLedgerRecon = async (bu: string, company: string, account: string, period: string) => {
