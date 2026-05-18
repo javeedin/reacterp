@@ -3584,30 +3584,21 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     <Layout style={{ minHeight: 'calc(100vh - 64px)', background: REDWOOD.neutral100 }}>
       <Content>
         {/* Header */}
-        <div style={{ padding: '14px 24px', background: REDWOOD.surface, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+        <div style={{ padding: '14px 24px', background: REDWOOD.surface, borderBottom: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Breadcrumb items={[
             { title: <Link to="/home"><HomeOutlined /> Home</Link> },
             { title: <Link to={modulePrefix}>{module === 'ap' ? 'Payables' : 'Cash Management'}</Link> },
             { title: 'Manage External Transactions' },
           ]} />
+          <Button icon={<PlusOutlined />} type="primary"
+            onClick={openCreateTab}
+            style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
+            Create Transaction
+          </Button>
         </div>
 
         <div style={{ padding: '0 24px 24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', padding: '14px 0 4px' }}>
-            <Space>
-              <Button icon={<DownloadOutlined />} onClick={exportToExcel} disabled={transactions.length === 0}>
-                Export Excel
-              </Button>
-              <Button icon={<FilePdfOutlined />} onClick={exportToPdf} disabled={transactions.length === 0}>
-                Export PDF
-              </Button>
-              <Button icon={<PlusOutlined />} type="primary"
-                onClick={openCreateTab}
-                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
-                Create Transaction
-              </Button>
-            </Space>
-          </div>
+          <div style={{ height: 12 }} />
 
           <Tabs
             type="card"
