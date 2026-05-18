@@ -616,14 +616,15 @@ const TrialBalance: React.FC = () => {
 
   // Fetch + generate ReERP Trial Balance for a period
   const fetchRrTrialBalance = useCallback(async (record: PeriodInfo) => {
-    const tabKey = `rr-${record.period_name_id}`;
+    const ledgerShort = record.ledger_name.split(/[\s_]+/)[0];
+    const tabKey = `rr-${ledgerShort}-${record.period_name_id}`;
 
     const existingTab = tabs.find(t => t.key === tabKey);
     if (existingTab) { setActiveTab(tabKey); return; }
 
     const newTab: TabData = {
       key: tabKey,
-      periodName: `ReERP: ${record.period_name_id}`,
+      periodName: `ReERP: ${record.period_name_id} · ${ledgerShort}`,
       ledgerName: record.ledger_name,
       tabType: 'reerp',
       data: [],
@@ -702,14 +703,15 @@ const TrialBalance: React.FC = () => {
 
   // Fetch ReERP Dynamic TB — calls /standard directly (no generate step)
   const fetchDynamicTB = useCallback(async (record: PeriodInfo) => {
-    const tabKey = `rr-dyn-${record.period_name_id}`;
+    const ledgerShort = record.ledger_name.split(/[\s_]+/)[0];
+    const tabKey = `rr-dyn-${ledgerShort}-${record.period_name_id}`;
 
     const existingTab = tabs.find(t => t.key === tabKey);
     if (existingTab) { setActiveTab(tabKey); return; }
 
     const newTab: TabData = {
       key: tabKey,
-      periodName: `Dynamic: ${record.period_name_id}`,
+      periodName: `Dynamic: ${record.period_name_id} · ${ledgerShort}`,
       ledgerName: record.ledger_name,
       tabType: 'reerp-dynamic',
       data: [],
@@ -764,13 +766,14 @@ const TrialBalance: React.FC = () => {
 
   // Fetch Dynamic YTD TB — same /standard endpoint, displayed in YTD columns
   const fetchDynamicYtdTB = useCallback(async (record: PeriodInfo) => {
-    const tabKey = `rr-ytd-${record.period_name_id}`;
+    const ledgerShort = record.ledger_name.split(/[\s_]+/)[0];
+    const tabKey = `rr-ytd-${ledgerShort}-${record.period_name_id}`;
     const existingTab = tabs.find(t => t.key === tabKey);
     if (existingTab) { setActiveTab(tabKey); return; }
 
     const newTab: TabData = {
       key: tabKey,
-      periodName: `YTD: ${record.period_name_id}`,
+      periodName: `YTD: ${record.period_name_id} · ${ledgerShort}`,
       ledgerName: record.ledger_name,
       tabType: 'reerp-ytd',
       data: [], rrData: [], rrGenerating: false, loading: true, error: null,
@@ -4882,9 +4885,10 @@ const TrialBalance: React.FC = () => {
               style={{ width: 160 }}
               value={reYearCompany ?? undefined}
               onChange={(v: string | undefined) => { setReYearCompany(v ?? null); setReYearRows([]); }}
-              options={[
-                ...([...new Set(tab.rrData.map(r => r.company).filter(Boolean))].sort().map(c => ({ label: c, value: c }))),
-              ]}
+              options={allCompanies.length > 0
+                ? allCompanies
+                : [...new Set(tab.rrData.map(r => r.company).filter(Boolean))].sort().map(c => ({ label: c, value: c }))
+              }
             />
           </Col>
           <Col>
@@ -5124,9 +5128,11 @@ const TrialBalance: React.FC = () => {
         ytd_entered_opening: 0, ytd_entered_debit: 0, ytd_entered_credit: 0, entered_closing: 0 }
     );
 
-    const allCompanies = [...new Set(tab.rrData.map(r => r.company).filter(Boolean))]
-      .sort()
-      .map(c => ({ value: c, label: c }));
+    // Use the outer allCompanies state (loaded from COA value set with descriptions);
+    // fall back to codes-only from tab data if the value set hasn't loaded yet.
+    const ytdCompanyOptions = allCompanies.length > 0
+      ? allCompanies
+      : [...new Set(tab.rrData.map(r => r.company).filter(Boolean))].sort().map(c => ({ value: c, label: c }));
 
     const columns = [
       {
@@ -5335,7 +5341,7 @@ const TrialBalance: React.FC = () => {
             <Select placeholder="All Companies" allowClear showSearch optionFilterProp="label" style={{ width: '100%' }}
               value={tab.selectedCompany}
               onChange={v => updateTabFilter(tab.key, 'selectedCompany', v ?? null)}
-              options={allCompanies.length > 0 ? allCompanies : tab.companies.map(c => ({ value: c, label: c }))}
+              options={ytdCompanyOptions}
             />
           </Col>
           <Col span={4}>
