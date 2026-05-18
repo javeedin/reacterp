@@ -3513,28 +3513,33 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                   </thead>
                   <tbody>
                     {liveLines
-                      ? lines.map((l: any, i: number) => (
+                      ? lines.map((l: any, i: number) => {
+                          const drColor  = REDWOOD.info;
+                          const crColor  = REDWOOD.success;
+                          const lineColor = l.lineType === 'DR' ? drColor : crColor;
+                          return (
                           <tr key={l.lineId ?? i} style={{ background: i % 2 === 1 ? REDWOOD.neutral100 : undefined }}>
                             <td style={tds({ textAlign: 'center', color: REDWOOD.neutral600 })}>{l.lineNumber ?? i + 1}</td>
-                            <td style={tds({ fontWeight: 700, color: l.lineType === 'DR' ? REDWOOD.info : REDWOOD.success })}>{l.lineType}</td>
+                            <td style={tds({ fontWeight: 700, color: lineColor })}>{l.lineType}</td>
                             <td style={tds()}>{l.accountCombination || '—'}</td>
                             <td style={tds({ fontSize: 10, color: REDWOOD.neutral600 })}>{l.accountDescription || '—'}</td>
                             <td style={tds({ fontSize: 10, color: REDWOOD.neutral600 })}>{l.accountingClass || '—'}</td>
                             <td style={tds({ fontSize: 10 })}>{l.description || '—'}</td>
-                            <td style={tds({ textAlign: 'right', color: REDWOOD.info, fontWeight: l.enteredDr ? 600 : 400 })}>
+                            <td style={tds({ textAlign: 'right', color: drColor, fontWeight: l.enteredDr ? 600 : 400 })}>
                               {l.enteredDr ? fmtAmount(l.enteredDr) : '—'}
                             </td>
-                            <td style={tds({ textAlign: 'right', color: REDWOOD.success, fontWeight: l.enteredCr ? 600 : 400 })}>
+                            <td style={tds({ textAlign: 'right', color: crColor, fontWeight: l.enteredCr ? 600 : 400 })}>
                               {l.enteredCr ? fmtAmount(l.enteredCr) : '—'}
                             </td>
-                            <td style={tds({ textAlign: 'right', color: REDWOOD.info, fontWeight: l.accountedDr ? 600 : 400 })}>
+                            <td style={tds({ textAlign: 'right', color: drColor, fontWeight: l.accountedDr ? 600 : 400 })}>
                               {l.accountedDr ? fmtAmount(l.accountedDr) : '—'}
                             </td>
-                            <td style={tds({ textAlign: 'right', color: REDWOOD.success, fontWeight: l.accountedCr ? 600 : 400 })}>
+                            <td style={tds({ textAlign: 'right', color: crColor, fontWeight: l.accountedCr ? 600 : 400 })}>
                               {l.accountedCr ? fmtAmount(l.accountedCr) : '—'}
                             </td>
                           </tr>
-                        ))
+                          );
+                        })
                       : (() => {
                           // Fallback: computed two-line entry
                           const drAcct = direction === 'DR' ? txn.assetAccountCombination : txn.offsetAccountCombination;
