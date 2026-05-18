@@ -201,12 +201,10 @@ const APModule: React.FC = () => {
     setDrillLoading(true);
     setDrillRows([]);
     setDrillSearch('');
-    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
     try {
       const params = new URLSearchParams();
       if (selectedBU) params.set('P_BUSINESS_UNIT', selectedBU);
-      params.set('P_AS_AT_DATE', today);
-      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers?${params}`;
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/outstanding-by-supplier${params.toString() ? '?' + params : ''}`;
       setDrillApiUrl(url);
       const res  = await fetch(url);
       const text = await res.text();
@@ -215,12 +213,12 @@ const APModule: React.FC = () => {
       if (data.error) throw new Error(data.error);
       const items: any[] = Array.isArray(data.items) ? data.items : (Array.isArray(data) ? data : []);
       setDrillRows(items.map((r: any) => ({
-        supplierNumber:     r.supplier_number                                                   || '',
-        supplierName:       r.supplier_name  || r.supplier                                     || '',
-        invoiceCount:       Number(r.invoice_count                                             ?? 0),
-        totalInvoiceAmount: Number(r.total_invoice_amount ?? r.invoice_amount                  ?? 0),
-        totalPaid:          Number(r.total_paid           ?? r.amount_paid                     ?? 0),
-        outstandingAmount:  Number(r.outstanding_balance  ?? r.outstanding_amount ?? r.balance ?? 0),
+        supplierNumber:     r.supplier_number     || '',
+        supplierName:       r.supplier_name       || '',
+        invoiceCount:       Number(r.invoice_count        ?? 0),
+        totalInvoiceAmount: Number(r.total_invoice_amount ?? 0),
+        totalPaid:          Number(r.total_paid           ?? 0),
+        outstandingAmount:  Number(r.outstanding_amount   ?? 0),
       })));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -253,25 +251,23 @@ const APModule: React.FC = () => {
   useEffect(() => {
     const fetchStats = async () => {
       setKpiLoading(true);
-      const today = new Date().toISOString().split('T')[0];
       try {
-        const buParam = selectedBU ? `&P_BUSINESS_UNIT=${encodeURIComponent(selectedBU)}` : '';
+        const buQs = selectedBU ? `?P_BUSINESS_UNIT=${encodeURIComponent(selectedBU)}` : '';
 
-        // 1. Invoice counts / overdue from stats endpoint
-        const statsUrl = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/stats${selectedBU ? `?P_BUSINESS_UNIT=${encodeURIComponent(selectedBU)}` : ''}`;
+        // 1. Invoice counts / overdue / last sync from stats endpoint
+        const statsUrl  = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/stats${buQs}`;
         const statsRes  = await fetch(statsUrl);
         const statsText = statsRes.ok ? await statsRes.text() : '';
         const statsData = statsText.trim() ? JSON.parse(statsText) : {};
         const d = Array.isArray(statsData?.items) && statsData.items.length > 0 ? statsData.items[0] : statsData;
 
-        // 2. Total outstanding from suppliers endpoint (as-at today)
-        const suppUrl  = `${APEX_DB_CONFIG.baseUrl}/suppliers?P_AS_AT_DATE=${today}${buParam}`;
-        const suppRes  = await fetch(suppUrl);
-        const suppText = suppRes.ok ? await suppRes.text() : '{}';
-        const suppData = suppText.trim() ? JSON.parse(suppText) : {};
-        const suppItems: any[] = Array.isArray(suppData.items) ? suppData.items : (Array.isArray(suppData) ? suppData : []);
-        const totalOutstanding = suppItems.reduce((sum, r) =>
-          sum + Number(r.outstanding_balance ?? r.outstanding_amount ?? r.balance ?? 0), 0);
+        // 2. Total outstanding — same endpoint as drill-down (sums outstanding_amount per supplier)
+        const outUrl   = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/outstanding-by-supplier${buQs}`;
+        const outRes   = await fetch(outUrl);
+        const outText  = outRes.ok ? await outRes.text() : '{}';
+        const outData  = outText.trim() ? JSON.parse(outText) : {};
+        const outItems: any[] = Array.isArray(outData.items) ? outData.items : (Array.isArray(outData) ? outData : []);
+        const totalOutstanding = outItems.reduce((sum, r) => sum + Number(r.outstanding_amount ?? 0), 0);
 
         setKpi({
           pendingInvoices:  Number(d.pending_invoices  ?? 0),

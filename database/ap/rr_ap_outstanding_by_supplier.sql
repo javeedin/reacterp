@@ -1,36 +1,59 @@
 -- =====================================================================
--- GET /ap/invoices/outstanding-by-supplier
--- Outstanding balance drilled down by supplier.
+-- GET reerp/ap/invoices/outstanding-by-supplier
+-- Outstanding balance broken down by supplier.
 -- Uses actual payment + prepayment application tables (not AMOUNT_PAID).
+-- DISCOUNT_TAKEN is included in total_paid so it reduces the outstanding.
 -- Excludes Prepayment-type invoices (they reduce other invoices via
 -- RR_AP_APPLIED_PREPAYMENTS and must not appear as outstanding themselves).
 -- Optional: P_BUSINESS_UNIT filter
+--
+-- Module : reerp   (base path /reerp/)
+-- Pattern: ap/invoices/outstanding-by-supplier
+-- Full URL: .../ords/bcldifc/reerp/ap/invoices/outstanding-by-supplier
 -- =====================================================================
 
+-- ---------------------------------------------------------------------------
+-- 1. Drop existing template (idempotent — handles both old 'ap' and 'reerp')
+-- ---------------------------------------------------------------------------
 BEGIN
-    ORDS.DELETE_TEMPLATE(p_module_name => 'ap', p_pattern => 'invoices/outstanding-by-supplier');
+    ORDS.DELETE_TEMPLATE(p_module_name => 'reerp', p_pattern => 'ap/invoices/outstanding-by-supplier');
+    COMMIT;
 EXCEPTION WHEN OTHERS THEN NULL;
 END;
 /
 
 BEGIN
+    ORDS.DELETE_TEMPLATE(p_module_name => 'ap', p_pattern => 'invoices/outstanding-by-supplier');
+    COMMIT;
+EXCEPTION WHEN OTHERS THEN NULL;
+END;
+/
+
+-- ---------------------------------------------------------------------------
+-- 2. Define template under reerp module
+-- ---------------------------------------------------------------------------
+BEGIN
     ORDS.DEFINE_TEMPLATE(
-        p_module_name => 'ap',
-        p_pattern     => 'invoices/outstanding-by-supplier',
+        p_module_name => 'reerp',
+        p_pattern     => 'ap/invoices/outstanding-by-supplier',
         p_comments    => 'AP outstanding balance broken down by supplier'
     );
     COMMIT;
 END;
 /
 
+-- ---------------------------------------------------------------------------
+-- 3. GET handler
+-- ---------------------------------------------------------------------------
 BEGIN
     ORDS.DEFINE_HANDLER(
-        p_module_name => 'ap',
-        p_pattern     => 'invoices/outstanding-by-supplier',
-        p_method      => 'GET',
-        p_source_type => 'plsql/block',
-        p_comments    => 'Returns one row per supplier: invoice count, total invoiced, total paid, outstanding (AED)',
-        p_source      => q'[
+        p_module_name    => 'reerp',
+        p_pattern        => 'ap/invoices/outstanding-by-supplier',
+        p_method         => 'GET',
+        p_source_type    => 'plsql/block',
+        p_items_per_page => 0,
+        p_comments       => 'Returns one row per supplier: invoice count, total invoiced, total paid (incl. discount), outstanding',
+        p_source         => q'[
 DECLARE
     l_rows   CLOB;
     l_first  BOOLEAN := TRUE;
@@ -61,41 +84,40 @@ BEGIN
     FOR rec IN (
         SELECT
             i.SUPPLIER_NUMBER,
-            NVL(sm.SUPPLIER, i.SUPPLIER_NUMBER)                                  AS SUPPLIER_NAME,
-            COUNT(i.INVOICE_ID)                                                  AS INVOICE_COUNT,
-            SUM(NVL(i.INVOICE_AMOUNT, 0))                                        AS TOTAL_INVOICE_AMOUNT,
-            SUM(NVL(pay_sum.total_paid,     0)
-              + NVL(prep_sum.total_applied, 0))                                  AS TOTAL_PAID,
+            NVL(sm.SUPPLIER, i.SUPPLIER_NUMBER)                          AS SUPPLIER_NAME,
+            COUNT(i.INVOICE_ID)                                          AS INVOICE_COUNT,
+            SUM(NVL(i.INVOICE_AMOUNT, 0))                                AS TOTAL_INVOICE_AMOUNT,
+            SUM(  NVL(pay_sum.total_paid,     0)
+                + NVL(prep_sum.total_applied, 0))                        AS TOTAL_PAID,
             SUM(GREATEST(0,
                     NVL(i.INVOICE_AMOUNT, 0)
                   - NVL(pay_sum.total_paid,     0)
-                  - NVL(prep_sum.total_applied, 0)))                             AS OUTSTANDING_AMOUNT
+                  - NVL(prep_sum.total_applied, 0)))                     AS OUTSTANDING_AMOUNT
         FROM RR_AP_INVOICES_ALL i
         LEFT JOIN RR_SUPPLIER_MASTER sm
                ON sm.SUPPLIER_NUMBER = i.SUPPLIER_NUMBER
-        -- actual cash payments per invoice (exclude voided)
+        -- cash payments per invoice: amount paid + discount taken (both reduce liability)
         LEFT JOIN (
             SELECT ri.INVOICE_ID,
-                   SUM(NVL(ri.AMOUNT_PAID_INVOICE_CURRENCY, 0) + NVL(ri.DISCOUNT_TAKEN, 0)) AS total_paid
+                   SUM(  NVL(ri.AMOUNT_PAID_INVOICE_CURRENCY, 0)
+                        + NVL(ri.DISCOUNT_TAKEN, 0))                     AS total_paid
             FROM   RR_AP_PAYMENTS_RELATED_INVOICES ri
-            JOIN   RR_AP_PAYMENTS_ALL              p ON p.CHECK_ID = ri.CHECK_ID
-            WHERE  NVL(p.PAYMENT_STATUS,           'Active') != 'Voided'
-            AND    NVL(ri.INVOICE_PAYMENT_STATUS,  'Active') != 'Voided'
+            JOIN   RR_AP_PAYMENTS_ALL              p  ON p.CHECK_ID = ri.CHECK_ID
+            WHERE  NVL(p.PAYMENT_STATUS,          'X') != 'Voided'
+            AND    NVL(ri.INVOICE_PAYMENT_STATUS, 'X') != 'Voided'
             GROUP BY ri.INVOICE_ID
         ) pay_sum  ON pay_sum.INVOICE_ID  = i.INVOICE_ID
-        -- prepayment applications per invoice (exclude cancelled)
+        -- prepayment applications per invoice
         LEFT JOIN (
             SELECT ap.INVOICE_ID,
-                   SUM(ap.APPLIED_AMOUNT) AS total_applied
+                   SUM(NVL(ap.APPLIED_AMOUNT, 0))                        AS total_applied
             FROM   RR_AP_APPLIED_PREPAYMENTS ap
             WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
             GROUP BY ap.INVOICE_ID
         ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
-        WHERE NVL(i.CANCELED_FLAG,  'N') != 'Y'
-        -- exclude prepayment-type invoices: they are advances already paid to supplier
-        -- and their balance is tracked separately via RR_AP_APPLIED_PREPAYMENTS
-        AND   NVL(i.INVOICE_TYPE, 'Standard') != 'Prepayment'
-        AND   NVL(i.PAID_STATUS,  'Unpaid')   NOT IN ('Paid', 'Cancelled')
+        WHERE NVL(i.CANCELED_FLAG,  'N')        != 'Y'
+        AND   NVL(i.INVOICE_TYPE,   'Standard') != 'Prepayment'
+        AND   NVL(i.PAID_STATUS,    'Unpaid')   NOT IN ('Paid', 'Cancelled')
         AND   (:P_BUSINESS_UNIT IS NULL OR i.BUSINESS_UNIT = :P_BUSINESS_UNIT)
         GROUP BY i.SUPPLIER_NUMBER,
                  NVL(sm.SUPPLIER, i.SUPPLIER_NUMBER)
@@ -123,14 +145,12 @@ BEGIN
 
     DBMS_LOB.APPEND(l_rows, TO_CLOB(']'));
 
-    -- Output in 32 KB chunks — HTP.PRN accepts VARCHAR2 only (max 32767)
-    -- a direct HTP.PRN(CLOB) silently truncates / raises ORA-06502 for large results
     OWA_UTIL.MIME_HEADER('application/json', TRUE);
     HTP.PRN('{"items":');
     l_len    := NVL(DBMS_LOB.GETLENGTH(l_rows), 0);
     l_offset := 1;
     WHILE l_offset <= l_len LOOP
-        HTP.prn(DBMS_LOB.SUBSTR(l_rows, l_chunk, l_offset));
+        HTP.PRN(DBMS_LOB.SUBSTR(l_rows, l_chunk, l_offset));
         l_offset := l_offset + l_chunk;
     END LOOP;
     HTP.PRN('}');
@@ -144,3 +164,14 @@ END;
     COMMIT;
 END;
 /
+
+-- ---------------------------------------------------------------------------
+-- 4. Verify
+-- ---------------------------------------------------------------------------
+SELECT t.uri_template, h.method, SUBSTR(h.source, 1, 80) src
+FROM   user_ords_modules   m
+JOIN   user_ords_templates t ON m.id  = t.module_id
+JOIN   user_ords_handlers  h ON t.id  = h.template_id
+WHERE  m.name         = 'reerp'
+AND    t.uri_template = 'ap/invoices/outstanding-by-supplier'
+ORDER  BY h.method;
