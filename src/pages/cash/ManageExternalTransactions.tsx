@@ -219,16 +219,18 @@ const statusLabel = (s: string) => {
 };
 
 interface BankAcctProgressRow {
-  extTxnId:    number;
-  txnDate:     string;
-  periodName:  string;
-  amount:      number;
-  currency:    string;
-  drAccount:   string;
-  crAccount:   string;
-  bu:          string;
-  status:      'pending' | 'running' | 'success' | 'error' | 'skipped';
-  message?:    string;
+  extTxnId:      number;
+  txnDate:       string;
+  periodName:    string;
+  amount:        number;
+  currency:      string;
+  drAccount:     string;
+  drAccountDesc: string;
+  crAccount:     string;
+  crAccountDesc: string;
+  bu:            string;
+  status:        'pending' | 'running' | 'success' | 'error' | 'skipped';
+  message?:      string;
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -2593,6 +2595,8 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     if (noAccounts.length > 0) {
       message.warning(`${noAccounts.length} row(s) have missing cash/offset account — they will be skipped.`);
     }
+    const acctDesc = (code: string) =>
+      distCombinations.find(c => c.combinationName === code)?.description ?? '';
     const rows: BankAcctProgressRow[] = selected.map(t => {
       const missingAccounts = !t.assetAccountCombination || !t.offsetAccountCombination;
       const alreadyAccounted = t.accountingFlag === 'Y';
@@ -2604,16 +2608,18 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       const drAccount = direction === 'DR' ? t.assetAccountCombination : t.offsetAccountCombination;
       const crAccount = direction === 'DR' ? t.offsetAccountCombination : t.assetAccountCombination;
       return {
-        extTxnId:   t.externalTransactionId,
-        txnDate:    date,
-        periodName: derivePeriodName(new Date(date)),
-        amount:     absAmount,
-        currency:   t.currencyCode || 'AED',
+        extTxnId:      t.externalTransactionId,
+        txnDate:       date,
+        periodName:    derivePeriodName(new Date(date)),
+        amount:        absAmount,
+        currency:      t.currencyCode || 'AED',
         drAccount,
+        drAccountDesc: acctDesc(drAccount),
         crAccount,
-        bu:         t.businessUnitName || '',
-        status:     alreadyAccounted ? 'skipped' : missingAccounts ? 'error' : 'pending',
-        message:    alreadyAccounted ? 'Already accounted — skipped' : missingAccounts ? 'Missing asset/offset account' : undefined,
+        crAccountDesc: acctDesc(crAccount),
+        bu:            t.businessUnitName || '',
+        status:        alreadyAccounted ? 'skipped' : missingAccounts ? 'error' : 'pending',
+        message:       alreadyAccounted ? 'Already accounted — skipped' : missingAccounts ? 'Missing asset/offset account' : undefined,
       };
     });
     setAcctProgress(rows);
@@ -2805,6 +2811,8 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       message.warning('Some transactions are missing cash/offset accounts — cannot create accounting.');
       return;
     }
+    const acctDesc = (code: string) =>
+      distCombinations.find(c => c.combinationName === code)?.description ?? '';
     const rows: BankAcctProgressRow[] = txnArray.map(txn => {
       const date = txn.transactionDate || txn.valueDate || dayjs().format('YYYY-MM-DD');
       const absAmount = Math.abs(txn.amount ?? 0);
@@ -2812,15 +2820,17 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       const drAccount = direction === 'DR' ? txn.assetAccountCombination : txn.offsetAccountCombination;
       const crAccount = direction === 'DR' ? txn.offsetAccountCombination : txn.assetAccountCombination;
       return {
-        extTxnId:   txn.externalTransactionId,
-        txnDate:    date,
-        periodName: derivePeriodName(new Date(date)),
-        amount:     absAmount,
-        currency:   txn.currencyCode || 'AED',
+        extTxnId:      txn.externalTransactionId,
+        txnDate:       date,
+        periodName:    derivePeriodName(new Date(date)),
+        amount:        absAmount,
+        currency:      txn.currencyCode || 'AED',
         drAccount,
+        drAccountDesc: acctDesc(drAccount),
         crAccount,
-        bu:         txn.businessUnitName || '',
-        status:     'pending' as const,
+        crAccountDesc: acctDesc(crAccount),
+        bu:            txn.businessUnitName || '',
+        status:        'pending' as const,
       };
     });
     setSingleAcctProgress(rows);
@@ -3697,9 +3707,19 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
               { title: 'Amount', dataIndex: 'amount', width: 110, align: 'right' as const,
                 render: (v, r) => <Text style={{ fontSize: 12, fontWeight: 600 }}>{fmtAmount(v, r.currency)}</Text> },
               { title: 'DR Account', dataIndex: 'drAccount',
-                render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: '#c74634' }}>{v || '—'}</Text> },
+                render: (v, r) => (
+                  <div>
+                    <Text style={{ fontSize: 11, fontFamily: 'monospace', color: '#c74634' }}>{v || '—'}</Text>
+                    {r.drAccountDesc && <div style={{ fontSize: 10, color: REDWOOD.neutral600, marginTop: 1 }}>{r.drAccountDesc}</div>}
+                  </div>
+                )},
               { title: 'CR Account', dataIndex: 'crAccount',
-                render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: '#1d7b4d' }}>{v || '—'}</Text> },
+                render: (v, r) => (
+                  <div>
+                    <Text style={{ fontSize: 11, fontFamily: 'monospace', color: '#1d7b4d' }}>{v || '—'}</Text>
+                    {r.crAccountDesc && <div style={{ fontSize: 10, color: REDWOOD.neutral600, marginTop: 1 }}>{r.crAccountDesc}</div>}
+                  </div>
+                )},
               { title: 'Status', dataIndex: 'status', width: 140,
                 render: (v, r) => {
                   if (v === 'pending') return <Tag color="default" style={{ fontSize: 11 }}>Pending</Tag>;
@@ -3759,9 +3779,19 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
               { title: 'Amount', dataIndex: 'amount', width: 110, align: 'right' as const,
                 render: (v, r) => <Text style={{ fontSize: 12, fontWeight: 600 }}>{fmtAmount(v, r.currency)}</Text> },
               { title: 'DR Account', dataIndex: 'drAccount',
-                render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.info }}>{v || '—'}</Text> },
+                render: (v, r) => (
+                  <div>
+                    <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.info }}>{v || '—'}</Text>
+                    {r.drAccountDesc && <div style={{ fontSize: 10, color: REDWOOD.neutral600, marginTop: 1 }}>{r.drAccountDesc}</div>}
+                  </div>
+                )},
               { title: 'CR Account', dataIndex: 'crAccount',
-                render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.success }}>{v || '—'}</Text> },
+                render: (v, r) => (
+                  <div>
+                    <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.success }}>{v || '—'}</Text>
+                    {r.crAccountDesc && <div style={{ fontSize: 10, color: REDWOOD.neutral600, marginTop: 1 }}>{r.crAccountDesc}</div>}
+                  </div>
+                )},
               { title: 'Status', dataIndex: 'status', width: 140,
                 render: (v, r) => {
                   if (v === 'pending') return <Tag color="default" style={{ fontSize: 11 }}>Pending</Tag>;
