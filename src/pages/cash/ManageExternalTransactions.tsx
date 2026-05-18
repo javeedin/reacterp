@@ -225,9 +225,9 @@ interface BankAcctProgressRow {
   amount:        number;
   currency:      string;
   drAccount:     string;
-  drAccountDesc: string;
   crAccount:     string;
-  crAccountDesc: string;
+  drAccountDesc?: string;
+  crAccountDesc?: string;
   bu:            string;
   status:        'pending' | 'running' | 'success' | 'error' | 'skipped';
   message?:      string;
@@ -2593,7 +2593,16 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   };
 
   // ── Create Accounting ─────────────────────────────────────────────────────
-  const openCreateAccountingModal = () => {
+  const fetchAccountDesc = async (code: string): Promise<string> => {
+    if (!code) return '';
+    try {
+      const r = await validateAccountCode(code);
+      const seg4 = Object.values(r.segmentDetails)[3];
+      return (seg4 as any)?.description || '';
+    } catch { return ''; }
+  };
+
+  const openCreateAccountingModal = async () => {
     const selected = transactions.filter(t => selectedRowKeys.includes(t.externalTransactionId));
     const noAccounts = selected.filter(t => !t.assetAccountCombination || !t.offsetAccountCombination);
     if (noAccounts.length > 0) {
@@ -2629,6 +2638,16 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     setAcctProgress(rows);
     setAcctDone(false);
     setAcctModalOpen(true);
+    // Fetch descriptions asynchronously and patch rows
+    rows.forEach(async (row) => {
+      const [drDesc, crDesc] = await Promise.all([
+        fetchAccountDesc(row.drAccount),
+        fetchAccountDesc(row.crAccount),
+      ]);
+      setAcctProgress(prev => prev.map(r =>
+        r.extTxnId === row.extTxnId ? { ...r, drAccountDesc: drDesc, crAccountDesc: crDesc } : r
+      ));
+    });
   };
 
   const runCreateAccounting = async () => {
@@ -2808,7 +2827,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   };
 
   // ── Single-row Create Accounting ──────────────────────────────────────────
-  const openSingleAcctModal = (txnOrTxns: ExternalTxnRecord | ExternalTxnRecord[]) => {
+  const openSingleAcctModal = async (txnOrTxns: ExternalTxnRecord | ExternalTxnRecord[]) => {
     const txnArray = Array.isArray(txnOrTxns) ? txnOrTxns : [txnOrTxns];
     const missing = txnArray.filter(t => !t.assetAccountCombination || !t.offsetAccountCombination);
     if (missing.length > 0) {
@@ -2841,6 +2860,16 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     setSingleAcctDone(false);
     setSingleAcctTxnRecords(txnArray);
     setSingleAcctModalOpen(true);
+    // Fetch descriptions asynchronously and patch rows
+    rows.forEach(async (row) => {
+      const [drDesc, crDesc] = await Promise.all([
+        fetchAccountDesc(row.drAccount),
+        fetchAccountDesc(row.crAccount),
+      ]);
+      setSingleAcctProgress(prev => prev.map(r =>
+        r.extTxnId === row.extTxnId ? { ...r, drAccountDesc: drDesc, crAccountDesc: crDesc } : r
+      ));
+    });
   };
 
   const runSingleAccounting = async () => {
