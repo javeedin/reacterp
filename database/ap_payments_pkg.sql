@@ -817,30 +817,32 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
 
     -- Get payments with filters
     FUNCTION get_payments(
-        p_payment_number    IN VARCHAR2 DEFAULT NULL,
-        p_payment_status    IN VARCHAR2 DEFAULT NULL,
-        p_payee             IN VARCHAR2 DEFAULT NULL,
-        p_supplier_number   IN VARCHAR2 DEFAULT NULL,
-        p_business_unit     IN VARCHAR2 DEFAULT NULL,
-        p_date_from         IN DATE DEFAULT NULL,
-        p_date_to           IN DATE DEFAULT NULL,
-        p_limit             IN NUMBER DEFAULT 100,
-        p_offset            IN NUMBER DEFAULT 0
-    ) RETURN CLOB IS
-        v_result CLOB;
-        v_count NUMBER;
-    BEGIN
-        -- Get total count
-        SELECT COUNT(*)
-        INTO v_count
-        FROM RR_AP_PAYMENTS_ALL
-        WHERE (p_payment_number IS NULL OR PAYMENT_NUMBER = p_payment_number)
-          AND (p_payment_status IS NULL OR PAYMENT_STATUS = p_payment_status)
-          AND (p_payee IS NULL OR UPPER(PAYEE) LIKE '%' || UPPER(p_payee) || '%')
-          AND (p_supplier_number IS NULL OR SUPPLIER_NUMBER = p_supplier_number)
-          AND (p_business_unit IS NULL OR BUSINESS_UNIT = p_business_unit)
-          AND (p_date_from IS NULL OR PAYMENT_DATE >= p_date_from)
-          AND (p_date_to IS NULL OR PAYMENT_DATE <= p_date_to);
+    p_payment_number  IN VARCHAR2 DEFAULT NULL,
+    p_payment_status  IN VARCHAR2 DEFAULT NULL,
+    p_payee           IN VARCHAR2 DEFAULT NULL,
+    p_supplier_number IN VARCHAR2 DEFAULT NULL,
+    p_business_unit   IN VARCHAR2 DEFAULT NULL,
+    p_date_from       IN DATE     DEFAULT NULL,
+    p_date_to         IN DATE     DEFAULT NULL,
+    p_only_pdc        IN VARCHAR2 DEFAULT 'N',
+    p_limit           IN NUMBER   DEFAULT 100,
+    p_offset          IN NUMBER   DEFAULT 0
+) RETURN CLOB IS
+    v_result CLOB;
+    v_count  NUMBER;
+BEGIN
+    -- Get total count
+    SELECT COUNT(*)
+    INTO v_count
+    FROM RR_AP_PAYMENTS_ALL
+    WHERE (p_payment_number IS NULL OR PAYMENT_NUMBER = p_payment_number)
+      AND (p_payment_status IS NULL OR PAYMENT_STATUS = p_payment_status)
+      AND (p_payee IS NULL OR UPPER(PAYEE) LIKE '%' || UPPER(p_payee) || '%')
+      AND (p_supplier_number IS NULL OR SUPPLIER_NUMBER = p_supplier_number)
+      AND (p_business_unit IS NULL OR BUSINESS_UNIT = p_business_unit)
+      AND (p_date_from IS NULL OR PAYMENT_DATE >= p_date_from)
+      AND (p_date_to IS NULL OR PAYMENT_DATE <= p_date_to)
+      AND (p_only_pdc <> 'Y' OR MATURITY_DATE IS NOT NULL);
 
         -- Get paginated results with full Fusion-compatible JSON
         SELECT JSON_OBJECT(
@@ -930,34 +932,35 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
                         'LastUpdateLogin' VALUE LAST_UPDATE_LOGIN,
                         'StopReason' VALUE STOP_REASON,
                         'StopReference' VALUE STOP_REFERENCE,
-                        'IbyPaymentStatus' VALUE IBY_PAYMENT_STATUS,
-                        'PaymentMode' VALUE PAYMENT_MODE,
-                        'FundingCardAccount' VALUE FUNDING_CARD_ACCOUNT,
-                        'DigitalPaymentAccount' VALUE DIGITAL_PAYMENT_ACCOUNT,
-                        'SyncStatus' VALUE SYNC_STATUS
-                        ABSENT ON NULL
-                    ) ORDER BY PAYMENT_DATE DESC
-                    RETURNING CLOB
-                )
-                FROM (
-                    SELECT p.*,
-                        (SELECT sh.ACCOUNTING_STATUS
-                         FROM RR_SLA_ACCOUNTING_HEADERS sh
-                         WHERE sh.SOURCE_TABLE = 'AP_PAYMENTS'
-                           AND sh.SOURCE_ID = p.CHECK_ID
-                         ORDER BY sh.HEADER_ID DESC
-                         FETCH FIRST 1 ROW ONLY) AS SLA_ACCOUNTING_STATUS
-                    FROM RR_AP_PAYMENTS_ALL p
-                    WHERE (p_payment_number IS NULL OR p.PAYMENT_NUMBER = p_payment_number)
-                      AND (p_payment_status IS NULL OR p.PAYMENT_STATUS = p_payment_status)
-                      AND (p_payee IS NULL OR UPPER(p.PAYEE) LIKE '%' || UPPER(p_payee) || '%')
-                      AND (p_supplier_number IS NULL OR p.SUPPLIER_NUMBER = p_supplier_number)
-                      AND (p_business_unit IS NULL OR p.BUSINESS_UNIT = p_business_unit)
-                      AND (p_date_from IS NULL OR p.PAYMENT_DATE >= p_date_from)
-                      AND (p_date_to IS NULL OR p.PAYMENT_DATE <= p_date_to)
-                    ORDER BY p.PAYMENT_DATE DESC
-                    OFFSET p_offset ROWS FETCH NEXT p_limit ROWS ONLY
-                )
+                    'IbyPaymentStatus' VALUE IBY_PAYMENT_STATUS,
+                    'PaymentMode' VALUE PAYMENT_MODE,
+                    'FundingCardAccount' VALUE FUNDING_CARD_ACCOUNT,
+                    'DigitalPaymentAccount' VALUE DIGITAL_PAYMENT_ACCOUNT,
+                    'SyncStatus' VALUE SYNC_STATUS
+                    ABSENT ON NULL
+                ) ORDER BY PAYMENT_DATE DESC
+                RETURNING CLOB
+            )
+            FROM (
+                SELECT p.*,
+                    (SELECT sh.ACCOUNTING_STATUS
+                     FROM RR_SLA_ACCOUNTING_HEADERS sh
+                     WHERE sh.SOURCE_TABLE = 'AP_PAYMENTS'
+                       AND sh.SOURCE_ID = p.CHECK_ID
+                     ORDER BY sh.HEADER_ID DESC
+                     FETCH FIRST 1 ROW ONLY) AS SLA_ACCOUNTING_STATUS
+                FROM RR_AP_PAYMENTS_ALL p
+                WHERE (p_payment_number IS NULL OR p.PAYMENT_NUMBER = p_payment_number)
+                  AND (p_payment_status IS NULL OR p.PAYMENT_STATUS = p_payment_status)
+                  AND (p_payee IS NULL OR UPPER(p.PAYEE) LIKE '%' || UPPER(p_payee) || '%')
+                  AND (p_supplier_number IS NULL OR p.SUPPLIER_NUMBER = p_supplier_number)
+                  AND (p_business_unit IS NULL OR p.BUSINESS_UNIT = p_business_unit)
+                  AND (p_date_from IS NULL OR p.PAYMENT_DATE >= p_date_from)
+                  AND (p_date_to IS NULL OR p.PAYMENT_DATE <= p_date_to)
+                  AND (p_only_pdc <> 'Y' OR p.MATURITY_DATE IS NOT NULL)
+                ORDER BY p.PAYMENT_DATE DESC
+                OFFSET p_offset ROWS FETCH NEXT p_limit ROWS ONLY
+            )
             )
             RETURNING CLOB
         )
