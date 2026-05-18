@@ -5,22 +5,28 @@
 -- Method   : GET
 --
 -- Query params:
---   source_cur  VARCHAR2  e.g. USD
---   target_cur  VARCHAR2  e.g. AED
---   rate_type   VARCHAR2  optional, e.g. Corporate (default: any)
+--   source_cur  VARCHAR2  e.g. USD          (required)
+--   target_cur  VARCHAR2  e.g. AED          (required)
+--   rate_type   VARCHAR2  e.g. Corporate    (optional; NULL = any)
 --
 -- Source table: RR_CURRENCY_DAILY_RATES
---   FROM_CURRENCY, TO_CURRENCY, RATE_DATE, RATE_TYPE,
---   RATE, INVERSE_RATE
---
--- Response shape is identical to the old BMSEXERATE_DAILY handler
--- so no frontend changes are required.
+--   RATE_ID, FROM_CURRENCY, TO_CURRENCY, RATE_DATE,
+--   RATE_TYPE, RATE, INVERSE_RATE, SOURCE, CREATED_BY, CREATION_DATE
 --
 -- Response (200):
---   { status, sourceCur, targetCur, rate, inverseRate,
---     buy, open, close, rateType, refreshDate }
+--   {
+--     "status":      "ok",
+--     "sourceCur":   "USD",
+--     "targetCur":   "AED",
+--     "rate":        3.6725,
+--     "inverseRate": 0.272479,
+--     "rateType":    "Corporate",
+--     "rateDate":    "2024-01-15"
+--   }
 -- Response (404):
---   { status:"not_found", sourceCur, targetCur, message }
+--   { "status":"not_found", "sourceCur", "targetCur", "message" }
+-- Response (400 / 500):
+--   { "status":"error", "code", "message" }
 -- ============================================================
 
 DECLARE
@@ -29,7 +35,7 @@ DECLARE
     v_rate_type   VARCHAR2(50);
     v_rate        NUMBER;
     v_inverse     NUMBER;
-    v_date        VARCHAR2(20);
+    v_rate_date   VARCHAR2(20);
     v_type_found  VARCHAR2(50);
     v_found       NUMBER := 0;
 BEGIN
@@ -37,15 +43,16 @@ BEGIN
 
     v_source_cur := UPPER(TRIM(:source_cur));
     v_target_cur := UPPER(TRIM(:target_cur));
-    v_rate_type  := UPPER(TRIM(:rate_type));   -- optional; NULL = any type
+    v_rate_type  := UPPER(TRIM(:rate_type));   -- optional
 
+    -- Validate required params
     IF v_source_cur IS NULL OR v_target_cur IS NULL THEN
         :status_code := 400;
         HTP.P('{"status":"error","code":400,"message":"Parameters source_cur and target_cur are required"}');
         RETURN;
     END IF;
 
-    -- Same currency → always 1
+    -- Same-currency shortcut — always 1, no DB hit needed
     IF v_source_cur = v_target_cur THEN
         :status_code := 200;
         APEX_JSON.OPEN_OBJECT;
@@ -54,21 +61,19 @@ BEGIN
         APEX_JSON.WRITE('targetCur',   v_target_cur);
         APEX_JSON.WRITE('rate',        1);
         APEX_JSON.WRITE('inverseRate', 1);
-        APEX_JSON.WRITE('buy',         1);
-        APEX_JSON.WRITE('open',        1);
-        APEX_JSON.WRITE('close',       1);
         APEX_JSON.WRITE('rateType',    'Corporate');
-        APEX_JSON.WRITE('refreshDate', TO_CHAR(SYSDATE, 'YYYY-MM-DD'));
+        APEX_JSON.WRITE('rateDate',    TO_CHAR(SYSDATE, 'YYYY-MM-DD'));
         APEX_JSON.CLOSE_OBJECT;
         RETURN;
     END IF;
 
+    -- Primary lookup: FROM_CURRENCY → TO_CURRENCY
     BEGIN
         SELECT RATE, INVERSE_RATE,
                TO_CHAR(RATE_DATE, 'YYYY-MM-DD'),
                RATE_TYPE,
                1
-        INTO   v_rate, v_inverse, v_date, v_type_found, v_found
+        INTO   v_rate, v_inverse, v_rate_date, v_type_found, v_found
         FROM (
             SELECT RATE, INVERSE_RATE, RATE_DATE, RATE_TYPE
             FROM   RR_CURRENCY_DAILY_RATES
@@ -82,17 +87,17 @@ BEGIN
         WHEN NO_DATA_FOUND THEN v_found := 0;
     END;
 
-    -- Fallback: try inverse direction and invert the rate
+    -- Fallback: try inverse direction and flip the rate
     IF v_found = 0 THEN
         BEGIN
-            SELECT 1 / RATE,
+            SELECT INVERSE_RATE,
                    RATE,
                    TO_CHAR(RATE_DATE, 'YYYY-MM-DD'),
                    RATE_TYPE,
                    1
-            INTO   v_rate, v_inverse, v_date, v_type_found, v_found
+            INTO   v_rate, v_inverse, v_rate_date, v_type_found, v_found
             FROM (
-                SELECT RATE, RATE_DATE, RATE_TYPE
+                SELECT RATE, INVERSE_RATE, RATE_DATE, RATE_TYPE
                 FROM   RR_CURRENCY_DAILY_RATES
                 WHERE  FROM_CURRENCY = v_target_cur
                   AND  TO_CURRENCY   = v_source_cur
@@ -113,8 +118,6 @@ BEGIN
         RETURN;
     END IF;
 
-    -- buy / open / close don't exist in RR_CURRENCY_DAILY_RATES;
-    -- return RATE for all three so the response shape stays identical.
     :status_code := 200;
     APEX_JSON.OPEN_OBJECT;
     APEX_JSON.WRITE('status',      'ok');
@@ -122,11 +125,8 @@ BEGIN
     APEX_JSON.WRITE('targetCur',   v_target_cur);
     APEX_JSON.WRITE('rate',        v_rate);
     APEX_JSON.WRITE('inverseRate', v_inverse);
-    APEX_JSON.WRITE('buy',         v_rate);   -- no BUY column; mirrors rate
-    APEX_JSON.WRITE('open',        v_rate);   -- no OPEN column; mirrors rate
-    APEX_JSON.WRITE('close',       v_rate);   -- no CLOSE column; mirrors rate
     APEX_JSON.WRITE('rateType',    v_type_found);
-    APEX_JSON.WRITE('refreshDate', v_date);
+    APEX_JSON.WRITE('rateDate',    v_rate_date);
     APEX_JSON.CLOSE_OBJECT;
 EXCEPTION
     WHEN OTHERS THEN

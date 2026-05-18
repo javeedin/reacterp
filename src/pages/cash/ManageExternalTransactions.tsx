@@ -207,7 +207,7 @@ const ExternalTxnForm: React.FC<{
   const [createPayeeVisible, setCreatePayeeVisible] = useState(false);
   const [createPayeeForm] = Form.useForm();
   const [createPayeeSaving, setCreatePayeeSaving] = useState(false);
-  const [bmsRate, setBmsRate] = useState<{ rate: number; date: string } | null>(null);
+  const [bmsRate, setBmsRate] = useState<{ rate: number; inverseRate: number; rateType: string; rateDate: string } | null>(null);
   const [bmsRateLoading, setBmsRateLoading] = useState(false);
   const isEdit = !!initialValues?.externalTransactionId;
   const buSelected = !!selectedBu;
@@ -251,12 +251,11 @@ const ExternalTxnForm: React.FC<{
       .then(r => r.json())
       .then(data => {
         if (data.status === 'ok') {
-          setBmsRate({ rate: data.rate, date: data.refreshDate });
+          setBmsRate({ rate: data.rate, inverseRate: data.inverseRate, rateType: data.rateType, rateDate: data.rateDate });
           // Auto-fill only for new transactions (no existing rate loaded)
           if (!isEdit && !initialValues?.bankConversionRate) {
-            const r = data.rate;
-            form.setFieldsValue({ bankConversionRate: r, bankConversionRateType: 'Corporate' });
-            setInverseRateVal(Math.round((1 / r) * 1000000) / 1000000);
+            form.setFieldsValue({ bankConversionRate: data.rate, bankConversionRateType: data.rateType || 'Corporate' });
+            setInverseRateVal(data.inverseRate);
           }
         }
       })
@@ -1106,11 +1105,11 @@ const ExternalTxnForm: React.FC<{
                               style={{ fontSize: 10, color: REDWOOD.info, cursor: (!isEdit && !saved) ? 'pointer' : 'default' }}
                               onClick={() => {
                                 if (isEdit || saved) return;
-                                form.setFieldsValue({ bankConversionRate: bmsRate.rate, bankConversionRateType: 'Corporate' });
-                                setInverseRateVal(Math.round((1 / bmsRate.rate) * 1000000) / 1000000);
+                                form.setFieldsValue({ bankConversionRate: bmsRate.rate, bankConversionRateType: bmsRate.rateType || 'Corporate' });
+                                setInverseRateVal(bmsRate.inverseRate);
                               }}
                             >
-                              BMS rate: <strong>{bmsRate.rate}</strong> as of {bmsRate.date}
+                              {bmsRate.rateType} rate: <strong>{bmsRate.rate}</strong> (inv: {bmsRate.inverseRate}) — {bmsRate.rateDate}
                               {(!isEdit && !saved) && <span style={{ marginLeft: 4, color: REDWOOD.info }}>(click to apply)</span>}
                             </Text>
                           : null}

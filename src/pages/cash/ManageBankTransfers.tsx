@@ -264,7 +264,7 @@ const TransferForm: React.FC<{
 
   const [fromCurrency, setFromCurrency] = useState<string>(initialValues?.fromCurrencyCode ?? '');
   const [toCurrency, setToCurrency] = useState<string>(initialValues?.toCurrencyCode ?? '');
-  const [bmsRateInfo, setBmsRateInfo] = useState<{ rate: number; date: string; sourceCur: string; targetCur: string } | null>(null);
+  const [bmsRateInfo, setBmsRateInfo] = useState<{ rate: number; inverseRate: number; rateType: string; rateDate: string; sourceCur: string; targetCur: string } | null>(null);
   const [bmsRateLoading, setBmsRateLoading] = useState(false);
   const [funcRate, setFuncRate] = useState<number | null>(initialValues?.funcConversionRate ?? null);
   const [cashClearingAcct, setCashClearingAcct] = useState<string>(initialValues?.cashClearingAccount ?? '');
@@ -380,12 +380,12 @@ const TransferForm: React.FC<{
       .then(r => r.json())
       .then(data => {
         if (data.status === 'ok') {
-          setBmsRateInfo({ rate: data.rate, date: data.refreshDate, sourceCur: data.sourceCur, targetCur: data.targetCur });
+          setBmsRateInfo({ rate: data.rate, inverseRate: data.inverseRate, rateType: data.rateType, rateDate: data.rateDate, sourceCur: data.sourceCur, targetCur: data.targetCur });
           // Auto-fill only when creating a new transfer (no existing rate)
           if (!initialValues?.conversionRate) {
             form.setFieldsValue({
               conversionRate: data.rate,
-              conversionRateDate: dayjs(data.refreshDate),
+              conversionRateDate: dayjs(data.rateDate),
             });
           }
         } else {
@@ -999,14 +999,14 @@ const TransferForm: React.FC<{
             {!bmsRateLoading && bmsRateInfo && (
               <div style={{ marginTop: -10, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Tag color="blue" style={{ fontSize: 11, margin: 0 }}>
-                  BMS: 1 {bmsRateInfo.sourceCur} = {bmsRateInfo.rate} {bmsRateInfo.targetCur}
+                  {bmsRateInfo.rateType}: 1 {bmsRateInfo.sourceCur} = {bmsRateInfo.rate} {bmsRateInfo.targetCur}
                 </Tag>
-                <Text type="secondary" style={{ fontSize: 11 }}>as of {bmsRateInfo.date}</Text>
+                <Text type="secondary" style={{ fontSize: 11 }}>inv: {bmsRateInfo.inverseRate} — {bmsRateInfo.rateDate}</Text>
                 <Button
                   size="small"
                   type="link"
                   style={{ fontSize: 11, padding: '0 4px', height: 'auto' }}
-                  onClick={() => form.setFieldsValue({ conversionRate: bmsRateInfo.rate, conversionRateDate: dayjs(bmsRateInfo.date) })}
+                  onClick={() => form.setFieldsValue({ conversionRate: bmsRateInfo.rate, conversionRateDate: dayjs(bmsRateInfo.rateDate) })}
                 >
                   Apply
                 </Button>
