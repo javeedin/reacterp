@@ -3580,7 +3580,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   }, [headerValues.paymentMethod]);
 
   // Fetch BMS rate when invoice currency is a foreign currency
-  useEffect(() => {
+  const fetchBmsRate = useCallback(() => {
     const currency = headerValues.invoiceCurrency;
     if (!currency || currency === 'AED') {
       setBmsRate(null);
@@ -3588,7 +3588,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
     }
     setBmsRateLoading(true);
     setBmsRate(null);
-    fetch(`${APEX_DB_CONFIG.baseUrl}/currencies/bmsrate?source_cur=${currency}&target_cur=AED`)
+    const convDate = (form.getFieldValue('conversionDate') as any)?.format?.('YYYY-MM-DD');
+    const datePart = convDate ? `&rate_date=${convDate}` : '';
+    fetch(`${APEX_DB_CONFIG.baseUrl}/currencies/bmsrate?source_cur=${currency}&target_cur=AED${datePart}`)
       .then(r => r.json())
       .then(data => {
         if (data.status === 'ok') {
@@ -3606,6 +3608,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       })
       .catch(() => {})
       .finally(() => setBmsRateLoading(false));
+  }, [headerValues.invoiceCurrency]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    fetchBmsRate();
   }, [headerValues.invoiceCurrency]); // eslint-disable-line react-hooks/exhaustive-deps
   // ────────────────────────────────────────────────────────────────────────
 
@@ -6192,6 +6198,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                                         conversionDate: dayjs(bmsRate.rateDate),
                                       })}>
                                       Apply
+                                    </Button>
+                                    <Button type="text" size="small" loading={bmsRateLoading} icon={<ReloadOutlined />} onClick={fetchBmsRate} style={{ fontSize: 10, padding: 0, height: 'auto' }}>
+                                      ↻ Refresh
                                     </Button>
                                   </Space>
                                 : null

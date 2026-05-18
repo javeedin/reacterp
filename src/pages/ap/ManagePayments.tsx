@@ -531,14 +531,16 @@ const ManagePayments: React.FC = () => {
   const [bmsRate, setBmsRate] = useState<{ rate: number; inverseRate: number; rateType: string; rateDate: string } | null>(null);
 
   // Fetch BMS rate when createPaymentCurrency is a foreign currency
-  useEffect(() => {
+  const fetchBmsRate = () => {
     if (createPaymentCurrency === 'AED') {
       setBmsRate(null);
       return;
     }
     setBmsRateLoading(true);
     setBmsRate(null);
-    fetch(`${APEX_DB_CONFIG.baseUrl}/currencies/bmsrate?source_cur=${createPaymentCurrency}&target_cur=AED`)
+    const convDate = (createPaymentForm.getFieldValue('conversionDate') as any)?.format?.('YYYY-MM-DD');
+    const datePart = convDate ? `&rate_date=${convDate}` : '';
+    fetch(`${APEX_DB_CONFIG.baseUrl}/currencies/bmsrate?source_cur=${createPaymentCurrency}&target_cur=AED${datePart}`)
       .then(r => r.json())
       .then(data => {
         if (data.status === 'ok') {
@@ -556,6 +558,10 @@ const ManagePayments: React.FC = () => {
       })
       .catch(() => {})
       .finally(() => setBmsRateLoading(false));
+  };
+
+  useEffect(() => {
+    fetchBmsRate();
   }, [createPaymentCurrency]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Supplier lookup modal state
@@ -3647,8 +3653,9 @@ const ManagePayments: React.FC = () => {
                                           })}>
                                           Apply
                                         </Button>
+                                        <Button type="text" size="small" loading={bmsRateLoading} icon={<ReloadOutlined />} onClick={fetchBmsRate} />
                                       </Space>
-                                    : null
+                                    : <Button type="text" size="small" loading={bmsRateLoading} icon={<ReloadOutlined />} onClick={fetchBmsRate} />
                               )}
                             >
                               <InputNumber style={{ width: '100%' }} placeholder="0.000000" precision={6} min={0} disabled={!buReady} />

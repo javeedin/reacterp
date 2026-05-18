@@ -376,7 +376,9 @@ const TransferForm: React.FC<{
     // Rate direction: how much from-currency per 1 payment-currency unit
     // so that fromAmount = paymentAmount × rate is correct
     // paymentCurrency = toCurrency (follows to account)
-    fetch(`${APEX_BASE}/currencies/bmsrate?source_cur=${toCurrency}&target_cur=${fromCurrency}`)
+    const rateDate = (form.getFieldValue('conversionRateDate') as Dayjs | undefined)?.format('YYYY-MM-DD');
+    const datePart = rateDate ? `&rate_date=${rateDate}` : '';
+    fetch(`${APEX_BASE}/currencies/bmsrate?source_cur=${toCurrency}&target_cur=${fromCurrency}${datePart}`)
       .then(r => r.json())
       .then(data => {
         if (data.status === 'ok') {
@@ -404,7 +406,9 @@ const TransferForm: React.FC<{
       if (!initialValues?.funcConversionRate) form.setFieldsValue({ funcConversionRate: toCurrency === 'AED' ? 1 : undefined });
       return;
     }
-    fetch(`${APEX_BASE}/currencies/bmsrate?source_cur=${toCurrency}&target_cur=AED`)
+    const rateDate2 = (form.getFieldValue('conversionRateDate') as Dayjs | undefined)?.format('YYYY-MM-DD');
+    const datePart2 = rateDate2 ? `&rate_date=${rateDate2}` : '';
+    fetch(`${APEX_BASE}/currencies/bmsrate?source_cur=${toCurrency}&target_cur=AED${datePart2}`)
       .then(r => r.json())
       .then(data => {
         if (data.status === 'ok') {
@@ -1002,6 +1006,28 @@ const TransferForm: React.FC<{
                   {bmsRateInfo.rateType}: 1 {bmsRateInfo.sourceCur} = {bmsRateInfo.rate} {bmsRateInfo.targetCur}
                 </Tag>
                 <Text type="secondary" style={{ fontSize: 11 }}>inv: {bmsRateInfo.inverseRate} — {bmsRateInfo.rateDate}</Text>
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<ReloadOutlined style={{ fontSize: 11 }} />}
+                  loading={bmsRateLoading}
+                  style={{ padding: '0 4px', height: 'auto' }}
+                  onClick={() => {
+                    const rateDate = (form.getFieldValue('conversionRateDate') as Dayjs | undefined)?.format('YYYY-MM-DD');
+                    const datePart = rateDate ? `&rate_date=${rateDate}` : '';
+                    setBmsRateLoading(true);
+                    setBmsRateInfo(null);
+                    fetch(`${APEX_BASE}/currencies/bmsrate?source_cur=${toCurrency}&target_cur=${fromCurrency}${datePart}`)
+                      .then(r => r.json())
+                      .then(data => {
+                        if (data.status === 'ok') {
+                          setBmsRateInfo({ rate: data.rate, inverseRate: data.inverseRate, rateType: data.rateType, rateDate: data.rateDate, sourceCur: data.sourceCur, targetCur: data.targetCur });
+                        } else setBmsRateInfo(null);
+                      })
+                      .catch(() => setBmsRateInfo(null))
+                      .finally(() => setBmsRateLoading(false));
+                  }}
+                />
                 <Button
                   size="small"
                   type="link"
