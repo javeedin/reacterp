@@ -2016,12 +2016,11 @@ const AAPanel: React.FC = () => {
           : brk.combo;
         doc.setFontSize(8);
         doc.setFont('helvetica', 'bold');
-        doc.setTextColor(26, 95, 204);
-        doc.text(label + (brk.description ? `  ${brk.description}` : ''), 14, startY);
         doc.setTextColor(0, 0, 0);
+        doc.text(label + (brk.description ? `  ${brk.description}` : ''), 14, startY);
 
         const ptdTot = {
-          jeLineDescription: 'PTD Total', userJeSourceName: '', currencyCode: '',
+          jeLineDescription: 'PTD Total', userJeSourceName: '', batchName: '', currencyCode: '',
           enteredDr: brk.ptdEntDr, enteredCr: brk.ptdEntCr,
           accountedDr: brk.ptdAccDr, accountedCr: brk.ptdAccCr,
           isTotals: true,
@@ -2036,39 +2035,39 @@ const AAPanel: React.FC = () => {
 
         const body = brkRows.map(r => {
           const special = r.isOpeningBalance || r.isClosingBalance || r.isTotals;
-          const label = r.isOpeningBalance ? 'Opening Balance'
+          const lineLabel = r.isOpeningBalance ? 'Opening Balance'
             : r.isClosingBalance ? 'Closing Balance'
             : r.isTotals ? 'PTD Total'
             : r.jeLineDescription || '';
           return [
-            label,
+            lineLabel,
             special ? '' : (r.userJeSourceName || ''),
+            special ? '' : (r.batchName || ''),
             special ? '' : (r.currencyCode || ''),
-            special ? '' : fmt(r.enteredDr || 0),
-            special ? '' : fmt(r.enteredCr || 0),
+            fmt(r.enteredDr || 0),
+            fmt(r.enteredCr || 0),
             fmt(r.accountedDr || 0),
             fmt(r.accountedCr || 0),
             fmt(r._accRun ?? 0),
           ];
         });
 
-        const headers = showEntered
-          ? ['Line Description', 'Source', 'Ccy', `Ent Dr`, `Ent Cr`, `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`]
-          : ['Line Description', 'Source', 'Ccy', `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`];
-        const filteredBody = showEntered ? body : body.map(row => [row[0], row[1], row[2], row[5], row[6], row[7]]);
+        const headers = ['Line Description', 'Source', 'Batch', 'Ccy', `Ent Dr`, `Ent Cr`, `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`];
 
         autoTable(doc, {
           startY: startY + 2,
           head: [headers],
-          body: filteredBody,
+          body,
           theme: 'grid',
-          styles: { fontSize: 7, cellPadding: 1.5, overflow: 'linebreak' },
+          styles: { fontSize: 7, cellPadding: 1.5, overflow: 'linebreak', textColor: [0, 0, 0] },
           headStyles: { fillColor: [26, 95, 204], textColor: 255, fontStyle: 'bold', fontSize: 7 },
           columnStyles: {
             0: { cellWidth: 'auto', overflow: 'linebreak' },
-            [headers.length - 1]: { halign: 'right', fontStyle: 'bold' },
-            [headers.length - 2]: { halign: 'right' },
-            [headers.length - 3]: { halign: 'right' },
+            4: { halign: 'right' },
+            5: { halign: 'right' },
+            6: { halign: 'right' },
+            7: { halign: 'right' },
+            8: { halign: 'right', fontStyle: 'bold' },
           },
           didParseCell: (data) => {
             const row = brkRows[data.row.index];
@@ -2109,33 +2108,35 @@ const AAPanel: React.FC = () => {
           acctLabel,
           special ? '' : (r.jeLineDescription || ''),
           special ? '' : (r.userJeSourceName || ''),
+          special ? '' : (r.batchName || ''),
           special ? '' : (r.currencyCode || ''),
-          special ? '' : fmt(r.enteredDr || 0),
-          special ? '' : fmt(r.enteredCr || 0),
+          fmt(r.enteredDr || 0),
+          fmt(r.enteredCr || 0),
           fmt(r.accountedDr || 0),
           fmt(r.accountedCr || 0),
           fmt(r._accRun ?? 0),
         ];
       });
 
-      const headers = showEntered
-        ? ['Account', 'Line Description', 'Source', 'Ccy', `Ent Dr`, `Ent Cr`, `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`]
-        : ['Account', 'Line Description', 'Source', 'Ccy', `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`];
-      const filteredBody = showEntered ? body : body.map(row => [row[0], row[1], row[2], row[3], row[6], row[7], row[8]]);
+      const headers = ['Account', 'Line Description', 'Source', 'Batch', 'Ccy', `Ent Dr`, `Ent Cr`, `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`];
 
       autoTable(doc, {
         startY: 22,
         head: [headers],
-        body: filteredBody,
+        body,
         theme: 'grid',
-        styles: { fontSize: 7, cellPadding: 1.5, overflow: 'linebreak' },
+        styles: { fontSize: 7, cellPadding: 1.5, overflow: 'linebreak', textColor: [0, 0, 0] },
         headStyles: { fillColor: [26, 95, 204], textColor: 255, fontStyle: 'bold', fontSize: 7 },
         columnStyles: {
-          0: { cellWidth: 55 },
+          0: { cellWidth: 45 },
           1: { cellWidth: 'auto', overflow: 'linebreak' },
-          [headers.length - 1]: { halign: 'right', fontStyle: 'bold' },
-          [headers.length - 2]: { halign: 'right' },
-          [headers.length - 3]: { halign: 'right' },
+          2: { cellWidth: 22 },
+          3: { cellWidth: 30 },
+          5: { halign: 'right' },
+          6: { halign: 'right' },
+          7: { halign: 'right' },
+          8: { halign: 'right' },
+          9: { halign: 'right', fontStyle: 'bold' },
         },
         didParseCell: (data) => {
           const row = pdfRows[data.row.index];
@@ -2161,10 +2162,9 @@ const AAPanel: React.FC = () => {
       doc.setPage(i);
       doc.setFontSize(7);
       doc.setFont('helvetica', 'normal');
-      doc.setTextColor(150);
+      doc.setTextColor(0, 0, 0);
       doc.text(`Page ${i} of ${pageCount}`, pageW - 14, doc.internal.pageSize.getHeight() - 6, { align: 'right' });
       doc.text(`Generated: ${new Date().toLocaleString()}`, 14, doc.internal.pageSize.getHeight() - 6);
-      doc.setTextColor(0);
     }
 
     const blob = doc.output('blob');
