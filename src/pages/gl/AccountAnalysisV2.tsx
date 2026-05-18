@@ -1989,14 +1989,15 @@ const AAPanel: React.FC = () => {
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
     const pageW = doc.internal.pageSize.getWidth();
 
-    const fmt = (v: number) =>
+    const fmtN = (v: number) =>
       v === 0 ? '—' : new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
 
     const periodLabel = periods.length
       ? (periods.length === 1 ? periods[0] : `${[...periods].sort()[0]} – ${[...periods].sort().slice(-1)[0]}`)
       : '';
 
-    // Title block
+    // Title block — all black
+    doc.setTextColor(0, 0, 0);
     doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
     doc.text('Account Analysis', pageW / 2, 12, { align: 'center' });
@@ -2005,33 +2006,47 @@ const AAPanel: React.FC = () => {
     const subtitle = [ledger, periodLabel, account ? `Acct: ${account}` : ''].filter(Boolean).join('   |   ');
     doc.text(subtitle, pageW / 2, 17, { align: 'center' });
 
+    // Shared table style — force black text on every cell
+    const baseStyles: any = { fontSize: 7, cellPadding: 1.5, overflow: 'linebreak', textColor: [0, 0, 0] };
+    const headStyles: any = { fillColor: [26, 95, 204], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7 };
+    const applyRowStyle = (data: any, rows: any[]) => {
+      const row = rows[data.row.index];
+      if (!row) return;
+      data.cell.styles.textColor = [0, 0, 0];
+      if (row.isOpeningBalance)      { data.cell.styles.fillColor = [219, 234, 254]; data.cell.styles.fontStyle = 'bold'; }
+      else if (row.isClosingBalance) { data.cell.styles.fillColor = [255, 251, 230]; data.cell.styles.fontStyle = 'bold'; }
+      else if (row.isTotals)         { data.cell.styles.fillColor = [240, 240, 240]; data.cell.styles.fontStyle = 'bold'; }
+    };
+
     const isComboBreak = appliedGroupBy === 'concatenatedSegments' || appliedGroupBy === 'currencyCode';
 
     if (isComboBreak) {
+      // Columns: Line Description | Batch | Source | Ccy | Ent Dr | Ent Cr | Acc Dr | Acc Cr | Acc Bal
+      const headers = ['Line Description', 'Batch', 'Source', 'Ccy', `Ent Dr`, `Ent Cr`, `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`];
       let startY = 22;
       comboBreaks.forEach((brk, bi) => {
         if (bi > 0) startY += 4;
-        const label = appliedGroupBy === 'currencyCode' && brk.combo.includes('||')
+        const comboLabel = appliedGroupBy === 'currencyCode' && brk.combo.includes('||')
           ? brk.combo.replace('||', '  –  ')
           : brk.combo;
         doc.setFontSize(8);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(0, 0, 0);
-        doc.text(label + (brk.description ? `  ${brk.description}` : ''), 14, startY);
+        doc.text(comboLabel + (brk.description ? `  ${brk.description}` : ''), 14, startY);
 
-        const ptdTot = {
-          jeLineDescription: 'PTD Total', userJeSourceName: '', batchName: '', currencyCode: '',
+        const ptdTot: any = {
+          jeLineDescription: 'PTD Total', batchName: '', userJeSourceName: '', currencyCode: '',
           enteredDr: brk.ptdEntDr, enteredCr: brk.ptdEntCr,
           accountedDr: brk.ptdAccDr, accountedCr: brk.ptdAccCr,
           isTotals: true,
           _accRun: brk.linesWithBal.length ? brk.linesWithBal[brk.linesWithBal.length - 1]._accRun : 0,
         };
-        const brkRows = [
+        const brkRows: any[] = [
           ...(brk.openingRow ? [brk.openingRow] : []),
           ...brk.linesWithBal,
           ptdTot,
           ...(brk.closingRow ? [brk.closingRow] : []),
-        ] as any[];
+        ];
 
         const body = brkRows.map(r => {
           const special = r.isOpeningBalance || r.isClosingBalance || r.isTotals;
@@ -2041,62 +2056,63 @@ const AAPanel: React.FC = () => {
             : r.jeLineDescription || '';
           return [
             lineLabel,
-            special ? '' : (r.userJeSourceName || ''),
             special ? '' : (r.batchName || ''),
+            special ? '' : (r.userJeSourceName || ''),
             special ? '' : (r.currencyCode || ''),
-            fmt(r.enteredDr || 0),
-            fmt(r.enteredCr || 0),
-            fmt(r.accountedDr || 0),
-            fmt(r.accountedCr || 0),
-            fmt(r._accRun ?? 0),
+            fmtN(r.enteredDr || 0),
+            fmtN(r.enteredCr || 0),
+            fmtN(r.accountedDr || 0),
+            fmtN(r.accountedCr || 0),
+            fmtN(r._accRun ?? 0),
           ];
         });
-
-        const headers = ['Line Description', 'Source', 'Batch', 'Ccy', `Ent Dr`, `Ent Cr`, `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`];
 
         autoTable(doc, {
           startY: startY + 2,
           head: [headers],
           body,
           theme: 'grid',
-          styles: { fontSize: 7, cellPadding: 1.5, overflow: 'linebreak', textColor: [0, 0, 0] },
-          headStyles: { fillColor: [26, 95, 204], textColor: 255, fontStyle: 'bold', fontSize: 7 },
+          styles: baseStyles,
+          headStyles,
           columnStyles: {
-            0: { cellWidth: 'auto', overflow: 'linebreak' },
-            4: { halign: 'right' },
-            5: { halign: 'right' },
-            6: { halign: 'right' },
-            7: { halign: 'right' },
-            8: { halign: 'right', fontStyle: 'bold' },
+            0: { cellWidth: 55, overflow: 'linebreak' },
+            1: { cellWidth: 32 },
+            2: { cellWidth: 20 },
+            3: { cellWidth: 9 },
+            4: { halign: 'right', cellWidth: 22 },
+            5: { halign: 'right', cellWidth: 22 },
+            6: { halign: 'right', cellWidth: 26 },
+            7: { halign: 'right', cellWidth: 26 },
+            8: { halign: 'right', cellWidth: 27, fontStyle: 'bold' },
           },
-          didParseCell: (data) => {
-            const row = brkRows[data.row.index];
-            if (!row) return;
-            if (row.isOpeningBalance) {
-              data.cell.styles.fillColor = [219, 234, 254];
-              data.cell.styles.fontStyle = 'bold';
-            } else if (row.isClosingBalance) {
-              data.cell.styles.fillColor = [255, 251, 230];
-              data.cell.styles.fontStyle = 'bold';
-            } else if (row.isTotals) {
-              data.cell.styles.fillColor = [240, 240, 240];
-              data.cell.styles.fontStyle = 'bold';
-            }
-          },
+          didParseCell: (data) => applyRowStyle(data, brkRows),
           margin: { left: 14, right: 14 },
           didDrawPage: (data) => { startY = data.cursor?.y ?? startY; },
         });
         startY = (doc as any).lastAutoTable.finalY + 4;
       });
     } else {
+      // Compute running accounted balance (not stored on rows in flat mode)
+      let accRun = 0;
+      const flatRows: any[] = filteredData.map(r => {
+        if (r.isOpeningBalance) {
+          accRun = (r.accountedDr || 0) - (r.accountedCr || 0);
+        } else if (!r.isClosingBalance) {
+          accRun += (r.accountedDr || 0) - (r.accountedCr || 0);
+        }
+        return { ...r, _accRun: accRun };
+      });
       const totRow: any = {
         concatenatedSegments: 'Total for Report',
-        jeLineDescription: '', userJeSourceName: '', currencyCode: '',
+        jeLineDescription: '', batchName: '', userJeSourceName: '', currencyCode: '',
         enteredDr: gridTotals.entDr, enteredCr: gridTotals.entCr,
         accountedDr: gridTotals.accDr, accountedCr: gridTotals.accCr,
-        isTotals: true, _accRun: 0,
+        isTotals: true, _accRun: accRun,
       };
-      const pdfRows = [...filteredData, totRow];
+      const pdfRows = [...flatRows, totRow];
+
+      // Columns: Account | Line Description | Batch | Source | Ccy | Ent Dr | Ent Cr | Acc Dr | Acc Cr | Acc Bal
+      const headers = ['Account', 'Line Description', 'Batch', 'Source', 'Ccy', `Ent Dr`, `Ent Cr`, `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`];
 
       const body = pdfRows.map(r => {
         const special = r.isOpeningBalance || r.isClosingBalance || r.isTotals;
@@ -2107,56 +2123,42 @@ const AAPanel: React.FC = () => {
         return [
           acctLabel,
           special ? '' : (r.jeLineDescription || ''),
-          special ? '' : (r.userJeSourceName || ''),
           special ? '' : (r.batchName || ''),
+          special ? '' : (r.userJeSourceName || ''),
           special ? '' : (r.currencyCode || ''),
-          fmt(r.enteredDr || 0),
-          fmt(r.enteredCr || 0),
-          fmt(r.accountedDr || 0),
-          fmt(r.accountedCr || 0),
-          fmt(r._accRun ?? 0),
+          fmtN(r.enteredDr || 0),
+          fmtN(r.enteredCr || 0),
+          fmtN(r.accountedDr || 0),
+          fmtN(r.accountedCr || 0),
+          fmtN(r._accRun ?? 0),
         ];
       });
-
-      const headers = ['Account', 'Line Description', 'Source', 'Batch', 'Ccy', `Ent Dr`, `Ent Cr`, `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`];
 
       autoTable(doc, {
         startY: 22,
         head: [headers],
         body,
         theme: 'grid',
-        styles: { fontSize: 7, cellPadding: 1.5, overflow: 'linebreak', textColor: [0, 0, 0] },
-        headStyles: { fillColor: [26, 95, 204], textColor: 255, fontStyle: 'bold', fontSize: 7 },
+        styles: baseStyles,
+        headStyles,
         columnStyles: {
-          0: { cellWidth: 45 },
-          1: { cellWidth: 'auto', overflow: 'linebreak' },
-          2: { cellWidth: 22 },
-          3: { cellWidth: 30 },
-          5: { halign: 'right' },
-          6: { halign: 'right' },
-          7: { halign: 'right' },
-          8: { halign: 'right' },
-          9: { halign: 'right', fontStyle: 'bold' },
+          0: { cellWidth: 38 },
+          1: { cellWidth: 50, overflow: 'linebreak' },
+          2: { cellWidth: 32 },
+          3: { cellWidth: 20 },
+          4: { cellWidth: 9 },
+          5: { halign: 'right', cellWidth: 22 },
+          6: { halign: 'right', cellWidth: 22 },
+          7: { halign: 'right', cellWidth: 26 },
+          8: { halign: 'right', cellWidth: 26 },
+          9: { halign: 'right', cellWidth: 24, fontStyle: 'bold' },
         },
-        didParseCell: (data) => {
-          const row = pdfRows[data.row.index];
-          if (!row) return;
-          if (row.isOpeningBalance) {
-            data.cell.styles.fillColor = [219, 234, 254];
-            data.cell.styles.fontStyle = 'bold';
-          } else if (row.isClosingBalance) {
-            data.cell.styles.fillColor = [255, 251, 230];
-            data.cell.styles.fontStyle = 'bold';
-          } else if (row.isTotals) {
-            data.cell.styles.fillColor = [240, 240, 240];
-            data.cell.styles.fontStyle = 'bold';
-          }
-        },
+        didParseCell: (data) => applyRowStyle(data, pdfRows),
         margin: { left: 14, right: 14 },
       });
     }
 
-    // Page numbers
+    // Page numbers — black
     const pageCount = (doc as any).internal.getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) {
       doc.setPage(i);
