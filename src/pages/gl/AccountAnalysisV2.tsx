@@ -1084,7 +1084,10 @@ const AAPanel: React.FC = () => {
       if (compRes.ok) {
         const cd = await compRes.json();
         setCompanyOptions((cd.items || [])
-          .map((i: any) => ({ value: i.value || i.VALUE || '', meaning: i.meaning || i.MEANING || '' }))
+          .map((i: any) => ({
+            value: i.value || i.VALUE || '',
+            meaning: i.description || i.Description || i.meaning || i.MEANING || '',
+          }))
           .filter((c: any) => c.value));
       }
       if (segRes.ok) {
