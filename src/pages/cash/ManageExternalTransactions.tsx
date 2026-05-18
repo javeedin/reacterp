@@ -93,56 +93,93 @@ const parseApexJson = async (res: Response) => {
     .replace(/:(-?)\.(\d)/g, ':$10.$2')
     .replace(/(\d)\.([,}\]])/g, '$1$2');
 
-  // Pass 2: strip/escape raw control chars (literal newlines, tabs, etc.)
+  // Pass 2: strip/escape raw control chars (literal newlines etc.)
   const fixCtrl = (s: string) =>
     s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
      .replace(/\x0a/g, '\\n')
      .replace(/\x0d/g, '\\r');
 
-  // Pass 3: fix unescaped double-quotes inside JSON string values.
-  // Walk character-by-character tracking parser state; when inside a string
-  // value a bare `"` that is NOT a closing quote gets escaped to `\"`.
+  // Pass 3: context-aware unescaped-quote repair.
+  //
+  // The previous look-ahead heuristic failed when an unescaped `"` inside a
+  // VALUE string was followed by `:` — it was wrongly treated as a closing
+  // quote, turning `"desc": "Note: "see attached""` into a parse error.
+  //
+  // This pass tracks object/array nesting and key-vs-value position:
+  //   • KEY context   → close the string on `"` followed by `:`
+  //   • VALUE context → close the string only on `"` followed by `,`, `}`, `]`,
+  //                     or end-of-input; everything else (including `:`) is an
+  //                     interior unescaped quote and gets escaped to `\"`
   const fixQuotes = (s: string): string => {
+    type Ctx = { inObj: boolean; afterColon: boolean };
+    const stack: Ctx[] = [];
     let out = '';
-    let inStr = false;   // currently inside a JSON string
-    let escaped = false; // previous char was backslash
+    let i   = 0;
 
-    for (let i = 0; i < s.length; i++) {
+    const inValCtx = (): boolean => {
+      if (!stack.length) return false;
+      const t = stack[stack.length - 1];
+      return !t.inObj || t.afterColon; // array elements are always values
+    };
+
+    const skipWs = (from: number): number => {
+      let j = from;
+      while (j < s.length && (s[j] === ' ' || s[j] === '\t' || s[j] === '\n' || s[j] === '\r')) j++;
+      return j;
+    };
+
+    while (i < s.length) {
       const ch = s[i];
-      if (escaped) {
-        out += ch;
-        escaped = false;
-        continue;
+      if      (ch === '{') { stack.push({ inObj: true,  afterColon: false }); out += ch; i++; }
+      else if (ch === '[') { stack.push({ inObj: false, afterColon: false }); out += ch; i++; }
+      else if (ch === '}' || ch === ']') { stack.pop(); out += ch; i++; }
+      else if (ch === ':') {
+        if (stack.length && stack[stack.length - 1].inObj) stack[stack.length - 1].afterColon = true;
+        out += ch; i++;
       }
-      if (ch === '\\') {
-        out += ch;
-        escaped = true;
-        continue;
+      else if (ch === ',') {
+        if (stack.length && stack[stack.length - 1].inObj) stack[stack.length - 1].afterColon = false;
+        out += ch; i++;
       }
-      if (ch === '"') {
-        if (!inStr) {
-          // Opening quote
-          inStr = true;
-          out += ch;
-        } else {
-          // Could be a closing quote or an unescaped quote inside the value.
-          // Look ahead past whitespace; if the next meaningful char is a
-          // JSON structural token (:, ,, }, ]) this is a closing quote.
-          let j = i + 1;
-          while (j < s.length && (s[j] === ' ' || s[j] === '\t' || s[j] === '\n' || s[j] === '\r')) j++;
-          const next = s[j];
-          if (next === ':' || next === ',' || next === '}' || next === ']' || j >= s.length) {
-            // Closing quote
-            inStr = false;
-            out += ch;
+      else if (ch !== '"') { out += ch; i++; }
+      else {
+        // Opening quote — enter string
+        const isVal = inValCtx();
+        out += '"'; i++;
+
+        while (i < s.length) {
+          const sc = s[i];
+          if (sc === '\\') {
+            // Already-escaped sequence — pass through verbatim
+            out += sc; i++;
+            if (i < s.length) { out += s[i]; i++; }
+          } else if (sc !== '"') {
+            out += sc; i++;
           } else {
-            // Unescaped quote inside a string value — escape it
-            out += '\\"';
+            // `"` encountered — closing or interior?
+            const nwsIdx = skipWs(i + 1);
+            const next   = nwsIdx < s.length ? s[nwsIdx] : '';
+            if (!isVal) {
+              // KEY context: close only when followed by `:` (or end, for safety)
+              if (next === ':' || nwsIdx >= s.length) { out += '"'; i++; break; }
+              else { out += '\\"'; i++; }
+            } else {
+              // VALUE context: close only on `,`, `}`, `]`, or end-of-input
+              // A `"` followed by `:` here means an unescaped interior quote
+              if (next === ',' || next === '}' || next === ']' || nwsIdx >= s.length) {
+                out += '"'; i++; break;
+              } else {
+                out += '\\"'; i++;
+              }
+            }
           }
         }
-        continue;
+
+        // Reset afterColon after consuming a value string
+        if (isVal && stack.length && stack[stack.length - 1].inObj) {
+          stack[stack.length - 1].afterColon = false;
+        }
       }
-      out += ch;
     }
     return out;
   };
