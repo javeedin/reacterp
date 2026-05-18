@@ -420,8 +420,8 @@ const mapApexToPaymentRecord = (item: any, index: number): PaymentRecord => ({
   city: item.City || '',
   country: item.Country || '',
   relatedInvoicesHref: '',
-  isSynced: true,
-  syncStatus: (item.FusionSyncStatus || item.fusion_sync_status || item.SyncStatus || item.sync_status || ''),
+  isSynced: (item.SyncStatus || '') === 'SYNCED',
+  syncStatus: item.SyncStatus || '',
 });
 
 const ManagePayments: React.FC = () => {
@@ -1691,11 +1691,6 @@ const ManagePayments: React.FC = () => {
 
         const mapper = useApex ? mapApexToPaymentRecord : mapFusionToPaymentRecord;
         let mappedPayments = items.map(mapper);
-        // Client-side payment number filter (APEX endpoint may not support this param)
-        if (values.paymentNumber) {
-          const pn = String(values.paymentNumber).trim();
-          mappedPayments = mappedPayments.filter(p => String(p.paymentNumber) === pn);
-        }
         // Client-side date filtering (guards against APEX endpoints that don't support date params yet)
         if (dateFrom || dateTo) {
           mappedPayments = mappedPayments.filter(p => {

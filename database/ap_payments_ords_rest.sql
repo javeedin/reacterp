@@ -114,7 +114,7 @@ BEGIN
     END IF;
 
     v_result := XXAP_PAYMENTS_PKG.get_payments(
-        p_payment_number => TO_NUMBER(:payment_number DEFAULT NULL ON CONVERSION ERROR),
+        p_payment_number => :payment_number,
         p_payment_status => :payment_status,
         p_payee => :payee,
         p_supplier_number => :supplier_number,

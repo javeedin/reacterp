@@ -797,7 +797,8 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
             'IbyPaymentStatus' VALUE IBY_PAYMENT_STATUS,
             'PaymentMode' VALUE PAYMENT_MODE,
             'FundingCardAccount' VALUE FUNDING_CARD_ACCOUNT,
-            'DigitalPaymentAccount' VALUE DIGITAL_PAYMENT_ACCOUNT
+            'DigitalPaymentAccount' VALUE DIGITAL_PAYMENT_ACCOUNT,
+            'SyncStatus' VALUE SYNC_STATUS
             ABSENT ON NULL
             RETURNING CLOB
         )
@@ -932,7 +933,8 @@ CREATE OR REPLACE PACKAGE BODY XXAP_PAYMENTS_PKG AS
                         'IbyPaymentStatus' VALUE IBY_PAYMENT_STATUS,
                         'PaymentMode' VALUE PAYMENT_MODE,
                         'FundingCardAccount' VALUE FUNDING_CARD_ACCOUNT,
-                        'DigitalPaymentAccount' VALUE DIGITAL_PAYMENT_ACCOUNT
+                        'DigitalPaymentAccount' VALUE DIGITAL_PAYMENT_ACCOUNT,
+                        'SyncStatus' VALUE SYNC_STATUS
                         ABSENT ON NULL
                     ) ORDER BY PAYMENT_DATE DESC
                     RETURNING CLOB
