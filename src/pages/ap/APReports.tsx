@@ -914,18 +914,12 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
   // Aging summary fields for both aging reports
   const AGING_FIELDS = ['invoiceAmount', 'unpaidAmount', 'months1', 'months2', 'months3', 'over3months', 'unallocated'] as const;
 
-  // For aging-report: label spans Supplier+InvoiceAmount cols (indices 0-1), numbers start at index 2
-  // For aging-by-invoice: label spans Supplier+Invoice#+InvoiceDate+DueDate cols (indices 0-3), numbers at 4
-  const agingLabelSpan  = report.key === 'aging-by-invoice' ? 4 : 2;
+  // For aging-report:      label spans Supplier col only (index 0), numbers start at index 1
+  // For aging-by-invoice:  label spans Supplier+Invoice#+InvoiceDate+DueDate (indices 0-3), numbers at 4
+  const agingLabelSpan  = report.key === 'aging-by-invoice' ? 4 : 1;
   const agingStartIndex = agingLabelSpan;
-  // AGING_FIELDS minus invoiceAmount when label spans it for aging-report (we still show it)
-  // Fields rendered as number cells:
-  // aging-report:      [invoiceAmount skipped in label span] → start from unpaidAmount onward
-  // Actually we skip invoiceAmount from the number cells when the label already spans 2 cols
-  // Simpler: for aging-report colSpan=2 means we drop the invoiceAmount cell and show it merged
-  // → just keep all 7 fields but for aging-report merge Supplier+InvoiceAmount into the label cell
-  //   and only render 6 number cells (unpaidAmount..unallocated)
-  const agingNumberFields = report.key === 'aging-by-invoice'
+  // aging-report uses all 7 fields so Invoice Amount total shows in its own column
+  const agingNumberFields = AGING_FIELDS;
     ? AGING_FIELDS
     : (['unpaidAmount', 'months1', 'months2', 'months3', 'over3months', 'unallocated'] as const);
 
@@ -941,11 +935,7 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
       <Table.Summary>
         <Table.Summary.Row style={{ background: '#f0f5ff' }}>
           <Table.Summary.Cell index={0} colSpan={agingLabelSpan}>
-            <Text strong style={{ whiteSpace: 'nowrap' }}>
-              {report.key === 'aging-report'
-                ? `Total for Report   ${fmt(totals.invoiceAmount)}`
-                : 'Total for Report'}
-            </Text>
+            <Text strong style={{ whiteSpace: 'nowrap' }}>Total for Report</Text>
           </Table.Summary.Cell>
           {agingNumberFields.map((f, i) => (
             <Table.Summary.Cell key={f} index={agingStartIndex + i} align="right">
