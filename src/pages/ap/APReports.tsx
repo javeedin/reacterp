@@ -137,7 +137,7 @@ const AGING_DRILL_COLUMNS = [
     render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.primary : undefined }}>{fmt(v)}</Text> },
   { title: 'Over 3 Months',      dataIndex: 'over3months', key: 'over3months', width: 130, align: 'right' as const,
     render: (v: number) => <Text strong style={{ color: v > 0 ? '#8B0000' : undefined }}>{fmt(v)}</Text> },
-  { title: 'Unallocated',        dataIndex: 'unallocated', key: 'unallocated', width: 120, align: 'right' as const,
+  { title: 'Current (Not Due)',  dataIndex: 'unallocated', key: 'unallocated', width: 130, align: 'right' as const,
     render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.neutral600 : undefined }}>{fmt(v)}</Text> },
 ];
 
@@ -191,7 +191,7 @@ const COLUMNS: Record<string, any[]> = {
       render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.primary : undefined }}>{fmt(v)}</Text> },
     { title: 'Over 3 Months Overdue', dataIndex: 'over3months', key: 'over3months',   width: 150, align: 'right' as const,
       render: (v: number) => <Text strong style={{ color: v > 0 ? '#8B0000' : undefined }}>{fmt(v)}</Text> },
-    { title: 'Unallocated Amount', dataIndex: 'unallocated',   key: 'unallocated',    width: 140, align: 'right' as const,
+    { title: 'Current (Not Due)', dataIndex: 'unallocated',   key: 'unallocated',    width: 140, align: 'right' as const,
       render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.neutral600 : undefined }}>{fmt(v)}</Text> },
   ],
   'aging-by-invoice': [
@@ -211,7 +211,7 @@ const COLUMNS: Record<string, any[]> = {
       render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.primary : undefined }}>{fmt(v)}</Text> },
     { title: 'Over 3 Months Overdue', dataIndex: 'over3months', key: 'over3months',   width: 150, align: 'right' as const,
       render: (v: number) => <Text strong style={{ color: v > 0 ? '#8B0000' : undefined }}>{fmt(v)}</Text> },
-    { title: 'Unallocated Amount', dataIndex: 'unallocated',   key: 'unallocated',    width: 140, align: 'right' as const,
+    { title: 'Current (Not Due)', dataIndex: 'unallocated',   key: 'unallocated',    width: 140, align: 'right' as const,
       render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.neutral600 : undefined }}>{fmt(v)}</Text> },
   ],
 };
@@ -498,13 +498,16 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
 
   // Build per-invoice aging row (shared by both aging reports)
   const buildInvoiceAgingRow = (inv: any, supplierName: string, asAt: Date, idx: number) => {
-    const invDate = new Date(inv.invoice_date || inv.terms_date || '');
-    if (isNaN(invDate.getTime())) return null;
+    // Age from due_date (payment terms date), falling back to invoice_date.
+    // Using invoice_date causes wrong buckets: a fresh invoice with 30-day terms
+    // would show as "1 Month Overdue" when it hasn't even passed its due date.
+    const ageDate = new Date(inv.due_date || inv.terms_date || inv.invoice_date || '');
+    if (isNaN(ageDate.getTime())) return null;
     const invAmt   = Number(inv.invoice_amount || 0);
     const paid     = Number(inv.amount_paid || 0);
     const bal      = Number(inv.amount_remaining ?? (invAmt - paid));
     if (bal <= 0) return null;
-    const age  = Math.floor((asAt.getTime() - invDate.getTime()) / 86400000);
+    const age  = Math.floor((asAt.getTime() - ageDate.getTime()) / 86400000);
     const bkts = agingBuckets(age, bal);
     return {
       key:           `${inv.invoice_number || idx}-${idx}`,
@@ -545,15 +548,16 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
     allInvoices.forEach((inv: any, i: number) => {
       const sn    = inv.supplier_number || '';
       const sName = inv.supplier_name   || sn;
-      const invDate = new Date(inv.invoice_date || '');
-      if (!sn || isNaN(invDate.getTime())) return;
+      // Age from due_date; fall back to invoice_date only if no due date
+      const ageDate = new Date(inv.due_date || inv.invoice_date || '');
+      if (!sn || isNaN(ageDate.getTime())) return;
 
       const invAmt = Number(inv.invoice_amount  || 0);
       const paid   = Number(inv.amount_paid     || 0);
       const bal    = Number(inv.amount_remaining ?? (invAmt - paid));
       if (bal <= 0) return;
 
-      const age  = Math.floor((asAt.getTime() - invDate.getTime()) / 86400000);
+      const age  = Math.floor((asAt.getTime() - ageDate.getTime()) / 86400000);
       const bkts = agingBuckets(age, bal);
 
       if (!supplierMap.has(sn)) {
