@@ -201,30 +201,29 @@ const APModule: React.FC = () => {
     setDrillLoading(true);
     setDrillRows([]);
     setDrillSearch('');
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
     try {
       const params = new URLSearchParams();
       if (selectedBU) params.set('P_BUSINESS_UNIT', selectedBU);
-      const qs = params.toString();
-      // endpoint registered without 'ap/' prefix in this ORDS environment
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/outstanding-by-supplier${qs ? '?' + qs : ''}`;
+      params.set('P_AS_AT_DATE', today);
+      const url = `${APEX_DB_CONFIG.baseUrl}/suppliers?${params}`;
       setDrillApiUrl(url);
-      const res = await fetch(url);
+      const res  = await fetch(url);
       const text = await res.text();
       if (!text.trim()) throw new Error('Empty response from server');
       const data = JSON.parse(text);
       if (data.error) throw new Error(data.error);
       const items: any[] = Array.isArray(data.items) ? data.items : (Array.isArray(data) ? data : []);
       setDrillRows(items.map((r: any) => ({
-        supplierNumber:     r.supplier_number     || '',
-        supplierName:       r.supplier_name       || r.supplier_number || '',
-        invoiceCount:       Number(r.invoice_count        ?? 0),
-        totalInvoiceAmount: Number(r.total_invoice_amount ?? 0),
-        totalPaid:          Number(r.total_paid           ?? 0),
-        outstandingAmount:  Number(r.outstanding_amount   ?? 0),
+        supplierNumber:     r.supplier_number                                                   || '',
+        supplierName:       r.supplier_name  || r.supplier                                     || '',
+        invoiceCount:       Number(r.invoice_count                                             ?? 0),
+        totalInvoiceAmount: Number(r.total_invoice_amount ?? r.invoice_amount                  ?? 0),
+        totalPaid:          Number(r.total_paid           ?? r.amount_paid                     ?? 0),
+        outstandingAmount:  Number(r.outstanding_balance  ?? r.outstanding_amount ?? r.balance ?? 0),
       })));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      // Import message from antd is already in scope
       message.error(`Failed to load outstanding: ${msg}`);
       console.error('Drill-down error:', msg);
     } finally {
@@ -254,23 +253,32 @@ const APModule: React.FC = () => {
   useEffect(() => {
     const fetchStats = async () => {
       setKpiLoading(true);
+      const today = new Date().toISOString().split('T')[0];
       try {
-        const params = new URLSearchParams();
-        if (selectedBU) params.set('P_BUSINESS_UNIT', selectedBU);
-        const qs = params.toString();
-        const url = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/stats${qs ? '?' + qs : ''}`;
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const text = await res.text();
-        if (!text.trim()) throw new Error('empty');
-        const data = JSON.parse(text);
-        const d = Array.isArray(data?.items) && data.items.length > 0 ? data.items[0] : data;
+        const buParam = selectedBU ? `&P_BUSINESS_UNIT=${encodeURIComponent(selectedBU)}` : '';
+
+        // 1. Invoice counts / overdue from stats endpoint
+        const statsUrl = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/stats${selectedBU ? `?P_BUSINESS_UNIT=${encodeURIComponent(selectedBU)}` : ''}`;
+        const statsRes  = await fetch(statsUrl);
+        const statsText = statsRes.ok ? await statsRes.text() : '';
+        const statsData = statsText.trim() ? JSON.parse(statsText) : {};
+        const d = Array.isArray(statsData?.items) && statsData.items.length > 0 ? statsData.items[0] : statsData;
+
+        // 2. Total outstanding from suppliers endpoint (as-at today)
+        const suppUrl  = `${APEX_DB_CONFIG.baseUrl}/suppliers?P_AS_AT_DATE=${today}${buParam}`;
+        const suppRes  = await fetch(suppUrl);
+        const suppText = suppRes.ok ? await suppRes.text() : '{}';
+        const suppData = suppText.trim() ? JSON.parse(suppText) : {};
+        const suppItems: any[] = Array.isArray(suppData.items) ? suppData.items : (Array.isArray(suppData) ? suppData : []);
+        const totalOutstanding = suppItems.reduce((sum, r) =>
+          sum + Number(r.outstanding_balance ?? r.outstanding_amount ?? r.balance ?? 0), 0);
+
         setKpi({
           pendingInvoices:  Number(d.pending_invoices  ?? 0),
           approvedInvoices: Number(d.approved_invoices ?? 0),
           pendingPayments:  Number(d.pending_payments  ?? 0),
           overduePayments:  Number(d.overdue_payments  ?? 0),
-          totalPayables:    Number(d.total_outstanding ?? 0),
+          totalPayables:    totalOutstanding,
           lastSync: d.last_sync_date
             ? new Date(d.last_sync_date).toLocaleString()
             : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),

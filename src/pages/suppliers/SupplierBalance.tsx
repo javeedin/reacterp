@@ -345,8 +345,17 @@ const SupplierBalance: React.FC = () => {
   ];
 
   // ── Supplier header ────────────────────────────────────────────────────────
+  const supplierApiUrl = `${SUPPLIERS_URL}?supplier_number=${encodeURIComponent(supplierNumber || '')}&limit=1`;
   const renderHeader = () => (
-    <Card style={{ marginBottom: 16, borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
+    <Card
+      style={{ marginBottom: 16, borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
+      extra={
+        <ApiInfoButton
+          url={supplierApiUrl}
+          description="Fetches supplier master record from APEX by supplier number."
+        />
+      }
+    >
       <Row gutter={24} align="middle">
         <Col flex="auto">
           <Row align="middle" gutter={16}>
