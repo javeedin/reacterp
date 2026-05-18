@@ -2404,16 +2404,22 @@ const AccountAnalysis: React.FC = () => {
         title: getSegmentLabel(segment),
         dataIndex: segment,
         key: segment,
-        width: 100,
+        width: segment === 'company' ? 160 : 100,
         fixed: 'left' as const,
+        render: segment === 'company'
+          ? (v: string) => companyNames[v] ? `${v} – ${companyNames[v]}` : v
+          : undefined,
       })),
       { title: 'Account', dataIndex: 'account', key: 'account', width: 100, fixed: 'left' as const },
       ...segmentsAfterAccount.map((segment) => ({
         title: getSegmentLabel(segment),
         dataIndex: segment,
         key: segment,
-        width: 100,
+        width: segment === 'company' ? 160 : 100,
         fixed: 'left' as const,
+        render: segment === 'company'
+          ? (v: string) => companyNames[v] ? `${v} – ${companyNames[v]}` : v
+          : undefined,
       })),
       ...(showDrCrColumns
         ? periods.flatMap((period) => [
@@ -2791,8 +2797,11 @@ const AccountAnalysis: React.FC = () => {
         title: getSegmentLabel(segment),
         dataIndex: segment,
         key: segment,
-        width: 100,
+        width: segment === 'company' ? 160 : 100,
         fixed: 'left' as const,
+        render: segment === 'company'
+          ? (v: string) => companyNames[v] ? `${v} – ${companyNames[v]}` : v
+          : undefined,
       })),
       {
         title: 'Account',
@@ -2813,8 +2822,11 @@ const AccountAnalysis: React.FC = () => {
         title: getSegmentLabel(segment),
         dataIndex: segment,
         key: segment,
-        width: 100,
+        width: segment === 'company' ? 160 : 100,
         fixed: 'left' as const,
+        render: segment === 'company'
+          ? (v: string) => companyNames[v] ? `${v} – ${companyNames[v]}` : v
+          : undefined,
       })),
       // Dynamic period columns - grouped by month with Debit, Credit, Balance
       ...selectedPeriods.map((period) => ({
