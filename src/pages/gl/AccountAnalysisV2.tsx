@@ -20,10 +20,12 @@ const { Text } = Typography;
 const { Option } = Select;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const API_BASE         = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/gl';
-const APEX_BASE        = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp';
-const COMPANY_LOV_URL  = `${APEX_BASE}/valuesets/getvalues/BUIMERC_FIN_GLB_COA_CO`;
-const ACCOUNTS_LOV_URL = `${APEX_BASE}/glaccountslist`;
+const API_BASE           = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/gl';
+const APEX_BASE          = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp';
+const COMPANY_LOV_URL    = `${APEX_BASE}/valuesets/getvalues/BUIMERC_FIN_GLB_COA_CO`;
+const ACCOUNTS_LOV_URL   = `${APEX_BASE}/glaccountslist`;
+const SEGMENTS_API_URL   = `${APEX_BASE}/chartofaccounts/structuresegments`;
+const VALUES_API_URL     = `${APEX_BASE}/valuesets/getvalues`;
 
 const REDWOOD = {
   primary: '#C74634', success: '#1D7B4D', warning: '#D4A800',
@@ -248,17 +250,24 @@ const SegmentPicker: React.FC<{
   open: boolean; onClose: () => void;
   segmentValues: Record<string, string[]>;
   companyOptions: { value: string; meaning: string }[];
+  segDescMaps: Record<string, Record<string, string>>;
   existing: Record<string, string>;
   onAdd: (key: string, value: string, label?: string) => void;
   loading: boolean;
-}> = ({ open, onClose, segmentValues, companyOptions, existing, onAdd, loading }) => {
+}> = ({ open, onClose, segmentValues, companyOptions, segDescMaps, existing, onAdd, loading }) => {
   const [sel, setSel] = useState<SegmentDef | null>(null);
   const [q, setQ]     = useState('');
 
-  const getValues = (seg: SegmentDef) =>
-    seg.key === 'company'
-      ? companyOptions.map(c => ({ value: c.value, label: `${c.value} – ${c.meaning}` }))
-      : (segmentValues[seg.valueKey] || []).map(v => ({ value: v, label: v }));
+  const getValues = (seg: SegmentDef) => {
+    if (seg.key === 'company') {
+      return companyOptions.map(c => ({ value: c.value, label: `${c.value} – ${c.meaning}` }));
+    }
+    const descMap = segDescMaps[seg.valueKey] || {};
+    return (segmentValues[seg.valueKey] || []).map(v => {
+      const desc = descMap[v];
+      return { value: v, label: desc ? `${v} – ${desc}` : v };
+    });
+  };
 
   const vals = sel ? getValues(sel) : [];
   const filtered = q ? vals.filter(v => v.label.toLowerCase().includes(q.toLowerCase())) : vals;
@@ -334,10 +343,10 @@ const SegmentPicker: React.FC<{
                 }}
                 onMouseEnter={e => (e.currentTarget.style.background = '#e6f4ff')}
                 onMouseLeave={e => (e.currentTarget.style.background = existing[sel.key] === v.value ? '#e6f4ff' : '')}>
-                {sel.key === 'company' ? (
+                {v.label.includes(' – ') ? (
                   <>
-                    <Tag color="blue" style={{ fontSize: 11, minWidth: 56, textAlign: 'center', margin: 0 }}>{v.value}</Tag>
-                    <Text style={{ fontSize: 12 }}>{v.label.split(' – ')[1]}</Text>
+                    <Tag color={sel.color} style={{ fontSize: 11, minWidth: 56, textAlign: 'center', margin: 0 }}>{v.value}</Tag>
+                    <Text style={{ fontSize: 12 }}>{v.label.split(' – ').slice(1).join(' – ')}</Text>
                   </>
                 ) : (
                   <Text style={{ fontSize: 12 }}>{v.label}</Text>
@@ -1014,6 +1023,7 @@ const AAPanel: React.FC = () => {
     analyses: [], intercompanies: [], sources: [], categories: [],
   });
   const [companyOptions, setCompanyOptions]   = useState<{ value: string; meaning: string }[]>([]);
+  const [segDescMaps, setSegDescMaps]         = useState<Record<string, Record<string, string>>>({});
   const [segValuesLoading, setSegValuesLoading] = useState(false);
   const [segPickerOpen, setSegPickerOpen]     = useState(false);
 
@@ -1066,9 +1076,10 @@ const AAPanel: React.FC = () => {
     if (!ldg) return;
     setSegValuesLoading(true);
     try {
-      const [compRes, segRes] = await Promise.all([
+      const [compRes, segRes, structRes] = await Promise.all([
         fetch(COMPANY_LOV_URL),
         fetch(`${API_BASE}/segment-values?ledger_name=${encodeURIComponent(ldg)}`),
+        fetch(SEGMENTS_API_URL),
       ]);
       if (compRes.ok) {
         const cd = await compRes.json();
@@ -1085,6 +1096,36 @@ const AAPanel: React.FC = () => {
           intercompanies: sd.intercompanies || [], sources: sd.sources || [],
           categories: sd.categories || [],
         }));
+      }
+      // Fetch descriptions from valuesets for each COA segment
+      if (structRes.ok) {
+        const structData = await structRes.json();
+        const segs: any[] = structData.items || [];
+        // Map prompt → valueKey in SEGMENT_DEFS (excluding company which is handled separately)
+        const promptMap: Record<string, string> = {
+          lob: 'lobs', department: 'departments', 'sub account': 'subAccounts',
+          subaccount: 'subAccounts', analysis: 'analyses', intercompany: 'intercompanies', interco: 'intercompanies',
+        };
+        const descFetches = segs
+          .filter((s: any) => s.segment_code && s.segment_code !== 'BUIMERC_FIN_GLB_COA_CO')
+          .map(async (s: any) => {
+            const prompt = (s.prompt || s.segment_name || '').toLowerCase().trim();
+            const valueKey = promptMap[prompt];
+            if (!valueKey) return;
+            try {
+              const vRes = await fetch(`${VALUES_API_URL}/${s.segment_code}`);
+              if (!vRes.ok) return;
+              const vData = await vRes.json();
+              const descMap: Record<string, string> = {};
+              (vData.items || []).forEach((item: any) => {
+                const code = item.value || item.VALUE || '';
+                const desc = item.description || item.DESCRIPTION || item.meaning || '';
+                if (code) descMap[code] = desc;
+              });
+              setSegDescMaps(prev => ({ ...prev, [valueKey]: descMap }));
+            } catch { /* silent */ }
+          });
+        await Promise.all(descFetches);
       }
     } catch { /* silent */ } finally {
       setSegValuesLoading(false);
@@ -2210,6 +2251,7 @@ const AAPanel: React.FC = () => {
 
       <SegmentPicker open={segPickerOpen} onClose={() => setSegPickerOpen(false)}
         segmentValues={segmentValues} companyOptions={companyOptions}
+        segDescMaps={segDescMaps}
         existing={segFilters} loading={segValuesLoading} onAdd={addSegFilter} />
 
       <DrillModal open={drillOpen} onClose={() => setDrillOpen(false)}
