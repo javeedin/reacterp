@@ -3105,7 +3105,7 @@ const TrialBalance: React.FC = () => {
             </Tooltip>
           ),
       },
-      { title: 'Combination', dataIndex: 'combo', key: 'combo', width: 260, ellipsis: true,
+      { title: 'Combination', dataIndex: 'combo', key: 'combo', width: 320, ellipsis: true,
         render: (v: string, r: ComboRow) => (
           <Tooltip title={v}>
             <Text
@@ -3132,7 +3132,7 @@ const TrialBalance: React.FC = () => {
             {v >= 0 ? fmtN(v) : `(${fmtN(v)})`}
           </Text>
         )},
-      { title: 'Book Rate', dataIndex: 'bookRate', key: 'bookRate', align: 'right' as const, width: 130,
+      { title: 'Book Rate', dataIndex: 'bookRate', key: 'bookRate', align: 'right' as const, width: 160,
         render: (v: number, r: ComboRow) => r.excluded
           ? <Text style={{ color: '#aaa', fontFamily: 'monospace' }}>—</Text>
           : (
