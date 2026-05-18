@@ -2215,6 +2215,9 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   const [transactions, setTransactions]   = useState<ExternalTxnRecord[]>([]);
   const [loading, setLoading]             = useState(false);
   const [hasSearched, setHasSearched]     = useState(false);
+  const [totalRecords, setTotalRecords]   = useState(0);
+  const [pageNum, setPageNum]             = useState(1);
+  const [pageSize, setPageSize]           = useState(50);
   const [allBankAccounts, setAllBankAccounts] = useState<BankAccountOption[]>([]);
   const [businessUnits, setBusinessUnits] = useState<BUOption[]>([]);
   const [bankAccountMap, setBankAccountMap] = useState<Record<string, string>>({});
@@ -2499,7 +2502,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   useEffect(() => { loadLovs(); }, [loadLovs]);
 
   // ── Search ────────────────────────────────────────────────────────────────
-  const handleSearch = useCallback(async () => {
+  const handleSearch = useCallback(async (page = 1, size = 50) => {
     const values = searchForm.getFieldsValue();
     const params = new URLSearchParams();
     if (values.transactionNumber)  params.set('transaction_number', values.transactionNumber);
@@ -2531,7 +2534,8 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       if (values.createdTo)   params.set('creation_date_to',   (values.createdTo   as Dayjs).format('YYYY-MM-DD'));
     }
 
-    params.set('row_limit', '500');
+    params.set('row_limit',  String(size));
+    params.set('row_offset', String((page - 1) * size));
 
     const url = `${APEX_BASE}/cash/externaltransactions?${params.toString()}`;
     setLastApiUrl(url);
@@ -2542,6 +2546,9 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       const data = await parseApexJson(res);
       if (data.success) {
         setTransactions(data.items ?? []);
+        setTotalRecords(data.total ?? 0);
+        setPageNum(page);
+        setPageSize(size);
         if ((data.items ?? []).length === 0) message.info('No transactions found for the selected criteria.');
       } else {
         message.error(data.message || 'Search failed.');
@@ -2570,6 +2577,8 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     setSelectedRowKeys([]);
     setSelectedBU('');
     setDerivedLE('');
+    setTotalRecords(0);
+    setPageNum(1);
   };
 
   // ── Create Accounting ─────────────────────────────────────────────────────
@@ -3335,7 +3344,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
             <Space size={8} onClick={e => e.stopPropagation()}>
               <Button size="small" onClick={e => { e.stopPropagation(); handleReset(); }} icon={<ReloadOutlined />}>Reset</Button>
               <Button size="small" icon={<ApiOutlined />} onClick={e => { e.stopPropagation(); setShowApiModal(true); }} style={{ color: REDWOOD.neutral600 }}>API</Button>
-              <Button size="small" type="primary" icon={<SearchOutlined />} loading={loading} onClick={e => { e.stopPropagation(); handleSearch(); }}
+              <Button size="small" type="primary" icon={<SearchOutlined />} loading={loading} onClick={e => { e.stopPropagation(); handleSearch(1, pageSize); }}
                 style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
                 Search
               </Button>
@@ -3556,7 +3565,15 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           >
             <Table
               dataSource={filtered} columns={columns} rowKey="externalTransactionId"
-              loading={loading} size="small" pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `${t} transactions` }}
+              loading={loading} size="small" pagination={{
+                current: pageNum,
+                pageSize,
+                total: totalRecords,
+                showSizeChanger: true,
+                pageSizeOptions: ['25', '50', '100', '200'],
+                showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} records`,
+                onChange: (p, s) => handleSearch(p, s),
+              }}
               locale={{ emptyText: <Empty description="No transactions found" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
               scroll={{ x: 1600 }}
               rowSelection={{
