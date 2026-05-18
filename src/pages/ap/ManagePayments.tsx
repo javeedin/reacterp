@@ -527,6 +527,36 @@ const ManagePayments: React.FC = () => {
   const [createPaymentTabOpen, setCreatePaymentTabOpen] = useState(false);
   const [createPaymentActiveTab, setCreatePaymentActiveTab] = useState('paymentDetails');
   const [createPaymentCurrency, setCreatePaymentCurrency] = useState<string>('AED');
+  const [bmsRateLoading, setBmsRateLoading] = useState(false);
+  const [bmsRate, setBmsRate] = useState<{ rate: number; inverseRate: number; rateType: string; rateDate: string } | null>(null);
+
+  // Fetch BMS rate when createPaymentCurrency is a foreign currency
+  useEffect(() => {
+    if (createPaymentCurrency === 'AED') {
+      setBmsRate(null);
+      return;
+    }
+    setBmsRateLoading(true);
+    setBmsRate(null);
+    fetch(`${APEX_DB_CONFIG.baseUrl}/currencies/bmsrate?source_cur=${createPaymentCurrency}&target_cur=AED`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.status === 'ok') {
+          setBmsRate({ rate: data.rate, inverseRate: data.inverseRate, rateType: data.rateType, rateDate: data.rateDate });
+          // Auto-fill only if conversionRate is currently empty/null
+          const currentRate = createPaymentForm.getFieldValue('conversionRate');
+          if (!currentRate) {
+            createPaymentForm.setFieldsValue({
+              conversionRate: data.rate,
+              conversionRateType: data.rateType || 'Corporate',
+              conversionDate: dayjs(data.rateDate),
+            });
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => setBmsRateLoading(false));
+  }, [createPaymentCurrency]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Supplier lookup modal state
   const [supplierModalVisible, setSupplierModalVisible] = useState(false);
@@ -3273,6 +3303,7 @@ const ManagePayments: React.FC = () => {
                         setInvoicesToPay([]);
                         setSelectedBuLegalEntityName('');
                         setCreatePaymentCurrency('AED');
+                        setBmsRate(null);
                       }}
                     >
                       Cancel
@@ -3323,6 +3354,7 @@ const ManagePayments: React.FC = () => {
                         setInvoicesToPay([]);
                         setSelectedBuLegalEntityName('');
                         setCreatePaymentCurrency('AED');
+                        setBmsRate(null);
                         setPaymentConfirmed(false);
                         setConfirmedPaymentNumber('');
                       }}
@@ -3597,6 +3629,25 @@ const ManagePayments: React.FC = () => {
                               label={createPaymentCurrency !== 'AED' ? <><span style={{ color: REDWOOD.primary }}>*</span> Conversion Rate</> : 'Conversion Rate'}
                               name="conversionRate"
                               rules={[{ required: createPaymentCurrency !== 'AED', message: 'Required for foreign currency' }]}
+                              extra={createPaymentCurrency !== 'AED' && (
+                                bmsRateLoading
+                                  ? <Text type="secondary" style={{ fontSize: 10 }}>Fetching rate…</Text>
+                                  : bmsRate
+                                    ? <Space size={4}>
+                                        <Text style={{ fontSize: 10, color: '#0572CE' }}>
+                                          {bmsRate.rateType}: <strong>{bmsRate.rate}</strong> (inv: {bmsRate.inverseRate}) — {bmsRate.rateDate}
+                                        </Text>
+                                        <Button type="link" size="small" style={{ fontSize: 10, padding: 0, height: 'auto' }}
+                                          onClick={() => createPaymentForm.setFieldsValue({
+                                            conversionRate: bmsRate.rate,
+                                            conversionRateType: bmsRate.rateType,
+                                            conversionDate: dayjs(bmsRate.rateDate),
+                                          })}>
+                                          Apply
+                                        </Button>
+                                      </Space>
+                                    : null
+                              )}
                             >
                               <InputNumber style={{ width: '100%' }} placeholder="0.000000" precision={6} min={0} disabled={!buReady} />
                             </Form.Item>

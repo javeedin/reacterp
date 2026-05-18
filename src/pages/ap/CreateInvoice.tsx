@@ -618,6 +618,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [slaDebugLoading, setSlaDebugLoading]       = useState<'get' | 'post' | null>(null);
   const [slaDebugTab, setSlaDebugTab]               = useState<string>('post');
 
+  // BMS currency rate auto-fetch
+  const [bmsRateLoading, setBmsRateLoading] = useState(false);
+  const [bmsRate, setBmsRate] = useState<{ rate: number; inverseRate: number; rateType: string; rateDate: string } | null>(null);
+
   // Applied prepayment SLA – per-row accounting state (keyed by applicationId)
   const [appSlaMap, setAppSlaMap] = useState<Record<number, { headerId: number | null; status: string | null }>>({});
   const [appSlaLoadingId, setAppSlaLoadingId] = useState<number | null>(null);
@@ -3574,6 +3578,35 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       return [{ ...prev[0], paymentMethod: headerValues.paymentMethod }];
     });
   }, [headerValues.paymentMethod]);
+
+  // Fetch BMS rate when invoice currency is a foreign currency
+  useEffect(() => {
+    const currency = headerValues.invoiceCurrency;
+    if (!currency || currency === 'AED') {
+      setBmsRate(null);
+      return;
+    }
+    setBmsRateLoading(true);
+    setBmsRate(null);
+    fetch(`${APEX_DB_CONFIG.baseUrl}/currencies/bmsrate?source_cur=${currency}&target_cur=AED`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.status === 'ok') {
+          setBmsRate({ rate: data.rate, inverseRate: data.inverseRate, rateType: data.rateType, rateDate: data.rateDate });
+          // Auto-fill only if conversionRate is currently empty
+          const currentRate = form.getFieldValue('conversionRate');
+          if (!currentRate) {
+            form.setFieldsValue({
+              conversionRate: data.rate,
+              conversionRateType: data.rateType || 'Corporate',
+              conversionDate: dayjs(data.rateDate),
+            });
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => setBmsRateLoading(false));
+  }, [headerValues.invoiceCurrency]); // eslint-disable-line react-hooks/exhaustive-deps
   // ────────────────────────────────────────────────────────────────────────
 
   // Invoice Actions dropdown menu items
@@ -6144,6 +6177,25 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                           name="conversionRate"
                           style={{ marginBottom: 4 }}
                           required={!isFuncCcy}
+                          extra={!isFuncCcy && (
+                            bmsRateLoading
+                              ? <Text type="secondary" style={{ fontSize: 10 }}>Fetching rate…</Text>
+                              : bmsRate
+                                ? <Space size={4}>
+                                    <Text style={{ fontSize: 10, color: '#0572CE' }}>
+                                      {bmsRate.rateType}: <strong>{bmsRate.rate}</strong> (inv: {bmsRate.inverseRate}) — {bmsRate.rateDate}
+                                    </Text>
+                                    <Button type="link" size="small" style={{ fontSize: 10, padding: 0, height: 'auto' }}
+                                      onClick={() => form.setFieldsValue({
+                                        conversionRate: bmsRate.rate,
+                                        conversionRateType: bmsRate.rateType,
+                                        conversionDate: dayjs(bmsRate.rateDate),
+                                      })}>
+                                      Apply
+                                    </Button>
+                                  </Space>
+                                : null
+                          )}
                         >
                           <InputNumber style={{ width: '100%' }} placeholder={isFuncCcy ? '1' : '0.000000'} precision={6} min={0} disabled={isFuncCcy || isReadOnly} />
                         </Form.Item>
