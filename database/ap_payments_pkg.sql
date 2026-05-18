@@ -70,6 +70,7 @@ CREATE OR REPLACE PACKAGE XXAP_PAYMENTS_PKG AS
         p_business_unit     IN VARCHAR2 DEFAULT NULL,
         p_date_from         IN DATE DEFAULT NULL,
         p_date_to           IN DATE DEFAULT NULL,
+        p_only_pdc          IN VARCHAR2 DEFAULT 'N',
         p_limit             IN NUMBER DEFAULT 100,
         p_offset            IN NUMBER DEFAULT 0
     ) RETURN CLOB;
