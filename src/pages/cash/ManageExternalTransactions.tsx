@@ -2600,7 +2600,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       message.warning(`${noAccounts.length} row(s) have missing cash/offset account — they will be skipped.`);
     }
     const acctDesc = (code: string) =>
-      acctCombinations.find(c => c.combinationName === code)?.description ?? '';
+      acctCombinations.find(c => c.glAccountDesc === code)?.description ?? '';
     const rows: BankAcctProgressRow[] = selected.map(t => {
       const missingAccounts = !t.assetAccountCombination || !t.offsetAccountCombination;
       const alreadyAccounted = t.accountingFlag === 'Y';
@@ -2816,7 +2816,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       return;
     }
     const acctDesc = (code: string) =>
-      acctCombinations.find(c => c.combinationName === code)?.description ?? '';
+      acctCombinations.find(c => c.glAccountDesc === code)?.description ?? '';
     const rows: BankAcctProgressRow[] = txnArray.map(txn => {
       const date = txn.transactionDate || txn.valueDate || dayjs().format('YYYY-MM-DD');
       const absAmount = Math.abs(txn.amount ?? 0);
