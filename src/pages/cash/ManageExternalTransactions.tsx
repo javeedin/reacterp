@@ -3514,27 +3514,32 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                   <tbody>
                     {liveLines
                       ? lines.map((l: any, i: number) => {
-                          const drColor  = REDWOOD.info;
-                          const crColor  = REDWOOD.success;
+                          const drColor   = REDWOOD.info;
+                          const crColor   = REDWOOD.success;
                           const lineColor = l.lineType === 'DR' ? drColor : crColor;
+                          const fwEntDr   = l.enteredDr  ? 600 : 400;
+                          const fwEntCr   = l.enteredCr  ? 600 : 400;
+                          const fwAccDr   = l.accountedDr ? 600 : 400;
+                          const fwAccCr   = l.accountedCr ? 600 : 400;
+                          const rowBg     = i % 2 === 1 ? REDWOOD.neutral100 : undefined;
                           return (
-                          <tr key={l.lineId ?? i} style={{ background: i % 2 === 1 ? REDWOOD.neutral100 : undefined }}>
+                          <tr key={l.lineId ?? i} style={{ background: rowBg }}>
                             <td style={tds({ textAlign: 'center', color: REDWOOD.neutral600 })}>{l.lineNumber ?? i + 1}</td>
                             <td style={tds({ fontWeight: 700, color: lineColor })}>{l.lineType}</td>
                             <td style={tds()}>{l.accountCombination || '—'}</td>
                             <td style={tds({ fontSize: 10, color: REDWOOD.neutral600 })}>{l.accountDescription || '—'}</td>
                             <td style={tds({ fontSize: 10, color: REDWOOD.neutral600 })}>{l.accountingClass || '—'}</td>
                             <td style={tds({ fontSize: 10 })}>{l.description || '—'}</td>
-                            <td style={tds({ textAlign: 'right', color: drColor, fontWeight: l.enteredDr ? 600 : 400 })}>
+                            <td style={tds({ textAlign: 'right', color: drColor, fontWeight: fwEntDr })}>
                               {l.enteredDr ? fmtAmount(l.enteredDr) : '—'}
                             </td>
-                            <td style={tds({ textAlign: 'right', color: crColor, fontWeight: l.enteredCr ? 600 : 400 })}>
+                            <td style={tds({ textAlign: 'right', color: crColor, fontWeight: fwEntCr })}>
                               {l.enteredCr ? fmtAmount(l.enteredCr) : '—'}
                             </td>
-                            <td style={tds({ textAlign: 'right', color: drColor, fontWeight: l.accountedDr ? 600 : 400 })}>
+                            <td style={tds({ textAlign: 'right', color: drColor, fontWeight: fwAccDr })}>
                               {l.accountedDr ? fmtAmount(l.accountedDr) : '—'}
                             </td>
-                            <td style={tds({ textAlign: 'right', color: crColor, fontWeight: l.accountedCr ? 600 : 400 })}>
+                            <td style={tds({ textAlign: 'right', color: crColor, fontWeight: fwAccCr })}>
                               {l.accountedCr ? fmtAmount(l.accountedCr) : '—'}
                             </td>
                           </tr>
