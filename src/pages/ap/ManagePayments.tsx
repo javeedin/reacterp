@@ -1690,6 +1690,11 @@ const ManagePayments: React.FC = () => {
 
         const mapper = useApex ? mapApexToPaymentRecord : mapFusionToPaymentRecord;
         let mappedPayments = items.map(mapper);
+        // Client-side payment number filter (APEX endpoint may not support this param)
+        if (values.paymentNumber) {
+          const pn = String(values.paymentNumber).trim();
+          mappedPayments = mappedPayments.filter(p => String(p.paymentNumber) === pn);
+        }
         // Client-side date filtering (guards against APEX endpoints that don't support date params yet)
         if (dateFrom || dateTo) {
           mappedPayments = mappedPayments.filter(p => {
