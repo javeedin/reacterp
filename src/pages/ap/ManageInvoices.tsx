@@ -1458,7 +1458,7 @@ const ManageInvoices: React.FC = () => {
       width: 120,
       render: (status: string) => status === 'SYNCED'
         ? <Tag color="purple" style={{ fontSize: 11 }}>Fusion Synced</Tag>
-        : <Tag color="default" style={{ fontSize: 11, color: '#888' }}>Local</Tag>,
+        : null,
       filters: [
         { text: 'Fusion Synced', value: 'SYNCED' },
         { text: 'Local', value: '' },

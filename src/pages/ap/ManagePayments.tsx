@@ -185,8 +185,8 @@ interface PaymentRecord {
   currency?: string;
   checkDate?: string;
   legalEntityName?: string;
-  // true = record came from APEX (synced Oracle Fusion payment) → read-only
   isSynced?: boolean;
+  syncStatus?: string;
 }
 
 // Tab item interface
@@ -420,7 +420,8 @@ const mapApexToPaymentRecord = (item: any, index: number): PaymentRecord => ({
   city: item.City || '',
   country: item.Country || '',
   relatedInvoicesHref: '',
-  isSynced: true,  // APEX synced Oracle payment — read-only
+  isSynced: true,
+  syncStatus: (item.FusionSyncStatus || item.fusion_sync_status || item.SyncStatus || item.sync_status || ''),
 });
 
 const ManagePayments: React.FC = () => {
@@ -2019,17 +2020,16 @@ const ManagePayments: React.FC = () => {
     },
     {
       title: 'Fusion Sync',
-      dataIndex: 'isSynced',
-      key: 'isSynced',
+      dataIndex: 'syncStatus',
+      key: 'syncStatus',
       width: 120,
-      render: (synced: boolean) => synced
+      render: (status: string) => status === 'SYNCED'
         ? <Tag color="purple" style={{ fontSize: 11 }}>Fusion Synced</Tag>
-        : <Tag color="default" style={{ fontSize: 11, color: '#888' }}>Local</Tag>,
+        : null,
       filters: [
-        { text: 'Fusion Synced', value: true },
-        { text: 'Local', value: false },
+        { text: 'Fusion Synced', value: 'SYNCED' },
       ],
-      onFilter: (value, record) => record.isSynced === value,
+      onFilter: (value, record) => record.syncStatus === value,
     },
     {
       title: 'Actions',
