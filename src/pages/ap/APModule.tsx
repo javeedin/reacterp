@@ -251,39 +251,40 @@ const APModule: React.FC = () => {
   useEffect(() => {
     const fetchStats = async () => {
       setKpiLoading(true);
+
+      const buQs = selectedBU ? `?P_BUSINESS_UNIT=${encodeURIComponent(selectedBU)}` : '';
+
+      // 1. Stats — invoice counts, overdue, last sync
+      let d: any = {};
       try {
-        const buQs = selectedBU ? `?P_BUSINESS_UNIT=${encodeURIComponent(selectedBU)}` : '';
+        const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/invoices/stats${buQs}`);
+        const text = res.ok ? await res.text() : '';
+        const json = text.trim() ? JSON.parse(text) : {};
+        d = Array.isArray(json?.items) && json.items.length > 0 ? json.items[0] : json;
+      } catch { /* leave d empty — KPIs default to 0 */ }
 
-        // 1. Invoice counts / overdue / last sync from stats endpoint
-        const statsUrl  = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/stats${buQs}`;
-        const statsRes  = await fetch(statsUrl);
-        const statsText = statsRes.ok ? await statsRes.text() : '';
-        const statsData = statsText.trim() ? JSON.parse(statsText) : {};
-        const d = Array.isArray(statsData?.items) && statsData.items.length > 0 ? statsData.items[0] : statsData;
+      // 2. Total outstanding — sum outstanding_amount from outstanding-by-supplier
+      let totalOutstanding = 0;
+      try {
+        const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/invoices/outstanding-by-supplier${buQs}`);
+        const text = res.ok ? await res.text() : '';
+        const json = text.trim() ? JSON.parse(text) : {};
+        const items: any[] = Array.isArray(json.items) ? json.items : (Array.isArray(json) ? json : []);
+        totalOutstanding = items.reduce((s, r) => s + Number(r.outstanding_amount ?? 0), 0);
+      } catch { /* leave totalOutstanding 0 */ }
 
-        // 2. Total outstanding — same endpoint as drill-down (sums outstanding_amount per supplier)
-        const outUrl   = `${APEX_DB_CONFIG.baseUrl}/ap/invoices/outstanding-by-supplier${buQs}`;
-        const outRes   = await fetch(outUrl);
-        const outText  = outRes.ok ? await outRes.text() : '{}';
-        const outData  = outText.trim() ? JSON.parse(outText) : {};
-        const outItems: any[] = Array.isArray(outData.items) ? outData.items : (Array.isArray(outData) ? outData : []);
-        const totalOutstanding = outItems.reduce((sum, r) => sum + Number(r.outstanding_amount ?? 0), 0);
+      setKpi({
+        pendingInvoices:  Number(d.pending_invoices  ?? 0),
+        approvedInvoices: Number(d.approved_invoices ?? 0),
+        pendingPayments:  Number(d.pending_payments  ?? 0),
+        overduePayments:  Number(d.overdue_payments  ?? 0),
+        totalPayables:    totalOutstanding,
+        lastSync: d.last_sync_date
+          ? new Date(d.last_sync_date).toLocaleString()
+          : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      });
 
-        setKpi({
-          pendingInvoices:  Number(d.pending_invoices  ?? 0),
-          approvedInvoices: Number(d.approved_invoices ?? 0),
-          pendingPayments:  Number(d.pending_payments  ?? 0),
-          overduePayments:  Number(d.overdue_payments  ?? 0),
-          totalPayables:    totalOutstanding,
-          lastSync: d.last_sync_date
-            ? new Date(d.last_sync_date).toLocaleString()
-            : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        });
-      } catch {
-        setKpi({ ...DEFAULT_KPI, lastSync: 'Unavailable' });
-      } finally {
-        setKpiLoading(false);
-      }
+      setKpiLoading(false);
     };
     fetchStats();
   }, [selectedBU]);
