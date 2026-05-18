@@ -2284,14 +2284,14 @@ const ManageSuppliers: React.FC = () => {
                                     cx="50%"
                                     cy="50%"
                                     outerRadius={100}
-                                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                                    label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
                                     labelLine={false}
                                   >
                                     {analyticsData.categories.map((_, i) => (
                                       <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                                     ))}
                                   </Pie>
-                                  <RTooltip formatter={(val: number) => [`AED ${val.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`, 'Amount']} />
+                                  <RTooltip formatter={(val: any) => [`AED ${(val as number).toLocaleString('en-AE', { minimumFractionDigits: 2 })}`, 'Amount']} />
                                   <Legend />
                                 </PieChart>
                               </ResponsiveContainer>
@@ -2306,7 +2306,7 @@ const ManageSuppliers: React.FC = () => {
                                   <CartesianGrid strokeDasharray="3 3" />
                                   <XAxis dataKey="name" angle={-35} textAnchor="end" tick={{ fontSize: 10 }} interval={0} />
                                   <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
-                                  <RTooltip formatter={(val: number) => [`AED ${val.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`, 'Amount']} />
+                                  <RTooltip formatter={(val: any) => [`AED ${(val as number).toLocaleString('en-AE', { minimumFractionDigits: 2 })}`, 'Amount']} />
                                   <Bar dataKey="amount" radius={[4, 4, 0, 0]}>
                                     {analyticsData.categories.map((_, i) => (
                                       <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
@@ -2330,7 +2330,7 @@ const ManageSuppliers: React.FC = () => {
                                     <CartesianGrid strokeDasharray="3 3" />
                                     <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                                     <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
-                                    <RTooltip formatter={(val: number) => [`AED ${val.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`, 'Amount']} />
+                                    <RTooltip formatter={(val: any) => [`AED ${(val as number).toLocaleString('en-AE', { minimumFractionDigits: 2 })}`, 'Amount']} />
                                     <Legend />
                                     <Line type="monotone" dataKey="amount" stroke={REDWOOD.primary} strokeWidth={2} dot={{ r: 4 }} name="Invoice Amount" />
                                   </LineChart>

@@ -807,8 +807,8 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
               const numStyle = (v: number | null, isVariance?: boolean): React.CSSProperties => ({
                 ...tdBase, textAlign: 'right', background: rowBg,
                 color: v === null ? 'transparent'
-                     : isVariance && Math.abs(v) < 0.005 ? REDWOOD.error
-                     : v < 0 ? REDWOOD.error
+                     : isVariance && Math.abs(v) < 0.005 ? '#ff4d4f'
+                     : v < 0 ? '#ff4d4f'
                      : v > 0 && isVariance ? REDWOOD.warning
                      : REDWOOD.neutral900,
                 fontWeight: (row as any).bold ? 700 : 400,
@@ -816,8 +816,8 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
               const diffStyle = (v: number | null): React.CSSProperties => ({
                 ...tdBase, textAlign: 'right', background: rowBg,
                 color: v === null ? 'transparent'
-                     : Math.abs(v) < 0.005 ? REDWOOD.error
-                     : v < 0 ? REDWOOD.error
+                     : Math.abs(v) < 0.005 ? '#ff4d4f'
+                     : v < 0 ? '#ff4d4f'
                      : REDWOOD.warning,
                 fontWeight: (row as any).bold ? 700 : 400,
               });

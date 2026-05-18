@@ -1648,7 +1648,7 @@ const AAPanel: React.FC = () => {
     wb.creator = 'ReactERP'; wb.created = new Date();
     const ws = wb.addWorksheet('Account Analysis');
 
-    const white: ExcelJS.Color      = { argb: 'FFFFFFFF' };
+    const white: ExcelJS.Color      = { argb: 'FFFFFFFF' } as ExcelJS.Color;
     const numFmt                    = '#,##0.00';
     const hdrFill: ExcelJS.Fill     = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC74634' } };
     const fltFill: ExcelJS.Fill     = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0D6' } };
