@@ -1176,9 +1176,9 @@ const AAPanel: React.FC = () => {
   }, [accountOptions.length]);
 
   // ── Opening/closing balance ───────────────────────────────────────────────────
-  const fetchBalanceRow = useCallback(async (acct: string, co: string, period: string, isOpen: boolean) => {
+  const fetchBalanceRow = useCallback(async (acct: string, period: string, isOpen: boolean) => {
     const p = new URLSearchParams({ ledger_name: ledger, period_name: period, account: acct });
-    if (co) p.set('company', co);
+    Object.entries(segFilters).forEach(([k, v]) => { if (v) p.set(k, v); });
     const res = await fetch(`${API_BASE}/rr-trialbalance/standard?${p}`);
     if (!res.ok) return null;
     const data = await res.json();
@@ -1203,7 +1203,7 @@ const AAPanel: React.FC = () => {
       enteredDr: ent.dr, enteredCr: ent.cr, accountedDr: acc.dr, accountedCr: acc.cr,
       jeHeaderId: 0, isOpeningBalance: isOpen, isClosingBalance: !isOpen,
     } as JournalLine;
-  }, [ledger]);
+  }, [ledger, segFilters]);
 
   // ── Search ────────────────────────────────────────────────────────────────────
   const handleSearch = useCallback(async () => {
@@ -1265,10 +1265,9 @@ const AAPanel: React.FC = () => {
       let openRow: JournalLine | null = null;
       let closeRow: JournalLine | null = null;
       if (account && sortedPeriods.length) {
-        const co = segFilters['company'] || '';
         [openRow, closeRow] = await Promise.all([
-          fetchBalanceRow(account, co, sortedPeriods[0], true),
-          fetchBalanceRow(account, co, sortedPeriods[sortedPeriods.length - 1], false),
+          fetchBalanceRow(account, sortedPeriods[0], true),
+          fetchBalanceRow(account, sortedPeriods[sortedPeriods.length - 1], false),
         ]);
       }
       const allRows: JournalLine[] = [
