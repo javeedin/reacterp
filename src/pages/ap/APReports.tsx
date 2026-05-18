@@ -920,8 +920,6 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
   const agingStartIndex = agingLabelSpan;
   // aging-report uses all 7 fields so Invoice Amount total shows in its own column
   const agingNumberFields = AGING_FIELDS;
-    ? AGING_FIELDS
-    : (['unpaidAmount', 'months1', 'months2', 'months3', 'over3months', 'unallocated'] as const);
 
   const agingSummary = () => {
     const totals = AGING_FIELDS.reduce((acc, f) => {
