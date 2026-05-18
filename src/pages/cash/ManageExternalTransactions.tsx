@@ -207,6 +207,8 @@ const ExternalTxnForm: React.FC<{
   const [createPayeeVisible, setCreatePayeeVisible] = useState(false);
   const [createPayeeForm] = Form.useForm();
   const [createPayeeSaving, setCreatePayeeSaving] = useState(false);
+  const [bmsRate, setBmsRate] = useState<{ rate: number; date: string } | null>(null);
+  const [bmsRateLoading, setBmsRateLoading] = useState(false);
   const isEdit = !!initialValues?.externalTransactionId;
   const buSelected = !!selectedBu;
   const [selectedBank, setSelectedBank] = useState<string | undefined>(initialValues?.bankAccountName);
@@ -236,8 +238,31 @@ const ExternalTxnForm: React.FC<{
     if (watchedCurrency === 'AED') {
       form.setFieldsValue({ bankConversionRate: 1, bankConversionRateType: 'Corporate' });
       setInverseRateVal(1);
+      setBmsRate(null);
     }
   }, [watchedCurrency, form]);
+
+  // Fetch BMS rate when currency is foreign — auto-fills rate only on new records
+  useEffect(() => {
+    if (!watchedCurrency || watchedCurrency === 'AED') return;
+    setBmsRateLoading(true);
+    setBmsRate(null);
+    fetch(`${APEX_BASE}/currencies/bmsrate?source_cur=${watchedCurrency}&target_cur=AED`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.status === 'ok') {
+          setBmsRate({ rate: data.rate, date: data.refreshDate });
+          // Auto-fill only for new transactions (no existing rate loaded)
+          if (!isEdit && !initialValues?.bankConversionRate) {
+            const r = data.rate;
+            form.setFieldsValue({ bankConversionRate: r, bankConversionRateType: 'Corporate' });
+            setInverseRateVal(Math.round((1 / r) * 1000000) / 1000000);
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => setBmsRateLoading(false));
+  }, [watchedCurrency]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync inverse rate display when watchedRate changes externally (e.g. on edit load)
   useEffect(() => {
@@ -1072,6 +1097,23 @@ const ExternalTxnForm: React.FC<{
               <div className="ext-val">
                 <Form.Item name="bankConversionRate"
                   rules={[{ required: isForeignCurrency, message: 'Required' }]}
+                  extra={isForeignCurrency && (
+                    bmsRateLoading
+                      ? <Text type="secondary" style={{ fontSize: 10 }}>Fetching BMS rate…</Text>
+                      : bmsRate
+                        ? <Text
+                            style={{ fontSize: 10, color: REDWOOD.info, cursor: (!isEdit && !saved) ? 'pointer' : 'default' }}
+                            onClick={() => {
+                              if (isEdit || saved) return;
+                              form.setFieldsValue({ bankConversionRate: bmsRate.rate, bankConversionRateType: 'Corporate' });
+                              setInverseRateVal(Math.round((1 / bmsRate.rate) * 1000000) / 1000000);
+                            }}
+                          >
+                            BMS rate: <strong>{bmsRate.rate}</strong> as of {bmsRate.date}
+                            {(!isEdit && !saved) && <span style={{ marginLeft: 4, color: REDWOOD.info }}>(click to apply)</span>}
+                          </Text>
+                        : null
+                  )}
                 >
                   <InputNumber
                     variant="borderless" precision={6} min={0}
