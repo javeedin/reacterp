@@ -538,8 +538,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       const val = headerValues[field];
       return val !== undefined && val !== null && val !== '';
     });
-    return fieldsOk && !!derivedCompany;
-  }, [headerValues, derivedCompany]);
+    // For existing invoices derivedCompany is not required — it's only needed when
+    // creating new account distributions. Synced/existing invoices already have lines stored.
+    const editMode = !!initialData?.invoiceId;
+    return fieldsOk && (editMode || !!derivedCompany);
+  }, [headerValues, derivedCompany, initialData?.invoiceId]);
 
   // Line selection
   const [selectedLineKeys, setSelectedLineKeys] = useState<React.Key[]>([]);
