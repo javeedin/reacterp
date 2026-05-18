@@ -497,6 +497,7 @@ const ExternalTxnForm: React.FC<{
   const [saved, setSaved] = useState(false);
   const [savedExtId, setSavedExtId] = useState<number | null>(null);
   const [savedExtIds, setSavedExtIds] = useState<number[]>([]);
+  const [savedTxnId, setSavedTxnId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [attSaving, setAttSaving] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -561,12 +562,13 @@ const ExternalTxnForm: React.FC<{
       .finally(() => setBmsRateLoading(false));
   }, [form]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch BMS rate when currency is foreign — auto-fills rate only on new records
+  // Auto-fetch BMS rate once when a foreign currency is first selected on a new record.
+  // Does NOT re-fetch on conv date changes — use the ↻ button for that.
   useEffect(() => {
     if (!watchedCurrency || watchedCurrency === 'AED') return;
+    if (isEdit || initialValues?.bankConversionRate) return; // already has a rate
     const convDate = form.getFieldValue('bankConversionDate') as Dayjs | undefined;
-    const dateStr = convDate ? convDate.format('YYYY-MM-DD') : undefined;
-    fetchAndApplyBmsRate(watchedCurrency, !isEdit && !initialValues?.bankConversionRate, dateStr);
+    fetchAndApplyBmsRate(watchedCurrency, true, convDate?.format('YYYY-MM-DD'));
   }, [watchedCurrency]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync inverse rate display when watchedRate changes externally (e.g. on edit load)
@@ -634,7 +636,7 @@ const ExternalTxnForm: React.FC<{
       // Fetch existing attachments for edit mode — moved to dedicated effect below
     } else {
       form.resetFields();
-      form.setFieldsValue({ transactionDate: dayjs(), valueDate: dayjs(), transactionDirection: 'CR', transactionType: 'External Transaction' });
+      form.setFieldsValue({ transactionDate: dayjs(), valueDate: dayjs(), bankConversionDate: dayjs(), transactionDirection: 'CR', transactionType: 'External Transaction' });
       setTxnDirection('CR');
       setAssetAcctDesc('');
       setOffsetAcctDesc('');
@@ -895,6 +897,7 @@ const ExternalTxnForm: React.FC<{
       TransactionDirection:    values.transactionDirection ?? txnDirection,
       BankConversionRate:      values.bankConversionRate ?? null,
       BankConversionRateType:  values.bankConversionRateType ?? null,
+      BankConversionDate:      values.bankConversionDate ? (values.bankConversionDate as Dayjs).format('YYYY-MM-DD') : null,
       Source: 'ORA_MAN', Status: 'UNR', AccountingFlag: false,
       CreatedBy: 'ERP_USER', CreationDate: new Date().toISOString(),
       LastUpdatedBy: 'ERP_USER', LastUpdateDate: new Date().toISOString(), LastUpdateLogin: '',
@@ -926,7 +929,10 @@ const ExternalTxnForm: React.FC<{
         const data = await res.json();
         if (data.status === 'success') {
           successCount++;
-          if (i === 0) savedId = data.externalTransactionId ?? null;
+          if (i === 0) {
+            savedId = data.externalTransactionId ?? null;
+            if (data.transactionId) setSavedTxnId(data.transactionId);
+          }
           if (data.externalTransactionId) allSavedIds.push(data.externalTransactionId);
           // Upload attachments on first line
           if (i === 0 && data.externalTransactionId && attachments.length > 0) {
@@ -1292,19 +1298,8 @@ const ExternalTxnForm: React.FC<{
                   <DatePicker format="D-MMM-YYYY" variant="borderless" disabled={isEdit || !bankSelected || saved} style={{ width: '100%' }}
                     onChange={(date: Dayjs | null) => {
                       if (!date || isEdit || saved) return;
-                      const dateStr = date.format('YYYY-MM-DD');
-                      // Copy to bankConversionDate if not yet set
-                      const existing = form.getFieldValue('bankConversionDate');
-                      if (!existing) {
-                        form.setFieldValue('bankConversionDate', date);
-                      }
-                      // Re-fetch rate using the transaction date (or existing conversion date)
-                      const convDate = (form.getFieldValue('bankConversionDate') as Dayjs | undefined);
-                      const rateDate = convDate ? convDate.format('YYYY-MM-DD') : dateStr;
-                      const rateType = form.getFieldValue('bankConversionRateType');
-                      if (watchedCurrency && watchedCurrency !== 'AED' && rateType !== 'User' && rateType !== 'Spot') {
-                        fetchAndApplyBmsRate(watchedCurrency, true, rateDate);
-                      }
+                      // Always copy transaction date → conversion date
+                      form.setFieldValue('bankConversionDate', date);
                     }}
                   />
                 </Form.Item>
@@ -1326,10 +1321,12 @@ const ExternalTxnForm: React.FC<{
               <div className="ext-val">
                 {isEdit
                   ? <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.info }}>{initialValues?.transactionId || '—'}</Text>
+                  : saved && savedTxnId
+                  ? <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success }}>#{savedTxnId} (auto-assigned)</Text>
                   : (
                     <Form.Item name="transactionId" style={{ marginBottom: 0, width: '100%' }}>
                       <InputNumber
-                        variant="borderless" style={{ width: '100%' }} placeholder="Oracle Fusion txn number (optional)"
+                        variant="borderless" style={{ width: '100%' }} placeholder="Auto-assigned (leave blank)"
                         disabled={!bankSelected || saved}
                       />
                     </Form.Item>
@@ -1425,15 +1422,7 @@ const ExternalTxnForm: React.FC<{
                 <div className="ext-lbl">Conv. Date</div>
                 <div className="ext-val">
                   <Form.Item name="bankConversionDate">
-                    <DatePicker format="D-MMM-YYYY" variant="borderless" disabled={isEdit || !bankSelected || saved} style={{ width: '100%' }}
-                      onChange={(date: Dayjs | null) => {
-                        if (!date || isEdit || saved) return;
-                        const rateType = form.getFieldValue('bankConversionRateType');
-                        if (watchedCurrency && watchedCurrency !== 'AED' && rateType !== 'User' && rateType !== 'Spot') {
-                          fetchAndApplyBmsRate(watchedCurrency, true, date.format('YYYY-MM-DD'));
-                        }
-                      }}
-                    />
+                    <DatePicker format="D-MMM-YYYY" variant="borderless" disabled={isEdit || !bankSelected || saved} style={{ width: '100%' }} />
                   </Form.Item>
                 </div>
                 <div className="ext-lbl" />
@@ -1456,9 +1445,9 @@ const ExternalTxnForm: React.FC<{
                 <Form.Item name="bankConversionRate"
                   rules={[{ required: isForeignCurrency, message: 'Required' }]}
                   extra={isForeignCurrency && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       {bmsRateLoading
-                        ? <Text type="secondary" style={{ fontSize: 10 }}>Fetching BMS rate…</Text>
+                        ? <Text type="secondary" style={{ fontSize: 10 }}>Fetching…</Text>
                         : bmsRate
                           ? <Text
                               style={{ fontSize: 10, color: REDWOOD.info, cursor: (!isEdit && !saved) ? 'pointer' : 'default' }}
@@ -1468,27 +1457,24 @@ const ExternalTxnForm: React.FC<{
                                 setInverseRateVal(bmsRate.inverseRate);
                               }}
                             >
-                              {bmsRate.rateType} rate: <strong>{bmsRate.rate}</strong> (inv: {bmsRate.inverseRate}) — {bmsRate.rateDate}
-                              {(!isEdit && !saved) && <span style={{ marginLeft: 4, color: REDWOOD.info }}>(click to apply)</span>}
+                              {bmsRate.rateType}: <strong>{bmsRate.rate}</strong> (inv: {bmsRate.inverseRate}) — {bmsRate.rateDate}
+                              {(!isEdit && !saved) && <span style={{ marginLeft: 4 }}>(click to apply)</span>}
                             </Text>
-                          : null}
-                      {watchedCurrency && watchedCurrency !== 'AED' && (() => {
-                        const convDate = form.getFieldValue('bankConversionDate') as Dayjs | undefined;
-                        const dateParam = convDate ? `&rate_date=${convDate.format('YYYY-MM-DD')}` : '';
-                        const apiUrl = `${APEX_BASE}/currencies/bmsrate?source_cur=${watchedCurrency}&target_cur=AED${dateParam}`;
-                        return (
-                          <Tooltip title={apiUrl}>
-                            <Button
-                              type="text" size="small"
-                              icon={<ApiOutlined style={{ fontSize: 11, color: REDWOOD.info }} />}
-                              style={{ padding: '0 2px', height: 16, lineHeight: '16px' }}
-                              onClick={() => {
-                                navigator.clipboard.writeText(apiUrl).then(() => message.success('API URL copied'));
-                              }}
-                            />
-                          </Tooltip>
-                        );
-                      })()}
+                          : <Text type="secondary" style={{ fontSize: 10 }}>No rate — click ↻ to fetch</Text>
+                      }
+                      {watchedCurrency && watchedCurrency !== 'AED' && !isEdit && !saved && (
+                        <Tooltip title="Refresh Corporate rate for the conversion date">
+                          <Button
+                            type="text" size="small" loading={bmsRateLoading}
+                            icon={<ReloadOutlined style={{ fontSize: 12, color: REDWOOD.primary }} />}
+                            style={{ padding: '0 4px', height: 18 }}
+                            onClick={() => {
+                              const convDate = form.getFieldValue('bankConversionDate') as Dayjs | undefined;
+                              fetchAndApplyBmsRate(watchedCurrency, true, convDate?.format('YYYY-MM-DD'));
+                            }}
+                          />
+                        </Tooltip>
+                      )}
                     </div>
                   )}
                 >
