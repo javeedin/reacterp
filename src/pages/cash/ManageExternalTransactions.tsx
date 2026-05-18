@@ -2442,6 +2442,23 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     if (values.dateTo)             params.set('date_to',   (values.dateTo   as Dayjs).format('YYYY-MM-DD'));
     if (values.amountFrom != null) params.set('amount_from', String(values.amountFrom));
     if (values.amountTo   != null) params.set('amount_to',   String(values.amountTo));
+
+    // Created date filter — resolve preset or explicit range
+    const crPreset = values.createdPreset as string | undefined;
+    if (crPreset === 'today') {
+      params.set('creation_date_from', dayjs().format('YYYY-MM-DD'));
+      params.set('creation_date_to',   dayjs().format('YYYY-MM-DD'));
+    } else if (crPreset === 'last7') {
+      params.set('creation_date_from', dayjs().subtract(6, 'day').format('YYYY-MM-DD'));
+      params.set('creation_date_to',   dayjs().format('YYYY-MM-DD'));
+    } else if (crPreset === 'last10') {
+      params.set('creation_date_from', dayjs().subtract(9, 'day').format('YYYY-MM-DD'));
+      params.set('creation_date_to',   dayjs().format('YYYY-MM-DD'));
+    } else {
+      if (values.createdFrom) params.set('creation_date_from', (values.createdFrom as Dayjs).format('YYYY-MM-DD'));
+      if (values.createdTo)   params.set('creation_date_to',   (values.createdTo   as Dayjs).format('YYYY-MM-DD'));
+    }
+
     params.set('row_limit', '500');
 
     const url = `${APEX_BASE}/cash/externaltransactions?${params.toString()}`;
@@ -2475,6 +2492,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
 
   const handleReset = () => {
     searchForm.resetFields();
+    searchForm.setFieldsValue({ createdPreset: undefined, createdFrom: undefined, createdTo: undefined });
     setTransactions([]);
     setHasSearched(false);
     setSelectedRowKeys([]);
@@ -3339,6 +3357,40 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                 </Select>
               </Form.Item>
             </Col>
+
+            {/* ── Creation Date ───────────────────────────── */}
+            <Col xs={24} md={12}>
+              <Form.Item label="Created" name="createdPreset" style={{ marginBottom: 4 }}>
+                <Select placeholder="Any date" allowClear
+                  onChange={(val: string | undefined) => {
+                    if (val && val !== 'range') {
+                      searchForm.setFieldsValue({ createdFrom: undefined, createdTo: undefined });
+                    }
+                  }}>
+                  <Option value="today">Today</Option>
+                  <Option value="last7">Last 7 days</Option>
+                  <Option value="last10">Last 10 days</Option>
+                  <Option value="range">Custom range…</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Form.Item noStyle shouldUpdate={(prev, cur) => prev.createdPreset !== cur.createdPreset}>
+              {({ getFieldValue }) => getFieldValue('createdPreset') === 'range' && (
+                <>
+                  <Col xs={24} md={12}>
+                    <Form.Item label="Created From" name="createdFrom" style={{ marginBottom: 4 }}>
+                      <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} md={12}>
+                    <Form.Item label="Created To" name="createdTo" style={{ marginBottom: 4 }}>
+                      <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
+                    </Form.Item>
+                  </Col>
+                </>
+              )}
+            </Form.Item>
+
           </Row>
           <Text type="secondary" style={{ fontSize: 11 }}>Select a Business Unit to filter banks and legal entity</Text>
         </Form>
