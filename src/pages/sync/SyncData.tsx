@@ -3561,7 +3561,7 @@ const SyncData: React.FC = () => {
                   <span style={{ fontSize: 22 }}>📄</span>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 13 }}>Payables</div>
-                    <div style={{ fontSize: 11, color: '#8c8c8c' }}>5 BIP Reports</div>
+                    <div style={{ fontSize: 11, color: '#8c8c8c' }}>6 BIP Reports</div>
                   </div>
                 </Space>
               </Card>

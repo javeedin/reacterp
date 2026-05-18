@@ -22,19 +22,21 @@ const AP_COLOR      = '#1677ff';
 const BATCH_SIZE    = 500;
 
 const APEX_ENDPOINT_MAP: Record<string, string> = {
-  AP_INVOICES_ALL_BIP:          'ap/raw-invoices',
-  AP_INVOICE_PAYMENTS_ALL_BIP:  'ap/raw-invoice-payments',
-  AP_INVOICE_LINES_ALL_BIP:     'ap/raw-invoice-lines',
-  AP_PAYMENT_SCHEDULES_ALL_BIP: 'ap/raw-payment-schedules',
-  AP_SYSTEM_PARAMETERS_ALL_BIP: 'ap/raw-system-parameters',
+  AP_INVOICES_ALL_BIP:               'ap/raw-invoices',
+  AP_INVOICE_PAYMENTS_ALL_BIP:       'ap/raw-invoice-payments',
+  AP_INVOICE_LINES_ALL_BIP:          'ap/raw-invoice-lines',
+  AP_INVOICE_DISTRIBUTIONS_ALL_BIP:  'ap/raw-invoice-distributions',
+  AP_PAYMENT_SCHEDULES_ALL_BIP:      'ap/raw-payment-schedules',
+  AP_SYSTEM_PARAMETERS_ALL_BIP:      'ap/raw-system-parameters',
 };
 
 const AP_REPORTS = [
-  { id: 'AP_INVOICES_ALL_BIP',          label: 'AP_INVOICES_ALL',          description: 'Invoice headers — amounts, dates, vendor, status' },
-  { id: 'AP_INVOICE_PAYMENTS_ALL_BIP',  label: 'AP_INVOICE_PAYMENTS_ALL',  description: 'Payment applications against invoices' },
-  { id: 'AP_INVOICE_LINES_ALL_BIP',     label: 'AP_INVOICE_LINES_ALL',     description: 'Invoice distribution lines' },
-  { id: 'AP_PAYMENT_SCHEDULES_ALL_BIP', label: 'AP_PAYMENT_SCHEDULES_ALL', description: 'Payment due dates and installments' },
-  { id: 'AP_SYSTEM_PARAMETERS_ALL_BIP', label: 'AP_SYSTEM_PARAMETERS_ALL', description: 'Payables system configuration by OU' },
+  { id: 'AP_INVOICES_ALL_BIP',               label: 'AP_INVOICES_ALL',               description: 'Invoice headers — amounts, dates, vendor, status' },
+  { id: 'AP_INVOICE_PAYMENTS_ALL_BIP',       label: 'AP_INVOICE_PAYMENTS_ALL',       description: 'Payment applications against invoices' },
+  { id: 'AP_INVOICE_LINES_ALL_BIP',          label: 'AP_INVOICE_LINES_ALL',          description: 'Invoice distribution lines' },
+  { id: 'AP_INVOICE_DISTRIBUTIONS_ALL_BIP',  label: 'AP_INVOICE_DISTRIBUTIONS_ALL',  description: 'GL account distributions per invoice line' },
+  { id: 'AP_PAYMENT_SCHEDULES_ALL_BIP',      label: 'AP_PAYMENT_SCHEDULES_ALL',      description: 'Payment due dates and installments' },
+  { id: 'AP_SYSTEM_PARAMETERS_ALL_BIP',      label: 'AP_SYSTEM_PARAMETERS_ALL',      description: 'Payables system configuration by OU' },
 ];
 
 interface BatchProgress {
