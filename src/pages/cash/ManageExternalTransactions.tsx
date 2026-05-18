@@ -554,8 +554,9 @@ const ExternalTxnForm: React.FC<{
   const watchedAmount  = Form.useWatch('amount', form);
   const watchedTxnType = Form.useWatch('transactionType', form);
   const watchedCurrency = Form.useWatch('currencyCode', form);
-  const watchedRate     = Form.useWatch('bankConversionRate', form);
+  const watchedRate      = Form.useWatch('bankConversionRate', form);
   const [inverseRateVal, setInverseRateVal] = useState<number | undefined>(undefined);
+  const skipInverseSync  = useRef(false); // prevents watchedRate effect from overwriting while user types in inverse field
   const isForeignCurrency = !!watchedCurrency && watchedCurrency !== 'AED';
   const isAdhocPayment = watchedTxnType === 'Adhoc Payment';
 
@@ -608,8 +609,10 @@ const ExternalTxnForm: React.FC<{
     fetchAndApplyBmsRate(watchedCurrency, true, convDate?.format('YYYY-MM-DD'));
   }, [watchedCurrency]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Sync inverse rate display when watchedRate changes externally (e.g. on edit load)
+  // Sync inverse rate display when watchedRate changes externally (e.g. on edit load, BMS apply).
+  // Skipped when the change originated from typing in the inverse rate field to prevent a feedback loop.
   useEffect(() => {
+    if (skipInverseSync.current) return;
     if (watchedRate && watchedRate > 0) {
       setInverseRateVal(Math.round((1 / watchedRate) * 1000000) / 1000000);
     }
@@ -1453,26 +1456,34 @@ const ExternalTxnForm: React.FC<{
               </div>
             </div>
 
-            {/* Conv. Date | (spacer) */}
-            {isForeignCurrency && (
-              <div className="ext-row">
-                <div className="ext-lbl">Conv. Date</div>
-                <div className="ext-val">
-                  <Form.Item name="bankConversionDate">
-                    <DatePicker format="D-MMM-YYYY" variant="borderless" disabled={isEdit || !bankSelected || saved} style={{ width: '100%' }} />
-                  </Form.Item>
-                </div>
-                <div className="ext-lbl" />
-                <div className="ext-val" />
-              </div>
-            )}
-
-            {/* Paper Doc # | Conv. Rate */}
+            {/* Paper Doc # | Conv. Date (right column, below Conv. Rate Type) */}
             <div className="ext-row ext-row-alt">
               <div className="ext-lbl">Paper Doc #</div>
               <div className="ext-val">
                 <Form.Item name="paperDocumentNumber">
                   <Input variant="borderless" placeholder="CHQ-00123" disabled={isEdit || !bankSelected || saved} />
+                </Form.Item>
+              </div>
+              {isForeignCurrency ? (
+                <>
+                  <div className="ext-lbl">Conv. Date</div>
+                  <div className="ext-val">
+                    <Form.Item name="bankConversionDate">
+                      <DatePicker format="D-MMM-YYYY" variant="borderless" disabled={isEdit || !bankSelected || saved} style={{ width: '100%' }} />
+                    </Form.Item>
+                  </div>
+                </>
+              ) : (
+                <><div className="ext-lbl" /><div className="ext-val" /></>
+              )}
+            </div>
+
+            {/* Payment Document | Conv. Rate */}
+            <div className="ext-row">
+              <div className="ext-lbl">Payment Document</div>
+              <div className="ext-val">
+                <Form.Item name="paymentDocument" rules={[{ required: true, message: 'Required' }]}>
+                  <Input variant="borderless" placeholder="e.g. Cheque Book Name" disabled={isEdit || !bankSelected || saved} />
                 </Form.Item>
               </div>
               <div className="ext-lbl" style={{ fontFamily: 'monospace', fontSize: 11 }}>
@@ -1529,14 +1540,10 @@ const ExternalTxnForm: React.FC<{
               </div>
             </div>
 
-            {/* Payment Document | Inverse Rate */}
-            <div className="ext-row">
-              <div className="ext-lbl">Payment Document</div>
-              <div className="ext-val">
-                <Form.Item name="paymentDocument" rules={[{ required: true, message: 'Required' }]}>
-                  <Input variant="borderless" placeholder="e.g. Cheque Book Name" disabled={isEdit || !bankSelected || saved} />
-                </Form.Item>
-              </div>
+            {/* (spacer left) | Inverse Rate */}
+            <div className="ext-row ext-row-alt">
+              <div className="ext-lbl" />
+              <div className="ext-val" />
               <div className="ext-lbl" style={{ fontFamily: 'monospace', fontSize: 11 }}>
                 Inverse Rate (AED→{watchedCurrency || 'FCY'}){isForeignCurrency && <span style={{ color: '#ff4d4f', marginLeft: 2 }}>*</span>}
               </div>
@@ -1548,8 +1555,12 @@ const ExternalTxnForm: React.FC<{
                   value={inverseRateVal}
                   style={{ width: '100%' }}
                   onChange={v => {
+                    skipInverseSync.current = true;
                     setInverseRateVal(v ?? undefined);
                     if (v && v > 0) form.setFieldValue('bankConversionRate', Math.round((1 / v) * 1000000) / 1000000);
+                    else form.setFieldValue('bankConversionRate', undefined);
+                    // Clear flag after React has flushed the watchedRate effect
+                    setTimeout(() => { skipInverseSync.current = false; }, 0);
                   }}
                 />
               </div>
