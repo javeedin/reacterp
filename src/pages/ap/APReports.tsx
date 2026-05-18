@@ -527,7 +527,7 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
     if (bu)          p.set('P_BUSINESS_UNIT', bu);
     if (supplierNum) p.set('supplier_number', supplierNum);
     const listUrl = `${APEX_DB_CONFIG.baseUrl}/suppliers${p.toString() ? '?' + p : ''}`;
-    const invoicePattern = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/{supplierNumber}?status=Unpaid`;
+    const invoicePattern = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/{supplierNumber}?status=All`;
     setApiUrls([listUrl, invoicePattern]);
 
     const listRes = await fetch(listUrl);
@@ -540,7 +540,9 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
         const sn    = s.supplier_number || '';
         const sName = s.supplier || sn;
         if (!sn) return null;
-        const r = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${encodeURIComponent(sn)}?status=Unpaid&limit=1000`);
+        // Use status=All so partially-paid invoices are included regardless of stored PAID_STATUS;
+        // client-side bal <= 0 check below handles excluding fully-paid invoices.
+        const r = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${encodeURIComponent(sn)}?status=All&limit=1000`);
         if (!r.ok) return null;
         const d = JSON.parse(await r.text() || '{}');
         const invoices: any[] = Array.isArray(d) ? d : (d.items || d.invoices || []);
@@ -601,7 +603,7 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
     if (bu)          p.set('P_BUSINESS_UNIT', bu);
     if (supplierNum) p.set('supplier_number', supplierNum);
     const listUrl = `${APEX_DB_CONFIG.baseUrl}/suppliers${p.toString() ? '?' + p : ''}`;
-    const invoicePattern = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/{supplierNumber}?status=Unpaid`;
+    const invoicePattern = `${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/{supplierNumber}?status=All`;
     setApiUrls([listUrl, invoicePattern]);
 
     const listRes = await fetch(listUrl);
@@ -613,7 +615,7 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
       suppliers.map(async (s: any) => {
         const sn = s.supplier_number || '';
         if (!sn) return [];
-        const r = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${encodeURIComponent(sn)}?status=Unpaid&limit=1000`);
+        const r = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers/balance/invoices/${encodeURIComponent(sn)}?status=All&limit=1000`);
         if (!r.ok) return [];
         const d = JSON.parse(await r.text() || '{}');
         const invoices: any[] = Array.isArray(d) ? d : (d.items || d.invoices || []);
@@ -1000,7 +1002,8 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
       {/* Parameters */}
       <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 14 }}
         styles={{ body: { padding: '12px 16px' } }}>
-        <Form form={form} layout="inline" size="small" onValuesChange={handleFormValuesChange}>
+        <Form form={form} layout="inline" size="small" onValuesChange={handleFormValuesChange}
+          initialValues={{ asAtDate: new Date().toISOString().slice(0, 10) }}>
           <Form.Item label="Business Unit" name="businessUnit">
             <Select placeholder="All Business Units" allowClear showSearch style={{ width: 200 }}
               filterOption={(i, o) => String(o?.value ?? '').toLowerCase().includes(i.toLowerCase())}>

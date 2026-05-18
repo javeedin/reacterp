@@ -127,7 +127,7 @@ interface PivotDataRow {
   subAccount: string;
   analysis: string;
   intercompany: string;
-  currencyCode?: string;
+  currencyCode: string | number;
   concatenatedSegments: string;
   [key: string]: string | number;
 }
