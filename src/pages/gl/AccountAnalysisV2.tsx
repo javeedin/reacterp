@@ -118,6 +118,7 @@ interface JournalLine {
   segSubAcct?: string;
   segAnalysis?: string;
   segInterco?: string;
+  approvalStatus?: string;
   isOpeningBalance?: boolean;
   isClosingBalance?: boolean;
   isTotals?: boolean;
@@ -1255,7 +1256,8 @@ const AAPanel: React.FC = () => {
               segAccount:  String(item.account      || item.ACCOUNT      || ''),
               segSubAcct:  String(item.subAccount   || item.sub_account  || item.SUB_ACCOUNT || ''),
               segAnalysis: String(item.analysis     || item.ANALYSIS     || ''),
-              segInterco:  String(item.intercompany || item.INTERCOMPANY || item.interco || ''),
+              segInterco:     String(item.intercompany || item.INTERCOMPANY || item.interco || ''),
+              approvalStatus: String(item.approvalStatusMeaning || item.approval_status_meaning || ''),
             } as JournalLine];
           });
         }
@@ -1568,6 +1570,10 @@ const AAPanel: React.FC = () => {
         render: (v: string, r: JournalLine) => isTot(r) ? null : <span style={{ fontSize: 10 }}>{v}</span> },
       { title: 'Category', dataIndex: 'userJeCategoryName', key: 'category', width: 120,
         render: (v: string, r: JournalLine) => isTot(r) ? null : <span style={{ fontSize: 10 }}>{v}</span> },
+      { title: 'Status', dataIndex: 'approvalStatus', key: 'status', width: 80,
+        render: (v: string, r: JournalLine) => isTot(r) || isSpecial(r) ? null : (
+          <Tag color={v === 'Posted' ? 'success' : v ? 'warning' : 'default'} style={{ fontSize: 9 }}>{v || '—'}</Tag>
+        ) },
       { title: 'Currency', dataIndex: 'currencyCode', key: 'currency', width: 80,
         render: (v: string, r: JournalLine) => isTot(r) ? null : <Tag style={{ fontSize: 9 }}>{v}</Tag> },
       ...entCols,
@@ -1667,6 +1673,10 @@ const AAPanel: React.FC = () => {
         render: (v: string, r: JournalLine) => isSpec(r) ? null : <span style={{ fontSize: 10 }}>{v}</span> },
       { title: 'Category', dataIndex: 'userJeCategoryName', key: 'bCat', width: 120,
         render: (v: string, r: JournalLine) => isSpec(r) ? null : <span style={{ fontSize: 10 }}>{v}</span> },
+      { title: 'Status', dataIndex: 'approvalStatus', key: 'bStatus', width: 80,
+        render: (v: string, r: JournalLine) => isSpec(r) ? null : (
+          <Tag color={v === 'Posted' ? 'success' : v ? 'warning' : 'default'} style={{ fontSize: 9 }}>{v || '—'}</Tag>
+        ) },
       { title: 'Ccy', dataIndex: 'currencyCode', key: 'bCcy', width: 70,
         render: (v: string, r: JournalLine) => isSpec(r) ? null : <Tag style={{ fontSize: 9 }}>{v}</Tag> },
       ...entCols,
@@ -2021,8 +2031,8 @@ const AAPanel: React.FC = () => {
     const isComboBreak = appliedGroupBy === 'concatenatedSegments' || appliedGroupBy === 'currencyCode';
 
     if (isComboBreak) {
-      // Columns: Line Description | Batch | Source | Ccy | Ent Dr | Ent Cr | Acc Dr | Acc Cr | Acc Bal
-      const headers = ['Line Description', 'Batch', 'Source', 'Ccy', `Ent Dr`, `Ent Cr`, `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`];
+      // Columns: Line Description | Batch | Source | Status | Ccy | Ent Dr | Ent Cr | Acc Dr | Acc Cr | Acc Bal
+      const headers = ['Line Description', 'Batch', 'Source', 'Status', 'Ccy', `Ent Dr`, `Ent Cr`, `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`];
       let startY = 22;
       comboBreaks.forEach((brk, bi) => {
         if (bi > 0) startY += 4;
@@ -2058,6 +2068,7 @@ const AAPanel: React.FC = () => {
             lineLabel,
             special ? '' : (r.batchName || ''),
             special ? '' : (r.userJeSourceName || ''),
+            special ? '' : (r.approvalStatus || ''),
             special ? '' : (r.currencyCode || ''),
             fmtN(r.enteredDr || 0),
             fmtN(r.enteredCr || 0),
@@ -2075,15 +2086,16 @@ const AAPanel: React.FC = () => {
           styles: baseStyles,
           headStyles,
           columnStyles: {
-            0: { cellWidth: 55, overflow: 'linebreak' },
-            1: { cellWidth: 32 },
-            2: { cellWidth: 20 },
-            3: { cellWidth: 9 },
-            4: { halign: 'right', cellWidth: 22 },
-            5: { halign: 'right', cellWidth: 22 },
-            6: { halign: 'right', cellWidth: 26 },
-            7: { halign: 'right', cellWidth: 26 },
-            8: { halign: 'right', cellWidth: 27, fontStyle: 'bold' },
+            0: { cellWidth: 50, overflow: 'linebreak' },
+            1: { cellWidth: 30 },
+            2: { cellWidth: 18 },
+            3: { cellWidth: 16 },
+            4: { cellWidth: 9 },
+            5: { halign: 'right', cellWidth: 20 },
+            6: { halign: 'right', cellWidth: 20 },
+            7: { halign: 'right', cellWidth: 24 },
+            8: { halign: 'right', cellWidth: 24 },
+            9: { halign: 'right', cellWidth: 26, fontStyle: 'bold' },
           },
           didParseCell: (data) => applyRowStyle(data, brkRows),
           margin: { left: 14, right: 14 },
@@ -2111,8 +2123,8 @@ const AAPanel: React.FC = () => {
       };
       const pdfRows = [...flatRows, totRow];
 
-      // Columns: Account | Line Description | Batch | Source | Ccy | Ent Dr | Ent Cr | Acc Dr | Acc Cr | Acc Bal
-      const headers = ['Account', 'Line Description', 'Batch', 'Source', 'Ccy', `Ent Dr`, `Ent Cr`, `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`];
+      // Columns: Account | Line Description | Batch | Source | Status | Ccy | Ent Dr | Ent Cr | Acc Dr | Acc Cr | Acc Bal
+      const headers = ['Account', 'Line Description', 'Batch', 'Source', 'Status', 'Ccy', `Ent Dr`, `Ent Cr`, `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`];
 
       const body = pdfRows.map(r => {
         const special = r.isOpeningBalance || r.isClosingBalance || r.isTotals;
@@ -2125,6 +2137,7 @@ const AAPanel: React.FC = () => {
           special ? '' : (r.jeLineDescription || ''),
           special ? '' : (r.batchName || ''),
           special ? '' : (r.userJeSourceName || ''),
+          special ? '' : (r.approvalStatus || ''),
           special ? '' : (r.currencyCode || ''),
           fmtN(r.enteredDr || 0),
           fmtN(r.enteredCr || 0),
@@ -2142,16 +2155,17 @@ const AAPanel: React.FC = () => {
         styles: baseStyles,
         headStyles,
         columnStyles: {
-          0: { cellWidth: 38 },
-          1: { cellWidth: 50, overflow: 'linebreak' },
-          2: { cellWidth: 32 },
-          3: { cellWidth: 20 },
-          4: { cellWidth: 9 },
-          5: { halign: 'right', cellWidth: 22 },
-          6: { halign: 'right', cellWidth: 22 },
-          7: { halign: 'right', cellWidth: 26 },
-          8: { halign: 'right', cellWidth: 26 },
-          9: { halign: 'right', cellWidth: 24, fontStyle: 'bold' },
+          0: { cellWidth: 35 },
+          1: { cellWidth: 45, overflow: 'linebreak' },
+          2: { cellWidth: 28 },
+          3: { cellWidth: 18 },
+          4: { cellWidth: 16 },
+          5: { cellWidth: 9 },
+          6: { halign: 'right', cellWidth: 20 },
+          7: { halign: 'right', cellWidth: 20 },
+          8: { halign: 'right', cellWidth: 24 },
+          9: { halign: 'right', cellWidth: 24 },
+          10: { halign: 'right', cellWidth: 24, fontStyle: 'bold' },
         },
         didParseCell: (data) => applyRowStyle(data, pdfRows),
         margin: { left: 14, right: 14 },
