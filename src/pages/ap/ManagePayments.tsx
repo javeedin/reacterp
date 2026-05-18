@@ -3319,6 +3319,8 @@ const ManagePayments: React.FC = () => {
                         setSupplierTotalBalance(null);
                         setBankAcctCashOverride('');
                         setBankAcctPdcOverride('');
+                        setCreatePaymentCurrency('AED');
+                        setBmsRate(null);
                         setTimeout(() => {
                           const buField = createPaymentForm.getFieldInstance?.('businessUnit');
                           if (buField && typeof buField.focus === 'function') buField.focus();
@@ -4233,6 +4235,8 @@ const ManagePayments: React.FC = () => {
                 setCreatePaymentTabOpen(true);
                 setCreatePaymentActiveTab('paymentDetails');
                 createPaymentForm.resetFields();
+                setCreatePaymentCurrency('AED');
+                setBmsRate(null);
                 setActiveTab('create-payment');
                 setPaymentConfirmed(false);
                 setConfirmedPaymentNumber('');
