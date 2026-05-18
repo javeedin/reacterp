@@ -2246,6 +2246,10 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     ? buBankMap[selectedBU].sort().map(n => ({ label: bankAccountCurrencyMap[n] ? `${n} (${bankAccountCurrencyMap[n]})` : n, value: n }))
     : allBankAccounts;
 
+  // ── Account combinations (for description lookup in Create Accounting) ──────
+  const [acctCombinations, setAcctCombinations] = useState<import('../../services/distCombinations.service').DistCombination[]>([]);
+  useEffect(() => { searchCombinations({}).then(setAcctCombinations).catch(() => {}); }, []);
+
   // ── Accounting state ─────────────────────────────────────────────────────
   const [selectedRowKeys, setSelectedRowKeys]   = useState<number[]>([]);
   const [acctModalOpen, setAcctModalOpen]       = useState(false);
@@ -2596,7 +2600,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       message.warning(`${noAccounts.length} row(s) have missing cash/offset account — they will be skipped.`);
     }
     const acctDesc = (code: string) =>
-      distCombinations.find(c => c.combinationName === code)?.description ?? '';
+      acctCombinations.find(c => c.combinationName === code)?.description ?? '';
     const rows: BankAcctProgressRow[] = selected.map(t => {
       const missingAccounts = !t.assetAccountCombination || !t.offsetAccountCombination;
       const alreadyAccounted = t.accountingFlag === 'Y';
@@ -2812,7 +2816,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       return;
     }
     const acctDesc = (code: string) =>
-      distCombinations.find(c => c.combinationName === code)?.description ?? '';
+      acctCombinations.find(c => c.combinationName === code)?.description ?? '';
     const rows: BankAcctProgressRow[] = txnArray.map(txn => {
       const date = txn.transactionDate || txn.valueDate || dayjs().format('YYYY-MM-DD');
       const absAmount = Math.abs(txn.amount ?? 0);
