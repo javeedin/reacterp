@@ -182,17 +182,17 @@ const COLUMNS: Record<string, any[]> = {
     { title: 'Invoice Amount',    dataIndex: 'invoiceAmount',  key: 'invoiceAmount',  width: 140, align: 'right' as const,
       render: (v: number) => <Text>{fmt(v)}</Text> },
     { title: 'Unpaid Amount',     dataIndex: 'unpaidAmount',   key: 'unpaidAmount',   width: 140, align: 'right' as const,
-      render: (v: number) => <Text strong>{fmt(v)}</Text> },
+      render: (v: number) => <Text strong style={{ color: v < 0 ? REDWOOD.warning : undefined }}>{fmt(v)}{v < 0 ? <span style={{ fontSize: 10, marginLeft: 4 }}>(credit)</span> : null}</Text> },
     { title: '1 Month Overdue',   dataIndex: 'months1',        key: 'months1',        width: 130, align: 'right' as const,
-      render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.warning : undefined }}>{fmt(v)}</Text> },
+      render: (v: number) => <Text style={{ color: v < 0 ? REDWOOD.warning : v > 0 ? REDWOOD.warning : undefined }}>{fmt(v)}</Text> },
     { title: '2 Months Overdue',  dataIndex: 'months2',        key: 'months2',        width: 130, align: 'right' as const,
-      render: (v: number) => <Text style={{ color: v > 0 ? '#D46B08' : undefined }}>{fmt(v)}</Text> },
+      render: (v: number) => <Text style={{ color: v < 0 ? REDWOOD.warning : v > 0 ? '#D46B08' : undefined }}>{fmt(v)}</Text> },
     { title: '3 Months Overdue',  dataIndex: 'months3',        key: 'months3',        width: 130, align: 'right' as const,
-      render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.primary : undefined }}>{fmt(v)}</Text> },
+      render: (v: number) => <Text style={{ color: v < 0 ? REDWOOD.warning : v > 0 ? REDWOOD.primary : undefined }}>{fmt(v)}</Text> },
     { title: 'Over 3 Months Overdue', dataIndex: 'over3months', key: 'over3months',   width: 150, align: 'right' as const,
-      render: (v: number) => <Text strong style={{ color: v > 0 ? '#8B0000' : undefined }}>{fmt(v)}</Text> },
+      render: (v: number) => <Text strong style={{ color: v < 0 ? REDWOOD.warning : v > 0 ? '#8B0000' : undefined }}>{fmt(v)}</Text> },
     { title: 'Current (Not Due)', dataIndex: 'unallocated',   key: 'unallocated',    width: 140, align: 'right' as const,
-      render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.neutral600 : undefined }}>{fmt(v)}</Text> },
+      render: (v: number) => <Text style={{ color: v < 0 ? REDWOOD.warning : v > 0 ? REDWOOD.neutral600 : undefined }}>{fmt(v)}</Text> },
   ],
   'aging-by-invoice': [
     { title: 'Supplier',          dataIndex: 'supplier',       key: 'supplier',       width: 200 },
@@ -200,19 +200,19 @@ const COLUMNS: Record<string, any[]> = {
     { title: 'Invoice Date',      dataIndex: 'invoiceDate',    key: 'invoiceDate',    width: 110 },
     { title: 'Due Date',          dataIndex: 'dueDate',        key: 'dueDate',        width: 110 },
     { title: 'Invoice Amount',    dataIndex: 'invoiceAmount',  key: 'invoiceAmount',  width: 140, align: 'right' as const,
-      render: (v: number) => <Text>{fmt(v)}</Text> },
-    { title: 'Unpaid Amount',     dataIndex: 'unpaidAmount',   key: 'unpaidAmount',   width: 130, align: 'right' as const,
-      render: (v: number) => <Text strong>{fmt(v)}</Text> },
+      render: (v: number) => <Text style={{ color: v < 0 ? REDWOOD.warning : undefined }}>{fmt(v)}{v < 0 ? <span style={{ fontSize: 10, marginLeft: 4 }}>(CN)</span> : null}</Text> },
+    { title: 'Open Balance',      dataIndex: 'unpaidAmount',   key: 'unpaidAmount',   width: 130, align: 'right' as const,
+      render: (v: number) => <Text strong style={{ color: v < 0 ? REDWOOD.warning : undefined }}>{fmt(v)}{v < 0 ? <span style={{ fontSize: 10, marginLeft: 4 }}>(credit)</span> : null}</Text> },
     { title: '1 Month Overdue',   dataIndex: 'months1',        key: 'months1',        width: 130, align: 'right' as const,
-      render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.warning : undefined }}>{fmt(v)}</Text> },
+      render: (v: number) => <Text style={{ color: v < 0 ? REDWOOD.warning : v > 0 ? REDWOOD.warning : undefined }}>{fmt(v)}</Text> },
     { title: '2 Months Overdue',  dataIndex: 'months2',        key: 'months2',        width: 130, align: 'right' as const,
-      render: (v: number) => <Text style={{ color: v > 0 ? '#D46B08' : undefined }}>{fmt(v)}</Text> },
+      render: (v: number) => <Text style={{ color: v < 0 ? REDWOOD.warning : v > 0 ? '#D46B08' : undefined }}>{fmt(v)}</Text> },
     { title: '3 Months Overdue',  dataIndex: 'months3',        key: 'months3',        width: 130, align: 'right' as const,
-      render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.primary : undefined }}>{fmt(v)}</Text> },
+      render: (v: number) => <Text style={{ color: v < 0 ? REDWOOD.warning : v > 0 ? REDWOOD.primary : undefined }}>{fmt(v)}</Text> },
     { title: 'Over 3 Months Overdue', dataIndex: 'over3months', key: 'over3months',   width: 150, align: 'right' as const,
-      render: (v: number) => <Text strong style={{ color: v > 0 ? '#8B0000' : undefined }}>{fmt(v)}</Text> },
+      render: (v: number) => <Text strong style={{ color: v < 0 ? REDWOOD.warning : v > 0 ? '#8B0000' : undefined }}>{fmt(v)}</Text> },
     { title: 'Current (Not Due)', dataIndex: 'unallocated',   key: 'unallocated',    width: 140, align: 'right' as const,
-      render: (v: number) => <Text style={{ color: v > 0 ? REDWOOD.neutral600 : undefined }}>{fmt(v)}</Text> },
+      render: (v: number) => <Text style={{ color: v < 0 ? REDWOOD.warning : v > 0 ? REDWOOD.neutral600 : undefined }}>{fmt(v)}</Text> },
   ],
 };
 
@@ -506,7 +506,7 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
     const invAmt   = Number(inv.invoice_amount || 0);
     const paid     = Number(inv.amount_paid || 0);
     const bal      = Number(inv.amount_remaining ?? (invAmt - paid));
-    if (bal <= 0) return null;
+    if (bal === 0) return null;  // skip fully-settled; credit notes (bal < 0) pass through
     const age  = Math.floor((asAt.getTime() - ageDate.getTime()) / 86400000);
     const bkts = agingBuckets(age, bal);
     return {
@@ -555,7 +555,7 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
       const invAmt = Number(inv.invoice_amount  || 0);
       const paid   = Number(inv.amount_paid     || 0);
       const bal    = Number(inv.amount_remaining ?? (invAmt - paid));
-      if (bal <= 0) return;
+      if (bal === 0) return;  // skip fully-settled; credit notes (bal < 0) pass through
 
       const age  = Math.floor((asAt.getTime() - ageDate.getTime()) / 86400000);
       const bkts = agingBuckets(age, bal);
@@ -590,7 +590,7 @@ const ReportPanel: React.FC<{ report: ReportDef; businessUnits: { name: string; 
     });
 
     return [...supplierMap.values()]
-      .filter(r => r.unpaidAmount > 0)
+      .filter(r => r.unpaidAmount !== 0)
       .sort((a, b) => b.unpaidAmount - a.unpaidAmount);
   };
 
