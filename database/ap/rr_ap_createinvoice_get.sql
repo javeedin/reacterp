@@ -65,19 +65,38 @@ SELECT
     -- amount_paid = cash payments + applied prepayments
     NVL(pay.total_paid, NVL(i.amount_paid, 0)) + NVL(prep.total_prep, 0)  AS amount_paid,
     -- unpaid = invoice minus (cash payments + applied prepayments)
-    GREATEST(0,
-        NVL(i.invoice_amount, 0)
-        - NVL(pay.total_paid, NVL(i.amount_paid, 0))
-        - NVL(prep.total_prep, 0)
-    ) AS unpaid_amount,
-    -- paid status: cancelled takes priority, then computed from payments
+    -- Credit notes (invoice_amount < 0) keep their negative balance; GREATEST(0) is only
+    -- applied to positive invoices to prevent negative unpaid on overpayment.
     CASE
-        WHEN NVL(i.canceled_flag, 'N') = 'Y'                              THEN 'Cancelled'
-        WHEN NVL(i.invoice_amount, 0) = 0                                  THEN NVL(i.paid_status, 'Unpaid')
+        WHEN NVL(i.invoice_amount, 0) < 0 THEN
+            NVL(i.invoice_amount, 0)
+            - NVL(pay.total_paid, NVL(i.amount_paid, 0))
+            - NVL(prep.total_prep, 0)
+        ELSE
+            GREATEST(0,
+                NVL(i.invoice_amount, 0)
+                - NVL(pay.total_paid, NVL(i.amount_paid, 0))
+                - NVL(prep.total_prep, 0)
+            )
+    END AS unpaid_amount,
+    -- paid status: cancelled takes priority, then computed from payments
+    -- Credit notes use reversed comparison (amount is negative, payments reduce toward 0)
+    CASE
+        WHEN NVL(i.canceled_flag, 'N') = 'Y'     THEN 'Cancelled'
+        WHEN NVL(i.invoice_amount, 0) = 0         THEN NVL(i.paid_status, 'Unpaid')
+        WHEN NVL(i.invoice_amount, 0) < 0         THEN
+            -- Credit note: "paid" means credit has been applied or refunded
+            CASE
+                WHEN (NVL(pay.total_paid, NVL(i.amount_paid, 0)) + NVL(prep.total_prep, 0))
+                     <= NVL(i.invoice_amount, 0)                             THEN 'Fully Paid'
+                WHEN (NVL(pay.total_paid, NVL(i.amount_paid, 0)) + NVL(prep.total_prep, 0))
+                     < 0                                                      THEN 'Partially Paid'
+                ELSE NVL(i.paid_status, 'Unpaid')
+            END
         WHEN (NVL(pay.total_paid, NVL(i.amount_paid, 0)) + NVL(prep.total_prep, 0))
-             >= NVL(i.invoice_amount, 0)                                   THEN 'Fully Paid'
+             >= NVL(i.invoice_amount, 0)                                     THEN 'Fully Paid'
         WHEN (NVL(pay.total_paid, NVL(i.amount_paid, 0)) + NVL(prep.total_prep, 0))
-             > 0                                                            THEN 'Partially Paid'
+             > 0                                                              THEN 'Partially Paid'
         ELSE NVL(i.paid_status, 'Unpaid')
     END AS paid_status,
     i.canceled_flag,

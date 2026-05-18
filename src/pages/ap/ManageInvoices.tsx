@@ -1314,16 +1314,20 @@ const ManageInvoices: React.FC = () => {
       ),
     },
     {
-      title: 'Unpaid Amount',
+      title: 'Unpaid / Open Credit',
       dataIndex: 'unpaidAmount',
       key: 'unpaidAmount',
-      width: 120,
+      width: 140,
       align: 'right',
-      render: (value: number, record: InvoiceRecord) => (
-        <span style={{ color: value === 0 ? REDWOOD.neutral600 : REDWOOD.neutral900 }}>
-          {formatAmount(value)} {record.invoiceCurrency}
-        </span>
-      ),
+      render: (value: number, record: InvoiceRecord) => {
+        const isCredit = value < 0;
+        return (
+          <span style={{ color: value === 0 ? REDWOOD.neutral600 : isCredit ? REDWOOD.warning : REDWOOD.neutral900 }}>
+            {isCredit ? `(${formatAmount(Math.abs(value))})` : formatAmount(value)} {record.invoiceCurrency}
+            {isCredit && <span style={{ fontSize: 10, marginLeft: 4, color: REDWOOD.warning }}>(credit)</span>}
+          </span>
+        );
+      },
     },
     {
       title: 'Invoice Amount',

@@ -5265,7 +5265,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   </Space>
                 )
                 : initialData?.unpaidAmount !== undefined
-                  ? <Text strong style={{ fontSize: 15, color: REDWOOD.primary }}>{`Unpaid: ${formatAmount(initialData.unpaidAmount)} ${initialData.invoiceCurrency || 'AED'}`}</Text>
+                  ? (() => {
+                      const isCredit = (initialData.invoiceAmount ?? 0) < 0;
+                      const label    = isCredit ? 'Open Credit' : 'Unpaid';
+                      const color    = isCredit ? REDWOOD.warning : REDWOOD.primary;
+                      return <Text strong style={{ fontSize: 15, color }}>{`${label}: ${formatAmount(Math.abs(initialData.unpaidAmount))} ${initialData.invoiceCurrency || 'AED'}`}</Text>;
+                    })()
                   : null
           ) : null}
           {(isEditMode || !!savedInvoiceId) && (
@@ -6460,7 +6465,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   />
                 ) : (
                   <div style={{ textAlign: 'center', padding: 30, color: REDWOOD.neutral600, fontSize: 12 }}>
-                    No payments found for this invoice.
+                    {(initialData?.invoiceAmount ?? headerValues.invoiceAmount ?? 0) < 0
+                      ? 'Credit notes are settled by applying the credit against another invoice (Pre-Payment Applications tab), not by a cash payment.'
+                      : 'No payments found for this invoice.'}
                   </div>
                 ),
               }] : []),
