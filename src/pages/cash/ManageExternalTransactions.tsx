@@ -1464,18 +1464,12 @@ const ExternalTxnForm: React.FC<{
                   <Input variant="borderless" placeholder="CHQ-00123" disabled={isEdit || !bankSelected || saved} />
                 </Form.Item>
               </div>
-              {isForeignCurrency ? (
-                <>
-                  <div className="ext-lbl">Conv. Date</div>
-                  <div className="ext-val">
-                    <Form.Item name="bankConversionDate">
-                      <DatePicker format="D-MMM-YYYY" variant="borderless" disabled={isEdit || !bankSelected || saved} style={{ width: '100%' }} />
-                    </Form.Item>
-                  </div>
-                </>
-              ) : (
-                <><div className="ext-lbl" /><div className="ext-val" /></>
-              )}
+              <div className="ext-lbl">Conv. Date</div>
+              <div className="ext-val">
+                <Form.Item name="bankConversionDate">
+                  <DatePicker format="D-MMM-YYYY" variant="borderless" disabled={isEdit || !bankSelected || saved} style={{ width: '100%' }} />
+                </Form.Item>
+              </div>
             </div>
 
             {/* Payment Document | Conv. Rate */}
