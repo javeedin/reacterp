@@ -2986,29 +2986,44 @@ const TrialBalance: React.FC = () => {
       bookRate: number; newRate: number; newAcctValue: number;
       revalAmt: number; isGain: boolean; excluded: boolean;
     }
-    const comboRows: ComboRow[] = allRawRows.map(r => {
+    // Group by (combo + ccy) to deduplicate rows that share the same combination and currency
+    const comboMap = new Map<string, ComboRow>();
+    allRawRows.forEach(r => {
       const ccy        = r.currency_code || '';
-      const entClosing = r.entered_closing || 0;
-      const acctClosing = r.closing || 0;
-      const excluded   = revalExcludedCombos.has(r.account_combination || '');
+      const combo      = r.account_combination || revalAccount;
+      const key        = `${combo}-${ccy}`;
+      const excluded   = revalExcludedCombos.has(combo);
       const newRate    = excluded ? 0 : (parseFloat(revalRates[ccy] || '') || 0);
-      const bookRate   = entClosing !== 0 ? acctClosing / entClosing : 0;
-      const newAcctVal = entClosing * newRate;
-      const revalAmt   = newAcctVal - acctClosing;
-      return {
-        rowKey:       `${r.account_combination}-${ccy}`,
-        combo:        r.account_combination || revalAccount,
-        ccy,
-        entClosing,
-        acctClosing,
-        bookRate,
-        newRate,
-        newAcctValue: newAcctVal,
-        revalAmt,
-        isGain:       revalAmt >= 0,
-        excluded,
-      };
+      if (comboMap.has(key)) {
+        const g = comboMap.get(key)!;
+        g.entClosing  += r.entered_closing || 0;
+        g.acctClosing += r.closing        || 0;
+        g.bookRate     = g.entClosing !== 0 ? g.acctClosing / g.entClosing : 0;
+        g.newAcctValue = g.entClosing * g.newRate;
+        g.revalAmt     = g.newAcctValue - g.acctClosing;
+        g.isGain       = g.revalAmt >= 0;
+      } else {
+        const entClosing  = r.entered_closing || 0;
+        const acctClosing = r.closing         || 0;
+        const bookRate    = entClosing !== 0 ? acctClosing / entClosing : 0;
+        const newAcctVal  = entClosing * newRate;
+        const revalAmt    = newAcctVal - acctClosing;
+        comboMap.set(key, {
+          rowKey:       key,
+          combo,
+          ccy,
+          entClosing,
+          acctClosing,
+          bookRate,
+          newRate,
+          newAcctValue: newAcctVal,
+          revalAmt,
+          isGain:       revalAmt >= 0,
+          excluded,
+        });
+      }
     });
+    const comboRows: ComboRow[] = Array.from(comboMap.values());
 
     // Active rows only (for totals + preview)
     const activeComboRows = comboRows.filter(r => !r.excluded);
@@ -3090,7 +3105,7 @@ const TrialBalance: React.FC = () => {
             </Tooltip>
           ),
       },
-      { title: 'Combination', dataIndex: 'combo', key: 'combo', width: 200, ellipsis: true,
+      { title: 'Combination', dataIndex: 'combo', key: 'combo', width: 260, ellipsis: true,
         render: (v: string, r: ComboRow) => (
           <Tooltip title={v}>
             <Text
@@ -3117,7 +3132,7 @@ const TrialBalance: React.FC = () => {
             {v >= 0 ? fmtN(v) : `(${fmtN(v)})`}
           </Text>
         )},
-      { title: 'Book Rate', dataIndex: 'bookRate', key: 'bookRate', align: 'right' as const, width: 100,
+      { title: 'Book Rate', dataIndex: 'bookRate', key: 'bookRate', align: 'right' as const, width: 130,
         render: (v: number, r: ComboRow) => r.excluded
           ? <Text style={{ color: '#aaa', fontFamily: 'monospace' }}>—</Text>
           : (
@@ -3128,12 +3143,15 @@ const TrialBalance: React.FC = () => {
                 <div style={{ fontFamily: 'monospace', color: '#ffffffa0' }}>
                   {r.acctClosing.toFixed(2)} ÷ {r.entClosing.toFixed(2)}
                 </div>
+                <div style={{ fontFamily: 'monospace', color: '#ffffffa0', marginTop: 4 }}>
+                  Full: {v ? v.toFixed(10) : '—'}
+                </div>
               </div>
             }
             color="#1d3557"
           >
             <Text style={{ fontFamily: 'monospace', color: REDWOOD.textSecondary, cursor: 'help', borderBottom: '1px dashed #aaa' }}>
-              {v ? v.toFixed(10) : '—'}
+              {v ? v.toFixed(8) : '—'}
             </Text>
           </Tooltip>
         )},
