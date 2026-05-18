@@ -1885,6 +1885,9 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   // ── View Accounting modal state ───────────────────────────────────────────
   const [viewAcctOpen, setViewAcctOpen]   = useState(false);
   const [viewAcctTxn, setViewAcctTxn]     = useState<ExternalTxnRecord | null>(null);
+  const [viewAcctHeader, setViewAcctHeader] = useState<any>(null);
+  const [viewAcctLines,  setViewAcctLines]  = useState<any[]>([]);
+  const [viewAcctLoading, setViewAcctLoading] = useState(false);
 
   const modulePrefix = module === 'ap' ? '/ap' : '/cash';
 
@@ -2820,7 +2823,23 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
             <Tooltip title="View Accounting">
               <Button type="text" size="small" icon={<EyeOutlined />}
                 style={{ color: REDWOOD.success }}
-                onClick={() => { setViewAcctTxn(r); setViewAcctOpen(true); }} />
+                onClick={() => {
+                  setViewAcctTxn(r);
+                  setViewAcctHeader(null);
+                  setViewAcctLines([]);
+                  setViewAcctOpen(true);
+                  setViewAcctLoading(true);
+                  const srcNum = encodeURIComponent(String(r.externalTransactionId));
+                  Promise.all([
+                    fetch(`${APEX_BASE}/sla/journals?moduleName=CASH&sourceNumber=${srcNum}`).then(x => x.json()),
+                    fetch(`${APEX_BASE}/sla/journals/lines?moduleName=CASH&sourceNumber=${srcNum}`).then(x => x.json()),
+                  ]).then(([hRes, lRes]) => {
+                    const headers: any[] = hRes.items || [];
+                    const lines: any[]   = lRes.items || [];
+                    setViewAcctHeader(headers[0] || null);
+                    setViewAcctLines(lines);
+                  }).catch(() => {}).finally(() => setViewAcctLoading(false));
+                }} />
             </Tooltip>
           )}
         </Space>
@@ -3341,62 +3360,65 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           open={viewAcctOpen}
           onCancel={() => setViewAcctOpen(false)}
           footer={<Button onClick={() => setViewAcctOpen(false)}>Close</Button>}
-          width={860}
+          width={980}
           destroyOnClose
         >
           {viewAcctTxn && (() => {
-            const txn = viewAcctTxn;
+            const txn       = viewAcctTxn;
+            const hdr       = viewAcctHeader;
+            const lines     = viewAcctLines;
             const direction = txn.transactionDirection ?? ((txn.amount ?? 0) >= 0 ? 'DR' : 'CR');
             const absAmount = Math.abs(txn.amount ?? 0);
             const exRate    = txn.bankConversionRate ?? 1;
-            const acctedAmt = Math.round(absAmount * exRate * 100) / 100;
             const ledgerCcy = 'AED';
-            const drLabel = direction === 'DR' ? 'Bank / Asset Account' : 'Offset Account';
-            const crLabel = direction === 'DR' ? 'Offset Account' : 'Bank / Asset Account';
-            const drAcct  = direction === 'DR' ? txn.assetAccountCombination : txn.offsetAccountCombination;
-            const crAcct  = direction === 'DR' ? txn.offsetAccountCombination : txn.assetAccountCombination;
-            const tdStyle = (extra?: React.CSSProperties): React.CSSProperties => ({
-              padding: '8px 10px', border: `1px solid ${REDWOOD.neutral200}`, ...extra,
+            const entrCcy   = hdr?.currencyCode || txn.currencyCode || ledgerCcy;
+
+            // Use live lines if available, else fall back to computed rows
+            const liveLines = lines.length > 0;
+            const totalEntDr  = liveLines ? lines.reduce((s: number, l: any) => s + (l.enteredDr || 0), 0) : absAmount;
+            const totalEntCr  = liveLines ? lines.reduce((s: number, l: any) => s + (l.enteredCr || 0), 0) : absAmount;
+            const totalAccDr  = liveLines ? lines.reduce((s: number, l: any) => s + (l.accountedDr || 0), 0) : Math.round(absAmount * exRate * 100) / 100;
+            const totalAccCr  = liveLines ? lines.reduce((s: number, l: any) => s + (l.accountedCr || 0), 0) : Math.round(absAmount * exRate * 100) / 100;
+
+            const td = (extra?: React.CSSProperties): React.CSSProperties => ({
+              padding: '7px 10px', border: `1px solid ${REDWOOD.neutral200}`, ...extra,
             });
+
             return (
               <>
-                {/* Transaction Info Header */}
-                <div style={{ background: REDWOOD.neutral100, borderRadius: 6, padding: '12px 16px', marginBottom: 16 }}>
-                  <Row gutter={16}>
+                {/* ── Transaction Info ── */}
+                <div style={{ background: REDWOOD.neutral100, borderRadius: 6, padding: '12px 16px', marginBottom: 12 }}>
+                  <Row gutter={[16, 8]}>
                     <Col xs={12} md={6}>
                       <Text type="secondary" style={{ fontSize: 11 }}>Transaction ID</Text>
                       <div style={{ fontWeight: 600, fontSize: 13 }}>{txn.transactionId || txn.externalTransactionId}</div>
                     </Col>
                     <Col xs={12} md={6}>
-                      <Text type="secondary" style={{ fontSize: 11 }}>Date</Text>
+                      <Text type="secondary" style={{ fontSize: 11 }}>Txn Date</Text>
                       <div style={{ fontWeight: 600, fontSize: 13 }}>{fmtDate(txn.transactionDate)}</div>
                     </Col>
                     <Col xs={12} md={6}>
-                      <Text type="secondary" style={{ fontSize: 11 }}>Amount</Text>
-                      <div style={{ fontWeight: 600, fontSize: 13, color: absAmount >= 0 ? REDWOOD.success : REDWOOD.error }}>
-                        {fmtAmount(absAmount, txn.currencyCode)}
+                      <Text type="secondary" style={{ fontSize: 11 }}>Amount (Entered)</Text>
+                      <div style={{ fontWeight: 600, fontSize: 13, color: REDWOOD.info }}>
+                        {fmtAmount(absAmount, entrCcy)}
                       </div>
                     </Col>
                     <Col xs={12} md={6}>
-                      <Text type="secondary" style={{ fontSize: 11 }}>Business Unit</Text>
-                      <div style={{ fontWeight: 600, fontSize: 13 }}>{txn.businessUnitName || '—'}</div>
-                    </Col>
-                  </Row>
-                  <Row gutter={16} style={{ marginTop: 8 }}>
-                    <Col xs={24} md={6}>
                       <Text type="secondary" style={{ fontSize: 11 }}>Direction</Text>
-                      <div>
-                        <Tag color={direction === 'DR' ? 'blue' : 'green'} style={{ fontSize: 12, fontWeight: 600 }}>
-                          {direction === 'DR' ? '▲ DR — Money In' : '▼ CR — Money Out'}
-                        </Tag>
-                      </div>
+                      <Tag color={direction === 'DR' ? 'blue' : 'green'} style={{ fontSize: 12, fontWeight: 600, marginTop: 2 }}>
+                        {direction === 'DR' ? '▲ DR — Money In' : '▼ CR — Money Out'}
+                      </Tag>
                     </Col>
-                    <Col xs={24} md={6}>
+                    <Col xs={12} md={6}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>Business Unit</Text>
+                      <div style={{ fontSize: 13 }}>{txn.businessUnitName || '—'}</div>
+                    </Col>
+                    <Col xs={12} md={6}>
                       <Text type="secondary" style={{ fontSize: 11 }}>Reference</Text>
                       <div style={{ fontSize: 13 }}>{txn.referenceText || '—'}</div>
                     </Col>
                     <Col xs={12} md={6}>
-                      <Text type="secondary" style={{ fontSize: 11 }}>Conversion Rate</Text>
+                      <Text type="secondary" style={{ fontSize: 11 }}>Conv. Rate</Text>
                       <div style={{ fontSize: 13, fontFamily: 'monospace' }}>{exRate} ({txn.bankConversionRateType || 'Corporate'})</div>
                     </Col>
                     <Col xs={12} md={6}>
@@ -3406,59 +3428,158 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                   </Row>
                 </div>
 
-                {/* Journal Lines */}
-                <div style={{ fontWeight: 600, fontSize: 12, color: REDWOOD.neutral600, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  Journal Entry
+                {/* ── Journal / Batch Info (from SLA) ── */}
+                {viewAcctLoading
+                  ? <div style={{ textAlign: 'center', padding: '16px 0' }}><Spin size="small" /><Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>Loading journal details…</Text></div>
+                  : hdr && (
+                    <div style={{ background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 6, padding: '10px 16px', marginBottom: 12 }}>
+                      <Row gutter={[16, 6]}>
+                        <Col xs={24} md={12}>
+                          <Text type="secondary" style={{ fontSize: 11 }}>GL Batch Name</Text>
+                          <div style={{ fontWeight: 600, fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all' }}>{hdr.glBatchName || '—'}</div>
+                        </Col>
+                        <Col xs={12} md={6}>
+                          <Text type="secondary" style={{ fontSize: 11 }}>GL Batch ID</Text>
+                          <div style={{ fontSize: 12, fontFamily: 'monospace' }}>{hdr.glBatchId || '—'}</div>
+                        </Col>
+                        <Col xs={12} md={6}>
+                          <Text type="secondary" style={{ fontSize: 11 }}>GL Header ID</Text>
+                          <div style={{ fontSize: 12, fontFamily: 'monospace' }}>{hdr.glHeaderId || '—'}</div>
+                        </Col>
+                        <Col xs={12} md={6}>
+                          <Text type="secondary" style={{ fontSize: 11 }}>Period</Text>
+                          <div style={{ fontSize: 12, fontWeight: 600 }}>{hdr.periodName || '—'}</div>
+                        </Col>
+                        <Col xs={12} md={6}>
+                          <Text type="secondary" style={{ fontSize: 11 }}>Accounting Date</Text>
+                          <div style={{ fontSize: 12 }}>{fmtDate(hdr.accountingDate)}</div>
+                        </Col>
+                        <Col xs={12} md={6}>
+                          <Text type="secondary" style={{ fontSize: 11 }}>Journal Category</Text>
+                          <div style={{ fontSize: 12 }}>{hdr.moduleName || 'Cash Management'}</div>
+                        </Col>
+                        <Col xs={12} md={6}>
+                          <Text type="secondary" style={{ fontSize: 11 }}>Status</Text>
+                          <div>
+                            <Tag color={hdr.postingStatus === 'POSTED' ? 'success' : hdr.accountingStatus === 'FINAL' ? 'processing' : 'default'} style={{ fontSize: 11 }}>
+                              {hdr.postingStatus || hdr.accountingStatus || '—'}
+                            </Tag>
+                          </div>
+                        </Col>
+                        <Col xs={12} md={6}>
+                          <Text type="secondary" style={{ fontSize: 11 }}>Posted By</Text>
+                          <div style={{ fontSize: 12 }}>{hdr.postedBy || '—'}</div>
+                        </Col>
+                        <Col xs={12} md={6}>
+                          <Text type="secondary" style={{ fontSize: 11 }}>Posted Date</Text>
+                          <div style={{ fontSize: 12 }}>{hdr.postedDate ? fmtDate(hdr.postedDate) : '—'}</div>
+                        </Col>
+                        <Col xs={12} md={6}>
+                          <Text type="secondary" style={{ fontSize: 11 }}>SLA Header ID</Text>
+                          <div style={{ fontSize: 12, fontFamily: 'monospace' }}>{hdr.headerId}</div>
+                        </Col>
+                      </Row>
+                    </div>
+                  )
+                }
+
+                {/* ── Journal Lines ── */}
+                <div style={{ fontWeight: 600, fontSize: 11, color: REDWOOD.neutral600, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Journal Lines
                 </div>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'monospace', fontSize: 12 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'monospace', fontSize: 11 }}>
                   <thead>
                     <tr style={{ background: REDWOOD.neutral100 }}>
-                      <th style={tdStyle({ textAlign: 'left', width: 44 })}>Dr/Cr</th>
-                      <th style={tdStyle({ textAlign: 'left' })}>Account</th>
-                      <th style={tdStyle({ textAlign: 'left', width: 130, fontSize: 11 })}>Label</th>
-                      <th colSpan={2} style={tdStyle({ textAlign: 'center', width: 220, background: '#e6f4ff', color: REDWOOD.info })}>
-                        Entered ({txn.currencyCode || '—'})
+                      <th style={td({ textAlign: 'center', width: 32 }}>#</th>
+                      <th style={td({ textAlign: 'left', width: 38 })}>Dr/Cr</th>
+                      <th style={td({ textAlign: 'left' })}>Account</th>
+                      <th style={td({ textAlign: 'left', width: 110, fontSize: 10 })}>Acct Desc</th>
+                      <th style={td({ textAlign: 'left', width: 90, fontSize: 10 })}>Class</th>
+                      <th style={td({ textAlign: 'left', width: 140, fontSize: 10 })}>Description</th>
+                      <th colSpan={2} style={td({ textAlign: 'center', background: '#e6f4ff', color: REDWOOD.info })}>
+                        Entered ({entrCcy})
                       </th>
-                      <th colSpan={2} style={tdStyle({ textAlign: 'center', width: 220, background: '#f6ffed', color: REDWOOD.success })}>
+                      <th colSpan={2} style={td({ textAlign: 'center', background: '#f6ffed', color: REDWOOD.success })}>
                         Accounted ({ledgerCcy})
                       </th>
                     </tr>
                     <tr style={{ background: REDWOOD.neutral100 }}>
-                      <th style={tdStyle()} />
-                      <th style={tdStyle()} />
-                      <th style={tdStyle()} />
-                      <th style={tdStyle({ textAlign: 'right', background: '#e6f4ff', fontSize: 11 })}>DR</th>
-                      <th style={tdStyle({ textAlign: 'right', background: '#e6f4ff', fontSize: 11 })}>CR</th>
-                      <th style={tdStyle({ textAlign: 'right', background: '#f6ffed', fontSize: 11 })}>DR</th>
-                      <th style={tdStyle({ textAlign: 'right', background: '#f6ffed', fontSize: 11 })}>CR</th>
+                      <th style={td()} /><th style={td()} /><th style={td()} /><th style={td()} /><th style={td()} /><th style={td()} />
+                      <th style={td({ textAlign: 'right', background: '#e6f4ff', fontSize: 10 })}>DR</th>
+                      <th style={td({ textAlign: 'right', background: '#e6f4ff', fontSize: 10 })}>CR</th>
+                      <th style={td({ textAlign: 'right', background: '#f6ffed', fontSize: 10 })}>DR</th>
+                      <th style={td({ textAlign: 'right', background: '#f6ffed', fontSize: 10 })}>CR</th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr>
-                      <td style={tdStyle({ color: REDWOOD.info, fontWeight: 700 })}>DR</td>
-                      <td style={tdStyle()}>{drAcct || '—'}</td>
-                      <td style={tdStyle({ fontSize: 11, color: REDWOOD.neutral600 })}>{drLabel}</td>
-                      <td style={tdStyle({ textAlign: 'right', color: REDWOOD.info, fontWeight: 600 })}>{fmtAmount(absAmount)}</td>
-                      <td style={tdStyle({ textAlign: 'right' })}>—</td>
-                      <td style={tdStyle({ textAlign: 'right', color: REDWOOD.info, fontWeight: 600 })}>{fmtAmount(acctedAmt)}</td>
-                      <td style={tdStyle({ textAlign: 'right' })}>—</td>
-                    </tr>
-                    <tr style={{ background: REDWOOD.neutral100 }}>
-                      <td style={tdStyle({ color: REDWOOD.success, fontWeight: 700 })}>CR</td>
-                      <td style={tdStyle()}>{crAcct || '—'}</td>
-                      <td style={tdStyle({ fontSize: 11, color: REDWOOD.neutral600 })}>{crLabel}</td>
-                      <td style={tdStyle({ textAlign: 'right' })}>—</td>
-                      <td style={tdStyle({ textAlign: 'right', color: REDWOOD.success, fontWeight: 600 })}>{fmtAmount(absAmount)}</td>
-                      <td style={tdStyle({ textAlign: 'right' })}>—</td>
-                      <td style={tdStyle({ textAlign: 'right', color: REDWOOD.success, fontWeight: 600 })}>{fmtAmount(acctedAmt)}</td>
-                    </tr>
+                    {liveLines
+                      ? lines.map((l: any, i: number) => (
+                          <tr key={l.lineId ?? i} style={{ background: i % 2 === 1 ? REDWOOD.neutral100 : undefined }}>
+                            <td style={td({ textAlign: 'center', color: REDWOOD.neutral600 })}>{l.lineNumber ?? i + 1}</td>
+                            <td style={td({ fontWeight: 700, color: l.lineType === 'DR' ? REDWOOD.info : REDWOOD.success })}>{l.lineType}</td>
+                            <td style={td()}>{l.accountCombination || '—'}</td>
+                            <td style={td({ fontSize: 10, color: REDWOOD.neutral600 })}>{l.accountDescription || '—'}</td>
+                            <td style={td({ fontSize: 10, color: REDWOOD.neutral600 })}>{l.accountingClass || '—'}</td>
+                            <td style={td({ fontSize: 10 })}>{l.description || '—'}</td>
+                            <td style={td({ textAlign: 'right', color: REDWOOD.info, fontWeight: l.enteredDr ? 600 : 400 })}>
+                              {l.enteredDr ? fmtAmount(l.enteredDr) : '—'}
+                            </td>
+                            <td style={td({ textAlign: 'right', color: REDWOOD.success, fontWeight: l.enteredCr ? 600 : 400 })}>
+                              {l.enteredCr ? fmtAmount(l.enteredCr) : '—'}
+                            </td>
+                            <td style={td({ textAlign: 'right', color: REDWOOD.info, fontWeight: l.accountedDr ? 600 : 400 })}>
+                              {l.accountedDr ? fmtAmount(l.accountedDr) : '—'}
+                            </td>
+                            <td style={td({ textAlign: 'right', color: REDWOOD.success, fontWeight: l.accountedCr ? 600 : 400 })}>
+                              {l.accountedCr ? fmtAmount(l.accountedCr) : '—'}
+                            </td>
+                          </tr>
+                        ))
+                      : (() => {
+                          // Fallback: computed two-line entry
+                          const drAcct = direction === 'DR' ? txn.assetAccountCombination : txn.offsetAccountCombination;
+                          const crAcct = direction === 'DR' ? txn.offsetAccountCombination : txn.assetAccountCombination;
+                          const drLabel = direction === 'DR' ? 'Bank / Asset Account' : 'Offset Account';
+                          const crLabel = direction === 'DR' ? 'Offset Account' : 'Bank / Asset Account';
+                          const acctedAmt = Math.round(absAmount * exRate * 100) / 100;
+                          return (
+                            <>
+                              <tr>
+                                <td style={td({ textAlign: 'center' })}>1</td>
+                                <td style={td({ fontWeight: 700, color: REDWOOD.info })}>DR</td>
+                                <td style={td()}>{drAcct || '—'}</td>
+                                <td style={td({ fontSize: 10 })}>—</td>
+                                <td style={td({ fontSize: 10 })}>{drLabel}</td>
+                                <td style={td({ fontSize: 10 })}>—</td>
+                                <td style={td({ textAlign: 'right', color: REDWOOD.info, fontWeight: 600 })}>{fmtAmount(absAmount)}</td>
+                                <td style={td({ textAlign: 'right' })}>—</td>
+                                <td style={td({ textAlign: 'right', color: REDWOOD.info, fontWeight: 600 })}>{fmtAmount(acctedAmt)}</td>
+                                <td style={td({ textAlign: 'right' })}>—</td>
+                              </tr>
+                              <tr style={{ background: REDWOOD.neutral100 }}>
+                                <td style={td({ textAlign: 'center' })}>2</td>
+                                <td style={td({ fontWeight: 700, color: REDWOOD.success })}>CR</td>
+                                <td style={td()}>{crAcct || '—'}</td>
+                                <td style={td({ fontSize: 10 })}>—</td>
+                                <td style={td({ fontSize: 10 })}>{crLabel}</td>
+                                <td style={td({ fontSize: 10 })}>—</td>
+                                <td style={td({ textAlign: 'right' })}>—</td>
+                                <td style={td({ textAlign: 'right', color: REDWOOD.success, fontWeight: 600 })}>{fmtAmount(absAmount)}</td>
+                                <td style={td({ textAlign: 'right' })}>—</td>
+                                <td style={td({ textAlign: 'right', color: REDWOOD.success, fontWeight: 600 })}>{fmtAmount(acctedAmt)}</td>
+                              </tr>
+                            </>
+                          );
+                        })()
+                    }
                   </tbody>
                 </table>
-                <div style={{ marginTop: 0, display: 'flex', justifyContent: 'flex-end', gap: 24, padding: '6px 12px', background: REDWOOD.neutral100, borderRadius: '0 0 4px 4px', border: `1px solid ${REDWOOD.neutral200}`, borderTop: 'none' }}>
-                  <Text style={{ fontSize: 12 }}>Entered DR: <Text strong style={{ color: REDWOOD.info }}>{fmtAmount(absAmount, txn.currencyCode)}</Text></Text>
-                  <Text style={{ fontSize: 12 }}>Entered CR: <Text strong style={{ color: REDWOOD.success }}>{fmtAmount(absAmount, txn.currencyCode)}</Text></Text>
-                  <Text style={{ fontSize: 12 }}>Accounted DR: <Text strong style={{ color: REDWOOD.info }}>{fmtAmount(acctedAmt, ledgerCcy)}</Text></Text>
-                  <Text style={{ fontSize: 12 }}>Accounted CR: <Text strong style={{ color: REDWOOD.success }}>{fmtAmount(acctedAmt, ledgerCcy)}</Text></Text>
+                {/* Totals footer */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 24, padding: '5px 10px', background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, borderTop: 'none', borderRadius: '0 0 4px 4px', fontSize: 11 }}>
+                  <Text>Entered DR: <Text strong style={{ color: REDWOOD.info }}>{fmtAmount(totalEntDr, entrCcy)}</Text></Text>
+                  <Text>Entered CR: <Text strong style={{ color: REDWOOD.success }}>{fmtAmount(totalEntCr, entrCcy)}</Text></Text>
+                  <Text>Accounted DR: <Text strong style={{ color: REDWOOD.info }}>{fmtAmount(totalAccDr, ledgerCcy)}</Text></Text>
+                  <Text>Accounted CR: <Text strong style={{ color: REDWOOD.success }}>{fmtAmount(totalAccCr, ledgerCcy)}</Text></Text>
                 </div>
               </>
             );
