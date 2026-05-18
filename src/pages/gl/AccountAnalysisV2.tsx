@@ -7,10 +7,12 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, SearchOutlined, ClearOutlined,
-  FileExcelOutlined, AuditOutlined, ReloadOutlined,
+  FileExcelOutlined, FilePdfOutlined, AuditOutlined, ReloadOutlined,
   ApiOutlined, CopyOutlined, BookOutlined, DownOutlined,
   FilterOutlined, PlusOutlined, GroupOutlined, BarChartOutlined,
 } from '@ant-design/icons';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { Link } from 'react-router-dom';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
@@ -1054,6 +1056,10 @@ const AAPanel: React.FC = () => {
   const [apiUrl, setApiUrl]                   = useState('');
   const [apiModalOpen, setApiModalOpen]       = useState(false);
 
+  // PDF preview modal
+  const [pdfPreviewOpen, setPdfPreviewOpen]   = useState(false);
+  const [pdfBlobUrl, setPdfBlobUrl]           = useState('');
+
   // ── Load ledgers ─────────────────────────────────────────────────────────────
   useEffect(() => {
     setLedgersLoading(true);
@@ -1978,6 +1984,197 @@ const AAPanel: React.FC = () => {
     message.success('Excel file downloaded');
   };
 
+  const handlePrintPdf = useCallback(() => {
+    if (!filteredData.length) { message.warning('No data to export'); return; }
+
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+
+    const fmt = (v: number) =>
+      v === 0 ? '—' : new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
+
+    const periodLabel = periods.length
+      ? (periods.length === 1 ? periods[0] : `${[...periods].sort()[0]} – ${[...periods].sort().slice(-1)[0]}`)
+      : '';
+
+    // Title block
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Account Analysis', pageW / 2, 12, { align: 'center' });
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    const subtitle = [ledger, periodLabel, account ? `Acct: ${account}` : ''].filter(Boolean).join('   |   ');
+    doc.text(subtitle, pageW / 2, 17, { align: 'center' });
+
+    const isComboBreak = appliedGroupBy === 'concatenatedSegments' || appliedGroupBy === 'currencyCode';
+
+    if (isComboBreak) {
+      let startY = 22;
+      comboBreaks.forEach((brk, bi) => {
+        if (bi > 0) startY += 4;
+        const label = appliedGroupBy === 'currencyCode' && brk.combo.includes('||')
+          ? brk.combo.replace('||', '  –  ')
+          : brk.combo;
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(26, 95, 204);
+        doc.text(label + (brk.description ? `  ${brk.description}` : ''), 14, startY);
+        doc.setTextColor(0, 0, 0);
+
+        const ptdTot = {
+          jeLineDescription: 'PTD Total', userJeSourceName: '', currencyCode: '',
+          enteredDr: brk.ptdEntDr, enteredCr: brk.ptdEntCr,
+          accountedDr: brk.ptdAccDr, accountedCr: brk.ptdAccCr,
+          isTotals: true,
+          _accRun: brk.linesWithBal.length ? brk.linesWithBal[brk.linesWithBal.length - 1]._accRun : 0,
+        };
+        const brkRows = [
+          ...(brk.openingRow ? [brk.openingRow] : []),
+          ...brk.linesWithBal,
+          ptdTot,
+          ...(brk.closingRow ? [brk.closingRow] : []),
+        ] as any[];
+
+        const body = brkRows.map(r => {
+          const special = r.isOpeningBalance || r.isClosingBalance || r.isTotals;
+          const label = r.isOpeningBalance ? 'Opening Balance'
+            : r.isClosingBalance ? 'Closing Balance'
+            : r.isTotals ? 'PTD Total'
+            : r.jeLineDescription || '';
+          return [
+            label,
+            special ? '' : (r.userJeSourceName || ''),
+            special ? '' : (r.currencyCode || ''),
+            special ? '' : fmt(r.enteredDr || 0),
+            special ? '' : fmt(r.enteredCr || 0),
+            fmt(r.accountedDr || 0),
+            fmt(r.accountedCr || 0),
+            fmt(r._accRun ?? 0),
+          ];
+        });
+
+        const headers = showEntered
+          ? ['Line Description', 'Source', 'Ccy', `Ent Dr`, `Ent Cr`, `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`]
+          : ['Line Description', 'Source', 'Ccy', `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`];
+        const filteredBody = showEntered ? body : body.map(row => [row[0], row[1], row[2], row[5], row[6], row[7]]);
+
+        autoTable(doc, {
+          startY: startY + 2,
+          head: [headers],
+          body: filteredBody,
+          theme: 'grid',
+          styles: { fontSize: 7, cellPadding: 1.5, overflow: 'linebreak' },
+          headStyles: { fillColor: [26, 95, 204], textColor: 255, fontStyle: 'bold', fontSize: 7 },
+          columnStyles: {
+            0: { cellWidth: 'auto', overflow: 'linebreak' },
+            [headers.length - 1]: { halign: 'right', fontStyle: 'bold' },
+            [headers.length - 2]: { halign: 'right' },
+            [headers.length - 3]: { halign: 'right' },
+          },
+          didParseCell: (data) => {
+            const row = brkRows[data.row.index];
+            if (!row) return;
+            if (row.isOpeningBalance) {
+              data.cell.styles.fillColor = [219, 234, 254];
+              data.cell.styles.fontStyle = 'bold';
+            } else if (row.isClosingBalance) {
+              data.cell.styles.fillColor = [255, 251, 230];
+              data.cell.styles.fontStyle = 'bold';
+            } else if (row.isTotals) {
+              data.cell.styles.fillColor = [240, 240, 240];
+              data.cell.styles.fontStyle = 'bold';
+            }
+          },
+          margin: { left: 14, right: 14 },
+          didDrawPage: (data) => { startY = data.cursor?.y ?? startY; },
+        });
+        startY = (doc as any).lastAutoTable.finalY + 4;
+      });
+    } else {
+      const totRow: any = {
+        concatenatedSegments: 'Total for Report',
+        jeLineDescription: '', userJeSourceName: '', currencyCode: '',
+        enteredDr: gridTotals.entDr, enteredCr: gridTotals.entCr,
+        accountedDr: gridTotals.accDr, accountedCr: gridTotals.accCr,
+        isTotals: true, _accRun: 0,
+      };
+      const pdfRows = [...filteredData, totRow];
+
+      const body = pdfRows.map(r => {
+        const special = r.isOpeningBalance || r.isClosingBalance || r.isTotals;
+        const acctLabel = r.isTotals ? 'Total for Report'
+          : r.isOpeningBalance ? 'Opening Balance'
+          : r.isClosingBalance ? 'Closing Balance'
+          : r.concatenatedSegments || '';
+        return [
+          acctLabel,
+          special ? '' : (r.jeLineDescription || ''),
+          special ? '' : (r.userJeSourceName || ''),
+          special ? '' : (r.currencyCode || ''),
+          special ? '' : fmt(r.enteredDr || 0),
+          special ? '' : fmt(r.enteredCr || 0),
+          fmt(r.accountedDr || 0),
+          fmt(r.accountedCr || 0),
+          fmt(r._accRun ?? 0),
+        ];
+      });
+
+      const headers = showEntered
+        ? ['Account', 'Line Description', 'Source', 'Ccy', `Ent Dr`, `Ent Cr`, `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`]
+        : ['Account', 'Line Description', 'Source', 'Ccy', `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`];
+      const filteredBody = showEntered ? body : body.map(row => [row[0], row[1], row[2], row[3], row[6], row[7], row[8]]);
+
+      autoTable(doc, {
+        startY: 22,
+        head: [headers],
+        body: filteredBody,
+        theme: 'grid',
+        styles: { fontSize: 7, cellPadding: 1.5, overflow: 'linebreak' },
+        headStyles: { fillColor: [26, 95, 204], textColor: 255, fontStyle: 'bold', fontSize: 7 },
+        columnStyles: {
+          0: { cellWidth: 55 },
+          1: { cellWidth: 'auto', overflow: 'linebreak' },
+          [headers.length - 1]: { halign: 'right', fontStyle: 'bold' },
+          [headers.length - 2]: { halign: 'right' },
+          [headers.length - 3]: { halign: 'right' },
+        },
+        didParseCell: (data) => {
+          const row = pdfRows[data.row.index];
+          if (!row) return;
+          if (row.isOpeningBalance) {
+            data.cell.styles.fillColor = [219, 234, 254];
+            data.cell.styles.fontStyle = 'bold';
+          } else if (row.isClosingBalance) {
+            data.cell.styles.fillColor = [255, 251, 230];
+            data.cell.styles.fontStyle = 'bold';
+          } else if (row.isTotals) {
+            data.cell.styles.fillColor = [240, 240, 240];
+            data.cell.styles.fontStyle = 'bold';
+          }
+        },
+        margin: { left: 14, right: 14 },
+      });
+    }
+
+    // Page numbers
+    const pageCount = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(7);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(150);
+      doc.text(`Page ${i} of ${pageCount}`, pageW - 14, doc.internal.pageSize.getHeight() - 6, { align: 'right' });
+      doc.text(`Generated: ${new Date().toLocaleString()}`, 14, doc.internal.pageSize.getHeight() - 6);
+      doc.setTextColor(0);
+    }
+
+    const blob = doc.output('blob');
+    const url = URL.createObjectURL(blob);
+    if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
+    setPdfBlobUrl(url);
+    setPdfPreviewOpen(true);
+  }, [filteredData, periods, ledger, account, appliedGroupBy, comboBreaks, showEntered, functionalCcy, gridTotals, pdfBlobUrl]);
+
   const activeFilters = Object.entries(segFilters).filter(([, v]) => v);
   const accountLabel  = account ? `${account}${accountDesc ? ' – ' + accountDesc : ''}` : '';
 
@@ -2114,6 +2311,9 @@ const AAPanel: React.FC = () => {
             </Tooltip>
             <Button size="small" icon={<FileExcelOutlined />} onClick={exportExcel}
               disabled={!filteredData.length}>Excel</Button>
+            <Button size="small" icon={<FilePdfOutlined />} onClick={handlePrintPdf}
+              disabled={!filteredData.length}
+              style={{ color: '#c74634', borderColor: '#c74634' }}>PDF</Button>
           </Space>
         </div>
       )}
@@ -2327,6 +2527,36 @@ const AAPanel: React.FC = () => {
               </div>
             ))}
           </>
+        )}
+      </Modal>
+
+      {/* PDF Preview Modal */}
+      <Modal
+        open={pdfPreviewOpen}
+        onCancel={() => { setPdfPreviewOpen(false); }}
+        title={<Space><FilePdfOutlined style={{ color: '#c74634' }} />PDF Preview — Account Analysis</Space>}
+        footer={[
+          <Button key="close" onClick={() => setPdfPreviewOpen(false)}>Close</Button>,
+          <Button key="download" type="primary" icon={<FilePdfOutlined />}
+            style={{ background: '#c74634', borderColor: '#c74634' }}
+            onClick={() => {
+              const a = document.createElement('a');
+              a.href = pdfBlobUrl;
+              a.download = `account_analysis_${new Date().toISOString().slice(0, 10)}.pdf`;
+              a.click();
+            }}>
+            Download PDF
+          </Button>,
+        ]}
+        width="90vw"
+        styles={{ body: { padding: 0 } }}
+      >
+        {pdfBlobUrl && (
+          <iframe
+            src={pdfBlobUrl}
+            style={{ width: '100%', height: '75vh', border: 'none', display: 'block' }}
+            title="PDF Preview"
+          />
         )}
       </Modal>
     </div>
