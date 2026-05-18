@@ -3371,7 +3371,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           ),
           children: (
         <Form form={searchForm} layout="horizontal" labelCol={{ span: 8 }} wrapperCol={{ span: 16 }}
-          initialValues={{ dateFrom: dayjs(), dateTo: dayjs() }}>
+          initialValues={{ createdPreset: 'last7' }}>
           <Row gutter={[16, 0]}>
 
             <Col xs={24} md={12}>
