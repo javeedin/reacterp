@@ -156,6 +156,250 @@ interface ExtTxnLine { key: number; amount?: number; description: string; offset
 
 interface PayeeOption { label: string; value: number; payeeName: string; }
 
+// ── View Accounting Modal ─────────────────────────────────────────────────────
+const ts = (extra?: React.CSSProperties): React.CSSProperties => ({
+  padding: '7px 10px', border: '1px solid #e5e7eb', ...extra,
+});
+
+const ViewAcctModal: React.FC<{
+  open: boolean;
+  txn: any;
+  hdr: any;
+  lines: any[];
+  loading: boolean;
+  onClose: () => void;
+}> = ({ open, txn, hdr, lines, loading, onClose }) => {
+  if (!txn) return null;
+
+  const direction = txn.transactionDirection ?? ((txn.amount ?? 0) >= 0 ? 'DR' : 'CR');
+  const absAmount = Math.abs(txn.amount ?? 0);
+  const exRate    = txn.bankConversionRate ?? 1;
+  const ledgerCcy = 'AED';
+  const entrCcy   = hdr?.currencyCode || txn.currencyCode || ledgerCcy;
+
+  const liveLines  = lines.length > 0;
+  const acctedAmtFb = Math.round(absAmount * exRate * 100) / 100;
+
+  const totalEntDr = liveLines ? lines.reduce((s: number, l: any) => s + (l.enteredDr || 0), 0) : absAmount;
+  const totalEntCr = liveLines ? lines.reduce((s: number, l: any) => s + (l.enteredCr || 0), 0) : absAmount;
+  const totalAccDr = liveLines ? lines.reduce((s: number, l: any) => s + (l.accountedDr || 0), 0) : acctedAmtFb;
+  const totalAccCr = liveLines ? lines.reduce((s: number, l: any) => s + (l.accountedCr || 0), 0) : acctedAmtFb;
+
+  const dirTagColor   = direction === 'DR' ? 'blue' : 'green';
+  const dirLabel      = direction === 'DR' ? '▲ DR — Money In' : '▼ CR — Money Out';
+  const drAcctFb      = direction === 'DR' ? txn.assetAccountCombination : txn.offsetAccountCombination;
+  const crAcctFb      = direction === 'DR' ? txn.offsetAccountCombination : txn.assetAccountCombination;
+  const drLabelFb     = direction === 'DR' ? 'Bank / Asset Account' : 'Offset Account';
+  const crLabelFb     = direction === 'DR' ? 'Offset Account' : 'Bank / Asset Account';
+
+  let hdStatusColor = 'default';
+  if (hdr) {
+    if (hdr.postingStatus === 'POSTED') hdStatusColor = 'success';
+    else if (hdr.accountingStatus === 'FINAL') hdStatusColor = 'processing';
+  }
+
+  const batchInfoEl = loading
+    ? (
+      <div style={{ textAlign: 'center', padding: '16px 0' }}>
+        <Spin size="small" />
+        <Typography.Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>Loading journal details…</Typography.Text>
+      </div>
+    )
+    : hdr
+      ? (
+        <div style={{ background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 6, padding: '10px 16px', marginBottom: 12 }}>
+          <Row gutter={[16, 6]}>
+            <Col xs={24} md={12}>
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>GL Batch Name</Typography.Text>
+              <div style={{ fontWeight: 600, fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all' }}>{hdr.glBatchName || '—'}</div>
+            </Col>
+            <Col xs={12} md={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>GL Batch ID</Typography.Text>
+              <div style={{ fontSize: 12, fontFamily: 'monospace' }}>{hdr.glBatchId || '—'}</div>
+            </Col>
+            <Col xs={12} md={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>GL Header ID</Typography.Text>
+              <div style={{ fontSize: 12, fontFamily: 'monospace' }}>{hdr.glHeaderId || '—'}</div>
+            </Col>
+            <Col xs={12} md={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>Period</Typography.Text>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>{hdr.periodName || '—'}</div>
+            </Col>
+            <Col xs={12} md={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>Accounting Date</Typography.Text>
+              <div style={{ fontSize: 12 }}>{fmtDate(hdr.accountingDate)}</div>
+            </Col>
+            <Col xs={12} md={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>Journal Category</Typography.Text>
+              <div style={{ fontSize: 12 }}>{hdr.moduleName || 'Cash Management'}</div>
+            </Col>
+            <Col xs={12} md={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>Status</Typography.Text>
+              <div><Tag color={hdStatusColor} style={{ fontSize: 11 }}>{hdr.postingStatus || hdr.accountingStatus || '—'}</Tag></div>
+            </Col>
+            <Col xs={12} md={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>Posted By</Typography.Text>
+              <div style={{ fontSize: 12 }}>{hdr.postedBy || '—'}</div>
+            </Col>
+            <Col xs={12} md={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>Posted Date</Typography.Text>
+              <div style={{ fontSize: 12 }}>{hdr.postedDate ? fmtDate(hdr.postedDate) : '—'}</div>
+            </Col>
+            <Col xs={12} md={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>SLA Header ID</Typography.Text>
+              <div style={{ fontSize: 12, fontFamily: 'monospace' }}>{hdr.headerId}</div>
+            </Col>
+          </Row>
+        </div>
+      )
+      : null;
+
+  const liveRows = lines.map((l: any, i: number) => {
+    const lineColor = l.lineType === 'DR' ? '#0572CE' : '#389e0d';
+    const rowBg     = i % 2 === 1 ? '#f9fafb' : undefined;
+    return (
+      <tr key={l.lineId ?? i} style={{ background: rowBg }}>
+        <td style={ts({ textAlign: 'center', color: '#6b7280' })}>{l.lineNumber ?? i + 1}</td>
+        <td style={ts({ fontWeight: 700, color: lineColor })}>{l.lineType}</td>
+        <td style={ts()}>{l.accountCombination || '—'}</td>
+        <td style={ts({ fontSize: 10, color: '#6b7280' })}>{l.accountDescription || '—'}</td>
+        <td style={ts({ fontSize: 10, color: '#6b7280' })}>{l.accountingClass || '—'}</td>
+        <td style={ts({ fontSize: 10 })}>{l.description || '—'}</td>
+        <td style={ts({ textAlign: 'right', color: '#0572CE', fontWeight: l.enteredDr ? 600 : 400 })}>
+          {l.enteredDr ? fmtAmount(l.enteredDr) : '—'}
+        </td>
+        <td style={ts({ textAlign: 'right', color: '#389e0d', fontWeight: l.enteredCr ? 600 : 400 })}>
+          {l.enteredCr ? fmtAmount(l.enteredCr) : '—'}
+        </td>
+        <td style={ts({ textAlign: 'right', color: '#0572CE', fontWeight: l.accountedDr ? 600 : 400 })}>
+          {l.accountedDr ? fmtAmount(l.accountedDr) : '—'}
+        </td>
+        <td style={ts({ textAlign: 'right', color: '#389e0d', fontWeight: l.accountedCr ? 600 : 400 })}>
+          {l.accountedCr ? fmtAmount(l.accountedCr) : '—'}
+        </td>
+      </tr>
+    );
+  });
+
+  const fallbackRows = [
+    <tr key="dr">
+      <td style={ts({ textAlign: 'center' })}>1</td>
+      <td style={ts({ fontWeight: 700, color: '#0572CE' })}>DR</td>
+      <td style={ts()}>{drAcctFb || '—'}</td>
+      <td style={ts({ fontSize: 10 })}>—</td>
+      <td style={ts({ fontSize: 10 })}>{drLabelFb}</td>
+      <td style={ts({ fontSize: 10 })}>—</td>
+      <td style={ts({ textAlign: 'right', color: '#0572CE', fontWeight: 600 })}>{fmtAmount(absAmount)}</td>
+      <td style={ts({ textAlign: 'right' })}>—</td>
+      <td style={ts({ textAlign: 'right', color: '#0572CE', fontWeight: 600 })}>{fmtAmount(acctedAmtFb)}</td>
+      <td style={ts({ textAlign: 'right' })}>—</td>
+    </tr>,
+    <tr key="cr" style={{ background: '#f9fafb' }}>
+      <td style={ts({ textAlign: 'center' })}>2</td>
+      <td style={ts({ fontWeight: 700, color: '#389e0d' })}>CR</td>
+      <td style={ts()}>{crAcctFb || '—'}</td>
+      <td style={ts({ fontSize: 10 })}>—</td>
+      <td style={ts({ fontSize: 10 })}>{crLabelFb}</td>
+      <td style={ts({ fontSize: 10 })}>—</td>
+      <td style={ts({ textAlign: 'right' })}>—</td>
+      <td style={ts({ textAlign: 'right', color: '#389e0d', fontWeight: 600 })}>{fmtAmount(absAmount)}</td>
+      <td style={ts({ textAlign: 'right' })}>—</td>
+      <td style={ts({ textAlign: 'right', color: '#389e0d', fontWeight: 600 })}>{fmtAmount(acctedAmtFb)}</td>
+    </tr>,
+  ];
+
+  return (
+    <Modal
+      title={<Space><EyeOutlined style={{ color: '#389e0d' }} />View Accounting</Space>}
+      open={open}
+      onCancel={onClose}
+      footer={<Button onClick={onClose}>Close</Button>}
+      width={980}
+      destroyOnClose
+    >
+      {/* Transaction Info */}
+      <div style={{ background: '#f9fafb', borderRadius: 6, padding: '12px 16px', marginBottom: 12 }}>
+        <Row gutter={[16, 8]}>
+          <Col xs={12} md={6}>
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>Transaction ID</Typography.Text>
+            <div style={{ fontWeight: 600, fontSize: 13 }}>{txn.transactionId || txn.externalTransactionId}</div>
+          </Col>
+          <Col xs={12} md={6}>
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>Txn Date</Typography.Text>
+            <div style={{ fontWeight: 600, fontSize: 13 }}>{fmtDate(txn.transactionDate)}</div>
+          </Col>
+          <Col xs={12} md={6}>
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>Amount (Entered)</Typography.Text>
+            <div style={{ fontWeight: 600, fontSize: 13, color: '#0572CE' }}>{fmtAmount(absAmount, entrCcy)}</div>
+          </Col>
+          <Col xs={12} md={6}>
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>Direction</Typography.Text>
+            <Tag color={dirTagColor} style={{ fontSize: 12, fontWeight: 600, marginTop: 2 }}>{dirLabel}</Tag>
+          </Col>
+          <Col xs={12} md={6}>
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>Business Unit</Typography.Text>
+            <div style={{ fontSize: 13 }}>{txn.businessUnitName || '—'}</div>
+          </Col>
+          <Col xs={12} md={6}>
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>Reference</Typography.Text>
+            <div style={{ fontSize: 13 }}>{txn.referenceText || '—'}</div>
+          </Col>
+          <Col xs={12} md={6}>
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>Conv. Rate</Typography.Text>
+            <div style={{ fontSize: 13, fontFamily: 'monospace' }}>{exRate} ({txn.bankConversionRateType || 'Corporate'})</div>
+          </Col>
+          <Col xs={12} md={6}>
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>Ledger Currency</Typography.Text>
+            <div style={{ fontSize: 13, fontFamily: 'monospace' }}>{ledgerCcy}</div>
+          </Col>
+        </Row>
+      </div>
+
+      {/* Batch / SLA info */}
+      {batchInfoEl}
+
+      {/* Journal Lines table */}
+      <div style={{ fontWeight: 600, fontSize: 11, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+        Journal Lines
+      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'monospace', fontSize: 11 }}>
+        <thead>
+          <tr style={{ background: '#f9fafb' }}>
+            <th style={ts({ textAlign: 'center', width: 32 })}>#</th>
+            <th style={ts({ textAlign: 'left', width: 38 })}>Dr/Cr</th>
+            <th style={ts({ textAlign: 'left' })}>Account</th>
+            <th style={ts({ textAlign: 'left', width: 110, fontSize: 10 })}>Acct Desc</th>
+            <th style={ts({ textAlign: 'left', width: 90, fontSize: 10 })}>Class</th>
+            <th style={ts({ textAlign: 'left', width: 140, fontSize: 10 })}>Description</th>
+            <th colSpan={2} style={ts({ textAlign: 'center', background: '#e6f4ff', color: '#0572CE' })}>
+              Entered ({entrCcy})
+            </th>
+            <th colSpan={2} style={ts({ textAlign: 'center', background: '#f6ffed', color: '#389e0d' })}>
+              Accounted ({ledgerCcy})
+            </th>
+          </tr>
+          <tr style={{ background: '#f9fafb' }}>
+            <th style={ts()} /><th style={ts()} /><th style={ts()} /><th style={ts()} /><th style={ts()} /><th style={ts()} />
+            <th style={ts({ textAlign: 'right', background: '#e6f4ff', fontSize: 10 })}>DR</th>
+            <th style={ts({ textAlign: 'right', background: '#e6f4ff', fontSize: 10 })}>CR</th>
+            <th style={ts({ textAlign: 'right', background: '#f6ffed', fontSize: 10 })}>DR</th>
+            <th style={ts({ textAlign: 'right', background: '#f6ffed', fontSize: 10 })}>CR</th>
+          </tr>
+        </thead>
+        <tbody>{liveLines ? liveRows : fallbackRows}</tbody>
+      </table>
+
+      {/* Totals */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 24, padding: '5px 10px', background: '#f9fafb', border: '1px solid #e5e7eb', borderTop: 'none', borderRadius: '0 0 4px 4px', fontSize: 11 }}>
+        <Typography.Text>Entered DR: <Typography.Text strong style={{ color: '#0572CE' }}>{fmtAmount(totalEntDr, entrCcy)}</Typography.Text></Typography.Text>
+        <Typography.Text>Entered CR: <Typography.Text strong style={{ color: '#389e0d' }}>{fmtAmount(totalEntCr, entrCcy)}</Typography.Text></Typography.Text>
+        <Typography.Text>Accounted DR: <Typography.Text strong style={{ color: '#0572CE' }}>{fmtAmount(totalAccDr, ledgerCcy)}</Typography.Text></Typography.Text>
+        <Typography.Text>Accounted CR: <Typography.Text strong style={{ color: '#389e0d' }}>{fmtAmount(totalAccCr, ledgerCcy)}</Typography.Text></Typography.Text>
+      </div>
+    </Modal>
+  );
+};
+
 const ExternalTxnForm: React.FC<{
   initialValues?: Partial<ExternalTxnRecord>;
   bankAccounts: BankAccountOption[];
@@ -3355,246 +3599,14 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
         </Modal>
 
         {/* ── View Accounting Modal ────────────────────────────────── */}
-        <Modal
-          title={<Space><EyeOutlined style={{ color: REDWOOD.success }} />View Accounting</Space>}
+        <ViewAcctModal
           open={viewAcctOpen}
-          onCancel={() => setViewAcctOpen(false)}
-          footer={<Button onClick={() => setViewAcctOpen(false)}>Close</Button>}
-          width={980}
-          destroyOnClose
-        >
-          {viewAcctTxn && (() => {
-            const txn       = viewAcctTxn;
-            const hdr       = viewAcctHeader;
-            const lines     = viewAcctLines;
-            const direction = txn.transactionDirection ?? ((txn.amount ?? 0) >= 0 ? 'DR' : 'CR');
-            const absAmount = Math.abs(txn.amount ?? 0);
-            const exRate    = txn.bankConversionRate ?? 1;
-            const ledgerCcy = 'AED';
-            const entrCcy   = hdr?.currencyCode || txn.currencyCode || ledgerCcy;
-
-            // Use live lines if available, else fall back to computed rows
-            const liveLines = lines.length > 0;
-            const totalEntDr  = liveLines ? lines.reduce((s: number, l: any) => s + (l.enteredDr || 0), 0) : absAmount;
-            const totalEntCr  = liveLines ? lines.reduce((s: number, l: any) => s + (l.enteredCr || 0), 0) : absAmount;
-            const totalAccDr  = liveLines ? lines.reduce((s: number, l: any) => s + (l.accountedDr || 0), 0) : Math.round(absAmount * exRate * 100) / 100;
-            const totalAccCr  = liveLines ? lines.reduce((s: number, l: any) => s + (l.accountedCr || 0), 0) : Math.round(absAmount * exRate * 100) / 100;
-
-            const tds = (extra?: React.CSSProperties): React.CSSProperties => ({
-              padding: '7px 10px', border: `1px solid ${REDWOOD.neutral200}`, ...extra,
-            });
-
-            return (
-              <>
-                {/* ── Transaction Info ── */}
-                <div style={{ background: REDWOOD.neutral100, borderRadius: 6, padding: '12px 16px', marginBottom: 12 }}>
-                  <Row gutter={[16, 8]}>
-                    <Col xs={12} md={6}>
-                      <Text type="secondary" style={{ fontSize: 11 }}>Transaction ID</Text>
-                      <div style={{ fontWeight: 600, fontSize: 13 }}>{txn.transactionId || txn.externalTransactionId}</div>
-                    </Col>
-                    <Col xs={12} md={6}>
-                      <Text type="secondary" style={{ fontSize: 11 }}>Txn Date</Text>
-                      <div style={{ fontWeight: 600, fontSize: 13 }}>{fmtDate(txn.transactionDate)}</div>
-                    </Col>
-                    <Col xs={12} md={6}>
-                      <Text type="secondary" style={{ fontSize: 11 }}>Amount (Entered)</Text>
-                      <div style={{ fontWeight: 600, fontSize: 13, color: REDWOOD.info }}>
-                        {fmtAmount(absAmount, entrCcy)}
-                      </div>
-                    </Col>
-                    <Col xs={12} md={6}>
-                      <Text type="secondary" style={{ fontSize: 11 }}>Direction</Text>
-                      <Tag color={direction === 'DR' ? 'blue' : 'green'} style={{ fontSize: 12, fontWeight: 600, marginTop: 2 }}>
-                        {direction === 'DR' ? '▲ DR — Money In' : '▼ CR — Money Out'}
-                      </Tag>
-                    </Col>
-                    <Col xs={12} md={6}>
-                      <Text type="secondary" style={{ fontSize: 11 }}>Business Unit</Text>
-                      <div style={{ fontSize: 13 }}>{txn.businessUnitName || '—'}</div>
-                    </Col>
-                    <Col xs={12} md={6}>
-                      <Text type="secondary" style={{ fontSize: 11 }}>Reference</Text>
-                      <div style={{ fontSize: 13 }}>{txn.referenceText || '—'}</div>
-                    </Col>
-                    <Col xs={12} md={6}>
-                      <Text type="secondary" style={{ fontSize: 11 }}>Conv. Rate</Text>
-                      <div style={{ fontSize: 13, fontFamily: 'monospace' }}>{exRate} ({txn.bankConversionRateType || 'Corporate'})</div>
-                    </Col>
-                    <Col xs={12} md={6}>
-                      <Text type="secondary" style={{ fontSize: 11 }}>Ledger Currency</Text>
-                      <div style={{ fontSize: 13, fontFamily: 'monospace' }}>{ledgerCcy}</div>
-                    </Col>
-                  </Row>
-                </div>
-
-                {/* ── Journal / Batch Info (from SLA) ── */}
-                {viewAcctLoading
-                  ? <div style={{ textAlign: 'center', padding: '16px 0' }}><Spin size="small" /><Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>Loading journal details…</Text></div>
-                  : hdr && (
-                    <div style={{ background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 6, padding: '10px 16px', marginBottom: 12 }}>
-                      <Row gutter={[16, 6]}>
-                        <Col xs={24} md={12}>
-                          <Text type="secondary" style={{ fontSize: 11 }}>GL Batch Name</Text>
-                          <div style={{ fontWeight: 600, fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all' }}>{hdr.glBatchName || '—'}</div>
-                        </Col>
-                        <Col xs={12} md={6}>
-                          <Text type="secondary" style={{ fontSize: 11 }}>GL Batch ID</Text>
-                          <div style={{ fontSize: 12, fontFamily: 'monospace' }}>{hdr.glBatchId || '—'}</div>
-                        </Col>
-                        <Col xs={12} md={6}>
-                          <Text type="secondary" style={{ fontSize: 11 }}>GL Header ID</Text>
-                          <div style={{ fontSize: 12, fontFamily: 'monospace' }}>{hdr.glHeaderId || '—'}</div>
-                        </Col>
-                        <Col xs={12} md={6}>
-                          <Text type="secondary" style={{ fontSize: 11 }}>Period</Text>
-                          <div style={{ fontSize: 12, fontWeight: 600 }}>{hdr.periodName || '—'}</div>
-                        </Col>
-                        <Col xs={12} md={6}>
-                          <Text type="secondary" style={{ fontSize: 11 }}>Accounting Date</Text>
-                          <div style={{ fontSize: 12 }}>{fmtDate(hdr.accountingDate)}</div>
-                        </Col>
-                        <Col xs={12} md={6}>
-                          <Text type="secondary" style={{ fontSize: 11 }}>Journal Category</Text>
-                          <div style={{ fontSize: 12 }}>{hdr.moduleName || 'Cash Management'}</div>
-                        </Col>
-                        <Col xs={12} md={6}>
-                          <Text type="secondary" style={{ fontSize: 11 }}>Status</Text>
-                          <div>
-                            <Tag color={hdr.postingStatus === 'POSTED' ? 'success' : hdr.accountingStatus === 'FINAL' ? 'processing' : 'default'} style={{ fontSize: 11 }}>
-                              {hdr.postingStatus || hdr.accountingStatus || '—'}
-                            </Tag>
-                          </div>
-                        </Col>
-                        <Col xs={12} md={6}>
-                          <Text type="secondary" style={{ fontSize: 11 }}>Posted By</Text>
-                          <div style={{ fontSize: 12 }}>{hdr.postedBy || '—'}</div>
-                        </Col>
-                        <Col xs={12} md={6}>
-                          <Text type="secondary" style={{ fontSize: 11 }}>Posted Date</Text>
-                          <div style={{ fontSize: 12 }}>{hdr.postedDate ? fmtDate(hdr.postedDate) : '—'}</div>
-                        </Col>
-                        <Col xs={12} md={6}>
-                          <Text type="secondary" style={{ fontSize: 11 }}>SLA Header ID</Text>
-                          <div style={{ fontSize: 12, fontFamily: 'monospace' }}>{hdr.headerId}</div>
-                        </Col>
-                      </Row>
-                    </div>
-                  )
-                }
-
-                {/* ── Journal Lines ── */}
-                <div style={{ fontWeight: 600, fontSize: 11, color: REDWOOD.neutral600, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  Journal Lines
-                </div>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'monospace', fontSize: 11 }}>
-                  <thead>
-                    <tr style={{ background: REDWOOD.neutral100 }}>
-                      <th style={tds({ textAlign: 'center', width: 32 }}>#</th>
-                      <th style={tds({ textAlign: 'left', width: 38 })}>Dr/Cr</th>
-                      <th style={tds({ textAlign: 'left' })}>Account</th>
-                      <th style={tds({ textAlign: 'left', width: 110, fontSize: 10 })}>Acct Desc</th>
-                      <th style={tds({ textAlign: 'left', width: 90, fontSize: 10 })}>Class</th>
-                      <th style={tds({ textAlign: 'left', width: 140, fontSize: 10 })}>Description</th>
-                      <th colSpan={2} style={tds({ textAlign: 'center', background: '#e6f4ff', color: REDWOOD.info })}>
-                        Entered ({entrCcy})
-                      </th>
-                      <th colSpan={2} style={tds({ textAlign: 'center', background: '#f6ffed', color: REDWOOD.success })}>
-                        Accounted ({ledgerCcy})
-                      </th>
-                    </tr>
-                    <tr style={{ background: REDWOOD.neutral100 }}>
-                      <th style={tds()} /><th style={tds()} /><th style={tds()} /><th style={tds()} /><th style={tds()} /><th style={tds()} />
-                      <th style={tds({ textAlign: 'right', background: '#e6f4ff', fontSize: 10 })}>DR</th>
-                      <th style={tds({ textAlign: 'right', background: '#e6f4ff', fontSize: 10 })}>CR</th>
-                      <th style={tds({ textAlign: 'right', background: '#f6ffed', fontSize: 10 })}>DR</th>
-                      <th style={tds({ textAlign: 'right', background: '#f6ffed', fontSize: 10 })}>CR</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {liveLines
-                      ? lines.map((l: any, i: number) => {
-                          const drColor   = REDWOOD.info;
-                          const crColor   = REDWOOD.success;
-                          const lineColor = l.lineType === 'DR' ? drColor : crColor;
-                          const fwEntDr   = l.enteredDr  ? 600 : 400;
-                          const fwEntCr   = l.enteredCr  ? 600 : 400;
-                          const fwAccDr   = l.accountedDr ? 600 : 400;
-                          const fwAccCr   = l.accountedCr ? 600 : 400;
-                          const rowBg     = i % 2 === 1 ? REDWOOD.neutral100 : undefined;
-                          return (
-                          <tr key={l.lineId ?? i} style={{ background: rowBg }}>
-                            <td style={tds({ textAlign: 'center', color: REDWOOD.neutral600 })}>{l.lineNumber ?? i + 1}</td>
-                            <td style={tds({ fontWeight: 700, color: lineColor })}>{l.lineType}</td>
-                            <td style={tds()}>{l.accountCombination || '—'}</td>
-                            <td style={tds({ fontSize: 10, color: REDWOOD.neutral600 })}>{l.accountDescription || '—'}</td>
-                            <td style={tds({ fontSize: 10, color: REDWOOD.neutral600 })}>{l.accountingClass || '—'}</td>
-                            <td style={tds({ fontSize: 10 })}>{l.description || '—'}</td>
-                            <td style={tds({ textAlign: 'right', color: drColor, fontWeight: fwEntDr })}>
-                              {l.enteredDr ? fmtAmount(l.enteredDr) : '—'}
-                            </td>
-                            <td style={tds({ textAlign: 'right', color: crColor, fontWeight: fwEntCr })}>
-                              {l.enteredCr ? fmtAmount(l.enteredCr) : '—'}
-                            </td>
-                            <td style={tds({ textAlign: 'right', color: drColor, fontWeight: fwAccDr })}>
-                              {l.accountedDr ? fmtAmount(l.accountedDr) : '—'}
-                            </td>
-                            <td style={tds({ textAlign: 'right', color: crColor, fontWeight: fwAccCr })}>
-                              {l.accountedCr ? fmtAmount(l.accountedCr) : '—'}
-                            </td>
-                          </tr>
-                          );
-                        })
-                      : (() => {
-                          // Fallback: computed two-line entry
-                          const drAcct = direction === 'DR' ? txn.assetAccountCombination : txn.offsetAccountCombination;
-                          const crAcct = direction === 'DR' ? txn.offsetAccountCombination : txn.assetAccountCombination;
-                          const drLabel = direction === 'DR' ? 'Bank / Asset Account' : 'Offset Account';
-                          const crLabel = direction === 'DR' ? 'Offset Account' : 'Bank / Asset Account';
-                          const acctedAmt = Math.round(absAmount * exRate * 100) / 100;
-                          return (
-                            <>
-                              <tr>
-                                <td style={tds({ textAlign: 'center' })}>1</td>
-                                <td style={tds({ fontWeight: 700, color: REDWOOD.info })}>DR</td>
-                                <td style={tds()}>{drAcct || '—'}</td>
-                                <td style={tds({ fontSize: 10 })}>—</td>
-                                <td style={tds({ fontSize: 10 })}>{drLabel}</td>
-                                <td style={tds({ fontSize: 10 })}>—</td>
-                                <td style={tds({ textAlign: 'right', color: REDWOOD.info, fontWeight: 600 })}>{fmtAmount(absAmount)}</td>
-                                <td style={tds({ textAlign: 'right' })}>—</td>
-                                <td style={tds({ textAlign: 'right', color: REDWOOD.info, fontWeight: 600 })}>{fmtAmount(acctedAmt)}</td>
-                                <td style={tds({ textAlign: 'right' })}>—</td>
-                              </tr>
-                              <tr style={{ background: REDWOOD.neutral100 }}>
-                                <td style={tds({ textAlign: 'center' })}>2</td>
-                                <td style={tds({ fontWeight: 700, color: REDWOOD.success })}>CR</td>
-                                <td style={tds()}>{crAcct || '—'}</td>
-                                <td style={tds({ fontSize: 10 })}>—</td>
-                                <td style={tds({ fontSize: 10 })}>{crLabel}</td>
-                                <td style={tds({ fontSize: 10 })}>—</td>
-                                <td style={tds({ textAlign: 'right' })}>—</td>
-                                <td style={tds({ textAlign: 'right', color: REDWOOD.success, fontWeight: 600 })}>{fmtAmount(absAmount)}</td>
-                                <td style={tds({ textAlign: 'right' })}>—</td>
-                                <td style={tds({ textAlign: 'right', color: REDWOOD.success, fontWeight: 600 })}>{fmtAmount(acctedAmt)}</td>
-                              </tr>
-                            </>
-                          );
-                        })()
-                    }
-                  </tbody>
-                </table>
-                {/* Totals footer */}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 24, padding: '5px 10px', background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, borderTop: 'none', borderRadius: '0 0 4px 4px', fontSize: 11 }}>
-                  <Text>Entered DR: <Text strong style={{ color: REDWOOD.info }}>{fmtAmount(totalEntDr, entrCcy)}</Text></Text>
-                  <Text>Entered CR: <Text strong style={{ color: REDWOOD.success }}>{fmtAmount(totalEntCr, entrCcy)}</Text></Text>
-                  <Text>Accounted DR: <Text strong style={{ color: REDWOOD.info }}>{fmtAmount(totalAccDr, ledgerCcy)}</Text></Text>
-                  <Text>Accounted CR: <Text strong style={{ color: REDWOOD.success }}>{fmtAmount(totalAccCr, ledgerCcy)}</Text></Text>
-                </div>
-              </>
-            );
-          })()}
-        </Modal>
+          txn={viewAcctTxn}
+          hdr={viewAcctHeader}
+          lines={viewAcctLines}
+          loading={viewAcctLoading}
+          onClose={() => setViewAcctOpen(false)}
+        />
 
         {/* API Info Modal */}
         <Modal title={<Space><ApiOutlined /><span>API Endpoint Info</span></Space>}
