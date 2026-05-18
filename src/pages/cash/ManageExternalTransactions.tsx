@@ -86,20 +86,72 @@ interface BUOption          { label: string; value: string; }
 
 const parseApexJson = async (res: Response) => {
   const text = await res.text();
-  const fix = (s: string) => s
-    .replace(/:(-?)\.(\d)/g, ':$10.$2')   // .428 → 0.428
-    .replace(/(\d)\.([,}\]])/g, '$1$2');  // 100., → 100,
+
+  // Pass 1: fix Oracle numeric quirks (.428 → 0.428, 100., → 100)
+  const fixNums = (s: string) => s
+    .replace(/:(-?)\.(\d)/g, ':$10.$2')
+    .replace(/(\d)\.([,}\]])/g, '$1$2');
+
+  // Pass 2: strip/escape raw control chars (literal newlines, tabs, etc.)
+  const fixCtrl = (s: string) =>
+    s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+     .replace(/\x0a/g, '\\n')
+     .replace(/\x0d/g, '\\r');
+
+  // Pass 3: fix unescaped double-quotes inside JSON string values.
+  // Walk character-by-character tracking parser state; when inside a string
+  // value a bare `"` that is NOT a closing quote gets escaped to `\"`.
+  const fixQuotes = (s: string): string => {
+    let out = '';
+    let inStr = false;   // currently inside a JSON string
+    let escaped = false; // previous char was backslash
+
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      if (escaped) {
+        out += ch;
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        out += ch;
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        if (!inStr) {
+          // Opening quote
+          inStr = true;
+          out += ch;
+        } else {
+          // Could be a closing quote or an unescaped quote inside the value.
+          // Look ahead past whitespace; if the next meaningful char is a
+          // JSON structural token (:, ,, }, ]) this is a closing quote.
+          let j = i + 1;
+          while (j < s.length && (s[j] === ' ' || s[j] === '\t' || s[j] === '\n' || s[j] === '\r')) j++;
+          const next = s[j];
+          if (next === ':' || next === ',' || next === '}' || next === ']' || j >= s.length) {
+            // Closing quote
+            inStr = false;
+            out += ch;
+          } else {
+            // Unescaped quote inside a string value — escape it
+            out += '\\"';
+          }
+        }
+        continue;
+      }
+      out += ch;
+    }
+    return out;
+  };
+
+  const repair = (s: string) => fixNums(fixCtrl(s));
+
   try {
-    return JSON.parse(fix(text));
+    return JSON.parse(repair(text));
   } catch {
-    // Sanitise raw control characters that Oracle may not have escaped,
-    // then retry — handles edge cases in long description/reference fields.
-    const cleaned = fix(
-      text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
-          .replace(/\x0a/g, '\\n')
-          .replace(/\x0d/g, '\\r')
-    );
-    return JSON.parse(cleaned);
+    return JSON.parse(fixQuotes(repair(text)));
   }
 };
 
