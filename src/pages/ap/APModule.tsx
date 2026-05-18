@@ -254,7 +254,7 @@ const APModule: React.FC = () => {
 
       const buQs = selectedBU ? `?P_BUSINESS_UNIT=${encodeURIComponent(selectedBU)}` : '';
 
-      // 1. Stats — invoice counts, overdue, last sync
+      // Single call — stats endpoint returns all KPIs including total_outstanding
       let d: any = {};
       try {
         const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/invoices/stats${buQs}`);
@@ -263,22 +263,12 @@ const APModule: React.FC = () => {
         d = Array.isArray(json?.items) && json.items.length > 0 ? json.items[0] : json;
       } catch { /* leave d empty — KPIs default to 0 */ }
 
-      // 2. Total outstanding — sum outstanding_amount from outstanding-by-supplier
-      let totalOutstanding = 0;
-      try {
-        const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/invoices/outstanding-by-supplier${buQs}`);
-        const text = res.ok ? await res.text() : '';
-        const json = text.trim() ? JSON.parse(text) : {};
-        const items: any[] = Array.isArray(json.items) ? json.items : (Array.isArray(json) ? json : []);
-        totalOutstanding = items.reduce((s, r) => s + Number(r.outstanding_amount ?? 0), 0);
-      } catch { /* leave totalOutstanding 0 */ }
-
       setKpi({
         pendingInvoices:  Number(d.pending_invoices  ?? 0),
         approvedInvoices: Number(d.approved_invoices ?? 0),
         pendingPayments:  Number(d.pending_payments  ?? 0),
         overduePayments:  Number(d.overdue_payments  ?? 0),
-        totalPayables:    totalOutstanding,
+        totalPayables:    Number(d.total_outstanding ?? 0),
         lastSync: d.last_sync_date
           ? new Date(d.last_sync_date).toLocaleString()
           : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
