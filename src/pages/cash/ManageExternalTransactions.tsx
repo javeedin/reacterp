@@ -3380,7 +3380,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
             const totalAccDr  = liveLines ? lines.reduce((s: number, l: any) => s + (l.accountedDr || 0), 0) : Math.round(absAmount * exRate * 100) / 100;
             const totalAccCr  = liveLines ? lines.reduce((s: number, l: any) => s + (l.accountedCr || 0), 0) : Math.round(absAmount * exRate * 100) / 100;
 
-            const td = (extra?: React.CSSProperties): React.CSSProperties => ({
+            const tds = (extra?: React.CSSProperties): React.CSSProperties => ({
               padding: '7px 10px', border: `1px solid ${REDWOOD.neutral200}`, ...extra,
             });
 
@@ -3490,47 +3490,47 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'monospace', fontSize: 11 }}>
                   <thead>
                     <tr style={{ background: REDWOOD.neutral100 }}>
-                      <th style={td({ textAlign: 'center', width: 32 }}>#</th>
-                      <th style={td({ textAlign: 'left', width: 38 })}>Dr/Cr</th>
-                      <th style={td({ textAlign: 'left' })}>Account</th>
-                      <th style={td({ textAlign: 'left', width: 110, fontSize: 10 })}>Acct Desc</th>
-                      <th style={td({ textAlign: 'left', width: 90, fontSize: 10 })}>Class</th>
-                      <th style={td({ textAlign: 'left', width: 140, fontSize: 10 })}>Description</th>
-                      <th colSpan={2} style={td({ textAlign: 'center', background: '#e6f4ff', color: REDWOOD.info })}>
+                      <th style={tds({ textAlign: 'center', width: 32 }}>#</th>
+                      <th style={tds({ textAlign: 'left', width: 38 })}>Dr/Cr</th>
+                      <th style={tds({ textAlign: 'left' })}>Account</th>
+                      <th style={tds({ textAlign: 'left', width: 110, fontSize: 10 })}>Acct Desc</th>
+                      <th style={tds({ textAlign: 'left', width: 90, fontSize: 10 })}>Class</th>
+                      <th style={tds({ textAlign: 'left', width: 140, fontSize: 10 })}>Description</th>
+                      <th colSpan={2} style={tds({ textAlign: 'center', background: '#e6f4ff', color: REDWOOD.info })}>
                         Entered ({entrCcy})
                       </th>
-                      <th colSpan={2} style={td({ textAlign: 'center', background: '#f6ffed', color: REDWOOD.success })}>
+                      <th colSpan={2} style={tds({ textAlign: 'center', background: '#f6ffed', color: REDWOOD.success })}>
                         Accounted ({ledgerCcy})
                       </th>
                     </tr>
                     <tr style={{ background: REDWOOD.neutral100 }}>
-                      <th style={td()} /><th style={td()} /><th style={td()} /><th style={td()} /><th style={td()} /><th style={td()} />
-                      <th style={td({ textAlign: 'right', background: '#e6f4ff', fontSize: 10 })}>DR</th>
-                      <th style={td({ textAlign: 'right', background: '#e6f4ff', fontSize: 10 })}>CR</th>
-                      <th style={td({ textAlign: 'right', background: '#f6ffed', fontSize: 10 })}>DR</th>
-                      <th style={td({ textAlign: 'right', background: '#f6ffed', fontSize: 10 })}>CR</th>
+                      <th style={tds()} /><th style={tds()} /><th style={tds()} /><th style={tds()} /><th style={tds()} /><th style={tds()} />
+                      <th style={tds({ textAlign: 'right', background: '#e6f4ff', fontSize: 10 })}>DR</th>
+                      <th style={tds({ textAlign: 'right', background: '#e6f4ff', fontSize: 10 })}>CR</th>
+                      <th style={tds({ textAlign: 'right', background: '#f6ffed', fontSize: 10 })}>DR</th>
+                      <th style={tds({ textAlign: 'right', background: '#f6ffed', fontSize: 10 })}>CR</th>
                     </tr>
                   </thead>
                   <tbody>
                     {liveLines
                       ? lines.map((l: any, i: number) => (
                           <tr key={l.lineId ?? i} style={{ background: i % 2 === 1 ? REDWOOD.neutral100 : undefined }}>
-                            <td style={td({ textAlign: 'center', color: REDWOOD.neutral600 })}>{l.lineNumber ?? i + 1}</td>
-                            <td style={td({ fontWeight: 700, color: l.lineType === 'DR' ? REDWOOD.info : REDWOOD.success })}>{l.lineType}</td>
-                            <td style={td()}>{l.accountCombination || '—'}</td>
-                            <td style={td({ fontSize: 10, color: REDWOOD.neutral600 })}>{l.accountDescription || '—'}</td>
-                            <td style={td({ fontSize: 10, color: REDWOOD.neutral600 })}>{l.accountingClass || '—'}</td>
-                            <td style={td({ fontSize: 10 })}>{l.description || '—'}</td>
-                            <td style={td({ textAlign: 'right', color: REDWOOD.info, fontWeight: l.enteredDr ? 600 : 400 })}>
+                            <td style={tds({ textAlign: 'center', color: REDWOOD.neutral600 })}>{l.lineNumber ?? i + 1}</td>
+                            <td style={tds({ fontWeight: 700, color: l.lineType === 'DR' ? REDWOOD.info : REDWOOD.success })}>{l.lineType}</td>
+                            <td style={tds()}>{l.accountCombination || '—'}</td>
+                            <td style={tds({ fontSize: 10, color: REDWOOD.neutral600 })}>{l.accountDescription || '—'}</td>
+                            <td style={tds({ fontSize: 10, color: REDWOOD.neutral600 })}>{l.accountingClass || '—'}</td>
+                            <td style={tds({ fontSize: 10 })}>{l.description || '—'}</td>
+                            <td style={tds({ textAlign: 'right', color: REDWOOD.info, fontWeight: l.enteredDr ? 600 : 400 })}>
                               {l.enteredDr ? fmtAmount(l.enteredDr) : '—'}
                             </td>
-                            <td style={td({ textAlign: 'right', color: REDWOOD.success, fontWeight: l.enteredCr ? 600 : 400 })}>
+                            <td style={tds({ textAlign: 'right', color: REDWOOD.success, fontWeight: l.enteredCr ? 600 : 400 })}>
                               {l.enteredCr ? fmtAmount(l.enteredCr) : '—'}
                             </td>
-                            <td style={td({ textAlign: 'right', color: REDWOOD.info, fontWeight: l.accountedDr ? 600 : 400 })}>
+                            <td style={tds({ textAlign: 'right', color: REDWOOD.info, fontWeight: l.accountedDr ? 600 : 400 })}>
                               {l.accountedDr ? fmtAmount(l.accountedDr) : '—'}
                             </td>
-                            <td style={td({ textAlign: 'right', color: REDWOOD.success, fontWeight: l.accountedCr ? 600 : 400 })}>
+                            <td style={tds({ textAlign: 'right', color: REDWOOD.success, fontWeight: l.accountedCr ? 600 : 400 })}>
                               {l.accountedCr ? fmtAmount(l.accountedCr) : '—'}
                             </td>
                           </tr>
@@ -3545,28 +3545,28 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                           return (
                             <>
                               <tr>
-                                <td style={td({ textAlign: 'center' })}>1</td>
-                                <td style={td({ fontWeight: 700, color: REDWOOD.info })}>DR</td>
-                                <td style={td()}>{drAcct || '—'}</td>
-                                <td style={td({ fontSize: 10 })}>—</td>
-                                <td style={td({ fontSize: 10 })}>{drLabel}</td>
-                                <td style={td({ fontSize: 10 })}>—</td>
-                                <td style={td({ textAlign: 'right', color: REDWOOD.info, fontWeight: 600 })}>{fmtAmount(absAmount)}</td>
-                                <td style={td({ textAlign: 'right' })}>—</td>
-                                <td style={td({ textAlign: 'right', color: REDWOOD.info, fontWeight: 600 })}>{fmtAmount(acctedAmt)}</td>
-                                <td style={td({ textAlign: 'right' })}>—</td>
+                                <td style={tds({ textAlign: 'center' })}>1</td>
+                                <td style={tds({ fontWeight: 700, color: REDWOOD.info })}>DR</td>
+                                <td style={tds()}>{drAcct || '—'}</td>
+                                <td style={tds({ fontSize: 10 })}>—</td>
+                                <td style={tds({ fontSize: 10 })}>{drLabel}</td>
+                                <td style={tds({ fontSize: 10 })}>—</td>
+                                <td style={tds({ textAlign: 'right', color: REDWOOD.info, fontWeight: 600 })}>{fmtAmount(absAmount)}</td>
+                                <td style={tds({ textAlign: 'right' })}>—</td>
+                                <td style={tds({ textAlign: 'right', color: REDWOOD.info, fontWeight: 600 })}>{fmtAmount(acctedAmt)}</td>
+                                <td style={tds({ textAlign: 'right' })}>—</td>
                               </tr>
                               <tr style={{ background: REDWOOD.neutral100 }}>
-                                <td style={td({ textAlign: 'center' })}>2</td>
-                                <td style={td({ fontWeight: 700, color: REDWOOD.success })}>CR</td>
-                                <td style={td()}>{crAcct || '—'}</td>
-                                <td style={td({ fontSize: 10 })}>—</td>
-                                <td style={td({ fontSize: 10 })}>{crLabel}</td>
-                                <td style={td({ fontSize: 10 })}>—</td>
-                                <td style={td({ textAlign: 'right' })}>—</td>
-                                <td style={td({ textAlign: 'right', color: REDWOOD.success, fontWeight: 600 })}>{fmtAmount(absAmount)}</td>
-                                <td style={td({ textAlign: 'right' })}>—</td>
-                                <td style={td({ textAlign: 'right', color: REDWOOD.success, fontWeight: 600 })}>{fmtAmount(acctedAmt)}</td>
+                                <td style={tds({ textAlign: 'center' })}>2</td>
+                                <td style={tds({ fontWeight: 700, color: REDWOOD.success })}>CR</td>
+                                <td style={tds()}>{crAcct || '—'}</td>
+                                <td style={tds({ fontSize: 10 })}>—</td>
+                                <td style={tds({ fontSize: 10 })}>{crLabel}</td>
+                                <td style={tds({ fontSize: 10 })}>—</td>
+                                <td style={tds({ textAlign: 'right' })}>—</td>
+                                <td style={tds({ textAlign: 'right', color: REDWOOD.success, fontWeight: 600 })}>{fmtAmount(absAmount)}</td>
+                                <td style={tds({ textAlign: 'right' })}>—</td>
+                                <td style={tds({ textAlign: 'right', color: REDWOOD.success, fontWeight: 600 })}>{fmtAmount(acctedAmt)}</td>
                               </tr>
                             </>
                           );
