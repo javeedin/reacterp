@@ -2662,6 +2662,16 @@ const TrialBalance: React.FC = () => {
     setRevalId(null);
     setRevalStatus(null);
     setRevalExcludedCombos(new Set());
+
+    // Set rate date to last day of the selected period's month
+    if (tab?.periodName) {
+      const periodStr = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '').replace(/\s*·.*$/, '').trim();
+      const parsed = dayjs(periodStr, ['MMM-YYYY', 'MMM-YY', 'MMMM-YYYY', 'MMM YYYY']);
+      setRevalRateDate(parsed.isValid() ? parsed.endOf('month').format('YYYY-MM-DD') : dayjs().endOf('month').format('YYYY-MM-DD'));
+    } else {
+      setRevalRateDate(dayjs().endOf('month').format('YYYY-MM-DD'));
+    }
+
     setRevalVisible(true);
 
     // Look up existing revaluation for this account + ledger + period
@@ -3015,7 +3025,7 @@ const TrialBalance: React.FC = () => {
 
     // One row per (combination, currency) pair — the primary table rows
     interface ComboRow {
-      rowKey: string; combo: string; ccy: string;
+      rowKey: string; combo: string; ccy: string; subAccount: string;
       entClosing: number; acctClosing: number;
       bookRate: number; newRate: number; newAcctValue: number;
       revalAmt: number; isGain: boolean; excluded: boolean;
@@ -3046,6 +3056,7 @@ const TrialBalance: React.FC = () => {
           rowKey:       key,
           combo,
           ccy,
+          subAccount:   r.sub_account || '',
           entClosing,
           acctClosing,
           bookRate,
@@ -3087,19 +3098,21 @@ const TrialBalance: React.FC = () => {
 
     // Build journal preview — one line pair per active combination
     const buildPreview = () => {
-      const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-      const baseDesc = `${accountDesc} - Revaluation on ${today}`;
+      const rawPeriod = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '').replace(/\s*·.*$/, '').trim();
+      const periodMonth = rawPeriod || tab.periodName;
       const lines: { lineNum: number; combo: string; desc: string; comment: string; dr: number; cr: number }[] = [];
       let ln = 1;
       activeComboRows.forEach(r => {
         if (r.revalAmt === 0 || r.newRate === 0) return;
         const abs = Math.abs(r.revalAmt);
+        const subAcctPart = r.subAccount ? ` - ${r.subAccount}` : '';
+        const lineDesc = `${accountDesc}${subAcctPart} - Revaluation (${periodMonth})`;
         if (r.isGain) {
-          lines.push({ lineNum: ln++, combo: r.combo, desc: baseDesc, comment: '', dr: abs, cr: 0 });
-          lines.push({ lineNum: ln++, combo: revalGainCombo || '[Gain Account]', desc: `Unrealized FX Gain - ${r.ccy}`, comment: '', dr: 0, cr: abs });
+          lines.push({ lineNum: ln++, combo: r.combo, desc: lineDesc, comment: '', dr: abs, cr: 0 });
+          lines.push({ lineNum: ln++, combo: revalGainCombo || '[Gain Account]', desc: `Unrealized FX Gain - ${r.ccy} (${periodMonth})`, comment: '', dr: 0, cr: abs });
         } else {
-          lines.push({ lineNum: ln++, combo: revalLossCombo || '[Loss Account]', desc: `Unrealized FX Loss - ${r.ccy}`, comment: '', dr: abs, cr: 0 });
-          lines.push({ lineNum: ln++, combo: r.combo, desc: baseDesc, comment: '', dr: 0, cr: abs });
+          lines.push({ lineNum: ln++, combo: revalLossCombo || '[Loss Account]', desc: `Unrealized FX Loss - ${r.ccy} (${periodMonth})`, comment: '', dr: abs, cr: 0 });
+          lines.push({ lineNum: ln++, combo: r.combo, desc: lineDesc, comment: '', dr: 0, cr: abs });
         }
       });
       setRevalPreviewRows(lines);
