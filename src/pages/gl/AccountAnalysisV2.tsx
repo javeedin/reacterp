@@ -1709,6 +1709,10 @@ const AAPanel: React.FC = () => {
     const isComboBreak = appliedGroupBy === 'concatenatedSegments' || appliedGroupBy === 'currencyCode';
     const isGrouped    = !!(appliedGroupBy && !isComboBreak);
 
+    const fullCombination: string =
+      filteredData.find(r => r.concatenatedSegments && !r.isOpeningBalance && !r.isClosingBalance && !(r as any).isTotals)
+        ?.concatenatedSegments || account;
+
     const wb = new ExcelJS.Workbook();
     wb.creator = 'ReactERP'; wb.created = new Date();
     const ws = wb.addWorksheet('Account Analysis');
@@ -1729,8 +1733,8 @@ const AAPanel: React.FC = () => {
     const closeFill: ExcelJS.Fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFBE6' } };
 
     // ── Column layout ──────────────────────────────────────────────────────────
-    // Flat / combo-break: 9 desc cols + [3 entered] + 3 accounted + 1 jeHeaderId
-    const NCOLS_FLAT = showEntered ? 16 : 13;
+    // Flat: 7 desc cols + [3 entered] + 3 accounted + 1 jeHeaderId (Account/AccountDesc moved to title)
+    const NCOLS_FLAT = showEntered ? 14 : 11;
     // Combo-break rows skip account/desc cols → 7 desc + [3 entered] + 3 accounted
     const NCOLS_BRK  = showEntered ? 13 : 10;
     // Grouped summary: group + count + [3 entered] + 3 accounted
@@ -1750,6 +1754,30 @@ const AAPanel: React.FC = () => {
     tc.fill = hdrFill; tc.alignment = { horizontal: 'center', vertical: 'middle' };
     ws.getRow(1).height = 22;
 
+    let ri = 2;
+
+    // Account description subtitle row
+    if (accountDesc) {
+      mergeFull(ri);
+      const adc = ws.getCell(ri, 1);
+      adc.value = accountDesc;
+      adc.font = { bold: true, size: 11, color: white };
+      adc.fill = hdrFill;
+      adc.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws.getRow(ri).height = 18; ri++;
+    }
+
+    // Full combination subtitle row
+    if (fullCombination) {
+      mergeFull(ri);
+      const fcc = ws.getCell(ri, 1);
+      fcc.value = fullCombination;
+      fcc.font = { italic: true, size: 10, color: white };
+      fcc.fill = hdrFill;
+      fcc.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws.getRow(ri).height = 16; ri++;
+    }
+
     // ── Filter summary ─────────────────────────────────────────────────────────
     const activeSegs = Object.entries(segFilters).map(([k, v]) => {
       const def = SEGMENT_DEFS.find(d => d.key === k);
@@ -1757,13 +1785,11 @@ const AAPanel: React.FC = () => {
     });
     const fRows: [string, string][] = [
       ['Ledger',   ledger || '—'],
-      ['Account',  account ? `${account}${accountDesc ? ' – ' + accountDesc : ''}` : '—'],
       ['Periods',  periods.length ? periods.join(', ') : '—'],
       ['Filters',  activeSegs.length ? activeSegs.join(' | ') : '—'],
       ['Exported', new Date().toLocaleString()],
       ['Records',  String(filteredData.length)],
     ];
-    let ri = 2;
     for (const [lbl, val] of fRows) {
       ws.mergeCells(ri, 1, ri, 3); ws.mergeCells(ri, 4, ri, NCOLS);
       const lc = ws.getCell(ri, 1); const vc = ws.getCell(ri, 4);
@@ -1862,7 +1888,7 @@ const AAPanel: React.FC = () => {
     };
 
     // Write a single data row (flat or break detail)
-    const writeDetailRow = (r: any, idx: number, showJeId: boolean) => {
+    const writeDetailRow = (r: any, idx: number, showAccount: boolean, showJeId: boolean) => {
       const isSpec = r.isOpeningBalance || r.isClosingBalance || r.isTotals;
       const fill = r.isOpeningBalance ? openFill
         : r.isClosingBalance ? closeFill
@@ -1875,7 +1901,7 @@ const AAPanel: React.FC = () => {
         ? (r.enteredDr || 0) - (r.enteredCr || 0) : (r._entRun ?? 0);
 
       const vals: (string | number)[] = [
-        ...(showJeId
+        ...(showAccount
           ? [r.concatenatedSegments || '', r.accountDescription || ''] : []),
         r.jeLineDescription || '',
         isSpec ? '' : (r.defaultPeriodName || ''),
@@ -1894,7 +1920,7 @@ const AAPanel: React.FC = () => {
         accBal,
         ...(showJeId ? [isSpec ? '' : (r.jeHeaderId || '')] : []),
       ];
-      const descColCount = showJeId ? 9 : 7;
+      const descColCount = showAccount ? 9 : 7;
       ws.getRow(ri).height = 15;
       vals.forEach((v, i) => {
         const cell = ws.getCell(ri, i + 1);
@@ -1918,16 +1944,15 @@ const AAPanel: React.FC = () => {
     // MODE B: FLAT DETAIL
     // ══════════════════════════════════════════════════════════════════════════
     if (!isGrouped && !isComboBreak) {
-      writeDetailColHeaders(9);
-      const descHdrs = ['Account', 'Account Description', 'Line Description', 'Period', 'Acctg Date', 'Batch', 'Source', 'Category', 'Currency'];
+      writeDetailColHeaders(7);
+      const descHdrs = ['Line Description', 'Period', 'Acctg Date', 'Batch', 'Source', 'Category', 'Currency'];
       const entHdrs  = showEntered ? ['Ent Dr', 'Ent Cr', 'Ent Balance'] : [];
       const accHdrs  = [`Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Balance (${functionalCcy})`];
       const hdrs     = [...descHdrs, ...entHdrs, ...accHdrs, 'JE Header ID'];
-      const widths   = [28, 28, 32, 12, 14, 28, 14, 16, 10, ...(showEntered ? [16, 16, 16] : []), 16, 16, 16, 14];
+      const widths   = [42, 12, 14, 24, 14, 16, 10, ...(showEntered ? [16, 16, 16] : []), 16, 16, 16, 14];
       writeDetailColNames(hdrs, widths);
       const dataStartRow = ri;
-      // pass rowsWithBal which has _accRun/_entRun; totals row already appended in tableData
-      tableData.forEach((r, idx) => writeDetailRow(r as any, idx, true));
+      tableData.forEach((r, idx) => writeDetailRow(r as any, idx, false, true));
       ws.views = [{ state: 'frozen', xSplit: 0, ySplit: dataStartRow - 1 }];
       ws.autoFilter = { from: { row: dataStartRow - 1, column: 1 }, to: { row: ri - 1, column: NCOLS_FLAT } };
     }
@@ -1974,7 +1999,7 @@ const AAPanel: React.FC = () => {
           ...(brk.closingRow ? [brk.closingRow] : []),
         ];
 
-        brkData.forEach((r, idx) => writeDetailRow(r, idx, false));
+        brkData.forEach((r, idx) => writeDetailRow(r, idx, false, false));
 
         // Blank spacer between combos
         ws.getRow(ri).height = 8; ri++;
@@ -1983,11 +2008,14 @@ const AAPanel: React.FC = () => {
 
     const buf = await wb.xlsx.writeBuffer();
     const suffix = isComboBreak ? '_by_combination' : isGrouped ? `_by_${appliedGroupBy}` : '';
-    saveAs(
-      new Blob([buf], { type: 'application/octet-stream' }),
-      `account_analysis${suffix}_${new Date().toISOString().slice(0, 10)}.xlsx`
-    );
-    message.success('Excel file downloaded');
+    const filename = `account_analysis${suffix}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    message.success(`Excel downloaded — ${filename}`);
   };
 
   const handlePrintPdf = useCallback(() => {
