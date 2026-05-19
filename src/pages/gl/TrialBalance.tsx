@@ -3475,7 +3475,7 @@ const TrialBalance: React.FC = () => {
                         <div style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 600, color: REDWOOD.primary, background: '#fafafa', padding: '6px 10px', borderRadius: 4 }}>
                           {row.subAccount}
                         </div>
-                        <div style={{ marginTop: 8, fontSize: 12, color: REDWOOD.neutral600 }}>
+                        <div style={{ marginTop: 8, fontSize: 12, color: REDWOOD.neutral }}>
                           The description will be inserted into the journal line description.
                         </div>
                       </div>
