@@ -1180,28 +1180,24 @@ const AAPanel: React.FC = () => {
   const fetchBalanceRow = useCallback(async (acct: string, period: string, isOpen: boolean) => {
     const p = new URLSearchParams({ ledger_name: ledger, period_name: period, account: acct });
     Object.entries(segFilters).forEach(([k, v]) => { if (v) p.set(k, v); });
-    const res = await fetch(`${API_BASE}/rr-trialbalance/standard?${p}`);
+    const url = `${API_BASE}/rr-trialbalance/standard?${p}`;
+    setTbApiUrls(prev => [...new Set([...prev, url])]);
+    const res = await fetch(url);
     if (!res.ok) return null;
     const data = await res.json();
     const items: any[] = data.items || [];
     if (!items.length) return null;
-    const accAmt = items.reduce((s: number, i: any) => s + (i.opening || 0), 0);
-    const entAmt = items.reduce((s: number, i: any) => s + (i.entered_opening || 0), 0);
+    const accAmt = items.reduce((s: number, i: any) => s + (isOpen ? (i.opening || 0) : (i.closing || 0)), 0);
+    const entAmt = items.reduce((s: number, i: any) => s + (isOpen ? (i.entered_opening || 0) : (i.entered_closing || 0)), 0);
     if (accAmt === 0 && entAmt === 0) return null;
-    const accountType = items[0].account_type || '';
-    const isDebitNormal = accountType === 'A' || accountType === 'E';
-    const toDrCr = (amt: number) => ({
-      dr: isDebitNormal && amt > 0 ? amt : (!isDebitNormal && amt < 0 ? Math.abs(amt) : 0),
-      cr: !isDebitNormal && amt > 0 ? amt : (isDebitNormal && amt < 0 ? Math.abs(amt) : 0),
-    });
-    const acc = toDrCr(accAmt); const ent = toDrCr(entAmt);
     return {
       key: isOpen ? 'opening-balance' : 'closing-balance',
       concatenatedSegments: acct, accountDescription: items[0].account_desc || '',
       jeLineDescription: isOpen ? 'Opening Balance' : 'Closing Balance',
       defaultPeriodName: period, accountingDate: '', batchName: '',
       userJeSourceName: '', userJeCategoryName: '', currencyCode: items[0].currency_code || 'AED',
-      enteredDr: ent.dr, enteredCr: ent.cr, accountedDr: acc.dr, accountedCr: acc.cr,
+      enteredDr: entAmt > 0 ? entAmt : 0, enteredCr: entAmt < 0 ? Math.abs(entAmt) : 0,
+      accountedDr: accAmt > 0 ? accAmt : 0, accountedCr: accAmt < 0 ? Math.abs(accAmt) : 0,
       jeHeaderId: 0, isOpeningBalance: isOpen, isClosingBalance: !isOpen,
     } as JournalLine;
   }, [ledger, segFilters]);
@@ -1211,6 +1207,7 @@ const AAPanel: React.FC = () => {
     if (!periods.length) { message.warning('Select at least one period'); return; }
     setLoading(true); setHasSearched(true); setRows([]);
     setOpeningBal(null); setClosingBal(null);
+    setTbApiUrls([]);
     try {
       const p = new URLSearchParams({ ledger_name: ledger });
       p.set('period_names', periods.join(','));
@@ -1407,13 +1404,6 @@ const AAPanel: React.FC = () => {
         const accAmt = Number(isOpen ? (tbRow.opening || 0) : (tbRow.closing || 0));
         const entAmt = Number(isOpen ? (tbRow.entered_opening || 0) : (tbRow.entered_closing || 0));
         if (accAmt === 0 && entAmt === 0) return null;
-        const accountType = tbRow.account_type || '';
-        const isDebitNormal = accountType === 'A' || accountType === 'E';
-        const toDrCr = (amt: number) => ({
-          dr: isDebitNormal && amt > 0 ? amt : (!isDebitNormal && amt < 0 ? Math.abs(amt) : 0),
-          cr: !isDebitNormal && amt > 0 ? amt : (isDebitNormal && amt < 0 ? Math.abs(amt) : 0),
-        });
-        const acc = toDrCr(accAmt); const ent = toDrCr(entAmt);
         return {
           key: `${combo}-${isOpen ? 'open' : 'close'}`,
           concatenatedSegments: combo,
@@ -1422,7 +1412,8 @@ const AAPanel: React.FC = () => {
           defaultPeriodName: period, accountingDate: '', batchName: '',
           userJeSourceName: '', userJeCategoryName: '',
           currencyCode: tbRow.currency_code || '',
-          enteredDr: ent.dr, enteredCr: ent.cr, accountedDr: acc.dr, accountedCr: acc.cr,
+          enteredDr: entAmt > 0 ? entAmt : 0, enteredCr: entAmt < 0 ? Math.abs(entAmt) : 0,
+          accountedDr: accAmt > 0 ? accAmt : 0, accountedCr: accAmt < 0 ? Math.abs(accAmt) : 0,
           jeHeaderId: 0, isOpeningBalance: isOpen, isClosingBalance: !isOpen,
         } as JournalLine;
       };
@@ -2508,15 +2499,17 @@ const AAPanel: React.FC = () => {
             })}
           </div>
         )}
-        {/* TB balance calls shown only when combo-break group is applied */}
-        {(appliedGroupBy === 'concatenatedSegments' || appliedGroupBy === 'currencyCode') && tbApiUrls.length > 0 && (
+        {/* TB balance calls — opening/closing */}
+        {tbApiUrls.length > 0 && (
           <>
             <Divider style={{ margin: '12px 0 8px' }} />
             <Text strong style={{ fontSize: 12 }}>Trial Balance (Opening / Closing Balance)</Text>
-            {tbApiUrls.map((url, idx) => (
+            {tbApiUrls.map((url, idx) => {
+              const periodParam = new URL(url).searchParams.get('period_name') || '';
+              return (
               <div key={idx} style={{ marginTop: 6 }}>
                 <Text type="secondary" style={{ fontSize: 11 }}>
-                  {idx === 0 ? 'Opening period' : 'Closing period'}
+                  {periodParam || (idx === 0 ? 'Opening period' : 'Closing period')}
                 </Text>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
                   <div style={{ flex: 1, background: '#f5f5f5', border: '1px solid #e0e0e0', borderRadius: 6,
@@ -2543,7 +2536,8 @@ const AAPanel: React.FC = () => {
                   </div>
                 )}
               </div>
-            ))}
+            );
+            })}
           </>
         )}
       </Modal>
