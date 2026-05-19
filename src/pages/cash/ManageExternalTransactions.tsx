@@ -537,7 +537,8 @@ const ExternalTxnForm: React.FC<{
   const [savedExtId, setSavedExtId] = useState<number | null>(null);
   const [savedExtIds, setSavedExtIds] = useState<number[]>([]);
   const [savedTxnId, setSavedTxnId] = useState<number | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  const [deleting, setDeleting]       = useState(false);
+  const [deleteApiUrl, setDeleteApiUrl] = useState('');
   const [attSaving, setAttSaving] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfVisible, setPdfVisible] = useState(false);
@@ -1130,15 +1131,22 @@ const ExternalTxnForm: React.FC<{
   const handleDelete = async () => {
     const extId = savedExtId ?? initialValues?.externalTransactionId;
     if (!extId) { message.error('Transaction ID not available'); return; }
+    const url = `${APEX_BASE}/cash/externaltransactions/${extId}`;
+    setDeleteApiUrl(url);
     setDeleting(true);
     try {
-      const res = await fetch(`${APEX_BASE}/cash/externaltransactions/${extId}`, { method: 'DELETE' });
-      const data = await res.json();
+      const res = await fetch(url, { method: 'DELETE' });
+      const text = await res.text();
+      let data: any = {};
+      try { data = JSON.parse(text); } catch {
+        message.error(`Delete failed (HTTP ${res.status}): server returned non-JSON response`);
+        return;
+      }
       if (data.status === 'success') {
         message.success('Transaction deleted.');
         onSave();
       } else {
-        message.error(data.message || 'Delete failed.');
+        message.error(data.message || `Delete failed (HTTP ${res.status}).`);
       }
     } catch (e: any) {
       message.error('Network error: ' + e.message);
@@ -1990,12 +1998,35 @@ const ExternalTxnForm: React.FC<{
             </Button>
           )}
           {(saved || (isEdit && !isLocked)) && (
-            <Popconfirm title="Delete this transaction?" description="This action cannot be undone."
-              onConfirm={handleDelete} okText="Delete" okButtonProps={{ danger: true }}>
-              <Button size="large" danger loading={deleting} icon={<DeleteOutlined />} style={{ minWidth: 110 }}>
-                Delete
-              </Button>
-            </Popconfirm>
+            <Space size={4}>
+              <Popconfirm title="Delete this transaction?" description="This action cannot be undone."
+                onConfirm={handleDelete} okText="Delete" okButtonProps={{ danger: true }}>
+                <Button size="large" danger loading={deleting} icon={<DeleteOutlined />} style={{ minWidth: 110 }}>
+                  Delete
+                </Button>
+              </Popconfirm>
+              <Tooltip title="Show DELETE API URL">
+                <Button size="large" icon={<ApiOutlined />} style={{ color: REDWOOD.neutral600 }}
+                  onClick={() => {
+                    const extId = savedExtId ?? initialValues?.externalTransactionId;
+                    const url = `${APEX_BASE}/cash/externaltransactions/${extId}`;
+                    setDeleteApiUrl(url);
+                    Modal.info({
+                      title: 'DELETE API URL',
+                      width: 640,
+                      content: (
+                        <div>
+                          <div style={{ marginBottom: 6, fontSize: 12, color: REDWOOD.neutral600 }}>Method: <strong>DELETE</strong></div>
+                          <div style={{ background: '#f5f5f5', borderRadius: 4, padding: '8px 12px', fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>
+                            {url}
+                          </div>
+                        </div>
+                      ),
+                    });
+                  }}
+                />
+              </Tooltip>
+            </Space>
           )}
           {!isEdit && (
             <Button size="large"
