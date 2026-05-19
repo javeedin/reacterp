@@ -506,6 +506,8 @@ const ExternalTxnForm: React.FC<{
   onPayeeCreated: (newOption: PayeeOption) => void;
   onCreateAccounting?: (txns: ExternalTxnRecord[]) => void;
 }> = ({ initialValues, bankAccounts, businessUnits, bankAccountMap, bankAccountCurrencyMap, buBankMap, buCompanyMap, payeeOptions, onSave, onCancel, onPayeeCreated, onCreateAccounting }) => {
+  const { user } = useAuth();
+  const loggedUser = user?.email ?? user?.username ?? 'ERP_USER';
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [txnDirection, setTxnDirection] = useState<'DR' | 'CR'>('CR');
@@ -872,32 +874,27 @@ const ExternalTxnForm: React.FC<{
     for (let i = 1; i <= pageCount; i++) {
       doc.setPage(i);
 
-      // Signature block
-      const sigY = 268;
+      // Signature block — name above line, role label below
+      const sigY = 272;
       const col1 = 14, col2 = 80, col3 = 146;
       const lineLen = 55;
+      // logged user name above the Created By line
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(40);
+      doc.text(loggedUser, col1, sigY - 3);
       doc.setDrawColor(180);
       doc.setLineWidth(0.3);
-      // signature lines
       doc.line(col1, sigY, col1 + lineLen, sigY);
       doc.line(col2, sigY, col2 + lineLen, sigY);
       doc.line(col3, sigY, col3 + lineLen, sigY);
-      // labels above lines
+      // role labels below lines
       doc.setFontSize(7.5);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(80);
-      doc.text('Created By', col1, sigY - 3);
-      doc.text('Approved By', col2, sigY - 3);
-      doc.text('Received By', col3, sigY - 3);
-      // pre-filled created by value
-      const createdByVal = initialValues?.createdBy ?? '';
-      if (createdByVal) {
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(7);
-        doc.setTextColor(60);
-        doc.text(createdByVal, col1, sigY - 1, { baseline: 'bottom' as any });
-      }
-      // blank lines for approved/received
+      doc.text('Created By', col1, sigY + 4);
+      doc.text('Approved By', col2, sigY + 4);
+      doc.text('Received By', col3, sigY + 4);
 
       doc.setFontSize(8);
       doc.setFont('helvetica', 'normal');
