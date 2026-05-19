@@ -1746,12 +1746,14 @@ const ExternalTxnForm: React.FC<{
                 },
                 {
                   title: <span style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Description</span>,
-                  width: 180,
+                  width: 200,
                   render: (_: any, record: ExtTxnLine, idx: number) => (
-                    <Input
+                    <Input.TextArea
                       size="small" value={record.description}
                       disabled={(isEdit && !editingEnabled) || !bankSelected || saved}
                       placeholder="Optional"
+                      autoSize={{ minRows: 1, maxRows: 5 }}
+                      style={{ resize: 'none', fontSize: 12 }}
                       onChange={(e) => updateExtLine(idx, 'description', e.target.value)}
                     />
                   ),
@@ -1992,16 +1994,23 @@ const ExternalTxnForm: React.FC<{
               Cancel Edit
             </Button>
           )}
-          {isEdit && (
-            <Button
-              size="large"
-              icon={<PaperClipOutlined />}
-              loading={attSaving}
-              onClick={handleSaveAttachments}
-            >
-              Save Attachments
-            </Button>
-          )}
+          {(() => {
+            const extId = savedExtId ?? initialValues?.externalTransactionId ?? null;
+            const hasId = !!extId;
+            return (
+              <Tooltip title={!hasId ? 'Save the transaction first to enable attachments' : 'Save queued attachments'}>
+                <Button
+                  size="large"
+                  icon={<PaperClipOutlined />}
+                  loading={attSaving}
+                  disabled={!hasId}
+                  onClick={handleSaveAttachments}
+                >
+                  Save Attachments
+                </Button>
+              </Tooltip>
+            );
+          })()}
           {(saved || (isEdit && !isLocked)) && onCreateAccounting && (
             <Button
               size="large"
@@ -3415,6 +3424,20 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     { title: 'Reference', dataIndex: 'referenceText', ellipsis: true, width: 140,
       render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     {
+      title: 'Description', dataIndex: 'description', ellipsis: true, width: 180,
+      render: v => <Tooltip title={v}><Text style={{ fontSize: 12 }}>{v || '—'}</Text></Tooltip>,
+    },
+    {
+      title: 'Pmt Method', dataIndex: 'paymentMethod', width: 110,
+      render: v => v
+        ? <Tag style={{ fontSize: 11, margin: 0 }}>{v}</Tag>
+        : <Text style={{ fontSize: 12, color: '#bbb' }}>—</Text>,
+    },
+    {
+      title: 'Pmt Document', dataIndex: 'paymentDocument', ellipsis: true, width: 130,
+      render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
+    },
+    {
       title: 'Cash Account', dataIndex: 'assetAccountCombination', ellipsis: true, width: 180,
       render: v => <Tooltip title={v}><Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v || '—'}</Text></Tooltip>,
     },
@@ -3445,12 +3468,6 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     {
       title: 'Type', dataIndex: 'transactionType', ellipsis: true, width: 130,
       render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
-    },
-    {
-      title: 'Pmt Method', dataIndex: 'paymentMethod', width: 100,
-      render: v => v
-        ? <Tag style={{ fontSize: 11, margin: 0 }}>{v}</Tag>
-        : <Text style={{ fontSize: 12, color: '#bbb' }}>—</Text>,
     },
     {
       title: 'Payee', dataIndex: 'payeeName', ellipsis: true,
