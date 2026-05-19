@@ -692,6 +692,7 @@ const RegisterDetail: React.FC<{
   const [bankTxnDetail, setBankTxnDetail]             = useState<any>(null);
   const [bankTxnDetailLoading, setBankTxnDetailLoading] = useState(false);
   const [bankTxnDetailSourceId, setBankTxnDetailSourceId] = useState<number | null>(null);
+  const [bankTxnDetailUrl, setBankTxnDetailUrl]       = useState<string>('');
   const [bankTxnPostResponse, setBankTxnPostResponse]   = useState<any>(null);
   const [bankTxnLookupResult, setBankTxnLookupResult]   = useState<any>(null);
   const [bankTxnPayload, setBankTxnPayload]             = useState<any>(null);
@@ -1477,8 +1478,10 @@ const RegisterDetail: React.FC<{
     setBankTxnDetailLoading(true);
     setBankTxnDetailOpen(true);
     setBankTxnDetail(null);
+    const url = `${EXT_TXN_URL}?external_transaction_id=${bankTxnId}&row_limit=1`;
+    setBankTxnDetailUrl(url);
     try {
-      const res  = await fetch(`${EXT_TXN_URL}?external_transaction_id=${bankTxnId}&row_limit=1`, { headers: { Accept: 'application/json' } });
+      const res  = await fetch(url, { headers: { Accept: 'application/json' } });
       const data = await res.json();
       const item = (data.items || [])[0] || null;
       setBankTxnDetail(item);
@@ -4948,6 +4951,46 @@ const RegisterDetail: React.FC<{
               )}
               {alreadyPosted && (
                 <Tag color="green" icon={<CheckCircleOutlined />} style={{ fontSize: 12 }}>Already Accounted</Tag>
+              )}
+              {bankTxnDetailUrl && (
+                <Tooltip title="View API endpoint used to load this record">
+                  <Button icon={<ApiOutlined />} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
+                    onClick={() => Modal.info({
+                      title: 'Bank Transaction — API Endpoint',
+                      width: 760,
+                      content: (
+                        <div style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                          <div style={{ marginBottom: 8 }}>
+                            <Tag color="blue">GET</Tag>
+                            <span style={{ wordBreak: 'break-all', color: REDWOOD.info }}>{bankTxnDetailUrl}</span>
+                          </div>
+                          <div style={{ background: '#f5f5f5', border: '1px solid #e0e0e0', borderRadius: 6,
+                            padding: '8px 12px', marginTop: 8 }}>
+                            {bankTxnDetailUrl.split('?')[1]?.split('&').map((part, i) => {
+                              const [k, v] = part.split('=');
+                              return <div key={i} style={{ marginBottom: 2 }}>
+                                <Text code style={{ fontSize: 11 }}>{decodeURIComponent(k)}</Text>
+                                {' = '}
+                                <Text style={{ fontSize: 11, color: REDWOOD.info }}>{decodeURIComponent(v || '')}</Text>
+                              </div>;
+                            })}
+                          </div>
+                          {bankTxnDetail && (
+                            <>
+                              <div style={{ marginTop: 10, marginBottom: 4, fontWeight: 600, fontSize: 11 }}>Response (first item):</div>
+                              <div style={{ background: '#1d1d1d', color: '#d4d4d4', borderRadius: 6, padding: '8px 12px',
+                                maxHeight: 300, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontSize: 10 }}>
+                                {JSON.stringify(bankTxnDetail, null, 2)}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      ),
+                    })}
+                  >
+                    API
+                  </Button>
+                </Tooltip>
               )}
               <Button onClick={() => setBankTxnDetailOpen(false)}>Close</Button>
             </Space>
