@@ -1895,10 +1895,16 @@ const AAPanel: React.FC = () => {
         : r.isTotals ? totFill
         : idx % 2 === 1 ? altFill : undefined;
 
-      const accBal = r.isTotals ? (r._accBal ?? 0) : r.isOpeningBalance || r.isClosingBalance
-        ? (r.accountedDr || 0) - (r.accountedCr || 0) : (r._accRun ?? 0);
-      const entBal = r.isTotals ? (r._entBal ?? 0) : r.isOpeningBalance || r.isClosingBalance
-        ? (r.enteredDr || 0) - (r.enteredCr || 0) : (r._entRun ?? 0);
+      const accBal = r.isTotals
+        ? (r._accBal ?? 0)
+        : r._accRun !== undefined
+          ? r._accRun
+          : Number(r.accountedDr ?? 0) - Number(r.accountedCr ?? 0);
+      const entBal = r.isTotals
+        ? (r._entBal ?? 0)
+        : r._entRun !== undefined
+          ? r._entRun
+          : Number(r.enteredDr ?? 0) - Number(r.enteredCr ?? 0);
 
       const vals: (string | number)[] = [
         ...(showAccount
