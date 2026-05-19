@@ -309,20 +309,24 @@ BEGIN
         p_comments       => 'Sync external cash transactions from Oracle Fusion',
         p_source         => q'[
 DECLARE
-    l_json      CLOB;
-    l_count     NUMBER;
-    l_error     VARCHAR2(4000);
-    l_ext_id    NUMBER;
-    l_reference VARCHAR2(360);
+    l_json        CLOB;
+    l_count       NUMBER;
+    l_error       VARCHAR2(4000);
+    l_ext_id      NUMBER;
+    l_json_ext_id NUMBER;
+    l_ts_before   TIMESTAMP;
 BEGIN
     l_json := :body_text;
 
-    -- Extract reference text from first item so we can look up the created ID after insert
+    -- 1. Try to read ExternalTransactionId directly from the request JSON
     BEGIN
-        SELECT ref_text INTO l_reference
+        SELECT TO_NUMBER(ext_id) INTO l_json_ext_id
         FROM JSON_TABLE(l_json, '$.items[0]'
-            COLUMNS (ref_text VARCHAR2(360) PATH '$.ReferenceText')) t;
-    EXCEPTION WHEN OTHERS THEN l_reference := NULL; END;
+            COLUMNS (ext_id VARCHAR2(30) PATH '$.ExternalTransactionId')) t;
+    EXCEPTION WHEN OTHERS THEN l_json_ext_id := NULL; END;
+
+    -- Capture timestamp before insert so we can find the new row if ID was not supplied
+    l_ts_before := SYSTIMESTAMP;
 
     RR_SYNC_EXTERNAL_CASH_TRANSACTIONS(
         p_json  => l_json,
@@ -334,14 +338,18 @@ BEGIN
         :status_code := 500;
         HTP.P('{"status":"error","message":"' || REPLACE(l_error, '"', '\"') || '"}');
     ELSE
-        -- Look up the external_transaction_id of the record just inserted/updated
-        IF l_reference IS NOT NULL THEN
+        IF l_json_ext_id IS NOT NULL THEN
+            -- ID came from the request — use it directly
+            l_ext_id := l_json_ext_id;
+        ELSE
+            -- Manual transaction: sequence fired inside the procedure.
+            -- Find the row inserted in this same DB session (SYNC_DATE >= our timestamp).
             BEGIN
                 SELECT EXTERNAL_TRANSACTION_ID INTO l_ext_id
                 FROM (
                     SELECT EXTERNAL_TRANSACTION_ID
                       FROM RR_EXTERNAL_CASH_TRANSACTIONS
-                     WHERE REFERENCE_TEXT = l_reference
+                     WHERE SYNC_DATE >= l_ts_before
                      ORDER BY EXTERNAL_TRANSACTION_ID DESC
                 )
                 WHERE ROWNUM = 1;
