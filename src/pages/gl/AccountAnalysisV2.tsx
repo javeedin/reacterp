@@ -1205,6 +1205,7 @@ const AAPanel: React.FC = () => {
   // ── Search ────────────────────────────────────────────────────────────────────
   const handleSearch = useCallback(async () => {
     if (!periods.length) { message.warning('Select at least one period'); return; }
+    if (!segFilters['company']) { message.warning('Company segment is required'); return; }
     setLoading(true); setHasSearched(true); setRows([]);
     setOpeningBal(null); setClosingBal(null);
     setTbApiUrls([]);
