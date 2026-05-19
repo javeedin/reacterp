@@ -1426,12 +1426,12 @@ const AAPanel: React.FC = () => {
         const tbKey = byCurrency ? combo : combo;
         const openRow  = buildBalRow(combo, openMap.get(tbKey)  || openMap.get(combo.split('||')[0])  || null, true,  firstP);
         const closeRow = buildBalRow(combo, closeMap.get(tbKey) || closeMap.get(combo.split('||')[0]) || null, false, lastP);
-        const openAcc = openRow ? openRow.accountedDr - openRow.accountedCr : 0;
-        const openEnt = openRow ? openRow.enteredDr   - openRow.enteredCr   : 0;
+        const openAcc = openRow ? (openRow.accountedDr || 0) - (openRow.accountedCr || 0) : 0;
+        const openEnt = openRow ? (openRow.enteredDr   || 0) - (openRow.enteredCr   || 0) : 0;
         let accRun = openAcc, entRun = openEnt;
         const linesWithBal: ComboBreakLine[] = lines.map(r => {
-          accRun += r.accountedDr - r.accountedCr;
-          entRun += r.enteredDr   - r.enteredCr;
+          accRun += (r.accountedDr || 0) - (r.accountedCr || 0);
+          entRun += (r.enteredDr   || 0) - (r.enteredCr   || 0);
           return { ...r, _accRun: accRun, _entRun: entRun };
         });
         return {
@@ -1896,15 +1896,15 @@ const AAPanel: React.FC = () => {
         : idx % 2 === 1 ? altFill : undefined;
 
       const accBal = r.isTotals
-        ? (r._accBal ?? 0)
-        : r._accRun !== undefined
-          ? r._accRun
-          : Number(r.accountedDr ?? 0) - Number(r.accountedCr ?? 0);
+        ? Number(r._accBal ?? 0)
+        : (r.isOpeningBalance || r.isClosingBalance)
+          ? Number(r.accountedDr ?? 0) - Number(r.accountedCr ?? 0)
+          : Number(r._accRun ?? 0);
       const entBal = r.isTotals
-        ? (r._entBal ?? 0)
-        : r._entRun !== undefined
-          ? r._entRun
-          : Number(r.enteredDr ?? 0) - Number(r.enteredCr ?? 0);
+        ? Number(r._entBal ?? 0)
+        : (r.isOpeningBalance || r.isClosingBalance)
+          ? Number(r.enteredDr ?? 0) - Number(r.enteredCr ?? 0)
+          : Number(r._entRun ?? 0);
 
       const vals: (string | number)[] = [
         ...(showAccount
@@ -1917,13 +1917,13 @@ const AAPanel: React.FC = () => {
         isSpec ? '' : (r.userJeCategoryName || ''),
         isSpec ? '' : (r.currencyCode || ''),
         ...(showEntered ? [
-          isSpec ? '' : (r.enteredDr || 0),
-          isSpec ? '' : (r.enteredCr || 0),
-          entBal,
+          isSpec ? '' : Number(r.enteredDr  || 0),
+          isSpec ? '' : Number(r.enteredCr  || 0),
+          Number(entBal),
         ] : []),
-        isSpec ? '' : (r.accountedDr || 0),
-        isSpec ? '' : (r.accountedCr || 0),
-        accBal,
+        isSpec ? '' : Number(r.accountedDr || 0),
+        isSpec ? '' : Number(r.accountedCr || 0),
+        Number(accBal),
         ...(showJeId ? [isSpec ? '' : (r.jeHeaderId || '')] : []),
       ];
       const descColCount = showAccount ? 9 : 7;
