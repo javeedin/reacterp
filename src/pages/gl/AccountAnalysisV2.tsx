@@ -1887,25 +1887,29 @@ const AAPanel: React.FC = () => {
       ri++;
     };
 
+    const safeN = (v: any) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+
     // Write a single data row (flat or break detail)
-    const writeDetailRow = (r: any, idx: number, showAccount: boolean, showJeId: boolean) => {
+    // xlAccBal / xlEntBal: when provided, bypass _accRun/_entRun and use these explicit values
+    const writeDetailRow = (r: any, idx: number, showAccount: boolean, showJeId: boolean, xlAccBal?: number, xlEntBal?: number) => {
       const isSpec = r.isOpeningBalance || r.isClosingBalance || r.isTotals;
       const fill = r.isOpeningBalance ? openFill
         : r.isClosingBalance ? closeFill
         : r.isTotals ? totFill
         : idx % 2 === 1 ? altFill : undefined;
 
-      const safeN = (v: any) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
-      const accBal = r.isTotals
-        ? safeN(r._accBal)
-        : (r.isOpeningBalance || r.isClosingBalance)
-          ? safeN(r.accountedDr) - safeN(r.accountedCr)
-          : safeN(r._accRun);
-      const entBal = r.isTotals
-        ? safeN(r._entBal)
-        : (r.isOpeningBalance || r.isClosingBalance)
-          ? safeN(r.enteredDr) - safeN(r.enteredCr)
-          : safeN(r._entRun);
+      const accBal = xlAccBal !== undefined ? xlAccBal
+        : r.isTotals
+          ? safeN(r._accBal)
+          : (r.isOpeningBalance || r.isClosingBalance)
+            ? safeN(r.accountedDr) - safeN(r.accountedCr)
+            : safeN(r._accRun);
+      const entBal = xlEntBal !== undefined ? xlEntBal
+        : r.isTotals
+          ? safeN(r._entBal)
+          : (r.isOpeningBalance || r.isClosingBalance)
+            ? safeN(r.enteredDr) - safeN(r.enteredCr)
+            : safeN(r._entRun);
 
       const vals: (string | number)[] = [
         ...(showAccount
@@ -2006,7 +2010,31 @@ const AAPanel: React.FC = () => {
           ...(brk.closingRow ? [brk.closingRow] : []),
         ];
 
-        brkData.forEach((r, idx) => writeDetailRow(r, idx, false, false));
+        // Compute balances locally — do not rely on _accRun/_entRun being populated
+        let xlAccRun = brk.openingRow ? safeN(brk.openingRow.accountedDr) - safeN(brk.openingRow.accountedCr) : 0;
+        let xlEntRun = brk.openingRow ? safeN(brk.openingRow.enteredDr)   - safeN(brk.openingRow.enteredCr)   : 0;
+        brkData.forEach((r: any, idx: number) => {
+          let rowAccBal: number;
+          let rowEntBal: number;
+          if (r.isTotals) {
+            rowAccBal = xlAccRun;
+            rowEntBal = xlEntRun;
+          } else if (r.isOpeningBalance) {
+            rowAccBal = safeN(r.accountedDr) - safeN(r.accountedCr);
+            rowEntBal = safeN(r.enteredDr)   - safeN(r.enteredCr);
+            xlAccRun  = rowAccBal;
+            xlEntRun  = rowEntBal;
+          } else if (r.isClosingBalance) {
+            rowAccBal = safeN(r.accountedDr) - safeN(r.accountedCr);
+            rowEntBal = safeN(r.enteredDr)   - safeN(r.enteredCr);
+          } else {
+            xlAccRun += safeN(r.accountedDr) - safeN(r.accountedCr);
+            xlEntRun += safeN(r.enteredDr)   - safeN(r.enteredCr);
+            rowAccBal = xlAccRun;
+            rowEntBal = xlEntRun;
+          }
+          writeDetailRow(r, idx, false, false, rowAccBal, rowEntBal);
+        });
 
         // Blank spacer between combos
         ws.getRow(ri).height = 8; ri++;
