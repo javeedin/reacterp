@@ -742,8 +742,17 @@ const ExternalTxnForm: React.FC<{
     }],
   });
 
-  const handlePrintPdf = () => {
+  const handlePrintPdf = async () => {
     const values = form.getFieldsValue();
+    // Resolve any missing offset account descriptions before building PDF
+    const resolvedLines = await Promise.all(extTxnLines.map(async (l) => {
+      if (l.offsetDesc || !l.offsetAccount) return l;
+      try {
+        const r = await validateAccountCode(l.offsetAccount);
+        const desc = Object.values(r.segmentDetails)[3]?.description || '';
+        return { ...l, offsetDesc: desc };
+      } catch { return l; }
+    }));
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const pageW = doc.internal.pageSize.getWidth();
     const fmt = (v: any) => v != null && v !== '' ? String(v) : '—';
@@ -848,14 +857,14 @@ const ExternalTxnForm: React.FC<{
     doc.text('Transaction Lines', 14, y);
     y += 2;
 
-    const lineRows = extTxnLines.map((l, i) => [
+    const lineRows = resolvedLines.map((l, i) => [
       i + 1,
       l.offsetAccount || '—',
       l.offsetDesc || '—',
       l.description || '—',
       l.amount != null ? fmtNum(Math.abs(l.amount)) : '—',
     ]);
-    const totalAmt = extTxnLines.reduce((s, l) => s + Math.abs(l.amount ?? 0), 0);
+    const totalAmt = resolvedLines.reduce((s, l) => s + Math.abs(l.amount ?? 0), 0);
     lineRows.push(['', '', '', 'Total', fmtNum(totalAmt)] as any);
 
     autoTable(doc, {
@@ -3195,7 +3204,15 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   const [voucherPdfUrl, setVoucherPdfUrl] = useState<string | null>(null);
   const [voucherModalOpen, setVoucherModalOpen] = useState(false);
 
-  const generateVoucherPdf = (r: ExternalTxnRecord) => {
+  const generateVoucherPdf = async (r: ExternalTxnRecord) => {
+    // Resolve offset account description
+    let offsetAcctDesc = '';
+    if (r.offsetAccountCombination) {
+      try {
+        const res = await validateAccountCode(r.offsetAccountCombination);
+        offsetAcctDesc = Object.values(res.segmentDetails)[3]?.description || '';
+      } catch { /* leave blank */ }
+    }
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const pageW = doc.internal.pageSize.getWidth();
     const fmt = (v: any) => v != null && v !== '' ? String(v) : '—';
@@ -3298,9 +3315,9 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     const fmtAmt = (v: number) => Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     autoTable(doc, {
       startY: y,
-      head: [['#', 'Offset Account', 'Description', 'Amount']],
-      body: [[1, r.offsetAccountCombination || '—', r.description || '—', fmtAmt(Math.abs(r.amount))]],
-      foot: [['', '', 'Total', fmtAmt(Math.abs(r.amount))]],
+      head: [['#', 'Offset Account', 'Account Desc', 'Description', 'Amount']],
+      body: [[1, r.offsetAccountCombination || '—', offsetAcctDesc || '—', r.description || '—', fmtAmt(Math.abs(r.amount))]],
+      foot: [['', '', '', 'Total', fmtAmt(Math.abs(r.amount))]],
       styles: { fontSize: 8.5, cellPadding: 2 },
       headStyles: { fillColor: [58, 58, 58] },
       footStyles: { fillColor: [240, 240, 240], fontStyle: 'bold' },
