@@ -539,6 +539,7 @@ const ExternalTxnForm: React.FC<{
   const [savedExtId, setSavedExtId] = useState<number | null>(null);
   const [savedExtIds, setSavedExtIds] = useState<number[]>([]);
   const [savedTxnId, setSavedTxnId] = useState<number | null>(null);
+  const [lastSaveResponse, setLastSaveResponse] = useState<string | null>(null);
   const [deleting, setDeleting]       = useState(false);
   const [deleteApiUrl, setDeleteApiUrl] = useState('');
   const [attSaving, setAttSaving] = useState(false);
@@ -982,22 +983,36 @@ const ExternalTxnForm: React.FC<{
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        const data = await res.json();
+        const rawText = await res.text();
+        if (i === 0) setLastSaveResponse(rawText);
+        let data: any = {};
+        try { data = JSON.parse(rawText); } catch { /* non-JSON */ }
         if (data.status === 'success') {
           successCount++;
           if (i === 0) {
-            savedId = data.externalTransactionId ?? data.id ?? null;
-            if (data.transactionId) setSavedTxnId(data.transactionId);
-            // If POST didn't return externalTransactionId but did return transactionId, use it as fallback
-            if (!savedId && data.transactionId) savedId = data.transactionId;
+            // Try every field name variant Oracle APEX might return
+            const extId =
+              data.externalTransactionId ?? data.external_transaction_id ??
+              data.EXTERNAL_TRANSACTION_ID ?? data.ExternalTransactionId ??
+              data.id ?? data.ID ?? null;
+            const txnId =
+              data.transactionId ?? data.transaction_id ??
+              data.TRANSACTION_ID ?? data.TransactionId ?? null;
+            savedId = extId ?? txnId ?? null;
+            if (txnId) setSavedTxnId(Number(txnId));
+            if (extId) setSavedExtId(Number(extId));
           }
-          if (data.externalTransactionId) allSavedIds.push(data.externalTransactionId);
+          const extIdForAtt =
+            data.externalTransactionId ?? data.external_transaction_id ??
+            data.EXTERNAL_TRANSACTION_ID ?? data.id ?? null;
+          if (extIdForAtt) allSavedIds.push(extIdForAtt);
           else if (i === 0 && savedId) allSavedIds.push(savedId);
           // Upload attachments on first line
-          if (i === 0 && data.externalTransactionId && attachments.length > 0) {
+          const attExtId = extIdForAtt ?? savedId;
+          if (i === 0 && attExtId && attachments.length > 0) {
             for (const att of attachments.filter(a => !a.id)) {
               try {
-                await fetch(`${APEX_BASE}/cash/externaltransactions/${data.externalTransactionId}/attachments`, {
+                await fetch(`${APEX_BASE}/cash/externaltransactions/${attExtId}/attachments`, {
                   method: 'POST', headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ fileName: att.name, fileType: att.fileType, fileSize: att.fileSize, content: att.content, createdBy: 'ERP_USER' }),
                 });
@@ -1018,7 +1033,8 @@ const ExternalTxnForm: React.FC<{
     setSaving(false);
     message.success(`${successCount} transaction(s) created.`);
     setSaved(true);
-    setSavedExtId(savedId);
+    // savedExtId is already set inline per-line above; set fallback here if still null
+    if (savedId && !savedExtId) setSavedExtId(Number(savedId));
     setSavedExtIds(allSavedIds);
   };
 
@@ -1235,9 +1251,18 @@ const ExternalTxnForm: React.FC<{
           <div className="ext-sec">
             <div className="ext-sec-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span>Organisation &amp; Bank</span>
-              {!isEdit && (saved || savedExtId || savedTxnId) && (
-                <span style={{ fontSize: 12, fontWeight: 400, color: REDWOOD.success, fontFamily: 'monospace' }}>
-                  ✓ Saved — ID: {savedExtId ?? savedTxnId}
+              {!isEdit && saved && (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 12, fontWeight: 400, color: REDWOOD.success, fontFamily: 'monospace' }}>
+                    ✓ Saved{(savedExtId ?? savedTxnId) ? ` — ID: ${savedExtId ?? savedTxnId}` : ''}
+                    {savedTxnId && savedExtId && savedTxnId !== savedExtId ? ` · Txn: ${savedTxnId}` : ''}
+                  </span>
+                  {lastSaveResponse && (
+                    <Tooltip title="View POST response">
+                      <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info, fontSize: 11, padding: '0 4px' }}
+                        onClick={() => Modal.info({ title: 'POST Response (line 1)', width: 600, content: <pre style={{ fontSize: 11, maxHeight: 400, overflow: 'auto', background: '#f5f5f5', padding: 8, borderRadius: 4 }}>{(() => { try { return JSON.stringify(JSON.parse(lastSaveResponse), null, 2); } catch { return lastSaveResponse; } })()}</pre> })} />
+                    </Tooltip>
+                  )}
                 </span>
               )}
               {isEdit && initialValues?.externalTransactionId && (
