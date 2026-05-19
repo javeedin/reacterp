@@ -870,9 +870,9 @@ const ExternalTxnForm: React.FC<{
         fmtAmt(Math.abs(l.amount ?? 0)),
       ]),
       foot: [['', '', '', 'Total', fmtAmt(totalAmt)]],
-      styles: { fontSize: 8.5, cellPadding: 2 },
-      headStyles: { fillColor: [58, 58, 58] },
-      footStyles: { fillColor: [240, 240, 240], fontStyle: 'bold' },
+      styles: { fontSize: 8.5, cellPadding: 2, textColor: [0, 0, 0] },
+      headStyles: { fillColor: [58, 58, 58], textColor: [255, 255, 255] },
+      footStyles: { fillColor: [255, 255, 255], fontStyle: 'bold', textColor: [0, 0, 0], halign: 'right' },
       alternateRowStyles: { fillColor: [247, 247, 247] },
       columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 55 }, 4: { halign: 'right', cellWidth: 28 } },
       margin: { left: 14, right: 14 },
@@ -3346,14 +3346,14 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     doc.text('Transaction Lines', 14, y);
     y += 2;
     const fmtAmt = (v: number) => Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const lineBodyRows: any[] = [[1, r.offsetAccountCombination || '—', offsetAcctDesc || '—', r.description || '—', fmtAmt(Math.abs(r.amount))]];
-    lineBodyRows.push(['', '', '', 'Total', fmtAmt(Math.abs(r.amount))]);
     autoTable(doc, {
       startY: y,
       head: [['#', 'Offset Account', 'Account Desc', 'Description', 'Amount']],
-      body: lineBodyRows,
-      styles: { fontSize: 8.5, cellPadding: 2 },
-      headStyles: { fillColor: [58, 58, 58] },
+      body: [[1, r.offsetAccountCombination || '—', offsetAcctDesc || '—', r.description || '—', fmtAmt(Math.abs(r.amount))]],
+      foot: [['', '', '', 'Total', fmtAmt(Math.abs(r.amount))]],
+      styles: { fontSize: 8.5, cellPadding: 2, textColor: [0, 0, 0] },
+      headStyles: { fillColor: [58, 58, 58], textColor: [255, 255, 255] },
+      footStyles: { fillColor: [255, 255, 255], fontStyle: 'bold', textColor: [0, 0, 0], halign: 'right' },
       alternateRowStyles: { fillColor: [247, 247, 247] },
       columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 50 }, 4: { halign: 'right', cellWidth: 28 } },
       margin: { left: 14, right: 14 },
@@ -3369,7 +3369,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);
       doc.setTextColor(0);
-      doc.text(loggedUser, col1, sigY - 3);
+      doc.text(currentUser, col1, sigY - 3);
       doc.setDrawColor(180);
       doc.setLineWidth(0.3);
       doc.line(col1, sigY, col1 + lineLen, sigY);
