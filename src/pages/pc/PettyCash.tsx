@@ -3831,9 +3831,12 @@ const RegisterDetail: React.FC<{
 
               {/* Add Line + Total */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
-                <Button size="small" icon={<PlusOutlined />} onClick={() => setExpenseLines(prev => [...prev, makeNewLine()])}>
-                  Add Line
-                </Button>
+                <Button size="small" icon={<PlusOutlined />} onClick={() => setExpenseLines(prev => {
+                  const last = prev[prev.length - 1];
+                  const newLine = makeNewLine();
+                  if (last?.paidTo) newLine.paidTo = last.paidTo;
+                  return [...prev, newLine];
+                })}>Add Line</Button>
                 <Space>
                   <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>
                     Total:
