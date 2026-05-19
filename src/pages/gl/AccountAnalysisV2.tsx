@@ -2013,6 +2013,7 @@ const AAPanel: React.FC = () => {
         // Compute balances locally — do not rely on _accRun/_entRun being populated
         let xlAccRun = brk.openingRow ? safeN(brk.openingRow.accountedDr) - safeN(brk.openingRow.accountedCr) : 0;
         let xlEntRun = brk.openingRow ? safeN(brk.openingRow.enteredDr)   - safeN(brk.openingRow.enteredCr)   : 0;
+        console.log(`[XL] combo=${brk.combo} openingRow=`, brk.openingRow, `xlAccRun_init=${xlAccRun}`);
         brkData.forEach((r: any, idx: number) => {
           let rowAccBal: number;
           let rowEntBal: number;
@@ -2033,6 +2034,7 @@ const AAPanel: React.FC = () => {
             rowAccBal = xlAccRun;
             rowEntBal = xlEntRun;
           }
+          console.log(`[XL] row[${idx}] type=${r.isTotals?'TOT':r.isOpeningBalance?'OPEN':r.isClosingBalance?'CLOSE':'LINE'} accDr=${r.accountedDr} accCr=${r.accountedCr} rowAccBal=${rowAccBal} entDr=${r.enteredDr} rowEntBal=${rowEntBal}`);
           writeDetailRow(r, idx, false, false, rowAccBal, rowEntBal);
         });
 
