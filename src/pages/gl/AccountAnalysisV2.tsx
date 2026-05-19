@@ -2083,14 +2083,17 @@ const AAPanel: React.FC = () => {
         if (i === lastIdx) colStyles[i].fontStyle = 'bold';
       }
 
+      let currentY = drawPageHeader(); // draw title once at the top
       comboBreaks.forEach((brk, bi) => {
-        // Each combination starts on a new page (except the very first)
-        if (bi > 0) doc.addPage();
-
+        // Combination label printed inline above each group (no page break)
         const comboLabel = appliedGroupBy === 'currencyCode' && brk.combo.includes('||')
           ? brk.combo.replace('||', '  –  ')
           : brk.combo;
-        const startY = drawPageHeader(comboLabel, brk.description || '');
+        const labelY = bi === 0 ? currentY : currentY + 4;
+        doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 0, 0);
+        const label = brk.description ? `${comboLabel}   –   ${brk.description}` : comboLabel;
+        doc.text(label, margin, labelY);
+        const startY = labelY + 3;
 
         const lastLine = brk.linesWithBal[brk.linesWithBal.length - 1];
         const ptdTot: any = {
@@ -2131,6 +2134,7 @@ const AAPanel: React.FC = () => {
           didParseCell: (data) => applyRowStyle(data, brkRows),
           margin: { left: margin, right: margin },
         });
+        currentY = (doc as any).lastAutoTable.finalY;
       });
     } else {
       // Flat mode — no Account column (shown in title), all space goes to Line Description
