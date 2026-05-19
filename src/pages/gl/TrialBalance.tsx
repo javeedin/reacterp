@@ -3099,7 +3099,12 @@ const TrialBalance: React.FC = () => {
           rowKey:       key,
           combo,
           ccy,
-          subAccount:   r.sub_account || '',
+          subAccount:   (() => {
+            if (r.sub_account && !/^0+$/.test(r.sub_account)) return r.sub_account;
+            // Extract segment 5 (index 4) from combination, skip if all-zeros
+            const seg5 = combo.split('-')[4] || '';
+            return /^0+$/.test(seg5) ? '' : seg5;
+          })(),
           entClosing,
           acctClosing,
           bookRate,
@@ -3346,7 +3351,7 @@ const TrialBalance: React.FC = () => {
         render: (_: any, row: any) => {
           if (!row.subAccount) return null;
           const isFetching = !!subAcctFetching[row.lineNum];
-          const rawPeriod = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '').replace(/\s*\..*$/, '').trim();
+          const rawPeriod = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '').replace(/\s*·.*$/, '').trim();
           const periodMonth = rawPeriod || tab.periodName;
           const doFetch = async () => {
             setSubAcctFetching(prev => ({ ...prev, [row.lineNum]: true }));
