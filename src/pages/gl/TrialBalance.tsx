@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import dayjs from 'dayjs';
 import {
   Layout,
   Card,
@@ -27,6 +28,7 @@ import {
   Drawer,
   Collapse,
   Steps,
+  DatePicker,
 } from 'antd';
 import {
   HomeOutlined,
@@ -57,6 +59,7 @@ import {
   LineChartOutlined,
   DownOutlined,
   CalculatorOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -326,6 +329,8 @@ const TrialBalance: React.FC = () => {
   const [revalLastCall,            setRevalLastCall]            = useState<{ url: string; method: string; payload: object; responseText: string; httpStatus: number } | null>(null);
   const [revalApiDebugOpen,        setRevalApiDebugOpen]        = useState(false);
   const [revalSaving,              setRevalSaving]              = useState(false);
+  const [revalRateDate,            setRevalRateDate]            = useState<string>(dayjs().format('YYYY-MM-DD'));
+  const [revalBmsFetching,         setRevalBmsFetching]         = useState<Record<string, boolean>>({});
   // Create Accounting flow
   const [acctFlowVisible,  setAcctFlowVisible]  = useState(false);
   const [acctFlowLoading,  setAcctFlowLoading]  = useState(false);
@@ -2959,6 +2964,32 @@ const TrialBalance: React.FC = () => {
     }
   };
 
+  // ── BMS rate fetch for revaluation ───────────────────────────
+  const fetchRevalBmsRate = useCallback(async (currencies: string[]) => {
+    const dateParam = revalRateDate ? `&rate_date=${encodeURIComponent(revalRateDate)}` : '';
+    for (const ccy of currencies) {
+      if (!ccy || ccy === 'AED') continue;
+      setRevalBmsFetching(prev => ({ ...prev, [ccy]: true }));
+      try {
+        const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/currencies/bmsrate?source_cur=${encodeURIComponent(ccy)}&target_cur=AED${dateParam}`);
+        const data = await res.json();
+        if (data.rate) {
+          const rateStr = String(data.rate);
+          setRevalRates(prev => ({ ...prev, [ccy]: rateStr }));
+          const inv = parseFloat(rateStr);
+          if (!isNaN(inv) && inv !== 0)
+            setRevalFuncRates(prev => ({ ...prev, [ccy]: (1 / inv).toFixed(10) }));
+        } else {
+          message.warning(`No BMS rate found for ${ccy}${revalRateDate ? ` on ${revalRateDate}` : ''}`);
+        }
+      } catch {
+        message.error(`Failed to fetch BMS rate for ${ccy}`);
+      } finally {
+        setRevalBmsFetching(prev => ({ ...prev, [ccy]: false }));
+      }
+    }
+  }, [revalRateDate]);
+
   // ── Revaluation modal renderer ────────────────────────────────
   const renderRevalModal = () => {
     const tab = tabs.find(t => t.key === revalTabKey);
@@ -3164,21 +3195,31 @@ const TrialBalance: React.FC = () => {
           : isPosted
           ? <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{revalRates[r.ccy] || '—'}</Text>
           : (
-          <Input
-            size="small"
-            style={{ width: 120, fontFamily: 'monospace', textAlign: 'right' }}
-            placeholder="e.g. 3.675"
-            value={revalRates[r.ccy] || ''}
-            onChange={e => {
-              const val = e.target.value;
-              setRevalRates(prev => ({ ...prev, [r.ccy]: val }));
-              const n = parseFloat(val);
-              if (!isNaN(n) && n !== 0)
-                setRevalFuncRates(prev => ({ ...prev, [r.ccy]: (1 / n).toFixed(10) }));
-              else
-                setRevalFuncRates(prev => ({ ...prev, [r.ccy]: '' }));
-            }}
-          />
+          <Space.Compact>
+            <Input
+              size="small"
+              style={{ width: 110, fontFamily: 'monospace', textAlign: 'right' }}
+              placeholder="e.g. 3.675"
+              value={revalRates[r.ccy] || ''}
+              onChange={e => {
+                const val = e.target.value;
+                setRevalRates(prev => ({ ...prev, [r.ccy]: val }));
+                const n = parseFloat(val);
+                if (!isNaN(n) && n !== 0)
+                  setRevalFuncRates(prev => ({ ...prev, [r.ccy]: (1 / n).toFixed(10) }));
+                else
+                  setRevalFuncRates(prev => ({ ...prev, [r.ccy]: '' }));
+              }}
+            />
+            <Tooltip title={`Fetch BMS rate for ${r.ccy}${revalRateDate ? ` on ${revalRateDate}` : ''}`}>
+              <Button
+                size="small"
+                icon={<SyncOutlined spin={!!revalBmsFetching[r.ccy]} />}
+                disabled={!r.ccy || r.ccy === 'AED'}
+                onClick={() => fetchRevalBmsRate([r.ccy])}
+              />
+            </Tooltip>
+          </Space.Compact>
         )},
       { title: 'Func. Rate (Func→FCY)', key: 'funcRate', align: 'right' as const, width: 160,
         render: (_: any, r: ComboRow) => r.excluded
@@ -3307,6 +3348,34 @@ const TrialBalance: React.FC = () => {
               Adjustment = New Value − Book Value. Positive → Dr Account / Cr Gain. Negative → Dr Loss / Cr Account.
             </Text>
           </div>
+
+          {/* BMS rate date + fetch controls */}
+          {!isPosted && (
+            <Space style={{ marginBottom: 12 }}>
+              <Text style={{ fontSize: 12, color: REDWOOD.textSecondary }}>Rate Date:</Text>
+              <DatePicker
+                size="small"
+                format="D-MMM-YYYY"
+                value={revalRateDate ? dayjs(revalRateDate) : null}
+                onChange={d => setRevalRateDate(d ? d.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD'))}
+                style={{ width: 130 }}
+              />
+              <Tooltip title="Fetch BMS rates for all currencies on the selected date">
+                <Button
+                  size="small"
+                  icon={<SyncOutlined />}
+                  loading={Object.values(revalBmsFetching).some(Boolean)}
+                  onClick={() => {
+                    const ccys = [...new Set(comboRows.filter(r => !r.excluded && r.ccy && r.ccy !== 'AED').map(r => r.ccy))];
+                    if (ccys.length === 0) { message.info('No foreign currency rows to fetch rates for'); return; }
+                    fetchRevalBmsRate(ccys);
+                  }}
+                >
+                  Fetch All BMS Rates
+                </Button>
+              </Tooltip>
+            </Space>
+          )}
 
           {/* Per-combination balance + rate table */}
           <Table
