@@ -748,22 +748,28 @@ const ExternalTxnForm: React.FC<{
     const resolvedLines = await Promise.all(extTxnLines.map(async (l) => {
       if (l.offsetDesc || !l.offsetAccount) return l;
       try {
-        const r = await validateAccountCode(l.offsetAccount);
-        const desc = Object.values(r.segmentDetails)[3]?.description || '';
+        const res = await validateAccountCode(l.offsetAccount);
+        const desc = Object.values(res.segmentDetails)[3]?.description || '';
         return { ...l, offsetDesc: desc };
       } catch { return l; }
     }));
+
+    const txnId = savedExtId ?? savedTxnId ?? initialValues?.externalTransactionId ?? initialValues?.transactionId;
+
+    // Build a record and delegate to the same function used by search results,
+    // but for multi-line we generate the PDF directly using the same layout.
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const pageW = doc.internal.pageSize.getWidth();
     const fmt = (v: any) => v != null && v !== '' ? String(v) : '—';
     const fmtNum = (v: any) => v != null ? Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 }) : '—';
+    const fmtAmt = (v: number) => Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const fmtDate = (v: any) => {
       if (!v) return '—';
       try { return new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
       catch { return String(v); }
     };
 
-    // Header bar
+    // Header bar — identical to search results voucher
     doc.setFillColor(191, 70, 0);
     doc.rect(0, 0, pageW, 18, 'F');
     doc.setTextColor(255, 255, 255);
@@ -776,12 +782,12 @@ const ExternalTxnForm: React.FC<{
 
     let y = 26;
 
-    // Transaction ID if saved
-    if (savedExtId) {
+    // Transaction ID (always show when available)
+    if (txnId) {
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(10);
       doc.setTextColor(191, 70, 0);
-      doc.text(`Transaction ID: ${savedExtId}`, 14, y);
+      doc.text(`Transaction ID: ${txnId}`, 14, y);
       doc.setTextColor(0, 0, 0);
       y += 8;
     }
@@ -794,7 +800,7 @@ const ExternalTxnForm: React.FC<{
     autoTable(doc, {
       startY: y,
       body: [
-        ['Business Unit', fmt(values.businessUnitName), 'Company Code', fmt(derivedCompany)],
+        ['Business Unit', fmt(values.businessUnitName), 'Legal Entity', fmt(initialValues?.legalEntityName || derivedCompany)],
         ['Bank Account', fmt(values.bankAccountName), 'Currency', fmt(values.currencyCode)],
         ['Cash / Asset Account', fmt(values.assetAccountCombination), 'Direction', values.transactionDirection === 'DR' ? 'Money In (DR)' : 'Money Out (CR)'],
       ],
@@ -803,7 +809,6 @@ const ExternalTxnForm: React.FC<{
       alternateRowStyles: { fillColor: [247, 247, 247] },
       margin: { left: 14, right: 14 },
     });
-
     y = (doc as any).lastAutoTable.finalY + 6;
 
     // Section 2: Transaction Details
@@ -827,7 +832,6 @@ const ExternalTxnForm: React.FC<{
       alternateRowStyles: { fillColor: [247, 247, 247] },
       margin: { left: 14, right: 14 },
     });
-
     y = (doc as any).lastAutoTable.finalY + 6;
 
     // Section 3: Adhoc Payee (if applicable)
@@ -839,9 +843,7 @@ const ExternalTxnForm: React.FC<{
       autoTable(doc, {
         startY: y,
         body: [
-          ['Payee Name', fmt(values.payeeName), 'Payee Type', fmt(values.payeeType)],
-          ['Payee Account', fmt(values.payeeAccountNumber), 'Bank Name', fmt(values.payeeBankName)],
-          ['IBAN', fmt(values.payeeIban), '', ''],
+          ['Payee Name', fmt(values.payeeName), 'Check #', fmt(values.checkNumber)],
         ],
         styles: { fontSize: 9, cellPadding: 2 },
         columnStyles: { 0: { fontStyle: 'bold', cellWidth: 42 }, 2: { fontStyle: 'bold', cellWidth: 42 } },
@@ -857,59 +859,35 @@ const ExternalTxnForm: React.FC<{
     doc.text('Transaction Lines', 14, y);
     y += 2;
 
-    const lineRows = resolvedLines.map((l, i) => [
-      i + 1,
-      l.offsetAccount || '—',
-      l.offsetDesc || '—',
-      l.description || '—',
-      l.amount != null ? fmtNum(Math.abs(l.amount)) : '—',
-    ]);
     const totalAmt = resolvedLines.reduce((s, l) => s + Math.abs(l.amount ?? 0), 0);
-    lineRows.push(['', '', '', 'Total', fmtNum(totalAmt)] as any);
-
     autoTable(doc, {
       startY: y,
       head: [['#', 'Offset Account', 'Account Desc', 'Description', 'Amount']],
-      body: lineRows,
+      body: resolvedLines.map((l, i) => [
+        i + 1,
+        l.offsetAccount || '—',
+        l.offsetDesc || '—',
+        l.description || '—',
+        fmtAmt(Math.abs(l.amount ?? 0)),
+      ]),
+      foot: [['', '', '', 'Total', fmtAmt(totalAmt)]],
       styles: { fontSize: 8.5, cellPadding: 2 },
       headStyles: { fillColor: [58, 58, 58] },
+      footStyles: { fillColor: [240, 240, 240], fontStyle: 'bold' },
       alternateRowStyles: { fillColor: [247, 247, 247] },
-      columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 50 }, 4: { halign: 'right', cellWidth: 28 } },
+      columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 55 }, 4: { halign: 'right', cellWidth: 28 } },
       margin: { left: 14, right: 14 },
     });
 
-    // Footer with signature lines
+    // Footer — same as search results voucher (page number only, no signature block)
     const pageCount = (doc as any).internal.getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) {
       doc.setPage(i);
-
-      // Signature block — name above line, role label below
-      const sigY = 272;
-      const col1 = 14, col2 = 80, col3 = 146;
-      const lineLen = 55;
-      // logged user name above the Created By line
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-      doc.setTextColor(40);
-      doc.text(loggedUser, col1, sigY - 3);
-      doc.setDrawColor(180);
-      doc.setLineWidth(0.3);
-      doc.line(col1, sigY, col1 + lineLen, sigY);
-      doc.line(col2, sigY, col2 + lineLen, sigY);
-      doc.line(col3, sigY, col3 + lineLen, sigY);
-      // role labels below lines
-      doc.setFontSize(7.5);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(80);
-      doc.text('Created By', col1, sigY + 4);
-      doc.text('Approved By', col2, sigY + 4);
-      doc.text('Received By', col3, sigY + 4);
-
       doc.setFontSize(8);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(150);
-      doc.text(`Page ${i} of ${pageCount}`, pageW / 2, 291, { align: 'center' });
-      doc.text('Generated by ReactERP', 14, 291);
+      doc.text(`Page ${i} of ${pageCount}`, pageW / 2, 290, { align: 'center' });
+      doc.text('Generated by ReactERP', 14, 290);
       doc.setTextColor(0);
     }
 
