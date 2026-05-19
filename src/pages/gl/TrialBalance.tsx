@@ -3144,26 +3144,78 @@ const TrialBalance: React.FC = () => {
     const totalGain = activeComboRows.filter(r => r.isGain && r.revalAmt !== 0).reduce((s, r) => s + r.revalAmt, 0);
     const totalLoss = activeComboRows.filter(r => !r.isGain).reduce((s, r) => s + Math.abs(r.revalAmt), 0);
 
+    // Extract sub-account from combination string (segment 5, index 4), skip all-zero
+    const extractSubAcct = (comboStr: string): string => {
+      const seg5 = (comboStr || '').split('-')[4] || '';
+      return /^0+$/.test(seg5) ? '' : seg5;
+    };
+
     // Build journal preview — one line pair per active combination
     const buildPreview = () => {
       const rawPeriod = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '').replace(/\s*·.*$/, '').trim();
       const periodMonth = rawPeriod || tab.periodName;
       const lines: { lineNum: number; combo: string; subAccount: string; desc: string; comment: string; dr: number; cr: number }[] = [];
       let ln = 1;
+      const gainSubAcct = extractSubAcct(revalGainCombo);
+      const lossSubAcct = extractSubAcct(revalLossCombo);
       activeComboRows.forEach(r => {
         if (r.revalAmt === 0 || r.newRate === 0) return;
         const abs = Math.abs(r.revalAmt);
         const subAcctPart = r.subAccount ? ` - ${r.subAccount}` : '';
         const lineDesc = `${accountDesc}${subAcctPart} - Revaluation (${periodMonth})`;
         if (r.isGain) {
-          lines.push({ lineNum: ln++, combo: r.combo, subAccount: r.subAccount, desc: lineDesc, comment: '', dr: abs, cr: 0 });
-          lines.push({ lineNum: ln++, combo: revalGainCombo || '[Gain Account]', subAccount: '', desc: `Unrealized FX Gain - ${r.ccy} (${periodMonth})`, comment: '', dr: 0, cr: abs });
+          lines.push({ lineNum: ln++, combo: r.combo,                         subAccount: r.subAccount, desc: lineDesc,                                              comment: '', dr: abs, cr: 0 });
+          lines.push({ lineNum: ln++, combo: revalGainCombo || '[Gain Account]', subAccount: gainSubAcct, desc: `Unrealized FX Gain - ${r.ccy} (${periodMonth})`,    comment: '', dr: 0,   cr: abs });
         } else {
-          lines.push({ lineNum: ln++, combo: revalLossCombo || '[Loss Account]', subAccount: '', desc: `Unrealized FX Loss - ${r.ccy} (${periodMonth})`, comment: '', dr: abs, cr: 0 });
-          lines.push({ lineNum: ln++, combo: r.combo, subAccount: r.subAccount, desc: lineDesc, comment: '', dr: 0, cr: abs });
+          lines.push({ lineNum: ln++, combo: revalLossCombo || '[Loss Account]', subAccount: lossSubAcct, desc: `Unrealized FX Loss - ${r.ccy} (${periodMonth})`,    comment: '', dr: abs, cr: 0 });
+          lines.push({ lineNum: ln++, combo: r.combo,                         subAccount: r.subAccount, desc: lineDesc,                                              comment: '', dr: 0,   cr: abs });
         }
       });
       setRevalPreviewRows(lines);
+
+      // Auto-fetch sub-account descriptions and patch descriptions
+      const subAccts = [...new Set(lines.map(l => l.subAccount).filter(Boolean))];
+      if (subAccts.length === 0) return;
+      (async () => {
+        try {
+          const VS_BASE   = `${APEX_DB_CONFIG.baseUrl}/valuesets/getvalues`;
+          const STRUCT_URL = `${APEX_DB_CONFIG.baseUrl}/chartofaccounts/structuresegments`;
+          let vsCode = subAcctVsCode.current;
+          if (!vsCode) {
+            const sr = await fetch(STRUCT_URL);
+            if (sr.ok) {
+              const sd = await sr.json();
+              const seg = (sd.items || []).find((s: any) => {
+                const p = (s.prompt || s.segment_name || s.name || s.PROMPT || '').toLowerCase();
+                return p.includes('sub') && p.includes('account');
+              });
+              if (seg) { vsCode = seg.segment_code || seg.SEGMENT_CODE || ''; subAcctVsCode.current = vsCode; }
+            }
+          }
+          if (!vsCode) return;
+          const vr = await fetch(`${VS_BASE}/${vsCode}`);
+          if (!vr.ok) return;
+          const vd = await vr.json();
+          const freshMap: Record<string, string> = { ...subAcctDescMap };
+          (vd.items || []).forEach((item: any) => {
+            const c = item.value || item.Value || item.VALUE || '';
+            const d = item.description || item.Description || item.DESCRIPTION || item.meaning || '';
+            if (c) freshMap[c] = d;
+          });
+          setSubAcctDescMap(freshMap);
+          // Patch description: replace "- {code} - Revaluation" with "- {code} - {desc} - Revaluation"
+          setRevalPreviewRows(prev => prev.map(r => {
+            if (!r.subAccount) return r;
+            const d = freshMap[r.subAccount];
+            if (!d) return r;
+            const updated = r.desc.replace(
+              ` - ${r.subAccount} - `,
+              ` - ${r.subAccount} - ${d} - `
+            );
+            return updated !== r.desc ? { ...r, desc: updated } : r;
+          }));
+        } catch { /* silent — user can still use the icon */ }
+      })();
     };
 
     const updatePreviewRow = (lineNum: number, field: string, value: string) => {
