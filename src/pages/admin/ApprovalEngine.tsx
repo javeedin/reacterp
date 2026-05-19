@@ -27,8 +27,8 @@ import {
   Divider,
   Popconfirm,
   Avatar,
-  notification as antdNotification,
-  message as antdMessage,
+  notification,
+  message,
   Breadcrumb,
   Badge,
   Radio,
@@ -59,12 +59,14 @@ import {
   ArrowDownOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import {
+import type {
   ApprovalUser,
   ApprovalRule,
   ApprovalRequest,
   ApprovalHistoryEntry,
   RuleApprover,
+} from '../../services/approvals.service';
+import {
   APPROVAL_MODULES,
   TRANSACTION_TYPES,
   getApprovalUsers,
@@ -227,7 +229,7 @@ const ApprovalEngine: React.FC = () => {
     try {
       setApprovers(await getApprovalUsers());
     } catch {
-      antdMessage.error('Failed to load approvers');
+      message.error('Failed to load approvers');
     } finally {
       setApproversLoading(false);
     }
@@ -238,7 +240,7 @@ const ApprovalEngine: React.FC = () => {
     try {
       setRules(await getApprovalRules());
     } catch {
-      antdMessage.error('Failed to load approval rules');
+      message.error('Failed to load approval rules');
     } finally {
       setRulesLoading(false);
     }
@@ -295,16 +297,16 @@ const ApprovalEngine: React.FC = () => {
       };
       if (editingApprover) {
         await updateApprovalUser(editingApprover.userId, payload);
-        antdNotification.success({ message: 'Approver updated successfully' });
+        notification.success({ message: 'Approver updated successfully' });
       } else {
         await createApprovalUser(payload);
-        antdNotification.success({ message: 'Approver created successfully' });
+        notification.success({ message: 'Approver created successfully' });
       }
       setApproverModalOpen(false);
       loadApprovers();
     } catch (err: unknown) {
       if (err && typeof err === 'object' && 'errorFields' in err) return; // validation error
-      antdMessage.error('Failed to save approver');
+      message.error('Failed to save approver');
     } finally {
       setApproverSaving(false);
     }
@@ -313,10 +315,10 @@ const ApprovalEngine: React.FC = () => {
   const handleApproverDelete = async (userId: number) => {
     try {
       await deleteApprovalUser(userId);
-      antdNotification.success({ message: 'Approver deleted' });
+      notification.success({ message: 'Approver deleted' });
       loadApprovers();
     } catch {
-      antdMessage.error('Failed to delete approver');
+      message.error('Failed to delete approver');
     }
   };
 
@@ -377,16 +379,16 @@ const ApprovalEngine: React.FC = () => {
       };
       if (editingRule) {
         await updateApprovalRule(editingRule.ruleId, payload);
-        antdNotification.success({ message: 'Rule updated successfully' });
+        notification.success({ message: 'Rule updated successfully' });
       } else {
         await createApprovalRule(payload);
-        antdNotification.success({ message: 'Rule created successfully' });
+        notification.success({ message: 'Rule created successfully' });
       }
       setRuleModalOpen(false);
       loadRules();
     } catch (err: unknown) {
       if (err && typeof err === 'object' && 'errorFields' in err) return;
-      antdMessage.error('Failed to save approval rule');
+      message.error('Failed to save approval rule');
     } finally {
       setRuleSaving(false);
     }
@@ -395,10 +397,10 @@ const ApprovalEngine: React.FC = () => {
   const handleRuleDelete = async (ruleId: number) => {
     try {
       await deleteApprovalRule(ruleId);
-      antdNotification.success({ message: 'Rule deleted' });
+      notification.success({ message: 'Rule deleted' });
       loadRules();
     } catch {
-      antdMessage.error('Failed to delete approval rule');
+      message.error('Failed to delete approval rule');
     }
   };
 
@@ -408,7 +410,7 @@ const ApprovalEngine: React.FC = () => {
     const user = approvers.find((a) => a.userId === userId);
     if (!user) return;
     if (selectedRuleApprovers.find((a) => a.userId === userId)) {
-      antdMessage.warning('This approver is already in the list');
+      message.warning('This approver is already in the list');
       return;
     }
     const nextSeq = selectedRuleApprovers.length + 1;
@@ -449,7 +451,7 @@ const ApprovalEngine: React.FC = () => {
       const entries = await getApprovalHistory(request.requestId);
       setHistoryEntries(entries);
     } catch {
-      antdMessage.error('Failed to load approval history');
+      message.error('Failed to load approval history');
     } finally {
       setHistoryLoading(false);
     }
@@ -459,7 +461,7 @@ const ApprovalEngine: React.FC = () => {
 
   const handleSendTest = async () => {
     if (!testUser) {
-      antdMessage.warning('Please select an approver first');
+      message.warning('Please select an approver first');
       return;
     }
     setTestSending(true);
