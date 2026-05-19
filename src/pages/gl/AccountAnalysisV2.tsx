@@ -1960,7 +1960,7 @@ const AAPanel: React.FC = () => {
       const entHdrs  = showEntered ? ['Ent Dr', 'Ent Cr', 'Ent Balance'] : [];
       const accHdrs  = [`Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Balance (${functionalCcy})`];
       const hdrs     = [...descHdrs, ...entHdrs, ...accHdrs, 'JE Header ID'];
-      const widths   = [42, 12, 14, 24, 14, 16, 10, ...(showEntered ? [16, 16, 16] : []), 16, 16, 16, 14];
+      const widths   = [42, 12, 14, 24, 14, 16, 10, ...(showEntered ? [18, 18, 20] : []), 18, 18, 20, 14];
       writeDetailColNames(hdrs, widths);
       const dataStartRow = ri;
       tableData.forEach((r, idx) => writeDetailRow(r as any, idx, false, true));
@@ -1979,7 +1979,7 @@ const AAPanel: React.FC = () => {
       const entHdrs  = showEntered ? ['Ent Dr', 'Ent Cr', 'Ent Balance'] : [];
       const accHdrs  = [`Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Balance (${functionalCcy})`];
       const hdrs     = [...descHdrs, ...entHdrs, ...accHdrs];
-      const widths   = [32, 12, 14, 28, 14, 16, 10, ...(showEntered ? [16, 16, 16] : []), 16, 16, 16];
+      const widths   = [32, 12, 14, 28, 14, 16, 10, ...(showEntered ? [18, 18, 20] : []), 18, 18, 20];
       writeDetailColNames(hdrs, widths);
 
       comboBreaks.forEach(brk => {
@@ -2013,7 +2013,6 @@ const AAPanel: React.FC = () => {
         // Compute balances locally — do not rely on _accRun/_entRun being populated
         let xlAccRun = brk.openingRow ? safeN(brk.openingRow.accountedDr) - safeN(brk.openingRow.accountedCr) : 0;
         let xlEntRun = brk.openingRow ? safeN(brk.openingRow.enteredDr)   - safeN(brk.openingRow.enteredCr)   : 0;
-        console.log(`[XL] combo=${brk.combo} openingRow=`, brk.openingRow, `xlAccRun_init=${xlAccRun}`);
         brkData.forEach((r: any, idx: number) => {
           let rowAccBal: number;
           let rowEntBal: number;
@@ -2034,7 +2033,6 @@ const AAPanel: React.FC = () => {
             rowAccBal = xlAccRun;
             rowEntBal = xlEntRun;
           }
-          console.log(`[XL] row[${idx}] type=${r.isTotals?'TOT':r.isOpeningBalance?'OPEN':r.isClosingBalance?'CLOSE':'LINE'} accDr=${r.accountedDr} accCr=${r.accountedCr} rowAccBal=${rowAccBal} entDr=${r.enteredDr} rowEntBal=${rowEntBal}`);
           writeDetailRow(r, idx, false, false, rowAccBal, rowEntBal);
         });
 
