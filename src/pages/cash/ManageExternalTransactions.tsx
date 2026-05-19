@@ -1542,7 +1542,7 @@ const ExternalTxnForm: React.FC<{
                             </Text>
                           : <Text type="secondary" style={{ fontSize: 10 }}>No rate — click ↻ to fetch</Text>
                       }
-                      {watchedCurrency && watchedCurrency !== 'AED' && !isEdit && !saved && (
+                      {watchedCurrency && watchedCurrency !== 'AED' && (!isEdit || editingEnabled) && !saved && (
                         <Tooltip title="Refresh Corporate rate for the conversion date">
                           <Button
                             type="text" size="small" loading={bmsRateLoading}
