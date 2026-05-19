@@ -1895,16 +1895,17 @@ const AAPanel: React.FC = () => {
         : r.isTotals ? totFill
         : idx % 2 === 1 ? altFill : undefined;
 
+      const safeN = (v: any) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
       const accBal = r.isTotals
-        ? Number(r._accBal ?? 0)
+        ? safeN(r._accBal)
         : (r.isOpeningBalance || r.isClosingBalance)
-          ? Number(r.accountedDr ?? 0) - Number(r.accountedCr ?? 0)
-          : Number(r._accRun ?? 0);
+          ? safeN(r.accountedDr) - safeN(r.accountedCr)
+          : safeN(r._accRun);
       const entBal = r.isTotals
-        ? Number(r._entBal ?? 0)
+        ? safeN(r._entBal)
         : (r.isOpeningBalance || r.isClosingBalance)
-          ? Number(r.enteredDr ?? 0) - Number(r.enteredCr ?? 0)
-          : Number(r._entRun ?? 0);
+          ? safeN(r.enteredDr) - safeN(r.enteredCr)
+          : safeN(r._entRun);
 
       const vals: (string | number)[] = [
         ...(showAccount
@@ -1917,13 +1918,13 @@ const AAPanel: React.FC = () => {
         isSpec ? '' : (r.userJeCategoryName || ''),
         isSpec ? '' : (r.currencyCode || ''),
         ...(showEntered ? [
-          isSpec ? '' : Number(r.enteredDr  || 0),
-          isSpec ? '' : Number(r.enteredCr  || 0),
-          Number(entBal),
+          isSpec ? '' : safeN(r.enteredDr),
+          isSpec ? '' : safeN(r.enteredCr),
+          entBal,
         ] : []),
-        isSpec ? '' : Number(r.accountedDr || 0),
-        isSpec ? '' : Number(r.accountedCr || 0),
-        Number(accBal),
+        isSpec ? '' : safeN(r.accountedDr),
+        isSpec ? '' : safeN(r.accountedCr),
+        accBal,
         ...(showJeId ? [isSpec ? '' : (r.jeHeaderId || '')] : []),
       ];
       const descColCount = showAccount ? 9 : 7;
