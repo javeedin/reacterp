@@ -3621,9 +3621,11 @@ const RegisterDetail: React.FC<{
                   <Form.Item name="chargeAccountDesc" noStyle>
                     <Input placeholder="Auto-filled when Expense Type is selected" />
                   </Form.Item>
-                  <Button icon={<BankOutlined />} onClick={() => { setCoaTarget('add'); setCoaOpen(true); }}>
-                    Browse
-                  </Button>
+                  <Button icon={<BankOutlined />} onClick={() => {
+                    setCoaInitialValue(expenseForm.getFieldValue('chargeAccountDesc') || '');
+                    setCoaTarget('add');
+                    setCoaOpen(true);
+                  }}>Browse</Button>
                 </Space.Compact>
                 {addAcctDesc && (
                   <div style={{ marginTop: 4, fontSize: 11, color: '#1677ff', paddingLeft: 2 }}>
@@ -4873,32 +4875,35 @@ const RegisterDetail: React.FC<{
         initialValue={coaInitialValue}
         onCancel={() => { setCoaOpen(false); setCoaInitialValue(''); }}
         onSelect={(accountCode, segmentDetails) => {
-          const seg4Desc = Object.values(segmentDetails)[3]?.description || '';
+          const segs = Object.values(segmentDetails);
+          const seg4Desc = segs[3]?.description || '';
+          const seg5Desc = segs[4]?.description || '';
+          const acctLabel = seg5Desc ? `${seg4Desc}  |  ${seg5Desc}` : seg4Desc;
           setCoaInitialValue('');
           if (coaTarget === 'add') {
             expenseForm.setFieldsValue({ chargeAccountDesc: accountCode, chargeAccountCcid: null });
-            setAddAcctDesc(seg4Desc);
+            setAddAcctDesc(acctLabel);
           } else if (coaTarget === 'edit') {
             editTxnForm.setFieldsValue({ chargeAccountDesc: accountCode, chargeAccountCcid: null });
-            setEditAcctDesc(seg4Desc);
+            setEditAcctDesc(acctLabel);
           } else if (coaTarget === 'money') {
             moneyForm.setFieldsValue({ chargeAccountDesc: accountCode, chargeAccountCcid: null });
-            setMoneyAcctDesc(seg4Desc);
+            setMoneyAcctDesc(acctLabel);
             bankTxnForm.setFieldsValue({ offsetAccountCombination: accountCode });
           } else if (coaTarget === 'bankAsset') {
             bankTxnForm.setFieldsValue({ assetAccountCombination: accountCode });
-            setBankAssetDesc(seg4Desc);
+            setBankAssetDesc(acctLabel);
           } else if (coaTarget === 'bankOffset') {
             bankTxnForm.setFieldsValue({ offsetAccountCombination: accountCode });
-            setBankOffsetDesc(seg4Desc);
+            setBankOffsetDesc(acctLabel);
           } else if (coaTarget === 'refundCash') {
             moneyForm.setFieldsValue({ refundCashAccount: accountCode });
-            setRefundCashDesc(seg4Desc);
+            setRefundCashDesc(acctLabel);
           } else if (coaTarget === 'multiLine' && coaMultiLineKey) {
-            updateLine(coaMultiLineKey, { chargeAccountDesc: accountCode, chargeAccountCcid: null, acctDesc: seg4Desc });
+            updateLine(coaMultiLineKey, { chargeAccountDesc: accountCode, chargeAccountCcid: null, acctDesc: acctLabel });
             setCoaMultiLineKey(null);
           } else if (coaTarget === 'convertLine' && coaConvertLineKey) {
-            updateConvertLine(coaConvertLineKey, { chargeAccountDesc: accountCode, chargeAccountCcid: null, acctDesc: seg4Desc });
+            updateConvertLine(coaConvertLineKey, { chargeAccountDesc: accountCode, chargeAccountCcid: null, acctDesc: acctLabel });
             setCoaConvertLineKey(null);
           } else if (coaTarget === 'newDist') {
             newDistForm.setFieldsValue({ glAccountDesc: accountCode });
