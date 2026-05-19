@@ -2027,7 +2027,13 @@ const AAPanel: React.FC = () => {
     const numW   = showEntered ? 22 : 20;   // each numeric column (Dr/Cr) width
     const balW   = showEntered ? 24 : 22;   // running balance column (slightly wider)
 
+    // Full account combination from data (e.g. "01-00-00-1240100-0000-000-00-000-000")
+    const fullCombination: string =
+      filteredData.find(r => r.concatenatedSegments && !r.isOpeningBalance && !r.isClosingBalance && !(r as any).isTotals)
+        ?.concatenatedSegments || account;
+
     // Helper: draw the standard page header (title block) at top of each page
+    // comboLabel/comboDesc are used in combo-break mode only (per-page sub-title)
     const drawPageHeader = (comboLabel?: string, comboDesc?: string) => {
       doc.setTextColor(0, 0, 0);
       doc.setFontSize(13); doc.setFont('helvetica', 'bold');
@@ -2035,14 +2041,18 @@ const AAPanel: React.FC = () => {
       doc.setFontSize(8); doc.setFont('helvetica', 'normal');
       doc.text([ledger, periodLabel].filter(Boolean).join('   |   '), pageW / 2, 16, { align: 'center' });
       let y = 20;
-      if (account) {
+      // Account description (bold) + full combination below it
+      if (accountDesc) {
         doc.setFontSize(8.5); doc.setFont('helvetica', 'bold');
-        doc.text(accountDesc || account, pageW / 2, y, { align: 'center' });
-        y += 4.5;
-        doc.setFontSize(7.5); doc.setFont('helvetica', 'normal');
-        doc.text(account, pageW / 2, y, { align: 'center' });
+        doc.text(accountDesc, pageW / 2, y, { align: 'center' });
         y += 4.5;
       }
+      if (fullCombination) {
+        doc.setFontSize(7.5); doc.setFont('helvetica', 'normal');
+        doc.text(fullCombination, pageW / 2, y, { align: 'center' });
+        y += 5;
+      }
+      // Per-combination sub-title in combo-break mode
       if (comboLabel) {
         doc.setFontSize(8); doc.setFont('helvetica', 'bold');
         const label = comboDesc ? `${comboLabel}   –   ${comboDesc}` : comboLabel;
