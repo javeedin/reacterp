@@ -2010,13 +2010,25 @@ const AAPanel: React.FC = () => {
 
     // Title block — all black
     doc.setTextColor(0, 0, 0);
-    doc.setFontSize(11);
+    doc.setFontSize(13);
     doc.setFont('helvetica', 'bold');
-    doc.text('Account Analysis', pageW / 2, 12, { align: 'center' });
+    doc.text('Account Analysis', pageW / 2, 11, { align: 'center' });
+
+    // Ledger | Period line
     doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
-    const subtitle = [ledger, periodLabel, account ? `Acct: ${account}` : ''].filter(Boolean).join('   |   ');
-    doc.text(subtitle, pageW / 2, 17, { align: 'center' });
+    const ledgerLine = [ledger, periodLabel].filter(Boolean).join('   |   ');
+    doc.text(ledgerLine, pageW / 2, 16, { align: 'center' });
+
+    // Account combination + description on its own line (bold, slightly larger)
+    let titleY = 20;
+    if (account) {
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      const acctLine = accountDesc ? `${account}   –   ${accountDesc}` : account;
+      doc.text(acctLine, pageW / 2, titleY, { align: 'center' });
+      titleY += 5;
+    }
 
     const baseStyles: any = { fontSize: 6.5, cellPadding: 1.2, overflow: 'linebreak', textColor: [0, 0, 0] };
     const headStyles: any = { fillColor: [26, 95, 204], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 6.5 };
@@ -2038,8 +2050,8 @@ const AAPanel: React.FC = () => {
     const balW   = showEntered ? 24 : 22;   // running balance column (slightly wider)
 
     if (isComboBreak) {
-      // Fixed columns: Batch(24) Source(15) Ccy(8) = 47
-      const fixedW   = 24 + 15 + 8;
+      // Fixed columns: Batch(20) Source(14) Ccy(8) = 42  (narrowed to give more to line desc)
+      const fixedW   = 20 + 14 + 8;
       const numCols  = showEntered ? 6 : 3;  // Ent Dr+Cr+Bal + Acc Dr+Cr+Bal  OR  Acc Dr+Cr+Bal
       const numTotal = numCols * numW + (balW - numW); // last col wider by (balW-numW)
       const lineDescW = usableW - fixedW - numTotal;
@@ -2048,7 +2060,7 @@ const AAPanel: React.FC = () => {
         ? ['Line Description', 'Batch', 'Source', 'Ccy', 'Ent Dr', 'Ent Cr', 'Ent Bal', `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`]
         : ['Line Description', 'Batch', 'Source', 'Ccy', `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`];
 
-      let startY = 22;
+      let startY = titleY;
       comboBreaks.forEach((brk, bi) => {
         if (bi > 0) startY += 4;
         const comboLabel = appliedGroupBy === 'currencyCode' && brk.combo.includes('||')
@@ -2088,7 +2100,7 @@ const AAPanel: React.FC = () => {
         const lastIdx = headers.length - 1;
         const colStyles: any = {
           0: { cellWidth: lineDescW, overflow: 'linebreak' },
-          1: { cellWidth: 24 }, 2: { cellWidth: 15 }, 3: { cellWidth: 8 },
+          1: { cellWidth: 20 }, 2: { cellWidth: 14 }, 3: { cellWidth: 8 },
         };
         for (let i = 4; i <= lastIdx; i++) {
           colStyles[i] = { halign: 'right', cellWidth: i === lastIdx ? balW : numW };
@@ -2126,9 +2138,9 @@ const AAPanel: React.FC = () => {
       };
       const pdfRows = [...flatRows, totRow];
 
-      // Fixed columns: Account(42) LineDesc(auto) Batch(24) Source(15) Ccy(8)
-      const acctW   = 42;
-      const fixedW  = acctW + 24 + 15 + 8;
+      // Fixed columns: Account(38) LineDesc(auto) Batch(20) Source(14) Ccy(8)
+      const acctW   = 38;
+      const fixedW  = acctW + 20 + 14 + 8;
       const numCols = showEntered ? 6 : 3;
       const numTotal = numCols * numW + (balW - numW);
       const lineDescW = usableW - fixedW - numTotal;
@@ -2154,7 +2166,7 @@ const AAPanel: React.FC = () => {
       const colStyles: any = {
         0: { cellWidth: acctW },
         1: { cellWidth: lineDescW, overflow: 'linebreak' },
-        2: { cellWidth: 24 }, 3: { cellWidth: 15 }, 4: { cellWidth: 8 },
+        2: { cellWidth: 20 }, 3: { cellWidth: 14 }, 4: { cellWidth: 8 },
       };
       for (let i = 5; i <= lastIdx; i++) {
         colStyles[i] = { halign: 'right', cellWidth: i === lastIdx ? balW : numW };
@@ -2162,7 +2174,7 @@ const AAPanel: React.FC = () => {
       }
 
       autoTable(doc, {
-        startY: 22, head: [headers], body, theme: 'grid',
+        startY: titleY, head: [headers], body, theme: 'grid',
         styles: baseStyles, headStyles, columnStyles: colStyles,
         didParseCell: (data) => applyRowStyle(data, pdfRows),
         margin: { left: margin, right: margin },
