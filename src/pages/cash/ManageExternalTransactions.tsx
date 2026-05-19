@@ -950,8 +950,9 @@ const ExternalTxnForm: React.FC<{
 
     setSaving(true);
 
-    if (isEdit) {
-      // Edit: update the single transaction using first line values
+    const effectiveExtId = initialValues?.externalTransactionId ?? savedExtId ?? savedTxnId ?? null;
+    if (isEdit || (saved && effectiveExtId)) {
+      // Edit: update the transaction
       const line = extTxnLines[0];
       try {
         const res = await fetch(`${APEX_BASE}/cash/externaltransactions`, {
@@ -961,7 +962,8 @@ const ExternalTxnForm: React.FC<{
         const data = await res.json();
         if (data.status === 'success') {
           message.success('Transaction updated.');
-          onSave();
+          setEditingEnabled(false);
+          if (isEdit) onSave();
         } else {
           message.error(data.message || 'Update failed.');
         }
@@ -1371,7 +1373,7 @@ const ExternalTxnForm: React.FC<{
               <div className="ext-lbl">Currency</div>
               <div className="ext-val">
                 <Form.Item name="currencyCode">
-                  <Select variant="borderless" placeholder="Auto" allowClear disabled={(isEdit && !editingEnabled) || !bankSelected || saved}>
+                  <Select variant="borderless" placeholder="Auto" allowClear disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)}>
                     {['AED', 'USD', 'EUR', 'GBP', 'SAR', 'QAR', 'KWD', 'BHD', 'OMR'].map(c => (
                       <Option key={c} value={c}>{c}</Option>
                     ))}
@@ -1387,7 +1389,7 @@ const ExternalTxnForm: React.FC<{
                 <div style={{ display: 'flex', width: '100%', gap: 0 }}>
                   <Form.Item name="assetAccountCombination" noStyle>
                     <Input
-                      readOnly disabled={(isEdit && !editingEnabled) || saved} variant="borderless"
+                      readOnly disabled={(isEdit && !editingEnabled) || (saved && !editingEnabled)} variant="borderless"
                       placeholder={isEdit ? '—' : 'Auto-populated from bank account'}
                       style={{ fontFamily: 'monospace', fontSize: 12, flex: 1 }}
                     />
@@ -1413,7 +1415,7 @@ const ExternalTxnForm: React.FC<{
                           : l
                       ));
                     }}
-                    disabled={(isEdit && !editingEnabled) || !bankSelected || isAdhocPayment || saved}
+                    disabled={(isEdit && !editingEnabled) || !bankSelected || isAdhocPayment || (saved && !editingEnabled)}
                     style={{ background: txnDirection === 'DR' ? '#e6f4ff' : '#fff1f0', opacity: isAdhocPayment ? 0.7 : 1 }}
                     className={`direction-segmented direction-${txnDirection.toLowerCase()}`}
                   />
@@ -1431,7 +1433,7 @@ const ExternalTxnForm: React.FC<{
               <div className="ext-lbl">Transaction Date</div>
               <div className="ext-val">
                 <Form.Item name="transactionDate" rules={[{ required: !isEdit, message: 'Required' }]}>
-                  <DatePicker format="D-MMM-YYYY" variant="borderless" disabled={(isEdit && !editingEnabled) || !bankSelected || saved} style={{ width: '100%' }}
+                  <DatePicker format="D-MMM-YYYY" variant="borderless" disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)} style={{ width: '100%' }}
                     onChange={(date: Dayjs | null) => {
                       if (!date || (isEdit && !editingEnabled) || saved) return;
                       // Always copy transaction date → conversion date
@@ -1443,7 +1445,7 @@ const ExternalTxnForm: React.FC<{
               <div className="ext-lbl">Value Date</div>
               <div className="ext-val">
                 <Form.Item name="valueDate">
-                  <DatePicker format="D-MMM-YYYY" variant="borderless" disabled={(isEdit && !editingEnabled) || !bankSelected || saved} style={{ width: '100%' }} />
+                  <DatePicker format="D-MMM-YYYY" variant="borderless" disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)} style={{ width: '100%' }} />
                 </Form.Item>
               </div>
             </div>
@@ -1463,7 +1465,7 @@ const ExternalTxnForm: React.FC<{
                     <Form.Item name="transactionId" style={{ marginBottom: 0, width: '100%' }}>
                       <InputNumber
                         variant="borderless" style={{ width: '100%' }} placeholder="Auto-assigned (leave blank)"
-                        disabled={!bankSelected || saved}
+                        disabled={!bankSelected || (saved && !editingEnabled)}
                       />
                     </Form.Item>
                   )
@@ -1472,7 +1474,7 @@ const ExternalTxnForm: React.FC<{
               <div className="ext-lbl">Cleared Date</div>
               <div className="ext-val">
                 <Form.Item name="clearedDate">
-                  <DatePicker format="D-MMM-YYYY" variant="borderless" disabled={(isEdit && !editingEnabled) || !bankSelected || saved} style={{ width: '100%' }} />
+                  <DatePicker format="D-MMM-YYYY" variant="borderless" disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)} style={{ width: '100%' }} />
                 </Form.Item>
               </div>
             </div>
@@ -1482,7 +1484,7 @@ const ExternalTxnForm: React.FC<{
               <div className="ext-lbl">Transaction Type</div>
               <div className="ext-val">
                 <Form.Item name="transactionType" initialValue="External Transaction" rules={[{ required: true, message: 'Required' }]}>
-                  <Select variant="borderless" placeholder="Select type" disabled={(isEdit && !editingEnabled) || !bankSelected || saved}
+                  <Select variant="borderless" placeholder="Select type" disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)}
                     onChange={(val) => {
                       if (val === 'Adhoc Payment' && extTxnLines.length > 1) {
                         Modal.confirm({
@@ -1506,7 +1508,7 @@ const ExternalTxnForm: React.FC<{
               <div className="ext-lbl">Reference</div>
               <div className="ext-val">
                 <Form.Item name="referenceText">
-                  <Input variant="borderless" placeholder="e.g. STMT-REF-001" disabled={(isEdit && !editingEnabled) || !bankSelected || saved} />
+                  <Input variant="borderless" placeholder="e.g. STMT-REF-001" disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)} />
                 </Form.Item>
               </div>
             </div>
@@ -1516,7 +1518,7 @@ const ExternalTxnForm: React.FC<{
               <div className="ext-lbl">Payment Method</div>
               <div className="ext-val">
                 <Form.Item name="paymentMethod" rules={[{ required: true, message: 'Required' }]}>
-                  <Select variant="borderless" placeholder="Select method" allowClear disabled={(isEdit && !editingEnabled) || !bankSelected || saved}>
+                  <Select variant="borderless" placeholder="Select method" allowClear disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)}>
                     {['CHECK', 'EFT', 'WIRE', 'CASH', 'MISC'].map(m => <Option key={m} value={m}>{m}</Option>)}
                   </Select>
                 </Form.Item>
@@ -1530,7 +1532,7 @@ const ExternalTxnForm: React.FC<{
                 >
                   <Select variant="borderless"
                     placeholder={isForeignCurrency ? 'Required' : 'Optional'}
-                    allowClear disabled={(isEdit && !editingEnabled) || !bankSelected || saved}
+                    allowClear disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)}
                     onChange={(val: string | undefined) => {
                       if (val === 'Corporate') {
                         const convDate = form.getFieldValue('bankConversionDate') as Dayjs | undefined;
@@ -1557,13 +1559,13 @@ const ExternalTxnForm: React.FC<{
               <div className="ext-lbl">Paper Doc #</div>
               <div className="ext-val">
                 <Form.Item name="paperDocumentNumber">
-                  <Input variant="borderless" placeholder="CHQ-00123" disabled={(isEdit && !editingEnabled) || !bankSelected || saved} />
+                  <Input variant="borderless" placeholder="CHQ-00123" disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)} />
                 </Form.Item>
               </div>
               <div className="ext-lbl">Conv. Date</div>
               <div className="ext-val">
                 <Form.Item name="bankConversionDate">
-                  <DatePicker format="D-MMM-YYYY" variant="borderless" disabled={(isEdit && !editingEnabled) || !bankSelected || saved} style={{ width: '100%' }} />
+                  <DatePicker format="D-MMM-YYYY" variant="borderless" disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)} style={{ width: '100%' }} />
                 </Form.Item>
               </div>
             </div>
@@ -1573,7 +1575,7 @@ const ExternalTxnForm: React.FC<{
               <div className="ext-lbl">Payment Document</div>
               <div className="ext-val">
                 <Form.Item name="paymentDocument" rules={[{ required: true, message: 'Required' }]}>
-                  <Input variant="borderless" placeholder="e.g. Cheque Book Name" disabled={(isEdit && !editingEnabled) || !bankSelected || saved} />
+                  <Input variant="borderless" placeholder="e.g. Cheque Book Name" disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)} />
                 </Form.Item>
               </div>
               <div className="ext-lbl" style={{ fontFamily: 'monospace', fontSize: 11 }}>
@@ -1619,7 +1621,7 @@ const ExternalTxnForm: React.FC<{
                   <InputNumber
                     variant="borderless" precision={8} min={0}
                     placeholder="e.g. 3.6725"
-                    disabled={(isEdit && !editingEnabled) || !bankSelected || saved}
+                    disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)}
                     style={{ width: '100%' }}
                     onChange={v => {
                       if (v && v > 0) setInverseRateVal(Math.round((1 / v) * 100000000) / 100000000);
@@ -1641,7 +1643,7 @@ const ExternalTxnForm: React.FC<{
                 <InputNumber
                   variant="borderless" precision={8} min={0}
                   placeholder="e.g. 0.2724"
-                  disabled={(isEdit && !editingEnabled) || !bankSelected || saved}
+                  disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)}
                   value={inverseRateVal}
                   style={{ width: '100%' }}
                   onChange={v => {
@@ -1668,7 +1670,7 @@ const ExternalTxnForm: React.FC<{
                   <div style={{ display: 'flex', width: '100%', gap: 4, alignItems: 'center' }}>
                     <Form.Item name="payeeId" rules={[{ required: true, message: 'Select a payee' }]} style={{ flex: 1, marginBottom: 0 }}>
                       <Select showSearch placeholder="Select payee..." variant="borderless"
-                        disabled={(isEdit && !editingEnabled) || !bankSelected || saved}
+                        disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)}
                         optionFilterProp="label" options={payeeOptions}
                         onChange={(val: number) => {
                           const p = payeeOptions.find(o => o.value === val);
@@ -1741,7 +1743,7 @@ const ExternalTxnForm: React.FC<{
                         size="small"
                         value={lineDistSets[idx] || ''}
                         placeholder="Search distribution set…"
-                        disabled={(isEdit && !editingEnabled) || !bankSelected || saved}
+                        disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)}
                         style={{ width: '100%' }}
                         options={distCombinations
                           .filter(d => {
@@ -1790,7 +1792,7 @@ const ExternalTxnForm: React.FC<{
                         {record.offsetAccount || <span style={{ color: REDWOOD.neutral300, fontFamily: 'sans-serif', fontSize: 11 }}>—</span>}
                       </div>
                       <Button size="small" icon={<SearchOutlined />}
-                        disabled={(isEdit && !editingEnabled) || !bankSelected || saved}
+                        disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)}
                         onClick={() => { setLineCoaIdx(idx); setLineCoaInitial(record.offsetAccount || ''); setLineCoaOpen(true); }} />
                     </Space.Compact>
                   ),
@@ -1808,7 +1810,7 @@ const ExternalTxnForm: React.FC<{
                   render: (_: any, record: ExtTxnLine, idx: number) => (
                     <Input.TextArea
                       size="small" value={record.description}
-                      disabled={(isEdit && !editingEnabled) || !bankSelected || saved}
+                      disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)}
                       placeholder="Optional"
                       autoSize={{ minRows: 1, maxRows: 5 }}
                       style={{ resize: 'none', fontSize: 12 }}
@@ -1824,7 +1826,7 @@ const ExternalTxnForm: React.FC<{
                     <InputNumber
                       size="small" style={{ width: '100%' }} precision={2}
                       value={record.amount}
-                      disabled={(isEdit && !editingEnabled) || !bankSelected || saved}
+                      disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)}
                       placeholder={txnDirection === 'DR' ? '+ve' : '-ve'}
                       onChange={(v) => {
                         if (v === null || v === undefined) { updateExtLine(idx, 'amount', v); return; }
@@ -2026,7 +2028,7 @@ const ExternalTxnForm: React.FC<{
           )}
         </Space>
         <Space size={8}>
-          {isEdit && !isLocked && !editingEnabled && (
+          {(isEdit ? (!isLocked && !editingEnabled) : (saved && !!(savedExtId ?? savedTxnId) && !editingEnabled)) && (
             <Button
               size="large"
               icon={<EditOutlined />}
@@ -2035,7 +2037,7 @@ const ExternalTxnForm: React.FC<{
               Edit
             </Button>
           )}
-          {isEdit && editingEnabled && (
+          {((isEdit && editingEnabled) || (!isEdit && saved && editingEnabled)) && (
             <Button
               size="large"
               type="primary"
@@ -2047,7 +2049,7 @@ const ExternalTxnForm: React.FC<{
               Save Changes
             </Button>
           )}
-          {isEdit && editingEnabled && (
+          {editingEnabled && (
             <Button size="large" onClick={() => setEditingEnabled(false)}>
               Cancel Edit
             </Button>
