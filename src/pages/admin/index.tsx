@@ -50,6 +50,14 @@ const adminCards: AdminCard[] = [
     path: '/admin/users',
   },
   {
+    key: 'approvals',
+    title: 'Approval Engine',
+    description: 'Configure approval workflows, manage approvers, set amount limits, and track approval history across all modules.',
+    icon: <SafetyOutlined />,
+    color: '#0572CE',
+    path: '/admin/approvals',
+  },
+  {
     key: 'settings',
     title: 'System Settings',
     description: 'Configure global system parameters, security policies, and application preferences.',

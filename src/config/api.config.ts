@@ -58,6 +58,11 @@ export const APEX_DB_CONFIG = {
     externalCashTransactions: 'cash/externaltransactions',
     // Revaluation Endpoints
     revaluation: 'gl/revaluation',
+    // Approval Engine
+    approvalUsers:    'approvals/users',
+    approvalRules:    'approvals/rules',
+    approvalRequests: 'approvals/requests',
+    approvalNotify:   'approvals/notify',
   },
 };
 
