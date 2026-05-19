@@ -2843,7 +2843,11 @@ const TrialBalance: React.FC = () => {
 
       // Step 2 — Write SLA
       updateStep(2, 'process');
-      const periodName = d.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '');
+      // Strip YTD/ReERP prefix AND ledger suffix ("· BUIMERC") from period name
+      const periodName = d.periodName
+        .replace(/^(?:ReERP|Dynamic|YTD):\s*/, '')
+        .replace(/\s*·.*$/, '')
+        .trim();
       // Safety: functionalCcy in DB might have been saved as a foreign currency (e.g. INR) from
       // an older code version. Exclude it if it matches one of the ccyRow foreign currencies.
       const foreignCcys = new Set(d.ccyRows.map((c: any) => c.currencyCode).filter(Boolean));
@@ -2879,21 +2883,25 @@ const TrialBalance: React.FC = () => {
           description:      `${d.accountDesc || d.account} Revaluation for ${periodName}`,
           createdBy,
         },
-        lines: d.lines.map((l: any, idx: number) => ({
-          lineNumber:         l.lineNum || idx + 1,
-          lineType:           l.drAmount > 0 ? 'DR' : 'CR',
-          accountingClass:    'Revaluation',
-          accountCombination: l.combo,
-          enteredDr:          l.drAmount || 0,
-          enteredCr:          l.crAmount || 0,
-          accountedDr:        l.drAmount || 0,
-          accountedCr:        l.crAmount || 0,
-          currencyCode:       currency,
-          exchangeRate:       1,
-          description:        `${d.accountDesc || d.account} Revaluation for ${periodName}`,
-          sourceLineId:       l.lineId || idx + 1,
-          sourceLineNumber:   l.lineNum || idx + 1,
-        })),
+        lines: d.lines.map((l: any, idx: number) => {
+          const dr = Math.round((l.drAmount || 0) * 100) / 100;
+          const cr = Math.round((l.crAmount || 0) * 100) / 100;
+          return {
+            lineNumber:         l.lineNum || idx + 1,
+            lineType:           dr > 0 ? 'DR' : 'CR',
+            accountingClass:    'Revaluation',
+            accountCombination: l.combo,
+            enteredDr:          dr,
+            enteredCr:          cr,
+            accountedDr:        dr,
+            accountedCr:        cr,
+            currencyCode:       currency,
+            exchangeRate:       1,
+            description:        `${d.accountDesc || d.account} Revaluation for ${periodName}`,
+            sourceLineId:       l.lineId || idx + 1,
+            sourceLineNumber:   l.lineNum || idx + 1,
+          };
+        }),
       };
 
       setAcctFlowLastCall({ url: `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.slaAccountingCreate}`, method: 'POST', body: slaPayload });
