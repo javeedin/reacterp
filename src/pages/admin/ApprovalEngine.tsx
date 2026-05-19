@@ -172,6 +172,42 @@ const approvalTypeColor: Record<string, string> = {
   ANY_ONE: 'orange',
 };
 
+// ─── Error Boundary ───────────────────────────────────────────────────────────
+
+class ApprovalErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: 32 }}>
+          <Alert
+            type="error"
+            showIcon
+            message="Approval Engine failed to render"
+            description={
+              <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                {this.state.error.message}
+                {'\n\n'}
+                {this.state.error.stack}
+              </pre>
+            }
+          />
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 const ApprovalEngine: React.FC = () => {
@@ -2018,4 +2054,10 @@ END;`;
   );
 };
 
-export default ApprovalEngine;
+const ApprovalEngineWithBoundary: React.FC = () => (
+  <ApprovalErrorBoundary>
+    <ApprovalEngine />
+  </ApprovalErrorBoundary>
+);
+
+export default ApprovalEngineWithBoundary;
