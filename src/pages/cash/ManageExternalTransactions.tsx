@@ -745,15 +745,28 @@ const ExternalTxnForm: React.FC<{
 
   const handlePrintPdf = async () => {
     const values = form.getFieldsValue();
-    // Resolve any missing offset account descriptions before building PDF
+
+    // Resolve offset account description + sub-account description
     const resolvedLines = await Promise.all(extTxnLines.map(async (l) => {
-      if (l.offsetDesc || !l.offsetAccount) return l;
+      if (!l.offsetAccount) return l;
       try {
         const res = await validateAccountCode(l.offsetAccount);
-        const desc = Object.values(res.segmentDetails)[3]?.description || '';
-        return { ...l, offsetDesc: desc };
+        const segs = Object.values(res.segmentDetails);
+        const acctDesc = segs[3]?.description || '';
+        const subDesc  = segs[4]?.description || '';
+        return { ...l, offsetDesc: acctDesc, offsetSubDesc: subDesc };
       } catch { return l; }
     }));
+
+    // Resolve cash/asset account description
+    let assetDesc = assetAcctDesc || '';
+    if (!assetDesc && values.assetAccountCombination) {
+      try {
+        const res = await validateAccountCode(values.assetAccountCombination);
+        const segs = Object.values(res.segmentDetails);
+        assetDesc = segs[3]?.description || '';
+      } catch { /* leave blank */ }
+    }
 
     const txnId = savedExtId ?? savedTxnId ?? initialValues?.externalTransactionId ?? initialValues?.transactionId;
 
@@ -802,6 +815,7 @@ const ExternalTxnForm: React.FC<{
         ['Business Unit', fmt(values.businessUnitName), 'Legal Entity', fmt(initialValues?.legalEntityName || derivedCompany)],
         ['Bank Account', fmt(values.bankAccountName), 'Currency', fmt(values.currencyCode)],
         ['Cash / Asset Account', fmt(values.assetAccountCombination), 'Direction', values.transactionDirection === 'DR' ? 'Money In (DR)' : 'Money Out (CR)'],
+        ...(assetDesc ? [['Account Description', assetDesc, '', '']] : []),
       ],
       styles: { fontSize: 9, cellPadding: 2 },
       columnStyles: { 0: { fontStyle: 'bold', cellWidth: 42 }, 2: { fontStyle: 'bold', cellWidth: 42 } },
@@ -861,20 +875,21 @@ const ExternalTxnForm: React.FC<{
     const totalAmt = resolvedLines.reduce((s, l) => s + Math.abs(l.amount ?? 0), 0);
     autoTable(doc, {
       startY: y,
-      head: [['#', 'Offset Account', 'Account Desc', 'Description', 'Amount']],
+      head: [['#', 'Offset Account', 'Account Desc', 'Sub-Account Desc', 'Description', 'Amount']],
       body: resolvedLines.map((l, i) => [
         i + 1,
         l.offsetAccount || '—',
-        l.offsetDesc || '—',
+        (l as any).offsetDesc || '—',
+        (l as any).offsetSubDesc || '—',
         l.description || '—',
         fmtAmt(Math.abs(l.amount ?? 0)),
       ]),
-      foot: [['', '', '', 'Total', fmtAmt(totalAmt)]],
-      styles: { fontSize: 8.5, cellPadding: 2, textColor: [0, 0, 0] },
+      foot: [['', '', '', '', 'Total', fmtAmt(totalAmt)]],
+      styles: { fontSize: 8, cellPadding: 2, textColor: [0, 0, 0] },
       headStyles: { fillColor: [58, 58, 58], textColor: [255, 255, 255] },
       footStyles: { fillColor: [255, 255, 255], fontStyle: 'bold', textColor: [0, 0, 0], halign: 'right' },
       alternateRowStyles: { fillColor: [247, 247, 247] },
-      columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 55 }, 4: { halign: 'right', cellWidth: 28 } },
+      columnStyles: { 0: { cellWidth: 8 }, 1: { cellWidth: 40 }, 5: { halign: 'right', cellWidth: 24 } },
       margin: { left: 14, right: 14 },
     });
 
@@ -3239,12 +3254,24 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   const [voucherModalOpen, setVoucherModalOpen] = useState(false);
 
   const generateVoucherPdf = async (r: ExternalTxnRecord) => {
-    // Resolve offset account description
+    // Resolve offset account description + sub-account description
     let offsetAcctDesc = '';
+    let offsetSubDesc = '';
     if (r.offsetAccountCombination) {
       try {
         const res = await validateAccountCode(r.offsetAccountCombination);
-        offsetAcctDesc = Object.values(res.segmentDetails)[3]?.description || '';
+        const segs = Object.values(res.segmentDetails);
+        offsetAcctDesc = segs[3]?.description || '';
+        offsetSubDesc  = segs[4]?.description || '';
+      } catch { /* leave blank */ }
+    }
+
+    // Resolve cash/asset account description
+    let assetDesc = '';
+    if (r.assetAccountCombination) {
+      try {
+        const res = await validateAccountCode(r.assetAccountCombination);
+        assetDesc = Object.values(res.segmentDetails)[3]?.description || '';
       } catch { /* leave blank */ }
     }
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -3288,6 +3315,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
         ['Business Unit', fmt(r.businessUnitName), 'Legal Entity', fmt(r.legalEntityName)],
         ['Bank Account', fmt(r.bankAccountName), 'Currency', fmt(r.currencyCode)],
         ['Cash / Asset Account', fmt(r.assetAccountCombination), 'Direction', r.transactionDirection === 'DR' ? 'Money In (DR)' : 'Money Out (CR)'],
+        ...(assetDesc ? [['Account Description', assetDesc, '', '']] : []),
       ],
       styles: { fontSize: 9, cellPadding: 2 },
       columnStyles: { 0: { fontStyle: 'bold', cellWidth: 42 }, 2: { fontStyle: 'bold', cellWidth: 42 } },
@@ -3348,14 +3376,14 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     const fmtAmt = (v: number) => Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     autoTable(doc, {
       startY: y,
-      head: [['#', 'Offset Account', 'Account Desc', 'Description', 'Amount']],
-      body: [[1, r.offsetAccountCombination || '—', offsetAcctDesc || '—', r.description || '—', fmtAmt(Math.abs(r.amount))]],
-      foot: [['', '', '', 'Total', fmtAmt(Math.abs(r.amount))]],
-      styles: { fontSize: 8.5, cellPadding: 2, textColor: [0, 0, 0] },
+      head: [['#', 'Offset Account', 'Account Desc', 'Sub-Account Desc', 'Description', 'Amount']],
+      body: [[1, r.offsetAccountCombination || '—', offsetAcctDesc || '—', offsetSubDesc || '—', r.description || '—', fmtAmt(Math.abs(r.amount))]],
+      foot: [['', '', '', '', 'Total', fmtAmt(Math.abs(r.amount))]],
+      styles: { fontSize: 8, cellPadding: 2, textColor: [0, 0, 0] },
       headStyles: { fillColor: [58, 58, 58], textColor: [255, 255, 255] },
       footStyles: { fillColor: [255, 255, 255], fontStyle: 'bold', textColor: [0, 0, 0], halign: 'right' },
       alternateRowStyles: { fillColor: [247, 247, 247] },
-      columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 50 }, 4: { halign: 'right', cellWidth: 28 } },
+      columnStyles: { 0: { cellWidth: 8 }, 1: { cellWidth: 40 }, 5: { halign: 'right', cellWidth: 24 } },
       margin: { left: 14, right: 14 },
     });
 
