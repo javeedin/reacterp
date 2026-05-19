@@ -331,6 +331,8 @@ const TrialBalance: React.FC = () => {
   const [revalSaving,              setRevalSaving]              = useState(false);
   const [revalRateDate,            setRevalRateDate]            = useState<string>(dayjs().format('YYYY-MM-DD'));
   const [revalBmsFetching,         setRevalBmsFetching]         = useState<Record<string, boolean>>({});
+  const [subAcctDescMap,           setSubAcctDescMap]           = useState<Record<string, string>>({});
+  const subAcctDescLoaded = useRef(false);
   // Create Accounting flow
   const [acctFlowVisible,  setAcctFlowVisible]  = useState(false);
   const [acctFlowLoading,  setAcctFlowLoading]  = useState(false);
@@ -1264,6 +1266,36 @@ const TrialBalance: React.FC = () => {
     setSelectedYear(null);
     fetchPeriods();
   }, [selectedLedger]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load sub-account segment descriptions once (for revaluation journal preview)
+  useEffect(() => {
+    if (subAcctDescLoaded.current) return;
+    subAcctDescLoaded.current = true;
+    const VS_BASE = `${APEX_DB_CONFIG.baseUrl}/valuesets/getvalues`;
+    const STRUCT_URL = `${APEX_DB_CONFIG.baseUrl}/chartofaccounts/structuresegments`;
+    fetch(STRUCT_URL)
+      .then(r => r.ok ? r.json() : null)
+      .then(async data => {
+        if (!data) return;
+        const segs: any[] = data.items || [];
+        const subAcctSeg = segs.find((s: any) => {
+          const p = (s.prompt || s.segment_name || s.name || '').toLowerCase();
+          return p.includes('sub') && p.includes('account');
+        });
+        if (!subAcctSeg?.segment_code) return;
+        const vsRes = await fetch(`${VS_BASE}/${subAcctSeg.segment_code}`);
+        if (!vsRes.ok) return;
+        const vsData = await vsRes.json();
+        const map: Record<string, string> = {};
+        (vsData.items || []).forEach((item: any) => {
+          const code = item.value || item.Value || item.VALUE || '';
+          const desc = item.description || item.Description || item.DESCRIPTION || item.meaning || '';
+          if (code) map[code] = desc;
+        });
+        setSubAcctDescMap(map);
+      })
+      .catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load GL Revaluation distributions whenever the LOV picker opens
   useEffect(() => {
@@ -3105,7 +3137,8 @@ const TrialBalance: React.FC = () => {
       activeComboRows.forEach(r => {
         if (r.revalAmt === 0 || r.newRate === 0) return;
         const abs = Math.abs(r.revalAmt);
-        const subAcctPart = r.subAccount ? ` - ${r.subAccount}` : '';
+        const subAcctDesc = r.subAccount ? (subAcctDescMap[r.subAccount] || r.subAccount) : '';
+        const subAcctPart = subAcctDesc ? ` - ${subAcctDesc}` : '';
         const lineDesc = `${accountDesc}${subAcctPart} - Revaluation (${periodMonth})`;
         if (r.isGain) {
           lines.push({ lineNum: ln++, combo: r.combo, desc: lineDesc, comment: '', dr: abs, cr: 0 });
