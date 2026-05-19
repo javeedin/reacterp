@@ -2078,7 +2078,7 @@ const AAPanel: React.FC = () => {
             : r.isClosingBalance ? 'Closing Balance'
             : r.isTotals ? 'PTD Total' : (r.jeLineDescription || '');
           const base = [lineLabel, special ? '' : (r.batchName||''), special ? '' : (r.userJeSourceName||''),
-                        special ? '' : (r.currencyCode||'')];
+                        r.isTotals ? '' : (r.currencyCode||'')];
           const entCols = showEntered ? [fmtN(r.enteredDr||0), fmtN(r.enteredCr||0), fmtN(r._entRun??0)] : [];
           const accCols = [fmtN(r.accountedDr||0), fmtN(r.accountedCr||0), fmtN(r._accRun??0)];
           return [...base, ...entCols, ...accCols];
@@ -2143,7 +2143,7 @@ const AAPanel: React.FC = () => {
           : r.isClosingBalance ? 'Closing Balance'
           : r.concatenatedSegments || '';
         const base = [acctLabel, special ? '' : (r.jeLineDescription||''), special ? '' : (r.batchName||''),
-                      special ? '' : (r.userJeSourceName||''), special ? '' : (r.currencyCode||'')];
+                      special ? '' : (r.userJeSourceName||''), r.isTotals ? '' : (r.currencyCode||'')];
         const entCols = showEntered ? [fmtN(r.enteredDr||0), fmtN(r.enteredCr||0), fmtN(r._entRun??0)] : [];
         const accCols = [fmtN(r.accountedDr||0), fmtN(r.accountedCr||0), fmtN(r._accRun??0)];
         return [...base, ...entCols, ...accCols];
