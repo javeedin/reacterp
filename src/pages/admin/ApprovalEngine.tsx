@@ -1146,7 +1146,7 @@ END;`;
                 }
                 style={{ marginBottom: 16 }}
               />
-              <Divider orientation="left" style={{ fontSize: 13 }}>
+              <Divider titlePlacement="left" style={{ fontSize: 13 }}>
                 ORDS Handler SQL (deploy to Oracle APEX)
               </Divider>
               <pre
@@ -1503,7 +1503,7 @@ END;`;
         </Form.Item>
 
         {/* ── Approvers Section ── */}
-        <Divider orientation="left" style={{ fontSize: 13, margin: '8px 0 12px' }}>
+        <Divider titlePlacement="left" style={{ fontSize: 13, margin: '8px 0 12px' }}>
           Approvers ({selectedRuleApprovers.length})
         </Divider>
 
@@ -1671,7 +1671,7 @@ END;`;
             </Row>
           </Card>
 
-          <Divider orientation="left" style={{ fontSize: 13 }}>
+          <Divider titlePlacement="left" style={{ fontSize: 13 }}>
             Timeline
           </Divider>
 
