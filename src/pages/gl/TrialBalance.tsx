@@ -3148,8 +3148,7 @@ const TrialBalance: React.FC = () => {
       activeComboRows.forEach(r => {
         if (r.revalAmt === 0 || r.newRate === 0) return;
         const abs = Math.abs(r.revalAmt);
-        const subAcctDesc = r.subAccount ? (subAcctDescMap[r.subAccount] || '') : '';
-        const subAcctPart = subAcctDesc ? ` - ${subAcctDesc}` : '';
+        const subAcctPart = r.subAccount ? ` - ${r.subAccount}` : '';
         const lineDesc = `${accountDesc}${subAcctPart} - Revaluation (${periodMonth})`;
         if (r.isGain) {
           lines.push({ lineNum: ln++, combo: r.combo, subAccount: r.subAccount, desc: lineDesc, comment: '', dr: abs, cr: 0 });
@@ -3337,69 +3336,86 @@ const TrialBalance: React.FC = () => {
         )},
       { title: 'Description', dataIndex: 'desc', key: 'desc',
         render: (v: string, row: any) => (
-          <Space.Compact style={{ width: '100%' }}>
-            <Input
-              size="small"
-              value={v}
-              onChange={e => updatePreviewRow(row.lineNum, 'desc', e.target.value)}
-            />
-            {row.subAccount && (
-              <Tooltip title={`Fetch sub-account description for ${row.subAccount}`}>
-                <Button
-                  size="small"
-                  icon={subAcctFetching[row.lineNum] ? <LoadingOutlined /> : <SyncOutlined />}
-                  onClick={async () => {
-                    if (!row.subAccount) return;
-                    // Use cached map first
-                    if (subAcctDescMap[row.subAccount]) {
-                      const rawPeriod = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '').replace(/\s*·.*$/, '').trim();
-                      const periodMonth = rawPeriod || tab.periodName;
-                      updatePreviewRow(row.lineNum, 'desc', `${accountDesc} - ${subAcctDescMap[row.subAccount]} - Revaluation (${periodMonth})`);
-                      return;
-                    }
-                    setSubAcctFetching(prev => ({ ...prev, [row.lineNum]: true }));
-                    const rawPeriod2 = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '').replace(/\s*·.*$/, '').trim();
-                    const periodMonth2 = rawPeriod2 || tab.periodName;
-                    try {
-                      // Fetch directly for this specific sub-account value
-                      const VS_BASE = `${APEX_DB_CONFIG.baseUrl}/valuesets/getvalues`;
-                      const STRUCT_URL = `${APEX_DB_CONFIG.baseUrl}/chartofaccounts/structuresegments`;
-                      let vsCode = subAcctVsCode.current;
-                      if (!vsCode) {
-                        const sr = await fetch(STRUCT_URL);
-                        if (sr.ok) {
-                          const sd = await sr.json();
-                          const seg = (sd.items || []).find((s: any) => {
-                            const p = (s.prompt || s.segment_name || s.name || s.PROMPT || '').toLowerCase();
-                            return p.includes('sub') && p.includes('account');
-                          });
-                          if (seg) { vsCode = seg.segment_code || seg.SEGMENT_CODE || ''; subAcctVsCode.current = vsCode; }
-                        }
-                      }
-                      if (vsCode) {
-                        const vr = await fetch(`${VS_BASE}/${vsCode}`);
-                        if (vr.ok) {
-                          const vd = await vr.json();
-                          const freshMap: Record<string, string> = { ...subAcctDescMap };
-                          (vd.items || []).forEach((item: any) => {
-                            const c = item.value || item.Value || item.VALUE || '';
-                            const d = item.description || item.Description || item.DESCRIPTION || item.meaning || '';
-                            if (c) freshMap[c] = d;
-                          });
-                          setSubAcctDescMap(freshMap);
-                          const d2 = freshMap[row.subAccount];
-                          if (d2) updatePreviewRow(row.lineNum, 'desc', `${accountDesc} - ${d2} - Revaluation (${periodMonth2})`);
-                        }
-                      }
-                    } finally {
-                      setSubAcctFetching(prev => ({ ...prev, [row.lineNum]: false }));
-                    }
-                  }}
-                />
-              </Tooltip>
-            )}
-          </Space.Compact>
+          <Input
+            size="small"
+            value={v}
+            onChange={e => updatePreviewRow(row.lineNum, 'desc', e.target.value)}
+          />
         )},
+      { title: '', key: 'subAcctFetch', width: 34,
+        render: (_: any, row: any) => {
+          if (!row.subAccount) return null;
+          const isFetching = !!subAcctFetching[row.lineNum];
+          const rawPeriod = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '').replace(/\s*\..*$/, '').trim();
+          const periodMonth = rawPeriod || tab.periodName;
+          const doFetch = async () => {
+            setSubAcctFetching(prev => ({ ...prev, [row.lineNum]: true }));
+            try {
+              const VS_BASE = `${APEX_DB_CONFIG.baseUrl}/valuesets/getvalues`;
+              const STRUCT_URL = `${APEX_DB_CONFIG.baseUrl}/chartofaccounts/structuresegments`;
+              let vsCode = subAcctVsCode.current;
+              if (!vsCode) {
+                const sr = await fetch(STRUCT_URL);
+                if (sr.ok) {
+                  const sd = await sr.json();
+                  const seg = (sd.items || []).find((s: any) => {
+                    const p = (s.prompt || s.segment_name || s.name || s.PROMPT || '').toLowerCase();
+                    return p.includes('sub') && p.includes('account');
+                  });
+                  if (seg) { vsCode = seg.segment_code || seg.SEGMENT_CODE || ''; subAcctVsCode.current = vsCode; }
+                }
+              }
+              if (!vsCode) { message.warning('Sub-account value set not found'); return; }
+              const vr = await fetch(`${VS_BASE}/${vsCode}`);
+              if (!vr.ok) { message.error('Failed to load value set'); return; }
+              const vd = await vr.json();
+              const freshMap: Record<string, string> = { ...subAcctDescMap };
+              (vd.items || []).forEach((item: any) => {
+                const c = item.value || item.Value || item.VALUE || '';
+                const d = item.description || item.Description || item.DESCRIPTION || item.meaning || '';
+                if (c) freshMap[c] = d;
+              });
+              setSubAcctDescMap(freshMap);
+              const subDesc = freshMap[row.subAccount];
+              if (subDesc) {
+                updatePreviewRow(row.lineNum, 'desc', `${accountDesc} - ${row.subAccount} - ${subDesc} - Revaluation (${periodMonth})`);
+              } else {
+                message.warning(`No description found for sub-account: ${row.subAccount}`);
+              }
+            } finally {
+              setSubAcctFetching(prev => ({ ...prev, [row.lineNum]: false }));
+            }
+          };
+          return (
+            <Tooltip title={`Sub-account: ${row.subAccount} — click to fetch description`}>
+              <Button
+                type="text"
+                size="small"
+                icon={isFetching ? <LoadingOutlined /> : <SyncOutlined />}
+                style={{ color: REDWOOD.info }}
+                onClick={() => {
+                  Modal.confirm({
+                    title: 'Fetch Sub-Account Description',
+                    content: (
+                      <div>
+                        <div style={{ marginBottom: 8, fontSize: 13 }}>Fetch description for sub-account:</div>
+                        <div style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 600, color: REDWOOD.primary, background: '#fafafa', padding: '6px 10px', borderRadius: 4 }}>
+                          {row.subAccount}
+                        </div>
+                        <div style={{ marginTop: 8, fontSize: 12, color: REDWOOD.neutral600 }}>
+                          The description will be inserted into the journal line description.
+                        </div>
+                      </div>
+                    ),
+                    okText: 'Fetch & Apply',
+                    cancelText: 'Cancel',
+                    onOk: doFetch,
+                  });
+                }}
+              />
+            </Tooltip>
+          );
+        }},
       { title: 'Comment', dataIndex: 'comment', key: 'comment', width: 160,
         render: (v: string, row: any) => (
           <Input
