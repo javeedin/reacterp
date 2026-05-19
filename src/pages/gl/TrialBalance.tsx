@@ -340,6 +340,7 @@ const TrialBalance: React.FC = () => {
   const [acctFlowLoading,  setAcctFlowLoading]  = useState(false);
   const [acctFlowDone,     setAcctFlowDone]     = useState(false);
   const [acctFlowError,    setAcctFlowError]    = useState<string | null>(null);
+  const [acctFlowLastCall, setAcctFlowLastCall] = useState<{ url: string; method: string; body: object } | null>(null);
   const [acctFlowSteps,    setAcctFlowSteps]    = useState<
     { title: string; status: 'wait'|'process'|'finish'|'error'; desc?: string }[]
   >([]);
@@ -2775,6 +2776,7 @@ const TrialBalance: React.FC = () => {
     setAcctFlowSteps(initSteps);
     setAcctFlowDone(false);
     setAcctFlowError(null);
+    setAcctFlowLastCall(null);
     setAcctFlowVisible(true);
     setAcctFlowLoading(true);
 
@@ -2894,6 +2896,7 @@ const TrialBalance: React.FC = () => {
         })),
       };
 
+      setAcctFlowLastCall({ url: `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.slaAccountingCreate}`, method: 'POST', body: slaPayload });
       const slaResult = await createAccounting(slaPayload);
       updateStep(2, 'finish', `SLA header ${slaResult.headerId} created — ${slaResult.lineCount} lines`);
 
@@ -4039,14 +4042,41 @@ const TrialBalance: React.FC = () => {
           open={acctFlowVisible}
           onCancel={() => setAcctFlowVisible(false)}
           footer={
-            <Button
-              type={acctFlowDone ? 'primary' : 'default'}
-              onClick={() => setAcctFlowVisible(false)}
-            >
-              {acctFlowDone ? 'Done' : 'Close'}
-            </Button>
+            <Space>
+              {acctFlowError && acctFlowLastCall && (
+                <Button
+                  icon={<ApiOutlined />}
+                  style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
+                  onClick={() => {
+                    Modal.info({
+                      title: 'Failed API Call — Debug Info',
+                      width: 860,
+                      content: (
+                        <div style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                          <div style={{ marginBottom: 8 }}>
+                            <Tag color="blue">{acctFlowLastCall.method}</Tag>
+                            <span style={{ wordBreak: 'break-all', color: REDWOOD.info }}>{acctFlowLastCall.url}</span>
+                          </div>
+                          <div style={{ background: '#1d1d1d', color: '#d4d4d4', borderRadius: 6, padding: '10px 14px', maxHeight: 480, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontSize: 11 }}>
+                            {JSON.stringify(acctFlowLastCall.body, null, 2)}
+                          </div>
+                        </div>
+                      ),
+                    });
+                  }}
+                >
+                  View API Payload
+                </Button>
+              )}
+              <Button
+                type={acctFlowDone ? 'primary' : 'default'}
+                onClick={() => setAcctFlowVisible(false)}
+              >
+                {acctFlowDone ? 'Done' : 'Close'}
+              </Button>
+            </Space>
           }
-          width={540}
+          width={560}
           title={
             <Space>
               <ThunderboltOutlined style={{ color: '#722ED1' }} />
