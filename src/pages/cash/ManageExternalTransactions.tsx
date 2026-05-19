@@ -1146,7 +1146,9 @@ const ExternalTxnForm: React.FC<{
         message.success('Transaction deleted.');
         onSave();
       } else {
-        message.error(data.message || `Delete failed (HTTP ${res.status}).`);
+        // Show full detail including receivedId so we can debug bind variable issues
+        const detail = data.receivedId ? ` (server received ID: ${data.receivedId})` : '';
+        message.error((data.message || `Delete failed (HTTP ${res.status}).`) + detail);
       }
     } catch (e: any) {
       message.error('Network error: ' + e.message);
