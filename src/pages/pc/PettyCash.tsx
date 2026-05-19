@@ -702,6 +702,8 @@ const RegisterDetail: React.FC<{
   // Multi-file upload state (new RR_PC_ATTACHMENTS system)
   const [addExpenseFiles, setAddExpenseFiles] = useState<FileEntry[]>([]);
   const [editExpenseFiles, setEditExpenseFiles] = useState<FileEntry[]>([]);
+  const [editTxnAttachments, setEditTxnAttachments] = useState<PCAttachment[]>([]);
+  const [editTxnAttachmentsLoading, setEditTxnAttachmentsLoading] = useState(false);
   // Old single-attachment viewer (backward compat for hasAttachment=Y rows)
   const [viewAttachOpen, setViewAttachOpen]   = useState(false);
   const [viewAttachData, setViewAttachData]   = useState<string>('');
@@ -1119,6 +1121,14 @@ const RegisterDetail: React.FC<{
     });
     setEditAcctDesc(desc);
     setEditExpenseFiles([]);
+    setEditTxnAttachments([]);
+    if (editTxn.transactionId) {
+      setEditTxnAttachmentsLoading(true);
+      getAttachments(editTxn.registerId, editTxn.transactionId)
+        .then(list => setEditTxnAttachments(list))
+        .catch(() => {})
+        .finally(() => setEditTxnAttachmentsLoading(false));
+    }
   }, [editTxnOpen, editTxn, distCombinations]);
 
   // ── Delete transaction (Unposted / Error only) ────────────
@@ -1408,6 +1418,7 @@ const RegisterDetail: React.FC<{
       setEditTxnOpen(false);
       setEditTxn(null);
       setEditExpenseFiles([]);
+      setEditTxnAttachments([]);
       onRefresh();
     } catch (e: any) {
       message.error(e?.message ?? 'Update failed');
@@ -4460,44 +4471,79 @@ const RegisterDetail: React.FC<{
               <Input.TextArea rows={2} placeholder="Optional" />
             </Form.Item>
             {editTxn.transactionType === 'Expense' && (
-              <Form.Item label="Add Attachments">
-                <Space direction="vertical" style={{ width: '100%' }} size={4}>
-                  <Space size={8} wrap>
-                    <Upload
-                      multiple
-                      beforeUpload={async (file) => {
-                        try {
-                          const entry = await readFileAsEntry(file);
-                          setEditExpenseFiles(prev => [...prev, entry]);
-                        } catch { message.error(`Failed to read ${file.name}`); }
-                        return false;
-                      }}
-                      showUploadList={false}
-                      accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
-                    >
-                      <Button icon={<UploadOutlined />}>Upload New Files</Button>
-                    </Upload>
-                    {(editTxn.attachmentCount ?? 0) > 0 && (
-                      <Button size="small" icon={<PaperClipOutlined />}
-                        onClick={() => openAttachList(editTxn)}>
-                        View Existing ({editTxn.attachmentCount})
-                      </Button>
-                    )}
-                  </Space>
+              <Form.Item label="Attachments">
+                <Space direction="vertical" style={{ width: '100%' }} size={6}>
+                  {/* Existing attachments */}
+                  {editTxnAttachmentsLoading ? (
+                    <Text type="secondary" style={{ fontSize: 12 }}>Loading attachments…</Text>
+                  ) : editTxnAttachments.length > 0 ? (
+                    <div style={{ border: '1px solid #f0f0f0', borderRadius: 6, overflow: 'hidden' }}>
+                      {editTxnAttachments.map((att, idx) => (
+                        <div key={att.attachmentId} style={{
+                          display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
+                          background: idx % 2 === 0 ? '#fafafa' : '#fff',
+                          borderBottom: idx < editTxnAttachments.length - 1 ? '1px solid #f0f0f0' : undefined,
+                        }}>
+                          <PaperClipOutlined style={{ color: REDWOOD.info, flexShrink: 0 }} />
+                          <Text style={{ fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {att.fileName}
+                          </Text>
+                          {att.createdBy && (
+                            <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>{att.createdBy}</Text>
+                          )}
+                          <Button type="text" size="small" icon={<EyeOutlined />}
+                            style={{ color: REDWOOD.info, flexShrink: 0 }}
+                            onClick={() => openFilePreview(att)} />
+                          <Button type="text" size="small" danger icon={<CloseOutlined />}
+                            style={{ flexShrink: 0 }}
+                            onClick={() => {
+                              Modal.confirm({
+                                title: 'Delete attachment?',
+                                content: `"${att.fileName}" will be permanently removed.`,
+                                okType: 'danger', okText: 'Delete',
+                                onOk: async () => {
+                                  await deleteAttachment(att.attachmentId);
+                                  setEditTxnAttachments(prev => prev.filter(a => a.attachmentId !== att.attachmentId));
+                                  message.success('Attachment deleted');
+                                },
+                              });
+                            }} />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <Text type="secondary" style={{ fontSize: 12 }}>No attachments</Text>
+                  )}
+                  {/* New files queued for upload */}
                   {editExpenseFiles.map(f => (
                     <Space key={f.uid} size={4} style={{ display: 'flex' }}>
-                      <PaperClipOutlined style={{ color: REDWOOD.info }} />
-                      <Text style={{ fontSize: 12, color: REDWOOD.info }}>{f.name}</Text>
+                      <PaperClipOutlined style={{ color: REDWOOD.success }} />
+                      <Text style={{ fontSize: 12, color: REDWOOD.success }}>{f.name} (new)</Text>
                       <Button type="text" size="small" danger icon={<CloseOutlined />}
                         onClick={() => setEditExpenseFiles(prev => prev.filter(x => x.uid !== f.uid))} />
                     </Space>
                   ))}
+                  {/* Upload button */}
+                  <Upload
+                    multiple
+                    beforeUpload={async (file) => {
+                      try {
+                        const entry = await readFileAsEntry(file);
+                        setEditExpenseFiles(prev => [...prev, entry]);
+                      } catch { message.error(`Failed to read ${file.name}`); }
+                      return false;
+                    }}
+                    showUploadList={false}
+                    accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+                  >
+                    <Button icon={<UploadOutlined />} size="small">Upload New Files</Button>
+                  </Upload>
                 </Space>
               </Form.Item>
             )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-              <Button onClick={() => { setEditTxnOpen(false); setEditTxn(null); setEditExpenseFiles([]); }}>Cancel</Button>
+              <Button onClick={() => { setEditTxnOpen(false); setEditTxn(null); setEditExpenseFiles([]); setEditTxnAttachments([]); }}>Cancel</Button>
               <Button type="primary" htmlType="submit" loading={saving}
                 style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}>
                 Save Changes
