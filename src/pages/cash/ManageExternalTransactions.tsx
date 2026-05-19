@@ -1008,10 +1008,13 @@ const ExternalTxnForm: React.FC<{
         if (data.status === 'success') {
           successCount++;
           if (i === 0) {
-            savedId = data.externalTransactionId ?? null;
+            savedId = data.externalTransactionId ?? data.id ?? null;
             if (data.transactionId) setSavedTxnId(data.transactionId);
+            // If POST didn't return externalTransactionId but did return transactionId, use it as fallback
+            if (!savedId && data.transactionId) savedId = data.transactionId;
           }
           if (data.externalTransactionId) allSavedIds.push(data.externalTransactionId);
+          else if (i === 0 && savedId) allSavedIds.push(savedId);
           // Upload attachments on first line
           if (i === 0 && data.externalTransactionId && attachments.length > 0) {
             for (const att of attachments.filter(a => !a.id)) {
@@ -1124,7 +1127,7 @@ const ExternalTxnForm: React.FC<{
   const isLocked = isEdit && (initialValues?.status === 'REC' || initialValues?.accountingFlag === 'Y');
 
   const handleSaveAttachments = async () => {
-    const extId = savedExtId ?? initialValues?.externalTransactionId;
+    const extId = savedExtId ?? savedTxnId ?? initialValues?.externalTransactionId;
     if (!extId) { message.error('Transaction ID not available'); return; }
     const pending = attachments.filter(a => !a.id);
     if (pending.length === 0) { message.info('No new attachments to save.'); return; }
@@ -1252,7 +1255,20 @@ const ExternalTxnForm: React.FC<{
 
           {/* ══════════ SECTION 1: Organisation & Bank ══════════ */}
           <div className="ext-sec">
-            <div className="ext-sec-title">Organisation &amp; Bank</div>
+            <div className="ext-sec-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Organisation &amp; Bank</span>
+              {!isEdit && (saved || savedExtId || savedTxnId) && (
+                <span style={{ fontSize: 12, fontWeight: 400, color: REDWOOD.success, fontFamily: 'monospace' }}>
+                  ✓ Saved — ID: {savedExtId ?? savedTxnId}
+                </span>
+              )}
+              {isEdit && initialValues?.externalTransactionId && (
+                <span style={{ fontSize: 12, fontWeight: 400, color: REDWOOD.info, fontFamily: 'monospace' }}>
+                  ID: {initialValues.externalTransactionId}
+                  {initialValues.transactionId ? ` · Txn: ${initialValues.transactionId}` : ''}
+                </span>
+              )}
+            </div>
 
             {/* Business Unit | Company Code */}
             <div className="ext-row">
@@ -2004,7 +2020,7 @@ const ExternalTxnForm: React.FC<{
             </Button>
           )}
           {(() => {
-            const extId = savedExtId ?? initialValues?.externalTransactionId ?? null;
+            const extId = savedExtId ?? savedTxnId ?? initialValues?.externalTransactionId ?? null;
             const hasId = !!extId;
             return (
               <Tooltip title={!hasId ? 'Save the transaction first to enable attachments' : 'Save queued attachments'}>
