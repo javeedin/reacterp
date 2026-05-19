@@ -2115,8 +2115,13 @@ const AAPanel: React.FC = () => {
             : r.isTotals ? 'PTD Total' : (r.jeLineDescription || '');
           const base = [lineLabel, special ? '' : (r.batchName||''), special ? '' : (r.userJeSourceName||''),
                         r.isTotals ? '' : (r.currencyCode||'')];
-          const entCols = showEntered ? [fmtN(r.enteredDr||0), fmtN(r.enteredCr||0), fmtN(r._entRun??0)] : [];
-          const accCols = [fmtN(r.accountedDr||0), fmtN(r.accountedCr||0), fmtN(r._accRun??0)];
+          // For opening/closing rows balance = Dr - Cr (no running total); for detail rows use _accRun
+          const accBal = (r.isOpeningBalance || r.isClosingBalance)
+            ? (r.accountedDr||0) - (r.accountedCr||0) : (r._accRun ?? 0);
+          const entBal = (r.isOpeningBalance || r.isClosingBalance)
+            ? (r.enteredDr||0) - (r.enteredCr||0) : (r._entRun ?? 0);
+          const entCols = showEntered ? [fmtN(r.enteredDr||0), fmtN(r.enteredCr||0), fmtN(entBal)] : [];
+          const accCols = [fmtN(r.accountedDr||0), fmtN(r.accountedCr||0), fmtN(accBal)];
           return [...base, ...entCols, ...accCols];
         });
 
@@ -2166,8 +2171,12 @@ const AAPanel: React.FC = () => {
           : (r.jeLineDescription || '');
         const base = [lineLabel, special ? '' : (r.batchName||''),
                       special ? '' : (r.userJeSourceName||''), r.isTotals ? '' : (r.currencyCode||'')];
-        const entCols = showEntered ? [fmtN(r.enteredDr||0), fmtN(r.enteredCr||0), fmtN(r._entRun??0)] : [];
-        const accCols = [fmtN(r.accountedDr||0), fmtN(r.accountedCr||0), fmtN(r._accRun??0)];
+        const accBal = (r.isOpeningBalance || r.isClosingBalance)
+          ? (r.accountedDr||0) - (r.accountedCr||0) : (r._accRun ?? 0);
+        const entBal = (r.isOpeningBalance || r.isClosingBalance)
+          ? (r.enteredDr||0) - (r.enteredCr||0) : (r._entRun ?? 0);
+        const entCols = showEntered ? [fmtN(r.enteredDr||0), fmtN(r.enteredCr||0), fmtN(entBal)] : [];
+        const accCols = [fmtN(r.accountedDr||0), fmtN(r.accountedCr||0), fmtN(accBal)];
         return [...base, ...entCols, ...accCols];
       });
 
