@@ -317,7 +317,7 @@ const TrialBalance: React.FC = () => {
   const [reYearProgress,  setReYearProgress]  = useState('');
   const [reYearError,     setReYearError]     = useState<string | null>(null);
   const [revalPreviewRows,     setRevalPreviewRows]     = useState<
-    { lineNum: number; combo: string; desc: string; comment: string; dr: number; cr: number }[]
+    { lineNum: number; combo: string; subAccount: string; desc: string; comment: string; dr: number; cr: number }[]
   >([]);
   const [revalAcctSelectorOpen,    setRevalAcctSelectorOpen]    = useState(false);
   const [revalAcctSelectorLineNum, setRevalAcctSelectorLineNum] = useState<number | null>(null);
@@ -332,7 +332,9 @@ const TrialBalance: React.FC = () => {
   const [revalRateDate,            setRevalRateDate]            = useState<string>(dayjs().format('YYYY-MM-DD'));
   const [revalBmsFetching,         setRevalBmsFetching]         = useState<Record<string, boolean>>({});
   const [subAcctDescMap,           setSubAcctDescMap]           = useState<Record<string, string>>({});
+  const [subAcctFetching,          setSubAcctFetching]          = useState<Record<number, boolean>>({});
   const subAcctDescLoaded = useRef(false);
+  const subAcctVsCode = useRef<string | null>(null);
   // Create Accounting flow
   const [acctFlowVisible,  setAcctFlowVisible]  = useState(false);
   const [acctFlowLoading,  setAcctFlowLoading]  = useState(false);
@@ -1268,33 +1270,42 @@ const TrialBalance: React.FC = () => {
   }, [selectedLedger]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load sub-account segment descriptions once (for revaluation journal preview)
+  const loadSubAcctDescs = useCallback(async () => {
+    const VS_BASE = `${APEX_DB_CONFIG.baseUrl}/valuesets/getvalues`;
+    const STRUCT_URL = `${APEX_DB_CONFIG.baseUrl}/chartofaccounts/structuresegments`;
+    try {
+      let vsCode = subAcctVsCode.current;
+      if (!vsCode) {
+        const structRes = await fetch(STRUCT_URL);
+        if (!structRes.ok) return;
+        const data = await structRes.json();
+        const segs: any[] = data.items || [];
+        const subAcctSeg = segs.find((s: any) => {
+          const p = (s.prompt || s.segment_name || s.name || s.PROMPT || '').toLowerCase();
+          return p.includes('sub') && p.includes('account');
+        });
+        if (!subAcctSeg) return;
+        vsCode = subAcctSeg.segment_code || subAcctSeg.SEGMENT_CODE || '';
+        if (!vsCode) return;
+        subAcctVsCode.current = vsCode;
+      }
+      const vsRes = await fetch(`${VS_BASE}/${vsCode}`);
+      if (!vsRes.ok) return;
+      const vsData = await vsRes.json();
+      const map: Record<string, string> = {};
+      (vsData.items || []).forEach((item: any) => {
+        const code = item.value || item.Value || item.VALUE || '';
+        const desc = item.description || item.Description || item.DESCRIPTION || item.meaning || '';
+        if (code) map[code] = desc;
+      });
+      setSubAcctDescMap(map);
+    } catch { /* silent */ }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (subAcctDescLoaded.current) return;
     subAcctDescLoaded.current = true;
-    const VS_BASE = `${APEX_DB_CONFIG.baseUrl}/valuesets/getvalues`;
-    const STRUCT_URL = `${APEX_DB_CONFIG.baseUrl}/chartofaccounts/structuresegments`;
-    fetch(STRUCT_URL)
-      .then(r => r.ok ? r.json() : null)
-      .then(async data => {
-        if (!data) return;
-        const segs: any[] = data.items || [];
-        const subAcctSeg = segs.find((s: any) => {
-          const p = (s.prompt || s.segment_name || s.name || '').toLowerCase();
-          return p.includes('sub') && p.includes('account');
-        });
-        if (!subAcctSeg?.segment_code) return;
-        const vsRes = await fetch(`${VS_BASE}/${subAcctSeg.segment_code}`);
-        if (!vsRes.ok) return;
-        const vsData = await vsRes.json();
-        const map: Record<string, string> = {};
-        (vsData.items || []).forEach((item: any) => {
-          const code = item.value || item.Value || item.VALUE || '';
-          const desc = item.description || item.Description || item.DESCRIPTION || item.meaning || '';
-          if (code) map[code] = desc;
-        });
-        setSubAcctDescMap(map);
-      })
-      .catch(() => {});
+    loadSubAcctDescs();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load GL Revaluation distributions whenever the LOV picker opens
@@ -3132,20 +3143,20 @@ const TrialBalance: React.FC = () => {
     const buildPreview = () => {
       const rawPeriod = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '').replace(/\s*·.*$/, '').trim();
       const periodMonth = rawPeriod || tab.periodName;
-      const lines: { lineNum: number; combo: string; desc: string; comment: string; dr: number; cr: number }[] = [];
+      const lines: { lineNum: number; combo: string; subAccount: string; desc: string; comment: string; dr: number; cr: number }[] = [];
       let ln = 1;
       activeComboRows.forEach(r => {
         if (r.revalAmt === 0 || r.newRate === 0) return;
         const abs = Math.abs(r.revalAmt);
-        const subAcctDesc = r.subAccount ? (subAcctDescMap[r.subAccount] || r.subAccount) : '';
+        const subAcctDesc = r.subAccount ? (subAcctDescMap[r.subAccount] || '') : '';
         const subAcctPart = subAcctDesc ? ` - ${subAcctDesc}` : '';
         const lineDesc = `${accountDesc}${subAcctPart} - Revaluation (${periodMonth})`;
         if (r.isGain) {
-          lines.push({ lineNum: ln++, combo: r.combo, desc: lineDesc, comment: '', dr: abs, cr: 0 });
-          lines.push({ lineNum: ln++, combo: revalGainCombo || '[Gain Account]', desc: `Unrealized FX Gain - ${r.ccy} (${periodMonth})`, comment: '', dr: 0, cr: abs });
+          lines.push({ lineNum: ln++, combo: r.combo, subAccount: r.subAccount, desc: lineDesc, comment: '', dr: abs, cr: 0 });
+          lines.push({ lineNum: ln++, combo: revalGainCombo || '[Gain Account]', subAccount: '', desc: `Unrealized FX Gain - ${r.ccy} (${periodMonth})`, comment: '', dr: 0, cr: abs });
         } else {
-          lines.push({ lineNum: ln++, combo: revalLossCombo || '[Loss Account]', desc: `Unrealized FX Loss - ${r.ccy} (${periodMonth})`, comment: '', dr: abs, cr: 0 });
-          lines.push({ lineNum: ln++, combo: r.combo, desc: lineDesc, comment: '', dr: 0, cr: abs });
+          lines.push({ lineNum: ln++, combo: revalLossCombo || '[Loss Account]', subAccount: '', desc: `Unrealized FX Loss - ${r.ccy} (${periodMonth})`, comment: '', dr: abs, cr: 0 });
+          lines.push({ lineNum: ln++, combo: r.combo, subAccount: r.subAccount, desc: lineDesc, comment: '', dr: 0, cr: abs });
         }
       });
       setRevalPreviewRows(lines);
@@ -3326,11 +3337,68 @@ const TrialBalance: React.FC = () => {
         )},
       { title: 'Description', dataIndex: 'desc', key: 'desc',
         render: (v: string, row: any) => (
-          <Input
-            size="small"
-            value={v}
-            onChange={e => updatePreviewRow(row.lineNum, 'desc', e.target.value)}
-          />
+          <Space.Compact style={{ width: '100%' }}>
+            <Input
+              size="small"
+              value={v}
+              onChange={e => updatePreviewRow(row.lineNum, 'desc', e.target.value)}
+            />
+            {row.subAccount && (
+              <Tooltip title={`Fetch sub-account description for ${row.subAccount}`}>
+                <Button
+                  size="small"
+                  icon={subAcctFetching[row.lineNum] ? <LoadingOutlined /> : <SyncOutlined />}
+                  onClick={async () => {
+                    if (!row.subAccount) return;
+                    // Use cached map first
+                    if (subAcctDescMap[row.subAccount]) {
+                      const rawPeriod = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '').replace(/\s*·.*$/, '').trim();
+                      const periodMonth = rawPeriod || tab.periodName;
+                      updatePreviewRow(row.lineNum, 'desc', `${accountDesc} - ${subAcctDescMap[row.subAccount]} - Revaluation (${periodMonth})`);
+                      return;
+                    }
+                    setSubAcctFetching(prev => ({ ...prev, [row.lineNum]: true }));
+                    const rawPeriod2 = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '').replace(/\s*·.*$/, '').trim();
+                    const periodMonth2 = rawPeriod2 || tab.periodName;
+                    try {
+                      // Fetch directly for this specific sub-account value
+                      const VS_BASE = `${APEX_DB_CONFIG.baseUrl}/valuesets/getvalues`;
+                      const STRUCT_URL = `${APEX_DB_CONFIG.baseUrl}/chartofaccounts/structuresegments`;
+                      let vsCode = subAcctVsCode.current;
+                      if (!vsCode) {
+                        const sr = await fetch(STRUCT_URL);
+                        if (sr.ok) {
+                          const sd = await sr.json();
+                          const seg = (sd.items || []).find((s: any) => {
+                            const p = (s.prompt || s.segment_name || s.name || s.PROMPT || '').toLowerCase();
+                            return p.includes('sub') && p.includes('account');
+                          });
+                          if (seg) { vsCode = seg.segment_code || seg.SEGMENT_CODE || ''; subAcctVsCode.current = vsCode; }
+                        }
+                      }
+                      if (vsCode) {
+                        const vr = await fetch(`${VS_BASE}/${vsCode}`);
+                        if (vr.ok) {
+                          const vd = await vr.json();
+                          const freshMap: Record<string, string> = { ...subAcctDescMap };
+                          (vd.items || []).forEach((item: any) => {
+                            const c = item.value || item.Value || item.VALUE || '';
+                            const d = item.description || item.Description || item.DESCRIPTION || item.meaning || '';
+                            if (c) freshMap[c] = d;
+                          });
+                          setSubAcctDescMap(freshMap);
+                          const d2 = freshMap[row.subAccount];
+                          if (d2) updatePreviewRow(row.lineNum, 'desc', `${accountDesc} - ${d2} - Revaluation (${periodMonth2})`);
+                        }
+                      }
+                    } finally {
+                      setSubAcctFetching(prev => ({ ...prev, [row.lineNum]: false }));
+                    }
+                  }}
+                />
+              </Tooltip>
+            )}
+          </Space.Compact>
         )},
       { title: 'Comment', dataIndex: 'comment', key: 'comment', width: 160,
         render: (v: string, row: any) => (
