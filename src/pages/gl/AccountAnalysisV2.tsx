@@ -2008,28 +2008,6 @@ const AAPanel: React.FC = () => {
       ? (periods.length === 1 ? periods[0] : `${[...periods].sort()[0]} – ${[...periods].sort().slice(-1)[0]}`)
       : '';
 
-    // Title block — all black
-    doc.setTextColor(0, 0, 0);
-    doc.setFontSize(13);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Account Analysis', pageW / 2, 11, { align: 'center' });
-
-    // Ledger | Period line
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'normal');
-    const ledgerLine = [ledger, periodLabel].filter(Boolean).join('   |   ');
-    doc.text(ledgerLine, pageW / 2, 16, { align: 'center' });
-
-    // Account combination + description on its own line (bold, slightly larger)
-    let titleY = 20;
-    if (account) {
-      doc.setFontSize(9);
-      doc.setFont('helvetica', 'bold');
-      const acctLine = accountDesc ? `${account}   –   ${accountDesc}` : account;
-      doc.text(acctLine, pageW / 2, titleY, { align: 'center' });
-      titleY += 5;
-    }
-
     const baseStyles: any = { fontSize: 6.5, cellPadding: 1.2, overflow: 'linebreak', textColor: [0, 0, 0] };
     const headStyles: any = { fillColor: [26, 95, 204], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 6.5 };
     const applyRowStyle = (data: any, rows: any[]) => {
@@ -2049,27 +2027,62 @@ const AAPanel: React.FC = () => {
     const numW   = showEntered ? 22 : 20;   // each numeric column (Dr/Cr) width
     const balW   = showEntered ? 24 : 22;   // running balance column (slightly wider)
 
+    // Helper: draw the standard page header (title block) at top of each page
+    const drawPageHeader = (comboLabel?: string, comboDesc?: string) => {
+      doc.setTextColor(0, 0, 0);
+      doc.setFontSize(13); doc.setFont('helvetica', 'bold');
+      doc.text('Account Analysis', pageW / 2, 11, { align: 'center' });
+      doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+      doc.text([ledger, periodLabel].filter(Boolean).join('   |   '), pageW / 2, 16, { align: 'center' });
+      let y = 20;
+      if (account) {
+        doc.setFontSize(8.5); doc.setFont('helvetica', 'bold');
+        doc.text(accountDesc || account, pageW / 2, y, { align: 'center' });
+        y += 4.5;
+        doc.setFontSize(7.5); doc.setFont('helvetica', 'normal');
+        doc.text(account, pageW / 2, y, { align: 'center' });
+        y += 4.5;
+      }
+      if (comboLabel) {
+        doc.setFontSize(8); doc.setFont('helvetica', 'bold');
+        const label = comboDesc ? `${comboLabel}   –   ${comboDesc}` : comboLabel;
+        doc.text(label, pageW / 2, y, { align: 'center' });
+        y += 5;
+      }
+      return y; // table startY
+    };
+
     if (isComboBreak) {
-      // Fixed columns: Batch(20) Source(14) Ccy(8) = 42  (narrowed to give more to line desc)
+      // Fixed columns: Batch(20) Source(14) Ccy(8) — no Account column, more space for line desc
       const fixedW   = 20 + 14 + 8;
-      const numCols  = showEntered ? 6 : 3;  // Ent Dr+Cr+Bal + Acc Dr+Cr+Bal  OR  Acc Dr+Cr+Bal
-      const numTotal = numCols * numW + (balW - numW); // last col wider by (balW-numW)
+      const numCols  = showEntered ? 6 : 3;
+      const numTotal = numCols * numW + (balW - numW);
       const lineDescW = usableW - fixedW - numTotal;
 
       const headers = showEntered
         ? ['Line Description', 'Batch', 'Source', 'Ccy', 'Ent Dr', 'Ent Cr', 'Ent Bal', `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`]
         : ['Line Description', 'Batch', 'Source', 'Ccy', `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`];
 
-      let startY = titleY;
+      const lastIdx = headers.length - 1;
+      const colStyles: any = {
+        0: { cellWidth: lineDescW, overflow: 'linebreak' },
+        1: { cellWidth: 20 }, 2: { cellWidth: 14 }, 3: { cellWidth: 8 },
+      };
+      for (let i = 4; i <= lastIdx; i++) {
+        colStyles[i] = { halign: 'right', cellWidth: i === lastIdx ? balW : numW };
+        if (i === lastIdx) colStyles[i].fontStyle = 'bold';
+      }
+
       comboBreaks.forEach((brk, bi) => {
-        if (bi > 0) startY += 4;
+        // Each combination starts on a new page (except the very first)
+        if (bi > 0) doc.addPage();
+
         const comboLabel = appliedGroupBy === 'currencyCode' && brk.combo.includes('||')
           ? brk.combo.replace('||', '  –  ')
           : brk.combo;
-        doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 0, 0);
-        doc.text(comboLabel + (brk.description ? `  ${brk.description}` : ''), margin, startY);
+        const startY = drawPageHeader(comboLabel, brk.description || '');
 
-        const lastLine  = brk.linesWithBal[brk.linesWithBal.length - 1];
+        const lastLine = brk.linesWithBal[brk.linesWithBal.length - 1];
         const ptdTot: any = {
           jeLineDescription: 'PTD Total', batchName: '', userJeSourceName: '', currencyCode: '',
           enteredDr: brk.ptdEntDr, enteredCr: brk.ptdEntCr,
@@ -2097,27 +2110,15 @@ const AAPanel: React.FC = () => {
           return [...base, ...entCols, ...accCols];
         });
 
-        const lastIdx = headers.length - 1;
-        const colStyles: any = {
-          0: { cellWidth: lineDescW, overflow: 'linebreak' },
-          1: { cellWidth: 20 }, 2: { cellWidth: 14 }, 3: { cellWidth: 8 },
-        };
-        for (let i = 4; i <= lastIdx; i++) {
-          colStyles[i] = { halign: 'right', cellWidth: i === lastIdx ? balW : numW };
-          if (i === lastIdx) colStyles[i].fontStyle = 'bold';
-        }
-
         autoTable(doc, {
-          startY: startY + 2, head: [headers], body, theme: 'grid',
+          startY, head: [headers], body, theme: 'grid',
           styles: baseStyles, headStyles, columnStyles: colStyles,
           didParseCell: (data) => applyRowStyle(data, brkRows),
           margin: { left: margin, right: margin },
-          didDrawPage: (data) => { startY = data.cursor?.y ?? startY; },
         });
-        startY = (doc as any).lastAutoTable.finalY + 4;
       });
     } else {
-      // Flat mode — compute running balances inline
+      // Flat mode — no Account column (shown in title), all space goes to Line Description
       let accRun = 0, entRun = 0;
       const flatRows: any[] = filteredData.map(r => {
         if (r.isOpeningBalance) {
@@ -2130,7 +2131,6 @@ const AAPanel: React.FC = () => {
         return { ...r, _accRun: accRun, _entRun: entRun };
       });
       const totRow: any = {
-        concatenatedSegments: 'Total for Report',
         jeLineDescription: '', batchName: '', userJeSourceName: '', currencyCode: '',
         enteredDr: gridTotals.entDr, enteredCr: gridTotals.entCr,
         accountedDr: gridTotals.accDr, accountedCr: gridTotals.accCr,
@@ -2138,24 +2138,23 @@ const AAPanel: React.FC = () => {
       };
       const pdfRows = [...flatRows, totRow];
 
-      // Fixed columns: Account(38) LineDesc(auto) Batch(20) Source(14) Ccy(8)
-      const acctW   = 38;
-      const fixedW  = acctW + 20 + 14 + 8;
+      // No Account column — give all fixed space to Line Description + Batch + Source + Ccy
+      const fixedW  = 20 + 14 + 8;
       const numCols = showEntered ? 6 : 3;
       const numTotal = numCols * numW + (balW - numW);
       const lineDescW = usableW - fixedW - numTotal;
 
       const headers = showEntered
-        ? ['Account', 'Line Description', 'Batch', 'Source', 'Ccy', 'Ent Dr', 'Ent Cr', 'Ent Bal', `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`]
-        : ['Account', 'Line Description', 'Batch', 'Source', 'Ccy', `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`];
+        ? ['Line Description', 'Batch', 'Source', 'Ccy', 'Ent Dr', 'Ent Cr', 'Ent Bal', `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`]
+        : ['Line Description', 'Batch', 'Source', 'Ccy', `Acc Dr (${functionalCcy})`, `Acc Cr (${functionalCcy})`, `Acc Bal (${functionalCcy})`];
 
       const body = pdfRows.map(r => {
         const special = r.isOpeningBalance || r.isClosingBalance || r.isTotals;
-        const acctLabel = r.isTotals ? 'Total for Report'
+        const lineLabel = r.isTotals ? 'Total for Report'
           : r.isOpeningBalance ? 'Opening Balance'
           : r.isClosingBalance ? 'Closing Balance'
-          : r.concatenatedSegments || '';
-        const base = [acctLabel, special ? '' : (r.jeLineDescription||''), special ? '' : (r.batchName||''),
+          : (r.jeLineDescription || '');
+        const base = [lineLabel, special ? '' : (r.batchName||''),
                       special ? '' : (r.userJeSourceName||''), r.isTotals ? '' : (r.currencyCode||'')];
         const entCols = showEntered ? [fmtN(r.enteredDr||0), fmtN(r.enteredCr||0), fmtN(r._entRun??0)] : [];
         const accCols = [fmtN(r.accountedDr||0), fmtN(r.accountedCr||0), fmtN(r._accRun??0)];
@@ -2164,17 +2163,17 @@ const AAPanel: React.FC = () => {
 
       const lastIdx = headers.length - 1;
       const colStyles: any = {
-        0: { cellWidth: acctW },
-        1: { cellWidth: lineDescW, overflow: 'linebreak' },
-        2: { cellWidth: 20 }, 3: { cellWidth: 14 }, 4: { cellWidth: 8 },
+        0: { cellWidth: lineDescW, overflow: 'linebreak' },
+        1: { cellWidth: 20 }, 2: { cellWidth: 14 }, 3: { cellWidth: 8 },
       };
-      for (let i = 5; i <= lastIdx; i++) {
+      for (let i = 4; i <= lastIdx; i++) {
         colStyles[i] = { halign: 'right', cellWidth: i === lastIdx ? balW : numW };
         if (i === lastIdx) colStyles[i].fontStyle = 'bold';
       }
 
+      const startY = drawPageHeader();
       autoTable(doc, {
-        startY: titleY, head: [headers], body, theme: 'grid',
+        startY, head: [headers], body, theme: 'grid',
         styles: baseStyles, headStyles, columnStyles: colStyles,
         didParseCell: (data) => applyRowStyle(data, pdfRows),
         margin: { left: margin, right: margin },
