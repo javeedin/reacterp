@@ -86,6 +86,7 @@ export interface GlPostingResult {
   headerId:   number | null;
   batchName:  string;
   error?:     string;
+  postPayload?: { url: string; body: object };  // captured for debug display
 }
 
 export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResult> {
@@ -203,14 +204,16 @@ export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResu
     }),
   };
 
-  const createRes  = await fetch(`${BASE}/journals/create`, {
+  const createUrl  = `${BASE}/journals/create`;
+  const postPayload = { url: createUrl, body: payload };
+  const createRes  = await fetch(createUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify(payload),
   });
   const createData = await createRes.json().catch(() => ({}));
   if (!createRes.ok) {
-    return { success: false, skipped: false, batchId: null, headerId: null, batchName, error: createData?.message || `HTTP ${createRes.status}` };
+    return { success: false, skipped: false, batchId: null, headerId: null, batchName, error: createData?.message || `HTTP ${createRes.status}`, postPayload };
   }
 
   const glBatchId  = createData.jeBatchId  ?? createData.je_batch_id  ?? createData.batchId  ?? null;
@@ -227,7 +230,7 @@ export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResu
   // ── 3. Stamp SLA header ───────────────────────────────────────────────────
   await stampSla(slaHeaderId, glBatchId, batchName, glHeaderId, createdBy);
 
-  return { success: true, skipped: false, batchId: glBatchId, headerId: glHeaderId, batchName };
+  return { success: true, skipped: false, batchId: glBatchId, headerId: glHeaderId, batchName, postPayload };
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────

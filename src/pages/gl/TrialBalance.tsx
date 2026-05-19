@@ -341,6 +341,7 @@ const TrialBalance: React.FC = () => {
   const [acctFlowDone,     setAcctFlowDone]     = useState(false);
   const [acctFlowError,    setAcctFlowError]    = useState<string | null>(null);
   const [acctFlowLastCall, setAcctFlowLastCall] = useState<{ url: string; method: string; body: object } | null>(null);
+  const [postFlowLastCall, setPostFlowLastCall] = useState<{ url: string; method: string; body: object } | null>(null);
   const [acctFlowSteps,    setAcctFlowSteps]    = useState<
     { title: string; status: 'wait'|'process'|'finish'|'error'; desc?: string }[]
   >([]);
@@ -2777,6 +2778,7 @@ const TrialBalance: React.FC = () => {
     setAcctFlowDone(false);
     setAcctFlowError(null);
     setAcctFlowLastCall(null);
+    setPostFlowLastCall(null);
     setAcctFlowVisible(true);
     setAcctFlowLoading(true);
 
@@ -2981,6 +2983,9 @@ const TrialBalance: React.FC = () => {
           ],
         });
         glResults.push(r);
+        if (r.postPayload) {
+          setPostFlowLastCall({ url: r.postPayload.url, method: 'POST', body: r.postPayload.body });
+        }
         if (!r.success) {
           updateStep(3, 'error', `${fCcy}: ${r.error || 'GL posting failed'}`);
           throw new Error(`${fCcy}: ${r.error || 'GL posting failed'}`);
@@ -4051,13 +4056,13 @@ const TrialBalance: React.FC = () => {
           onCancel={() => setAcctFlowVisible(false)}
           footer={
             <Space>
-              {acctFlowError && acctFlowLastCall && (
+              {acctFlowLastCall && (
                 <Button
                   icon={<ApiOutlined />}
-                  style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
+                  style={{ color: REDWOOD.warning, borderColor: REDWOOD.warning }}
                   onClick={() => {
                     Modal.info({
-                      title: 'Failed API Call — Debug Info',
+                      title: 'SLA Create — API Payload',
                       width: 860,
                       content: (
                         <div style={{ fontFamily: 'monospace', fontSize: 12 }}>
@@ -4073,7 +4078,32 @@ const TrialBalance: React.FC = () => {
                     });
                   }}
                 >
-                  View API Payload
+                  SLA Payload
+                </Button>
+              )}
+              {postFlowLastCall && (
+                <Button
+                  icon={<ApiOutlined />}
+                  style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
+                  onClick={() => {
+                    Modal.info({
+                      title: 'GL Journal POST — API Payload',
+                      width: 960,
+                      content: (
+                        <div style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                          <div style={{ marginBottom: 8 }}>
+                            <Tag color="blue">POST</Tag>
+                            <span style={{ wordBreak: 'break-all', color: REDWOOD.info }}>{postFlowLastCall.url}</span>
+                          </div>
+                          <div style={{ background: '#1d1d1d', color: '#d4d4d4', borderRadius: 6, padding: '10px 14px', maxHeight: 520, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontSize: 11 }}>
+                            {JSON.stringify(postFlowLastCall.body, null, 2)}
+                          </div>
+                        </div>
+                      ),
+                    });
+                  }}
+                >
+                  POST Payload
                 </Button>
               )}
               <Button
