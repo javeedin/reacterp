@@ -475,20 +475,22 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
                     i.INVOICE_ID,
                     i.INVOICE_NUMBER,
                     i.INVOICE_DATE,
-                    NVL(i.INVOICE_AMOUNT, 0)                                              AS INVOICE_AMOUNT,
-                    NVL(pay_sum.total_paid, 0) + NVL(prep_sum.total_applied, 0)           AS AMOUNT_PAID,
+                    NVL(i.INVOICE_AMOUNT, 0)                                                                          AS INVOICE_AMOUNT,
+                    NVL(pay_sum.total_paid, 0) + NVL(prep_sum.total_applied, 0) + NVL(prepaid_sum.total_applied_out, 0) AS AMOUNT_PAID,
                     -- Credit notes (invoice_amount < 0) retain their negative balance so open
                     -- credits are visible; GREATEST(0) is only used for positive invoices.
                     CASE
                         WHEN NVL(i.INVOICE_AMOUNT, 0) < 0 THEN
                             NVL(i.INVOICE_AMOUNT, 0)
-                            - NVL(pay_sum.total_paid,     0)
-                            - NVL(prep_sum.total_applied, 0)
+                            - NVL(pay_sum.total_paid,           0)
+                            - NVL(prep_sum.total_applied,       0)
+                            - NVL(prepaid_sum.total_applied_out, 0)
                         ELSE
                             GREATEST(0, NVL(i.INVOICE_AMOUNT, 0)
-                                        - NVL(pay_sum.total_paid,    0)
-                                        - NVL(prep_sum.total_applied, 0))
-                    END                                                                    AS BALANCE_DUE,
+                                        - NVL(pay_sum.total_paid,            0)
+                                        - NVL(prep_sum.total_applied,        0)
+                                        - NVL(prepaid_sum.total_applied_out, 0))
+                    END                                                                                               AS BALANCE_DUE,
                     i.INVOICE_CURRENCY,
                     i.INVOICE_TYPE,
                     SUBSTR(i.DESCRIPTION, 1, 4000)                                        AS DESCRIPTION,
@@ -510,15 +512,23 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
                     GROUP BY ri.INVOICE_ID
                 ) pay_sum  ON pay_sum.INVOICE_ID  = i.INVOICE_ID
                 LEFT JOIN (
+                    -- Prepayments applied TO this invoice (reduces regular invoice balance)
                     SELECT ap.INVOICE_ID,
                            SUM(ap.APPLIED_AMOUNT) AS total_applied
                     FROM   RR_AP_APPLIED_PREPAYMENTS ap
                     WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
                     GROUP BY ap.INVOICE_ID
                 ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
+                LEFT JOIN (
+                    -- Amount applied OUT from this prepayment invoice to other invoices
+                    SELECT ap.PREPAYMENT_INVOICE_ID,
+                           SUM(ap.APPLIED_AMOUNT) AS total_applied_out
+                    FROM   RR_AP_APPLIED_PREPAYMENTS ap
+                    WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
+                    GROUP BY ap.PREPAYMENT_INVOICE_ID
+                ) prepaid_sum ON prepaid_sum.PREPAYMENT_INVOICE_ID = i.INVOICE_ID
                 WHERE i.SUPPLIER_NUMBER = p_supplier_number
-                AND NVL(i.CANCELED_FLAG,  'N')      != 'Y'
-                AND NVL(i.INVOICE_TYPE, 'Standard') != 'Prepayment'
+                AND NVL(i.CANCELED_FLAG,  'N') != 'Y'
                 AND (p_status = 'All'
                      OR (p_status = 'Paid'   AND i.PAID_STATUS = 'Paid')
                      OR (p_status = 'Unpaid' AND NVL(i.PAID_STATUS, 'Unpaid') NOT IN ('Paid', 'Cancelled')))
@@ -531,8 +541,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
             INTO l_total_count
             FROM RR_AP_INVOICES_ALL
             WHERE SUPPLIER_NUMBER = p_supplier_number
-            AND NVL(CANCELED_FLAG,  'N')      != 'Y'
-            AND NVL(INVOICE_TYPE, 'Standard') != 'Prepayment'
+            AND NVL(CANCELED_FLAG, 'N') != 'Y'
             AND (p_status = 'All'
                  OR (p_status = 'Paid'   AND PAID_STATUS = 'Paid')
                  OR (p_status = 'Unpaid' AND NVL(PAID_STATUS, 'Unpaid') NOT IN ('Paid', 'Cancelled')));

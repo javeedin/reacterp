@@ -78,6 +78,7 @@ interface InvoiceRecord {
   currency: string;
   description: string;
   businessUnit: string;
+  invoiceType: string;
 }
 
 interface PaymentRecord {
@@ -220,6 +221,7 @@ const SupplierBalance: React.FC = () => {
         currency:         item.invoice_currency  || 'AED',
         description:      item.description       || '',
         businessUnit:     item.business_unit     || '',
+        invoiceType:      item.invoice_type      || 'Standard',
       })));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -301,6 +303,11 @@ const SupplierBalance: React.FC = () => {
   const invoiceColumns: ColumnsType<InvoiceRecord> = [
     { title: 'Invoice #', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 140,
       render: (v: string) => <Text strong style={{ color: REDWOOD.info }}>{v}</Text> },
+    { title: 'Type', dataIndex: 'invoiceType', key: 'invoiceType', width: 110,
+      render: (v: string) => {
+        const color = v === 'Prepayment' ? 'purple' : v === 'Credit Memo' ? 'orange' : 'default';
+        return <Tag color={color}>{v || 'Standard'}</Tag>;
+      } },
     { title: 'Date', dataIndex: 'invoiceDate', key: 'invoiceDate', width: 110,
       render: (v: string) => formatDate(v) },
     { title: 'Amount', dataIndex: 'invoiceAmount', key: 'invoiceAmount', width: 140, align: 'right',
