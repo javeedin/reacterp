@@ -245,11 +245,14 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
             GROUP BY ri.INVOICE_ID
         ) pay_sum  ON pay_sum.INVOICE_ID  = i.INVOICE_ID
         LEFT JOIN (
-            SELECT ap.INVOICE_ID,
-                   SUM(ap.APPLIED_AMOUNT) AS total_applied
+            SELECT COALESCE(ap.INVOICE_ID, inv_r.INVOICE_ID) AS INVOICE_ID,
+                   SUM(ap.APPLIED_AMOUNT)                     AS total_applied
             FROM   RR_AP_APPLIED_PREPAYMENTS ap
+            LEFT JOIN RR_AP_INVOICES_ALL inv_r
+                ON  ap.INVOICE_ID IS NULL
+                AND inv_r.INVOICE_NUMBER = ap.INVOICE_NUMBER
             WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
-            GROUP BY ap.INVOICE_ID
+            GROUP BY COALESCE(ap.INVOICE_ID, inv_r.INVOICE_ID)
         ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
         WHERE i.SUPPLIER_NUMBER = p_supplier_number
         AND NVL(i.CANCELED_FLAG, 'N')      != 'Y'
@@ -289,18 +292,24 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
             GROUP BY ri.INVOICE_ID
         ) pay_sum  ON pay_sum.INVOICE_ID  = i.INVOICE_ID
         LEFT JOIN (
-            SELECT ap.INVOICE_ID,
-                   SUM(ap.APPLIED_AMOUNT) AS total_applied
+            SELECT COALESCE(ap.INVOICE_ID, inv_r.INVOICE_ID) AS INVOICE_ID,
+                   SUM(ap.APPLIED_AMOUNT)                     AS total_applied
             FROM   RR_AP_APPLIED_PREPAYMENTS ap
+            LEFT JOIN RR_AP_INVOICES_ALL inv_r
+                ON  ap.INVOICE_ID IS NULL
+                AND inv_r.INVOICE_NUMBER = ap.INVOICE_NUMBER
             WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
-            GROUP BY ap.INVOICE_ID
+            GROUP BY COALESCE(ap.INVOICE_ID, inv_r.INVOICE_ID)
         ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
         LEFT JOIN (
-            SELECT ap.PREPAYMENT_INVOICE_ID,
-                   SUM(ap.APPLIED_AMOUNT) AS total_applied_out
+            SELECT COALESCE(ap.PREPAYMENT_INVOICE_ID, prep_r.INVOICE_ID) AS PREPAYMENT_INVOICE_ID,
+                   SUM(ap.APPLIED_AMOUNT)                                AS total_applied_out
             FROM   RR_AP_APPLIED_PREPAYMENTS ap
+            LEFT JOIN RR_AP_INVOICES_ALL prep_r
+                ON  ap.PREPAYMENT_INVOICE_ID IS NULL
+                AND prep_r.INVOICE_NUMBER = ap.PREPAYMENT_NUMBER
             WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
-            GROUP BY ap.PREPAYMENT_INVOICE_ID
+            GROUP BY COALESCE(ap.PREPAYMENT_INVOICE_ID, prep_r.INVOICE_ID)
         ) prepaid_sum ON prepaid_sum.PREPAYMENT_INVOICE_ID = i.INVOICE_ID
         WHERE i.SUPPLIER_NUMBER = p_supplier_number
         AND NVL(i.CANCELED_FLAG, 'N') != 'Y';
@@ -403,18 +412,24 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
                 GROUP BY ri.INVOICE_ID
             ) pay_sum  ON pay_sum.INVOICE_ID  = i.INVOICE_ID
             LEFT JOIN (
-                SELECT ap.INVOICE_ID,
-                       SUM(ap.APPLIED_AMOUNT) AS total_applied
+                SELECT COALESCE(ap.INVOICE_ID, inv_r.INVOICE_ID) AS INVOICE_ID,
+                       SUM(ap.APPLIED_AMOUNT)                     AS total_applied
                 FROM   RR_AP_APPLIED_PREPAYMENTS ap
+                LEFT JOIN RR_AP_INVOICES_ALL inv_r
+                    ON  ap.INVOICE_ID IS NULL
+                    AND inv_r.INVOICE_NUMBER = ap.INVOICE_NUMBER
                 WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
-                GROUP BY ap.INVOICE_ID
+                GROUP BY COALESCE(ap.INVOICE_ID, inv_r.INVOICE_ID)
             ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
             LEFT JOIN (
-                SELECT ap.PREPAYMENT_INVOICE_ID,
-                       SUM(ap.APPLIED_AMOUNT) AS total_applied_out
+                SELECT COALESCE(ap.PREPAYMENT_INVOICE_ID, prep_r.INVOICE_ID) AS PREPAYMENT_INVOICE_ID,
+                       SUM(ap.APPLIED_AMOUNT)                                AS total_applied_out
                 FROM   RR_AP_APPLIED_PREPAYMENTS ap
+                LEFT JOIN RR_AP_INVOICES_ALL prep_r
+                    ON  ap.PREPAYMENT_INVOICE_ID IS NULL
+                    AND prep_r.INVOICE_NUMBER = ap.PREPAYMENT_NUMBER
                 WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
-                GROUP BY ap.PREPAYMENT_INVOICE_ID
+                GROUP BY COALESCE(ap.PREPAYMENT_INVOICE_ID, prep_r.INVOICE_ID)
             ) prepaid_sum ON prepaid_sum.PREPAYMENT_INVOICE_ID = i.INVOICE_ID
             WHERE i.SUPPLIER_NUMBER = p_supplier_number
             AND NVL(i.CANCELED_FLAG, 'N') != 'Y'
@@ -561,19 +576,25 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
                 ) pay_sum  ON pay_sum.INVOICE_ID  = i.INVOICE_ID
                 LEFT JOIN (
                     -- Prepayments applied TO this invoice (reduces regular invoice balance)
-                    SELECT ap.INVOICE_ID,
-                           SUM(ap.APPLIED_AMOUNT) AS total_applied
+                    SELECT COALESCE(ap.INVOICE_ID, inv_r.INVOICE_ID) AS INVOICE_ID,
+                           SUM(ap.APPLIED_AMOUNT)                     AS total_applied
                     FROM   RR_AP_APPLIED_PREPAYMENTS ap
+                    LEFT JOIN RR_AP_INVOICES_ALL inv_r
+                        ON  ap.INVOICE_ID IS NULL
+                        AND inv_r.INVOICE_NUMBER = ap.INVOICE_NUMBER
                     WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
-                    GROUP BY ap.INVOICE_ID
+                    GROUP BY COALESCE(ap.INVOICE_ID, inv_r.INVOICE_ID)
                 ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
                 LEFT JOIN (
                     -- Amount applied OUT from this prepayment invoice to other invoices
-                    SELECT ap.PREPAYMENT_INVOICE_ID,
-                           SUM(ap.APPLIED_AMOUNT) AS total_applied_out
+                    SELECT COALESCE(ap.PREPAYMENT_INVOICE_ID, prep_r.INVOICE_ID) AS PREPAYMENT_INVOICE_ID,
+                           SUM(ap.APPLIED_AMOUNT)                                AS total_applied_out
                     FROM   RR_AP_APPLIED_PREPAYMENTS ap
+                    LEFT JOIN RR_AP_INVOICES_ALL prep_r
+                        ON  ap.PREPAYMENT_INVOICE_ID IS NULL
+                        AND prep_r.INVOICE_NUMBER = ap.PREPAYMENT_NUMBER
                     WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
-                    GROUP BY ap.PREPAYMENT_INVOICE_ID
+                    GROUP BY COALESCE(ap.PREPAYMENT_INVOICE_ID, prep_r.INVOICE_ID)
                 ) prepaid_sum ON prepaid_sum.PREPAYMENT_INVOICE_ID = i.INVOICE_ID
                 WHERE i.SUPPLIER_NUMBER = p_supplier_number
                 AND NVL(i.CANCELED_FLAG,  'N') != 'Y'
@@ -969,11 +990,14 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
             GROUP BY ri.INVOICE_ID
         ) pay_sum  ON pay_sum.INVOICE_ID  = i.INVOICE_ID
         LEFT JOIN (
-            SELECT ap.INVOICE_ID,
-                   SUM(ap.APPLIED_AMOUNT) AS total_applied
+            SELECT COALESCE(ap.INVOICE_ID, inv_r.INVOICE_ID) AS INVOICE_ID,
+                   SUM(ap.APPLIED_AMOUNT)                     AS total_applied
             FROM   RR_AP_APPLIED_PREPAYMENTS ap
+            LEFT JOIN RR_AP_INVOICES_ALL inv_r
+                ON  ap.INVOICE_ID IS NULL
+                AND inv_r.INVOICE_NUMBER = ap.INVOICE_NUMBER
             WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
-            GROUP BY ap.INVOICE_ID
+            GROUP BY COALESCE(ap.INVOICE_ID, inv_r.INVOICE_ID)
         ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
         WHERE i.SUPPLIER_NUMBER = p_supplier_number
         AND NVL(i.CANCELED_FLAG,  'N')      != 'Y'
@@ -987,11 +1011,13 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
         FROM RR_AP_PAYMENTS_ALL
         WHERE SUPPLIER_NUMBER = p_supplier_number;
 
-        -- Calculate aging with actual payment amounts
+        -- Calculate aging with actual payment amounts (all invoice types)
         FOR rec IN (
             SELECT
                 i.INVOICE_AMOUNT,
-                NVL(pay_sum.total_paid, 0) + NVL(prep_sum.total_applied, 0) AS AMOUNT_PAID,
+                NVL(pay_sum.total_paid, 0)
+                    + NVL(prep_sum.total_applied,        0)
+                    + NVL(prepaid_sum.total_applied_out, 0) AS AMOUNT_PAID,
                 i.INVOICE_DATE
             FROM RR_AP_INVOICES_ALL i
             LEFT JOIN (
@@ -1003,28 +1029,38 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
                 GROUP BY ri.INVOICE_ID
             ) pay_sum  ON pay_sum.INVOICE_ID  = i.INVOICE_ID
             LEFT JOIN (
-                SELECT ap.INVOICE_ID,
-                       SUM(ap.APPLIED_AMOUNT) AS total_applied
+                SELECT COALESCE(ap.INVOICE_ID, inv_r.INVOICE_ID) AS INVOICE_ID,
+                       SUM(ap.APPLIED_AMOUNT)                     AS total_applied
                 FROM   RR_AP_APPLIED_PREPAYMENTS ap
+                LEFT JOIN RR_AP_INVOICES_ALL inv_r
+                    ON  ap.INVOICE_ID IS NULL
+                    AND inv_r.INVOICE_NUMBER = ap.INVOICE_NUMBER
                 WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
-                GROUP BY ap.INVOICE_ID
+                GROUP BY COALESCE(ap.INVOICE_ID, inv_r.INVOICE_ID)
             ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
+            LEFT JOIN (
+                SELECT COALESCE(ap.PREPAYMENT_INVOICE_ID, prep_r.INVOICE_ID) AS PREPAYMENT_INVOICE_ID,
+                       SUM(ap.APPLIED_AMOUNT)                                AS total_applied_out
+                FROM   RR_AP_APPLIED_PREPAYMENTS ap
+                LEFT JOIN RR_AP_INVOICES_ALL prep_r
+                    ON  ap.PREPAYMENT_INVOICE_ID IS NULL
+                    AND prep_r.INVOICE_NUMBER = ap.PREPAYMENT_NUMBER
+                WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
+                GROUP BY COALESCE(ap.PREPAYMENT_INVOICE_ID, prep_r.INVOICE_ID)
+            ) prepaid_sum ON prepaid_sum.PREPAYMENT_INVOICE_ID = i.INVOICE_ID
             WHERE i.SUPPLIER_NUMBER = p_supplier_number
-            AND NVL(i.CANCELED_FLAG,  'N')      != 'Y'
-            AND NVL(i.INVOICE_TYPE, 'Standard') != 'Prepayment'
+            AND NVL(i.CANCELED_FLAG, 'N') != 'Y'
             AND NVL(i.PAID_STATUS, 'Unpaid') NOT IN ('Paid', 'Cancelled')
         ) LOOP
             DECLARE
-                l_invoice_date DATE;
-                l_days_old NUMBER;
+                l_days_old   NUMBER;
                 l_unpaid_amt NUMBER;
             BEGIN
-                l_invoice_date := safe_to_date(rec.INVOICE_DATE);
                 l_unpaid_amt := rec.INVOICE_AMOUNT - rec.AMOUNT_PAID;
 
                 -- Include credit notes (l_unpaid_amt < 0): they reduce the aging bucket totals
-                IF l_invoice_date IS NOT NULL AND l_unpaid_amt <> 0 THEN
-                    l_days_old := TRUNC(SYSDATE) - TRUNC(l_invoice_date);
+                IF rec.INVOICE_DATE IS NOT NULL AND l_unpaid_amt <> 0 THEN
+                    l_days_old := TRUNC(SYSDATE) - TRUNC(rec.INVOICE_DATE);
 
                     IF l_days_old <= 0 THEN
                         l_current := l_current + l_unpaid_amt;
