@@ -227,7 +227,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
         l_unpaid_count      NUMBER := 0;
         l_balance           NUMBER := 0;
     BEGIN
-        -- Get invoice totals — actual amounts from payment and prepayment tables
+        -- Invoice totals (regular invoices only, for display)
         SELECT
             NVL(SUM(i.INVOICE_AMOUNT), 0),
             COUNT(*),
@@ -252,7 +252,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
             GROUP BY ap.INVOICE_ID
         ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
         WHERE i.SUPPLIER_NUMBER = p_supplier_number
-        AND NVL(i.CANCELED_FLAG,  'N')      != 'Y'
+        AND NVL(i.CANCELED_FLAG, 'N')      != 'Y'
         AND NVL(i.INVOICE_TYPE, 'Standard') != 'Prepayment';
 
         -- Get payment count
@@ -261,8 +261,49 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
         FROM RR_AP_PAYMENTS_ALL
         WHERE SUPPLIER_NUMBER = p_supplier_number;
 
-        -- Calculate balance
-        l_balance := l_total_invoices - l_total_paid;
+        -- True outstanding balance: sum of remaining amounts across ALL invoice types.
+        -- Prepayment invoices with an unapplied balance reduce the net payable to the supplier.
+        SELECT NVL(SUM(
+            CASE WHEN NVL(i.INVOICE_AMOUNT, 0) < 0 THEN
+                NVL(i.INVOICE_AMOUNT, 0)
+                - NVL(pay_sum.total_paid,            0)
+                - NVL(prep_sum.total_applied,        0)
+                - NVL(prepaid_sum.total_applied_out, 0)
+            ELSE
+                GREATEST(0,
+                    NVL(i.INVOICE_AMOUNT, 0)
+                    - NVL(pay_sum.total_paid,            0)
+                    - NVL(prep_sum.total_applied,        0)
+                    - NVL(prepaid_sum.total_applied_out, 0))
+            END
+        ), 0)
+        INTO l_balance
+        FROM RR_AP_INVOICES_ALL i
+        LEFT JOIN (
+            SELECT ri.INVOICE_ID,
+                   SUM(NVL(ri.AMOUNT_PAID_INVOICE_CURRENCY, 0) + NVL(ri.DISCOUNT_TAKEN, 0)) AS total_paid
+            FROM   RR_AP_PAYMENTS_RELATED_INVOICES ri
+            JOIN   RR_AP_PAYMENTS_ALL              p ON p.CHECK_ID = ri.CHECK_ID
+            WHERE  NVL(p.PAYMENT_STATUS,           'Active') != 'Voided'
+            AND    NVL(ri.INVOICE_PAYMENT_STATUS,  'Active') != 'Voided'
+            GROUP BY ri.INVOICE_ID
+        ) pay_sum  ON pay_sum.INVOICE_ID  = i.INVOICE_ID
+        LEFT JOIN (
+            SELECT ap.INVOICE_ID,
+                   SUM(ap.APPLIED_AMOUNT) AS total_applied
+            FROM   RR_AP_APPLIED_PREPAYMENTS ap
+            WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
+            GROUP BY ap.INVOICE_ID
+        ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
+        LEFT JOIN (
+            SELECT ap.PREPAYMENT_INVOICE_ID,
+                   SUM(ap.APPLIED_AMOUNT) AS total_applied_out
+            FROM   RR_AP_APPLIED_PREPAYMENTS ap
+            WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
+            GROUP BY ap.PREPAYMENT_INVOICE_ID
+        ) prepaid_sum ON prepaid_sum.PREPAYMENT_INVOICE_ID = i.INVOICE_ID
+        WHERE i.SUPPLIER_NUMBER = p_supplier_number
+        AND NVL(i.CANCELED_FLAG, 'N') != 'Y';
 
         -- Build JSON response
         l_result := JSON_OBJECT(
@@ -344,12 +385,14 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
         l_pct_91_120        NUMBER := 0;
         l_pct_over_120      NUMBER := 0;
     BEGIN
-        -- Calculate aging based on invoice date and actual unpaid amount
+        -- Calculate aging based on invoice date and actual unpaid amount (all invoice types)
         FOR rec IN (
             SELECT
                 i.INVOICE_AMOUNT,
-                NVL(pay_sum.total_paid, 0) + NVL(prep_sum.total_applied, 0) AS AMOUNT_PAID,
-                i.INVOICE_DATE
+                NVL(pay_sum.total_paid, 0)
+                    + NVL(prep_sum.total_applied,        0)
+                    + NVL(prepaid_sum.total_applied_out, 0) AS AMOUNT_PAID,
+                i.INVOICE_DATE   -- DATE column: used directly, no string conversion
             FROM RR_AP_INVOICES_ALL i
             LEFT JOIN (
                 SELECT ri.INVOICE_ID,
@@ -366,22 +409,27 @@ CREATE OR REPLACE PACKAGE BODY PKG_SUPPLIER_BALANCE AS
                 WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
                 GROUP BY ap.INVOICE_ID
             ) prep_sum ON prep_sum.INVOICE_ID = i.INVOICE_ID
+            LEFT JOIN (
+                SELECT ap.PREPAYMENT_INVOICE_ID,
+                       SUM(ap.APPLIED_AMOUNT) AS total_applied_out
+                FROM   RR_AP_APPLIED_PREPAYMENTS ap
+                WHERE  NVL(ap.STATUS, 'Applied') != 'Cancelled'
+                GROUP BY ap.PREPAYMENT_INVOICE_ID
+            ) prepaid_sum ON prepaid_sum.PREPAYMENT_INVOICE_ID = i.INVOICE_ID
             WHERE i.SUPPLIER_NUMBER = p_supplier_number
-            AND NVL(i.CANCELED_FLAG,  'N')      != 'Y'
-            AND NVL(i.INVOICE_TYPE, 'Standard') != 'Prepayment'
+            AND NVL(i.CANCELED_FLAG, 'N') != 'Y'
             AND NVL(i.PAID_STATUS, 'Unpaid') NOT IN ('Paid', 'Cancelled')
         ) LOOP
             DECLARE
-                l_invoice_date DATE;
-                l_days_old NUMBER;
+                l_days_old   NUMBER;
                 l_unpaid_amt NUMBER;
             BEGIN
-                l_invoice_date := safe_to_date(rec.INVOICE_DATE);
+                -- Use DATE column directly — no string round-trip that loses date info
                 l_unpaid_amt := rec.INVOICE_AMOUNT - rec.AMOUNT_PAID;
 
                 -- Include credit notes (l_unpaid_amt < 0): they reduce the aging bucket totals
-                IF l_invoice_date IS NOT NULL AND l_unpaid_amt <> 0 THEN
-                    l_days_old := TRUNC(SYSDATE) - TRUNC(l_invoice_date);
+                IF rec.INVOICE_DATE IS NOT NULL AND l_unpaid_amt <> 0 THEN
+                    l_days_old := TRUNC(SYSDATE) - TRUNC(rec.INVOICE_DATE);
 
                     IF l_days_old <= 0 THEN
                         l_current := l_current + l_unpaid_amt;
