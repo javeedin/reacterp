@@ -206,6 +206,7 @@ interface InvoiceRecord {
   invoiceId: number;
   invoiceNumber: string;
   invoiceDate: string;
+  invoiceType: string;
   invoiceAmount: number;
   amountPaid: number;
   amountRemaining: number;
@@ -864,6 +865,7 @@ const ManageSuppliers: React.FC = () => {
           invoiceId:      item.invoice_id,
           invoiceNumber:  item.invoice_number  || '',
           invoiceDate:    item.invoice_date    || '',
+          invoiceType:    item.invoice_type    || 'Standard',
           invoiceAmount:  Number(item.invoice_amount   || 0),
           amountPaid:     Number(item.amount_paid      || 0),
           amountRemaining: Number(item.amount_remaining ?? 0),
@@ -2801,7 +2803,7 @@ const ManageSuppliers: React.FC = () => {
                   invoiceId: editInvoice.invoiceId,
                   invoiceNumber: editInvoice.invoiceNumber,
                   invoiceDate: editInvoice.invoiceDate,
-                  invoiceType: 'Standard',
+                  invoiceType: editInvoice.invoiceType || 'Standard',
                   supplierOrParty: supplierName,
                   supplierSite: '',
                   invoiceAmount: editInvoice.invoiceAmount,

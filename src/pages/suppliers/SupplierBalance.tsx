@@ -283,6 +283,7 @@ const SupplierBalance: React.FC = () => {
         invoiceAmount:   Number(item.invoice_amount  || 0),
         amountPaid:      Number(item.amount_applied  || item.amount_paid || 0),
         amountRemaining: Number(item.amount_remaining || 0),
+        invoiceType:     item.invoice_type || 'Standard',
         validationStatus:'', paidStatus: '', currency: 'AED', description: '', businessUnit: '',
       })));
     } catch (err) {

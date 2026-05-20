@@ -202,6 +202,8 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
   const [installmentsModalData, setInstallmentsModalData] = useState<any[]>([]);
   const [installmentsModalLoading, setInstallmentsModalLoading] = useState(false);
 
+  const [prepaymentAppliedOut, setPrepaymentAppliedOut] = useState(0);
+
   // ── SLA state ──────────────────────────────────────────────────────────────
   const [slaStatus, setSlaStatus] = useState<SlaExistsResult | null>(null);
   const [slaLoading, setSlaLoading] = useState(false);
@@ -218,6 +220,20 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
   const [glBatchId, setGlBatchId] = useState('');
   const [glBatchName, setGlBatchName] = useState('');
   const [glHeaderId, setGlHeaderId] = useState('');
+
+  // Fetch applied-out amount for prepayment invoices
+  useEffect(() => {
+    if (invoice.invoiceType !== 'Prepayment') return;
+    const url = `${APEX_DB_CONFIG.baseUrl}/ap/applied-prepayments/balances?prepayment_invoice_id=${invoice.invoiceId}`;
+    fetch(url, { headers: { Accept: 'application/json' } })
+      .then(r => r.ok ? r.json() : null)
+      .then(json => {
+        if (!json) return;
+        const item = Array.isArray(json) ? json[0] : Array.isArray(json?.items) ? json.items[0] : json;
+        if (item) setPrepaymentAppliedOut(Number(item.TotalApplied ?? item.total_applied ?? 0));
+      })
+      .catch(() => {});
+  }, [invoice.invoiceId, invoice.invoiceType]);
 
   // Fetch all data on mount
   useEffect(() => {
@@ -852,10 +868,12 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
     },
   ];
 
-  // Invoice balance calculation (considers payments + discounts taken)
+  // Invoice balance calculation (considers payments + discounts taken + prepayment applications)
   const totalPaid           = payments.reduce((s, p) => s + (p.amountPaidInvoiceCurrency || 0), 0);
   const totalDiscountTaken  = payments.reduce((s, p) => s + (p.discountTaken || 0), 0);
-  const invoiceBalance      = invoice.invoiceAmount - totalPaid - totalDiscountTaken;
+  const invoiceBalance      = invoice.invoiceType === 'Prepayment'
+    ? invoice.invoiceAmount - totalPaid - totalDiscountTaken - prepaymentAppliedOut
+    : invoice.invoiceAmount - totalPaid - totalDiscountTaken - (invoice.appliedPrepayments || 0);
 
   // Installments columns
   const installmentsColumns: ColumnsType<Installment> = [
