@@ -202,7 +202,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
   const [installmentsModalData, setInstallmentsModalData] = useState<any[]>([]);
   const [installmentsModalLoading, setInstallmentsModalLoading] = useState(false);
 
-  const [prepaymentAppliedOut, setPrepaymentAppliedOut] = useState(0);
+  const [apiBalance, setApiBalance] = useState<number | null>(null);
 
   // ── SLA state ──────────────────────────────────────────────────────────────
   const [slaStatus, setSlaStatus] = useState<SlaExistsResult | null>(null);
@@ -221,16 +221,22 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
   const [glBatchName, setGlBatchName] = useState('');
   const [glHeaderId, setGlHeaderId] = useState('');
 
-  // Fetch applied-out amount for prepayment invoices
+  // Fetch true balance from API — net-balance for regular invoices, available_balance for prepayments
   useEffect(() => {
-    if (invoice.invoiceType !== 'Prepayment') return;
-    const url = `${APEX_DB_CONFIG.baseUrl}/ap/applied-prepayments/balances?prepayment_invoice_id=${invoice.invoiceId}`;
+    const isPrep = invoice.invoiceType === 'Prepayment';
+    const url = isPrep
+      ? `${APEX_DB_CONFIG.baseUrl}/ap/applied-prepayments/balances?prepayment_invoice_id=${invoice.invoiceId}`
+      : `${APEX_DB_CONFIG.baseUrl}/ap/invoices/${invoice.invoiceId}/net-balance`;
     fetch(url, { headers: { Accept: 'application/json' } })
       .then(r => r.ok ? r.json() : null)
       .then(json => {
         if (!json) return;
-        const item = Array.isArray(json) ? json[0] : Array.isArray(json?.items) ? json.items[0] : json;
-        if (item) setPrepaymentAppliedOut(Number(item.TotalApplied ?? item.total_applied ?? 0));
+        if (isPrep) {
+          const item = Array.isArray(json) ? json[0] : Array.isArray(json?.items) ? json.items[0] : json;
+          if (item) setApiBalance(Number(item.AvailableBalance ?? item.available_balance ?? item.availableBalance ?? 0));
+        } else {
+          setApiBalance(json.netBalance ?? json.balance ?? null);
+        }
       })
       .catch(() => {});
   }, [invoice.invoiceId, invoice.invoiceType]);
@@ -868,11 +874,11 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
     },
   ];
 
-  // Invoice balance calculation (considers payments + discounts taken + prepayment applications)
+  // Invoice balance calculation — use API balance (net-balance / available_balance) when available
   const totalPaid           = payments.reduce((s, p) => s + (p.amountPaidInvoiceCurrency || 0), 0);
   const totalDiscountTaken  = payments.reduce((s, p) => s + (p.discountTaken || 0), 0);
-  const invoiceBalance      = invoice.invoiceType === 'Prepayment'
-    ? invoice.invoiceAmount - totalPaid - totalDiscountTaken - prepaymentAppliedOut
+  const invoiceBalance      = apiBalance !== null
+    ? apiBalance
     : invoice.invoiceAmount - totalPaid - totalDiscountTaken - (invoice.appliedPrepayments || 0);
 
   // Installments columns
