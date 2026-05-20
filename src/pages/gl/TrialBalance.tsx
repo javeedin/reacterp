@@ -4285,8 +4285,9 @@ const TrialBalance: React.FC = () => {
                 </div>
               )}
               {filteredDistCombos.map(item => {
-                const currentVal = revalComboPickerFor === 'gain' ? revalGainCombo : revalLossCombo;
-                const selected   = currentVal === item.combinationName;
+                const accountCode = item.glAccountDesc || item.combinationName;
+                const currentVal  = revalComboPickerFor === 'gain' ? revalGainCombo : revalLossCombo;
+                const selected    = currentVal === accountCode;
                 return (
                   <div
                     key={item.combinationId}
@@ -4297,8 +4298,13 @@ const TrialBalance: React.FC = () => {
                       display: 'flex', alignItems: 'center', gap: 10,
                     }}
                     onClick={() => {
-                      if (revalComboPickerFor === 'gain') setRevalGainCombo(item.combinationName);
-                      else setRevalLossCombo(item.combinationName);
+                      if (revalComboPickerFor === 'gain') {
+                        setRevalGainCombo(accountCode);
+                        if (!revalLossCombo) setRevalLossCombo(accountCode);
+                      } else {
+                        setRevalLossCombo(accountCode);
+                        if (!revalGainCombo) setRevalGainCombo(accountCode);
+                      }
                       setRevalComboPickerOpen(false);
                     }}
                     onMouseEnter={e => { if (!selected) e.currentTarget.style.background = '#f0f5ff'; }}
@@ -4307,11 +4313,16 @@ const TrialBalance: React.FC = () => {
                     {selected && <CheckCircleOutlined style={{ color: REDWOOD.info, fontSize: 14 }} />}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <Text style={{ fontFamily: 'monospace', fontSize: 12, display: 'block' }}>
-                        {item.combinationName}
+                        {accountCode}
                       </Text>
-                      {(item.description || item.glAccountDesc) && (
+                      {item.combinationName && item.combinationName !== accountCode && (
                         <Text style={{ fontSize: 11, color: REDWOOD.textSecondary }}>
-                          {item.description || item.glAccountDesc}
+                          {item.combinationName}{item.description ? ` — ${item.description}` : ''}
+                        </Text>
+                      )}
+                      {item.combinationName === accountCode && item.description && (
+                        <Text style={{ fontSize: 11, color: REDWOOD.textSecondary }}>
+                          {item.description}
                         </Text>
                       )}
                     </div>
@@ -4351,8 +4362,13 @@ const TrialBalance: React.FC = () => {
           visible={revalGainLossAcctOpen}
           onCancel={() => setRevalGainLossAcctOpen(false)}
           onSelect={(accountCode) => {
-            if (revalGainLossAcctFor === 'gain') setRevalGainCombo(accountCode);
-            else setRevalLossCombo(accountCode);
+            if (revalGainLossAcctFor === 'gain') {
+              setRevalGainCombo(accountCode);
+              if (!revalLossCombo) setRevalLossCombo(accountCode);
+            } else {
+              setRevalLossCombo(accountCode);
+              if (!revalGainCombo) setRevalGainCombo(accountCode);
+            }
             setRevalGainLossAcctOpen(false);
           }}
           lockedFirstSegment={revalCompany || undefined}
