@@ -46,9 +46,6 @@ export interface APSyncProgress {
   // Installments (child data)
   totalInstallments: number;
   processedInstallments: number;
-  // Prepayment applications (child data)
-  totalPrepayApps: number;
-  processedPrepayApps: number;
   // Pagination
   currentPage: number;
   totalPages: number;
@@ -317,69 +314,6 @@ const insertInvoiceInstallmentsToApex = async (
   }
 };
 
-// Fetch prepayment applications (invoicePayments) for an invoice from Oracle Fusion
-const fetchInvoicePaymentsFromOracle = async (
-  invoiceId: number,
-  log?: LogCallback,
-  verbose = true
-): Promise<{ success: boolean; items: any[]; error?: string }> => {
-  try {
-    if (verbose) log?.('info', `Fetching prepayment applications for Invoice ${invoiceId}...`);
-    const items = await fetchAllFromOracleUrl(
-      `${ORACLE_FUSION_CONFIG.baseUrl}/invoices/${invoiceId}/child/invoicePayments`,
-      log,
-      verbose,
-      500
-    );
-    if (verbose) log?.('success', `Fetched ${items.length} prepayment application(s) for Invoice ${invoiceId}`);
-    return { success: true, items };
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    if (verbose) log?.('error', `Fetch Prepayment Applications Error: ${errorMsg}`);
-    return { success: false, items: [], error: errorMsg };
-  }
-};
-
-// Insert prepayment applications to APEX one by one (endpoint accepts single records)
-const insertAppliedPrepaymentsToApex = async (
-  invoiceId: number,
-  invoiceNumber: string,
-  applications: any[],
-  log?: LogCallback,
-  verbose = true
-): Promise<{ successCount: number; error?: string }> => {
-  let successCount = 0;
-  for (const app of applications) {
-    try {
-      const payload = {
-        InvoiceId:                 invoiceId,
-        InvoiceNumber:             invoiceNumber,
-        PrepaymentInvoiceId:       app.PrepaymentInvoiceId ?? app.prepayment_invoice_id ?? null,
-        PrepaymentNumber:          app.PrepaymentNumber    ?? app.prepayment_number      ?? null,
-        LineNumber:                app.LineNumber          ?? app.line_number             ?? 1,
-        PrepaymentLineNumber:      app.PrepaymentLineNumber ?? app.prepayment_line_number ?? 1,
-        Description:               app.Description        ?? app.description             ?? null,
-        BusinessUnit:              app.BusinessUnit        ?? app.business_unit           ?? null,
-        SupplierSite:              app.SupplierSite        ?? app.supplier_site           ?? null,
-        PurchaseOrder:             app.PurchaseOrder       ?? app.purchase_order          ?? null,
-        Currency:                  app.Currency            ?? app.currency                ?? null,
-        AppliedAmount:             app.AppliedAmount       ?? app.applied_amount          ?? 0,
-        IncludedTax:               app.IncludedTax         ?? null,
-        IncludedonInvoiceFlag:     app.IncludedonInvoiceFlag ?? false,
-        ApplicationAccountingDate: app.ApplicationAccountingDate ?? app.application_accounting_date ?? null,
-        Status:                    app.Status              ?? 'Applied',
-      };
-      const data = await insertToApex('ap/invoices/appliedprepayments', payload, log, verbose);
-      const ok = data.status === 'SUCCESS' || data.success === true || data.successCount > 0;
-      if (ok) successCount++;
-      else if (verbose) log?.('warning', `Prepay app insert failed: ${JSON.stringify(data)}`);
-    } catch (err) {
-      if (verbose) log?.('error', `Prepay app insert error: ${err instanceof Error ? err.message : err}`);
-    }
-  }
-  return { successCount };
-};
-
 // Fetch invoices from Oracle Fusion
 const fetchInvoicesFromOracle = async (
   params: Record<string, string> = {},
@@ -539,8 +473,6 @@ export const syncAPInvoices = async (
     processedDistributions: 0,
     totalInstallments: 0,
     processedInstallments: 0,
-    totalPrepayApps: 0,
-    processedPrepayApps: 0,
     currentPage: 0,
     totalPages: 0,
     errors: 0,
@@ -859,17 +791,6 @@ export const syncAPInvoices = async (
           log?.('error', `✗ Failed to fetch installments for ${invoiceNum}: ${installmentsResult.error}`);
         }
 
-        // ========================================
-        // STEP 2d: Fetch and POST Prepayment Applications
-        // ========================================
-        const prepayAppsResult = await fetchInvoicePaymentsFromOracle(invoice.InvoiceId, log, verbose);
-        if (prepayAppsResult.success && prepayAppsResult.items.length > 0) {
-          updateProgress({ totalPrepayApps: progress.totalPrepayApps + prepayAppsResult.items.length });
-          const prepayInsertResult = await insertAppliedPrepaymentsToApex(invoice.InvoiceId, invoiceNum, prepayAppsResult.items, log, verbose);
-          updateProgress({ processedPrepayApps: progress.processedPrepayApps + prepayInsertResult.successCount });
-          if (verbose) log?.('success', `✓ ${prepayInsertResult.successCount} prepayment application(s) inserted for ${invoiceNum}`);
-        }
-
         // Update payload callback with success result, lines info, and installments info
         onInvoicePayload?.(invoice.InvoiceId, invoiceNum, invoice, insertResult.response, undefined, linesInfo, installmentsInfo);
 
@@ -902,7 +823,7 @@ export const syncAPInvoices = async (
     });
 
     // Always show brief completion summary
-    log?.('success', `✓ Sync completed: ${progress.insertedInvoices} invoices, ${progress.processedLines} lines, ${progress.processedInstallments} installments, ${progress.processedPrepayApps} prepayment applications inserted`);
+    log?.('success', `✓ Sync completed: ${progress.insertedInvoices} invoices, ${progress.processedLines} lines, ${progress.processedInstallments} installments inserted`);
     if (progress.errors > 0) {
       log?.('warning', `⚠ ${progress.errors} errors occurred`);
     }

@@ -77,7 +77,7 @@ import Autopilot from '../../components/Autopilot';
 import { useElectron, useElectronBackgroundSync } from '../../hooks/useElectron';
 
 // Icon imports for AP
-import { FileSearchOutlined, BranchesOutlined, ScheduleOutlined, DollarOutlined } from '@ant-design/icons';
+import { FileSearchOutlined, BranchesOutlined, ScheduleOutlined } from '@ant-design/icons';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -263,8 +263,6 @@ const SyncData: React.FC = () => {
     processedDistributions: 0,
     totalInstallments: 0,
     processedInstallments: 0,
-    totalPrepayApps: 0,
-    processedPrepayApps: 0,
     currentPage: 0,
     totalPages: 0,
     errors: 0,
@@ -2174,7 +2172,7 @@ const SyncData: React.FC = () => {
         totalHeaders: 0, processedHeaders: 0,
         totalLines: 0, processedLines: 0,
         totalDistributions: 0, processedDistributions: 0,
-        totalInstallments: 0, processedInstallments: 0, totalPrepayApps: 0, processedPrepayApps: 0,
+        totalInstallments: 0, processedInstallments: 0,
         currentPage: 0, totalPages: 0,
         errors: 0, lastError: '',
         startTime: new Date(), endTime: null,
@@ -4313,10 +4311,10 @@ const SyncData: React.FC = () => {
                   </Col>
                 </Row>
 
-                {/* Row 2: Distributions · Installments · Prepay Applications */}
+                {/* Row 2: Distributions · Installments */}
                 <Row gutter={16} style={{ marginBottom: 16 }}>
                   {/* Distributions Card */}
-                  <Col xs={24} sm={8}>
+                  <Col xs={24} sm={12}>
                     <Card
                       style={{
                         borderRadius: 12,
@@ -4350,7 +4348,7 @@ const SyncData: React.FC = () => {
                   </Col>
 
                   {/* Installments Card */}
-                  <Col xs={24} sm={8}>
+                  <Col xs={24} sm={12}>
                     <Card
                       style={{
                         borderRadius: 12,
@@ -4373,35 +4371,6 @@ const SyncData: React.FC = () => {
                         percent={apProgress.totalInstallments > 0 ? Math.round((apProgress.processedInstallments / apProgress.totalInstallments) * 100) : 0}
                         showInfo={false}
                         strokeColor="#722ed1"
-                        style={{ marginTop: 8 }}
-                      />
-                    </Card>
-                  </Col>
-
-                  {/* Prepay Applications Card */}
-                  <Col xs={24} sm={8}>
-                    <Card
-                      style={{
-                        borderRadius: 12,
-                        border: `1px solid ${REDWOOD.border}`,
-                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
-                      }}
-                      bodyStyle={{ padding: 16 }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
-                        <DollarOutlined style={{ fontSize: 20, color: '#13c2c2', marginRight: 8 }} />
-                        <Text strong>Prepay Applications</Text>
-                      </div>
-                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
-                        {apProgress.processedPrepayApps}
-                        <Text type="secondary" style={{ fontSize: 14, marginLeft: 8 }}>
-                          / {apProgress.totalPrepayApps}
-                        </Text>
-                      </div>
-                      <Progress
-                        percent={apProgress.totalPrepayApps > 0 ? Math.round((apProgress.processedPrepayApps / apProgress.totalPrepayApps) * 100) : 0}
-                        showInfo={false}
-                        strokeColor="#13c2c2"
                         style={{ marginTop: 8 }}
                       />
                     </Card>
