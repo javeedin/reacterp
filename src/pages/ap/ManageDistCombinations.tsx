@@ -347,7 +347,7 @@ const ManageDistCombinations: React.FC = () => {
         <Row gutter={8} align="middle">
           <Col flex="1">
             <Form.Item name="glAccountDesc" noStyle>
-              <Input placeholder="e.g. 01-100-6010-000" readOnly />
+              <Input placeholder="e.g. 01-100-6010-000" />
             </Form.Item>
           </Col>
           <Col>
@@ -386,6 +386,7 @@ const ManageDistCombinations: React.FC = () => {
       <AccountSelector
         visible={coaOpen}
         onCancel={() => setCoaOpen(false)}
+        initialValue={form.getFieldValue('glAccountDesc') || undefined}
         onSelect={(accountCode, _segments) => {
           form.setFieldsValue({ glAccountDesc: accountCode });
           setCoaOpen(false);
@@ -670,7 +671,7 @@ const EditCombinationForm: React.FC<{
         <Row gutter={8} align="middle">
           <Col flex="1">
             <Form.Item name="glAccountDesc" noStyle>
-              <Input placeholder="e.g. 01-100-6010-000" readOnly />
+              <Input placeholder="e.g. 01-100-6010-000" />
             </Form.Item>
           </Col>
           <Col>
@@ -712,6 +713,7 @@ const EditCombinationForm: React.FC<{
       <AccountSelector
         visible={coaOpen}
         onCancel={() => setCoaOpen(false)}
+        initialValue={form.getFieldValue('glAccountDesc') || undefined}
         onSelect={(accountCode, _segments) => {
           form.setFieldsValue({ glAccountDesc: accountCode });
           setCoaOpen(false);
