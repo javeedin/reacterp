@@ -60,6 +60,7 @@ import {
   DownOutlined,
   CalculatorOutlined,
   SyncOutlined,
+  ExclamationCircleOutlined,
 } from '@ant-design/icons';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -3713,6 +3714,47 @@ const TrialBalance: React.FC = () => {
                     cr_amount:    r.cr,
                   })),
                 };
+                // ── Company segment mismatch validation ───────────────
+                if (revalCompany) {
+                  const mismatched = revalPreviewRows.filter(r => {
+                    const firstSeg = (r.combo || '').split('-')[0];
+                    return firstSeg && firstSeg !== revalCompany;
+                  });
+                  if (mismatched.length > 0) {
+                    const confirmed = await new Promise<boolean>(resolve => {
+                      Modal.confirm({
+                        title: 'Company Segment Mismatch',
+                        icon: <ExclamationCircleOutlined style={{ color: REDWOOD.warning }} />,
+                        content: (
+                          <div>
+                            <p style={{ marginBottom: 8 }}>
+                              {mismatched.length} journal line{mismatched.length > 1 ? 's have' : ' has'} a company
+                              segment that does not match the trial balance company <strong>"{revalCompany}"</strong>:
+                            </p>
+                            <ul style={{ margin: 0, paddingLeft: 20, fontSize: 12, fontFamily: 'monospace' }}>
+                              {mismatched.map(r => (
+                                <li key={r.lineNum} style={{ color: REDWOOD.primary }}>
+                                  {r.combo} (company: {(r.combo || '').split('-')[0]})
+                                </li>
+                              ))}
+                            </ul>
+                            <p style={{ marginTop: 8, marginBottom: 0 }}>Save anyway?</p>
+                          </div>
+                        ),
+                        okText: 'Save Anyway',
+                        cancelText: 'Cancel',
+                        okButtonProps: { danger: true },
+                        onOk:    () => resolve(true),
+                        onCancel: () => resolve(false),
+                      });
+                    });
+                    if (!confirmed) {
+                      setRevalSaving(false);
+                      return;
+                    }
+                  }
+                }
+
                 const callUrl = isUpdate
                   ? `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}/${revalId}`
                   : `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}`;
@@ -4298,12 +4340,16 @@ const TrialBalance: React.FC = () => {
                       display: 'flex', alignItems: 'center', gap: 10,
                     }}
                     onClick={() => {
+                      // Auto-set company segment from TB filter
+                      const finalCode = revalCompany && accountCode
+                        ? revalCompany + accountCode.slice(accountCode.indexOf('-'))
+                        : accountCode;
                       if (revalComboPickerFor === 'gain') {
-                        setRevalGainCombo(accountCode);
-                        if (!revalLossCombo) setRevalLossCombo(accountCode);
+                        setRevalGainCombo(finalCode);
+                        if (!revalLossCombo) setRevalLossCombo(finalCode);
                       } else {
-                        setRevalLossCombo(accountCode);
-                        if (!revalGainCombo) setRevalGainCombo(accountCode);
+                        setRevalLossCombo(finalCode);
+                        if (!revalGainCombo) setRevalGainCombo(finalCode);
                       }
                       setRevalComboPickerOpen(false);
                     }}
