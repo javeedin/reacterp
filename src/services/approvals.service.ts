@@ -218,6 +218,23 @@ export async function submitApprovalAction(
   await handleResponse<void>(res);
 }
 
+// ─── Approval Tokens ─────────────────────────────────────────────────────────
+
+async function generateApprovalTokens(
+  requestRef: string,
+  requestId: number | undefined,
+  toEmail: string,
+  toName: string,
+  transactionType?: string,
+): Promise<{ approveToken: string; rejectToken: string }> {
+  const res = await fetch(`${BASE}/generate-links`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requestRef, requestId, toEmail, toName, transactionType }),
+  });
+  return handleResponse<{ approveToken: string; rejectToken: string }>(res);
+}
+
 // ─── Notifications ────────────────────────────────────────────────────────────
 
 export async function sendTestNotification(
@@ -230,4 +247,192 @@ export async function sendTestNotification(
     body: JSON.stringify({ user_id: userId, sampleData }),
   });
   return handleResponse<{ success: boolean; message: string }>(res);
+}
+
+// ─── External Transaction Approval ───────────────────────────────────────────
+
+function buildTxnApprovalEmailHtml(params: {
+  recipientName: string;
+  today: string;
+  approveUrl: string;
+  rejectUrl: string;
+  txnRef: string;
+  txnType: string;
+  amount: number;
+  currency: string;
+  description: string;
+  submittedBy: string;
+}): string {
+  const { recipientName, today, approveUrl, rejectUrl, txnRef, txnType, amount, currency, description, submittedBy } = params;
+  const fmtAmt = `${currency} ${amount.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Approval Required</title></head>
+<body style="margin:0;padding:0;background:#f4f6f8;font-family:Arial,Helvetica,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f4f6f8;padding:32px 16px;">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" border="0"
+  style="background:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.10);max-width:600px;">
+  <tr><td style="background:linear-gradient(135deg,#C74634 0%,#9B3528 100%);padding:32px;text-align:center;">
+    <div style="font-size:10px;letter-spacing:3px;color:rgba(255,255,255,0.70);margin-bottom:8px;text-transform:uppercase;">Bumeric Business Solutions</div>
+    <div style="font-size:28px;font-weight:700;color:#ffffff;margin-bottom:6px;">&#128338; Approval Required</div>
+    <div style="font-size:12px;color:rgba(255,255,255,0.80);">Cash — External Transaction Approval</div>
+  </td></tr>
+  <tr><td style="background:#fff8e1;padding:12px 32px;border-bottom:2px solid #ffe082;">
+    <table width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td style="font-size:13px;color:#7c5a00;font-weight:600;">&#9888;&nbsp; Action Required — Please click Approve or Reject below</td>
+      <td align="right" style="font-size:11px;color:#bbb;white-space:nowrap;">${today}</td>
+    </tr></table>
+  </td></tr>
+  <tr><td style="padding:28px 32px 0;">
+    <p style="margin:0 0 10px;font-size:15px;color:#1a1a1a;font-weight:500;">Dear ${recipientName},</p>
+    <p style="margin:0 0 22px;font-size:13px;color:#555;line-height:1.7;">
+      A cash external transaction has been submitted for your approval. Click <strong>Approve</strong> or
+      <strong>Reject</strong> below — your response will be recorded instantly.
+      Each link is single-use and expires in 72 hours.
+    </p>
+  </td></tr>
+  <tr><td style="padding:0 32px;">
+    <table width="100%" cellpadding="0" cellspacing="0" border="0"
+      style="border:1px solid #e8e8e8;border-radius:8px;overflow:hidden;">
+      <tr><td colspan="2" style="background:#f8f9fa;padding:10px 16px;font-size:10px;font-weight:700;color:#999;letter-spacing:1px;text-transform:uppercase;">Transaction Details</td></tr>
+      <tr style="border-top:1px solid #e8e8e8;">
+        <td style="padding:11px 16px;font-size:12px;color:#888;width:130px;background:#fff;">Module</td>
+        <td style="padding:11px 16px;font-size:13px;font-weight:600;background:#fff;">Cash Management</td>
+      </tr>
+      <tr style="border-top:1px solid #e8e8e8;">
+        <td style="padding:11px 16px;font-size:12px;color:#888;background:#f8f9fa;">Transaction Type</td>
+        <td style="padding:11px 16px;font-size:13px;font-weight:600;background:#f8f9fa;">${txnType || '—'}</td>
+      </tr>
+      <tr style="border-top:1px solid #e8e8e8;">
+        <td style="padding:11px 16px;font-size:12px;color:#888;background:#fff;">Reference</td>
+        <td style="padding:11px 16px;font-size:13px;font-weight:600;background:#fff;">${txnRef}</td>
+      </tr>
+      <tr style="border-top:1px solid #e8e8e8;">
+        <td style="padding:11px 16px;font-size:12px;color:#888;background:#f8f9fa;">Amount</td>
+        <td style="padding:11px 16px;font-size:16px;font-weight:700;color:#C74634;background:#f8f9fa;">${fmtAmt}</td>
+      </tr>
+      <tr style="border-top:1px solid #e8e8e8;">
+        <td style="padding:11px 16px;font-size:12px;color:#888;background:#fff;">Submitted By</td>
+        <td style="padding:11px 16px;font-size:13px;background:#fff;">${submittedBy}</td>
+      </tr>
+      <tr style="border-top:1px solid #e8e8e8;">
+        <td style="padding:11px 16px;font-size:12px;color:#888;background:#f8f9fa;">Date</td>
+        <td style="padding:11px 16px;font-size:13px;background:#f8f9fa;">${today}</td>
+      </tr>
+      <tr style="border-top:1px solid #e8e8e8;">
+        <td style="padding:11px 16px;font-size:12px;color:#888;background:#fff;">Description</td>
+        <td style="padding:11px 16px;font-size:13px;color:#555;background:#fff;">${description || '—'}</td>
+      </tr>
+    </table>
+  </td></tr>
+  <tr><td style="padding:28px 32px;">
+    <table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
+      <table cellpadding="0" cellspacing="0"><tr>
+        <td style="padding:0 8px;">
+          <a href="${approveUrl}"
+            style="display:inline-block;background:#16a34a;color:#ffffff;text-decoration:none;
+              padding:14px 40px;border-radius:7px;font-weight:700;font-size:15px;
+              letter-spacing:0.4px;box-shadow:0 3px 10px rgba(22,163,74,0.40);">
+            &#10003;&nbsp;APPROVE
+          </a>
+        </td>
+        <td style="padding:0 8px;">
+          <a href="${rejectUrl}"
+            style="display:inline-block;background:#dc2626;color:#ffffff;text-decoration:none;
+              padding:14px 40px;border-radius:7px;font-weight:700;font-size:15px;
+              letter-spacing:0.4px;box-shadow:0 3px 10px rgba(220,38,38,0.40);">
+            &#10007;&nbsp;REJECT
+          </a>
+        </td>
+      </tr></table>
+    </td></tr></table>
+    <p style="text-align:center;margin:12px 0 0;font-size:11px;color:#aaa;">Each button is a single-use secure link valid for 72 hours.</p>
+  </td></tr>
+  <tr><td style="background:#f8f9fa;border-top:1px solid #e8e8e8;padding:18px 32px;text-align:center;">
+    <p style="margin:0 0 4px;font-size:11px;color:#bbb;">This is an automated notification from the ERP Approval System. Please do not reply to this email.</p>
+    <p style="margin:0;font-size:11px;color:#ddd;">&copy; ${new Date().getFullYear()} Bumeric Business Solutions LLC</p>
+  </td></tr>
+</table>
+</td></tr></table>
+</body></html>`;
+}
+
+export async function sendExternalTxnApproval(params: {
+  txnId: number;
+  txnRef: string;
+  txnType: string;
+  amount: number;
+  currency: string;
+  description: string;
+  approverEmail: string;
+  approverName: string;
+  sentBy: string;
+}): Promise<{ success: boolean; message: string }> {
+  const { txnId, txnRef, txnType, amount, currency, description, approverEmail, approverName, sentBy } = params;
+
+  const cfgRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/config/emailsettings`);
+  const cfg = await cfgRes.json();
+  if (cfg.status !== 'success') throw new Error('Email config not found in database');
+
+  const apiKey    = cfg.pass;
+  const fromEmail = cfg.user;
+  const fromName  = cfg.fromName ?? 'ERP Approval System';
+  const approvalRef = `CASH-EXT-${txnId}`;
+  const today = new Date().toLocaleDateString('en-AE', { year: 'numeric', month: 'long', day: 'numeric' });
+
+  const { approveToken, rejectToken } = await generateApprovalTokens(
+    approvalRef, txnId, approverEmail, approverName, txnType,
+  );
+  const approveUrl = `https://erp-approval.reerperp.workers.dev?token=${approveToken}`;
+  const rejectUrl  = `https://erp-approval.reerperp.workers.dev?token=${rejectToken}`;
+
+  // Mark transaction as PENDING approval in the DB
+  const putRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/cash/externaltransactions/${txnId}/approval`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      approvalStatus:  'PENDING',
+      approvalSentBy:  sentBy,
+      approverName,
+      approverEmail,
+      approvalRef,
+    }),
+  });
+  if (!putRes.ok) {
+    const t = await putRes.text().catch(() => putRes.statusText);
+    throw new Error(`Failed to update approval status: ${t}`);
+  }
+
+  const html = buildTxnApprovalEmailHtml({
+    recipientName: approverName,
+    today,
+    approveUrl,
+    rejectUrl,
+    txnRef,
+    txnType,
+    amount,
+    currency,
+    description,
+    submittedBy: sentBy,
+  });
+
+  const brevoRes = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: { 'api-key': apiKey, 'content-type': 'application/json', 'accept': 'application/json' },
+    body: JSON.stringify({
+      sender:      { name: fromName, email: fromEmail },
+      to:          [{ email: approverEmail, name: approverName }],
+      subject:     `[Approval Required] ${txnType || 'External Transaction'} — ${txnRef}`,
+      htmlContent: html,
+    }),
+  });
+
+  if (brevoRes.ok) {
+    return { success: true, message: `Approval email sent to ${approverName} (${approverEmail}). Single-use links expire in 72 hours.` };
+  }
+  const errText = await brevoRes.text().catch(() => '');
+  let errMsg = `Brevo API error (${brevoRes.status})`;
+  try { errMsg += ': ' + JSON.parse(errText).message; } catch { /* ignore */ }
+  return { success: false, message: errMsg };
 }

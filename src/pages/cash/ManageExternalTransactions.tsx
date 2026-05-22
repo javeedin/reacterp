@@ -13,6 +13,7 @@ import {
   AccountBookOutlined, EyeOutlined, UploadOutlined, PaperClipOutlined, DeleteOutlined,
   LockOutlined, PrinterOutlined, FilePdfOutlined, QuestionCircleOutlined,
   ArrowUpOutlined, ArrowDownOutlined, RollbackOutlined, CopyOutlined,
+  SendOutlined, AuditOutlined,
 } from '@ant-design/icons';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -27,6 +28,7 @@ import {
 import { searchCombinations, type DistCombination } from '../../services/distCombinations.service';
 import { validateGlPayload, persistValidationLog, type GlJournalPayload } from '../../services/glValidation.service';
 import { useGlValidation } from '../../context/GlValidationContext';
+import { getApprovalUsers, sendExternalTxnApproval, type ApprovalUser } from '../../services/approvals.service';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -78,6 +80,13 @@ interface ExternalTxnRecord {
   paperDocumentNumber?: string;
   payeeName?: string;
   payeeId?: number;
+  approvalStatus?: string;
+  approvalSentDate?: string;
+  approvalSentBy?: string;
+  approvalApproverName?: string;
+  approvalApproverEmail?: string;
+  approvedDate?: string;
+  approvalRef?: string;
 }
 
 interface BankAccountOption { label: string; value: string; }
@@ -2425,6 +2434,16 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   const [viewAcctLines,  setViewAcctLines]  = useState<any[]>([]);
   const [viewAcctLoading, setViewAcctLoading] = useState(false);
 
+  // ── Approval modal state ──────────────────────────────────────────────────
+  const [approvalModalOpen, setApprovalModalOpen]       = useState(false);
+  const [approvalTargetTxn, setApprovalTargetTxn]       = useState<ExternalTxnRecord | null>(null);
+  const [approvalUsers, setApprovalUsers]               = useState<ApprovalUser[]>([]);
+  const [approvalLoadingUsers, setApprovalLoadingUsers] = useState(false);
+  const [approvalSending, setApprovalSending]           = useState(false);
+  const [selectedApproverEmail, setSelectedApproverEmail] = useState<string | undefined>(undefined);
+  const [approvalStatusOpen, setApprovalStatusOpen]     = useState(false);
+  const [approvalStatusTxn, setApprovalStatusTxn]       = useState<ExternalTxnRecord | null>(null);
+
   const modulePrefix = module === 'ap' ? '/ap' : '/cash';
 
   const exportToExcel = () => {
@@ -3424,10 +3443,65 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     setVoucherModalOpen(true);
   };
 
+  // ── Approval handlers ────────────────────────────────────────────────────
+  const openApprovalModal = (txn: ExternalTxnRecord) => {
+    setApprovalTargetTxn(txn);
+    setSelectedApproverEmail(undefined);
+    setApprovalModalOpen(true);
+    setApprovalLoadingUsers(true);
+    getApprovalUsers()
+      .then(users => setApprovalUsers(users.filter(u => u.active === 'Y' && u.modules.includes('CASH'))))
+      .catch(() => setApprovalUsers([]))
+      .finally(() => setApprovalLoadingUsers(false));
+  };
+
+  const handleSendApproval = async () => {
+    if (!approvalTargetTxn || !selectedApproverEmail) return;
+    const approver = approvalUsers.find(u => u.email === selectedApproverEmail);
+    if (!approver) return;
+    setApprovalSending(true);
+    try {
+      const result = await sendExternalTxnApproval({
+        txnId:         approvalTargetTxn.externalTransactionId,
+        txnRef:        approvalTargetTxn.referenceText || String(approvalTargetTxn.transactionId),
+        txnType:       approvalTargetTxn.transactionType || '',
+        amount:        Math.abs(approvalTargetTxn.amount),
+        currency:      approvalTargetTxn.currencyCode,
+        description:   approvalTargetTxn.description || '',
+        approverEmail: approver.email,
+        approverName:  approver.fullName,
+        sentBy:        currentUser,
+      });
+      if (result.success) {
+        message.success(result.message);
+        setTransactions(prev => prev.map(t =>
+          t.externalTransactionId === approvalTargetTxn.externalTransactionId
+            ? {
+                ...t,
+                approvalStatus:        'PENDING',
+                approvalSentBy:        currentUser,
+                approvalSentDate:      new Date().toISOString(),
+                approvalApproverName:  approver.fullName,
+                approvalApproverEmail: approver.email,
+                approvalRef:           `CASH-EXT-${approvalTargetTxn.externalTransactionId}`,
+              }
+            : t
+        ));
+        setApprovalModalOpen(false);
+      } else {
+        message.error(result.message);
+      }
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : 'Failed to send approval');
+    } finally {
+      setApprovalSending(false);
+    }
+  };
+
   // ── Table columns ─────────────────────────────────────────────────────────
   const columns: ColumnsType<ExternalTxnRecord> = [
     {
-      title: 'Actions', key: 'actions', width: 140, align: 'center', fixed: 'left',
+      title: 'Actions', key: 'actions', width: 160, align: 'center', fixed: 'left',
       render: (_, r) => (
         <Space size={2}>
           <Tooltip title="Edit"><Button type="text" size="small" icon={<EditOutlined />} onClick={() => openEditTab(r)} /></Tooltip>
@@ -3474,6 +3548,20 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                     setViewAcctLines(lines);
                   }).catch(() => {}).finally(() => setViewAcctLoading(false));
                 }} />
+            </Tooltip>
+          )}
+          {(!r.approvalStatus || r.approvalStatus === 'NONE') && (
+            <Tooltip title="Send for Approval">
+              <Button type="text" size="small" icon={<SendOutlined />}
+                style={{ color: REDWOOD.primary }}
+                onClick={() => openApprovalModal(r)} />
+            </Tooltip>
+          )}
+          {r.approvalStatus && r.approvalStatus !== 'NONE' && (
+            <Tooltip title="View Approval Status">
+              <Button type="text" size="small" icon={<AuditOutlined />}
+                style={{ color: r.approvalStatus === 'APPROVED' ? REDWOOD.success : r.approvalStatus === 'REJECTED' ? REDWOOD.error : REDWOOD.warning }}
+                onClick={() => { setApprovalStatusTxn(r); setApprovalStatusOpen(true); }} />
             </Tooltip>
           )}
         </Space>
@@ -3569,6 +3657,16 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     {
       title: 'Payee', dataIndex: 'payeeName', ellipsis: true,
       render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
+    },
+    {
+      title: 'Approval', dataIndex: 'approvalStatus', width: 105,
+      render: (v) => {
+        if (!v || v === 'NONE') return <Text style={{ fontSize: 11, color: '#bbb' }}>—</Text>;
+        if (v === 'PENDING')  return <Tag color="orange"  style={{ fontSize: 11, margin: 0 }}>Pending</Tag>;
+        if (v === 'APPROVED') return <Tag color="green"   style={{ fontSize: 11, margin: 0 }}>Approved</Tag>;
+        if (v === 'REJECTED') return <Tag color="red"     style={{ fontSize: 11, margin: 0 }}>Rejected</Tag>;
+        return <Tag style={{ fontSize: 11, margin: 0 }}>{v}</Tag>;
+      },
     },
   ];
 
@@ -4106,6 +4204,116 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
               title="Payment Voucher Preview"
             />
           )}
+        </Modal>
+
+        {/* ── Send for Approval Modal ─────────────────────────────── */}
+        <Modal
+          title={<Space><SendOutlined style={{ color: REDWOOD.primary }} /><span>Send for Approval</span></Space>}
+          open={approvalModalOpen}
+          onCancel={() => { setApprovalModalOpen(false); setSelectedApproverEmail(undefined); }}
+          footer={[
+            <Button key="cancel" onClick={() => { setApprovalModalOpen(false); setSelectedApproverEmail(undefined); }}>
+              Cancel
+            </Button>,
+            <Button
+              key="send"
+              type="primary"
+              icon={<SendOutlined />}
+              loading={approvalSending}
+              disabled={!selectedApproverEmail}
+              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+              onClick={handleSendApproval}
+            >
+              Send
+            </Button>,
+          ]}
+          width={520}
+        >
+          {approvalTargetTxn && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ background: REDWOOD.neutral100, borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <Text type="secondary">Transaction</Text>
+                  <Text strong>#{approvalTargetTxn.transactionId}</Text>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <Text type="secondary">Reference</Text>
+                  <Text strong>{approvalTargetTxn.referenceText || '—'}</Text>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <Text type="secondary">Amount</Text>
+                  <Text strong style={{ color: REDWOOD.primary }}>
+                    {approvalTargetTxn.currencyCode} {Math.abs(approvalTargetTxn.amount).toLocaleString('en-AE', { minimumFractionDigits: 2 })}
+                  </Text>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Text type="secondary">Type</Text>
+                  <Text>{approvalTargetTxn.transactionType || '—'}</Text>
+                </div>
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <Text strong style={{ fontSize: 13 }}>Select Approver</Text>
+              </div>
+              <Select
+                showSearch
+                placeholder={approvalLoadingUsers ? 'Loading approvers...' : 'Select an approver'}
+                loading={approvalLoadingUsers}
+                style={{ width: '100%' }}
+                optionFilterProp="label"
+                value={selectedApproverEmail}
+                onChange={setSelectedApproverEmail}
+                options={approvalUsers.map(u => ({
+                  label: `${u.fullName} — ${u.email}${u.department ? ` (${u.department})` : ''}`,
+                  value: u.email,
+                }))}
+              />
+              {approvalUsers.length === 0 && !approvalLoadingUsers && (
+                <Alert
+                  type="warning"
+                  style={{ marginTop: 12 }}
+                  message="No active CASH approvers found. Please configure approvers in the Approval Engine."
+                  showIcon
+                />
+              )}
+            </div>
+          )}
+        </Modal>
+
+        {/* ── View Approval Status Modal ──────────────────────────── */}
+        <Modal
+          title={<Space><AuditOutlined style={{ color: REDWOOD.info }} /><span>Approval Status</span></Space>}
+          open={approvalStatusOpen}
+          onCancel={() => setApprovalStatusOpen(false)}
+          footer={<Button onClick={() => setApprovalStatusOpen(false)}>Close</Button>}
+          width={480}
+        >
+          {approvalStatusTxn && (() => {
+            const st = approvalStatusTxn.approvalStatus;
+            return (
+              <div>
+                <div style={{ textAlign: 'center', marginBottom: 20 }}>
+                  {st === 'APPROVED' && <Tag color="green"  style={{ fontSize: 14, padding: '4px 16px' }}>Approved</Tag>}
+                  {st === 'REJECTED' && <Tag color="red"    style={{ fontSize: 14, padding: '4px 16px' }}>Rejected</Tag>}
+                  {st === 'PENDING'  && <Tag color="orange" style={{ fontSize: 14, padding: '4px 16px' }}>Pending Approval</Tag>}
+                </div>
+                <div style={{ background: REDWOOD.neutral100, borderRadius: 8, padding: '12px 16px', fontSize: 13 }}>
+                  {[
+                    { label: 'Approval Ref',  value: approvalStatusTxn.approvalRef },
+                    { label: 'Sent By',       value: approvalStatusTxn.approvalSentBy },
+                    { label: 'Sent Date',     value: approvalStatusTxn.approvalSentDate ? dayjs(approvalStatusTxn.approvalSentDate).format('D MMM YYYY HH:mm') : undefined },
+                    { label: 'Approver',      value: approvalStatusTxn.approvalApproverName },
+                    { label: 'Approver Email',value: approvalStatusTxn.approvalApproverEmail },
+                    { label: 'Approved Date', value: approvalStatusTxn.approvedDate ? dayjs(approvalStatusTxn.approvedDate).format('D MMM YYYY HH:mm') : undefined },
+                  ].map(row => (
+                    <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <Text type="secondary">{row.label}</Text>
+                      <Text strong>{row.value || '—'}</Text>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </Modal>
 
       </Content>
