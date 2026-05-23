@@ -2387,7 +2387,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   const [hasSearched, setHasSearched]     = useState(false);
   const [totalRecords, setTotalRecords]   = useState(0);
   const [pageNum, setPageNum]             = useState(1);
-  const [pageSize, setPageSize]           = useState(50);
+  const [pageSize, setPageSize]           = useState(500);
   const [allBankAccounts, setAllBankAccounts] = useState<BankAccountOption[]>([]);
   const [businessUnits, setBusinessUnits] = useState<BUOption[]>([]);
   const [bankAccountMap, setBankAccountMap] = useState<Record<string, string>>({});
@@ -2686,7 +2686,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   useEffect(() => { loadLovs(); }, [loadLovs]);
 
   // ── Search ────────────────────────────────────────────────────────────────
-  const handleSearch = useCallback(async (page = 1, size = 50) => {
+  const handleSearch = useCallback(async (page = 1, size = 500) => {
     const values = searchForm.getFieldsValue();
     const params = new URLSearchParams();
     if (values.transactionNumber)  params.set('transaction_number', values.transactionNumber);
@@ -3915,7 +3915,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                 pageSize,
                 total: totalRecords,
                 showSizeChanger: true,
-                pageSizeOptions: ['25', '50', '100', '200'],
+                pageSizeOptions: ['25', '50', '100', '200', '500'],
                 showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} records`,
                 onChange: (p, s) => handleSearch(p, s),
               }}
