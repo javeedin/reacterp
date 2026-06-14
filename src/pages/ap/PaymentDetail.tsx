@@ -919,27 +919,54 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     setViewAcctData(null);
     setViewAcctAllEvents([]);
     try {
-      const [result, allLinesData] = await Promise.all([
-        getAccounting('AP_PAYMENTS', payment.checkId),
-        payment.paymentNumber
-          ? getAccountingLinesBySourceNumber(String(payment.paymentNumber), 'AP').catch(() => ({ items: [] }))
-          : Promise.resolve({ items: [] }),
-      ]);
-      if (result.headerId) {
-        try {
-          const linesData = await getLinesByHeaderId(result.headerId);
-          const descMap = new Map(linesData.items.map(l => [l.lineId, l.accountDescription]));
-          result.lines = result.lines.map(l => ({ ...l, accountDescription: descMap.get(l.lineId) || undefined }));
-        } catch { /* non-critical */ }
-      }
+      // Fetch all SLA headers for this payment (covers both original + void)
+      const allHeadersRes = await fetch(
+        `${APEX_DB_CONFIG.baseUrl}/sla/accounting?sourceTable=AP_PAYMENTS&sourceId=${payment.checkId}&limit=50`,
+        { headers: { Accept: 'application/json' } }
+      );
+      const allHeadersData = await allHeadersRes.json();
+      const allHeaders: any[] = allHeadersData.items || (allHeadersData.found ? [allHeadersData] : []);
+
+      // Also get the primary header via service (for viewAcctData/Post button)
+      const result = await getAccounting('AP_PAYMENTS', payment.checkId);
       setViewAcctData(result);
-      const eventsMap = new Map<number, { headerId: number; eventTypeCode: string; accountingStatus: string; accountingDate: string; lines: any[] }>();
-      for (const line of (allLinesData.items || [])) {
-        const hid = line.headerId as number;
-        if (!eventsMap.has(hid)) eventsMap.set(hid, { headerId: hid, eventTypeCode: (line as any).eventTypeCode || '', accountingStatus: (line as any).accountingStatus || '', accountingDate: (line as any).accountingDate || '', lines: [] });
-        eventsMap.get(hid)!.lines.push(line);
+
+      if (allHeaders.length > 0) {
+        // Fetch lines for every header
+        const events = await Promise.all(
+          allHeaders.map(async (h: any) => {
+            const hid = h.headerId || h.header_id;
+            let lines: any[] = h.lines || [];
+            if (!lines.length && hid) {
+              try {
+                const ld = await getLinesByHeaderId(hid);
+                lines = ld.items || [];
+              } catch { /* non-critical */ }
+            }
+            return {
+              headerId: hid,
+              eventTypeCode: h.eventTypeCode || h.event_type_code || '',
+              accountingStatus: h.accountingStatus || h.accounting_status || '',
+              accountingDate: h.accountingDate || h.accounting_date || '',
+              description: h.description || '',
+              lines,
+            };
+          })
+        );
+        setViewAcctAllEvents(events.sort((a, b) => a.headerId - b.headerId));
+      } else {
+        // Fallback: build from GL lines by payment number
+        const allLinesData = payment.paymentNumber
+          ? await getAccountingLinesBySourceNumber(String(payment.paymentNumber), 'AP').catch(() => ({ items: [] }))
+          : { items: [] };
+        const eventsMap = new Map<number, { headerId: number; eventTypeCode: string; accountingStatus: string; accountingDate: string; description: string; lines: any[] }>();
+        for (const line of (allLinesData.items || [])) {
+          const hid = line.headerId as number;
+          if (!eventsMap.has(hid)) eventsMap.set(hid, { headerId: hid, eventTypeCode: (line as any).eventTypeCode || '', accountingStatus: (line as any).accountingStatus || '', accountingDate: (line as any).accountingDate || '', description: '', lines: [] });
+          eventsMap.get(hid)!.lines.push(line);
+        }
+        setViewAcctAllEvents(Array.from(eventsMap.values()).sort((a, b) => a.headerId - b.headerId));
       }
-      setViewAcctAllEvents(Array.from(eventsMap.values()).sort((a, b) => a.headerId - b.headerId));
     } catch (err: any) {
       message.error(`Failed to fetch accounting: ${err.message}`);
       setViewAcctOpen(false);
@@ -2440,7 +2467,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           const eventLabel = (code: string) =>
             isVoid(code) ? 'Void Reversal' : code?.includes('PAYMENT') ? 'Payment Accounting' : code || 'Accounting';
 
-          if (viewAcctAllEvents.length > 1) {
+          if (viewAcctAllEvents.length > 0) {
             return (
               <Collapse
                 defaultActiveKey={viewAcctAllEvents.map(e => String(e.headerId))}
@@ -2457,6 +2484,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
                       </Tag>
                       <span style={{ fontSize: 12, color: '#888' }}>{event.accountingDate}</span>
                       <span style={{ fontSize: 12, color: '#999' }}>Header #{event.headerId}</span>
+                      {event.description ? <span style={{ fontSize: 11, color: '#aaa' }}>{event.description}</span> : null}
                     </Space>
                   ),
                   children: (
@@ -2465,6 +2493,18 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
                       pagination={false}
                       dataSource={event.lines.map((l: any, i: number) => ({ ...l, key: i }))}
                       columns={acctLineColumns}
+                      summary={(rows) => {
+                        const tDr = rows.reduce((s, r) => s + (r.enteredDr || 0), 0);
+                        const tCr = rows.reduce((s, r) => s + (r.enteredCr || 0), 0);
+                        return (
+                          <Table.Summary.Row style={{ fontWeight: 600, background: '#fafafa' }}>
+                            <Table.Summary.Cell index={0} colSpan={5} align="right">Total</Table.Summary.Cell>
+                            <Table.Summary.Cell index={1} align="right">{tDr ? tDr.toLocaleString('en-US', { minimumFractionDigits: 2 }) : ''}</Table.Summary.Cell>
+                            <Table.Summary.Cell index={2} align="right">{tCr ? tCr.toLocaleString('en-US', { minimumFractionDigits: 2 }) : ''}</Table.Summary.Cell>
+                            <Table.Summary.Cell index={3} colSpan={3} />
+                          </Table.Summary.Row>
+                        );
+                      }}
                     />
                   ),
                 }))}
