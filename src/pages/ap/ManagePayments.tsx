@@ -2951,9 +2951,10 @@ const ManagePayments: React.FC = () => {
       // 1b. Delete existing DRAFT SLA header before re-creating
       if (exists?.exists && exists?.headerId && exists?.accountingStatus !== 'POSTED') {
         try {
-          const delRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete?headerId=${exists.headerId}`, {
-            method: 'GET',
-            headers: { Accept: 'application/json' },
+          const delRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete`, {
+            method: 'POST',
+            headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+            body: JSON.stringify({ headerId: exists.headerId }),
           });
           if (!delRes.ok && delRes.status !== 404) {
             console.warn('[Create Accounting] Delete SLA header failed:', delRes.status);

@@ -1103,9 +1103,10 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
       setStep(1, 'running');
       if (exists?.exists && exists?.headerId && exists?.accountingStatus !== 'POSTED') {
         try {
-          const delRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete?headerId=${exists.headerId}`, {
+          const delRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete`, {
             method: 'POST',
-            headers: { Accept: 'application/json' },
+            headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+            body: JSON.stringify({ headerId: exists.headerId }),
           });
           if (delRes.ok || delRes.status === 404) {
             setStep(1, 'success', `Deleted SLA header #${exists.headerId}`);
@@ -1349,9 +1350,10 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     setAcctDeleteRunning(true);
     setAcctDeleteResult(null);
     try {
-      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete?headerId=${headerId}`, {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete`, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ headerId }),
       });
       const data = await res.json().catch(() => ({ status: res.status }));
       setAcctDeleteResult({ ...data, _httpStatus: res.status });
@@ -2489,7 +2491,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
                     </Button>
                   </div>
                   <code style={{ fontSize: 10, color: '#666', display: 'block', wordBreak: 'break-all', marginBottom: 4 }}>
-                    GET {APEX_DB_CONFIG.baseUrl}/sla/accounting/delete?headerId={slaStatus?.headerId ?? '?'}
+                    POST {APEX_DB_CONFIG.baseUrl}/sla/accounting/delete {"{"}"headerId":{slaStatus?.headerId ?? '?'}{"}"}
                   </code>
                   <Text type="secondary" style={{ fontSize: 11 }}>
                     {slaStatus?.headerId
