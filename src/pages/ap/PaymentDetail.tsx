@@ -451,7 +451,6 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
   const [slaLinesResult, setSlaLinesResult] = useState<any>(null);
   const [slaLinesRunning, setSlaLinesRunning] = useState(false);
   const [step6ApiLog, setStep6ApiLog] = useState<{ url: string; request: any; response: any }[]>([]);
-  const [step7ApiLog, setStep7ApiLog] = useState<{ url: string; request: any; response: any }[]>([]);
   // ─────────────────────────────────────────────────────────────────────────
 
   // ── SLA Status / Post to Ledger / View Accounting state ──────────────────
@@ -1086,8 +1085,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
       { step: 3, label: 'Fetch related invoices',     status: 'idle' as const },
       { step: 4, label: 'Fetch ledger info',           status: 'idle' as const },
       { step: 5, label: 'Build SLA payloads',          status: 'idle' as const },
-      { step: 6, label: 'Post SLA accounting entries', status: 'idle' as const },
-      { step: 7, label: 'Create GL journal',           status: 'idle' as const },
+      { step: 6, label: 'Post accounting entries',     status: 'idle' as const },
     ];
     setAcctResults([]);
     setAcctStepStatus(steps);
@@ -1328,107 +1326,9 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
       setStep6ApiLog(step6Log);
       const hasErrors = results.some(r => r.status === 'ERROR');
       setStep(6, hasErrors ? 'error' : 'success',
-        hasErrors ? `${results.filter(r => r.status === 'ERROR').length} error(s)` : `${results.length} SLA record(s) created`
+        hasErrors ? `${results.filter(r => r.status === 'ERROR').length} error(s)` : `${results.length} journal(s) created`
       );
       setAcctResults(results);
-
-      // Step 7: Create GL journal via journals/create
-      setStep(7, 'running');
-      const step7Url = `${APEX_DB_CONFIG.baseUrl}/journals/create`;
-      const step7Log: { url: string; request: any; response: any }[] = [];
-      const paymentCcy = payment.paymentCurrency || 'AED';
-      const exRate = (payment.conversionRate && payment.conversionRate > 0) ? payment.conversionRate : 1;
-      const ledgerName = ledgerInfo?.ledgerName ?? 'BUIMERC LEDGER';
-      const ledgerId   = ledgerInfo?.ledgerId   ?? 0;
-      const batchName  = `AP-PMT-${payment.paymentNumber}-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Date.now().toString().slice(-5)}`;
-
-      try {
-        for (const slaPl of payloads) {
-          const lines = slaPl.lines as any[];
-          const entTotalDr = lines.reduce((s: number, l: any) => s + (l.enteredDr ?? 0), 0);
-          const entTotalCr = lines.reduce((s: number, l: any) => s + (l.enteredCr ?? 0), 0);
-          const totalDr = entTotalDr > 0 ? entTotalDr : lines.reduce((s: number, l: any) => s + (l.accountedDr ?? 0), 0);
-          const totalCr = entTotalCr > 0 ? entTotalCr : lines.reduce((s: number, l: any) => s + (l.accountedCr ?? 0), 0);
-          const glPayload = {
-            batch: {
-              batchName,
-              batchDescription: slaPl.header?.description || '',
-              ledgerName, ledgerId,
-              status: 'NEW',
-              accountingPeriod: slaPl.header?.periodName,
-              controlTotal: totalDr,
-              runningTotalDr: totalDr,
-              runningTotalCr: totalCr,
-              batchSource: 'Payables',
-              createdBy: 'SYSTEM',
-            },
-            header: {
-              ledgerId, ledgerName,
-              jeCategory: slaPl.header?.eventTypeCode || 'Payables',
-              jeSource: 'Payables',
-              periodName: slaPl.header?.periodName,
-              journalName: batchName,
-              description: slaPl.header?.description || '',
-              currencyCode: paymentCcy,
-              currencyConversionType: 'User',
-              currencyConversionDate: slaPl.header?.accountingDate,
-              currencyConversionRate: exRate,
-              defaultEffectiveDate: slaPl.header?.accountingDate,
-              status: 'NEW',
-              runningTotalDr: totalDr,
-              runningTotalCr: totalCr,
-              createdBy: 'SYSTEM',
-            },
-            lines: lines.map((l: any, i: number) => {
-              const eDr = l.lineType === 'DR' ? (l.enteredDr || null) : null;
-              const eCr = l.lineType === 'CR' ? (l.enteredCr || null) : null;
-              const aDr = l.lineType === 'DR' ? (l.accountedDr ?? (eDr != null ? Math.round(eDr * exRate * 100) / 100 : null)) : null;
-              const aCr = l.lineType === 'CR' ? (l.accountedCr ?? (eCr != null ? Math.round(eCr * exRate * 100) / 100 : null)) : null;
-              return {
-                enteredDr: eDr,
-                enteredCr: eCr,
-                accountedDr: aDr,
-                accountedCr: aCr,
-                statAmount: null,
-                description: l.description || slaPl.header?.description || '',
-                currencyCode: l.currencyCode || paymentCcy,
-                currencyConversionDate: slaPl.header?.accountingDate,
-                currencyConversionRate: l.exchangeRate ?? exRate,
-                userCurrencyConversionType: 'User',
-                accountCombination: l.accountCombination || '',
-                chartOfAccountsName: 'Chart of Accounts',
-                reference1: String(payment.paymentNumber || ''),
-                reference2: String(payment.checkId || ''),
-                reference3: l.accountingClass || null,
-                reference4: payment.businessUnit || null,
-                reference5: 'AP-PAYMENT',
-                createdBy: 'SYSTEM',
-                lineNumber: i + 1,
-              };
-            }),
-          };
-          let glRawResponse: any = null;
-          try {
-            const glRes = await fetch(step7Url, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-              body: JSON.stringify(glPayload),
-            });
-            glRawResponse = await glRes.json();
-            step7Log.push({ url: step7Url, request: glPayload, response: glRawResponse });
-            if (!glRes.ok) throw new Error(glRawResponse?.message || `HTTP ${glRes.status}`);
-          } catch (glErr: any) {
-            step7Log.push({ url: step7Url, request: glPayload, response: glRawResponse ?? { error: glErr.message } });
-            throw glErr;
-          }
-        }
-        setStep7ApiLog(step7Log);
-        setStep(7, 'success', `${step7Log.length} GL journal(s) created`);
-      } catch (glErr: any) {
-        setStep7ApiLog(step7Log);
-        setStep(7, 'error', glErr.message);
-      }
-
       fetchSlaStatus(); // refresh accounting status badge
     } catch (err: any) {
       setAcctResults([{ invoiceNumber: '—', status: 'ERROR', error: err.message }]);
@@ -2532,34 +2432,6 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
                             items={(step6ApiLog.length > 0 ? step6ApiLog : acctPostPayload.map(pl => ({ url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`, request: pl, response: null }))).map((log, idx) => ({
                               key: String(idx),
                               label: <Text style={{ fontSize: 11 }}><Tag color="green" style={{ fontSize: 10, margin: 0, marginRight: 4 }}>POST</Tag>{log.url.split('/').slice(-3).join('/')} — call {idx + 1}</Text>,
-                              children: (
-                                <div>
-                                  <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Request body:</Text>
-                                  <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 4, maxHeight: 220, overflowY: 'auto', margin: '0 0 8px' }}>
-                                    {JSON.stringify(log.request, null, 2)}
-                                  </pre>
-                                  {log.response && (
-                                    <>
-                                      <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Response:</Text>
-                                      <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#a6e3a1', padding: 8, borderRadius: 4, maxHeight: 100, overflowY: 'auto', margin: 0 }}>
-                                        {JSON.stringify(log.response, null, 2)}
-                                      </pre>
-                                    </>
-                                  )}
-                                </div>
-                              ),
-                            }))}
-                          />
-                        )}
-                        {/* Step 7: GL journal create collapsible */}
-                        {s.step === 7 && step7ApiLog.length > 0 && (
-                          <Collapse
-                            size="small"
-                            ghost
-                            style={{ marginTop: 4 }}
-                            items={step7ApiLog.map((log, idx) => ({
-                              key: String(idx),
-                              label: <Text style={{ fontSize: 11 }}><Tag color="green" style={{ fontSize: 10, margin: 0, marginRight: 4 }}>POST</Tag>journals/create — runningTotalDr: <strong>{log.request?.batch?.runningTotalDr}</strong></Text>,
                               children: (
                                 <div>
                                   <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Request body:</Text>
