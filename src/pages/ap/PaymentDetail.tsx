@@ -597,17 +597,31 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     // Step 3 — Create SLA Reversal
     const s3 = await ok('sla', async () => {
       const ctx  = voidCtxRef.current;
+
+      // Skip if void SLA was already created (re-run scenario)
+      const existingVoid = await checkAccountingExists('AP_PAYMENTS', payment.checkId, 'AP_PAYMENT_VOID').catch(() => ({ exists: false }));
+      if ((existingVoid as any).exists && (existingVoid as any).headerId) {
+        voidCtxRef.current.slaHeaderId = (existingVoid as any).headerId;
+        setVoidStep('sla', { status: 'success', response: existingVoid });
+        return true;
+      }
+
+      // Validate pre-conditions before building lines
       const bank = bankAccounts.find(b => b.bankAccountName === payment.disbursementBankAccount);
+      if (!bank) throw new Error(`Bank account "${payment.disbursementBankAccount || '(none)'}" not found in loaded list (${bankAccounts.length} accounts)`);
+      if (!relatedInvoices.length) throw new Error('No related invoices — try opening the Paid Invoices tab first');
 
       // PDC: maturity date exists and differs from payment date
       const isPdcVoid = !!(payment.maturityDate && payment.maturityDate !== payment.paymentDate);
 
-      // For void reversal: normal payment → debit bank cash account; PDC → debit PDC account
-      const bankAcct        = isPdcVoid ? (bank?.pdcAccountCombination || '') : (bank?.cashAccountCombination || '');
-      const bankAcctClass   = isPdcVoid ? 'PDC' : 'CASH';
-      const bankAcctLabel   = isPdcVoid ? 'PDC' : 'Cash';
-      if (!bankAcct) throw new Error(`No ${bankAcctLabel} account for bank: ${payment.disbursementBankAccount || '(none)'}`);
-      if (!relatedInvoices.length) throw new Error('No related invoices found');
+      // For void reversal: normal payment → bank cash account; PDC → PDC account
+      // Fall back to cash clearing if the specific account is not configured
+      const bankAcct      = isPdcVoid
+        ? (bank.pdcAccountCombination  || bank.cashClearingAccountCombination || '')
+        : (bank.cashAccountCombination || bank.cashClearingAccountCombination || '');
+      const bankAcctClass = isPdcVoid ? 'PDC' : 'CASH';
+      const bankAcctLabel = isPdcVoid ? 'PDC' : 'Cash';
+      if (!bankAcct) throw new Error(`No ${bankAcctLabel} account (or cash clearing fallback) configured for bank: ${payment.disbursementBankAccount}`);
       const reverseLines: any[] = [];
       relatedInvoices.forEach((inv, idx) => {
         const amt = Number(inv.amountPaidPaymentCurrency) || 0;
