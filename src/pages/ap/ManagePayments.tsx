@@ -1441,6 +1441,21 @@ const ManagePayments: React.FC = () => {
   // Supplier table columns
   const supplierColumns: ColumnsType<SupplierRecord> = [
     {
+      title: 'Action',
+      key: 'action',
+      width: 80,
+      render: (_: any, record: SupplierRecord) => (
+        <Button
+          type="link"
+          size="small"
+          onClick={() => handleSupplierSelect(record)}
+          style={{ color: REDWOOD.info }}
+        >
+          Select
+        </Button>
+      ),
+    },
+    {
       title: 'Supplier Number',
       dataIndex: 'supplierNumber',
       key: 'supplierNumber',
@@ -1481,21 +1496,6 @@ const ManagePayments: React.FC = () => {
       dataIndex: 'taxpayerId',
       key: 'taxpayerId',
       width: 120,
-    },
-    {
-      title: 'Action',
-      key: 'action',
-      width: 80,
-      render: (_: any, record: SupplierRecord) => (
-        <Button
-          type="link"
-          size="small"
-          onClick={() => handleSupplierSelect(record)}
-          style={{ color: REDWOOD.info }}
-        >
-          Select
-        </Button>
-      ),
     },
   ];
 
