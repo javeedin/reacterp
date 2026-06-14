@@ -919,53 +919,52 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     setViewAcctData(null);
     setViewAcctAllEvents([]);
     try {
-      // Fetch all SLA headers for this payment (covers both original + void)
-      const allHeadersRes = await fetch(
-        `${APEX_DB_CONFIG.baseUrl}/sla/accounting?sourceTable=AP_PAYMENTS&sourceId=${payment.checkId}&limit=50`,
-        { headers: { Accept: 'application/json' } }
-      );
-      const allHeadersData = await allHeadersRes.json();
-      const allHeaders: any[] = allHeadersData.items || (allHeadersData.found ? [allHeadersData] : []);
-
-      // Also get the primary header via service (for viewAcctData/Post button)
+      // Fetch the primary header (for the Post button check)
       const result = await getAccounting('AP_PAYMENTS', payment.checkId);
       setViewAcctData(result);
 
-      if (allHeaders.length > 0) {
-        // Fetch lines for every header
-        const events = await Promise.all(
-          allHeaders.map(async (h: any) => {
-            const hid = h.headerId || h.header_id;
-            let lines: any[] = h.lines || [];
-            if (!lines.length && hid) {
-              try {
-                const ld = await getLinesByHeaderId(hid);
-                lines = ld.items || [];
-              } catch { /* non-critical */ }
-            }
-            return {
-              headerId: hid,
-              eventTypeCode: h.eventTypeCode || h.event_type_code || '',
-              accountingStatus: h.accountingStatus || h.accounting_status || '',
-              accountingDate: h.accountingDate || h.accounting_date || '',
-              description: h.description || '',
-              lines,
-            };
-          })
-        );
-        setViewAcctAllEvents(events.sort((a, b) => a.headerId - b.headerId));
-      } else {
-        // Fallback: build from GL lines by payment number
-        const allLinesData = payment.paymentNumber
-          ? await getAccountingLinesBySourceNumber(String(payment.paymentNumber), 'AP').catch(() => ({ items: [] }))
-          : { items: [] };
-        const eventsMap = new Map<number, { headerId: number; eventTypeCode: string; accountingStatus: string; accountingDate: string; description: string; lines: any[] }>();
-        for (const line of (allLinesData.items || [])) {
-          const hid = line.headerId as number;
-          if (!eventsMap.has(hid)) eventsMap.set(hid, { headerId: hid, eventTypeCode: (line as any).eventTypeCode || '', accountingStatus: (line as any).accountingStatus || '', accountingDate: (line as any).accountingDate || '', description: '', lines: [] });
-          eventsMap.get(hid)!.lines.push(line);
+      // Fetch ALL journal lines by payment number — this returns lines from every event
+      // (original payment + void reversal) unlike sla/accounting which returns only one header
+      const allLinesData = payment.paymentNumber
+        ? await getAccountingLinesBySourceNumber(String(payment.paymentNumber), 'AP').catch(() => ({ items: [] }))
+        : { items: [] };
+
+      const eventsMap = new Map<number, {
+        headerId: number;
+        eventTypeCode: string;
+        accountingStatus: string;
+        accountingDate: string;
+        description: string;
+        lines: any[];
+      }>();
+
+      for (const line of ((allLinesData as any).items || [])) {
+        const hid = (line as any).headerId as number;
+        if (!eventsMap.has(hid)) {
+          eventsMap.set(hid, {
+            headerId: hid,
+            eventTypeCode: (line as any).eventTypeCode || '',
+            accountingStatus: (line as any).accountingStatus || '',
+            accountingDate: (line as any).accountingDate || '',
+            description: (line as any).headerDescription || (line as any).description || '',
+            lines: [],
+          });
         }
+        eventsMap.get(hid)!.lines.push(line);
+      }
+
+      if (eventsMap.size > 0) {
         setViewAcctAllEvents(Array.from(eventsMap.values()).sort((a, b) => a.headerId - b.headerId));
+      } else if (result.found) {
+        // Last resort: show only what getAccounting returned
+        setViewAcctAllEvents([{
+          headerId: result.headerId,
+          eventTypeCode: result.eventTypeCode || '',
+          accountingStatus: result.accountingStatus || '',
+          accountingDate: result.accountingDate || '',
+          description: result.description || '',
+          lines: result.lines || [],
+        }]);
       }
     } catch (err: any) {
       message.error(`Failed to fetch accounting: ${err.message}`);
@@ -2450,12 +2449,15 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
             { title: '#', dataIndex: 'lineNumber', width: 40 },
             { title: 'Type', dataIndex: 'lineType', width: 50, render: (v: string) => <Tag color={v === 'DR' ? 'blue' : 'green'}>{v}</Tag> },
             { title: 'Class', dataIndex: 'accountingClass', width: 120 },
-            { title: 'Account', dataIndex: 'accountCombination', width: 170, render: (v: string, r: any) => (
-              <div>
-                <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{v || '—'}</span>
-                {r.accountDescription && <div style={{ fontSize: 10, color: '#888', marginTop: 1 }}>{r.accountDescription}</div>}
-              </div>
-            )},
+            { title: 'Account', dataIndex: 'accountCombination', width: 200, render: (v: string, r: any) => {
+              const desc = r.accountDescription || r.AccountDescription || r.account_description || r.glAccountDescription || '';
+              return (
+                <div>
+                  <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{v || '—'}</span>
+                  {desc && <div style={{ fontSize: 10, color: '#888', marginTop: 2 }}>{desc}</div>}
+                </div>
+              );
+            }},
             { title: 'Description', dataIndex: 'description', ellipsis: true },
             { title: 'Ent. Dr',  dataIndex: 'enteredDr',   width: 105, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US', { minimumFractionDigits: 2 }) : <span style={{ color: '#bbb' }}>—</span> },
             { title: 'Ent. Cr',  dataIndex: 'enteredCr',   width: 105, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US', { minimumFractionDigits: 2 }) : <span style={{ color: '#bbb' }}>—</span> },
