@@ -607,8 +607,11 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
       }
 
       // Validate pre-conditions before building lines
+      console.log('[Void SLA] disbursementBankAccount:', payment.disbursementBankAccount);
+      console.log('[Void SLA] loaded bank accounts:', bankAccounts.map(b => b.bankAccountName));
       const bank = bankAccounts.find(b => b.bankAccountName === payment.disbursementBankAccount);
       if (!bank) throw new Error(`Bank account "${payment.disbursementBankAccount || '(none)'}" not found in loaded list (${bankAccounts.length} accounts)`);
+      console.log('[Void SLA] matched bank:', bank);
       if (!relatedInvoices.length) throw new Error('No related invoices — try opening the Paid Invoices tab first');
 
       // PDC: maturity date exists and differs from payment date
