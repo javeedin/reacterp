@@ -1148,13 +1148,13 @@ const ManagePayments: React.FC = () => {
             });
             if (totalFxGain > 0 && fxAcct) {
               fxLines.push({ lineNumber: fxLineNum++, lineType: 'CR' as const, accountingClass: 'FX_REALIZED_GAIN',
-                accountCombination: fxAcct, enteredDr: 0, enteredCr: 0,
+                accountCombination: fxAcct, enteredDr: 0, enteredCr: totalFxGain,
                 accountedDr: 0, accountedCr: totalFxGain, currencyCode: 'AED', exchangeRate: 1,
                 description: `FX Realized Gain – Payment ${paperDocNum}`, sourceLineNumber: fxLineNum - 1 });
             }
             if (totalFxLoss > 0 && fxAcct) {
               fxLines.push({ lineNumber: fxLineNum++, lineType: 'DR' as const, accountingClass: 'FX_REALIZED_LOSS',
-                accountCombination: fxAcct, enteredDr: 0, enteredCr: 0,
+                accountCombination: fxAcct, enteredDr: totalFxLoss, enteredCr: 0,
                 accountedDr: totalFxLoss, accountedCr: 0, currencyCode: 'AED', exchangeRate: 1,
                 description: `FX Realized Loss – Payment ${paperDocNum}`, sourceLineNumber: fxLineNum - 1 });
             }
@@ -1441,21 +1441,6 @@ const ManagePayments: React.FC = () => {
   // Supplier table columns
   const supplierColumns: ColumnsType<SupplierRecord> = [
     {
-      title: 'Action',
-      key: 'action',
-      width: 80,
-      render: (_: any, record: SupplierRecord) => (
-        <Button
-          type="link"
-          size="small"
-          onClick={() => handleSupplierSelect(record)}
-          style={{ color: REDWOOD.info }}
-        >
-          Select
-        </Button>
-      ),
-    },
-    {
       title: 'Supplier Number',
       dataIndex: 'supplierNumber',
       key: 'supplierNumber',
@@ -1496,6 +1481,21 @@ const ManagePayments: React.FC = () => {
       dataIndex: 'taxpayerId',
       key: 'taxpayerId',
       width: 120,
+    },
+    {
+      title: 'Action',
+      key: 'action',
+      width: 80,
+      render: (_: any, record: SupplierRecord) => (
+        <Button
+          type="link"
+          size="small"
+          onClick={() => handleSupplierSelect(record)}
+          style={{ color: REDWOOD.info }}
+        >
+          Select
+        </Button>
+      ),
     },
   ];
 
@@ -2726,10 +2726,9 @@ const ManagePayments: React.FC = () => {
       // Filter to only lines that belong to this specific payment (AP_PAYMENTS + checkId)
       const paymentLines = (allLinesData.items || []).filter((line: any) => {
         const st  = (line.sourceTable || line.SOURCE_TABLE || '').toUpperCase();
-        const sid = line.sourceId ?? line.SOURCE_ID ?? line.SourceId;
-        const sidMatch = sid != null && String(sid) === String(record.checkId);
-        const stMatch  = !st || st === 'AP_PAYMENTS';
-        return stMatch && sidMatch;
+        const sid = line.sourceId ?? line.SOURCE_ID;
+        return (!st || st === 'AP_PAYMENTS')
+            && (!sid || String(sid) === String(record.checkId));
       });
       // Group lines by headerId to build per-event sections (Payment, Void, etc.)
       const eventsMap = new Map<number, { headerId: number; eventTypeCode: string; accountingStatus: string; accountingDate: string; lines: any[] }>();
@@ -2946,22 +2945,6 @@ const ManagePayments: React.FC = () => {
         setAcctResults([{ invoiceNumber: '—', status: 'ALREADY POSTED', headerId: exists.headerId ?? undefined }]);
         setAcctLoading(false);
         return;
-      }
-
-      // 1b. Delete existing DRAFT SLA header before re-creating
-      if (exists?.exists && exists?.headerId && exists?.accountingStatus !== 'POSTED') {
-        try {
-          const delRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete`, {
-            method: 'POST',
-            headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-            body: JSON.stringify({ headerId: exists.headerId }),
-          });
-          if (!delRes.ok && delRes.status !== 404) {
-            console.warn('[Create Accounting] Delete SLA header failed:', delRes.status);
-          }
-        } catch (e) {
-          console.warn('[Create Accounting] Delete SLA header error:', e);
-        }
       }
 
       // 2. Find matching bank account by name
@@ -3518,13 +3501,7 @@ const ManagePayments: React.FC = () => {
                         <Row gutter={32}>
                           <Col span={12}>
                             <Form.Item
-                              label={
-                                <Space size={6} align="center">
-                                  <span><span style={{ color: REDWOOD.primary }}>*</span> Business Unit</span>
-                                  {derivedCompany && <Tag color="blue" style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 11, margin: 0 }}>{derivedCompany}</Tag>}
-                                  {selectedBuLegalEntityName && !derivedCompany && <Tag color="red" style={{ fontSize: 11, margin: 0 }}>No company code</Tag>}
-                                </Space>
-                              }
+                              label={<><span style={{ color: REDWOOD.primary }}>*</span> Business Unit</>}
                               name="businessUnit"
                               rules={[{ required: true, message: 'Required' }]}
                             >
@@ -3559,6 +3536,17 @@ const ManagePayments: React.FC = () => {
                                 ))}
                               </Select>
                             </Form.Item>
+                            {selectedBuLegalEntityName && derivedCompany && (
+                              <div style={{ marginTop: -10, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ fontSize: 11, color: '#6B6B6B' }}>Company Code:</span>
+                                <Tag color="blue" style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{derivedCompany}</Tag>
+                              </div>
+                            )}
+                            {selectedBuLegalEntityName && !derivedCompany && (
+                              <div style={{ marginTop: -10, marginBottom: 8, padding: '4px 8px', background: '#fff2f0', border: '1px solid #ffa39e', borderRadius: 4 }}>
+                                <span style={{ fontSize: 11, color: '#cf1322' }}>⚠ No company code configured for this Business Unit. Cannot proceed.</span>
+                              </div>
+                            )}
                             <Form.Item
                               label={<><span style={{ color: REDWOOD.primary }}>*</span> Supplier or Party</>}
                               name="payee"
@@ -3851,7 +3839,7 @@ const ManagePayments: React.FC = () => {
                                 validator: (_, value) => {
                                   if (!value) return Promise.resolve();
                                   const payDate = createPaymentForm.getFieldValue('paymentDate');
-                                  if (payDate && !value.isAfter(dayjs(payDate), 'day')) {
+                                  if (payDate && value.isSameOrBefore(payDate, 'day')) {
                                     return Promise.reject('Maturity date must be after the payment date');
                                   }
                                   return Promise.resolve();
@@ -4152,7 +4140,7 @@ const ManagePayments: React.FC = () => {
                                 validator: (_, value) => {
                                   if (!value) return Promise.resolve();
                                   const payDate = createPaymentForm.getFieldValue('paymentDate');
-                                  if (payDate && !value.isAfter(dayjs(payDate), 'day')) {
+                                  if (payDate && value.isSameOrBefore(payDate, 'day')) {
                                     return Promise.reject('Maturity date must be after the payment date');
                                   }
                                   return Promise.resolve();
@@ -4243,37 +4231,26 @@ const ManagePayments: React.FC = () => {
               locale={{ emptyText: 'Select a supplier and click Add Invoices to add unpaid invoices' }}
               summary={() => invoicesToPay.length === 0 ? null : (
                 <Table.Summary.Row style={{ background: '#f0f2f5', fontWeight: 600 }}>
-                  {/* cols 0-7: Invoice Number … Description */}
-                  <Table.Summary.Cell index={0} colSpan={8} align="right">
+                  <Table.Summary.Cell index={0} colSpan={6} align="right">
                     <span style={{ fontSize: 12, color: '#555' }}>Totals</span>
                   </Table.Summary.Cell>
-                  {/* col 8: Invoice Amount */}
                   <Table.Summary.Cell index={1} align="right">
-                    <span style={{ fontSize: 12 }}>
-                      {invoicesToPay.reduce((s, i) => s + (i.invoiceAmount || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                    </span>
-                  </Table.Summary.Cell>
-                  {/* col 9: Amount Due */}
-                  <Table.Summary.Cell index={2} align="right">
                     <span style={{ fontSize: 12 }}>
                       {invoicesToPay.reduce((s, i) => s + (i.amountDue || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </span>
                   </Table.Summary.Cell>
-                  {/* col 10: Apply Amount */}
-                  <Table.Summary.Cell index={3} align="right">
+                  <Table.Summary.Cell index={2} align="right">
                     <span style={{ fontSize: 12, color: REDWOOD.primary }}>
                       {totalAppliedAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </span>
                   </Table.Summary.Cell>
-                  {/* col 11: Discount Amount */}
-                  <Table.Summary.Cell index={4} align="right">
+                  <Table.Summary.Cell index={3} align="right">
                     <span style={{ fontSize: 12 }}>
                       {invoicesToPay.reduce((s, i) => s + (i.discountAmount || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </span>
                   </Table.Summary.Cell>
-                  {/* col 12: Due Date, col 13: Remove */}
+                  <Table.Summary.Cell index={4} />
                   <Table.Summary.Cell index={5} />
-                  <Table.Summary.Cell index={6} />
                 </Table.Summary.Row>
               )}
               columns={[
@@ -4774,29 +4751,6 @@ const ManagePayments: React.FC = () => {
                 ),
               },
               {
-                title: 'Exch. Rate',
-                dataIndex: 'invoiceExchangeRate',
-                key: 'invoiceExchangeRate',
-                width: 100,
-                align: 'right' as const,
-                render: (val: number | null) => val != null
-                  ? <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{Number(val).toFixed(4)}</span>
-                  : <span style={{ color: '#bbb' }}>—</span>,
-              },
-              {
-                title: 'Functional Amt (AED)',
-                key: 'functionalAmt',
-                width: 140,
-                align: 'right' as const,
-                render: (_: any, record: PaymentInvoice) => {
-                  const rate = record.invoiceExchangeRate;
-                  const amt = record.invoiceAmount;
-                  if (rate == null || amt == null) return <span style={{ color: '#bbb' }}>—</span>;
-                  const functional = Math.round(rate * amt * 100) / 100;
-                  return <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{functional.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>;
-                },
-              },
-              {
                 title: 'Due Date',
                 dataIndex: 'dueDate',
                 key: 'dueDate',
@@ -4820,18 +4774,7 @@ const ManagePayments: React.FC = () => {
                       .toLocaleString('en-US', { minimumFractionDigits: 2 })}
                   </span>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={3} align="right">
-                  {/* empty — exch rate */}
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={4} align="right">
-                  <span style={{ fontSize: 12, fontWeight: 600 }}>
-                    {availableInvoices
-                      .filter(i => i.invoiceExchangeRate != null && i.invoiceAmount != null)
-                      .reduce((s, i) => s + Math.round((i.invoiceExchangeRate! * i.invoiceAmount!) * 100) / 100, 0)
-                      .toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                  </span>
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={5} />
+                <Table.Summary.Cell index={3} />
               </Table.Summary.Row>
             )}
           />
