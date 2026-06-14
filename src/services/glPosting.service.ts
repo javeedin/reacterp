@@ -126,10 +126,12 @@ export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResu
   }
 
   // ── 1. Create journal ─────────────────────────────────────────────────────
-  // Use accountedDr/Cr for control totals — enteredDr/Cr may be 0 for revaluation journals
-  // where amounts are purely in functional currency.
-  const totalDr = lines.reduce((s, l) => s + (l.accountedDr ?? l.enteredDr ?? 0), 0);
-  const totalCr = lines.reduce((s, l) => s + (l.accountedCr ?? l.enteredCr ?? 0), 0);
+  // runningTotalDr/Cr = entered (foreign currency) amounts for the journal header.
+  // For revaluation journals enteredDr/Cr are 0, so fall back to accountedDr/Cr.
+  const entTotalDr = lines.reduce((s, l) => s + (l.enteredDr ?? 0), 0);
+  const entTotalCr = lines.reduce((s, l) => s + (l.enteredCr ?? 0), 0);
+  const totalDr = entTotalDr > 0 ? entTotalDr : lines.reduce((s, l) => s + (l.accountedDr ?? 0), 0);
+  const totalCr = entTotalCr > 0 ? entTotalCr : lines.reduce((s, l) => s + (l.accountedCr ?? 0), 0);
 
   const payload = {
     batch: {
