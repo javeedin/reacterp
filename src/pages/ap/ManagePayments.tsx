@@ -622,8 +622,11 @@ const ManagePayments: React.FC = () => {
   const [selectedBankAccount, setSelectedBankAccount] = useState<BankAccountRecord | null>(null);
   // Local overrides so user can set missing account combinations without leaving the form
   const [bankAcctCashOverride,    setBankAcctCashOverride]    = useState<string>('');
+  const [bankAcctCashDesc,        setBankAcctCashDesc]        = useState<string>('');
   const [bankAcctPdcOverride,     setBankAcctPdcOverride]     = useState<string>('');
+  const [bankAcctPdcDesc,         setBankAcctPdcDesc]         = useState<string>('');
   const [bankAcctFxOverride,      setBankAcctFxOverride]      = useState<string>('');
+  const [bankAcctFxDesc,          setBankAcctFxDesc]          = useState<string>('');
   const [bankAcctSelectorField,   setBankAcctSelectorField]   = useState<'cash' | 'pdc' | 'fx' | null>(null);
 
   // Payment accounting state
@@ -3388,9 +3391,9 @@ const ManagePayments: React.FC = () => {
                         setSelectedBankAccount(null);
                         setInvoicesToPay([]);
                         setSupplierTotalBalance(null);
-                        setBankAcctCashOverride('');
-                        setBankAcctPdcOverride('');
-                        setBankAcctFxOverride('');
+                        setBankAcctCashOverride(''); setBankAcctCashDesc('');
+                        setBankAcctPdcOverride('');  setBankAcctPdcDesc('');
+                        setBankAcctFxOverride('');   setBankAcctFxDesc('');
                         setCreatePaymentCurrency('AED');
                         setBmsRate(null);
                         setTimeout(() => {
@@ -3572,7 +3575,8 @@ const ManagePayments: React.FC = () => {
                                   <Form.Item
                                     label="Cash Account"
                                     validateStatus={!effectiveCash ? 'error' : ''}
-                                    help={!effectiveCash ? 'Required — click to select' : (selectedBankAccount.cashAccountDescription || undefined)}
+                                    help={!effectiveCash ? 'Required — click to select'
+                                      : (bankAcctCashDesc || selectedBankAccount.cashAccountDescription || undefined)}
                                   >
                                     <Input.Group compact>
                                       <Input
@@ -3595,11 +3599,12 @@ const ManagePayments: React.FC = () => {
                                     const isFx = paymentCurrency && paymentCurrency !== 'AED';
                                     if (!isFx) return null;
                                     const effectiveFx = bankAcctFxOverride || selectedBankAccount.fxGainLossAccountCombination;
+                                    const fxDesc = bankAcctFxDesc || undefined;
                                     return (
                                       <Form.Item
                                         label={<><span style={{ color: REDWOOD.primary }}>*</span> FX Gain/Loss Account</>}
                                         validateStatus={!effectiveFx ? 'error' : ''}
-                                        help={!effectiveFx ? 'Required for foreign-currency payments' : undefined}
+                                        help={!effectiveFx ? 'Required for foreign-currency payments' : fxDesc}
                                       >
                                         <Input.Group compact>
                                           <Input
@@ -3617,7 +3622,8 @@ const ManagePayments: React.FC = () => {
                                     <Form.Item
                                       label="PDC Account"
                                       validateStatus={maturityDate && !effectivePdc ? 'error' : ''}
-                                      help={maturityDate && !effectivePdc ? 'Required when Maturity Date is set' : undefined}
+                                      help={maturityDate && !effectivePdc ? 'Required when Maturity Date is set'
+                                        : (bankAcctPdcDesc || undefined)}
                                     >
                                       <Input.Group compact>
                                         <Input
@@ -3654,11 +3660,16 @@ const ManagePayments: React.FC = () => {
                                 onChange={(value) => {
                                   const acct = filteredBankAccounts.find(a => a.bankAccountName === value) || null;
                                   setSelectedBankAccount(acct);
-                                  setBankAcctCashOverride('');
-                                  setBankAcctPdcOverride('');
-                                  setBankAcctFxOverride('');
+                                  setBankAcctCashOverride(''); setBankAcctCashDesc('');
+                                  setBankAcctPdcOverride('');  setBankAcctPdcDesc('');
+                                  setBankAcctFxOverride('');   setBankAcctFxDesc('');
                                 }}
-                                onClear={() => { setSelectedBankAccount(null); setBankAcctCashOverride(''); setBankAcctPdcOverride(''); setBankAcctFxOverride(''); }}
+                                onClear={() => {
+                                  setSelectedBankAccount(null);
+                                  setBankAcctCashOverride(''); setBankAcctCashDesc('');
+                                  setBankAcctPdcOverride('');  setBankAcctPdcDesc('');
+                                  setBankAcctFxOverride('');   setBankAcctFxDesc('');
+                                }}
                               >
                                 {filteredBankAccounts.map((acct, idx) => (
                                   <Option key={idx} value={acct.bankAccountName}>
@@ -6016,10 +6027,14 @@ const ManagePayments: React.FC = () => {
       <AccountSelector
         visible={bankAcctSelectorField !== null}
         onCancel={() => setBankAcctSelectorField(null)}
-        onSelect={(code: string) => {
-          if (bankAcctSelectorField === 'cash') setBankAcctCashOverride(code);
-          else if (bankAcctSelectorField === 'pdc') setBankAcctPdcOverride(code);
-          else if (bankAcctSelectorField === 'fx')  setBankAcctFxOverride(code);
+        onSelect={(code: string, segments?: Record<string, { value: string; description: string; name: string }>) => {
+          // Derive a human-readable description from the Account segment
+          const acctDesc = segments
+            ? Object.values(segments).find(s => s.name?.toLowerCase().includes('account') && !s.name?.toLowerCase().includes('sub'))?.description || ''
+            : '';
+          if (bankAcctSelectorField === 'cash') { setBankAcctCashOverride(code); setBankAcctCashDesc(acctDesc); }
+          else if (bankAcctSelectorField === 'pdc') { setBankAcctPdcOverride(code); setBankAcctPdcDesc(acctDesc); }
+          else if (bankAcctSelectorField === 'fx')  { setBankAcctFxOverride(code);  setBankAcctFxDesc(acctDesc); }
           setBankAcctSelectorField(null);
         }}
         initialValue={
