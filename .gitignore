@@ -29,3 +29,4 @@ src/config/email.secret.ts
 *.sln
 *.sw?
 .claude/
+!dist/assets/ManagePayablesOptions-DfKp8wqN.js
