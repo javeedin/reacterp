@@ -850,22 +850,24 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           createdBy:              'SYSTEM',
         },
         lines: lines.map((l) => {
-          const eDr  = l.lineType === 'DR' && (l.enteredDr  || 0) > 0 ? l.enteredDr  : null;
-          const eCr  = l.lineType === 'CR' && (l.enteredCr  || 0) > 0 ? l.enteredCr  : null;
+          const isAedLine = (l.currencyCode || '').toUpperCase() === 'AED';
           const rate = (payment.conversionRate && payment.conversionRate > 0) ? payment.conversionRate : 1;
           // Use explicit accounted amounts from SLA (covers FX lines where entered=0 but accounted≠0)
-          const aDr  = l.accountedDr  != null && l.accountedDr  > 0 ? l.accountedDr  : (eDr != null ? Math.round(eDr * rate * 100) / 100 : null);
-          const aCr  = l.accountedCr  != null && l.accountedCr  > 0 ? l.accountedCr  : (eCr != null ? Math.round(eCr * rate * 100) / 100 : null);
+          const aDr = l.accountedDr != null && l.accountedDr > 0 ? l.accountedDr : null;
+          const aCr = l.accountedCr != null && l.accountedCr > 0 ? l.accountedCr : null;
+          // For AED-only lines (FX gain/loss), entered = accounted (rate=1). For FC lines use entered from SLA.
+          const eDr = isAedLine ? aDr : (l.lineType === 'DR' && (l.enteredDr || 0) > 0 ? l.enteredDr : null);
+          const eCr = isAedLine ? aCr : (l.lineType === 'CR' && (l.enteredCr || 0) > 0 ? l.enteredCr : null);
           return {
             enteredDr:                  eDr,
             enteredCr:                  eCr,
-            accountedDr:                aDr,
-            accountedCr:                aCr,
+            accountedDr:                aDr ?? (eDr != null ? Math.round(eDr * rate * 100) / 100 : null),
+            accountedCr:                aCr ?? (eCr != null ? Math.round(eCr * rate * 100) / 100 : null),
             statAmount:                 null,
             description:                l.description || acctData.description || '',
             currencyCode:               l.currencyCode || payment.paymentCurrency || 'AED',
             currencyConversionDate:     acctData.accountingDate,
-            currencyConversionRate:     l.currencyCode === 'AED' ? 1 : rate,
+            currencyConversionRate:     isAedLine ? 1 : rate,
             userCurrencyConversionType: 'User',
             accountCombination:         l.accountCombination || '',
             chartOfAccountsName:        'Chart of Accounts',
@@ -2736,33 +2738,46 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         ) : postGLPayload ? (
           <Space direction="vertical" style={{ width: '100%' }}>
             {postGLPayload.lines?.length === 0 && (
-              <Alert type="warning" message={`No SLA lines found for header ${postModalHeadId}. The backend may be ignoring the headerId filter — check the GET endpoint above.`} />
+              <Alert type="warning" message={`No SLA lines found for header ${postModalHeadId}.`} />
             )}
             <div style={{ color: REDWOOD.warning, fontSize: 12 }}>
               ⚠ Once posted, the accounting entry will be locked and cannot be modified.
             </div>
-            {/* Step 1 payload */}
-            <div>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
-                <Tag color="blue" style={{ fontSize: 11, margin: 0 }}>POST</Tag>
-                <span style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.neutral900 }}>
-                  {`${APEX_DB_CONFIG.baseUrl}/journals/create`}
-                </span>
-              </div>
-              <pre style={{
-                fontSize: 11, background: REDWOOD.neutral100,
-                border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 4,
-                padding: '8px 10px', margin: 0, color: REDWOOD.neutral900,
-                maxHeight: 360, overflowY: 'auto',
-              }}>
-                {JSON.stringify(postGLPayload, null, 2)}
-              </pre>
-            </div>
-            {/* Step 2 note */}
+            {/* Journal entry preview table */}
+            <Table
+              size="small"
+              pagination={false}
+              dataSource={(postGLPayload.lines || []).map((l: any, i: number) => ({ ...l, key: i }))}
+              columns={[
+                { title: 'Account', dataIndex: 'accountCombination', key: 'acct', ellipsis: true, width: 220 },
+                { title: 'Class', dataIndex: 'reference3', key: 'cls', width: 120, render: (v: string) => <Tag style={{ fontSize: 10 }}>{v}</Tag> },
+                { title: 'Ccy', dataIndex: 'currencyCode', key: 'ccy', width: 50 },
+                { title: 'Entered Dr', dataIndex: 'enteredDr', key: 'eDr', width: 90, align: 'right' as const, render: (v: number) => v ? v.toLocaleString() : '—' },
+                { title: 'Entered Cr', dataIndex: 'enteredCr', key: 'eCr', width: 90, align: 'right' as const, render: (v: number) => v ? v.toLocaleString() : '—' },
+                { title: 'Accounted Dr', dataIndex: 'accountedDr', key: 'aDr', width: 100, align: 'right' as const, render: (v: number) => v ? v.toLocaleString() : '—' },
+                { title: 'Accounted Cr', dataIndex: 'accountedCr', key: 'aCr', width: 100, align: 'right' as const, render: (v: number) => v ? v.toLocaleString() : '—' },
+              ]}
+              summary={() => (
+                <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 600 }}>
+                  <Table.Summary.Cell index={0} colSpan={3}>Total (runningTotalDr/Cr)</Table.Summary.Cell>
+                  <Table.Summary.Cell index={1} align="right"><Text strong>{postGLPayload.batch?.runningTotalDr?.toLocaleString()}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={2} align="right"><Text strong>{postGLPayload.batch?.runningTotalCr?.toLocaleString()}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={3} colSpan={2} />
+                </Table.Summary.Row>
+              )}
+            />
+            {/* Collapsible JSON */}
+            <Collapse size="small" ghost items={[{
+              key: '1',
+              label: <Text style={{ fontSize: 11 }}><Tag color="blue" style={{ fontSize: 10, margin: 0, marginRight: 4 }}>POST</Tag>{`${APEX_DB_CONFIG.baseUrl}/journals/create`} — view full JSON</Text>,
+              children: (
+                <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 4, maxHeight: 300, overflowY: 'auto', margin: 0 }}>
+                  {JSON.stringify(postGLPayload, null, 2)}
+                </pre>
+              ),
+            }]} />
             <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
-              <ApiOutlined /> Step 2 (auto): <Tag color="blue" style={{ fontSize: 10 }}>POST</Tag>
-              <code style={{ fontSize: 11 }}>{`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`}</code>
-              {' '}— stamps returned GL IDs back on SLA header
+              <ApiOutlined /> Step 2 (auto): stamps returned GL IDs back on SLA header
             </div>
           </Space>
         ) : null}
