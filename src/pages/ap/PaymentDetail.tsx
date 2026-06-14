@@ -442,6 +442,8 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
   const [acctPostPayload, setAcctPostPayload] = useState<any[]>([]);
   const [acctPostResult, setAcctPostResult] = useState<any>(null);
   const [acctPostRunning, setAcctPostRunning] = useState(false);
+  const [acctDeleteResult, setAcctDeleteResult] = useState<any>(null);
+  const [acctDeleteRunning, setAcctDeleteRunning] = useState(false);
   // ─────────────────────────────────────────────────────────────────────────
 
   // ── SLA Status / Post to Ledger / View Accounting state ──────────────────
@@ -1337,6 +1339,27 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
       setAcctPostResult({ error: e?.message ?? 'Network error' });
     } finally {
       setAcctPostRunning(false);
+    }
+  };
+
+  // Manual DELETE SLA header API
+  const runDeleteSlaApi = async () => {
+    const headerId = slaStatus?.headerId;
+    if (!headerId) { setAcctDeleteResult({ error: 'No SLA headerId found — run Check Accounting Exists first' }); return; }
+    setAcctDeleteRunning(true);
+    setAcctDeleteResult(null);
+    try {
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/${headerId}`, {
+        method: 'DELETE',
+        headers: { Accept: 'application/json' },
+      });
+      const data = await res.json().catch(() => ({ status: res.status }));
+      setAcctDeleteResult({ ...data, _httpStatus: res.status });
+    } catch (e: any) {
+      setAcctDeleteResult({ error: e?.message ?? 'Network error' });
+    } finally {
+      setAcctDeleteRunning(false);
+      fetchSlaStatus();
     }
   };
 
@@ -2447,6 +2470,42 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
                     </>
                   )}
                 </div>
+
+                {/* DELETE SLA header */}
+                <div style={{ border: '1px solid #ffa39e', borderRadius: 6, padding: '10px 12px', marginBottom: 10, background: '#fff2f0' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <Space size={6}>
+                      <Tag color="red" style={{ margin: 0 }}>DELETE</Tag>
+                      <Text strong style={{ fontSize: 12 }}>Delete SLA Header</Text>
+                    </Space>
+                    <Button
+                      size="small"
+                      danger
+                      icon={acctDeleteRunning ? <LoadingOutlined spin /> : <PlayCircleOutlined />}
+                      loading={acctDeleteRunning}
+                      onClick={runDeleteSlaApi}
+                    >
+                      Run
+                    </Button>
+                  </div>
+                  <code style={{ fontSize: 10, color: '#666', display: 'block', wordBreak: 'break-all', marginBottom: 4 }}>
+                    DELETE {APEX_DB_CONFIG.baseUrl}/sla/accounting/{slaStatus?.headerId ?? ':headerId'}
+                  </code>
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    {slaStatus?.headerId
+                      ? `Deletes header #${slaStatus.headerId} and all its lines (DRAFT only)`
+                      : 'No SLA header found for this payment'}
+                  </Text>
+                  {acctDeleteResult && (
+                    <>
+                      <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>Response:</Text>
+                      <pre style={{ fontSize: 10, background: '#1e1e1e', color: acctDeleteResult.status === 'success' ? '#a6e3a1' : '#f38ba8', padding: 8, borderRadius: 4, margin: '4px 0 0', maxHeight: 100, overflowY: 'auto' }}>
+                        {JSON.stringify(acctDeleteResult, null, 2)}
+                      </pre>
+                    </>
+                  )}
+                </div>
+
               </div>
             )}
           </div>
