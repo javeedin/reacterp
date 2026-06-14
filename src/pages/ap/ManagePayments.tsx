@@ -4226,26 +4226,37 @@ const ManagePayments: React.FC = () => {
               locale={{ emptyText: 'Select a supplier and click Add Invoices to add unpaid invoices' }}
               summary={() => invoicesToPay.length === 0 ? null : (
                 <Table.Summary.Row style={{ background: '#f0f2f5', fontWeight: 600 }}>
-                  <Table.Summary.Cell index={0} colSpan={6} align="right">
+                  {/* cols 0-7: Invoice Number … Description */}
+                  <Table.Summary.Cell index={0} colSpan={8} align="right">
                     <span style={{ fontSize: 12, color: '#555' }}>Totals</span>
                   </Table.Summary.Cell>
+                  {/* col 8: Invoice Amount */}
                   <Table.Summary.Cell index={1} align="right">
+                    <span style={{ fontSize: 12 }}>
+                      {invoicesToPay.reduce((s, i) => s + (i.invoiceAmount || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </span>
+                  </Table.Summary.Cell>
+                  {/* col 9: Amount Due */}
+                  <Table.Summary.Cell index={2} align="right">
                     <span style={{ fontSize: 12 }}>
                       {invoicesToPay.reduce((s, i) => s + (i.amountDue || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </span>
                   </Table.Summary.Cell>
-                  <Table.Summary.Cell index={2} align="right">
+                  {/* col 10: Apply Amount */}
+                  <Table.Summary.Cell index={3} align="right">
                     <span style={{ fontSize: 12, color: REDWOOD.primary }}>
                       {totalAppliedAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </span>
                   </Table.Summary.Cell>
-                  <Table.Summary.Cell index={3} align="right">
+                  {/* col 11: Discount Amount */}
+                  <Table.Summary.Cell index={4} align="right">
                     <span style={{ fontSize: 12 }}>
                       {invoicesToPay.reduce((s, i) => s + (i.discountAmount || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </span>
                   </Table.Summary.Cell>
-                  <Table.Summary.Cell index={4} />
+                  {/* col 12: Due Date, col 13: Remove */}
                   <Table.Summary.Cell index={5} />
+                  <Table.Summary.Cell index={6} />
                 </Table.Summary.Row>
               )}
               columns={[
