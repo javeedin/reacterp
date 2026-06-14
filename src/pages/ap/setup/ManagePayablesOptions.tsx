@@ -109,12 +109,14 @@ export default function ManagePayablesOptions() {
   const [syncLog, setSyncLog] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState('search');
   const [editTabs, setEditTabs] = useState<EditTab[]>([]);
+  const [filterBuId, setFilterBuId] = useState<string>('');
   const [forms] = useState<Record<string, ReturnType<typeof Form.useForm>[0]>>({});
 
-  const loadOptions = useCallback(async () => {
+  const loadOptions = useCallback(async (buId?: string) => {
     setLoading(true);
     try {
-      const res = await fetch(APEX_OPTIONS_URL, { headers: { Accept: 'application/json' } });
+      const params = buId ? `?businessUnitId=${encodeURIComponent(buId)}` : '';
+      const res = await fetch(`${APEX_OPTIONS_URL}${params}`, { headers: { Accept: 'application/json' } });
       const data = await res.json();
       setOptions(data.items ?? []);
     } catch {
@@ -125,6 +127,8 @@ export default function ManagePayablesOptions() {
   }, []);
 
   useEffect(() => { loadOptions(); }, [loadOptions]);
+
+  const handleSearch = () => loadOptions(filterBuId || undefined);
 
   const syncFromFusion = async () => {
     setSyncing(true);
@@ -293,7 +297,21 @@ export default function ManagePayablesOptions() {
 
   const SearchTab = (
     <div>
-      <Space style={{ marginBottom: 16 }}>
+      <Space style={{ marginBottom: 16 }} wrap>
+        <Input
+          placeholder="Business Unit ID"
+          value={filterBuId}
+          onChange={e => setFilterBuId(e.target.value)}
+          onPressEnter={handleSearch}
+          allowClear
+          onClear={() => { setFilterBuId(''); loadOptions(); }}
+          style={{ width: 180 }}
+          prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
+        />
+        <Button type="default" icon={<SearchOutlined />} onClick={handleSearch} loading={loading}>
+          Search
+        </Button>
+        <Divider type="vertical" />
         <Button
           type="primary"
           icon={<SyncOutlined spin={syncing} />}
@@ -303,7 +321,7 @@ export default function ManagePayablesOptions() {
         >
           Sync from Fusion
         </Button>
-        <Button icon={<ReloadOutlined />} onClick={loadOptions} loading={loading}>
+        <Button icon={<ReloadOutlined />} onClick={() => { setFilterBuId(''); loadOptions(); }} loading={loading}>
           Refresh
         </Button>
         <Badge count={options.length} style={{ background: REDWOOD.info }}>
