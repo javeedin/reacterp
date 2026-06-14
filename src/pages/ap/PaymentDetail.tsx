@@ -445,6 +445,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
   const [acctPostRunning, setAcctPostRunning] = useState(false);
   const [fxAcctOverride, setFxAcctOverride] = useState('');
   const [showFxAcctSelector, setShowFxAcctSelector] = useState(false);
+  const [derivedCompany, setDerivedCompany] = useState('');
   const [acctDeleteResult, setAcctDeleteResult] = useState<any>(null);
   const [acctDeleteRunning, setAcctDeleteRunning] = useState(false);
   // ─────────────────────────────────────────────────────────────────────────
@@ -739,25 +740,34 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     fetchSlaStatus();
   }, [payment.checkId]);
 
-  // Fetch bank accounts on mount (needed for Create Accounting)
+  // Fetch bank accounts and business units on mount (needed for Create Accounting)
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/banks/bankaccounts`, { headers: { Accept: 'application/json' } });
-        if (!res.ok) return;
-        const data = await res.json();
-        setBankAccounts((data.items || []).map((item: any) => ({
-          bankAccountName:                item.bank_account_name                 || '',
-          cashAccountCombination:          item.cash_account_combination          || '',
-          pdcAccountCombination:           item.pdc_account_combination           || '',
-          cashClearingAccountCombination:  item.cash_clearing_account_combination || '',
-          legalEntityName:                 item.legal_entity_name                 || '',
-          fxGainLossAccountCombination:    item.fx_gain_account_combination || item.fx_loss_account_combination || '',
-        })));
+        const [bankRes, buRes] = await Promise.all([
+          fetch(`${APEX_DB_CONFIG.baseUrl}/banks/bankaccounts`, { headers: { Accept: 'application/json' } }),
+          fetch(`${APEX_DB_CONFIG.baseUrl}/gl/businessunits`, { headers: { Accept: 'application/json' } }),
+        ]);
+        if (bankRes.ok) {
+          const data = await bankRes.json();
+          setBankAccounts((data.items || []).map((item: any) => ({
+            bankAccountName:                item.bank_account_name                 || '',
+            cashAccountCombination:          item.cash_account_combination          || '',
+            pdcAccountCombination:           item.pdc_account_combination           || '',
+            cashClearingAccountCombination:  item.cash_clearing_account_combination || '',
+            legalEntityName:                 item.legal_entity_name                 || '',
+            fxGainLossAccountCombination:    item.fx_gain_account_combination || item.fx_loss_account_combination || '',
+          })));
+        }
+        if (buRes.ok) {
+          const buData = await buRes.json();
+          const matched = (buData.items || []).find((b: any) => b.business_unit_name === payment.businessUnit);
+          if (matched?.company) setDerivedCompany(matched.company);
+        }
       } catch { /* silent */ }
     };
     load();
-  }, []);
+  }, [payment.businessUnit]);
 
   // ── SLA helpers ──────────────────────────────────────────────────────────
 
@@ -2031,7 +2041,12 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         <Row gutter={[48, 8]}>
           <Col span={12}>
             <Descriptions column={1} size="small" labelStyle={{ width: 140, color: REDWOOD.neutral600 }}>
-              <Descriptions.Item label="Business Unit">{payment.businessUnit}</Descriptions.Item>
+              <Descriptions.Item label="Business Unit">
+                {payment.businessUnit}
+                {derivedCompany && (
+                  <Tag color="blue" style={{ marginLeft: 8, fontFamily: 'monospace', fontWeight: 700 }}>{derivedCompany}</Tag>
+                )}
+              </Descriptions.Item>
               <Descriptions.Item label="Legal Entity">{payment.legalEntity}</Descriptions.Item>
               <Descriptions.Item label="Payee">{payment.payee}</Descriptions.Item>
               <Descriptions.Item label="Payment Date">{payment.paymentDate}</Descriptions.Item>
@@ -2341,6 +2356,9 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
                 readOnly
               />
               <Button size="small" onClick={() => setShowFxAcctSelector(true)}>Select</Button>
+              {derivedCompany && (
+                <Text style={{ fontSize: 11, color: '#ad6800' }}>Company: <strong>{derivedCompany}</strong> (locked)</Text>
+              )}
               {fxAcctOverride && (
                 <Text style={{ fontSize: 11, color: '#389e0d' }}>✓ Set</Text>
               )}
@@ -2647,7 +2665,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           setShowFxAcctSelector(false);
         }}
         initialValue={fxAcctOverride || ''}
-        lockedFirstSegment={undefined}
+        lockedFirstSegment={derivedCompany || undefined}
       />
 
       {/* View Accounting Modal */}
