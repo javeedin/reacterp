@@ -4746,6 +4746,29 @@ const ManagePayments: React.FC = () => {
                 ),
               },
               {
+                title: 'Exch. Rate',
+                dataIndex: 'invoiceExchangeRate',
+                key: 'invoiceExchangeRate',
+                width: 100,
+                align: 'right' as const,
+                render: (val: number | null) => val != null
+                  ? <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{Number(val).toFixed(4)}</span>
+                  : <span style={{ color: '#bbb' }}>—</span>,
+              },
+              {
+                title: 'Functional Amt (AED)',
+                key: 'functionalAmt',
+                width: 140,
+                align: 'right' as const,
+                render: (_: any, record: PaymentInvoice) => {
+                  const rate = record.invoiceExchangeRate;
+                  const amt = record.invoiceAmount;
+                  if (rate == null || amt == null) return <span style={{ color: '#bbb' }}>—</span>;
+                  const functional = Math.round(rate * amt * 100) / 100;
+                  return <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{functional.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>;
+                },
+              },
+              {
                 title: 'Due Date',
                 dataIndex: 'dueDate',
                 key: 'dueDate',
@@ -4769,7 +4792,18 @@ const ManagePayments: React.FC = () => {
                       .toLocaleString('en-US', { minimumFractionDigits: 2 })}
                   </span>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={3} />
+                <Table.Summary.Cell index={3} align="right">
+                  {/* empty — exch rate */}
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={4} align="right">
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>
+                    {availableInvoices
+                      .filter(i => i.invoiceExchangeRate != null && i.invoiceAmount != null)
+                      .reduce((s, i) => s + Math.round((i.invoiceExchangeRate! * i.invoiceAmount!) * 100) / 100, 0)
+                      .toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </span>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={5} />
               </Table.Summary.Row>
             )}
           />
