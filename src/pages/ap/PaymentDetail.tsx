@@ -450,6 +450,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
   const [acctDeleteRunning, setAcctDeleteRunning] = useState(false);
   const [slaLinesResult, setSlaLinesResult] = useState<any>(null);
   const [slaLinesRunning, setSlaLinesRunning] = useState(false);
+  const [step6ApiLog, setStep6ApiLog] = useState<{ url: string; request: any; response: any }[]>([]);
   // ─────────────────────────────────────────────────────────────────────────
 
   // ── SLA Status / Post to Ledger / View Accounting state ──────────────────
@@ -1302,15 +1303,27 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
       // Step 6: Post each journal
       setStep(6, 'running');
       const results: typeof acctResults = [];
+      const step6Log: typeof step6ApiLog = [];
+      const step6Url = `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`;
       for (const payload of payloads) {
         const invNum = payload.header?.description?.split('Invoice ')[1] || payload.header?.description || '—';
+        let rawResponse: any = null;
         try {
-          const result = await createAccounting(payload);
-          results.push({ invoiceNumber: invNum, status: 'DRAFT', headerId: result.headerId });
+          const res = await fetch(step6Url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          rawResponse = await res.json();
+          if (!res.ok) throw new Error(rawResponse?.message || `HTTP ${res.status}`);
+          step6Log.push({ url: step6Url, request: payload, response: rawResponse });
+          results.push({ invoiceNumber: invNum, status: 'DRAFT', headerId: rawResponse.headerId });
         } catch (err: any) {
+          step6Log.push({ url: step6Url, request: payload, response: rawResponse ?? { error: err.message } });
           results.push({ invoiceNumber: invNum, status: 'ERROR', error: err.message });
         }
       }
+      setStep6ApiLog(step6Log);
       const hasErrors = results.some(r => r.status === 'ERROR');
       setStep(6, hasErrors ? 'error' : 'success',
         hasErrors ? `${results.filter(r => r.status === 'ERROR').length} error(s)` : `${results.length} journal(s) created`
@@ -2410,19 +2423,30 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
                           <strong>Step {s.step}:</strong> {s.label}
                         </Text>
                         {s.detail && <div><Text type="secondary" style={{ fontSize: 11 }}>{s.detail}</Text></div>}
-                        {/* Step 6: show collapsible SLA payload */}
-                        {s.step === 6 && acctPostPayload.length > 0 && (
+                        {/* Step 6: show collapsible API call (URL + request + response) */}
+                        {s.step === 6 && (acctPostPayload.length > 0 || step6ApiLog.length > 0) && (
                           <Collapse
                             size="small"
                             ghost
                             style={{ marginTop: 4 }}
-                            items={acctPostPayload.map((pl, idx) => ({
+                            items={(step6ApiLog.length > 0 ? step6ApiLog : acctPostPayload.map(pl => ({ url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`, request: pl, response: null }))).map((log, idx) => ({
                               key: String(idx),
-                              label: <Text style={{ fontSize: 11 }}>Payload {idx + 1} — {pl.header?.description || `Invoice ${idx + 1}`}</Text>,
+                              label: <Text style={{ fontSize: 11 }}><Tag color="green" style={{ fontSize: 10, margin: 0, marginRight: 4 }}>POST</Tag>{log.url.split('/').slice(-3).join('/')} — call {idx + 1}</Text>,
                               children: (
-                                <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 4, maxHeight: 260, overflowY: 'auto', margin: 0 }}>
-                                  {JSON.stringify(pl, null, 2)}
-                                </pre>
+                                <div>
+                                  <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Request body:</Text>
+                                  <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 4, maxHeight: 220, overflowY: 'auto', margin: '0 0 8px' }}>
+                                    {JSON.stringify(log.request, null, 2)}
+                                  </pre>
+                                  {log.response && (
+                                    <>
+                                      <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Response:</Text>
+                                      <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#a6e3a1', padding: 8, borderRadius: 4, maxHeight: 100, overflowY: 'auto', margin: 0 }}>
+                                        {JSON.stringify(log.response, null, 2)}
+                                      </pre>
+                                    </>
+                                  )}
+                                </div>
                               ),
                             }))}
                           />
