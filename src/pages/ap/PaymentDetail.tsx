@@ -121,6 +121,7 @@ interface PaymentRecord {
   stopDate?: string | null;
   stopReason?: string;
   stopReference?: string;
+  syncStatus?: string;
 }
 
 // Related invoice interface
@@ -2037,6 +2038,8 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     { key: 'other', label: 'Other', children: <OtherTab /> },
   ];
 
+  const isFusionSynced = payment.syncStatus === 'SYNCED';
+
   return (
     <div style={{ background: REDWOOD.neutral100, minHeight: '100%' }}>
       {/* Payment Header */}
@@ -2054,15 +2057,22 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           alignItems: 'flex-start',
           marginBottom: 16,
         }}>
-          <Title level={4} style={{ margin: 0 }}>
-            Payment: {payment.paymentNumber}
-          </Title>
           <Space>
-            <Dropdown menu={{ items: actionsMenuItems, onClick: handleActionsClick }} trigger={['click']}>
-              <Button>Actions <DownOutlined /></Button>
-            </Dropdown>
+            <Title level={4} style={{ margin: 0 }}>
+              Payment: {payment.paymentNumber}
+            </Title>
+            {isFusionSynced && (
+              <Tag color="purple" style={{ fontSize: 12, fontWeight: 600 }}>Fusion Synced</Tag>
+            )}
+          </Space>
+          <Space>
+            {!isFusionSynced && (
+              <Dropdown menu={{ items: actionsMenuItems, onClick: handleActionsClick }} trigger={['click']}>
+                <Button>Actions <DownOutlined /></Button>
+              </Dropdown>
+            )}
             {getAccountingStatusDisplay()}
-            {slaStatus?.accountingStatus !== 'POSTED' && (
+            {!isFusionSynced && slaStatus?.accountingStatus !== 'POSTED' && (
               <Tooltip title="Create accounting entries in DRAFT">
                 <Button
                   icon={<AccountBookOutlined />}
