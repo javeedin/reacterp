@@ -1661,6 +1661,7 @@ const ManagePayments: React.FC = () => {
         if (values.paymentStatus) params.append('payment_status', values.paymentStatus);
         if (values.businessUnit) params.append('business_unit', values.businessUnit);
         if (values.supplierNumber) params.append('supplier_number', values.supplierNumber);
+        if (values.paymentCurrency) params.append('payment_currency', values.paymentCurrency);
         if (dateFrom) params.append('payment_date_from', dateFrom);
         if (dateTo)   params.append('payment_date_to',   dateTo);
         if (onlyPdc)  params.append('only_pdc', 'Y');
@@ -1898,6 +1899,23 @@ const ManagePayments: React.FC = () => {
         </span>
       ),
       sorter: (a, b) => a.paymentAmount - b.paymentAmount,
+    },
+    {
+      title: 'Currency',
+      dataIndex: 'paymentCurrency',
+      key: 'paymentCurrency',
+      width: 80,
+      filters: [
+        { text: 'AED', value: 'AED' },
+        { text: 'USD', value: 'USD' },
+        { text: 'EUR', value: 'EUR' },
+        { text: 'GBP', value: 'GBP' },
+        { text: 'SAR', value: 'SAR' },
+        { text: 'QAR', value: 'QAR' },
+        { text: 'KWD', value: 'KWD' },
+      ],
+      onFilter: (value, record) => record.paymentCurrency === value,
+      render: (val: string) => val ? <Tag style={{ fontSize: 11 }}>{val}</Tag> : null,
     },
     {
       title: 'Business Unit',
@@ -3150,6 +3168,19 @@ const ManagePayments: React.FC = () => {
                               <Option value="Cleared">Cleared</Option>
                               <Option value="Voided">Voided</Option>
                               <Option value="Stopped">Stopped</Option>
+                            </Select>
+                          </Form.Item>
+                          <Form.Item label="Currency" name="paymentCurrency">
+                            <Select placeholder="Select Currency" allowClear showSearch>
+                              <Option value="AED">AED</Option>
+                              <Option value="USD">USD</Option>
+                              <Option value="EUR">EUR</Option>
+                              <Option value="GBP">GBP</Option>
+                              <Option value="SAR">SAR</Option>
+                              <Option value="QAR">QAR</Option>
+                              <Option value="KWD">KWD</Option>
+                              <Option value="BHD">BHD</Option>
+                              <Option value="OMR">OMR</Option>
                             </Select>
                           </Form.Item>
                           <Form.Item
