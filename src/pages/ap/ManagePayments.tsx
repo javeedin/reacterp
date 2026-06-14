@@ -3501,7 +3501,13 @@ const ManagePayments: React.FC = () => {
                         <Row gutter={32}>
                           <Col span={12}>
                             <Form.Item
-                              label={<><span style={{ color: REDWOOD.primary }}>*</span> Business Unit</>}
+                              label={
+                                <Space size={6} align="center">
+                                  <span><span style={{ color: REDWOOD.primary }}>*</span> Business Unit</span>
+                                  {derivedCompany && <Tag color="blue" style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 11, margin: 0 }}>{derivedCompany}</Tag>}
+                                  {selectedBuLegalEntityName && !derivedCompany && <Tag color="red" style={{ fontSize: 11, margin: 0 }}>No company code</Tag>}
+                                </Space>
+                              }
                               name="businessUnit"
                               rules={[{ required: true, message: 'Required' }]}
                             >
@@ -3536,17 +3542,6 @@ const ManagePayments: React.FC = () => {
                                 ))}
                               </Select>
                             </Form.Item>
-                            {selectedBuLegalEntityName && derivedCompany && (
-                              <div style={{ marginTop: -10, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <span style={{ fontSize: 11, color: '#6B6B6B' }}>Company Code:</span>
-                                <Tag color="blue" style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{derivedCompany}</Tag>
-                              </div>
-                            )}
-                            {selectedBuLegalEntityName && !derivedCompany && (
-                              <div style={{ marginTop: -10, marginBottom: 8, padding: '4px 8px', background: '#fff2f0', border: '1px solid #ffa39e', borderRadius: 4 }}>
-                                <span style={{ fontSize: 11, color: '#cf1322' }}>⚠ No company code configured for this Business Unit. Cannot proceed.</span>
-                              </div>
-                            )}
                             <Form.Item
                               label={<><span style={{ color: REDWOOD.primary }}>*</span> Supplier or Party</>}
                               name="payee"
@@ -3839,7 +3834,7 @@ const ManagePayments: React.FC = () => {
                                 validator: (_, value) => {
                                   if (!value) return Promise.resolve();
                                   const payDate = createPaymentForm.getFieldValue('paymentDate');
-                                  if (payDate && value.isSameOrBefore(payDate, 'day')) {
+                                  if (payDate && !value.isAfter(dayjs(payDate), 'day')) {
                                     return Promise.reject('Maturity date must be after the payment date');
                                   }
                                   return Promise.resolve();
@@ -4140,7 +4135,7 @@ const ManagePayments: React.FC = () => {
                                 validator: (_, value) => {
                                   if (!value) return Promise.resolve();
                                   const payDate = createPaymentForm.getFieldValue('paymentDate');
-                                  if (payDate && value.isSameOrBefore(payDate, 'day')) {
+                                  if (payDate && !value.isAfter(dayjs(payDate), 'day')) {
                                     return Promise.reject('Maturity date must be after the payment date');
                                   }
                                   return Promise.resolve();
