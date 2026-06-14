@@ -212,6 +212,8 @@ interface BankAccountRecord {
   cashClearingAccountCombination: string;
   cashClearingAccountDescription: string;
   pdcAccountCombination: string;
+  fxGainAccountCombination: string;
+  fxLossAccountCombination: string;
   legalEntityName: string;
 }
 
@@ -668,6 +670,8 @@ const ManagePayments: React.FC = () => {
         cashClearingAccountCombination: item.cash_clearing_account_combination || '',
         cashClearingAccountDescription: item.cash_clearing_account_description || '',
         pdcAccountCombination: item.pdc_account_combination || '',
+        fxGainAccountCombination: item.fx_gain_account_combination || '',
+        fxLossAccountCombination: item.fx_loss_account_combination || '',
         legalEntityName: item.legal_entity_name || '',
       }));
       setBankAccounts(items);
@@ -3585,6 +3589,18 @@ const ManagePayments: React.FC = () => {
                                     help={selectedBankAccount.cashClearingAccountDescription || undefined}
                                   >
                                     <Input readOnly value={selectedBankAccount.cashClearingAccountCombination} style={{ background: '#f5f5f5', color: '#333', fontFamily: 'monospace', fontSize: 12 }} placeholder="—" />
+                                  </Form.Item>
+                                  <Form.Item
+                                    label="FX Gain Account"
+                                    help={selectedBankAccount.fxGainAccountCombination ? undefined : <span style={{ color: '#bbb' }}>Not configured — FX gain entries will be skipped</span>}
+                                  >
+                                    <Input readOnly value={selectedBankAccount.fxGainAccountCombination} style={{ background: '#f5f5f5', color: '#333', fontFamily: 'monospace', fontSize: 12 }} placeholder="—" />
+                                  </Form.Item>
+                                  <Form.Item
+                                    label="FX Loss Account"
+                                    help={selectedBankAccount.fxLossAccountCombination ? undefined : <span style={{ color: '#bbb' }}>Not configured — FX loss entries will be skipped</span>}
+                                  >
+                                    <Input readOnly value={selectedBankAccount.fxLossAccountCombination} style={{ background: '#f5f5f5', color: '#333', fontFamily: 'monospace', fontSize: 12 }} placeholder="—" />
                                   </Form.Item>
                                   {(maturityDate || effectivePdc) && (
                                     <Form.Item
