@@ -187,6 +187,7 @@ const toApiDate = (s: string): string => {
 };
 
 import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../../config/api.config';
+import AccountSelector from '../../components/AccountSelector';
 import {
   checkAccountingExists,
   createAccounting,
@@ -442,6 +443,8 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
   const [acctPostPayload, setAcctPostPayload] = useState<any[]>([]);
   const [acctPostResult, setAcctPostResult] = useState<any>(null);
   const [acctPostRunning, setAcctPostRunning] = useState(false);
+  const [fxAcctOverride, setFxAcctOverride] = useState('');
+  const [showFxAcctSelector, setShowFxAcctSelector] = useState(false);
   const [acctDeleteResult, setAcctDeleteResult] = useState<any>(null);
   const [acctDeleteRunning, setAcctDeleteRunning] = useState(false);
   // ─────────────────────────────────────────────────────────────────────────
@@ -1198,9 +1201,9 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         // ── FX Gain / Loss lines (foreign-currency payments only) ──────────
         const isFxPayment = payment.paymentCurrency && payment.paymentCurrency !== 'AED';
         if (isFxPayment) {
-          const fxAcct = bank.fxGainLossAccountCombination;
+          const fxAcct = fxAcctOverride || bank.fxGainLossAccountCombination;
           if (!fxAcct) {
-            throw new Error(`FX Gain/Loss account not configured for bank "${bank.bankAccountName}". Please set fx_gain_account_combination on the bank account.`);
+            throw new Error(`FX Gain/Loss account not configured. Please select the FX Gain/Loss account in the form above and run again.`);
           }
 
           for (const pl of payloads) {
@@ -2325,6 +2328,25 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         }
         width={showAcctApiSection ? 960 : 640}
       >
+        {/* FX Gain/Loss account selector — shown for foreign currency payments */}
+        {payment.paymentCurrency && payment.paymentCurrency !== 'AED' && (
+          <div style={{ marginBottom: 14, background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 6, padding: '10px 14px' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: '#ad6800' }}>FX Gain/Loss Account</div>
+            <Space>
+              <Input
+                size="small"
+                style={{ width: 260 }}
+                value={fxAcctOverride}
+                placeholder="Select FX Gain/Loss account…"
+                readOnly
+              />
+              <Button size="small" onClick={() => setShowFxAcctSelector(true)}>Select</Button>
+              {fxAcctOverride && (
+                <Text style={{ fontSize: 11, color: '#389e0d' }}>✓ Set</Text>
+              )}
+            </Space>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 16 }}>
           {/* Left: Steps + Results */}
           <div style={{ flex: 1 }}>
@@ -2615,6 +2637,18 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           </Space>
         ) : null}
       </Modal>
+
+      {/* FX Gain/Loss AccountSelector */}
+      <AccountSelector
+        visible={showFxAcctSelector}
+        onCancel={() => setShowFxAcctSelector(false)}
+        onSelect={(code: string) => {
+          setFxAcctOverride(code);
+          setShowFxAcctSelector(false);
+        }}
+        initialValue={fxAcctOverride || ''}
+        lockedFirstSegment={undefined}
+      />
 
       {/* View Accounting Modal */}
       <Modal
