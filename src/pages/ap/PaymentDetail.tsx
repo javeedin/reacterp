@@ -2405,11 +2405,28 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
                   return (
                     <div key={s.step} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 4 }}>
                       <span style={{ marginTop: 2 }}>{icon}</span>
-                      <div>
+                      <div style={{ flex: 1 }}>
                         <Text style={{ fontSize: 12, color: textColor }}>
                           <strong>Step {s.step}:</strong> {s.label}
                         </Text>
                         {s.detail && <div><Text type="secondary" style={{ fontSize: 11 }}>{s.detail}</Text></div>}
+                        {/* Step 6: show collapsible SLA payload */}
+                        {s.step === 6 && acctPostPayload.length > 0 && (
+                          <Collapse
+                            size="small"
+                            ghost
+                            style={{ marginTop: 4 }}
+                            items={acctPostPayload.map((pl, idx) => ({
+                              key: String(idx),
+                              label: <Text style={{ fontSize: 11 }}>Payload {idx + 1} — {pl.header?.description || `Invoice ${idx + 1}`}</Text>,
+                              children: (
+                                <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 4, maxHeight: 260, overflowY: 'auto', margin: 0 }}>
+                                  {JSON.stringify(pl, null, 2)}
+                                </pre>
+                              ),
+                            }))}
+                          />
+                        )}
                       </div>
                     </div>
                   );
