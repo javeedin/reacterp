@@ -212,8 +212,7 @@ interface BankAccountRecord {
   cashClearingAccountCombination: string;
   cashClearingAccountDescription: string;
   pdcAccountCombination: string;
-  fxGainAccountCombination: string;
-  fxLossAccountCombination: string;
+  fxGainLossAccountCombination: string;
   legalEntityName: string;
 }
 
@@ -624,7 +623,8 @@ const ManagePayments: React.FC = () => {
   // Local overrides so user can set missing account combinations without leaving the form
   const [bankAcctCashOverride,    setBankAcctCashOverride]    = useState<string>('');
   const [bankAcctPdcOverride,     setBankAcctPdcOverride]     = useState<string>('');
-  const [bankAcctSelectorField,   setBankAcctSelectorField]   = useState<'cash' | 'pdc' | null>(null);
+  const [bankAcctFxOverride,      setBankAcctFxOverride]      = useState<string>('');
+  const [bankAcctSelectorField,   setBankAcctSelectorField]   = useState<'cash' | 'pdc' | 'fx' | null>(null);
 
   // Payment accounting state
   const [acctPayment, setAcctPayment] = useState<PaymentRecord | null>(null);
@@ -670,8 +670,7 @@ const ManagePayments: React.FC = () => {
         cashClearingAccountCombination: item.cash_clearing_account_combination || '',
         cashClearingAccountDescription: item.cash_clearing_account_description || '',
         pdcAccountCombination: item.pdc_account_combination || '',
-        fxGainAccountCombination: item.fx_gain_account_combination || '',
-        fxLossAccountCombination: item.fx_loss_account_combination || '',
+        fxGainLossAccountCombination: item.fx_gain_account_combination || item.fx_loss_account_combination || '',
         legalEntityName: item.legal_entity_name || '',
       }));
       setBankAccounts(items);
@@ -3391,6 +3390,7 @@ const ManagePayments: React.FC = () => {
                         setSupplierTotalBalance(null);
                         setBankAcctCashOverride('');
                         setBankAcctPdcOverride('');
+                        setBankAcctFxOverride('');
                         setCreatePaymentCurrency('AED');
                         setBmsRate(null);
                         setTimeout(() => {
@@ -3590,18 +3590,29 @@ const ManagePayments: React.FC = () => {
                                   >
                                     <Input readOnly value={selectedBankAccount.cashClearingAccountCombination} style={{ background: '#f5f5f5', color: '#333', fontFamily: 'monospace', fontSize: 12 }} placeholder="—" />
                                   </Form.Item>
-                                  <Form.Item
-                                    label="FX Gain Account"
-                                    help={selectedBankAccount.fxGainAccountCombination ? undefined : <span style={{ color: '#bbb' }}>Not configured — FX gain entries will be skipped</span>}
-                                  >
-                                    <Input readOnly value={selectedBankAccount.fxGainAccountCombination} style={{ background: '#f5f5f5', color: '#333', fontFamily: 'monospace', fontSize: 12 }} placeholder="—" />
-                                  </Form.Item>
-                                  <Form.Item
-                                    label="FX Loss Account"
-                                    help={selectedBankAccount.fxLossAccountCombination ? undefined : <span style={{ color: '#bbb' }}>Not configured — FX loss entries will be skipped</span>}
-                                  >
-                                    <Input readOnly value={selectedBankAccount.fxLossAccountCombination} style={{ background: '#f5f5f5', color: '#333', fontFamily: 'monospace', fontSize: 12 }} placeholder="—" />
-                                  </Form.Item>
+                                  {(() => {
+                                    const paymentCurrency = createPaymentForm.getFieldValue('paymentCurrency');
+                                    const isFx = paymentCurrency && paymentCurrency !== 'AED';
+                                    if (!isFx) return null;
+                                    const effectiveFx = bankAcctFxOverride || selectedBankAccount.fxGainLossAccountCombination;
+                                    return (
+                                      <Form.Item
+                                        label={<><span style={{ color: REDWOOD.primary }}>*</span> FX Gain/Loss Account</>}
+                                        validateStatus={!effectiveFx ? 'error' : ''}
+                                        help={!effectiveFx ? 'Required for foreign-currency payments' : undefined}
+                                      >
+                                        <Input.Group compact>
+                                          <Input
+                                            readOnly
+                                            value={effectiveFx}
+                                            style={{ background: effectiveFx ? '#f5f5f5' : '#fff2f0', color: '#333', width: 'calc(100% - 32px)', borderColor: !effectiveFx ? '#ff4d4f' : undefined, fontFamily: 'monospace', fontSize: 12 }}
+                                            placeholder="Select account"
+                                          />
+                                          <Button icon={<SearchOutlined />} onClick={() => setBankAcctSelectorField('fx')} style={{ borderColor: !effectiveFx ? '#ff4d4f' : undefined }} />
+                                        </Input.Group>
+                                      </Form.Item>
+                                    );
+                                  })()}
                                   {(maturityDate || effectivePdc) && (
                                     <Form.Item
                                       label="PDC Account"
@@ -3645,8 +3656,9 @@ const ManagePayments: React.FC = () => {
                                   setSelectedBankAccount(acct);
                                   setBankAcctCashOverride('');
                                   setBankAcctPdcOverride('');
+                                  setBankAcctFxOverride('');
                                 }}
-                                onClear={() => { setSelectedBankAccount(null); setBankAcctCashOverride(''); setBankAcctPdcOverride(''); }}
+                                onClear={() => { setSelectedBankAccount(null); setBankAcctCashOverride(''); setBankAcctPdcOverride(''); setBankAcctFxOverride(''); }}
                               >
                                 {filteredBankAccounts.map((acct, idx) => (
                                   <Option key={idx} value={acct.bankAccountName}>
@@ -6000,20 +6012,23 @@ const ManagePayments: React.FC = () => {
         )}
       </Drawer>
 
-      {/* Account selector for missing cash / PDC combinations in Bank Details */}
+      {/* Account selector for cash / PDC / FX combinations — company segment locked to derivedCompany */}
       <AccountSelector
         visible={bankAcctSelectorField !== null}
         onCancel={() => setBankAcctSelectorField(null)}
         onSelect={(code: string) => {
           if (bankAcctSelectorField === 'cash') setBankAcctCashOverride(code);
           else if (bankAcctSelectorField === 'pdc') setBankAcctPdcOverride(code);
+          else if (bankAcctSelectorField === 'fx')  setBankAcctFxOverride(code);
           setBankAcctSelectorField(null);
         }}
         initialValue={
-          bankAcctSelectorField === 'cash'
-            ? (bankAcctCashOverride || selectedBankAccount?.cashAccountCombination || '')
-            : (bankAcctPdcOverride  || selectedBankAccount?.pdcAccountCombination  || '')
+          bankAcctSelectorField === 'cash' ? (bankAcctCashOverride || selectedBankAccount?.cashAccountCombination || '') :
+          bankAcctSelectorField === 'pdc'  ? (bankAcctPdcOverride  || selectedBankAccount?.pdcAccountCombination  || '') :
+          bankAcctSelectorField === 'fx'   ? (bankAcctFxOverride   || selectedBankAccount?.fxGainLossAccountCombination || '') :
+          ''
         }
+        lockedFirstSegment={derivedCompany || undefined}
       />
 
       <Autopilot module="ap" />

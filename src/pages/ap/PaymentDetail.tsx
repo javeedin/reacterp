@@ -428,7 +428,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
   const [showRelatedInvoicesApi, setShowRelatedInvoicesApi] = useState(false);
 
   // ── Create Accounting state ───────────────────────────────────────────────
-  const [bankAccounts, setBankAccounts] = useState<{ bankAccountName: string; cashAccountCombination: string; pdcAccountCombination: string; cashClearingAccountCombination: string; legalEntityName: string; fxGainAccountCombination: string; fxLossAccountCombination: string }[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<{ bankAccountName: string; cashAccountCombination: string; pdcAccountCombination: string; cashClearingAccountCombination: string; legalEntityName: string; fxGainLossAccountCombination: string }[]>([]);
   const [acctLoading, setAcctLoading] = useState(false);
   const [acctResults, setAcctResults] = useState<{ invoiceNumber: string; status: string; headerId?: number; error?: string }[]>([]);
   const [acctModalOpen, setAcctModalOpen] = useState(false);
@@ -743,12 +743,11 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         const data = await res.json();
         setBankAccounts((data.items || []).map((item: any) => ({
           bankAccountName:                item.bank_account_name                 || '',
-          cashAccountCombination:         item.cash_account_combination          || '',
-          pdcAccountCombination:          item.pdc_account_combination           || '',
-          cashClearingAccountCombination: item.cash_clearing_account_combination || '',
-          legalEntityName:                item.legal_entity_name                 || '',
-          fxGainAccountCombination:       item.fx_gain_account_combination       || '',
-          fxLossAccountCombination:       item.fx_loss_account_combination       || '',
+          cashAccountCombination:          item.cash_account_combination          || '',
+          pdcAccountCombination:           item.pdc_account_combination           || '',
+          cashClearingAccountCombination:  item.cash_clearing_account_combination || '',
+          legalEntityName:                 item.legal_entity_name                 || '',
+          fxGainLossAccountCombination:    item.fx_gain_account_combination || item.fx_loss_account_combination || '',
         })));
       } catch { /* silent */ }
     };
@@ -1206,11 +1205,16 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
               cashLine.accountedCr = Math.round(totalPmtFunctional * 100) / 100;
             }
 
-            // Add FX Gain line (CR)
-            if (totalFxGain > 0 && bank.fxGainAccountCombination) {
+            const fxAcct = bank.fxGainLossAccountCombination;
+            if (!fxAcct) {
+              console.warn('[FX Accounting] fx_gain_account_combination not configured for bank:', bank.bankAccountName);
+            }
+
+            // CR FX Gain (paid fewer AED than liability was booked at)
+            if (totalFxGain > 0 && fxAcct) {
               lines.push({
                 lineNumber: nextLine++, lineType: 'CR', accountingClass: 'FX_REALIZED_GAIN',
-                accountCombination: bank.fxGainAccountCombination,
+                accountCombination: fxAcct,
                 enteredDr: 0, enteredCr: totalFxGain,
                 accountedDr: 0, accountedCr: totalFxGain,
                 currencyCode: 'AED', exchangeRate: 1,
@@ -1219,21 +1223,17 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
               });
             }
 
-            // Add FX Loss line (DR)
-            if (totalFxLoss > 0 && bank.fxLossAccountCombination) {
+            // DR FX Loss (paid more AED than liability was booked at)
+            if (totalFxLoss > 0 && fxAcct) {
               lines.push({
                 lineNumber: nextLine++, lineType: 'DR', accountingClass: 'FX_REALIZED_LOSS',
-                accountCombination: bank.fxLossAccountCombination,
+                accountCombination: fxAcct,
                 enteredDr: totalFxLoss, enteredCr: 0,
                 accountedDr: totalFxLoss, accountedCr: 0,
                 currencyCode: 'AED', exchangeRate: 1,
                 description: `FX Realized Loss – Payment ${payNum}`,
                 sourceLineNumber: nextLine - 1,
               });
-            }
-
-            if (isFxPayment && !bank.fxGainAccountCombination && !bank.fxLossAccountCombination) {
-              console.warn('[FX Accounting] fx_gain_account_combination and fx_loss_account_combination not configured for bank:', bank.bankAccountName);
             }
           }
         }
