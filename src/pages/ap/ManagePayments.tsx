@@ -1226,39 +1226,8 @@ const ManagePayments: React.FC = () => {
           const slaResult = await createAccounting(singlePayload);
           if ((slaResult as any).status === 'error' || !(slaResult.headerId > 0)) throw new Error((slaResult as any).message ?? 'headerId missing');
           const lastSlaHeaderId = slaResult.headerId;
-          setConfStep('sla', { status: 'success', detail: `SLA header #${lastSlaHeaderId} created (${appliedInvoices.length} DR + 1 CR)` });
-
-          // Post to GL
-          setConfStep('gl', { status: 'running' });
-          const glResult = await postSlaToGL({
-            slaHeaderId:    lastSlaHeaderId!,
-            sourceNumber:   paperDocNum,
-            sourceId:       checkId,
-            eventTypeCode:  'AP_PAYMENT_CREATED',
-            periodName:     derivePeriodName(new Date(payDate)),
-            ledgerName:     ledger?.ledgerName ?? 'BCL DIFC',
-            ledgerId:       ledger?.ledgerId   ?? 300000003259529,
-            currency:       ccy,
-            accountingDate: payDate,
-            legalEntity:    ledger?.legalEntity ?? buName,
-            businessUnit:   buName,
-            conversionRate: exRate,
-            jeCategory:     'AP_PAYMENT_CREATED',
-            lines: singlePayload.lines.map(l => ({
-              lineType:           (l.enteredDr ?? 0) > 0 ? 'DR' as const : 'CR' as const,
-              enteredDr:          l.enteredDr ?? null,
-              enteredCr:          l.enteredCr ?? null,
-              accountedDr:        l.accountedDr ?? null,
-              accountedCr:        l.accountedCr ?? null,
-              description:        l.description ?? '',
-              currencyCode:       l.currencyCode ?? ccy,
-              accountingDate:     payDate,
-              accountCombination: l.accountCombination ?? '',
-              accountingClass:    l.accountingClass ?? null,
-              legalEntity:        ledger?.legalEntity ?? null,
-            })),
-          });
-          setConfStep('gl', { status: glResult.success ? 'success' : 'error', detail: glResult.success ? `GL Batch: ${glResult.batchName}` : glResult.error });
+          setConfStep('sla', { status: 'success', detail: `SLA header #${lastSlaHeaderId} created (${appliedInvoices.length} DR + 1 CR${fxLines.length ? ` + ${fxLines.length} FX` : ''})` });
+          setConfStep('gl',  { status: 'success', detail: 'Skipped — use Post to GL from payment detail' });
         } catch (accErr: any) {
           setConfStep('sla', { status: 'error', detail: accErr.message });
           setConfStep('gl',  { status: 'error', detail: 'Skipped due to SLA error' });
