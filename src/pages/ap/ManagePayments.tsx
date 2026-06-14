@@ -2952,7 +2952,7 @@ const ManagePayments: React.FC = () => {
       if (exists?.exists && exists?.headerId && exists?.accountingStatus !== 'POSTED') {
         try {
           const delRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete?headerId=${exists.headerId}`, {
-            method: 'DELETE',
+            method: 'POST',
             headers: { Accept: 'application/json' },
           });
           if (!delRes.ok && delRes.status !== 404) {

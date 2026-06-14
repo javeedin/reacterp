@@ -1104,7 +1104,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
       if (exists?.exists && exists?.headerId && exists?.accountingStatus !== 'POSTED') {
         try {
           const delRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete?headerId=${exists.headerId}`, {
-            method: 'DELETE',
+            method: 'POST',
             headers: { Accept: 'application/json' },
           });
           if (delRes.ok || delRes.status === 404) {
@@ -1350,7 +1350,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     setAcctDeleteResult(null);
     try {
       const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete?headerId=${headerId}`, {
-        method: 'DELETE',
+        method: 'POST',
         headers: { Accept: 'application/json' },
       });
       const data = await res.json().catch(() => ({ status: res.status }));
