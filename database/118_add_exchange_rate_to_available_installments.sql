@@ -47,7 +47,7 @@ SELECT
     )                              AS unpaid_amount,
     i.INVOICE_CURRENCY             AS invoice_currency,
     i.PAYMENT_CURRENCY             AS payment_currency,
-    i.EXCHANGE_RATE                AS exchange_rate,
+    i.CONVERSION_RATE              AS exchange_rate,
     i.DESCRIPTION                  AS description,
     i.SUPPLIER_NUMBER              AS supplier_number,
     i.SUPPLIER                     AS supplier,
