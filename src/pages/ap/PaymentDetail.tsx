@@ -1103,7 +1103,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
       setStep(1, 'running');
       if (exists?.exists && exists?.headerId && exists?.accountingStatus !== 'POSTED') {
         try {
-          const delRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/${exists.headerId}`, {
+          const delRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete?headerId=${exists.headerId}`, {
             method: 'DELETE',
             headers: { Accept: 'application/json' },
           });
@@ -1349,7 +1349,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     setAcctDeleteRunning(true);
     setAcctDeleteResult(null);
     try {
-      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/${headerId}`, {
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete?headerId=${headerId}`, {
         method: 'DELETE',
         headers: { Accept: 'application/json' },
       });
@@ -2489,7 +2489,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
                     </Button>
                   </div>
                   <code style={{ fontSize: 10, color: '#666', display: 'block', wordBreak: 'break-all', marginBottom: 4 }}>
-                    DELETE {APEX_DB_CONFIG.baseUrl}/sla/accounting/{slaStatus?.headerId ?? ':headerId'}
+                    DELETE {APEX_DB_CONFIG.baseUrl}/sla/accounting/delete?headerId={slaStatus?.headerId ?? '?'}
                   </code>
                   <Text type="secondary" style={{ fontSize: 11 }}>
                     {slaStatus?.headerId
