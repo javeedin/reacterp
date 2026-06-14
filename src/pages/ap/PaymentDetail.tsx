@@ -1155,9 +1155,9 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         setAcctGetRelResult(relData);
         relInvoices = relData.items || [];
         if (!relRes.ok) throw new Error(`HTTP ${relRes.status}: ${relData?.message || relText.slice(0, 100)}`);
-        setStep(2, 'success', `${relInvoices.length} invoice(s) found`);
+        setStep(3, 'success', `${relInvoices.length} invoice(s) found`);
       } catch (e: any) {
-        setStep(2, 'error', e?.message ?? 'Fetch failed');
+        setStep(3, 'error', e?.message ?? 'Fetch failed');
         setAcctResults([{ invoiceNumber: '—', status: 'ERROR', error: `Failed to fetch related invoices: ${e?.message}` }]);
         return;
       }
