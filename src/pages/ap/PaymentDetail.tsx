@@ -448,6 +448,8 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
   const [derivedCompany, setDerivedCompany] = useState('');
   const [acctDeleteResult, setAcctDeleteResult] = useState<any>(null);
   const [acctDeleteRunning, setAcctDeleteRunning] = useState(false);
+  const [slaLinesResult, setSlaLinesResult] = useState<any>(null);
+  const [slaLinesRunning, setSlaLinesRunning] = useState(false);
   // ─────────────────────────────────────────────────────────────────────────
 
   // ── SLA Status / Post to Ledger / View Accounting state ──────────────────
@@ -1353,6 +1355,25 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
       setAcctPostResult({ error: e?.message ?? 'Network error' });
     } finally {
       setAcctPostRunning(false);
+    }
+  };
+
+  // GET SLA lines (to inspect enteredDr/accountedDr Oracle returns)
+  const runGetSlaLinesApi = async () => {
+    setSlaLinesRunning(true);
+    setSlaLinesResult(null);
+    try {
+      const headerId = slaStatus?.headerId;
+      const url = headerId
+        ? `${APEX_DB_CONFIG.baseUrl}/sla/journals/lines?headerId=${headerId}&limit=50`
+        : `${APEX_DB_CONFIG.baseUrl}/sla/accounting?sourceTable=AP_PAYMENTS&sourceId=${payment.checkId}`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const data = await res.json();
+      setSlaLinesResult(data);
+    } catch (e: any) {
+      setSlaLinesResult({ error: e?.message ?? 'Network error' });
+    } finally {
+      setSlaLinesRunning(false);
     }
   };
 
@@ -2512,6 +2533,53 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
                     </>
                   )}
                 </div>
+
+                {/* GET SLA Lines (debug: shows what Oracle returns for enteredDr/accountedDr) */}
+                <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, padding: '10px 12px', marginBottom: 10, background: '#fafafa', marginTop: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <Space size={6}>
+                      <Tag color="blue" style={{ margin: 0 }}>GET</Tag>
+                      <Text strong style={{ fontSize: 12 }}>SLA Lines (DR/CR values)</Text>
+                    </Space>
+                    <Button
+                      size="small"
+                      type="primary"
+                      icon={slaLinesRunning ? <LoadingOutlined spin /> : <PlayCircleOutlined />}
+                      loading={slaLinesRunning}
+                      onClick={runGetSlaLinesApi}
+                    >
+                      Run
+                    </Button>
+                  </div>
+                  <code style={{ fontSize: 10, background: '#e3f2fd', padding: '3px 8px', borderRadius: 4, display: 'block', wordBreak: 'break-all', marginBottom: 6 }}>
+                    {APEX_DB_CONFIG.baseUrl}/sla/journals/lines?headerId={slaStatus?.headerId ?? '?'}
+                  </code>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Check enteredDr vs accountedDr returned by Oracle</Text>
+                  {slaLinesResult && (
+                    <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 4, maxHeight: 200, overflowY: 'auto', margin: '4px 0 0' }}>
+                      {JSON.stringify(slaLinesResult, null, 2)}
+                    </pre>
+                  )}
+                </div>
+
+                {/* GL POST payload preview */}
+                {postGLPayload && (
+                  <div style={{ border: '1px solid #b7eb8f', borderRadius: 6, padding: '10px 12px', marginBottom: 10, background: '#f6ffed' }}>
+                    <Space size={6} style={{ marginBottom: 6 }}>
+                      <Tag color="green" style={{ margin: 0 }}>POST</Tag>
+                      <Text strong style={{ fontSize: 12 }}>GL Journal Payload (journals/create)</Text>
+                    </Space>
+                    <code style={{ fontSize: 10, background: '#e8f5e9', padding: '3px 8px', borderRadius: 4, display: 'block', wordBreak: 'break-all', marginBottom: 6 }}>
+                      {APEX_DB_CONFIG.baseUrl}/journals/create
+                    </code>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>
+                      runningTotalDr: <strong>{postGLPayload.batch?.runningTotalDr}</strong> | runningTotalCr: <strong>{postGLPayload.batch?.runningTotalCr}</strong>
+                    </Text>
+                    <pre style={{ fontSize: 10, background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 4, maxHeight: 200, overflowY: 'auto', margin: 0 }}>
+                      {JSON.stringify(postGLPayload, null, 2)}
+                    </pre>
+                  </div>
+                )}
 
                 {/* DELETE SLA header */}
                 <div style={{ border: '1px solid #ffa39e', borderRadius: 6, padding: '10px 12px', marginBottom: 10, background: '#fff2f0' }}>
