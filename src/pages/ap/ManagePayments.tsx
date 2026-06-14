@@ -1148,13 +1148,13 @@ const ManagePayments: React.FC = () => {
             });
             if (totalFxGain > 0 && fxAcct) {
               fxLines.push({ lineNumber: fxLineNum++, lineType: 'CR' as const, accountingClass: 'FX_REALIZED_GAIN',
-                accountCombination: fxAcct, enteredDr: 0, enteredCr: totalFxGain,
+                accountCombination: fxAcct, enteredDr: 0, enteredCr: 0,
                 accountedDr: 0, accountedCr: totalFxGain, currencyCode: 'AED', exchangeRate: 1,
                 description: `FX Realized Gain – Payment ${paperDocNum}`, sourceLineNumber: fxLineNum - 1 });
             }
             if (totalFxLoss > 0 && fxAcct) {
               fxLines.push({ lineNumber: fxLineNum++, lineType: 'DR' as const, accountingClass: 'FX_REALIZED_LOSS',
-                accountCombination: fxAcct, enteredDr: totalFxLoss, enteredCr: 0,
+                accountCombination: fxAcct, enteredDr: 0, enteredCr: 0,
                 accountedDr: totalFxLoss, accountedCr: 0, currencyCode: 'AED', exchangeRate: 1,
                 description: `FX Realized Loss – Payment ${paperDocNum}`, sourceLineNumber: fxLineNum - 1 });
             }
@@ -2726,9 +2726,10 @@ const ManagePayments: React.FC = () => {
       // Filter to only lines that belong to this specific payment (AP_PAYMENTS + checkId)
       const paymentLines = (allLinesData.items || []).filter((line: any) => {
         const st  = (line.sourceTable || line.SOURCE_TABLE || '').toUpperCase();
-        const sid = line.sourceId ?? line.SOURCE_ID;
-        return (!st || st === 'AP_PAYMENTS')
-            && (!sid || String(sid) === String(record.checkId));
+        const sid = line.sourceId ?? line.SOURCE_ID ?? line.SourceId;
+        const sidMatch = sid != null && String(sid) === String(record.checkId);
+        const stMatch  = !st || st === 'AP_PAYMENTS';
+        return stMatch && sidMatch;
       });
       // Group lines by headerId to build per-event sections (Payment, Void, etc.)
       const eventsMap = new Map<number, { headerId: number; eventTypeCode: string; accountingStatus: string; accountingDate: string; lines: any[] }>();

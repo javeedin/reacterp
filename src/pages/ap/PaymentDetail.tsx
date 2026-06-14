@@ -1215,7 +1215,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
               lines.push({
                 lineNumber: nextLine++, lineType: 'CR', accountingClass: 'FX_REALIZED_GAIN',
                 accountCombination: fxAcct,
-                enteredDr: 0, enteredCr: totalFxGain,
+                enteredDr: 0, enteredCr: 0,
                 accountedDr: 0, accountedCr: totalFxGain,
                 currencyCode: 'AED', exchangeRate: 1,
                 description: `FX Realized Gain – Payment ${payNum}`,
@@ -1228,7 +1228,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
               lines.push({
                 lineNumber: nextLine++, lineType: 'DR', accountingClass: 'FX_REALIZED_LOSS',
                 accountCombination: fxAcct,
-                enteredDr: totalFxLoss, enteredCr: 0,
+                enteredDr: 0, enteredCr: 0,
                 accountedDr: totalFxLoss, accountedCr: 0,
                 currencyCode: 'AED', exchangeRate: 1,
                 description: `FX Realized Loss – Payment ${payNum}`,
