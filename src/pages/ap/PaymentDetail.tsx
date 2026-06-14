@@ -116,6 +116,11 @@ interface PaymentRecord {
   relatedInvoicesHref: string;
   accountingDate?: string;
   maturityDate?: string | null;
+  voidDate?: string | null;
+  voidAccountingDate?: string | null;
+  stopDate?: string | null;
+  stopReason?: string;
+  stopReference?: string;
 }
 
 // Related invoice interface
@@ -1900,8 +1905,26 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
               )}
               <Descriptions.Item label="Business Unit">{payment.businessUnit}</Descriptions.Item>
               <Descriptions.Item label="Legal Entity">{payment.legalEntity}</Descriptions.Item>
-              <Descriptions.Item label="Stop Date"></Descriptions.Item>
-              <Descriptions.Item label="Void Date"></Descriptions.Item>
+              {payment.stopDate ? (
+                <Descriptions.Item label="Stop Date">
+                  <Text type="warning">{formatDate(payment.stopDate)}</Text>
+                </Descriptions.Item>
+              ) : null}
+              {payment.voidDate ? (
+                <Descriptions.Item label="Void Date">
+                  <Tag color="red">{formatDate(payment.voidDate)}</Tag>
+                </Descriptions.Item>
+              ) : null}
+              {payment.voidAccountingDate ? (
+                <Descriptions.Item label="Void Acct. Date">
+                  <Text type="secondary">{formatDate(payment.voidAccountingDate)}</Text>
+                </Descriptions.Item>
+              ) : null}
+              {payment.stopReason ? (
+                <Descriptions.Item label="Void Reason" span={2}>
+                  <Text type="secondary">{payment.stopReason}</Text>
+                </Descriptions.Item>
+              ) : null}
               <Descriptions.Item label="Attachments">
                 <a style={{ color: REDWOOD.info }}>None +</a>
               </Descriptions.Item>
