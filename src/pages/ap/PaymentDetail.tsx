@@ -428,7 +428,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
   const [showRelatedInvoicesApi, setShowRelatedInvoicesApi] = useState(false);
 
   // ── Create Accounting state ───────────────────────────────────────────────
-  const [bankAccounts, setBankAccounts] = useState<{ bankAccountName: string; cashAccountCombination: string; pdcAccountCombination: string; cashClearingAccountCombination: string; legalEntityName: string }[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<{ bankAccountName: string; cashAccountCombination: string; pdcAccountCombination: string; cashClearingAccountCombination: string; legalEntityName: string; fxGainAccountCombination: string; fxLossAccountCombination: string }[]>([]);
   const [acctLoading, setAcctLoading] = useState(false);
   const [acctResults, setAcctResults] = useState<{ invoiceNumber: string; status: string; headerId?: number; error?: string }[]>([]);
   const [acctModalOpen, setAcctModalOpen] = useState(false);
@@ -747,6 +747,8 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           pdcAccountCombination:          item.pdc_account_combination           || '',
           cashClearingAccountCombination: item.cash_clearing_account_combination || '',
           legalEntityName:                item.legal_entity_name                 || '',
+          fxGainAccountCombination:       item.fx_gain_account_combination       || '',
+          fxLossAccountCombination:       item.fx_loss_account_combination       || '',
         })));
       } catch { /* silent */ }
     };
@@ -1138,26 +1140,29 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         setStep(3, 'error', e?.message ?? 'Fetch failed — using null ledger');
       }
 
-      // Step 4: Build payload (single combined: N DR + 1 CR)
+      // Step 4: Build payload and inject FX gain/loss lines for foreign currency payments
       setStep(4, 'running');
       let payloads: any[] = [];
       try {
         const paymentDate = toApiDate(payment.paymentDate || '');
+        const isPdc = !!(payment.maturityDate && payment.maturityDate !== payment.paymentDate);
+        const exRate = (payment.paymentCurrency && payment.paymentCurrency !== 'AED' && payment.conversionRate && payment.conversionRate > 0)
+          ? payment.conversionRate : 1;
+
         payloads = buildApPaymentSlaPayloads({
           checkId: payment.checkId,
           paymentNumber: String(payment.paymentNumber || payment.checkId),
           paymentDate,
           currencyCode: payment.paymentCurrency || 'AED',
-          exchangeRate: (payment.paymentCurrency && payment.paymentCurrency !== 'AED' && payment.conversionRate && payment.conversionRate > 0)
-            ? payment.conversionRate : 1,
+          exchangeRate: exRate,
           businessUnit: payment.businessUnit,
           legalEntity: payment.legalEntity,
           ledgerId: ledgerInfo?.ledgerId,
           ledgerName: ledgerInfo?.ledgerName,
-          cashClearingAccount: (payment.maturityDate && payment.maturityDate !== payment.paymentDate)
-            ? (bank.pdcAccountCombination  || '')
-            : (bank.cashAccountCombination || ''),
-          accountingClass: (payment.maturityDate && payment.maturityDate !== payment.paymentDate) ? 'PDC' : 'CASH',
+          cashClearingAccount: isPdc
+            ? (bank.pdcAccountCombination  || bank.cashClearingAccountCombination || '')
+            : (bank.cashAccountCombination || bank.cashClearingAccountCombination || ''),
+          accountingClass: isPdc ? 'PDC' : 'CASH',
           appliedInvoices: relInvoices.map((inv: any) => ({
             invoiceNumber: inv.InvoiceNumber || '',
             invoiceId: inv.InvoiceId || 0,
@@ -1165,8 +1170,78 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
             liabilityDistribution: inv.LiabilityDistribution || '',
           })),
         });
+
+        // ── FX Gain / Loss lines (foreign-currency payments only) ──────────
+        const isFxPayment = payment.paymentCurrency && payment.paymentCurrency !== 'AED';
+        if (isFxPayment) {
+          for (const pl of payloads) {
+            const lines: any[] = pl.lines;
+            const payNum = pl.header?.sourceNumber || String(payment.paymentNumber);
+            let nextLine = lines.length + 1;
+            let totalFxGain = 0;
+            let totalFxLoss = 0;
+
+            relInvoices.forEach((inv: any, idx: number) => {
+              const invFunctional = inv.InvoiceFunctionalAmount;  // AED at invoice rate
+              const pmtFunctional = inv.PaymentFunctionalAmount;  // AED at payment rate
+
+              // Fix DR Liability accounted amount to use invoice rate (not payment rate)
+              if (invFunctional != null && lines[idx]) {
+                lines[idx].accountedDr = Math.round(invFunctional * 100) / 100;
+              }
+
+              // Compute FX for this invoice
+              if (invFunctional != null && pmtFunctional != null) {
+                const diff = Math.round((invFunctional - pmtFunctional) * 100) / 100;
+                if (diff > 0) totalFxGain += diff;   // paid less AED than liability → gain
+                if (diff < 0) totalFxLoss += Math.abs(diff); // paid more AED → loss
+              }
+            });
+
+            // Fix CR Cash/PDC accounted amount to use total payment functional
+            const totalPmtFunctional = relInvoices.reduce((s: number, inv: any) =>
+              s + (inv.PaymentFunctionalAmount || 0), 0);
+            const cashLine = lines.find((l: any) => l.accountingClass !== 'LIABILITY');
+            if (cashLine && totalPmtFunctional > 0) {
+              cashLine.accountedCr = Math.round(totalPmtFunctional * 100) / 100;
+            }
+
+            // Add FX Gain line (CR)
+            if (totalFxGain > 0 && bank.fxGainAccountCombination) {
+              lines.push({
+                lineNumber: nextLine++, lineType: 'CR', accountingClass: 'FX_REALIZED_GAIN',
+                accountCombination: bank.fxGainAccountCombination,
+                enteredDr: 0, enteredCr: totalFxGain,
+                accountedDr: 0, accountedCr: totalFxGain,
+                currencyCode: 'AED', exchangeRate: 1,
+                description: `FX Realized Gain – Payment ${payNum}`,
+                sourceLineNumber: nextLine - 1,
+              });
+            }
+
+            // Add FX Loss line (DR)
+            if (totalFxLoss > 0 && bank.fxLossAccountCombination) {
+              lines.push({
+                lineNumber: nextLine++, lineType: 'DR', accountingClass: 'FX_REALIZED_LOSS',
+                accountCombination: bank.fxLossAccountCombination,
+                enteredDr: totalFxLoss, enteredCr: 0,
+                accountedDr: totalFxLoss, accountedCr: 0,
+                currencyCode: 'AED', exchangeRate: 1,
+                description: `FX Realized Loss – Payment ${payNum}`,
+                sourceLineNumber: nextLine - 1,
+              });
+            }
+
+            if (isFxPayment && !bank.fxGainAccountCombination && !bank.fxLossAccountCombination) {
+              console.warn('[FX Accounting] fx_gain_account_combination and fx_loss_account_combination not configured for bank:', bank.bankAccountName);
+            }
+          }
+        }
+        // ── End FX lines ───────────────────────────────────────────────────
+
         setAcctPostPayload(payloads);
-        setStep(4, 'success', `${payloads.length} payload(s) built`);
+        const fxNote = isFxPayment ? ' (with FX gain/loss)' : '';
+        setStep(4, 'success', `${payloads.length} payload(s) built${fxNote}`);
       } catch (e: any) {
         setStep(4, 'error', e?.message ?? 'Build failed');
         setAcctResults([{ invoiceNumber: '—', status: 'ERROR', error: `Payload build failed: ${e?.message}` }]);
