@@ -850,19 +850,22 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           createdBy:              'SYSTEM',
         },
         lines: lines.map((l) => {
-          const eDr  = l.lineType === 'DR' ? (l.enteredDr  || null) : null;
-          const eCr  = l.lineType === 'CR' ? (l.enteredCr  || null) : null;
+          const eDr  = l.lineType === 'DR' && (l.enteredDr  || 0) > 0 ? l.enteredDr  : null;
+          const eCr  = l.lineType === 'CR' && (l.enteredCr  || 0) > 0 ? l.enteredCr  : null;
           const rate = (payment.conversionRate && payment.conversionRate > 0) ? payment.conversionRate : 1;
+          // Use explicit accounted amounts from SLA (covers FX lines where entered=0 but accounted≠0)
+          const aDr  = l.accountedDr  != null && l.accountedDr  > 0 ? l.accountedDr  : (eDr != null ? Math.round(eDr * rate * 100) / 100 : null);
+          const aCr  = l.accountedCr  != null && l.accountedCr  > 0 ? l.accountedCr  : (eCr != null ? Math.round(eCr * rate * 100) / 100 : null);
           return {
             enteredDr:                  eDr,
             enteredCr:                  eCr,
-            accountedDr:                eDr != null ? Math.round(eDr * rate * 100) / 100 : null,
-            accountedCr:                eCr != null ? Math.round(eCr * rate * 100) / 100 : null,
+            accountedDr:                aDr,
+            accountedCr:                aCr,
             statAmount:                 null,
             description:                l.description || acctData.description || '',
-            currencyCode:               payment.paymentCurrency || 'AED',
+            currencyCode:               l.currencyCode || payment.paymentCurrency || 'AED',
             currencyConversionDate:     acctData.accountingDate,
-            currencyConversionRate:     rate,
+            currencyConversionRate:     l.currencyCode === 'AED' ? 1 : rate,
             userCurrencyConversionType: 'User',
             accountCombination:         l.accountCombination || '',
             chartOfAccountsName:        'Chart of Accounts',
