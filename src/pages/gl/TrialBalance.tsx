@@ -5484,7 +5484,6 @@ const TrialBalance: React.FC = () => {
           ];
 
           return (
-            <>
             <Table
               dataSource={reYearRows.map(r => ({ ...r, key: r.year }))}
               columns={multiYearCols}
@@ -5542,7 +5541,6 @@ const TrialBalance: React.FC = () => {
                 </Button>
               </div>
             </div>
-            </>
           );
         })()}
       </Modal>
