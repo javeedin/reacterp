@@ -639,15 +639,56 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         const amt = Number(inv.amountPaidPaymentCurrency) || 0;
         reverseLines.push({ lineNumber: idx*2+1, lineType: 'DR', accountingClass: bankAcctClass,
           accountCombination: bankAcct, enteredDr: amt, enteredCr: 0,
-          accountedDr: amt*ctx.exRate, accountedCr: 0,
+          accountedDr: Math.round(amt*ctx.exRate*100)/100, accountedCr: 0,
           currencyCode: ctx.ccy, exchangeRate: ctx.exRate, sourceLineNumber: idx*2+1,
           description: `Void ${bankAcctLabel} – Payment ${ctx.paymentNum} / Invoice ${inv.invoiceNumber}` });
+        const invFunctional = inv.invoiceFunctionalAmount != null
+          ? inv.invoiceFunctionalAmount
+          : (inv.invoiceConversionRate ? Math.round(amt * inv.invoiceConversionRate * 100) / 100 : null);
+        const pmtFunctional = Math.round(amt * ctx.exRate * 100) / 100;
+        const accountedCrAmt = invFunctional != null ? Math.round(invFunctional * 100) / 100 : pmtFunctional;
         reverseLines.push({ lineNumber: idx*2+2, lineType: 'CR', accountingClass: 'LIABILITY',
           accountCombination: inv.liabilityDistribution || '', enteredDr: 0, enteredCr: amt,
-          accountedDr: 0, accountedCr: amt*ctx.exRate,
+          accountedDr: 0, accountedCr: accountedCrAmt,
           currencyCode: ctx.ccy, exchangeRate: ctx.exRate, sourceLineNumber: idx*2+2,
           description: `Void AP Liability – Payment ${ctx.paymentNum} / Invoice ${inv.invoiceNumber}` });
       });
+
+      // FX Gain/Loss reversal for foreign currency payments
+      if (ctx.ccy !== 'AED') {
+        const fxAcct = fxAcctOverride || bank.fxGainLossAccountCombination;
+        if (!fxAcct) throw new Error(`FX Gain/Loss account not configured for void. Please select the FX account first (same as Create Accounting).`);
+        let totalFxGain = 0;
+        let totalFxLoss = 0;
+        relatedInvoices.forEach(inv => {
+          const amt = Number(inv.amountPaidPaymentCurrency) || 0;
+          const invFunctional = inv.invoiceFunctionalAmount != null
+            ? inv.invoiceFunctionalAmount
+            : (inv.invoiceConversionRate ? Math.round(amt * inv.invoiceConversionRate * 100) / 100 : null);
+          const pmtFunctional = Math.round(amt * ctx.exRate * 100) / 100;
+          if (invFunctional != null) {
+            const diff = Math.round((invFunctional - pmtFunctional) * 100) / 100;
+            if (diff > 0) totalFxGain += diff;
+            if (diff < 0) totalFxLoss += Math.abs(diff);
+          }
+        });
+        const nextLine = reverseLines.length + 1;
+        // Void reverses: original gain (CR) → now DR; original loss (DR) → now CR
+        if (totalFxGain > 0) {
+          reverseLines.push({ lineNumber: nextLine, lineType: 'DR', accountingClass: 'FX_REALIZED_GAIN',
+            accountCombination: fxAcct, enteredDr: 0, enteredCr: 0,
+            accountedDr: totalFxGain, accountedCr: 0,
+            currencyCode: 'AED', exchangeRate: 1,
+            description: `Void FX Realized Gain – Payment ${ctx.paymentNum}` });
+        }
+        if (totalFxLoss > 0) {
+          reverseLines.push({ lineNumber: nextLine + (totalFxGain > 0 ? 1 : 0), lineType: 'CR', accountingClass: 'FX_REALIZED_LOSS',
+            accountCombination: fxAcct, enteredDr: 0, enteredCr: 0,
+            accountedDr: 0, accountedCr: totalFxLoss,
+            currencyCode: 'AED', exchangeRate: 1,
+            description: `Void FX Realized Loss – Payment ${ctx.paymentNum}` });
+        }
+      }
       voidCtxRef.current.reverseLines = reverseLines;
       const payload: SlaCreatePayload = {
         header: { moduleName: 'AP', sourceTable: 'AP_PAYMENTS', sourceId: payment.checkId,
@@ -688,17 +729,21 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           currencyConversionDate: ctx.voidDate, currencyConversionRate: ctx.exRate,
           defaultEffectiveDate: ctx.voidDate, status: 'NEW',
           runningTotalDr: totalDr, runningTotalCr: totalCr, createdBy: 'SYSTEM' },
-        lines: ctx.reverseLines.map(l => ({
-          enteredDr: l.enteredDr||null, enteredCr: l.enteredCr||null,
+        lines: ctx.reverseLines.map(l => {
+          const isAedLine = (l.currencyCode || '').toUpperCase() === 'AED';
+          const eDr = isAedLine ? (l.accountedDr > 0 ? l.accountedDr : 0) : (l.enteredDr || null);
+          const eCr = isAedLine ? (l.accountedCr > 0 ? l.accountedCr : 0) : (l.enteredCr || null);
+          return {
+          enteredDr: eDr, enteredCr: eCr,
           accountedDr: l.accountedDr||null, accountedCr: l.accountedCr||null,
           statAmount: null, description: l.description||'', currencyCode: l.currencyCode||ctx.ccy,
-          currencyConversionDate: ctx.voidDate, currencyConversionRate: ctx.exRate,
+          currencyConversionDate: ctx.voidDate, currencyConversionRate: isAedLine ? 1 : ctx.exRate,
           userCurrencyConversionType: 'User', accountCombination: l.accountCombination||'',
           chartOfAccountsName: 'Chart of Accounts',
           reference1: ctx.paymentNum, reference2: String(payment.checkId),
           reference3: l.accountingClass||null, reference4: ctx.buName||null,
           reference5: ref5, createdBy: 'SYSTEM',
-        })),
+        }; }),
       };
       const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/journals/create`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(payload) });
