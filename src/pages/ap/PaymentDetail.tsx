@@ -1349,8 +1349,8 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     setAcctDeleteRunning(true);
     setAcctDeleteResult(null);
     try {
-      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete?headerId=${headerId}`, {
-        method: 'POST',
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/delete?headerId=${headerId}`, {
+        method: 'GET',
         headers: { Accept: 'application/json' },
       });
       const data = await res.json().catch(() => ({ status: res.status }));
@@ -2489,7 +2489,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
                     </Button>
                   </div>
                   <code style={{ fontSize: 10, color: '#666', display: 'block', wordBreak: 'break-all', marginBottom: 4 }}>
-                    DELETE {APEX_DB_CONFIG.baseUrl}/sla/accounting/delete?headerId={slaStatus?.headerId ?? '?'}
+                    GET {APEX_DB_CONFIG.baseUrl}/sla/delete?headerId={slaStatus?.headerId ?? '?'}
                   </code>
                   <Text type="secondary" style={{ fontSize: 11 }}>
                     {slaStatus?.headerId
