@@ -233,6 +233,7 @@ interface PaymentInvoice {
   liabilityDistribution?: string;
   installmentNumber?: number | null;
   businessUnit?: string;
+  invoiceExchangeRate?: number | null;  // rate at which liability was originally booked
 }
 
 // Supplier record from API
@@ -1124,11 +1125,43 @@ const ManagePayments: React.FC = () => {
               invoiceId: inv.invoiceId,
               amountPaid: inv.applyAmount,
               liabilityDistribution: rel?.LiabilityDistribution || inv.liabilityDistribution || '',
+              invoiceExchangeRate: inv.invoiceExchangeRate ?? null,
             };
           });
 
+          const isFxPayment = ccy !== 'AED';
+          const fxAcct = bankAcctFxOverride || bank?.fxGainLossAccountCombination || '';
+
           if (!appliedInvoices.length) throw new Error('No invoices to account for');
-          setConfStep('sla', { status: 'running', detail: `Creating SLA entry (${appliedInvoices.length} DR + 1 CR)…` });
+
+          // Compute FX gain/loss per invoice
+          const fxLines: any[] = [];
+          let fxLineNum = appliedInvoices.length + 2;
+          if (isFxPayment) {
+            let totalFxGain = 0, totalFxLoss = 0;
+            appliedInvoices.forEach(inv => {
+              const invRate = inv.invoiceExchangeRate;
+              if (invRate == null) return;
+              const diff = Math.round((invRate - exRate) * inv.amountPaid * 100) / 100;
+              if (diff > 0) totalFxGain += diff;
+              if (diff < 0) totalFxLoss += Math.abs(diff);
+            });
+            if (totalFxGain > 0 && fxAcct) {
+              fxLines.push({ lineNumber: fxLineNum++, lineType: 'CR' as const, accountingClass: 'FX_REALIZED_GAIN',
+                accountCombination: fxAcct, enteredDr: 0, enteredCr: totalFxGain,
+                accountedDr: 0, accountedCr: totalFxGain, currencyCode: 'AED', exchangeRate: 1,
+                description: `FX Realized Gain – Payment ${paperDocNum}`, sourceLineNumber: fxLineNum - 1 });
+            }
+            if (totalFxLoss > 0 && fxAcct) {
+              fxLines.push({ lineNumber: fxLineNum++, lineType: 'DR' as const, accountingClass: 'FX_REALIZED_LOSS',
+                accountCombination: fxAcct, enteredDr: totalFxLoss, enteredCr: 0,
+                accountedDr: totalFxLoss, accountedCr: 0, currencyCode: 'AED', exchangeRate: 1,
+                description: `FX Realized Loss – Payment ${paperDocNum}`, sourceLineNumber: fxLineNum - 1 });
+            }
+          }
+
+          const lineCount = appliedInvoices.length + 1 + fxLines.length;
+          setConfStep('sla', { status: 'running', detail: `Creating SLA entry (${appliedInvoices.length} DR + 1 CR${fxLines.length ? ` + ${fxLines.length} FX` : ''})…` });
 
           const totalAmount = appliedInvoices.reduce((s, inv) => s + inv.amountPaid, 0);
           const singlePayload: SlaCreatePayload = {
@@ -1154,20 +1187,24 @@ const ManagePayments: React.FC = () => {
               createdBy:        'SYSTEM',
             },
             lines: [
-              ...appliedInvoices.map((inv, idx) => ({
-                lineNumber:         idx + 1,
-                lineType:           'DR' as const,
-                accountingClass:    'LIABILITY',
-                accountCombination: inv.liabilityDistribution,
-                enteredDr:          inv.amountPaid,
-                enteredCr:          0,
-                accountedDr:        inv.amountPaid * exRate,
-                accountedCr:        0,
-                currencyCode:       ccy,
-                exchangeRate:       exRate,
-                description:        `AP Liability – ${paperDocNum} / ${inv.invoiceNumber} / ${v2.payee || ''}`,
-                sourceLineNumber:   idx + 1,
-              })),
+              ...appliedInvoices.map((inv, idx) => {
+                // Use invoice exchange rate for accountedDr (AED at original liability booking rate)
+                const invRate = (isFxPayment && inv.invoiceExchangeRate != null) ? inv.invoiceExchangeRate : exRate;
+                return {
+                  lineNumber:         idx + 1,
+                  lineType:           'DR' as const,
+                  accountingClass:    'LIABILITY',
+                  accountCombination: inv.liabilityDistribution,
+                  enteredDr:          inv.amountPaid,
+                  enteredCr:          0,
+                  accountedDr:        Math.round(inv.amountPaid * invRate * 100) / 100,
+                  accountedCr:        0,
+                  currencyCode:       ccy,
+                  exchangeRate:       invRate,
+                  description:        `AP Liability – ${paperDocNum} / ${inv.invoiceNumber} / ${v2.payee || ''}`,
+                  sourceLineNumber:   idx + 1,
+                };
+              }),
               {
                 lineNumber:         appliedInvoices.length + 1,
                 lineType:           'CR' as const,
@@ -1176,12 +1213,13 @@ const ManagePayments: React.FC = () => {
                 enteredDr:          0,
                 enteredCr:          totalAmount,
                 accountedDr:        0,
-                accountedCr:        totalAmount * exRate,
+                accountedCr:        Math.round(totalAmount * exRate * 100) / 100,
                 currencyCode:       ccy,
                 exchangeRate:       exRate,
                 description:        `${crClass} – Payment ${paperDocNum} / Invoices: ${appliedInvoices.map(i => i.invoiceNumber).join(', ')}`,
                 sourceLineNumber:   appliedInvoices.length + 1,
               },
+              ...fxLines,
             ],
           };
 
@@ -1264,6 +1302,9 @@ const ManagePayments: React.FC = () => {
             liabilityDistribution: item.liability_distribution || '',
             installmentNumber: item.installment_id != null ? Number(item.installment_id) : null,
             businessUnit: item.business_unit || item.businessUnit || '',
+            invoiceExchangeRate: item.exchange_rate != null ? Number(item.exchange_rate)
+              : item.invoice_exchange_rate != null ? Number(item.invoice_exchange_rate)
+              : item.conv_rate != null ? Number(item.conv_rate) : null,
           };
         })
         .filter((inv: PaymentInvoice) => {
@@ -3766,11 +3807,25 @@ const ManagePayments: React.FC = () => {
                                 {(() => {
                                   const rate = Number(watchedConversionRate) || 0;
                                   const functionalAmt = rate > 0 ? totalAppliedAmount * rate : null;
+                                  // FX Gain/Loss vs invoice rates
+                                  const totalFx = rate > 0 ? invoicesToPay
+                                    .filter(inv => inv.invoiceExchangeRate != null && (inv.currency || 'AED') !== 'AED')
+                                    .reduce((s, inv) => s + Math.round((inv.invoiceExchangeRate! - rate) * inv.applyAmount * 100) / 100, 0) : null;
                                   return functionalAmt != null ? (
-                                    <Text strong style={{ color: REDWOOD.info, fontSize: 14 }}>
-                                      {functionalAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                      <Text type="secondary" style={{ fontSize: 12, marginLeft: 6 }}>AED</Text>
-                                    </Text>
+                                    <Space direction="vertical" size={2}>
+                                      <Text strong style={{ color: REDWOOD.info, fontSize: 14 }}>
+                                        {functionalAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        <Text type="secondary" style={{ fontSize: 12, marginLeft: 6 }}>AED</Text>
+                                      </Text>
+                                      {totalFx != null && totalFx !== 0 && (
+                                        <Tag color={totalFx > 0 ? 'green' : 'red'} style={{ fontSize: 11 }}>
+                                          FX {totalFx > 0 ? 'Gain' : 'Loss'}: {totalFx > 0 ? '+' : ''}{totalFx.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED
+                                        </Tag>
+                                      )}
+                                      {totalFx === 0 && invoicesToPay.some(i => i.invoiceExchangeRate != null) && (
+                                        <Tag color="default" style={{ fontSize: 11 }}>No FX difference</Tag>
+                                      )}
+                                    </Space>
                                   ) : (
                                     <Text type="secondary">Enter conversion rate to calculate</Text>
                                   );
@@ -4220,15 +4275,62 @@ const ManagePayments: React.FC = () => {
                   render: (v: string) => <Tag style={{ fontSize: 11, padding: '0 4px' }}>{v || 'AED'}</Tag>,
                 },
                 {
-                  title: 'Conv. Rate',
-                  key: 'convRate',
-                  width: 90,
+                  title: 'Inv. Rate',
+                  key: 'invoiceRate',
+                  width: 85,
+                  align: 'right' as const,
+                  render: (_: any, record: PaymentInvoice) => {
+                    const ccy = record.currency || 'AED';
+                    if (ccy === 'AED') return <span style={{ color: '#bbb' }}>—</span>;
+                    return record.invoiceExchangeRate != null
+                      ? <span style={{ fontSize: 11, fontFamily: 'monospace' }}>{Number(record.invoiceExchangeRate).toFixed(4)}</span>
+                      : <span style={{ color: '#bbb', fontSize: 11 }}>N/A</span>;
+                  },
+                },
+                {
+                  title: 'Pay Rate',
+                  key: 'payRate',
+                  width: 85,
                   align: 'right' as const,
                   render: (_: any, record: PaymentInvoice) => {
                     const ccy = record.currency || 'AED';
                     if (ccy === 'AED') return <span style={{ color: '#bbb' }}>—</span>;
                     const rate = watchedConversionRate;
-                    return rate ? <span style={{ fontSize: 11 }}>{Number(rate).toFixed(4)}</span> : <span style={{ color: '#bbb' }}>—</span>;
+                    return rate ? <span style={{ fontSize: 11, fontFamily: 'monospace' }}>{Number(rate).toFixed(4)}</span> : <span style={{ color: '#bbb' }}>—</span>;
+                  },
+                },
+                {
+                  title: 'Liability AED',
+                  key: 'liabilityAed',
+                  width: 110,
+                  align: 'right' as const,
+                  render: (_: any, record: PaymentInvoice) => {
+                    const ccy = record.currency || 'AED';
+                    if (ccy === 'AED') return <span style={{ color: '#bbb' }}>—</span>;
+                    const invRate = record.invoiceExchangeRate;
+                    if (invRate == null) return <span style={{ color: '#bbb', fontSize: 11 }}>N/A</span>;
+                    const liabilityAed = record.applyAmount * invRate;
+                    return <span style={{ fontSize: 11 }}>{liabilityAed.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>;
+                  },
+                },
+                {
+                  title: 'FX Gain/Loss',
+                  key: 'fxGainLoss',
+                  width: 110,
+                  align: 'right' as const,
+                  render: (_: any, record: PaymentInvoice) => {
+                    const ccy = record.currency || 'AED';
+                    if (ccy === 'AED') return <span style={{ color: '#bbb' }}>—</span>;
+                    const invRate = record.invoiceExchangeRate;
+                    const payRate = Number(watchedConversionRate) || 0;
+                    if (invRate == null || !payRate) return <span style={{ color: '#bbb', fontSize: 11 }}>—</span>;
+                    const fx = Math.round((invRate - payRate) * record.applyAmount * 100) / 100;
+                    if (fx === 0) return <span style={{ color: '#bbb', fontSize: 11 }}>0.00</span>;
+                    return (
+                      <span style={{ fontSize: 11, fontWeight: 600, color: fx > 0 ? '#389e0d' : '#cf1322' }}>
+                        {fx > 0 ? '+' : ''}{fx.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </span>
+                    );
                   },
                 },
                 {
@@ -4314,6 +4416,76 @@ const ManagePayments: React.FC = () => {
               ]}
             />
           </Card>
+
+          {/* ── FX Gain / Loss Summary Card ─────────────────────────────── */}
+          {(() => {
+            const ccy = createPaymentForm.getFieldValue('paymentCurrency');
+            const isFx = ccy && ccy !== 'AED';
+            const payRate = Number(watchedConversionRate) || 0;
+            const fxRows = invoicesToPay
+              .filter(inv => (inv.currency || 'AED') !== 'AED' && inv.invoiceExchangeRate != null && payRate > 0)
+              .map(inv => {
+                const fx = Math.round(((inv.invoiceExchangeRate! - payRate) * inv.applyAmount) * 100) / 100;
+                return { invoiceNumber: inv.invoiceNumber, invRate: inv.invoiceExchangeRate!, applyAmount: inv.applyAmount, fx };
+              });
+            const totalFx = fxRows.reduce((s, r) => s + r.fx, 0);
+            if (!isFx || fxRows.length === 0) return null;
+            return (
+              <Card
+                size="small"
+                style={{ marginTop: 12, borderRadius: 8, border: `1px solid ${totalFx > 0 ? '#b7eb8f' : totalFx < 0 ? '#ffa39e' : '#d9d9d9'}` }}
+                styles={{ body: { padding: '12px 16px' } }}
+                title={
+                  <Space>
+                    <span style={{ fontWeight: 600 }}>FX Realized {totalFx >= 0 ? 'Gain' : 'Loss'}</span>
+                    <Tag color={totalFx > 0 ? 'green' : totalFx < 0 ? 'red' : 'default'}>
+                      {totalFx > 0 ? '+' : ''}{totalFx.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED
+                    </Tag>
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      Payment rate {payRate.toFixed(4)} vs invoice rate(s)
+                    </Text>
+                  </Space>
+                }
+              >
+                <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ color: '#888', borderBottom: '1px solid #f0f0f0' }}>
+                      <th style={{ textAlign: 'left', paddingBottom: 4 }}>Invoice</th>
+                      <th style={{ textAlign: 'right', paddingBottom: 4 }}>Inv. Rate</th>
+                      <th style={{ textAlign: 'right', paddingBottom: 4 }}>Pay Rate</th>
+                      <th style={{ textAlign: 'right', paddingBottom: 4 }}>Apply Amount</th>
+                      <th style={{ textAlign: 'right', paddingBottom: 4 }}>Liability AED</th>
+                      <th style={{ textAlign: 'right', paddingBottom: 4 }}>Payment AED</th>
+                      <th style={{ textAlign: 'right', paddingBottom: 4, fontWeight: 600 }}>FX Gain/Loss</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fxRows.map(r => (
+                      <tr key={r.invoiceNumber} style={{ borderBottom: '1px solid #fafafa' }}>
+                        <td style={{ padding: '3px 0', color: REDWOOD.info }}>{r.invoiceNumber}</td>
+                        <td style={{ textAlign: 'right', fontFamily: 'monospace' }}>{r.invRate.toFixed(4)}</td>
+                        <td style={{ textAlign: 'right', fontFamily: 'monospace' }}>{payRate.toFixed(4)}</td>
+                        <td style={{ textAlign: 'right' }}>{r.applyAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                        <td style={{ textAlign: 'right' }}>{(r.applyAmount * r.invRate).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                        <td style={{ textAlign: 'right' }}>{(r.applyAmount * payRate).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 600, color: r.fx > 0 ? '#389e0d' : r.fx < 0 ? '#cf1322' : undefined }}>
+                          {r.fx > 0 ? '+' : ''}{r.fx.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{ borderTop: '1px solid #d9d9d9', fontWeight: 600 }}>
+                      <td colSpan={6} style={{ paddingTop: 4 }}>Total FX {totalFx >= 0 ? 'Gain' : 'Loss'}</td>
+                      <td style={{ textAlign: 'right', paddingTop: 4, color: totalFx > 0 ? '#389e0d' : totalFx < 0 ? '#cf1322' : undefined }}>
+                        {totalFx > 0 ? '+' : ''}{totalFx.toLocaleString('en-US', { minimumFractionDigits: 2 })} AED
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </Card>
+            );
+          })()}
 
         </div>
       ),
