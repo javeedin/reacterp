@@ -598,17 +598,24 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     const s3 = await ok('sla', async () => {
       const ctx  = voidCtxRef.current;
       const bank = bankAccounts.find(b => b.bankAccountName === payment.disbursementBankAccount);
-      const cashClearingAcct = bank?.cashClearingAccountCombination || '';
-      if (!cashClearingAcct) throw new Error(`No cash clearing account for bank: ${payment.disbursementBankAccount || '(none)'}`);
+
+      // PDC: maturity date exists and differs from payment date
+      const isPdcVoid = !!(payment.maturityDate && payment.maturityDate !== payment.paymentDate);
+
+      // For void reversal: normal payment → debit bank cash account; PDC → debit PDC account
+      const bankAcct        = isPdcVoid ? (bank?.pdcAccountCombination || '') : (bank?.cashAccountCombination || '');
+      const bankAcctClass   = isPdcVoid ? 'PDC' : 'CASH';
+      const bankAcctLabel   = isPdcVoid ? 'PDC' : 'Cash';
+      if (!bankAcct) throw new Error(`No ${bankAcctLabel} account for bank: ${payment.disbursementBankAccount || '(none)'}`);
       if (!relatedInvoices.length) throw new Error('No related invoices found');
       const reverseLines: any[] = [];
       relatedInvoices.forEach((inv, idx) => {
         const amt = Number(inv.amountPaidPaymentCurrency) || 0;
-        reverseLines.push({ lineNumber: idx*2+1, lineType: 'DR', accountingClass: 'CASH_CLEARING',
-          accountCombination: cashClearingAcct, enteredDr: amt, enteredCr: 0,
+        reverseLines.push({ lineNumber: idx*2+1, lineType: 'DR', accountingClass: bankAcctClass,
+          accountCombination: bankAcct, enteredDr: amt, enteredCr: 0,
           accountedDr: amt*ctx.exRate, accountedCr: 0,
           currencyCode: ctx.ccy, exchangeRate: ctx.exRate, sourceLineNumber: idx*2+1,
-          description: `Void Cash Clearing – Payment ${ctx.paymentNum} / Invoice ${inv.invoiceNumber}` });
+          description: `Void ${bankAcctLabel} – Payment ${ctx.paymentNum} / Invoice ${inv.invoiceNumber}` });
         reverseLines.push({ lineNumber: idx*2+2, lineType: 'CR', accountingClass: 'LIABILITY',
           accountCombination: inv.liabilityDistribution || '', enteredDr: 0, enteredCr: amt,
           accountedDr: 0, accountedCr: amt*ctx.exRate,
@@ -1871,6 +1878,8 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         <Row gutter={[48, 8]}>
           <Col span={12}>
             <Descriptions column={1} size="small" labelStyle={{ width: 140, color: REDWOOD.neutral600 }}>
+              <Descriptions.Item label="Business Unit">{payment.businessUnit}</Descriptions.Item>
+              <Descriptions.Item label="Legal Entity">{payment.legalEntity}</Descriptions.Item>
               <Descriptions.Item label="Payee">{payment.payee}</Descriptions.Item>
               <Descriptions.Item label="Payment Date">{payment.paymentDate}</Descriptions.Item>
               <Descriptions.Item label="Status">{getStatusTag(payment.paymentStatus)}</Descriptions.Item>
@@ -1929,8 +1938,6 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
                   {payment.conversionDate ? formatDate(payment.conversionDate) : '—'}
                 </Descriptions.Item>
               )}
-              <Descriptions.Item label="Business Unit">{payment.businessUnit}</Descriptions.Item>
-              <Descriptions.Item label="Legal Entity">{payment.legalEntity}</Descriptions.Item>
               {payment.stopDate ? (
                 <Descriptions.Item label="Stop Date">
                   <Text type="warning">{formatDate(payment.stopDate)}</Text>
