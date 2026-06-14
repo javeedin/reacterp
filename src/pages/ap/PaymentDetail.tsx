@@ -855,9 +855,9 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           // Use explicit accounted amounts from SLA (covers FX lines where entered=0 but accounted≠0)
           const aDr = l.accountedDr != null && l.accountedDr > 0 ? l.accountedDr : null;
           const aCr = l.accountedCr != null && l.accountedCr > 0 ? l.accountedCr : null;
-          // For AED-only lines (FX gain/loss), entered = accounted (rate=1). For FC lines use entered from SLA.
-          const eDr = isAedLine ? aDr : (l.lineType === 'DR' && (l.enteredDr || 0) > 0 ? l.enteredDr : null);
-          const eCr = isAedLine ? aCr : (l.lineType === 'CR' && (l.enteredCr || 0) > 0 ? l.enteredCr : null);
+          // For AED-only lines (FX gain/loss), entered = 0 (functional-only line). For FC lines use entered from SLA.
+          const eDr = isAedLine ? 0 : (l.lineType === 'DR' && (l.enteredDr || 0) > 0 ? l.enteredDr : null);
+          const eCr = isAedLine ? 0 : (l.lineType === 'CR' && (l.enteredCr || 0) > 0 ? l.enteredCr : null);
           return {
             enteredDr:                  eDr,
             enteredCr:                  eCr,
@@ -2700,7 +2700,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         confirmLoading={slaActionLoading}
         okText="Post to GL"
         okButtonProps={{ type: 'primary', disabled: !postGLPayload || postGLFetchingLines || !!postGLResult?.success }}
-        width={740}
+        width={1050}
       >
         {/* SLA Lines API row — always visible so user can inspect */}
         {postGLLinesUrl && (
@@ -2752,10 +2752,10 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
                 { title: 'Account', dataIndex: 'accountCombination', key: 'acct', ellipsis: true, width: 220 },
                 { title: 'Class', dataIndex: 'reference3', key: 'cls', width: 120, render: (v: string) => <Tag style={{ fontSize: 10 }}>{v}</Tag> },
                 { title: 'Ccy', dataIndex: 'currencyCode', key: 'ccy', width: 50 },
-                { title: 'Entered Dr', dataIndex: 'enteredDr', key: 'eDr', width: 90, align: 'right' as const, render: (v: number) => v ? v.toLocaleString() : '—' },
-                { title: 'Entered Cr', dataIndex: 'enteredCr', key: 'eCr', width: 90, align: 'right' as const, render: (v: number) => v ? v.toLocaleString() : '—' },
-                { title: 'Accounted Dr', dataIndex: 'accountedDr', key: 'aDr', width: 100, align: 'right' as const, render: (v: number) => v ? v.toLocaleString() : '—' },
-                { title: 'Accounted Cr', dataIndex: 'accountedCr', key: 'aCr', width: 100, align: 'right' as const, render: (v: number) => v ? v.toLocaleString() : '—' },
+                { title: 'Entered Dr',   dataIndex: 'enteredDr',  key: 'eDr', width: 100, align: 'right' as const, render: (v: number) => (v && v > 0) ? v.toLocaleString() : '—' },
+                { title: 'Entered Cr',   dataIndex: 'enteredCr',  key: 'eCr', width: 100, align: 'right' as const, render: (v: number) => (v && v > 0) ? v.toLocaleString() : '—' },
+                { title: 'Accounted Dr', dataIndex: 'accountedDr', key: 'aDr', width: 110, align: 'right' as const, render: (v: number) => (v && v > 0) ? v.toLocaleString() : '—' },
+                { title: 'Accounted Cr', dataIndex: 'accountedCr', key: 'aCr', width: 110, align: 'right' as const, render: (v: number) => (v && v > 0) ? v.toLocaleString() : '—' },
               ]}
               summary={() => (
                 <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 600 }}>
