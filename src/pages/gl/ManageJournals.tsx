@@ -4625,7 +4625,8 @@ const ManageJournals: React.FC = () => {
                       const q = gridFilter.toLowerCase();
                       const count = journals.filter(j =>
                         [j.batchName, j.batchDescription, j.journalName, j.journalDescription,
-                         j.category, j.source, j.statusMeaning, j.periodName, j.ledgerName]
+                         j.category, j.source, j.statusMeaning, j.periodName, j.ledgerName,
+                         j.currencyCode, j.effectiveDate, j.postedDate]
                         .some(v => (v || '').toLowerCase().includes(q))
                       ).length;
                       return `${count} of ${journals.length} shown`;
@@ -4643,7 +4644,8 @@ const ManageJournals: React.FC = () => {
                 ? journals.filter(j => {
                     const q = gridFilter.toLowerCase();
                     return [j.batchName, j.batchDescription, j.journalName, j.journalDescription,
-                            j.category, j.source, j.statusMeaning, j.periodName, j.ledgerName]
+                            j.category, j.source, j.statusMeaning, j.periodName, j.ledgerName,
+                            j.currencyCode, j.effectiveDate, j.postedDate]
                       .some(v => (v || '').toLowerCase().includes(q));
                   })
                 : journals}
