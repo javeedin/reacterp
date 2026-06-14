@@ -2948,6 +2948,21 @@ const ManagePayments: React.FC = () => {
         return;
       }
 
+      // 1b. Delete existing DRAFT SLA header before re-creating
+      if (exists?.exists && exists?.headerId && exists?.accountingStatus !== 'POSTED') {
+        try {
+          const delRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/${exists.headerId}`, {
+            method: 'DELETE',
+            headers: { Accept: 'application/json' },
+          });
+          if (!delRes.ok && delRes.status !== 404) {
+            console.warn('[Create Accounting] Delete SLA header failed:', delRes.status);
+          }
+        } catch (e) {
+          console.warn('[Create Accounting] Delete SLA header error:', e);
+        }
+      }
+
       // 2. Find matching bank account by name
       const bank = bankAccounts.find(b => b.bankAccountName === record.disbursementBankAccount);
       if (!bank) {

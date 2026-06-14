@@ -1061,12 +1061,13 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
   const handleCreateAccounting = async () => {
     // Reset and open modal immediately so user sees it right away
     const steps = [
-      { step: 0, label: 'Check accounting exists', status: 'idle' as const },
-      { step: 1, label: 'Find bank account',        status: 'idle' as const },
-      { step: 2, label: 'Fetch related invoices',   status: 'idle' as const },
-      { step: 3, label: 'Fetch ledger info',         status: 'idle' as const },
-      { step: 4, label: 'Build SLA payloads',        status: 'idle' as const },
-      { step: 5, label: 'Post accounting entries',   status: 'idle' as const },
+      { step: 0, label: 'Check accounting exists',   status: 'idle' as const },
+      { step: 1, label: 'Delete existing SLA',        status: 'idle' as const },
+      { step: 2, label: 'Find bank account',          status: 'idle' as const },
+      { step: 3, label: 'Fetch related invoices',     status: 'idle' as const },
+      { step: 4, label: 'Fetch ledger info',           status: 'idle' as const },
+      { step: 5, label: 'Build SLA payloads',          status: 'idle' as const },
+      { step: 6, label: 'Post accounting entries',     status: 'idle' as const },
     ];
     setAcctResults([]);
     setAcctStepStatus(steps);
@@ -1094,20 +1095,41 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         setAcctResults([{ invoiceNumber: '—', status: 'ALREADY POSTED', headerId: exists.headerId ?? undefined }]);
         return;
       }
-      setStep(0, 'success', exists?.exists ? `Exists (${exists.accountingStatus})` : 'No existing accounting');
+      setStep(0, 'success', exists?.exists ? `Exists (${exists.accountingStatus}) — will delete` : 'No existing accounting');
 
-      // Step 1: Find bank account
+      // Step 1: Delete existing SLA header (if any, and not POSTED)
       setStep(1, 'running');
+      if (exists?.exists && exists?.headerId && exists?.accountingStatus !== 'POSTED') {
+        try {
+          const delRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/${exists.headerId}`, {
+            method: 'DELETE',
+            headers: { Accept: 'application/json' },
+          });
+          if (delRes.ok || delRes.status === 404) {
+            setStep(1, 'success', `Deleted SLA header #${exists.headerId}`);
+          } else {
+            const delBody = await delRes.json().catch(() => ({}));
+            setStep(1, 'error', `Delete returned ${delRes.status}: ${delBody?.message || 'Unknown'} — proceeding anyway`);
+          }
+        } catch (e: any) {
+          setStep(1, 'error', `Delete failed: ${e?.message} — proceeding anyway`);
+        }
+      } else {
+        setStep(1, 'success', exists?.exists ? 'Skipped (already POSTED)' : 'No existing entry to delete');
+      }
+
+      // Step 2: Find bank account
+      setStep(2, 'running');
       const bank = bankAccounts.find(b => b.bankAccountName === payment.disbursementBankAccount);
       if (!bank) {
-        setStep(1, 'error', `Not found: "${payment.disbursementBankAccount}"`);
+        setStep(2, 'error', `Not found: "${payment.disbursementBankAccount}"`);
         setAcctResults([{ invoiceNumber: '—', status: 'ERROR', error: `Bank account "${payment.disbursementBankAccount}" not found in loaded list (${bankAccounts.length} accounts loaded)` }]);
         return;
       }
-      setStep(1, 'success', bank.bankAccountName);
+      setStep(2, 'success', bank.bankAccountName);
 
-      // Step 2: Fetch related invoices
-      setStep(2, 'running');
+      // Step 3: Fetch related invoices
+      setStep(3, 'running');
       const relUrl = `${APEX_DB_CONFIG.baseUrl}/ap/payments/${payment.checkId}/related-invoices`;
       let relInvoices: any[] = [];
       try {
@@ -1124,23 +1146,23 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         return;
       }
       if (relInvoices.length === 0) {
-        setStep(2, 'error', 'No applied invoices');
+        setStep(3, 'error', 'No applied invoices');
         setAcctResults([{ invoiceNumber: '—', status: 'ERROR', error: 'No applied invoices found for this payment' }]);
         return;
       }
 
-      // Step 3: Fetch ledger
-      setStep(3, 'running');
+      // Step 4: Fetch ledger
+      setStep(4, 'running');
       let ledgerInfo: any = null;
       try {
         ledgerInfo = await fetchLedgerByBusinessUnit(payment.businessUnit || '');
-        setStep(3, 'success', ledgerInfo?.ledgerName || 'Ledger loaded');
+        setStep(4, 'success', ledgerInfo?.ledgerName || 'Ledger loaded');
       } catch (e: any) {
-        setStep(3, 'error', e?.message ?? 'Fetch failed — using null ledger');
+        setStep(4, 'error', e?.message ?? 'Fetch failed — using null ledger');
       }
 
-      // Step 4: Build payload and inject FX gain/loss lines for foreign currency payments
-      setStep(4, 'running');
+      // Step 5: Build payload and inject FX gain/loss lines for foreign currency payments
+      setStep(5, 'running');
       let payloads: any[] = [];
       try {
         const paymentDate = toApiDate(payment.paymentDate || '');
@@ -1241,15 +1263,15 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
 
         setAcctPostPayload(payloads);
         const fxNote = isFxPayment ? ' (with FX gain/loss)' : '';
-        setStep(4, 'success', `${payloads.length} payload(s) built${fxNote}`);
+        setStep(5, 'success', `${payloads.length} payload(s) built${fxNote}`);
       } catch (e: any) {
-        setStep(4, 'error', e?.message ?? 'Build failed');
+        setStep(5, 'error', e?.message ?? 'Build failed');
         setAcctResults([{ invoiceNumber: '—', status: 'ERROR', error: `Payload build failed: ${e?.message}` }]);
         return;
       }
 
-      // Step 5: Post each journal
-      setStep(5, 'running');
+      // Step 6: Post each journal
+      setStep(6, 'running');
       const results: typeof acctResults = [];
       for (const payload of payloads) {
         const invNum = payload.header?.description?.split('Invoice ')[1] || payload.header?.description || '—';
@@ -1261,7 +1283,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         }
       }
       const hasErrors = results.some(r => r.status === 'ERROR');
-      setStep(5, hasErrors ? 'error' : 'success',
+      setStep(6, hasErrors ? 'error' : 'success',
         hasErrors ? `${results.filter(r => r.status === 'ERROR').length} error(s)` : `${results.length} journal(s) created`
       );
       setAcctResults(results);
