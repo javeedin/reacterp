@@ -1195,45 +1195,56 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         // ── FX Gain / Loss lines (foreign-currency payments only) ──────────
         const isFxPayment = payment.paymentCurrency && payment.paymentCurrency !== 'AED';
         if (isFxPayment) {
+          const fxAcct = bank.fxGainLossAccountCombination;
+          if (!fxAcct) {
+            throw new Error(`FX Gain/Loss account not configured for bank "${bank.bankAccountName}". Please set fx_gain_account_combination on the bank account.`);
+          }
+
           for (const pl of payloads) {
             const lines: any[] = pl.lines;
             const payNum = pl.header?.sourceNumber || String(payment.paymentNumber);
             let nextLine = lines.length + 1;
             let totalFxGain = 0;
             let totalFxLoss = 0;
+            let totalPmtFunctional = 0;
 
             relInvoices.forEach((inv: any, idx: number) => {
-              const invFunctional = inv.InvoiceFunctionalAmount;  // AED at invoice rate
-              const pmtFunctional = inv.PaymentFunctionalAmount;  // AED at payment rate
+              const amountPaid = inv.AmountPaidInvoiceCurrency || inv.InvoicePaymentAmount || 0;
 
-              // Fix DR Liability accounted amount to use invoice rate (not payment rate)
+              // Invoice rate: prefer pre-computed functional amount, else derive from rate fields
+              const invRate = inv.InvoiceConversionRate ?? inv.ConversionRate ?? inv.InvoiceExchangeRate ?? inv.ExchangeRate ?? null;
+              const invFunctional = inv.InvoiceFunctionalAmount != null
+                ? inv.InvoiceFunctionalAmount
+                : invRate != null ? Math.round(amountPaid * invRate * 100) / 100 : null;
+
+              // Payment rate
+              const pmtFunctional = inv.PaymentFunctionalAmount != null
+                ? inv.PaymentFunctionalAmount
+                : Math.round(amountPaid * exRate * 100) / 100;
+
+              totalPmtFunctional += pmtFunctional;
+
+              // Fix DR Liability accountedDr to use invoice rate
               if (invFunctional != null && lines[idx]) {
                 lines[idx].accountedDr = Math.round(invFunctional * 100) / 100;
               }
 
-              // Compute FX for this invoice
-              if (invFunctional != null && pmtFunctional != null) {
+              // Compute FX diff
+              if (invFunctional != null) {
                 const diff = Math.round((invFunctional - pmtFunctional) * 100) / 100;
-                if (diff > 0) totalFxGain += diff;   // paid less AED than liability → gain
-                if (diff < 0) totalFxLoss += Math.abs(diff); // paid more AED → loss
+                if (diff > 0) totalFxGain += diff;
+                if (diff < 0) totalFxLoss += Math.abs(diff);
               }
             });
 
-            // Fix CR Cash/PDC accounted amount to use total payment functional
-            const totalPmtFunctional = relInvoices.reduce((s: number, inv: any) =>
-              s + (inv.PaymentFunctionalAmount || 0), 0);
+            // Fix CR Cash/PDC accountedCr to use payment rate
             const cashLine = lines.find((l: any) => l.accountingClass !== 'LIABILITY');
             if (cashLine && totalPmtFunctional > 0) {
               cashLine.accountedCr = Math.round(totalPmtFunctional * 100) / 100;
             }
 
-            const fxAcct = bank.fxGainLossAccountCombination;
-            if (!fxAcct) {
-              console.warn('[FX Accounting] fx_gain_account_combination not configured for bank:', bank.bankAccountName);
-            }
-
             // CR FX Gain (paid fewer AED than liability was booked at)
-            if (totalFxGain > 0 && fxAcct) {
+            if (totalFxGain > 0) {
               lines.push({
                 lineNumber: nextLine++, lineType: 'CR', accountingClass: 'FX_REALIZED_GAIN',
                 accountCombination: fxAcct,
@@ -1246,7 +1257,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
             }
 
             // DR FX Loss (paid more AED than liability was booked at)
-            if (totalFxLoss > 0 && fxAcct) {
+            if (totalFxLoss > 0) {
               lines.push({
                 lineNumber: nextLine++, lineType: 'DR', accountingClass: 'FX_REALIZED_LOSS',
                 accountCombination: fxAcct,
