@@ -2739,8 +2739,10 @@ const ManagePayments: React.FC = () => {
       setPostGLLinesUrl(acctUrl);
 
       const ledgerInfo = await fetchLedgerByBusinessUnit(viewAcctRecord.businessUnit || '');
-      const totalDr    = lines.reduce((s, l) => s + (l.enteredDr || 0), 0);
-      const totalCr    = lines.reduce((s, l) => s + (l.enteredCr || 0), 0);
+      const totalDr    = lines.reduce((s, l) => s + Math.max(Number(l.enteredDr)  || 0, 0), 0);
+      const totalCr    = lines.reduce((s, l) => s + Math.max(Number(l.enteredCr)  || 0, 0), 0);
+      const totalADr   = lines.reduce((s, l) => s + Math.max(Number(l.accountedDr) || 0, 0), 0);
+      const totalACr   = lines.reduce((s, l) => s + Math.max(Number(l.accountedCr) || 0, 0), 0);
       const ledgerName = ledgerInfo?.ledgerName ?? 'BCL DIFC';
       const ledgerId   = ledgerInfo?.ledgerId   ?? 0;
       const batchName  = `SLA-AP_PAYMENTS-${viewAcctData.periodName}-${viewAcctData.headerId}`;
@@ -2753,6 +2755,7 @@ const ManagePayments: React.FC = () => {
           status:            'NEW',
           accountingPeriod:  viewAcctData.periodName,
           controlTotal:      totalDr, runningTotalDr: totalDr, runningTotalCr: totalCr,
+          accountedTotalDr:  totalADr, accountedTotalCr: totalACr,
           batchSource:       'Payables',
           createdBy:         'SYSTEM',
         },
@@ -2773,14 +2776,19 @@ const ManagePayments: React.FC = () => {
           createdBy:              'SYSTEM',
         },
         lines: lines.map((l) => {
-          const eDr  = l.lineType === 'DR' ? (l.enteredDr  || null) : null;
-          const eCr  = l.lineType === 'CR' ? (l.enteredCr  || null) : null;
           const rate = (viewAcctRecord.conversionRate && viewAcctRecord.conversionRate > 0) ? viewAcctRecord.conversionRate : 1;
+          // Use enteredDr/enteredCr directly from SLA line if available; fall back to lineType
+          const rawEDr = l.enteredDr  != null ? Number(l.enteredDr)  : (l.lineType === 'DR' ? (l.amount || 0) : 0);
+          const rawECr = l.enteredCr  != null ? Number(l.enteredCr)  : (l.lineType === 'CR' ? (l.amount || 0) : 0);
+          const eDr = rawEDr > 0 ? rawEDr : null;
+          const eCr = rawECr > 0 ? rawECr : null;
+          const aDr = l.accountedDr != null ? Number(l.accountedDr) : (eDr != null ? Math.round(eDr * rate * 100) / 100 : null);
+          const aCr = l.accountedCr != null ? Number(l.accountedCr) : (eCr != null ? Math.round(eCr * rate * 100) / 100 : null);
           return {
-            enteredDr:                  eDr,
-            enteredCr:                  eCr,
-            accountedDr:                eDr != null ? Math.round(eDr * rate * 100) / 100 : null,
-            accountedCr:                eCr != null ? Math.round(eCr * rate * 100) / 100 : null,
+            enteredDr:   eDr,
+            enteredCr:   eCr,
+            accountedDr: aDr,
+            accountedCr: aCr,
             statAmount:                 null,
             description:                l.description || viewAcctData.description || '',
             currencyCode:               viewAcctRecord.currency || viewAcctRecord.paymentCurrency || 'AED',
@@ -5821,21 +5829,25 @@ const ManagePayments: React.FC = () => {
       >
         {/* SLA Lines API row — always visible */}
         {postGLLinesUrl && (
-          <div style={{ marginBottom: 10, padding: '6px 10px', background: REDWOOD.neutral100, borderRadius: 6, border: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <Tag color="green" style={{ fontSize: 11, margin: 0 }}>GET</Tag>
-            <code style={{ fontSize: 11, flex: 1, wordBreak: 'break-all', color: REDWOOD.neutral900 }}>{postGLLinesUrl}</code>
-            <Button
-              size="small"
-              icon={<ApiOutlined />}
-              onClick={() => window.open(postGLLinesUrl, '_blank')}
-              style={{ fontSize: 11, flexShrink: 0 }}
-            >
-              Open
-            </Button>
-            {postGLRawCount > 0 && (
-              <span style={{ fontSize: 11, color: REDWOOD.neutral600, flexShrink: 0 }}>
-                {postGLRawCount} raw → {postGLPayload?.lines?.length ?? 0} for header {postModalHeadId}
-              </span>
+          <div style={{ marginBottom: 10, padding: '6px 10px', background: REDWOOD.neutral100, borderRadius: 6, border: `1px solid ${REDWOOD.neutral200}` }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <Tag color="green" style={{ fontSize: 11, margin: 0 }}>GET</Tag>
+              <code style={{ fontSize: 11, flex: 1, wordBreak: 'break-all', color: REDWOOD.neutral900 }}>{postGLLinesUrl}</code>
+              <Button size="small" icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(postGLLinesUrl); message.success('URL copied'); }} style={{ fontSize: 11, flexShrink: 0 }} />
+              <Button size="small" icon={<ApiOutlined />} onClick={() => window.open(postGLLinesUrl, '_blank')} style={{ fontSize: 11, flexShrink: 0 }}>Open</Button>
+              {postGLRawCount > 0 && (
+                <span style={{ fontSize: 11, color: REDWOOD.neutral600, flexShrink: 0 }}>
+                  {postGLRawCount} raw → {postGLPayload?.lines?.length ?? 0} for header {postModalHeadId}
+                </span>
+              )}
+            </div>
+            {postGLPayload && (
+              <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 11, color: REDWOOD.neutral700 }}>
+                <span>Entered Dr: <strong>{(postGLPayload.batch.runningTotalDr || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                <span>Entered Cr: <strong>{(postGLPayload.batch.runningTotalCr || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                <span>Accounted Dr: <strong>{(postGLPayload.batch.accountedTotalDr || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                <span>Accounted Cr: <strong>{(postGLPayload.batch.accountedTotalCr || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+              </div>
             )}
           </div>
         )}
