@@ -241,7 +241,7 @@ const ManageReceipts: React.FC = () => {
     company:                    r.COMPANY                      ?? r.company                      ?? '',
     bankAccountId:              r.BANK_ACCOUNT_ID              ?? r.bank_account_id              ?? 0,
     bankAccountName:            r.BANK_ACCOUNT_NAME            ?? r.bank_account_name            ?? '',
-    bankAccountNum:             r.BANK_ACCOUNT_NUM             ?? r.bank_account_num             ?? '',
+    bankAccountNum:             r.BANK_ACCOUNT_NUM             ?? r.bank_account_num             ?? r.bank_account_number ?? '',
     bankName:                   r.BANK_NAME                    ?? r.bank_name                    ?? '',
     bankBranchName:             r.BANK_BRANCH_NAME             ?? r.bank_branch_name             ?? '',
     bankCurrency:               r.BANK_CURRENCY                ?? r.bank_currency                ?? '',
