@@ -2307,96 +2307,110 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
             <Input placeholder="Optional" disabled={voidRunning} />
           </Form.Item>
 
-          {/* GL Lines tables — shown after Step 2 (get_lines) succeeds */}
-          {voidOrigLines.length > 0 && (
-            <div style={{ marginBottom: 14 }}>
-              <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Original GL Journal Lines</Text>
-              <Table size="small" dataSource={voidOrigLines.map((r, i) => ({ ...r, key: i }))} pagination={false} scroll={{ y: 120 }}
-                columns={[
-                  { title: '#', dataIndex: 'line_num', key: 'line_num', width: 36 },
-                  { title: 'Account', dataIndex: 'account', key: 'account', ellipsis: true },
-                  { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
-                  { title: 'Currency', dataIndex: 'currency_code', key: 'currency_code', width: 70 },
-                  { title: 'Entered Dr', dataIndex: 'entered_dr', key: 'entered_dr', align: 'right' as const, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
-                  { title: 'Entered Cr', dataIndex: 'entered_cr', key: 'entered_cr', align: 'right' as const, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
-                  { title: 'Accounted Dr', dataIndex: 'accounted_dr', key: 'accounted_dr', align: 'right' as const, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
-                  { title: 'Accounted Cr', dataIndex: 'accounted_cr', key: 'accounted_cr', align: 'right' as const, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
-                ]}
-              />
-              <div style={{ marginTop: 10 }}>
-                <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 4, color: '#cf1322' }}>Accounting After Void (Reversal Lines)</Text>
-                <Table size="small" dataSource={voidRevLines.map((r, i) => ({ ...r, key: i }))} pagination={false} scroll={{ y: 120 }}
-                  style={{ border: '1px solid #ffccc7', borderRadius: 4 }}
-                  columns={[
-                    { title: '#', dataIndex: 'line_num', key: 'line_num', width: 36 },
-                    { title: 'Account', dataIndex: 'account', key: 'account', ellipsis: true },
-                    { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
-                    { title: 'Currency', dataIndex: 'currency_code', key: 'currency_code', width: 70 },
-                    { title: 'Entered Dr', dataIndex: 'entered_dr', key: 'entered_dr', align: 'right' as const, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
-                    { title: 'Entered Cr', dataIndex: 'entered_cr', key: 'entered_cr', align: 'right' as const, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
-                    { title: 'Accounted Dr', dataIndex: 'accounted_dr', key: 'accounted_dr', align: 'right' as const, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
-                    { title: 'Accounted Cr', dataIndex: 'accounted_cr', key: 'accounted_cr', align: 'right' as const, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
-                  ]}
-                />
-              </div>
+          {/* ── Running indicator ──────────────────────────────────────────── */}
+          {voidRunning && (
+            <div style={{ textAlign: 'center', padding: '16px 0', color: '#1677ff' }}>
+              <LoadingOutlined spin style={{ fontSize: 22, marginBottom: 8 }} />
+              <div style={{ fontSize: 12 }}>Processing void…</div>
             </div>
           )}
 
-          {/* ── 7 Step Progress Cards ─────────────────────────── */}
+          {/* ── Journal lines — shown after steps complete ──────────────────── */}
+          {voidOrigLines.length > 0 && (
+            <>
+              {(() => {
+                const lineCols = [
+                  { title: '#', dataIndex: 'line_num', key: 'line_num', width: 36 },
+                  { title: 'Account', dataIndex: 'account', key: 'account', ellipsis: true },
+                  { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+                  { title: 'CCY', dataIndex: 'currency_code', key: 'currency_code', width: 52 },
+                  { title: 'Entered Dr', dataIndex: 'entered_dr', key: 'entered_dr', align: 'right' as const, width: 100, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
+                  { title: 'Entered Cr', dataIndex: 'entered_cr', key: 'entered_cr', align: 'right' as const, width: 100, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
+                  { title: 'Acc Dr', dataIndex: 'accounted_dr', key: 'accounted_dr', align: 'right' as const, width: 100, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
+                  { title: 'Acc Cr', dataIndex: 'accounted_cr', key: 'accounted_cr', align: 'right' as const, width: 100, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
+                ];
+                return (
+                  <div style={{ marginBottom: 14 }}>
+                    <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 4, color: '#595959' }}>Original Journal</Text>
+                    <Table size="small" dataSource={voidOrigLines.map((r, i) => ({ ...r, key: i }))} pagination={false} columns={lineCols} />
+                    <div style={{ marginTop: 10 }}>
+                      <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 4, color: '#cf1322' }}>Reversal Journal (After Void)</Text>
+                      <Table size="small" dataSource={voidRevLines.map((r, i) => ({ ...r, key: i }))} pagination={false} columns={lineCols}
+                        style={{ border: '1px solid #ffccc7', borderRadius: 4 }} />
+                    </div>
+                  </div>
+                );
+              })()}
+            </>
+          )}
+
+          {/* ── Error from any failed step ──────────────────────────────────── */}
+          {(() => {
+            const failed = VOID_STEP_KEYS.map(k => voidStepMap[k]).find(s => s.status === 'error');
+            if (!failed) return null;
+            return <Alert type="error" showIcon message={failed.error || 'A step failed'} style={{ marginBottom: 10 }} />;
+          })()}
+
+          {/* ── API Details (collapsible) ───────────────────────────────────── */}
           {(() => {
             const STEPS: { key: VoidStepKey; step: number; method: string; methodColor: string; label: string; url: string }[] = [
-              { key: 'eligibility', step: 1, method: 'GET',  methodColor: 'blue',   label: 'Check Void Eligibility',          url: `${APEX_DB_CONFIG.baseUrl}/ap/payments/${payment.checkId}/void-eligibility` },
-              { key: 'get_lines',   step: 2, method: 'GET',  methodColor: 'blue',   label: 'Get Original GL Lines',            url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${payment.checkId}&reference5=AP-PAYMENT` },
-              { key: 'sla',         step: 3, method: 'POST', methodColor: 'green',  label: 'Create SLA Reversal Accounting',   url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create` },
-              { key: 'gl_create',   step: 4, method: 'POST', methodColor: 'green',  label: 'Create GL Journal',                url: `${APEX_DB_CONFIG.baseUrl}/journals/create` },
-              { key: 'gl_post',     step: 5, method: 'PUT',  methodColor: 'orange', label: 'Post GL Journal',                  url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/:batchId/post` },
-              { key: 'sla_stamp',   step: 6, method: 'POST', methodColor: 'green',  label: 'Stamp SLA as POSTED',              url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post` },
-              { key: 'void',        step: 7, method: 'PUT',  methodColor: 'orange', label: 'Void Payment',                     url: `${APEX_DB_CONFIG.baseUrl}/ap/payments/void` },
+              { key: 'eligibility', step: 1, method: 'GET',  methodColor: 'blue',   label: 'Check Void Eligibility',        url: `${APEX_DB_CONFIG.baseUrl}/ap/payments/${payment.checkId}/void-eligibility` },
+              { key: 'get_lines',   step: 2, method: 'GET',  methodColor: 'blue',   label: 'Get Original GL Lines',          url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${payment.checkId}&reference5=AP-PAYMENT` },
+              { key: 'sla',         step: 3, method: 'POST', methodColor: 'green',  label: 'Create SLA Reversal Accounting', url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create` },
+              { key: 'gl_create',   step: 4, method: 'POST', methodColor: 'green',  label: 'Create GL Journal',              url: `${APEX_DB_CONFIG.baseUrl}/journals/create` },
+              { key: 'gl_post',     step: 5, method: 'PUT',  methodColor: 'orange', label: 'Post GL Journal',                url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/:batchId/post` },
+              { key: 'sla_stamp',   step: 6, method: 'POST', methodColor: 'green',  label: 'Stamp SLA as POSTED',            url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post` },
+              { key: 'void',        step: 7, method: 'PUT',  methodColor: 'orange', label: 'Void Payment',                   url: `${APEX_DB_CONFIG.baseUrl}/ap/payments/void` },
             ];
-            return STEPS.map((s, idx) => {
-              const st = voidStepMap[s.key];
-              const borderColor = st.status === 'success' ? '#52c41a' : st.status === 'error' ? '#ff4d4f' : st.status === 'running' ? '#1677ff' : undefined;
-              const statusIcon = st.status === 'running' ? <LoadingOutlined style={{ color: '#1677ff' }} spin />
-                : st.status === 'success' ? <CheckCircleOutlined style={{ color: '#52c41a' }} />
-                : st.status === 'error'   ? <CloseCircleOutlined style={{ color: '#ff4d4f' }} /> : null;
-              // Previous step succeeded (or this is the first step)
-              const prevKey = idx > 0 ? STEPS[idx - 1].key : null;
-              const prevOk  = prevKey ? voidStepMap[prevKey].status === 'success' : true;
-              const canRun  = prevOk && (st.status === 'idle' || st.status === 'error') && !voidRunning;
-              const hasPayload = !!voidStepPayloads[s.key];
-              return (
-                <Card key={s.key} size="small" style={{ marginBottom: 6, borderColor }}
-                  title={
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <Space size={4}>
-                        <Tag color={s.methodColor} style={{ minWidth: 44, textAlign: 'center', margin: 0 }}>{s.method}</Tag>
-                        <Text strong style={{ fontSize: 12 }}>Step {s.step}: {s.label}</Text>
-                        {statusIcon}
-                      </Space>
-                      <Space size={4}>
-                        {hasPayload && (
-                          <Tooltip title="View payload">
-                            <Button size="small" icon={<EyeOutlined />} onClick={() => {
-                              Modal.info({ title: `Step ${s.step} Payload`, width: 600,
-                                content: <pre style={{ fontSize: 11, maxHeight: 400, overflowY: 'auto' }}>{JSON.stringify(voidStepPayloads[s.key], null, 2)}</pre> });
-                            }} />
-                          </Tooltip>
-                        )}
-                        <Button size="small" disabled={!canRun} onClick={() => runVoidStep(s.key)}>Run</Button>
-                      </Space>
-                    </div>
-                  }
-                >
-                  <code style={{ fontSize: 10, background: '#f0f0f0', padding: '2px 6px', borderRadius: 3, display: 'block', wordBreak: 'break-all', marginBottom: st.response || st.error ? 6 : 0 }}>{s.url}</code>
-                  {st.error && <Alert type="error" message={st.error} style={{ marginTop: 6, fontSize: 11 }} showIcon />}
-                  {st.response && (
-                    <pre style={{ fontSize: 10, background: '#1e1e1e', color: st.status === 'error' ? '#f48771' : '#b5cea8', padding: 6, borderRadius: 4, margin: '4px 0 0', maxHeight: 80, overflowY: 'auto' }}>
-                      {JSON.stringify(st.response, null, 2)}
-                    </pre>
-                  )}
-                </Card>
-              );
-            });
+            const hasAnyActivity = STEPS.some(s => voidStepMap[s.key].status !== 'idle');
+            if (!hasAnyActivity) return null;
+            const collapseItems = [{
+              key: 'api',
+              label: (
+                <Space size={4}>
+                  <ApiOutlined />
+                  <span style={{ fontSize: 12 }}>API Details</span>
+                  {STEPS.map(s => {
+                    const st = voidStepMap[s.key];
+                    if (st.status === 'idle') return null;
+                    return st.status === 'success' ? <CheckCircleOutlined key={s.key} style={{ color: '#52c41a', fontSize: 12 }} />
+                      : st.status === 'error'   ? <CloseCircleOutlined key={s.key} style={{ color: '#ff4d4f', fontSize: 12 }} />
+                      : st.status === 'running' ? <LoadingOutlined key={s.key} style={{ color: '#1677ff', fontSize: 12 }} spin /> : null;
+                  })}
+                </Space>
+              ),
+              children: (
+                <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 4 }}>
+                  {STEPS.map(s => {
+                    const st = voidStepMap[s.key];
+                    if (st.status === 'idle') return null;
+                    const statusIcon = st.status === 'running' ? <LoadingOutlined style={{ color: '#1677ff' }} spin />
+                      : st.status === 'success' ? <CheckCircleOutlined style={{ color: '#52c41a' }} />
+                      : <CloseCircleOutlined style={{ color: '#ff4d4f' }} />;
+                    return (
+                      <div key={s.key} style={{ background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 4, padding: '6px 10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: st.error || st.response ? 4 : 0 }}>
+                          <Space size={4}>
+                            <Tag color={s.methodColor} style={{ minWidth: 40, textAlign: 'center', margin: 0, fontSize: 10 }}>{s.method}</Tag>
+                            <Text style={{ fontSize: 11 }}>Step {s.step}: {s.label}</Text>
+                            {statusIcon}
+                          </Space>
+                          {voidStepPayloads[s.key] && (
+                            <Button size="small" icon={<EyeOutlined />} style={{ fontSize: 10 }} onClick={() =>
+                              Modal.info({ title: `Step ${s.step} — ${s.label}`, width: 640,
+                                content: <pre style={{ fontSize: 11, maxHeight: 420, overflowY: 'auto' }}>{JSON.stringify(voidStepPayloads[s.key], null, 2)}</pre> })
+                            }>Payload</Button>
+                          )}
+                        </div>
+                        <code style={{ fontSize: 10, color: '#888', wordBreak: 'break-all' as const }}>{s.url}</code>
+                        {st.error && <Alert type="error" message={st.error} style={{ marginTop: 4, fontSize: 11 }} showIcon />}
+                      </div>
+                    );
+                  })}
+                </div>
+              ),
+            }];
+            return <Collapse size="small" style={{ marginBottom: 10 }} items={collapseItems} />;
           })()}
 
           {/* Done confirmation */}
