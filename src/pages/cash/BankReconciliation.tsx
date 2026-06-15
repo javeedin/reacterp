@@ -1140,11 +1140,21 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       const res  = await fetch(stmtLinesUrl);
       const data = await parseApexJson(res);
       if (data.status === 'success') {
+        if (data.items?.length) console.log('[StmtLines] raw first item keys:', Object.keys(data.items[0]), 'reconStatus sample:', data.items[0].reconStatus ?? data.items[0].recon_status ?? data.items[0].RECON_STATUS);
         setStmtLines((data.items ?? []).map((i: any) => ({
           ...i,
-          // Oracle may return snake_case or UPPERCASE — normalise to camelCase
-          externalTxnId:  i.externalTxnId  ?? i.external_txn_id  ?? i.EXTERNAL_TXN_ID  ?? undefined,
-          externalTxnRef: i.externalTxnRef ?? i.external_txn_ref ?? i.EXTERNAL_TXN_REF ?? undefined,
+          // Normalise all possible Oracle casing variants to camelCase
+          lineId:         i.lineId         ?? i.line_id         ?? i.LINE_ID,
+          statementId:    i.statementId    ?? i.statement_id    ?? i.STATEMENT_ID,
+          reconStatus:    i.reconStatus    ?? i.recon_status    ?? i.RECON_STATUS ?? '',
+          reconTxnId:     i.reconTxnId     ?? i.recon_txn_id    ?? i.RECON_TXN_ID,
+          reconTxnNumber: i.reconTxnNumber ?? i.recon_txn_number ?? i.RECON_TXN_NUMBER,
+          reconTxnType:   i.reconTxnType   ?? i.recon_txn_type  ?? i.RECON_TXN_TYPE,
+          reconAmount:    i.reconAmount    ?? i.recon_amount    ?? i.RECON_AMOUNT,
+          reconDate:      i.reconDate      ?? i.recon_date      ?? i.RECON_DATE,
+          reconNotes:     i.reconNotes     ?? i.recon_notes     ?? i.RECON_NOTES,
+          externalTxnId:  i.externalTxnId  ?? i.external_txn_id  ?? i.EXTERNAL_TXN_ID,
+          externalTxnRef: i.externalTxnRef ?? i.external_txn_ref ?? i.EXTERNAL_TXN_REF,
         })) as StmtLine[]);
       } else {
         msgApi.error(data.message ?? 'Failed to load statement lines');
