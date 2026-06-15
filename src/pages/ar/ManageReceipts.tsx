@@ -1109,50 +1109,39 @@ const ManageReceipts: React.FC = () => {
                               disabled={isLocked}
                               showSearch
                               loading={allMethodAccountsLoading[tabKey]}
-                              placeholder="Select method…"
+                              placeholder={allMethodAccountsLoading[tabKey] ? 'Loading…' : draft.businessUnit ? 'Select method…' : 'Select Business Unit first'}
+                              optionLabelProp="label"
                               filterOption={(input, opt) =>
-                                String(opt?.label ?? '').toLowerCase().includes(input.trim().toLowerCase())
+                                String(opt?.searchtext ?? '').toLowerCase().includes(input.trim().toLowerCase())
                               }
                               onChange={v => updateDraft(tabKey, { receiptMethod: v ?? '' })}
-                              optionLabelProp="displayLabel"
                             >
                               {receiptMethods.map(m => {
-                                const accts = allMethodAccounts[m.id] ?? [];
+                                const accts   = allMethodAccounts[m.id] ?? [];
                                 const primary = accts.find(a => a.primaryFlag === 'Y') ?? accts[0];
-                                // label = all searchable text: name + class + all bank names/numbers
-                                const searchLabel = [
-                                  m.name,
-                                  m.receiptClass,
+                                const searchtext = [
+                                  m.name, m.receiptClass,
                                   ...accts.map(a => a.bankName),
                                   ...accts.map(a => a.bankAccountName),
                                   ...accts.map(a => a.bankAccountNum),
                                 ].filter(Boolean).join(' ');
                                 return (
-                                  <Option key={m.id} value={m.name} label={searchLabel} displayLabel={m.name}>
-                                    <div style={{ lineHeight: 1.6, padding: '2px 0' }}>
-                                      {/* Row 1: name + class */}
-                                      <div>
-                                        <span style={{ fontWeight: 600, fontSize: 12 }}>{m.name}</span>
+                                  <Option key={m.id} value={m.name} label={m.name} searchtext={searchtext}>
+                                    <div style={{ lineHeight: 1.5, padding: '2px 0' }}>
+                                      <div style={{ fontWeight: 600, fontSize: 12 }}>
+                                        {m.name}
                                         {m.receiptClass && (
-                                          <Tag color="default" style={{ fontSize: 10, marginLeft: 6, verticalAlign: 'middle' }}>
-                                            {m.receiptClass}
-                                          </Tag>
+                                          <Tag color="default" style={{ fontSize: 10, marginLeft: 6 }}>{m.receiptClass}</Tag>
                                         )}
                                       </div>
-                                      {/* Row 2: bank account (primary) */}
                                       {primary && (
-                                        <div style={{ fontSize: 11, color: '#595959', marginTop: 1 }}>
+                                        <div style={{ fontSize: 11, color: '#595959' }}>
                                           <BankOutlined style={{ marginRight: 4, color: REDWOOD.info }} />
-                                          {primary.bankAccountName || primary.bankName || ''}
+                                          {primary.bankName || ''}
                                           {primary.bankAccountNum && (
                                             <span style={{ fontFamily: 'monospace', marginLeft: 6, color: REDWOOD.info }}>
                                               {primary.bankAccountNum}
                                             </span>
-                                          )}
-                                          {primary.bankCurrency && (
-                                            <Tag color="blue" style={{ fontSize: 10, marginLeft: 6, verticalAlign: 'middle' }}>
-                                              {primary.bankCurrency}
-                                            </Tag>
                                           )}
                                         </div>
                                       )}
