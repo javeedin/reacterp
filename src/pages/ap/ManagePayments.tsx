@@ -1870,7 +1870,13 @@ const ManagePayments: React.FC = () => {
       sorter: (a, b) => a.paymentNumber - b.paymentNumber,
     },
     {
-      title: 'Payment Document',
+      title: 'Check ID',
+      dataIndex: 'checkId',
+      key: 'checkId',
+      width: 150,
+      render: (val: number) => val ? <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#888' }}>{val}</span> : null,
+    },
+    {
       dataIndex: 'paymentDocument',
       key: 'paymentDocument',
       width: 140,
@@ -2095,13 +2101,6 @@ const ManagePayments: React.FC = () => {
       dataIndex: 'remitToAccountNumber',
       key: 'remitToAccountNumber',
       width: 180,
-    },
-    {
-      title: 'Check ID',
-      dataIndex: 'checkId',
-      key: 'checkId',
-      width: 150,
-      render: (val: number) => val ? <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#888' }}>{val}</span> : null,
     },
     {
       title: 'Fusion Sync',
