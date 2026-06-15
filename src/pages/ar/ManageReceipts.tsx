@@ -212,6 +212,9 @@ const ManageReceipts: React.FC = () => {
 
   const [businessUnits,   setBusinessUnits]   = useState<{ name: string; companyCode: string }[]>([]);
   const [receiptMethods,  setReceiptMethods]  = useState<{ id: number; name: string; receiptClass: string }[]>([]);
+  // All receipt method accounts pre-loaded on mount, keyed by receipt_method_id
+  const [allMethodAccounts,        setAllMethodAccounts]        = useState<Record<number, ReceiptMethodAccount[]>>({});
+  const [allMethodAccountsLoading, setAllMethodAccountsLoading] = useState(false);
   const [searchRows, setSearchRows]           = useState<ReceiptRow[]>([]);
   const [searching, setSearching]         = useState(false);
   const [tabs, setTabs]                   = useState<ReceiptTab[]>([]);
@@ -227,59 +230,37 @@ const ManageReceipts: React.FC = () => {
     Record<string, { loading: boolean; rows: AppRow[] }>
   >({});
 
-  // Receipt method bank accounts (per tab)
-  const [methodAccounts,        setMethodAccounts]        = useState<Record<string, ReceiptMethodAccount[]>>({});
-  const [methodAccountsLoading, setMethodAccountsLoading] = useState<Record<string, boolean>>({});
-
-  const fetchMethodAccounts = useCallback(async (tabKey: string, methodName: string) => {
-    const method = receiptMethods.find(m => m.name === methodName);
-    if (!method) return;
-    setMethodAccountsLoading(prev => ({ ...prev, [tabKey]: true }));
-    try {
-      const tab = tabs.find(t => t.key === tabKey);
-      const params = new URLSearchParams({ receipt_method_id: String(method.id) });
-      if (tab?.draft.businessUnit) params.set('business_unit_name', tab.draft.businessUnit);
-      const res  = await fetch(`${ORDS_RECEIPT_METHOD_ACCOUNTS}?${params}`, {
-        headers: { Accept: 'application/json' },
-      });
-      const data = await res.json();
-      const items: ReceiptMethodAccount[] = ((data.items ?? []) as any[]).map((r: any) => ({
-        id:                         r.ID                           ?? r.id                           ?? 0,
-        receiptMethodId:            r.RECEIPT_METHOD_ID            ?? r.receipt_method_id            ?? 0,
-        receiptMethodName:          r.RECEIPT_METHOD_NAME          ?? r.receipt_method_name          ?? '',
-        receiptClass:               r.RECEIPT_CLASS                ?? r.receipt_class                ?? '',
-        orgId:                      r.ORG_ID                       ?? r.org_id                       ?? 0,
-        businessUnitName:           r.BUSINESS_UNIT_NAME           ?? r.business_unit_name           ?? '',
-        company:                    r.COMPANY                      ?? r.company                      ?? '',
-        bankAccountId:              r.BANK_ACCOUNT_ID              ?? r.bank_account_id              ?? 0,
-        bankAccountName:            r.BANK_ACCOUNT_NAME            ?? r.bank_account_name            ?? '',
-        bankAccountNum:             r.BANK_ACCOUNT_NUM             ?? r.bank_account_num             ?? '',
-        bankName:                   r.BANK_NAME                    ?? r.bank_name                    ?? '',
-        bankBranchName:             r.BANK_BRANCH_NAME             ?? r.bank_branch_name             ?? '',
-        bankCurrency:               r.BANK_CURRENCY                ?? r.bank_currency                ?? '',
-        primaryFlag:                r.PRIMARY_FLAG                 ?? r.primary_flag                 ?? '',
-        startDate:                  (r.START_DATE                  ?? r.start_date                   ?? '').slice(0, 10),
-        endDate:                    (r.END_DATE                    ?? r.end_date                     ?? '').slice(0, 10),
-        cashCcid:                   r.CASH_CCID                    ?? r.cash_ccid                    ?? 0,
-        cashCombination:            r.CASH_COMBINATION             ?? r.cash_combination             ?? '',
-        unappliedCcid:              r.UNAPPLIED_CCID               ?? r.unapplied_ccid               ?? 0,
-        unappliedCombination:       r.UNAPPLIED_COMBINATION        ?? r.unapplied_combination        ?? '',
-        unidentifiedCcid:           r.UNIDENTIFIED_CCID            ?? r.unidentified_ccid            ?? 0,
-        unidentifiedCombination:    r.UNIDENTIFIED_COMBINATION     ?? r.unidentified_combination     ?? '',
-        onAccountCcid:              r.ON_ACCOUNT_CCID              ?? r.on_account_ccid              ?? 0,
-        onAccountCombination:       r.ON_ACCOUNT_COMBINATION       ?? r.on_account_combination       ?? '',
-        receiptClearingCcid:        r.RECEIPT_CLEARING_CCID        ?? r.receipt_clearing_ccid        ?? 0,
-        receiptClearingCombination: r.RECEIPT_CLEARING_COMBINATION ?? r.receipt_clearing_combination ?? '',
-        remittanceCcid:             r.REMITTANCE_CCID              ?? r.remittance_ccid              ?? 0,
-        remittanceCombination:      r.REMITTANCE_COMBINATION       ?? r.remittance_combination       ?? '',
-      }));
-      setMethodAccounts(prev => ({ ...prev, [tabKey]: items }));
-    } catch {
-      message.error('Failed to load receipt method bank accounts');
-    } finally {
-      setMethodAccountsLoading(prev => ({ ...prev, [tabKey]: false }));
-    }
-  }, [receiptMethods]);
+  // Helper to map raw API row → ReceiptMethodAccount
+  const mapAccount = (r: any): ReceiptMethodAccount => ({
+    id:                         r.ID                           ?? r.id                           ?? 0,
+    receiptMethodId:            r.RECEIPT_METHOD_ID            ?? r.receipt_method_id            ?? 0,
+    receiptMethodName:          r.RECEIPT_METHOD_NAME          ?? r.receipt_method_name          ?? '',
+    receiptClass:               r.RECEIPT_CLASS                ?? r.receipt_class                ?? '',
+    orgId:                      r.ORG_ID                       ?? r.org_id                       ?? 0,
+    businessUnitName:           r.BUSINESS_UNIT_NAME           ?? r.business_unit_name           ?? '',
+    company:                    r.COMPANY                      ?? r.company                      ?? '',
+    bankAccountId:              r.BANK_ACCOUNT_ID              ?? r.bank_account_id              ?? 0,
+    bankAccountName:            r.BANK_ACCOUNT_NAME            ?? r.bank_account_name            ?? '',
+    bankAccountNum:             r.BANK_ACCOUNT_NUM             ?? r.bank_account_num             ?? '',
+    bankName:                   r.BANK_NAME                    ?? r.bank_name                    ?? '',
+    bankBranchName:             r.BANK_BRANCH_NAME             ?? r.bank_branch_name             ?? '',
+    bankCurrency:               r.BANK_CURRENCY                ?? r.bank_currency                ?? '',
+    primaryFlag:                r.PRIMARY_FLAG                 ?? r.primary_flag                 ?? '',
+    startDate:                  (r.START_DATE                  ?? r.start_date                   ?? '').slice(0, 10),
+    endDate:                    (r.END_DATE                    ?? r.end_date                     ?? '').slice(0, 10),
+    cashCcid:                   r.CASH_CCID                    ?? r.cash_ccid                    ?? 0,
+    cashCombination:            r.CASH_COMBINATION             ?? r.cash_combination             ?? '',
+    unappliedCcid:              r.UNAPPLIED_CCID               ?? r.unapplied_ccid               ?? 0,
+    unappliedCombination:       r.UNAPPLIED_COMBINATION        ?? r.unapplied_combination        ?? '',
+    unidentifiedCcid:           r.UNIDENTIFIED_CCID            ?? r.unidentified_ccid            ?? 0,
+    unidentifiedCombination:    r.UNIDENTIFIED_COMBINATION     ?? r.unidentified_combination     ?? '',
+    onAccountCcid:              r.ON_ACCOUNT_CCID              ?? r.on_account_ccid              ?? 0,
+    onAccountCombination:       r.ON_ACCOUNT_COMBINATION       ?? r.on_account_combination       ?? '',
+    receiptClearingCcid:        r.RECEIPT_CLEARING_CCID        ?? r.receipt_clearing_ccid        ?? 0,
+    receiptClearingCombination: r.RECEIPT_CLEARING_COMBINATION ?? r.receipt_clearing_combination ?? '',
+    remittanceCcid:             r.REMITTANCE_CCID              ?? r.remittance_ccid              ?? 0,
+    remittanceCombination:      r.REMITTANCE_COMBINATION       ?? r.remittance_combination       ?? '',
+  });
 
   // Date preset
   const [datePreset, setDatePreset] = useState<string>('range');
@@ -380,8 +361,9 @@ const ManageReceipts: React.FC = () => {
     fetchApplications(activeKey, tab.draft.standardReceiptId);
   }, [activeKey, tabs, fetchApplications]);
 
-  // ── Load business units ───────────────────────────────────────────────────
+  // ── Load business units, receipt methods, and all method accounts ─────────
   useEffect(() => {
+    // Business units
     fetch(`${APEX_DB_CONFIG.baseUrl}/gl/businessunits`, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
       .then(data => {
@@ -393,6 +375,8 @@ const ManageReceipts: React.FC = () => {
         );
       })
       .catch(() => {});
+
+    // Receipt methods
     fetch(`${APEX_RECEIPT_METHODS}?limit=300`, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
       .then(data => {
@@ -403,6 +387,22 @@ const ManageReceipts: React.FC = () => {
         );
       })
       .catch(() => {});
+
+    // Pre-load ALL receipt method bank accounts — used to enrich the dropdown and Remittance Bank tab
+    setAllMethodAccountsLoading(true);
+    fetch(`${ORDS_RECEIPT_METHOD_ACCOUNTS}?limit=500`, { headers: { Accept: 'application/json' } })
+      .then(r => r.json())
+      .then(data => {
+        const grouped: Record<number, ReceiptMethodAccount[]> = {};
+        ((data.items ?? []) as any[]).forEach(r => {
+          const acct = mapAccount(r);
+          if (!grouped[acct.receiptMethodId]) grouped[acct.receiptMethodId] = [];
+          grouped[acct.receiptMethodId].push(acct);
+        });
+        setAllMethodAccounts(grouped);
+      })
+      .catch(() => {})
+      .finally(() => setAllMethodAccountsLoading(false));
   }, []);
 
   // ── Date preset logic ─────────────────────────────────────────────────────
@@ -1019,32 +1019,62 @@ const ManageReceipts: React.FC = () => {
                         , true)}
                         {field('Receipt Method',
                           <div>
-                            <Select size="small" style={{ width: '100%', fontSize: 12 }}
-                              value={draft.receiptMethod || undefined} allowClear disabled={isLocked}
-                              showSearch optionFilterProp="children"
+                            <Select
+                              size="small"
+                              style={{ width: '100%', fontSize: 12 }}
+                              value={draft.receiptMethod || undefined}
+                              allowClear
+                              disabled={isLocked}
+                              showSearch
+                              loading={allMethodAccountsLoading}
                               placeholder="Select method…"
-                              onChange={v => {
-                                updateDraft(tabKey, { receiptMethod: v ?? '' });
-                                if (v) fetchMethodAccounts(tabKey, v);
-                                else setMethodAccounts(prev => ({ ...prev, [tabKey]: [] }));
-                              }}>
-                              {receiptMethods.map(m => (
-                                <Option key={m.id} value={m.name}>
-                                  <div style={{ lineHeight: 1.4 }}>
-                                    <span style={{ fontWeight: 600 }}>{m.name}</span>
-                                    {m.receiptClass && (
-                                      <Text type="secondary" style={{ fontSize: 10, marginLeft: 6 }}>
-                                        {m.receiptClass}
-                                      </Text>
-                                    )}
-                                  </div>
-                                </Option>
-                              ))}
+                              filterOption={(input, opt) =>
+                                String(opt?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                              }
+                              onChange={v => updateDraft(tabKey, { receiptMethod: v ?? '' })}
+                              optionLabelProp="label"
+                            >
+                              {receiptMethods.map(m => {
+                                const accts = allMethodAccounts[m.id] ?? [];
+                                const primary = accts.find(a => a.primaryFlag === 'Y') ?? accts[0];
+                                return (
+                                  <Option key={m.id} value={m.name} label={m.name}>
+                                    <div style={{ lineHeight: 1.6, padding: '2px 0' }}>
+                                      {/* Row 1: name + class */}
+                                      <div>
+                                        <span style={{ fontWeight: 600, fontSize: 12 }}>{m.name}</span>
+                                        {m.receiptClass && (
+                                          <Tag color="default" style={{ fontSize: 10, marginLeft: 6, verticalAlign: 'middle' }}>
+                                            {m.receiptClass}
+                                          </Tag>
+                                        )}
+                                      </div>
+                                      {/* Row 2: bank account (primary) */}
+                                      {primary && (
+                                        <div style={{ fontSize: 11, color: '#595959', marginTop: 1 }}>
+                                          <BankOutlined style={{ marginRight: 4, color: REDWOOD.info }} />
+                                          {primary.bankAccountName || primary.bankName || ''}
+                                          {primary.bankAccountNum && (
+                                            <span style={{ fontFamily: 'monospace', marginLeft: 6, color: REDWOOD.info }}>
+                                              {primary.bankAccountNum}
+                                            </span>
+                                          )}
+                                          {primary.bankCurrency && (
+                                            <Tag color="blue" style={{ fontSize: 10, marginLeft: 6, verticalAlign: 'middle' }}>
+                                              {primary.bankCurrency}
+                                            </Tag>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </Option>
+                                );
+                              })}
                             </Select>
-                            {/* After method is selected, show loaded bank account numbers */}
+                            {/* Selected: show class + all bank accounts as tags */}
                             {draft.receiptMethod && (() => {
-                              const m    = receiptMethods.find(x => x.name === draft.receiptMethod);
-                              const accts = methodAccounts[tabKey] ?? [];
+                              const m     = receiptMethods.find(x => x.name === draft.receiptMethod);
+                              const accts = allMethodAccounts[m?.id ?? -1] ?? [];
                               return (
                                 <div style={{ marginTop: 4 }}>
                                   {m?.receiptClass && (
@@ -1052,9 +1082,7 @@ const ManageReceipts: React.FC = () => {
                                       Class: <strong>{m.receiptClass}</strong>
                                     </Text>
                                   )}
-                                  {methodAccountsLoading[tabKey] ? (
-                                    <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>Loading accounts…</Text>
-                                  ) : accts.length > 0 && (
+                                  {accts.length > 0 && (
                                     <div style={{ marginTop: 3, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                                       {accts.map(a => (
                                         <Tag key={a.id} color="blue" icon={<BankOutlined />}
@@ -1159,15 +1187,20 @@ const ManageReceipts: React.FC = () => {
                       </Space>
                     </Divider>
 
-                    <Spin spinning={methodAccountsLoading[tabKey] || false} tip="Loading bank accounts…">
+                    {(() => {
+                      const m          = receiptMethods.find(x => x.name === draft.receiptMethod);
+                      const acctList   = allMethodAccounts[m?.id ?? -1] ?? [];
+                      const isLoading  = allMethodAccountsLoading;
+                      return (
+                      <Spin spinning={isLoading} tip="Loading bank accounts…">
                       {!draft.receiptMethod ? (
                         <Alert type="info" showIcon style={{ fontSize: 12 }}
                           message="Select a Receipt Method in the General Information tab to view the associated GL accounts." />
-                      ) : (methodAccounts[tabKey] ?? []).length === 0 && !methodAccountsLoading[tabKey] ? (
+                      ) : acctList.length === 0 && !isLoading ? (
                         <Alert type="warning" showIcon style={{ fontSize: 12 }}
                           message={`No bank accounts found for receipt method "${draft.receiptMethod}".`} />
                       ) : (
-                        (methodAccounts[tabKey] ?? []).map((acct, idx) => (
+                        acctList.map((acct, idx) => (
                           <div key={acct.id} style={{
                             border: `1px solid ${REDWOOD.border}`, borderRadius: 8,
                             marginBottom: 12, overflow: 'hidden',
@@ -1240,7 +1273,9 @@ const ManageReceipts: React.FC = () => {
                           </div>
                         ))
                       )}
-                    </Spin>
+                      </Spin>
+                      );
+                    })()}
                   </div>
                 ),
               },
