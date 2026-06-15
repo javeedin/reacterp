@@ -817,7 +817,7 @@ const TrialBalance: React.FC = () => {
 
       // Auto-fetch RE closing from previous fiscal year → replace 3112100 ytd_opening
       try {
-        const prevYear = record.period_year - 1;
+        const prevYear = record.period_year;
         const reUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceStandardRE}`
           + `?ledger_name=${encodeURIComponent(record.ledger_name)}`
           + `&period_year=${prevYear}`
@@ -869,12 +869,12 @@ const TrialBalance: React.FC = () => {
   const fetchREForTab = useCallback(async (tab: TabData) => {
     setReFetching(true);
     try {
-      const fiscalYear = periods.find(p => tab.periodName.includes(p.period_name_id))?.period_year
+      const fiscalYear = tab.periodYear
+        ?? periods.find(p => tab.periodName.includes(p.period_name_id))?.period_year
         ?? new Date().getFullYear();
-      const prevYear = fiscalYear - 1;
       const reUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceStandardRE}`
         + `?ledger_name=${encodeURIComponent(tab.ledgerName)}`
-        + `&period_year=${prevYear}`
+        + `&period_year=${fiscalYear}`
         + `&limit=100`;
       const reRes = await fetch(reUrl, { headers: { Accept: 'application/json' } });
       if (!reRes.ok) throw new Error(`HTTP ${reRes.status}`);
@@ -5929,7 +5929,7 @@ const TrialBalance: React.FC = () => {
           {tab.periodYear && (
             <Col>
               <Tag color="purple" style={{ fontSize: 12, padding: '2px 8px', fontWeight: 600 }}>
-                FY {tab.periodYear} → RE fetches FY {tab.periodYear - 1}
+                FY {tab.periodYear} → RE fetches FY {tab.periodYear}
               </Tag>
             </Col>
           )}
