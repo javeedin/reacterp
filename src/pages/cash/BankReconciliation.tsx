@@ -614,6 +614,15 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const [progressSteps, setProgressSteps] = useState<ProgressStep[]>([]);
   const [progressDone,  setProgressDone]  = useState(false);
 
+  // ── Unreconcile confirmation modal ────────────────────────────────────────
+  interface UnreconPlan {
+    title: string;
+    calls: { label: string; method: string; url: string; body: object }[];
+    onConfirm: () => Promise<void>;
+  }
+  const [unreconPlan,    setUnreconPlan]    = useState<UnreconPlan | null>(null);
+  const [unreconRunning, setUnreconRunning] = useState(false);
+
   // Resize drag handlers
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
@@ -2583,6 +2592,55 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   return (
     <>
       {contextHolder}
+
+      {/* ── Unreconcile Confirmation Modal ─────────────────────────────── */}
+      <Modal
+        open={!!unreconPlan}
+        title={<span style={{ color: '#cf1322' }}><DisconnectOutlined /> {unreconPlan?.title}</span>}
+        onCancel={() => !unreconRunning && setUnreconPlan(null)}
+        footer={[
+          <Button key="cancel" onClick={() => setUnreconPlan(null)} disabled={unreconRunning}>Cancel</Button>,
+          <Button
+            key="confirm"
+            danger
+            type="primary"
+            loading={unreconRunning}
+            icon={<DisconnectOutlined />}
+            onClick={async () => {
+              if (!unreconPlan) return;
+              setUnreconRunning(true);
+              try {
+                await unreconPlan.onConfirm();
+                setUnreconPlan(null);
+              } catch (e: any) {
+                msgApi.error(e?.message ?? 'Unreconcile failed');
+              } finally {
+                setUnreconRunning(false);
+              }
+            }}
+          >
+            Confirm Unreconcile
+          </Button>,
+        ]}
+        width={680}
+      >
+        <p style={{ marginBottom: 12, color: '#595959' }}>
+          The following API calls will be executed to reverse this reconciliation:
+        </p>
+        {unreconPlan?.calls.map((c, idx) => (
+          <div key={idx} style={{ marginBottom: 12, background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 6, padding: '10px 14px' }}>
+            <div style={{ marginBottom: 6 }}>
+              <Tag color={c.method === 'POST' ? 'blue' : 'orange'} style={{ fontFamily: 'monospace', fontWeight: 600 }}>{c.method}</Tag>
+              <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#1677ff', wordBreak: 'break-all' }}>{c.url}</span>
+            </div>
+            <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#595959', background: '#f5f5f5', borderRadius: 4, padding: '6px 10px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+              {JSON.stringify(c.body, null, 2)}
+            </div>
+            <div style={{ fontSize: 11, color: '#8c8c8c', marginTop: 4 }}>Step {idx + 1}: {c.label}</div>
+          </div>
+        ))}
+      </Modal>
+
       <SearchPanel
         bankAccounts={bankAccounts}
         businessUnits={businessUnits}
@@ -4173,114 +4231,117 @@ const ReconciledTab: React.FC<ReconciledTabProps> = ({ bankAccounts, businessUni
     setReconLines([]);
   }, []);
 
-  const handleUnreconcile = useCallback(async (line: StmtLine) => {
-    try {
-      // Step 1: unreconcile the statement line
-      const res  = await fetch(
-        `${APEX_BASE}/cash/bankstatements/${line.statementId}/unreconcile`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lineId: line.lineId }) }
-      );
-      const data = await parseApexJson(res);
-      if (data.status !== 'success') {
-        msgApi.error(data.message ?? 'Failed to unreconcile statement line');
-        return;
-      }
-
-      // Step 2: reverse the linked system transaction reconciliation
-      if (line.reconTxnId) {
-        const linkedTxn = sysTxns.find(t => t.txnId === line.reconTxnId)
-          ?? { txnId: line.reconTxnId, txnNumber: line.reconTxnNumber ?? '', source: line.reconTxnType ?? '', jeHeaderId: undefined, jeLineNumber: undefined } as SysTxn;
-        const isBankTransfer = linkedTxn.source === 'BANK_TRANSFER' || linkedTxn.source === 'GL_BANK_TRANSFER';
-        const isGlJournal    = linkedTxn.source === 'GL_JOURNAL';
-        const pathId         = isBankTransfer ? linkedTxn.txnNumber : isGlJournal ? linkedTxn.jeHeaderId : linkedTxn.txnId;
-        try {
-          await fetch(`${APEX_BASE}/cash/reconciliation/systxns/${pathId}`, {
-            method:  'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({
-              source:         linkedTxn.source,
-              reconciledFlag: 'N',
-              reconciledDate: null,
-              reconciledBy:   null,
-              statementId:    null,
-              stmtLineId:     null,
-              ...(isBankTransfer ? { transferId: linkedTxn.txnNumber, jeHeaderId: linkedTxn.jeHeaderId, jeLineNumber: linkedTxn.jeLineNumber } : {}),
-              ...(isGlJournal    ? { jeHeaderId: linkedTxn.jeHeaderId, jeLineNumber: linkedTxn.jeLineNumber } : {}),
-            }),
-          });
-        } catch {
-          console.warn('Could not reverse system transaction reconciliation for txnId', linkedTxn.txnId);
-        }
-      }
-
-      // Step 3: if linked to a CM external transaction, reverse its reconciliation
-      if (line.externalTxnId) {
-        try {
-          await fetch(`${EXT_TXN_URL}/${line.externalTxnId}`, {
-            method:  'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ status: 'UNR', reconciledFlag: 'N', reconciledDate: null, statementId: null, stmtLineId: null }),
-          });
-        } catch {
-          console.warn('Could not reverse external transaction reconciliation for ID', line.externalTxnId);
-        }
-      }
-
-      msgApi.success('Line unreconciled successfully');
-      setReconLines((prev) => prev.filter((l) => l.lineId !== line.lineId));
-      setSysTxns((prev) => prev.map(t => t.txnId === line.reconTxnId ? { ...t, reconciledFlag: 'N', reconStmtLineId: undefined, reconStatementId: undefined } : t));
-    } catch (err) {
-      msgApi.error('Network error during unreconcile');
-      console.error(err);
-    }
-  }, [msgApi, sysTxns]);
-
-  const handleSysTxnUnreconcile = useCallback(async (txn: SysTxn) => {
+  const buildSysTxnUnreconBody = (txn: SysTxn) => {
     const isBankTransfer = txn.source === 'BANK_TRANSFER' || txn.source === 'GL_BANK_TRANSFER';
     const isGlJournal    = txn.source === 'GL_JOURNAL';
     const pathId         = isBankTransfer ? txn.txnNumber : isGlJournal ? txn.jeHeaderId : txn.txnId;
-    try {
-      // Step 1: unreconcile the system transaction
-      const res  = await fetch(`${APEX_BASE}/cash/reconciliation/systxns/${pathId}`, {
-        method:  'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
-          source:         txn.source,
-          reconciledFlag: 'N',
-          reconciledDate: null,
-          reconciledBy:   null,
-          statementId:    null,
-          stmtLineId:     null,
-          ...(isBankTransfer ? { transferId: txn.txnNumber, jeHeaderId: txn.jeHeaderId, jeLineNumber: txn.jeLineNumber } : {}),
-          ...(isGlJournal    ? { jeHeaderId: txn.jeHeaderId, jeLineNumber: txn.jeLineNumber } : {}),
-        }),
-      });
-      const data = await parseApexJson(res);
-      if (data.status !== 'success') {
-        msgApi.error(data.message ?? 'Failed to unreconcile transaction');
-        return;
-      }
+    const body = {
+      source:         txn.source,
+      reconciledFlag: 'N',
+      reconciledDate: null,
+      reconciledBy:   null,
+      statementId:    null,
+      stmtLineId:     null,
+      ...(isBankTransfer ? { transferId: txn.txnNumber, jeHeaderId: txn.jeHeaderId, jeLineNumber: txn.jeLineNumber } : {}),
+      ...(isGlJournal    ? { jeHeaderId: txn.jeHeaderId, jeLineNumber: txn.jeLineNumber } : {}),
+    };
+    return { url: `${APEX_BASE}/cash/reconciliation/systxns/${pathId}`, body };
+  };
 
-      // Step 2: unreconcile the linked statement line
-      if (txn.reconStatementId && txn.reconStmtLineId) {
-        try {
-          await fetch(`${APEX_BASE}/cash/bankstatements/${txn.reconStatementId}/unreconcile`, {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ lineId: txn.reconStmtLineId }),
-          });
-        } catch {
-          console.warn('Could not reverse statement line reconciliation for lineId', txn.reconStmtLineId);
-        }
-      }
+  const handleUnreconcile = useCallback((line: StmtLine) => {
+    const isRecon = (line.reconStatus || '').toUpperCase() === 'RECONCILED';
+    if (!isRecon) return;
 
-      msgApi.success('Transaction unreconciled successfully');
-      setSysTxns((prev) => prev.map(t => t.txnId === txn.txnId ? { ...t, reconciledFlag: 'N', reconStmtLineId: undefined, reconStatementId: undefined } : t));
-      setStmtLines((prev) => prev.map(l => l.lineId === txn.reconStmtLineId ? { ...l, reconStatus: 'UNRECONCILED', reconTxnNumber: undefined, reconTxnId: undefined } : l));
-    } catch (err) {
-      msgApi.error('Network error during unreconcile');
-      console.error(err);
+    const calls: UnreconPlan['calls'] = [
+      {
+        label:  'Unreconcile Statement Line',
+        method: 'POST',
+        url:    `${APEX_BASE}/cash/bankstatements/${line.statementId}/unreconcile`,
+        body:   { lineId: line.lineId },
+      },
+    ];
+
+    if (line.reconTxnId) {
+      const linkedTxn = sysTxns.find(t => t.txnId === line.reconTxnId)
+        ?? { txnId: line.reconTxnId, txnNumber: line.reconTxnNumber ?? '', source: line.reconTxnType ?? '', jeHeaderId: undefined, jeLineNumber: undefined } as SysTxn;
+      const { url, body } = buildSysTxnUnreconBody(linkedTxn);
+      calls.push({ label: `Unreconcile System Txn (${linkedTxn.source})`, method: 'PUT', url, body });
     }
+
+    if (line.externalTxnId) {
+      calls.push({
+        label:  'Reverse External Transaction',
+        method: 'PUT',
+        url:    `${EXT_TXN_URL}/${line.externalTxnId}`,
+        body:   { status: 'UNR', reconciledFlag: 'N', reconciledDate: null, statementId: null, stmtLineId: null },
+      });
+    }
+
+    setUnreconPlan({
+      title: `Unreconcile Statement Line #${line.lineId}`,
+      calls,
+      onConfirm: async () => {
+        // Call 1: statement line
+        const r1   = await fetch(calls[0].url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(calls[0].body) });
+        const d1   = await parseApexJson(r1);
+        if (d1.status !== 'success') throw new Error(d1.message ?? 'Failed to unreconcile statement line');
+
+        // Call 2: system transaction (if linked)
+        if (line.reconTxnId && calls[1]) {
+          try { await fetch(calls[1].url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(calls[1].body) }); }
+          catch { console.warn('Could not reverse system txn for', line.reconTxnId); }
+        }
+
+        // Call 3: external transaction (if linked)
+        if (line.externalTxnId) {
+          const extCall = calls.find(c => c.url.includes('externaltransactions'));
+          if (extCall) try { await fetch(extCall.url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(extCall.body) }); }
+          catch { console.warn('Could not reverse external txn for', line.externalTxnId); }
+        }
+
+        msgApi.success('Line unreconciled successfully');
+        setReconLines(prev => prev.filter(l => l.lineId !== line.lineId));
+        setStmtLines(prev => prev.map(l => l.lineId === line.lineId ? { ...l, reconStatus: 'UNRECONCILED', reconTxnNumber: undefined, reconTxnId: undefined } : l));
+        setSysTxns(prev => prev.map(t => t.txnId === line.reconTxnId ? { ...t, reconciledFlag: 'N', reconStmtLineId: undefined, reconStatementId: undefined } : t));
+      },
+    });
+  }, [msgApi, sysTxns]);
+
+  const handleSysTxnUnreconcile = useCallback((txn: SysTxn) => {
+    const { url, body } = buildSysTxnUnreconBody(txn);
+    const calls: UnreconPlan['calls'] = [
+      { label: `Unreconcile System Txn (${txn.source})`, method: 'PUT', url, body },
+    ];
+
+    if (txn.reconStatementId && txn.reconStmtLineId) {
+      calls.push({
+        label:  'Unreconcile Statement Line',
+        method: 'POST',
+        url:    `${APEX_BASE}/cash/bankstatements/${txn.reconStatementId}/unreconcile`,
+        body:   { lineId: txn.reconStmtLineId },
+      });
+    }
+
+    setUnreconPlan({
+      title: `Unreconcile Transaction #${txn.txnNumber}`,
+      calls,
+      onConfirm: async () => {
+        // Call 1: system transaction
+        const r1 = await fetch(calls[0].url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(calls[0].body) });
+        const d1 = await parseApexJson(r1);
+        if (d1.status !== 'success') throw new Error(d1.message ?? 'Failed to unreconcile transaction');
+
+        // Call 2: statement line (if linked)
+        if (txn.reconStatementId && txn.reconStmtLineId && calls[1]) {
+          try { await fetch(calls[1].url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(calls[1].body) }); }
+          catch { console.warn('Could not reverse stmt line for', txn.reconStmtLineId); }
+        }
+
+        msgApi.success('Transaction unreconciled successfully');
+        setSysTxns(prev => prev.map(t => t.txnId === txn.txnId ? { ...t, reconciledFlag: 'N', reconStmtLineId: undefined, reconStatementId: undefined } : t));
+        setStmtLines(prev => prev.map(l => l.lineId === txn.reconStmtLineId ? { ...l, reconStatus: 'UNRECONCILED', reconTxnNumber: undefined, reconTxnId: undefined } : l));
+      },
+    });
   }, [msgApi]);
 
   const columns: ColumnsType<StmtLine> = [
@@ -4374,7 +4435,7 @@ const ReconciledTab: React.FC<ReconciledTabProps> = ({ bankAccounts, businessUni
       key: 'actions',
       width: 60,
       render: (_: unknown, record: StmtLine) =>
-        record.reconStatus === 'RECONCILED' ? (
+        (record.reconStatus || '').toUpperCase() === 'RECONCILED' ? (
           <Tooltip title="Unreconcile this line">
             <Button
               size="small"
