@@ -211,10 +211,46 @@ const ManageReceipts: React.FC = () => {
   const [searchForm] = Form.useForm();
 
   const [businessUnits,   setBusinessUnits]   = useState<{ name: string; companyCode: string }[]>([]);
+  // Per-tab receipt method accounts, fetched when BU is selected
   const [receiptMethods,  setReceiptMethods]  = useState<{ id: number; name: string; receiptClass: string }[]>([]);
-  // All receipt method accounts pre-loaded on mount, keyed by receipt_method_id
   const [allMethodAccounts,        setAllMethodAccounts]        = useState<Record<number, ReceiptMethodAccount[]>>({});
-  const [allMethodAccountsLoading, setAllMethodAccountsLoading] = useState(false);
+  const [allMethodAccountsLoading, setAllMethodAccountsLoading] = useState<Record<string, boolean>>({});
+
+  const fetchMethodAccountsByBU = useCallback(async (tabKey: string, businessUnit: string) => {
+    if (!businessUnit) return;
+    setAllMethodAccountsLoading(prev => ({ ...prev, [tabKey]: true }));
+    try {
+      const params = new URLSearchParams({ limit: '500', business_unit_name: businessUnit });
+      const res  = await fetch(`${ORDS_RECEIPT_METHOD_ACCOUNTS}?${params}`, { headers: { Accept: 'application/json' } });
+      const data = await res.json();
+      const items = ((data.items ?? []) as any[]).map(mapAccount);
+
+      // Build unique receipt methods list for this tab's dropdown
+      const methodMap: Record<number, { id: number; name: string; receiptClass: string }> = {};
+      items.forEach(a => {
+        if (!methodMap[a.receiptMethodId]) {
+          methodMap[a.receiptMethodId] = {
+            id:           a.receiptMethodId,
+            name:         a.receiptMethodName || `Method ${a.receiptMethodId}`,
+            receiptClass: a.receiptClass,
+          };
+        }
+      });
+      // Store per-tab: use tabKey prefix in allMethodAccounts key space
+      const grouped: Record<number, ReceiptMethodAccount[]> = {};
+      items.forEach(a => {
+        if (!grouped[a.receiptMethodId]) grouped[a.receiptMethodId] = [];
+        grouped[a.receiptMethodId].push(a);
+      });
+      // Update global maps with this tab's data (overwrite — BU-filtered is more specific)
+      setReceiptMethods(Object.values(methodMap).sort((a, b) => a.name.localeCompare(b.name)));
+      setAllMethodAccounts(grouped);
+    } catch {
+      message.error('Failed to load receipt methods for this Business Unit');
+    } finally {
+      setAllMethodAccountsLoading(prev => ({ ...prev, [tabKey]: false }));
+    }
+  }, []);
   const [searchRows, setSearchRows]           = useState<ReceiptRow[]>([]);
   const [searching, setSearching]         = useState(false);
   const [tabs, setTabs]                   = useState<ReceiptTab[]>([]);
@@ -376,36 +412,7 @@ const ManageReceipts: React.FC = () => {
       })
       .catch(() => {});
 
-    // ORDS only — single source for receipt methods, bank accounts, GL combinations
-    setAllMethodAccountsLoading(true);
-    fetch(`${ORDS_RECEIPT_METHOD_ACCOUNTS}?limit=500`, { headers: { Accept: 'application/json' } })
-      .then(r => r.json())
-      .then(data => {
-        const items = ((data.items ?? []) as any[]).map(mapAccount);
-
-        // Build unique receipt methods list for dropdown
-        const methodMap: Record<number, { id: number; name: string; receiptClass: string }> = {};
-        items.forEach(a => {
-          if (!methodMap[a.receiptMethodId]) {
-            methodMap[a.receiptMethodId] = {
-              id:           a.receiptMethodId,
-              name:         a.receiptMethodName || `Method ${a.receiptMethodId}`,
-              receiptClass: a.receiptClass,
-            };
-          }
-        });
-        setReceiptMethods(Object.values(methodMap).sort((a, b) => a.name.localeCompare(b.name)));
-
-        // Group accounts by receipt_method_id for Remittance Bank tab
-        const grouped: Record<number, ReceiptMethodAccount[]> = {};
-        items.forEach(a => {
-          if (!grouped[a.receiptMethodId]) grouped[a.receiptMethodId] = [];
-          grouped[a.receiptMethodId].push(a);
-        });
-        setAllMethodAccounts(grouped);
-      })
-      .catch(() => message.error('Failed to load receipt methods'))
-      .finally(() => setAllMethodAccountsLoading(false));
+    // Receipt methods are loaded per-tab when Business Unit is selected
   }, []);
 
   // ── Date preset logic ─────────────────────────────────────────────────────
@@ -857,7 +864,12 @@ const ManageReceipts: React.FC = () => {
           <Select size="small" style={{ width: '100%', fontSize: 12 }}
             value={draft.businessUnit || undefined} allowClear disabled={isLocked} showSearch
             filterOption={(input, opt) => String(opt?.children ?? '').toLowerCase().includes(input.toLowerCase())}
-            onChange={v => updateDraft(tabKey, { businessUnit: v ?? '' })}>
+            onChange={v => {
+              updateDraft(tabKey, { businessUnit: v ?? '', receiptMethod: '' });
+              setReceiptMethods([]);
+              setAllMethodAccounts({});
+              if (v) fetchMethodAccountsByBU(tabKey, v);
+            }}>
             {businessUnits.map(bu => (
               <Option key={bu.name} value={bu.name}>
                 {bu.companyCode ? `${bu.name} — ${bu.companyCode}` : bu.name}
@@ -1025,7 +1037,7 @@ const ManageReceipts: React.FC = () => {
                             {/* API debug icon — shows exactly what URL populates this dropdown */}
                             <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
                               <Text type="secondary" style={{ fontSize: 10, flex: 1 }}>
-                                {allMethodAccountsLoading
+                                {allMethodAccountsLoading[tabKey]
                                   ? 'Loading…'
                                   : `${receiptMethods.length} methods loaded`}
                               </Text>
@@ -1096,7 +1108,7 @@ const ManageReceipts: React.FC = () => {
                               allowClear
                               disabled={isLocked}
                               showSearch
-                              loading={allMethodAccountsLoading}
+                              loading={allMethodAccountsLoading[tabKey]}
                               placeholder="Select method…"
                               filterOption={(input, opt) =>
                                 String(opt?.label ?? '').toLowerCase().includes(input.trim().toLowerCase())
@@ -1268,7 +1280,7 @@ const ManageReceipts: React.FC = () => {
                     {(() => {
                       const m          = receiptMethods.find(x => x.name === draft.receiptMethod);
                       const acctList   = allMethodAccounts[m?.id ?? -1] ?? [];
-                      const isLoading  = allMethodAccountsLoading;
+                      const isLoading  = allMethodAccountsLoading[tabKey];
                       return (
                       <Spin spinning={isLoading} tip="Loading bank accounts…">
                       {!draft.receiptMethod ? (
