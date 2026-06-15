@@ -73,6 +73,7 @@ interface ReceiptDraft {
   receiptType:                    string;
   businessUnit:                   string;
   receiptMethod:                  string;
+  selectedBankAccountId:          number | null;
   receiptDate:                    string;
   accountingDate:                 string;
   maturityDate:                   string;
@@ -165,7 +166,7 @@ function blankDraft(): ReceiptDraft {
   return {
     standardReceiptId: 0,
     receiptNumber: '', documentNumber: null, receiptType: '',
-    businessUnit: '', receiptMethod: '',
+    businessUnit: '', receiptMethod: '', selectedBankAccountId: null,
     receiptDate: today(), accountingDate: today(), maturityDate: today(),
     amount: null, unappliedAmount: null, accountedAmount: null,
     currency: 'AED', conversionRateType: '', conversionRate: null,
@@ -177,6 +178,12 @@ function blankDraft(): ReceiptDraft {
     receivablesSpecialist: '', comments: '', structuredPaymentReference: '',
     receiptBatchName: '',
   };
+}
+
+function maskAcct(num: string) {
+  if (!num) return '';
+  const s = num.replace(/[^0-9A-Za-z]/g, '');
+  return s.length <= 4 ? num : 'X'.repeat(s.length - 4) + s.slice(-4);
 }
 
 function fmt(n: number) {
@@ -211,9 +218,9 @@ const ManageReceipts: React.FC = () => {
   const [searchForm] = Form.useForm();
 
   const [businessUnits,   setBusinessUnits]   = useState<{ name: string; companyCode: string }[]>([]);
-  // Per-tab receipt method accounts, fetched when BU is selected
-  const [receiptMethods,  setReceiptMethods]  = useState<{ id: number; name: string; receiptClass: string }[]>([]);
-  const [allMethodAccounts,        setAllMethodAccounts]        = useState<Record<number, ReceiptMethodAccount[]>>({});
+  // Flat list of all receipt method+bank account rows for the current tab's BU
+  const [receiptMethods,           setReceiptMethods]           = useState<{ id: number; name: string; receiptClass: string }[]>([]);
+  const [allMethodAccounts,        setAllMethodAccounts]        = useState<ReceiptMethodAccount[]>([]);
   const [allMethodAccountsLoading, setAllMethodAccountsLoading] = useState<Record<string, boolean>>({});
 
   const fetchMethodAccountsByBU = useCallback(async (tabKey: string, businessUnit: string) => {
@@ -236,15 +243,8 @@ const ManageReceipts: React.FC = () => {
           };
         }
       });
-      // Store per-tab: use tabKey prefix in allMethodAccounts key space
-      const grouped: Record<number, ReceiptMethodAccount[]> = {};
-      items.forEach(a => {
-        if (!grouped[a.receiptMethodId]) grouped[a.receiptMethodId] = [];
-        grouped[a.receiptMethodId].push(a);
-      });
-      // Update global maps with this tab's data (overwrite — BU-filtered is more specific)
       setReceiptMethods(Object.values(methodMap).sort((a, b) => a.name.localeCompare(b.name)));
-      setAllMethodAccounts(grouped);
+      setAllMethodAccounts(items);
     } catch {
       message.error('Failed to load receipt methods for this Business Unit');
     } finally {
@@ -865,9 +865,9 @@ const ManageReceipts: React.FC = () => {
             value={draft.businessUnit || undefined} allowClear disabled={isLocked} showSearch
             filterOption={(input, opt) => String(opt?.children ?? '').toLowerCase().includes(input.toLowerCase())}
             onChange={v => {
-              updateDraft(tabKey, { businessUnit: v ?? '', receiptMethod: '' });
+              updateDraft(tabKey, { businessUnit: v ?? '', receiptMethod: '', selectedBankAccountId: null });
               setReceiptMethods([]);
-              setAllMethodAccounts({});
+              setAllMethodAccounts([]);
               if (v) fetchMethodAccountsByBU(tabKey, v);
             }}>
             {businessUnits.map(bu => (
@@ -1104,47 +1104,41 @@ const ManageReceipts: React.FC = () => {
                             <Select
                               size="small"
                               style={{ width: '100%', fontSize: 12 }}
-                              value={draft.receiptMethod || undefined}
+                              value={draft.selectedBankAccountId ?? undefined}
                               allowClear
                               disabled={isLocked}
                               showSearch
                               loading={allMethodAccountsLoading[tabKey]}
                               placeholder={allMethodAccountsLoading[tabKey] ? 'Loading…' : draft.businessUnit ? 'Select method…' : 'Select Business Unit first'}
                               optionLabelProp="label"
+                              dropdownStyle={{ minWidth: 620 }}
                               filterOption={(input, opt) =>
                                 String(opt?.searchtext ?? '').toLowerCase().includes(input.trim().toLowerCase())
                               }
-                              onChange={v => updateDraft(tabKey, { receiptMethod: v ?? '' })}
+                              onChange={(v) => {
+                                const acct = allMethodAccounts.find(a => a.id === v);
+                                updateDraft(tabKey, {
+                                  receiptMethod:        acct?.receiptMethodName ?? '',
+                                  selectedBankAccountId: v ?? null,
+                                  remittanceBankName:   acct?.bankName          ?? '',
+                                  remittanceBankAccountNumber: acct?.bankAccountNum ?? '',
+                                });
+                              }}
                             >
-                              {receiptMethods.map(m => {
-                                const accts   = allMethodAccounts[m.id] ?? [];
-                                const primary = accts.find(a => a.primaryFlag === 'Y') ?? accts[0];
-                                const searchtext = [
-                                  m.name, m.receiptClass,
-                                  ...accts.map(a => a.bankName),
-                                  ...accts.map(a => a.bankAccountName),
-                                  ...accts.map(a => a.bankAccountNum),
-                                ].filter(Boolean).join(' ');
+                              {allMethodAccounts.map(a => {
+                                const masked     = maskAcct(a.bankAccountNum);
+                                const searchtext = [a.receiptMethodName, a.receiptClass, a.bankName, a.bankAccountName, a.bankAccountNum].filter(Boolean).join(' ');
+                                const label      = `${a.receiptMethodName} — ${a.bankAccountName || a.bankName}`;
                                 return (
-                                  <Option key={m.id} value={m.name} label={m.name} searchtext={searchtext}>
-                                    <div style={{ lineHeight: 1.5, padding: '2px 0' }}>
-                                      <div style={{ fontWeight: 600, fontSize: 12 }}>
-                                        {m.name}
-                                        {m.receiptClass && (
-                                          <Tag color="default" style={{ fontSize: 10, marginLeft: 6 }}>{m.receiptClass}</Tag>
-                                        )}
-                                      </div>
-                                      {primary && (
-                                        <div style={{ fontSize: 11, color: '#595959' }}>
-                                          <BankOutlined style={{ marginRight: 4, color: REDWOOD.info }} />
-                                          {primary.bankName || ''}
-                                          {primary.bankAccountNum && (
-                                            <span style={{ fontFamily: 'monospace', marginLeft: 6, color: REDWOOD.info }}>
-                                              {primary.bankAccountNum}
-                                            </span>
-                                          )}
-                                        </div>
-                                      )}
+                                  <Option key={a.id} value={a.id} label={label} searchtext={searchtext}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 0, fontSize: 12, padding: '2px 0' }}>
+                                      <span style={{ fontWeight: 600, minWidth: 120, flexShrink: 0 }}>{a.receiptMethodName}</span>
+                                      <span style={{ flex: 1, color: '#595959', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginLeft: 12 }}>
+                                        {a.bankAccountName || a.bankName || '—'}
+                                      </span>
+                                      <span style={{ fontFamily: 'monospace', color: REDWOOD.info, marginLeft: 12, flexShrink: 0, fontSize: 11 }}>
+                                        {masked}
+                                      </span>
                                     </div>
                                   </Option>
                                 );
@@ -1153,7 +1147,7 @@ const ManageReceipts: React.FC = () => {
                             {/* Selected: show class + all bank accounts as tags */}
                             {draft.receiptMethod && (() => {
                               const m     = receiptMethods.find(x => x.name === draft.receiptMethod);
-                              const accts = allMethodAccounts[m?.id ?? -1] ?? [];
+                              const accts = allMethodAccounts.filter(a => a.receiptMethodName === draft.receiptMethod);
                               return (
                                 <div style={{ marginTop: 4 }}>
                                   {m?.receiptClass && (
@@ -1268,7 +1262,9 @@ const ManageReceipts: React.FC = () => {
 
                     {(() => {
                       const m          = receiptMethods.find(x => x.name === draft.receiptMethod);
-                      const acctList   = allMethodAccounts[m?.id ?? -1] ?? [];
+                      const acctList   = draft.selectedBankAccountId
+                        ? allMethodAccounts.filter(a => a.id === draft.selectedBankAccountId)
+                        : allMethodAccounts.filter(a => a.receiptMethodName === draft.receiptMethod);
                       const isLoading  = allMethodAccountsLoading[tabKey];
                       return (
                       <Spin spinning={isLoading} tip="Loading bank accounts…">
