@@ -897,6 +897,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           createdBy:              'SYSTEM',
         },
         lines: lines.map((l) => {
+          const isAedLine = (l.currencyCode || '').toUpperCase() === 'AED';
           const rate = (payment.conversionRate && payment.conversionRate > 0) ? payment.conversionRate : 1;
           // Use enteredDr/enteredCr directly from SLA line; fall back to lineType + amount
           const rawEDr = l.enteredDr  != null ? Number(l.enteredDr)  : (l.lineType === 'DR' ? (Number(l.amount) || 0) : 0);
