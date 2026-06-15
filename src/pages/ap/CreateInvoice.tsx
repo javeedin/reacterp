@@ -2324,7 +2324,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               endDate: formatDateStr(item.multiperiod_end_date) || '',
               accrualAccount: item.multiperiod_accrual_account || item.accrual_account || '',
               // Only carry taxAmount if the line actually has a tax classification
-              taxAmount: taxClass ? (item.tax_amount || 0) : 0,
+              taxAmount: taxClass ? (item.tax_control_amount || item.tax_amount || 0) : 0,
             };
           });
           setLines(mappedLines);
@@ -4451,6 +4451,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       DistributionCombination: line.distributionCombination || null,
       DistributionSet: line.distributionSet || null,
       TaxClassification: line.taxClassification || null,
+      TaxControlAmount: line.taxAmount || null,
       Quantity: line.quantity || null,
       UnitPrice: line.unitPrice || null,
       UOM: line.uomName || null,
