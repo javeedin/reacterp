@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import {
   Layout, Typography, Card, Button, Input, Space, Tag, Spin,
   Row, Col, Menu, Table, Alert, Tabs, Badge, Empty, message,
-  Steps, Statistic, Divider, Collapse, Select, Tooltip,
+  Steps, Statistic, Divider, Collapse, Select, Tooltip, Modal, Form,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -11,8 +11,11 @@ import {
   ShoppingOutlined, FileTextOutlined, TeamOutlined, InboxOutlined,
   DatabaseOutlined, AuditOutlined, DollarOutlined, CarOutlined,
   ExclamationCircleOutlined, MinusCircleOutlined,
+  CloudDownloadOutlined, FileExcelOutlined, PlusOutlined, AppstoreOutlined,
+  SyncOutlined, CopyOutlined, BlockOutlined, FunctionOutlined,
 } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
 
 const { Header, Content, Sider } = Layout;
 const { Title, Text } = Typography;
@@ -36,6 +39,36 @@ const REDWOOD = {
   bg:         '#fafafa',
 };
 
+// ── Module-level COA cache: coaSegmentCache[valueSetName][value] = description
+const coaSegmentCache: Record<string, Record<string, string>> = {};
+// backward-compat alias used by BIP "Get Account Description"
+const coaAccountCache: Record<string, string> = {};
+
+const COA_BASE = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05/valueSets';
+
+const COA_SEGMENTS = [
+  { key: 'coa-company',          label: 'Company',          valueSet: 'Company_VS'         },
+  { key: 'coa-main-account',     label: 'Main_Account',     valueSet: 'Main Account VS'    },
+  { key: 'coa-sub-account',      label: 'Sub_Account',      valueSet: 'Sub Account VS'     },
+  { key: 'coa-division',         label: 'Division',         valueSet: 'Division VS'        },
+  { key: 'coa-department',       label: 'Department',       valueSet: 'Department VS'      },
+  { key: 'coa-lob',              label: 'LOB',              valueSet: 'LOB'                },
+  { key: 'coa-activity-type',    label: 'Activity_Type',    valueSet: 'Activity Type VS'   },
+  { key: 'coa-activity-details', label: 'Activity_Details', valueSet: 'Analysis Details VS'},
+  { key: 'coa-analysis-type',    label: 'Analysis_Type',    valueSet: 'Analysis Type VS'   },
+  { key: 'coa-analysis-details', label: 'Analysis_Details', valueSet: 'Analysis Details VS'},
+  { key: 'coa-ic',               label: 'IC',               valueSet: 'IC VS'              },
+  { key: 'coa-emp',              label: 'Emp',              valueSet: 'Emp VS'             },
+  { key: 'coa-future-1',         label: 'Future_1',         valueSet: 'Future 1'           },
+  { key: 'coa-future-2',         label: 'Future_2',         valueSet: 'Future 2'           },
+  { key: 'coa-future-3',         label: 'Future_3',         valueSet: 'Future 3'           },
+];
+
+const COA_KEY_SET = new Set(COA_SEGMENTS.map(s => s.key));
+
+const coaSegmentUrl = (valueSet: string) =>
+  `${COA_BASE}/${encodeURIComponent(valueSet)}/child/values?limit=500&offset=0`;
+
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 const MODULES = [
   {
@@ -56,6 +89,16 @@ const MODULES = [
   {
     key: 'suppliers', label: 'Suppliers', icon: <TeamOutlined />,
     features: [{ key: 'suppliers-list', label: 'Supplier List' }],
+  },
+  {
+    key: 'oracle-bip', label: 'Oracle BIP Reports', icon: <AppstoreOutlined />,
+    features: [
+      { key: 'oracle-bip-reports', label: 'Oracle BIP Reports' },
+    ],
+  },
+  {
+    key: 'coa', label: 'COA Segments', icon: <BlockOutlined />,
+    features: COA_SEGMENTS.map(s => ({ key: s.key, label: s.label })),
   },
   {
     key: 'inventory', label: 'Inventory', icon: <InboxOutlined />,
@@ -684,6 +727,843 @@ const PO360Tracker: React.FC = () => {
   );
 };
 
+// ── COA Segments page — tab-based, one tab per segment ───────────────────────
+interface CoaTabState {
+  segKey: string;
+  label: string;
+  valueSet: string;
+  loading: boolean;
+  error: string;
+  rows: any[];
+  search: string;
+  fetchedAt: string;
+}
+
+const COA_GRID_COLS: ColumnsType<any> = [
+  { title: 'Value', dataIndex: 'Value', key: 'Value', width: 160,
+    render: v => <Text style={{ fontFamily: 'monospace', fontWeight: 700 }}>{v ?? '—'}</Text> },
+  { title: 'Description', dataIndex: 'Description', key: 'Description', ellipsis: true,
+    render: (v, r) => <Text>{v || r.ValueDescription || r.MeaningDescription || '—'}</Text> },
+  { title: 'Enabled', dataIndex: 'EnabledFlag', key: 'EnabledFlag', width: 80,
+    render: v => <Tag color={v === 'Y' ? 'green' : 'default'}>{v === 'Y' ? 'Yes' : (v ?? '—')}</Tag> },
+  { title: 'Start Date', dataIndex: 'StartDateActive', key: 'StartDateActive', width: 120,
+    render: v => <Text style={{ fontSize: 11 }}>{v ?? '—'}</Text> },
+  { title: 'End Date', dataIndex: 'EndDateActive', key: 'EndDateActive', width: 120,
+    render: v => <Text style={{ fontSize: 11 }}>{v ?? '—'}</Text> },
+];
+
+const COASegmentsPage: React.FC<{ activeSegKey: string }> = ({ activeSegKey }) => {
+  const [tabs, setTabs]           = useState<CoaTabState[]>([]);
+  const [activeTabKey, setActiveTabKey] = useState<string>('');
+
+  const openOrFocusTab = useCallback((segKey: string) => {
+    const seg = COA_SEGMENTS.find(s => s.key === segKey);
+    if (!seg) return;
+
+    // already open → just focus
+    const existing = tabs.find(t => t.segKey === segKey);
+    if (existing) { setActiveTabKey(segKey); return; }
+
+    // open new tab (starts loading)
+    const newTab: CoaTabState = {
+      segKey, label: seg.label, valueSet: seg.valueSet,
+      loading: true, error: '', rows: [], search: '', fetchedAt: '',
+    };
+    setTabs(prev => [...prev, newTab]);
+    setActiveTabKey(segKey);
+
+    // fetch
+    const url = coaSegmentUrl(seg.valueSet);
+    (async () => {
+      try {
+        const all: any[] = [];
+        let next: string | null = url;
+        while (next) {
+          const r = await fetch(next, { headers: HDRS });
+          if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
+          const d = await r.json();
+          (d.items || []).forEach((i: any) => all.push(i));
+          const nl = (d.links || []).find((l: any) => l.rel === 'next');
+          next = nl?.href ?? null;
+        }
+        // populate segment cache
+        if (!coaSegmentCache[seg.valueSet]) coaSegmentCache[seg.valueSet] = {};
+        all.forEach(item => {
+          const k = String(item.Value ?? '').trim();
+          const v = String(item.Description ?? item.ValueDescription ?? '').trim();
+          if (k) coaSegmentCache[seg.valueSet][k] = v;
+        });
+        // keep Main Account in the alias cache for BIP enrichment
+        if (seg.valueSet === 'Main Account VS') {
+          Object.assign(coaAccountCache, coaSegmentCache[seg.valueSet]);
+        }
+        setTabs(prev => prev.map(t =>
+          t.segKey === segKey
+            ? { ...t, loading: false, rows: all, fetchedAt: new Date().toLocaleString() }
+            : t
+        ));
+        message.success(`${seg.label}: ${all.length} values loaded`);
+      } catch (e: any) {
+        setTabs(prev => prev.map(t =>
+          t.segKey === segKey ? { ...t, loading: false, error: e.message } : t
+        ));
+      }
+    })();
+  }, [tabs]);
+
+  // open/focus tab whenever sidebar selection changes to a COA segment
+  useEffect(() => {
+    if (COA_KEY_SET.has(activeSegKey)) openOrFocusTab(activeSegKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSegKey]);
+
+  const refetch = (segKey: string) => {
+    setTabs(prev => prev.map(t => t.segKey === segKey ? { ...t, loading: true, error: '', rows: [] } : t));
+    const seg = COA_SEGMENTS.find(s => s.key === segKey)!;
+    const url = coaSegmentUrl(seg.valueSet);
+    (async () => {
+      try {
+        const all: any[] = [];
+        let next: string | null = url;
+        while (next) {
+          const r = await fetch(next, { headers: HDRS });
+          if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
+          const d = await r.json();
+          (d.items || []).forEach((i: any) => all.push(i));
+          const nl = (d.links || []).find((l: any) => l.rel === 'next');
+          next = nl?.href ?? null;
+        }
+        if (!coaSegmentCache[seg.valueSet]) coaSegmentCache[seg.valueSet] = {};
+        all.forEach(item => {
+          const k = String(item.Value ?? '').trim();
+          const v = String(item.Description ?? item.ValueDescription ?? '').trim();
+          if (k) coaSegmentCache[seg.valueSet][k] = v;
+        });
+        if (seg.valueSet === 'Main Account VS') Object.assign(coaAccountCache, coaSegmentCache[seg.valueSet]);
+        setTabs(prev => prev.map(t =>
+          t.segKey === segKey
+            ? { ...t, loading: false, rows: all, fetchedAt: new Date().toLocaleString() }
+            : t
+        ));
+        message.success(`${seg.label}: refreshed ${all.length} values`);
+      } catch (e: any) {
+        setTabs(prev => prev.map(t => t.segKey === segKey ? { ...t, loading: false, error: e.message } : t));
+      }
+    })();
+  };
+
+  if (tabs.length === 0) return (
+    <Card style={{ textAlign: 'center', padding: '40px 0' }}>
+      <BlockOutlined style={{ fontSize: 56, color: '#d9d9d9', marginBottom: 16 }} />
+      <div style={{ fontSize: 16, color: '#8c8c8c', marginBottom: 8 }}>No segments open</div>
+      <div style={{ fontSize: 13, color: '#aaa' }}>
+        Click any segment in the left sidebar to open it as a tab
+      </div>
+    </Card>
+  );
+
+  const tabItems = tabs.map(tab => {
+    const filtered = tab.search
+      ? tab.rows.filter(r => {
+          const s = tab.search.toLowerCase();
+          return String(r.Value ?? '').toLowerCase().includes(s) ||
+                 String(r.Description ?? r.ValueDescription ?? '').toLowerCase().includes(s);
+        })
+      : tab.rows;
+
+    const cached = coaSegmentCache[tab.valueSet];
+    const cachedCount = cached ? Object.keys(cached).length : 0;
+
+    return {
+      key: tab.segKey,
+      closable: true,
+      label: (
+        <span style={{ fontSize: 12 }}>
+          {tab.loading && <SyncOutlined spin style={{ marginRight: 4 }} />}
+          {!tab.loading && tab.rows.length > 0 && (
+            <Badge count={tab.rows.length} size="small"
+              style={{ marginRight: 4, backgroundColor: tab.error ? '#ff4d4f' : '#52c41a' }} />
+          )}
+          {tab.label}
+        </span>
+      ),
+      children: (
+        <Space direction="vertical" style={{ width: '100%' }} size={12}>
+          {/* Info bar */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
+            background: '#f0f5ff', border: '1px solid #adc6ff', borderRadius: 6 }}>
+            <BlockOutlined style={{ color: REDWOOD.info }} />
+            <Text style={{ fontSize: 11, fontWeight: 600, color: REDWOOD.info }}>{tab.label}</Text>
+            <Text type="secondary" style={{ fontSize: 11 }}>Value Set:</Text>
+            <code style={{ fontSize: 11, color: REDWOOD.warning }}>{tab.valueSet}</code>
+            <code style={{ flex: 1, fontSize: 10, color: '#595959', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {coaSegmentUrl(tab.valueSet)}
+            </code>
+            {tab.fetchedAt && <Text style={{ fontSize: 10, color: REDWOOD.neutral600, flexShrink: 0 }}>Fetched: {tab.fetchedAt}</Text>}
+          </div>
+
+          {tab.loading && (
+            <div style={{ padding: 60, textAlign: 'center' }}>
+              <Spin size="large" /><div style={{ marginTop: 12, color: '#8c8c8c' }}>Fetching {tab.label} values…</div>
+            </div>
+          )}
+          {tab.error && <Alert type="error" message={tab.error} showIcon />}
+
+          {!tab.loading && !tab.error && tab.rows.length > 0 && (
+            <>
+              <Row justify="space-between" align="middle">
+                <Col>
+                  <Space>
+                    <Input.Search placeholder={`Search ${tab.label}…`} allowClear style={{ width: 260 }}
+                      value={tab.search}
+                      onChange={e => setTabs(prev => prev.map(t => t.segKey === tab.segKey ? { ...t, search: e.target.value } : t))} />
+                    <Tag color="blue">{filtered.length} / {tab.rows.length}</Tag>
+                    {cachedCount > 0 && <Tag icon={<CheckCircleOutlined />} color="green">{cachedCount} cached</Tag>}
+                  </Space>
+                </Col>
+                <Col>
+                  <Space>
+                    <Button size="small" icon={<ReloadOutlined />} onClick={() => refetch(tab.segKey)}>Refresh</Button>
+                    <Button size="small" icon={<FileExcelOutlined />}
+                      style={{ borderColor: '#1D6F42', color: '#1D6F42' }}
+                      onClick={() => {
+                        const ws = XLSX.utils.json_to_sheet(tab.rows);
+                        const wb = XLSX.utils.book_new();
+                        XLSX.utils.book_append_sheet(wb, ws, tab.label.slice(0,31));
+                        XLSX.writeFile(wb, `COA_${tab.label}_${new Date().toISOString().slice(0,10)}.xlsx`);
+                      }}>Export Excel</Button>
+                  </Space>
+                </Col>
+              </Row>
+              <Table
+                dataSource={filtered.map((r, i) => ({ ...r, _k: i }))}
+                rowKey="_k" columns={COA_GRID_COLS} size="small" bordered
+                scroll={{ x: 'max-content' }}
+                pagination={{ pageSize: 100, showSizeChanger: true, showTotal: t => `${t} values` }}
+              />
+            </>
+          )}
+        </Space>
+      ),
+    };
+  });
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16,
+        padding: '10px 16px', background: '#fff', borderRadius: 8,
+        border: `1px solid ${REDWOOD.neutral200}`, boxShadow: '0 1px 3px rgba(0,0,0,.06)' }}>
+        <BlockOutlined style={{ color: REDWOOD.primary, fontSize: 18 }} />
+        <span style={{ fontWeight: 700, fontSize: 15 }}>COA Segments</span>
+        <Tag color="blue" style={{ fontSize: 11 }}>{tabs.length} open</Tag>
+        <Text type="secondary" style={{ fontSize: 12 }}>Click any segment in the sidebar to open a new tab</Text>
+      </div>
+      <Card bodyStyle={{ padding: '8px 12px' }}>
+        <Tabs
+          type="editable-card"
+          hideAdd
+          activeKey={activeTabKey}
+          onChange={setActiveTabKey}
+          onEdit={(key, action) => {
+            if (action === 'remove') {
+              setTabs(prev => prev.filter(t => t.segKey !== key));
+              setActiveTabKey(prev => {
+                if (prev !== key) return prev;
+                const idx = tabs.findIndex(t => t.segKey === key);
+                const next = tabs[idx + 1] ?? tabs[idx - 1];
+                return next?.segKey ?? '';
+              });
+            }
+          }}
+          items={tabItems}
+        />
+      </Card>
+    </div>
+  );
+};
+
+// ── Oracle BIP Reports helpers ────────────────────────────────────────────────
+
+const BIP_HOST      = 'https://iacney-test.fa.ocs.oraclecloud.com';
+const BIP_BASE_PATH = '/Custom/UAT_disanostic_SCRIPTS/';
+
+const buildBipSoapEnvelope = (reportPath: string, username: string, password: string) =>
+  `<?xml version="1.0" encoding="utf-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:v2="http://xmlns.oracle.com/oxp/service/v2">
+  <soapenv:Header/>
+  <soapenv:Body>
+    <v2:runReport>
+      <v2:reportRequest>
+        <v2:reportAbsolutePath>${reportPath}</v2:reportAbsolutePath>
+        <v2:parameterNameValues><v2:listOfParamNameValues/></v2:parameterNameValues>
+        <v2:reportData/><v2:reportOutputPath/>
+      </v2:reportRequest>
+      <v2:userID>${username}</v2:userID>
+      <v2:password>${password}</v2:password>
+    </v2:runReport>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+
+const parseBipXml = (xmlString: string): { columns: string[]; rows: Record<string, string>[] } => {
+  if (!xmlString.trim()) return { columns: [], rows: [] };
+  const doc = new DOMParser().parseFromString(xmlString, 'text/xml');
+  let elements: NodeListOf<Element> | Element[] = doc.querySelectorAll('G_1');
+  if (elements.length === 0) {
+    const root = doc.documentElement;
+    const counts = new Map<string, number>();
+    Array.from(root.children).forEach(c => counts.set(c.tagName, (counts.get(c.tagName) || 0) + 1));
+    let best = { tag: '', count: 0 };
+    counts.forEach((n, t) => { if (n > best.count) best = { tag: t, count: n }; });
+    if (best.tag) elements = doc.querySelectorAll(best.tag);
+  }
+  if (elements.length === 0) return { columns: [], rows: [] };
+  const colSet = new Set<string>(); const colOrder: string[] = [];
+  Array.from(elements).forEach(el =>
+    Array.from(el.children).forEach(c => { if (!colSet.has(c.tagName)) { colSet.add(c.tagName); colOrder.push(c.tagName); } })
+  );
+  const rows = Array.from(elements).map(el => {
+    const row: Record<string, string> = {};
+    colOrder.forEach(col => { row[col] = el.querySelector(col)?.textContent?.trim() || ''; });
+    return row;
+  });
+  return { columns: colOrder, rows };
+};
+
+interface BipTabState {
+  path: string;
+  name: string;
+  username: string;
+  password: string;
+  loading: boolean;
+  error: string | null;
+  columns: string[];
+  rows: Record<string, string>[];
+  duration: number | null;
+  gridSearch: string;
+  envelope: string | null;
+  soapUrl: string;
+}
+
+interface DrillState {
+  col: string;
+  val: string;
+  rows: Record<string, string>[];
+  columns: string[];
+}
+
+// columns whose names look like IDs (ends _ID, _NUMBER, _KEY, _BATCH, _HDR etc.)
+const isIdColumn = (col: string) =>
+  /(_ID|_NUMBER|_KEY|_BATCH|_HDR|_HEADER|_LINE|_SEQ|BATCH_ID|JE_BATCH|JE_HEADER|HEADER_ID|LINE_ID)$/i.test(col);
+
+const APEX_DEFAULT_URL = 'https://iacney-test.fa.ocs.oraclecloud.com/ords/';
+
+const OracleBIPReports: React.FC = () => {
+  const [tabs, setTabs]           = useState<BipTabState[]>([]);
+  const [activeIdx, setActiveIdx] = useState<number>(0);
+  const [pathModalOpen, setPathModalOpen] = useState(false);
+  const [xmlExpanded, setXmlExpanded] = useState<Record<number, boolean>>({});
+  const [drill, setDrill] = useState<DrillState | null>(null);
+  const [apexModal, setApexModal] = useState(false);
+  const [apexUrl, setApexUrl] = useState(APEX_DEFAULT_URL);
+  const [apexSyncing, setApexSyncing] = useState(false);
+  const [form] = Form.useForm();
+
+  const addReport = async (path: string, name: string, username: string, password: string) => {
+    const idx = tabs.length;
+    const soapUrl  = `${BIP_HOST}/xmlpserver/services/v2/ReportService`;
+    const envelope = buildBipSoapEnvelope(path, username, password);
+    const maskedEnvelope = envelope.replace(/<v2:password>[^<]*<\/v2:password>/, '<v2:password>••••••••</v2:password>');
+    const newTab: BipTabState = { path, name, username, password, loading: true, error: null, columns: [], rows: [], duration: null, gridSearch: '', envelope: maskedEnvelope, soapUrl };
+    setTabs(prev => [...prev, newTab]);
+    setActiveIdx(idx);
+
+    try {
+      const t0  = Date.now();
+      const res = await fetch(soapUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': '"runReport"' },
+        body: envelope,
+      });
+      const duration = Date.now() - t0;
+
+      if (!res.ok) {
+        const txt = await res.text();
+        setTabs(prev => prev.map((t, i) => i === idx
+          ? { ...t, loading: false, error: `HTTP ${res.status}: ${txt.slice(0, 300)}`, duration }
+          : t));
+        return;
+      }
+
+      const soapText = await res.text();
+      const match    = soapText.match(/<reportBytes[^>]*>([^<]+)<\/reportBytes>/);
+      if (!match) {
+        setTabs(prev => prev.map((t, i) => i === idx
+          ? { ...t, loading: false, error: 'No reportBytes in SOAP response — check report path and credentials', duration }
+          : t));
+        return;
+      }
+
+      const bin = atob(match[1].trim());
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const xml = new TextDecoder('utf-8').decode(bytes);
+      const { columns, rows } = parseBipXml(xml);
+
+      setTabs(prev => prev.map((t, i) => i === idx
+        ? { ...t, loading: false, error: null, columns, rows, duration }
+        : t));
+    } catch (e: any) {
+      setTabs(prev => prev.map((t, i) => i === idx
+        ? { ...t, loading: false, error: e.message ?? 'SOAP call failed', duration: null }
+        : t));
+    }
+  };
+
+  const handleNewReport = async () => {
+    const vals = await form.validateFields();
+    const reportFile = vals.reportName.trim();
+    const path = BIP_BASE_PATH + reportFile;
+    const name = reportFile.replace(/\.xdo$/i, '');
+    setPathModalOpen(false);
+    form.resetFields();
+    addReport(path, name, vals.username.trim(), vals.password);
+  };
+
+  const exportExcel = (tab: BipTabState) => {
+    if (!tab.rows.length) return;
+    const ws  = XLSX.utils.json_to_sheet(tab.rows);
+    const wb  = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, tab.name.slice(0, 31));
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `${tab.name}.xlsx`);
+  };
+
+  // Detect which column in the BIP rows most likely holds account codes
+  const detectAccountColumn = (columns: string[]): string | null => {
+    const patterns = [/ACCOUNT/i, /ACCT/i, /SEGMENT4/i, /SEG4/i, /COA/i, /NATURAL_ACCOUNT/i];
+    for (const pat of patterns) {
+      const col = columns.find(c => pat.test(c));
+      if (col) return col;
+    }
+    return null;
+  };
+
+  const addAccountDescriptions = (tabIdx: number) => {
+    const tab = tabs[tabIdx];
+    if (!tab || !tab.rows.length) return;
+
+    const cacheSize = Object.keys(coaAccountCache).length;
+    if (cacheSize === 0) {
+      message.warning('Account cache is empty — please go to COA Segments → Account and click Fetch Accounts first');
+      return;
+    }
+
+    const acctCol = detectAccountColumn(tab.columns);
+    if (!acctCol) {
+      message.warning('No account column detected (expected ACCOUNT, ACCT, SEGMENT4, etc.)');
+      return;
+    }
+
+    const descCol = `${acctCol}_DESC`;
+    const enriched = tab.rows.map(r => {
+      const code = String(r[acctCol] ?? '').trim();
+      const desc = coaAccountCache[code] ?? '';
+      return { ...r, [descCol]: desc };
+    });
+
+    const newColumns = tab.columns.includes(descCol)
+      ? tab.columns
+      : [...tab.columns.slice(0, tab.columns.indexOf(acctCol) + 1), descCol, ...tab.columns.slice(tab.columns.indexOf(acctCol) + 1)];
+
+    setTabs(prev => prev.map((t, i) => i === tabIdx ? { ...t, rows: enriched, columns: newColumns } : t));
+    const matched = enriched.filter(r => r[descCol]).length;
+    message.success(`Added ${descCol} — ${matched} / ${enriched.length} rows matched`);
+  };
+
+  const syncToApex = async (tab: BipTabState) => {
+    if (!tab.rows.length) { message.warning('No data to sync'); return; }
+    setApexSyncing(true);
+    try {
+      const res = await fetch(apexUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': AUTH_HEADER },
+        body: JSON.stringify({ reportPath: tab.path, reportName: tab.name, rows: tab.rows }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      message.success(`Synced ${tab.rows.length.toLocaleString()} rows to APEX`);
+      setApexModal(false);
+    } catch (e: any) {
+      message.error(`Sync failed: ${e.message}`);
+    } finally {
+      setApexSyncing(false);
+    }
+  };
+
+  const tabItems = tabs.map((tab, idx) => ({
+    key: String(idx),
+    closable: true,
+    label: (
+      <span style={{ fontSize: 12 }}>
+        {tab.loading && <SyncOutlined spin style={{ marginRight: 4 }} />}
+        {tab.rows.length > 0 && !tab.loading && (
+          <Badge count={tab.rows.length} size="small" style={{ marginRight: 4, backgroundColor: '#52c41a' }} />
+        )}
+        {tab.name}
+      </span>
+    ),
+    children: (() => {
+      const payloadPanel = (
+        <div style={{ marginBottom: 12 }}>
+          <div
+            onClick={() => setXmlExpanded(prev => ({ ...prev, [idx]: !(prev[idx] ?? false) }))}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+              padding: '5px 10px', borderRadius: 6, background: '#f0f5ff',
+              border: '1px solid #adc6ff', fontSize: 12, color: '#2f54eb', userSelect: 'none' }}
+          >
+            <ApiOutlined style={{ fontSize: 13 }} />
+            <span style={{ fontWeight: 600 }}>SOAP Payload</span>
+            <Tag color="blue" style={{ fontSize: 10 }}>POST</Tag>
+            <code style={{ flex: 1, fontSize: 10, color: '#595959', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {tab.soapUrl}
+            </code>
+            <span style={{ fontSize: 11, flexShrink: 0 }}>{(xmlExpanded[idx] ?? false) ? '▲ Hide' : '▼ Show'}</span>
+          </div>
+          {(xmlExpanded[idx] ?? false) && (
+            <div style={{ marginTop: 6, padding: '10px 12px', borderRadius: 6, background: '#fafafa', border: '1px solid #d9d9d9' }}>
+              <div style={{ marginBottom: 6 }}>
+                <Text type="secondary" style={{ fontSize: 11 }}>Report Path</Text>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2, background: '#fff', border: '1px solid #e0e0e0', borderRadius: 4, padding: '4px 8px' }}>
+                  <code style={{ flex: 1, fontSize: 11, color: '#d46b08' }}>{tab.path}</code>
+                  <CopyOutlined style={{ cursor: 'pointer', color: '#595959', flexShrink: 0 }}
+                    onClick={() => { navigator.clipboard.writeText(tab.path); message.success('Path copied'); }} />
+                </div>
+              </div>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>XML Payload (password masked)</Text>
+                  <CopyOutlined style={{ cursor: 'pointer', color: '#595959', fontSize: 12 }}
+                    onClick={() => { navigator.clipboard.writeText(tab.envelope || ''); message.success('XML copied'); }} />
+                </div>
+                <pre style={{ margin: 0, padding: '8px 10px', background: '#1e1e1e', color: '#9cdcfe',
+                  borderRadius: 4, fontSize: 10, maxHeight: 240, overflow: 'auto', whiteSpace: 'pre', lineHeight: 1.5 }}>
+                  {tab.envelope || '—'}
+                </pre>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+
+      if (tab.loading) return (
+        <div>
+          {payloadPanel}
+          <div style={{ padding: 60, textAlign: 'center' }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 16, color: '#8c8c8c' }}>Running SOAP call to Oracle BIP…<br />
+              <code style={{ fontSize: 11 }}>{BIP_HOST}</code>
+            </div>
+          </div>
+        </div>
+      );
+      if (tab.error) return (
+        <div>
+          {payloadPanel}
+          <Alert type="error" showIcon message="SOAP Call Failed" description={
+            <pre style={{ fontSize: 11, maxHeight: 120, overflow: 'auto', whiteSpace: 'pre-wrap', marginTop: 6 }}>{tab.error}</pre>
+          } style={{ marginBottom: 10 }} />
+          <Space>
+            <Button icon={<CloudDownloadOutlined />} onClick={() => addReport(tab.path, tab.name, tab.username, tab.password)}>Retry</Button>
+            <code style={{ fontSize: 11, color: '#8c8c8c' }}>{tab.path}</code>
+          </Space>
+        </div>
+      );
+
+      const search   = tab.gridSearch.toLowerCase();
+      const filtered = search ? tab.rows.filter(r => Object.values(r).some(v => v.toLowerCase().includes(search))) : tab.rows;
+      const cols     = tab.columns.map(col => {
+        const isId = isIdColumn(col);
+        return {
+          title: isId
+            ? <span style={{ color: REDWOOD.info, fontWeight: 700, fontSize: 11 }}>{col} <LinkOutlined style={{ fontSize: 9 }} /></span>
+            : <span style={{ fontSize: 11, fontWeight: 600 }}>{col}</span>,
+          dataIndex: col, key: col, width: 140, ellipsis: true,
+          render: (v: string) => {
+            if (!v) return <span style={{ color: '#d9d9d9', fontFamily: 'monospace', fontSize: 11 }}>—</span>;
+            if (isId) return (
+              <a style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info }}
+                onClick={() => {
+                  const drillRows = tab.rows.filter(r => r[col] === v);
+                  setDrill({ col, val: v, rows: drillRows, columns: tab.columns });
+                }}>
+                {v}
+              </a>
+            );
+            return <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{v}</Text>;
+          },
+        };
+      });
+
+      return (
+        <div>
+          {payloadPanel}
+
+          <Space style={{ marginBottom: 12 }} wrap>
+            <Button type="primary" icon={<CloudDownloadOutlined />} onClick={() => addReport(tab.path, tab.name, tab.username, tab.password)}
+              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Re-fetch</Button>
+            <Button icon={<FileExcelOutlined />} disabled={!tab.rows.length} onClick={() => exportExcel(tab)}
+              style={{ borderColor: '#1D6F42', color: '#1D6F42' }}>Export Excel</Button>
+            <Button icon={<SyncOutlined />} disabled={!tab.rows.length} onClick={() => setApexModal(true)}
+              style={{ borderColor: REDWOOD.purple, color: REDWOOD.purple }}>Sync to APEX</Button>
+            <Button icon={<FunctionOutlined />} disabled={!tab.rows.length}
+              onClick={() => addAccountDescriptions(idx)}
+              style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}>
+              Get Account Description
+            </Button>
+            <Input.Search placeholder="Search grid…" allowClear size="small" style={{ width: 220 }}
+              value={tab.gridSearch}
+              onChange={e => setTabs(prev => prev.map((t, i) => i === idx ? { ...t, gridSearch: e.target.value } : t))} />
+            {tab.duration !== null && <Tag icon={<ClockCircleOutlined />} color="blue">{(tab.duration / 1000).toFixed(1)}s</Tag>}
+            {tab.rows.length > 0 && <Tag icon={<CheckCircleOutlined />} color="green">{filtered.length.toLocaleString()} / {tab.rows.length.toLocaleString()} rows</Tag>}
+            {tab.columns.length > 0 && <Tag color="purple">{tab.columns.length} columns</Tag>}
+          </Space>
+
+          {tab.rows.length === 0 ? (
+            <Empty description="Report returned no data" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          ) : (
+            <Table dataSource={filtered.map((r, i) => ({ ...r, _key: i }))} rowKey="_key"
+              columns={cols} size="small" bordered
+              scroll={{ x: tab.columns.length * 140, y: 420 }}
+              pagination={{ pageSize: 100, showSizeChanger: true, showQuickJumper: true,
+                showTotal: t => `${t} rows` }} />
+          )}
+        </div>
+      );
+    })(),
+  }));
+
+  return (
+    <div style={{ padding: 0 }}>
+      {/* Header bar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16,
+        padding: '10px 16px', background: '#fff', borderRadius: 8,
+        border: `1px solid ${REDWOOD.neutral200}`, boxShadow: '0 1px 3px rgba(0,0,0,.06)' }}>
+        <AppstoreOutlined style={{ color: REDWOOD.primary, fontSize: 18 }} />
+        <span style={{ fontWeight: 700, fontSize: 15 }}>Oracle BIP Reports</span>
+        <Tag color="blue" style={{ fontSize: 11 }}>{BIP_HOST}</Tag>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <Button type="primary" icon={<PlusOutlined />}
+            style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+            onClick={() => setPathModalOpen(true)}>
+            New Report
+          </Button>
+        </div>
+      </div>
+
+      {tabs.length === 0 ? (
+        <Card style={{ textAlign: 'center', padding: '40px 0' }}>
+          <AppstoreOutlined style={{ fontSize: 56, color: '#d9d9d9', marginBottom: 16 }} />
+          <div style={{ fontSize: 16, color: '#8c8c8c', marginBottom: 8 }}>No reports open</div>
+          <div style={{ fontSize: 13, color: '#aaa', marginBottom: 20 }}>
+            Click <strong>New Report</strong> and enter the BIP report path to run it against<br />
+            <code style={{ fontSize: 12 }}>{BIP_HOST}</code>
+          </div>
+          <Button type="primary" icon={<PlusOutlined />}
+            style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+            onClick={() => setPathModalOpen(true)}>
+            New Report
+          </Button>
+        </Card>
+      ) : (
+        <Card bodyStyle={{ padding: '8px 12px' }}>
+          <Tabs
+            type="editable-card"
+            hideAdd
+            activeKey={String(activeIdx)}
+            onChange={k => setActiveIdx(Number(k))}
+            onEdit={(key, action) => {
+              if (action === 'remove') {
+                const i = Number(key);
+                setTabs(prev => prev.filter((_, idx) => idx !== i));
+                setActiveIdx(prev => Math.max(0, prev >= i ? prev - 1 : prev));
+              }
+            }}
+            items={tabItems}
+            tabBarExtraContent={
+              <Button size="small" icon={<PlusOutlined />}
+                style={{ borderColor: REDWOOD.primary, color: REDWOOD.primary }}
+                onClick={() => setPathModalOpen(true)}>
+                New Report
+              </Button>
+            }
+          />
+        </Card>
+      )}
+
+      {/* Drill-down modal */}
+      <Modal
+        open={!!drill}
+        onCancel={() => setDrill(null)}
+        footer={[
+          <Button key="excel" icon={<FileExcelOutlined />} style={{ borderColor: '#1D6F42', color: '#1D6F42' }}
+            onClick={() => {
+              if (!drill) return;
+              const ws = XLSX.utils.json_to_sheet(drill.rows);
+              const wb = XLSX.utils.book_new();
+              XLSX.utils.book_append_sheet(wb, ws, 'DrillDown');
+              const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+              saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `DrillDown_${drill.col}_${drill.val}.xlsx`);
+            }}>Export Excel</Button>,
+          <Button key="close" onClick={() => setDrill(null)}>Close</Button>,
+        ]}
+        title={
+          <Space>
+            <LinkOutlined style={{ color: REDWOOD.info }} />
+            <span>Drill-down: <code style={{ fontSize: 12 }}>{drill?.col}</code> = <code style={{ fontSize: 12, color: REDWOOD.primary }}>{drill?.val}</code></span>
+            <Tag color="blue">{drill?.rows.length} rows</Tag>
+          </Space>
+        }
+        width={960}
+        styles={{ body: { padding: '12px 16px' } }}
+      >
+        {drill && (
+          <Table
+            dataSource={drill.rows.map((r, i) => ({ ...r, _k: i }))}
+            rowKey="_k"
+            size="small"
+            bordered
+            scroll={{ x: drill.columns.length * 140, y: 400 }}
+            pagination={{ pageSize: 50, showSizeChanger: true, showTotal: t => `${t} rows` }}
+            columns={drill.columns.map(col => ({
+              title: <span style={{ fontSize: 11, fontWeight: col === drill.col ? 700 : 400, color: col === drill.col ? REDWOOD.primary : undefined }}>{col}</span>,
+              dataIndex: col, key: col, width: 140, ellipsis: true,
+              render: (v: string) => (
+                <Text style={{ fontFamily: 'monospace', fontSize: 11,
+                  background: col === drill.col ? '#fff7e6' : undefined,
+                  padding: col === drill.col ? '0 3px' : undefined,
+                  borderRadius: col === drill.col ? 2 : undefined }}>
+                  {v || <span style={{ color: '#d9d9d9' }}>—</span>}
+                </Text>
+              ),
+            }))}
+          />
+        )}
+      </Modal>
+
+      {/* Sync to APEX modal */}
+      <Modal
+        open={apexModal}
+        onCancel={() => setApexModal(false)}
+        onOk={() => {
+          const tab = tabs[activeIdx];
+          if (tab) syncToApex(tab);
+        }}
+        okText={apexSyncing ? 'Syncing…' : 'Sync Now'}
+        okButtonProps={{ style: { background: REDWOOD.purple, borderColor: REDWOOD.purple }, loading: apexSyncing }}
+        title={<Space><SyncOutlined style={{ color: REDWOOD.purple }} /><span>Sync to Oracle APEX</span></Space>}
+        width={520}
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size={12}>
+          <div>
+            <Text style={{ fontSize: 12, fontWeight: 600 }}>APEX REST Endpoint URL</Text>
+            <Input
+              value={apexUrl}
+              onChange={e => setApexUrl(e.target.value)}
+              placeholder="https://…/ords/schema/module/endpoint"
+              style={{ fontFamily: 'monospace', fontSize: 12, marginTop: 6 }}
+            />
+          </div>
+          {tabs[activeIdx] && (
+            <Alert type="info" showIcon message={
+              <span style={{ fontSize: 12 }}>
+                Will POST <strong>{tabs[activeIdx].rows.length.toLocaleString()} rows</strong> from report <code>{tabs[activeIdx].name}</code> as JSON
+              </span>
+            } />
+          )}
+        </Space>
+      </Modal>
+
+      {/* Path input modal */}
+      <Modal
+        open={pathModalOpen}
+        onCancel={() => { setPathModalOpen(false); form.resetFields(); }}
+        onOk={handleNewReport}
+        okText="Run Report"
+        okButtonProps={{ style: { background: REDWOOD.primary, borderColor: REDWOOD.primary } }}
+        title={<Space><AppstoreOutlined style={{ color: REDWOOD.primary }} /><span>Oracle BIP Report</span></Space>}
+        width={680}
+        destroyOnClose
+      >
+        <Form
+          form={form}
+          layout="vertical"
+          size="small"
+          initialValues={{ username: 'emparun', password: 'Fusion@1234' }}
+        >
+          <Form.Item
+            name="reportName"
+            label="Report File Name"
+            rules={[{ required: true, message: 'Please enter the report file name' }]}
+            extra={<span>Full path: <code style={{ fontSize: 11, color: REDWOOD.warning }}>{BIP_BASE_PATH}<strong>YourReport.xdo</strong></code></span>}
+          >
+            <Input
+              autoFocus
+              placeholder="MyReport.xdo"
+              style={{ fontFamily: 'monospace', fontSize: 13 }}
+              addonBefore={
+                <code style={{ fontSize: 11, color: REDWOOD.warning, whiteSpace: 'nowrap' }}>
+                  {BIP_BASE_PATH}
+                </code>
+              }
+            />
+          </Form.Item>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="username" label="Username" rules={[{ required: true, message: 'Required' }]}>
+                <Input placeholder="Oracle BIP username" style={{ fontFamily: 'monospace', fontSize: 12 }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="password" label="Password" rules={[{ required: true, message: 'Required' }]}>
+                <Input.Password placeholder="Password" style={{ fontFamily: 'monospace', fontSize: 12 }} />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          {/* Live XML preview */}
+          <Form.Item noStyle shouldUpdate>
+            {() => {
+              const reportFile = (form.getFieldValue('reportName') || '').trim();
+              const u = form.getFieldValue('username') || '';
+              if (!reportFile) return (
+                <div style={{ background: '#1e1e1e', borderRadius: 6, padding: '10px 14px', fontSize: 11, color: '#555', fontFamily: 'monospace' }}>
+                  XML payload will appear here as you type the report file name…
+                </div>
+              );
+              const fullPath = BIP_BASE_PATH + reportFile;
+              const preview  = buildBipSoapEnvelope(fullPath, u, '••••••••');
+              return (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    <Text style={{ fontSize: 11, color: '#595959', fontWeight: 600 }}>XML Payload Preview</Text>
+                    <Tag color="blue" style={{ fontSize: 10 }}>POST {BIP_HOST}/xmlpserver/services/v2/ReportService</Tag>
+                    <CopyOutlined style={{ cursor: 'pointer', color: '#595959', fontSize: 12, marginLeft: 'auto' }}
+                      onClick={() => { navigator.clipboard.writeText(preview); message.success('XML copied'); }} />
+                  </div>
+                  <pre style={{ margin: 0, padding: '8px 12px', background: '#1e1e1e', color: '#9cdcfe',
+                    borderRadius: 6, fontSize: 10, maxHeight: 200, overflow: 'auto',
+                    whiteSpace: 'pre', lineHeight: 1.6 }}>
+                    {preview}
+                  </pre>
+                </div>
+              );
+            }}
+          </Form.Item>
+        </Form>
+      </Modal>
+    </div>
+  );
+};
+
 // ── Main page wrapper ─────────────────────────────────────────────────────────
 const UATDiagnostics: React.FC = () => {
   const [selectedFeature, setSelectedFeature] = useState('po-360');
@@ -721,9 +1601,17 @@ const UATDiagnostics: React.FC = () => {
         </Sider>
 
         <Content style={{ padding: 24 }}>
-          {selectedFeature === 'po-360' ? (
+          {/* Always-mounted panels — hidden with CSS so tab state is preserved */}
+          <div style={{ display: selectedFeature === 'po-360' ? undefined : 'none' }}>
             <PO360Tracker />
-          ) : (
+          </div>
+          <div style={{ display: selectedFeature === 'oracle-bip-reports' ? undefined : 'none' }}>
+            <OracleBIPReports />
+          </div>
+          <div style={{ display: COA_KEY_SET.has(selectedFeature) ? undefined : 'none' }}>
+            <COASegmentsPage activeSegKey={selectedFeature} />
+          </div>
+          {!['po-360', 'oracle-bip-reports'].includes(selectedFeature) && !COA_KEY_SET.has(selectedFeature) && (
             <Card>
               <Empty
                 image={<BugOutlined style={{ fontSize: 48, color: REDWOOD.neutral200 }} />}
