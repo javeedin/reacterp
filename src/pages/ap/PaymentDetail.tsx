@@ -563,229 +563,195 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     setVoidModalOpen(true);
   };
 
-  // ── Auto void: runs all 6 steps in sequence ──────────────────────────────
+  // ── Void step executors (extracted so each can run standalone or as part of run-all) ──
+  const execVoidStep = async (key: VoidStepKey, values: any): Promise<boolean> => {
+    setVoidStep(key, { status: 'running', response: undefined, error: undefined });
+    try {
+      const ctx = voidCtxRef.current;
+      if (key === 'eligibility') {
+        const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments/${payment.checkId}/void-eligibility`, { headers: { Accept: 'application/json' } });
+        const data = await res.json();
+        if (!data.eligible) { setVoidStep('eligibility', { status: 'error', response: data, error: data.errors?.[0] ?? 'Not eligible' }); return false; }
+        setVoidStep('eligibility', { status: 'success', response: data });
+        return true;
+      }
+      if (key === 'get_lines') {
+        // Initialise ctx from form values first
+        const voidDate   = values.voidDate ? values.voidDate.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
+        const paymentNum = String(payment.paymentNumber || payment.checkId);
+        const buName     = payment.businessUnit || '';
+        const ccy        = payment.paymentCurrency || 'AED';
+        const exRate     = (payment.conversionRate && payment.conversionRate > 0) ? payment.conversionRate : 1;
+        const voidPeriod = derivePeriodName(new Date(voidDate));
+        const ledger     = await fetchLedgerByBusinessUnit(buName);
+        voidCtxRef.current = { ...voidCtxRef.current, voidDate, paymentNum, buName, ccy, exRate, voidPeriod,
+          ledgerId: ledger?.ledgerId ?? 300000003259529, ledgerName: ledger?.ledgerName ?? 'BCL DIFC' };
+        const url = `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${payment.checkId}&reference5=AP-PAYMENT`;
+        setVoidStepPayloads(prev => ({ ...prev, get_lines: { url } }));
+        const res  = await fetch(url, { headers: { Accept: 'application/json' } });
+        const data = await res.json();
+        if (!res.ok) { setVoidStep('get_lines', { status: 'error', response: data, error: data.message ?? `HTTP ${res.status}` }); return false; }
+        const origLines: any[] = data.items || [];
+        const revLines = origLines.map(l => ({
+          ...l,
+          entered_dr:    l.entered_cr,
+          entered_cr:    l.entered_dr,
+          accounted_dr:  l.accounted_cr,
+          accounted_cr:  l.accounted_dr,
+        }));
+        voidCtxRef.current.origGLLines  = origLines;
+        voidCtxRef.current.reverseLines = revLines;
+        setVoidOrigLines(origLines);
+        setVoidRevLines(revLines);
+        setVoidStep('get_lines', { status: 'success', response: data });
+        return true;
+      }
+      if (key === 'sla') {
+        // Skip if void SLA was already created (re-run scenario)
+        const existingVoid = await checkAccountingExists('AP_PAYMENTS', payment.checkId, 'AP_PAYMENT_VOID').catch(() => ({ exists: false }));
+        if ((existingVoid as any).exists && (existingVoid as any).headerId) {
+          voidCtxRef.current.slaHeaderId = (existingVoid as any).headerId;
+          setVoidStep('sla', { status: 'success', response: existingVoid });
+          return true;
+        }
+        const reverseLines = voidCtxRef.current.reverseLines;
+        if (!reverseLines.length) throw new Error('No reversal lines — run Step 2 (Get GL Lines) first');
+        const slaLines = reverseLines.map((l, i) => ({
+          lineNumber: i + 1,
+          lineType: (l.entered_dr > 0 || l.accounted_dr > 0) ? 'DR' : 'CR',
+          accountingClass: l.description || 'REVERSAL',
+          accountCombination: l.account,
+          enteredDr: l.entered_dr || 0,
+          enteredCr: l.entered_cr || 0,
+          accountedDr: l.accounted_dr || 0,
+          accountedCr: l.accounted_cr || 0,
+          currencyCode: l.currency_code,
+          exchangeRate: ctx.exRate,
+          description: `Void: ${l.description || ''}`,
+        }));
+        const payload: SlaCreatePayload = {
+          header: { moduleName: 'AP', sourceTable: 'AP_PAYMENTS', sourceId: payment.checkId,
+            sourceNumber: ctx.paymentNum, sourceType: 'PAYMENT', eventTypeCode: 'AP_PAYMENT_VOID',
+            eventDate: ctx.voidDate, accountingDate: ctx.voidDate, periodName: ctx.voidPeriod,
+            ledgerId: ctx.ledgerId, ledgerName: ctx.ledgerName, currencyCode: ctx.ccy,
+            ledgerCurrency: 'AED', exchangeRate: ctx.exRate, exchangeRateType: 'Corporate',
+            businessUnit: ctx.buName || undefined, description: `AP Payment Void — ${ctx.paymentNum}`, createdBy: 'SYSTEM' },
+          lines: slaLines,
+        };
+        setVoidStepPayloads(prev => ({ ...prev, sla: payload }));
+        const result = await createAccounting(payload);
+        if ((result as any).status === 'error' || !(result.headerId > 0)) {
+          setVoidStep('sla', { status: 'error', response: result, error: (result as any).message ?? 'headerId missing' }); return false;
+        }
+        voidCtxRef.current.slaHeaderId = result.headerId;
+        setVoidStep('sla', { status: 'success', response: result });
+        return true;
+      }
+      if (key === 'gl_create') {
+        const reverseLines = voidCtxRef.current.reverseLines;
+        if (!reverseLines.length) throw new Error('No reversal lines — run Step 2 (Get GL Lines) first');
+        const ref5 = eventTypeToRef5('AP_PAYMENT_VOID');
+        const batchName = `${ref5}-${ctx.paymentNum}-${ctx.voidDate.replace(/-/g,'')}-${Date.now().toString().slice(-6)}`;
+        voidCtxRef.current.batchName = batchName;
+        const glLines = reverseLines.map(l => ({
+          enteredDr: l.entered_dr > 0 ? l.entered_dr : null,
+          enteredCr: l.entered_cr > 0 ? l.entered_cr : null,
+          accountedDr: l.accounted_dr > 0 ? l.accounted_dr : null,
+          accountedCr: l.accounted_cr > 0 ? l.accounted_cr : null,
+          statAmount: null,
+          description: `Void: ${l.description || ''}`,
+          currencyCode: l.currency_code,
+          currencyConversionDate: ctx.voidDate,
+          currencyConversionRate: (l.currency_code?.toUpperCase() === 'AED') ? 1 : ctx.exRate,
+          userCurrencyConversionType: 'User',
+          accountCombination: l.account,
+          chartOfAccountsName: 'Chart of Accounts',
+          reference1: ctx.paymentNum,
+          reference2: String(payment.checkId),
+          reference3: null,
+          reference4: ctx.buName || null,
+          reference5: 'AP-PAYMENT-VOID',
+          createdBy: 'SYSTEM',
+        }));
+        const totalDr = glLines.reduce((s, l) => s + (l.enteredDr || 0), 0);
+        const totalCr = glLines.reduce((s, l) => s + (l.enteredCr || 0), 0);
+        const payload = {
+          batch: { batchName, batchDescription: `AP-PAYMENT-VOID – ${ctx.paymentNum}`,
+            ledgerName: ctx.ledgerName, ledgerId: ctx.ledgerId, status: 'NEW',
+            accountingPeriod: ctx.voidPeriod, controlTotal: totalDr,
+            runningTotalDr: totalDr, runningTotalCr: totalCr, batchSource: 'Payables', createdBy: 'SYSTEM' },
+          header: { ledgerId: ctx.ledgerId, ledgerName: ctx.ledgerName,
+            jeCategory: 'AP_PAYMENT_VOID', jeSource: 'Payables', periodName: ctx.voidPeriod,
+            journalName: batchName, description: `AP Payment Void — ${ctx.paymentNum}`,
+            currencyCode: ctx.ccy, currencyConversionType: 'User',
+            currencyConversionDate: ctx.voidDate, currencyConversionRate: ctx.exRate,
+            defaultEffectiveDate: ctx.voidDate, status: 'NEW',
+            runningTotalDr: totalDr, runningTotalCr: totalCr, createdBy: 'SYSTEM' },
+          lines: glLines,
+        };
+        setVoidStepPayloads(prev => ({ ...prev, gl_create: payload }));
+        const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/journals/create`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(payload) });
+        const data = await res.json();
+        if (!res.ok) { setVoidStep('gl_create', { status: 'error', response: data, error: data.message ?? `HTTP ${res.status}` }); return false; }
+        voidCtxRef.current.glBatchId  = data.jeBatchId  ?? data.batchId  ?? null;
+        voidCtxRef.current.glHeaderId = data.jeHeaderId ?? data.headerId ?? null;
+        setVoidStep('gl_create', { status: 'success', response: data });
+        return true;
+      }
+      if (key === 'gl_post') {
+        if (!ctx.glBatchId) throw new Error('GL Batch ID missing');
+        const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/${ctx.glBatchId}/post`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: '{}' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data?.success === false) { setVoidStep('gl_post', { status: 'error', response: data, error: data.error ?? `HTTP ${res.status}` }); return false; }
+        setVoidStep('gl_post', { status: 'success', response: data });
+        return true;
+      }
+      if (key === 'sla_stamp') {
+        if (!ctx.slaHeaderId) throw new Error('SLA Header ID missing');
+        const result = await postToLedger(ctx.slaHeaderId, ctx.glBatchId ?? 0, ctx.batchName, ctx.glHeaderId ?? 0, 'SYSTEM');
+        setVoidStep('sla_stamp', { status: 'success', response: result });
+        return true;
+      }
+      if (key === 'void') {
+        const voidDate   = ctx.voidDate || (values.voidDate ? values.voidDate.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD'));
+        const paymentNum = ctx.paymentNum || String(payment.paymentNumber || payment.checkId);
+        const body = { CheckId: payment.checkId, VoidDate: voidDate, VoidedBy: null,
+          StopReason: values.voidReason || 'Payment Voided', StopReference: paymentNum };
+        setVoidStepPayloads(prev => ({ ...prev, void: body }));
+        const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments/void`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) });
+        const data = await res.json();
+        if (data.status === 'error' || !res.ok) { setVoidStep('void', { status: 'error', response: data, error: data.message ?? `HTTP ${res.status}` }); return false; }
+        setVoidStep('void', { status: 'success', response: data });
+        return true;
+      }
+      return false;
+    } catch (e: any) {
+      setVoidStep(key, { status: 'error', error: e.message });
+      return false;
+    }
+  };
+
+  // Run a single step (for individual Run buttons)
+  const runVoidStep = async (key: VoidStepKey) => {
+    const values = voidForm.getFieldsValue();
+    setVoidRunning(true);
+    await execVoidStep(key, values);
+    setVoidRunning(false);
+  };
+
+  // ── Auto void: runs all 7 steps in sequence ──────────────────────────────
   const handleVoidAuto = async (values: any) => {
     setVoidRunning(true);
     setVoidDone(false);
     setVoidStepMap(initVoidSteps());
 
-    const ok = async (key: VoidStepKey, fn: () => Promise<boolean>): Promise<boolean> => {
-      setVoidStep(key, { status: 'running', response: undefined, error: undefined });
-      try {
-        const success = await fn();
-        return success;
-      } catch (e: any) {
-        setVoidStep(key, { status: 'error', error: e.message });
-        return false;
-      }
-    };
-
-    // Step 1 — Eligibility
-    const s1 = await ok('eligibility', async () => {
-      const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments/${payment.checkId}/void-eligibility`, { headers: { Accept: 'application/json' } });
-      const data = await res.json();
-      if (!data.eligible) { setVoidStep('eligibility', { status: 'error', response: data, error: data.errors?.[0] ?? 'Not eligible' }); return false; }
-      setVoidStep('eligibility', { status: 'success', response: data });
-      return true;
-    });
-    if (!s1) { setVoidRunning(false); return; }
-
-    // Step 2 — Void Payment
-    const s2 = await ok('void', async () => {
-      const voidDate   = values.voidDate ? values.voidDate.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
-      const paymentNum = String(payment.paymentNumber || payment.checkId);
-      const buName     = payment.businessUnit || '';
-      const ccy        = payment.paymentCurrency || 'AED';
-      const exRate     = (payment.conversionRate && payment.conversionRate > 0) ? payment.conversionRate : 1;
-      const voidPeriod = derivePeriodName(new Date(voidDate));
-      const ledger     = await fetchLedgerByBusinessUnit(buName);
-      voidCtxRef.current = { ...voidCtxRef.current, voidDate, paymentNum, buName, ccy, exRate, voidPeriod,
-        ledgerId: ledger?.ledgerId ?? 300000003259529, ledgerName: ledger?.ledgerName ?? 'BCL DIFC' };
-      const body = { CheckId: payment.checkId, VoidDate: voidDate, VoidedBy: null,
-        StopReason: values.voidReason || 'Payment Voided', StopReference: paymentNum };
-      const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments/void`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) });
-      const data = await res.json();
-      if (data.status === 'error' || !res.ok) { setVoidStep('void', { status: 'error', response: data, error: data.message ?? `HTTP ${res.status}` }); return false; }
-      setVoidStep('void', { status: 'success', response: data });
-      return true;
-    });
-    if (!s2) { setVoidRunning(false); return; }
-
-    // Step 3 — Create SLA Reversal
-    const s3 = await ok('sla', async () => {
-      const ctx  = voidCtxRef.current;
-
-      // Skip if void SLA was already created (re-run scenario)
-      const existingVoid = await checkAccountingExists('AP_PAYMENTS', payment.checkId, 'AP_PAYMENT_VOID').catch(() => ({ exists: false }));
-      if ((existingVoid as any).exists && (existingVoid as any).headerId) {
-        voidCtxRef.current.slaHeaderId = (existingVoid as any).headerId;
-        setVoidStep('sla', { status: 'success', response: existingVoid });
-        return true;
-      }
-
-      // Validate pre-conditions before building lines
-      console.log('[Void SLA] disbursementBankAccount:', payment.disbursementBankAccount);
-      console.log('[Void SLA] loaded bank accounts:', bankAccounts.map(b => b.bankAccountName));
-      const bank = bankAccounts.find(b => b.bankAccountName === payment.disbursementBankAccount);
-      if (!bank) throw new Error(`Bank account "${payment.disbursementBankAccount || '(none)'}" not found in loaded list (${bankAccounts.length} accounts)`);
-      console.log('[Void SLA] matched bank:', bank);
-      if (!relatedInvoices.length) throw new Error('No related invoices — try opening the Paid Invoices tab first');
-
-      // PDC: maturity date exists and differs from payment date
-      const isPdcVoid = !!(payment.maturityDate && payment.maturityDate !== payment.paymentDate);
-
-      // For void reversal: normal payment → bank cash account; PDC → PDC account
-      // Fall back to cash clearing if the specific account is not configured
-      const bankAcct      = isPdcVoid
-        ? (bank.pdcAccountCombination  || bank.cashClearingAccountCombination || '')
-        : (bank.cashAccountCombination || bank.cashClearingAccountCombination || '');
-      const bankAcctClass = isPdcVoid ? 'PDC' : 'CASH';
-      const bankAcctLabel = isPdcVoid ? 'PDC' : 'Cash';
-      if (!bankAcct) throw new Error(`No ${bankAcctLabel} account (or cash clearing fallback) configured for bank: ${payment.disbursementBankAccount}`);
-      const reverseLines: any[] = [];
-      relatedInvoices.forEach((inv, idx) => {
-        const amt = Number(inv.amountPaidPaymentCurrency) || 0;
-        reverseLines.push({ lineNumber: idx*2+1, lineType: 'DR', accountingClass: bankAcctClass,
-          accountCombination: bankAcct, enteredDr: amt, enteredCr: 0,
-          accountedDr: Math.round(amt*ctx.exRate*100)/100, accountedCr: 0,
-          currencyCode: ctx.ccy, exchangeRate: ctx.exRate, sourceLineNumber: idx*2+1,
-          description: `Void ${bankAcctLabel} – Payment ${ctx.paymentNum} / Invoice ${inv.invoiceNumber}` });
-        const invFunctional = inv.invoiceFunctionalAmount != null
-          ? inv.invoiceFunctionalAmount
-          : (inv.invoiceConversionRate ? Math.round(amt * inv.invoiceConversionRate * 100) / 100 : null);
-        const pmtFunctional = Math.round(amt * ctx.exRate * 100) / 100;
-        const accountedCrAmt = invFunctional != null ? Math.round(invFunctional * 100) / 100 : pmtFunctional;
-        reverseLines.push({ lineNumber: idx*2+2, lineType: 'CR', accountingClass: 'LIABILITY',
-          accountCombination: inv.liabilityDistribution || '', enteredDr: 0, enteredCr: amt,
-          accountedDr: 0, accountedCr: accountedCrAmt,
-          currencyCode: ctx.ccy, exchangeRate: ctx.exRate, sourceLineNumber: idx*2+2,
-          description: `Void AP Liability – Payment ${ctx.paymentNum} / Invoice ${inv.invoiceNumber}` });
-      });
-
-      // FX Gain/Loss reversal for foreign currency payments
-      if (ctx.ccy !== 'AED') {
-        const fxAcct = fxAcctOverride || bank.fxGainLossAccountCombination;
-        if (!fxAcct) throw new Error(`FX Gain/Loss account not configured for void. Please select the FX account first (same as Create Accounting).`);
-        let totalFxGain = 0;
-        let totalFxLoss = 0;
-        relatedInvoices.forEach(inv => {
-          const amt = Number(inv.amountPaidPaymentCurrency) || 0;
-          const invFunctional = inv.invoiceFunctionalAmount != null
-            ? inv.invoiceFunctionalAmount
-            : (inv.invoiceConversionRate ? Math.round(amt * inv.invoiceConversionRate * 100) / 100 : null);
-          const pmtFunctional = Math.round(amt * ctx.exRate * 100) / 100;
-          if (invFunctional != null) {
-            const diff = Math.round((invFunctional - pmtFunctional) * 100) / 100;
-            if (diff > 0) totalFxGain += diff;
-            if (diff < 0) totalFxLoss += Math.abs(diff);
-          }
-        });
-        const nextLine = reverseLines.length + 1;
-        // Void reverses: original gain (CR) → now DR; original loss (DR) → now CR
-        if (totalFxGain > 0) {
-          reverseLines.push({ lineNumber: nextLine, lineType: 'DR', accountingClass: 'FX_REALIZED_GAIN',
-            accountCombination: fxAcct, enteredDr: 0, enteredCr: 0,
-            accountedDr: totalFxGain, accountedCr: 0,
-            currencyCode: 'AED', exchangeRate: 1,
-            description: `Void FX Realized Gain – Payment ${ctx.paymentNum}` });
-        }
-        if (totalFxLoss > 0) {
-          reverseLines.push({ lineNumber: nextLine + (totalFxGain > 0 ? 1 : 0), lineType: 'CR', accountingClass: 'FX_REALIZED_LOSS',
-            accountCombination: fxAcct, enteredDr: 0, enteredCr: 0,
-            accountedDr: 0, accountedCr: totalFxLoss,
-            currencyCode: 'AED', exchangeRate: 1,
-            description: `Void FX Realized Loss – Payment ${ctx.paymentNum}` });
-        }
-      }
-      voidCtxRef.current.reverseLines = reverseLines;
-      const payload: SlaCreatePayload = {
-        header: { moduleName: 'AP', sourceTable: 'AP_PAYMENTS', sourceId: payment.checkId,
-          sourceNumber: ctx.paymentNum, sourceType: 'PAYMENT', eventTypeCode: 'AP_PAYMENT_VOID',
-          eventDate: ctx.voidDate, accountingDate: ctx.voidDate, periodName: ctx.voidPeriod,
-          ledgerId: ctx.ledgerId, ledgerName: ctx.ledgerName, currencyCode: ctx.ccy,
-          ledgerCurrency: 'AED', exchangeRate: ctx.exRate, exchangeRateType: 'Corporate',
-          businessUnit: ctx.buName || undefined, description: `AP Payment Void — ${ctx.paymentNum}`, createdBy: 'SYSTEM' },
-        lines: reverseLines,
-      };
-      const result = await createAccounting(payload);
-      if ((result as any).status === 'error' || !(result.headerId > 0)) {
-        setVoidStep('sla', { status: 'error', response: result, error: (result as any).message ?? 'headerId missing' }); return false;
-      }
-      voidCtxRef.current.slaHeaderId = result.headerId;
-      setVoidStep('sla', { status: 'success', response: result });
-      return true;
-    });
-    if (!s3) { setVoidRunning(false); return; }
-
-    // Step 4 — Create GL Journal
-    const s4 = await ok('gl_create', async () => {
-      const ctx = voidCtxRef.current;
-      const ref5 = eventTypeToRef5('AP_PAYMENT_VOID');
-      const batchName = `${ref5}-${ctx.paymentNum}-${ctx.voidDate.replace(/-/g,'')}-${Date.now().toString().slice(-6)}`;
-      voidCtxRef.current.batchName = batchName;
-      const totalDr = ctx.reverseLines.reduce((s, l) => s + (l.enteredDr||0), 0);
-      const totalCr = ctx.reverseLines.reduce((s, l) => s + (l.enteredCr||0), 0);
-      const payload = {
-        batch: { batchName, batchDescription: `AP-PAYMENT-VOID – ${ctx.paymentNum}`,
-          ledgerName: ctx.ledgerName, ledgerId: ctx.ledgerId, status: 'NEW',
-          accountingPeriod: ctx.voidPeriod, controlTotal: totalDr,
-          runningTotalDr: totalDr, runningTotalCr: totalCr, batchSource: 'Payables', createdBy: 'SYSTEM' },
-        header: { ledgerId: ctx.ledgerId, ledgerName: ctx.ledgerName,
-          jeCategory: 'AP_PAYMENT_VOID', jeSource: 'Payables', periodName: ctx.voidPeriod,
-          journalName: batchName, description: `AP Payment Void — ${ctx.paymentNum}`,
-          currencyCode: ctx.ccy, currencyConversionType: 'User',
-          currencyConversionDate: ctx.voidDate, currencyConversionRate: ctx.exRate,
-          defaultEffectiveDate: ctx.voidDate, status: 'NEW',
-          runningTotalDr: totalDr, runningTotalCr: totalCr, createdBy: 'SYSTEM' },
-        lines: ctx.reverseLines.map(l => {
-          const isAedLine = (l.currencyCode || '').toUpperCase() === 'AED';
-          const eDr = isAedLine ? (l.accountedDr > 0 ? l.accountedDr : 0) : (l.enteredDr || null);
-          const eCr = isAedLine ? (l.accountedCr > 0 ? l.accountedCr : 0) : (l.enteredCr || null);
-          return {
-          enteredDr: eDr, enteredCr: eCr,
-          accountedDr: l.accountedDr||null, accountedCr: l.accountedCr||null,
-          statAmount: null, description: l.description||'', currencyCode: l.currencyCode||ctx.ccy,
-          currencyConversionDate: ctx.voidDate, currencyConversionRate: isAedLine ? 1 : ctx.exRate,
-          userCurrencyConversionType: 'User', accountCombination: l.accountCombination||'',
-          chartOfAccountsName: 'Chart of Accounts',
-          reference1: ctx.paymentNum, reference2: String(payment.checkId),
-          reference3: l.accountingClass||null, reference4: ctx.buName||null,
-          reference5: ref5, createdBy: 'SYSTEM',
-        }; }),
-      };
-      const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/journals/create`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(payload) });
-      const data = await res.json();
-      if (!res.ok) { setVoidStep('gl_create', { status: 'error', response: data, error: data.message ?? `HTTP ${res.status}` }); return false; }
-      voidCtxRef.current.glBatchId  = data.jeBatchId  ?? data.batchId  ?? null;
-      voidCtxRef.current.glHeaderId = data.jeHeaderId ?? data.headerId ?? null;
-      setVoidStep('gl_create', { status: 'success', response: data });
-      return true;
-    });
-    if (!s4) { setVoidRunning(false); return; }
-
-    // Step 5 — Post GL Journal
-    const s5 = await ok('gl_post', async () => {
-      const ctx = voidCtxRef.current;
-      if (!ctx.glBatchId) throw new Error('GL Batch ID missing');
-      const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/${ctx.glBatchId}/post`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: '{}' });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data?.success === false) { setVoidStep('gl_post', { status: 'error', response: data, error: data.error ?? `HTTP ${res.status}` }); return false; }
-      setVoidStep('gl_post', { status: 'success', response: data });
-      return true;
-    });
-    if (!s5) { setVoidRunning(false); return; }
-
-    // Step 6 — Stamp SLA
-    await ok('sla_stamp', async () => {
-      const ctx = voidCtxRef.current;
-      if (!ctx.slaHeaderId) throw new Error('SLA Header ID missing');
-      const result = await postToLedger(ctx.slaHeaderId, ctx.glBatchId ?? 0, ctx.batchName, ctx.glHeaderId ?? 0, 'SYSTEM');
-      setVoidStep('sla_stamp', { status: 'success', response: result });
-      return true;
-    });
+    for (const key of VOID_STEP_KEYS) {
+      const ok = await execVoidStep(key, values);
+      if (!ok) { setVoidRunning(false); return; }
+    }
 
     setVoidRunning(false);
     setVoidDone(true);
@@ -2315,7 +2281,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         open={voidModalOpen}
         onCancel={() => { if (!voidRunning) { setVoidModalOpen(false); voidForm.resetFields(); } }}
         footer={null}
-        width={760}
+        width={900}
         destroyOnClose
         styles={{ body: { maxHeight: '85vh', overflowY: 'auto' } }}
       >
@@ -2341,42 +2307,84 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
             <Input placeholder="Optional" disabled={voidRunning} />
           </Form.Item>
 
-          {/* Related Invoices */}
-          <Table size="small" loading={loadingInvoices} dataSource={relatedInvoices} rowKey="key"
-            pagination={false} scroll={{ y: 100 }} style={{ marginBottom: 14 }}
-            locale={{ emptyText: 'No related invoices' }}
-            columns={[
-              { title: 'Invoice #', dataIndex: 'invoiceNumber', key: 'invoiceNumber', ellipsis: true },
-              { title: 'Installment', dataIndex: 'installmentNumber', key: 'installmentNumber', width: 90, align: 'center' as const, render: (v: any) => v || '—' },
-              { title: 'Amt Paid', dataIndex: 'amountPaidPaymentCurrency', key: 'amountPaidPaymentCurrency', align: 'right' as const, render: (v: number) => v?.toLocaleString('en-AE', { minimumFractionDigits: 2 }) ?? '—' },
-              { title: 'Liability Account', dataIndex: 'liabilityDistribution', key: 'liabilityDistribution', ellipsis: true },
-            ]}
-          />
+          {/* GL Lines tables — shown after Step 2 (get_lines) succeeds */}
+          {voidOrigLines.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Original GL Journal Lines</Text>
+              <Table size="small" dataSource={voidOrigLines.map((r, i) => ({ ...r, key: i }))} pagination={false} scroll={{ y: 120 }}
+                columns={[
+                  { title: '#', dataIndex: 'line_num', key: 'line_num', width: 36 },
+                  { title: 'Account', dataIndex: 'account', key: 'account', ellipsis: true },
+                  { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+                  { title: 'Currency', dataIndex: 'currency_code', key: 'currency_code', width: 70 },
+                  { title: 'Entered Dr', dataIndex: 'entered_dr', key: 'entered_dr', align: 'right' as const, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
+                  { title: 'Entered Cr', dataIndex: 'entered_cr', key: 'entered_cr', align: 'right' as const, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
+                  { title: 'Accounted Dr', dataIndex: 'accounted_dr', key: 'accounted_dr', align: 'right' as const, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
+                  { title: 'Accounted Cr', dataIndex: 'accounted_cr', key: 'accounted_cr', align: 'right' as const, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
+                ]}
+              />
+              <div style={{ marginTop: 10 }}>
+                <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 4, color: '#cf1322' }}>Accounting After Void (Reversal Lines)</Text>
+                <Table size="small" dataSource={voidRevLines.map((r, i) => ({ ...r, key: i }))} pagination={false} scroll={{ y: 120 }}
+                  style={{ border: '1px solid #ffccc7', borderRadius: 4 }}
+                  columns={[
+                    { title: '#', dataIndex: 'line_num', key: 'line_num', width: 36 },
+                    { title: 'Account', dataIndex: 'account', key: 'account', ellipsis: true },
+                    { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+                    { title: 'Currency', dataIndex: 'currency_code', key: 'currency_code', width: 70 },
+                    { title: 'Entered Dr', dataIndex: 'entered_dr', key: 'entered_dr', align: 'right' as const, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
+                    { title: 'Entered Cr', dataIndex: 'entered_cr', key: 'entered_cr', align: 'right' as const, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
+                    { title: 'Accounted Dr', dataIndex: 'accounted_dr', key: 'accounted_dr', align: 'right' as const, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
+                    { title: 'Accounted Cr', dataIndex: 'accounted_cr', key: 'accounted_cr', align: 'right' as const, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
+                  ]}
+                />
+              </div>
+            </div>
+          )}
 
-          {/* ── 6 Step Progress Cards (auto-run) ─────────────────────────── */}
+          {/* ── 7 Step Progress Cards ─────────────────────────── */}
           {(() => {
             const STEPS: { key: VoidStepKey; step: number; method: string; methodColor: string; label: string; url: string }[] = [
-              { key: 'eligibility', step: 1, method: 'GET',  methodColor: 'blue',   label: 'Check Void Eligibility',       url: `${APEX_DB_CONFIG.baseUrl}/ap/payments/${payment.checkId}/void-eligibility` },
-              { key: 'void',        step: 2, method: 'PUT',  methodColor: 'orange', label: 'Void Payment',                 url: `${APEX_DB_CONFIG.baseUrl}/ap/payments/void` },
-              { key: 'sla',         step: 3, method: 'POST', methodColor: 'green',  label: 'Create SLA Reversal Accounting', url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create` },
-              { key: 'gl_create',   step: 4, method: 'POST', methodColor: 'green',  label: 'Create GL Journal',             url: `${APEX_DB_CONFIG.baseUrl}/journals/create` },
-              { key: 'gl_post',     step: 5, method: 'PUT',  methodColor: 'orange', label: 'Post GL Journal',               url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/:batchId/post` },
-              { key: 'sla_stamp',   step: 6, method: 'POST', methodColor: 'green',  label: 'Stamp SLA as POSTED',           url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post` },
+              { key: 'eligibility', step: 1, method: 'GET',  methodColor: 'blue',   label: 'Check Void Eligibility',          url: `${APEX_DB_CONFIG.baseUrl}/ap/payments/${payment.checkId}/void-eligibility` },
+              { key: 'get_lines',   step: 2, method: 'GET',  methodColor: 'blue',   label: 'Get Original GL Lines',            url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${payment.checkId}&reference5=AP-PAYMENT` },
+              { key: 'sla',         step: 3, method: 'POST', methodColor: 'green',  label: 'Create SLA Reversal Accounting',   url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create` },
+              { key: 'gl_create',   step: 4, method: 'POST', methodColor: 'green',  label: 'Create GL Journal',                url: `${APEX_DB_CONFIG.baseUrl}/journals/create` },
+              { key: 'gl_post',     step: 5, method: 'PUT',  methodColor: 'orange', label: 'Post GL Journal',                  url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/:batchId/post` },
+              { key: 'sla_stamp',   step: 6, method: 'POST', methodColor: 'green',  label: 'Stamp SLA as POSTED',              url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post` },
+              { key: 'void',        step: 7, method: 'PUT',  methodColor: 'orange', label: 'Void Payment',                     url: `${APEX_DB_CONFIG.baseUrl}/ap/payments/void` },
             ];
-            return STEPS.map(s => {
+            return STEPS.map((s, idx) => {
               const st = voidStepMap[s.key];
               const borderColor = st.status === 'success' ? '#52c41a' : st.status === 'error' ? '#ff4d4f' : st.status === 'running' ? '#1677ff' : undefined;
               const statusIcon = st.status === 'running' ? <LoadingOutlined style={{ color: '#1677ff' }} spin />
                 : st.status === 'success' ? <CheckCircleOutlined style={{ color: '#52c41a' }} />
                 : st.status === 'error'   ? <CloseCircleOutlined style={{ color: '#ff4d4f' }} /> : null;
+              // Previous step succeeded (or this is the first step)
+              const prevKey = idx > 0 ? STEPS[idx - 1].key : null;
+              const prevOk  = prevKey ? voidStepMap[prevKey].status === 'success' : true;
+              const canRun  = prevOk && (st.status === 'idle' || st.status === 'error') && !voidRunning;
+              const hasPayload = !!voidStepPayloads[s.key];
               return (
                 <Card key={s.key} size="small" style={{ marginBottom: 6, borderColor }}
                   title={
-                    <Space size={4}>
-                      <Tag color={s.methodColor} style={{ minWidth: 44, textAlign: 'center', margin: 0 }}>{s.method}</Tag>
-                      <Text strong style={{ fontSize: 12 }}>Step {s.step}: {s.label}</Text>
-                      {statusIcon}
-                    </Space>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Space size={4}>
+                        <Tag color={s.methodColor} style={{ minWidth: 44, textAlign: 'center', margin: 0 }}>{s.method}</Tag>
+                        <Text strong style={{ fontSize: 12 }}>Step {s.step}: {s.label}</Text>
+                        {statusIcon}
+                      </Space>
+                      <Space size={4}>
+                        {hasPayload && (
+                          <Tooltip title="View payload">
+                            <Button size="small" icon={<EyeOutlined />} onClick={() => {
+                              Modal.info({ title: `Step ${s.step} Payload`, width: 600,
+                                content: <pre style={{ fontSize: 11, maxHeight: 400, overflowY: 'auto' }}>{JSON.stringify(voidStepPayloads[s.key], null, 2)}</pre> });
+                            }} />
+                          </Tooltip>
+                        )}
+                        <Button size="small" disabled={!canRun} onClick={() => runVoidStep(s.key)}>Run</Button>
+                      </Space>
+                    </div>
                   }
                 >
                   <code style={{ fontSize: 10, background: '#f0f0f0', padding: '2px 6px', borderRadius: 3, display: 'block', wordBreak: 'break-all', marginBottom: st.response || st.error ? 6 : 0 }}>{s.url}</code>
@@ -2408,7 +2416,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
             <Button type="primary" danger htmlType="submit" loading={voidRunning}
               icon={<StopOutlined />} disabled={isVoided || isCleared || voidDone}
             >
-              {voidRunning ? 'Processing…' : voidDone ? 'Voided ✓' : 'Void Payment'}
+              {voidRunning ? 'Processing…' : voidDone ? 'Voided ✓' : 'Run All'}
             </Button>
           </div>
         </Form>
