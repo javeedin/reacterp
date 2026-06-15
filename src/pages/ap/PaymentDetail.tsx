@@ -238,6 +238,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
   const [voidOrigLines, setVoidOrigLines] = useState<any[]>([]);
   const [voidRevLines, setVoidRevLines] = useState<any[]>([]);
   const [voidStepPayloads, setVoidStepPayloads] = useState<Record<string, any>>({});
+  const [voidLinesLoading, setVoidLinesLoading] = useState(false);
 
   interface VoidCtx {
     voidDate: string; paymentNum: string; buName: string; ccy: string;
@@ -548,7 +549,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     }
   };
 
-  const openVoidModal = () => {
+  const openVoidModal = async () => {
     setVoidStepMap(initVoidSteps());
     setVoidDone(false);
     setVoidOrigLines([]);
@@ -561,6 +562,28 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     };
     voidForm.setFieldsValue({ voidDate: dayjs(), voidReason: '' });
     setVoidModalOpen(true);
+    // Pre-fetch original GL lines so the user sees accounting upfront
+    setVoidLinesLoading(true);
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${payment.checkId}&reference5=AP-PAYMENT`;
+      const res  = await fetch(url, { headers: { Accept: 'application/json' } });
+      const data = await res.json();
+      if (res.ok) {
+        const origLines: any[] = data.items || [];
+        const revLines = origLines.map(l => ({
+          ...l,
+          entered_dr:   l.entered_cr,
+          entered_cr:   l.entered_dr,
+          accounted_dr: l.accounted_cr,
+          accounted_cr: l.accounted_dr,
+        }));
+        setVoidOrigLines(origLines);
+        setVoidRevLines(revLines);
+        voidCtxRef.current.origGLLines  = origLines;
+        voidCtxRef.current.reverseLines = revLines;
+      }
+    } catch { /* non-critical — user can still run steps */ }
+    finally { setVoidLinesLoading(false); }
   };
 
   // ── Void step executors (extracted so each can run standalone or as part of run-all) ──
@@ -2336,45 +2359,60 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item label="Void Reason" name="voidReason" style={{ marginBottom: 12 }}>
-            <Input placeholder="Optional" disabled={voidRunning} />
+          <Form.Item
+            label={<><span style={{ color: REDWOOD.error }}>*</span> Void Reason</>}
+            name="voidReason"
+            rules={[{ required: true, message: 'Void Reason is required' }]}
+            style={{ marginBottom: 12 }}
+          >
+            <Input placeholder="Enter reason for voiding this payment" disabled={voidRunning} />
           </Form.Item>
+
+          {/* ── Accounting before & after void ─────────────────────────────── */}
+          {(() => {
+            const lineCols = [
+              { title: '#', dataIndex: 'line_num', key: 'line_num', width: 36 },
+              { title: 'Account', dataIndex: 'account', key: 'account', ellipsis: true },
+              { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+              { title: 'CCY', dataIndex: 'currency_code', key: 'currency_code', width: 52 },
+              { title: 'Entered Dr', dataIndex: 'entered_dr', key: 'entered_dr', align: 'right' as const, width: 100, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
+              { title: 'Entered Cr', dataIndex: 'entered_cr', key: 'entered_cr', align: 'right' as const, width: 100, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
+              { title: 'Acc Dr', dataIndex: 'accounted_dr', key: 'accounted_dr', align: 'right' as const, width: 100, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
+              { title: 'Acc Cr', dataIndex: 'accounted_cr', key: 'accounted_cr', align: 'right' as const, width: 100, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
+            ];
+            if (voidLinesLoading) {
+              return (
+                <div style={{ textAlign: 'center', padding: '20px 0', color: '#1677ff', marginBottom: 12 }}>
+                  <LoadingOutlined spin style={{ fontSize: 18, marginBottom: 6 }} />
+                  <div style={{ fontSize: 12 }}>Loading accounting lines…</div>
+                </div>
+              );
+            }
+            if (voidOrigLines.length === 0) {
+              return (
+                <Alert type="warning" showIcon message="No posted GL journal found for this payment. Accounting lines will be fetched when void is processed." style={{ marginBottom: 12 }} />
+              );
+            }
+            return (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6, padding: '8px 12px', marginBottom: 10 }}>
+                  <Text strong style={{ fontSize: 12, color: '#389e0d' }}>Original Accounting</Text>
+                  <Table size="small" style={{ marginTop: 6 }} dataSource={voidOrigLines.map((r, i) => ({ ...r, key: i }))} pagination={false} columns={lineCols} />
+                </div>
+                <div style={{ background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 6, padding: '8px 12px' }}>
+                  <Text strong style={{ fontSize: 12, color: '#cf1322' }}>Accounting After Void (Reversal)</Text>
+                  <Table size="small" style={{ marginTop: 6 }} dataSource={voidRevLines.map((r, i) => ({ ...r, key: i }))} pagination={false} columns={lineCols} />
+                </div>
+              </div>
+            );
+          })()}
 
           {/* ── Running indicator ──────────────────────────────────────────── */}
           {voidRunning && (
-            <div style={{ textAlign: 'center', padding: '16px 0', color: '#1677ff' }}>
+            <div style={{ textAlign: 'center', padding: '12px 0', color: '#1677ff' }}>
               <LoadingOutlined spin style={{ fontSize: 22, marginBottom: 8 }} />
               <div style={{ fontSize: 12 }}>Processing void…</div>
             </div>
-          )}
-
-          {/* ── Journal lines — shown after steps complete ──────────────────── */}
-          {voidOrigLines.length > 0 && (
-            <>
-              {(() => {
-                const lineCols = [
-                  { title: '#', dataIndex: 'line_num', key: 'line_num', width: 36 },
-                  { title: 'Account', dataIndex: 'account', key: 'account', ellipsis: true },
-                  { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
-                  { title: 'CCY', dataIndex: 'currency_code', key: 'currency_code', width: 52 },
-                  { title: 'Entered Dr', dataIndex: 'entered_dr', key: 'entered_dr', align: 'right' as const, width: 100, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
-                  { title: 'Entered Cr', dataIndex: 'entered_cr', key: 'entered_cr', align: 'right' as const, width: 100, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
-                  { title: 'Acc Dr', dataIndex: 'accounted_dr', key: 'accounted_dr', align: 'right' as const, width: 100, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
-                  { title: 'Acc Cr', dataIndex: 'accounted_cr', key: 'accounted_cr', align: 'right' as const, width: 100, render: (v: any) => v ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2 }) : '—' },
-                ];
-                return (
-                  <div style={{ marginBottom: 14 }}>
-                    <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 4, color: '#595959' }}>Original Journal</Text>
-                    <Table size="small" dataSource={voidOrigLines.map((r, i) => ({ ...r, key: i }))} pagination={false} columns={lineCols} />
-                    <div style={{ marginTop: 10 }}>
-                      <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 4, color: '#cf1322' }}>Reversal Journal (After Void)</Text>
-                      <Table size="small" dataSource={voidRevLines.map((r, i) => ({ ...r, key: i }))} pagination={false} columns={lineCols}
-                        style={{ border: '1px solid #ffccc7', borderRadius: 4 }} />
-                    </div>
-                  </div>
-                );
-              })()}
-            </>
           )}
 
           {/* ── Error from any failed step ──────────────────────────────────── */}
