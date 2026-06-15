@@ -847,7 +847,7 @@ const ManagePayments: React.FC = () => {
       try { return new Date(v instanceof Object ? v.toDate?.() ?? v : v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
       catch { return String(v); }
     };
-    const totalAmt = (invoicesToPay || []).reduce((s: number, r: any) => s + (Number(r.paymentAmount) || 0), 0);
+    const totalAmt = (invoicesToPay || []).reduce((s: number, r: any) => s + (Number(r.applyAmount) || 0), 0);
 
     // Header bar
     doc.setFillColor(191, 70, 0);
@@ -925,10 +925,10 @@ const ManagePayments: React.FC = () => {
         body: (invoicesToPay || []).map((r: any) => [
           r.invoiceNumber || r.invoiceId,
           r.installmentNumber || 1,
-          r.invoiceCurrency || fv.currency || 'AED',
+          r.currency || fv.paymentCurrency || 'AED',
           fmtAmt(r.invoiceAmount),
-          fmtAmt(r.paymentAmount),
-          fmtAmt(r.discountTaken || 0),
+          fmtAmt(r.applyAmount),
+          fmtAmt(r.discountAmount || 0),
         ]),
         foot: [['', '', 'Total', '', fmtAmt(totalAmt), '']],
         styles: { fontSize: 8, cellPadding: 2 },
@@ -945,10 +945,18 @@ const ManagePayments: React.FC = () => {
     if (y > 240) { doc.addPage(); y = 20; }
     const sigY = Math.max(y + 10, 250);
     const sigLabels = ['Prepared By', 'Reviewed By', 'Approved By', 'Received By'];
+    const sigValues = [user?.name || user?.email || '', '', '', ''];
     const sigW = (pageW - 28 - (sigLabels.length - 1) * 8) / sigLabels.length;
     doc.setDrawColor(200, 200, 200);
     sigLabels.forEach((label, i) => {
       const sx = 14 + i * (sigW + 8);
+      // Print name above the line for Prepared By
+      if (sigValues[i]) {
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(40);
+        doc.text(sigValues[i], sx + sigW / 2, sigY - 3, { align: 'center', maxWidth: sigW });
+      }
       doc.line(sx, sigY, sx + sigW, sigY);
       doc.setFontSize(8);
       doc.setFont('helvetica', 'normal');
@@ -3535,7 +3543,7 @@ const ManagePayments: React.FC = () => {
                               <Input
                                 placeholder="Search and select supplier"
                                 readOnly
-                                disabled={!buReady}
+                                disabled={paymentConfirmed || !buReady}
                                 suffix={
                                   <SearchOutlined
                                     style={{ color: buReady ? REDWOOD.info : '#ccc', cursor: buReady ? 'pointer' : 'default', fontSize: 14 }}
@@ -3554,7 +3562,7 @@ const ManagePayments: React.FC = () => {
                               name="payeeSite"
                               rules={[{ required: true, message: 'Required' }]}
                             >
-                              <Select placeholder="Select Supplier Site" allowClear disabled={!buReady}>
+                              <Select placeholder="Select Supplier Site" allowClear disabled={paymentConfirmed || !buReady}>
                                 <Option value="MAIN">Main</Option>
                                 <Option value="HQ">Headquarters</Option>
                               </Select>
@@ -3572,7 +3580,7 @@ const ManagePayments: React.FC = () => {
                               name="paymentDate"
                               rules={[{ required: true, message: 'Required' }]}
                             >
-                              <DatePicker disabled={!buReady} style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
+                              <DatePicker disabled={paymentConfirmed || !buReady} style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
                             </Form.Item>
                             <Form.Item
                               label={<><span style={{ color: REDWOOD.primary }}>*</span> Type</>}
@@ -3580,7 +3588,7 @@ const ManagePayments: React.FC = () => {
                               initialValue="QUICK"
                               rules={[{ required: true, message: 'Required' }]}
                             >
-                              <Select disabled={!buReady} style={{ width: 130 }}>
+                              <Select disabled={paymentConfirmed || !buReady} style={{ width: 130 }}>
                                 <Option value="QUICK">Quick</Option>
                                 <Option value="STANDARD">Standard</Option>
                                 <Option value="MANUAL">Manual</Option>
@@ -3674,7 +3682,7 @@ const ManagePayments: React.FC = () => {
                                 placeholder={!selectedBuLegalEntityName ? 'Select Business Unit first' : !derivedCompany ? 'No company code — cannot select bank' : 'Select Bank Account'}
                                 allowClear
                                 showSearch
-                                disabled={!buReady}
+                                disabled={paymentConfirmed || !buReady}
                                 loading={bankAccountsLoading}
                                 optionFilterProp="children"
                                 notFoundContent={bankAccountsLoading ? 'Loading…' : 'No bank accounts found'}
@@ -3709,7 +3717,7 @@ const ManagePayments: React.FC = () => {
                                 showSearch
                                 optionFilterProp="label"
                                 placeholder="Select Currency"
-                                disabled={!buReady}
+                                disabled={paymentConfirmed || !buReady}
                                 onChange={(val) => {
                                   setCreatePaymentCurrency(val || 'AED');
                                   createPaymentForm.validateFields(['conversionRateType', 'conversionDate', 'conversionRate']);
@@ -3742,7 +3750,7 @@ const ManagePayments: React.FC = () => {
                               name="conversionRateType"
                               rules={[{ required: createPaymentCurrency !== 'AED', message: 'Required for foreign currency' }]}
                             >
-                              <Select placeholder="Select rate type" allowClear disabled={!buReady}>
+                              <Select placeholder="Select rate type" allowClear disabled={paymentConfirmed || !buReady}>
                                 <Option value="User">User</Option>
                                 <Option value="Corporate">Corporate</Option>
                                 <Option value="Spot">Spot</Option>
@@ -3753,7 +3761,7 @@ const ManagePayments: React.FC = () => {
                               name="conversionDate"
                               rules={[{ required: createPaymentCurrency !== 'AED', message: 'Required for foreign currency' }]}
                             >
-                              <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" disabled={!buReady} />
+                              <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" disabled={paymentConfirmed || !buReady} />
                             </Form.Item>
                             <Form.Item
                               label={createPaymentCurrency !== 'AED' ? <><span style={{ color: REDWOOD.primary }}>*</span> Conversion Rate</> : 'Conversion Rate'}
@@ -3780,7 +3788,7 @@ const ManagePayments: React.FC = () => {
                                     : <Button type="text" size="small" loading={bmsRateLoading} icon={<ReloadOutlined />} onClick={fetchBmsRate} />
                               )}
                             >
-                              <InputNumber style={{ width: '100%' }} placeholder="0.000000" precision={6} min={0} disabled={!buReady} />
+                              <InputNumber style={{ width: '100%' }} placeholder="0.000000" precision={6} min={0} disabled={paymentConfirmed || !buReady} />
                             </Form.Item>
                             {createPaymentCurrency !== 'AED' && (
                               <Form.Item label="Functional Amount (AED)">
@@ -3826,14 +3834,14 @@ const ManagePayments: React.FC = () => {
                                 },
                               }]}
                             >
-                              <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" disabled={!buReady} />
+                              <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" disabled={paymentConfirmed || !buReady} />
                             </Form.Item>
                             <Form.Item
                               label={<><span style={{ color: REDWOOD.primary }}>*</span> Payment Method</>}
                               name="paymentMethod"
                               rules={[{ required: true, message: 'Required' }]}
                             >
-                              <Select placeholder="Select Payment Method" disabled={!buReady}>
+                              <Select placeholder="Select Payment Method" disabled={paymentConfirmed || !buReady}>
                                 <Option value="CHECK">Check</Option>
                                 <Option value="EFT">Electronic Funds Transfer</Option>
                                 <Option value="WIRE">Wire Transfer</Option>
@@ -3841,10 +3849,10 @@ const ManagePayments: React.FC = () => {
                               </Select>
                             </Form.Item>
                             <Form.Item label="Payment Document" name="paymentDocument">
-                              <Select placeholder="Select Payment Document" allowClear disabled={!buReady} />
+                              <Select placeholder="Select Payment Document" allowClear disabled={paymentConfirmed || !buReady} />
                             </Form.Item>
                             <Form.Item label="Paper Document Number" name="paperDocumentNumber">
-                              <Input disabled={!buReady} placeholder="Leave blank to auto-generate" />
+                              <Input disabled={paymentConfirmed || !buReady} placeholder="Leave blank to auto-generate" />
                             </Form.Item>
                             <Form.Item label="Attachments">
                               <Space size={4}>
@@ -3853,13 +3861,13 @@ const ManagePayments: React.FC = () => {
                                   size="small"
                                   type="text"
                                   icon={<PlusOutlined />}
-                                  disabled={!buReady}
+                                  disabled={paymentConfirmed || !buReady}
                                   style={{ color: buReady ? REDWOOD.info : '#ccc', padding: '0 4px', height: 22 }}
                                 />
                               </Space>
                             </Form.Item>
                             <Form.Item label="Description" name="paymentDescription">
-                              <Input disabled={!buReady} />
+                              <Input disabled={paymentConfirmed || !buReady} />
                             </Form.Item>
                           </Col>
                         </Row>
@@ -3997,10 +4005,10 @@ const ManagePayments: React.FC = () => {
                         <Row gutter={32}>
                           <Col span={12}>
                             <Form.Item label="Payment Process Profile" name="paymentProcessProfile">
-                              <Select placeholder="Select Profile" allowClear disabled={!buReady} />
+                              <Select placeholder="Select Profile" allowClear disabled={paymentConfirmed || !buReady} />
                             </Form.Item>
                             <Form.Item label="Remit-to Account" name="remitToAccount">
-                              <Select placeholder="Select Remit-to Account" allowClear disabled={!buReady} />
+                              <Select placeholder="Select Remit-to Account" allowClear disabled={paymentConfirmed || !buReady} />
                             </Form.Item>
                           </Col>
                           <Col span={12}>
@@ -5523,15 +5531,22 @@ const ManagePayments: React.FC = () => {
             {(Object.entries(confirmSteps) as [ConfirmStepKey, ConfirmStep][])
               .filter(([key]) => key !== 'sla' && key !== 'gl' ? true : createAccountingChecked)
               .map(([key, s]) => {
-                const icon = s.status === 'running' ? <LoadingOutlined style={{ color: '#1677ff' }} spin />
-                  : s.status === 'success' ? <CheckCircleOutlined style={{ color: '#52c41a' }} />
+                const isSkipped = s.status === 'success' && s.detail?.toLowerCase().includes('skipped');
+                const iconColor = s.status === 'running' ? '#1677ff'
+                  : isSkipped            ? '#fa8c16'
+                  : s.status === 'success' ? '#52c41a'
+                  : s.status === 'error'   ? '#ff4d4f'
+                  : '#6B6B6B';
+                const icon = s.status === 'running' ? <LoadingOutlined style={{ color: iconColor }} spin />
+                  : isSkipped            ? <CheckCircleOutlined style={{ color: iconColor }} />
+                  : s.status === 'success' ? <CheckCircleOutlined style={{ color: iconColor }} />
                   : s.status === 'error'   ? <CloseCircleOutlined style={{ color: '#ff4d4f' }} />
                   : <span style={{ display: 'inline-block', width: 14, height: 14, borderRadius: '50%', background: '#d9d9d9' }} />;
                 return (
-                  <div key={key} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 4 }}>
+                  <div key={key} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 4, ...(isSkipped ? { background: '#fff7e6', border: '1px solid #ffd591', borderRadius: 4, padding: '4px 8px' } : {}) }}>
                     <span style={{ marginTop: 2 }}>{icon}</span>
                     <div>
-                      <Text style={{ fontSize: 12, color: s.status === 'success' ? '#52c41a' : s.status === 'error' ? '#ff4d4f' : s.status === 'running' ? '#1677ff' : '#6B6B6B' }}>{s.label}</Text>
+                      <Text style={{ fontSize: 12, color: iconColor }}>{s.label}</Text>
                       {s.detail && <div><Text type="secondary" style={{ fontSize: 11 }}>{s.detail}</Text></div>}
                     </div>
                   </div>
