@@ -322,6 +322,8 @@ const TrialBalance: React.FC = () => {
   const [reSaving,        setReSaving]        = useState(false);
   const [reMergedTabs,    setReMergedTabs]    = useState<Set<string>>(new Set());
   const [reFetching,      setReFetching]      = useState(false);
+  const [reApiLog,        setReApiLog]        = useState<{ url: string; status: number | null; items: number } | null>(null);
+  const [reApiVisible,    setReApiVisible]    = useState(false);
   const [revalPreviewRows,     setRevalPreviewRows]     = useState<
     { lineNum: number; combo: string; subAccount: string; desc: string; comment: string; dr: number; cr: number }[]
   >([]);
@@ -822,34 +824,34 @@ const TrialBalance: React.FC = () => {
           + `&period_year=${prevYear}`
           + `&limit=100`;
         const reRes = await fetch(reUrl, { headers: { Accept: 'application/json' } });
-        if (reRes.ok) {
-          const reData = await reRes.json();
-          const reItems: RrTBRecord[] = (reData.items || []) as RrTBRecord[];
-          if (reItems.length > 0) {
-            // Use the RE row's closing as the brought-forward opening for 3112100
-            const reClosing = reItems[reItems.length - 1].closing ?? reItems[reItems.length - 1].ytd_credit ?? 0;
-            const exists = items.some(i => i.account === RE_ACCOUNT);
-            if (exists) {
-              items = items.map(i =>
-                i.account === RE_ACCOUNT
-                  ? { ...i, ytd_opening: reClosing, opening: reClosing, entered_opening: reClosing, ytd_entered_opening: reClosing }
-                  : i
-              );
-            } else {
-              const reRow = reItems[reItems.length - 1];
-              items = [...items, {
-                ...reRow,
-                ytd_opening: reClosing, opening: reClosing,
-                entered_opening: reClosing, ytd_entered_opening: reClosing,
-                debit: 0, credit: 0, closing: reClosing,
-                ytd_debit: 0, ytd_credit: 0,
-                account_desc: 'Retained Earnings B/F',
-              }];
-            }
-            setReMergedTabs(prev => new Set([...prev, tabKey]));
+        const reData = await reRes.json().catch(() => ({}));
+        const reItems: RrTBRecord[] = (reData.items || []) as RrTBRecord[];
+        setReApiLog({ url: reUrl, status: reRes.status, items: reItems.length });
+        if (reRes.ok && reItems.length > 0) {
+          const reClosing = reItems[reItems.length - 1].closing ?? reItems[reItems.length - 1].ytd_credit ?? 0;
+          const exists = items.some(i => i.account === RE_ACCOUNT);
+          if (exists) {
+            items = items.map(i =>
+              i.account === RE_ACCOUNT
+                ? { ...i, ytd_opening: reClosing, opening: reClosing, entered_opening: reClosing, ytd_entered_opening: reClosing }
+                : i
+            );
+          } else {
+            const reRow = reItems[reItems.length - 1];
+            items = [...items, {
+              ...reRow,
+              ytd_opening: reClosing, opening: reClosing,
+              entered_opening: reClosing, ytd_entered_opening: reClosing,
+              debit: 0, credit: 0, closing: reClosing,
+              ytd_debit: 0, ytd_credit: 0,
+              account_desc: 'Retained Earnings B/F',
+            }];
           }
+          setReMergedTabs(prev => new Set([...prev, tabKey]));
         }
-      } catch { /* RE fetch failure is non-fatal */ }
+      } catch (e: any) {
+        setReApiLog({ url: reUrl, status: null, items: 0 });
+      }
 
       const companies = [...new Set(items.map(i => i.company).filter(Boolean))].sort();
       const currencies = [...new Set(items.map(i => i.currency_code).filter(Boolean))].sort();
@@ -5961,6 +5963,13 @@ const TrialBalance: React.FC = () => {
             {reMergedTabs.has(tab.key) && (
               <Tag color="cyan" style={{ fontSize: 11, margin: 0 }}>RE ✓</Tag>
             )}
+            <Tooltip title="RE API debug — see last standardRE call">
+              <Button
+                size="small"
+                icon={<ApiOutlined style={{ color: reApiLog?.status === 200 ? '#389e0d' : reApiLog ? '#cf1322' : '#8c8c8c' }} />}
+                onClick={() => setReApiVisible(true)}
+              />
+            </Tooltip>
             <Button
               size="small"
               type="primary"
@@ -6475,6 +6484,40 @@ const TrialBalance: React.FC = () => {
         {/* ── TB Drill-down modals ─────────────────────────────────────── */}
         {renderDrillComboModal()}
         {renderDrillJnlModal()}
+
+        {/* ── RE API Debug Modal ───────────────────────────────────────── */}
+        <Modal
+          open={reApiVisible}
+          onCancel={() => setReApiVisible(false)}
+          footer={null}
+          width={700}
+          title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>RE API Debug — standardRE call</span></Space>}
+        >
+          {reApiLog ? (
+            <div style={{ fontSize: 12, fontFamily: 'monospace' }}>
+              <div style={{ marginBottom: 8 }}>
+                <Tag color={reApiLog.status === 200 ? 'green' : 'red'}>HTTP {reApiLog.status ?? 'ERR'}</Tag>
+                <Tag color={reApiLog.items > 0 ? 'blue' : 'orange'}>{reApiLog.items} rows returned</Tag>
+              </div>
+              <div style={{ background: '#f5f5f5', padding: 12, borderRadius: 6, wordBreak: 'break-all' }}>
+                <div style={{ color: '#595959', marginBottom: 4 }}>URL:</div>
+                <a href={reApiLog.url} target="_blank" rel="noreferrer" style={{ color: REDWOOD.info }}>{reApiLog.url}</a>
+              </div>
+              <div style={{ marginTop: 12, color: '#595959', fontSize: 11 }}>
+                Parameters extracted from URL:
+                <ul style={{ marginTop: 4 }}>
+                  {reApiLog.url.split('?')[1]?.split('&').map((p, i) => (
+                    <li key={i}><strong>{decodeURIComponent(p.split('=')[0])}</strong> = {decodeURIComponent(p.split('=')[1] ?? '')}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          ) : (
+            <div style={{ color: '#8c8c8c', textAlign: 'center', padding: 24 }}>
+              No RE API call made yet — open a YTD TB tab first.
+            </div>
+          )}
+        </Modal>
 
         {/* ── ReERP ↔ Fusion Reconciliation Modal ──────────────────────── */}
         <Modal
