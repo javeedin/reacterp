@@ -1055,13 +1055,10 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
           (detail.name && detail.name.toUpperCase().includes('ACCOUNT'))
         );
 
-        // Build description: "Account Desc - Sub-Account Desc" (or just account if no sub-account)
-        const subAccountSegment = Object.entries(result.segmentDetails).find(([key, detail]) =>
-          /sub.?account/i.test(key) || /sub.?account/i.test(detail.name || '')
-        );
-        const acctPart = accountSegment ? accountSegment[1].description : '';
-        const subPart  = subAccountSegment ? subAccountSegment[1].description : '';
-        const accountDescription = [acctPart, subPart].filter(Boolean).join(' - ');
+        // Build account description from Account segment only (e.g., "1000000 - Assets")
+        const accountDescription = accountSegment
+          ? `${accountSegment[1].value} - ${accountSegment[1].description}`
+          : '';
 
         // Update the line with segment details and description
         setLines(prevLines => prevLines.map(line =>
@@ -1089,13 +1086,10 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
         (detail.name && detail.name.toUpperCase().includes('ACCOUNT'))
       );
 
-      // Build description: "Account Desc - Sub-Account Desc" (or just account if no sub-account)
-      const subAccountSegment = Object.entries(segments).find(([key, detail]) =>
-        /sub.?account/i.test(key) || /sub.?account/i.test(detail.name || '')
-      );
-      const acctPart = accountSegment ? accountSegment[1].description : '';
-      const subPart  = subAccountSegment ? subAccountSegment[1].description : '';
-      const accountDescription = [acctPart, subPart].filter(Boolean).join(' - ');
+      // Build account description from Account segment only (e.g., "1000000 - Assets")
+      const accountDescription = accountSegment
+        ? `${accountSegment[1].value} - ${accountSegment[1].description}`
+        : '';
 
       // Update the line with account code, description, and segment details
       setLines(prevLines => prevLines.map(line =>
@@ -3142,6 +3136,48 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
               </Space>
             </div>
 
+            {/* Lines Toolbar */}
+            <div style={{
+              padding: '6px 12px',
+              borderBottom: `1px solid ${REDWOOD.neutral200}`,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              background: REDWOOD.surface,
+            }}>
+              <Space size="small">
+                <Button
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={handleAddLine}
+                  type="primary"
+                  style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+                  disabled={isPosted || isViewMode}
+                >
+                  Add Row
+                </Button>
+                <Button
+                  size="small"
+                  icon={<DeleteOutlined />}
+                  onClick={handleDeleteLines}
+                  disabled={isPosted || isViewMode || selectedLineKeys.length === 0}
+                  danger
+                >
+                  Delete Row{selectedLineKeys.length > 1 ? `s (${selectedLineKeys.length})` : ''}
+                </Button>
+                <Tooltip title={isDetached ? 'Close Detached View' : 'Detach to Full Page'}>
+                  <Button
+                    size="small"
+                    icon={<SplitCellsOutlined />}
+                    onClick={() => setIsDetached(true)}
+                    type={isDetached ? 'primary' : 'default'}
+                  >
+                    Detach
+                  </Button>
+                </Tooltip>
+              </Space>
+            </div>
+
             {/* Search Row */}
             <div style={{
               padding: '8px 12px',
@@ -3207,47 +3243,6 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
                 </Table.Summary>
               )}
             />
-
-            {/* Lines Toolbar — below the table */}
-            <div style={{
-              padding: '6px 12px',
-              borderTop: `1px solid ${REDWOOD.neutral200}`,
-              display: 'flex',
-              alignItems: 'center',
-              background: REDWOOD.surface,
-            }}>
-              <Space size="small">
-                <Button
-                  size="small"
-                  icon={<PlusOutlined />}
-                  onClick={handleAddLine}
-                  type="primary"
-                  style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
-                  disabled={isPosted || isViewMode}
-                >
-                  Add Row
-                </Button>
-                <Button
-                  size="small"
-                  icon={<DeleteOutlined />}
-                  onClick={handleDeleteLines}
-                  disabled={isPosted || isViewMode || selectedLineKeys.length === 0}
-                  danger
-                >
-                  Delete Row{selectedLineKeys.length > 1 ? `s (${selectedLineKeys.length})` : ''}
-                </Button>
-                <Tooltip title={isDetached ? 'Close Detached View' : 'Detach to Full Page'}>
-                  <Button
-                    size="small"
-                    icon={<SplitCellsOutlined />}
-                    onClick={() => setIsDetached(true)}
-                    type={isDetached ? 'primary' : 'default'}
-                  >
-                    Detach
-                  </Button>
-                </Tooltip>
-              </Space>
-            </div>
           </Card>
           ) : (
           <Card

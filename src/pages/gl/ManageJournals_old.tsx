@@ -79,7 +79,6 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   FilePdfOutlined,
-  FileAddOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -242,7 +241,7 @@ interface ApiResponse {
 // Note: Ledgers and Periods are now fetched from API dynamically
 
 // Batch statuses
-const batchStatuses = ['Posted', 'Unposted', 'NEW', 'Error', 'Pending', 'All'];
+const batchStatuses = ['Posted', 'Unposted', 'Error', 'Pending', 'All'];
 
 // Operators
 const operators = ['Starts with', 'Equals', 'Contains', 'Ends with'];
@@ -1312,7 +1311,6 @@ const ManageJournals: React.FC = () => {
     const config: Record<string, { color: string; icon: React.ReactNode }> = {
       posted: { color: REDWOOD.success, icon: <CheckCircleOutlined /> },
       unposted: { color: REDWOOD.warning, icon: <ClockCircleOutlined /> },
-      new: { color: REDWOOD.info, icon: <FileAddOutlined /> },
       error: { color: REDWOOD.primary, icon: <CloseCircleOutlined /> },
       pending: { color: REDWOOD.info, icon: <ClockCircleOutlined /> },
     };
@@ -4628,11 +4626,7 @@ const ManageJournals: React.FC = () => {
                       const count = journals.filter(j =>
                         [j.batchName, j.batchDescription, j.journalName, j.journalDescription,
                          j.category, j.source, j.statusMeaning, j.periodName, j.ledgerName,
-                         j.currencyCode,
-                         j.enteredDebit   != null ? String(j.enteredDebit)   : '',
-                         j.enteredCredit  != null ? String(j.enteredCredit)  : '',
-                         j.accountedDebit != null ? String(j.accountedDebit) : '',
-                         j.accountedCredit!= null ? String(j.accountedCredit): '']
+                         j.currencyCode, j.effectiveDate, j.postedDate]
                         .some(v => (v || '').toLowerCase().includes(q))
                       ).length;
                       return `${count} of ${journals.length} shown`;
@@ -4651,11 +4645,7 @@ const ManageJournals: React.FC = () => {
                     const q = gridFilter.toLowerCase();
                     return [j.batchName, j.batchDescription, j.journalName, j.journalDescription,
                             j.category, j.source, j.statusMeaning, j.periodName, j.ledgerName,
-                            j.currencyCode,
-                            j.runningTotalDr != null ? String(j.runningTotalDr) : '',
-                            j.runningTotalCr != null ? String(j.runningTotalCr) : '',
-                            j.enteredDebit  != null ? String(j.enteredDebit)  : '',
-                            j.enteredCredit != null ? String(j.enteredCredit) : '']
+                            j.currencyCode, j.effectiveDate, j.postedDate]
                       .some(v => (v || '').toLowerCase().includes(q));
                   })
                 : journals}
