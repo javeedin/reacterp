@@ -44,6 +44,7 @@ import {
   SendOutlined,
   PrinterOutlined,
   EyeOutlined,
+  CopyOutlined,
 } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
@@ -2762,14 +2763,8 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           <div style={{ marginBottom: 10, padding: '6px 10px', background: REDWOOD.neutral100, borderRadius: 6, border: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <Tag color="green" style={{ fontSize: 11, margin: 0 }}>GET</Tag>
             <code style={{ fontSize: 11, flex: 1, wordBreak: 'break-all', color: REDWOOD.neutral900 }}>{postGLLinesUrl}</code>
-            <Button
-              size="small"
-              icon={<ApiOutlined />}
-              onClick={() => window.open(postGLLinesUrl, '_blank')}
-              style={{ fontSize: 11, flexShrink: 0 }}
-            >
-              Open
-            </Button>
+            <Button size="small" icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(postGLLinesUrl); message.success('URL copied'); }} style={{ flexShrink: 0 }} />
+            <Button size="small" icon={<ApiOutlined />} onClick={() => window.open(postGLLinesUrl, '_blank')} style={{ fontSize: 11, flexShrink: 0 }}>Open</Button>
             {postGLRawCount > 0 && (
               <span style={{ fontSize: 11, color: REDWOOD.neutral600, flexShrink: 0 }}>
                 {postGLRawCount} raw lines → {postGLPayload?.lines?.length ?? 0} for header {postModalHeadId}
@@ -2812,14 +2807,23 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
                 { title: 'Accounted Dr', dataIndex: 'accountedDr', key: 'aDr', width: 110, align: 'right' as const, render: (v: number) => (v && v > 0) ? v.toLocaleString() : '—' },
                 { title: 'Accounted Cr', dataIndex: 'accountedCr', key: 'aCr', width: 110, align: 'right' as const, render: (v: number) => (v && v > 0) ? v.toLocaleString() : '—' },
               ]}
-              summary={() => (
-                <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 600 }}>
-                  <Table.Summary.Cell index={0} colSpan={3}>Total (runningTotalDr/Cr)</Table.Summary.Cell>
-                  <Table.Summary.Cell index={1} align="right"><Text strong>{postGLPayload.batch?.runningTotalDr?.toLocaleString()}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell index={2} align="right"><Text strong>{postGLPayload.batch?.runningTotalCr?.toLocaleString()}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell index={3} colSpan={2} />
-                </Table.Summary.Row>
-              )}
+              summary={() => {
+                const lines = postGLPayload.lines || [];
+                const totalEDr = lines.reduce((s: number, l: any) => s + (Number(l.enteredDr)  || 0), 0);
+                const totalECr = lines.reduce((s: number, l: any) => s + (Number(l.enteredCr)  || 0), 0);
+                const totalADr = lines.reduce((s: number, l: any) => s + (Number(l.accountedDr) || 0), 0);
+                const totalACr = lines.reduce((s: number, l: any) => s + (Number(l.accountedCr) || 0), 0);
+                const fmt = (n: number) => n > 0 ? n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
+                return (
+                  <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 600 }}>
+                    <Table.Summary.Cell index={0} colSpan={3}>Total</Table.Summary.Cell>
+                    <Table.Summary.Cell index={1} align="right"><Text strong>{fmt(totalEDr)}</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={2} align="right"><Text strong>{fmt(totalECr)}</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={3} align="right"><Text strong style={{ color: '#1677ff' }}>{fmt(totalADr)}</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={4} align="right"><Text strong style={{ color: '#1677ff' }}>{fmt(totalACr)}</Text></Table.Summary.Cell>
+                  </Table.Summary.Row>
+                );
+              }}
             />
             {/* Collapsible JSON */}
             <Collapse size="small" ghost items={[{
