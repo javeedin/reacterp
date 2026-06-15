@@ -1099,16 +1099,24 @@ const ManageReceipts: React.FC = () => {
                               loading={allMethodAccountsLoading}
                               placeholder="Select method…"
                               filterOption={(input, opt) =>
-                                String(opt?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                                String(opt?.label ?? '').toLowerCase().includes(input.trim().toLowerCase())
                               }
                               onChange={v => updateDraft(tabKey, { receiptMethod: v ?? '' })}
-                              optionLabelProp="label"
+                              optionLabelProp="displayLabel"
                             >
                               {receiptMethods.map(m => {
                                 const accts = allMethodAccounts[m.id] ?? [];
                                 const primary = accts.find(a => a.primaryFlag === 'Y') ?? accts[0];
+                                // label = all searchable text: name + class + all bank names/numbers
+                                const searchLabel = [
+                                  m.name,
+                                  m.receiptClass,
+                                  ...accts.map(a => a.bankName),
+                                  ...accts.map(a => a.bankAccountName),
+                                  ...accts.map(a => a.bankAccountNum),
+                                ].filter(Boolean).join(' ');
                                 return (
-                                  <Option key={m.id} value={m.name} label={m.name}>
+                                  <Option key={m.id} value={m.name} label={searchLabel} displayLabel={m.name}>
                                     <div style={{ lineHeight: 1.6, padding: '2px 0' }}>
                                       {/* Row 1: name + class */}
                                       <div>
