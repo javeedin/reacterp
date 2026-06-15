@@ -4325,22 +4325,26 @@ const ReconciledTab: React.FC<ReconciledTabProps> = ({ bankAccounts, businessUni
       title: `Unreconcile Statement Line #${line.lineId}`,
       calls,
       onConfirm: async () => {
-        // Call 1: statement line
-        const r1   = await fetch(calls[0].url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(calls[0].body) });
-        const d1   = await parseApexJson(r1);
+        // Step 1: unreconcile the statement line
+        const r1 = await fetch(calls[0].url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(calls[0].body) });
+        const d1 = await parseApexJson(r1);
         if (d1.status !== 'success') throw new Error(d1.message ?? 'Failed to unreconcile statement line');
 
-        // Call 2: system transaction (if linked)
+        // Step 2: reverse linked system transaction (if any)
         if (line.reconTxnId && calls[1]) {
           try { await fetch(calls[1].url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(calls[1].body) }); }
           catch { console.warn('Could not reverse system txn for', line.reconTxnId); }
         }
 
-        // Call 3: external transaction (if linked)
-        if (line.externalTxnId) {
-          const extCall = calls.find(c => c.url.includes('externaltransactions'));
-          if (extCall) try { await fetch(extCall.url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(extCall.body) }); }
-          catch { console.warn('Could not reverse external txn for', line.externalTxnId); }
+        // Step 3: reverse external transaction — use ID from response (most reliable) or from line
+        const extTxnId = d1.externalTxnId ?? line.externalTxnId;
+        if (extTxnId) {
+          try {
+            await fetch(`${EXT_TXN_URL}/${extTxnId}`, {
+              method: 'PUT', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status: 'UNR', reconciledFlag: 'N', reconciledDate: null, statementId: null, stmtLineId: null }),
+            });
+          } catch { console.warn('Could not reverse external txn', extTxnId); }
         }
 
         msgApi.success('Line unreconciled successfully');
