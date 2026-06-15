@@ -239,6 +239,8 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
   const [voidRevLines, setVoidRevLines] = useState<any[]>([]);
   const [voidStepPayloads, setVoidStepPayloads] = useState<Record<string, any>>({});
   const [voidLinesLoading, setVoidLinesLoading] = useState(false);
+  const [voidEligibilityStatus, setVoidEligibilityStatus] = useState<'checking' | 'eligible' | 'ineligible' | null>(null);
+  const [voidEligibilityError, setVoidEligibilityError] = useState<string>('');
 
   interface VoidCtx {
     voidDate: string; paymentNum: string; buName: string; ccy: string;
@@ -555,6 +557,8 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     setVoidOrigLines([]);
     setVoidRevLines([]);
     setVoidStepPayloads({});
+    setVoidEligibilityStatus('checking');
+    setVoidEligibilityError('');
     voidCtxRef.current = {
       voidDate: '', paymentNum: '', buName: '', ccy: 'AED', exRate: 1,
       voidPeriod: '', ledgerId: 300000003259529, ledgerName: 'BCL DIFC',
@@ -562,7 +566,27 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     };
     voidForm.setFieldsValue({ voidDate: dayjs(), voidReason: '' });
     setVoidModalOpen(true);
-    // Pre-fetch original GL lines so the user sees accounting upfront
+
+    // Step 1: Check eligibility first
+    try {
+      const eligRes  = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/payments/${payment.checkId}/void-eligibility`, { headers: { Accept: 'application/json' } });
+      const eligData = await eligRes.json();
+      if (!eligData.eligible) {
+        const errMsg = eligData.errors?.[0] ?? eligData.message ?? 'This payment is not eligible for voiding.';
+        setVoidEligibilityStatus('ineligible');
+        setVoidEligibilityError(errMsg);
+        setVoidStep('eligibility', { status: 'error', response: eligData, error: errMsg });
+        return;
+      }
+      setVoidEligibilityStatus('eligible');
+      setVoidStep('eligibility', { status: 'success', response: eligData });
+    } catch (e: any) {
+      setVoidEligibilityStatus('ineligible');
+      setVoidEligibilityError(e?.message ?? 'Failed to check eligibility');
+      return;
+    }
+
+    // Step 2: Eligible — now pre-fetch original GL lines
     setVoidLinesLoading(true);
     try {
       const url = `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${payment.checkId}&reference5=AP-PAYMENT`;
@@ -582,7 +606,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         voidCtxRef.current.origGLLines  = origLines;
         voidCtxRef.current.reverseLines = revLines;
       }
-    } catch { /* non-critical — user can still run steps */ }
+    } catch { /* non-critical */ }
     finally { setVoidLinesLoading(false); }
   };
 
@@ -2341,6 +2365,25 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
         destroyOnClose
         styles={{ body: { maxHeight: '85vh', overflowY: 'auto' } }}
       >
+        {/* Eligibility check — shown while checking or when ineligible */}
+        {voidEligibilityStatus === 'checking' && (
+          <div style={{ textAlign: 'center', padding: '40px 0' }}>
+            <LoadingOutlined spin style={{ fontSize: 28, color: '#1677ff', marginBottom: 12 }} />
+            <div style={{ fontSize: 13, color: '#1677ff' }}>Checking void eligibility…</div>
+          </div>
+        )}
+        {voidEligibilityStatus === 'ineligible' && (
+          <Alert
+            type="error"
+            showIcon
+            message="Payment Cannot Be Voided"
+            description={voidEligibilityError}
+            style={{ marginBottom: 16 }}
+          />
+        )}
+
+        {/* Main form — only shown when eligible */}
+        {voidEligibilityStatus === 'eligible' && (
         <Form form={voidForm} layout="vertical" onFinish={handleVoidAuto} size="small">
           <Row gutter={16}>
             <Col span={8}>
@@ -2505,6 +2548,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
             </Button>
           </div>
         </Form>
+        )}
       </Modal>
       {/* ─────────────────────────────────────────────────────────────────── */}
 
