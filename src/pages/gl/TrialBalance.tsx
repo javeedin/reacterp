@@ -815,10 +815,7 @@ const TrialBalance: React.FC = () => {
 
       // Auto-fetch RE closing from previous fiscal year → replace 3112100 ytd_opening
       try {
-        // period_name_id is like "Mar-26" → fiscal year is 2000 + 26 = 2026
-        const yearSuffix = record.period_name_id ? Number(record.period_name_id.split('-')[1]) : NaN;
-        const fiscalYear = !isNaN(yearSuffix) ? (yearSuffix < 100 ? 2000 + yearSuffix : yearSuffix) : new Date().getFullYear();
-        const prevYear = fiscalYear - 1;
+        const prevYear = record.period_year - 1;
         const reUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceStandardRE}`
           + `?ledger_name=${encodeURIComponent(record.ledger_name)}`
           + `&period_year=${prevYear}`
