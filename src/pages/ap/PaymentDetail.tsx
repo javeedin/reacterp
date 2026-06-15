@@ -897,19 +897,23 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           createdBy:              'SYSTEM',
         },
         lines: lines.map((l) => {
-          const isAedLine = (l.currencyCode || '').toUpperCase() === 'AED';
           const rate = (payment.conversionRate && payment.conversionRate > 0) ? payment.conversionRate : 1;
-          // Use explicit accounted amounts from SLA (covers FX lines where entered=0 but accounted≠0)
-          const aDr = l.accountedDr != null && l.accountedDr > 0 ? l.accountedDr : null;
-          const aCr = l.accountedCr != null && l.accountedCr > 0 ? l.accountedCr : null;
-          // For AED-only lines (FX gain/loss), entered = 0 (functional-only line). For FC lines use entered from SLA.
-          const eDr = isAedLine ? 0 : (l.lineType === 'DR' && (l.enteredDr || 0) > 0 ? l.enteredDr : null);
-          const eCr = isAedLine ? 0 : (l.lineType === 'CR' && (l.enteredCr || 0) > 0 ? l.enteredCr : null);
+          // Use enteredDr/enteredCr directly from SLA line; fall back to lineType + amount
+          const rawEDr = l.enteredDr  != null ? Number(l.enteredDr)  : (l.lineType === 'DR' ? (Number(l.amount) || 0) : 0);
+          const rawECr = l.enteredCr  != null ? Number(l.enteredCr)  : (l.lineType === 'CR' ? (Number(l.amount) || 0) : 0);
+          // accountedDr/Cr from SLA; fall back to compute from rate
+          const rawADr = l.accountedDr != null ? Number(l.accountedDr) : Math.round(rawEDr * rate * 100) / 100;
+          const rawACr = l.accountedCr != null ? Number(l.accountedCr) : Math.round(rawECr * rate * 100) / 100;
+          // For AED functional-only lines (FX gain/loss): entered = accounted (no FC conversion)
+          const eDr = rawEDr > 0 ? rawEDr : (rawADr > 0 ? rawADr : null);
+          const eCr = rawECr > 0 ? rawECr : (rawACr > 0 ? rawACr : null);
+          const aDr = rawADr > 0 ? rawADr : null;
+          const aCr = rawACr > 0 ? rawACr : null;
           return {
             enteredDr:                  eDr,
             enteredCr:                  eCr,
-            accountedDr:                aDr ?? (eDr != null ? Math.round(eDr * rate * 100) / 100 : null),
-            accountedCr:                aCr ?? (eCr != null ? Math.round(eCr * rate * 100) / 100 : null),
+            accountedDr:                aDr,
+            accountedCr:                aCr,
             statAmount:                 null,
             description:                l.description || acctData.description || '',
             currencyCode:               l.currencyCode || payment.paymentCurrency || 'AED',
