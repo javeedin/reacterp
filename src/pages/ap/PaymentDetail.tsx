@@ -225,26 +225,30 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
 
   type VoidStepStatus = 'idle' | 'running' | 'success' | 'error';
   interface VoidStepState { status: VoidStepStatus; response?: any; error?: string }
-  const VOID_STEP_KEYS = ['eligibility', 'void', 'sla', 'gl_create', 'gl_post', 'sla_stamp'] as const;
+  const VOID_STEP_KEYS = ['eligibility', 'get_lines', 'sla', 'gl_create', 'gl_post', 'sla_stamp', 'void'] as const;
   type VoidStepKey = typeof VOID_STEP_KEYS[number];
   const initVoidSteps = (): Record<VoidStepKey, VoidStepState> => ({
-    eligibility: { status: 'idle' }, void: { status: 'idle' }, sla: { status: 'idle' },
+    eligibility: { status: 'idle' }, get_lines: { status: 'idle' }, sla: { status: 'idle' },
     gl_create: { status: 'idle' }, gl_post: { status: 'idle' }, sla_stamp: { status: 'idle' },
+    void: { status: 'idle' },
   });
   const [voidStepMap, setVoidStepMap] = useState<Record<VoidStepKey, VoidStepState>>(initVoidSteps());
   const [voidRunning, setVoidRunning] = useState(false);
   const [voidDone, setVoidDone] = useState(false);
+  const [voidOrigLines, setVoidOrigLines] = useState<any[]>([]);
+  const [voidRevLines, setVoidRevLines] = useState<any[]>([]);
+  const [voidStepPayloads, setVoidStepPayloads] = useState<Record<string, any>>({});
 
   interface VoidCtx {
     voidDate: string; paymentNum: string; buName: string; ccy: string;
     exRate: number; voidPeriod: string; ledgerId: number; ledgerName: string;
-    reverseLines: any[]; slaHeaderId: number | null;
+    origGLLines: any[]; reverseLines: any[]; slaHeaderId: number | null;
     glBatchId: number | null; glHeaderId: number | null; batchName: string;
   }
   const voidCtxRef = useRef<VoidCtx>({
     voidDate: '', paymentNum: '', buName: '', ccy: 'AED', exRate: 1,
     voidPeriod: '', ledgerId: 300000003259529, ledgerName: 'BCL DIFC',
-    reverseLines: [], slaHeaderId: null, glBatchId: null, glHeaderId: null, batchName: '',
+    origGLLines: [], reverseLines: [], slaHeaderId: null, glBatchId: null, glHeaderId: null, batchName: '',
   });
 
   const setVoidStep = (key: VoidStepKey, upd: Partial<VoidStepState>) =>
@@ -547,10 +551,13 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
   const openVoidModal = () => {
     setVoidStepMap(initVoidSteps());
     setVoidDone(false);
+    setVoidOrigLines([]);
+    setVoidRevLines([]);
+    setVoidStepPayloads({});
     voidCtxRef.current = {
       voidDate: '', paymentNum: '', buName: '', ccy: 'AED', exRate: 1,
       voidPeriod: '', ledgerId: 300000003259529, ledgerName: 'BCL DIFC',
-      reverseLines: [], slaHeaderId: null, glBatchId: null, glHeaderId: null, batchName: '',
+      origGLLines: [], reverseLines: [], slaHeaderId: null, glBatchId: null, glHeaderId: null, batchName: '',
     };
     voidForm.setFieldsValue({ voidDate: dayjs(), voidReason: '' });
     setVoidModalOpen(true);
