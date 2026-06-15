@@ -320,6 +320,8 @@ const TrialBalance: React.FC = () => {
   const [reYearError,     setReYearError]     = useState<string | null>(null);
   const [reYearSelected,  setReYearSelected]  = useState<number[]>([]);   // years checked to save
   const [reSaving,        setReSaving]        = useState(false);
+  const [reMergedTabs,    setReMergedTabs]    = useState<Set<string>>(new Set());
+  const [reFetching,      setReFetching]      = useState(false);
   const [revalPreviewRows,     setRevalPreviewRows]     = useState<
     { lineNum: number; combo: string; subAccount: string; desc: string; comment: string; dr: number; cr: number }[]
   >([]);
@@ -847,6 +849,7 @@ const TrialBalance: React.FC = () => {
             }
           }
         }
+        setReMergedTabs(prev => new Set([...prev, tabKey]));
       } catch { /* RE fetch failure is non-fatal */ }
 
       const companies = [...new Set(items.map(i => i.company).filter(Boolean))].sort();
@@ -861,6 +864,39 @@ const TrialBalance: React.FC = () => {
       ));
     }
   }, [tabs]);
+
+  // Manual Fetch RE button — re-runs the standardRE fetch for the current YTD tab
+  const fetchREForTab = useCallback(async (tab: TabData) => {
+    setReFetching(true);
+    try {
+      const fiscalYear = periods.find(p => tab.periodName.includes(p.period_name_id))?.period_year
+        ?? new Date().getFullYear();
+      const prevYear = fiscalYear - 1;
+      const reUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceStandardRE}`
+        + `?ledger_name=${encodeURIComponent(tab.ledgerName)}`
+        + `&period_year=${prevYear}`
+        + `&limit=100`;
+      const reRes = await fetch(reUrl, { headers: { Accept: 'application/json' } });
+      if (!reRes.ok) throw new Error(`HTTP ${reRes.status}`);
+      const reData = await reRes.json();
+      const reItems: RrTBRecord[] = (reData.items || []) as RrTBRecord[];
+      if (reItems.length > 0) {
+        const reClosing = reItems[reItems.length - 1].closing ?? 0;
+        setTabs(prev => prev.map(t => {
+          if (t.key !== tab.key) return t;
+          const exists = t.rrData.some(i => i.account === RE_ACCOUNT);
+          const updated = exists
+            ? t.rrData.map(i => i.account === RE_ACCOUNT
+                ? { ...i, ytd_opening: reClosing, opening: reClosing, entered_opening: reClosing, ytd_entered_opening: reClosing }
+                : i)
+            : [...t.rrData, { ...reItems[reItems.length - 1], ytd_opening: reClosing, opening: reClosing, entered_opening: reClosing, ytd_entered_opening: reClosing, debit: 0, credit: 0, closing: reClosing, ytd_debit: 0, ytd_credit: 0, account_desc: 'Retained Earnings B/F' }];
+          return { ...t, rrData: updated };
+        }));
+        setReMergedTabs(prev => new Set([...prev, tab.key]));
+      }
+    } catch { /* non-fatal */ }
+    setReFetching(false);
+  }, [periods, tabs]);
 
   // Open YTD Movement drawer — fetch periods from fromPeriodId onwards for one account
   const openYtdMovement = useCallback(async (
@@ -5914,6 +5950,18 @@ const TrialBalance: React.FC = () => {
             >
               Retained Earnings
             </Button>
+            <Button
+              size="small"
+              icon={<SyncOutlined />}
+              loading={reFetching}
+              style={{ borderColor: '#08979c', color: '#08979c' }}
+              onClick={() => fetchREForTab(tab)}
+            >
+              Fetch RE
+            </Button>
+            {reMergedTabs.has(tab.key) && (
+              <Tag color="cyan" style={{ fontSize: 11, margin: 0 }}>RE ✓</Tag>
+            )}
             <Button
               size="small"
               type="primary"
