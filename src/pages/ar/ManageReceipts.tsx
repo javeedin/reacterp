@@ -131,13 +131,15 @@ interface ReceiptMethodAccount {
   receiptMethodId:            number;
   receiptMethodName:          string;
   receiptClass:               string;
+  orgId:                      number;
+  businessUnitName:           string;
+  company:                    string;
   bankAccountId:              number;
   bankAccountName:            string;
   bankAccountNum:             string;
   bankName:                   string;
   bankBranchName:             string;
   bankCurrency:               string;
-  orgId:                      number;
   primaryFlag:                string;
   startDate:                  string;
   endDate:                    string;
@@ -234,7 +236,10 @@ const ManageReceipts: React.FC = () => {
     if (!method) return;
     setMethodAccountsLoading(prev => ({ ...prev, [tabKey]: true }));
     try {
-      const res  = await fetch(`${ORDS_RECEIPT_METHOD_ACCOUNTS}?receipt_method_id=${method.id}`, {
+      const tab = tabs.find(t => t.key === tabKey);
+      const params = new URLSearchParams({ receipt_method_id: String(method.id) });
+      if (tab?.draft.businessUnit) params.set('business_unit_name', tab.draft.businessUnit);
+      const res  = await fetch(`${ORDS_RECEIPT_METHOD_ACCOUNTS}?${params}`, {
         headers: { Accept: 'application/json' },
       });
       const data = await res.json();
@@ -243,13 +248,15 @@ const ManageReceipts: React.FC = () => {
         receiptMethodId:            r.RECEIPT_METHOD_ID            ?? r.receipt_method_id            ?? 0,
         receiptMethodName:          r.RECEIPT_METHOD_NAME          ?? r.receipt_method_name          ?? '',
         receiptClass:               r.RECEIPT_CLASS                ?? r.receipt_class                ?? '',
+        orgId:                      r.ORG_ID                       ?? r.org_id                       ?? 0,
+        businessUnitName:           r.BUSINESS_UNIT_NAME           ?? r.business_unit_name           ?? '',
+        company:                    r.COMPANY                      ?? r.company                      ?? '',
         bankAccountId:              r.BANK_ACCOUNT_ID              ?? r.bank_account_id              ?? 0,
         bankAccountName:            r.BANK_ACCOUNT_NAME            ?? r.bank_account_name            ?? '',
         bankAccountNum:             r.BANK_ACCOUNT_NUM             ?? r.bank_account_num             ?? '',
         bankName:                   r.BANK_NAME                    ?? r.bank_name                    ?? '',
         bankBranchName:             r.BANK_BRANCH_NAME             ?? r.bank_branch_name             ?? '',
         bankCurrency:               r.BANK_CURRENCY                ?? r.bank_currency                ?? '',
-        orgId:                      r.ORG_ID                       ?? r.org_id                       ?? 0,
         primaryFlag:                r.PRIMARY_FLAG                 ?? r.primary_flag                 ?? '',
         startDate:                  (r.START_DATE                  ?? r.start_date                   ?? '').slice(0, 10),
         endDate:                    (r.END_DATE                    ?? r.end_date                     ?? '').slice(0, 10),
@@ -1186,11 +1193,12 @@ const ManageReceipts: React.FC = () => {
                                 <Tag color="blue" style={{ fontSize: 10, margin: 0 }}>{acct.bankCurrency}</Tag>
                               )}
                               <Text type="secondary" style={{ fontSize: 11, marginLeft: 'auto' }}>
-                                {acct.bankName && <span>{acct.bankName}</span>}
-                                {acct.bankBranchName && <span> · {acct.bankBranchName}</span>}
-                                {acct.orgId    ? <span> · Org: {acct.orgId}</span> : ''}
-                                {acct.startDate ? <span> · From: {acct.startDate}</span> : ''}
-                                {acct.endDate   ? <span> · To: {acct.endDate}</span> : ''}
+                                {acct.businessUnitName && <span>{acct.businessUnitName}</span>}
+                                {acct.company          && <span> ({acct.company})</span>}
+                                {acct.bankName         && <span> · {acct.bankName}</span>}
+                                {acct.bankBranchName   && <span> · {acct.bankBranchName}</span>}
+                                {acct.startDate        ? <span> · From: {acct.startDate}</span> : ''}
+                                {acct.endDate          ? <span> · To: {acct.endDate}</span> : ''}
                               </Text>
                             </div>
 

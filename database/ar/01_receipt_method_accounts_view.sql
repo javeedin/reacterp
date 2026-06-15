@@ -4,6 +4,7 @@
 --   AR_RECEIPT_METHOD_ACCOUNTS_ALL  — base bank account rows
 --   RR_AR_RECEIPT_METHODS           — receipt method name + class
 --   RR_BANK_ACCOUNTS                — bank account name, number, bank/branch
+--   RR_GL_BUSINESS_UNITS            — business unit name + company (via org_id)
 --   REERP_GL_CODE_COMBINATIONS      — GL code combinations per CCID
 -- ============================================================
 CREATE OR REPLACE VIEW RR_V_RECEIPT_METHODS_BANK_ACCOUNTS AS
@@ -16,6 +17,11 @@ SELECT
     rm.RECEIPTCLASS      AS RECEIPT_CLASS,
     rm.RECEIPTMETHODID   AS FUSION_RECEIPT_METHOD_ID,
 
+    -- Business Unit details (org_id = business_unit_id)
+    r.ORG_ID,
+    bu.BUSINESS_UNIT_NAME,
+    bu.COMPANY,
+
     -- Bank Account details
     r.BANK_ACCOUNT_ID,
     ba.BANK_ACCOUNT_NAME,
@@ -24,7 +30,6 @@ SELECT
     ba.BANK_BRANCH_NAME,
     ba.CURRENCY_CODE     AS BANK_CURRENCY,
 
-    r.ORG_ID,
     r.PRIMARY_FLAG,
     r.START_DATE,
     r.END_DATE,
@@ -103,9 +108,11 @@ SELECT
 
 FROM AR_RECEIPT_METHOD_ACCOUNTS_ALL r
 LEFT JOIN RR_AR_RECEIPT_METHODS rm
-       ON rm.ID = r.RECEIPT_METHOD_ID
+       ON rm.ID              = r.RECEIPT_METHOD_ID
+LEFT JOIN RR_GL_BUSINESS_UNITS bu
+       ON bu.BUSINESS_UNIT_ID = r.ORG_ID
 LEFT JOIN RR_BANK_ACCOUNTS ba
-       ON ba.BANK_ACCOUNT_ID = r.BANK_ACCOUNT_ID
+       ON ba.BANK_ACCOUNT_ID  = r.BANK_ACCOUNT_ID
 LEFT JOIN REERP_GL_CODE_COMBINATIONS cc_cash  ON cc_cash."_CODE_COMBINATION_ID" = r.CASH_CCID
 LEFT JOIN REERP_GL_CODE_COMBINATIONS cc_unap  ON cc_unap."_CODE_COMBINATION_ID" = r.UNAPPLIED_CCID
 LEFT JOIN REERP_GL_CODE_COMBINATIONS cc_unid  ON cc_unid."_CODE_COMBINATION_ID" = r.UNIDENTIFIED_CCID
