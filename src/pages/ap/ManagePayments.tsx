@@ -4191,6 +4191,7 @@ const ManagePayments: React.FC = () => {
                 <Button
                   size="small"
                   icon={<PlusOutlined />}
+                  disabled={paymentConfirmed}
                   onClick={() => {
                     const supplierNum = createPaymentForm.getFieldValue('supplierNumber');
                     if (!supplierNum) { message.warning('Please select a supplier first'); return; }
@@ -4200,7 +4201,7 @@ const ManagePayments: React.FC = () => {
                     setAddInvoicesModalVisible(true);
                   }}
                 >Add Invoices</Button>
-                <Button size="small" icon={<ReloadOutlined />}>Refresh</Button>
+                <Button size="small" icon={<ReloadOutlined />} disabled={paymentConfirmed}>Refresh</Button>
               </Space>
             </div>
             <Table
@@ -4347,6 +4348,7 @@ const ManagePayments: React.FC = () => {
                       type="number"
                       defaultValue={val.toFixed(2)}
                       style={{ textAlign: 'right', width: 120 }}
+                      disabled={paymentConfirmed}
                       onBlur={(e) => {
                         const newVal = parseFloat(e.target.value) || 0;
                         setInvoicesToPay(prev => prev.map(i => i.key === record.key ? { ...i, applyAmount: newVal } : i));
@@ -4366,6 +4368,7 @@ const ManagePayments: React.FC = () => {
                       type="number"
                       defaultValue={(val || 0).toFixed(2)}
                       style={{ textAlign: 'right', width: 120 }}
+                      disabled={paymentConfirmed}
                       onBlur={(e) => {
                         const newVal = parseFloat(e.target.value) || 0;
                         setInvoicesToPay(prev => prev.map(i => i.key === record.key ? { ...i, discountAmount: newVal } : i));
@@ -4389,6 +4392,7 @@ const ManagePayments: React.FC = () => {
                       size="small"
                       danger
                       icon={<CloseCircleOutlined />}
+                      disabled={paymentConfirmed}
                       onClick={() => setInvoicesToPay(prev => prev.filter(i => i.key !== record.key))}
                     />
                   ),
