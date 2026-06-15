@@ -4318,6 +4318,7 @@ const ReconciledTab: React.FC<ReconciledTabProps> = ({ bankAccounts, businessUni
   }, [msgApi, sysTxns]);
 
   const handleSysTxnUnreconcile = useCallback((txn: SysTxn) => {
+    console.log('[Unrecon] sys txn clicked', txn.txnId, txn.source, txn.reconciledFlag);
     const { url, body } = buildSysTxnUnreconBody(txn);
     const calls: UnreconPlan['calls'] = [
       { label: `Unreconcile System Txn (${txn.source})`, method: 'PUT', url, body },
