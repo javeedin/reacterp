@@ -1424,28 +1424,6 @@ const RegisterDetail: React.FC<{
   // ── Save edited transaction ───────────────────────────────
   const handleSaveEditTransaction = async (values: any) => {
     if (!editTxn) return;
-    const isPostedTxn = editTxn.postingStatus === 'Posted';
-
-    // Posted transactions: only allow attachment uploads, no field changes
-    if (isPostedTxn) {
-      if (editExpenseFiles.length === 0) {
-        setEditTxnOpen(false); setEditTxn(null); setEditTxnAttachments([]);
-        return;
-      }
-      setSaving(true);
-      try {
-        await uploadFiles(editTxn.transactionId, editTxn.registerId, editTxn.referenceNo, editExpenseFiles);
-        message.success('Attachment(s) uploaded');
-        setEditTxnOpen(false); setEditTxn(null); setEditExpenseFiles([]); setEditTxnAttachments([]);
-        onRefresh();
-      } catch (e: any) {
-        message.error(e?.message ?? 'Upload failed');
-      } finally {
-        setSaving(false);
-      }
-      return;
-    }
-
     const accDate = values.accountingDate ?? values.transactionDate;
     if (periodsLoaded && openPeriods.length > 0 && !findAPPeriod(accDate)) {
       message.error(`Accounting date ${accDate.format('DD-MMM-YYYY')} does not fall within an open AP period`);
@@ -4474,17 +4452,7 @@ const RegisterDetail: React.FC<{
       >
         {editTxn && (
           <Form form={editTxnForm} layout="vertical" size="small" onFinish={handleSaveEditTransaction}>
-            {editTxn.postingStatus === 'Posted' && (
-              <Alert
-                type="info"
-                showIcon
-                icon={<CheckCircleOutlined style={{ color: REDWOOD.success }} />}
-                style={{ marginBottom: 12, fontSize: 12, background: '#f6ffed', borderColor: '#b7eb8f' }}
-                message={<span style={{ color: REDWOOD.success, fontWeight: 600 }}>Posted — fields are locked</span>}
-                description="This transaction has been posted to GL. All fields are read-only. You can still view and add attachments below."
-              />
-            )}
-            {editTxn.bankTxnId && editTxn.postingStatus !== 'Posted' && (
+            {editTxn.bankTxnId && (
               <Alert
                 type="warning"
                 showIcon
@@ -4497,18 +4465,16 @@ const RegisterDetail: React.FC<{
                 }
               />
             )}
-            {(() => { const fDisabled = editTxn.postingStatus === 'Posted'; return (
-            <>
             <Row gutter={12}>
               <Col span={8}>
                 <Form.Item label="Transaction Date" name="transactionDate"
                   rules={[{ required: true, message: 'Required' }]}>
-                  <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" disabled={fDisabled} />
+                  <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
                 </Form.Item>
               </Col>
               <Col span={8}>
                 <Form.Item label="Accounting Date" name="accountingDate">
-                  <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="Defaults to Txn Date" disabled={fDisabled} />
+                  <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="Defaults to Txn Date" />
                 </Form.Item>
               </Col>
               <Col span={8}>
@@ -4534,7 +4500,6 @@ const RegisterDetail: React.FC<{
                     <Select
                       placeholder="Select expense type"
                       showSearch
-                      disabled={fDisabled}
                       filterOption={(input, option) =>
                         String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
                       }
@@ -4552,7 +4517,7 @@ const RegisterDetail: React.FC<{
                 </Col>
                 <Col span={12}>
                   <Form.Item label="Currency" name="currency">
-                    <Select disabled={fDisabled}>
+                    <Select>
                       {['AED','USD','EUR','GBP','SAR','KWD','QAR','OMR','BHD','EGP','INR'].map(c =>
                         <Option key={c} value={c}>{c}</Option>)}
                     </Select>
@@ -4567,13 +4532,13 @@ const RegisterDetail: React.FC<{
                   label={editTxn.transactionType === 'Expense' ? 'Amount (Credit)' : 'Amount (Debit)'}
                   name="amount"
                   rules={[{ required: true, message: 'Required' }, { type: 'number', min: 0.01, message: 'Must be > 0' }]}>
-                  <InputNumber style={{ width: '100%' }} precision={2} min={0} placeholder="0.00" disabled={fDisabled} />
+                  <InputNumber style={{ width: '100%' }} precision={2} min={0} placeholder="0.00" />
                 </Form.Item>
               </Col>
               {editTxn.transactionType !== 'Expense' && (
                 <Col span={12}>
                   <Form.Item label="Currency" name="currency">
-                    <Select disabled={fDisabled}>
+                    <Select>
                       {['AED','USD','EUR','GBP','SAR','KWD','QAR','OMR','BHD','EGP','INR'].map(c =>
                         <Option key={c} value={c}>{c}</Option>)}
                     </Select>
@@ -4599,7 +4564,7 @@ const RegisterDetail: React.FC<{
                     <Form.Item name="chargeAccountDesc" noStyle>
                       <Input placeholder="Select via Browse" readOnly style={{ cursor: 'not-allowed', background: '#fafafa' }} />
                     </Form.Item>
-                    <Button icon={<BankOutlined />} disabled={fDisabled} onClick={() => { setCoaTarget('edit'); setCoaInitialValue(editTxnForm.getFieldValue('chargeAccountDesc') || ''); setCoaOpen(true); }}>
+                    <Button icon={<BankOutlined />} onClick={() => { setCoaTarget('edit'); setCoaInitialValue(editTxnForm.getFieldValue('chargeAccountDesc') || ''); setCoaOpen(true); }}>
                       Browse
                     </Button>
                   </Space.Compact>
@@ -4615,13 +4580,13 @@ const RegisterDetail: React.FC<{
             <Row gutter={12}>
               <Col span={editTxn.transactionType === 'Expense' ? 12 : 24}>
                 <Form.Item label="Paid To" name="employeeName">
-                  <Input prefix={<UserOutlined />} placeholder="Optional" disabled={fDisabled} />
+                  <Input prefix={<UserOutlined />} placeholder="Optional" />
                 </Form.Item>
               </Col>
               {editTxn.transactionType === 'Expense' && (
                 <Col span={12}>
                   <Form.Item label="Receipt Status" name="receiptStatus">
-                    <Select allowClear placeholder="Select" disabled={fDisabled}>
+                    <Select allowClear placeholder="Select">
                       <Option value="YES">YES</Option>
                       <Option value="NO">NO</Option>
                     </Select>
@@ -4630,11 +4595,8 @@ const RegisterDetail: React.FC<{
               )}
             </Row>
             <Form.Item label="Comments" name="comments">
-              <Input.TextArea rows={2} placeholder="Optional" disabled={fDisabled} />
+              <Input.TextArea rows={2} placeholder="Optional" />
             </Form.Item>
-            </>
-            ); })()}
-
             {editTxn.transactionType === 'Expense' && (
               <Form.Item label="Attachments">
                 <Space direction="vertical" style={{ width: '100%' }} size={6}>
@@ -4726,21 +4688,11 @@ const RegisterDetail: React.FC<{
             )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-              <Button onClick={() => { setEditTxnOpen(false); setEditTxn(null); setEditExpenseFiles([]); setEditTxnAttachments([]); }}>
-                {editTxn.postingStatus === 'Posted' ? 'Close' : 'Cancel'}
+              <Button onClick={() => { setEditTxnOpen(false); setEditTxn(null); setEditExpenseFiles([]); setEditTxnAttachments([]); }}>Cancel</Button>
+              <Button type="primary" htmlType="submit" loading={saving}
+                style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}>
+                Save Changes
               </Button>
-              {editTxn.postingStatus === 'Posted' ? (
-                <Button type="primary" htmlType="submit" loading={saving}
-                  disabled={editExpenseFiles.length === 0}
-                  style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>
-                  Save Attachments
-                </Button>
-              ) : (
-                <Button type="primary" htmlType="submit" loading={saving}
-                  style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}>
-                  Save Changes
-                </Button>
-              )}
             </div>
           </Form>
         )}
@@ -4962,11 +4914,12 @@ const RegisterDetail: React.FC<{
                 const canDelete = !isPosted && row.transactionType === 'Expense';
                 return (
                   <Space size={2}>
-                    <Tooltip title={isPosted ? 'View / add attachments (posted)' : 'Edit this line'}>
+                    <Tooltip title={isPosted ? 'Posted — cannot edit' : 'Edit this line'}>
                       <Button
                         type="text"
                         size="small"
-                        icon={<EditOutlined style={{ color: REDWOOD.info }} />}
+                        disabled={isPosted}
+                        icon={<EditOutlined style={{ color: isPosted ? undefined : REDWOOD.info }} />}
                         loading={txnActionLoading === row.transactionId}
                         onClick={() => openEditTransaction(row)}
                       />
@@ -6205,7 +6158,6 @@ const PettyCash: React.FC = () => {
   const openEditReg = (tab: RegisterTab) => {
     setEditRegTarget(tab);
     editRegForm.setFieldsValue({
-      registerName:    tab.register.registerName,
       cashAccountDesc: tab.register.cashAccountDesc,
       ownedBy:         tab.register.ownedBy,
       limit:           tab.register.limit,
@@ -6218,7 +6170,6 @@ const PettyCash: React.FC = () => {
     setEditRegLoading(true);
     try {
       await updateRegister(editRegTarget.register.registerId, {
-        registerName:    values.registerName    || null,
         cashAccountDesc: values.cashAccountDesc || null,
         ownedBy:         values.ownedBy         || null,
         limit:           values.limit           ?? null,
@@ -6823,9 +6774,6 @@ const PettyCash: React.FC = () => {
         destroyOnClose
       >
         <Form form={editRegForm} layout="vertical" size="small" onFinish={handleEditRegister} style={{ marginTop: 16 }}>
-          <Form.Item label="Register Name" name="registerName" rules={[{ required: true, message: 'Required' }]}>
-            <Input placeholder="e.g. Main Office Petty Cash" />
-          </Form.Item>
           <Form.Item label="Owned By" name="ownedBy">
             <Input placeholder="e.g. Finance Dept / John Doe" prefix={<UserOutlined style={{ color: REDWOOD.neutral300 }} />} />
           </Form.Item>
@@ -6848,7 +6796,6 @@ const PettyCash: React.FC = () => {
             {() => {
               const v = editRegForm.getFieldsValue();
               const body = {
-                registerName:    v.registerName    || null,
                 cashAccountDesc: v.cashAccountDesc || null,
                 ownedBy:         v.ownedBy         || null,
                 limit:           v.limit           ?? null,
