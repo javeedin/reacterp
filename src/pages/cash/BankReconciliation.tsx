@@ -2617,7 +2617,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       {/* ── Unreconcile Confirmation Modal ─────────────────────────────── */}
       <Modal
         open={!!unreconPlan}
-        title={<span style={{ color: '#cf1322' }}><DisconnectOutlined /> {unreconPlan?.title}</span>}
+        title={<span style={{ color: '#cf1322' }}><DisconnectOutlined style={{ marginRight: 6 }} />{unreconPlan?.title}</span>}
         onCancel={() => !unreconRunning && setUnreconPlan(null)}
         footer={[
           <Button key="cancel" onClick={() => setUnreconPlan(null)} disabled={unreconRunning}>Cancel</Button>,
@@ -2640,26 +2640,52 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
               }
             }}
           >
-            Confirm Unreconcile
+            Yes, Unreconcile
           </Button>,
         ]}
-        width={680}
+        width={620}
       >
-        <p style={{ marginBottom: 12, color: '#595959' }}>
-          The following API calls will be executed to reverse this reconciliation:
-        </p>
-        {unreconPlan?.calls.map((c, idx) => (
-          <div key={idx} style={{ marginBottom: 12, background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 6, padding: '10px 14px' }}>
-            <div style={{ marginBottom: 6 }}>
-              <Tag color={c.method === 'POST' ? 'blue' : 'orange'} style={{ fontFamily: 'monospace', fontWeight: 600 }}>{c.method}</Tag>
-              <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#1677ff', wordBreak: 'break-all' }}>{c.url}</span>
+        {/* Confirmation warning */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 0 16px' }}>
+          <DisconnectOutlined style={{ fontSize: 22, color: '#cf1322', marginTop: 2 }} />
+          <div>
+            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Are you sure you want to unreconcile?</div>
+            <div style={{ color: '#595959', fontSize: 13 }}>
+              This will reverse the reconciliation for the selected record and its linked transaction. This action can be re-reconciled later.
             </div>
-            <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#595959', background: '#f5f5f5', borderRadius: 4, padding: '6px 10px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-              {JSON.stringify(c.body, null, 2)}
-            </div>
-            <div style={{ fontSize: 11, color: '#8c8c8c', marginTop: 4 }}>Step {idx + 1}: {c.label}</div>
           </div>
-        ))}
+        </div>
+
+        {/* Collapsible API details */}
+        <Collapse
+          size="small"
+          ghost
+          items={[{
+            key: '1',
+            label: (
+              <span style={{ fontSize: 12, color: '#595959' }}>
+                <ApiOutlined style={{ marginRight: 6, color: '#1677ff' }} />
+                API calls that will be executed ({unreconPlan?.calls.length ?? 0} request{(unreconPlan?.calls.length ?? 0) > 1 ? 's' : ''})
+              </span>
+            ),
+            children: (
+              <div style={{ paddingTop: 4 }}>
+                {unreconPlan?.calls.map((c, idx) => (
+                  <div key={idx} style={{ marginBottom: 10, background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 6, padding: '8px 12px' }}>
+                    <div style={{ marginBottom: 5, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Tag color={c.method === 'POST' ? 'blue' : 'orange'} style={{ fontFamily: 'monospace', fontWeight: 700, margin: 0 }}>{c.method}</Tag>
+                      <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#1677ff', wordBreak: 'break-all' }}>{c.url}</span>
+                    </div>
+                    <pre style={{ margin: 0, fontSize: 11, color: '#595959', background: '#f5f5f5', borderRadius: 4, padding: '6px 8px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                      {JSON.stringify(c.body, null, 2)}
+                    </pre>
+                    <div style={{ fontSize: 10, color: '#8c8c8c', marginTop: 4 }}>Step {idx + 1}: {c.label}</div>
+                  </div>
+                ))}
+              </div>
+            ),
+          }]}
+        />
       </Modal>
 
       <SearchPanel
@@ -4270,9 +4296,6 @@ const ReconciledTab: React.FC<ReconciledTabProps> = ({ bankAccounts, businessUni
   };
 
   const handleUnreconcile = useCallback((line: StmtLine) => {
-    const isRecon = (line.reconStatus || '').toUpperCase() === 'RECONCILED';
-    if (!isRecon) return;
-
     const calls: UnreconPlan['calls'] = [
       {
         label:  'Unreconcile Statement Line',
