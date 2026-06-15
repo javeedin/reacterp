@@ -1246,7 +1246,8 @@ const ManagePayments: React.FC = () => {
     setAvailableInvoicesLoading(true);
     try {
       const buName = createPaymentForm.getFieldValue('businessUnit') || '';
-      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/available-installments?supplier_number=${encodeURIComponent(supplierNumber)}&business_unit=${encodeURIComponent(buName)}`;
+      const paymentCurrency = createPaymentForm.getFieldValue('paymentCurrency') || '';
+      const url = `${APEX_DB_CONFIG.baseUrl}/ap/payments/available-installments?supplier_number=${encodeURIComponent(supplierNumber)}&business_unit=${encodeURIComponent(buName)}${paymentCurrency ? `&payment_currency=${encodeURIComponent(paymentCurrency)}` : ''}`;
       setAddInvoicesApiUrl(url);
       const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -1278,8 +1279,10 @@ const ManagePayments: React.FC = () => {
         })
         .filter((inv: PaymentInvoice) => {
           if (inv.amountDue <= 0 || already.has(inv.key)) return false;
-          // Client-side BU filter — covers cases where ORDS param isn't bound server-side
+          // Client-side BU filter
           if (buName && inv.businessUnit && inv.businessUnit.trim().toLowerCase() !== buName.trim().toLowerCase()) return false;
+          // Client-side currency filter — only show invoices matching the payment currency
+          if (paymentCurrency && inv.currency && inv.currency.trim().toUpperCase() !== paymentCurrency.trim().toUpperCase()) return false;
           return true;
         });
       setAvailableInvoices(items);
