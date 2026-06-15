@@ -127,25 +127,32 @@ interface AppRow {
 }
 
 interface ReceiptMethodAccount {
-  id:                       number;
-  receiptMethodId:          number;
-  bankAccountId:            number;
-  orgId:                    number;
-  primaryFlag:              string;
-  startDate:                string;
-  endDate:                  string;
-  cashCcid:                 number;
-  cashCombination:          string;
-  unappliedCcid:            number;
-  unappliedCombination:     string;
-  unidentifiedCcid:         number;
-  unidentifiedCombination:  string;
-  onAccountCcid:            number;
-  onAccountCombination:     string;
-  receiptClearingCcid:      number;
+  id:                         number;
+  receiptMethodId:            number;
+  receiptMethodName:          string;
+  receiptClass:               string;
+  bankAccountId:              number;
+  bankAccountName:            string;
+  bankAccountNum:             string;
+  bankName:                   string;
+  bankBranchName:             string;
+  bankCurrency:               string;
+  orgId:                      number;
+  primaryFlag:                string;
+  startDate:                  string;
+  endDate:                    string;
+  cashCcid:                   number;
+  cashCombination:            string;
+  unappliedCcid:              number;
+  unappliedCombination:       string;
+  unidentifiedCcid:           number;
+  unidentifiedCombination:    string;
+  onAccountCcid:              number;
+  onAccountCombination:       string;
+  receiptClearingCcid:        number;
   receiptClearingCombination: string;
-  remittanceCcid:           number;
-  remittanceCombination:    string;
+  remittanceCcid:             number;
+  remittanceCombination:      string;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -232,25 +239,32 @@ const ManageReceipts: React.FC = () => {
       });
       const data = await res.json();
       const items: ReceiptMethodAccount[] = ((data.items ?? []) as any[]).map((r: any) => ({
-        id:                         r.ID                        ?? r.id                        ?? 0,
-        receiptMethodId:            r.RECEIPT_METHOD_ID         ?? r.receipt_method_id         ?? 0,
-        bankAccountId:              r.BANK_ACCOUNT_ID           ?? r.bank_account_id           ?? 0,
-        orgId:                      r.ORG_ID                    ?? r.org_id                    ?? 0,
-        primaryFlag:                r.PRIMARY_FLAG              ?? r.primary_flag              ?? '',
-        startDate:                  (r.START_DATE               ?? r.start_date                ?? '').slice(0, 10),
-        endDate:                    (r.END_DATE                 ?? r.end_date                  ?? '').slice(0, 10),
-        cashCcid:                   r.CASH_CCID                 ?? r.cash_ccid                 ?? 0,
-        cashCombination:            r.CASH_COMBINATION          ?? r.cash_combination          ?? '',
-        unappliedCcid:              r.UNAPPLIED_CCID            ?? r.unapplied_ccid            ?? 0,
-        unappliedCombination:       r.UNAPPLIED_COMBINATION     ?? r.unapplied_combination     ?? '',
-        unidentifiedCcid:           r.UNIDENTIFIED_CCID         ?? r.unidentified_ccid         ?? 0,
-        unidentifiedCombination:    r.UNIDENTIFIED_COMBINATION  ?? r.unidentified_combination  ?? '',
-        onAccountCcid:              r.ON_ACCOUNT_CCID           ?? r.on_account_ccid           ?? 0,
-        onAccountCombination:       r.ON_ACCOUNT_COMBINATION    ?? r.on_account_combination    ?? '',
-        receiptClearingCcid:        r.RECEIPT_CLEARING_CCID     ?? r.receipt_clearing_ccid     ?? 0,
+        id:                         r.ID                           ?? r.id                           ?? 0,
+        receiptMethodId:            r.RECEIPT_METHOD_ID            ?? r.receipt_method_id            ?? 0,
+        receiptMethodName:          r.RECEIPT_METHOD_NAME          ?? r.receipt_method_name          ?? '',
+        receiptClass:               r.RECEIPT_CLASS                ?? r.receipt_class                ?? '',
+        bankAccountId:              r.BANK_ACCOUNT_ID              ?? r.bank_account_id              ?? 0,
+        bankAccountName:            r.BANK_ACCOUNT_NAME            ?? r.bank_account_name            ?? '',
+        bankAccountNum:             r.BANK_ACCOUNT_NUM             ?? r.bank_account_num             ?? '',
+        bankName:                   r.BANK_NAME                    ?? r.bank_name                    ?? '',
+        bankBranchName:             r.BANK_BRANCH_NAME             ?? r.bank_branch_name             ?? '',
+        bankCurrency:               r.BANK_CURRENCY                ?? r.bank_currency                ?? '',
+        orgId:                      r.ORG_ID                       ?? r.org_id                       ?? 0,
+        primaryFlag:                r.PRIMARY_FLAG                 ?? r.primary_flag                 ?? '',
+        startDate:                  (r.START_DATE                  ?? r.start_date                   ?? '').slice(0, 10),
+        endDate:                    (r.END_DATE                    ?? r.end_date                     ?? '').slice(0, 10),
+        cashCcid:                   r.CASH_CCID                    ?? r.cash_ccid                    ?? 0,
+        cashCombination:            r.CASH_COMBINATION             ?? r.cash_combination             ?? '',
+        unappliedCcid:              r.UNAPPLIED_CCID               ?? r.unapplied_ccid               ?? 0,
+        unappliedCombination:       r.UNAPPLIED_COMBINATION        ?? r.unapplied_combination        ?? '',
+        unidentifiedCcid:           r.UNIDENTIFIED_CCID            ?? r.unidentified_ccid            ?? 0,
+        unidentifiedCombination:    r.UNIDENTIFIED_COMBINATION     ?? r.unidentified_combination     ?? '',
+        onAccountCcid:              r.ON_ACCOUNT_CCID              ?? r.on_account_ccid              ?? 0,
+        onAccountCombination:       r.ON_ACCOUNT_COMBINATION       ?? r.on_account_combination       ?? '',
+        receiptClearingCcid:        r.RECEIPT_CLEARING_CCID        ?? r.receipt_clearing_ccid        ?? 0,
         receiptClearingCombination: r.RECEIPT_CLEARING_COMBINATION ?? r.receipt_clearing_combination ?? '',
-        remittanceCcid:             r.REMITTANCE_CCID           ?? r.remittance_ccid           ?? 0,
-        remittanceCombination:      r.REMITTANCE_COMBINATION    ?? r.remittance_combination    ?? '',
+        remittanceCcid:             r.REMITTANCE_CCID              ?? r.remittance_ccid              ?? 0,
+        remittanceCombination:      r.REMITTANCE_COMBINATION       ?? r.remittance_combination       ?? '',
       }));
       setMethodAccounts(prev => ({ ...prev, [tabKey]: items }));
     } catch {
@@ -1009,22 +1023,45 @@ const ManageReceipts: React.FC = () => {
                               }}>
                               {receiptMethods.map(m => (
                                 <Option key={m.id} value={m.name}>
-                                  <span>{m.name}</span>
-                                  {m.receiptClass && (
-                                    <Text type="secondary" style={{ fontSize: 10, marginLeft: 6 }}>
-                                      {m.receiptClass}
-                                    </Text>
-                                  )}
+                                  <div style={{ lineHeight: 1.4 }}>
+                                    <span style={{ fontWeight: 600 }}>{m.name}</span>
+                                    {m.receiptClass && (
+                                      <Text type="secondary" style={{ fontSize: 10, marginLeft: 6 }}>
+                                        {m.receiptClass}
+                                      </Text>
+                                    )}
+                                  </div>
                                 </Option>
                               ))}
                             </Select>
+                            {/* After method is selected, show loaded bank account numbers */}
                             {draft.receiptMethod && (() => {
-                              const m = receiptMethods.find(x => x.name === draft.receiptMethod);
-                              return m?.receiptClass
-                                ? <Text type="secondary" style={{ fontSize: 11, marginTop: 2, display: 'block' }}>
-                                    Class: <strong>{m.receiptClass}</strong>
-                                  </Text>
-                                : null;
+                              const m    = receiptMethods.find(x => x.name === draft.receiptMethod);
+                              const accts = methodAccounts[tabKey] ?? [];
+                              return (
+                                <div style={{ marginTop: 4 }}>
+                                  {m?.receiptClass && (
+                                    <Text type="secondary" style={{ fontSize: 11 }}>
+                                      Class: <strong>{m.receiptClass}</strong>
+                                    </Text>
+                                  )}
+                                  {methodAccountsLoading[tabKey] ? (
+                                    <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>Loading accounts…</Text>
+                                  ) : accts.length > 0 && (
+                                    <div style={{ marginTop: 3, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                      {accts.map(a => (
+                                        <Tag key={a.id} color="blue" icon={<BankOutlined />}
+                                          style={{ fontSize: 10, margin: 0 }}>
+                                          {a.bankAccountName
+                                            ? `${a.bankAccountName}${a.bankAccountNum ? ' · ' + a.bankAccountNum : ''}`
+                                            : a.bankAccountNum || `Acct ${a.bankAccountId}`}
+                                          {a.primaryFlag === 'Y' ? ' ★' : ''}
+                                        </Tag>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
                             })()}
                           </div>
                         , true)}
@@ -1131,20 +1168,29 @@ const ManageReceipts: React.FC = () => {
                             {/* Account header */}
                             <div style={{
                               background: '#e6f4ff', borderBottom: `1px solid #91caff`,
-                              padding: '6px 14px', display: 'flex', alignItems: 'center', gap: 8,
+                              padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
                             }}>
                               <BankOutlined style={{ color: REDWOOD.info }} />
                               <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>
-                                Bank Account #{idx + 1}
+                                {acct.bankAccountName || `Bank Account #${idx + 1}`}
                               </Text>
+                              {acct.bankAccountNum && (
+                                <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>
+                                  {acct.bankAccountNum}
+                                </Text>
+                              )}
                               {acct.primaryFlag === 'Y' && (
                                 <Tag color="gold" style={{ fontSize: 10, margin: 0 }}>Primary</Tag>
                               )}
+                              {acct.bankCurrency && (
+                                <Tag color="blue" style={{ fontSize: 10, margin: 0 }}>{acct.bankCurrency}</Tag>
+                              )}
                               <Text type="secondary" style={{ fontSize: 11, marginLeft: 'auto' }}>
-                                Bank Acct ID: <strong>{acct.bankAccountId}</strong>
-                                {acct.orgId ? ` · Org: ${acct.orgId}` : ''}
-                                {acct.startDate ? ` · From: ${acct.startDate}` : ''}
-                                {acct.endDate   ? ` · To: ${acct.endDate}` : ''}
+                                {acct.bankName && <span>{acct.bankName}</span>}
+                                {acct.bankBranchName && <span> · {acct.bankBranchName}</span>}
+                                {acct.orgId    ? <span> · Org: {acct.orgId}</span> : ''}
+                                {acct.startDate ? <span> · From: {acct.startDate}</span> : ''}
+                                {acct.endDate   ? <span> · To: {acct.endDate}</span> : ''}
                               </Text>
                             </div>
 
