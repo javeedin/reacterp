@@ -1046,31 +1046,45 @@ const ManageReceipts: React.FC = () => {
                                 <Button size="small" type="text"
                                   icon={<ApiOutlined style={{ color: REDWOOD.info, fontSize: 12 }} />}
                                   style={{ padding: '0 2px', height: 18 }}
-                                  onClick={() => {
-                                    Modal.info({
-                                      title: 'Receipt Method API',
-                                      width: 600,
+                                  onClick={async () => {
+                                    const url = `${ORDS_RECEIPT_METHOD_ACCOUNTS}?limit=500`;
+                                    let rawJson = 'Fetching…';
+                                    const modal = Modal.info({
+                                      title: 'Receipt Method API Inspector',
+                                      width: 700,
                                       content: (
                                         <div>
                                           <div style={{ marginBottom: 8 }}>
                                             <Tag color="blue">GET</Tag>
-                                            <Text style={{ fontSize: 11, wordBreak: 'break-all' }}>
-                                              {`${ORDS_RECEIPT_METHOD_ACCOUNTS}?limit=500`}
-                                            </Text>
+                                            <Text style={{ fontSize: 11, wordBreak: 'break-all' }}>{url}</Text>
                                           </div>
                                           <div style={{ marginBottom: 8 }}>
                                             <Text type="secondary" style={{ fontSize: 11 }}>
-                                              Methods loaded: <strong>{receiptMethods.length}</strong>
+                                              State — Methods in dropdown: <strong>{receiptMethods.length}</strong>
                                             </Text>
                                             {receiptMethods.length > 0 && (
-                                              <pre style={{ background: '#1e1e1e', color: '#9cdcfe', padding: 8, borderRadius: 4, fontSize: 11, maxHeight: 200, overflowY: 'auto', marginTop: 6 }}>
+                                              <pre style={{ background: '#1e1e1e', color: '#9cdcfe', padding: 8, borderRadius: 4, fontSize: 11, maxHeight: 120, overflowY: 'auto', marginTop: 4 }}>
                                                 {JSON.stringify(receiptMethods, null, 2)}
                                               </pre>
                                             )}
                                           </div>
+                                          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Live Response (first 3 items):</Text>
+                                          <pre id="rm-api-result" style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 4, fontSize: 11, maxHeight: 300, overflowY: 'auto' }}>
+                                            Fetching…
+                                          </pre>
                                         </div>
                                       ),
                                     });
+                                    try {
+                                      const res  = await fetch(url, { headers: { Accept: 'application/json' } });
+                                      const data = await res.json();
+                                      const preview = { ...data, items: (data.items ?? []).slice(0, 3) };
+                                      rawJson = JSON.stringify(preview, null, 2);
+                                    } catch (e: any) {
+                                      rawJson = `Error: ${e.message}`;
+                                    }
+                                    const el = document.getElementById('rm-api-result');
+                                    if (el) el.textContent = rawJson;
                                   }}
                                 />
                               </Tooltip>
