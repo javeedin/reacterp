@@ -101,6 +101,7 @@ const ClaudeKeySettings       = lazy(() => import('./pages/admin/ClaudeKeySettin
 const RagAssistant            = lazy(() => import('./pages/admin/RagAssistant'));
 const ApprovalEngine          = lazy(() => import('./pages/admin/ApprovalEngine'));
 const BrevoSettings           = lazy(() => import('./pages/admin/BrevoSettings'));
+const ManageChangeRequest     = lazy(() => import('./pages/admin/ManageChangeRequest'));
 const CashModule              = lazy(() => import('./pages/cash/CashModule'));
 const ManageBankTransfers     = lazy(() => import('./pages/cash/ManageBankTransfers'));
 const AccountingDebugPage     = lazy(() => import('./pages/cash/AccountingDebugPage'));
@@ -284,6 +285,7 @@ function App() {
               <Route path="admin/ai-assistant" element={<RagAssistant />} />
               <Route path="admin/approvals" element={<ApprovalEngine />} />
               <Route path="admin/brevo-settings" element={<BrevoSettings />} />
+              <Route path="admin/change-requests" element={<ManageChangeRequest />} />
               {/* Petty Cash */}
               <Route path="pc/registers" element={<PettyCash />} />
               {/* Cash Management */}

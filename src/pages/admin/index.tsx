@@ -8,6 +8,7 @@ import {
   RobotOutlined,
   MessageOutlined,
   MailOutlined,
+  DatabaseOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -89,6 +90,14 @@ const adminCards: AdminCard[] = [
     icon: <MessageOutlined />,
     color: '#08979c',
     path: '/admin/ai-assistant',
+  },
+  {
+    key: 'change-requests',
+    title: 'Data Change Requests',
+    description: 'Controlled, audited updates to transactional records. Search a transaction, edit specific fields, preview the generated SQL, and execute with full audit trail.',
+    icon: <DatabaseOutlined />,
+    color: '#C74634',
+    path: '/admin/change-requests',
   },
   {
     key: 'brevo-settings',
