@@ -313,6 +313,7 @@ const TrialBalance: React.FC = () => {
     year: number; lastPeriod: string;
     revenue: number; expenses: number; netPL: number;
     reBalance: number; cumulativeRE: number;
+    openingRE: number; closingRE: number;
   }[]>([]);
   const [reYearLoading,   setReYearLoading]   = useState(false);
   const [reYearProgress,  setReYearProgress]  = useState('');
@@ -806,7 +807,48 @@ const TrialBalance: React.FC = () => {
       const res = await fetch(fetchUrl, { headers: { Accept: 'application/json' } });
       const data = await res.json();
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-      const items: RrTBRecord[] = (data.items || []) as RrTBRecord[];
+      let items: RrTBRecord[] = (data.items || []) as RrTBRecord[];
+
+      // Auto-fetch RE closing from previous fiscal year → replace 3112100 ytd_opening
+      try {
+        const fiscalYear = record.period_name_id
+          ? Number(record.period_name_id.split('-')[1] ?? new Date().getFullYear())
+          : new Date().getFullYear();
+        const prevYear = fiscalYear - 1;
+        const reUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceStandardRE}`
+          + `?ledger_name=${encodeURIComponent(record.ledger_name)}`
+          + `&period_year=${prevYear}`
+          + `&limit=100`;
+        const reRes = await fetch(reUrl, { headers: { Accept: 'application/json' } });
+        if (reRes.ok) {
+          const reData = await reRes.json();
+          const reItems: RrTBRecord[] = (reData.items || []) as RrTBRecord[];
+          if (reItems.length > 0) {
+            // Use the RE row's closing as the brought-forward opening for 3112100
+            const reClosing = reItems[reItems.length - 1].closing ?? reItems[reItems.length - 1].ytd_credit ?? 0;
+            const exists = items.some(i => i.account === RE_ACCOUNT);
+            if (exists) {
+              items = items.map(i =>
+                i.account === RE_ACCOUNT
+                  ? { ...i, ytd_opening: reClosing, opening: reClosing, entered_opening: reClosing, ytd_entered_opening: reClosing }
+                  : i
+              );
+            } else {
+              // RE account not in TB — inject as B/F row
+              const reRow = reItems[reItems.length - 1];
+              items = [...items, {
+                ...reRow,
+                ytd_opening: reClosing, opening: reClosing,
+                entered_opening: reClosing, ytd_entered_opening: reClosing,
+                debit: 0, credit: 0, closing: reClosing,
+                ytd_debit: 0, ytd_credit: 0,
+                account_desc: 'Retained Earnings B/F',
+              }];
+            }
+          }
+        }
+      } catch { /* RE fetch failure is non-fatal */ }
+
       const companies = [...new Set(items.map(i => i.company).filter(Boolean))].sort();
       const currencies = [...new Set(items.map(i => i.currency_code).filter(Boolean))].sort();
       setTabs(prev => prev.map(t =>
@@ -5031,8 +5073,9 @@ const TrialBalance: React.FC = () => {
     const yearRange: number[] = [];
     for (let y = reYearFrom; y <= reYearTo; y++) yearRange.push(y);
 
-    const rows: { year: number; lastPeriod: string; revenue: number; expenses: number; netPL: number; reBalance: number; cumulativeRE: number }[] = [];
+    const rows: { year: number; lastPeriod: string; revenue: number; expenses: number; netPL: number; reBalance: number; cumulativeRE: number; openingRE: number; closingRE: number }[] = [];
     let cumulativeRE = 0;
+    let runningOpeningRE = 0;
 
     for (let i = 0; i < yearRange.length; i++) {
       const year = yearRange[i];
@@ -5044,7 +5087,7 @@ const TrialBalance: React.FC = () => {
         .sort((a, b) => b.period_number - a.period_number);
 
       if (yearPeriods.length === 0) {
-        rows.push({ year, lastPeriod: '—', revenue: 0, expenses: 0, netPL: 0, reBalance: 0, cumulativeRE });
+        rows.push({ year, lastPeriod: '—', revenue: 0, expenses: 0, netPL: 0, reBalance: 0, cumulativeRE, openingRE: runningOpeningRE, closingRE: runningOpeningRE });
         continue;
       }
 
@@ -5065,9 +5108,12 @@ const TrialBalance: React.FC = () => {
         const netPL    = -(revenue + expenses); // positive = profit
         const reAcct   = items.filter(r => r.account === RE_ACCOUNT).reduce((s, r) => s + (r.closing || 0), 0);
         cumulativeRE  += netPL;
-        rows.push({ year, lastPeriod: lastPeriod.period_name_id, revenue, expenses, netPL, reBalance: reAcct, cumulativeRE });
+        const openingRE = runningOpeningRE;
+        const closingRE = openingRE + netPL;
+        runningOpeningRE = closingRE;
+        rows.push({ year, lastPeriod: lastPeriod.period_name_id, revenue, expenses, netPL, reBalance: reAcct, cumulativeRE, openingRE, closingRE });
       } catch (_err) {
-        rows.push({ year, lastPeriod: lastPeriod.period_name_id, revenue: 0, expenses: 0, netPL: 0, reBalance: 0, cumulativeRE });
+        rows.push({ year, lastPeriod: lastPeriod.period_name_id, revenue: 0, expenses: 0, netPL: 0, reBalance: 0, cumulativeRE, openingRE: runningOpeningRE, closingRE: runningOpeningRE });
       }
     }
 
@@ -5095,6 +5141,8 @@ const TrialBalance: React.FC = () => {
         netPL:        r.netPL,
         reBalance:    r.reBalance,
         cumulativeRE: r.cumulativeRE,
+        openingRe:    r.openingRE,
+        closingRe:    r.closingRE,
       }));
     setReSaving(true);
     try {
@@ -5461,6 +5509,50 @@ const TrialBalance: React.FC = () => {
                     {v >= 0 ? '▲' : '▼'}
                   </Tag>
                 </Space>
+              ),
+            },
+            {
+              title: 'Opening RE',
+              dataIndex: 'openingRE',
+              key: 'openingRE',
+              align: 'right' as const,
+              width: 150,
+              render: (v: number, r: { year: number }) => (
+                <input
+                  key={`opening-${r.year}-${v}`}
+                  type="number"
+                  defaultValue={v}
+                  onBlur={e => {
+                    const newOpening = parseFloat(e.target.value);
+                    if (isNaN(newOpening) || newOpening === v) return;
+                    setReYearRows(prev => {
+                      const updated = [...prev];
+                      const idx = updated.findIndex(x => x.year === r.year);
+                      if (idx === -1) return prev;
+                      for (let i = idx; i < updated.length; i++) {
+                        const opening = i === idx ? newOpening : updated[i - 1].closingRE;
+                        updated[i] = { ...updated[i], openingRE: opening, closingRE: opening + updated[i].netPL };
+                      }
+                      return updated;
+                    });
+                  }}
+                  style={{
+                    width: '100%', textAlign: 'right', fontFamily: 'monospace',
+                    color: v < 0 ? '#722ed1' : '#237804',
+                    border: '1px solid #d3adf7', borderRadius: 4,
+                    padding: '2px 6px', background: '#faf5ff', fontSize: 12,
+                  }}
+                />
+              ),
+            },
+            {
+              title: 'Closing RE',
+              dataIndex: 'closingRE',
+              key: 'closingRE',
+              align: 'right' as const,
+              width: 150,
+              render: (v: number) => (
+                <Text style={{ fontFamily: 'monospace', fontWeight: 700, color: v < 0 ? '#722ed1' : '#237804' }}>{fmtN(v)}</Text>
               ),
             },
             {
