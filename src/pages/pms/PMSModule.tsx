@@ -67,6 +67,7 @@ const PMSModule: React.FC = () => {
     { key: 'benchmark', icon: <LineChartOutlined />, label: 'Benchmark', description: 'Index comparison & attribution', color: '#1B5E20', path: '/pms/benchmark' },
     { key: 'fees', icon: <DollarOutlined />, label: 'Fee Management', description: 'Mgmt & performance fees', color: '#BF360C', path: '/pms/fees' },
     { key: 'reports', icon: <FileTextOutlined />, label: 'Reports', description: 'Statements, MIS, analytics', color: '#4A148C', path: '/pms/reports' },
+    { key: 'investment-holdings', icon: <BarChartOutlined />, label: 'Investment Holdings', description: 'NRE/NRO equity holdings & P&L', color: '#00695C', path: '/pms/investment-holdings' },
   ];
 
   // KPI Card

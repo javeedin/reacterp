@@ -88,6 +88,7 @@ const ReportsPage             = lazy(() => import('./pages/pms').then(m => ({ de
 const ModelPortfolioPage      = lazy(() => import('./pages/pms').then(m => ({ default: m.ModelPortfolioPage })));
 const FeeManagementPage       = lazy(() => import('./pages/pms').then(m => ({ default: m.FeeManagementPage })));
 const BenchmarkComparison     = lazy(() => import('./pages/pms').then(m => ({ default: m.BenchmarkComparison })));
+const InvestmentHoldings      = lazy(() => import('./pages/pms/InvestmentHoldings'));
 const PMSWatchlist            = lazy(() => import('./pages/pms/Watchlist'));
 const PMSPortfolio            = lazy(() => import('./pages/pms/Portfolio'));
 const RMModule                = lazy(() => import('./pages/rm').then(m => ({ default: m.RMModule })));
@@ -267,6 +268,7 @@ function App() {
               <Route path="pms/model-portfolio" element={<ModelPortfolioPage />} />
               <Route path="pms/fees" element={<FeeManagementPage />} />
               <Route path="pms/benchmark" element={<BenchmarkComparison />} />
+              <Route path="pms/investment-holdings" element={<InvestmentHoldings />} />
               <Route path="pms/*" element={<PMSModule />} />
               {/* Rental Management */}
               <Route path="rm"                  element={<RMModule />} />
