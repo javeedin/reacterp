@@ -204,6 +204,7 @@ interface TabData {
   segmentsAfter: string[];
   gridSearch: string;
   showEntered: boolean;
+  periodYear?: number;
 }
 
 interface ApiCallInfo {
@@ -799,6 +800,7 @@ const TrialBalance: React.FC = () => {
       companies: [], currencies: [],
       selectedCompany: null, selectedCurrency: null,
       segmentsBefore: [], segmentsAfter: [], gridSearch: '', showEntered: false,
+      periodYear: record.period_year,
     };
     setTabs(prev => [...prev, newTab]);
     setActiveTab(tabKey);
@@ -5924,6 +5926,13 @@ const TrialBalance: React.FC = () => {
               YTD — cumulative from period 1 of fiscal year
             </Tag>
           </Col>
+          {tab.periodYear && (
+            <Col>
+              <Tag color="purple" style={{ fontSize: 12, padding: '2px 8px', fontWeight: 600 }}>
+                FY {tab.periodYear} → RE fetches FY {tab.periodYear - 1}
+              </Tag>
+            </Col>
+          )}
         </Row>
 
         <Row gutter={12} style={{ marginBottom: 6 }}>
