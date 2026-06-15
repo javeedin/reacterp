@@ -308,66 +308,49 @@ const ViewAcctModal: React.FC<{
     )
     : hdr
       ? (
-        <div style={{ marginBottom: 12 }}>
-          {/* GL Journal Header strip */}
-          <div style={{ background: '#e6f4ff', border: '1px solid #91caff', borderRadius: '6px 6px 0 0', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <FileTextOutlined style={{ color: '#0572CE' }} />
-            <Typography.Text strong style={{ fontSize: 12, color: '#0572CE' }}>GL Journal Header</Typography.Text>
-          </div>
-          <div style={{ border: '1px solid #91caff', borderTop: 'none', borderRadius: '0 0 6px 6px', padding: '10px 14px', background: '#fff' }}>
-            <Row gutter={[16, 8]}>
-              <Col xs={24} md={8}>
-                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Batch Name</Typography.Text>
-                <Typography.Text strong style={{ fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all' }}>{hdr.glBatchName || '—'}</Typography.Text>
-              </Col>
-              <Col xs={12} md={4}>
-                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Batch ID</Typography.Text>
-                <Typography.Text code style={{ fontSize: 12 }}>{hdr.glBatchId || '—'}</Typography.Text>
-              </Col>
-              <Col xs={12} md={4}>
-                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>JE Header ID</Typography.Text>
-                <Typography.Text code style={{ fontSize: 12 }}>{hdr.glHeaderId || '—'}</Typography.Text>
-              </Col>
-              <Col xs={12} md={4}>
-                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Period</Typography.Text>
-                <Typography.Text strong style={{ fontSize: 12 }}>{hdr.periodName || '—'}</Typography.Text>
-              </Col>
-              <Col xs={12} md={4}>
-                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Accounting Date</Typography.Text>
-                <Typography.Text style={{ fontSize: 12 }}>{fmtDate(hdr.accountingDate)}</Typography.Text>
-              </Col>
-              <Col xs={12} md={4}>
-                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Posting Status</Typography.Text>
-                <Tag color={hdStatusColor} style={{ fontSize: 11 }}>{hdr.postingStatus || hdr.accountingStatus || '—'}</Tag>
-              </Col>
-              <Col xs={12} md={4}>
-                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Acctg Status</Typography.Text>
-                <Tag color={hdr.accountingStatus === 'FINAL' ? 'processing' : 'default'} style={{ fontSize: 11 }}>{hdr.accountingStatus || '—'}</Tag>
-              </Col>
-              <Col xs={12} md={4}>
-                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Module</Typography.Text>
-                <Typography.Text style={{ fontSize: 12 }}>{hdr.moduleName || 'Cash Management'}</Typography.Text>
-              </Col>
-              <Col xs={12} md={4}>
-                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Posted By</Typography.Text>
-                <Typography.Text style={{ fontSize: 12 }}>{hdr.postedBy || '—'}</Typography.Text>
-              </Col>
-              <Col xs={12} md={4}>
-                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Posted Date</Typography.Text>
-                <Typography.Text style={{ fontSize: 12 }}>{hdr.postedDate ? fmtDate(hdr.postedDate) : '—'}</Typography.Text>
-              </Col>
-              <Col xs={12} md={4}>
-                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>SLA Header ID</Typography.Text>
-                <Typography.Text code style={{ fontSize: 12 }}>{hdr.headerId || '—'}</Typography.Text>
-              </Col>
-              {hdr.description && (
-                <Col xs={24}>
-                  <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Description</Typography.Text>
-                  <Typography.Text style={{ fontSize: 12 }}>{hdr.description}</Typography.Text>
-                </Col>
-              )}
-            </Row>
-          </div>
+        <div style={{ background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 6, padding: '10px 16px', marginBottom: 12 }}>
+          <Row gutter={[16, 6]}>
+            <Col xs={24} md={12}>
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>GL Batch Name</Typography.Text>
+              <div style={{ fontWeight: 600, fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all' }}>{hdr.glBatchName || '—'}</div>
+            </Col>
+            <Col xs={12} md={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>GL Batch ID</Typography.Text>
+              <div style={{ fontSize: 12, fontFamily: 'monospace' }}>{hdr.glBatchId || '—'}</div>
+            </Col>
+            <Col xs={12} md={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>GL Header ID</Typography.Text>
+              <div style={{ fontSize: 12, fontFamily: 'monospace' }}>{hdr.glHeaderId || '—'}</div>
+            </Col>
+            <Col xs={12} md={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>Period</Typography.Text>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>{hdr.periodName || '—'}</div>
+            </Col>
+            <Col xs={12} md={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>Accounting Date</Typography.Text>
+              <div style={{ fontSize: 12 }}>{fmtDate(hdr.accountingDate)}</div>
+            </Col>
+            <Col xs={12} md={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>Journal Category</Typography.Text>
+              <div style={{ fontSize: 12 }}>{hdr.moduleName || 'Cash Management'}</div>
+            </Col>
+            <Col xs={12} md={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>Status</Typography.Text>
+              <div><Tag color={hdStatusColor} style={{ fontSize: 11 }}>{hdr.postingStatus || hdr.accountingStatus || '—'}</Tag></div>
+            </Col>
+            <Col xs={12} md={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>Posted By</Typography.Text>
+              <div style={{ fontSize: 12 }}>{hdr.postedBy || '—'}</div>
+            </Col>
+            <Col xs={12} md={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>Posted Date</Typography.Text>
+              <div style={{ fontSize: 12 }}>{hdr.postedDate ? fmtDate(hdr.postedDate) : '—'}</div>
+            </Col>
+            <Col xs={12} md={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>SLA Header ID</Typography.Text>
+              <div style={{ fontSize: 12, fontFamily: 'monospace' }}>{hdr.headerId}</div>
+            </Col>
+          </Row>
         </div>
       )
       : null;
@@ -2629,7 +2612,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   const [hasSearched, setHasSearched]     = useState(false);
   const [totalRecords, setTotalRecords]   = useState(0);
   const [pageNum, setPageNum]             = useState(1);
-  const [pageSize, setPageSize]           = useState(25);
+  const [pageSize, setPageSize]           = useState(500);
   const [allBankAccounts, setAllBankAccounts] = useState<BankAccountOption[]>([]);
   const [businessUnits, setBusinessUnits] = useState<BUOption[]>([]);
   const [bankAccountMap, setBankAccountMap] = useState<Record<string, string>>({});
@@ -2930,12 +2913,8 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   useEffect(() => { loadLovs(); }, [loadLovs]);
 
   // ── Search ────────────────────────────────────────────────────────────────
-  const handleSearch = useCallback(async () => {
+  const handleSearch = useCallback(async (page = 1, size = 500) => {
     const values = searchForm.getFieldsValue();
-    if (!values.dateFrom || !values.dateTo) {
-      message.warning('Please select both Date From and Date To before searching.');
-      return;
-    }
     const params = new URLSearchParams();
     if (values.transactionNumber)  params.set('transaction_number', values.transactionNumber);
     if (values.bankAccount)        params.set('bank_account',       values.bankAccount);
@@ -2966,7 +2945,8 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       if (values.createdTo)   params.set('creation_date_to',   (values.createdTo   as Dayjs).format('YYYY-MM-DD'));
     }
 
-    params.set('row_limit', '5000'); // fetch all, client-side pagination handles display
+    params.set('row_limit',  String(size));
+    params.set('row_offset', String((page - 1) * size));
 
     const url = `${APEX_BASE}/cash/externaltransactions?${params.toString()}`;
     setLastApiUrl(url);
@@ -2978,10 +2958,11 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       if (data.success) {
         const items = data.items ?? [];
         setTransactions(items);
-        setTotalRecords(items.length);
+        setTotalRecords(data.total ?? 0);
         const users = [...new Set(items.map((t: any) => t.createdBy).filter(Boolean))] as string[];
         setKnownUsers(prev => [...new Set([currentUser, ...prev, ...users])].filter(Boolean).sort());
-        setPageNum(1);
+        setPageNum(page);
+        setPageSize(size);
         if (items.length === 0) message.info('No transactions found for the selected criteria.');
       } else {
         message.error(data.message || 'Search failed.');
@@ -3968,7 +3949,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
             <Space size={8} onClick={e => e.stopPropagation()}>
               <Button size="small" onClick={e => { e.stopPropagation(); handleReset(); }} icon={<ReloadOutlined />}>Reset</Button>
               <Button size="small" icon={<ApiOutlined />} onClick={e => { e.stopPropagation(); setShowApiModal(true); }} style={{ color: REDWOOD.neutral600 }}>API</Button>
-              <Button size="small" type="primary" icon={<SearchOutlined />} loading={loading} onClick={e => { e.stopPropagation(); handleSearch(); }}
+              <Button size="small" type="primary" icon={<SearchOutlined />} loading={loading} onClick={e => { e.stopPropagation(); handleSearch(1, pageSize); }}
                 style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
                 Search
               </Button>
@@ -3998,7 +3979,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
-              <Form.Item label="Date From" name="dateFrom" style={{ marginBottom: 4 }} rules={[{ required: true, message: 'Date From is required' }]}>
+              <Form.Item label="Date From" name="dateFrom" style={{ marginBottom: 4 }}>
                 <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
               </Form.Item>
             </Col>
@@ -4013,7 +3994,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
-              <Form.Item label="Date To" name="dateTo" style={{ marginBottom: 4 }} rules={[{ required: true, message: 'Date To is required' }]}>
+              <Form.Item label="Date To" name="dateTo" style={{ marginBottom: 4 }}>
                 <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
               </Form.Item>
             </Col>
@@ -4223,11 +4204,11 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
               loading={loading} size="small" pagination={{
                 current: pageNum,
                 pageSize,
-                total: filtered.length,
+                total: totalRecords,
                 showSizeChanger: true,
                 pageSizeOptions: ['25', '50', '100', '200', '500'],
                 showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} records`,
-                onChange: (p, s) => { setPageNum(p); setPageSize(s); },
+                onChange: (p, s) => handleSearch(p, s),
               }}
               locale={{ emptyText: <Empty description="No transactions found" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
               scroll={{ x: 1600 }}
