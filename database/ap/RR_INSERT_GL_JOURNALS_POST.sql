@@ -355,15 +355,7 @@ BEGIN
             v_eff_rate := 1;
         END IF;
 
-        -- FIX 1: For functional-only lines (e.g. FX Realized Gain/Loss) where
-        -- enteredDr and enteredCr are both zero/null, use accountedDr/Cr as the
-        -- entered amounts so the posting step does not reject with "both equal to zero".
-        IF NVL(v_line_entered_dr, 0) = 0 AND NVL(v_line_entered_cr, 0) = 0 THEN
-            v_line_entered_dr := safe_get_number(l_line_obj, 'accountedDr');
-            v_line_entered_cr := safe_get_number(l_line_obj, 'accountedCr');
-        END IF;
-
-        -- FIX 2: Always honour JSON accountedDr/Cr values directly.
+        -- Always honour JSON accountedDr/Cr values directly.
         -- Compute from entered * rate only when accountedDr/Cr is absent in the payload.
         v_line_accounted_dr := safe_get_number(l_line_obj, 'accountedDr');
         v_line_accounted_cr := safe_get_number(l_line_obj, 'accountedCr');

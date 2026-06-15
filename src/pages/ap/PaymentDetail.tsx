@@ -905,9 +905,8 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           // accountedDr/Cr from SLA; fall back to compute from rate
           const rawADr = l.accountedDr != null ? Number(l.accountedDr) : Math.round(rawEDr * rate * 100) / 100;
           const rawACr = l.accountedCr != null ? Number(l.accountedCr) : Math.round(rawECr * rate * 100) / 100;
-          // For AED functional-only lines (FX gain/loss): entered = accounted (no FC conversion)
-          const eDr = rawEDr > 0 ? rawEDr : (rawADr > 0 ? rawADr : null);
-          const eCr = rawECr > 0 ? rawECr : (rawACr > 0 ? rawACr : null);
+          const eDr = rawEDr > 0 ? rawEDr : null;
+          const eCr = rawECr > 0 ? rawECr : null;
           const aDr = rawADr > 0 ? rawADr : null;
           const aCr = rawACr > 0 ? rawACr : null;
           return {
