@@ -29,7 +29,6 @@ import {
   Collapse,
   Steps,
   DatePicker,
-  Progress,
 } from 'antd';
 import {
   HomeOutlined,
@@ -45,7 +44,6 @@ import {
   DragOutlined,
   ExpandAltOutlined,
   ApiOutlined,
-  CopyOutlined,
   FileExcelOutlined,
   SearchOutlined,
   CheckCircleOutlined,
@@ -63,15 +61,13 @@ import {
   CalculatorOutlined,
   SyncOutlined,
   ExclamationCircleOutlined,
-  ReconciliationOutlined,
-  CheckOutlined,
 } from '@ant-design/icons';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { APEX_DB_CONFIG } from '../../config/api.config';
-import { Divider, Popover } from 'antd';
+import { Divider } from 'antd';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import { exportRrTBToExcel, exportFusionTBToExcel, exportBothTBToExcel } from '../../utils/tbExcelExport';
@@ -86,12 +82,6 @@ const { Content } = Layout;
 const { Title, Text } = Typography;
 
 // Oracle Redwood Color Palette
-/** Extract clean Mon-YY period from a tab periodName that may include prefix/suffix (e.g. "YTD: Apr-26 · SB" → "Apr-26") */
-const cleanPeriodName = (raw: string): string => {
-  const m = raw.match(/[A-Z][a-z]{2}-\d{2}/);
-  return m ? m[0] : raw.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '').trim();
-};
-
 const REDWOOD = {
   primary: '#C74634',
   primaryDark: '#A33B2C',
@@ -214,6 +204,7 @@ interface TabData {
   segmentsAfter: string[];
   gridSearch: string;
   showEntered: boolean;
+  periodYear?: number;
 }
 
 interface ApiCallInfo {
@@ -322,16 +313,18 @@ const TrialBalance: React.FC = () => {
   const [reYearRows,      setReYearRows]      = useState<{
     year: number; lastPeriod: string;
     revenue: number; expenses: number; netPL: number;
-    reBalance: number; openingRE: number; closingRE: number;
+    reBalance: number; cumulativeRE: number;
+    openingRE: number; closingRE: number;
   }[]>([]);
   const [reYearLoading,   setReYearLoading]   = useState(false);
   const [reYearProgress,  setReYearProgress]  = useState('');
   const [reYearError,     setReYearError]     = useState<string | null>(null);
   const [reYearSelected,  setReYearSelected]  = useState<number[]>([]);   // years checked to save
   const [reSaving,        setReSaving]        = useState(false);
-  const [reApiDebug,      setReApiDebug]      = useState<{ url: string; body: string; response: string; status: number | null } | null>(null);
-  const [reFetchingTabKey, setReFetchingTabKey] = useState<string | null>(null);
-  const [reLastUrl, setReLastUrl] = useState<Record<string, string>>({});
+  const [reMergedTabs,    setReMergedTabs]    = useState<Set<string>>(new Set());
+  const [reFetching,      setReFetching]      = useState(false);
+  const [reApiLog,        setReApiLog]        = useState<{ url: string; status: number | null; items: number; response?: any[] } | null>(null);
+  const [reApiVisible,    setReApiVisible]    = useState(false);
   const [revalPreviewRows,     setRevalPreviewRows]     = useState<
     { lineNum: number; combo: string; subAccount: string; desc: string; comment: string; dr: number; cr: number }[]
   >([]);
@@ -357,11 +350,6 @@ const TrialBalance: React.FC = () => {
   const [acctFlowDone,     setAcctFlowDone]     = useState(false);
   const [acctFlowError,    setAcctFlowError]    = useState<string | null>(null);
   const [acctFlowLastCall, setAcctFlowLastCall] = useState<{ url: string; method: string; body: object } | null>(null);
-  // Bank Recon Status for reval modal
-  const [reconStatusOpen,    setReconStatusOpen]    = useState(false);
-  const [reconStatusLoading, setReconStatusLoading] = useState(false);
-  const [reconStatusData,    setReconStatusData]    = useState<Record<string, any>>({});
-  const [reconDrillCombo,    setReconDrillCombo]    = useState<string | null>(null);
   const [postFlowLastCall, setPostFlowLastCall] = useState<{ url: string; method: string; body: object } | null>(null);
   const [acctFlowSteps,    setAcctFlowSteps]    = useState<
     { title: string; status: 'wait'|'process'|'finish'|'error'; desc?: string }[]
@@ -812,12 +800,12 @@ const TrialBalance: React.FC = () => {
       companies: [], currencies: [],
       selectedCompany: null, selectedCurrency: null,
       segmentsBefore: [], segmentsAfter: [], gridSearch: '', showEntered: false,
+      periodYear: record.period_year,
     };
     setTabs(prev => [...prev, newTab]);
     setActiveTab(tabKey);
 
     try {
-      // Fetch TB rows
       const fetchUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceStandard}`
         + `?ledger_name=${encodeURIComponent(record.ledger_name)}`
         + `&period_name=${encodeURIComponent(record.period_name_id)}`
@@ -827,69 +815,43 @@ const TrialBalance: React.FC = () => {
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       let items: RrTBRecord[] = (data.items || []) as RrTBRecord[];
 
-      // Auto-fetch RE opening: previous year's closing (period_year - 1, period_number=12)
+      // Auto-fetch RE closing from previous fiscal year → replace 3112100 ytd_opening
       try {
-        const prevYear = record.period_year - 1;
-        const prevLastPeriod = periods.find(
-          p => p.ledger_name === record.ledger_name
-            && p.period_year === prevYear
-            && p.period_number === 12
-        );
+        const prevYear = record.period_year;
         const reUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceStandardRE}`
           + `?ledger_name=${encodeURIComponent(record.ledger_name)}`
-          + (prevLastPeriod
-            ? `&period_name=${encodeURIComponent(prevLastPeriod.period_name_id)}`
-            : `&period_year=${prevYear}`);
+          + `&period_year=${prevYear}`
+          + `&limit=100`;
         const reRes = await fetch(reUrl, { headers: { Accept: 'application/json' } });
-        if (reRes.ok) {
-          const reData = await reRes.json();
-          const reItems: RrTBRecord[] = (reData.items || []) as RrTBRecord[];
-          if (reItems.length > 0) {
-            // Replace ytd_opening of the existing RE account row in TB with the
-            // closing from standardRE (previous year's closing = this year's opening B/F)
-            const reClosing = reItems.reduce((s, r) => s + (r.closing || 0), 0);
-            const hasExisting = items.some(i => i.account === reItems[0].account);
-            if (hasExisting) {
-              // Update existing row — opening and closing both = prev year closing
-              items = items.map(i =>
-                i.account === reItems[0].account
-                  ? {
-                      ...i,
-                      account_desc:        'Retained Earnings',
-                      opening:              reClosing,
-                      closing:              reClosing,
-                      entered_opening:      reClosing,
-                      entered_closing:      reClosing,
-                      ytd_opening:          reClosing,
-                      ytd_entered_opening:  reClosing,
-                    }
-                  : i
-              );
-            } else {
-              // No existing row — inject as B/F row
-              const merged: RrTBRecord[] = reItems.map(r => ({
-                ...r,
-                account_desc:       'Retained Earnings',
-                opening:             reClosing,
-                debit:               0,
-                credit:              0,
-                closing:             reClosing,
-                entered_opening:     reClosing,
-                entered_debit:       0,
-                entered_credit:      0,
-                entered_closing:     reClosing,
-                ytd_opening:         reClosing,
-                ytd_debit:           0,
-                ytd_credit:          0,
-                ytd_entered_opening: reClosing,
-                ytd_entered_debit:   0,
-                ytd_entered_credit:  0,
-              }));
-              items = [...items, ...merged];
-            }
+        const reData = await reRes.json().catch(() => ({}));
+        const reItems: RrTBRecord[] = (reData.items || []) as RrTBRecord[];
+        setReApiLog({ url: reUrl, status: reRes.status, items: reItems.length, response: reItems });
+        if (reRes.ok && reItems.length > 0) {
+          const reClosing = reItems[reItems.length - 1].closing ?? reItems[reItems.length - 1].ytd_credit ?? 0;
+          const exists = items.some(i => i.account === RE_ACCOUNT);
+          if (exists) {
+            items = items.map(i =>
+              i.account === RE_ACCOUNT
+                ? { ...i, ytd_opening: reClosing, opening: reClosing, entered_opening: reClosing, ytd_entered_opening: reClosing,
+                        closing: reClosing, entered_closing: reClosing, debit: 0, credit: 0, ytd_debit: 0, ytd_credit: 0 }
+                : i
+            );
+          } else {
+            const reRow = reItems[reItems.length - 1];
+            items = [...items, {
+              ...reRow,
+              ytd_opening: reClosing, opening: reClosing,
+              entered_opening: reClosing, ytd_entered_opening: reClosing,
+              debit: 0, credit: 0, closing: reClosing, entered_closing: reClosing,
+              ytd_debit: 0, ytd_credit: 0,
+              account_desc: 'Retained Earnings B/F',
+            }];
           }
+          setReMergedTabs(prev => new Set([...prev, tabKey]));
         }
-      } catch { /* RE fetch failure is non-fatal — TB still loads */ }
+      } catch (e: any) {
+        setReApiLog({ url: reUrl, status: null, items: 0 });
+      }
 
       const companies = [...new Set(items.map(i => i.company).filter(Boolean))].sort();
       const currencies = [...new Set(items.map(i => i.currency_code).filter(Boolean))].sort();
@@ -903,6 +865,40 @@ const TrialBalance: React.FC = () => {
       ));
     }
   }, [tabs]);
+
+  // Manual Fetch RE button — re-runs the standardRE fetch for the current YTD tab
+  const fetchREForTab = useCallback(async (tab: TabData) => {
+    setReFetching(true);
+    try {
+      const fiscalYear = tab.periodYear
+        ?? periods.find(p => tab.periodName.includes(p.period_name_id))?.period_year
+        ?? new Date().getFullYear();
+      const reUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceStandardRE}`
+        + `?ledger_name=${encodeURIComponent(tab.ledgerName)}`
+        + `&period_year=${fiscalYear}`
+        + `&limit=100`;
+      const reRes = await fetch(reUrl, { headers: { Accept: 'application/json' } });
+      if (!reRes.ok) throw new Error(`HTTP ${reRes.status}`);
+      const reData = await reRes.json();
+      const reItems: RrTBRecord[] = (reData.items || []) as RrTBRecord[];
+      if (reItems.length > 0) {
+        const reClosing = reItems[reItems.length - 1].closing ?? 0;
+        setTabs(prev => prev.map(t => {
+          if (t.key !== tab.key) return t;
+          const exists = t.rrData.some(i => i.account === RE_ACCOUNT);
+          const updated = exists
+            ? t.rrData.map(i => i.account === RE_ACCOUNT
+                ? { ...i, ytd_opening: reClosing, opening: reClosing, entered_opening: reClosing, ytd_entered_opening: reClosing,
+                        closing: reClosing, entered_closing: reClosing, debit: 0, credit: 0, ytd_debit: 0, ytd_credit: 0 }
+                : i)
+            : [...t.rrData, { ...reItems[reItems.length - 1], ytd_opening: reClosing, opening: reClosing, entered_opening: reClosing, ytd_entered_opening: reClosing, debit: 0, credit: 0, closing: reClosing, ytd_debit: 0, ytd_credit: 0, account_desc: 'Retained Earnings B/F' }];
+          return { ...t, rrData: updated };
+        }));
+        setReMergedTabs(prev => new Set([...prev, tab.key]));
+      }
+    } catch { /* non-fatal */ }
+    setReFetching(false);
+  }, [periods, tabs]);
 
   // Open YTD Movement drawer — fetch periods from fromPeriodId onwards for one account
   const openYtdMovement = useCallback(async (
@@ -2797,7 +2793,7 @@ const TrialBalance: React.FC = () => {
 
     // Set rate date to last day of the selected period's month
     if (tab?.periodName) {
-      const periodStr = cleanPeriodName(tab.periodName);
+      const periodStr = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '').replace(/\s*·.*$/, '').trim();
       const parsed = dayjs(periodStr, ['MMM-YYYY', 'MMM-YY', 'MMMM-YYYY', 'MMM YYYY']);
       setRevalRateDate(parsed.isValid() ? parsed.endOf('month').format('YYYY-MM-DD') : dayjs().endOf('month').format('YYYY-MM-DD'));
     } else {
@@ -2811,7 +2807,7 @@ const TrialBalance: React.FC = () => {
     try {
       const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}`);
       const json = await res.json();
-      const rawPeriod = cleanPeriodName(tab?.periodName ?? '');
+      const rawPeriod = tab?.periodName?.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '') ?? '';
       const existing  = (json.items || []).find((r: any) =>
         r.account    === accountKey &&
         r.ledgerName === tab?.ledgerName &&
@@ -3255,7 +3251,7 @@ const TrialBalance: React.FC = () => {
 
     // Build journal preview — one line pair per active combination
     const buildPreview = () => {
-      const rawPeriod = cleanPeriodName(tab.periodName);
+      const rawPeriod = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '').replace(/\s*·.*$/, '').trim();
       const periodMonth = rawPeriod || tab.periodName;
       const lines: { lineNum: number; combo: string; subAccount: string; desc: string; comment: string; dr: number; cr: number }[] = [];
       let ln = 1;
@@ -3507,7 +3503,7 @@ const TrialBalance: React.FC = () => {
         render: (_: any, row: any) => {
           if (!row.subAccount) return null;
           const isFetching = !!subAcctFetching[row.lineNum];
-          const rawPeriod = cleanPeriodName(tab.periodName);
+          const rawPeriod = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '').replace(/\s*·.*$/, '').trim();
           const periodMonth = rawPeriod || tab.periodName;
           const doFetch = async () => {
             setSubAcctFetching(prev => ({ ...prev, [row.lineNum]: true }));
@@ -3606,7 +3602,7 @@ const TrialBalance: React.FC = () => {
               </Tag>
               <Text strong style={{ fontFamily: 'monospace' }}>{revalAccount}</Text>
               <Text style={{ color: REDWOOD.textSecondary }}>{accountDesc}</Text>
-              <Tag color="purple">{cleanPeriodName(tab.periodName)}</Tag>
+              <Tag color="purple">{tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '')}</Tag>
               {revalChecking && <Tag icon={<LoadingOutlined />} color="processing">Checking…</Tag>}
               {revalId && !revalChecking && (
                 <Tag color="success" style={{ fontFamily: 'monospace' }}>ID: {revalId}</Tag>
@@ -3665,38 +3661,6 @@ const TrialBalance: React.FC = () => {
                   Fetch All BMS Rates
                 </Button>
               </Tooltip>
-              <Popover
-                trigger="click"
-                title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span style={{ color: REDWOOD.info }}>BMS Rate — GET Endpoint</span></Space>}
-                content={
-                  <div style={{ maxWidth: 520 }}>
-                    <Text style={{ fontSize: 12 }} type="secondary">Called once per foreign currency (skips AED):</Text>
-                    <div style={{ marginTop: 6, background: '#f5f8ff', borderRadius: 6, padding: '8px 10px', fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
-                      {`${APEX_DB_CONFIG.baseUrl}/currencies/bmsrate?source_cur={CCY}&target_cur=AED`}
-                      {revalRateDate ? `&rate_date=${revalRateDate}` : ''}
-                    </div>
-                    <div style={{ marginTop: 8 }}>
-                      <Text style={{ fontSize: 11 }} type="secondary">Parameters:</Text>
-                      <table style={{ fontSize: 11, marginTop: 4, borderCollapse: 'collapse', width: '100%' }}>
-                        <tbody>
-                          {[
-                            ['source_cur', 'Foreign currency code (e.g. USD, EUR)'],
-                            ['target_cur', 'Always AED (functional currency)'],
-                            ['rate_date',  revalRateDate ? revalRateDate : '(not set — uses latest rate)'],
-                          ].map(([p, d]) => (
-                            <tr key={p}>
-                              <td style={{ padding: '2px 8px 2px 0', fontWeight: 600, whiteSpace: 'nowrap' }}>{p}</td>
-                              <td style={{ padding: '2px 0', color: '#555' }}>{d}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                }
-              >
-                <Button size="small" icon={<ApiOutlined />} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }} />
-              </Popover>
             </Space>
           )}
 
@@ -3799,7 +3763,7 @@ const TrialBalance: React.FC = () => {
               onClick={async () => {
                 setRevalSaving(true);
                 setRevalApiError(null);
-                const rawPeriod = cleanPeriodName(tab.periodName);
+                const rawPeriod = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '');
                 const isUpdate  = revalId != null;
                 const payload   = {
                   ledger_id:      Number((allRawRows[0] as any)?.ledger_id) || 0,
@@ -4084,40 +4048,6 @@ const TrialBalance: React.FC = () => {
             >
               API {revalLastCall ? `(${revalLastCall.httpStatus})` : ''}
             </Button>
-
-            {/* Bank Recon Status button */}
-            <Button
-              size="small"
-              icon={<ReconciliationOutlined />}
-              style={{ color: '#722ed1', borderColor: '#722ed1' }}
-              loading={reconStatusLoading}
-              onClick={async () => {
-                setReconStatusOpen(true);
-                setReconStatusLoading(true);
-                setReconStatusData({});
-                setReconDrillCombo(null);
-                const tab = tabs.find(t => t.key === revalTabKey);
-                if (!tab) { setReconStatusLoading(false); return; }
-                const periodClean = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '').replace(/\s*·.*$/, '').trim();
-                const allRawRows  = tab.rrData.filter((r: any) => r.account === revalAccount);
-                const ledgerId    = (allRawRows[0] as any)?.ledger_id || null;
-                const combos = [...new Set(allRawRows.map((r: any) => r.account_combination as string).filter(Boolean))];
-                const results: Record<string, any> = {};
-                await Promise.allSettled(combos.map(async combo => {
-                  try {
-                    const q = new URLSearchParams({ account_combination: combo, period_name: periodClean });
-                    if (ledgerId) q.set('ledger_id', String(ledgerId));
-                    const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/cash/recon-status?${q}`);
-                    const data = await res.json();
-                    results[combo] = data;
-                  } catch (e) { results[combo] = { status: 'error', message: String(e) }; }
-                }));
-                setReconStatusData(results);
-                setReconStatusLoading(false);
-              }}
-            >
-              Bank Recon
-            </Button>
           </Space>
 
           {/* Error alert */}
@@ -4269,166 +4199,6 @@ const TrialBalance: React.FC = () => {
               No API call made yet. Click Save / Update Revaluation first.
             </div>
           )}
-        </Modal>
-
-        {/* ── Bank Recon Status Modal ── */}
-        <Modal
-          open={reconStatusOpen}
-          onCancel={() => setReconStatusOpen(false)}
-          title={
-            <Space>
-              <ReconciliationOutlined style={{ color: '#722ed1' }} />
-              <span>Bank Reconciliation Status — {revalAccount} · {tabs.find(t => t.key === revalTabKey)?.periodName?.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '')}</span>
-            </Space>
-          }
-          width={900}
-          footer={<Button onClick={() => setReconStatusOpen(false)}>Close</Button>}
-          destroyOnClose
-        >
-          <Spin spinning={reconStatusLoading} tip="Loading recon status…">
-            {(() => {
-              const combos  = Object.keys(reconStatusData);
-              const totalAll   = combos.reduce((s, c) => s + (reconStatusData[c]?.totalLines   ?? 0), 0);
-              const reconAll   = combos.reduce((s, c) => s + (reconStatusData[c]?.reconLines   ?? 0), 0);
-              const unreconAll = combos.reduce((s, c) => s + (reconStatusData[c]?.unreconLines ?? 0), 0);
-              const pct = totalAll > 0 ? Math.round((reconAll / totalAll) * 100) : 0;
-              return (
-                <div>
-                  {/* Summary */}
-                  {combos.length > 0 && (
-                    <div style={{ display: 'flex', gap: 24, marginBottom: 20, padding: '12px 16px', background: '#fafafa', borderRadius: 8, border: '1px solid #f0f0f0', alignItems: 'center', flexWrap: 'wrap' }}>
-                      <div style={{ textAlign: 'center' }}>
-                        <div style={{ fontSize: 26, fontWeight: 700, color: '#1677ff' }}>{totalAll}</div>
-                        <div style={{ fontSize: 11, color: '#8c8c8c' }}>Total GL Lines</div>
-                      </div>
-                      <div style={{ textAlign: 'center' }}>
-                        <div style={{ fontSize: 26, fontWeight: 700, color: '#1D7B4D' }}>{reconAll}</div>
-                        <div style={{ fontSize: 11, color: '#8c8c8c' }}>Reconciled</div>
-                      </div>
-                      <div style={{ textAlign: 'center' }}>
-                        <div style={{ fontSize: 26, fontWeight: 700, color: '#C74634' }}>{unreconAll}</div>
-                        <div style={{ fontSize: 11, color: '#8c8c8c' }}>Unreconciled</div>
-                      </div>
-                      <div style={{ flex: 1, minWidth: 180 }}>
-                        <div style={{ fontSize: 11, color: '#8c8c8c', marginBottom: 4 }}>Overall Reconciliation Progress</div>
-                        <Progress
-                          percent={pct}
-                          strokeColor={pct === 100 ? '#1D7B4D' : pct > 50 ? '#D4A800' : '#C74634'}
-                          size="default"
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Per-combination */}
-                  {combos.map(combo => {
-                    const rs = reconStatusData[combo];
-                    const ok = rs?.status === 'success';
-                    const comboPct = ok && rs.totalLines > 0 ? Math.round((rs.reconLines / rs.totalLines) * 100) : 0;
-                    const apiUrl = `${APEX_DB_CONFIG.baseUrl}/cash/recon-status?account_combination=${encodeURIComponent(combo)}&period_name=${encodeURIComponent((tabs.find(t => t.key === revalTabKey)?.periodName ?? '').replace(/^(?:ReERP|Dynamic|YTD):\s*/, '').replace(/\s*·.*$/, '').trim())}`;
-
-                    return (
-                      <div key={combo} style={{ border: '1px solid #e8e8e8', borderRadius: 8, marginBottom: 10, overflow: 'hidden' }}>
-                        {/* Header */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: '#fafafa' }}>
-                          <Text style={{ fontFamily: 'monospace', fontSize: 12, flex: 1 }}>{combo}</Text>
-                          {ok ? (
-                            <>
-                              <Tag color="blue"  style={{ fontSize: 10, margin: 0 }}>{rs.totalLines} total</Tag>
-                              <Tag color="green" style={{ fontSize: 10, margin: 0 }}>{rs.reconLines} recon</Tag>
-                              {rs.unreconLines > 0 && <Tag color="red" style={{ fontSize: 10, margin: 0 }}>{rs.unreconLines} unrecon</Tag>}
-                              <Progress percent={comboPct} size="small" style={{ width: 90, margin: 0 }}
-                                strokeColor={comboPct === 100 ? '#1D7B4D' : comboPct > 50 ? '#D4A800' : '#C74634'}
-                                format={p => <span style={{ fontSize: 10 }}>{p}%</span>}
-                              />
-                            </>
-                          ) : ok === false ? (
-                            <Tag color="red" style={{ fontSize: 10 }}>{rs?.message || 'Error'}</Tag>
-                          ) : (
-                            <Tag color="default" style={{ fontSize: 10 }}>No data</Tag>
-                          )}
-                          <Tooltip title="Drill down — GL lines with recon details">
-                            <Button size="small" icon={<ReconciliationOutlined />}
-                              style={{ color: '#722ed1', borderColor: '#722ed1' }}
-                              onClick={() => setReconDrillCombo(reconDrillCombo === combo ? null : combo)}
-                            />
-                          </Tooltip>
-                          <Tooltip title="View API endpoint">
-                            <Button size="small" icon={<ApiOutlined />}
-                              style={{ color: '#8c8c8c', borderColor: '#d9d9d9' }}
-                              onClick={() => Modal.info({
-                                title: 'Recon Status API',
-                                width: 680,
-                                content: (
-                                  <div>
-                                    <div style={{ marginBottom: 8 }}>
-                                      <Tag color="blue">GET</Tag>
-                                      <Text style={{ fontSize: 11, wordBreak: 'break-all' }}>{apiUrl}</Text>
-                                    </div>
-                                    {ok && (
-                                      <pre style={{ background: '#1e1e1e', color: '#9cdcfe', padding: 8, borderRadius: 4, fontSize: 11, overflowX: 'auto' }}>
-                                        {JSON.stringify({ totalLines: rs.totalLines, reconLines: rs.reconLines, unreconLines: rs.unreconLines, reconAmount: rs.reconAmount, unreconAmount: rs.unreconAmount }, null, 2)}
-                                      </pre>
-                                    )}
-                                  </div>
-                                ),
-                              })}
-                            />
-                          </Tooltip>
-                        </div>
-
-                        {/* Drill-down table */}
-                        {reconDrillCombo === combo && ok && rs.lines?.length > 0 && (
-                          <Table
-                            dataSource={rs.lines}
-                            rowKey={(r: any) => `${r.jeHeaderId}-${r.jeLineNumber}`}
-                            size="small"
-                            pagination={false}
-                            scroll={{ x: 750, y: 320 }}
-                            style={{ margin: 0 }}
-                            columns={[
-                              { title: 'JE Header',    dataIndex: 'jeHeaderId',   width: 110, render: (v: number) => <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{v}</Text> },
-                              { title: 'Line',         dataIndex: 'jeLineNumber', width: 55 },
-                              { title: 'Date',         dataIndex: 'effectiveDate', width: 100, render: (v: string) => v?.substring(0, 10) || '—' },
-                              { title: 'Category',     dataIndex: 'jeCategory', width: 130, ellipsis: true, render: (v: string) => <Tooltip title={v}><span style={{ fontSize: 11 }}>{v || '—'}</span></Tooltip> },
-                              { title: 'Debit',        dataIndex: 'debit',  width: 115, align: 'right' as const, render: (v: number) => v > 0 ? <Text style={{ fontFamily: 'monospace', fontSize: 11, color: '#1D7B4D' }}>{v.toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> : '' },
-                              { title: 'Credit',       dataIndex: 'credit', width: 115, align: 'right' as const, render: (v: number) => v > 0 ? <Text style={{ fontFamily: 'monospace', fontSize: 11, color: '#C74634' }}>{v.toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> : '' },
-                              { title: 'Description',  dataIndex: 'description', ellipsis: true, render: (v: string) => <Tooltip title={v}><span style={{ fontSize: 11 }}>{v || '—'}</span></Tooltip> },
-                              {
-                                title: 'Recon Status',
-                                key: 'recon',
-                                width: 100,
-                                render: (_: any, r: any) => r.reconciledFlag === 'Y'
-                                  ? <Tag color="green"  icon={<CheckOutlined />}    style={{ fontSize: 10, margin: 0 }}>Reconciled</Tag>
-                                  : <Tag color="orange" icon={<CloseOutlined />}    style={{ fontSize: 10, margin: 0 }}>Unreconciled</Tag>,
-                              },
-                              {
-                                title: 'Recon Ref',
-                                key: 'reconRef',
-                                width: 110,
-                                render: (_: any, r: any) => r.reconReference
-                                  ? <Tooltip title={`Date: ${r.reconDate || '—'} · By: ${r.lastUpdatedBy || '—'}`}>
-                                      <Text style={{ fontFamily: 'monospace', fontSize: 11, color: '#0572CE' }}>{r.reconReference}</Text>
-                                    </Tooltip>
-                                  : <Text type="secondary" style={{ fontSize: 11 }}>—</Text>,
-                              },
-                            ]}
-                          />
-                        )}
-                        {reconDrillCombo === combo && ok && rs.lines?.length === 0 && (
-                          <div style={{ padding: 16, color: '#8c8c8c', fontSize: 12, textAlign: 'center' }}>No GL lines found for this combination and period.</div>
-                        )}
-                      </div>
-                    );
-                  })}
-
-                  {!reconStatusLoading && combos.length === 0 && (
-                    <Alert type="info" showIcon message="No data loaded yet. Click 'Bank Recon' button to fetch." />
-                  )}
-                </div>
-              );
-            })()}
-          </Spin>
         </Modal>
 
         {/* ── Create Accounting Flow Modal ── */}
@@ -5341,8 +5111,9 @@ const TrialBalance: React.FC = () => {
     const yearRange: number[] = [];
     for (let y = reYearFrom; y <= reYearTo; y++) yearRange.push(y);
 
-    const rows: { year: number; lastPeriod: string; revenue: number; expenses: number; netPL: number; reBalance: number; openingRE: number; closingRE: number }[] = [];
-    let prevClosingRE: number | null = null;  // null = not yet known (will seed from GL)
+    const rows: { year: number; lastPeriod: string; revenue: number; expenses: number; netPL: number; reBalance: number; cumulativeRE: number; openingRE: number; closingRE: number }[] = [];
+    let cumulativeRE = 0;
+    let runningOpeningRE = 0;
 
     for (let i = 0; i < yearRange.length; i++) {
       const year = yearRange[i];
@@ -5354,8 +5125,7 @@ const TrialBalance: React.FC = () => {
         .sort((a, b) => b.period_number - a.period_number);
 
       if (yearPeriods.length === 0) {
-        const openingRE = prevClosingRE ?? 0;
-        rows.push({ year, lastPeriod: '—', revenue: 0, expenses: 0, netPL: 0, reBalance: 0, openingRE, closingRE: openingRE });
+        rows.push({ year, lastPeriod: '—', revenue: 0, expenses: 0, netPL: 0, reBalance: 0, cumulativeRE, openingRE: runningOpeningRE, closingRE: runningOpeningRE });
         continue;
       }
 
@@ -5373,17 +5143,15 @@ const TrialBalance: React.FC = () => {
 
         const revenue  = items.filter(r => r.account_type === 'R').reduce((s, r) => s + (r.closing || 0), 0);
         const expenses = items.filter(r => r.account_type === 'E').reduce((s, r) => s + (r.closing || 0), 0);
-        const netPL    = revenue + expenses;  // as-is: negative = profit (Cr revenue dominates)
+        const netPL    = -(revenue + expenses); // positive = profit
         const reAcct   = items.filter(r => r.account === RE_ACCOUNT).reduce((s, r) => s + (r.closing || 0), 0);
-        // Seed: first year openingRE = RE account GL balance (before this year's P&L)
-        // Subsequent years: openingRE = previous year's closingRE (chained rollforward)
-        const openingRE: number  = prevClosingRE ?? (reAcct - netPL);
-        const closingRE: number  = openingRE + netPL;
-        prevClosingRE = closingRE;
-        rows.push({ year, lastPeriod: lastPeriod.period_name_id, revenue, expenses, netPL, reBalance: reAcct, openingRE, closingRE });
+        cumulativeRE  += netPL;
+        const openingRE = runningOpeningRE;
+        const closingRE = openingRE + netPL;
+        runningOpeningRE = closingRE;
+        rows.push({ year, lastPeriod: lastPeriod.period_name_id, revenue, expenses, netPL, reBalance: reAcct, cumulativeRE, openingRE, closingRE });
       } catch (_err) {
-        const openingRE = prevClosingRE ?? 0;
-        rows.push({ year, lastPeriod: lastPeriod.period_name_id, revenue: 0, expenses: 0, netPL: 0, reBalance: 0, openingRE, closingRE: openingRE });
+        rows.push({ year, lastPeriod: lastPeriod.period_name_id, revenue: 0, expenses: 0, netPL: 0, reBalance: 0, cumulativeRE, openingRE: runningOpeningRE, closingRE: runningOpeningRE });
       }
     }
 
@@ -5394,7 +5162,6 @@ const TrialBalance: React.FC = () => {
   };
 
   // ── Save selected RE years to RR_GL_RETAINED_EARNINGS ───────
-  const RE_ACCOUNT = '3112100';
   const saveRetainedEarnings = async () => {
     if (!reCalcTab || reYearSelected.length === 0) {
       message.warning('Select at least one year to save'); return;
@@ -5411,32 +5178,26 @@ const TrialBalance: React.FC = () => {
         expenses:     r.expenses,
         netPL:        r.netPL,
         reBalance:    r.reBalance,
+        cumulativeRE: r.cumulativeRE,
         openingRe:    r.openingRE,
         closingRe:    r.closingRE,
-        cumulativeRE: r.closingRE,
       }));
-    const url  = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.retainedEarningsSave}`;
-    const body = JSON.stringify(rowsToSave, null, 2);
-    setReApiDebug({ url, body, response: '', status: null });
     setReSaving(true);
     try {
-      const res  = await fetch(url, {
+      const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.retainedEarningsSave}`;
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(rowsToSave),
       });
-      const text = await res.text();
-      let data: any = {};
-      try { data = JSON.parse(text); } catch { data = { raw: text }; }
-      setReApiDebug(prev => prev ? { ...prev, status: res.status, response: JSON.stringify(data, null, 2) } : null);
+      const data = await res.json();
       if (res.ok && data.status === 'ok') {
         message.success(`Saved ${data.saved} retained earnings record(s)`);
         setReYearSelected([]);
       } else {
-        message.error(`Save failed (HTTP ${res.status}): ${data.message || text.slice(0, 200)}`);
+        message.error(`Save failed: ${data.message || 'Unknown error'}`);
       }
     } catch (e: any) {
-      setReApiDebug(prev => prev ? { ...prev, status: 0, response: e.message } : null);
       message.error(`Save error: ${e.message}`);
     } finally {
       setReSaving(false);
@@ -5444,83 +5205,7 @@ const TrialBalance: React.FC = () => {
   };
 
   // ── Render: Retained Earnings calculator popup ───────────────
-
-  // ── Export Retained Earnings to Excel ─────────────────────────
-  const exportReCalcExcel = () => {
-    if (!reCalcTab) return;
-    const tab    = reCalcTab;
-    const period = tab.periodName.replace(/^YTD:\s*/, '');
-    const rows   = tab.rrData;
-    const fmtN   = (n: number) => Math.abs(n);
-
-    const revenueRows  = rows.filter(r => r.account_type === 'R');
-    const expenseRows  = rows.filter(r => r.account_type === 'E');
-    const revenueTotal = revenueRows.reduce((s, r) => s + (r.closing || 0), 0);
-    const expenseTotal = expenseRows.reduce((s, r) => s + (r.closing || 0), 0);
-    const netPL        = revenueTotal + expenseTotal;
-    const reCurrentClosing = rows.filter(r => r.account === RE_ACCOUNT).reduce((s, r) => s + (r.closing || 0), 0);
-    const reAdjusted   = reCurrentClosing + netPL;
-
-    const wb = XLSX.utils.book_new();
-
-    // ── Sheet 1: Summary ──────────────────────────────────────
-    const summaryData = [
-      ['Retained Earnings Calculation'],
-      ['Ledger', tab.ledgerName],
-      ['Period', period],
-      [],
-      ['Item', 'Amount'],
-      ['Total Revenue',                  fmtN(revenueTotal)],
-      ['Total Expenses',                 fmtN(expenseTotal)],
-      ['Net Profit / (Loss)',            netPL],
-      ['RE Account Current Balance',     fmtN(reCurrentClosing)],
-      ['Adjusted RE Balance',            reAdjusted],
-    ];
-    const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
-    wsSummary['!cols'] = [{ wch: 32 }, { wch: 20 }];
-    XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary');
-
-    // ── Sheet 2: Revenue Accounts ─────────────────────────────
-    const revData = [
-      ['Account', 'Description', 'Closing Balance'],
-      ...revenueRows
-        .sort((a, b) => (a.account || '').localeCompare(b.account || ''))
-        .map(r => [r.account, r.account_desc || '', r.closing || 0]),
-      [],
-      ['', 'Total Revenue', fmtN(revenueTotal)],
-    ];
-    const wsRev = XLSX.utils.aoa_to_sheet(revData);
-    wsRev['!cols'] = [{ wch: 16 }, { wch: 40 }, { wch: 18 }];
-    XLSX.utils.book_append_sheet(wb, wsRev, 'Revenue');
-
-    // ── Sheet 3: Expense Accounts ─────────────────────────────
-    const expData = [
-      ['Account', 'Description', 'Closing Balance'],
-      ...expenseRows
-        .sort((a, b) => (a.account || '').localeCompare(b.account || ''))
-        .map(r => [r.account, r.account_desc || '', r.closing || 0]),
-      [],
-      ['', 'Total Expenses', fmtN(expenseTotal)],
-    ];
-    const wsExp = XLSX.utils.aoa_to_sheet(expData);
-    wsExp['!cols'] = [{ wch: 16 }, { wch: 40 }, { wch: 18 }];
-    XLSX.utils.book_append_sheet(wb, wsExp, 'Expenses');
-
-    // ── Sheet 4: Multi-Year (if calculated) ───────────────────
-    if (reYearRows.length > 0) {
-      const yearData = [
-        ['Year', 'Last Period', 'Opening RE', 'Revenue', 'Expenses', 'Net P&L', `RE Acct (${RE_ACCOUNT})`, 'Closing RE'],
-        ...reYearRows.map(r => [r.year, r.lastPeriod, r.openingRE, r.revenue, r.expenses, r.netPL, r.reBalance, r.closingRE]),
-      ];
-      const wsYears = XLSX.utils.aoa_to_sheet(yearData);
-      wsYears['!cols'] = [{ wch: 8 }, { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 18 }];
-      XLSX.utils.book_append_sheet(wb, wsYears, 'Multi-Year');
-    }
-
-    const buf  = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-    const blob = new Blob([buf], { type: 'application/octet-stream' });
-    saveAs(blob, `retained_earnings_${tab.ledgerName.replace(/\s+/g, '_')}_${period.replace(/\s+/g, '_')}.xlsx`);
-  };
+  const RE_ACCOUNT = '3112100';
 
   const renderReCalcModal = () => {
     const tab = reCalcTab;
@@ -5528,9 +5213,6 @@ const TrialBalance: React.FC = () => {
 
     const fmtN = (n: number) =>
       new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(n));
-    // Show actual value as-is (negative for Cr balances like Revenue/RE)
-    const fmtRaw = (n: number) =>
-      new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
     const fmtSigned = (n: number) =>
       n >= 0
         ? <Text style={{ fontFamily: 'monospace', color: '#237804' }}>{fmtN(n)}</Text>
@@ -5547,16 +5229,18 @@ const TrialBalance: React.FC = () => {
     const expenseRows = rows.filter(r => r.account_type === 'E');
     const expenseTotal = expenseRows.reduce((s, r) => s + (r.closing || 0), 0);
 
-    // Net P&L as-is: revenue (Cr, -ve) + expenses (Dr, +ve)
-    // negative result = profit (revenue dominates), positive = loss
-    const netPL = revenueTotal + expenseTotal;
+    // Net P&L: revenue is Cr (negative) + expenses are Dr (positive)
+    // Net Income = -(revenueTotal) - expenseTotal
+    // Equivalently: revenueTotal + expenseTotal already gives the P&L with correct sign
+    // because revenueTotal < 0 and expenseTotal > 0
+    const netPL = -(revenueTotal + expenseTotal);   // positive = net income, negative = net loss
 
     // Retained Earnings account current balance
     const reRows = rows.filter(r => r.account === RE_ACCOUNT);
     const reCurrentClosing = reRows.reduce((s, r) => s + (r.closing || 0), 0);
-    const reAdjusted = reCurrentClosing + netPL;   // profit (negative netPL) increases Cr RE (makes more negative)
+    const reAdjusted = reCurrentClosing - netPL;   // RE is Cr (negative), add net income increases Cr
 
-    const isProfit = netPL <= 0;  // negative sum = revenue > expenses = profit
+    const isProfit = netPL >= 0;
 
     // Summary table for revenue accounts
     const revSummary = revenueRows.map(r => ({
@@ -5604,25 +5288,25 @@ const TrialBalance: React.FC = () => {
             <div style={{ border: '1px solid #d9d9d9', borderRadius: 8, padding: '12px 16px', background: '#f6ffed' }}>
               <div style={{ fontSize: 11, color: REDWOOD.textSecondary, marginBottom: 4 }}>Total Revenue</div>
               <div style={{ fontFamily: 'monospace', fontSize: 15, fontWeight: 700, color: '#237804' }}>
-                {fmtRaw(revenueTotal)}
+                {fmtN(revenueTotal)}
               </div>
-              <div style={{ fontSize: 10, color: REDWOOD.textSecondary }}>{revenueRows.length} accounts · Cr (−ve)</div>
+              <div style={{ fontSize: 10, color: REDWOOD.textSecondary }}>{revenueRows.length} accounts</div>
             </div>
           </Col>
           <Col span={6}>
             <div style={{ border: '1px solid #d9d9d9', borderRadius: 8, padding: '12px 16px', background: '#fff1f0' }}>
               <div style={{ fontSize: 11, color: REDWOOD.textSecondary, marginBottom: 4 }}>Total Expenses</div>
               <div style={{ fontFamily: 'monospace', fontSize: 15, fontWeight: 700, color: REDWOOD.primary }}>
-                {fmtRaw(expenseTotal)}
+                {fmtN(expenseTotal)}
               </div>
-              <div style={{ fontSize: 10, color: REDWOOD.textSecondary }}>{expenseRows.length} accounts · Dr (+ve)</div>
+              <div style={{ fontSize: 10, color: REDWOOD.textSecondary }}>{expenseRows.length} accounts</div>
             </div>
           </Col>
           <Col span={6}>
             <div style={{ border: `2px solid ${isProfit ? '#52c41a' : REDWOOD.primary}`, borderRadius: 8, padding: '12px 16px', background: isProfit ? '#f6ffed' : '#fff1f0' }}>
               <div style={{ fontSize: 11, color: REDWOOD.textSecondary, marginBottom: 4 }}>Net {isProfit ? 'Income' : 'Loss'}</div>
               <div style={{ fontFamily: 'monospace', fontSize: 15, fontWeight: 700, color: isProfit ? '#237804' : REDWOOD.primary }}>
-                {fmtRaw(netPL)}
+                {fmtN(netPL)}
               </div>
               <Tag color={isProfit ? 'success' : 'error'} style={{ marginTop: 4 }}>
                 {isProfit ? '▲ PROFIT' : '▼ LOSS'}
@@ -5635,10 +5319,10 @@ const TrialBalance: React.FC = () => {
                 RE Account ({RE_ACCOUNT})
               </div>
               <div style={{ fontSize: 10, color: REDWOOD.textSecondary, marginBottom: 2 }}>
-                Current: <span style={{ fontFamily: 'monospace' }}>{fmtRaw(reCurrentClosing)}</span>
+                Current: <span style={{ fontFamily: 'monospace' }}>{fmtN(reCurrentClosing)}</span>
               </div>
               <div style={{ fontFamily: 'monospace', fontSize: 15, fontWeight: 700, color: '#722ed1' }}>
-                {fmtRaw(reAdjusted)}
+                {fmtN(reAdjusted)}
               </div>
               <div style={{ fontSize: 10, color: REDWOOD.textSecondary }}>After closing P&amp;L</div>
             </div>
@@ -5647,14 +5331,14 @@ const TrialBalance: React.FC = () => {
 
         {/* Formula note */}
         <div style={{ background: '#fafafa', border: '1px solid #e8e8e8', borderRadius: 6, padding: '8px 14px', marginBottom: 16, fontSize: 12, color: REDWOOD.textSecondary }}>
-          <strong>Formula:</strong>&nbsp; RE Adjusted = RE Current ({fmtRaw(reCurrentClosing)}) + Net P&amp;L ({fmtRaw(netPL)}) = <strong style={{ color: '#722ed1' }}>{fmtRaw(reAdjusted)}</strong>
+          <strong>Formula:</strong>&nbsp; RE Adjusted = RE Current ({fmtN(reCurrentClosing)}) − Net {isProfit ? 'Income' : 'Loss'} ({fmtN(netPL)}) = <strong style={{ color: '#722ed1' }}>{fmtN(reAdjusted)}</strong>
           &nbsp;·&nbsp; Revenue and Expense accounts close to zero; balance transfers to Retained Earnings.
         </div>
 
         {/* Revenue breakdown */}
         <Collapse size="small" style={{ marginBottom: 8 }} items={[{
           key: 'rev',
-          label: <span style={{ color: '#237804', fontWeight: 600 }}>Revenue Accounts — {revenueRows.length} accounts, Total: {fmtRaw(revenueTotal)}</span>,
+          label: <span style={{ color: '#237804', fontWeight: 600 }}>Revenue Accounts — {revenueRows.length} accounts, Total: {fmtN(revenueTotal)}</span>,
           children: (
             <Table
               dataSource={revSummary}
@@ -5669,7 +5353,7 @@ const TrialBalance: React.FC = () => {
                       <Text strong style={{ fontSize: 12 }}>Total Revenue</Text>
                     </Table.Summary.Cell>
                     <Table.Summary.Cell index={2} align="right">
-                      <Text strong style={{ fontFamily: 'monospace', color: '#237804' }}>{fmtRaw(revenueTotal)}</Text>
+                      <Text strong style={{ fontFamily: 'monospace', color: '#237804' }}>{fmtN(revenueTotal)}</Text>
                     </Table.Summary.Cell>
                   </Table.Summary.Row>
                 </Table.Summary>
@@ -5681,7 +5365,7 @@ const TrialBalance: React.FC = () => {
         {/* Expense breakdown */}
         <Collapse size="small" items={[{
           key: 'exp',
-          label: <span style={{ color: REDWOOD.primary, fontWeight: 600 }}>Expense Accounts — {expenseRows.length} accounts, Total: {fmtRaw(expenseTotal)}</span>,
+          label: <span style={{ color: REDWOOD.primary, fontWeight: 600 }}>Expense Accounts — {expenseRows.length} accounts, Total: {fmtN(expenseTotal)}</span>,
           children: (
             <Table
               dataSource={expSummary}
@@ -5696,7 +5380,7 @@ const TrialBalance: React.FC = () => {
                       <Text strong style={{ fontSize: 12 }}>Total Expenses</Text>
                     </Table.Summary.Cell>
                     <Table.Summary.Cell index={2} align="right">
-                      <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmtRaw(expenseTotal)}</Text>
+                      <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmtN(expenseTotal)}</Text>
                     </Table.Summary.Cell>
                   </Table.Summary.Row>
                 </Table.Summary>
@@ -5783,7 +5467,6 @@ const TrialBalance: React.FC = () => {
           const totalRevenue  = reYearRows.reduce((s, r) => s + r.revenue,  0);
           const totalExpenses = reYearRows.reduce((s, r) => s + r.expenses, 0);
           const totalNetPL    = reYearRows.reduce((s, r) => s + r.netPL,    0);
-          const lastRow       = reYearRows[reYearRows.length - 1];
 
           const allYears = reYearRows.map(r => r.year);
           const allChecked = allYears.every(y => reYearSelected.includes(y));
@@ -5826,8 +5509,45 @@ const TrialBalance: React.FC = () => {
               title: 'Last Period',
               dataIndex: 'lastPeriod',
               key: 'lastPeriod',
-              width: 120,
+              width: 130,
               render: (v: string) => <Tag style={{ fontSize: 10 }}>{v}</Tag>,
+            },
+            {
+              title: 'Revenue',
+              dataIndex: 'revenue',
+              key: 'revenue',
+              align: 'right' as const,
+              width: 120,
+              render: (v: number) => (
+                <Text style={{ fontFamily: 'monospace', color: '#237804' }}>{fmtN(v)}</Text>
+              ),
+            },
+            {
+              title: 'Expenses',
+              dataIndex: 'expenses',
+              key: 'expenses',
+              align: 'right' as const,
+              width: 120,
+              render: (v: number) => (
+                <Text style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmtN(v)}</Text>
+              ),
+            },
+            {
+              title: 'Net P&L',
+              dataIndex: 'netPL',
+              key: 'netPL',
+              align: 'right' as const,
+              width: 130,
+              render: (v: number) => (
+                <Space size={4}>
+                  <Text style={{ fontFamily: 'monospace', color: v >= 0 ? '#237804' : REDWOOD.primary }}>
+                    {fmtN(v)}
+                  </Text>
+                  <Tag color={v >= 0 ? 'success' : 'error'} style={{ fontSize: 10, marginLeft: 2 }}>
+                    {v >= 0 ? '▲' : '▼'}
+                  </Tag>
+                </Space>
+              ),
             },
             {
               title: 'Opening RE',
@@ -5864,40 +5584,13 @@ const TrialBalance: React.FC = () => {
               ),
             },
             {
-              title: 'Revenue (Cr)',
-              dataIndex: 'revenue',
-              key: 'revenue',
+              title: 'Closing RE',
+              dataIndex: 'closingRE',
+              key: 'closingRE',
               align: 'right' as const,
-              width: 120,
+              width: 150,
               render: (v: number) => (
-                <Text style={{ fontFamily: 'monospace', color: '#237804' }}>{fmtRaw(v)}</Text>
-              ),
-            },
-            {
-              title: 'Expenses (Dr)',
-              dataIndex: 'expenses',
-              key: 'expenses',
-              align: 'right' as const,
-              width: 120,
-              render: (v: number) => (
-                <Text style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmtRaw(v)}</Text>
-              ),
-            },
-            {
-              title: 'Net P&L',
-              dataIndex: 'netPL',
-              key: 'netPL',
-              align: 'right' as const,
-              width: 130,
-              render: (v: number) => (
-                <Space size={4}>
-                  <Text style={{ fontFamily: 'monospace', color: v <= 0 ? '#237804' : REDWOOD.primary }}>
-                    {fmtRaw(v)}
-                  </Text>
-                  <Tag color={v <= 0 ? 'success' : 'error'} style={{ fontSize: 10, marginLeft: 2 }}>
-                    {v <= 0 ? '▲' : '▼'}
-                  </Tag>
-                </Space>
+                <Text style={{ fontFamily: 'monospace', fontWeight: 700, color: v < 0 ? '#722ed1' : '#237804' }}>{fmtN(v)}</Text>
               ),
             },
             {
@@ -5905,119 +5598,55 @@ const TrialBalance: React.FC = () => {
               dataIndex: 'reBalance',
               key: 'reBalance',
               align: 'right' as const,
-              width: 130,
-              render: (v: number) => (
-                <Text style={{ fontFamily: 'monospace', color: '#722ed1' }}>{fmtRaw(v)}</Text>
-              ),
+              width: 140,
+              render: (v: number) => fmtSigned(v),
             },
             {
-              title: 'Closing RE',
-              dataIndex: 'closingRE',
-              key: 'closingRE',
+              title: 'Cumulative Net P&L',
+              dataIndex: 'cumulativeRE',
+              key: 'cumulativeRE',
               align: 'right' as const,
-              width: 130,
+              width: 150,
               render: (v: number) => (
-                <Text style={{ fontFamily: 'monospace', fontWeight: 700, color: '#722ed1' }}>{fmtRaw(v)}</Text>
+                <Text style={{ fontFamily: 'monospace', fontWeight: 700, color: '#722ed1' }}>{fmtN(v)}</Text>
               ),
             },
           ];
 
           return (
             <>
-            <div style={{ fontSize: 11, color: REDWOOD.textSecondary, marginBottom: 8, background: '#e6f7ff', border: '1px solid #91d5ff', borderRadius: 6, padding: '6px 12px' }}>
-              <strong>Opening RE</strong> = RE account GL balance (seeded from first year) → carried forward each year.&nbsp;
-              <strong>Closing RE = Opening RE + Net P&amp;L.</strong>&nbsp;
-              Negative = credit balance (normal for equity).
-            </div>
             <Table
               dataSource={reYearRows.map(r => ({ ...r, key: r.year }))}
               columns={multiYearCols}
               size="small"
               bordered
               pagination={false}
-              scroll={{ x: 1000 }}
+              scroll={{ x: 900 }}
               summary={() => (
                 <Table.Summary>
                   <Table.Summary.Row style={{ background: '#f9f0ff' }}>
-                    <Table.Summary.Cell index={0} colSpan={3} align="right">
+                    <Table.Summary.Cell index={0} colSpan={2} align="right">
                       <Text strong style={{ fontSize: 12 }}>Totals</Text>
                     </Table.Summary.Cell>
+                    <Table.Summary.Cell index={2} align="right">
+                      <Text strong style={{ fontFamily: 'monospace', color: '#237804' }}>{fmtN(totalRevenue)}</Text>
+                    </Table.Summary.Cell>
                     <Table.Summary.Cell index={3} align="right">
-                      <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.textSecondary }}>—</Text>
+                      <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmtN(totalExpenses)}</Text>
                     </Table.Summary.Cell>
                     <Table.Summary.Cell index={4} align="right">
-                      <Text strong style={{ fontFamily: 'monospace', color: '#237804' }}>{fmtRaw(totalRevenue)}</Text>
+                      <Text strong style={{ fontFamily: 'monospace', color: totalNetPL >= 0 ? '#237804' : REDWOOD.primary }}>{fmtN(totalNetPL)}</Text>
                     </Table.Summary.Cell>
-                    <Table.Summary.Cell index={5} align="right">
-                      <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmtRaw(totalExpenses)}</Text>
-                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={5} />
                     <Table.Summary.Cell index={6} align="right">
-                      <Text strong style={{ fontFamily: 'monospace', color: totalNetPL <= 0 ? '#237804' : REDWOOD.primary }}>{fmtRaw(totalNetPL)}</Text>
-                    </Table.Summary.Cell>
-                    <Table.Summary.Cell index={7} />
-                    <Table.Summary.Cell index={8} align="right">
                       <Text strong style={{ fontFamily: 'monospace', color: '#722ed1' }}>
-                        {lastRow ? fmtRaw(lastRow.closingRE) : '0.00'}
+                        {reYearRows.length > 0 ? fmtN(reYearRows[reYearRows.length - 1].cumulativeRE) : '0.00'}
                       </Text>
                     </Table.Summary.Cell>
                   </Table.Summary.Row>
                 </Table.Summary>
               )}
             />
-
-            {/* API debug panel */}
-            {reApiDebug && (
-              <div style={{ marginTop: 12, borderRadius: 6, border: '1px solid #adc6ff', overflow: 'hidden' }}>
-                <div style={{ background: '#f0f5ff', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <ApiOutlined style={{ color: '#2f54eb' }} />
-                  <Text style={{ fontSize: 12, fontWeight: 700, color: '#2f54eb' }}>API Debug — Save Retained Earnings</Text>
-                  {reApiDebug.status !== null && (
-                    <Tag color={reApiDebug.status >= 200 && reApiDebug.status < 300 ? 'green' : 'red'}>
-                      HTTP {reApiDebug.status}
-                    </Tag>
-                  )}
-                  <Button size="small" type="text" style={{ marginLeft: 'auto', fontSize: 11 }}
-                    onClick={() => setReApiDebug(null)}>✕</Button>
-                </div>
-                <div style={{ padding: '8px 12px', background: '#fafafa' }}>
-                  <div style={{ marginBottom: 6 }}>
-                    <Text type="secondary" style={{ fontSize: 11 }}>POST URL</Text>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2,
-                      background: '#fff', border: '1px solid #e0e0e0', borderRadius: 4, padding: '4px 8px' }}>
-                      <code style={{ flex: 1, fontSize: 11, color: '#d46b08', wordBreak: 'break-all' }}>{reApiDebug.url}</code>
-                      <CopyOutlined style={{ cursor: 'pointer', color: '#595959', flexShrink: 0 }}
-                        onClick={() => { navigator.clipboard.writeText(reApiDebug.url); message.success('URL copied'); }} />
-                    </div>
-                  </div>
-                  <div style={{ marginBottom: reApiDebug.response ? 6 : 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                      <Text type="secondary" style={{ fontSize: 11 }}>Request Body (JSON)</Text>
-                      <CopyOutlined style={{ cursor: 'pointer', color: '#595959', fontSize: 11 }}
-                        onClick={() => { navigator.clipboard.writeText(reApiDebug.body); message.success('Body copied'); }} />
-                    </div>
-                    <pre style={{ margin: 0, padding: '6px 8px', background: '#1e1e1e', color: '#9cdcfe',
-                      borderRadius: 4, fontSize: 10, maxHeight: 180, overflow: 'auto', whiteSpace: 'pre' }}>
-                      {reApiDebug.body}
-                    </pre>
-                  </div>
-                  {reApiDebug.response && (
-                    <div style={{ marginTop: 6 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                        <Text type="secondary" style={{ fontSize: 11 }}>Response</Text>
-                        <CopyOutlined style={{ cursor: 'pointer', color: '#595959', fontSize: 11 }}
-                          onClick={() => { navigator.clipboard.writeText(reApiDebug.response); message.success('Copied'); }} />
-                      </div>
-                      <pre style={{ margin: 0, padding: '6px 8px', background: '#1e1e1e',
-                        color: reApiDebug.status !== null && reApiDebug.status >= 200 && reApiDebug.status < 300 ? '#b5f5a0' : '#ff9999',
-                        borderRadius: 4, fontSize: 10, maxHeight: 140, overflow: 'auto', whiteSpace: 'pre' }}>
-                        {reApiDebug.response}
-                      </pre>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
             {/* Save bar */}
             <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 12,
               padding: '10px 14px', background: '#f9f0ff', borderRadius: 8,
@@ -6031,14 +5660,6 @@ const TrialBalance: React.FC = () => {
               <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
                 <Button size="small" onClick={() => setReYearSelected(allYears)}>Select All</Button>
                 <Button size="small" onClick={() => setReYearSelected([])}>Clear</Button>
-                <Button
-                  size="small"
-                  icon={<FileExcelOutlined />}
-                  onClick={exportReCalcExcel}
-                  style={{ color: '#237804', borderColor: '#237804' }}
-                >
-                  Export Excel
-                </Button>
                 <Button
                   size="small" type="primary"
                   style={{ background: '#722ed1', borderColor: '#722ed1', fontWeight: 600 }}
@@ -6181,19 +5802,7 @@ const TrialBalance: React.FC = () => {
       {
         title: 'Description', dataIndex: 'account_desc', key: 'account_desc',
         width: 180, ellipsis: true,
-        render: (v: string) => v === 'Retained Earnings'
-          ? (
-            <Space size={6}>
-              <span style={{
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                width: 18, height: 18, borderRadius: '50%',
-                background: '#13c2c2', color: '#fff',
-                fontSize: 10, fontWeight: 700, flexShrink: 0,
-              }}>M</span>
-              <Text style={{ fontSize: 12 }}>Retained Earnings B/F</Text>
-            </Space>
-          )
-          : <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
+        render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text>,
       },
       {
         title: <span style={{ color: '#1677ff' }}>Accounted (YTD)</span>,
@@ -6319,6 +5928,13 @@ const TrialBalance: React.FC = () => {
               YTD — cumulative from period 1 of fiscal year
             </Tag>
           </Col>
+          {tab.periodYear && (
+            <Col>
+              <Tag color="purple" style={{ fontSize: 12, padding: '2px 8px', fontWeight: 600 }}>
+                FY {tab.periodYear} → RE fetches FY {tab.periodYear}
+              </Tag>
+            </Col>
+          )}
         </Row>
 
         <Row gutter={12} style={{ marginBottom: 6 }}>
@@ -6346,104 +5962,22 @@ const TrialBalance: React.FC = () => {
             <Button
               size="small"
               icon={<SyncOutlined />}
-              loading={reFetchingTabKey === tab.key}
-              style={{ borderColor: '#13c2c2', color: '#13c2c2' }}
-              onClick={async () => {
-                const periodId = tab.periodName.replace(/^YTD:\s*/, '').split('·')[0].trim();
-                const periodInfo = periods.find(p => p.period_name_id === periodId && p.ledger_name === tab.ledgerName);
-                const currentYear = periodInfo?.period_year;
-                if (!currentYear) { message.warning('Could not determine year for this tab'); return; }
-                // RE opening = closing of previous year's last period (Mar of year-1)
-                const prevYear = currentYear - 1;
-                const lastPeriod = periods.find(p =>
-                  p.ledger_name === tab.ledgerName &&
-                  p.period_year === prevYear &&
-                  p.period_number === 12
-                );
-                const reUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceStandardRE}`
-                  + `?ledger_name=${encodeURIComponent(tab.ledgerName)}`
-                  + (lastPeriod ? `&period_name=${encodeURIComponent(lastPeriod.period_name_id)}` : `&period_year=${prevYear}`);
-                setReLastUrl(prev => ({ ...prev, [tab.key]: reUrl }));
-                if (!lastPeriod) { message.warning(`No closing period found for year ${prevYear} — will try period_year filter`); }
-                setReFetchingTabKey(tab.key);
-                try {
-                  const res = await fetch(reUrl, { headers: { Accept: 'application/json' } });
-                  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                  const data = await res.json();
-                  const reItems: RrTBRecord[] = data.items || [];
-                  if (reItems.length === 0) {
-                    message.info(`No saved RE data found for year ${prevYear} (${lastPeriod?.period_name_id ?? '—'})`);
-                    return;
-                  }
-                  // Transform RE rows: closing becomes the B/F opening balance for current period
-                  const mergedItems: RrTBRecord[] = reItems.map(r => ({
-                    ...r,
-                    account_desc:        'Retained Earnings',
-                    opening:              r.closing,
-                    debit:                0,
-                    credit:               0,
-                    closing:              r.closing,
-                    entered_opening:      r.closing,
-                    entered_debit:        0,
-                    entered_credit:       0,
-                    entered_closing:      r.closing,
-                    ytd_opening:          r.closing,
-                    ytd_debit:            0,
-                    ytd_credit:           0,
-                    ytd_entered_opening:  r.closing,
-                    ytd_entered_debit:    0,
-                    ytd_entered_credit:   0,
-                  }));
-                  const reClosing = mergedItems.reduce((s, r) => s + (r.closing || 0), 0);
-                  const reAccount = mergedItems[0]?.account;
-                  setTabs(prev => prev.map(t => {
-                    if (t.key !== tab.key) return t;
-                    const hasExisting = t.rrData.some(r => r.account === reAccount);
-                    let newData: RrTBRecord[];
-                    if (hasExisting) {
-                      newData = t.rrData.map(r =>
-                        r.account === reAccount
-                          ? { ...r, account_desc: 'Retained Earnings', opening: reClosing, closing: reClosing, entered_opening: reClosing, entered_closing: reClosing, ytd_opening: reClosing, ytd_entered_opening: reClosing }
-                          : r
-                      );
-                    } else {
-                      newData = [...t.rrData.filter(r => r.account_desc !== 'Retained Earnings'), ...mergedItems];
-                    }
-                    return { ...t, rrData: newData };
-                  }));
-                  message.success(`RE opening balance loaded from ${lastPeriod?.period_name_id ?? prevYear} — ${reClosing.toLocaleString('en-US', { minimumFractionDigits: 2 })} set as YTD Opening`);
-                } catch (e: any) {
-                  message.error(`Fetch RE failed: ${e.message}`);
-                } finally {
-                  setReFetchingTabKey(null);
-                }
-              }}
+              loading={reFetching}
+              style={{ borderColor: '#08979c', color: '#08979c' }}
+              onClick={() => fetchREForTab(tab)}
             >
               Fetch RE
             </Button>
-            {tab.rrData.some(r => r.account_desc === 'Retained Earnings') && (
-              <Tag color="cyan" style={{ fontSize: 10, marginLeft: 0 }}>RE ✓</Tag>
+            {reMergedTabs.has(tab.key) && (
+              <Tag color="cyan" style={{ fontSize: 11, margin: 0 }}>RE ✓</Tag>
             )}
-            {reLastUrl[tab.key] && (
-              <Tooltip
-                title={
-                  <div style={{ maxWidth: 560 }}>
-                    <div style={{ fontSize: 11, marginBottom: 4, color: '#91d5ff' }}>RE Endpoint (last fetch)</div>
-                    <code style={{ fontSize: 10, wordBreak: 'break-all', color: '#fff' }}>{reLastUrl[tab.key]}</code>
-                    <div style={{ marginTop: 6 }}>
-                      <Button size="small" icon={<CopyOutlined />} type="link" style={{ color: '#69c0ff', padding: 0, fontSize: 11 }}
-                        onClick={() => { navigator.clipboard.writeText(reLastUrl[tab.key]); message.success('URL copied'); }}>
-                        Copy
-                      </Button>
-                    </div>
-                  </div>
-                }
-                overlayStyle={{ maxWidth: 580 }}
-                color="#001529"
-              >
-                <Button size="small" icon={<ApiOutlined />} style={{ borderColor: '#096dd9', color: '#096dd9' }} />
-              </Tooltip>
-            )}
+            <Tooltip title="RE API debug — see last standardRE call">
+              <Button
+                size="small"
+                icon={<ApiOutlined style={{ color: reApiLog?.status === 200 ? '#389e0d' : reApiLog ? '#cf1322' : '#8c8c8c' }} />}
+                onClick={() => setReApiVisible(true)}
+              />
+            </Tooltip>
             <Button
               size="small"
               type="primary"
@@ -6627,7 +6161,6 @@ const TrialBalance: React.FC = () => {
           pagination={false}
           scroll={{ x: 'max-content' }}
           summary={summaryRow}
-
           rowSelection={{
             type: 'checkbox',
             selectedRowKeys: tabSelections[tab.key] || [],
@@ -6959,6 +6492,66 @@ const TrialBalance: React.FC = () => {
         {/* ── TB Drill-down modals ─────────────────────────────────────── */}
         {renderDrillComboModal()}
         {renderDrillJnlModal()}
+
+        {/* ── RE API Debug Modal ───────────────────────────────────────── */}
+        <Modal
+          open={reApiVisible}
+          onCancel={() => setReApiVisible(false)}
+          footer={null}
+          width={750}
+          title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>RE API Debug — standardRE call</span></Space>}
+        >
+          {reApiLog ? (
+            <div style={{ fontSize: 12, fontFamily: 'monospace' }}>
+              <Space style={{ marginBottom: 12 }}>
+                <Tag color={reApiLog.status === 200 ? 'green' : 'red'}>HTTP {reApiLog.status ?? 'ERR'}</Tag>
+                <Tag color={reApiLog.items > 0 ? 'blue' : 'orange'}>{reApiLog.items} rows returned</Tag>
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<SyncOutlined />}
+                  loading={reFetching}
+                  onClick={async () => {
+                    setReFetching(true);
+                    try {
+                      const res = await fetch(reApiLog.url, { headers: { Accept: 'application/json' } });
+                      const data = await res.json().catch(() => ({}));
+                      const items = data.items || [];
+                      setReApiLog(prev => prev ? { ...prev, status: res.status, items: items.length, response: items } : prev);
+                    } catch { setReApiLog(prev => prev ? { ...prev, status: null, items: 0 } : prev); }
+                    setReFetching(false);
+                  }}
+                >
+                  Run Again
+                </Button>
+              </Space>
+              <div style={{ background: '#f5f5f5', padding: 12, borderRadius: 6, wordBreak: 'break-all', marginBottom: 12 }}>
+                <div style={{ color: '#595959', marginBottom: 4 }}>URL:</div>
+                <a href={reApiLog.url} target="_blank" rel="noreferrer" style={{ color: REDWOOD.info }}>{reApiLog.url}</a>
+              </div>
+              <div style={{ marginBottom: 12, color: '#595959', fontSize: 11 }}>
+                <strong>Parameters:</strong>
+                <ul style={{ marginTop: 4, marginBottom: 0 }}>
+                  {reApiLog.url.split('?')[1]?.split('&').map((p, i) => (
+                    <li key={i}><strong>{decodeURIComponent(p.split('=')[0])}</strong> = {decodeURIComponent(p.split('=')[1] ?? '')}</li>
+                  ))}
+                </ul>
+              </div>
+              {(reApiLog as any).response && (
+                <div>
+                  <div style={{ color: '#595959', marginBottom: 4 }}><strong>Response:</strong></div>
+                  <pre style={{ background: '#141414', color: '#52c41a', padding: 12, borderRadius: 6, fontSize: 11, maxHeight: 300, overflow: 'auto', margin: 0 }}>
+                    {JSON.stringify((reApiLog as any).response, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ color: '#8c8c8c', textAlign: 'center', padding: 24 }}>
+              No RE API call made yet — open a YTD TB tab first.
+            </div>
+          )}
+        </Modal>
 
         {/* ── ReERP ↔ Fusion Reconciliation Modal ──────────────────────── */}
         <Modal
