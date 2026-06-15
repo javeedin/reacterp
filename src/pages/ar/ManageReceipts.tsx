@@ -376,22 +376,36 @@ const ManageReceipts: React.FC = () => {
       })
       .catch(() => {});
 
-    // Single ORDS endpoint — source of truth for receipt methods + bank accounts + GL combinations
+    // Load ORDS bank/GL accounts + APEX method names in parallel, then join client-side
     setAllMethodAccountsLoading(true);
-    fetch(`${ORDS_RECEIPT_METHOD_ACCOUNTS}?limit=500`, { headers: { Accept: 'application/json' } })
-      .then(r => r.json())
-      .then(data => {
-        const items = ((data.items ?? []) as any[]).map(mapAccount);
+    Promise.all([
+      fetch(`${ORDS_RECEIPT_METHOD_ACCOUNTS}?limit=500`, { headers: { Accept: 'application/json' } }).then(r => r.json()),
+      fetch(`${APEX_RECEIPT_METHODS}?limit=300`,          { headers: { Accept: 'application/json' } }).then(r => r.json()),
+    ])
+      .then(([ordsData, apexData]) => {
+        // Build name lookup: fusionReceiptMethodId → { name, receiptClass }
+        // APEX returns receiptmethodid (Fusion ID), name, receiptclass
+        const nameMap: Record<number, { name: string; receiptClass: string }> = {};
+        ((apexData.items ?? []) as any[]).forEach((m: any) => {
+          const fusionId = m.receiptmethodid ?? m.RECEIPTMETHODID ?? m.id ?? 0;
+          if (fusionId) nameMap[fusionId] = { name: m.name ?? '', receiptClass: m.receiptclass ?? '' };
+        });
 
-        // Build unique receipt methods list from the data (for the dropdown)
+        // Map ORDS items, filling in name from APEX if view join not yet fixed in Oracle
+        const items = ((ordsData.items ?? []) as any[]).map((r: any) => {
+          const acct = mapAccount(r);
+          if (!acct.receiptMethodName && nameMap[acct.receiptMethodId]) {
+            acct.receiptMethodName = nameMap[acct.receiptMethodId].name;
+            acct.receiptClass      = nameMap[acct.receiptMethodId].receiptClass;
+          }
+          return acct;
+        });
+
+        // Build unique receipt methods list for dropdown
         const methodMap: Record<number, { id: number; name: string; receiptClass: string }> = {};
         items.forEach(a => {
           if (!methodMap[a.receiptMethodId] && a.receiptMethodName) {
-            methodMap[a.receiptMethodId] = {
-              id:           a.receiptMethodId,
-              name:         a.receiptMethodName,
-              receiptClass: a.receiptClass,
-            };
+            methodMap[a.receiptMethodId] = { id: a.receiptMethodId, name: a.receiptMethodName, receiptClass: a.receiptClass };
           }
         });
         setReceiptMethods(Object.values(methodMap).sort((a, b) => a.name.localeCompare(b.name)));
