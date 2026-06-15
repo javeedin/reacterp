@@ -361,7 +361,7 @@ const ManageReceipts: React.FC = () => {
     fetchApplications(activeKey, tab.draft.standardReceiptId);
   }, [activeKey, tabs, fetchApplications]);
 
-  // ── Load business units, receipt methods, and all method accounts ─────────
+  // ── Load business units + all receipt method accounts from ORDS ──────────
   useEffect(() => {
     // Business units
     fetch(`${APEX_DB_CONFIG.baseUrl}/gl/businessunits`, { headers: { Accept: 'application/json' } })
@@ -376,32 +376,35 @@ const ManageReceipts: React.FC = () => {
       })
       .catch(() => {});
 
-    // Receipt methods
-    fetch(`${APEX_RECEIPT_METHODS}?limit=300`, { headers: { Accept: 'application/json' } })
-      .then(r => r.json())
-      .then(data => {
-        setReceiptMethods(
-          ((data.items || []) as any[])
-            .map((i: any) => ({ id: i.id ?? 0, name: i.name ?? '', receiptClass: i.receiptclass ?? '' }))
-            .filter(m => m.name)
-        );
-      })
-      .catch(() => {});
-
-    // Pre-load ALL receipt method bank accounts — used to enrich the dropdown and Remittance Bank tab
+    // Single ORDS endpoint — source of truth for receipt methods + bank accounts + GL combinations
     setAllMethodAccountsLoading(true);
     fetch(`${ORDS_RECEIPT_METHOD_ACCOUNTS}?limit=500`, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
       .then(data => {
+        const items = ((data.items ?? []) as any[]).map(mapAccount);
+
+        // Build unique receipt methods list from the data (for the dropdown)
+        const methodMap: Record<number, { id: number; name: string; receiptClass: string }> = {};
+        items.forEach(a => {
+          if (!methodMap[a.receiptMethodId] && a.receiptMethodName) {
+            methodMap[a.receiptMethodId] = {
+              id:           a.receiptMethodId,
+              name:         a.receiptMethodName,
+              receiptClass: a.receiptClass,
+            };
+          }
+        });
+        setReceiptMethods(Object.values(methodMap).sort((a, b) => a.name.localeCompare(b.name)));
+
+        // Group accounts by receipt_method_id for Remittance Bank tab
         const grouped: Record<number, ReceiptMethodAccount[]> = {};
-        ((data.items ?? []) as any[]).forEach(r => {
-          const acct = mapAccount(r);
-          if (!grouped[acct.receiptMethodId]) grouped[acct.receiptMethodId] = [];
-          grouped[acct.receiptMethodId].push(acct);
+        items.forEach(a => {
+          if (!grouped[a.receiptMethodId]) grouped[a.receiptMethodId] = [];
+          grouped[a.receiptMethodId].push(a);
         });
         setAllMethodAccounts(grouped);
       })
-      .catch(() => {})
+      .catch(() => message.error('Failed to load receipt methods'))
       .finally(() => setAllMethodAccountsLoading(false));
   }, []);
 
