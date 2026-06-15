@@ -813,9 +813,9 @@ const TrialBalance: React.FC = () => {
 
       // Auto-fetch RE closing from previous fiscal year → replace 3112100 ytd_opening
       try {
-        const fiscalYear = record.period_name_id
-          ? Number(record.period_name_id.split('-')[1] ?? new Date().getFullYear())
-          : new Date().getFullYear();
+        // period_name_id is like "Mar-26" → fiscal year is 2000 + 26 = 2026
+        const yearSuffix = record.period_name_id ? Number(record.period_name_id.split('-')[1]) : NaN;
+        const fiscalYear = !isNaN(yearSuffix) ? (yearSuffix < 100 ? 2000 + yearSuffix : yearSuffix) : new Date().getFullYear();
         const prevYear = fiscalYear - 1;
         const reUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceStandardRE}`
           + `?ledger_name=${encodeURIComponent(record.ledger_name)}`
@@ -836,7 +836,6 @@ const TrialBalance: React.FC = () => {
                   : i
               );
             } else {
-              // RE account not in TB — inject as B/F row
               const reRow = reItems[reItems.length - 1];
               items = [...items, {
                 ...reRow,
@@ -847,9 +846,9 @@ const TrialBalance: React.FC = () => {
                 account_desc: 'Retained Earnings B/F',
               }];
             }
+            setReMergedTabs(prev => new Set([...prev, tabKey]));
           }
         }
-        setReMergedTabs(prev => new Set([...prev, tabKey]));
       } catch { /* RE fetch failure is non-fatal */ }
 
       const companies = [...new Set(items.map(i => i.company).filter(Boolean))].sort();
