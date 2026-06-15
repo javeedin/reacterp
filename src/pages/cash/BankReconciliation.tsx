@@ -2120,6 +2120,17 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       width: 70,
       render: (v: number) => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{v}</Text>,
     },
+    {
+      title: '',
+      key: 'unrecon',
+      width: 44,
+      render: (_: unknown, record: StmtLine) =>
+        record.reconStatus === 'RECONCILED' ? (
+          <Tooltip title="Unreconcile this line">
+            <Button size="small" danger icon={<DisconnectOutlined />} onClick={() => handleUnreconcile(record)} />
+          </Tooltip>
+        ) : null,
+    },
   ];
 
   const SOURCE_COLORS: Record<string, string> = {
