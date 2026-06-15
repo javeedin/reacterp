@@ -832,7 +832,8 @@ const TrialBalance: React.FC = () => {
           if (exists) {
             items = items.map(i =>
               i.account === RE_ACCOUNT
-                ? { ...i, ytd_opening: reClosing, opening: reClosing, entered_opening: reClosing, ytd_entered_opening: reClosing }
+                ? { ...i, ytd_opening: reClosing, opening: reClosing, entered_opening: reClosing, ytd_entered_opening: reClosing,
+                        closing: reClosing, entered_closing: reClosing, debit: 0, credit: 0, ytd_debit: 0, ytd_credit: 0 }
                 : i
             );
           } else {
@@ -841,7 +842,7 @@ const TrialBalance: React.FC = () => {
               ...reRow,
               ytd_opening: reClosing, opening: reClosing,
               entered_opening: reClosing, ytd_entered_opening: reClosing,
-              debit: 0, credit: 0, closing: reClosing,
+              debit: 0, credit: 0, closing: reClosing, entered_closing: reClosing,
               ytd_debit: 0, ytd_credit: 0,
               account_desc: 'Retained Earnings B/F',
             }];
@@ -887,7 +888,8 @@ const TrialBalance: React.FC = () => {
           const exists = t.rrData.some(i => i.account === RE_ACCOUNT);
           const updated = exists
             ? t.rrData.map(i => i.account === RE_ACCOUNT
-                ? { ...i, ytd_opening: reClosing, opening: reClosing, entered_opening: reClosing, ytd_entered_opening: reClosing }
+                ? { ...i, ytd_opening: reClosing, opening: reClosing, entered_opening: reClosing, ytd_entered_opening: reClosing,
+                        closing: reClosing, entered_closing: reClosing, debit: 0, credit: 0, ytd_debit: 0, ytd_credit: 0 }
                 : i)
             : [...t.rrData, { ...reItems[reItems.length - 1], ytd_opening: reClosing, opening: reClosing, entered_opening: reClosing, ytd_entered_opening: reClosing, debit: 0, credit: 0, closing: reClosing, ytd_debit: 0, ytd_credit: 0, account_desc: 'Retained Earnings B/F' }];
           return { ...t, rrData: updated };
