@@ -39,6 +39,7 @@ const APEX_AR_RECEIPTS     = `${APEX_DB_CONFIG.baseUrl}/ar/receipts`;
 const APEX_RECEIPT_APPS    = `${APEX_DB_CONFIG.baseUrl}/ar/receipt-applications`;
 const APEX_RECEIPT_METHODS = `${APEX_DB_CONFIG.baseUrl}/ar/receiptmethods`;
 const GL_ORDS_BASE         = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp';
+const ORDS_RECEIPT_METHOD_ACCOUNTS = `${GL_ORDS_BASE}/ar/receipt-method-accounts`;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -125,6 +126,28 @@ interface AppRow {
   customerSite:               string;
 }
 
+interface ReceiptMethodAccount {
+  id:                       number;
+  receiptMethodId:          number;
+  bankAccountId:            number;
+  orgId:                    number;
+  primaryFlag:              string;
+  startDate:                string;
+  endDate:                  string;
+  cashCcid:                 number;
+  cashCombination:          string;
+  unappliedCcid:            number;
+  unappliedCombination:     string;
+  unidentifiedCcid:         number;
+  unidentifiedCombination:  string;
+  onAccountCcid:            number;
+  onAccountCombination:     string;
+  receiptClearingCcid:      number;
+  receiptClearingCombination: string;
+  remittanceCcid:           number;
+  remittanceCombination:    string;
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const today = () => dayjs().format('YYYY-MM-DD');
@@ -194,6 +217,48 @@ const ManageReceipts: React.FC = () => {
   const [receiptApplications, setReceiptApplications] = useState<
     Record<string, { loading: boolean; rows: AppRow[] }>
   >({});
+
+  // Receipt method bank accounts (per tab)
+  const [methodAccounts,        setMethodAccounts]        = useState<Record<string, ReceiptMethodAccount[]>>({});
+  const [methodAccountsLoading, setMethodAccountsLoading] = useState<Record<string, boolean>>({});
+
+  const fetchMethodAccounts = useCallback(async (tabKey: string, methodName: string) => {
+    const method = receiptMethods.find(m => m.name === methodName);
+    if (!method) return;
+    setMethodAccountsLoading(prev => ({ ...prev, [tabKey]: true }));
+    try {
+      const res  = await fetch(`${ORDS_RECEIPT_METHOD_ACCOUNTS}?receipt_method_id=${method.id}`, {
+        headers: { Accept: 'application/json' },
+      });
+      const data = await res.json();
+      const items: ReceiptMethodAccount[] = ((data.items ?? []) as any[]).map((r: any) => ({
+        id:                         r.ID                        ?? r.id                        ?? 0,
+        receiptMethodId:            r.RECEIPT_METHOD_ID         ?? r.receipt_method_id         ?? 0,
+        bankAccountId:              r.BANK_ACCOUNT_ID           ?? r.bank_account_id           ?? 0,
+        orgId:                      r.ORG_ID                    ?? r.org_id                    ?? 0,
+        primaryFlag:                r.PRIMARY_FLAG              ?? r.primary_flag              ?? '',
+        startDate:                  (r.START_DATE               ?? r.start_date                ?? '').slice(0, 10),
+        endDate:                    (r.END_DATE                 ?? r.end_date                  ?? '').slice(0, 10),
+        cashCcid:                   r.CASH_CCID                 ?? r.cash_ccid                 ?? 0,
+        cashCombination:            r.CASH_COMBINATION          ?? r.cash_combination          ?? '',
+        unappliedCcid:              r.UNAPPLIED_CCID            ?? r.unapplied_ccid            ?? 0,
+        unappliedCombination:       r.UNAPPLIED_COMBINATION     ?? r.unapplied_combination     ?? '',
+        unidentifiedCcid:           r.UNIDENTIFIED_CCID         ?? r.unidentified_ccid         ?? 0,
+        unidentifiedCombination:    r.UNIDENTIFIED_COMBINATION  ?? r.unidentified_combination  ?? '',
+        onAccountCcid:              r.ON_ACCOUNT_CCID           ?? r.on_account_ccid           ?? 0,
+        onAccountCombination:       r.ON_ACCOUNT_COMBINATION    ?? r.on_account_combination    ?? '',
+        receiptClearingCcid:        r.RECEIPT_CLEARING_CCID     ?? r.receipt_clearing_ccid     ?? 0,
+        receiptClearingCombination: r.RECEIPT_CLEARING_COMBINATION ?? r.receipt_clearing_combination ?? '',
+        remittanceCcid:             r.REMITTANCE_CCID           ?? r.remittance_ccid           ?? 0,
+        remittanceCombination:      r.REMITTANCE_COMBINATION    ?? r.remittance_combination    ?? '',
+      }));
+      setMethodAccounts(prev => ({ ...prev, [tabKey]: items }));
+    } catch {
+      message.error('Failed to load receipt method bank accounts');
+    } finally {
+      setMethodAccountsLoading(prev => ({ ...prev, [tabKey]: false }));
+    }
+  }, [receiptMethods]);
 
   // Date preset
   const [datePreset, setDatePreset] = useState<string>('range');
@@ -937,7 +1002,11 @@ const ManageReceipts: React.FC = () => {
                               value={draft.receiptMethod || undefined} allowClear disabled={isLocked}
                               showSearch optionFilterProp="children"
                               placeholder="Select method…"
-                              onChange={v => updateDraft(tabKey, { receiptMethod: v ?? '' })}>
+                              onChange={v => {
+                                updateDraft(tabKey, { receiptMethod: v ?? '' });
+                                if (v) fetchMethodAccounts(tabKey, v);
+                                else setMethodAccounts(prev => ({ ...prev, [tabKey]: [] }));
+                              }}>
                               {receiptMethods.map(m => (
                                 <Option key={m.id} value={m.name}>
                                   <span>{m.name}</span>
@@ -1015,7 +1084,8 @@ const ManageReceipts: React.FC = () => {
                 label: <span><BankOutlined style={{ marginRight: 4 }} />Remittance Bank</span>,
                 children: (
                   <div style={{ padding: '10px 8px 14px' }}>
-                    <Row gutter={0}>
+                    {/* Manual bank fields */}
+                    <Row gutter={0} style={{ marginBottom: 16 }}>
                       <Col span={8} style={{ paddingRight: 16, borderRight: `1px solid ${REDWOOD.border}` }}>
                         {field('Bank Name',       inp('remittanceBankName'))}
                         {field('Branch',          inp('remittanceBankBranch'))}
@@ -1032,6 +1102,91 @@ const ManageReceipts: React.FC = () => {
                         {field('Cust. Bank Acct. No.', inp('customerBankAccountNumber'))}
                       </Col>
                     </Row>
+
+                    {/* GL Accounts from Receipt Method */}
+                    <Divider style={{ fontSize: 13, margin: '12px 0' }}>
+                      <Space>
+                        <BankOutlined style={{ color: REDWOOD.info }} />
+                        GL Accounts — Receipt Method
+                        {draft.receiptMethod
+                          ? <Tag color="blue" style={{ fontSize: 11 }}>{draft.receiptMethod}</Tag>
+                          : <Text type="secondary" style={{ fontSize: 12 }}>Select a Receipt Method above to load accounts</Text>
+                        }
+                      </Space>
+                    </Divider>
+
+                    <Spin spinning={methodAccountsLoading[tabKey] || false} tip="Loading bank accounts…">
+                      {!draft.receiptMethod ? (
+                        <Alert type="info" showIcon style={{ fontSize: 12 }}
+                          message="Select a Receipt Method in the General Information tab to view the associated GL accounts." />
+                      ) : (methodAccounts[tabKey] ?? []).length === 0 && !methodAccountsLoading[tabKey] ? (
+                        <Alert type="warning" showIcon style={{ fontSize: 12 }}
+                          message={`No bank accounts found for receipt method "${draft.receiptMethod}".`} />
+                      ) : (
+                        (methodAccounts[tabKey] ?? []).map((acct, idx) => (
+                          <div key={acct.id} style={{
+                            border: `1px solid ${REDWOOD.border}`, borderRadius: 8,
+                            marginBottom: 12, overflow: 'hidden',
+                          }}>
+                            {/* Account header */}
+                            <div style={{
+                              background: '#e6f4ff', borderBottom: `1px solid #91caff`,
+                              padding: '6px 14px', display: 'flex', alignItems: 'center', gap: 8,
+                            }}>
+                              <BankOutlined style={{ color: REDWOOD.info }} />
+                              <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>
+                                Bank Account #{idx + 1}
+                              </Text>
+                              {acct.primaryFlag === 'Y' && (
+                                <Tag color="gold" style={{ fontSize: 10, margin: 0 }}>Primary</Tag>
+                              )}
+                              <Text type="secondary" style={{ fontSize: 11, marginLeft: 'auto' }}>
+                                Bank Acct ID: <strong>{acct.bankAccountId}</strong>
+                                {acct.orgId ? ` · Org: ${acct.orgId}` : ''}
+                                {acct.startDate ? ` · From: ${acct.startDate}` : ''}
+                                {acct.endDate   ? ` · To: ${acct.endDate}` : ''}
+                              </Text>
+                            </div>
+
+                            {/* GL Combinations grid */}
+                            <div style={{ padding: '10px 14px', background: '#fff' }}>
+                              <Row gutter={[12, 8]}>
+                                {[
+                                  { label: 'Cash',              ccid: acct.cashCcid,              combo: acct.cashCombination,              color: '#f6ffed', border: '#b7eb8f', textColor: REDWOOD.success },
+                                  { label: 'Unapplied',         ccid: acct.unappliedCcid,         combo: acct.unappliedCombination,         color: '#e6f4ff', border: '#91caff', textColor: REDWOOD.info },
+                                  { label: 'Unidentified',      ccid: acct.unidentifiedCcid,      combo: acct.unidentifiedCombination,      color: '#fff7e6', border: '#ffd591', textColor: REDWOOD.warning },
+                                  { label: 'On Account',        ccid: acct.onAccountCcid,         combo: acct.onAccountCombination,         color: '#f9f0ff', border: '#d3adf7', textColor: '#722ed1' },
+                                  { label: 'Receipt Clearing',  ccid: acct.receiptClearingCcid,   combo: acct.receiptClearingCombination,   color: '#e6fffb', border: '#87e8de', textColor: '#08979c' },
+                                  { label: 'Remittance',        ccid: acct.remittanceCcid,        combo: acct.remittanceCombination,        color: '#fff0f6', border: '#ffadd2', textColor: '#c41d7f' },
+                                ].map(({ label, ccid, combo, color, border, textColor }) => (
+                                  <Col xs={24} md={12} lg={8} key={label}>
+                                    <div style={{
+                                      background: color, border: `1px solid ${border}`,
+                                      borderRadius: 6, padding: '6px 10px',
+                                    }}>
+                                      <Text type="secondary" style={{ fontSize: 10, display: 'block', marginBottom: 2 }}>
+                                        {label}
+                                      </Text>
+                                      <Text style={{
+                                        fontSize: 11, fontFamily: 'monospace', fontWeight: 600,
+                                        color: combo ? textColor : '#bfbfbf', wordBreak: 'break-all',
+                                      }}>
+                                        {combo || '—'}
+                                      </Text>
+                                      {ccid > 0 && (
+                                        <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 2 }}>
+                                          CCID: {ccid}
+                                        </Text>
+                                      )}
+                                    </div>
+                                  </Col>
+                                ))}
+                              </Row>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </Spin>
                   </div>
                 ),
               },
