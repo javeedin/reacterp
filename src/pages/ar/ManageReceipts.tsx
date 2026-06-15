@@ -1022,6 +1022,59 @@ const ManageReceipts: React.FC = () => {
                         , true)}
                         {field('Receipt Method',
                           <div>
+                            {/* API debug icon — shows exactly what URL populates this dropdown */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+                              <Text type="secondary" style={{ fontSize: 10, flex: 1 }}>
+                                {allMethodAccountsLoading
+                                  ? 'Loading…'
+                                  : `${receiptMethods.length} methods loaded`}
+                              </Text>
+                              <Tooltip
+                                title={
+                                  <div style={{ fontSize: 11 }}>
+                                    <div style={{ fontWeight: 600, marginBottom: 4 }}>GET endpoint:</div>
+                                    <code style={{ wordBreak: 'break-all', fontSize: 10 }}>
+                                      {`${ORDS_RECEIPT_METHOD_ACCOUNTS}?limit=500`}
+                                    </code>
+                                    <div style={{ marginTop: 6, color: '#aaa' }}>
+                                      Builds receipt method dropdown + Remittance Bank GL accounts
+                                    </div>
+                                  </div>
+                                }
+                                placement="topRight"
+                              >
+                                <Button size="small" type="text"
+                                  icon={<ApiOutlined style={{ color: REDWOOD.info, fontSize: 12 }} />}
+                                  style={{ padding: '0 2px', height: 18 }}
+                                  onClick={() => {
+                                    Modal.info({
+                                      title: 'Receipt Method API',
+                                      width: 600,
+                                      content: (
+                                        <div>
+                                          <div style={{ marginBottom: 8 }}>
+                                            <Tag color="blue">GET</Tag>
+                                            <Text style={{ fontSize: 11, wordBreak: 'break-all' }}>
+                                              {`${ORDS_RECEIPT_METHOD_ACCOUNTS}?limit=500`}
+                                            </Text>
+                                          </div>
+                                          <div style={{ marginBottom: 8 }}>
+                                            <Text type="secondary" style={{ fontSize: 11 }}>
+                                              Methods loaded: <strong>{receiptMethods.length}</strong>
+                                            </Text>
+                                            {receiptMethods.length > 0 && (
+                                              <pre style={{ background: '#1e1e1e', color: '#9cdcfe', padding: 8, borderRadius: 4, fontSize: 11, maxHeight: 200, overflowY: 'auto', marginTop: 6 }}>
+                                                {JSON.stringify(receiptMethods, null, 2)}
+                                              </pre>
+                                            )}
+                                          </div>
+                                        </div>
+                                      ),
+                                    });
+                                  }}
+                                />
+                              </Tooltip>
+                            </div>
                             <Select
                               size="small"
                               style={{ width: '100%', fontSize: 12 }}
