@@ -13,9 +13,9 @@ SELECT
     r.RECEIPT_METHOD_ID,
 
     -- Receipt Method details
-    rm.NAME              AS RECEIPT_METHOD_NAME,
-    rm.RECEIPTCLASS      AS RECEIPT_CLASS,
-    rm.RECEIPTMETHODID   AS FUSION_RECEIPT_METHOD_ID,
+    COALESCE(rm.NAME,         'Method-' || r.RECEIPT_METHOD_ID) AS RECEIPT_METHOD_NAME,
+    COALESCE(rm.RECEIPTCLASS, 'Unknown')                        AS RECEIPT_CLASS,
+    rm.RECEIPTMETHODID                                          AS FUSION_RECEIPT_METHOD_ID,
 
     -- Business Unit details (org_id = business_unit_id)
     r.ORG_ID,
