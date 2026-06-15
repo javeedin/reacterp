@@ -845,6 +845,28 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
       const ledgerId   = ledgerInfo?.ledgerId   ?? 0;
       const batchName  = `SLA-AP_PAYMENTS-${acctData.periodName}-${acctData.headerId}`;
 
+      // Validate FX Gain/Loss lines: AED lines in a foreign-currency payment must
+      // have a non-zero accounted amount (accountedDr or accountedCr > 0).
+      // If an FX line has zero accounted amounts it means the SLA data is incomplete.
+      if (isFxPayment) {
+        const badFxLines = lines.filter((l) => {
+          const isAedLine = (l.currencyCode || '').toUpperCase() === 'AED';
+          if (!isAedLine) return false;
+          const aDr = Number(l.accountedDr) || 0;
+          const aCr = Number(l.accountedCr) || 0;
+          return aDr === 0 && aCr === 0;
+        });
+        if (badFxLines.length > 0) {
+          const acctClasses = badFxLines.map((l) => l.accountingClass || l.description || 'Unknown').join(', ');
+          message.error(
+            `FX Realized Gain/Loss line(s) have no accounted amount (Accounted Dr and Accounted Cr are both zero): ${acctClasses}. ` +
+            `Re-create accounting to generate correct FX amounts before posting.`,
+            8,
+          );
+          return;
+        }
+      }
+
       setPostGLPayload({
         batch: {
           batchName,
