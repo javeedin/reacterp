@@ -5,7 +5,6 @@ import {
   Divider, Badge, Modal, Tabs, Radio, Segmented, DatePicker, Progress, InputNumber,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
 import {
   HomeOutlined, SearchOutlined, ClearOutlined,
@@ -19,7 +18,6 @@ import autoTable from 'jspdf-autotable';
 import { Link } from 'react-router-dom';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
-import AccountAnalyticsPage from './AccountAnalyticsPage';
 
 const { Content } = Layout;
 const { Text } = Typography;
@@ -37,7 +35,6 @@ const REDWOOD = {
   primary: '#C74634', success: '#1D7B4D', warning: '#D4A800',
   info: '#0572CE', neutral100: '#F7F7F7', neutral200: '#E5E5E5',
   neutral600: '#6B6B6B', neutral900: '#1A1A1A', surface: '#FFFFFF',
-  purple: '#722ed1', error: '#cf1322', textSecondary: '#6B6B6B',
 };
 
 const MONTH_MAP: Record<string, number> = {
@@ -480,7 +477,6 @@ const TBPanel: React.FC = () => {
   const [showEntered, setShowEntered]     = useState(false);
   const [tbData, setTbData]               = useState<any[]>([]);
   const [loading, setLoading]             = useState(false);
-  const [tablePageSize, setTablePageSize] = useState(50);
   const [hasSearched, setHasSearched]     = useState(false);
   const [functionalCcy, setFunctionalCcy] = useState('AED');
   const [gridSearch, setGridSearch]       = useState('');
@@ -1022,8 +1018,8 @@ const AAPanel: React.FC = () => {
   const [periods, setPeriods]                 = useState<string[]>([]);
   const [allPeriods, setAllPeriods]           = useState<string[]>([]);
   const [periodsLoading, setPeriodsLoading]   = useState(false);
-  const [dateMode, setDateMode]               = useState<'period' | 'daterange'>('daterange');
-  const [dateRange, setDateRange]             = useState<[Dayjs | null, Dayjs | null]>([dayjs().subtract(2, 'month').startOf('month'), dayjs()]);
+  const [dateMode, setDateMode]               = useState<'period' | 'daterange'>('period');
+  const [dateRange, setDateRange]             = useState<[Dayjs | null, Dayjs | null]>([null, null]);
   const [account, setAccount]                 = useState('');
   const [accountDesc, setAccountDesc]         = useState('');
   const [accountOptions, setAccountOptions]   = useState<AccountOption[]>([]);
@@ -1045,7 +1041,6 @@ const AAPanel: React.FC = () => {
   const [rows, setRows]                       = useState<JournalLine[]>([]);
   const [hasSearched, setHasSearched]         = useState(false);
   const [showEntered, setShowEntered]         = useState(false);
-  const [showAnalytics, setShowAnalytics]     = useState(false);
   const [gridSearch, setGridSearch]           = useState('');
   const [functionalCcy, setFunctionalCcy]     = useState('AED');
   const [groupBy, setGroupBy]                 = useState('');
@@ -1317,7 +1312,7 @@ const AAPanel: React.FC = () => {
             return [{
               key: `row-${idx}`,
               concatenatedSegments: combo,
-              accountDescription:   item.accountDescription || item.account_description || item.account_desc || '',
+              accountDescription:   item.accountDescription || item.account_description || '',
               jeLineDescription:    item.description || item.DESCRIPTION || item.je_line_description || '',
               defaultPeriodName:    item.defaultPeriodName || item.period_name || '',
               accountingDate:       item.accountingDate || item.accounting_date || '',
@@ -1375,8 +1370,8 @@ const AAPanel: React.FC = () => {
       if (!account && items.length > 0) {
         const accountMap = new Map<string, string>();
         items.forEach(r => {
-          const a = String((r as any).account || (r as any).ACCOUNT || '');
-          if (a && !accountMap.has(a)) accountMap.set(a, r.accountDescription || '');
+          const a = String(r.account || r.ACCOUNT || '');
+          if (a && !accountMap.has(a)) accountMap.set(a, r.accountDescription || r.account_description || '');
         });
         const sorted = Array.from(accountMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
         const initRows: AccRunRow[] = sorted.map(([acct, desc]) => ({
@@ -1702,7 +1697,7 @@ const AAPanel: React.FC = () => {
     if (!ptdLines.length) { message.warning('No data — run a search first'); return; }
     const accountMap = new Map<string, string>();
     ptdLines.forEach(r => {
-      if (r.segAccount && !accountMap.has(r.segAccount)) accountMap.set(r.segAccount, r.accountDescription || '');
+      if (!accountMap.has(r.segAccount)) accountMap.set(r.segAccount, r.accountDescription || '');
     });
     const accounts = Array.from(accountMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
     const initRows: AccRunRow[] = accounts.map(([acct, desc]) => ({
@@ -1765,12 +1760,12 @@ const AAPanel: React.FC = () => {
           setAccRunRows(prev => prev.map(r => r.account === acct ? { ...r, openStatus: 'error' } : r));
         }
 
-        // Account-level opening row (sum of all TB items for this account — always shown even if zero)
+        // Account-level opening row (sum of all TB items for this account)
         const acctOpenAcc = tbItems.reduce((s: number, i: any) => s + Number(i.opening || 0), 0);
         const acctOpenEnt = tbItems.reduce((s: number, i: any) => s + Number(i.entered_opening || 0), 0);
         const acctCcy = tbItems[0]?.currency_code || 'AED';
         const acctDesc = tbItems[0]?.account_desc || acctRow.description || '';
-        const acctOpenRow: JournalLine = {
+        const acctOpenRow: JournalLine | null = (acctOpenAcc !== 0 || acctOpenEnt !== 0) ? {
           key: `acct-open-${acct}`,
           concatenatedSegments: acct, accountDescription: acctDesc,
           jeLineDescription: 'Opening Balance',
@@ -1784,7 +1779,7 @@ const AAPanel: React.FC = () => {
           jeHeaderId: 0, isOpeningBalance: true, isClosingBalance: false,
           segAccount: acct, segCompany: '', segLob: '', segDept: '',
           segSubAcct: '', segAnalysis: '', segInterco: '', approvalStatus: '',
-        } as JournalLine;
+        } as JournalLine : null;
         sc2AccountBals[acct] = { openRow: acctOpenRow };
 
         if (accRunAbort.current) return;
@@ -2050,7 +2045,7 @@ const AAPanel: React.FC = () => {
         const acctOpenEnt = acctTbItems.reduce((s, i) => s + Number(i.entered_opening || 0), 0);
         const acctDesc = acctTbItems[0]?.account_desc || acctRow.description || '';
         const acctCcy  = acctTbItems[0]?.currency_code || 'AED';
-        const acctOpenRow: JournalLine = {
+        const acctOpenRow: JournalLine | null = (acctOpenAcc !== 0 || acctOpenEnt !== 0) ? {
           key: `acct-open-${acct}`,
           concatenatedSegments: acct, accountDescription: acctDesc,
           jeLineDescription: 'Opening Balance',
@@ -2064,7 +2059,7 @@ const AAPanel: React.FC = () => {
           jeHeaderId: 0, isOpeningBalance: true, isClosingBalance: false,
           segAccount: acct, segCompany: '', segLob: '', segDept: '',
           segSubAcct: '', segAnalysis: '', segInterco: '', approvalStatus: '',
-        } as JournalLine;
+        } as JournalLine : null;
         accountBals[acct] = { openRow: acctOpenRow };
 
         // One ComboBreak per combination within this account
@@ -2455,8 +2450,8 @@ const AAPanel: React.FC = () => {
       ws.getRow(ri).height = 18; ri++;
     }
 
-    // Full combination subtitle row — only in flat mode (combo-break shows combo per section)
-    if (fullCombination && !isComboBreak) {
+    // Full combination subtitle row
+    if (fullCombination) {
       mergeFull(ri);
       const fcc = ws.getCell(ri, 1);
       fcc.value = fullCombination;
@@ -2471,14 +2466,9 @@ const AAPanel: React.FC = () => {
       const def = SEGMENT_DEFS.find(d => d.key === k);
       return `${def?.label || k}: ${segLabels[k] || v}`;
     });
-    const xlDateLabel = dateMode === 'daterange' && dateRange[0] && dateRange[1]
-      ? `${dateRange[0].format('DD-MMM-YYYY')}  –  ${dateRange[1].format('DD-MMM-YYYY')}`
-      : periods.length ? periods.join(', ') : '—';
     const fRows: [string, string][] = [
       ['Ledger',   ledger || '—'],
-      dateMode === 'daterange'
-        ? ['Date Range', xlDateLabel]
-        : ['Periods',    periods.length ? periods.join(', ') : '—'],
+      ['Periods',  periods.length ? periods.join(', ') : '—'],
       ['Filters',  activeSegs.length ? activeSegs.join(' | ') : '—'],
       ['Exported', new Date().toLocaleString()],
       ['Records',  String(filteredData.length)],
@@ -2686,68 +2676,40 @@ const AAPanel: React.FC = () => {
       }
 
       let xlLastAcct = '';
-      let xlAccRun = 0, xlEntRun = 0; // continuous running balance per account
-      let xlTotAccDr = 0, xlTotAccCr = 0, xlTotEntDr = 0, xlTotEntCr = 0;
-
-      const writeXlAcctTotals = () => {
-        if (!xlLastAcct) return;
-        const totRow: any = { jeLineDescription: 'Total', isTotals: true,
-          accountedDr: xlTotAccDr, accountedCr: xlTotAccCr,
-          enteredDr: xlTotEntDr, enteredCr: xlTotEntCr };
-        writeDetailRow(totRow, 0, false, false, xlAccRun, xlEntRun, '');
-        ws.getRow(ri - 1).height = 16;
-      };
-
       effectiveComboBreaksXl.forEach(brk => {
+        // For All Accounts mode: insert account-level opening row before first combo of each account
         if (isAllAccounts) {
           const acct = brk.accountGroup || '';
-          // When account changes: write totals for previous account, then opening for new one
-          if (acct !== xlLastAcct) {
-            writeXlAcctTotals();
-            const openRow = accRunAccountBals[acct]?.openRow;
-            const acctAccBal = openRow ? (openRow.accountedDr||0)-(openRow.accountedCr||0) : 0;
-            const acctEntBal = openRow ? (openRow.enteredDr||0)-(openRow.enteredCr||0) : 0;
-            if (openRow) writeDetailRow(openRow, 0, false, false, acctAccBal, acctEntBal, acct);
-            xlAccRun = acctAccBal; xlEntRun = acctEntBal;
-            xlTotAccDr = 0; xlTotAccCr = 0; xlTotEntDr = 0; xlTotEntCr = 0;
-            xlLastAcct = acct;
+          if (acct !== xlLastAcct && accRunAccountBals[acct]?.openRow) {
+            const r = accRunAccountBals[acct].openRow!;
+            writeDetailRow(r, 0, false, false,
+              (r.accountedDr||0)-(r.accountedCr||0),
+              (r.enteredDr||0)-(r.enteredCr||0),
+              acct);
           }
-          // Write transaction rows — running balance continues from account opening
-          brk.linesWithBal.forEach((r: any, idx: number) => {
-            xlAccRun += safeN(r.accountedDr) - safeN(r.accountedCr);
-            xlEntRun += safeN(r.enteredDr)   - safeN(r.enteredCr);
-            xlTotAccDr += safeN(r.accountedDr); xlTotAccCr += safeN(r.accountedCr);
-            xlTotEntDr += safeN(r.enteredDr);   xlTotEntCr += safeN(r.enteredCr);
-            const rowCombo = r.concatenatedSegments ||
-              [r.segCompany, r.segLob, r.segDept, r.segAccount, r.segSubAcct, r.segAnalysis, r.segInterco]
-                .filter((v: any) => v != null && v !== '').join('-');
-            writeDetailRow(r, idx, false, false, xlAccRun, xlEntRun, rowCombo);
-          });
-          return;
+          xlLastAcct = acct;
         }
 
-        // Non-All-Accounts: standard combo-break output with per-combo running balance
-        // Combo + description header row
-        const resolvedComboXl = brk.combo || (() => {
-          const s = brk.linesWithBal.find((l: any) => !l.isOpeningBalance && !l.isClosingBalance) || brk.linesWithBal[0];
-          if (!s) return '';
-          return [s.segCompany, s.segLob, s.segDept, s.segAccount, s.segSubAcct, s.segAnalysis, s.segInterco]
+        // Section header row
+        mergeFull(ri);
+        const sh = ws.getCell(ri, 1);
+        const xlResolvedCombo = brk.combo || (() => {
+          const sample = brk.linesWithBal.find((l: any) => !l.isOpeningBalance && !l.isClosingBalance && !l.isTotals) || brk.linesWithBal[0];
+          if (!sample) return '';
+          return [sample.segCompany, sample.segLob, sample.segDept, sample.segAccount, sample.segSubAcct, sample.segAnalysis, sample.segInterco]
             .filter((v: any) => v != null && v !== '').join('-');
         })();
-        ws.mergeCells(ri, 1, ri, NCOLS_BRK);
-        const brkHdrCell = ws.getCell(ri, 1);
-        const xlSubAcctCode = resolvedComboXl.split('-')[4] || '';
-        const xlSubAcctDesc = xlSubAcctCode ? (segDescMaps['subAccounts']?.[xlSubAcctCode] || '') : '';
-        brkHdrCell.value = [
-          resolvedComboXl,
-          brk.description || null,
-          xlSubAcctDesc || null,
-        ].filter(Boolean).join('   –   ');
-        brkHdrCell.font = { bold: true, size: 10, color: { argb: 'FF1A3FAA' } };
-        brkHdrCell.fill = brkHdrFill;
-        brkHdrCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
-        ws.getRow(ri).height = 18; ri++;
+        const xlSubAcct = xlResolvedCombo.split('-')[4] || '';
+        const xlSubDesc = xlSubAcct ? (segDescMaps['subAccounts']?.[xlSubAcct] || '') : '';
+        const xlSubLabel = xlSubDesc ? `   [${xlSubAcct} – ${xlSubDesc}]` : (xlSubAcct ? `   [${xlSubAcct}]` : '');
+        sh.value = `${xlResolvedCombo}${brk.description ? '   —   ' + brk.description : ''}${xlSubLabel}   (${brk.linesWithBal.length} line${brk.linesWithBal.length !== 1 ? 's' : ''})`;
+        sh.font = { bold: true, size: 11, color: { argb: 'FF1A5FCC' } };
+        sh.fill = brkHdrFill;
+        sh.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+        sh.border = { left: { style: 'medium', color: { argb: 'FF1677FF' } } };
+        ws.getRow(ri).height = 19; ri++;
 
+        // Build brkData identical to what the table shows on screen
         const lastLine = brk.linesWithBal[brk.linesWithBal.length - 1];
         const ptdTotRow: any = {
           key: `${brk.combo}-ptd`, jeLineDescription: 'PTD Total',
@@ -2763,21 +2725,37 @@ const AAPanel: React.FC = () => {
           ptdTotRow,
           ...(brk.closingRow ? [brk.closingRow] : []),
         ];
-        let brkAccRun = brk.openingRow ? safeN(brk.openingRow.accountedDr) - safeN(brk.openingRow.accountedCr) : 0;
-        let brkEntRun = brk.openingRow ? safeN(brk.openingRow.enteredDr)   - safeN(brk.openingRow.enteredCr)   : 0;
+
+        // Compute balances locally — do not rely on _accRun/_entRun being populated
+        let xlAccRun = brk.openingRow ? safeN(brk.openingRow.accountedDr) - safeN(brk.openingRow.accountedCr) : 0;
+        let xlEntRun = brk.openingRow ? safeN(brk.openingRow.enteredDr)   - safeN(brk.openingRow.enteredCr)   : 0;
         brkData.forEach((r: any, idx: number) => {
-          let rowAccBal: number; let rowEntBal: number;
-          if (r.isTotals)            { rowAccBal = brkAccRun; rowEntBal = brkEntRun; }
-          else if (r.isOpeningBalance) { brkAccRun = rowAccBal = safeN(r.accountedDr)-safeN(r.accountedCr); brkEntRun = rowEntBal = safeN(r.enteredDr)-safeN(r.enteredCr); }
-          else if (r.isClosingBalance) { rowAccBal = safeN(r.accountedDr)-safeN(r.accountedCr); rowEntBal = safeN(r.enteredDr)-safeN(r.enteredCr); }
-          else { brkAccRun += safeN(r.accountedDr)-safeN(r.accountedCr); brkEntRun += safeN(r.enteredDr)-safeN(r.enteredCr); rowAccBal = brkAccRun; rowEntBal = brkEntRun; }
-          writeDetailRow(r, idx, false, false, rowAccBal, rowEntBal);
+          let rowAccBal: number;
+          let rowEntBal: number;
+          if (r.isTotals) {
+            rowAccBal = xlAccRun;
+            rowEntBal = xlEntRun;
+          } else if (r.isOpeningBalance) {
+            rowAccBal = safeN(r.accountedDr) - safeN(r.accountedCr);
+            rowEntBal = safeN(r.enteredDr)   - safeN(r.enteredCr);
+            xlAccRun  = rowAccBal;
+            xlEntRun  = rowEntBal;
+          } else if (r.isClosingBalance) {
+            rowAccBal = safeN(r.accountedDr) - safeN(r.accountedCr);
+            rowEntBal = safeN(r.enteredDr)   - safeN(r.enteredCr);
+          } else {
+            xlAccRun += safeN(r.accountedDr) - safeN(r.accountedCr);
+            xlEntRun += safeN(r.enteredDr)   - safeN(r.enteredCr);
+            rowAccBal = xlAccRun;
+            rowEntBal = xlEntRun;
+          }
+          writeDetailRow(r, idx, false, false, rowAccBal, rowEntBal,
+            isAllAccounts ? (r.isTotals ? '' : xlResolvedCombo) : undefined);
         });
+
+        // Blank spacer between combos
         ws.getRow(ri).height = 8; ri++;
       });
-
-      // Write totals for last All Accounts group
-      if (isAllAccounts) writeXlAcctTotals();
 
       // Account-level closing balance row (concatenatedSegments mode only)
       if (!isAllAccounts && comboAccountBal.closeRow) {
@@ -2821,11 +2799,9 @@ const AAPanel: React.FC = () => {
     const fmtN = (v: number) =>
       v === 0 ? '—' : new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
 
-    const periodLabel = dateMode === 'daterange' && dateRange[0] && dateRange[1]
-      ? `${dateRange[0].format('DD-MMM-YYYY')} – ${dateRange[1].format('DD-MMM-YYYY')}`
-      : periods.length
-        ? (periods.length === 1 ? periods[0] : `${[...periods].sort()[0]} – ${[...periods].sort().slice(-1)[0]}`)
-        : '';
+    const periodLabel = periods.length
+      ? (periods.length === 1 ? periods[0] : `${[...periods].sort()[0]} – ${[...periods].sort().slice(-1)[0]}`)
+      : '';
 
     const baseStyles: any = { fontSize: 6.5, cellPadding: 1.2, overflow: 'linebreak', textColor: [0, 0, 0] };
     const headStyles: any = { fillColor: [26, 95, 204], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 6.5 };
@@ -2861,25 +2837,16 @@ const AAPanel: React.FC = () => {
       doc.setFontSize(8); doc.setFont('helvetica', 'normal');
       doc.text([ledger, periodLabel].filter(Boolean).join('   |   '), pageW / 2, 16, { align: 'center' });
       let y = 20;
-      // In combo-break mode show account + description; in flat mode show account code only
-      if (isComboBreak) {
-        if (account || accountDesc) {
-          doc.setFontSize(8.5); doc.setFont('helvetica', 'bold');
-          const acctHeader = account && accountDesc ? `${account}   –   ${accountDesc}` : (accountDesc || account);
-          doc.text(acctHeader, pageW / 2, y, { align: 'center' });
-          y += 5;
-        }
-      } else {
-        if (accountDesc) {
-          doc.setFontSize(8.5); doc.setFont('helvetica', 'bold');
-          doc.text(accountDesc, pageW / 2, y, { align: 'center' });
-          y += 4.5;
-        }
-        if (fullCombination) {
-          doc.setFontSize(7.5); doc.setFont('helvetica', 'normal');
-          doc.text(fullCombination, pageW / 2, y, { align: 'center' });
-          y += 5;
-        }
+      // Account description (bold) + full combination below it
+      if (accountDesc) {
+        doc.setFontSize(8.5); doc.setFont('helvetica', 'bold');
+        doc.text(accountDesc, pageW / 2, y, { align: 'center' });
+        y += 4.5;
+      }
+      if (fullCombination) {
+        doc.setFontSize(7.5); doc.setFont('helvetica', 'normal');
+        doc.text(fullCombination, pageW / 2, y, { align: 'center' });
+        y += 5;
       }
       // Per-combination sub-title in combo-break mode
       if (comboLabel) {
@@ -2893,11 +2860,11 @@ const AAPanel: React.FC = () => {
 
     if (isComboBreak) {
       const isAllAccountsPdf = accRunBreaks.length > 0;
-      // Fixed columns: Combo(38 AllAccounts) + Period(16) Date(18) Batch(18) Source(12) Ccy(8)
+      // Fixed columns: Combo(26 AllAccounts) + Period(16) Date(18) Batch(20) Source(14) Ccy(8)
       const periodW   = 16;
       const dateW     = 18;
-      const comboColW = isAllAccountsPdf ? 38 : 0;
-      const fixedW    = comboColW + periodW + dateW + 18 + 12 + 8;
+      const comboColW = isAllAccountsPdf ? 26 : 0;
+      const fixedW    = comboColW + periodW + dateW + 20 + 14 + 8;
       const numCols   = showEntered ? 6 : 3;
       const numTotal  = numCols * numW + (balW - numW);
       const lineDescW = usableW - fixedW - numTotal;
@@ -2917,7 +2884,7 @@ const AAPanel: React.FC = () => {
         [colOff + 0]: { cellWidth: periodW },
         [colOff + 1]: { cellWidth: dateW },
         [colOff + 2]: { cellWidth: lineDescW, overflow: 'linebreak' },
-        [colOff + 3]: { cellWidth: 18 }, [colOff + 4]: { cellWidth: 12 }, [colOff + 5]: { cellWidth: 8 },
+        [colOff + 3]: { cellWidth: 20 }, [colOff + 4]: { cellWidth: 14 }, [colOff + 5]: { cellWidth: 8 },
       };
       for (let i = colOff + 6; i <= lastIdx; i++) {
         colStyles[i] = { halign: 'right', cellWidth: i === lastIdx ? balW : numW };
@@ -2962,98 +2929,53 @@ const AAPanel: React.FC = () => {
       }
 
       let lastPdfAcct = '';
-      // ── All Accounts: one continuous table per account ──────────────────────
-      if (isAllAccountsPdf) {
-        // Group combo-breaks by account
-        const acctGroups: Map<string, typeof effectiveComboBreaks> = new Map();
-        effectiveComboBreaks.forEach(brk => {
-          const acct = brk.accountGroup || '';
-          if (!acctGroups.has(acct)) acctGroups.set(acct, []);
-          acctGroups.get(acct)!.push(brk);
-        });
-
-        acctGroups.forEach((breaks, acct) => {
-          // Account-level opening balance row
-          const acctBal = accRunAccountBals[acct];
-          const acctAccBal = acctBal?.openRow ? (acctBal.openRow.accountedDr||0)-(acctBal.openRow.accountedCr||0) : 0;
-          const acctEntBal = acctBal?.openRow ? (acctBal.openRow.enteredDr||0)-(acctBal.openRow.enteredCr||0) : 0;
-          const openingBodyRow = makePdfBalRow(acctBal?.openRow ?? null as any, acct);
-          // Override bal columns with account-level balance
-          const openComboCell = isAllAccountsPdf ? [acct] : [];
-          const openBase = [...openComboCell, '', '', 'Opening Balance', '', '', ''];
-          const openEntCols = showEntered ? [fmtN(acctBal?.openRow?.enteredDr||0), fmtN(acctBal?.openRow?.enteredCr||0), fmtN(acctEntBal)] : [];
-          const openAccCols = [fmtN(acctBal?.openRow?.accountedDr||0), fmtN(acctBal?.openRow?.accountedCr||0), fmtN(acctAccBal)];
-          const openRow = [...openBase, ...openEntCols, ...openAccCols];
-
-          // Flatten all transaction lines across all combos — continuous running balance
-          let pdfAccRun = acctAccBal, pdfEntRun = acctEntBal;
-          let pdfTotAccDr = 0, pdfTotAccCr = 0, pdfTotEntDr = 0, pdfTotEntCr = 0;
-          const txnRows: any[] = [];
-          breaks.forEach(brk => {
-            brk.linesWithBal.forEach(r => {
-              pdfAccRun += (r.accountedDr||0) - (r.accountedCr||0);
-              pdfEntRun += (r.enteredDr||0)   - (r.enteredCr||0);
-              pdfTotAccDr += (r.accountedDr||0); pdfTotAccCr += (r.accountedCr||0);
-              pdfTotEntDr += (r.enteredDr||0);   pdfTotEntCr += (r.enteredCr||0);
-              const rowCombo = r.concatenatedSegments ||
-                [r.segCompany, r.segLob, r.segDept, r.segAccount, r.segSubAcct, r.segAnalysis, r.segInterco]
-                  .filter((v: any) => v != null && v !== '').join('-');
-              const base = [rowCombo, r.defaultPeriodName||'', (r.accountingDate||'').slice(0,10), r.jeLineDescription||'', r.batchName||'', r.userJeSourceName||'', r.currencyCode||''];
-              const entCols = showEntered ? [fmtN(r.enteredDr||0), fmtN(r.enteredCr||0), fmtN(pdfEntRun)] : [];
-              txnRows.push([...base, ...entCols, fmtN(r.accountedDr||0), fmtN(r.accountedCr||0), fmtN(pdfAccRun)]);
-            });
-          });
-          // Totals row
-          const totBase = ['', '', '', 'Total', '', '', ''];
-          const totEntCols = showEntered ? [fmtN(pdfTotEntDr), fmtN(pdfTotEntCr), fmtN(pdfEntRun)] : [];
-          const totRow = [...totBase, ...totEntCols, fmtN(pdfTotAccDr), fmtN(pdfTotAccCr), fmtN(pdfAccRun)];
-
-          const allRows = [openRow, ...txnRows, totRow];
-          const totIdx = allRows.length - 1;
-
-          autoTable(doc, {
-            startY: currentY + 4, head: [headers], body: allRows, theme: 'grid',
-            styles: baseStyles, headStyles, columnStyles: colStyles,
-            didParseCell: (data) => {
-              if (data.section !== 'body') return;
-              if (data.row.index === 0) {
-                data.cell.styles.fillColor = [219, 234, 254];
-                data.cell.styles.fontStyle = 'bold';
-                data.cell.styles.textColor = [0, 0, 0];
-              }
-              if (data.row.index === totIdx) {
-                data.cell.styles.fillColor = [240, 240, 240];
-                data.cell.styles.fontStyle = 'bold';
-                data.cell.styles.textColor = [0, 0, 0];
-              }
-            },
-            margin: { left: margin, right: margin },
-          });
-          currentY = (doc as any).lastAutoTable.finalY;
-        });
-      } else {
-      // ── Standard combo-break mode ────────────────────────────────────────────
       effectiveComboBreaks.forEach((brk, bi) => {
+        // For All Accounts mode: insert account-level opening row before first combo of each account
+        if (isAllAccountsPdf) {
+          const acct = brk.accountGroup || '';
+          if (acct !== lastPdfAcct) {
+            const acctBal = accRunAccountBals[acct];
+            if (acctBal?.openRow) {
+              const openBody = [makePdfBalRow(acctBal.openRow, acct)];
+              autoTable(doc, {
+                startY: currentY + (bi === 0 ? 0 : 4),
+                body: openBody,
+                theme: 'grid', styles: { ...baseStyles, textColor: [0,0,0] as [number,number,number] },
+                columnStyles: colStyles,
+                didParseCell: (data: any) => {
+                  data.cell.styles.fillColor = [219, 234, 254];
+                  data.cell.styles.fontStyle = 'bold';
+                  data.cell.styles.textColor = [0, 0, 0];
+                },
+                margin: { left: margin, right: margin },
+              });
+              currentY = (doc as any).lastAutoTable.finalY;
+            }
+            lastPdfAcct = acct;
+          }
+        }
+
+        // Combination label printed inline above each group (no page break)
         const resolvedCombo = brk.combo || (() => {
           const sample = brk.linesWithBal.find(l => !l.isOpeningBalance && !l.isClosingBalance && !l.isTotals) || brk.linesWithBal[0];
           if (!sample) return '';
           return [sample.segCompany, sample.segLob, sample.segDept, sample.segAccount, sample.segSubAcct, sample.segAnalysis, sample.segInterco]
             .filter((v: any) => v != null && v !== '').join('-');
         })();
-        // Draw combo + description sub-title above each break table
-        const subAcctCode = resolvedCombo.split('-')[4] || '';
-        const subAcctDesc = subAcctCode ? (segDescMaps['subAccounts']?.[subAcctCode] || '') : '';
-        const comboSubLabel = [
-          resolvedCombo,
-          brk.description || null,
-          subAcctDesc || null,
-        ].filter(Boolean).join('   –   ');
-        const subTitleY = bi === 0 ? currentY + 5 : currentY + 8;
-        doc.setFontSize(8.5); doc.setFont('helvetica', 'bold');
-        doc.setTextColor(26, 63, 170);
-        doc.text(comboSubLabel, margin, subTitleY);
-        doc.setTextColor(0, 0, 0); doc.setFont('helvetica', 'normal');
-        const startY = subTitleY + 4;
+        const comboLabel = appliedGroupBy === 'currencyCode' && resolvedCombo.includes('||')
+          ? resolvedCombo.replace('||', '  –  ')
+          : resolvedCombo;
+        const labelY = bi === 0 && !isAllAccountsPdf ? currentY + 4 : currentY + 6;   // extra space after account opening
+        doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 0, 0);
+        // Include sub-account description (5th segment) if available
+        const subAcct = appliedGroupBy === 'concatenatedSegments' ? (resolvedCombo.split('-')[4] || '') : '';
+        const subDesc = subAcct ? (segDescMaps['subAccounts']?.[subAcct] || '') : '';
+        const subLabel = subDesc ? `   [${subAcct} – ${subDesc}]` : (subAcct ? `   [${subAcct}]` : '');
+        const label = brk.description
+          ? `${comboLabel}   –   ${brk.description}${subLabel}`
+          : `${comboLabel}${subLabel}`;
+        doc.text(label, margin, labelY);
+        const startY = labelY + 3;
 
         const lastLine = brk.linesWithBal[brk.linesWithBal.length - 1];
         const ptdTot: any = {
@@ -3076,7 +2998,9 @@ const AAPanel: React.FC = () => {
           const lineLabel = r.isOpeningBalance ? 'Opening Balance'
             : r.isClosingBalance ? 'Closing Balance'
             : r.isTotals ? 'PTD Total' : (r.jeLineDescription || r.description || '');
+          const comboCell = isAllAccountsPdf ? [r.isTotals ? '' : resolvedCombo] : [];
           const base = [
+            ...comboCell,
             special ? '' : (r.defaultPeriodName || ''),
             special ? '' : (r.accountingDate ? r.accountingDate.slice(0, 10) : ''),
             lineLabel,
@@ -3100,7 +3024,6 @@ const AAPanel: React.FC = () => {
         });
         currentY = (doc as any).lastAutoTable.finalY;
       });
-      } // end standard combo-break
 
       // Account-level closing balance (concatenatedSegments mode only)
       if (!isAllAccountsPdf && comboAccountBal.closeRow) {
@@ -3267,11 +3190,8 @@ const AAPanel: React.FC = () => {
               onClick={handleSearch}
               style={{ background: REDWOOD.info, borderColor: REDWOOD.info, flex: 1 }}>Search</Button>
             <Button icon={<ClearOutlined />} size="small" onClick={() => {
-              setRows([]); setHasSearched(false); setPeriods([]);
+              setRows([]); setHasSearched(false); setPeriods([]); setDateRange([null, null]);
               setAccount(''); setAccountDesc(''); setSegFilters({}); setSegLabels({});
-              setAccRunBreaks([]); setAccRunAccountBals({});
-              setGroupBy(''); setAppliedGroupBy(''); setComboBreaks([]);
-              setOpeningBal(null); setClosingBal(null);
             }} />
           </Col>
         </Row>
@@ -3319,8 +3239,6 @@ const AAPanel: React.FC = () => {
                 Show Entered
               </Text>
             </Space>
-            {accRunBreaks.length === 0 && (
-            <>
             <Divider type="vertical" />
             <Space size={6}>
               <GroupOutlined style={{ color: REDWOOD.neutral600, fontSize: 13 }} />
@@ -3362,8 +3280,6 @@ const AAPanel: React.FC = () => {
                   style={{ fontSize: 11, height: 24 }}>Clear Group</Button>
               )}
             </Space>
-            </>
-            )}
           </Space>
           <Space>
             <Input prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
@@ -3375,31 +3291,11 @@ const AAPanel: React.FC = () => {
                 style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
                 onClick={() => setApiModalOpen(true)} />
             </Tooltip>
-            {accRunBreaks.length > 0 ? (
-              <>
-                <Button size="small" icon={<FileExcelOutlined />} onClick={exportExcel}
-                  style={{ color: '#096dd9', borderColor: '#096dd9' }}>Excel (A)</Button>
-                <Button size="small" icon={<FilePdfOutlined />} onClick={handlePrintPdf}
-                  style={{ color: '#c74634', borderColor: '#c74634' }}>PDF (A)</Button>
-              </>
-            ) : (
-              <>
-                <Button size="small" icon={<FileExcelOutlined />} onClick={exportExcel}
-                  disabled={!filteredData.length}>Excel (S)</Button>
-                <Button size="small" icon={<FilePdfOutlined />} onClick={handlePrintPdf}
-                  disabled={!filteredData.length}
-                  style={{ color: '#c74634', borderColor: '#c74634' }}>PDF (S)</Button>
-              </>
-            )}
-            <Button
-              size="small"
-              icon={<BarChartOutlined />}
-              disabled={!rows.length}
-              onClick={() => setShowAnalytics(true)}
-              style={{ background: '#6B4C9A', borderColor: '#6B4C9A', color: '#fff', fontWeight: 600 }}
-            >
-              Analytics
-            </Button>
+            <Button size="small" icon={<FileExcelOutlined />} onClick={exportExcel}
+              disabled={!filteredData.length && !accRunBreaks.length}>Excel</Button>
+            <Button size="small" icon={<FilePdfOutlined />} onClick={handlePrintPdf}
+              disabled={!filteredData.length && !accRunBreaks.length}
+              style={{ color: '#c74634', borderColor: '#c74634' }}>PDF</Button>
           </Space>
         </div>
       )}
@@ -3430,52 +3326,78 @@ const AAPanel: React.FC = () => {
               const isAllAccountsGrid = accRunBreaks.length > 0;
               const allBreaks = accRunBreaks.length > 0 ? accRunBreaks : comboBreaks;
               if (isAllAccountsGrid) {
-                // All Accounts mode: one flat table per account — opening then all transactions
-                const acctGroups = new Map<string, typeof allBreaks>();
-                allBreaks.forEach(brk => {
-                  const acct = brk.accountGroup || '';
-                  if (!acctGroups.has(acct)) acctGroups.set(acct, []);
-                  acctGroups.get(acct)!.push(brk);
-                });
+                // All Accounts mode: group by accountGroup, insert account-level opening rows
                 const elements: React.ReactNode[] = [];
-                acctGroups.forEach((breaks, acct) => {
-                  const acctBal = accRunAccountBals[acct];
-                  const openRow = acctBal?.openRow;
-                  const acctAccOpen = openRow ? (openRow.accountedDr||0)-(openRow.accountedCr||0) : 0;
-                  const acctEntOpen = openRow ? (openRow.enteredDr||0)-(openRow.enteredCr||0) : 0;
-                  // Flatten all lines with continuous running balance from account opening
-                  let accRun = acctAccOpen, entRun = acctEntOpen;
-                  let totAccDr = 0, totAccCr = 0, totEntDr = 0, totEntCr = 0;
-                  const flatRows: (ComboBreakLine | JournalLine)[] = [];
-                  if (openRow) flatRows.push(openRow);
-                  breaks.forEach(brk => {
-                    brk.linesWithBal.forEach(r => {
-                      accRun += (r.accountedDr||0) - (r.accountedCr||0);
-                      entRun += (r.enteredDr||0)   - (r.enteredCr||0);
-                      totAccDr += (r.accountedDr||0); totAccCr += (r.accountedCr||0);
-                      totEntDr += (r.enteredDr||0);   totEntCr += (r.enteredCr||0);
-                      flatRows.push({ ...r, _accRun: accRun, _entRun: entRun });
-                    });
-                  });
-                  // Totals row
-                  flatRows.push({ key: `acct-tot-${acct}`, concatenatedSegments: '', jeLineDescription: 'Total',
-                    accountedDr: totAccDr, accountedCr: totAccCr, enteredDr: totEntDr, enteredCr: totEntCr,
-                    isTotals: true, _accBal: accRun, _entBal: entRun,
-                    defaultPeriodName: '', accountingDate: '', batchName: '', userJeSourceName: '',
-                    userJeCategoryName: '', currencyCode: '', jeHeaderId: 0,
-                    segAccount: acct, segCompany: '', segLob: '', segDept: '',
-                    segSubAcct: '', segAnalysis: '', segInterco: '', approvalStatus: '',
-                  } as any);
+                let lastAcct = '';
+                allBreaks.forEach((brk) => {
+                  const acct = brk.accountGroup || '';
+                  if (acct !== lastAcct) {
+                    const bal = accRunAccountBals[acct];
+                    if (bal?.openRow) {
+                      elements.push(
+                        <Table<JournalLine> key={`acct-open-${acct}`}
+                          dataSource={[bal.openRow]} columns={breakLineCols as any}
+                          rowKey="key" size="small" pagination={false}
+                          scroll={{ x: 'max-content' }} className="aa-v2-grid" showHeader={false}
+                          rowClassName={() => 'aa-opening-row'}
+                        />
+                      );
+                    }
+                    lastAcct = acct;
+                  }
+                  const ptdTotRow = {
+                    key: `${brk.combo}-ptd`,
+                    concatenatedSegments: brk.combo, accountDescription: '', jeLineDescription: 'PTD Total',
+                    defaultPeriodName: '', accountingDate: '', batchName: '',
+                    userJeSourceName: '', userJeCategoryName: '', currencyCode: '',
+                    enteredDr: brk.ptdEntDr, enteredCr: brk.ptdEntCr,
+                    accountedDr: brk.ptdAccDr, accountedCr: brk.ptdAccCr,
+                    jeHeaderId: 0, isTotals: true,
+                    _accBal: brk.linesWithBal.length > 0 ? brk.linesWithBal[brk.linesWithBal.length - 1]._accRun : 0,
+                    _entBal: brk.linesWithBal.length > 0 ? brk.linesWithBal[brk.linesWithBal.length - 1]._entRun : 0,
+                  } as JournalLine;
+                  const brkData: (ComboBreakLine | JournalLine)[] = [
+                    ...(brk.openingRow ? [brk.openingRow] : []),
+                    ...brk.linesWithBal,
+                    ptdTotRow,
+                    ...(brk.closingRow ? [brk.closingRow] : []),
+                  ];
                   elements.push(
-                    <Table<ComboBreakLine | JournalLine> key={acct}
-                      dataSource={flatRows} columns={breakLineCols as any}
-                      rowKey={(r: any) => r.key || Math.random().toString()}
-                      size="small" pagination={false} scroll={{ x: 'max-content' }}
-                      className="aa-v2-grid"
-                      rowClassName={(r: any) =>
-                        r.isOpeningBalance ? 'aa-opening-row' : r.isClosingBalance ? 'aa-closing-row' : r.isTotals ? 'aa-totals-row' : ''
-                      }
-                    />
+                    <div key={brk.combo}>
+                      <div style={{ background: REDWOOD.neutral100,
+                        borderLeft: `4px solid ${REDWOOD.info}`,
+                        padding: '7px 14px', marginBottom: 4, borderRadius: '4px 4px 0 0',
+                        display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <Text strong style={{ fontSize: 12, color: REDWOOD.info, fontFamily: 'monospace' }}>
+                          {brk.combo}
+                        </Text>
+                        {brk.description && (
+                          <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>
+                            {brk.description}
+                          </Text>
+                        )}
+                        {(() => {
+                          const subAcct = brk.combo.split('-')[4] || '';
+                          const subDesc = subAcct ? (segDescMaps['subAccounts']?.[subAcct] || '') : '';
+                          return subDesc ? (
+                            <Tag color="orange" style={{ fontSize: 11 }}>{subAcct} – {subDesc}</Tag>
+                          ) : null;
+                        })()}
+                        <Text type="secondary" style={{ fontSize: 11, marginLeft: 'auto' }}>
+                          {brk.linesWithBal.length} line{brk.linesWithBal.length !== 1 ? 's' : ''}
+                        </Text>
+                      </div>
+                      <Table<ComboBreakLine | JournalLine>
+                        dataSource={brkData} columns={breakLineCols as any}
+                        rowKey={(r: any) => r.key || Math.random().toString()}
+                        size="small" pagination={false}
+                        scroll={{ x: 'max-content' }}
+                        className="aa-v2-grid"
+                        rowClassName={(r: any) =>
+                          r.isTotals ? 'aa-totals-row' : r.isOpeningBalance ? 'aa-opening-row' : r.isClosingBalance ? 'aa-closing-row' : ''
+                        }
+                      />
+                    </div>
                   );
                 });
                 return <>{elements}</>;
@@ -4062,17 +3984,6 @@ const AAPanel: React.FC = () => {
           />
         )}
       </Modal>
-
-      {/* Analytics full-screen overlay */}
-      {showAnalytics && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: '#F0F2F5', overflowY: 'auto' }}>
-          <AccountAnalyticsPage
-            rows={rows}
-            functionalCcy={functionalCcy}
-            onClose={() => setShowAnalytics(false)}
-          />
-        </div>
-      )}
     </div>
   );
 };
