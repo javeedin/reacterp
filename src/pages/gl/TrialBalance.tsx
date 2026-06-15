@@ -322,7 +322,7 @@ const TrialBalance: React.FC = () => {
   const [reSaving,        setReSaving]        = useState(false);
   const [reMergedTabs,    setReMergedTabs]    = useState<Set<string>>(new Set());
   const [reFetching,      setReFetching]      = useState(false);
-  const [reApiLog,        setReApiLog]        = useState<{ url: string; status: number | null; items: number } | null>(null);
+  const [reApiLog,        setReApiLog]        = useState<{ url: string; status: number | null; items: number; response?: any[] } | null>(null);
   const [reApiVisible,    setReApiVisible]    = useState(false);
   const [revalPreviewRows,     setRevalPreviewRows]     = useState<
     { lineNum: number; combo: string; subAccount: string; desc: string; comment: string; dr: number; cr: number }[]
@@ -826,7 +826,7 @@ const TrialBalance: React.FC = () => {
         const reRes = await fetch(reUrl, { headers: { Accept: 'application/json' } });
         const reData = await reRes.json().catch(() => ({}));
         const reItems: RrTBRecord[] = (reData.items || []) as RrTBRecord[];
-        setReApiLog({ url: reUrl, status: reRes.status, items: reItems.length });
+        setReApiLog({ url: reUrl, status: reRes.status, items: reItems.length, response: reItems });
         if (reRes.ok && reItems.length > 0) {
           const reClosing = reItems[reItems.length - 1].closing ?? reItems[reItems.length - 1].ytd_credit ?? 0;
           const exists = items.some(i => i.account === RE_ACCOUNT);
@@ -6490,27 +6490,53 @@ const TrialBalance: React.FC = () => {
           open={reApiVisible}
           onCancel={() => setReApiVisible(false)}
           footer={null}
-          width={700}
+          width={750}
           title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>RE API Debug — standardRE call</span></Space>}
         >
           {reApiLog ? (
             <div style={{ fontSize: 12, fontFamily: 'monospace' }}>
-              <div style={{ marginBottom: 8 }}>
+              <Space style={{ marginBottom: 12 }}>
                 <Tag color={reApiLog.status === 200 ? 'green' : 'red'}>HTTP {reApiLog.status ?? 'ERR'}</Tag>
                 <Tag color={reApiLog.items > 0 ? 'blue' : 'orange'}>{reApiLog.items} rows returned</Tag>
-              </div>
-              <div style={{ background: '#f5f5f5', padding: 12, borderRadius: 6, wordBreak: 'break-all' }}>
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<SyncOutlined />}
+                  loading={reFetching}
+                  onClick={async () => {
+                    setReFetching(true);
+                    try {
+                      const res = await fetch(reApiLog.url, { headers: { Accept: 'application/json' } });
+                      const data = await res.json().catch(() => ({}));
+                      const items = data.items || [];
+                      setReApiLog(prev => prev ? { ...prev, status: res.status, items: items.length, response: items } : prev);
+                    } catch { setReApiLog(prev => prev ? { ...prev, status: null, items: 0 } : prev); }
+                    setReFetching(false);
+                  }}
+                >
+                  Run Again
+                </Button>
+              </Space>
+              <div style={{ background: '#f5f5f5', padding: 12, borderRadius: 6, wordBreak: 'break-all', marginBottom: 12 }}>
                 <div style={{ color: '#595959', marginBottom: 4 }}>URL:</div>
                 <a href={reApiLog.url} target="_blank" rel="noreferrer" style={{ color: REDWOOD.info }}>{reApiLog.url}</a>
               </div>
-              <div style={{ marginTop: 12, color: '#595959', fontSize: 11 }}>
-                Parameters extracted from URL:
-                <ul style={{ marginTop: 4 }}>
+              <div style={{ marginBottom: 12, color: '#595959', fontSize: 11 }}>
+                <strong>Parameters:</strong>
+                <ul style={{ marginTop: 4, marginBottom: 0 }}>
                   {reApiLog.url.split('?')[1]?.split('&').map((p, i) => (
                     <li key={i}><strong>{decodeURIComponent(p.split('=')[0])}</strong> = {decodeURIComponent(p.split('=')[1] ?? '')}</li>
                   ))}
                 </ul>
               </div>
+              {(reApiLog as any).response && (
+                <div>
+                  <div style={{ color: '#595959', marginBottom: 4 }}><strong>Response:</strong></div>
+                  <pre style={{ background: '#141414', color: '#52c41a', padding: 12, borderRadius: 6, fontSize: 11, maxHeight: 300, overflow: 'auto', margin: 0 }}>
+                    {JSON.stringify((reApiLog as any).response, null, 2)}
+                  </pre>
+                </div>
+              )}
             </div>
           ) : (
             <div style={{ color: '#8c8c8c', textAlign: 'center', padding: 24 }}>
