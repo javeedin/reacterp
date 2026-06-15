@@ -831,8 +831,16 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
       setPostGLRawCount(lines.length);
 
       const ledgerInfo = await fetchLedgerByBusinessUnit(payment.businessUnit || '');
-      const totalDr    = lines.reduce((s, l) => s + (l.enteredDr || 0), 0);
-      const totalCr    = lines.reduce((s, l) => s + (l.enteredCr || 0), 0);
+      const isFxPayment = (payment.paymentCurrency || 'AED').toUpperCase() !== 'AED';
+      // For totals: FX functional lines (AED lines in a foreign-currency payment) have entered=0
+      const totalDr = lines.reduce((s, l) => {
+        const isFxLine = isFxPayment && (l.currencyCode || '').toUpperCase() === 'AED';
+        return s + (isFxLine ? 0 : (l.enteredDr || 0));
+      }, 0);
+      const totalCr = lines.reduce((s, l) => {
+        const isFxLine = isFxPayment && (l.currencyCode || '').toUpperCase() === 'AED';
+        return s + (isFxLine ? 0 : (l.enteredCr || 0));
+      }, 0);
       const ledgerName = ledgerInfo?.ledgerName ?? 'BCL DIFC';
       const ledgerId   = ledgerInfo?.ledgerId   ?? 0;
       const batchName  = `SLA-AP_PAYMENTS-${acctData.periodName}-${acctData.headerId}`;
