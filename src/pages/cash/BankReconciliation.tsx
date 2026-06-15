@@ -1146,7 +1146,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           // Normalise all possible Oracle casing variants to camelCase
           lineId:         i.lineId         ?? i.line_id         ?? i.LINE_ID,
           statementId:    i.statementId    ?? i.statement_id    ?? i.STATEMENT_ID,
-          reconStatus:    i.reconStatus    ?? i.recon_status    ?? i.RECON_STATUS ?? '',
+          reconStatus:    ((i.reconStatus ?? i.recon_status ?? i.RECON_STATUS ?? '') as string).trim().toUpperCase(),
           reconTxnId:     i.reconTxnId     ?? i.recon_txn_id    ?? i.RECON_TXN_ID,
           reconTxnNumber: i.reconTxnNumber ?? i.recon_txn_number ?? i.RECON_TXN_NUMBER,
           reconTxnType:   i.reconTxnType   ?? i.recon_txn_type  ?? i.RECON_TXN_TYPE,
@@ -4446,7 +4446,7 @@ const ReconciledTab: React.FC<ReconciledTabProps> = ({ bankAccounts, businessUni
       key: 'actions',
       width: 60,
       render: (_: unknown, record: StmtLine) =>
-        (record.reconStatus || '').toUpperCase() === 'RECONCILED' ? (
+        (record.reconStatus || '').trim().toUpperCase() === 'RECONCILED' ? (
           <Tooltip title="Unreconcile this line">
             <Button
               size="small"
