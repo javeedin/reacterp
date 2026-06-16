@@ -5,10 +5,10 @@ import {
 } from 'antd';
 import {
   HomeOutlined, SearchOutlined, DownloadOutlined,
-  EyeOutlined, ApiOutlined, CopyOutlined, SyncOutlined,
+  EyeOutlined, ApiOutlined, CopyOutlined, SyncOutlined, FilterOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import type { ColumnsType, TableRowSelection } from 'antd/es/table/interface';
+import type { ColumnsType, TableRowSelection, ColumnType } from 'antd/es/table/interface';
 import * as XLSX from 'xlsx';
 import FloatingMenu from '../../components/FloatingMenu';
 import { ORACLE_FUSION_CONFIG } from '../../config/api.config';
@@ -65,18 +65,47 @@ function formatVal(key: string, val: unknown): React.ReactNode {
   return String(val);
 }
 
-function buildColumns(items: Row[], extraFirst?: { key: string; title: string }): ColumnsType<Row> {
-  if (!items.length) return [];
-  const keys = Object.keys(items[0]).filter(k => k !== 'links' && k !== '_customerName');
-  const cols: ColumnsType<Row> = keys.map(key => ({
-    title: key.replace(/([A-Z])/g, ' $1').trim(),
+function makeColWithFilter(key: string, title: string, extra?: Partial<ColumnType<Row>>): ColumnType<Row> {
+  return {
+    title,
     dataIndex: key,
     key,
     ellipsis: true,
+    filterDropdown: ({ setSelectedKeys, selectedKeys, confirm, clearFilters }) => (
+      <div style={{ padding: 8, minWidth: 200 }}>
+        <Input
+          placeholder={`Filter ${title}...`}
+          value={selectedKeys[0] as string}
+          onChange={e => setSelectedKeys(e.target.value ? [e.target.value] : [])}
+          onPressEnter={() => confirm()}
+          style={{ marginBottom: 8, display: 'block' }}
+          autoFocus
+        />
+        <Space>
+          <Button type="primary" onClick={() => confirm()} size="small" icon={<SearchOutlined />} style={{ width: 90 }}>Filter</Button>
+          <Button onClick={() => { clearFilters?.(); confirm(); }} size="small" style={{ width: 80 }}>Reset</Button>
+        </Space>
+      </div>
+    ),
+    filterIcon: (filtered: boolean) => <FilterOutlined style={{ color: filtered ? '#1677ff' : undefined }} />,
+    onFilter: (value, record) => {
+      const v = record[key];
+      if (v === null || v === undefined) return false;
+      return String(v).toLowerCase().includes(String(value).toLowerCase());
+    },
     render: (v: unknown) => formatVal(key, v),
-  }));
+    ...extra,
+  };
+}
+
+function buildColumns(items: Row[], extraFirst?: { key: string; title: string }): ColumnsType<Row> {
+  if (!items.length) return [];
+  const keys = Object.keys(items[0]).filter(k => k !== 'links' && k !== '_customerName');
+  const cols: ColumnsType<Row> = keys.map(key =>
+    makeColWithFilter(key, key.replace(/([A-Z])/g, ' $1').trim())
+  );
   if (extraFirst) {
-    cols.unshift({ title: extraFirst.title, dataIndex: extraFirst.key, key: extraFirst.key, width: 180, ellipsis: true, fixed: 'left' as const });
+    cols.unshift(makeColWithFilter(extraFirst.key, extraFirst.title, { width: 180, fixed: 'left' as const }));
   }
   return cols;
 }
