@@ -2050,10 +2050,36 @@ const ManagePayments: React.FC = () => {
       width: 130,
     },
     {
+      title: 'Payment Date',
+      dataIndex: 'paymentDate',
+      key: 'paymentDateCol2',
+      width: 110,
+      render: (v: string) => v || '—',
+    },
+    {
       title: 'Maturity Date',
       dataIndex: 'maturityDate',
       key: 'maturityDate',
-      width: 120,
+      width: 150,
+      render: (v: string) => {
+        if (!v || v === '-') return '—';
+        const today = dayjs().startOf('day');
+        const mat   = dayjs(v, 'DD-MMM-YYYY').startOf('day');
+        if (!mat.isValid()) return v;
+        const diff  = mat.diff(today, 'day');
+        const matured = diff < 0;
+        const daysLabel = matured
+          ? `Matured ${Math.abs(diff)}d ago`
+          : diff === 0 ? 'Matures today' : `${diff}d left`;
+        return (
+          <div>
+            <div style={{ fontSize: 12 }}>{v}</div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: matured ? '#ff4d4f' : '#389e0d' }}>
+              {daysLabel}
+            </div>
+          </div>
+        );
+      },
     },
     {
       title: 'Anticipated Value Date',
