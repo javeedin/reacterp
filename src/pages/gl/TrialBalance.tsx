@@ -5588,7 +5588,7 @@ const TrialBalance: React.FC = () => {
         open={reCalcVisible}
         onCancel={() => setReCalcVisible(false)}
         footer={null}
-        width={860}
+        width={1200}
         title={
           <Space>
             <CalculatorOutlined style={{ color: '#722ed1' }} />
@@ -5834,15 +5834,15 @@ const TrialBalance: React.FC = () => {
               dataIndex: 'openingRE',
               key: 'openingRE',
               align: 'right' as const,
-              width: 150,
+              width: 170,
               render: (v: number, r: { year: number }) => (
                 <input
                   key={`opening-${r.year}-${v}`}
                   type="number"
                   defaultValue={v}
-                  onBlur={e => {
+                  onChange={e => {
                     const newOpening = parseFloat(e.target.value);
-                    if (isNaN(newOpening) || newOpening === v) return;
+                    if (isNaN(newOpening)) return;
                     setReYearRows(prev => {
                       const updated = [...prev];
                       const idx = updated.findIndex(x => x.year === r.year);
@@ -5868,7 +5868,7 @@ const TrialBalance: React.FC = () => {
               dataIndex: 'revenue',
               key: 'revenue',
               align: 'right' as const,
-              width: 120,
+              width: 160,
               render: (v: number) => (
                 <Text style={{ fontFamily: 'monospace', color: '#237804' }}>{fmtRaw(v)}</Text>
               ),
@@ -5878,7 +5878,7 @@ const TrialBalance: React.FC = () => {
               dataIndex: 'expenses',
               key: 'expenses',
               align: 'right' as const,
-              width: 120,
+              width: 160,
               render: (v: number) => (
                 <Text style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmtRaw(v)}</Text>
               ),
@@ -5888,7 +5888,7 @@ const TrialBalance: React.FC = () => {
               dataIndex: 'netPL',
               key: 'netPL',
               align: 'right' as const,
-              width: 130,
+              width: 160,
               render: (v: number) => (
                 <Space size={4}>
                   <Text style={{ fontFamily: 'monospace', color: v <= 0 ? '#237804' : REDWOOD.primary }}>
@@ -5905,7 +5905,7 @@ const TrialBalance: React.FC = () => {
               dataIndex: 'reBalance',
               key: 'reBalance',
               align: 'right' as const,
-              width: 130,
+              width: 160,
               render: (v: number) => (
                 <Text style={{ fontFamily: 'monospace', color: '#722ed1' }}>{fmtRaw(v)}</Text>
               ),
@@ -5915,7 +5915,7 @@ const TrialBalance: React.FC = () => {
               dataIndex: 'closingRE',
               key: 'closingRE',
               align: 'right' as const,
-              width: 130,
+              width: 160,
               render: (v: number) => (
                 <Text style={{ fontFamily: 'monospace', fontWeight: 700, color: '#722ed1' }}>{fmtRaw(v)}</Text>
               ),
