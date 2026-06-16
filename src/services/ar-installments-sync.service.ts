@@ -43,7 +43,13 @@ const fetchInvoicesFromApex = async (
     if (!resp.ok) throw new Error(`APEX invoices fetch failed: ${resp.status} ${resp.statusText}`);
 
     const data = await resp.json();
-    const items: { CUSTOMER_TRANSACTION_ID: string }[] = data.items || [];
+    const items: any[] = data.items || [];
+
+    // Log first item keys so we can see the exact field names from APEX
+    if (allInvoices.length === 0 && items.length > 0) {
+      log?.('info', `  APEX invoice fields: ${Object.keys(items[0]).join(', ')}`);
+      log?.('info', `  First item sample: ${JSON.stringify(items[0])}`);
+    }
 
     allInvoices.push(...items);
     offset += items.length;
@@ -54,6 +60,11 @@ const fetchInvoicesFromApex = async (
 
   const result = maxInvoices !== undefined ? allInvoices.slice(0, maxInvoices) : allInvoices;
   log?.('info', `  Found ${result.length} invoices`);
+  // Log the transaction IDs we will process
+  const ids = result.map((inv: any) =>
+    inv.CUSTOMER_TRANSACTION_ID ?? inv.CustomerTransactionId ?? inv.customer_transaction_id ?? 'UNKNOWN'
+  );
+  log?.('info', `  Transaction IDs: ${ids.slice(0, 10).join(', ')}${ids.length > 10 ? ` ... +${ids.length - 10} more` : ''}`);
   return result;
 };
 
@@ -179,7 +190,9 @@ export const syncARInstallments = async (
       }
 
       const invoice = invoices[i];
-      const txnId = invoice.CUSTOMER_TRANSACTION_ID;
+      const txnId = (invoice as any).CUSTOMER_TRANSACTION_ID
+        ?? (invoice as any).CustomerTransactionId
+        ?? (invoice as any).customer_transaction_id;
 
       log?.('info', `\n[${i + 1}/${invoices.length}] Invoice: ${txnId}`);
 
