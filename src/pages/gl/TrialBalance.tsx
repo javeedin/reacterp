@@ -5522,7 +5522,532 @@ const TrialBalance: React.FC = () => {
     saveAs(blob, `retained_earnings_${tab.ledgerName.replace(/\s+/g, '_')}_${period.replace(/\s+/g, '_')}.xlsx`);
   };
 
+  const renderReCalcContent = () => {
+    const tab = reCalcTab;
+    if (!tab) return <div style={{ padding: 24, textAlign: 'center' }}><Text type="secondary">No retained earnings data loaded.</Text></div>;
+
+    const fmtN = (n: number) =>
+      new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(n));
+    // Show actual value as-is (negative for Cr balances like Revenue/RE)
+    const fmtRaw = (n: number) =>
+      new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+    const fmtSigned = (n: number) =>
+      n >= 0
+        ? <Text style={{ fontFamily: 'monospace', color: '#237804' }}>{fmtN(n)}</Text>
+        : <Text style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>({fmtN(n)})</Text>;
+
+    const period = tab.periodName.replace(/^YTD:\s*/, '');
+    const rows   = tab.rrData;
+
+    // Revenue rows (type R) — credit balance, stored as negative closing
+    const revenueRows = rows.filter(r => r.account_type === 'R');
+    const revenueTotal = revenueRows.reduce((s, r) => s + (r.closing || 0), 0);
+
+    // Expense rows (type E) — debit balance, stored as positive closing
+    const expenseRows = rows.filter(r => r.account_type === 'E');
+    const expenseTotal = expenseRows.reduce((s, r) => s + (r.closing || 0), 0);
+
+    // Net P&L as-is: revenue (Cr, -ve) + expenses (Dr, +ve)
+    // negative result = profit (revenue dominates), positive = loss
+    const netPL = revenueTotal + expenseTotal;
+
+    // Retained Earnings account current balance
+    const reRows = rows.filter(r => r.account === RE_ACCOUNT);
+    const reCurrentClosing = reRows.reduce((s, r) => s + (r.closing || 0), 0);
+    const reAdjusted = reCurrentClosing + netPL;   // profit (negative netPL) increases Cr RE (makes more negative)
+
+    const isProfit = netPL <= 0;  // negative sum = revenue > expenses = profit
+
+    // Summary table for revenue accounts
+    const revSummary = revenueRows.map(r => ({
+      key: r.account,
+      account: r.account,
+      desc: r.account_desc,
+      closing: r.closing || 0,
+    })).sort((a, b) => a.account.localeCompare(b.account));
+
+    // Summary table for expense accounts
+    const expSummary = expenseRows.map(r => ({
+      key: r.account,
+      account: r.account,
+      desc: r.account_desc,
+      closing: r.closing || 0,
+    })).sort((a, b) => a.account.localeCompare(b.account));
+
+    const acctCol = [
+      { title: 'Account', dataIndex: 'account', key: 'account', width: 110,
+        render: (v: string) => <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{v}</Text> },
+      { title: 'Description', dataIndex: 'desc', key: 'desc', ellipsis: true,
+        render: (v: string) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text> },
+      { title: 'Balance', dataIndex: 'closing', key: 'closing', align: 'right' as const, width: 130,
+        render: (v: number) => fmtSigned(v) },
+    ];
+
+    return (
+      <div style={{ padding: '16px 24px', overflowY: 'auto', height: 'calc(100vh - 180px)' }}>
+        {/* Summary cards */}
+        <Row gutter={12} style={{ marginBottom: 20 }}>
+          <Col span={6}>
+            <div style={{ border: '1px solid #d9d9d9', borderRadius: 8, padding: '12px 16px', background: '#f6ffed' }}>
+              <div style={{ fontSize: 11, color: REDWOOD.textSecondary, marginBottom: 4 }}>Total Revenue</div>
+              <div style={{ fontFamily: 'monospace', fontSize: 15, fontWeight: 700, color: '#237804' }}>
+                {fmtRaw(revenueTotal)}
+              </div>
+              <div style={{ fontSize: 10, color: REDWOOD.textSecondary }}>{revenueRows.length} accounts · Cr (−ve)</div>
+            </div>
+          </Col>
+          <Col span={6}>
+            <div style={{ border: '1px solid #d9d9d9', borderRadius: 8, padding: '12px 16px', background: '#fff1f0' }}>
+              <div style={{ fontSize: 11, color: REDWOOD.textSecondary, marginBottom: 4 }}>Total Expenses</div>
+              <div style={{ fontFamily: 'monospace', fontSize: 15, fontWeight: 700, color: REDWOOD.primary }}>
+                {fmtRaw(expenseTotal)}
+              </div>
+              <div style={{ fontSize: 10, color: REDWOOD.textSecondary }}>{expenseRows.length} accounts · Dr (+ve)</div>
+            </div>
+          </Col>
+          <Col span={6}>
+            <div style={{ border: `2px solid ${isProfit ? '#52c41a' : REDWOOD.primary}`, borderRadius: 8, padding: '12px 16px', background: isProfit ? '#f6ffed' : '#fff1f0' }}>
+              <div style={{ fontSize: 11, color: REDWOOD.textSecondary, marginBottom: 4 }}>Net {isProfit ? 'Income' : 'Loss'}</div>
+              <div style={{ fontFamily: 'monospace', fontSize: 15, fontWeight: 700, color: isProfit ? '#237804' : REDWOOD.primary }}>
+                {fmtRaw(netPL)}
+              </div>
+              <Tag color={isProfit ? 'success' : 'error'} style={{ marginTop: 4 }}>
+                {isProfit ? '▲ PROFIT' : '▼ LOSS'}
+              </Tag>
+            </div>
+          </Col>
+          <Col span={6}>
+            <div style={{ border: '2px solid #722ed1', borderRadius: 8, padding: '12px 16px', background: '#f9f0ff' }}>
+              <div style={{ fontSize: 11, color: REDWOOD.textSecondary, marginBottom: 4 }}>
+                RE Account ({RE_ACCOUNT})
+              </div>
+              <div style={{ fontSize: 10, color: REDWOOD.textSecondary, marginBottom: 2 }}>
+                Current: <span style={{ fontFamily: 'monospace' }}>{fmtRaw(reCurrentClosing)}</span>
+              </div>
+              <div style={{ fontFamily: 'monospace', fontSize: 15, fontWeight: 700, color: '#722ed1' }}>
+                {fmtRaw(reAdjusted)}
+              </div>
+              <div style={{ fontSize: 10, color: REDWOOD.textSecondary }}>After closing P&amp;L</div>
+            </div>
+          </Col>
+        </Row>
+
+        {/* Formula note */}
+        <div style={{ background: '#fafafa', border: '1px solid #e8e8e8', borderRadius: 6, padding: '8px 14px', marginBottom: 16, fontSize: 12, color: REDWOOD.textSecondary }}>
+          <strong>Formula:</strong>&nbsp; RE Adjusted = RE Current ({fmtRaw(reCurrentClosing)}) + Net P&amp;L ({fmtRaw(netPL)}) = <strong style={{ color: '#722ed1' }}>{fmtRaw(reAdjusted)}</strong>
+          &nbsp;·&nbsp; Revenue and Expense accounts close to zero; balance transfers to Retained Earnings.
+        </div>
+
+        {/* Revenue breakdown */}
+        <Collapse size="small" style={{ marginBottom: 8 }} items={[{
+          key: 'rev',
+          label: <span style={{ color: '#237804', fontWeight: 600 }}>Revenue Accounts — {revenueRows.length} accounts, Total: {fmtRaw(revenueTotal)}</span>,
+          children: (
+            <Table
+              dataSource={revSummary}
+              columns={acctCol}
+              size="small"
+              pagination={false}
+              scroll={{ y: 200 }}
+              summary={() => (
+                <Table.Summary>
+                  <Table.Summary.Row style={{ background: '#f6ffed' }}>
+                    <Table.Summary.Cell index={0} colSpan={2} align="right">
+                      <Text strong style={{ fontSize: 12 }}>Total Revenue</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={2} align="right">
+                      <Text strong style={{ fontFamily: 'monospace', color: '#237804' }}>{fmtRaw(revenueTotal)}</Text>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              )}
+            />
+          ),
+        }]} />
+
+        {/* Expense breakdown */}
+        <Collapse size="small" items={[{
+          key: 'exp',
+          label: <span style={{ color: REDWOOD.primary, fontWeight: 600 }}>Expense Accounts — {expenseRows.length} accounts, Total: {fmtRaw(expenseTotal)}</span>,
+          children: (
+            <Table
+              dataSource={expSummary}
+              columns={acctCol}
+              size="small"
+              pagination={false}
+              scroll={{ y: 200 }}
+              summary={() => (
+                <Table.Summary>
+                  <Table.Summary.Row style={{ background: '#fff1f0' }}>
+                    <Table.Summary.Cell index={0} colSpan={2} align="right">
+                      <Text strong style={{ fontSize: 12 }}>Total Expenses</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={2} align="right">
+                      <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmtRaw(expenseTotal)}</Text>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              )}
+            />
+          ),
+        }]} />
+
+        {/* Multi-Year Retained Earnings Rollforward */}
+        <Divider style={{ marginTop: 20, marginBottom: 12 }}>
+          <span style={{ color: '#722ed1', fontWeight: 600, fontSize: 13 }}>Multi-Year Retained Earnings Rollforward</span>
+        </Divider>
+
+        <Row gutter={8} align="middle" style={{ marginBottom: 12, flexWrap: 'wrap', rowGap: 8 }}>
+          <Col>
+            <span style={{ fontSize: 12, marginRight: 4 }}>From Year:</span>
+            <Select
+              size="small"
+              style={{ width: 100 }}
+              placeholder="From"
+              value={reYearFrom ?? undefined}
+              onChange={(v: number) => { setReYearFrom(v); setReYearRows([]); }}
+              options={[...new Set(periods.filter(p => p.ledger_name === reCalcTab?.ledgerName).map(p => p.period_year))].sort((a, b) => a - b).map(y => ({ label: String(y), value: y }))}
+            />
+          </Col>
+          <Col>
+            <span style={{ fontSize: 12, marginRight: 4 }}>To Year:</span>
+            <Select
+              size="small"
+              style={{ width: 100 }}
+              placeholder="To"
+              value={reYearTo ?? undefined}
+              onChange={(v: number) => { setReYearTo(v); setReYearRows([]); }}
+              options={[...new Set(periods.filter(p => p.ledger_name === reCalcTab?.ledgerName).map(p => p.period_year))].sort((a, b) => a - b).map(y => ({ label: String(y), value: y }))}
+            />
+          </Col>
+          <Col>
+            <span style={{ fontSize: 12, marginRight: 4 }}>Company:</span>
+            <Select
+              size="small"
+              allowClear
+              placeholder="All companies"
+              style={{ width: 160 }}
+              value={reYearCompany ?? undefined}
+              onChange={(v: string | undefined) => { setReYearCompany(v ?? null); setReYearRows([]); }}
+              options={allCompanies.length > 0
+                ? allCompanies
+                : [...new Set(tab.rrData.map(r => r.company).filter(Boolean))].sort().map(c => ({ label: c, value: c }))
+              }
+            />
+          </Col>
+          <Col>
+            <Button
+              size="small"
+              type="primary"
+              style={{ background: '#722ed1', borderColor: '#722ed1', fontWeight: 600 }}
+              loading={reYearLoading}
+              disabled={!reYearFrom || !reYearTo}
+              onClick={calcMultiYearRE}
+            >
+              Calculate
+            </Button>
+          </Col>
+          {reYearProgress && (
+            <Col flex="1">
+              <Text style={{ fontSize: 11, color: REDWOOD.textSecondary }}>{reYearProgress}</Text>
+            </Col>
+          )}
+        </Row>
+        {reYearCompany && (
+          <div style={{ marginBottom: 8 }}>
+            <Text style={{ fontSize: 11, color: REDWOOD.textSecondary }}>
+              Filtering by company: <Text strong style={{ color: '#722ed1' }}>{reYearCompany}</Text>
+              {' '}— amounts reflect only this company's accounts.
+            </Text>
+          </div>
+        )}
+
+        {reYearError && (
+          <Alert type="error" showIcon message={reYearError} style={{ marginBottom: 12 }} />
+        )}
+
+        {reYearRows.length > 0 && (() => {
+          const totalRevenue  = reYearRows.reduce((s, r) => s + r.revenue,  0);
+          const totalExpenses = reYearRows.reduce((s, r) => s + r.expenses, 0);
+          const totalNetPL    = reYearRows.reduce((s, r) => s + r.netPL,    0);
+          const lastRow       = reYearRows[reYearRows.length - 1];
+
+          const allYears = reYearRows.map(r => r.year);
+          const allChecked = allYears.every(y => reYearSelected.includes(y));
+          const someChecked = allYears.some(y => reYearSelected.includes(y));
+
+          const multiYearCols = [
+            {
+              title: (
+                <input
+                  type="checkbox"
+                  checked={allChecked}
+                  ref={(el) => { if (el) el.indeterminate = !allChecked && someChecked; }}
+                  onChange={e => setReYearSelected(e.target.checked ? allYears : [])}
+                  style={{ cursor: 'pointer' }}
+                />
+              ),
+              key: 'select',
+              width: 40,
+              render: (_: any, r: { year: number }) => (
+                <input
+                  type="checkbox"
+                  checked={reYearSelected.includes(r.year)}
+                  onChange={e => setReYearSelected(prev =>
+                    e.target.checked ? [...prev, r.year] : prev.filter(y => y !== r.year)
+                  )}
+                  style={{ cursor: 'pointer' }}
+                />
+              ),
+            },
+            {
+              title: 'Year',
+              dataIndex: 'year',
+              key: 'year',
+              width: 70,
+              render: (v: number) => (
+                <Text style={{ fontFamily: 'monospace', fontWeight: 700 }}>{v}</Text>
+              ),
+            },
+            {
+              title: 'Last Period',
+              dataIndex: 'lastPeriod',
+              key: 'lastPeriod',
+              width: 120,
+              render: (v: string) => <Tag style={{ fontSize: 10 }}>{v}</Tag>,
+            },
+            {
+              title: 'Opening RE',
+              dataIndex: 'openingRE',
+              key: 'openingRE',
+              align: 'right' as const,
+              width: 170,
+              render: (v: number, r: { year: number }) => (
+                <input
+                  key={`opening-${r.year}-${v}`}
+                  type="number"
+                  defaultValue={v}
+                  onChange={e => {
+                    const newOpening = parseFloat(e.target.value);
+                    if (isNaN(newOpening)) return;
+                    setReYearRows(prev => {
+                      const updated = [...prev];
+                      const idx = updated.findIndex(x => x.year === r.year);
+                      if (idx === -1) return prev;
+                      for (let i = idx; i < updated.length; i++) {
+                        const opening = i === idx ? newOpening : updated[i - 1].closingRE;
+                        updated[i] = { ...updated[i], openingRE: opening, closingRE: opening + updated[i].netPL };
+                      }
+                      return updated;
+                    });
+                  }}
+                  style={{
+                    width: '100%', textAlign: 'right', fontFamily: 'monospace',
+                    color: v < 0 ? '#722ed1' : '#237804',
+                    border: '1px solid #d3adf7', borderRadius: 4,
+                    padding: '2px 6px', background: '#faf5ff', fontSize: 12,
+                  }}
+                />
+              ),
+            },
+            {
+              title: 'Revenue (Cr)',
+              dataIndex: 'revenue',
+              key: 'revenue',
+              align: 'right' as const,
+              width: 160,
+              render: (v: number) => (
+                <Text style={{ fontFamily: 'monospace', color: '#237804' }}>{fmtRaw(v)}</Text>
+              ),
+            },
+            {
+              title: 'Expenses (Dr)',
+              dataIndex: 'expenses',
+              key: 'expenses',
+              align: 'right' as const,
+              width: 160,
+              render: (v: number) => (
+                <Text style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmtRaw(v)}</Text>
+              ),
+            },
+            {
+              title: 'Net P&L',
+              dataIndex: 'netPL',
+              key: 'netPL',
+              align: 'right' as const,
+              width: 160,
+              render: (v: number) => (
+                <Space size={4}>
+                  <Text style={{ fontFamily: 'monospace', color: v <= 0 ? '#237804' : REDWOOD.primary }}>
+                    {fmtRaw(v)}
+                  </Text>
+                  <Tag color={v <= 0 ? 'success' : 'error'} style={{ fontSize: 10, marginLeft: 2 }}>
+                    {v <= 0 ? '▲' : '▼'}
+                  </Tag>
+                </Space>
+              ),
+            },
+            {
+              title: `RE Acct (${RE_ACCOUNT})`,
+              dataIndex: 'reBalance',
+              key: 'reBalance',
+              align: 'right' as const,
+              width: 160,
+              render: (v: number) => (
+                <Text style={{ fontFamily: 'monospace', color: '#722ed1' }}>{fmtRaw(v)}</Text>
+              ),
+            },
+            {
+              title: 'Closing RE',
+              dataIndex: 'closingRE',
+              key: 'closingRE',
+              align: 'right' as const,
+              width: 160,
+              render: (v: number) => (
+                <Text style={{ fontFamily: 'monospace', fontWeight: 700, color: '#722ed1' }}>{fmtRaw(v)}</Text>
+              ),
+            },
+          ];
+
+          return (
+            <>
+            <div style={{ fontSize: 11, color: REDWOOD.textSecondary, marginBottom: 8, background: '#e6f7ff', border: '1px solid #91d5ff', borderRadius: 6, padding: '6px 12px' }}>
+              <strong>Opening RE</strong> = RE account GL balance (seeded from first year) → carried forward each year.&nbsp;
+              <strong>Closing RE = Opening RE + Net P&amp;L.</strong>&nbsp;
+              Negative = credit balance (normal for equity).
+            </div>
+            <Table
+              dataSource={reYearRows.map(r => ({ ...r, key: r.year }))}
+              columns={multiYearCols}
+              size="small"
+              bordered
+              pagination={false}
+              scroll={{ x: 1000 }}
+              summary={() => (
+                <Table.Summary>
+                  <Table.Summary.Row style={{ background: '#f9f0ff' }}>
+                    <Table.Summary.Cell index={0} colSpan={3} align="right">
+                      <Text strong style={{ fontSize: 12 }}>Totals</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={3} align="right">
+                      <Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.textSecondary }}>—</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={4} align="right">
+                      <Text strong style={{ fontFamily: 'monospace', color: '#237804' }}>{fmtRaw(totalRevenue)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={5} align="right">
+                      <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmtRaw(totalExpenses)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={6} align="right">
+                      <Text strong style={{ fontFamily: 'monospace', color: totalNetPL <= 0 ? '#237804' : REDWOOD.primary }}>{fmtRaw(totalNetPL)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={7} />
+                    <Table.Summary.Cell index={8} align="right">
+                      <Text strong style={{ fontFamily: 'monospace', color: '#722ed1' }}>
+                        {lastRow ? fmtRaw(lastRow.closingRE) : '0.00'}
+                      </Text>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              )}
+            />
+
+            {/* API debug panel */}
+            {reApiDebug && (
+              <div style={{ marginTop: 12, borderRadius: 6, border: '1px solid #adc6ff', overflow: 'hidden' }}>
+                <div style={{ background: '#f0f5ff', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <ApiOutlined style={{ color: '#2f54eb' }} />
+                  <Text style={{ fontSize: 12, fontWeight: 700, color: '#2f54eb' }}>API Debug — Save Retained Earnings</Text>
+                  {reApiDebug.status !== null && (
+                    <Tag color={reApiDebug.status >= 200 && reApiDebug.status < 300 ? 'green' : 'red'}>
+                      HTTP {reApiDebug.status}
+                    </Tag>
+                  )}
+                  <Button size="small" type="text" style={{ marginLeft: 'auto', fontSize: 11 }}
+                    onClick={() => setReApiDebug(null)}>✕</Button>
+                </div>
+                <div style={{ padding: '8px 12px', background: '#fafafa' }}>
+                  <div style={{ marginBottom: 6 }}>
+                    <Text type="secondary" style={{ fontSize: 11 }}>POST URL</Text>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2,
+                      background: '#fff', border: '1px solid #e0e0e0', borderRadius: 4, padding: '4px 8px' }}>
+                      <code style={{ flex: 1, fontSize: 11, color: '#d46b08', wordBreak: 'break-all' }}>{reApiDebug.url}</code>
+                      <CopyOutlined style={{ cursor: 'pointer', color: '#595959', flexShrink: 0 }}
+                        onClick={() => { navigator.clipboard.writeText(reApiDebug.url); message.success('URL copied'); }} />
+                    </div>
+                  </div>
+                  <div style={{ marginBottom: reApiDebug.response ? 6 : 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>Request Body (JSON)</Text>
+                      <CopyOutlined style={{ cursor: 'pointer', color: '#595959', fontSize: 11 }}
+                        onClick={() => { navigator.clipboard.writeText(reApiDebug.body); message.success('Body copied'); }} />
+                    </div>
+                    <pre style={{ margin: 0, padding: '6px 8px', background: '#1e1e1e', color: '#9cdcfe',
+                      borderRadius: 4, fontSize: 10, maxHeight: 180, overflow: 'auto', whiteSpace: 'pre' }}>
+                      {reApiDebug.body}
+                    </pre>
+                  </div>
+                  {reApiDebug.response && (
+                    <div style={{ marginTop: 6 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                        <Text type="secondary" style={{ fontSize: 11 }}>Response</Text>
+                        <CopyOutlined style={{ cursor: 'pointer', color: '#595959', fontSize: 11 }}
+                          onClick={() => { navigator.clipboard.writeText(reApiDebug.response); message.success('Copied'); }} />
+                      </div>
+                      <pre style={{ margin: 0, padding: '6px 8px', background: '#1e1e1e',
+                        color: reApiDebug.status !== null && reApiDebug.status >= 200 && reApiDebug.status < 300 ? '#b5f5a0' : '#ff9999',
+                        borderRadius: 4, fontSize: 10, maxHeight: 140, overflow: 'auto', whiteSpace: 'pre' }}>
+                        {reApiDebug.response}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Save bar */}
+            <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 12,
+              padding: '10px 14px', background: '#f9f0ff', borderRadius: 8,
+              border: '1px solid #d3adf7' }}>
+              <span style={{ fontSize: 12, color: '#722ed1', fontWeight: 600 }}>
+                Save to Database
+              </span>
+              <span style={{ fontSize: 12, color: '#595959' }}>
+                {reYearSelected.length} of {reYearRows.length} year(s) selected
+              </span>
+              <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                <Button size="small" onClick={() => setReYearSelected(allYears)}>Select All</Button>
+                <Button size="small" onClick={() => setReYearSelected([])}>Clear</Button>
+                <Button
+                  size="small"
+                  icon={<FileExcelOutlined />}
+                  onClick={exportReCalcExcel}
+                  style={{ color: '#237804', borderColor: '#237804' }}
+                >
+                  Export Excel
+                </Button>
+                <Button
+                  size="small" type="primary"
+                  style={{ background: '#722ed1', borderColor: '#722ed1', fontWeight: 600 }}
+                  icon={<SaveOutlined />}
+                  loading={reSaving}
+                  disabled={reYearSelected.length === 0}
+                  onClick={saveRetainedEarnings}
+                >
+                  Save Retained Earnings
+                </Button>
+              </div>
+            </div>
+            </>
+          );
+        })()}
+      </div>
+    );
+  };
+
   const renderReCalcModal = () => {
+    return null;
+    // Content moved to renderReCalcContent() which renders in a tab instead of a modal.
     const tab = reCalcTab;
     if (!tab) return null;
 
