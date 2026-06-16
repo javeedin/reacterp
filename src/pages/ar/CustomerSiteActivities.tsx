@@ -213,27 +213,43 @@ const CustomerSiteActivities: React.FC = () => {
     if (values.AccountNumber)   filters.push(`AccountNumber like "%${values.AccountNumber}%"`);
     if (values.BillToSiteNumber) filters.push(`BillToSiteNumber like "%${values.BillToSiteNumber}%"`);
 
-    let url = `${FUSION_BASE}?limit=500`;
-    if (filters.length) url += `&q=${encodeURIComponent(filters.join(' AND '))}`;
+    const LIMIT = 500;
+    const baseUrl = `${FUSION_BASE}?limit=${LIMIT}${filters.length ? `&q=${encodeURIComponent(filters.join(' AND '))}` : ''}`;
+    const firstUrl = `${baseUrl}&offset=0`;
 
-    setApiDebug({ url, status: null, response: '' });
+    setApiDebug({ url: firstUrl, status: null, response: '' });
     setSearchLoading(true);
     setSelectedRowKeys([]);
     try {
-      const res = await fetch(url, { headers: { Authorization: FUSION_AUTH } });
-      const text = await res.text();
-      let json: { items?: Row[] };
-      try { json = JSON.parse(text); } catch { throw new Error(`Non-JSON (HTTP ${res.status}): ${text.substring(0, 300)}`); }
-      setApiDebug({ url, status: res.status, response: JSON.stringify(json, null, 2) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const items = (json.items || []).map(item => {
-        const r: Row = {};
-        Object.keys(item).filter(k => k !== 'links').forEach(k => { r[k] = item[k]; });
-        return r;
-      });
-      setFusionData(items);
-      setFusionColumns(buildColumns(items));
-      if (!items.length) message.info('No results found');
+      let offset = 0;
+      let hasMore = true;
+      let allItems: Row[] = [];
+      let lastStatus = 0;
+      let lastJson: unknown = null;
+
+      while (hasMore) {
+        const url = `${baseUrl}&offset=${offset}`;
+        const res = await fetch(url, { headers: { Authorization: FUSION_AUTH } });
+        const text = await res.text();
+        let json: { items?: Row[]; hasMore?: boolean };
+        try { json = JSON.parse(text); } catch { throw new Error(`Non-JSON (HTTP ${res.status}): ${text.substring(0, 300)}`); }
+        lastStatus = res.status;
+        lastJson = json;
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const page = (json.items || []).map(item => {
+          const r: Row = {};
+          Object.keys(item).filter(k => k !== 'links').forEach(k => { r[k] = item[k]; });
+          return r;
+        });
+        allItems = allItems.concat(page);
+        hasMore = !!json.hasMore && page.length === LIMIT;
+        offset += LIMIT;
+      }
+
+      setApiDebug({ url: firstUrl, status: lastStatus, response: JSON.stringify(lastJson, null, 2) });
+      setFusionData(allItems);
+      setFusionColumns(buildColumns(allItems));
+      if (!allItems.length) message.info('No results found');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setApiDebug(prev => prev ? { ...prev, status: -1, response: msg } : null);
@@ -262,16 +278,26 @@ const CustomerSiteActivities: React.FC = () => {
         CHILD_NAMES.map(async childName => {
           try {
             const siteId = site['BillToSiteUseId'];
-            const url = `${FUSION_BASE}/${siteId}/child/${childName}`;
-            const res = await fetch(url, { headers: { Authorization: FUSION_AUTH } });
-            if (!res.ok) return;
-            const json = await res.json();
-            const items: Row[] = (json.items || []).map((item: Row) => {
-              const r: Row = { _customerName: `${site['CustomerName']} (${site['BillToSiteNumber']})` };
-              Object.keys(item).filter(k => k !== 'links').forEach(k => { r[k] = item[k]; });
-              return r;
-            });
-            allResults[childName].push(...items);
+            const LIMIT = 500;
+            let offset = 0;
+            let hasMore = true;
+            const allItems: Row[] = [];
+
+            while (hasMore) {
+              const url = `${FUSION_BASE}/${siteId}/child/${childName}?limit=${LIMIT}&offset=${offset}`;
+              const res = await fetch(url, { headers: { Authorization: FUSION_AUTH } });
+              if (!res.ok) break;
+              const json = await res.json();
+              const page: Row[] = (json.items || []).map((item: Row) => {
+                const r: Row = { _customerName: `${site['CustomerName']} (${site['BillToSiteNumber']})` };
+                Object.keys(item).filter(k => k !== 'links').forEach(k => { r[k] = item[k]; });
+                return r;
+              });
+              allItems.push(...page);
+              hasMore = !!json.hasMore && page.length === LIMIT;
+              offset += LIMIT;
+            }
+            allResults[childName].push(...allItems);
           } catch { /* skip */ }
         })
       )
