@@ -23,13 +23,13 @@ export type ARInstallmentsProgressCallback = (progress: Partial<ARInstallmentsSy
 const fetchInvoicesFromApex = async (
   log?: LogCallback,
   maxInvoices?: number
-): Promise<{ CustomerTransactionId: string }[]> => {
+): Promise<{ CUSTOMER_TRANSACTION_ID: string }[]> => {
   log?.('step', '──── [GET] APEX AR Invoices ────');
 
   const baseUrl = `${APEX_DB_CONFIG.baseUrl}/ar/invoices`;
   log?.('info', `  URL: ${baseUrl}`);
 
-  const allInvoices: { CustomerTransactionId: string }[] = [];
+  const allInvoices: { CUSTOMER_TRANSACTION_ID: string }[] = [];
   let offset = 0;
   const pageSize = 500;
   let hasMore = true;
@@ -43,7 +43,7 @@ const fetchInvoicesFromApex = async (
     if (!resp.ok) throw new Error(`APEX invoices fetch failed: ${resp.status} ${resp.statusText}`);
 
     const data = await resp.json();
-    const items: { CustomerTransactionId: string }[] = data.items || [];
+    const items: { CUSTOMER_TRANSACTION_ID: string }[] = data.items || [];
 
     allInvoices.push(...items);
     offset += items.length;
@@ -151,9 +151,9 @@ export const syncARInstallments = async (
     log?.('step', '═══════════════════════════════════════════════════════════');
 
     // ── STEP 1: Get invoice list ──────────────────────────────────────────────
-    let invoices: { CustomerTransactionId: string }[];
+    let invoices: { CUSTOMER_TRANSACTION_ID: string }[];
     if (specificTxnId) {
-      invoices = [{ CustomerTransactionId: specificTxnId }];
+      invoices = [{ CUSTOMER_TRANSACTION_ID: specificTxnId }];
     } else {
       invoices = await fetchInvoicesFromApex(log, maxInvoices);
     }
@@ -179,7 +179,7 @@ export const syncARInstallments = async (
       }
 
       const invoice = invoices[i];
-      const txnId = invoice.CustomerTransactionId;
+      const txnId = invoice.CUSTOMER_TRANSACTION_ID;
 
       log?.('info', `\n[${i + 1}/${invoices.length}] Invoice: ${txnId}`);
 
