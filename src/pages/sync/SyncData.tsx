@@ -3606,6 +3606,8 @@ const SyncData: React.FC = () => {
     ? arReceiptsProgress.status
     : isARReceiptApplications
     ? arReceiptAppsProgress.status
+    : isARInstallments
+    ? arInstallmentsProgress.status
     : isARAdj
     ? arAdjProgress.status
     : isARCreditMemos

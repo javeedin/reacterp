@@ -183,20 +183,50 @@ export const syncARInstallments = async (
 
       log?.('info', `\n[${i + 1}/${invoices.length}] Invoice: ${txnId}`);
 
-      const fusionUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/receivablesInvoices/${txnId}/child/receivablesInvoiceInstallments`;
+      // ── GET Fusion installments (raw fetch so we can log the response) ────────
+      const fusionUrl = `${ORACLE_FUSION_CONFIG.baseUrl}/receivablesInvoices/${txnId}/child/receivablesInvoiceInstallments?limit=500&offset=0`;
+      log?.('step', `──── [GET] Fusion: ${fusionUrl} ────`);
 
-      let installments: any[] = [];
+      let fusionRes: Response;
+      let fusionText: string;
       try {
-        installments = await fetchAllFromOracleUrl(fusionUrl, log, verbose, 500, abortSignal);
+        fusionRes = await fetch(fusionUrl, {
+          headers: {
+            Authorization: 'Basic ' + btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`),
+            'Content-Type': 'application/json',
+          },
+          signal: abortSignal,
+        });
+        fusionText = await fusionRes.text();
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Unknown error';
-        log?.('error', `  Failed to fetch installments for invoice ${txnId}: ${msg}`);
-        updateProgress({ errors: progress.errors + 1, lastError: msg });
-        updateProgress({ processedInvoices: i + 1 });
-        continue;
+        log?.('error', `  Network error fetching installments for ${txnId}: ${msg}`);
+        updateProgress({ errors: progress.errors + 1, lastError: msg, endTime: new Date(), status: 'error' });
+        return progress;
       }
 
-      log?.('info', `  Found ${installments.length} installment(s) for invoice ${txnId}`);
+      log?.('info', `  HTTP Status: ${fusionRes.status}`);
+      log?.('info', `  Fusion GET Response:\n${fusionText.substring(0, 2000)}`);
+
+      if (!fusionRes.ok) {
+        const msg = `Oracle API Error: ${fusionRes.status} — ${fusionText.substring(0, 300)}`;
+        log?.('error', `  ✗ ${msg}`);
+        updateProgress({ errors: progress.errors + 1, lastError: `Oracle API Error: ${fusionRes.status} —`, status: 'error', endTime: new Date() });
+        return progress;  // stop on first error so user can inspect
+      }
+
+      let fusionJson: { items?: any[]; hasMore?: boolean };
+      try {
+        fusionJson = JSON.parse(fusionText);
+      } catch {
+        const msg = `Non-JSON response from Fusion for txn ${txnId}`;
+        log?.('error', `  ✗ ${msg}`);
+        updateProgress({ errors: progress.errors + 1, lastError: msg, status: 'error', endTime: new Date() });
+        return progress;
+      }
+
+      const installments: any[] = fusionJson.items || [];
+      log?.('success', `  Found ${installments.length} installment(s)`);
       totalInstallments += installments.length;
       updateProgress({ totalInstallments });
 
@@ -204,6 +234,13 @@ export const syncARInstallments = async (
         updateProgress({ processedInvoices: i + 1 });
         continue;
       }
+
+      // ── POST to APEX ──────────────────────────────────────────────────────────
+      const apexEndpoint = `ar/invoices/${txnId}/installments`;
+      const apexUrl = `${APEX_DB_CONFIG.baseUrl}/${apexEndpoint}`;
+      const apexPayload = { items: installments.map(({ links, ...rest }: any) => rest) };
+      log?.('step', `──── [POST] APEX: ${apexUrl} ────`);
+      log?.('info', `  POST Body:\n${JSON.stringify(apexPayload, null, 2).substring(0, 2000)}`);
 
       updateProgress({ status: 'inserting' });
       const insertResult = await insertInstallmentsToApex(txnId, installments, log, verbose);
