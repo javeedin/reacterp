@@ -108,6 +108,7 @@ interface ReceiptDraft {
   structuredPaymentReference:     string;
   receiptBatchName:               string;
   miscAccount:                    string;
+  miscAccountDesc:                string;
 }
 
 interface ReceiptTab {
@@ -184,7 +185,7 @@ function blankDraft(): ReceiptDraft {
     customerName: '', customerAccountNumber: '', customerSite: '',
     customerBank: '', customerBankBranch: '', customerBankAccountNumber: '',
     receivablesSpecialist: '', comments: '', structuredPaymentReference: '',
-    receiptBatchName: '', miscAccount: '',
+    receiptBatchName: '', miscAccount: '', miscAccountDesc: '',
   };
 }
 
@@ -892,7 +893,12 @@ const ManageReceipts: React.FC = () => {
     if (!draft.receiptDate)                   missing.push('Receipt Date');
     if (!draft.currency)                      missing.push('Currency');
     if (!draft.amount || draft.amount <= 0)   missing.push('Amount (must be > 0)');
-    if (!draft.customerAccountNumber)         missing.push('Customer');
+    if (draft.receiptType === 'MISC') {
+      if (!draft.customerName)                missing.push('Customer');
+    } else {
+      if (!draft.customerAccountNumber && !draft.customerName) missing.push('Customer');
+    }
+    if (!draft.comments)                      missing.push('Comments');
 
     if (missing.length > 0) {
       message.warning({ content: `Please fill required fields: ${missing.join(' · ')}`, duration: 5 });
@@ -1386,20 +1392,27 @@ const ManageReceipts: React.FC = () => {
                           </div>
                         , true)}
                         {draft.receiptType === 'MISC' && field('Misc. Account',
-                          <Space.Compact style={{ width: '100%' }}>
-                            <Input size="small" readOnly
-                              value={draft.miscAccount}
-                              placeholder="Select GL combination…"
-                              style={{ fontSize: 12, fontFamily: draft.miscAccount ? 'monospace' : undefined, background: '#fff', cursor: 'pointer' }}
-                              onClick={() => { if (!isLocked) { setMiscAcctTabKey(tabKey); setMiscAcctVisible(true); } }}
-                            />
-                            {draft.miscAccount
-                              ? <Button size="small" icon={<CloseOutlined />} disabled={isLocked}
-                                  onClick={() => updateDraft(tabKey, { miscAccount: '' })} />
-                              : <Button size="small" icon={<SearchOutlined />} disabled={isLocked}
-                                  onClick={() => { setMiscAcctTabKey(tabKey); setMiscAcctVisible(true); }} />
-                            }
-                          </Space.Compact>
+                          <div>
+                            <Space.Compact style={{ width: '100%' }}>
+                              <Input size="small" readOnly
+                                value={draft.miscAccount}
+                                placeholder="Select GL combination…"
+                                style={{ fontSize: 11, fontFamily: draft.miscAccount ? 'monospace' : undefined, background: '#fff', cursor: 'pointer', letterSpacing: draft.miscAccount ? '0.02em' : undefined }}
+                                onClick={() => { if (!isLocked) { setMiscAcctTabKey(tabKey); setMiscAcctVisible(true); } }}
+                              />
+                              {draft.miscAccount
+                                ? <Button size="small" icon={<CloseOutlined />} disabled={isLocked}
+                                    onClick={() => updateDraft(tabKey, { miscAccount: '' })} />
+                                : <Button size="small" icon={<SearchOutlined />} disabled={isLocked}
+                                    onClick={() => { setMiscAcctTabKey(tabKey); setMiscAcctVisible(true); }} />
+                              }
+                            </Space.Compact>
+                            {draft.miscAccountDesc && (
+                              <Text style={{ fontSize: 10, color: REDWOOD.info, display: 'block', marginTop: 2 }}>
+                                {draft.miscAccountDesc}
+                              </Text>
+                            )}
+                          </div>
                         , true)}
                         {field('Receipt Number', inp('receiptNumber', 'Auto-generated if blank'), true)}
                         {field('Customer',       custSel())}
@@ -1432,7 +1445,7 @@ const ManageReceipts: React.FC = () => {
                           <Input.TextArea size="small" style={{ fontSize: 12 }} rows={2}
                             value={draft.comments} readOnly={isLocked}
                             onChange={e => !isLocked && updateDraft(tabKey, { comments: e.target.value })} />
-                        )}
+                        , true)}
                       </Col>
 
                       {/* Col 3: Dates + other */}
@@ -2124,8 +2137,10 @@ const ManageReceipts: React.FC = () => {
           <AccountSelector
             visible={miscAcctVisible}
             lockedFirstSegment={companyCode || undefined}
-            onSelect={(code) => {
-              updateDraft(miscAcctTabKey, { miscAccount: code });
+            onSelect={(code, segments) => {
+              const desc = Object.values(segments ?? {})
+                .map((s: any) => s.description).filter(Boolean).join(' · ');
+              updateDraft(miscAcctTabKey, { miscAccount: code, miscAccountDesc: desc });
               setMiscAcctVisible(false);
             }}
             onCancel={() => setMiscAcctVisible(false)}
