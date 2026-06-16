@@ -118,7 +118,7 @@ function SiteResultsTable({ data, columns, loading, rowSelection }: {
         rowKey={r => String(r['BillToSiteUseId'] ?? JSON.stringify(r))}
         rowSelection={rowSelection} loading={loading}
         size="small" scroll={{ x: 'max-content' }}
-        pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `Total ${t} sites` }} />
+        pagination={{ pageSize: 20, showSizeChanger: true, pageSizeOptions: ['20', '50', '100', '200', '500', '1000'], showTotal: t => `Total ${t} sites` }} />
     </div>
   );
 }
