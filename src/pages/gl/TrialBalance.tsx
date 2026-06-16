@@ -6424,26 +6424,47 @@ const TrialBalance: React.FC = () => {
             {tab.rrData.some(r => r.account_desc === 'Retained Earnings') && (
               <Tag color="cyan" style={{ fontSize: 10, marginLeft: 0 }}>RE ✓</Tag>
             )}
-            {reLastUrl[tab.key] && (
-              <Tooltip
-                title={
-                  <div style={{ maxWidth: 560 }}>
-                    <div style={{ fontSize: 11, marginBottom: 4, color: '#91d5ff' }}>RE Endpoint (last fetch)</div>
-                    <code style={{ fontSize: 10, wordBreak: 'break-all', color: '#fff' }}>{reLastUrl[tab.key]}</code>
-                    <div style={{ marginTop: 6 }}>
-                      <Button size="small" icon={<CopyOutlined />} type="link" style={{ color: '#69c0ff', padding: 0, fontSize: 11 }}
-                        onClick={() => { navigator.clipboard.writeText(reLastUrl[tab.key]); message.success('URL copied'); }}>
-                        Copy
-                      </Button>
+            {(() => {
+              const periodId = tab.periodName.replace(/^YTD:\s*/, '').split('·')[0].trim();
+              const periodInfo = periods.find(p => p.period_name_id === periodId && p.ledger_name === tab.ledgerName);
+              const currentYear = periodInfo?.period_year;
+              const prevYear = currentYear ? currentYear - 1 : null;
+              const lastPeriod = prevYear ? periods.find(p => p.ledger_name === tab.ledgerName && p.period_year === prevYear && p.period_number === 12) : null;
+              const previewUrl = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.rrTrialBalanceStandardRE}`
+                + `?ledger_name=${encodeURIComponent(tab.ledgerName)}`
+                + (lastPeriod ? `&period_name=${encodeURIComponent(lastPeriod.period_name_id)}` : prevYear ? `&period_year=${prevYear}` : '');
+              const displayUrl = reLastUrl[tab.key] || previewUrl;
+              return (
+                <Tooltip
+                  title={
+                    <div style={{ maxWidth: 560 }}>
+                      <div style={{ fontSize: 11, marginBottom: 4, color: '#91d5ff' }}>
+                        {reLastUrl[tab.key] ? 'RE Endpoint (last fetch)' : 'RE Endpoint (preview — click Fetch RE to run)'}
+                      </div>
+                      <div style={{ marginBottom: 4 }}>
+                        <Tag color="blue" style={{ fontSize: 10 }}>GET</Tag>
+                        <Tag color="purple" style={{ fontSize: 10 }}>{APEX_DB_CONFIG.endpoints.rrTrialBalanceStandardRE}</Tag>
+                      </div>
+                      <code style={{ fontSize: 10, wordBreak: 'break-all', color: '#fff' }}>{displayUrl}</code>
+                      <div style={{ marginTop: 6 }}>
+                        <Button size="small" icon={<CopyOutlined />} type="link" style={{ color: '#69c0ff', padding: 0, fontSize: 11 }}
+                          onClick={() => { navigator.clipboard.writeText(displayUrl); message.success('URL copied'); }}>
+                          Copy
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                }
-                overlayStyle={{ maxWidth: 580 }}
-                color="#001529"
-              >
-                <Button size="small" icon={<ApiOutlined />} style={{ borderColor: '#096dd9', color: '#096dd9' }} />
-              </Tooltip>
-            )}
+                  }
+                  overlayStyle={{ maxWidth: 600 }}
+                  color="#001529"
+                >
+                  <Button
+                    size="small"
+                    icon={<ApiOutlined />}
+                    style={{ borderColor: reLastUrl[tab.key] ? '#096dd9' : '#8c8c8c', color: reLastUrl[tab.key] ? '#096dd9' : '#8c8c8c' }}
+                  />
+                </Tooltip>
+              );
+            })()}
             <Button
               size="small"
               type="primary"
