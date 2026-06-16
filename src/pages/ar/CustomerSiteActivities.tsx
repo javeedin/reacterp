@@ -1,18 +1,17 @@
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   Layout, Card, Form, Input, Button, Space, Typography, Table, Tabs,
-  Row, Col, Breadcrumb, Spin, message, Empty, Modal, Tag, Badge, Progress, Tooltip,
+  Breadcrumb, Spin, message, Empty, Modal, Tag, Badge,
 } from 'antd';
 import {
   HomeOutlined, SearchOutlined, DownloadOutlined,
-  EyeOutlined, ApiOutlined, CopyOutlined, SyncOutlined, DatabaseOutlined,
-  CloudDownloadOutlined,
+  EyeOutlined, ApiOutlined, CopyOutlined, SyncOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType, TableRowSelection } from 'antd/es/table/interface';
 import * as XLSX from 'xlsx';
 import FloatingMenu from '../../components/FloatingMenu';
-import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../../config/api.config';
+import { ORACLE_FUSION_CONFIG } from '../../config/api.config';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -28,60 +27,35 @@ const REDWOOD = {
 };
 
 const FUSION_AUTH = 'Basic ' + btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
-const FUSION_BASE  = `${ORACLE_FUSION_CONFIG.baseUrl}/receivablesCustomerAccountSiteActivities`;
-const APEX_BASE    = APEX_DB_CONFIG.baseUrl;
-const APEX_CSA     = `${APEX_BASE}/ar/customer-site-activities`;
-const APEX_SYNC    = `${APEX_BASE}/ar/customer-site-activities/sync`;
+const FUSION_BASE = `${ORACLE_FUSION_CONFIG.baseUrl}/receivablesCustomerAccountSiteActivities`;
 
 const CHILD_LABEL_MAP: Record<string, string> = {
-  creditMemoApplications:          'CM Applications',
-  creditMemos:                     'Credit Memos',
-  standardReceiptApplications:     'Receipt Applications',
-  standardReceipts:                'Standard Receipts',
-  transactionAdjustments:          'Adjustments',
-  transactionPaymentSchedules:     'Payment Schedules',
-  transactionsPaidByOtherCustomers:'Paid by Others',
+  creditMemoApplications:           'CM Applications',
+  creditMemos:                      'Credit Memos',
+  standardReceiptApplications:      'Receipt Applications',
+  standardReceipts:                 'Standard Receipts',
+  transactionAdjustments:           'Adjustments',
+  transactionPaymentSchedules:      'Payment Schedules',
+  transactionsPaidByOtherCustomers: 'Paid by Others',
 };
 const CHILD_NAMES = Object.keys(CHILD_LABEL_MAP);
 
-interface SiteRecord {
-  BILL_TO_SITE_USE_ID:             number;
-  BILL_TO_SITE_NUMBER:             string;
-  BILL_TO_SITE_ADDRESS:            string;
-  ACCOUNT_NUMBER:                  string;
-  CUSTOMER_NAME:                   string;
-  TAX_REGISTRATION_NUMBER:         string;
-  TOTAL_OPEN_RECEIVABLES_FOR_SITE: number;
-  TOTAL_TRANSACTIONS_DUE_FOR_SITE: number;
-  SYNC_DATE?:                      string;
-}
-
-type ChildData = Record<string, unknown>;
+type Row = Record<string, unknown>;
 
 interface ChildState {
   loading: boolean;
-  data: ChildData[];
-  columns: ColumnsType<ChildData>;
-}
-
-interface SyncProgress {
-  phase: 'fetching' | 'saving' | 'done' | 'error';
-  fetchedPages: number;
-  totalFetched: number;
-  savedBatches: number;
-  totalBatches: number;
-  message: string;
+  data: Row[];
+  columns: ColumnsType<Row>;
 }
 
 interface ApiDebug { url: string; status: number | null; response: string; }
 
-function formatValue(key: string, val: unknown): React.ReactNode {
-  if (val === null || val === undefined) return '-';
+function formatVal(key: string, val: unknown): React.ReactNode {
+  if (val === null || val === undefined || val === '') return '-';
   if (typeof val === 'number') {
     const k = key.toLowerCase();
-    if (k.includes('amount') || k.includes('total') || k.includes('balance') || k.includes('due') || k.includes('receivable')) {
+    if (k.includes('amount') || k.includes('total') || k.includes('balance') || k.includes('receivable') || k.includes('due'))
       return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    }
     return val.toString();
   }
   if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}/.test(val)) {
@@ -91,24 +65,25 @@ function formatValue(key: string, val: unknown): React.ReactNode {
   return String(val);
 }
 
-function buildChildColumns(items: ChildData[]): ColumnsType<ChildData> {
+function buildColumns(items: Row[], extraFirst?: { key: string; title: string }): ColumnsType<Row> {
   if (!items.length) return [];
-  const keys = Object.keys(items[0]).filter(k => k !== 'links' && k !== '_siteId' && k !== '_customerName');
-  return [
-    { title: 'Customer', dataIndex: '_customerName', key: '_customerName', width: 180, ellipsis: true, fixed: 'left' as const },
-    ...keys.map(key => ({
-      title: key.replace(/([A-Z])/g, ' $1').trim(),
-      dataIndex: key,
-      key,
-      ellipsis: true,
-      render: (val: unknown) => formatValue(key, val),
-    })),
-  ];
+  const keys = Object.keys(items[0]).filter(k => k !== 'links' && k !== '_customerName');
+  const cols: ColumnsType<Row> = keys.map(key => ({
+    title: key.replace(/([A-Z])/g, ' $1').trim(),
+    dataIndex: key,
+    key,
+    ellipsis: true,
+    render: (v: unknown) => formatVal(key, v),
+  }));
+  if (extraFirst) {
+    cols.unshift({ title: extraFirst.title, dataIndex: extraFirst.key, key: extraFirst.key, width: 180, ellipsis: true, fixed: 'left' as const });
+  }
+  return cols;
 }
 
-function exportToExcel(data: Record<string, unknown>[], filename: string) {
+function exportToExcel(data: Row[], filename: string) {
   const cleaned = data.map(row => {
-    const r: Record<string, unknown> = {};
+    const r: Row = {};
     Object.keys(row).filter(k => k !== 'links').forEach(k => { r[k] = row[k]; });
     return r;
   });
@@ -118,27 +93,55 @@ function exportToExcel(data: Record<string, unknown>[], filename: string) {
   XLSX.writeFile(wb, `${filename}.xlsx`);
 }
 
-function FilteredChildTable({ state }: { state: ChildState }) {
+function SiteResultsTable({ data, columns, loading, rowSelection }: {
+  data: Row[]; columns: ColumnsType<Row>; loading?: boolean; rowSelection?: TableRowSelection<Row>;
+}) {
   const [filter, setFilter] = useState('');
   const filtered = useMemo(() => {
-    if (!filter.trim()) return state.data;
+    if (!filter.trim()) return data;
     const q = filter.toLowerCase();
-    return state.data.filter(row =>
-      Object.values(row).some(v => v !== null && v !== undefined && String(v).toLowerCase().includes(q))
-    );
-  }, [state.data, filter]);
+    return data.filter(row => Object.values(row).some(v => v !== null && v !== undefined && String(v).toLowerCase().includes(q)));
+  }, [data, filter]);
 
-  if (state.loading) return <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>;
-  if (!state.data.length) return <Empty description="Select customers in the first tab and click Load Activities" />;
+  if (!data.length && !loading) return <Empty description="Enter search criteria and click Search" />;
+
+  return (
+    <div>
+      {data.length > 0 && (
+        <div style={{ marginBottom: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
+          <Input prefix={<SearchOutlined style={{ color: '#aaa' }} />} placeholder="Filter results..."
+            value={filter} onChange={e => setFilter(e.target.value)} allowClear style={{ width: 280 }} size="small" />
+          <Text type="secondary" style={{ fontSize: 12 }}>{filtered.length} / {data.length} rows</Text>
+        </div>
+      )}
+      <Table dataSource={filtered} columns={columns}
+        rowKey={r => String(r['BillToSiteUseId'] ?? JSON.stringify(r))}
+        rowSelection={rowSelection} loading={loading}
+        size="small" scroll={{ x: 'max-content' }}
+        pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `Total ${t} sites` }} />
+    </div>
+  );
+}
+
+function FilteredTable({ data, columns, loading, emptyText }: { data: Row[]; columns: ColumnsType<Row>; loading?: boolean; emptyText?: string }) {
+  const [filter, setFilter] = useState('');
+  const filtered = useMemo(() => {
+    if (!filter.trim()) return data;
+    const q = filter.toLowerCase();
+    return data.filter(row => Object.values(row).some(v => v !== null && v !== undefined && String(v).toLowerCase().includes(q)));
+  }, [data, filter]);
+
+  if (loading) return <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>;
+  if (!data.length) return <Empty description={emptyText || 'No data'} />;
 
   return (
     <div>
       <div style={{ marginBottom: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
         <Input prefix={<SearchOutlined style={{ color: '#aaa' }} />} placeholder="Filter rows..."
           value={filter} onChange={e => setFilter(e.target.value)} allowClear style={{ width: 280 }} size="small" />
-        <Text type="secondary" style={{ fontSize: 12 }}>{filtered.length} / {state.data.length} rows</Text>
+        <Text type="secondary" style={{ fontSize: 12 }}>{filtered.length} / {data.length} rows</Text>
       </div>
-      <Table dataSource={filtered} columns={state.columns} rowKey={(_r, i) => String(i)}
+      <Table dataSource={filtered} columns={columns} rowKey={(_r, i) => String(i)}
         size="small" scroll={{ x: 'max-content' }}
         pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `Total ${t} records` }} />
     </div>
@@ -148,109 +151,60 @@ function FilteredChildTable({ state }: { state: ChildState }) {
 const CustomerSiteActivities: React.FC = () => {
   const [form] = Form.useForm();
 
-  // APEX data (loaded on mount & after sync)
-  const [apexData, setApexData] = useState<SiteRecord[]>([]);
-  const [apexLoading, setApexLoading] = useState(false);
-  const [lastSyncDate, setLastSyncDate] = useState<string>('');
+  const [fusionData, setFusionData] = useState<Row[]>([]);
+  const [fusionColumns, setFusionColumns] = useState<ColumnsType<Row>>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
 
-  // local filter over apex data
-  const [resultsFilter, setResultsFilter] = useState('');
-
-  // row selection for load activities
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [activeTab, setActiveTab] = useState('sites');
   const [childStates, setChildStates] = useState<Record<string, ChildState>>({});
   const [loadingActivities, setLoadingActivities] = useState(false);
 
-  // sync from Fusion
-  const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
-  const [syncModalVisible, setSyncModalVisible] = useState(false);
-
-  // API debug
   const [apiDebug, setApiDebug] = useState<ApiDebug | null>(null);
   const [apiDebugVisible, setApiDebugVisible] = useState(false);
 
-  // ── Load from APEX on mount ──────────────────────────────────────
-  const loadFromApex = useCallback(async () => {
-    setApexLoading(true);
+  // ── Search Fusion ────────────────────────────────────────────────
+  const handleSearch = useCallback(async () => {
+    const values = form.getFieldsValue();
+    const filters: string[] = [];
+    if (values.CustomerName)    filters.push(`CustomerName like "%${values.CustomerName}%"`);
+    if (values.AccountNumber)   filters.push(`AccountNumber like "%${values.AccountNumber}%"`);
+    if (values.BillToSiteNumber) filters.push(`BillToSiteNumber like "%${values.BillToSiteNumber}%"`);
+
+    let url = `${FUSION_BASE}?limit=500`;
+    if (filters.length) url += `&q=${encodeURIComponent(filters.join(' AND '))}`;
+
+    setApiDebug({ url, status: null, response: '' });
+    setSearchLoading(true);
+    setSelectedRowKeys([]);
     try {
-      const res = await fetch(APEX_CSA);
+      const res = await fetch(url, { headers: { Authorization: FUSION_AUTH } });
+      const text = await res.text();
+      let json: { items?: Row[] };
+      try { json = JSON.parse(text); } catch { throw new Error(`Non-JSON (HTTP ${res.status}): ${text.substring(0, 300)}`); }
+      setApiDebug({ url, status: res.status, response: JSON.stringify(json, null, 2) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      const items: SiteRecord[] = json.items || [];
-      setApexData(items);
-      if (items.length > 0 && items[0].SYNC_DATE) setLastSyncDate(items[0].SYNC_DATE);
+      const items = (json.items || []).map(item => {
+        const r: Row = {};
+        Object.keys(item).filter(k => k !== 'links').forEach(k => { r[k] = item[k]; });
+        return r;
+      });
+      setFusionData(items);
+      setFusionColumns(buildColumns(items));
+      if (!items.length) message.info('No results found');
     } catch (err: unknown) {
-      message.error(`Load from APEX failed: ${err instanceof Error ? err.message : String(err)}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      setApiDebug(prev => prev ? { ...prev, status: -1, response: msg } : null);
+      message.error(`Search failed: ${msg}`);
     } finally {
-      setApexLoading(false);
+      setSearchLoading(false);
     }
-  }, []);
+  }, [form]);
 
-  useEffect(() => { loadFromApex(); }, [loadFromApex]);
-
-  // ── Sync all records from Fusion → APEX ─────────────────────────
-  const handleSyncFromFusion = useCallback(async () => {
-    setSyncModalVisible(true);
-    setSyncProgress({ phase: 'fetching', fetchedPages: 0, totalFetched: 0, savedBatches: 0, totalBatches: 0, message: 'Starting…' });
-
-    const FUSION_LIMIT = 500;
-    const APEX_BATCH   = 100;
-    let offset = 0;
-    let hasMore = true;
-    let allRows: Record<string, unknown>[] = [];
-    let page = 0;
-
-    // Step 1: fetch all pages from Fusion
-    while (hasMore) {
-      page++;
-      const url = `${FUSION_BASE}?limit=${FUSION_LIMIT}&offset=${offset}`;
-      setSyncProgress(p => p ? { ...p, fetchedPages: page, message: `Fetching page ${page} (offset ${offset})…` } : null);
-      try {
-        const res = await fetch(url, { headers: { Authorization: FUSION_AUTH } });
-        const text = await res.text();
-        let json: { items?: Record<string, unknown>[]; hasMore?: boolean; count?: number };
-        try { json = JSON.parse(text); } catch { throw new Error(`Non-JSON on page ${page}: ${text.substring(0, 200)}`); }
-        if (!res.ok) throw new Error(`HTTP ${res.status} on page ${page}`);
-        const items = json.items || [];
-        allRows = allRows.concat(items);
-        hasMore = !!json.hasMore && items.length === FUSION_LIMIT;
-        offset += FUSION_LIMIT;
-        setSyncProgress(p => p ? { ...p, totalFetched: allRows.length } : null);
-      } catch (err: unknown) {
-        setSyncProgress({ phase: 'error', fetchedPages: page, totalFetched: allRows.length, savedBatches: 0, totalBatches: 0, message: String(err) });
-        return;
-      }
-    }
-
-    // Step 2: save to APEX in batches
-    const batches = Math.ceil(allRows.length / APEX_BATCH);
-    setSyncProgress(p => p ? { ...p, phase: 'saving', totalBatches: batches, message: `Saving ${allRows.length} records in ${batches} batches…` } : null);
-
-    for (let b = 0; b < batches; b++) {
-      const chunk = allRows.slice(b * APEX_BATCH, (b + 1) * APEX_BATCH);
-      try {
-        const res = await fetch(APEX_SYNC, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rows: chunk }),
-        });
-        if (!res.ok) throw new Error(`APEX sync batch ${b + 1} failed: HTTP ${res.status}`);
-        setSyncProgress(p => p ? { ...p, savedBatches: b + 1, message: `Saved batch ${b + 1} / ${batches}` } : null);
-      } catch (err: unknown) {
-        setSyncProgress(prev => prev ? { ...prev, phase: 'error', message: String(err) } : null);
-        return;
-      }
-    }
-
-    setSyncProgress(p => p ? { ...p, phase: 'done', message: `Sync complete — ${allRows.length} records saved.` } : null);
-    await loadFromApex();
-  }, [loadFromApex]);
-
-  // ── Load child activities for selected sites ─────────────────────
+  // ── Load child activities for selected rows ──────────────────────
   const handleLoadActivities = useCallback(async () => {
     if (!selectedRowKeys.length) { message.warning('Select at least one customer site first'); return; }
-    const selected = apexData.filter(r => selectedRowKeys.includes(r.BILL_TO_SITE_USE_ID));
+    const selected = fusionData.filter(r => selectedRowKeys.includes(String(r['BillToSiteUseId'])));
 
     const initStates: Record<string, ChildState> = {};
     CHILD_NAMES.forEach(cn => { initStates[cn] = { loading: true, data: [], columns: [] }; });
@@ -258,22 +212,23 @@ const CustomerSiteActivities: React.FC = () => {
     setLoadingActivities(true);
     setActiveTab(CHILD_NAMES[0]);
 
-    const allResults: Record<string, ChildData[]> = {};
+    const allResults: Record<string, Row[]> = {};
     CHILD_NAMES.forEach(cn => { allResults[cn] = []; });
 
     await Promise.all(
       selected.flatMap(site =>
         CHILD_NAMES.map(async childName => {
           try {
-            const url = `${FUSION_BASE}/${site.BILL_TO_SITE_USE_ID}/child/${childName}`;
+            const siteId = site['BillToSiteUseId'];
+            const url = `${FUSION_BASE}/${siteId}/child/${childName}`;
             const res = await fetch(url, { headers: { Authorization: FUSION_AUTH } });
             if (!res.ok) return;
             const json = await res.json();
-            const items: ChildData[] = (json.items || []).map((item: ChildData) => ({
-              ...item,
-              _siteId: site.BILL_TO_SITE_USE_ID,
-              _customerName: `${site.CUSTOMER_NAME} (${site.BILL_TO_SITE_NUMBER})`,
-            }));
+            const items: Row[] = (json.items || []).map((item: Row) => {
+              const r: Row = { _customerName: `${site['CustomerName']} (${site['BillToSiteNumber']})` };
+              Object.keys(item).filter(k => k !== 'links').forEach(k => { r[k] = item[k]; });
+              return r;
+            });
             allResults[childName].push(...items);
           } catch { /* skip */ }
         })
@@ -283,73 +238,16 @@ const CustomerSiteActivities: React.FC = () => {
     const finalStates: Record<string, ChildState> = {};
     CHILD_NAMES.forEach(cn => {
       const data = allResults[cn];
-      finalStates[cn] = { loading: false, data, columns: buildChildColumns(data) };
+      finalStates[cn] = { loading: false, data, columns: buildColumns(data, { key: '_customerName', title: 'Customer' }) };
     });
     setChildStates(finalStates);
     setLoadingActivities(false);
-  }, [selectedRowKeys, apexData]);
+  }, [selectedRowKeys, fusionData]);
 
-  // ── API debug for manual search (optional override) ──────────────
-  const handleFusionSearch = useCallback(async () => {
-    const values = form.getFieldsValue();
-    const filters: string[] = [];
-    if (values.CustomerName) filters.push(`CustomerName like "%${values.CustomerName}%"`);
-    if (values.AccountNumber) filters.push(`AccountNumber like "%${values.AccountNumber}%"`);
-
-    let url = `${FUSION_BASE}?limit=100`;
-    if (filters.length) url += `&q=${encodeURIComponent(filters.join(' AND '))}`;
-
-    setApiDebug({ url, status: null, response: '' });
-    setApiDebugVisible(true);
-    try {
-      const res = await fetch(url, { headers: { Authorization: FUSION_AUTH } });
-      const text = await res.text();
-      let json: unknown;
-      try { json = JSON.parse(text); } catch { throw new Error(`Non-JSON: ${text.substring(0, 200)}`); }
-      setApiDebug({ url, status: res.status, response: JSON.stringify(json, null, 2) });
-    } catch (err: unknown) {
-      setApiDebug(prev => prev ? { ...prev, status: -1, response: String(err) } : null);
-    }
-  }, [form]);
-
-  const rowSelection: TableRowSelection<SiteRecord> = {
+  const rowSelection: TableRowSelection<Row> = {
     selectedRowKeys,
     onChange: keys => setSelectedRowKeys(keys),
   };
-
-  const filteredApexData = useMemo(() => {
-    if (!resultsFilter.trim()) return apexData;
-    const q = resultsFilter.toLowerCase();
-    return apexData.filter(r =>
-      Object.values(r).some(v => v !== null && v !== undefined && String(v).toLowerCase().includes(q))
-    );
-  }, [apexData, resultsFilter]);
-
-  const searchColumns: ColumnsType<SiteRecord> = useMemo(() => {
-    if (!apexData.length) return [];
-    return Object.keys(apexData[0]).map(key => ({
-      title: key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-      dataIndex: key,
-      key,
-      ellipsis: true,
-      render: (v: unknown) => {
-        if (v === null || v === undefined || v === '') return '-';
-        if (typeof v === 'number') {
-          const k = key.toLowerCase();
-          if (k.includes('amount') || k.includes('total') || k.includes('balance') || k.includes('receivable') || k.includes('due'))
-            return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        }
-        return String(v);
-      },
-    }));
-  }, [apexData]);
-
-  const syncPercent = syncProgress
-    ? syncProgress.phase === 'fetching' ? 20
-    : syncProgress.phase === 'saving'
-      ? 20 + Math.round(80 * (syncProgress.savedBatches / Math.max(syncProgress.totalBatches, 1)))
-    : syncProgress.phase === 'done' ? 100 : 0
-    : 0;
 
   const childTabItems = CHILD_NAMES.map(cn => {
     const state = childStates[cn] || { loading: false, data: [], columns: [] };
@@ -369,7 +267,8 @@ const CustomerSiteActivities: React.FC = () => {
               <Button size="small" icon={<DownloadOutlined />} onClick={() => exportToExcel(state.data, cn)}>Export to Excel</Button>
             </div>
           )}
-          <FilteredChildTable state={state} />
+          <FilteredTable data={state.data} columns={state.columns} loading={state.loading}
+            emptyText="Select customers in the first tab and click Load Activities" />
         </div>
       ),
     };
@@ -378,63 +277,61 @@ const CustomerSiteActivities: React.FC = () => {
   const tabItems = [
     {
       key: 'sites',
-      label: <span><DatabaseOutlined style={{ marginRight: 4 }} />Customer Sites</span>,
-      closable: false,
+      label: 'Customer Sites',
       children: (
         <div>
-          {/* toolbar */}
-          <div style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <Input
-              prefix={<SearchOutlined style={{ color: '#aaa' }} />}
-              placeholder="Filter customer sites..."
-              value={resultsFilter}
-              onChange={e => setResultsFilter(e.target.value)}
-              allowClear
-              style={{ width: 280 }}
-            />
-            {apexData.length > 0 && (
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {filteredApexData.length} / {apexData.length} sites
-                {lastSyncDate && ` · Last sync: ${lastSyncDate}`}
-              </Text>
-            )}
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-              {selectedRowKeys.length > 0 && (
+          <Card style={{ marginBottom: 16, borderColor: REDWOOD.border }} bodyStyle={{ padding: '16px 24px' }}>
+            <Form form={form} layout="inline" onFinish={handleSearch}>
+              <Form.Item name="CustomerName" label="Customer Name">
+                <Input placeholder="Customer name..." style={{ width: 200 }} />
+              </Form.Item>
+              <Form.Item name="AccountNumber" label="Account Number">
+                <Input placeholder="Account number..." style={{ width: 160 }} />
+              </Form.Item>
+              <Form.Item name="BillToSiteNumber" label="Site Number">
+                <Input placeholder="Site number..." style={{ width: 140 }} />
+              </Form.Item>
+              <Form.Item>
+                <Button type="primary" htmlType="submit" icon={<SearchOutlined />} loading={searchLoading}
+                  style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
+                  Search
+                </Button>
+              </Form.Item>
+              <Form.Item>
+                <Button icon={<ApiOutlined />} onClick={() => setApiDebugVisible(true)}
+                  style={{ color: apiDebug ? REDWOOD.info : undefined }}>
+                  API
+                </Button>
+              </Form.Item>
+              {fusionData.length > 0 && (
+                <Form.Item>
+                  <Button icon={<DownloadOutlined />} onClick={() => exportToExcel(fusionData, 'CustomerSiteActivities')}>
+                    Export
+                  </Button>
+                </Form.Item>
+              )}
+            </Form>
+          </Card>
+
+          {selectedRowKeys.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <Space>
+                <Text type="secondary">{selectedRowKeys.length} site(s) selected</Text>
                 <Button type="primary" icon={<EyeOutlined />} loading={loadingActivities}
                   style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
                   onClick={handleLoadActivities}>
-                  Load Activities ({selectedRowKeys.length})
+                  Load Activities
                 </Button>
-              )}
-              <Tooltip title="Fetch all records from Oracle Fusion and save to local DB">
-                <Button icon={<CloudDownloadOutlined />} onClick={handleSyncFromFusion}
-                  style={{ background: REDWOOD.info, borderColor: REDWOOD.info, color: '#fff' }}>
-                  Sync from Fusion
-                </Button>
-              </Tooltip>
-              <Button icon={<SyncOutlined />} onClick={loadFromApex} loading={apexLoading} title="Refresh from APEX DB" />
-              <Button icon={<ApiOutlined />} onClick={() => { handleFusionSearch(); }}
-                title="Test Fusion API call" style={{ color: apiDebug ? REDWOOD.info : undefined }}>
-                API
-              </Button>
-              {apexData.length > 0 && (
-                <Button icon={<DownloadOutlined />} onClick={() => exportToExcel(apexData as unknown as Record<string, unknown>[], 'CustomerSiteActivities')}>
-                  Export
-                </Button>
-              )}
+              </Space>
             </div>
-          </div>
+          )}
 
           <Card style={{ borderColor: REDWOOD.border }}>
-            <Table
-              dataSource={filteredApexData}
-              columns={searchColumns}
-              rowKey="BILL_TO_SITE_USE_ID"
+            <SiteResultsTable
+              data={fusionData}
+              columns={fusionColumns}
+              loading={searchLoading}
               rowSelection={rowSelection}
-              loading={apexLoading}
-              size="small"
-              scroll={{ x: 'max-content' }}
-              pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `Total ${t} sites` }}
             />
           </Card>
         </div>
@@ -456,25 +353,19 @@ const CustomerSiteActivities: React.FC = () => {
 
         <div style={{ padding: 24 }}>
           <div style={{ marginBottom: 24 }}>
-            <Row justify="space-between" align="middle">
-              <Col>
-                <Space align="center">
-                  <div style={{
-                    width: 48, height: 48, borderRadius: 10,
-                    background: `linear-gradient(135deg, ${REDWOOD.primary} 0%, #E85D4A 100%)`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}>
-                    <EyeOutlined style={{ color: '#fff', fontSize: 22 }} />
-                  </div>
-                  <div>
-                    <Title level={4} style={{ margin: 0 }}>Customer Account Site Activities</Title>
-                    <Text type="secondary">
-                      Data from local DB · Sync from Fusion to refresh · Select sites → Load Activities
-                    </Text>
-                  </div>
-                </Space>
-              </Col>
-            </Row>
+            <Space align="center">
+              <div style={{
+                width: 48, height: 48, borderRadius: 10,
+                background: `linear-gradient(135deg, ${REDWOOD.primary} 0%, #E85D4A 100%)`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <EyeOutlined style={{ color: '#fff', fontSize: 22 }} />
+              </div>
+              <div>
+                <Title level={4} style={{ margin: 0 }}>Customer Account Site Activities</Title>
+                <Text type="secondary">Search → select sites → Load Activities tabs</Text>
+              </div>
+            </Space>
           </div>
 
           <Tabs activeKey={activeTab} onChange={setActiveTab} type="card" items={tabItems}
@@ -484,40 +375,8 @@ const CustomerSiteActivities: React.FC = () => {
         <FloatingMenu />
       </Content>
 
-      {/* Sync Progress Modal */}
-      <Modal open={syncModalVisible} onCancel={() => setSyncModalVisible(false)}
-        footer={syncProgress?.phase === 'done' || syncProgress?.phase === 'error'
-          ? <Button type="primary" onClick={() => setSyncModalVisible(false)}>Close</Button>
-          : null}
-        closable={syncProgress?.phase === 'done' || syncProgress?.phase === 'error'}
-        maskClosable={false}
-        title={<Space><CloudDownloadOutlined style={{ color: REDWOOD.info }} /> Sync from Oracle Fusion</Space>}
-        width={600}
-      >
-        {syncProgress && (
-          <div>
-            <Progress
-              percent={syncPercent}
-              status={syncProgress.phase === 'error' ? 'exception' : syncProgress.phase === 'done' ? 'success' : 'active'}
-              style={{ marginBottom: 16 }}
-            />
-            <div style={{ fontFamily: 'monospace', fontSize: 12, background: '#f5f5f5', padding: 12, borderRadius: 6 }}>
-              <div>Phase: <Tag color={syncProgress.phase === 'error' ? 'red' : syncProgress.phase === 'done' ? 'green' : 'blue'}>{syncProgress.phase}</Tag></div>
-              <div>Records fetched from Fusion: <strong>{syncProgress.totalFetched}</strong></div>
-              {syncProgress.totalBatches > 0 && (
-                <div>Batches saved to APEX: <strong>{syncProgress.savedBatches} / {syncProgress.totalBatches}</strong></div>
-              )}
-              <div style={{ marginTop: 8, color: syncProgress.phase === 'error' ? '#ff4d4f' : '#333' }}>
-                {syncProgress.message}
-              </div>
-            </div>
-          </div>
-        )}
-      </Modal>
-
-      {/* API Debug Modal */}
       <Modal open={apiDebugVisible} onCancel={() => setApiDebugVisible(false)} footer={null} width={900}
-        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /> API Debug — Fusion Direct Call</Space>}>
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /> API Debug</Space>}>
         {apiDebug ? (
           <div style={{ fontFamily: 'monospace', fontSize: 12 }}>
             <div style={{ marginBottom: 8 }}>
@@ -535,10 +394,10 @@ const CustomerSiteActivities: React.FC = () => {
               <Button size="small" icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(apiDebug.response); message.success('Copied'); }}>Copy</Button>
             </div>
             <pre style={{ background: '#f5f5f5', padding: 12, borderRadius: 6, maxHeight: 400, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-              {apiDebug.response || '(click API button to fire a test call)'}
+              {apiDebug.response || '(click Search first)'}
             </pre>
           </div>
-        ) : <Empty description="Click API button to test" />}
+        ) : <Empty description="Click Search to populate" />}
       </Modal>
     </Layout>
   );
