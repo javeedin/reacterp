@@ -97,8 +97,6 @@ function SiteResultsTable({ data, columns, loading, rowSelection }: {
   data: Row[]; columns: ColumnsType<Row>; loading?: boolean; rowSelection?: TableRowSelection<Row>;
 }) {
   const [filter, setFilter] = useState('');
-  const [pageSize, setPageSize] = useState(20);
-  const [page, setPage] = useState(1);
 
   const filtered = useMemo(() => {
     if (!filter.trim()) return data;
@@ -113,12 +111,13 @@ function SiteResultsTable({ data, columns, loading, rowSelection }: {
       {data.length > 0 && (
         <div style={{ marginBottom: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
           <Input prefix={<SearchOutlined style={{ color: '#aaa' }} />} placeholder="Filter results..."
-            value={filter} onChange={e => { setFilter(e.target.value); setPage(1); }}
+            value={filter} onChange={e => setFilter(e.target.value)}
             allowClear style={{ width: 280 }} size="small" />
           <Text type="secondary" style={{ fontSize: 12 }}>{filtered.length} / {data.length} rows</Text>
         </div>
       )}
       <Table
+        key={data.length}
         dataSource={filtered}
         columns={columns}
         rowKey={r => String(r['BillToSiteUseId'] ?? JSON.stringify(r))}
@@ -127,12 +126,10 @@ function SiteResultsTable({ data, columns, loading, rowSelection }: {
         size="small"
         scroll={{ x: 'max-content' }}
         pagination={{
-          current: page,
-          pageSize,
+          defaultPageSize: 20,
           showSizeChanger: true,
           pageSizeOptions: [20, 50, 100, 200, 500, 1000],
           showTotal: t => `Total ${t} sites`,
-          onChange: (p, ps) => { setPage(p); setPageSize(ps); },
         }}
       />
     </div>
