@@ -6,6 +6,7 @@ import {
   TeamOutlined,
   DollarOutlined,
   BankOutlined,
+  EyeOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import FloatingMenu from '../../components/FloatingMenu';
@@ -69,6 +70,13 @@ const tasks = [
     label: 'Sync CM Applications',
     description: 'Sync credit memo applications per customer from Oracle Fusion',
     path: '/ar/sync-cm-applications',
+  },
+  {
+    key: 'customer-site-activities',
+    icon: <EyeOutlined style={{ fontSize: 28, color: REDWOOD.primary }} />,
+    label: 'Customer Site Activities',
+    description: 'View receivables activity by customer account site',
+    path: '/ar/customer-site-activities',
   },
 ];
 
