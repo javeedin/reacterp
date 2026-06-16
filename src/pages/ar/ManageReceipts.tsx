@@ -17,6 +17,7 @@ import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import * as XLSX from 'xlsx';
 import FloatingMenu from '../../components/FloatingMenu';
+import { useAuth } from '../../context/AuthContext';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import { validateAccountCode } from '../../components/AccountSelector';
 import AccountSelector from '../../components/AccountSelector';
@@ -224,6 +225,8 @@ const LOCKED_SYNC = ['UPDATED', 'NEW'];
 // ── Component ─────────────────────────────────────────────────────────────────
 
 const ManageReceipts: React.FC = () => {
+  const { user } = useAuth();
+  const currentUser = user?.email ?? user?.username ?? 'REERP';
   const [searchForm] = Form.useForm();
 
   const [businessUnits,   setBusinessUnits]   = useState<{ name: string; companyCode: string }[]>([]);
@@ -672,9 +675,9 @@ const ManageReceipts: React.FC = () => {
       Comments:                    draft.comments                     || undefined,
       StructuredPaymentReference:  draft.structuredPaymentReference   || undefined,
       ReceiptBatchName:            draft.receiptBatchName             || undefined,
-      CreatedBy:                   'REERP',
+      CreatedBy:                   currentUser,
       CreationDate:                nowIso,
-      LastUpdatedBy:               'REERP',
+      LastUpdatedBy:               currentUser,
       LastUpdateDate:              nowIso,
     };
   };
@@ -781,7 +784,7 @@ const ManageReceipts: React.FC = () => {
           exchangeRateType: draft.conversionRateType || 'Corporate',
           businessUnit:     draft.businessUnit,
           description:      `Receipt ${draft.receiptNumber}`,
-          createdBy:        'REERP',
+          createdBy:        currentUser,
         },
         lines: lines.map((l, i) => ({
           lineNumber:       i + 1,
@@ -826,7 +829,7 @@ const ManageReceipts: React.FC = () => {
           ledgerName: ledger.ledgerName, ledgerId: ledger.ledgerId, status: 'NEW',
           accountingPeriod: period, controlTotal: amount,
           runningTotalDr: amount, runningTotalCr: amount,
-          batchSource: 'Accounts Receivable', createdBy: 'REERP',
+          batchSource: 'Accounts Receivable', createdBy: currentUser,
         },
         header: {
           ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName,
@@ -839,7 +842,7 @@ const ManageReceipts: React.FC = () => {
           currencyConversionDate: draft.receiptDate || today(),
           currencyConversionRate: exRate,
           defaultEffectiveDate: draft.receiptDate || today(),
-          status: 'NEW', runningTotalDr: amount, runningTotalCr: amount, createdBy: 'REERP',
+          status: 'NEW', runningTotalDr: amount, runningTotalCr: amount, createdBy: currentUser,
         },
         lines: lines.map(l => ({
           enteredDr:  l.lineType === 'DR' ? l.enteredDr : null,
@@ -858,7 +861,7 @@ const ManageReceipts: React.FC = () => {
           reference3: l.accountingClass,
           reference4: draft.businessUnit,
           reference5: 'AR_RECEIPTS',
-          createdBy: 'REERP',
+          createdBy: currentUser,
         })),
       };
       const glRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/journals/create`, {
@@ -870,7 +873,7 @@ const ManageReceipts: React.FC = () => {
       if (!glRes.ok) throw new Error(glBody?.message || `GL HTTP ${glRes.status}`);
       const glBatchId  = glBody?.batchId  ?? glBody?.batch_id  ?? 0;
       const glHeaderId = glBody?.headerId ?? glBody?.header_id ?? 0;
-      await postToLedger(slaHeaderId, glBatchId, batchName, glHeaderId, 'REERP');
+      await postToLedger(slaHeaderId, glBatchId, batchName, glHeaderId, currentUser);
       setAcctModal(m => m ? { ...m, posting: false, glBatchId, slaStatus: 'POSTED' } : m);
       message.success(`GL Journal posted — Batch ${batchName}`);
     } catch (e: any) {
