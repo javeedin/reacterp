@@ -742,8 +742,8 @@ const ManageReceipts: React.FC = () => {
     let lines: typeof acctModal extends null ? never : NonNullable<typeof acctModal>['lines'] = [];
     if (isMisc) {
       lines = [
-        { lineType: 'DR', accountingClass: 'MISC',    accountCombination: draft.miscAccount || '',  enteredDr: amount, enteredCr: 0,      description: `Receipt ${draft.receiptNumber} — Misc DR` },
-        { lineType: 'CR', accountingClass: 'CASH',    accountCombination: acct?.cashCombination?.replace(/\./g, '-') || '', enteredDr: 0, enteredCr: amount, description: `Receipt ${draft.receiptNumber} — Cash CR` },
+        { lineType: 'DR', accountingClass: 'CASH',    accountCombination: acct?.cashCombination?.replace(/\./g, '-') || '', enteredDr: amount, enteredCr: 0,      description: `Receipt ${draft.receiptNumber} — Cash DR` },
+        { lineType: 'CR', accountingClass: 'MISC',    accountCombination: draft.miscAccount || '',                          enteredDr: 0,      enteredCr: amount, description: `Receipt ${draft.receiptNumber} — Cr Account CR` },
       ];
     } else {
       lines = [
@@ -1394,7 +1394,7 @@ const ManageReceipts: React.FC = () => {
                             })()}
                           </div>
                         , true)}
-                        {field('Dr. Account',
+                        {field('Cr. Account',
                           <div>
                             <Space.Compact style={{ width: '100%' }}>
                               <Input size="small" readOnly
