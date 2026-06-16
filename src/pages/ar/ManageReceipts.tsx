@@ -1146,10 +1146,12 @@ const ManageReceipts: React.FC = () => {
                                 );
                               })}
                             </Select>
-                            {/* Selected: show class + all bank accounts as tags */}
+                            {/* Selected: show class + chosen bank account */}
                             {draft.receiptMethod && (() => {
                               const m     = receiptMethods.find(x => x.name === draft.receiptMethod);
-                              const accts = allMethodAccounts.filter(a => a.receiptMethodName === draft.receiptMethod);
+                              const accts = draft.selectedBankAccountId
+                                ? allMethodAccounts.filter(a => a.id === draft.selectedBankAccountId)
+                                : allMethodAccounts.filter(a => a.receiptMethodName === draft.receiptMethod);
                               return (
                                 <div style={{ marginTop: 4 }}>
                                   {m?.receiptClass && (
