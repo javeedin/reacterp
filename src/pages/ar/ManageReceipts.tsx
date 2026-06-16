@@ -1128,16 +1128,18 @@ const ManageReceipts: React.FC = () => {
                               {allMethodAccounts.map(a => {
                                 const masked     = maskAcct(a.bankAccountNum);
                                 const searchtext = [a.receiptMethodName, a.receiptClass, a.bankName, a.bankAccountName, a.bankAccountNum].filter(Boolean).join(' ');
-                                const label      = `${a.receiptMethodName} — ${a.bankAccountName || a.bankName}`;
                                 return (
-                                  <Option key={a.id} value={a.id} label={label} searchtext={searchtext}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 0, fontSize: 12, padding: '2px 0' }}>
-                                      <span style={{ fontWeight: 600, minWidth: 120, flexShrink: 0 }}>{a.receiptMethodName}</span>
-                                      <span style={{ flex: 1, color: '#595959', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginLeft: 12 }}>
+                                  <Option key={a.id} value={a.id} label={a.receiptMethodName} searchtext={searchtext}>
+                                    <div style={{ display: 'flex', alignItems: 'center', fontSize: 12, padding: '2px 0' }}>
+                                      <span style={{ fontWeight: 600, minWidth: 160, flexShrink: 0 }}>{a.receiptMethodName}</span>
+                                      <span style={{ flex: 1, color: '#595959', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginLeft: 8 }}>
                                         {a.bankAccountName || a.bankName || '—'}
                                       </span>
-                                      <span style={{ fontFamily: 'monospace', color: REDWOOD.info, marginLeft: 12, flexShrink: 0, fontSize: 11 }}>
+                                      <span style={{ fontFamily: 'monospace', color: REDWOOD.info, marginLeft: 8, flexShrink: 0, fontSize: 11, minWidth: 100, textAlign: 'right' }}>
                                         {masked}
+                                      </span>
+                                      <span style={{ color: '#8c8c8c', fontSize: 10, marginLeft: 12, flexShrink: 0, minWidth: 90, textAlign: 'right' }}>
+                                        {a.receiptClass || ''}
                                       </span>
                                     </div>
                                   </Option>
