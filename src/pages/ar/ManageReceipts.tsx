@@ -17,6 +17,7 @@ import dayjs from 'dayjs';
 import * as XLSX from 'xlsx';
 import FloatingMenu from '../../components/FloatingMenu';
 import { APEX_DB_CONFIG } from '../../config/api.config';
+import { validateAccountCode } from '../../components/AccountSelector';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -222,6 +223,46 @@ const ManageReceipts: React.FC = () => {
   const [receiptMethods,           setReceiptMethods]           = useState<{ id: number; name: string; receiptClass: string }[]>([]);
   const [allMethodAccounts,        setAllMethodAccounts]        = useState<ReceiptMethodAccount[]>([]);
   const [allMethodAccountsLoading, setAllMethodAccountsLoading] = useState<Record<string, boolean>>({});
+  // ccid → { combination: string; description: string; segmentDescs: Record<string,string> }
+  const [acctDescCache, setAcctDescCache] = useState<Record<number, { description: string; segmentDescs: Record<string, string> }>>({});
+
+  const enrichWithDescriptions = useCallback(async (items: ReceiptMethodAccount[]) => {
+    const ccidSet = new Set<number>();
+    items.forEach(a => {
+      [a.cashCcid, a.unappliedCcid, a.unidentifiedCcid, a.onAccountCcid, a.receiptClearingCcid, a.remittanceCcid]
+        .filter(id => id > 0)
+        .forEach(id => ccidSet.add(id));
+    });
+    const newCache: Record<number, { description: string; segmentDescs: Record<string, string> }> = {};
+    // Build combo→ccid map so we can validate by combo string
+    const combos: { ccid: number; combo: string }[] = [];
+    items.forEach(a => {
+      const pairs: [number, string][] = [
+        [a.cashCcid, a.cashCombination], [a.unappliedCcid, a.unappliedCombination],
+        [a.unidentifiedCcid, a.unidentifiedCombination], [a.onAccountCcid, a.onAccountCombination],
+        [a.receiptClearingCcid, a.receiptClearingCombination], [a.remittanceCcid, a.remittanceCombination],
+      ];
+      pairs.forEach(([ccid, combo]) => {
+        if (ccid > 0 && combo && !newCache[ccid]) combos.push({ ccid, combo });
+      });
+    });
+    // Deduplicate by ccid
+    const seen = new Set<number>();
+    const unique = combos.filter(x => { if (seen.has(x.ccid)) return false; seen.add(x.ccid); return true; });
+    await Promise.all(unique.map(async ({ ccid, combo }) => {
+      try {
+        const result = await validateAccountCode(combo.replace(/\./g, '-'));
+        const segmentDescs: Record<string, string> = {};
+        Object.entries(result.segmentDetails ?? {}).forEach(([k, v]) => {
+          segmentDescs[k] = v.description || '';
+        });
+        const description = Object.values(result.segmentDetails ?? {})
+          .map(v => v.description).filter(Boolean).join(' · ');
+        newCache[ccid] = { description, segmentDescs };
+      } catch { /* ignore */ }
+    }));
+    setAcctDescCache(prev => ({ ...prev, ...newCache }));
+  }, []);
 
   const fetchMethodAccountsByBU = useCallback(async (tabKey: string, businessUnit: string) => {
     if (!businessUnit) return;
@@ -245,6 +286,7 @@ const ManageReceipts: React.FC = () => {
       });
       setReceiptMethods(Object.values(methodMap).sort((a, b) => a.name.localeCompare(b.name)));
       setAllMethodAccounts(items);
+      enrichWithDescriptions(items);
     } catch {
       message.error('Failed to load receipt methods for this Business Unit');
     } finally {
@@ -313,9 +355,9 @@ const ManageReceipts: React.FC = () => {
   const lovFetched      = useRef(false);
   const fetchedAppsRef  = useRef<Set<string>>(new Set());
 
-  const openLov = (context: 'search' | string) => {
+  const openLov = (context: 'search' | string, prefill?: string) => {
     setLovContext(context);
-    setLovSearch('');
+    setLovSearch(prefill ?? '');
     setLovVisible(true);
     fetchAllCustomers();
   };
@@ -889,13 +931,41 @@ const ManageReceipts: React.FC = () => {
     };
 
     const custSel = () => {
+      const isMisc = draft.receiptType === 'MISC';
       const display = draft.customerAccountNumber
         ? `${draft.customerName} (${draft.customerAccountNumber})`
         : '';
+
+      if (isMisc) {
+        // MISC: free-text name with optional popup search
+        return (
+          <Space.Compact style={{ width: '100%' }}>
+            <Input size="small"
+              value={draft.customerName}
+              placeholder="Type customer name…"
+              disabled={isLocked}
+              style={{ fontSize: 12 }}
+              onChange={e => updateDraft(tabKey, { customerName: e.target.value, customerAccountNumber: '' })}
+            />
+            <Tooltip title="Search customer">
+              <Button size="small" icon={<SearchOutlined />} disabled={isLocked}
+                onClick={() => { if (!isLocked) openLov(tabKey, draft.customerName); }} />
+            </Tooltip>
+            {draft.customerAccountNumber && (
+              <Tooltip title="Clear">
+                <Button size="small" icon={<CloseOutlined />} disabled={isLocked}
+                  onClick={() => { if (!isLocked) updateDraft(tabKey, { customerName: '', customerAccountNumber: '' }); }} />
+              </Tooltip>
+            )}
+          </Space.Compact>
+        );
+      }
+
+      // CASH (and default): popup only
       return (
         <Input size="small" readOnly
           value={display}
-          placeholder="Click to search customer…"
+          placeholder={draft.receiptType ? 'Click to search customer…' : 'Select Receipt Type first'}
           style={{ cursor: isLocked ? 'default' : 'pointer', fontSize: 12, background: '#fff' }}
           onClick={() => { if (!isLocked) openLov(tabKey); }}
           suffix={
@@ -1324,7 +1394,9 @@ const ManageReceipts: React.FC = () => {
                                   { label: 'On Account',        ccid: acct.onAccountCcid,         combo: acct.onAccountCombination,         color: '#f9f0ff', border: '#d3adf7', textColor: '#722ed1' },
                                   { label: 'Receipt Clearing',  ccid: acct.receiptClearingCcid,   combo: acct.receiptClearingCombination,   color: '#e6fffb', border: '#87e8de', textColor: '#08979c' },
                                   { label: 'Remittance',        ccid: acct.remittanceCcid,        combo: acct.remittanceCombination,        color: '#fff0f6', border: '#ffadd2', textColor: '#c41d7f' },
-                                ].map(({ label, ccid, combo, color, border, textColor }) => (
+                                ].map(({ label, ccid, combo, color, border, textColor }) => {
+                                  const descInfo = ccid > 0 ? acctDescCache[ccid] : undefined;
+                                  return (
                                   <Col xs={24} md={12} lg={8} key={label}>
                                     <div style={{
                                       background: color, border: `1px solid ${border}`,
@@ -1339,6 +1411,21 @@ const ManageReceipts: React.FC = () => {
                                       }}>
                                         {combo || '—'}
                                       </Text>
+                                      {descInfo?.description && (
+                                        <Text style={{ fontSize: 10, color: textColor, display: 'block', marginTop: 2, opacity: 0.85 }}>
+                                          {descInfo.description}
+                                        </Text>
+                                      )}
+                                      {descInfo?.segmentDescs && Object.keys(descInfo.segmentDescs).length > 0 && (
+                                        <div style={{ marginTop: 3, borderTop: `1px solid ${border}`, paddingTop: 3 }}>
+                                          {Object.entries(descInfo.segmentDescs).filter(([, v]) => v).map(([k, v]) => (
+                                            <div key={k} style={{ display: 'flex', gap: 4, fontSize: 10 }}>
+                                              <Text type="secondary" style={{ fontSize: 10, minWidth: 60, flexShrink: 0 }}>{k}:</Text>
+                                              <Text style={{ fontSize: 10, color: '#434343' }}>{v}</Text>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
                                       {ccid > 0 && (
                                         <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 2 }}>
                                           CCID: {ccid}
@@ -1346,7 +1433,8 @@ const ManageReceipts: React.FC = () => {
                                       )}
                                     </div>
                                   </Col>
-                                ))}
+                                  );
+                                })}
                               </Row>
                             </div>
                           </div>
