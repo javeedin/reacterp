@@ -126,10 +126,12 @@ export const syncARInstallments = async (
     onProgress?.(updates);
   };
 
+  const specificTxnId = parameters['CustomerTransactionId']?.trim() || '';
   const maxInvoices = testMode === 'single' ? 1 : testMode === true ? 5 : undefined;
   const verbose = testMode !== false;
-  const modeLabel = testMode === 'single'
-    ? 'SINGLE RECORD DEBUG'
+  const modeLabel = specificTxnId
+    ? `SINGLE TRANSACTION (${specificTxnId})`
+    : testMode === 'single' ? 'SINGLE RECORD DEBUG'
     : testMode ? 'TEST MODE (5 invoices)' : 'FULL SYNC (all invoices)';
 
   try {
@@ -138,13 +140,23 @@ export const syncARInstallments = async (
     log?.('step', '═══════════════════════════════════════════════════════════');
     log?.('step', `  AR INVOICE INSTALLMENTS SYNC — ${modeLabel}`);
     log?.('step', '═══════════════════════════════════════════════════════════');
-    log?.('info', '  │ Step 1: GET invoices from APEX ar/invoices');
+    if (specificTxnId) {
+      log?.('info', `  │ CustomerTransactionId filter: ${specificTxnId}`);
+      log?.('info', '  │ Skipping APEX invoice list — using provided ID directly');
+    } else {
+      log?.('info', '  │ Step 1: GET invoices from APEX ar/invoices');
+    }
     log?.('info', `  │ Step 2: GET Fusion receivablesInvoices/{id}/child/receivablesInvoiceInstallments`);
     log?.('info', `  │ Step 3: POST APEX ar/invoices/{id}/installments`);
     log?.('step', '═══════════════════════════════════════════════════════════');
 
-    // ── STEP 1: Get invoices from APEX ────────────────────────────────────────
-    const invoices = await fetchInvoicesFromApex(log, maxInvoices);
+    // ── STEP 1: Get invoice list ──────────────────────────────────────────────
+    let invoices: { CustomerTransactionId: string }[];
+    if (specificTxnId) {
+      invoices = [{ CustomerTransactionId: specificTxnId }];
+    } else {
+      invoices = await fetchInvoicesFromApex(log, maxInvoices);
+    }
     updateProgress({ totalInvoices: invoices.length });
 
     if (invoices.length === 0) {

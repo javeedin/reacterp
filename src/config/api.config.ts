@@ -474,10 +474,18 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
   {
     id: 'ar-invoice-installments',
     name: 'AR Invoice Installments',
-    description: 'Sync AR Invoice Installments from Oracle Fusion (fetches installments for each synced AR invoice)',
+    description: 'Sync AR Invoice Installments from Oracle Fusion. If Customer Transaction ID is provided, only that invoice is synced; otherwise all APEX invoices are processed.',
     oracleEndpoint: 'receivablesInvoices',
     apexEndpoint: 'ar/invoices/:id/installments',
-    parameters: [],
+    parameters: [
+      {
+        key: 'CustomerTransactionId',
+        label: 'Customer Transaction ID',
+        type: 'text',
+        required: false,
+        placeholder: 'e.g. 300000089305592 — leave blank to sync all',
+      },
+    ],
   },
   {
     id: 'ar-credit-memos',
