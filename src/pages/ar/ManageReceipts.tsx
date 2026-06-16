@@ -1394,7 +1394,7 @@ const ManageReceipts: React.FC = () => {
                             })()}
                           </div>
                         , true)}
-                        {draft.receiptType === 'MISC' && field('Misc. Account',
+                        {field('Dr. Account',
                           <div>
                             <Space.Compact style={{ width: '100%' }}>
                               <Input size="small" readOnly
