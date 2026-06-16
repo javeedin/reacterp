@@ -200,7 +200,7 @@ interface TabData {
   key: string;
   periodName: string;
   ledgerName: string;
-  tabType: 'fusion' | 'reerp' | 'reerp-dynamic' | 'reerp-ytd';
+  tabType: 'fusion' | 'reerp' | 'reerp-dynamic' | 'reerp-ytd' | 're-calc';
   data: GLBalanceRecord[];
   rrData: RrTBRecord[];
   rrGenerating: boolean;
@@ -6330,7 +6330,6 @@ const TrialBalance: React.FC = () => {
               style={{ borderColor: '#722ed1', color: '#722ed1' }}
               onClick={() => {
                 setReCalcTab(tab);
-                setReCalcVisible(true);
                 setReYearRows([]);
                 setReYearError(null);
                 setReYearCompany(null);
@@ -6339,6 +6338,33 @@ const TrialBalance: React.FC = () => {
                 const tabYear = periods.find(p => tab.periodName.includes(p.period_name_id))?.period_year ?? (ledgerYears[ledgerYears.length - 1] ?? null);
                 setReYearFrom(ledgerYears[0] ?? null);
                 setReYearTo(tabYear);
+                const reCalcKey = `re-calc-${tab.key}`;
+                const existingTab = tabs.find(t => t.key === reCalcKey);
+                if (existingTab) {
+                  setActiveTab(reCalcKey);
+                } else {
+                  const newTab: TabData = {
+                    key: reCalcKey,
+                    periodName: `RE: ${tab.periodName.replace(/^YTD:\s*/, '')}`,
+                    ledgerName: tab.ledgerName,
+                    tabType: 're-calc',
+                    data: [],
+                    rrData: [],
+                    rrGenerating: false,
+                    loading: false,
+                    error: null,
+                    companies: [],
+                    currencies: [],
+                    selectedCompany: null,
+                    selectedCurrency: null,
+                    segmentsBefore: [],
+                    segmentsAfter: [],
+                    gridSearch: '',
+                    showEntered: false,
+                  };
+                  setTabs(prev => [...prev, newTab]);
+                  setActiveTab(reCalcKey);
+                }
               }}
             >
               Retained Earnings
@@ -6677,7 +6703,9 @@ const TrialBalance: React.FC = () => {
       key: tab.key,
       label: (
         <span>
-          {tab.tabType === 'reerp'
+          {tab.tabType === 're-calc'
+            ? <CalculatorOutlined style={{ marginRight: 6, color: '#722ed1' }} />
+            : tab.tabType === 'reerp'
             ? <BarChartOutlined style={{ marginRight: 6, color: REDWOOD.success }} />
             : tab.tabType === 'reerp-dynamic'
             ? <ThunderboltOutlined style={{ marginRight: 6, color: '#722ed1' }} />
@@ -6687,7 +6715,9 @@ const TrialBalance: React.FC = () => {
           {tab.periodName}
         </span>
       ),
-      children: tab.tabType === 'reerp-ytd'
+      children: tab.tabType === 're-calc'
+        ? renderReCalcContent()
+        : tab.tabType === 'reerp-ytd'
         ? renderRrYtdTBTab(tab)
         : (tab.tabType === 'reerp' || tab.tabType === 'reerp-dynamic') ? renderRrTBTab(tab) : renderTBTab(tab),
       closable: true,
