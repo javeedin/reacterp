@@ -21,7 +21,7 @@ import {
   SwapOutlined, UploadOutlined, PaperClipOutlined, EyeOutlined,
   BookOutlined, CheckCircleOutlined, SyncOutlined, ExclamationCircleOutlined,
   TagOutlined, PrinterOutlined, FilePdfOutlined, BranchesOutlined,
-  QuestionCircleOutlined, FullscreenOutlined, FullscreenExitOutlined,
+  QuestionCircleOutlined, FullscreenOutlined, FullscreenExitOutlined, CopyOutlined,
 } from '@ant-design/icons';
 import FloatingMenu from '../../components/FloatingMenu';
 import ApiDocsModal, { type ApiEndpoint } from '../../components/ApiDocsModal';
@@ -731,6 +731,7 @@ const RegisterDetail: React.FC<{
   const [suspAmtPopover, setSuspAmtPopover]     = useState<number | null>(null);
   const [suspAmtValue, setSuspAmtValue]         = useState<number>(0);
   const [suspAmtSaving, setSuspAmtSaving]       = useState(false);
+  const [suspAmtApiDebug, setSuspAmtApiDebug]   = useState<{ url: string; payload: string; response: string; status: number | null } | null>(null);
   const [bankTxnStatusMap, setBankTxnStatusMap] = useState<Map<number, { status: string; accountingFlag: string }>>(new Map());
   const [acctModalOpen, setAcctModalOpen]       = useState(false);
   const [acctProgress, setAcctProgress]         = useState<AcctProgressRow[]>([]);
@@ -1161,23 +1162,33 @@ const RegisterDetail: React.FC<{
   // ── Update suspense refund amount inline ──────────────────────
   const handleUpdateSuspenseRefundAmt = async (txn: PCTransaction) => {
     setSuspAmtSaving(true);
+    const url = `${APEX_DB_CONFIG.baseUrl}/pc/transactions/${txn.transactionId}`;
+    const payload = {
+      transactionDate:   txn.transactionDate,
+      accountingDate:    txn.accountingDate || txn.transactionDate,
+      currency:          txn.currency,
+      debitAmount:       txn.debitAmount,
+      creditAmount:      txn.creditAmount,
+      expenseType:       txn.expenseType       || null,
+      chargeAccountDesc: txn.chargeAccountDesc || null,
+      chargeAccountCcid: txn.chargeAccountCcid || null,
+      referenceNo:       txn.referenceNo       || null,
+      employeeName:      txn.employeeName      || null,
+      receiptStatus:     txn.receiptStatus     || null,
+      comments:          txn.comments          || null,
+      suspenseAmount:    suspAmtValue,
+      updatedBy:         currentUser,
+    };
+    setSuspAmtApiDebug({ url, payload: JSON.stringify(payload, null, 2), response: '', status: null });
     try {
-      await updateTransaction(txn.transactionId, {
-        transactionDate:   txn.transactionDate,
-        accountingDate:    txn.accountingDate || txn.transactionDate,
-        currency:          txn.currency,
-        debitAmount:       txn.debitAmount,
-        creditAmount:      txn.creditAmount,
-        expenseType:       txn.expenseType       || null,
-        chargeAccountDesc: txn.chargeAccountDesc || null,
-        chargeAccountCcid: txn.chargeAccountCcid || null,
-        referenceNo:       txn.referenceNo       || null,
-        employeeName:      txn.employeeName      || null,
-        receiptStatus:     txn.receiptStatus     || null,
-        comments:          txn.comments          || null,
-        suspenseAmount:    suspAmtValue,
-        updatedBy:         currentUser,
+      const res = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(payload),
       });
+      const data = await res.json();
+      setSuspAmtApiDebug(prev => prev ? { ...prev, status: res.status, response: JSON.stringify(data, null, 2) } : null);
+      if (!res.ok || !data.success) throw new Error(data?.message || `HTTP ${res.status}`);
       message.success('Refund amount updated');
       setSuspAmtPopover(null);
       onRefresh();
@@ -2452,9 +2463,50 @@ const RegisterDetail: React.FC<{
               else if (!suspAmtSaving) setSuspAmtPopover(null);
             }}
             trigger="click"
-            title={<Space size={4}><EditOutlined style={{ color: REDWOOD.info }} />Update Refund Amount</Space>}
+            title={
+              <Space size={4} style={{ justifyContent: 'space-between', width: '100%' }}>
+                <Space size={4}><EditOutlined style={{ color: REDWOOD.info }} />Update Refund Amount</Space>
+                <Tooltip title={
+                  suspAmtApiDebug ? (
+                    <div style={{ maxWidth: 480 }}>
+                      <div style={{ marginBottom: 4 }}>
+                        <Tag color="orange" style={{ fontSize: 10 }}>PUT</Tag>
+                        <code style={{ fontSize: 10, color: '#fff', wordBreak: 'break-all' }}>{suspAmtApiDebug.url}</code>
+                      </div>
+                      {suspAmtApiDebug.status !== null && (
+                        <Tag color={suspAmtApiDebug.status >= 200 && suspAmtApiDebug.status < 300 ? 'green' : 'red'} style={{ fontSize: 10 }}>
+                          HTTP {suspAmtApiDebug.status}
+                        </Tag>
+                      )}
+                      <div style={{ marginTop: 4, fontSize: 10, color: '#91d5ff' }}>Payload:</div>
+                      <pre style={{ fontSize: 9, color: '#9cdcfe', margin: 0, maxHeight: 160, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{suspAmtApiDebug.payload}</pre>
+                      {suspAmtApiDebug.response && <>
+                        <div style={{ marginTop: 4, fontSize: 10, color: '#91d5ff' }}>Response:</div>
+                        <pre style={{ fontSize: 9, color: suspAmtApiDebug.status && suspAmtApiDebug.status < 300 ? '#b5f5a0' : '#ff9999', margin: 0, maxHeight: 80, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{suspAmtApiDebug.response}</pre>
+                      </>}
+                      <div style={{ marginTop: 6 }}>
+                        <Button size="small" icon={<CopyOutlined />} type="link" style={{ color: '#69c0ff', padding: 0, fontSize: 10 }}
+                          onClick={() => { navigator.clipboard.writeText(suspAmtApiDebug.url); message.success('URL copied'); }}>
+                          Copy URL
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ maxWidth: 380 }}>
+                      <Tag color="orange" style={{ fontSize: 10 }}>PUT</Tag>
+                      <code style={{ fontSize: 10, color: '#fff', wordBreak: 'break-all' }}>
+                        {`${APEX_DB_CONFIG.baseUrl}/pc/transactions/${rec.transactionId}`}
+                      </code>
+                      <div style={{ marginTop: 4, fontSize: 10, color: '#aaa' }}>Run Save to see full payload + response</div>
+                    </div>
+                  )
+                } color="#001529" overlayStyle={{ maxWidth: 500 }}>
+                  <ApiOutlined style={{ color: suspAmtApiDebug?.status != null && suspAmtApiDebug.status >= 400 ? REDWOOD.error : REDWOOD.info, cursor: 'pointer', fontSize: 13 }} />
+                </Tooltip>
+              </Space>
+            }
             content={
-              <div style={{ width: 220 }}>
+              <div style={{ width: 240 }}>
                 <InputNumber
                   style={{ width: '100%', marginBottom: 8 }}
                   min={0}
@@ -2469,7 +2521,7 @@ const RegisterDetail: React.FC<{
                     style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
                     onClick={() => handleUpdateSuspenseRefundAmt(rec as PCTransaction)}
                   >Save</Button>
-                  <Button size="small" onClick={() => setSuspAmtPopover(null)}>Cancel</Button>
+                  <Button size="small" onClick={() => { setSuspAmtPopover(null); setSuspAmtApiDebug(null); }}>Cancel</Button>
                 </Space>
               </div>
             }
