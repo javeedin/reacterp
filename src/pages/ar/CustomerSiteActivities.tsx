@@ -1,17 +1,17 @@
 import React, { useState, useCallback } from 'react';
 import {
   Layout, Card, Form, Input, Button, Space, Typography, Table, Tabs,
-  Row, Col, Breadcrumb, Spin, message, Empty,
+  Row, Col, Breadcrumb, Spin, message, Empty, Modal, Tag,
 } from 'antd';
 import {
   HomeOutlined, SearchOutlined, DownloadOutlined, CloseOutlined,
-  EyeOutlined,
+  EyeOutlined, ApiOutlined, CopyOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import * as XLSX from 'xlsx';
 import FloatingMenu from '../../components/FloatingMenu';
-import { ORACLE_SOAP_CONFIG } from '../../config/api.config';
+import { ORACLE_FUSION_CONFIG } from '../../config/api.config';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -28,10 +28,15 @@ const REDWOOD = {
   border:     '#E5E5E5',
 };
 
-const { username, password } = ORACLE_SOAP_CONFIG.prod;
-const AUTH_HEADER = 'Basic ' + btoa(`${username}:${password}`);
+const AUTH_HEADER = 'Basic ' + btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
 
-const BASE_URL = '/proxy/fusion/fscmRestApi/resources/11.13.18.05/receivablesCustomerAccountSiteActivities';
+const BASE_URL = `${ORACLE_FUSION_CONFIG.baseUrl}/receivablesCustomerAccountSiteActivities`;
+
+interface ApiDebug {
+  url: string;
+  status: number | null;
+  response: string;
+}
 
 const CHILD_LABEL_MAP: Record<string, string> = {
   creditMemoApplications:          'CM Applications',
@@ -117,6 +122,9 @@ const CustomerSiteActivities: React.FC = () => {
   const [searchLoading, setSearchLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('search');
   const [childTabs, setChildTabs] = useState<ChildTabState[]>([]);
+  const [apiDebug, setApiDebug] = useState<ApiDebug | null>(null);
+  const [apiDebugVisible, setApiDebugVisible] = useState(false);
+  const [lastSearchUrl, setLastSearchUrl] = useState<string>('');
 
   const handleSearch = useCallback(async () => {
     const values = form.getFieldsValue();
@@ -128,15 +136,22 @@ const CustomerSiteActivities: React.FC = () => {
     let url = `${BASE_URL}?limit=50`;
     if (filters.length > 0) url += `&q=${encodeURIComponent(filters.join(' AND '))}`;
 
+    setLastSearchUrl(url);
+    setApiDebug({ url, status: null, response: '' });
     setSearchLoading(true);
     try {
-      const res = await fetch(url, { headers: { Authorization: AUTH_HEADER } });
+      const res = await fetch(url, { headers: { Authorization: AUTH_HEADER, 'Content-Type': 'application/json' } });
+      const text = await res.text();
+      let json: { items?: SiteRecord[] };
+      try { json = JSON.parse(text); } catch { throw new Error(`Non-JSON response (HTTP ${res.status}): ${text.substring(0, 200)}`); }
+      setApiDebug({ url, status: res.status, response: JSON.stringify(json, null, 2) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
       setSearchResults(json.items || []);
       if ((json.items || []).length === 0) message.info('No results found');
     } catch (err: unknown) {
-      message.error(`Search failed: ${err instanceof Error ? err.message : String(err)}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      setApiDebug(prev => prev ? { ...prev, status: -1, response: msg } : null);
+      message.error(`Search failed: ${msg}`);
     } finally {
       setSearchLoading(false);
     }
@@ -240,6 +255,16 @@ const CustomerSiteActivities: React.FC = () => {
                   style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
                 >
                   Search
+                </Button>
+              </Form.Item>
+              <Form.Item>
+                <Button
+                  icon={<ApiOutlined />}
+                  title="View API request / response"
+                  onClick={() => setApiDebugVisible(true)}
+                  style={{ color: lastSearchUrl ? REDWOOD.info : undefined }}
+                >
+                  API
                 </Button>
               </Form.Item>
               {searchResults.length > 0 && (
@@ -360,6 +385,38 @@ const CustomerSiteActivities: React.FC = () => {
 
         <FloatingMenu />
       </Content>
+
+      <Modal
+        open={apiDebugVisible}
+        onCancel={() => setApiDebugVisible(false)}
+        footer={null}
+        width={900}
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /> API Debug — Customer Site Activities Search</Space>}
+      >
+        {apiDebug ? (
+          <div style={{ fontFamily: 'monospace', fontSize: 12 }}>
+            <div style={{ marginBottom: 8 }}>
+              <Tag color="blue">GET</Tag>
+              <Text copyable style={{ fontSize: 12, wordBreak: 'break-all' }}>{apiDebug.url}</Text>
+            </div>
+            <div style={{ marginBottom: 8 }}>
+              <Text type="secondary">Status: </Text>
+              {apiDebug.status === null ? <Tag>Pending…</Tag>
+                : apiDebug.status > 0 ? <Tag color={apiDebug.status < 300 ? 'green' : 'red'}>{apiDebug.status}</Tag>
+                : <Tag color="red">Error</Tag>}
+            </div>
+            <div style={{ marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
+              <Text strong>Response</Text>
+              <Button size="small" icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(apiDebug.response); message.success('Copied'); }}>Copy</Button>
+            </div>
+            <pre style={{ background: '#f5f5f5', padding: 12, borderRadius: 6, maxHeight: 400, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+              {apiDebug.response || '(no response yet — click Search first)'}
+            </pre>
+          </div>
+        ) : (
+          <Empty description="Click Search to see the API call" />
+        )}
+      </Modal>
     </Layout>
   );
 };
