@@ -119,8 +119,8 @@ COMMENT ON TABLE  RR_AR_RECEIPTS IS 'AR Standard Receipts synced from Oracle Fus
 -- above any Oracle Fusion StandardReceiptId range so
 -- locally-created rows are always distinguishable.
 -- =====================================================
--- CREATE SEQUENCE RR_AR_RECEIPTS_LOCAL_SEQ
---     START WITH  9000000000
---     INCREMENT BY 1
---     NOCACHE
---     NOCYCLE;
+CREATE SEQUENCE RR_AR_RECEIPTS_LOCAL_SEQ
+    START WITH  9000000000
+    INCREMENT BY 1
+    NOCACHE
+    NOCYCLE;
