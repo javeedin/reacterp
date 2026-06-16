@@ -1563,16 +1563,6 @@ const ManageReceipts: React.FC = () => {
                                           {descInfo.description}
                                         </Text>
                                       )}
-                                      {descInfo?.segmentDescs && Object.keys(descInfo.segmentDescs).length > 0 && (
-                                        <div style={{ marginTop: 3, borderTop: `1px solid ${border}`, paddingTop: 3 }}>
-                                          {Object.entries(descInfo.segmentDescs).filter(([, v]) => v).map(([k, v]) => (
-                                            <div key={k} style={{ display: 'flex', gap: 4, fontSize: 10 }}>
-                                              <Text type="secondary" style={{ fontSize: 10, minWidth: 60, flexShrink: 0 }}>{k}:</Text>
-                                              <Text style={{ fontSize: 10, color: '#434343' }}>{v}</Text>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      )}
                                       {ccid > 0 && (
                                         <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 2 }}>
                                           CCID: {ccid}
