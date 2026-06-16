@@ -325,24 +325,24 @@ const CustomerSiteActivities: React.FC = () => {
     );
   }, [apexData, resultsFilter]);
 
-  const searchColumns: ColumnsType<SiteRecord> = [
-    { title: 'Customer Name',   dataIndex: 'CUSTOMER_NAME',               key: 'CUSTOMER_NAME', ellipsis: true },
-    { title: 'Account Number',  dataIndex: 'ACCOUNT_NUMBER',              key: 'ACCOUNT_NUMBER' },
-    { title: 'Site Number',     dataIndex: 'BILL_TO_SITE_NUMBER',         key: 'BILL_TO_SITE_NUMBER' },
-    { title: 'Site Address',    dataIndex: 'BILL_TO_SITE_ADDRESS',        key: 'BILL_TO_SITE_ADDRESS', ellipsis: true },
-    { title: 'Tax Reg No',      dataIndex: 'TAX_REGISTRATION_NUMBER',     key: 'TAX_REGISTRATION_NUMBER' },
-    {
-      title: 'Open Receivables', dataIndex: 'TOTAL_OPEN_RECEIVABLES_FOR_SITE', key: 'TOTAL_OPEN_RECEIVABLES_FOR_SITE',
-      align: 'right' as const,
-      render: (v: number) => typeof v === 'number' ? v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : (v || '-'),
-    },
-    {
-      title: 'Trans. Due', dataIndex: 'TOTAL_TRANSACTIONS_DUE_FOR_SITE', key: 'TOTAL_TRANSACTIONS_DUE_FOR_SITE',
-      align: 'right' as const,
-      render: (v: number) => typeof v === 'number' ? v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : (v || '-'),
-    },
-    { title: 'Synced', dataIndex: 'SYNC_DATE', key: 'SYNC_DATE', width: 150 },
-  ];
+  const searchColumns: ColumnsType<SiteRecord> = useMemo(() => {
+    if (!apexData.length) return [];
+    return Object.keys(apexData[0]).map(key => ({
+      title: key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      dataIndex: key,
+      key,
+      ellipsis: true,
+      render: (v: unknown) => {
+        if (v === null || v === undefined || v === '') return '-';
+        if (typeof v === 'number') {
+          const k = key.toLowerCase();
+          if (k.includes('amount') || k.includes('total') || k.includes('balance') || k.includes('receivable') || k.includes('due'))
+            return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+        return String(v);
+      },
+    }));
+  }, [apexData]);
 
   const syncPercent = syncProgress
     ? syncProgress.phase === 'fetching' ? 20
