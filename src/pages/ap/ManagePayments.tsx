@@ -3822,16 +3822,6 @@ const ManagePayments: React.FC = () => {
                             <Form.Item
                               label="Maturity Date"
                               name="maturityDate"
-                              rules={[{
-                                validator: (_, value) => {
-                                  if (!value) return Promise.resolve();
-                                  const payDate = createPaymentForm.getFieldValue('paymentDate');
-                                  if (payDate && value.isSameOrBefore(payDate, 'day')) {
-                                    return Promise.reject('Maturity date must be after the payment date');
-                                  }
-                                  return Promise.resolve();
-                                },
-                              }]}
                             >
                               <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" disabled={paymentConfirmed || !buReady} />
                             </Form.Item>
@@ -4123,16 +4113,6 @@ const ManagePayments: React.FC = () => {
                             <Form.Item
                               label="Maturity Date"
                               name="maturityDate"
-                              rules={[{
-                                validator: (_, value) => {
-                                  if (!value) return Promise.resolve();
-                                  const payDate = createPaymentForm.getFieldValue('paymentDate');
-                                  if (payDate && value.isSameOrBefore(payDate, 'day')) {
-                                    return Promise.reject('Maturity date must be after the payment date');
-                                  }
-                                  return Promise.resolve();
-                                },
-                              }]}
                             >
                               <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" placeholder="dd-mmm-yyyy" />
                             </Form.Item>
