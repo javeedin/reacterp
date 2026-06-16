@@ -2117,16 +2117,21 @@ const ManageReceipts: React.FC = () => {
       </Modal>
 
       {/* ── AccountSelector for MISC Account ── */}
-      {miscAcctVisible && (
-        <AccountSelector
-          visible={miscAcctVisible}
-          onSelect={(code) => {
-            updateDraft(miscAcctTabKey, { miscAccount: code });
-            setMiscAcctVisible(false);
-          }}
-          onCancel={() => setMiscAcctVisible(false)}
-        />
-      )}
+      {miscAcctVisible && (() => {
+        const miscTab = tabs.find(t => t.key === miscAcctTabKey);
+        const companyCode = businessUnits.find(b => b.name === miscTab?.draft.businessUnit)?.companyCode ?? '';
+        return (
+          <AccountSelector
+            visible={miscAcctVisible}
+            lockedFirstSegment={companyCode || undefined}
+            onSelect={(code) => {
+              updateDraft(miscAcctTabKey, { miscAccount: code });
+              setMiscAcctVisible(false);
+            }}
+            onCancel={() => setMiscAcctVisible(false)}
+          />
+        );
+      })()}
 
       {/* ── Create / Post Accounting Modal ── */}
       {acctModal?.visible && (() => {
