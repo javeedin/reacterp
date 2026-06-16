@@ -162,6 +162,7 @@ const CustomerSiteActivities: React.FC = () => {
 
   const [apiDebug, setApiDebug] = useState<ApiDebug | null>(null);
   const [apiDebugVisible, setApiDebugVisible] = useState(false);
+  const [resultsFilter, setResultsFilter] = useState('');
 
   const handleSearch = useCallback(async () => {
     const values = form.getFieldsValue();
@@ -176,6 +177,7 @@ const CustomerSiteActivities: React.FC = () => {
     setApiDebug({ url, status: null, response: '' });
     setSearchLoading(true);
     setSelectedRowKeys([]);
+    setResultsFilter('');
     try {
       const res = await fetch(url, { headers: { Authorization: AUTH_HEADER } });
       const text = await res.text();
@@ -345,8 +347,35 @@ const CustomerSiteActivities: React.FC = () => {
           )}
 
           <Card style={{ borderColor: REDWOOD.border }}>
+            {searchResults.length > 0 && (
+              <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Input
+                  prefix={<SearchOutlined style={{ color: '#aaa' }} />}
+                  placeholder="Filter results..."
+                  value={resultsFilter}
+                  onChange={e => setResultsFilter(e.target.value)}
+                  allowClear
+                  style={{ width: 280 }}
+                  size="small"
+                />
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {(() => {
+                    const q = resultsFilter.toLowerCase();
+                    const count = q ? searchResults.filter(r =>
+                      Object.values(r).some(v => v !== null && v !== undefined && String(v).toLowerCase().includes(q))
+                    ).length : searchResults.length;
+                    return `${count} / ${searchResults.length} sites`;
+                  })()}
+                </Text>
+              </div>
+            )}
             <Table
-              dataSource={searchResults}
+              dataSource={resultsFilter
+                ? searchResults.filter(r =>
+                    Object.values(r).some(v => v !== null && v !== undefined &&
+                      String(v).toLowerCase().includes(resultsFilter.toLowerCase()))
+                  )
+                : searchResults}
               columns={searchColumns}
               rowKey="BillToSiteUseId"
               rowSelection={rowSelection}
