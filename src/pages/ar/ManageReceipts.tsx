@@ -10,6 +10,7 @@ import {
   DownloadOutlined, UserOutlined, BankOutlined, LockOutlined,
   FileTextOutlined, EyeOutlined, UnorderedListOutlined, InfoCircleOutlined,
   ApiOutlined, DeleteOutlined, ExclamationCircleOutlined, SendOutlined, CodeOutlined,
+  BookOutlined, CheckCircleOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -18,6 +19,11 @@ import * as XLSX from 'xlsx';
 import FloatingMenu from '../../components/FloatingMenu';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import { validateAccountCode } from '../../components/AccountSelector';
+import AccountSelector from '../../components/AccountSelector';
+import {
+  createAccounting, postToLedger, fetchLedgerByBusinessUnit,
+  derivePeriodName, type SlaCreatePayload,
+} from '../../services/sla.service';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -101,6 +107,7 @@ interface ReceiptDraft {
   comments:                       string;
   structuredPaymentReference:     string;
   receiptBatchName:               string;
+  miscAccount:                    string;
 }
 
 interface ReceiptTab {
@@ -177,7 +184,7 @@ function blankDraft(): ReceiptDraft {
     customerName: '', customerAccountNumber: '', customerSite: '',
     customerBank: '', customerBankBranch: '', customerBankAccountNumber: '',
     receivablesSpecialist: '', comments: '', structuredPaymentReference: '',
-    receiptBatchName: '',
+    receiptBatchName: '', miscAccount: '',
   };
 }
 
@@ -301,7 +308,16 @@ const ManageReceipts: React.FC = () => {
   const [deleting, setDeleting]           = useState<Record<string, boolean>>({});
   const [fxRateLoading, setFxRateLoading] = useState<Record<string, boolean>>({});
   const [apiModal, setApiModal]           = useState<{ tabKey: string; testResult: string | null; testing: boolean } | null>(null);
+  const [apiInfoVisible, setApiInfoVisible] = useState(false);
   const [gridFilter, setGridFilter]       = useState('');
+  const [miscAcctVisible, setMiscAcctVisible] = useState(false);
+  const [miscAcctTabKey, setMiscAcctTabKey]   = useState('');
+  const [acctModal, setAcctModal] = useState<{
+    visible: boolean; tabKey: string; creating: boolean; posting: boolean;
+    slaHeaderId: number | null; slaStatus: string; glBatchId: number | null;
+    lines: { lineType: string; accountingClass: string; accountCombination: string;
+             enteredDr: number; enteredCr: number; description: string }[];
+  } | null>(null);
 
   // Receipt applications (per tab)
   const [receiptApplications, setReceiptApplications] = useState<
@@ -704,6 +720,157 @@ const ManageReceipts: React.FC = () => {
     });
   };
 
+  // ── Open Accounting Modal ────────────────────────────────────────────────
+  const openAcctModal = (tabKey: string) => {
+    const tab = tabs.find(t => t.key === tabKey);
+    if (!tab) return;
+    const { draft } = tab;
+    const acct = allMethodAccounts.find(a => a.id === draft.selectedBankAccountId);
+    const amount = Math.abs(draft.amount ?? 0);
+    const isMisc = draft.receiptType === 'MISC';
+    let lines: typeof acctModal extends null ? never : NonNullable<typeof acctModal>['lines'] = [];
+    if (isMisc) {
+      lines = [
+        { lineType: 'DR', accountingClass: 'MISC',    accountCombination: draft.miscAccount || '',  enteredDr: amount, enteredCr: 0,      description: `Receipt ${draft.receiptNumber} — Misc DR` },
+        { lineType: 'CR', accountingClass: 'CASH',    accountCombination: acct?.cashCombination?.replace(/\./g, '-') || '', enteredDr: 0, enteredCr: amount, description: `Receipt ${draft.receiptNumber} — Cash CR` },
+      ];
+    } else {
+      lines = [
+        { lineType: 'DR', accountingClass: 'CASH',      accountCombination: acct?.cashCombination?.replace(/\./g, '-') || '',      enteredDr: amount, enteredCr: 0,      description: `Receipt ${draft.receiptNumber} — Cash DR` },
+        { lineType: 'CR', accountingClass: 'UNAPPLIED', accountCombination: acct?.unappliedCombination?.replace(/\./g, '-') || '', enteredDr: 0,      enteredCr: amount, description: `Receipt ${draft.receiptNumber} — Unapplied CR` },
+      ];
+    }
+    setAcctModal({ visible: true, tabKey, creating: false, posting: false, slaHeaderId: null, slaStatus: '', glBatchId: null, lines });
+  };
+
+  const handleCreateAccounting = async () => {
+    if (!acctModal) return;
+    const { tabKey, lines } = acctModal;
+    const tab = tabs.find(t => t.key === tabKey);
+    if (!tab) return;
+    const { draft } = tab;
+    setAcctModal(m => m ? { ...m, creating: true } : m);
+    try {
+      const ledger = await fetchLedgerByBusinessUnit(draft.businessUnit);
+      if (!ledger) throw new Error('Could not resolve ledger for Business Unit: ' + draft.businessUnit);
+      const exRate   = draft.conversionRate ?? 1;
+      const period   = derivePeriodName(new Date(draft.receiptDate || today()));
+      const payload: SlaCreatePayload = {
+        header: {
+          moduleName: 'AR', sourceTable: 'AR_RECEIPTS',
+          sourceId:     draft.standardReceiptId,
+          sourceNumber: draft.receiptNumber,
+          sourceType:   'Receipt',
+          eventTypeCode: draft.receiptType === 'MISC' ? 'AR_MISC_RECEIPT' : 'AR_CASH_RECEIPT',
+          eventDate:        draft.receiptDate || today(),
+          accountingDate:   draft.accountingDate || draft.receiptDate || today(),
+          periodName:       period,
+          ledgerId:         ledger.ledgerId,
+          ledgerName:       ledger.ledgerName,
+          currencyCode:     draft.currency || 'AED',
+          ledgerCurrency:   'AED',
+          exchangeRate:     exRate,
+          exchangeRateType: draft.conversionRateType || 'Corporate',
+          businessUnit:     draft.businessUnit,
+          description:      `Receipt ${draft.receiptNumber}`,
+          createdBy:        'REERP',
+        },
+        lines: lines.map((l, i) => ({
+          lineNumber:       i + 1,
+          lineType:         l.lineType as 'DR' | 'CR',
+          accountingClass:  l.accountingClass,
+          accountCombination: l.accountCombination,
+          enteredDr:        l.lineType === 'DR' ? l.enteredDr : 0,
+          enteredCr:        l.lineType === 'CR' ? l.enteredCr : 0,
+          accountedDr:      l.lineType === 'DR' ? l.enteredDr * exRate : 0,
+          accountedCr:      l.lineType === 'CR' ? l.enteredCr * exRate : 0,
+          currencyCode:     draft.currency || 'AED',
+          exchangeRate:     exRate,
+          description:      l.description,
+        })),
+      };
+      const result = await createAccounting(payload);
+      setAcctModal(m => m ? { ...m, creating: false, slaHeaderId: result.headerId, slaStatus: result.status } : m);
+      message.success(`SLA created — Header ID ${result.headerId}`);
+    } catch (e: any) {
+      setAcctModal(m => m ? { ...m, creating: false, slaStatus: 'ERROR' } : m);
+      message.error('Create Accounting failed: ' + (e?.message || String(e)));
+    }
+  };
+
+  const handlePostAccounting = async () => {
+    if (!acctModal?.slaHeaderId) return;
+    const { tabKey, lines, slaHeaderId } = acctModal;
+    const tab = tabs.find(t => t.key === tabKey);
+    if (!tab) return;
+    const { draft } = tab;
+    setAcctModal(m => m ? { ...m, posting: true } : m);
+    try {
+      const ledger = await fetchLedgerByBusinessUnit(draft.businessUnit);
+      if (!ledger) throw new Error('Could not resolve ledger');
+      const period   = derivePeriodName(new Date(draft.receiptDate || today()));
+      const exRate   = draft.conversionRate ?? 1;
+      const amount   = Math.abs(draft.amount ?? 0);
+      const batchName = `AR-${draft.receiptNumber}-${Date.now()}`;
+      const glPayload = {
+        batch: {
+          batchName, batchDescription: `AR Receipt ${draft.receiptNumber}`,
+          ledgerName: ledger.ledgerName, ledgerId: ledger.ledgerId, status: 'NEW',
+          accountingPeriod: period, controlTotal: amount,
+          runningTotalDr: amount, runningTotalCr: amount,
+          batchSource: 'Accounts Receivable', createdBy: 'REERP',
+        },
+        header: {
+          ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName,
+          jeCategory: 'Receipts', jeSource: 'Receivables',
+          periodName: period,
+          journalName: `AR-${draft.receiptNumber}`,
+          description: `Receipt ${draft.receiptNumber} — ${draft.customerName || ''}`,
+          currencyCode: draft.currency || 'AED',
+          currencyConversionType: draft.conversionRateType || 'Corporate',
+          currencyConversionDate: draft.receiptDate || today(),
+          currencyConversionRate: exRate,
+          defaultEffectiveDate: draft.receiptDate || today(),
+          status: 'NEW', runningTotalDr: amount, runningTotalCr: amount, createdBy: 'REERP',
+        },
+        lines: lines.map(l => ({
+          enteredDr:  l.lineType === 'DR' ? l.enteredDr : null,
+          enteredCr:  l.lineType === 'CR' ? l.enteredCr : null,
+          accountedDr: l.lineType === 'DR' ? l.enteredDr * exRate : null,
+          accountedCr: l.lineType === 'CR' ? l.enteredCr * exRate : null,
+          statAmount: null, description: l.description,
+          currencyCode: draft.currency || 'AED',
+          currencyConversionDate: draft.receiptDate || today(),
+          currencyConversionRate: exRate,
+          userCurrencyConversionType: draft.conversionRateType || 'Corporate',
+          accountCombination: l.accountCombination,
+          chartOfAccountsName: 'Chart of Accounts',
+          reference1: draft.receiptNumber,
+          reference2: draft.customerName || '',
+          reference3: l.accountingClass,
+          reference4: draft.businessUnit,
+          reference5: 'AR_RECEIPTS',
+          createdBy: 'REERP',
+        })),
+      };
+      const glRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/journals/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(glPayload),
+      });
+      const glBody = await glRes.json();
+      if (!glRes.ok) throw new Error(glBody?.message || `GL HTTP ${glRes.status}`);
+      const glBatchId  = glBody?.batchId  ?? glBody?.batch_id  ?? 0;
+      const glHeaderId = glBody?.headerId ?? glBody?.header_id ?? 0;
+      await postToLedger(slaHeaderId, glBatchId, batchName, glHeaderId, 'REERP');
+      setAcctModal(m => m ? { ...m, posting: false, glBatchId, slaStatus: 'POSTED' } : m);
+      message.success(`GL Journal posted — Batch ${batchName}`);
+    } catch (e: any) {
+      setAcctModal(m => m ? { ...m, posting: false } : m);
+      message.error('Post Accounting failed: ' + (e?.message || String(e)));
+    }
+  };
+
   // ── Save ──────────────────────────────────────────────────────────────────
   const handleSave = async (tabKey: string): Promise<boolean> => {
     const tab = tabs.find(t => t.key === tabKey);
@@ -1049,9 +1216,14 @@ const ManageReceipts: React.FC = () => {
               {syncStatus && <Tag color={syncStatusColor(syncStatus)} style={{ fontSize: 11 }}>{syncStatus}</Tag>}
             </Space>
             <Space size="small">
-              {/* API Inspector */}
+              {/* API Services info */}
+              <Tooltip title="API Services">
+                <Button size="small" icon={<ApiOutlined style={{ color: REDWOOD.info }} />}
+                  onClick={() => setApiInfoVisible(true)} />
+              </Tooltip>
+              {/* Payload inspector */}
               <Tooltip title="Inspect POST payload">
-                <Button size="small" icon={<CodeOutlined style={{ color: REDWOOD.info }} />}
+                <Button size="small" icon={<CodeOutlined style={{ color: REDWOOD.neutral600 }} />}
                   onClick={() => setApiModal({ tabKey, testResult: null, testing: false })} />
               </Tooltip>
 
@@ -1061,6 +1233,29 @@ const ManageReceipts: React.FC = () => {
                   <Button size="small" danger icon={<DeleteOutlined />} loading={deleting[tabKey]}
                     onClick={() => handleDelete(tabKey)} />
                 </Tooltip>
+              )}
+
+              {/* Accounting buttons — only after receipt is saved */}
+              {!isNew && (
+                <>
+                  <Tooltip title={!draft.receiptMethod ? 'Select a Receipt Method first' : 'Create SLA accounting entries'}>
+                    <Button size="small" icon={<BookOutlined />}
+                      style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
+                      onClick={() => openAcctModal(tabKey)}>
+                      Create Accounting
+                    </Button>
+                  </Tooltip>
+                  <Tooltip title={acctModal?.slaHeaderId ? 'Post to GL' : 'Create Accounting first'}>
+                    <Button size="small" icon={<CheckCircleOutlined />}
+                      disabled={!acctModal?.slaHeaderId || acctModal?.slaStatus === 'POSTED'}
+                      style={acctModal?.slaHeaderId && acctModal?.slaStatus !== 'POSTED'
+                        ? { color: '#722ed1', borderColor: '#722ed1' } : {}}
+                      onClick={handlePostAccounting}
+                      loading={acctModal?.posting}>
+                      Post Accounting
+                    </Button>
+                  </Tooltip>
+                </>
               )}
 
               {!isLocked && <>
@@ -1104,73 +1299,9 @@ const ManageReceipts: React.FC = () => {
                         , true)}
                         {field('Receipt Method',
                           <div>
-                            {/* API debug icon — shows exactly what URL populates this dropdown */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
-                              <Text type="secondary" style={{ fontSize: 10, flex: 1 }}>
-                                {allMethodAccountsLoading[tabKey]
-                                  ? 'Loading…'
-                                  : `${receiptMethods.length} methods loaded`}
-                              </Text>
-                              <Tooltip
-                                title={
-                                  <div style={{ fontSize: 11 }}>
-                                    <div style={{ fontWeight: 600, marginBottom: 4 }}>GET endpoint:</div>
-                                    <code style={{ wordBreak: 'break-all', fontSize: 10 }}>
-                                      {`${ORDS_RECEIPT_METHOD_ACCOUNTS}?limit=500`}
-                                    </code>
-                                    <div style={{ marginTop: 6, color: '#aaa' }}>
-                                      Builds receipt method dropdown + Remittance Bank GL accounts
-                                    </div>
-                                  </div>
-                                }
-                                placement="topRight"
-                              >
-                                <Button size="small" type="text"
-                                  icon={<ApiOutlined style={{ color: REDWOOD.info, fontSize: 12 }} />}
-                                  style={{ padding: '0 2px', height: 18 }}
-                                  onClick={async () => {
-                                    const url = `${ORDS_RECEIPT_METHOD_ACCOUNTS}?limit=500`;
-                                    let rawJson = 'Fetching…';
-                                    const modal = Modal.info({
-                                      title: 'Receipt Method API Inspector',
-                                      width: 700,
-                                      content: (
-                                        <div>
-                                          <div style={{ marginBottom: 8 }}>
-                                            <Tag color="blue">GET</Tag>
-                                            <Text style={{ fontSize: 11, wordBreak: 'break-all' }}>{url}</Text>
-                                          </div>
-                                          <div style={{ marginBottom: 8 }}>
-                                            <Text type="secondary" style={{ fontSize: 11 }}>
-                                              State — Methods in dropdown: <strong>{receiptMethods.length}</strong>
-                                            </Text>
-                                            {receiptMethods.length > 0 && (
-                                              <pre style={{ background: '#1e1e1e', color: '#9cdcfe', padding: 8, borderRadius: 4, fontSize: 11, maxHeight: 120, overflowY: 'auto', marginTop: 4 }}>
-                                                {JSON.stringify(receiptMethods, null, 2)}
-                                              </pre>
-                                            )}
-                                          </div>
-                                          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Live Response (first 3 items):</Text>
-                                          <pre id="rm-api-result" style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 4, fontSize: 11, maxHeight: 300, overflowY: 'auto' }}>
-                                            Fetching…
-                                          </pre>
-                                        </div>
-                                      ),
-                                    });
-                                    try {
-                                      const res  = await fetch(url, { headers: { Accept: 'application/json' } });
-                                      const data = await res.json();
-                                      const preview = { ...data, items: (data.items ?? []).slice(0, 3) };
-                                      rawJson = JSON.stringify(preview, null, 2);
-                                    } catch (e: any) {
-                                      rawJson = `Error: ${e.message}`;
-                                    }
-                                    const el = document.getElementById('rm-api-result');
-                                    if (el) el.textContent = rawJson;
-                                  }}
-                                />
-                              </Tooltip>
-                            </div>
+                            <Text type="secondary" style={{ fontSize: 10, display: 'block', marginBottom: 4 }}>
+                              {allMethodAccountsLoading[tabKey] ? 'Loading…' : `${receiptMethods.length} methods loaded`}
+                            </Text>
                             <Select
                               size="small"
                               style={{ width: '100%', fontSize: 12 }}
@@ -1246,6 +1377,22 @@ const ManageReceipts: React.FC = () => {
                               );
                             })()}
                           </div>
+                        , true)}
+                        {draft.receiptType === 'MISC' && field('Misc. Account',
+                          <Space.Compact style={{ width: '100%' }}>
+                            <Input size="small" readOnly
+                              value={draft.miscAccount}
+                              placeholder="Select GL combination…"
+                              style={{ fontSize: 12, fontFamily: draft.miscAccount ? 'monospace' : undefined, background: '#fff', cursor: 'pointer' }}
+                              onClick={() => { if (!isLocked) { setMiscAcctTabKey(tabKey); setMiscAcctVisible(true); } }}
+                            />
+                            {draft.miscAccount
+                              ? <Button size="small" icon={<CloseOutlined />} disabled={isLocked}
+                                  onClick={() => updateDraft(tabKey, { miscAccount: '' })} />
+                              : <Button size="small" icon={<SearchOutlined />} disabled={isLocked}
+                                  onClick={() => { setMiscAcctTabKey(tabKey); setMiscAcctVisible(true); }} />
+                            }
+                          </Space.Compact>
                         , true)}
                         {field('Receipt Number', inp('receiptNumber', 'Auto-generated if blank'), true)}
                         {field('Customer',       custSel())}
@@ -1936,6 +2083,139 @@ const ManageReceipts: React.FC = () => {
                 </pre>
               </div>
             )}
+          </Modal>
+        );
+      })()}
+
+      {/* ── API Services Info Modal ── */}
+      <Modal
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>API Services</span></Space>}
+        open={apiInfoVisible} onCancel={() => setApiInfoVisible(false)}
+        footer={<Button onClick={() => setApiInfoVisible(false)}>Close</Button>}
+        width={760}
+      >
+        <Table
+          size="small" pagination={false}
+          dataSource={[
+            { key: 1, service: 'AR Receipts',             method: 'GET / POST / PUT', url: APEX_AR_RECEIPTS },
+            { key: 2, service: 'AR Receipt Applications', method: 'GET',              url: APEX_RECEIPT_APPS },
+            { key: 3, service: 'AR Customers',            method: 'GET',              url: `${APEX_DB_CONFIG.baseUrl}/ar/customers` },
+            { key: 4, service: 'Business Units',          method: 'GET',              url: `${APEX_DB_CONFIG.baseUrl}/gl/businessunits` },
+            { key: 5, service: 'Receipt Method Accounts', method: 'GET',              url: ORDS_RECEIPT_METHOD_ACCOUNTS },
+            { key: 6, service: 'GL Segment Values',       method: 'GET',              url: 'chartofaccounts/structuresegments (via AccountSelector)' },
+            { key: 7, service: 'FX Daily Rates',          method: 'GET',              url: `${GL_ORDS_BASE}/currencies/dailyrates` },
+            { key: 8, service: 'SLA Create Accounting',   method: 'POST',             url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create` },
+            { key: 9, service: 'SLA Post to Ledger',      method: 'POST',             url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post` },
+            { key: 10, service: 'GL Journals Create',     method: 'POST',             url: `${APEX_DB_CONFIG.baseUrl}/journals/create` },
+          ]}
+          columns={[
+            { title: 'Service', dataIndex: 'service', width: 200, render: v => <Text strong style={{ fontSize: 12 }}>{v}</Text> },
+            { title: 'Method', dataIndex: 'method', width: 130,
+              render: v => v.split(' / ').map((m: string) => (
+                <Tag key={m} color={m === 'GET' ? 'blue' : m === 'POST' ? 'green' : 'orange'} style={{ fontSize: 10, margin: '0 2px' }}>{m}</Tag>
+              )) },
+            { title: 'URL', dataIndex: 'url', render: v => <Text style={{ fontSize: 10, fontFamily: 'monospace', wordBreak: 'break-all' }}>{v}</Text> },
+          ]}
+        />
+      </Modal>
+
+      {/* ── AccountSelector for MISC Account ── */}
+      {miscAcctVisible && (
+        <AccountSelector
+          visible={miscAcctVisible}
+          onSelect={(code) => {
+            updateDraft(miscAcctTabKey, { miscAccount: code });
+            setMiscAcctVisible(false);
+          }}
+          onCancel={() => setMiscAcctVisible(false)}
+        />
+      )}
+
+      {/* ── Create / Post Accounting Modal ── */}
+      {acctModal?.visible && (() => {
+        const tab = tabs.find(t => t.key === acctModal.tabKey);
+        const draft2 = tab?.draft;
+        const amount = Math.abs(draft2?.amount ?? 0);
+        const isPosted = acctModal.slaStatus === 'POSTED';
+        return (
+          <Modal
+            title={
+              <Space>
+                <BookOutlined style={{ color: REDWOOD.success }} />
+                <span>Accounting — Receipt {draft2?.receiptNumber}</span>
+                {acctModal.slaHeaderId && (
+                  <Tag color="green" style={{ fontSize: 11 }}>SLA #{acctModal.slaHeaderId}</Tag>
+                )}
+                {isPosted && <Tag color="purple" style={{ fontSize: 11 }}>POSTED</Tag>}
+              </Space>
+            }
+            open onCancel={() => setAcctModal(null)}
+            width={780}
+            footer={
+              <Space>
+                <Button
+                  type="primary" icon={<BookOutlined />}
+                  loading={acctModal.creating}
+                  disabled={!!acctModal.slaHeaderId}
+                  style={!acctModal.slaHeaderId ? { background: REDWOOD.success, borderColor: REDWOOD.success } : {}}
+                  onClick={handleCreateAccounting}
+                >
+                  Create Accounting
+                </Button>
+                <Button
+                  icon={<CheckCircleOutlined />}
+                  loading={acctModal.posting}
+                  disabled={!acctModal.slaHeaderId || isPosted}
+                  style={acctModal.slaHeaderId && !isPosted ? { color: '#722ed1', borderColor: '#722ed1' } : {}}
+                  onClick={handlePostAccounting}
+                >
+                  Post Accounting
+                </Button>
+                <Button onClick={() => setAcctModal(null)}>Close</Button>
+              </Space>
+            }
+          >
+            {acctModal.slaHeaderId && (
+              <Alert type="success" showIcon style={{ marginBottom: 12, fontSize: 12 }}
+                message={`SLA Journal created — Header ID: ${acctModal.slaHeaderId}${acctModal.glBatchId ? ` · GL Batch ID: ${acctModal.glBatchId}` : ''}`} />
+            )}
+            <Table
+              size="small" pagination={false}
+              dataSource={acctModal.lines.map((l, i) => ({ ...l, key: i }))}
+              columns={[
+                { title: 'Type', dataIndex: 'lineType', width: 50,
+                  render: v => <Tag color={v === 'DR' ? 'blue' : 'green'} style={{ fontSize: 11, fontWeight: 700 }}>{v}</Tag> },
+                { title: 'Class', dataIndex: 'accountingClass', width: 110,
+                  render: v => <Text style={{ fontSize: 11 }}>{v}</Text> },
+                { title: 'Account Combination', dataIndex: 'accountCombination',
+                  render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: v ? REDWOOD.info : '#bfbfbf' }}>{v || '— not set —'}</Text> },
+                { title: 'Debit', dataIndex: 'enteredDr', width: 110, align: 'right' as const,
+                  render: v => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.success }}>{fmt(v)}</Text> : <Text type="secondary">—</Text> },
+                { title: 'Credit', dataIndex: 'enteredCr', width: 110, align: 'right' as const,
+                  render: v => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.primary }}>{fmt(v)}</Text> : <Text type="secondary">—</Text> },
+              ]}
+              summary={() => (
+                <Table.Summary.Row>
+                  <Table.Summary.Cell index={0} colSpan={3}>
+                    <Text strong style={{ fontSize: 11 }}>Total</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={3} align="right">
+                    <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(amount)}</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={4} align="right">
+                    <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(amount)}</Text>
+                  </Table.Summary.Cell>
+                </Table.Summary.Row>
+              )}
+            />
+            <div style={{ marginTop: 10, padding: '8px 12px', background: '#f5f5f5', borderRadius: 6, fontSize: 11 }}>
+              <Text type="secondary">
+                Currency: <strong>{draft2?.currency || 'AED'}</strong>
+                {draft2?.conversionRate && draft2.conversionRate !== 1 && <> · Rate: <strong>{draft2.conversionRate}</strong></>}
+                {' · '}BU: <strong>{draft2?.businessUnit}</strong>
+                {' · '}Reference5: <strong>AR_RECEIPTS</strong>
+              </Text>
+            </div>
           </Modal>
         );
       })()}
