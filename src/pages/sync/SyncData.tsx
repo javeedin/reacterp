@@ -989,11 +989,6 @@ const SyncData: React.FC = () => {
     errors: 0, lastError: '',
     startTime: null, endTime: null,
   });
-  const [arInstallmentsProgress, setArInstallmentsProgress] = useState<ARInstallmentsSyncProgress>({
-    status: 'idle', totalInvoices: 0, processedInvoices: 0,
-    totalInstallments: 0, insertedInstallments: 0,
-    errors: 0, lastError: '', startTime: null, endTime: null,
-  });
   const [arAdjProgress, setArAdjProgress] = useState<ARAdjSyncProgress>({
     status: 'idle',
     totalAdjustments: 0, processedAdjustments: 0,
