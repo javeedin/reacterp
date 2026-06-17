@@ -598,7 +598,8 @@ const ManageReceivables: React.FC = () => {
     }
   }, []);
 
-  // ── Balance Details per invoice tab ─────────────────────────────────────  const [balanceMap, setBalanceMap] = useState<Record<string, {
+  // ── Balance Details per invoice tab ─────────────────────────────────────
+  const [balanceMap, setBalanceMap] = useState<Record<string, {
     loading: boolean; rows: BalanceRow[]; balance: number; url: string; fetched: boolean;
   }>>({});
   const fetchedBalanceTabsRef = useRef<Set<string>>(new Set());
