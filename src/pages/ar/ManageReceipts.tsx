@@ -1807,12 +1807,17 @@ const ManageReceipts: React.FC = () => {
                               }
                               onChange={(v) => {
                                 const acct = allMethodAccounts.find(a => a.id === v);
+                                const tab  = tabs.find(t => t.key === tabKey);
                                 updateDraft(tabKey, {
                                   receiptMethod:               acct?.receiptMethodName ?? '',
                                   receiptMethodId:             acct?.receiptMethodId   ?? null,
                                   selectedBankAccountId:       v ?? null,
                                   remittanceBankName:          acct?.bankName          ?? '',
                                   remittanceBankAccountNumber: acct?.bankAccountNum    ?? '',
+                                  // auto-fill DR Account from Cash account if currently blank
+                                  ...(acct?.cashCombination && !(tab?.draft.drAccount)
+                                    ? { drAccount: acct.cashCombination.replace(/\./g, '-') }
+                                    : {}),
                                 });
                               }}
                             >
