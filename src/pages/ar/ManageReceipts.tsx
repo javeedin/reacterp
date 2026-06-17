@@ -227,7 +227,7 @@ function syncStatusColor(s: string) {
   return m[(s || '').toUpperCase()] || 'default';
 }
 
-const LOCKED_SYNC = ['UPDATED', 'NEW'];
+const LOCKED_SYNC = ['FUSION SYNC'];
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
