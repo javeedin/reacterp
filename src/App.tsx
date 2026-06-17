@@ -1,8 +1,9 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useState, useCallback } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ConfigProvider, Spin } from 'antd';
 import { AuthProvider } from './context/AuthContext';
 import { GlValidationProvider } from './context/GlValidationContext';
+import SplashScreen from './components/SplashScreen';
 import { NotificationProvider } from './context/NotificationContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import MainLayout from './layouts/MainLayout';
@@ -143,7 +144,12 @@ const ComingSoon = ({ moduleName }: { moduleName: string }) => (
 );
 
 function App() {
+  const [splashDone, setSplashDone] = useState(false);
+  const handleSplashDone = useCallback(() => setSplashDone(true), []);
+
   return (
+    <>
+      {!splashDone && <SplashScreen onDone={handleSplashDone} />}
     <ConfigProvider
       theme={{
         token: {
@@ -330,6 +336,7 @@ function App() {
         </NotificationProvider>
       </AuthProvider>
     </ConfigProvider>
+    </>
   );
 }
 
