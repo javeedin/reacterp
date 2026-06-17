@@ -3248,35 +3248,34 @@ const ManageReceipts: React.FC = () => {
             <Table
               size="small" pagination={false}
               dataSource={acctModal.lines.map((l, i) => ({ ...l, key: i }))}
+              scroll={{ x: 900 }}
               columns={[
-                { title: 'Type', dataIndex: 'lineType', width: 50,
+                { title: 'Type', dataIndex: 'lineType', width: 55,
                   render: v => <Tag color={v === 'DR' ? 'blue' : 'green'} style={{ fontSize: 11, fontWeight: 700 }}>{v}</Tag> },
-                { title: 'Class', dataIndex: 'accountingClass', width: 100,
-                  render: v => <Text style={{ fontSize: 11 }}>{v}</Text> },
-                { title: 'Account', dataIndex: 'accountCombination',
+                { title: 'Class', dataIndex: 'accountingClass', width: 90,
+                  render: v => <Text style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{v}</Text> },
+                { title: 'Account', dataIndex: 'accountCombination', width: 230,
                   render: (v, r: any) => (
-                    <div>
-                      <Text style={{ fontSize: 11, fontFamily: 'monospace', color: v ? REDWOOD.info : '#bfbfbf' }}>{v || '— not set —'}</Text>
-                      {r.accountDesc && <div style={{ fontSize: 10, color: '#8c8c8c', marginTop: 1 }}>{r.accountDesc}</div>}
+                    <div style={{ minWidth: 210 }}>
+                      <Text style={{ fontSize: 12, fontFamily: 'monospace', color: v ? REDWOOD.info : '#bfbfbf', whiteSpace: 'nowrap', display: 'block' }}>{v || '— not set —'}</Text>
+                      {r.accountDesc && <div style={{ fontSize: 10, color: '#8c8c8c', marginTop: 2, whiteSpace: 'nowrap' }}>{r.accountDesc}</div>}
                     </div>
                   ) },
-                { title: 'Line Description', dataIndex: 'description',
+                { title: 'Line Description', dataIndex: 'description', width: 240,
                   render: (_, r: any) => {
                     const desc = draft2?.comments || r.description;
                     return (
-                      <Tooltip title={desc}>
-                        <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }} ellipsis>{desc || '—'}</Text>
-                      </Tooltip>
+                      <Text style={{ fontSize: 11, color: REDWOOD.neutral600, wordBreak: 'break-word', whiteSpace: 'pre-wrap', display: 'block' }}>{desc || '—'}</Text>
                     );
                   } },
-                { title: 'Ref 1', width: 110,
-                  render: () => <Text style={{ fontSize: 10, fontFamily: 'monospace', color: '#888' }}>{draft2?.receiptNumber}</Text> },
-                { title: 'Ref 2', width: 90,
-                  render: () => <Text style={{ fontSize: 10, fontFamily: 'monospace', color: '#888' }}>{draft2?.standardReceiptId}</Text> },
-                { title: 'Debit', dataIndex: 'enteredDr', width: 100, align: 'right' as const,
-                  render: v => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.success }}>{fmt(v)}</Text> : <Text type="secondary">—</Text> },
-                { title: 'Credit', dataIndex: 'enteredCr', width: 100, align: 'right' as const,
-                  render: v => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.primary }}>{fmt(v)}</Text> : <Text type="secondary">—</Text> },
+                { title: 'Ref 1', width: 120,
+                  render: () => <Text style={{ fontSize: 10, fontFamily: 'monospace', color: '#888', whiteSpace: 'nowrap' }}>{draft2?.receiptNumber}</Text> },
+                { title: 'Ref 2', width: 100,
+                  render: () => <Text style={{ fontSize: 10, fontFamily: 'monospace', color: '#888', whiteSpace: 'nowrap' }}>{draft2?.standardReceiptId}</Text> },
+                { title: 'Debit', dataIndex: 'enteredDr', width: 110, align: 'right' as const,
+                  render: v => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.success, whiteSpace: 'nowrap' }}>{fmt(v)}</Text> : <Text type="secondary">—</Text> },
+                { title: 'Credit', dataIndex: 'enteredCr', width: 110, align: 'right' as const,
+                  render: v => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.primary, whiteSpace: 'nowrap' }}>{fmt(v)}</Text> : <Text type="secondary">—</Text> },
               ]}
               summary={() => (
                 <Table.Summary.Row>
