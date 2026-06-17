@@ -1265,7 +1265,7 @@ const ManageReceipts: React.FC = () => {
           accountedCr:      l.lineType === 'CR' ? l.enteredCr * exRate : 0,
           currencyCode:     draft.currency || 'AED',
           exchangeRate:     exRate,
-          description:      draft.comments || l.description,
+          description:      l.description,
         })),
       };
       const result = await createAccounting(payload);
