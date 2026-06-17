@@ -79,6 +79,7 @@ import { syncARAdj, testARAdjConnection, type ARAdjSyncProgress } from '../../se
 import { syncARCreditMemos, testARCreditMemoConnection, type ARCreditMemoSyncProgress } from '../../services/ar-creditmemo-sync.service';
 import { syncARInstallments, type ARInstallmentsSyncProgress } from '../../services/ar-installments-sync.service';
 import { syncARInvoiceDff, type ARInvoiceDffProgress } from '../../services/ar-invoice-dff-sync.service';
+import { syncARInstallmentNotes, type ARInstallmentNotesProgress } from '../../services/ar-installment-notes-sync.service';
 import { useSyncWorker, type WorkerSyncProgress, type WorkerLog } from '../../hooks/useSyncWorker';
 import Autopilot from '../../components/Autopilot';
 import { useElectron, useElectronBackgroundSync } from '../../hooks/useElectron';
@@ -782,6 +783,7 @@ const SyncData: React.FC = () => {
   const isARAdj                 = selectedObject?.id === 'ar-adjustments';
   const isARInstallments        = selectedObject?.id === 'ar-invoice-installments';
   const isARInvoiceDff          = selectedObject?.id === 'ar-invoice-dff';
+  const isARInstallmentNotes    = selectedObject?.id === 'ar-installment-notes';
   const isARCreditMemos         = selectedObject?.id === 'ar-credit-memos';
   const isAPPayments = selectedObject?.id === 'ap-payments';
   const isGLCodeComb = selectedObject?.id === 'gl-code-combinations';
@@ -987,6 +989,14 @@ const SyncData: React.FC = () => {
     status: 'idle',
     totalInvoices: 0, processedInvoices: 0,
     totalDff: 0, insertedDff: 0,
+    errors: 0, lastError: '',
+    startTime: null, endTime: null,
+  });
+  const [arInstNotesProg, setArInstNotesProg] = useState<ARInstallmentNotesProgress>({
+    status: 'idle',
+    totalInvoices: 0, processedInvoices: 0,
+    totalInstallments: 0, processedInstallments: 0,
+    totalNotes: 0, insertedNotes: 0,
     errors: 0, lastError: '',
     startTime: null, endTime: null,
   });
@@ -2371,6 +2381,14 @@ const SyncData: React.FC = () => {
         abortControllerRef.current.signal
       );
       syncResult = { inserted: result.insertedDff, errors: result.errors, type: 'AR Invoice DFF' };
+    } else if (isARInstallmentNotes) {
+      setArInstNotesProg({ status: 'fetching', totalInvoices: 0, processedInvoices: 0, totalInstallments: 0, processedInstallments: 0, totalNotes: 0, insertedNotes: 0, errors: 0, lastError: '', startTime: new Date(), endTime: null });
+      const result = await syncARInstallmentNotes(
+        parameters, testMode, addLog,
+        (p) => { setArInstNotesProg(prev => ({ ...prev, ...p })); },
+        abortControllerRef.current.signal
+      );
+      syncResult = { inserted: result.insertedNotes, errors: result.errors, type: 'AR Installment Notes' };
     } else if (isARReceiptApplications) {
       // AR Receipt Applications Sync
       setArReceiptAppsProgress({
@@ -3627,6 +3645,8 @@ const SyncData: React.FC = () => {
     ? arInstallmentsProgress.status
     : isARInvoiceDff
     ? arDffProgress.status
+    : isARInstallmentNotes
+    ? arInstNotesProg.status
     : isARAdj
     ? arAdjProgress.status
     : isARCreditMemos
@@ -4907,6 +4927,67 @@ const SyncData: React.FC = () => {
                       {arDffProgress.lastError && (
                         <Tooltip title={arDffProgress.lastError}>
                           <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>{arDffProgress.lastError}</Text>
+                        </Tooltip>
+                      )}
+                    </Card>
+                  </Col>
+                </Row>
+              ) : isARInstallmentNotes ? (
+                /* AR Installment Notes KPI Cards */
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  <Col xs={24} sm={6}>
+                    <Card style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }} bodyStyle={{ padding: 16 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <BankOutlined style={{ fontSize: 20, color: REDWOOD.info, marginRight: 8 }} />
+                        <Text strong>Invoices</Text>
+                      </div>
+                      <div style={{ fontSize: 26, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {arInstNotesProg.processedInvoices}
+                        <Text type="secondary" style={{ fontSize: 13, marginLeft: 6 }}>/ {arInstNotesProg.totalInvoices}</Text>
+                      </div>
+                      <Progress percent={arInstNotesProg.totalInvoices > 0 ? Math.round((arInstNotesProg.processedInvoices / arInstNotesProg.totalInvoices) * 100) : 0}
+                        showInfo={false} strokeColor={REDWOOD.info} style={{ marginTop: 8 }} />
+                    </Card>
+                  </Col>
+                  <Col xs={24} sm={6}>
+                    <Card style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }} bodyStyle={{ padding: 16 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <SyncOutlined style={{ fontSize: 20, color: '#fa8c16', marginRight: 8 }} />
+                        <Text strong>Installments</Text>
+                      </div>
+                      <div style={{ fontSize: 26, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {arInstNotesProg.processedInstallments}
+                        <Text type="secondary" style={{ fontSize: 13, marginLeft: 6 }}>/ {arInstNotesProg.totalInstallments}</Text>
+                      </div>
+                      <Progress percent={arInstNotesProg.totalInstallments > 0 ? Math.round((arInstNotesProg.processedInstallments / arInstNotesProg.totalInstallments) * 100) : 0}
+                        showInfo={false} strokeColor="#fa8c16" style={{ marginTop: 8 }} />
+                    </Card>
+                  </Col>
+                  <Col xs={24} sm={6}>
+                    <Card style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }} bodyStyle={{ padding: 16 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <CloudUploadOutlined style={{ fontSize: 20, color: REDWOOD.success, marginRight: 8 }} />
+                        <Text strong>Notes</Text>
+                      </div>
+                      <div style={{ fontSize: 24, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        <span style={{ color: REDWOOD.success }}>{arInstNotesProg.insertedNotes}</span>
+                        <Text type="secondary" style={{ fontSize: 13, marginLeft: 6 }}>synced of</Text>
+                        <span style={{ color: REDWOOD.info, marginLeft: 6 }}>{arInstNotesProg.totalNotes}</span>
+                      </div>
+                    </Card>
+                  </Col>
+                  <Col xs={24} sm={6}>
+                    <Card style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }} bodyStyle={{ padding: 16 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <WarningOutlined style={{ fontSize: 20, color: arInstNotesProg.errors > 0 ? REDWOOD.error : REDWOOD.textSecondary, marginRight: 8 }} />
+                        <Text strong>Errors</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: arInstNotesProg.errors > 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+                        {arInstNotesProg.errors}
+                      </div>
+                      {arInstNotesProg.lastError && (
+                        <Tooltip title={arInstNotesProg.lastError}>
+                          <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>{arInstNotesProg.lastError}</Text>
                         </Tooltip>
                       )}
                     </Card>

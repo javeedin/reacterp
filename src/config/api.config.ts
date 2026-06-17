@@ -504,6 +504,22 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
     ],
   },
   {
+    id: 'ar-installment-notes',
+    name: 'AR Installment Notes Sync',
+    description: 'Sync AR Invoice Installment Notes — fetches invoices from APEX, then loops Fusion receivablesInvoiceInstallments and receivablesInvoiceInstallmentNotes per installment.',
+    oracleEndpoint: 'receivablesInvoices',
+    apexEndpoint: 'ar/invoices/installments/notes/bulk',
+    parameters: [
+      {
+        key: 'CustomerTransactionId',
+        label: 'Customer Transaction ID',
+        type: 'text',
+        required: false,
+        placeholder: 'e.g. 300000089305592 — leave blank to sync all',
+      },
+    ],
+  },
+  {
     id: 'ar-credit-memos',
     name: 'AR Credit Memos',
     description: 'Sync AR Credit Memos from Oracle Fusion receivablesCreditMemos',
