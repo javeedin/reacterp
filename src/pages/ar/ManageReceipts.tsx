@@ -1265,7 +1265,7 @@ const ManageReceipts: React.FC = () => {
           accountedCr:      l.lineType === 'CR' ? l.enteredCr * exRate : 0,
           currencyCode:     draft.currency || 'AED',
           exchangeRate:     exRate,
-          description:      l.description,
+          description:      draft.comments || l.description,
         })),
       };
       const result = await createAccounting(payload);
@@ -1318,7 +1318,8 @@ const ManageReceipts: React.FC = () => {
           enteredCr:  l.lineType === 'CR' ? l.enteredCr : null,
           accountedDr: l.lineType === 'DR' ? l.enteredDr * exRate : null,
           accountedCr: l.lineType === 'CR' ? l.enteredCr * exRate : null,
-          statAmount: null, description: l.description,
+          statAmount: null,
+          description: draft.comments || l.description,
           currencyCode: draft.currency || 'AED',
           currencyConversionDate: draft.receiptDate || today(),
           currencyConversionRate: exRate,
@@ -1326,7 +1327,7 @@ const ManageReceipts: React.FC = () => {
           accountCombination: l.accountCombination,
           chartOfAccountsName: 'Chart of Accounts',
           reference1: draft.receiptNumber,
-          reference2: draft.customerName || '',
+          reference2: String(draft.standardReceiptId),
           reference3: l.accountingClass,
           reference4: draft.businessUnit,
           reference5: 'AR_RECEIPTS',
