@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Layout, Card, Form, Select, Input, Button, Space, Typography, Table, Tag,
   Row, Col, Breadcrumb, Tooltip, DatePicker, message, Tabs, Divider,
-  Badge, Alert, Modal, InputNumber, Radio, Spin,
+  Badge, Alert, Modal, InputNumber, Radio, Spin, Descriptions,
 } from 'antd';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -340,7 +340,27 @@ const ManageReceipts: React.FC = () => {
              accountDesc: string; enteredDr: number; enteredCr: number; description: string }[];
   } | null>(null);
 
-  // Receipt applications (per tab)
+  const [viewAcctModal, setViewAcctModal] = useState<{
+    receiptNumber: string; loading: boolean;
+    header: any; lines: any[];
+  } | null>(null);
+
+  const openViewAccounting = async (draft: ReceiptDraft) => {
+    setViewAcctModal({ receiptNumber: draft.receiptNumber, loading: true, header: null, lines: [] });
+    try {
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/by-txn?txn_id=${encodeURIComponent(draft.receiptNumber)}`,
+        { headers: { Accept: 'application/json' } });
+      const d = await res.json();
+      setViewAcctModal({ receiptNumber: draft.receiptNumber, loading: false,
+        header: d.found !== false ? d : null,
+        lines: d.lines || [] });
+    } catch (e: any) {
+      message.error('Failed to load GL journal: ' + e.message);
+      setViewAcctModal(null);
+    }
+  };
+
+
   const [receiptApplications, setReceiptApplications] = useState<
     Record<string, { loading: boolean; rows: AppRow[] }>
   >({});
@@ -1777,15 +1797,19 @@ const ManageReceipts: React.FC = () => {
 
               {/* Accounting buttons — only after receipt is saved */}
               {hasSavedId && (
-                <>
-                  <Tooltip title={!draft.receiptMethod ? 'Select a Receipt Method first' : 'Create SLA accounting entries'}>
-                    <Button size="small" icon={<BookOutlined />}
-                      style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
-                      onClick={() => openAcctModal(tabKey)}>
-                      Create Accounting
+                isAccounted
+                  ? <Button size="small" icon={<EyeOutlined />}
+                      style={{ color: '#722ed1', borderColor: '#722ed1' }}
+                      onClick={() => openViewAccounting(draft)}>
+                      View Accounting
                     </Button>
-                  </Tooltip>
-                </>
+                  : <Tooltip title={!draft.receiptMethod ? 'Select a Receipt Method first' : 'Create SLA accounting entries'}>
+                      <Button size="small" icon={<BookOutlined />}
+                        style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
+                        onClick={() => openAcctModal(tabKey)}>
+                        Create Accounting
+                      </Button>
+                    </Tooltip>
               )}
 
               {/* Edit / Save / Cancel */}
@@ -2943,6 +2967,49 @@ const ManageReceipts: React.FC = () => {
           />
         );
       })()}
+
+      {/* ── View Accounting Modal ── */}
+      {viewAcctModal && (
+        <Modal
+          open
+          title={<Space><EyeOutlined style={{ color: '#722ed1' }} /><span>GL Journal — Receipt {viewAcctModal.receiptNumber}</span></Space>}
+          onCancel={() => setViewAcctModal(null)}
+          footer={<Button onClick={() => setViewAcctModal(null)}>Close</Button>}
+          width={900}
+        >
+          {viewAcctModal.loading
+            ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+            : viewAcctModal.header
+              ? <>
+                  <Descriptions size="small" bordered column={3} style={{ marginBottom: 16 }}>
+                    <Descriptions.Item label="Journal Name">{viewAcctModal.header.journalName || '—'}</Descriptions.Item>
+                    <Descriptions.Item label="Batch">{viewAcctModal.header.batchName || '—'}</Descriptions.Item>
+                    <Descriptions.Item label="Status"><Tag color="green">{viewAcctModal.header.batchStatus || 'Posted'}</Tag></Descriptions.Item>
+                    <Descriptions.Item label="Period">{viewAcctModal.header.periodName || '—'}</Descriptions.Item>
+                    <Descriptions.Item label="Acctg Date">{viewAcctModal.header.accountingDate || '—'}</Descriptions.Item>
+                    <Descriptions.Item label="Created By">{viewAcctModal.header.createdBy || '—'}</Descriptions.Item>
+                  </Descriptions>
+                  <Table
+                    dataSource={(viewAcctModal.lines || []).map((l: any, i: number) => ({ ...l, key: i }))}
+                    size="small"
+                    pagination={false}
+                    scroll={{ x: 'max-content' }}
+                    columns={[
+                      { title: 'Line', dataIndex: 'lineNumber', width: 50, render: (_: any, __: any, i: number) => i + 1 },
+                      { title: 'Account', dataIndex: 'accountCombination', width: 220, render: (v: string) => <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>{v}</Text> },
+                      { title: 'Description', dataIndex: 'description', ellipsis: true, render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+                      { title: 'Dr', dataIndex: 'enteredDr', width: 130, align: 'right' as const,
+                        render: (v: number) => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> : <Text type="secondary">—</Text> },
+                      { title: 'Cr', dataIndex: 'enteredCr', width: 130, align: 'right' as const,
+                        render: (v: number) => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.primary }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> : <Text type="secondary">—</Text> },
+                      { title: 'Ref2', dataIndex: 'reference2', width: 120, render: (v: string) => <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>{v || '—'}</Text> },
+                    ]}
+                  />
+                </>
+              : <Alert type="warning" showIcon message={`No GL journal found for receipt number "${viewAcctModal.receiptNumber}"`} />
+          }
+        </Modal>
+      )}
 
       {/* ── Create / Post Accounting Modal ── */}
       {acctModal?.visible && (() => {
