@@ -61,9 +61,7 @@ const fetchInvoicesFromApex = async (
   const result = maxInvoices !== undefined ? allInvoices.slice(0, maxInvoices) : allInvoices;
   log?.('info', `  Found ${result.length} invoices`);
   // Log the transaction IDs we will process
-  const ids = result.map((inv: any) =>
-    inv.CUSTOMER_TRANSACTION_ID ?? inv.CustomerTransactionId ?? inv.customer_transaction_id ?? 'UNKNOWN'
-  );
+  const ids = result.map((inv: any) => inv.customer_transaction_id ?? 'UNKNOWN');
   log?.('info', `  Transaction IDs: ${ids.slice(0, 10).join(', ')}${ids.length > 10 ? ` ... +${ids.length - 10} more` : ''}`);
   return result;
 };
@@ -164,7 +162,7 @@ export const syncARInstallments = async (
     // ── STEP 1: Get invoice list ──────────────────────────────────────────────
     let invoices: { CUSTOMER_TRANSACTION_ID: string }[];
     if (specificTxnId) {
-      invoices = [{ CUSTOMER_TRANSACTION_ID: specificTxnId }];
+      invoices = [{ customer_transaction_id: specificTxnId } as any];
     } else {
       invoices = await fetchInvoicesFromApex(log, maxInvoices);
     }
@@ -190,9 +188,7 @@ export const syncARInstallments = async (
       }
 
       const invoice = invoices[i];
-      const txnId = (invoice as any).CUSTOMER_TRANSACTION_ID
-        ?? (invoice as any).CustomerTransactionId
-        ?? (invoice as any).customer_transaction_id;
+      const txnId = (invoice as any).customer_transaction_id;
 
       log?.('info', `\n[${i + 1}/${invoices.length}] Invoice: ${txnId}`);
 
