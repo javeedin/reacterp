@@ -2707,6 +2707,16 @@ const AAPanel: React.FC = () => {
             const openRow = accRunAccountBals[acct]?.openRow;
             const acctAccBal = openRow ? (openRow.accountedDr||0)-(openRow.accountedCr||0) : 0;
             const acctEntBal = openRow ? (openRow.enteredDr||0)-(openRow.enteredCr||0) : 0;
+            // Account header row: merged cell with account code + description
+            const xlAcctDesc = openRow?.accountDescription || '';
+            ws.mergeCells(ri, 1, ri, NCOLS_BRK);
+            const xlAcctHdrCell = ws.getCell(ri, 1);
+            xlAcctHdrCell.value = xlAcctDesc ? `${acct}   –   ${xlAcctDesc}` : acct;
+            xlAcctHdrCell.font = { bold: true, size: 11, color: { argb: 'FF1A3FAA' } };
+            xlAcctHdrCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F0FF' } } as ExcelJS.Fill;
+            xlAcctHdrCell.alignment = { vertical: 'middle' };
+            ws.getRow(ri).height = 18;
+            ri++;
             if (openRow) writeDetailRow(openRow, 0, false, false, acctAccBal, acctEntBal, acct);
             xlAccRun = acctAccBal; xlEntRun = acctEntBal;
             xlTotAccDr = 0; xlTotAccCr = 0; xlTotEntDr = 0; xlTotEntCr = 0;
@@ -2977,6 +2987,14 @@ const AAPanel: React.FC = () => {
           const acctBal = accRunAccountBals[acct];
           const acctAccBal = acctBal?.openRow ? (acctBal.openRow.accountedDr||0)-(acctBal.openRow.accountedCr||0) : 0;
           const acctEntBal = acctBal?.openRow ? (acctBal.openRow.enteredDr||0)-(acctBal.openRow.enteredCr||0) : 0;
+          const pdfAcctDesc = acctBal?.openRow?.accountDescription || '';
+          // Draw account header label above this account's table
+          const acctLabelY = currentY + 6;
+          doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+          doc.setTextColor(26, 63, 170);
+          doc.text(pdfAcctDesc ? `${acct}   –   ${pdfAcctDesc}` : acct, margin, acctLabelY);
+          doc.setTextColor(0, 0, 0); doc.setFont('helvetica', 'normal');
+          currentY = acctLabelY + 2;
           const openingBodyRow = makePdfBalRow(acctBal?.openRow ?? null as any, acct);
           // Override bal columns with account-level balance
           const openComboCell = isAllAccountsPdf ? [acct] : [];
@@ -3466,16 +3484,34 @@ const AAPanel: React.FC = () => {
                     segAccount: acct, segCompany: '', segLob: '', segDept: '',
                     segSubAcct: '', segAnalysis: '', segInterco: '', approvalStatus: '',
                   } as any);
+                  const acctDesc = openRow?.accountDescription || '';
                   elements.push(
-                    <Table<ComboBreakLine | JournalLine> key={acct}
-                      dataSource={flatRows} columns={breakLineCols as any}
-                      rowKey={(r: any) => r.key || Math.random().toString()}
-                      size="small" pagination={false} scroll={{ x: 'max-content' }}
-                      className="aa-v2-grid"
-                      rowClassName={(r: any) =>
-                        r.isOpeningBalance ? 'aa-opening-row' : r.isClosingBalance ? 'aa-closing-row' : r.isTotals ? 'aa-totals-row' : ''
-                      }
-                    />
+                    <div key={acct}>
+                      <div style={{ background: '#eff6ff', borderLeft: `4px solid ${REDWOOD.primary}`,
+                        padding: '7px 14px', marginBottom: 4, borderRadius: '4px 4px 0 0',
+                        display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <Text strong style={{ fontSize: 14, color: REDWOOD.primary, fontFamily: 'monospace' }}>
+                          {acct}
+                        </Text>
+                        {acctDesc && (
+                          <Text style={{ fontSize: 12, color: REDWOOD.neutral600, fontWeight: 600 }}>
+                            {acctDesc}
+                          </Text>
+                        )}
+                        <Text type="secondary" style={{ fontSize: 11, marginLeft: 'auto' }}>
+                          {flatRows.filter((r: any) => !r.isOpeningBalance && !r.isTotals).length} line{flatRows.filter((r: any) => !r.isOpeningBalance && !r.isTotals).length !== 1 ? 's' : ''}
+                        </Text>
+                      </div>
+                      <Table<ComboBreakLine | JournalLine>
+                        dataSource={flatRows} columns={breakLineCols as any}
+                        rowKey={(r: any) => r.key || Math.random().toString()}
+                        size="small" pagination={false} scroll={{ x: 'max-content' }}
+                        className="aa-v2-grid"
+                        rowClassName={(r: any) =>
+                          r.isOpeningBalance ? 'aa-opening-row' : r.isClosingBalance ? 'aa-closing-row' : r.isTotals ? 'aa-totals-row' : ''
+                        }
+                      />
+                    </div>
                   );
                 });
                 return <>{elements}</>;
