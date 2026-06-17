@@ -327,6 +327,7 @@ const ManageReceipts: React.FC = () => {
   const [apiModal, setApiModal]           = useState<{ tabKey: string; testResult: string | null; testing: boolean } | null>(null);
   const [apiInfoVisible, setApiInfoVisible] = useState(false);
   const [gridFilter, setGridFilter]       = useState('');
+  const [lastSearchUrl, setLastSearchUrl] = useState('');
   const [miscAcctVisible, setMiscAcctVisible] = useState(false);
   const [miscAcctTabKey, setMiscAcctTabKey]   = useState('');
   const [miscAcctField, setMiscAcctField]     = useState<'drAccount' | 'crAccount'>('crAccount');
@@ -535,7 +536,9 @@ const ManageReceipts: React.FC = () => {
       if (v.dateRange?.[1]) p.set('date_to',   v.dateRange[1].format('YYYY-MM-DD'));
       p.set('limit', '200');
 
-      const res  = await fetch(`${APEX_AR_RECEIPTS}?${p}`);
+      const searchUrl = `${APEX_AR_RECEIPTS}?${p}`;
+      setLastSearchUrl(searchUrl);
+      const res  = await fetch(searchUrl);
       const data = await res.json();
 
       const rows: ReceiptRow[] = ((data.items || []) as any[]).map((r: any, i: number) => ({
@@ -2588,6 +2591,26 @@ const ManageReceipts: React.FC = () => {
                           prefix={<FilterOutlined style={{ color: REDWOOD.neutral600 }} />}
                           placeholder="Filter results…" style={{ width: 200 }}
                           value={gridFilter} onChange={e => setGridFilter(e.target.value)} />
+                        {lastSearchUrl && (
+                          <Tooltip title="Show last API request URL">
+                            <Button size="small" icon={<ApiOutlined style={{ color: REDWOOD.info }} />}
+                              onClick={() => Modal.info({
+                                title: 'Search API Request',
+                                width: 720,
+                                content: (
+                                  <div style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                                    <div style={{ marginBottom: 6 }}><strong>Method:</strong> GET</div>
+                                    <div style={{ background: '#f5f5f5', border: '1px solid #d9d9d9', borderRadius: 4, padding: '8px 10px', wordBreak: 'break-all' }}>
+                                      {lastSearchUrl}
+                                    </div>
+                                    <div style={{ marginTop: 10, color: '#888', fontSize: 11 }}>
+                                      Tip: paste this URL in a browser to see the raw ORDS JSON response and verify ACCOUNTING_STATUS is returned.
+                                    </div>
+                                  </div>
+                                ),
+                              })} />
+                          </Tooltip>
+                        )}
                         <Tooltip title="Export to Excel">
                           <Button size="small" icon={<DownloadOutlined />}
                             disabled={filteredRows.length === 0}
