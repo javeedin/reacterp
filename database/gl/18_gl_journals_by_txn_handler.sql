@@ -70,7 +70,7 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_JOURNALS_PKG AS
         SELECT JE_HEADER_ID, BATCH_ID
           INTO p_je_header_id, p_je_batch_id
           FROM RR_GL_JE_LINES_ALL
-         WHERE REFERENCE1 = p_txn_id
+         WHERE REFERENCE2 = p_txn_id
            AND ROWNUM     = 1;
     EXCEPTION
         WHEN NO_DATA_FOUND THEN

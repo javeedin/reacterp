@@ -350,7 +350,7 @@ const ManageReceipts: React.FC = () => {
   const openViewAccounting = async (draft: ReceiptDraft) => {
     setViewAcctModal({ receiptNumber: draft.receiptNumber, loading: true, header: null, lines: [] });
     try {
-      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/by-txn?txn_id=${encodeURIComponent(draft.receiptNumber)}`,
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/by-txn?txn_id=${encodeURIComponent(String(draft.standardReceiptId))}`,
         { headers: { Accept: 'application/json' } });
       const d = await res.json();
       setViewAcctModal({ receiptNumber: draft.receiptNumber, loading: false,
