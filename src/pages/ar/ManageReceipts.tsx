@@ -26,7 +26,7 @@ import { validateAccountCode } from '../../components/AccountSelector';
 import AccountSelector from '../../components/AccountSelector';
 import {
   createAccounting, postToLedger, fetchLedgerByBusinessUnit,
-  derivePeriodName, type SlaCreatePayload,
+  derivePeriodName, checkAccountingExists, getAccounting, type SlaCreatePayload,
 } from '../../services/sla.service';
 
 const { Content } = Layout;
@@ -118,12 +118,15 @@ interface ReceiptDraft {
   drAccountDesc:                  string;
   crAccount:                      string;
   crAccountDesc:                  string;
+  accountingStatus:               string;
 }
 
 interface ReceiptTab {
-  key:        string;
-  draft:      ReceiptDraft;
-  syncStatus: string;
+  key:          string;
+  draft:        ReceiptDraft;
+  syncStatus:   string;
+  slaHeaderId:  number | null;
+  slaPosted:    boolean;
 }
 
 interface AppRow {
@@ -195,6 +198,7 @@ function blankDraft(): ReceiptDraft {
     customerBank: '', customerBankBranch: '', customerBankAccountNumber: '',
     receivablesSpecialist: '', comments: '', structuredPaymentReference: '',
     receiptBatchName: '', drAccount: '', drAccountDesc: '', crAccount: '', crAccountDesc: '',
+    accountingStatus: '',
   };
 }
 
@@ -331,7 +335,7 @@ const ManageReceipts: React.FC = () => {
     visible: boolean; tabKey: string; creating: boolean; posting: boolean;
     slaHeaderId: number | null; slaStatus: string; glBatchId: number | null;
     lines: { lineType: string; accountingClass: string; accountCombination: string;
-             enteredDr: number; enteredCr: number; description: string }[];
+             accountDesc: string; enteredDr: number; enteredCr: number; description: string }[];
   } | null>(null);
 
   // Receipt applications (per tab)
@@ -608,8 +612,9 @@ const ManageReceipts: React.FC = () => {
       drAccountDesc:               '',
       crAccount:                   '',
       crAccountDesc:               '',
+      accountingStatus:            '',
     };
-    setTabs(prev => [...prev, { key, draft: placeholderDraft, syncStatus: row.syncStatus }]);
+    setTabs(prev => [...prev, { key, draft: placeholderDraft, syncStatus: row.syncStatus, slaHeaderId: null, slaPosted: false }]);
     setActiveKey(key);
 
     // Fetch full receipt record — all columns including DR/CR accounts
@@ -658,6 +663,7 @@ const ManageReceipts: React.FC = () => {
         drAccountDesc:               '',
         crAccount:                   r.cr_account              ?? '',
         crAccountDesc:               '',
+        accountingStatus:            r.accounting_status       ?? '',
       };
 
       setTabs(prev => prev.map(t => t.key === key ? { ...t, draft: fullDraft } : t));
@@ -684,6 +690,19 @@ const ManageReceipts: React.FC = () => {
       if (fullDraft.businessUnit) {
         await fetchMethodAccountsByBU(key, fullDraft.businessUnit);
       }
+
+      // Check if SLA accounting already exists for this receipt
+      try {
+        const slaCheck = await checkAccountingExists('AR_RECEIPTS', fullDraft.standardReceiptId);
+        if (slaCheck?.exists) {
+          const slaData = await getAccounting('AR_RECEIPTS', fullDraft.standardReceiptId);
+          const headerId = slaData?.items?.[0]?.headerId ?? slaData?.headerId ?? null;
+          const posted   = slaData?.items?.[0]?.status === 'POSTED' || slaData?.status === 'POSTED';
+          if (headerId) {
+            setTabs(prev => prev.map(t => t.key === key ? { ...t, slaHeaderId: headerId, slaPosted: posted } : t));
+          }
+        }
+      } catch { /* SLA check is non-critical */ }
     } catch {
       // Tab already open with placeholder data — silent fail
     }
@@ -692,7 +711,7 @@ const ManageReceipts: React.FC = () => {
   // ── New receipt tab ───────────────────────────────────────────────────────
   const openNewTab = () => {
     const key = `new-${Date.now()}`;
-    setTabs(prev => [...prev, { key, draft: blankDraft(), syncStatus: '' }]);
+    setTabs(prev => [...prev, { key, draft: blankDraft(), syncStatus: '', slaHeaderId: null, slaPosted: false }]);
     setActiveKey(key);
   };
 
@@ -1090,7 +1109,6 @@ const ManageReceipts: React.FC = () => {
       ReceiptMethod:               draft.receiptMethod,
       ReceiptMethodId:             draft.receiptMethodId      ?? undefined,
       ReceiptDate:                 draft.receiptDate,
-      AccountingDate:              draft.accountingDate               || draft.receiptDate,
       MaturityDate:                draft.maturityDate                 || undefined,
       Amount:                      draft.amount,
       UnappliedAmount:             draft.unappliedAmount              ?? draft.amount,
@@ -1177,23 +1195,28 @@ const ManageReceipts: React.FC = () => {
   const openAcctModal = (tabKey: string) => {
     const tab = tabs.find(t => t.key === tabKey);
     if (!tab) return;
-    const { draft } = tab;
-    const acct = allMethodAccounts.find(a => a.id === draft.selectedBankAccountId);
+    const { draft, slaHeaderId, slaPosted } = tab;
+    const acct   = allMethodAccounts.find(a => a.id === draft.selectedBankAccountId);
     const amount = Math.abs(draft.amount ?? 0);
     const isMisc = draft.receiptType === 'MISC';
-    let lines: typeof acctModal extends null ? never : NonNullable<typeof acctModal>['lines'] = [];
+    const cashDesc       = acct?.cashCcid     ? (acctDescCache[acct.cashCcid]?.description      ?? '') : '';
+    const unappliedDesc  = acct?.unappliedCcid ? (acctDescCache[acct.unappliedCcid]?.description ?? '') : '';
+    const crDesc         = draft.crAccountDesc || '';
+    let lines: NonNullable<typeof acctModal>['lines'] = [];
     if (isMisc) {
       lines = [
-        { lineType: 'DR', accountingClass: 'CASH',    accountCombination: acct?.cashCombination?.replace(/\./g, '-') || '', enteredDr: amount, enteredCr: 0,      description: `Receipt ${draft.receiptNumber} — Cash DR` },
-        { lineType: 'CR', accountingClass: 'MISC',    accountCombination: draft.crAccount || '',                            enteredDr: 0,      enteredCr: amount, description: `Receipt ${draft.receiptNumber} — Cr Account CR` },
+        { lineType: 'DR', accountingClass: 'CASH', accountCombination: acct?.cashCombination?.replace(/\./g, '-') || draft.drAccount || '', accountDesc: cashDesc || draft.drAccountDesc, enteredDr: amount, enteredCr: 0,      description: `Receipt ${draft.receiptNumber} — Cash DR` },
+        { lineType: 'CR', accountingClass: 'MISC', accountCombination: draft.crAccount || '',                                               accountDesc: crDesc,                           enteredDr: 0,      enteredCr: amount, description: `Receipt ${draft.receiptNumber} — Cr Account CR` },
       ];
     } else {
       lines = [
-        { lineType: 'DR', accountingClass: 'CASH',      accountCombination: acct?.cashCombination?.replace(/\./g, '-') || '',      enteredDr: amount, enteredCr: 0,      description: `Receipt ${draft.receiptNumber} — Cash DR` },
-        { lineType: 'CR', accountingClass: 'UNAPPLIED', accountCombination: acct?.unappliedCombination?.replace(/\./g, '-') || '', enteredDr: 0,      enteredCr: amount, description: `Receipt ${draft.receiptNumber} — Unapplied CR` },
+        { lineType: 'DR', accountingClass: 'CASH',      accountCombination: acct?.cashCombination?.replace(/\./g, '-') || draft.drAccount || '',      accountDesc: cashDesc || draft.drAccountDesc,    enteredDr: amount, enteredCr: 0,      description: `Receipt ${draft.receiptNumber} — Cash DR` },
+        { lineType: 'CR', accountingClass: 'UNAPPLIED', accountCombination: acct?.unappliedCombination?.replace(/\./g, '-') || '',                    accountDesc: unappliedDesc,                      enteredDr: 0,      enteredCr: amount, description: `Receipt ${draft.receiptNumber} — Unapplied CR` },
       ];
     }
-    setAcctModal({ visible: true, tabKey, creating: false, posting: false, slaHeaderId: null, slaStatus: '', glBatchId: null, lines });
+    setAcctModal({ visible: true, tabKey, creating: false, posting: false,
+      slaHeaderId: slaHeaderId, slaStatus: slaPosted ? 'POSTED' : (slaHeaderId ? 'CREATED' : ''),
+      glBatchId: null, lines });
   };
 
   const handleCreateAccounting = async () => {
@@ -1244,6 +1267,7 @@ const ManageReceipts: React.FC = () => {
       };
       const result = await createAccounting(payload);
       setAcctModal(m => m ? { ...m, creating: false, slaHeaderId: result.headerId, slaStatus: result.status } : m);
+      setTabs(prev => prev.map(t => t.key === tabKey ? { ...t, slaHeaderId: result.headerId, slaPosted: false } : t));
       message.success(`SLA created — Header ID ${result.headerId}`);
     } catch (e: any) {
       setAcctModal(m => m ? { ...m, creating: false, slaStatus: 'ERROR' } : m);
@@ -1316,6 +1340,20 @@ const ManageReceipts: React.FC = () => {
       const glBatchId  = glBody?.batchId  ?? glBody?.batch_id  ?? 0;
       const glHeaderId = glBody?.headerId ?? glBody?.header_id ?? 0;
       await postToLedger(slaHeaderId, glBatchId, batchName, glHeaderId, currentUser);
+
+      // Stamp ACCOUNTING_STATUS = Accounted and ACCOUNTING_DATE = SYSDATE on the receipt
+      try {
+        await fetch(`${APEX_AR_RECEIPTS}/${draft.standardReceiptId}/accounting-status`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({}),
+        });
+      } catch { /* non-critical — journal already posted */ }
+
+      // Update tab state
+      setTabs(prev => prev.map(t => t.key === tabKey
+        ? { ...t, slaPosted: true, draft: { ...t.draft, accountingStatus: 'Accounted' } }
+        : t));
       setAcctModal(m => m ? { ...m, posting: false, glBatchId, slaStatus: 'POSTED' } : m);
       message.success(`GL Journal posted — Batch ${batchName}`);
     } catch (e: any) {
@@ -1701,6 +1739,12 @@ const ManageReceipts: React.FC = () => {
                   : <Badge color="blue" text={<Text style={{ fontSize: 12 }}>Saved Locally</Text>} />
               }
               {syncStatus && <Tag color={syncStatusColor(syncStatus)} style={{ fontSize: 11 }}>{syncStatus}</Tag>}
+              {draft.accountingStatus === 'Accounted'
+                ? <Tag color="green" style={{ fontSize: 11 }}>Accounted</Tag>
+                : tab.slaHeaderId
+                  ? <Tag color="blue" style={{ fontSize: 11 }}>SLA Created</Tag>
+                  : null
+              }
             </Space>
             <Space size="small">
               {/* API Services info */}
@@ -2901,7 +2945,12 @@ const ManageReceipts: React.FC = () => {
                 { title: 'Class', dataIndex: 'accountingClass', width: 110,
                   render: v => <Text style={{ fontSize: 11 }}>{v}</Text> },
                 { title: 'Account Combination', dataIndex: 'accountCombination',
-                  render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: v ? REDWOOD.info : '#bfbfbf' }}>{v || '— not set —'}</Text> },
+                  render: (v, r: any) => (
+                    <div>
+                      <Text style={{ fontSize: 11, fontFamily: 'monospace', color: v ? REDWOOD.info : '#bfbfbf' }}>{v || '— not set —'}</Text>
+                      {r.accountDesc && <div style={{ fontSize: 10, color: '#8c8c8c', marginTop: 1 }}>{r.accountDesc}</div>}
+                    </div>
+                  ) },
                 { title: 'Debit', dataIndex: 'enteredDr', width: 110, align: 'right' as const,
                   render: v => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.success }}>{fmt(v)}</Text> : <Text type="secondary">—</Text> },
                 { title: 'Credit', dataIndex: 'enteredCr', width: 110, align: 'right' as const,

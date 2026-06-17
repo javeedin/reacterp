@@ -124,6 +124,11 @@ ALTER TABLE RR_AR_RECEIPTS ADD (
     RECEIPT_METHOD_ID   NUMBER
 );
 
+-- Accounting Status (run once on existing DBs)
+ALTER TABLE RR_AR_RECEIPTS ADD (
+    ACCOUNTING_STATUS   VARCHAR2(20)
+);
+
 -- =====================================================
 -- Sequence for locally created receipts
 -- Run once on each DB. Start value (9000000000) is well
