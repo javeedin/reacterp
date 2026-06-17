@@ -488,6 +488,22 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
     ],
   },
   {
+    id: 'ar-invoice-dff',
+    name: 'AR Invoice DFF Sync',
+    description: 'Sync AR Invoice Descriptive Flexfield (Rental Details) — fetches each invoice from APEX then calls Fusion receivablesInvoiceDFF child endpoint.',
+    oracleEndpoint: 'receivablesInvoices',
+    apexEndpoint: 'ar/invoices/dff/bulk',
+    parameters: [
+      {
+        key: 'CustomerTransactionId',
+        label: 'Customer Transaction ID',
+        type: 'text',
+        required: false,
+        placeholder: 'e.g. 300000089305592 — leave blank to sync all',
+      },
+    ],
+  },
+  {
     id: 'ar-credit-memos',
     name: 'AR Credit Memos',
     description: 'Sync AR Credit Memos from Oracle Fusion receivablesCreditMemos',
