@@ -176,6 +176,56 @@ const syncARLookup = async (
   }
 };
 
+// ─── Combined: run all 5 lookups in one sync pass ────────────────────────────
+
+export interface ARAllLookupsProgress {
+  status:       'idle' | 'running' | 'completed' | 'error' | 'stopped';
+  currentObject: string;
+  completedCount: number;
+  totalInserted: number;
+  totalUpdated:  number;
+  totalErrors:   number;
+}
+
+const ALL_LOOKUP_CONFIGS: LookupConfig[] = [
+  { objectName: 'AR Payment Terms',           fusionEndpoint: 'paymentTermsLOV',           lookupType: 'PAYMENT_TERMS' },
+  { objectName: 'AR Transaction Sources',      fusionEndpoint: 'transactionSourcesLOV',     lookupType: 'TXN_SOURCES'   },
+  { objectName: 'AR Transaction Types',        fusionEndpoint: 'transactionTypesLOV',       lookupType: 'TXN_TYPES'     },
+  { objectName: 'AR Memo Lines',               fusionEndpoint: 'memoLinesLOV',              lookupType: 'MEMO_LINES'    },
+  { objectName: 'AR Revenue Scheduling Rules', fusionEndpoint: 'revenueSchedulingRulesLOV', lookupType: 'REVENUE_RULES' },
+];
+
+export const syncAllARLookups = async (
+  parameters:  Record<string, string>,
+  testMode:    boolean | 'single',
+  log?:        LogCallback,
+  onProgress?: (p: Partial<ARAllLookupsProgress>) => void,
+  signal?:     AbortSignal
+): Promise<ARAllLookupsProgress> => {
+  const summary: ARAllLookupsProgress = {
+    status: 'running', currentObject: '', completedCount: 0,
+    totalInserted: 0, totalUpdated: 0, totalErrors: 0,
+  };
+  const update = (p: Partial<ARAllLookupsProgress>) => { Object.assign(summary, p); onProgress?.(p); };
+
+  update({ status: 'running' });
+
+  for (const config of ALL_LOOKUP_CONFIGS) {
+    if (signal?.aborted) { update({ status: 'stopped' }); return summary; }
+    update({ currentObject: config.objectName });
+    const result = await syncARLookup(config, parameters, testMode, log, undefined, signal);
+    update({
+      completedCount: summary.completedCount + 1,
+      totalInserted:  summary.totalInserted  + result.inserted,
+      totalUpdated:   summary.totalUpdated   + result.updated,
+      totalErrors:    summary.totalErrors    + result.errors,
+    });
+  }
+
+  update({ status: summary.totalErrors > 0 ? 'error' : 'completed', currentObject: '' });
+  return summary;
+};
+
 // ─── Named exports for the 5 lookup objects ──────────────────────────────────
 
 export const syncPaymentTerms = (

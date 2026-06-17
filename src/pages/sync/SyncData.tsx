@@ -80,7 +80,7 @@ import { syncARCreditMemos, testARCreditMemoConnection, type ARCreditMemoSyncPro
 import { syncARInstallments, type ARInstallmentsSyncProgress } from '../../services/ar-installments-sync.service';
 import { syncARInvoiceDff, type ARInvoiceDffProgress } from '../../services/ar-invoice-dff-sync.service';
 import { syncARInstallmentNotes, type ARInstallmentNotesProgress } from '../../services/ar-installment-notes-sync.service';
-import { syncPaymentTerms, syncTxnSources, syncTxnTypes, syncMemoLines, syncRevenueRules, type ARLookupsProgress } from '../../services/ar-lookups-sync.service';
+import { syncAllARLookups, type ARAllLookupsProgress } from '../../services/ar-lookups-sync.service';
 import { useSyncWorker, type WorkerSyncProgress, type WorkerLog } from '../../hooks/useSyncWorker';
 import Autopilot from '../../components/Autopilot';
 import { useElectron, useElectronBackgroundSync } from '../../hooks/useElectron';
@@ -785,11 +785,7 @@ const SyncData: React.FC = () => {
   const isARInstallments        = selectedObject?.id === 'ar-invoice-installments';
   const isARInvoiceDff          = selectedObject?.id === 'ar-invoice-dff';
   const isARInstallmentNotes    = selectedObject?.id === 'ar-installment-notes';
-  const isARPaymentTerms        = selectedObject?.id === 'ar-payment-terms';
-  const isARTxnSources          = selectedObject?.id === 'ar-txn-sources';
-  const isARTxnTypes            = selectedObject?.id === 'ar-txn-types';
-  const isARMemoLines           = selectedObject?.id === 'ar-memo-lines';
-  const isARRevenueRules        = selectedObject?.id === 'ar-revenue-sched-rules';
+  const isARLookups             = selectedObject?.id === 'ar-lookups';
   const isARCreditMemos         = selectedObject?.id === 'ar-credit-memos';
   const isAPPayments = selectedObject?.id === 'ap-payments';
   const isGLCodeComb = selectedObject?.id === 'gl-code-combinations';
@@ -1006,12 +1002,10 @@ const SyncData: React.FC = () => {
     errors: 0, lastError: '',
     startTime: null, endTime: null,
   });
-  const emptyLookupProg: ARLookupsProgress = { status: 'idle', totalFetched: 0, inserted: 0, updated: 0, errors: 0, lastError: '', startTime: null, endTime: null, objectName: '' };
-  const [arPaymentTermsProg,  setArPaymentTermsProg]  = useState<ARLookupsProgress>({ ...emptyLookupProg, objectName: 'AR Payment Terms' });
-  const [arTxnSourcesProg,    setArTxnSourcesProg]    = useState<ARLookupsProgress>({ ...emptyLookupProg, objectName: 'AR Transaction Sources' });
-  const [arTxnTypesProg,      setArTxnTypesProg]      = useState<ARLookupsProgress>({ ...emptyLookupProg, objectName: 'AR Transaction Types' });
-  const [arMemoLinesProg,     setArMemoLinesProg]     = useState<ARLookupsProgress>({ ...emptyLookupProg, objectName: 'AR Memo Lines' });
-  const [arRevenueRulesProg,  setArRevenueRulesProg]  = useState<ARLookupsProgress>({ ...emptyLookupProg, objectName: 'AR Revenue Scheduling Rules' });
+  const [arLookupsProg, setArLookupsProg] = useState<ARAllLookupsProgress>({
+    status: 'idle', currentObject: '', completedCount: 0,
+    totalInserted: 0, totalUpdated: 0, totalErrors: 0,
+  });
   const [arReceiptAppsProgress, setArReceiptAppsProgress] = useState<ARReceiptApplicationsSyncProgress>({
     status: 'idle',
     totalCustomers: 0, processedCustomers: 0,
@@ -2401,46 +2395,14 @@ const SyncData: React.FC = () => {
         abortControllerRef.current.signal
       );
       syncResult = { inserted: result.insertedNotes, errors: result.errors, type: 'AR Installment Notes' };
-    } else if (isARPaymentTerms) {
-      setArPaymentTermsProg(prev => ({ ...prev, status: 'fetching', totalFetched: 0, inserted: 0, updated: 0, errors: 0, lastError: '', startTime: new Date(), endTime: null }));
-      const result = await syncPaymentTerms(
+    } else if (isARLookups) {
+      setArLookupsProg({ status: 'running', currentObject: '', completedCount: 0, totalInserted: 0, totalUpdated: 0, totalErrors: 0 });
+      const result = await syncAllARLookups(
         parameters, testMode, addLog,
-        (p) => { setArPaymentTermsProg(prev => ({ ...prev, ...p })); },
+        (p) => { setArLookupsProg(prev => ({ ...prev, ...p })); },
         abortControllerRef.current.signal
       );
-      syncResult = { inserted: result.inserted + result.updated, errors: result.errors, type: 'AR Payment Terms' };
-    } else if (isARTxnSources) {
-      setArTxnSourcesProg(prev => ({ ...prev, status: 'fetching', totalFetched: 0, inserted: 0, updated: 0, errors: 0, lastError: '', startTime: new Date(), endTime: null }));
-      const result = await syncTxnSources(
-        parameters, testMode, addLog,
-        (p) => { setArTxnSourcesProg(prev => ({ ...prev, ...p })); },
-        abortControllerRef.current.signal
-      );
-      syncResult = { inserted: result.inserted + result.updated, errors: result.errors, type: 'AR Transaction Sources' };
-    } else if (isARTxnTypes) {
-      setArTxnTypesProg(prev => ({ ...prev, status: 'fetching', totalFetched: 0, inserted: 0, updated: 0, errors: 0, lastError: '', startTime: new Date(), endTime: null }));
-      const result = await syncTxnTypes(
-        parameters, testMode, addLog,
-        (p) => { setArTxnTypesProg(prev => ({ ...prev, ...p })); },
-        abortControllerRef.current.signal
-      );
-      syncResult = { inserted: result.inserted + result.updated, errors: result.errors, type: 'AR Transaction Types' };
-    } else if (isARMemoLines) {
-      setArMemoLinesProg(prev => ({ ...prev, status: 'fetching', totalFetched: 0, inserted: 0, updated: 0, errors: 0, lastError: '', startTime: new Date(), endTime: null }));
-      const result = await syncMemoLines(
-        parameters, testMode, addLog,
-        (p) => { setArMemoLinesProg(prev => ({ ...prev, ...p })); },
-        abortControllerRef.current.signal
-      );
-      syncResult = { inserted: result.inserted + result.updated, errors: result.errors, type: 'AR Memo Lines' };
-    } else if (isARRevenueRules) {
-      setArRevenueRulesProg(prev => ({ ...prev, status: 'fetching', totalFetched: 0, inserted: 0, updated: 0, errors: 0, lastError: '', startTime: new Date(), endTime: null }));
-      const result = await syncRevenueRules(
-        parameters, testMode, addLog,
-        (p) => { setArRevenueRulesProg(prev => ({ ...prev, ...p })); },
-        abortControllerRef.current.signal
-      );
-      syncResult = { inserted: result.inserted + result.updated, errors: result.errors, type: 'AR Revenue Scheduling Rules' };
+      syncResult = { inserted: result.totalInserted + result.totalUpdated, errors: result.totalErrors, type: 'AR Lookups' };
     } else if (isARReceiptApplications) {
       // AR Receipt Applications Sync
       setArReceiptAppsProgress({
@@ -3699,16 +3661,8 @@ const SyncData: React.FC = () => {
     ? arDffProgress.status
     : isARInstallmentNotes
     ? arInstNotesProg.status
-    : isARPaymentTerms
-    ? arPaymentTermsProg.status
-    : isARTxnSources
-    ? arTxnSourcesProg.status
-    : isARTxnTypes
-    ? arTxnTypesProg.status
-    : isARMemoLines
-    ? arMemoLinesProg.status
-    : isARRevenueRules
-    ? arRevenueRulesProg.status
+    : isARLookups
+    ? arLookupsProg.status
     : isARAdj
     ? arAdjProgress.status
     : isARCreditMemos
@@ -5055,50 +5009,49 @@ const SyncData: React.FC = () => {
                     </Card>
                   </Col>
                 </Row>
-              ) : isARPaymentTerms || isARTxnSources || isARTxnTypes || isARMemoLines || isARRevenueRules ? (
-                /* AR Lookups KPI Cards (shared layout for all 5 simple LOV syncs) */
-                (() => {
-                  const prog = isARPaymentTerms  ? arPaymentTermsProg
-                             : isARTxnSources    ? arTxnSourcesProg
-                             : isARTxnTypes      ? arTxnTypesProg
-                             : isARMemoLines     ? arMemoLinesProg
-                             : arRevenueRulesProg;
-                  return (
-                    <Row gutter={16} style={{ marginBottom: 16 }}>
-                      <Col xs={24} sm={12}>
-                        <Card style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }} bodyStyle={{ padding: 16 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
-                            <CloudUploadOutlined style={{ fontSize: 20, color: REDWOOD.info, marginRight: 8 }} />
-                            <Text strong>Fetched</Text>
-                          </div>
-                          <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.textPrimary }}>
-                            {prog.totalFetched}
-                          </div>
-                          <div style={{ marginTop: 8, fontSize: 14, color: REDWOOD.textSecondary }}>
-                            <span style={{ color: REDWOOD.success, marginRight: 8 }}>{prog.inserted} inserted</span>
-                            <span style={{ color: REDWOOD.info }}>{prog.updated} updated</span>
-                          </div>
-                        </Card>
-                      </Col>
-                      <Col xs={24} sm={12}>
-                        <Card style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }} bodyStyle={{ padding: 16 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
-                            <WarningOutlined style={{ fontSize: 20, color: prog.errors > 0 ? REDWOOD.error : REDWOOD.textSecondary, marginRight: 8 }} />
-                            <Text strong>Errors</Text>
-                          </div>
-                          <div style={{ fontSize: 28, fontWeight: 600, color: prog.errors > 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
-                            {prog.errors}
-                          </div>
-                          {prog.lastError && (
-                            <Tooltip title={prog.lastError}>
-                              <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>{prog.lastError}</Text>
-                            </Tooltip>
-                          )}
-                        </Card>
-                      </Col>
-                    </Row>
-                  );
-                })()
+              ) : isARLookups ? (
+                /* AR Lookups KPI Cards — single object running all 5 */
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  <Col xs={24} sm={8}>
+                    <Card style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }} bodyStyle={{ padding: 16 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+                        <SyncOutlined spin={arLookupsProg.status === 'running'} style={{ fontSize: 18, color: REDWOOD.info, marginRight: 8 }} />
+                        <Text strong>Progress</Text>
+                      </div>
+                      <div style={{ fontSize: 26, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {arLookupsProg.completedCount} / 5
+                      </div>
+                      {arLookupsProg.currentObject && (
+                        <Text style={{ fontSize: 11, color: REDWOOD.textSecondary, marginTop: 4, display: 'block' }}>{arLookupsProg.currentObject}…</Text>
+                      )}
+                    </Card>
+                  </Col>
+                  <Col xs={24} sm={8}>
+                    <Card style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }} bodyStyle={{ padding: 16 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+                        <CloudUploadOutlined style={{ fontSize: 18, color: REDWOOD.success, marginRight: 8 }} />
+                        <Text strong>Synced</Text>
+                      </div>
+                      <div style={{ fontSize: 26, fontWeight: 600, color: REDWOOD.success }}>
+                        {arLookupsProg.totalInserted + arLookupsProg.totalUpdated}
+                      </div>
+                      <div style={{ fontSize: 12, color: REDWOOD.textSecondary, marginTop: 4 }}>
+                        {arLookupsProg.totalInserted} inserted · {arLookupsProg.totalUpdated} updated
+                      </div>
+                    </Card>
+                  </Col>
+                  <Col xs={24} sm={8}>
+                    <Card style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }} bodyStyle={{ padding: 16 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+                        <WarningOutlined style={{ fontSize: 18, color: arLookupsProg.totalErrors > 0 ? REDWOOD.error : REDWOOD.textSecondary, marginRight: 8 }} />
+                        <Text strong>Errors</Text>
+                      </div>
+                      <div style={{ fontSize: 26, fontWeight: 600, color: arLookupsProg.totalErrors > 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+                        {arLookupsProg.totalErrors}
+                      </div>
+                    </Card>
+                  </Col>
+                </Row>
               ) : isARReceiptApplications ? (
                 /* AR Receipt Applications KPI Cards */
                 <Row gutter={16} style={{ marginBottom: 16 }}>
