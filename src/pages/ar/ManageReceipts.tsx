@@ -353,9 +353,34 @@ const ManageReceipts: React.FC = () => {
       const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/by-txn?txn_id=${encodeURIComponent(String(draft.standardReceiptId))}`,
         { headers: { Accept: 'application/json' } });
       const d = await res.json();
+      // Build combo→description map from cached account data
+      const comboDescMap: Record<string, string> = {};
+      allMethodAccounts.forEach(a => {
+        const pairs: [number, string][] = [
+          [a.cashCcid, a.cashCombination], [a.unappliedCcid, a.unappliedCombination],
+          [a.unidentifiedCcid, a.unidentifiedCombination], [a.onAccountCcid, a.onAccountCombination],
+        ];
+        pairs.forEach(([ccid, combo]) => {
+          if (ccid > 0 && combo && acctDescCache[ccid]) {
+            const key = combo.replace(/\./g, '-').toUpperCase();
+            comboDescMap[key] = acctDescCache[ccid].description;
+          }
+        });
+      });
+      // Enrich lines with accountDesc; fetch missing ones
+      const rawLines: any[] = d.lines || [];
+      const enriched = await Promise.all(rawLines.map(async (l: any) => {
+        const key = (l.accountCombination || '').toUpperCase();
+        if (comboDescMap[key]) return { ...l, accountDesc: comboDescMap[key] };
+        try {
+          const r = await validateAccountCode(l.accountCombination);
+          const desc = Object.values(r.segmentDetails ?? {}).map((v: any) => v.description).filter(Boolean).join(' · ');
+          return { ...l, accountDesc: desc };
+        } catch { return l; }
+      }));
       setViewAcctModal({ receiptNumber: draft.receiptNumber, loading: false,
         header: d.found !== false ? d : null,
-        lines: d.lines || [] });
+        lines: enriched });
     } catch (e: any) {
       message.error('Failed to load GL journal: ' + e.message);
       setViewAcctModal(null);
@@ -3133,8 +3158,30 @@ const ManageReceipts: React.FC = () => {
                     scroll={{ x: 'max-content' }}
                     columns={[
                       { title: 'Line', dataIndex: 'lineNumber', width: 50, render: (_: any, __: any, i: number) => i + 1 },
-                      { title: 'Account', dataIndex: 'accountCombination', width: 220, render: (v: string) => <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>{v}</Text> },
-                      { title: 'Description', dataIndex: 'description', ellipsis: true, render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+                      { title: 'Account', dataIndex: 'accountCombination', width: 180,
+                        render: (v: string, r: any) => {
+                          const segDesc = r.accountDesc
+                            ? r.accountDesc.split(' · ').filter((s: string) => s && s !== 'Default').slice(1).join(' · ')
+                            : '';
+                          return (
+                            <Tooltip title={<><div style={{ fontFamily: 'monospace' }}>{v}</div>{r.accountDesc && <div style={{ fontSize: 11, marginTop: 2 }}>{r.accountDesc}</div>}</>} placement="topLeft">
+                              <div style={{ cursor: 'default' }}>
+                                <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.info, whiteSpace: 'nowrap', display: 'block' }}>{v}</Text>
+                                {segDesc && <div style={{ fontSize: 10, color: '#8c8c8c', marginTop: 1 }}>{segDesc}</div>}
+                              </div>
+                            </Tooltip>
+                          );
+                        } },
+                      { title: 'Description', dataIndex: 'description', width: 260,
+                        render: (v: string) => (
+                          <Tooltip title={v} placement="topLeft">
+                            <div style={{
+                              fontSize: 11, color: REDWOOD.neutral600, cursor: 'default',
+                              display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden', wordBreak: 'break-word',
+                            }}>{v || '—'}</div>
+                          </Tooltip>
+                        ) },
                       { title: 'Dr', dataIndex: 'enteredDr', width: 130, align: 'right' as const,
                         render: (v: number) => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> : <Text type="secondary">—</Text> },
                       { title: 'Cr', dataIndex: 'enteredCr', width: 130, align: 'right' as const,
