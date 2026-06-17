@@ -4,13 +4,15 @@ import {
   Row, Col, Breadcrumb, Tooltip, DatePicker, message, Tabs, Divider,
   Badge, Alert, Modal, InputNumber, Radio, Spin,
 } from 'antd';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import {
   HomeOutlined, SearchOutlined, PlusOutlined, CloseOutlined,
   DollarOutlined, SaveOutlined, FilterOutlined, ReloadOutlined,
   DownloadOutlined, UserOutlined, BankOutlined, LockOutlined,
   FileTextOutlined, EyeOutlined, UnorderedListOutlined, InfoCircleOutlined,
   ApiOutlined, DeleteOutlined, ExclamationCircleOutlined, SendOutlined, CodeOutlined,
-  BookOutlined, CheckCircleOutlined, PaperClipOutlined, UploadOutlined,
+  BookOutlined, CheckCircleOutlined, PaperClipOutlined, UploadOutlined, PrinterOutlined,
 } from '@ant-design/icons';
 import { Upload } from 'antd';
 import { Link } from 'react-router-dom';
@@ -711,6 +713,212 @@ const ManageReceipts: React.FC = () => {
     setAttSaving(prev => ({ ...prev, [tabKey]: false }));
   };
 
+  // ── Receipt PDF ──────────────────────────────────────────────────────────
+  const [receiptPdfUrl, setReceiptPdfUrl] = useState<string | null>(null);
+  const [receiptPdfModal, setReceiptPdfModal] = useState(false);
+
+  const generateReceiptPdf = (draft: ReceiptDraft) => {
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+
+    const fmt = (v: any) => (v != null && v !== '') ? String(v) : '—';
+    const fmtAmt = (v: any) => v != null ? Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
+    const fmtDt = (v: any) => {
+      if (!v) return '—';
+      try { return new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
+      catch { return String(v); }
+    };
+
+    // ── Header bar ─────────────────────────────────────────────────────────
+    doc.setFillColor(29, 123, 77);   // REDWOOD success green for AR
+    doc.rect(0, 0, pageW, 20, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('RECEIPT VOUCHER', 14, 13);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Printed: ${new Date().toLocaleString()}`, pageW - 14, 13, { align: 'right' });
+    doc.setTextColor(0, 0, 0);
+
+    let y = 28;
+
+    // ── Receipt number + state ──────────────────────────────────────────────
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(29, 123, 77);
+    doc.text(`Receipt #${draft.receiptNumber || '—'}`, 14, y);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(60, 60, 60);
+    doc.text(
+      `State: ${fmt(draft.state)}   |   Status: ${fmt(draft.status)}   |   Type: ${fmt(draft.receiptType)}`,
+      14, y + 6,
+    );
+    doc.setTextColor(0, 0, 0);
+    y += 16;
+
+    // ── Section 1: Receipt Details ─────────────────────────────────────────
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text('Receipt Details', 14, y);
+    y += 2;
+    autoTable(doc, {
+      startY: y,
+      body: [
+        ['Business Unit',    fmt(draft.businessUnit),          'Receipt Method',    fmt(draft.receiptMethod)],
+        ['Receipt Date',     fmtDt(draft.receiptDate),          'Accounting Date',   fmtDt(draft.accountingDate)],
+        ['Maturity Date',    fmtDt(draft.maturityDate),         'Receipt at Risk',   fmt(draft.receiptAtRisk)],
+        ['Document #',       fmt(draft.documentNumber),         'Receipt ID',        fmt(draft.standardReceiptId || '—')],
+        ['Struct. Pay. Ref', fmt(draft.structuredPaymentReference), 'Receipt Batch', fmt(draft.receiptBatchName)],
+      ],
+      styles: { fontSize: 9, cellPadding: 2.5 },
+      columnStyles: {
+        0: { fontStyle: 'bold', cellWidth: 42, fillColor: [245, 245, 245] },
+        2: { fontStyle: 'bold', cellWidth: 42, fillColor: [245, 245, 245] },
+      },
+      margin: { left: 14, right: 14 },
+    });
+    y = (doc as any).lastAutoTable.finalY + 6;
+
+    // ── Section 2: Customer ────────────────────────────────────────────────
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text('Customer', 14, y);
+    y += 2;
+    autoTable(doc, {
+      startY: y,
+      body: [
+        ['Customer Name',    fmt(draft.customerName),           'Account Number',    fmt(draft.customerAccountNumber)],
+        ['Customer Site',    fmt(draft.customerSite),           'Rec. Specialist',   fmt(draft.receivablesSpecialist)],
+        ['Customer Bank',    fmt(draft.customerBank),           'Cust. Bank Branch', fmt(draft.customerBankBranch)],
+        ['Cust. Bank Acct.', fmt(draft.customerBankAccountNumber), '', ''],
+      ],
+      styles: { fontSize: 9, cellPadding: 2.5 },
+      columnStyles: {
+        0: { fontStyle: 'bold', cellWidth: 42, fillColor: [245, 245, 245] },
+        2: { fontStyle: 'bold', cellWidth: 42, fillColor: [245, 245, 245] },
+      },
+      margin: { left: 14, right: 14 },
+    });
+    y = (doc as any).lastAutoTable.finalY + 6;
+
+    // ── Section 3: Amount & Currency ───────────────────────────────────────
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text('Amount & Currency', 14, y);
+    y += 2;
+    const amtRows: any[][] = [
+      ['Currency',         fmt(draft.currency),                'Entered Amount',   fmtAmt(draft.amount)],
+      ['Accounted Amount', fmtAmt(draft.accountedAmount),      'Unapplied Amount', fmtAmt(draft.unappliedAmount)],
+    ];
+    if (draft.currency && draft.currency !== 'AED') {
+      amtRows.push(['Conv. Rate Type', fmt(draft.conversionRateType), 'Conv. Rate', fmt(draft.conversionRate)]);
+    }
+    autoTable(doc, {
+      startY: y,
+      body: amtRows,
+      styles: { fontSize: 9, cellPadding: 2.5 },
+      columnStyles: {
+        0: { fontStyle: 'bold', cellWidth: 42, fillColor: [245, 245, 245] },
+        2: { fontStyle: 'bold', cellWidth: 42, fillColor: [245, 245, 245] },
+        3: { halign: 'right' as const },
+        1: { halign: 'right' as const },
+      },
+      margin: { left: 14, right: 14 },
+    });
+    y = (doc as any).lastAutoTable.finalY + 6;
+
+    // ── Section 4: Remittance Bank ─────────────────────────────────────────
+    if (draft.remittanceBankName || draft.remittanceBankAccountNumber) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.text('Remittance Bank', 14, y);
+      y += 2;
+      autoTable(doc, {
+        startY: y,
+        body: [
+          ['Bank Name',        fmt(draft.remittanceBankName),    'Branch',          fmt(draft.remittanceBankBranch)],
+          ['Account Number',   fmt(draft.remittanceBankAccountNumber), 'Deposit Date', fmtDt(draft.remittanceBankDepositDate)],
+        ],
+        styles: { fontSize: 9, cellPadding: 2.5 },
+        columnStyles: {
+          0: { fontStyle: 'bold', cellWidth: 42, fillColor: [245, 245, 245] },
+          2: { fontStyle: 'bold', cellWidth: 42, fillColor: [245, 245, 245] },
+        },
+        margin: { left: 14, right: 14 },
+      });
+      y = (doc as any).lastAutoTable.finalY + 6;
+    }
+
+    // ── Comments ───────────────────────────────────────────────────────────
+    if (draft.comments) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.text('Comments', 14, y);
+      y += 2;
+      autoTable(doc, {
+        startY: y,
+        body: [[draft.comments]],
+        styles: { fontSize: 9, cellPadding: 3 },
+        columnStyles: { 0: { fillColor: [250, 250, 250] } },
+        margin: { left: 14, right: 14 },
+      });
+      y = (doc as any).lastAutoTable.finalY + 6;
+    }
+
+    // ── Signature block ────────────────────────────────────────────────────
+    if (y > 230) { doc.addPage(); y = 20; }
+    const sigY = Math.max(y + 12, 240);
+    const sigLabels = ['Created By', 'Reviewed By', 'Approved By'];
+    const sigValues = [fmt(currentUser), '', ''];
+    const sigW = (pageW - 28 - (sigLabels.length - 1) * 10) / sigLabels.length;
+    doc.setDrawColor(180, 180, 180);
+    sigLabels.forEach((label, i) => {
+      const sx = 14 + i * (sigW + 10);
+      // Box
+      doc.setFillColor(249, 249, 249);
+      doc.roundedRect(sx, sigY - 14, sigW, 22, 2, 2, 'FD');
+      // Value (pre-filled for Created By)
+      if (sigValues[i]) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.setTextColor(29, 123, 77);
+        doc.text(sigValues[i], sx + sigW / 2, sigY - 4, { align: 'center', maxWidth: sigW - 4 });
+      }
+      // Signature line
+      doc.setDrawColor(120, 120, 120);
+      doc.line(sx + 4, sigY + 2, sx + sigW - 4, sigY + 2);
+      // Label below line
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(100, 100, 100);
+      doc.text(label, sx + sigW / 2, sigY + 7, { align: 'center' });
+    });
+    doc.setTextColor(0, 0, 0);
+    doc.setDrawColor(0, 0, 0);
+
+    // ── Footer on every page ───────────────────────────────────────────────
+    const pageCount = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(150);
+      doc.line(14, 286, pageW - 14, 286);
+      doc.text('Generated by ReactERP', 14, 291);
+      doc.text(`Page ${i} of ${pageCount}`, pageW / 2, 291, { align: 'center' });
+      doc.text(new Date().toLocaleString(), pageW - 14, 291, { align: 'right' });
+      doc.setTextColor(0);
+    }
+
+    const blob = doc.output('blob');
+    const url = URL.createObjectURL(blob);
+    if (receiptPdfUrl) URL.revokeObjectURL(receiptPdfUrl);
+    setReceiptPdfUrl(url);
+    setReceiptPdfModal(true);
+  };
+
   // ── Update draft ──────────────────────────────────────────────────────────
   const updateDraft = (key: string, patch: Partial<ReceiptDraft>) => {
     setTabs(prev => prev.map(t => t.key === key ? { ...t, draft: { ...t.draft, ...patch } } : t));
@@ -1380,6 +1588,14 @@ const ManageReceipts: React.FC = () => {
                 </>
               )}
 
+              {!isNew && (
+                <Tooltip title="Print Receipt">
+                  <Button size="small" icon={<PrinterOutlined />}
+                    onClick={() => generateReceiptPdf(draft)}>
+                    Print
+                  </Button>
+                </Tooltip>
+              )}
               {!isLocked && <>
                 <Button size="small" type="primary" icon={<SaveOutlined />} loading={isSaving}
                   style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
@@ -2161,6 +2377,34 @@ const ManageReceipts: React.FC = () => {
         />
       </Content>
       <FloatingMenu />
+
+      {/* Receipt PDF Preview Modal */}
+      <Modal
+        open={receiptPdfModal}
+        title={<Space><PrinterOutlined /><span>Receipt Voucher</span></Space>}
+        onCancel={() => { setReceiptPdfModal(false); if (receiptPdfUrl) { URL.revokeObjectURL(receiptPdfUrl); setReceiptPdfUrl(null); } }}
+        footer={
+          <Space>
+            <Button icon={<PrinterOutlined />} type="primary"
+              onClick={() => { if (receiptPdfUrl) { const w = window.open(receiptPdfUrl); w?.print(); } }}>
+              Print
+            </Button>
+            <Button icon={<DownloadOutlined />}
+              onClick={() => { if (receiptPdfUrl) { const a = document.createElement('a'); a.href = receiptPdfUrl; a.download = 'receipt.pdf'; a.click(); } }}>
+              Download PDF
+            </Button>
+            <Button onClick={() => { setReceiptPdfModal(false); if (receiptPdfUrl) { URL.revokeObjectURL(receiptPdfUrl); setReceiptPdfUrl(null); } }}>
+              Close
+            </Button>
+          </Space>
+        }
+        width={860}
+        styles={{ body: { padding: 0, height: '75vh' } }}
+      >
+        {receiptPdfUrl && (
+          <iframe src={receiptPdfUrl} title="Receipt PDF" style={{ width: '100%', height: '100%', border: 'none' }} />
+        )}
+      </Modal>
 
       {/* Attachment Preview Modal */}
       {previewAtt && (
