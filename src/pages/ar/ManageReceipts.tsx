@@ -29,6 +29,7 @@ import {
   createAccounting, postToLedger, fetchLedgerByBusinessUnit,
   derivePeriodName, checkAccountingExists, getAccounting, type SlaCreatePayload,
 } from '../../services/sla.service';
+import { postJournal } from '../../services/manage-journals.service';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -1461,6 +1462,12 @@ const ManageReceipts: React.FC = () => {
       const glBatchId  = glBody?.batchId  ?? glBody?.batch_id  ?? 0;
       const glHeaderId = glBody?.headerId ?? glBody?.header_id ?? 0;
       await postToLedger(slaHeaderId, glBatchId, batchName, glHeaderId, currentUser);
+
+      // Step 2b: Post the GL batch so status changes from NEW → Posted
+      const postResult = await postJournal(glBatchId);
+      if (!postResult.success) {
+        message.warning(`Journal created but posting failed: ${postResult.error || postResult.message || 'unknown'}`);
+      }
 
       // Step 3: Stamp ACCOUNTING_STATUS = Accounted on the receipt
       try {
