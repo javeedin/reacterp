@@ -10,6 +10,7 @@ import {
   UserOutlined, CreditCardOutlined, SettingOutlined, FilePdfOutlined,
   LockOutlined, EyeOutlined, DownloadOutlined, FilterOutlined, ReloadOutlined,
   ApiOutlined, DownOutlined, ProfileOutlined, ApartmentOutlined, AuditOutlined, AccountBookOutlined,
+  OrderedListOutlined, SyncOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -597,8 +598,7 @@ const ManageReceivables: React.FC = () => {
     }
   }, []);
 
-  // ── Balance Details per invoice tab ─────────────────────────────────────
-  const [balanceMap, setBalanceMap] = useState<Record<string, {
+  // ── Balance Details per invoice tab ─────────────────────────────────────  const [balanceMap, setBalanceMap] = useState<Record<string, {
     loading: boolean; rows: BalanceRow[]; balance: number; url: string; fetched: boolean;
   }>>({});
   const fetchedBalanceTabsRef = useRef<Set<string>>(new Set());
@@ -662,6 +662,100 @@ const ManageReceivables: React.FC = () => {
     }
   }, []);
 
+  // ── DFF (Additional Info) per invoice tab ────────────────────────────────
+  interface DffData {
+    flexContext: string; flexContextDisplay: string;
+    unit: string; location: string; propertyType: string;
+    nameOfTenant: string; nationality: string; occupantStatus: string;
+    noOfOccupant: number | null; ejari: string;
+    contractStartDate: string; contractEndDate: string;
+    rent: number | null; modeOfPay: string; noOfCheques: number | null;
+    pmgtFee: number | null; chqsWith: string;
+    attribute1: string; attribute2: string; attribute3: string; attribute4: string; attribute5: string;
+  }
+  const [dffMap, setDffMap] = useState<Record<string, { loading: boolean; data: DffData | null; fetched: boolean }>>({});
+  const fetchedDffTabsRef = useRef<Set<string>>(new Set());
+
+  const fetchDff = useCallback(async (tabKey: string, customerTransactionId: number) => {
+    if (!customerTransactionId || fetchedDffTabsRef.current.has(tabKey)) return;
+    fetchedDffTabsRef.current.add(tabKey);
+    setDffMap(prev => ({ ...prev, [tabKey]: { loading: true, data: null, fetched: false } }));
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ar/invoices/${customerTransactionId}/dff`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = await res.json();
+      const item = (d.items ?? [])[0] ?? null;
+      const data: DffData | null = item ? {
+        flexContext:        item.flex_context         ?? '',
+        flexContextDisplay: item.flex_context_display ?? '',
+        unit:               item.unit                 ?? '',
+        location:           item.location             ?? '',
+        propertyType:       item.property_type        ?? '',
+        nameOfTenant:       item.name_of_tenant       ?? '',
+        nationality:        item.nationality           ?? '',
+        occupantStatus:     item.occupant_status       ?? '',
+        noOfOccupant:       item.no_of_occupant        ?? null,
+        ejari:              item.ejari                 ?? '',
+        contractStartDate:  item.contract_start_date   ? String(item.contract_start_date).substring(0, 10) : '',
+        contractEndDate:    item.contract_end_date     ? String(item.contract_end_date).substring(0, 10)   : '',
+        rent:               item.rent                  ?? null,
+        modeOfPay:          item.mode_of_pay           ?? '',
+        noOfCheques:        item.no_of_cheques         ?? null,
+        pmgtFee:            item.pmgt_fee              ?? null,
+        chqsWith:           item.chqs_with             ?? '',
+        attribute1:         item.attribute1            ?? '',
+        attribute2:         item.attribute2            ?? '',
+        attribute3:         item.attribute3            ?? '',
+        attribute4:         item.attribute4            ?? '',
+        attribute5:         item.attribute5            ?? '',
+      } : null;
+      setDffMap(prev => ({ ...prev, [tabKey]: { loading: false, data, fetched: true } }));
+    } catch {
+      setDffMap(prev => ({ ...prev, [tabKey]: { loading: false, data: null, fetched: true } }));
+    }
+  }, []);
+
+  // ── Installments per invoice tab ─────────────────────────────────────────
+  interface InstTabRow {
+    key: string; sequenceNumber: number; status: string;
+    dueDate: string; closedDate: string;
+    originalAmount: number; balanceDue: number; amountPaid: number;
+    taxAmountOriginal: number; lineAmountOriginal: number; freightAmountOriginal: number;
+    daysLate: number | null;
+  }
+  const [instTabMap, setInstTabMap] = useState<Record<string, { loading: boolean; rows: InstTabRow[]; fetched: boolean }>>({});
+  const fetchedInstTabsRef = useRef<Set<string>>(new Set());
+
+  const fetchInstTab = useCallback(async (tabKey: string, customerTransactionId: number) => {
+    if (!customerTransactionId || fetchedInstTabsRef.current.has(tabKey)) return;
+    fetchedInstTabsRef.current.add(tabKey);
+    setInstTabMap(prev => ({ ...prev, [tabKey]: { loading: true, rows: [], fetched: false } }));
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ar/invoices/${customerTransactionId}/installments`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = await res.json();
+      const rows: InstTabRow[] = (d.items ?? []).map((x: any, i: number) => ({
+        key:                  String(x.installment_id ?? i),
+        sequenceNumber:       x.installment_sequence_number ?? x.INSTALLMENT_SEQUENCE_NUMBER ?? 0,
+        status:               x.installment_status          ?? x.INSTALLMENT_STATUS          ?? '',
+        dueDate:              x.installment_due_date        ?? x.INSTALLMENT_DUE_DATE        ?? '',
+        closedDate:           x.installment_closed_date     ?? x.INSTALLMENT_CLOSED_DATE     ?? '',
+        originalAmount:       x.original_amount             ?? x.ORIGINAL_AMOUNT             ?? 0,
+        balanceDue:           x.installment_balance_due     ?? x.INSTALLMENT_BALANCE_DUE     ?? 0,
+        amountPaid:           x.amount_paid                 ?? x.AMOUNT_PAID                 ?? 0,
+        taxAmountOriginal:    x.installment_tax_amount_original     ?? x.INSTALLMENT_TAX_AMOUNT_ORIGINAL     ?? 0,
+        lineAmountOriginal:   x.installment_line_amount_original    ?? x.INSTALLMENT_LINE_AMOUNT_ORIGINAL    ?? 0,
+        freightAmountOriginal:x.installment_freight_amount_original ?? x.INSTALLMENT_FREIGHT_AMOUNT_ORIGINAL ?? 0,
+        daysLate:             x.payment_days_late           ?? x.PAYMENT_DAYS_LATE           ?? null,
+      }));
+      setInstTabMap(prev => ({ ...prev, [tabKey]: { loading: false, rows, fetched: true } }));
+    } catch {
+      setInstTabMap(prev => ({ ...prev, [tabKey]: { loading: false, rows: [], fetched: true } }));
+    }
+  }, []);
+
   // Auto-fetch receipts, adjustments and balance when an invoice tab becomes active
   useEffect(() => {
     if (!activeKey || activeKey === 'search') return;
@@ -670,7 +764,9 @@ const ManageReceivables: React.FC = () => {
     fetchReceiptApps(activeKey, tab.draft.transactionNumber);
     fetchAdjustments(activeKey, tab.draft.transactionNumber);
     fetchBalance(activeKey, tab.draft.customerTransactionId, tab.draft.transactionNumber);
-  }, [activeKey, tabs, fetchReceiptApps, fetchAdjustments, fetchBalance]);
+    fetchDff(activeKey, tab.draft.customerTransactionId);
+    fetchInstTab(activeKey, tab.draft.customerTransactionId);
+  }, [activeKey, tabs, fetchReceiptApps, fetchAdjustments, fetchBalance, fetchDff, fetchInstTab]);
 
   // Grid-level quick filter for search results
   const [gridFilter, setGridFilter] = useState('');
@@ -1234,6 +1330,8 @@ const ManageReceivables: React.FC = () => {
                 if (key === 'receipts'    && !isNew) fetchReceiptApps(tabKey, draft.transactionNumber);
                 if (key === 'adjustments' && !isNew) fetchAdjustments(tabKey, draft.transactionNumber);
                 if (key === 'balance'     && !isNew) fetchBalance(tabKey, draft.customerTransactionId, draft.transactionNumber);
+                if (key === 'dff'         && !isNew) fetchDff(tabKey, draft.customerTransactionId);
+                if (key === 'installments'&& !isNew) fetchInstTab(tabKey, draft.customerTransactionId);
               }}
               items={[
                 // ── Customer ─────────────────────────────────────────────
@@ -1534,7 +1632,7 @@ const ManageReceivables: React.FC = () => {
                     );
                   })(),
                 },
-                // ── Balance Details ───────────────────────────────────────
+                // ── Balance Details ──────────────────────────────────────
                 {
                   key: 'balance',
                   label: <span><AccountBookOutlined style={{ marginRight: 4 }} />Balance Details</span>,
@@ -1670,6 +1768,220 @@ const ManageReceivables: React.FC = () => {
                               .balance-orig-row td { background: #e6f4ff !important; }
                               .balance-total-row td { background: #f6ffed !important; font-weight: 700; border-top: 2px solid #b7eb8f !important; }
                             `}</style>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })(),
+                },
+
+                // ── Additional Information (DFF) ──────────────────────────
+                {
+                  key: 'dff',
+                  label: <span><FileTextOutlined style={{ marginRight: 4 }} />Additional Info</span>,
+                  children: (() => {
+                    const dffState = dffMap[tabKey];
+                    const dff = dffState?.data;
+                    const fmt = (v: number | null) =>
+                      v !== null && v !== undefined
+                        ? v.toLocaleString('en-AE', { minimumFractionDigits: 2 })
+                        : '—';
+                    const val = (v: string | null | undefined) =>
+                      v ? <Text style={{ fontSize: 13 }}>{v}</Text> : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>;
+
+                    return (
+                      <div style={{ padding: '12px 4px' }}>
+                        {isNew ? (
+                          <Alert type="info" showIcon message="Save the invoice first to view additional information." />
+                        ) : dffState?.loading ? (
+                          <div style={{ textAlign: 'center', padding: 32 }}>
+                            <SyncOutlined spin style={{ fontSize: 28, color: REDWOOD.primary }} />
+                          </div>
+                        ) : dffState?.fetched && !dff ? (
+                          <Alert type="info" showIcon
+                            message="No Descriptive Flexfield data found for this invoice."
+                            description="Run the AR Invoice DFF Sync to populate this data from Oracle Fusion."
+                          />
+                        ) : dff ? (
+                          <>
+                            {/* Context badge */}
+                            {dff.flexContextDisplay && (
+                              <div style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 8,
+                                background: '#eff6ff', border: `1px solid ${REDWOOD.border}`,
+                                borderRadius: 8, padding: '5px 14px', marginBottom: 14,
+                              }}>
+                                <Text type="secondary" style={{ fontSize: 11 }}>Context</Text>
+                                <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>{dff.flexContextDisplay}</Text>
+                              </div>
+                            )}
+
+                            {/* Rental Details */}
+                            <Row gutter={[24, 0]}>
+                              <Col span={8}>
+                                <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8, color: REDWOOD.neutral600 }}>Property</Text>
+                                {[
+                                  ['Unit',          val(dff.unit)],
+                                  ['Location',      val(dff.location)],
+                                  ['Property Type', val(dff.propertyType)],
+                                  ['EJARI',         val(dff.ejari)],
+                                ].map(([label, node]) => (
+                                  <Row key={String(label)} style={{ marginBottom: 6, alignItems: 'center' }}>
+                                    <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}>{label}</Text></Col>
+                                    <Col span={14}>{node}</Col>
+                                  </Row>
+                                ))}
+                              </Col>
+                              <Col span={8}>
+                                <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8, color: REDWOOD.neutral600 }}>Tenant</Text>
+                                {[
+                                  ['Name',             val(dff.nameOfTenant)],
+                                  ['Nationality',      val(dff.nationality)],
+                                  ['Occupant Status',  val(dff.occupantStatus)],
+                                  ['No. of Occupants', dff.noOfOccupant !== null ? <Text style={{ fontSize: 13 }}>{dff.noOfOccupant}</Text> : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>],
+                                ].map(([label, node]) => (
+                                  <Row key={String(label)} style={{ marginBottom: 6, alignItems: 'center' }}>
+                                    <Col span={10}><Text type="secondary" style={{ fontSize: 12 }}>{label}</Text></Col>
+                                    <Col span={14}>{node}</Col>
+                                  </Row>
+                                ))}
+                              </Col>
+                              <Col span={8}>
+                                <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8, color: REDWOOD.neutral600 }}>Contract</Text>
+                                {[
+                                  ['Start Date',    val(dff.contractStartDate)],
+                                  ['End Date',      val(dff.contractEndDate)],
+                                  ['Rent',          <Text style={{ fontSize: 13, fontFamily: 'monospace' }}>{fmt(dff.rent)}</Text>],
+                                  ['Mode of Pay',   val(dff.modeOfPay)],
+                                  ['No. of Cheques', dff.noOfCheques !== null ? <Text style={{ fontSize: 13 }}>{dff.noOfCheques}</Text> : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>],
+                                  ['Mgmt Fee',      <Text style={{ fontSize: 13, fontFamily: 'monospace' }}>{fmt(dff.pmgtFee)}</Text>],
+                                  ['Cheques With',  val(dff.chqsWith)],
+                                ].map(([label, node]) => (
+                                  <Row key={String(label)} style={{ marginBottom: 6, alignItems: 'center' }}>
+                                    <Col span={12}><Text type="secondary" style={{ fontSize: 12 }}>{label}</Text></Col>
+                                    <Col span={12}>{node}</Col>
+                                  </Row>
+                                ))}
+                              </Col>
+                            </Row>
+
+                            {/* Attributes */}
+                            {[dff.attribute1, dff.attribute2, dff.attribute3, dff.attribute4, dff.attribute5].some(Boolean) && (
+                              <>
+                                <Divider style={{ margin: '12px 0' }} />
+                                <Text strong style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 8 }}>Additional Segments</Text>
+                                <Row gutter={16}>
+                                  {[dff.attribute1, dff.attribute2, dff.attribute3, dff.attribute4, dff.attribute5].map((v, i) =>
+                                    v ? (
+                                      <Col key={i} span={4}>
+                                        <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Attribute {i + 1}</Text>
+                                        <Text style={{ fontSize: 12 }}>{v}</Text>
+                                      </Col>
+                                    ) : null
+                                  )}
+                                </Row>
+                              </>
+                            )}
+
+                            {/* Refresh */}
+                            <div style={{ marginTop: 14, textAlign: 'right' }}>
+                              <Button size="small" icon={<ReloadOutlined />}
+                                onClick={() => {
+                                  fetchedDffTabsRef.current.delete(tabKey);
+                                  setDffMap(prev => { const n = { ...prev }; delete n[tabKey]; return n; });
+                                  fetchDff(tabKey, draft.customerTransactionId);
+                                }}>
+                                Refresh
+                              </Button>
+                            </div>
+                          </>
+                        ) : null}
+                      </div>
+                    );
+                  })(),
+                },
+
+                // ── Installment Details ───────────────────────────────────
+                {
+                  key: 'installments',
+                  label: <span><OrderedListOutlined style={{ marginRight: 4 }} />Installment Details</span>,
+                  children: (() => {
+                    const instState = instTabMap[tabKey];
+                    const rows = instState?.rows ?? [];
+                    const totalOriginal = rows.reduce((s, r) => s + r.originalAmount, 0);
+                    const totalBalance  = rows.reduce((s, r) => s + r.balanceDue,     0);
+                    const totalPaid     = rows.reduce((s, r) => s + r.amountPaid,     0);
+                    const fmtAmt = (v: number) => v.toLocaleString('en-AE', { minimumFractionDigits: 2 });
+
+                    const instCols = [
+                      { title: '#', dataIndex: 'sequenceNumber', width: 50,
+                        render: (v: number) => <Text type="secondary" style={{ fontSize: 12 }}>{v}</Text> },
+                      { title: 'Status', dataIndex: 'status', width: 110,
+                        render: (v: string) => {
+                          const color = v === 'OP' || v === 'Open' ? 'blue' : v === 'CL' || v === 'Closed' ? 'green' : 'default';
+                          return <Tag color={color} style={{ fontSize: 11 }}>{v || '—'}</Tag>;
+                        }},
+                      { title: 'Due Date', dataIndex: 'dueDate', width: 110,
+                        render: (v: string) => <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>{v ? v.substring(0, 10) : '—'}</Text> },
+                      { title: 'Closed Date', dataIndex: 'closedDate', width: 110,
+                        render: (v: string) => <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>{v ? v.substring(0, 10) : '—'}</Text> },
+                      { title: 'Original', dataIndex: 'originalAmount', align: 'right' as const, width: 130,
+                        render: (v: number) => <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>{fmtAmt(v)}</Text> },
+                      { title: 'Balance Due', dataIndex: 'balanceDue', align: 'right' as const, width: 130,
+                        render: (v: number) => <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: v > 0 ? REDWOOD.primary : REDWOOD.success }}>{fmtAmt(v)}</Text> },
+                      { title: 'Amount Paid', dataIndex: 'amountPaid', align: 'right' as const, width: 130,
+                        render: (v: number) => <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success }}>{fmtAmt(v)}</Text> },
+                      { title: 'Days Late', dataIndex: 'daysLate', width: 90, align: 'right' as const,
+                        render: (v: number | null) => v !== null
+                          ? <Tag color={v > 0 ? 'red' : 'green'} style={{ fontSize: 11 }}>{v}</Tag>
+                          : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
+                    ];
+
+                    return (
+                      <div style={{ padding: '8px 4px 12px' }}>
+                        {isNew ? (
+                          <Alert type="info" showIcon message="Save the invoice first to view installments." />
+                        ) : (
+                          <>
+                            {/* KPI strip */}
+                            {instState?.fetched && rows.length > 0 && (
+                              <Row gutter={12} style={{ marginBottom: 10 }}>
+                                {[
+                                  { title: 'Installments', value: rows.length,    color: undefined },
+                                  { title: 'Original',     value: fmtAmt(totalOriginal), color: undefined },
+                                  { title: 'Balance Due',  value: fmtAmt(totalBalance),  color: totalBalance > 0 ? REDWOOD.primary : REDWOOD.success },
+                                  { title: 'Amount Paid',  value: fmtAmt(totalPaid),     color: REDWOOD.success },
+                                ].map(s => (
+                                  <Col span={6} key={s.title}>
+                                    <Card size="small" style={{ borderRadius: 8, textAlign: 'center' }}>
+                                      <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>{s.title}</div>
+                                      <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'monospace', color: s.color }}>{s.value}</div>
+                                    </Card>
+                                  </Col>
+                                ))}
+                              </Row>
+                            )}
+
+                            <Table<InstTabRow>
+                              dataSource={rows}
+                              rowKey="key"
+                              size="small"
+                              loading={instState?.loading ?? false}
+                              pagination={false}
+                              columns={instCols}
+                              style={{ borderRadius: 6 }}
+                            />
+
+                            <div style={{ marginTop: 10, textAlign: 'right' }}>
+                              <Button size="small" icon={<ReloadOutlined />}
+                                onClick={() => {
+                                  fetchedInstTabsRef.current.delete(tabKey);
+                                  setInstTabMap(prev => { const n = { ...prev }; delete n[tabKey]; return n; });
+                                  fetchInstTab(tabKey, draft.customerTransactionId);
+                                }}>
+                                Refresh
+                              </Button>
+                            </div>
                           </>
                         )}
                       </div>
