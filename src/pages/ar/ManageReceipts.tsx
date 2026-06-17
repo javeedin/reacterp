@@ -558,18 +558,20 @@ const ManageReceipts: React.FC = () => {
     finally { setSearching(false); }
   };
 
-  // ── Open receipt tab ──────────────────────────────────────────────────────
-  const openReceiptTab = useCallback((row: ReceiptRow) => {
+  // ── Open receipt tab — fetches full record via GET ar/receipts/:id ──────────
+  const openReceiptTab = useCallback(async (row: ReceiptRow) => {
     const key = `rcpt-${row.standardReceiptId}`;
     if (tabs.find(t => t.key === key)) { setActiveKey(key); return; }
 
-    const draft: ReceiptDraft = {
+    // Open tab immediately with search-row data so user sees it right away
+    const placeholderDraft: ReceiptDraft = {
       standardReceiptId:           row.standardReceiptId,
       receiptNumber:               row.receiptNumber,
       documentNumber:              row.documentNumber,
       receiptType:                 row.receiptType,
       businessUnit:                row.businessUnit,
       receiptMethod:               row.receiptMethod,
+      selectedBankAccountId:       null,
       receiptDate:                 row.receiptDate,
       accountingDate:              row.accountingDate,
       maturityDate:                '',
@@ -596,14 +598,65 @@ const ManageReceipts: React.FC = () => {
       comments:                    row.comments,
       structuredPaymentReference:  '',
       receiptBatchName:            '',
-      drAccount:                   (row as any).dr_account ?? '',
+      drAccount:                   '',
       drAccountDesc:               '',
-      crAccount:                   (row as any).cr_account ?? '',
+      crAccount:                   '',
       crAccountDesc:               '',
     };
-
-    setTabs(prev => [...prev, { key, draft, syncStatus: row.syncStatus }]);
+    setTabs(prev => [...prev, { key, draft: placeholderDraft, syncStatus: row.syncStatus }]);
     setActiveKey(key);
+
+    // Fetch full receipt record — all columns including DR/CR accounts
+    try {
+      const res  = await fetch(`${APEX_AR_RECEIPTS}/${row.standardReceiptId}`, { headers: { Accept: 'application/json' } });
+      const data = await res.json();
+      const r    = (data.items ?? [data])[0];
+      if (!r) return;
+
+      const fullDraft: ReceiptDraft = {
+        standardReceiptId:           r.standard_receipt_id     ?? row.standardReceiptId,
+        receiptNumber:               r.receipt_number          ?? row.receiptNumber,
+        documentNumber:              r.document_number         ?? row.documentNumber,
+        receiptType:                 r.receipt_type            ?? row.receiptType,
+        businessUnit:                r.business_unit           ?? row.businessUnit,
+        receiptMethod:               r.receipt_method          ?? row.receiptMethod,
+        selectedBankAccountId:       null,
+        receiptDate:                 r.receipt_date            ? r.receipt_date.substring(0, 10) : row.receiptDate,
+        accountingDate:              r.accounting_date         ? r.accounting_date.substring(0, 10) : row.accountingDate,
+        maturityDate:                r.maturity_date           ? r.maturity_date.substring(0, 10) : '',
+        amount:                      r.amount                  ?? row.amount,
+        unappliedAmount:             r.unapplied_amount        ?? row.unappliedAmount,
+        accountedAmount:             r.accounted_amount        ?? row.accountedAmount,
+        currency:                    r.currency                ?? row.currency,
+        conversionRateType:          r.conversion_rate_type    ?? '',
+        conversionRate:              r.conversion_rate         ?? null,
+        state:                       r.state                   ?? row.state,
+        status:                      r.status                  ?? row.status,
+        receiptAtRisk:               r.receipt_at_risk         ?? 'N',
+        remittanceBankName:          r.remittance_bank_name    ?? row.remittanceBankName,
+        remittanceBankBranch:        r.remittance_bank_branch  ?? '',
+        remittanceBankAccountNumber: r.remittance_bank_account_number ?? '',
+        remittanceBankDepositDate:   r.remittance_bank_deposit_date   ? r.remittance_bank_deposit_date.substring(0, 10) : '',
+        customerName:                r.customer_name           ?? row.customerName,
+        customerAccountNumber:       r.customer_account_number ?? row.customerAccountNumber,
+        customerSite:                r.customer_site           ?? '',
+        customerBank:                r.customer_bank           ?? '',
+        customerBankBranch:          r.customer_bank_branch    ?? '',
+        customerBankAccountNumber:   r.customer_bank_account_number ?? '',
+        receivablesSpecialist:       r.receivables_specialist  ?? '',
+        comments:                    r.comments                ?? row.comments,
+        structuredPaymentReference:  r.structured_payment_reference ?? '',
+        receiptBatchName:            r.receipt_batch_name      ?? '',
+        drAccount:                   r.dr_account              ?? '',
+        drAccountDesc:               '',
+        crAccount:                   r.cr_account              ?? '',
+        crAccountDesc:               '',
+      };
+
+      setTabs(prev => prev.map(t => t.key === key ? { ...t, draft: fullDraft } : t));
+    } catch {
+      // Tab already open with placeholder data — silent fail
+    }
   }, [tabs]);
 
   // ── New receipt tab ───────────────────────────────────────────────────────

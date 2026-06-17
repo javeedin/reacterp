@@ -216,7 +216,73 @@ END;
 /
 
 -- =====================================================
--- 6. PUT /ar/receipts/:id  — update a receipt row
+-- 6. GET /ar/receipts/:id  — fetch single receipt (all columns)
+-- =====================================================
+BEGIN
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'ar',
+        p_pattern        => 'receipts/:id',
+        p_method         => 'GET',
+        p_source_type    => 'json/collection',
+        p_items_per_page => 1,
+        p_comments       => 'Fetch single AR receipt by StandardReceiptId — all columns',
+        p_source         => '
+SELECT
+    r.STANDARD_RECEIPT_ID,
+    r.RECEIPT_NUMBER,
+    r.DOCUMENT_NUMBER,
+    r.RECEIPT_TYPE,
+    r.RECEIVABLES_TRX_ID,
+    r.MISC_PAYMENT_SOURCE,
+    r.BUSINESS_UNIT,
+    r.RECEIPT_METHOD,
+    r.RECEIPT_DATE,
+    r.ACCOUNTING_DATE,
+    r.MATURITY_DATE,
+    r.POSTMARK_DATE,
+    r.REMITTANCE_BANK_DEPOSIT_DATE,
+    r.AMOUNT,
+    r.UNAPPLIED_AMOUNT,
+    r.ACCOUNTED_AMOUNT,
+    r.CURRENCY,
+    r.CONVERSION_RATE_TYPE,
+    r.CONVERSION_DATE,
+    r.CONVERSION_RATE,
+    r.STATE,
+    r.STATUS,
+    r.RECEIPT_AT_RISK,
+    r.REMITTANCE_BANK_NAME,
+    r.REMITTANCE_BANK_BRANCH,
+    r.REMITTANCE_BANK_ACCOUNT_NUMBER,
+    r.CUSTOMER_NAME,
+    r.CUSTOMER_ACCOUNT_NUMBER,
+    r.CUSTOMER_SITE,
+    r.CUSTOMER_BANK,
+    r.CUSTOMER_BANK_BRANCH,
+    r.CUSTOMER_BANK_ACCOUNT_NUMBER,
+    r.RECEIVABLES_SPECIALIST,
+    r.COMMENTS,
+    r.STRUCTURED_PAYMENT_REFERENCE,
+    r.RECEIPT_BATCH_NAME,
+    r.DR_ACCOUNT,
+    r.CR_ACCOUNT,
+    r.SYNC_STATUS,
+    r.SYNC_DATE,
+    r.FUSION_CREATED_BY,
+    r.FUSION_CREATION_DATE,
+    r.FUSION_LAST_UPDATED_BY,
+    r.FUSION_LAST_UPDATE_DATE,
+    r.LAST_UPDATED_BY,
+    r.LAST_UPDATE_DATE
+FROM RR_AR_RECEIPTS r
+WHERE r.STANDARD_RECEIPT_ID = :id'
+    );
+    COMMIT;
+END;
+/
+
+-- =====================================================
+-- 7. PUT /ar/receipts/:id  — update a receipt row
 -- =====================================================
 BEGIN
     ORDS.DEFINE_HANDLER(
@@ -287,11 +353,12 @@ END;
 -- =====================================================
 -- ENDPOINTS SUMMARY
 -- =====================================================
--- POST   {base}/ar/receipts             Upsert single receipt (INSERT)
+-- POST   {base}/ar/receipts             Insert single receipt
 -- POST   {base}/ar/receipts/bulk        Bulk upsert {"items":[...]}
 -- GET    {base}/ar/receipts             List with optional filters
 --   ?business_unit=  ?customer=  ?receipt_number=  ?receipt_type=CASH|MISC
 --   ?state=  ?status=  ?date_from=YYYY-MM-DD  ?date_to=YYYY-MM-DD
+-- GET    {base}/ar/receipts/:id         Fetch single receipt — all columns
 -- PUT    {base}/ar/receipts/:id         Update receipt by StandardReceiptId
 -- DELETE {base}/ar/receipts/:id         Delete receipt by StandardReceiptId
 -- =====================================================
