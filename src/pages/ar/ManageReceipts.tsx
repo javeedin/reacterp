@@ -10,8 +10,9 @@ import {
   DownloadOutlined, UserOutlined, BankOutlined, LockOutlined,
   FileTextOutlined, EyeOutlined, UnorderedListOutlined, InfoCircleOutlined,
   ApiOutlined, DeleteOutlined, ExclamationCircleOutlined, SendOutlined, CodeOutlined,
-  BookOutlined, CheckCircleOutlined,
+  BookOutlined, CheckCircleOutlined, PaperClipOutlined, UploadOutlined,
 } from '@ant-design/icons';
+import { Upload } from 'antd';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
@@ -328,6 +329,13 @@ const ManageReceipts: React.FC = () => {
     Record<string, { loading: boolean; rows: AppRow[] }>
   >({});
 
+  // Attachments (per tab)
+  type AttachItem = { id?: number; uid: string; name: string; fileType: string; fileSize: number; content?: string; rawFile?: File; status: 'done' | 'uploading' | 'error' };
+  const [tabAttachments, setTabAttachments] = useState<Record<string, AttachItem[]>>({});
+  const [attSaving, setAttSaving] = useState<Record<string, boolean>>({});
+  const [previewAtt, setPreviewAtt] = useState<{ name: string; fileType: string; blobUrl: string } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
   // Helper to map raw API row → ReceiptMethodAccount
   const mapAccount = (r: any): ReceiptMethodAccount => ({
     id:                         r.ID                           ?? r.id                           ?? 0,
@@ -598,11 +606,109 @@ const ManageReceipts: React.FC = () => {
   const closeTab = (key: string) => {
     fetchedAppsRef.current.delete(key);
     setReceiptApplications(prev => { const n = { ...prev }; delete n[key]; return n; });
+    setTabAttachments(prev => { const n = { ...prev }; delete n[key]; return n; });
     setTabs(prev => {
       const next = prev.filter(t => t.key !== key);
       if (activeKey === key) setActiveKey(next.length > 0 ? next[next.length - 1].key : 'search');
       return next;
     });
+  };
+
+  // ── Load attachments for a receipt tab ───────────────────────────────────
+  const loadedAttRef = useRef(new Set<string>());
+  const loadAttachments = useCallback(async (tabKey: string, receiptId: number) => {
+    if (!receiptId || loadedAttRef.current.has(tabKey)) return;
+    loadedAttRef.current.add(tabKey);
+    try {
+      const res = await fetch(`${APEX_AR_RECEIPTS}/${receiptId}/attachments`, { headers: { Accept: 'application/json' } });
+      const d = await res.json();
+      if (Array.isArray(d.items)) {
+        setTabAttachments(prev => ({
+          ...prev,
+          [tabKey]: d.items.map((a: any) => ({ id: a.id, uid: String(a.id), name: a.fileName || a.file_name, fileType: a.fileType || a.file_type || '', fileSize: a.fileSize || a.file_size || 0, status: 'done' as const })),
+        }));
+      }
+    } catch { /* silent */ }
+  }, []);
+
+  // Trigger load when a tab with an existing receipt is opened
+  useEffect(() => {
+    tabs.forEach(t => {
+      if (t.draft.standardReceiptId > 0) loadAttachments(t.key, t.draft.standardReceiptId);
+    });
+  }, [tabs, loadAttachments]);
+
+  const makeBlobUrl = (base64: string, mimeType: string) => {
+    const bytes = atob(base64);
+    const arr = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+    return URL.createObjectURL(new Blob([arr], { type: mimeType || 'application/octet-stream' }));
+  };
+
+  const handlePreviewAtt = async (tabKey: string, att: AttachItem, receiptId: number) => {
+    if (att.content) {
+      setPreviewAtt({ name: att.name, fileType: att.fileType, blobUrl: makeBlobUrl(att.content, att.fileType) });
+      return;
+    }
+    if (!att.id || !receiptId) return;
+    setPreviewLoading(true);
+    try {
+      const res = await fetch(`${APEX_AR_RECEIPTS}/${receiptId}/attachments/${att.id}`, { headers: { Accept: 'application/json' } });
+      const d = await res.json();
+      const content = d.content || d.CONTENT || '';
+      const ft = att.fileType || d.fileType || d.FILE_TYPE || 'application/octet-stream';
+      if (!content) { message.warning('No content available for preview.'); return; }
+      setPreviewAtt({ name: att.name, fileType: ft, blobUrl: makeBlobUrl(content, ft) });
+    } catch { message.error('Failed to load attachment for preview.'); }
+    finally { setPreviewLoading(false); }
+  };
+
+  const handleDownloadAtt = async (tabKey: string, att: AttachItem, receiptId: number) => {
+    let content = att.content;
+    let ft = att.fileType;
+    if (!content && att.id && receiptId) {
+      try {
+        const res = await fetch(`${APEX_AR_RECEIPTS}/${receiptId}/attachments/${att.id}`, { headers: { Accept: 'application/json' } });
+        const d = await res.json();
+        content = d.content || d.CONTENT || '';
+        ft = att.fileType || d.fileType || 'application/octet-stream';
+      } catch { message.error('Failed to download.'); return; }
+    }
+    if (!content) { message.warning('No content available.'); return; }
+    const blobUrl = makeBlobUrl(content, ft || 'application/octet-stream');
+    const a = document.createElement('a'); a.href = blobUrl; a.download = att.name; a.click();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+  };
+
+  const handleSaveAttachments = async (tabKey: string, receiptId: number) => {
+    if (!receiptId) { message.error('Receipt ID not available — save the receipt first.'); return; }
+    const pending = (tabAttachments[tabKey] || []).filter(a => !a.id);
+    if (pending.length === 0) { message.info('No new attachments to save.'); return; }
+    setAttSaving(prev => ({ ...prev, [tabKey]: true }));
+    let savedCount = 0;
+    for (const att of pending) {
+      if (!att.rawFile && !att.content) { message.warning(`${att.name}: no file data — skipped`); continue; }
+      try {
+        const base64 = att.content ?? await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => { const r = reader.result as string; resolve(r.split(',')[1] ?? r); };
+          reader.onerror = reject;
+          reader.readAsDataURL(att.rawFile!);
+        });
+        const payload = JSON.stringify({ fileName: att.name, fileType: att.fileType || '', fileSize: att.fileSize, content: base64 });
+        const res = await fetch(`${APEX_AR_RECEIPTS}/${receiptId}/attachments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload });
+        const txt = await res.text();
+        let resp: any = null;
+        try { resp = JSON.parse(txt); } catch { /* not JSON */ }
+        if (resp?.status === 'success' || res.ok) savedCount++;
+        else message.error(`${att.name}: ${resp?.message || txt || `HTTP ${res.status}`}`);
+      } catch (e: any) { message.error(`${att.name}: ${e.message}`); }
+    }
+    // Refresh
+    loadedAttRef.current.delete(tabKey);
+    await loadAttachments(tabKey, receiptId);
+    message.success(`${savedCount} attachment(s) saved.`);
+    setAttSaving(prev => ({ ...prev, [tabKey]: false }));
   };
 
   // ── Update draft ──────────────────────────────────────────────────────────
@@ -1643,6 +1749,109 @@ const ManageReceipts: React.FC = () => {
             ]} />
           </Card>
 
+          {/* ── Attachments ── */}
+          <Card size="small" style={{ marginBottom: 10, borderRadius: 8 }}
+            title={
+              <Space>
+                <PaperClipOutlined style={{ color: REDWOOD.neutral600 }} />
+                <Text strong style={{ fontSize: 13 }}>Attachments</Text>
+                {(tabAttachments[tabKey] || []).length > 0 && (
+                  <Badge count={(tabAttachments[tabKey] || []).length} style={{ backgroundColor: REDWOOD.info }} />
+                )}
+              </Space>
+            }
+            extra={
+              !isNew && (
+                <Button size="small" icon={<UploadOutlined />}
+                  loading={attSaving[tabKey]}
+                  onClick={() => handleSaveAttachments(tabKey, draft.standardReceiptId)}>
+                  Save Attachments
+                </Button>
+              )
+            }
+          >
+            <div style={{ padding: '8px 12px' }}>
+              <Upload
+                fileList={(tabAttachments[tabKey] || []).map(a => ({ uid: a.uid, name: a.name, status: a.status, size: a.fileSize, type: a.fileType }))}
+                beforeUpload={(file) => {
+                  const reader = new FileReader();
+                  reader.onload = (e) => {
+                    const base64 = (e.target?.result as string)?.split(',')[1] || '';
+                    setTabAttachments(prev => ({
+                      ...prev,
+                      [tabKey]: [...(prev[tabKey] || []), { uid: `new-${Date.now()}`, name: file.name, fileType: file.type, fileSize: file.size, content: base64, rawFile: file, status: 'done' }],
+                    }));
+                  };
+                  reader.readAsDataURL(file);
+                  return false;
+                }}
+                onRemove={(file) => new Promise((resolve) => {
+                  Modal.confirm({
+                    title: 'Delete attachment?',
+                    content: `"${file.name}" will be permanently removed.`,
+                    okText: 'Delete', okButtonProps: { danger: true }, cancelText: 'Cancel',
+                    onOk: async () => {
+                      const att = (tabAttachments[tabKey] || []).find(a => a.uid === file.uid);
+                      if (att?.id && draft.standardReceiptId) {
+                        await fetch(`${APEX_AR_RECEIPTS}/${draft.standardReceiptId}/attachments/${att.id}`, { method: 'DELETE' }).catch(() => {});
+                      }
+                      setTabAttachments(prev => ({ ...prev, [tabKey]: (prev[tabKey] || []).filter(a => a.uid !== file.uid) }));
+                      resolve(false);
+                    },
+                    onCancel: () => resolve(false),
+                  });
+                })}
+                showUploadList={false}
+                multiple
+                disabled={isNew}
+              >
+                <Button icon={<UploadOutlined />} disabled={isNew} size="small">
+                  {isNew ? 'Save receipt first to attach files' : 'Attach Files'}
+                </Button>
+              </Upload>
+
+              <div style={{ marginTop: 8 }}>
+                {(tabAttachments[tabKey] || []).map(att => (
+                  <div key={att.uid} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 0', fontSize: 13 }}>
+                    <PaperClipOutlined style={{ color: REDWOOD.neutral600, flexShrink: 0 }} />
+                    <span style={{ flex: '0 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 300 }} title={att.name}>
+                      {att.name}
+                    </span>
+                    {att.fileSize > 0 && (
+                      <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>
+                        ({att.fileSize < 1024 ? `${att.fileSize} B` : att.fileSize < 1048576 ? `${(att.fileSize / 1024).toFixed(1)} KB` : `${(att.fileSize / 1048576).toFixed(1)} MB`})
+                      </Text>
+                    )}
+                    {!att.id && <Tag color="orange" style={{ fontSize: 10, margin: 0 }}>Pending</Tag>}
+                    <Button type="text" size="small" icon={<EyeOutlined />} style={{ flexShrink: 0, padding: '0 4px' }}
+                      onClick={() => handlePreviewAtt(tabKey, att, draft.standardReceiptId)} />
+                    <Button type="text" size="small" icon={<DownloadOutlined />} style={{ flexShrink: 0, padding: '0 4px' }}
+                      onClick={() => handleDownloadAtt(tabKey, att, draft.standardReceiptId)} />
+                    <Button type="text" size="small" icon={<DeleteOutlined />} style={{ flexShrink: 0, padding: '0 4px', color: '#ff4d4f' }}
+                      onClick={() => {
+                        Modal.confirm({
+                          title: 'Delete attachment?',
+                          content: `"${att.name}" will be permanently removed.`,
+                          okText: 'Delete', okButtonProps: { danger: true }, cancelText: 'Cancel',
+                          onOk: async () => {
+                            if (att.id && draft.standardReceiptId) {
+                              await fetch(`${APEX_AR_RECEIPTS}/${draft.standardReceiptId}/attachments/${att.id}`, { method: 'DELETE' }).catch(() => {});
+                            }
+                            setTabAttachments(prev => ({ ...prev, [tabKey]: (prev[tabKey] || []).filter(a => a.uid !== att.uid) }));
+                          },
+                        });
+                      }}
+                    />
+                  </div>
+                ))}
+                {previewLoading && <Spin size="small" style={{ marginTop: 8 }} />}
+                {(tabAttachments[tabKey] || []).length === 0 && (
+                  <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>No attachments</Text>
+                )}
+              </div>
+            </div>
+          </Card>
+
           {/* ── Receipt Applications ── */}
           <Card size="small" style={{ borderRadius: 8 }} bodyStyle={{ padding: 0 }}
             title={
@@ -1952,6 +2161,32 @@ const ManageReceipts: React.FC = () => {
         />
       </Content>
       <FloatingMenu />
+
+      {/* Attachment Preview Modal */}
+      {previewAtt && (
+        <Modal
+          open title={<Space><PaperClipOutlined /><span>{previewAtt.name}</span></Space>}
+          onCancel={() => { URL.revokeObjectURL(previewAtt.blobUrl); setPreviewAtt(null); }}
+          footer={<Button onClick={() => { URL.revokeObjectURL(previewAtt.blobUrl); setPreviewAtt(null); }}>Close</Button>}
+          width={860}
+          styles={{ body: { padding: 0, maxHeight: '70vh', overflow: 'auto' } }}
+        >
+          {previewAtt.fileType.startsWith('image/') ? (
+            <img src={previewAtt.blobUrl} alt={previewAtt.name} style={{ width: '100%' }} />
+          ) : previewAtt.fileType === 'application/pdf' ? (
+            <iframe src={previewAtt.blobUrl} title={previewAtt.name} style={{ width: '100%', height: '65vh', border: 'none' }} />
+          ) : (
+            <div style={{ padding: 24, textAlign: 'center' }}>
+              <Text type="secondary">Preview not available for this file type.</Text>
+              <br />
+              <Button icon={<DownloadOutlined />} style={{ marginTop: 12 }}
+                onClick={() => { const a = document.createElement('a'); a.href = previewAtt.blobUrl; a.download = previewAtt.name; a.click(); }}>
+                Download
+              </Button>
+            </div>
+          )}
+        </Modal>
+      )}
 
       {/* Customer LOV Modal — shared for search panel and receipt tabs */}
       <Modal
