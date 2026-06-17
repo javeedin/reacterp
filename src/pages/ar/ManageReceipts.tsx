@@ -349,6 +349,7 @@ const ManageReceipts: React.FC = () => {
   const [attSaving, setAttSaving] = useState<Record<string, boolean>>({});
   const [previewAtt, setPreviewAtt] = useState<{ name: string; fileType: string; blobUrl: string } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [attApiDebug, setAttApiDebug] = useState<{ url: string; body: string } | null>(null);
 
   // Helper to map raw API row → ReceiptMethodAccount
   const mapAccount = (r: any): ReceiptMethodAccount => ({
@@ -2231,14 +2232,26 @@ const ManageReceipts: React.FC = () => {
               </Space>
             }
             extra={
-              <Tooltip title={!hasSavedId ? 'Save the receipt first' : undefined}>
-                <Button size="small" icon={<UploadOutlined />}
-                  disabled={!hasSavedId}
-                  loading={attSaving[tabKey]}
-                  onClick={() => handleSaveAttachments(tabKey, draft.standardReceiptId)}>
-                  Save Attachments
-                </Button>
-              </Tooltip>
+              <Space size={4}>
+                <Tooltip title="Show API request details (URL & JSON body)">
+                  <Button size="small" icon={<ApiOutlined />} onClick={() => {
+                    const pending = (tabAttachments[tabKey] || []).filter(a => !a.id);
+                    const url = `${APEX_AR_RECEIPTS}/${draft.standardReceiptId}/attachments`;
+                    const body = pending.length > 0
+                      ? JSON.stringify({ fileName: pending[0].name, fileType: pending[0].fileType || '', fileSize: pending[0].fileSize, content: '(base64 content omitted for brevity)' }, null, 2)
+                      : '(no pending attachments — add a file first)';
+                    setAttApiDebug({ url, body });
+                  }} />
+                </Tooltip>
+                <Tooltip title={!hasSavedId ? 'Save the receipt first' : undefined}>
+                  <Button size="small" icon={<UploadOutlined />}
+                    disabled={!hasSavedId}
+                    loading={attSaving[tabKey]}
+                    onClick={() => handleSaveAttachments(tabKey, draft.standardReceiptId)}>
+                    Save Attachments
+                  </Button>
+                </Tooltip>
+              </Space>
             }
           >
             <div style={{ padding: '8px 12px' }}>
@@ -2688,6 +2701,41 @@ const ManageReceipts: React.FC = () => {
           )}
         </Modal>
       )}
+
+      {/* Attachment API Debug Modal */}
+      <Modal
+        open={!!attApiDebug}
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>Attachment API Request</span></Space>}
+        onCancel={() => setAttApiDebug(null)}
+        footer={<Button onClick={() => setAttApiDebug(null)}>Close</Button>}
+        width={700}
+      >
+        {attApiDebug && (
+          <div style={{ fontFamily: 'monospace', fontSize: 12 }}>
+            <div style={{ marginBottom: 8 }}>
+              <Text strong>Method:</Text> <Text code>POST</Text>
+            </div>
+            <div style={{ marginBottom: 8 }}>
+              <Text strong>URL:</Text>
+              <div style={{ background: '#f5f5f5', border: '1px solid #d9d9d9', borderRadius: 4, padding: '6px 10px', marginTop: 4, wordBreak: 'break-all' }}>
+                {attApiDebug.url}
+              </div>
+            </div>
+            <div style={{ marginBottom: 8 }}>
+              <Text strong>Headers:</Text>
+              <div style={{ background: '#f5f5f5', border: '1px solid #d9d9d9', borderRadius: 4, padding: '6px 10px', marginTop: 4 }}>
+                {`Content-Type: application/json`}
+              </div>
+            </div>
+            <div>
+              <Text strong>Body (first pending attachment):</Text>
+              <pre style={{ background: '#f5f5f5', border: '1px solid #d9d9d9', borderRadius: 4, padding: '8px 10px', marginTop: 4, maxHeight: 300, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                {attApiDebug.body}
+              </pre>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Customer LOV Modal — shared for search panel and receipt tabs */}
       <Modal
