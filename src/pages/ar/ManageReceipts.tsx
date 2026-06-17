@@ -1851,12 +1851,6 @@ const ManageReceipts: React.FC = () => {
 
         {/* ── Toolbar ── */}
         <div style={{ background: REDWOOD.surface, borderBottom: `1px solid ${REDWOOD.border}`, padding: '8px 16px' }}>
-          {isLocked && (
-            <Alert type="info" showIcon icon={<LockOutlined />} style={{ marginBottom: 8, fontSize: 12 }}
-              message={<span><strong>Synced from Oracle Fusion</strong> — Sync Status:&nbsp;
-                <Tag color={syncStatusColor(syncStatus)} style={{ fontSize: 11 }}>{syncStatus}</Tag>
-              </span>} />
-          )}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Space>
               {isNew
@@ -2121,7 +2115,7 @@ const ManageReceipts: React.FC = () => {
                             </Space.Compact>
                             {draft.drAccountDesc && (
                               <Text style={{ fontSize: 10, color: REDWOOD.info, display: 'block', marginTop: 2 }}>
-                                {draft.drAccountDesc}
+                                {draft.drAccountDesc.split(' · ').filter((s: string) => s && s !== 'Default').slice(1).join(' · ') || draft.drAccountDesc}
                               </Text>
                             )}
                           </div>
@@ -2144,7 +2138,7 @@ const ManageReceipts: React.FC = () => {
                             </Space.Compact>
                             {draft.crAccountDesc && (
                               <Text style={{ fontSize: 10, color: REDWOOD.info, display: 'block', marginTop: 2 }}>
-                                {draft.crAccountDesc}
+                                {draft.crAccountDesc.split(' · ').filter((s: string) => s && s !== 'Default').slice(1).join(' · ') || draft.crAccountDesc}
                               </Text>
                             )}
                           </div>
