@@ -112,6 +112,12 @@ const postDffToApex = async (
     }
 
     const isSuccess = data.status === 'SUCCESS' || data.status === 'PARTIAL';
+    if (!isSuccess) {
+      log?.('error', '  ── FAILED PAYLOAD ──');
+      log?.('error', JSON.stringify(payload, null, 2));
+      log?.('error', '  ── RESPONSE ──');
+      log?.('error', JSON.stringify(data, null, 2));
+    }
     return {
       success: isSuccess,
       inserted: data.inserted ?? 0,
@@ -121,6 +127,8 @@ const postDffToApex = async (
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
     log?.('error', `POST Error: ${msg}`);
+    log?.('error', '  ── FAILED PAYLOAD ──');
+    log?.('error', JSON.stringify({ items: dffItems.map(({ links, ...rest }) => rest) }, null, 2));
     return { success: false, inserted: 0, updated: 0, error: msg };
   }
 };
