@@ -3254,28 +3254,46 @@ const ManageReceipts: React.FC = () => {
                   render: v => <Tag color={v === 'DR' ? 'blue' : 'green'} style={{ fontSize: 11, fontWeight: 700 }}>{v}</Tag> },
                 { title: 'Class', dataIndex: 'accountingClass', width: 90,
                   render: v => <Text style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{v}</Text> },
-                { title: 'Account', dataIndex: 'accountCombination', width: 180,
+                { title: 'Account', dataIndex: 'accountCombination', width: 150,
                   render: (v, r: any) => {
-                    // Show only the natural account segment description (skip company & 'Default' segments)
                     const acctSegDesc = r.accountDesc
                       ? r.accountDesc.split(' · ').filter((s: string) => s && s !== 'Default').slice(1).join(' · ')
                       : '';
                     return (
-                      <div style={{ minWidth: 160 }}>
-                        <Text style={{ fontSize: 12, fontFamily: 'monospace', color: v ? REDWOOD.info : '#bfbfbf', whiteSpace: 'nowrap', display: 'block' }}>{v || '— not set —'}</Text>
-                        {acctSegDesc && <div style={{ fontSize: 10, color: '#8c8c8c', marginTop: 2, whiteSpace: 'nowrap' }}>{acctSegDesc}</div>}
-                      </div>
+                      <Tooltip title={<><div>{v}</div>{r.accountDesc && <div style={{ fontSize: 10, marginTop: 2 }}>{r.accountDesc}</div>}</>} placement="topLeft">
+                        <div style={{ minWidth: 130, cursor: 'default' }}>
+                          <Text style={{ fontSize: 11, fontFamily: 'monospace', color: v ? REDWOOD.info : '#bfbfbf', whiteSpace: 'nowrap', display: 'block' }}>{v || '— not set —'}</Text>
+                          {acctSegDesc && <div style={{ fontSize: 10, color: '#8c8c8c', marginTop: 2, whiteSpace: 'nowrap' }}>{acctSegDesc}</div>}
+                        </div>
+                      </Tooltip>
                     );
                   } },
-                { title: 'Line Description', dataIndex: 'description', width: 240,
+                { title: 'Line Description', dataIndex: 'description', width: 280,
                   render: (_, r: any) => {
                     const desc = draft2?.comments || r.description;
                     return (
-                      <Text style={{ fontSize: 11, color: REDWOOD.neutral600, wordBreak: 'break-word', whiteSpace: 'pre-wrap', display: 'block' }}>{desc || '—'}</Text>
+                      <Tooltip title={desc} placement="topLeft">
+                        <div style={{
+                          fontSize: 11, color: REDWOOD.neutral600,
+                          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden', wordBreak: 'break-word', cursor: 'default',
+                        }}>{desc || '—'}</div>
+                      </Tooltip>
                     );
                   } },
-                { title: 'Ref 1', width: 120,
-                  render: () => <Text style={{ fontSize: 10, fontFamily: 'monospace', color: '#888', whiteSpace: 'nowrap' }}>{draft2?.receiptNumber}</Text> },
+                { title: 'Ref 1', width: 100,
+                  render: () => {
+                    const ref1 = draft2?.receiptNumber;
+                    return (
+                      <Tooltip title={ref1} placement="topLeft">
+                        <div style={{
+                          fontSize: 10, fontFamily: 'monospace', color: '#888',
+                          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden', wordBreak: 'break-all', cursor: 'default',
+                        }}>{ref1}</div>
+                      </Tooltip>
+                    );
+                  } },
                 { title: 'Ref 2', width: 100,
                   render: () => <Text style={{ fontSize: 10, fontFamily: 'monospace', color: '#888', whiteSpace: 'nowrap' }}>{draft2?.standardReceiptId}</Text> },
                 { title: 'Debit', dataIndex: 'enteredDr', width: 110, align: 'right' as const,
