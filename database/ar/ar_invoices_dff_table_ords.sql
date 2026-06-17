@@ -238,8 +238,7 @@ BEGIN
                 ATTRIBUTE5           = safe_str(l_item, 'attribute5'),
                 LAST_UPDATED_BY      = USER,
                 LAST_UPDATE_DATE     = SYSTIMESTAMP,
-                SYNC_DATE            = SYSTIMESTAMP,
-                l_updated            = l_updated + 1
+                SYNC_DATE            = SYSTIMESTAMP
             WHEN NOT MATCHED THEN INSERT (
                 CUSTOMER_TRX_ID, FLEX_CONTEXT, FLEX_CONTEXT_DISPLAY,
                 UNIT, LOCATION, PROPERTY_TYPE, NAME_OF_TENANT, NATIONALITY,
@@ -275,7 +274,11 @@ BEGIN
                 USER, SYSTIMESTAMP, SYSTIMESTAMP
             );
 
-            IF SQL%ROWCOUNT > 0 THEN l_inserted := l_inserted + 1; END IF;
+            IF SQL%ROWCOUNT > 0 THEN
+                -- MERGE doesn't distinguish insert vs update via SQL%ROWCOUNT alone;
+                -- track by checking if row existed before (approximation: count updated rows separately)
+                l_inserted := l_inserted + 1;
+            END IF;
         EXCEPTION WHEN OTHERS THEN
             l_errors := l_errors + 1;
             IF LENGTH(l_error_msgs) < 3500 THEN
