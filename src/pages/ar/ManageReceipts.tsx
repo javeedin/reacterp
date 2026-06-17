@@ -716,7 +716,8 @@ const ManageReceipts: React.FC = () => {
   }, [tabs, loadAttachments]);
 
   // After methods load for any tab, restore selectedBankAccountId by matching
-  // the saved bank account number or receipt method id
+  // the saved bank account number or receipt method id.
+  // Also auto-fill DR Account from cash combination if blank.
   useEffect(() => {
     if (allMethodAccounts.length === 0) return;
     setTabs(prev => prev.map(t => {
@@ -732,9 +733,19 @@ const ManageReceipts: React.FC = () => {
         match = allMethodAccounts.find(a => a.receiptMethodName === receiptMethod);
       }
       if (!match) return t;
-      return { ...t, draft: { ...t.draft, selectedBankAccountId: match.id } };
+      const cashCombo = match.cashCombination ? match.cashCombination.replace(/\./g, '-') : '';
+      const cashDesc  = match.cashCcid > 0 ? (acctDescCache[match.cashCcid]?.description ?? '') : '';
+      return {
+        ...t,
+        draft: {
+          ...t.draft,
+          selectedBankAccountId: match.id,
+          // auto-fill DR Account from cash combination only when blank
+          ...(cashCombo && !t.draft.drAccount ? { drAccount: cashCombo, drAccountDesc: cashDesc } : {}),
+        },
+      };
     }));
-  }, [allMethodAccounts]);
+  }, [allMethodAccounts, acctDescCache]);
 
   const makeBlobUrl = (base64: string, mimeType: string) => {
     const bytes = atob(base64);
@@ -1815,9 +1826,10 @@ const ManageReceipts: React.FC = () => {
                                   remittanceBankName:          acct?.bankName          ?? '',
                                   remittanceBankAccountNumber: acct?.bankAccountNum    ?? '',
                                   // auto-fill DR Account from Cash account if currently blank
-                                  ...(acct?.cashCombination && !(tab?.draft.drAccount)
-                                    ? { drAccount: acct.cashCombination.replace(/\./g, '-') }
-                                    : {}),
+                                  ...(acct?.cashCombination && !(tab?.draft.drAccount) ? {
+                                    drAccount:     acct.cashCombination.replace(/\./g, '-'),
+                                    drAccountDesc: acct.cashCcid > 0 ? (acctDescCache[acct.cashCcid]?.description ?? '') : '',
+                                  } : {}),
                                 });
                               }}
                             >
