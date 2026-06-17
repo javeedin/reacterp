@@ -167,6 +167,31 @@ DECLARE
     v_src_off    INTEGER := 1;
     v_lang_ctx   INTEGER := DBMS_LOB.DEFAULT_LANG_CTX;
     v_warning    INTEGER;
+    v_exists     NUMBER;
+
+    v_trx_id             NUMBER;
+    v_flex_context       VARCHAR2(100);
+    v_flex_context_disp  VARCHAR2(100);
+    v_unit               VARCHAR2(100);
+    v_location           VARCHAR2(240);
+    v_property_type      VARCHAR2(100);
+    v_name_of_tenant     VARCHAR2(360);
+    v_nationality        VARCHAR2(100);
+    v_occupant_status    VARCHAR2(100);
+    v_no_of_occupant     NUMBER;
+    v_ejari              VARCHAR2(100);
+    v_contract_start     DATE;
+    v_contract_end       DATE;
+    v_rent               NUMBER;
+    v_mode_of_pay        VARCHAR2(50);
+    v_no_of_cheques      NUMBER;
+    v_pmgt_fee           NUMBER;
+    v_chqs_with          VARCHAR2(100);
+    v_attribute1         VARCHAR2(1000);
+    v_attribute2         VARCHAR2(1000);
+    v_attribute3         VARCHAR2(1000);
+    v_attribute4         VARCHAR2(1000);
+    v_attribute5         VARCHAR2(1000);
 
     FUNCTION safe_str(p_obj JSON_OBJECT_T, p_key VARCHAR2) RETURN VARCHAR2 IS
     BEGIN
@@ -210,32 +235,60 @@ BEGIN
         BEGIN
             l_item := JSON_OBJECT_T(l_items.get(i));
 
+            v_trx_id            := safe_num(l_item, 'CustomerTrxId');
+            v_flex_context      := safe_str(l_item, '__FLEX_Context');
+            v_flex_context_disp := safe_str(l_item, '__FLEX_Context_DisplayValue');
+            v_unit              := safe_str(l_item, 'unit');
+            v_location          := safe_str(l_item, 'location');
+            v_property_type     := safe_str(l_item, 'propertyType');
+            v_name_of_tenant    := safe_str(l_item, 'nameOfTenant');
+            v_nationality       := safe_str(l_item, 'nationality');
+            v_occupant_status   := safe_str(l_item, 'occupantStatus');
+            v_no_of_occupant    := safe_num(l_item, 'noOfOccupant');
+            v_ejari             := safe_str(l_item, 'ejari');
+            v_contract_start    := safe_date(l_item, 'contractStartDate');
+            v_contract_end      := safe_date(l_item, 'contractEndDate');
+            v_rent              := safe_num(l_item, 'rent');
+            v_mode_of_pay       := safe_str(l_item, 'modeOfPay');
+            v_no_of_cheques     := safe_num(l_item, 'noOfChques');
+            v_pmgt_fee          := safe_num(l_item, 'pmgtFee');
+            v_chqs_with         := safe_str(l_item, 'chqsWith');
+            v_attribute1        := safe_str(l_item, 'attribute1');
+            v_attribute2        := safe_str(l_item, 'attribute2');
+            v_attribute3        := safe_str(l_item, 'attribute3');
+            v_attribute4        := safe_str(l_item, 'attribute4');
+            v_attribute5        := safe_str(l_item, 'attribute5');
+
+            SELECT COUNT(*) INTO v_exists
+            FROM RR_AR_INVOICES_DFF
+            WHERE CUSTOMER_TRX_ID = v_trx_id;
+
             MERGE INTO RR_AR_INVOICES_DFF d
-            USING (SELECT safe_num(l_item, 'CustomerTrxId') AS trx_id FROM DUAL) s
+            USING (SELECT v_trx_id AS trx_id FROM DUAL) s
             ON (d.CUSTOMER_TRX_ID = s.trx_id)
             WHEN MATCHED THEN UPDATE SET
-                FLEX_CONTEXT         = safe_str(l_item, '__FLEX_Context'),
-                FLEX_CONTEXT_DISPLAY = safe_str(l_item, '__FLEX_Context_DisplayValue'),
-                UNIT                 = safe_str(l_item, 'unit'),
-                LOCATION             = safe_str(l_item, 'location'),
-                PROPERTY_TYPE        = safe_str(l_item, 'propertyType'),
-                NAME_OF_TENANT       = safe_str(l_item, 'nameOfTenant'),
-                NATIONALITY          = safe_str(l_item, 'nationality'),
-                OCCUPANT_STATUS      = safe_str(l_item, 'occupantStatus'),
-                NO_OF_OCCUPANT       = safe_num(l_item, 'noOfOccupant'),
-                EJARI                = safe_str(l_item, 'ejari'),
-                CONTRACT_START_DATE  = safe_date(l_item, 'contractStartDate'),
-                CONTRACT_END_DATE    = safe_date(l_item, 'contractEndDate'),
-                RENT                 = safe_num(l_item, 'rent'),
-                MODE_OF_PAY          = safe_str(l_item, 'modeOfPay'),
-                NO_OF_CHEQUES        = safe_num(l_item, 'noOfChques'),
-                PMGT_FEE             = safe_num(l_item, 'pmgtFee'),
-                CHQS_WITH            = safe_str(l_item, 'chqsWith'),
-                ATTRIBUTE1           = safe_str(l_item, 'attribute1'),
-                ATTRIBUTE2           = safe_str(l_item, 'attribute2'),
-                ATTRIBUTE3           = safe_str(l_item, 'attribute3'),
-                ATTRIBUTE4           = safe_str(l_item, 'attribute4'),
-                ATTRIBUTE5           = safe_str(l_item, 'attribute5'),
+                FLEX_CONTEXT         = v_flex_context,
+                FLEX_CONTEXT_DISPLAY = v_flex_context_disp,
+                UNIT                 = v_unit,
+                LOCATION             = v_location,
+                PROPERTY_TYPE        = v_property_type,
+                NAME_OF_TENANT       = v_name_of_tenant,
+                NATIONALITY          = v_nationality,
+                OCCUPANT_STATUS      = v_occupant_status,
+                NO_OF_OCCUPANT       = v_no_of_occupant,
+                EJARI                = v_ejari,
+                CONTRACT_START_DATE  = v_contract_start,
+                CONTRACT_END_DATE    = v_contract_end,
+                RENT                 = v_rent,
+                MODE_OF_PAY          = v_mode_of_pay,
+                NO_OF_CHEQUES        = v_no_of_cheques,
+                PMGT_FEE             = v_pmgt_fee,
+                CHQS_WITH            = v_chqs_with,
+                ATTRIBUTE1           = v_attribute1,
+                ATTRIBUTE2           = v_attribute2,
+                ATTRIBUTE3           = v_attribute3,
+                ATTRIBUTE4           = v_attribute4,
+                ATTRIBUTE5           = v_attribute5,
                 LAST_UPDATED_BY      = USER,
                 LAST_UPDATE_DATE     = SYSTIMESTAMP,
                 SYNC_DATE            = SYSTIMESTAMP
@@ -248,37 +301,21 @@ BEGIN
                 ATTRIBUTE1, ATTRIBUTE2, ATTRIBUTE3, ATTRIBUTE4, ATTRIBUTE5,
                 LAST_UPDATED_BY, LAST_UPDATE_DATE, SYNC_DATE
             ) VALUES (
-                safe_num(l_item, 'CustomerTrxId'),
-                safe_str(l_item, '__FLEX_Context'),
-                safe_str(l_item, '__FLEX_Context_DisplayValue'),
-                safe_str(l_item, 'unit'),
-                safe_str(l_item, 'location'),
-                safe_str(l_item, 'propertyType'),
-                safe_str(l_item, 'nameOfTenant'),
-                safe_str(l_item, 'nationality'),
-                safe_str(l_item, 'occupantStatus'),
-                safe_num(l_item, 'noOfOccupant'),
-                safe_str(l_item, 'ejari'),
-                safe_date(l_item, 'contractStartDate'),
-                safe_date(l_item, 'contractEndDate'),
-                safe_num(l_item, 'rent'),
-                safe_str(l_item, 'modeOfPay'),
-                safe_num(l_item, 'noOfChques'),
-                safe_num(l_item, 'pmgtFee'),
-                safe_str(l_item, 'chqsWith'),
-                safe_str(l_item, 'attribute1'),
-                safe_str(l_item, 'attribute2'),
-                safe_str(l_item, 'attribute3'),
-                safe_str(l_item, 'attribute4'),
-                safe_str(l_item, 'attribute5'),
+                v_trx_id, v_flex_context, v_flex_context_disp,
+                v_unit, v_location, v_property_type, v_name_of_tenant, v_nationality,
+                v_occupant_status, v_no_of_occupant, v_ejari,
+                v_contract_start, v_contract_end,
+                v_rent, v_mode_of_pay, v_no_of_cheques, v_pmgt_fee, v_chqs_with,
+                v_attribute1, v_attribute2, v_attribute3, v_attribute4, v_attribute5,
                 USER, SYSTIMESTAMP, SYSTIMESTAMP
             );
 
-            IF SQL%ROWCOUNT > 0 THEN
-                -- MERGE doesn't distinguish insert vs update via SQL%ROWCOUNT alone;
-                -- track by checking if row existed before (approximation: count updated rows separately)
+            IF v_exists > 0 THEN
+                l_updated  := l_updated  + 1;
+            ELSE
                 l_inserted := l_inserted + 1;
             END IF;
+
         EXCEPTION WHEN OTHERS THEN
             l_errors := l_errors + 1;
             IF LENGTH(l_error_msgs) < 3500 THEN
