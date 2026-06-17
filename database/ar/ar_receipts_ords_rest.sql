@@ -174,6 +174,8 @@ SELECT
     r.CUSTOMER_NAME,
     r.CUSTOMER_ACCOUNT_NUMBER,
     r.COMMENTS,
+    r.DR_ACCOUNT,
+    r.CR_ACCOUNT,
     r.SYNC_STATUS,
     r.SYNC_DATE
 FROM RR_AR_RECEIPTS r
@@ -214,7 +216,56 @@ END;
 /
 
 -- =====================================================
--- 6. DELETE /ar/receipts/:id  — delete a receipt row
+-- 6. PUT /ar/receipts/:id  — update a receipt row
+-- =====================================================
+BEGIN
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'ar',
+        p_pattern        => 'receipts/:id',
+        p_method         => 'PUT',
+        p_source_type    => 'plsql/block',
+        p_mimes_allowed  => 'application/json',
+        p_comments       => 'Update AR receipt by StandardReceiptId',
+        p_source         => '
+DECLARE
+    l_status   VARCHAR2(20);
+    l_message  VARCHAR2(4000);
+    l_inserted NUMBER;
+    l_updated  NUMBER;
+    l_errors   NUMBER;
+    l_last_id  NUMBER;
+    l_body     CLOB;
+    l_wrapped  CLOB;
+BEGIN
+    l_body    := :body_text;
+    -- Inject the StandardReceiptId from the URL if not already in body
+    IF INSTR(l_body, ''StandardReceiptId'') = 0 THEN
+        l_body := REGEXP_REPLACE(l_body, ''^\s*\{'', ''{"StandardReceiptId":'' || :id || '','');
+    END IF;
+    l_wrapped := ''{"items":['' || l_body || '']}'';
+    RR_AR_RECEIPTS_PKG.save_receipts_bulk(
+        p_receipts_json => l_wrapped,
+        p_status        => l_status,
+        p_message       => l_message,
+        p_inserted      => l_inserted,
+        p_updated       => l_updated,
+        p_errors        => l_errors,
+        p_last_id       => l_last_id
+    );
+    :status_code := CASE WHEN l_status = ''SUCCESS'' THEN 200 ELSE 400 END;
+    HTP.P(''{"status":"''    || l_status                            ||
+          ''","message":"''  || REPLACE(l_message, ''"'', ''\\"'') ||
+          ''","updated":''   || l_updated                          ||
+          '',"errors":''     || l_errors                           ||
+          '',"receiptId":''  || NVL(TO_CHAR(:id), ''null'') || ''}'');
+END;'
+    );
+    COMMIT;
+END;
+/
+
+-- =====================================================
+-- 7. DELETE /ar/receipts/:id  — delete a receipt row
 -- =====================================================
 BEGIN
     ORDS.DEFINE_HANDLER(
@@ -250,10 +301,11 @@ END;
 -- =====================================================
 -- ENDPOINTS SUMMARY
 -- =====================================================
--- POST   {base}/ar/receipts             Upsert single receipt
+-- POST   {base}/ar/receipts             Upsert single receipt (INSERT)
 -- POST   {base}/ar/receipts/bulk        Bulk upsert {"items":[...]}
 -- GET    {base}/ar/receipts             List with optional filters
 --   ?business_unit=  ?customer=  ?receipt_number=  ?receipt_type=CASH|MISC
 --   ?state=  ?status=  ?date_from=YYYY-MM-DD  ?date_to=YYYY-MM-DD
+-- PUT    {base}/ar/receipts/:id         Update receipt by StandardReceiptId
 -- DELETE {base}/ar/receipts/:id         Delete receipt by StandardReceiptId
 -- =====================================================

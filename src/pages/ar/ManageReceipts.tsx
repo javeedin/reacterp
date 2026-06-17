@@ -111,8 +111,10 @@ interface ReceiptDraft {
   comments:                       string;
   structuredPaymentReference:     string;
   receiptBatchName:               string;
-  miscAccount:                    string;
-  miscAccountDesc:                string;
+  drAccount:                      string;
+  drAccountDesc:                  string;
+  crAccount:                      string;
+  crAccountDesc:                  string;
 }
 
 interface ReceiptTab {
@@ -189,7 +191,7 @@ function blankDraft(): ReceiptDraft {
     customerName: '', customerAccountNumber: '', customerSite: '',
     customerBank: '', customerBankBranch: '', customerBankAccountNumber: '',
     receivablesSpecialist: '', comments: '', structuredPaymentReference: '',
-    receiptBatchName: '', miscAccount: '', miscAccountDesc: '',
+    receiptBatchName: '', drAccount: '', drAccountDesc: '', crAccount: '', crAccountDesc: '',
   };
 }
 
@@ -319,6 +321,7 @@ const ManageReceipts: React.FC = () => {
   const [gridFilter, setGridFilter]       = useState('');
   const [miscAcctVisible, setMiscAcctVisible] = useState(false);
   const [miscAcctTabKey, setMiscAcctTabKey]   = useState('');
+  const [miscAcctField, setMiscAcctField]     = useState<'drAccount' | 'crAccount'>('crAccount');
   const [acctModal, setAcctModal] = useState<{
     visible: boolean; tabKey: string; creating: boolean; posting: boolean;
     slaHeaderId: number | null; slaStatus: string; glBatchId: number | null;
@@ -591,6 +594,10 @@ const ManageReceipts: React.FC = () => {
       comments:                    row.comments,
       structuredPaymentReference:  '',
       receiptBatchName:            '',
+      drAccount:                   (row as any).dr_account ?? '',
+      drAccountDesc:               '',
+      crAccount:                   (row as any).cr_account ?? '',
+      crAccountDesc:               '',
     };
 
     setTabs(prev => [...prev, { key, draft, syncStatus: row.syncStatus }]);
@@ -989,6 +996,8 @@ const ManageReceipts: React.FC = () => {
       Comments:                    draft.comments                     || undefined,
       StructuredPaymentReference:  draft.structuredPaymentReference   || undefined,
       ReceiptBatchName:            draft.receiptBatchName             || undefined,
+      DrAccount:                   draft.drAccount                    || undefined,
+      CrAccount:                   draft.crAccount                    || undefined,
       CreatedBy:                   currentUser,
       CreationDate:                nowIso,
       LastUpdatedBy:               currentUser,
@@ -1057,7 +1066,7 @@ const ManageReceipts: React.FC = () => {
     if (isMisc) {
       lines = [
         { lineType: 'DR', accountingClass: 'CASH',    accountCombination: acct?.cashCombination?.replace(/\./g, '-') || '', enteredDr: amount, enteredCr: 0,      description: `Receipt ${draft.receiptNumber} — Cash DR` },
-        { lineType: 'CR', accountingClass: 'MISC',    accountCombination: draft.miscAccount || '',                          enteredDr: 0,      enteredCr: amount, description: `Receipt ${draft.receiptNumber} — Cr Account CR` },
+        { lineType: 'CR', accountingClass: 'MISC',    accountCombination: draft.crAccount || '',                            enteredDr: 0,      enteredCr: amount, description: `Receipt ${draft.receiptNumber} — Cr Account CR` },
       ];
     } else {
       lines = [
@@ -1230,8 +1239,12 @@ const ManageReceipts: React.FC = () => {
     try {
       const body = buildPayload(draft, receiptId);
 
-      const res    = await fetch(APEX_AR_RECEIPTS, {
-        method:  'POST',
+      // POST for new receipts, PUT for existing ones
+      const url    = isNew ? APEX_AR_RECEIPTS : `${APEX_AR_RECEIPTS}/${draft.standardReceiptId}`;
+      const method = isNew ? 'POST' : 'PUT';
+
+      const res    = await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(body),
       });
@@ -1250,7 +1263,7 @@ const ManageReceipts: React.FC = () => {
       message.success(
         isNew
           ? `Receipt created (ID: ${result?.receiptId ?? '—'})`
-          : `Receipt saved`
+          : `Receipt updated`
       );
       return true;
     } catch (e: any) {
@@ -1716,29 +1729,52 @@ const ManageReceipts: React.FC = () => {
                             })()}
                           </div>
                         , true)}
+                        {field('Dr. Account',
+                          <div>
+                            <Space.Compact style={{ width: '100%' }}>
+                              <Input size="small" readOnly
+                                value={draft.drAccount}
+                                placeholder="Select GL combination…"
+                                style={{ fontSize: 11, fontFamily: draft.drAccount ? 'monospace' : undefined, background: '#fff', cursor: 'pointer', letterSpacing: draft.drAccount ? '0.02em' : undefined }}
+                                onClick={() => { if (!isLocked) { setMiscAcctTabKey(tabKey); setMiscAcctField('drAccount'); setMiscAcctVisible(true); } }}
+                              />
+                              {draft.drAccount
+                                ? <Button size="small" icon={<CloseOutlined />} disabled={isLocked}
+                                    onClick={() => updateDraft(tabKey, { drAccount: '', drAccountDesc: '' })} />
+                                : <Button size="small" icon={<SearchOutlined />} disabled={isLocked}
+                                    onClick={() => { setMiscAcctTabKey(tabKey); setMiscAcctField('drAccount'); setMiscAcctVisible(true); }} />
+                              }
+                            </Space.Compact>
+                            {draft.drAccountDesc && (
+                              <Text style={{ fontSize: 10, color: REDWOOD.info, display: 'block', marginTop: 2 }}>
+                                {draft.drAccountDesc}
+                              </Text>
+                            )}
+                          </div>
+                        )}
                         {field('Cr. Account',
                           <div>
                             <Space.Compact style={{ width: '100%' }}>
                               <Input size="small" readOnly
-                                value={draft.miscAccount}
+                                value={draft.crAccount}
                                 placeholder="Select GL combination…"
-                                style={{ fontSize: 11, fontFamily: draft.miscAccount ? 'monospace' : undefined, background: '#fff', cursor: 'pointer', letterSpacing: draft.miscAccount ? '0.02em' : undefined }}
-                                onClick={() => { if (!isLocked) { setMiscAcctTabKey(tabKey); setMiscAcctVisible(true); } }}
+                                style={{ fontSize: 11, fontFamily: draft.crAccount ? 'monospace' : undefined, background: '#fff', cursor: 'pointer', letterSpacing: draft.crAccount ? '0.02em' : undefined }}
+                                onClick={() => { if (!isLocked) { setMiscAcctTabKey(tabKey); setMiscAcctField('crAccount'); setMiscAcctVisible(true); } }}
                               />
-                              {draft.miscAccount
+                              {draft.crAccount
                                 ? <Button size="small" icon={<CloseOutlined />} disabled={isLocked}
-                                    onClick={() => updateDraft(tabKey, { miscAccount: '' })} />
+                                    onClick={() => updateDraft(tabKey, { crAccount: '', crAccountDesc: '' })} />
                                 : <Button size="small" icon={<SearchOutlined />} disabled={isLocked}
-                                    onClick={() => { setMiscAcctTabKey(tabKey); setMiscAcctVisible(true); }} />
+                                    onClick={() => { setMiscAcctTabKey(tabKey); setMiscAcctField('crAccount'); setMiscAcctVisible(true); }} />
                               }
                             </Space.Compact>
-                            {draft.miscAccountDesc && (
+                            {draft.crAccountDesc && (
                               <Text style={{ fontSize: 10, color: REDWOOD.info, display: 'block', marginTop: 2 }}>
-                                {draft.miscAccountDesc}
+                                {draft.crAccountDesc}
                               </Text>
                             )}
                           </div>
-                        , true)}
+                        )}
                         {field('Receipt Number', inp('receiptNumber', 'Auto-generated if blank'), true)}
                         {field('Customer',       custSel())}
                         {field('State',          sel('state', ['Applied', 'Unapplied', 'On Account', 'Reversed', 'NSF', 'Stop']))}
@@ -2611,7 +2647,7 @@ const ManageReceipts: React.FC = () => {
         />
       </Modal>
 
-      {/* ── AccountSelector for MISC Account ── */}
+      {/* ── AccountSelector for Dr / Cr Account ── */}
       {miscAcctVisible && (() => {
         const miscTab = tabs.find(t => t.key === miscAcctTabKey);
         const companyCode = businessUnits.find(b => b.name === miscTab?.draft.businessUnit)?.companyCode ?? '';
@@ -2622,7 +2658,8 @@ const ManageReceipts: React.FC = () => {
             onSelect={(code, segments) => {
               const desc = Object.values(segments ?? {})
                 .map((s: any) => s.description).filter(Boolean).join(' · ');
-              updateDraft(miscAcctTabKey, { miscAccount: code, miscAccountDesc: desc });
+              const descField = miscAcctField === 'drAccount' ? 'drAccountDesc' : 'crAccountDesc';
+              updateDraft(miscAcctTabKey, { [miscAcctField]: code, [descField]: desc } as any);
               setMiscAcctVisible(false);
             }}
             onCancel={() => setMiscAcctVisible(false)}

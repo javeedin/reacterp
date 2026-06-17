@@ -113,6 +113,12 @@ COMMENT ON TABLE  RR_AR_RECEIPTS IS 'AR Standard Receipts synced from Oracle Fus
 -- );
 -- CREATE INDEX RR_AR_RECEIPTS_IX6 ON RR_AR_RECEIPTS (RECEIPT_TYPE);
 
+-- DR / CR account code combinations (run once on existing DBs)
+ALTER TABLE RR_AR_RECEIPTS ADD (
+    DR_ACCOUNT   VARCHAR2(100),
+    CR_ACCOUNT   VARCHAR2(100)
+);
+
 -- =====================================================
 -- Sequence for locally created receipts
 -- Run once on each DB. Start value (9000000000) is well

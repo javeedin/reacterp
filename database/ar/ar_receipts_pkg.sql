@@ -115,7 +115,9 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_RECEIPTS_PKG AS
                 FUSION_CREATED_BY                   VARCHAR2(240)  PATH '$.CreatedBy',
                 CREATION_DATE_STR                   VARCHAR2(50)   PATH '$.CreationDate',
                 FUSION_LAST_UPDATED_BY              VARCHAR2(240)  PATH '$.LastUpdatedBy',
-                LAST_UPDATE_DATE_STR                VARCHAR2(50)   PATH '$.LastUpdateDate'
+                LAST_UPDATE_DATE_STR                VARCHAR2(50)   PATH '$.LastUpdateDate',
+                DR_ACCOUNT                          VARCHAR2(100)  PATH '$.DrAccount',
+                CR_ACCOUNT                          VARCHAR2(100)  PATH '$.CrAccount'
             )) j
         ) LOOP
             DECLARE
@@ -214,6 +216,8 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_RECEIPTS_PKG AS
                     FUSION_CREATION_DATE                = l_cr_ts,
                     FUSION_LAST_UPDATED_BY              = rec.FUSION_LAST_UPDATED_BY,
                     FUSION_LAST_UPDATE_DATE             = l_upd_ts,
+                    DR_ACCOUNT                          = rec.DR_ACCOUNT,
+                    CR_ACCOUNT                          = rec.CR_ACCOUNT,
                     LAST_UPDATED_BY                     = USER,
                     LAST_UPDATE_DATE                    = SYSTIMESTAMP,
                     SYNC_DATE                           = SYSTIMESTAMP,
@@ -246,7 +250,8 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_RECEIPTS_PKG AS
                     RECEIVABLES_SPECIALIST,             COMMENTS,
                     STRUCTURED_PAYMENT_REFERENCE,       FUSION_CREATED_BY,
                     FUSION_CREATION_DATE,               FUSION_LAST_UPDATED_BY,
-                    FUSION_LAST_UPDATE_DATE,            SYNC_STATUS
+                    FUSION_LAST_UPDATE_DATE,            DR_ACCOUNT,
+                    CR_ACCOUNT,                         SYNC_STATUS
                 ) VALUES (
                     l_receipt_id,                       rec.RECEIPT_NUMBER,
                     rec.DOCUMENT_NUMBER,                rec.RECEIPT_TYPE,
@@ -275,7 +280,8 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_RECEIPTS_PKG AS
                     rec.RECEIVABLES_SPECIALIST,         rec.COMMENTS,
                     rec.STRUCTURED_PAYMENT_REFERENCE,   rec.FUSION_CREATED_BY,
                     l_cr_ts,                            rec.FUSION_LAST_UPDATED_BY,
-                    l_upd_ts,                           'NEW'
+                    l_upd_ts,                           rec.DR_ACCOUNT,
+                    rec.CR_ACCOUNT,                     'NEW'
                 );
 
                 IF l_exists > 0 THEN
