@@ -12,7 +12,7 @@ import {
   DownloadOutlined, UserOutlined, BankOutlined, LockOutlined,
   FileTextOutlined, EyeOutlined, UnorderedListOutlined, InfoCircleOutlined,
   ApiOutlined, DeleteOutlined, ExclamationCircleOutlined, SendOutlined, CodeOutlined,
-  BookOutlined, CheckCircleOutlined, PaperClipOutlined, UploadOutlined, PrinterOutlined,
+  BookOutlined, CheckCircleOutlined, PaperClipOutlined, UploadOutlined, PrinterOutlined, EditOutlined,
 } from '@ant-design/icons';
 import { Upload } from 'antd';
 import { Link } from 'react-router-dom';
@@ -322,6 +322,8 @@ const ManageReceipts: React.FC = () => {
   const [miscAcctVisible, setMiscAcctVisible] = useState(false);
   const [miscAcctTabKey, setMiscAcctTabKey]   = useState('');
   const [miscAcctField, setMiscAcctField]     = useState<'drAccount' | 'crAccount'>('crAccount');
+  // Per-tab edit mode: false = view/locked, true = editing enabled
+  const [editingEnabled, setEditingEnabled]   = useState<Record<string, boolean>>({});
   const [acctModal, setAcctModal] = useState<{
     visible: boolean; tabKey: string; creating: boolean; posting: boolean;
     slaHeaderId: number | null; slaStatus: string; glBatchId: number | null;
@@ -616,6 +618,7 @@ const ManageReceipts: React.FC = () => {
     fetchedAppsRef.current.delete(key);
     setReceiptApplications(prev => { const n = { ...prev }; delete n[key]; return n; });
     setTabAttachments(prev => { const n = { ...prev }; delete n[key]; return n; });
+    setEditingEnabled(prev => { const n = { ...prev }; delete n[key]; return n; });
     setTabs(prev => {
       const next = prev.filter(t => t.key !== key);
       if (activeKey === key) setActiveKey(next.length > 0 ? next[next.length - 1].key : 'search');
@@ -1259,6 +1262,8 @@ const ManageReceipts: React.FC = () => {
       if (isNew && result?.receiptId) {
         updateDraft(tabKey, { standardReceiptId: result.receiptId });
       }
+      // Lock the form after save — user clicks Edit to make further changes
+      setEditingEnabled(prev => ({ ...prev, [tabKey]: false }));
 
       message.success(
         isNew
@@ -1357,8 +1362,13 @@ const ManageReceipts: React.FC = () => {
   // ── Receipt panel ─────────────────────────────────────────────────────────
   const renderReceiptPanel = (tab: ReceiptTab) => {
     const { key: tabKey, draft, syncStatus } = tab;
-    const isNew    = draft.standardReceiptId === 0;
-    const isLocked = LOCKED_SYNC.includes((syncStatus || '').toUpperCase()) && !isNew;
+    const isNew         = draft.standardReceiptId === 0;
+    const hasSavedId    = draft.standardReceiptId > 0;
+    const isFusionLocked = LOCKED_SYNC.includes((syncStatus || '').toUpperCase()) && !isNew;
+    // isEditing: new records are always editable; saved records require Edit button
+    const isEditing     = isNew || (editingEnabled[tabKey] ?? false);
+    // isLocked: Fusion-synced records cannot be edited even with Edit button
+    const isLocked      = isFusionLocked;
     const isSaving = saving[tabKey] || false;
     const apps     = receiptApplications[tabKey];
 
@@ -1378,15 +1388,17 @@ const ManageReceipts: React.FC = () => {
       </Row>
     );
 
+    const fieldDisabled = isLocked || !isEditing;
+
     const inp = (f: keyof ReceiptDraft, placeholder = '') => (
       <Input size="small" style={{ fontSize: 12 }} value={draft[f] as string}
-        placeholder={placeholder} readOnly={isLocked}
-        onChange={e => !isLocked && updateDraft(tabKey, { [f]: e.target.value } as any)} />
+        placeholder={placeholder} readOnly={fieldDisabled}
+        onChange={e => !fieldDisabled && updateDraft(tabKey, { [f]: e.target.value } as any)} />
     );
 
     const sel = (f: keyof ReceiptDraft, options: string[]) => (
       <Select size="small" style={{ width: '100%', fontSize: 12 }} value={(draft[f] as string) || undefined}
-        allowClear disabled={isLocked}
+        allowClear disabled={fieldDisabled}
         onChange={v => updateDraft(tabKey, { [f]: v ?? '' } as any)}>
         {options.map(o => <Option key={o} value={o}>{o}</Option>)}
       </Select>
@@ -1395,13 +1407,13 @@ const ManageReceipts: React.FC = () => {
     const dp = (f: keyof ReceiptDraft) => (
       <DatePicker size="small" style={{ width: '100%', fontSize: 12 }}
         value={draft[f] ? dayjs(draft[f] as string) : null}
-        format="DD-MMM-YYYY" disabled={isLocked}
+        format="DD-MMM-YYYY" disabled={fieldDisabled}
         onChange={d => updateDraft(tabKey, { [f]: d ? d.format('YYYY-MM-DD') : '' } as any)} />
     );
 
     const num = (f: keyof ReceiptDraft) => (
       <InputNumber size="small" style={{ width: '100%', fontSize: 12 }}
-        value={draft[f] as number} precision={2} disabled={isLocked}
+        value={draft[f] as number} precision={2} disabled={fieldDisabled}
         onChange={v => updateDraft(tabKey, { [f]: v } as any)} />
     );
 
@@ -1414,7 +1426,7 @@ const ManageReceipts: React.FC = () => {
       return (
         <div>
           <Select size="small" style={{ width: '100%', fontSize: 12 }}
-            value={draft.businessUnit || undefined} allowClear disabled={isLocked} showSearch
+            value={draft.businessUnit || undefined} allowClear disabled={fieldDisabled} showSearch
             filterOption={(input, opt) => String(opt?.children ?? '').toLowerCase().includes(input.toLowerCase())}
             onChange={v => {
               updateDraft(tabKey, { businessUnit: v ?? '', receiptMethod: '', selectedBankAccountId: null });
@@ -1453,18 +1465,18 @@ const ManageReceipts: React.FC = () => {
             <Input size="small"
               value={draft.customerName}
               placeholder="Type customer name…"
-              disabled={isLocked}
+              disabled={fieldDisabled}
               style={{ fontSize: 12 }}
               onChange={e => updateDraft(tabKey, { customerName: e.target.value, customerAccountNumber: '' })}
             />
             <Tooltip title="Search customer">
-              <Button size="small" icon={<SearchOutlined />} disabled={isLocked}
-                onClick={() => { if (!isLocked) openLov(tabKey, draft.customerName); }} />
+              <Button size="small" icon={<SearchOutlined />} disabled={fieldDisabled}
+                onClick={() => { if (!fieldDisabled) openLov(tabKey, draft.customerName); }} />
             </Tooltip>
             {draft.customerAccountNumber && (
               <Tooltip title="Clear">
-                <Button size="small" icon={<CloseOutlined />} disabled={isLocked}
-                  onClick={() => { if (!isLocked) updateDraft(tabKey, { customerName: '', customerAccountNumber: '' }); }} />
+                <Button size="small" icon={<CloseOutlined />} disabled={fieldDisabled}
+                  onClick={() => { if (!fieldDisabled) updateDraft(tabKey, { customerName: '', customerAccountNumber: '' }); }} />
               </Tooltip>
             )}
           </Space.Compact>
@@ -1476,14 +1488,14 @@ const ManageReceipts: React.FC = () => {
         <Input size="small" readOnly
           value={display}
           placeholder={draft.receiptType ? 'Click to search customer…' : 'Select Receipt Type first'}
-          style={{ cursor: isLocked ? 'default' : 'pointer', fontSize: 12, background: '#fff' }}
-          onClick={() => { if (!isLocked) openLov(tabKey); }}
+          style={{ cursor: fieldDisabled ? 'default' : 'pointer', fontSize: 12, background: '#fff' }}
+          onClick={() => { if (!fieldDisabled) openLov(tabKey); }}
           suffix={
             draft.customerAccountNumber
               ? <CloseOutlined style={{ fontSize: 10, cursor: 'pointer', color: REDWOOD.neutral600 }}
-                  onClick={e => { e.stopPropagation(); if (!isLocked) updateDraft(tabKey, { customerName: '', customerAccountNumber: '' }); }} />
-              : <SearchOutlined style={{ color: REDWOOD.info, cursor: isLocked ? 'default' : 'pointer' }}
-                  onClick={() => { if (!isLocked) openLov(tabKey); }} />
+                  onClick={e => { e.stopPropagation(); if (!fieldDisabled) updateDraft(tabKey, { customerName: '', customerAccountNumber: '' }); }} />
+              : <SearchOutlined style={{ color: REDWOOD.info, cursor: fieldDisabled ? 'default' : 'pointer' }}
+                  onClick={() => { if (!fieldDisabled) openLov(tabKey); }} />
           }
         />
       );
@@ -1492,7 +1504,7 @@ const ManageReceipts: React.FC = () => {
     const currSel = () => (
       <Space.Compact style={{ width: '100%' }}>
         <Select size="small" style={{ flex: 1, fontSize: 12 }}
-          value={draft.currency || undefined} allowClear disabled={isLocked}
+          value={draft.currency || undefined} allowClear disabled={fieldDisabled}
           onChange={v => { updateDraft(tabKey, { currency: v ?? '' }); if (v) fetchFxRate(tabKey, v); }}>
           {['AED', 'USD', 'EUR', 'GBP', 'SAR', 'QAR', 'KWD'].map(o => <Option key={o} value={o}>{o}</Option>)}
         </Select>
@@ -1552,8 +1564,15 @@ const ManageReceipts: React.FC = () => {
             <Space>
               {isNew
                 ? <Badge color="purple" text={<Text style={{ fontSize: 12 }}>New — Not Saved</Text>} />
-                : draft.standardReceiptId > 0
-                  ? <Text type="secondary" style={{ fontSize: 12 }}>Fusion Receipt ID: {draft.standardReceiptId}</Text>
+                : hasSavedId
+                  ? <>
+                      <Text type="secondary" style={{ fontSize: 12 }}>Receipt ID:</Text>
+                      <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.info }}>{draft.standardReceiptId}</Text>
+                      {isEditing
+                        ? <Badge color="orange" text={<Text style={{ fontSize: 12, color: '#d46b08' }}>Edit Mode</Text>} />
+                        : <Badge color="green" text={<Text style={{ fontSize: 12 }}>Saved</Text>} />
+                      }
+                    </>
                   : <Badge color="blue" text={<Text style={{ fontSize: 12 }}>Saved Locally</Text>} />
               }
               {syncStatus && <Tag color={syncStatusColor(syncStatus)} style={{ fontSize: 11 }}>{syncStatus}</Tag>}
@@ -1570,8 +1589,18 @@ const ManageReceipts: React.FC = () => {
                   onClick={() => setApiModal({ tabKey, testResult: null, testing: false })} />
               </Tooltip>
 
+              {/* Print — always visible for saved receipts */}
+              {hasSavedId && (
+                <Tooltip title="Print Receipt">
+                  <Button size="small" icon={<PrinterOutlined />}
+                    onClick={() => generateReceiptPdf(draft)}>
+                    Print
+                  </Button>
+                </Tooltip>
+              )}
+
               {/* Delete */}
-              {!isNew && (
+              {hasSavedId && isEditing && !isLocked && (
                 <Tooltip title="Delete receipt">
                   <Button size="small" danger icon={<DeleteOutlined />} loading={deleting[tabKey]}
                     onClick={() => handleDelete(tabKey)} />
@@ -1579,7 +1608,7 @@ const ManageReceipts: React.FC = () => {
               )}
 
               {/* Accounting buttons — only after receipt is saved */}
-              {!isNew && (
+              {hasSavedId && (
                 <>
                   <Tooltip title={!draft.receiptMethod ? 'Select a Receipt Method first' : 'Create SLA accounting entries'}>
                     <Button size="small" icon={<BookOutlined />}
@@ -1601,15 +1630,15 @@ const ManageReceipts: React.FC = () => {
                 </>
               )}
 
-              {!isNew && (
-                <Tooltip title="Print Receipt">
-                  <Button size="small" icon={<PrinterOutlined />}
-                    onClick={() => generateReceiptPdf(draft)}>
-                    Print
-                  </Button>
-                </Tooltip>
+              {/* Edit / Save / Cancel */}
+              {hasSavedId && !isEditing && !isLocked && (
+                <Button size="small" icon={<EditOutlined />}
+                  style={{ color: REDWOOD.warning, borderColor: REDWOOD.warning }}
+                  onClick={() => setEditingEnabled(prev => ({ ...prev, [tabKey]: true }))}>
+                  Edit
+                </Button>
               )}
-              {!isLocked && <>
+              {isEditing && !isLocked && <>
                 <Button size="small" type="primary" icon={<SaveOutlined />} loading={isSaving}
                   style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
                   onClick={() => handleSave(tabKey)}>Save</Button>
@@ -1617,6 +1646,11 @@ const ManageReceipts: React.FC = () => {
                   onClick={async () => { const ok = await handleSave(tabKey); if (ok) closeTab(tabKey); }}>
                   Save and Close
                 </Button>
+                {hasSavedId && (
+                  <Button size="small" onClick={() => setEditingEnabled(prev => ({ ...prev, [tabKey]: false }))}>
+                    Cancel
+                  </Button>
+                )}
               </>}
               <Button size="small" icon={<CloseOutlined />} onClick={() => closeTab(tabKey)}>Close</Button>
             </Space>
@@ -1642,7 +1676,7 @@ const ManageReceipts: React.FC = () => {
                         {field('Business Unit',  buSel(), true)}
                         {field('Receipt Type',
                           <Select size="small" style={{ width: '100%', fontSize: 12 }}
-                            value={draft.receiptType || undefined} allowClear disabled={isLocked}
+                            value={draft.receiptType || undefined} allowClear disabled={fieldDisabled}
                             onChange={v => updateDraft(tabKey, { receiptType: v ?? '' })}>
                             <Option value="CASH"><Tag color="blue" style={{ fontSize: 11 }}>CASH</Tag></Option>
                             <Option value="MISC"><Tag color="purple" style={{ fontSize: 11 }}>MISC</Tag></Option>
@@ -1658,7 +1692,7 @@ const ManageReceipts: React.FC = () => {
                               style={{ width: '100%', fontSize: 12 }}
                               value={draft.selectedBankAccountId ?? undefined}
                               allowClear
-                              disabled={isLocked}
+                              disabled={fieldDisabled}
                               showSearch
                               loading={allMethodAccountsLoading[tabKey]}
                               placeholder={allMethodAccountsLoading[tabKey] ? 'Loading…' : draft.businessUnit ? 'Select method…' : 'Select Business Unit first'}
@@ -1736,12 +1770,12 @@ const ManageReceipts: React.FC = () => {
                                 value={draft.drAccount}
                                 placeholder="Select GL combination…"
                                 style={{ fontSize: 11, fontFamily: draft.drAccount ? 'monospace' : undefined, background: '#fff', cursor: 'pointer', letterSpacing: draft.drAccount ? '0.02em' : undefined }}
-                                onClick={() => { if (!isLocked) { setMiscAcctTabKey(tabKey); setMiscAcctField('drAccount'); setMiscAcctVisible(true); } }}
+                                onClick={() => { if (!fieldDisabled) { setMiscAcctTabKey(tabKey); setMiscAcctField('drAccount'); setMiscAcctVisible(true); } }}
                               />
                               {draft.drAccount
-                                ? <Button size="small" icon={<CloseOutlined />} disabled={isLocked}
+                                ? <Button size="small" icon={<CloseOutlined />} disabled={fieldDisabled}
                                     onClick={() => updateDraft(tabKey, { drAccount: '', drAccountDesc: '' })} />
-                                : <Button size="small" icon={<SearchOutlined />} disabled={isLocked}
+                                : <Button size="small" icon={<SearchOutlined />} disabled={fieldDisabled}
                                     onClick={() => { setMiscAcctTabKey(tabKey); setMiscAcctField('drAccount'); setMiscAcctVisible(true); }} />
                               }
                             </Space.Compact>
@@ -1759,12 +1793,12 @@ const ManageReceipts: React.FC = () => {
                                 value={draft.crAccount}
                                 placeholder="Select GL combination…"
                                 style={{ fontSize: 11, fontFamily: draft.crAccount ? 'monospace' : undefined, background: '#fff', cursor: 'pointer', letterSpacing: draft.crAccount ? '0.02em' : undefined }}
-                                onClick={() => { if (!isLocked) { setMiscAcctTabKey(tabKey); setMiscAcctField('crAccount'); setMiscAcctVisible(true); } }}
+                                onClick={() => { if (!fieldDisabled) { setMiscAcctTabKey(tabKey); setMiscAcctField('crAccount'); setMiscAcctVisible(true); } }}
                               />
                               {draft.crAccount
-                                ? <Button size="small" icon={<CloseOutlined />} disabled={isLocked}
+                                ? <Button size="small" icon={<CloseOutlined />} disabled={fieldDisabled}
                                     onClick={() => updateDraft(tabKey, { crAccount: '', crAccountDesc: '' })} />
-                                : <Button size="small" icon={<SearchOutlined />} disabled={isLocked}
+                                : <Button size="small" icon={<SearchOutlined />} disabled={fieldDisabled}
                                     onClick={() => { setMiscAcctTabKey(tabKey); setMiscAcctField('crAccount'); setMiscAcctVisible(true); }} />
                               }
                             </Space.Compact>
@@ -1804,8 +1838,8 @@ const ManageReceipts: React.FC = () => {
                         {field('Rec. Specialist',   inp('receivablesSpecialist'))}
                         {field('Comments',
                           <Input.TextArea size="small" style={{ fontSize: 12 }} rows={2}
-                            value={draft.comments} readOnly={isLocked}
-                            onChange={e => !isLocked && updateDraft(tabKey, { comments: e.target.value })} />
+                            value={draft.comments} readOnly={fieldDisabled}
+                            onChange={e => !fieldDisabled && updateDraft(tabKey, { comments: e.target.value })} />
                         , true)}
                       </Col>
 
@@ -1992,9 +2026,9 @@ const ManageReceipts: React.FC = () => {
                 children: (
                   <div style={{ padding: '10px 8px 14px' }}>
                     <Input.TextArea rows={6} style={{ fontSize: 12 }}
-                      value={draft.comments} readOnly={isLocked}
+                      value={draft.comments} readOnly={fieldDisabled}
                       placeholder="Enter comments…"
-                      onChange={e => !isLocked && updateDraft(tabKey, { comments: e.target.value })} />
+                      onChange={e => !fieldDisabled && updateDraft(tabKey, { comments: e.target.value })} />
                   </div>
                 ),
               },
@@ -2013,13 +2047,14 @@ const ManageReceipts: React.FC = () => {
               </Space>
             }
             extra={
-              !isNew && (
+              <Tooltip title={!hasSavedId ? 'Save the receipt first' : undefined}>
                 <Button size="small" icon={<UploadOutlined />}
+                  disabled={!hasSavedId}
                   loading={attSaving[tabKey]}
                   onClick={() => handleSaveAttachments(tabKey, draft.standardReceiptId)}>
                   Save Attachments
                 </Button>
-              )
+              </Tooltip>
             }
           >
             <div style={{ padding: '8px 12px' }}>
@@ -2055,11 +2090,13 @@ const ManageReceipts: React.FC = () => {
                 })}
                 showUploadList={false}
                 multiple
-                disabled={isNew}
+                disabled={!hasSavedId}
               >
-                <Button icon={<UploadOutlined />} disabled={isNew} size="small">
-                  {isNew ? 'Save receipt first to attach files' : 'Attach Files'}
-                </Button>
+                <Tooltip title={!hasSavedId ? 'Save the receipt first to attach files' : undefined}>
+                  <Button icon={<UploadOutlined />} disabled={!hasSavedId} size="small">
+                    Attach Files
+                  </Button>
+                </Tooltip>
               </Upload>
 
               <div style={{ marginTop: 8 }}>
