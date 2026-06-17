@@ -662,6 +662,24 @@ const ManageReceipts: React.FC = () => {
 
       setTabs(prev => prev.map(t => t.key === key ? { ...t, draft: fullDraft } : t));
 
+      // Resolve descriptions for saved DR / CR account codes
+      const resolveDesc = async (code: string) => {
+        if (!code) return '';
+        try {
+          const result = await validateAccountCode(code);
+          return Object.values(result.segmentDetails ?? {}).map((s: any) => s.description).filter(Boolean).join(' · ');
+        } catch { return ''; }
+      };
+      const [drDesc, crDesc] = await Promise.all([
+        resolveDesc(fullDraft.drAccount),
+        resolveDesc(fullDraft.crAccount),
+      ]);
+      if (drDesc || crDesc) {
+        setTabs(prev => prev.map(t => t.key === key ? {
+          ...t, draft: { ...t.draft, drAccountDesc: drDesc, crAccountDesc: crDesc }
+        } : t));
+      }
+
       // Auto-load receipt methods for this BU so the dropdown is populated
       if (fullDraft.businessUnit) {
         await fetchMethodAccountsByBU(key, fullDraft.businessUnit);
