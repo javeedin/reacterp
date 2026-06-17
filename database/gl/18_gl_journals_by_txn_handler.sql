@@ -71,7 +71,6 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_JOURNALS_PKG AS
           INTO p_je_header_id, p_je_batch_id
           FROM RR_GL_JE_LINES_ALL
          WHERE REFERENCE1 = p_txn_id
-           AND REFERENCE3 = 'EXPENSE'
            AND ROWNUM     = 1;
     EXCEPTION
         WHEN NO_DATA_FOUND THEN
