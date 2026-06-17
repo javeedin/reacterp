@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Layout, Card, Form, Select, Input, Button, Space, Typography, Table, Tag,
   Row, Col, Breadcrumb, Tooltip, DatePicker, message, Tabs, Divider,
-  Badge, Alert, Modal, InputNumber, Radio, Spin, Descriptions,
+  Badge, Alert, Modal, InputNumber, Radio, Spin, Descriptions, Dropdown,
 } from 'antd';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -13,6 +13,7 @@ import {
   FileTextOutlined, EyeOutlined, UnorderedListOutlined, InfoCircleOutlined,
   ApiOutlined, DeleteOutlined, ExclamationCircleOutlined, SendOutlined, CodeOutlined,
   BookOutlined, CheckCircleOutlined, PaperClipOutlined, UploadOutlined, PrinterOutlined, EditOutlined,
+  CopyOutlined, RollbackOutlined, DownOutlined,
 } from '@ant-design/icons';
 import { Upload } from 'antd';
 import { Link } from 'react-router-dom';
@@ -850,6 +851,114 @@ const ManageReceipts: React.FC = () => {
     const blobUrl = makeBlobUrl(content, ft || 'application/octet-stream');
     const a = document.createElement('a'); a.href = blobUrl; a.download = att.name; a.click();
     setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+  };
+
+  // ── Copy Receipt ─────────────────────────────────────────────────────────
+  const [copyModal, setCopyModal] = useState<{ draft: ReceiptDraft } | null>(null);
+  const [copying, setCopying] = useState(false);
+
+  const openCopyModal = (draft: ReceiptDraft) => {
+    // Prepare the copy draft — blank out identity fields
+    setCopyModal({ draft });
+  };
+
+  const handleConfirmCopy = async () => {
+    if (!copyModal) return;
+    const src = copyModal.draft;
+    setCopying(true);
+    try {
+      const newReceiptNumber = `Copy:${src.receiptNumber}`;
+      const body = {
+        receipt_number:                  newReceiptNumber,
+        receipt_type:                    src.receiptType,
+        business_unit:                   src.businessUnit,
+        receipt_method:                  src.receiptMethod,
+        receipt_method_id:               src.receiptMethodId,
+        receipt_date:                    src.receiptDate,
+        accounting_date:                 null,           // blank per requirement
+        maturity_date:                   src.maturityDate || null,
+        amount:                          src.amount,
+        currency_code:                   src.currency,
+        conversion_rate_type:            src.conversionRateType || null,
+        conversion_rate:                 src.conversionRate,
+        state:                           src.state || null,
+        status:                          src.status || null,
+        receipt_at_risk:                 src.receiptAtRisk || 'N',
+        remittance_bank_name:            src.remittanceBankName || null,
+        remittance_bank_branch:          src.remittanceBankBranch || null,
+        remittance_bank_account_number:  src.remittanceBankAccountNumber || null,
+        remittance_bank_deposit_date:    null,
+        customer_name:                   src.customerName || null,
+        customer_account_number:         src.customerAccountNumber || null,
+        customer_site:                   src.customerSite || null,
+        customer_bank:                   src.customerBank || null,
+        customer_bank_branch:            src.customerBankBranch || null,
+        customer_bank_account_number:    src.customerBankAccountNumber || null,
+        receivables_specialist:          src.receivablesSpecialist || null,
+        comments:                        src.comments || null,
+        structured_payment_reference:    src.structuredPaymentReference || null,
+        receipt_batch_name:              src.receiptBatchName || null,
+        dr_account:                      src.drAccount || null,
+        cr_account:                      src.crAccount || null,
+        accounting_status:               null,           // blank per requirement
+        sync_status:                     'NEW',
+      };
+
+      const res    = await fetch(APEX_AR_RECEIPTS, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+      });
+      const result = await res.json().catch(() => ({}));
+
+      if (!res.ok || (result?.errors ?? 0) > 0) {
+        message.error(result?.message || `Copy failed (HTTP ${res.status})`);
+        return;
+      }
+
+      const newId = result?.receiptId ?? result?.standard_receipt_id;
+      if (!newId) { message.error('Copy created but could not retrieve new Receipt ID'); return; }
+
+      message.success(`Receipt copied — new ID: ${newId}`);
+      setCopyModal(null);
+
+      // Fetch the new receipt and open it in a new tab
+      const fetchRes = await fetch(`${APEX_AR_RECEIPTS}/${newId}`, { headers: { Accept: 'application/json' } });
+      const fetchData = await fetchRes.json();
+      const r = (fetchData.items ?? [fetchData])[0];
+      if (!r) { message.warning('Copied receipt created but could not open it automatically'); return; }
+
+      const newRow: ReceiptRow = {
+        key:                         String(newId),
+        standardReceiptId:           newId,
+        receiptNumber:               r.receipt_number          ?? newReceiptNumber,
+        documentNumber:              r.document_number         ?? null,
+        receiptType:                 r.receipt_type            ?? src.receiptType,
+        businessUnit:                r.business_unit           ?? src.businessUnit,
+        receiptMethod:               r.receipt_method          ?? src.receiptMethod,
+        receiptDate:                 r.receipt_date            ?? src.receiptDate,
+        accountingDate:              r.accounting_date         ?? '',
+        amount:                      r.amount                  ?? src.amount ?? 0,
+        unappliedAmount:             r.unapplied_amount        ?? 0,
+        accountedAmount:             r.accounted_amount        ?? 0,
+        currency:                    r.currency_code           ?? src.currency,
+        state:                       r.state                   ?? '',
+        status:                      r.status                  ?? '',
+        remittanceBankName:          r.remittance_bank_name    ?? '',
+        remittanceBankAccountNumber: r.remittance_bank_account_number ?? '',
+        maturityDate:                r.maturity_date           ?? '',
+        customerName:                r.customer_name           ?? src.customerName,
+        customerAccountNumber:       r.customer_account_number ?? src.customerAccountNumber,
+        comments:                    r.comments                ?? src.comments,
+        syncStatus:                  r.sync_status             ?? 'NEW',
+        accountingStatus:            '',
+      };
+      openReceiptTab(newRow);
+    } catch (e: any) {
+      message.error(`Copy failed: ${e.message}`);
+    } finally {
+      setCopying(false);
+    }
   };
 
   const handleSaveAttachments = async (tabKey: string, receiptId: number) => {
@@ -1834,6 +1943,33 @@ const ManageReceipts: React.FC = () => {
                   </Button>
                 )}
               </>}
+              {/* Actions dropdown — only for saved receipts */}
+              {hasSavedId && (
+                <Dropdown
+                  trigger={['click']}
+                  menu={{
+                    items: [
+                      {
+                        key: 'copy',
+                        icon: <CopyOutlined />,
+                        label: 'Copy Receipt',
+                        onClick: () => openCopyModal(draft),
+                      },
+                      {
+                        key: 'reverse',
+                        icon: <RollbackOutlined />,
+                        label: 'Reverse Receipt',
+                        disabled: true,
+                        title: 'Coming soon',
+                      },
+                    ],
+                  }}
+                >
+                  <Button size="small">
+                    Actions <DownOutlined style={{ fontSize: 10 }} />
+                  </Button>
+                </Dropdown>
+              )}
               <Button size="small" icon={<CloseOutlined />} onClick={() => closeTab(tabKey)}>Close</Button>
             </Space>
           </div>
@@ -3095,6 +3231,57 @@ const ManageReceipts: React.FC = () => {
           </Modal>
         );
       })()}
+
+      {/* ── Copy Receipt Modal ── */}
+      {copyModal && (
+        <Modal
+          open
+          title={<Space><CopyOutlined style={{ color: REDWOOD.info }} /><span>Copy Receipt — {copyModal.draft.receiptNumber}</span></Space>}
+          onCancel={() => { if (!copying) setCopyModal(null); }}
+          width={680}
+          footer={[
+            <Button key="cancel" onClick={() => setCopyModal(null)} disabled={copying}>Cancel</Button>,
+            <Button key="copy" type="primary" icon={<CopyOutlined />} loading={copying}
+              style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+              onClick={handleConfirmCopy}>
+              Copy Receipt
+            </Button>,
+          ]}
+        >
+          <Alert
+            type="info" showIcon style={{ marginBottom: 16 }}
+            message="A new receipt will be created with the data below."
+            description={<>Receipt Number will be set to <strong>Copy:{copyModal.draft.receiptNumber}</strong>. Accounting Date and Accounting Status will be blank.</>}
+          />
+          <Descriptions bordered size="small" column={2} labelStyle={{ fontWeight: 600, fontSize: 12 }} contentStyle={{ fontSize: 12 }}>
+            <Descriptions.Item label="New Receipt #" span={2}>
+              <Text strong style={{ color: REDWOOD.info }}>Copy:{copyModal.draft.receiptNumber}</Text>
+            </Descriptions.Item>
+            <Descriptions.Item label="Receipt Type">{copyModal.draft.receiptType || '—'}</Descriptions.Item>
+            <Descriptions.Item label="Business Unit">{copyModal.draft.businessUnit || '—'}</Descriptions.Item>
+            <Descriptions.Item label="Receipt Method">{copyModal.draft.receiptMethod || '—'}</Descriptions.Item>
+            <Descriptions.Item label="Currency">{copyModal.draft.currency || '—'}</Descriptions.Item>
+            <Descriptions.Item label="Receipt Date">{copyModal.draft.receiptDate || '—'}</Descriptions.Item>
+            <Descriptions.Item label="Accounting Date"><Text type="secondary">— (blank)</Text></Descriptions.Item>
+            <Descriptions.Item label="Amount" span={2}>
+              <Text strong style={{ fontFamily: 'monospace', fontSize: 14 }}>
+                {copyModal.draft.amount?.toLocaleString('en-AE', { minimumFractionDigits: 2 }) ?? '0.00'}
+              </Text>
+            </Descriptions.Item>
+            <Descriptions.Item label="Customer" span={2}>{copyModal.draft.customerName || copyModal.draft.customerAccountNumber || '—'}</Descriptions.Item>
+            <Descriptions.Item label="Customer Site">{copyModal.draft.customerSite || '—'}</Descriptions.Item>
+            <Descriptions.Item label="Customer Account #">{copyModal.draft.customerAccountNumber || '—'}</Descriptions.Item>
+            <Descriptions.Item label="Remittance Bank" span={2}>{copyModal.draft.remittanceBankName || '—'}</Descriptions.Item>
+            <Descriptions.Item label="Bank Account #">{copyModal.draft.remittanceBankAccountNumber || '—'}</Descriptions.Item>
+            <Descriptions.Item label="State">{copyModal.draft.state || '—'}</Descriptions.Item>
+            <Descriptions.Item label="Comments" span={2}>{copyModal.draft.comments || '—'}</Descriptions.Item>
+            <Descriptions.Item label="DR Account">{copyModal.draft.drAccount || '—'}</Descriptions.Item>
+            <Descriptions.Item label="CR Account">{copyModal.draft.crAccount || '—'}</Descriptions.Item>
+            <Descriptions.Item label="Accounting Status" span={2}><Text type="secondary">— (blank)</Text></Descriptions.Item>
+          </Descriptions>
+        </Modal>
+      )}
+
     </Layout>
   );
 };
