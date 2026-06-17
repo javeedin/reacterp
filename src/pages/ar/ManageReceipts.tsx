@@ -3254,13 +3254,19 @@ const ManageReceipts: React.FC = () => {
                   render: v => <Tag color={v === 'DR' ? 'blue' : 'green'} style={{ fontSize: 11, fontWeight: 700 }}>{v}</Tag> },
                 { title: 'Class', dataIndex: 'accountingClass', width: 90,
                   render: v => <Text style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{v}</Text> },
-                { title: 'Account', dataIndex: 'accountCombination', width: 230,
-                  render: (v, r: any) => (
-                    <div style={{ minWidth: 210 }}>
-                      <Text style={{ fontSize: 12, fontFamily: 'monospace', color: v ? REDWOOD.info : '#bfbfbf', whiteSpace: 'nowrap', display: 'block' }}>{v || '— not set —'}</Text>
-                      {r.accountDesc && <div style={{ fontSize: 10, color: '#8c8c8c', marginTop: 2, whiteSpace: 'nowrap' }}>{r.accountDesc}</div>}
-                    </div>
-                  ) },
+                { title: 'Account', dataIndex: 'accountCombination', width: 180,
+                  render: (v, r: any) => {
+                    // Show only the natural account segment description (skip company & 'Default' segments)
+                    const acctSegDesc = r.accountDesc
+                      ? r.accountDesc.split(' · ').filter((s: string) => s && s !== 'Default').slice(1).join(' · ')
+                      : '';
+                    return (
+                      <div style={{ minWidth: 160 }}>
+                        <Text style={{ fontSize: 12, fontFamily: 'monospace', color: v ? REDWOOD.info : '#bfbfbf', whiteSpace: 'nowrap', display: 'block' }}>{v || '— not set —'}</Text>
+                        {acctSegDesc && <div style={{ fontSize: 10, color: '#8c8c8c', marginTop: 2, whiteSpace: 'nowrap' }}>{acctSegDesc}</div>}
+                      </div>
+                    );
+                  } },
                 { title: 'Line Description', dataIndex: 'description', width: 240,
                   render: (_, r: any) => {
                     const desc = draft2?.comments || r.description;
