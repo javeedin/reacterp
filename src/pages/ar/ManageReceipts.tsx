@@ -77,6 +77,7 @@ interface ReceiptRow {
   customerAccountNumber:       string;
   comments:                    string;
   syncStatus:                  string;
+  accountingStatus:            string;
 }
 
 interface ReceiptDraft {
@@ -560,6 +561,7 @@ const ManageReceipts: React.FC = () => {
         customerAccountNumber:       r.customer_account_number          ?? '',
         comments:                    r.comments                         ?? '',
         syncStatus:                  r.sync_status                      ?? '',
+        accountingStatus:            r.accounting_status                ?? '',
       }));
 
       setSearchRows(rows);
@@ -1504,6 +1506,11 @@ const ManageReceipts: React.FC = () => {
       render: v => <Tag color={stateColor(v)} style={{ fontSize: 11 }}>{v || '—'}</Tag> },
     { title: 'Status', dataIndex: 'status', width: 100,
       render: v => <Tag color={statusColor(v)} style={{ fontSize: 11 }}>{v || '—'}</Tag> },
+    { title: 'Acctg Status', dataIndex: 'accountingStatus', width: 110,
+      render: v => v === 'Accounted'
+        ? <Tag color="green" style={{ fontSize: 11 }}>Accounted</Tag>
+        : v ? <Tag color="blue" style={{ fontSize: 11 }}>{v}</Tag>
+            : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
     { title: 'Remittance Bank', dataIndex: 'remittanceBankName', width: 180, ellipsis: true,
       render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Bank Acct #', dataIndex: 'remittanceBankAccountNumber', width: 140,
@@ -1529,10 +1536,11 @@ const ManageReceipts: React.FC = () => {
     const isNew         = draft.standardReceiptId === 0;
     const hasSavedId    = draft.standardReceiptId > 0;
     const isFusionLocked = LOCKED_SYNC.includes((syncStatus || '').toUpperCase()) && !isNew;
+    const isAccounted    = draft.accountingStatus === 'Accounted';
     // isEditing: new records are always editable; saved records require Edit button
     const isEditing     = isNew || (editingEnabled[tabKey] ?? false);
-    // isLocked: Fusion-synced records cannot be edited even with Edit button
-    const isLocked      = isFusionLocked;
+    // isLocked: Fusion-synced records or Accounted receipts cannot be edited
+    const isLocked      = isFusionLocked || isAccounted;
     const isSaving = saving[tabKey] || false;
     const apps     = receiptApplications[tabKey];
 
@@ -1741,7 +1749,8 @@ const ManageReceipts: React.FC = () => {
               }
               {syncStatus && <Tag color={syncStatusColor(syncStatus)} style={{ fontSize: 11 }}>{syncStatus}</Tag>}
               {draft.accountingStatus === 'Accounted'
-                ? <Tag color="green" style={{ fontSize: 11 }}>Accounted</Tag>
+                ? <><Tag color="green" style={{ fontSize: 11 }}>Accounted</Tag>
+                    <Tag icon={<LockOutlined />} color="red" style={{ fontSize: 11 }}>Read Only</Tag></>
                 : tab.slaHeaderId
                   ? <Tag color="blue" style={{ fontSize: 11 }}>SLA Created</Tag>
                   : null
