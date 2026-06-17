@@ -90,6 +90,20 @@ interface ReceiptAttRow {
   dlStatus:          'idle' | 'downloading' | 'done' | 'error' | 'partial';
 }
 
+interface ArInvRow {
+  key:                   string;
+  customerTransactionId: number;
+  transactionNumber:     string;
+  customerName:          string;
+  businessUnit:          string;
+  transactionDate:       string;
+  currency:              string;
+  scanStatus:            'idle' | 'scanning' | 'found' | 'none' | 'error';
+  scanError?:            string;
+  files:                 FusionFile[];
+  dlStatus:              'idle' | 'downloading' | 'done' | 'error' | 'partial';
+}
+
 // ── Shared helpers ───────────────────────────────────────────────────────────
 
 const fusionCreds   = () => btoa(`${ORACLE_FUSION_CONFIG.username}:${ORACLE_FUSION_CONFIG.password}`);
@@ -858,6 +872,177 @@ const DownloadInvoiceAttachments: React.FC = () => {
 
   const rcptPct = rcptTotal > 0 ? Math.round((rcptDone / rcptTotal) * 100) : 0;
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TAB 7 — AR INVOICES
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const [arInvForm] = Form.useForm();
+  const [arInvRows, setArInvRows]               = useState<ArInvRow[]>([]);
+  const [arInvLoading, setArInvLoading]         = useState(false);
+  const [arInvRunning, setArInvRunning]         = useState(false);
+  const arInvStopRef                            = useRef(false);
+  const [arInvScanned, setArInvScanned]         = useState(0);
+  const [arInvWith, setArInvWith]               = useState(0);
+  const [arInvTotal, setArInvTotal]             = useState(0);
+  const [arInvDone, setArInvDone]               = useState(0);
+  const [arInvErr, setArInvErr]                 = useState(0);
+  const [arInvPreview, setArInvPreview]         = useState<ArInvRow | null>(null);
+  const [arInvPreviewLoading, setArInvPreviewLoading] = useState(false);
+
+  const handleLoadArInvoices = async () => {
+    const vals = arInvForm.getFieldsValue();
+    setArInvLoading(true); setArInvRows([]);
+    setArInvScanned(0); setArInvWith(0); setArInvTotal(0); setArInvDone(0); setArInvErr(0);
+    try {
+      const allItems: any[] = [];
+      let offset = 0;
+      const pageSize = 500;
+      while (true) {
+        const q = new URLSearchParams({ limit: String(pageSize), offset: String(offset) });
+        if (vals.businessUnit)      q.set('business_unit',    vals.businessUnit);
+        if (vals.transactionNumber) q.set('transaction_number', vals.transactionNumber);
+        if (vals.customerName)      q.set('bill_to_customer', vals.customerName);
+        const res = await fetch(`${APEX_BASE}/ar/invoices?${q}`, { headers: { Accept: 'application/json' } });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const items: any[] = data.items || [];
+        allItems.push(...items);
+        if (items.length < pageSize || !data.hasMore) break;
+        offset += items.length;
+      }
+      const mapped: ArInvRow[] = allItems.map((it: any, i: number) => ({
+        key:                   String(it.customer_transaction_id ?? it.CUSTOMER_TRANSACTION_ID ?? i),
+        customerTransactionId: Number(it.customer_transaction_id ?? it.CUSTOMER_TRANSACTION_ID ?? 0),
+        transactionNumber:     it.transaction_number    ?? it.TRANSACTION_NUMBER    ?? '',
+        customerName:          it.bill_to_customer_name ?? it.BILL_TO_CUSTOMER_NAME ?? '',
+        businessUnit:          it.business_unit         ?? it.BUSINESS_UNIT         ?? '',
+        transactionDate:       it.transaction_date      ?? it.TRANSACTION_DATE      ?? '',
+        currency:              it.invoice_currency_code ?? it.INVOICE_CURRENCY_CODE ?? '',
+        scanStatus:            'idle',
+        files:                 [],
+        dlStatus:              'idle',
+      }));
+      setArInvRows(mapped);
+      message.success(`Loaded ${mapped.length} AR invoices`);
+    } catch (e: any) { message.error(`Failed: ${e.message}`); }
+    finally { setArInvLoading(false); }
+  };
+
+  const scanArInvoice = useCallback(async (row: ArInvRow): Promise<ArInvRow> => {
+    const upd = (p: Partial<ArInvRow>): ArInvRow => ({ ...row, ...p });
+    try {
+      const url = `${FUSION_BASE}/receivablesInvoices/${row.customerTransactionId}/child/attachments`;
+      const res = await fetch(url, { headers: fusionHeaders() });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data  = await res.json();
+      const items: any[] = data.items || [];
+      if (items.length === 0) return upd({ scanStatus: 'none' });
+      const files: FusionFile[] = items.map((att: any) => {
+        const links: any[] = att.links || [];
+        const best = links.find((l: any) => l.rel === 'enclosure' && l.name === 'FileContents') ||
+                     links.find((l: any) => l.rel === 'enclosure') ||
+                     (att.FileUrl ? { href: FUSION_HOST + att.FileUrl } : null);
+        const fileName = att.FileName || att.Title || 'attachment';
+        return {
+          fileName,
+          savedAs:  `[${safeName(row.transactionNumber || String(row.customerTransactionId))}]_${safeName(fileName)}`,
+          href:     best?.href ?? '',
+          fileSize: att.UploadedFileLength ?? att.FileSize,
+          mimeType: att.UploadedFileContentType ?? att.ContentType,
+          status:   'pending',
+        } as FusionFile;
+      });
+      return upd({ scanStatus: 'found', files });
+    } catch (e: any) { return upd({ scanStatus: 'error', scanError: e.message }); }
+  }, []);
+
+  const downloadArInvFile = async (file: FusionFile): Promise<'done' | 'error'> => {
+    if (!file.href) return 'error';
+    try {
+      const res = await fetch(file.href, { headers: { 'Authorization': `Basic ${fusionCreds()}` } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await saveBlob(await res.blob(), file.savedAs);
+      return 'done';
+    } catch { return 'error'; }
+  };
+
+  const handleRunArInvoices = async () => {
+    if (arInvRows.length === 0) { message.warning('Load invoices first'); return; }
+    arInvStopRef.current = false; setArInvRunning(true);
+    setArInvScanned(0); setArInvWith(0); setArInvTotal(0); setArInvDone(0); setArInvErr(0);
+    let sc = 0, ac = 0, fc = 0, dc = 0, ec = 0;
+    const work: ArInvRow[] = arInvRows.map(r => ({ ...r, scanStatus: 'idle' as const, files: [], dlStatus: 'idle' as const }));
+    const upd = (i: number, p: Partial<ArInvRow>) => { work[i] = { ...work[i], ...p } as ArInvRow; setArInvRows([...work]); };
+    for (let i = 0; i < work.length; i++) {
+      if (arInvStopRef.current) break;
+      upd(i, { scanStatus: 'scanning' });
+      const sv = await scanArInvoice(work[i]); sc++; setArInvScanned(sc);
+      if (sv.scanStatus === 'found') { ac++; fc += sv.files.length; setArInvWith(ac); setArInvTotal(fc); }
+      upd(i, sv);
+      if (sv.scanStatus !== 'found' || sv.files.length === 0) continue;
+      if (arInvStopRef.current) break;
+      upd(i, { dlStatus: 'downloading' });
+      const uf = [...sv.files]; let id = 0, ie = 0;
+      for (let j = 0; j < uf.length; j++) {
+        if (arInvStopRef.current) break;
+        uf[j] = { ...uf[j], status: 'downloading' }; upd(i, { files: [...uf] });
+        const r = await downloadArInvFile(uf[j]);
+        if (r === 'done') { uf[j] = { ...uf[j], status: 'done' }; dc++; id++; setArInvDone(dc); }
+        else              { uf[j] = { ...uf[j], status: 'error'}; ec++; ie++; setArInvErr(ec); }
+        upd(i, { files: [...uf] });
+      }
+      upd(i, { dlStatus: ie === 0 ? 'done' : id === 0 ? 'error' : 'partial', files: [...uf] });
+    }
+    setArInvRunning(false);
+    message.success(`Finished. ${dc} downloaded, ${ec} errors.`);
+  };
+
+  const handleArInvPreview = async (row: ArInvRow) => {
+    setArInvPreviewLoading(true);
+    setArInvPreview({ ...row, scanStatus: 'scanning', files: [] });
+    const result = await scanArInvoice(row);
+    setArInvPreview(result);
+    setArInvPreviewLoading(false);
+  };
+
+  const arInvColumns: ColumnsType<ArInvRow> = [
+    { title: '#', key: 'seq', width: 50, render: (_,__,i) => <Text type="secondary" style={{ fontSize: 11 }}>{i+1}</Text> },
+    { title: 'Txn #', dataIndex: 'transactionNumber', width: 160, render: (v) => <Text strong style={{ fontSize: 12 }}>{v}</Text> },
+    { title: 'Customer', dataIndex: 'customerName', ellipsis: true, render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+    { title: 'BU', dataIndex: 'businessUnit', width: 140, ellipsis: true, render: (v) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+    { title: 'Date', dataIndex: 'transactionDate', width: 100, render: (v) => <Text style={{ fontSize: 11 }}>{v ? String(v).substring(0, 10) : '—'}</Text> },
+    { title: 'Currency', dataIndex: 'currency', width: 80, render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+    { title: 'Scan', key: 'scan', width: 120, render: (_,r: ArInvRow) => ({
+        idle:     <Tag style={{ fontSize: 11 }}>—</Tag>,
+        scanning: <Tag color="processing" icon={<SyncOutlined spin />} style={{ fontSize: 11 }}>Scanning</Tag>,
+        found:    <Tag color="green" icon={<CheckCircleOutlined />} style={{ fontSize: 11 }}>{r.files.length} file{r.files.length !== 1 ? 's' : ''}</Tag>,
+        none:     <Tag color="default" style={{ fontSize: 11 }}>No attachments</Tag>,
+        error:    <Tooltip title={r.scanError}><Tag color="red" icon={<CloseCircleOutlined />} style={{ fontSize: 11 }}>Error</Tag></Tooltip>,
+      }[r.scanStatus] ?? null),
+    },
+    { title: 'Download', key: 'dl', width: 110, render: (_,r: ArInvRow) => ({
+        idle: null,
+        downloading: <Tag color="processing" icon={<SyncOutlined spin />} style={{ fontSize: 11 }}>Downloading</Tag>,
+        done:        <Tag color="success"    icon={<CheckCircleOutlined />} style={{ fontSize: 11 }}>Done</Tag>,
+        partial:     <Tag color="warning"    icon={<CloseCircleOutlined />} style={{ fontSize: 11 }}>Partial</Tag>,
+        error:       <Tag color="error"      icon={<CloseCircleOutlined />} style={{ fontSize: 11 }}>Error</Tag>,
+      }[r.dlStatus] ?? null),
+    },
+    { title: 'Files', key: 'files', render: (_,r: ArInvRow) => r.files.length === 0 ? null : (
+        <Space size={2} wrap>{r.files.map((f,i) => {
+          const col = f.status === 'done' ? '#1D7B4D' : f.status === 'error' ? '#D93025' : f.status === 'downloading' ? '#0572CE' : '#6B6B6B';
+          return <Tooltip key={i} title={`${f.savedAs}${f.error ? ` — ${f.error}` : ''}`}><span style={{ color: col, fontSize: 16 }}>{fileIcon(f.mimeType ?? '', f.fileName)}</span></Tooltip>;
+        })}</Space>
+    )},
+    { title: 'Preview', key: 'preview', width: 80, render: (_,r: ArInvRow) => (
+        <Tooltip title="Preview attachments for this invoice">
+          <Button size="small" icon={<EyeOutlined />} onClick={() => handleArInvPreview(r)} />
+        </Tooltip>
+    )},
+  ];
+
+  const arInvPct = arInvTotal > 0 ? Math.round((arInvDone / arInvTotal) * 100) : 0;
+
   // ── Placeholder tab ───────────────────────────────────────────────────────
   const comingSoon = (label: string) => (
     <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>
@@ -1466,7 +1651,142 @@ const DownloadInvoiceAttachments: React.FC = () => {
               ),
             },
 
-            // ── Tab 7: Customers (placeholder) ────────────────────────────
+            // ── Tab 7: AR Invoices ─────────────────────────────────────────
+            {
+              key: 'arInvoices',
+              label: <span><FileTextOutlined style={{ marginRight: 6 }} />AR Invoices</span>,
+              children: (
+                <div style={{ paddingTop: 8 }}>
+                  <Card size="small" style={{ marginBottom: 12, borderRadius: 8 }}>
+                    <Form form={arInvForm} layout="inline" size="small" onFinish={handleLoadArInvoices}>
+                      <Form.Item name="businessUnit" label="Business Unit">
+                        <Input style={{ width: 220 }} placeholder="Filter by BU" allowClear />
+                      </Form.Item>
+                      <Form.Item name="customerName" label="Customer">
+                        <Input style={{ width: 200 }} placeholder="Customer name" allowClear />
+                      </Form.Item>
+                      <Form.Item name="transactionNumber" label="Txn #">
+                        <Input style={{ width: 160 }} placeholder="Transaction number" allowClear />
+                      </Form.Item>
+                      <Form.Item>
+                        <Button type="primary" icon={<SearchOutlined />} htmlType="submit" loading={arInvLoading}
+                          style={{ background: '#fa8c16', borderColor: '#fa8c16' }}>
+                          Load Invoices
+                        </Button>
+                      </Form.Item>
+                    </Form>
+                  </Card>
+
+                  <Row gutter={12} style={{ marginBottom: 12 }}>
+                    {[
+                      { title: 'Loaded',           value: arInvRows.length, color: undefined },
+                      { title: 'Scanned',          value: arInvScanned,     color: '#0572CE' },
+                      { title: 'With Attachments', value: arInvWith,        color: '#fa8c16' },
+                      { title: 'Total Files',      value: arInvTotal,       color: undefined },
+                      { title: 'Downloaded',       value: arInvDone,        color: '#1D7B4D' },
+                      { title: 'Errors',           value: arInvErr,         color: '#D93025' },
+                    ].map(s => (
+                      <Col span={4} key={s.title}>
+                        <Card size="small" style={{ borderRadius: 8, textAlign: 'center' }}>
+                          <Statistic title={s.title} value={s.value} valueStyle={{ fontSize: 22, color: s.color }} />
+                        </Card>
+                      </Col>
+                    ))}
+                  </Row>
+
+                  {(arInvRunning || arInvDone > 0 || arInvErr > 0) && (
+                    <Card size="small" style={{ marginBottom: 12, borderRadius: 8 }}>
+                      <Space direction="vertical" style={{ width: '100%' }} size={4}>
+                        <Space>
+                          <Text strong style={{ fontSize: 13 }}>{arInvRunning ? 'Downloading…' : 'Complete'}</Text>
+                          <Text type="secondary" style={{ fontSize: 12 }}>{arInvDone} of {arInvTotal} files{arInvErr > 0 && ` · ${arInvErr} error${arInvErr > 1 ? 's' : ''}`}</Text>
+                        </Space>
+                        <Progress percent={arInvPct} strokeColor={{ '0%': '#fa8c16', '100%': '#1D7B4D' }} status={arInvRunning ? 'active' : arInvErr > 0 ? 'exception' : 'success'} />
+                      </Space>
+                    </Card>
+                  )}
+
+                  <Card size="small" style={{ marginBottom: 12, borderRadius: 8 }}>
+                    <Space wrap>
+                      {folderControls}
+                      <Divider type="vertical" />
+                      <Button type="primary" icon={<DownloadOutlined />} onClick={handleRunArInvoices} loading={arInvRunning} disabled={arInvRows.length === 0} style={{ background: '#fa8c16', borderColor: '#fa8c16' }}>
+                        Scan &amp; Download All
+                      </Button>
+                      {arInvRunning && <Button danger icon={<StopOutlined />} onClick={() => { arInvStopRef.current = true; }}>Stop</Button>}
+                      {!arInvRunning && arInvRows.length > 0 && <Button icon={<ReloadOutlined />} onClick={handleLoadArInvoices}>Reset</Button>}
+                    </Space>
+                  </Card>
+
+                  {!folderName && arInvRows.length > 0 && (
+                    <Alert type="info" showIcon style={{ marginBottom: 12, borderRadius: 8 }}
+                      message='Click "Choose Save Folder" to save directly to a local path.'
+                      description='Files are named [TransactionNumber]_FileName. Use the Preview button to check attachments for a single invoice first.'
+                    />
+                  )}
+
+                  <Card size="small" style={{ borderRadius: 8 }}
+                    title={<Space><Badge count={arInvRows.length} style={{ backgroundColor: '#fa8c16' }} /><Text strong>AR Invoices</Text></Space>}
+                  >
+                    <Table<ArInvRow>
+                      dataSource={arInvRows} columns={arInvColumns} rowKey="key" size="small" loading={arInvLoading}
+                      pagination={{ pageSize: 50, size: 'small', showSizeChanger: true, showTotal: t => `${t} invoices` }}
+                      scroll={{ y: 500 }}
+                      rowClassName={r => r.dlStatus === 'done' ? 'row-done' : r.dlStatus === 'error' ? 'row-error' : r.scanStatus === 'found' ? 'row-found' : ''}
+                    />
+                  </Card>
+
+                  {/* Preview modal */}
+                  <Modal
+                    open={arInvPreview !== null}
+                    title={arInvPreview ? `Attachments — ${arInvPreview.transactionNumber} · ${arInvPreview.customerName}` : ''}
+                    onCancel={() => setArInvPreview(null)}
+                    footer={[
+                      arInvPreview?.scanStatus === 'found' && arInvPreview.files.length > 0 && (
+                        <Button key="dl" type="primary" icon={<DownloadOutlined />}
+                          style={{ background: '#fa8c16', borderColor: '#fa8c16' }}
+                          onClick={async () => {
+                            if (!arInvPreview) return;
+                            for (const f of arInvPreview.files) await downloadArInvFile(f);
+                            message.success(`Downloaded ${arInvPreview.files.length} file(s)`);
+                            setArInvPreview(null);
+                          }}
+                        >
+                          Download All ({arInvPreview.files.length})
+                        </Button>
+                      ),
+                      <Button key="close" onClick={() => setArInvPreview(null)}>Close</Button>,
+                    ]}
+                    width={640}
+                  >
+                    {arInvPreviewLoading ? (
+                      <div style={{ textAlign: 'center', padding: 32 }}><SyncOutlined spin style={{ fontSize: 32, color: '#fa8c16' }} /></div>
+                    ) : arInvPreview?.scanStatus === 'none' ? (
+                      <Alert type="info" message="No attachments found for this invoice." />
+                    ) : arInvPreview?.scanStatus === 'error' ? (
+                      <Alert type="error" message={`Error: ${arInvPreview.scanError}`} />
+                    ) : (
+                      <Table
+                        dataSource={(arInvPreview?.files || []).map((f, i) => ({ ...f, key: i }))}
+                        size="small" pagination={false}
+                        columns={[
+                          { title: 'File', dataIndex: 'fileName', render: (v, r: any) => <Space>{fileIcon(r.mimeType ?? '', v)}<Text style={{ fontSize: 12 }}>{v}</Text></Space> },
+                          { title: 'Saved As', dataIndex: 'savedAs', ellipsis: true, render: (v) => <Text code style={{ fontSize: 11 }}>{v}</Text> },
+                          { title: 'Size', dataIndex: 'fileSize', width: 90, render: (v) => v ? <Text style={{ fontSize: 11 }}>{(v / 1024).toFixed(0)} KB</Text> : '—' },
+                          { title: 'Download', key: 'dl', width: 90, render: (_,r: any) => (
+                              <Button size="small" icon={<DownloadOutlined />}
+                                onClick={async () => { await downloadArInvFile(r); message.success(`Downloaded ${r.fileName}`); }}
+                              >Save</Button>
+                          )},
+                        ]}
+                      />
+                    )}
+                  </Modal>
+                </div>
+              ),
+            },
+
+            // ── Tab 8: Customers (placeholder) ────────────────────────────
             {
               key: 'customers',
               label: <span><TeamOutlined style={{ marginRight: 6 }} />Customers</span>,
