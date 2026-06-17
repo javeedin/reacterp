@@ -175,8 +175,8 @@ CREATE OR REPLACE PACKAGE BODY RR_GL_JOURNALS_PKG AS
         RETURN '{"found":true'
             || ',"headerId":'         || jnum(v_je_header_id)
             || ',"glHeaderId":'       || jnum(v_je_header_id)
-            || ',"accountingStatus":' || jstr(NVL(v_batch_status, 'POSTED'))
-            || ',"postingStatus":'    || jstr(NVL(v_batch_status, 'POSTED'))
+            || ',"batchId":'          || jnum(v_je_batch_id)
+            || ',"batchStatus":'      || jstr(v_batch_status)
             || ',"accountingDate":'   || jstr(v_acct_date)
             || ',"periodName":'       || jstr(v_period_name)
             || ',"description":'      || jstr(v_journal_name)

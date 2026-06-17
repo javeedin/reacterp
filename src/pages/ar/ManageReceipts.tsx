@@ -343,12 +343,12 @@ const ManageReceipts: React.FC = () => {
   } | null>(null);
 
   const [viewAcctModal, setViewAcctModal] = useState<{
-    receiptNumber: string; loading: boolean;
+    receiptNumber: string; loading: boolean; posting: boolean;
     header: any; lines: any[];
   } | null>(null);
 
   const openViewAccounting = async (draft: ReceiptDraft) => {
-    setViewAcctModal({ receiptNumber: draft.receiptNumber, loading: true, header: null, lines: [] });
+    setViewAcctModal({ receiptNumber: draft.receiptNumber, loading: true, posting: false, header: null, lines: [] });
     try {
       const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/by-txn?txn_id=${encodeURIComponent(String(draft.standardReceiptId))}`,
         { headers: { Accept: 'application/json' } });
@@ -378,7 +378,7 @@ const ManageReceipts: React.FC = () => {
           return { ...l, accountDesc: desc };
         } catch { return l; }
       }));
-      setViewAcctModal({ receiptNumber: draft.receiptNumber, loading: false,
+      setViewAcctModal({ receiptNumber: draft.receiptNumber, loading: false, posting: false,
         header: d.found !== false ? d : null,
         lines: enriched });
     } catch (e: any) {
@@ -3131,25 +3131,63 @@ const ManageReceipts: React.FC = () => {
       })()}
 
       {/* ── View Accounting Modal ── */}
-      {viewAcctModal && (
+      {viewAcctModal && (() => {
+        const vhdr = viewAcctModal.header;
+        const batchStatus: string = vhdr?.batchStatus || '';
+        const isPosted = batchStatus.toUpperCase() === 'POSTED' || batchStatus === 'Posted';
+        const batchId: number = vhdr?.batchId ?? 0;
+        const postUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/${batchId}/post`;
+        const handleViewPost = async () => {
+          if (!batchId) return;
+          setViewAcctModal(m => m ? { ...m, posting: true } : m);
+          const r = await postJournal(batchId);
+          if (r.success) {
+            setViewAcctModal(m => m ? { ...m, posting: false, header: { ...m.header, batchStatus: 'Posted' } } : m);
+            message.success('Journal posted successfully');
+          } else {
+            setViewAcctModal(m => m ? { ...m, posting: false } : m);
+            message.error('Post failed: ' + (r.error || r.message));
+          }
+        };
+        return (
         <Modal
           open
           title={<Space><EyeOutlined style={{ color: '#722ed1' }} /><span>GL Journal — Receipt {viewAcctModal.receiptNumber}</span></Space>}
           onCancel={() => setViewAcctModal(null)}
-          footer={<Button onClick={() => setViewAcctModal(null)}>Close</Button>}
+          footer={
+            <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+              <Space>
+                {!isPosted && batchId > 0 && (
+                  <>
+                    <Tooltip title={<Text style={{ fontSize: 11, fontFamily: 'monospace', color: '#fff', wordBreak: 'break-all' }}>{`PUT ${postUrl}`}</Text>}>
+                      <ApiOutlined style={{ color: REDWOOD.info, cursor: 'help' }} />
+                    </Tooltip>
+                    <Button type="primary" size="small" icon={<BookOutlined />}
+                      loading={viewAcctModal.posting}
+                      onClick={handleViewPost}>
+                      Post to Ledger
+                    </Button>
+                  </>
+                )}
+              </Space>
+              <Button onClick={() => setViewAcctModal(null)}>Close</Button>
+            </Space>
+          }
           width={900}
         >
           {viewAcctModal.loading
             ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
-            : viewAcctModal.header
+            : vhdr
               ? <>
                   <Descriptions size="small" bordered column={3} style={{ marginBottom: 16 }}>
-                    <Descriptions.Item label="Journal Name">{viewAcctModal.header.journalName || '—'}</Descriptions.Item>
-                    <Descriptions.Item label="Batch">{viewAcctModal.header.batchName || '—'}</Descriptions.Item>
-                    <Descriptions.Item label="Status"><Tag color="green">{viewAcctModal.header.batchStatus || 'Posted'}</Tag></Descriptions.Item>
-                    <Descriptions.Item label="Period">{viewAcctModal.header.periodName || '—'}</Descriptions.Item>
-                    <Descriptions.Item label="Acctg Date">{viewAcctModal.header.accountingDate || '—'}</Descriptions.Item>
-                    <Descriptions.Item label="Created By">{viewAcctModal.header.createdBy || '—'}</Descriptions.Item>
+                    <Descriptions.Item label="Journal Name">{vhdr.description || vhdr.journalName || '—'}</Descriptions.Item>
+                    <Descriptions.Item label="Batch">{vhdr.glBatchName || '—'}</Descriptions.Item>
+                    <Descriptions.Item label="Status">
+                      <Tag color={isPosted ? 'green' : 'orange'}>{batchStatus || 'NEW'}</Tag>
+                    </Descriptions.Item>
+                    <Descriptions.Item label="Period">{vhdr.periodName || '—'}</Descriptions.Item>
+                    <Descriptions.Item label="Acctg Date">{vhdr.accountingDate || '—'}</Descriptions.Item>
+                    <Descriptions.Item label="Created By">{vhdr.createdBy || vhdr.postedBy || '—'}</Descriptions.Item>
                   </Descriptions>
                   <Table
                     dataSource={(viewAcctModal.lines || []).map((l: any, i: number) => ({ ...l, key: i }))}
@@ -3193,7 +3231,8 @@ const ManageReceipts: React.FC = () => {
               : <Alert type="warning" showIcon message={`No GL journal found for receipt number "${viewAcctModal.receiptNumber}"`} />
           }
         </Modal>
-      )}
+        );
+      })()}
 
       {/* ── Create / Post Accounting Modal ── */}
       {acctModal?.visible && (() => {
