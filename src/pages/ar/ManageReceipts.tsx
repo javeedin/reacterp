@@ -1232,9 +1232,13 @@ const ManageReceipts: React.FC = () => {
     try {
       const ledger = await fetchLedgerByBusinessUnit(draft.businessUnit);
       if (!ledger) throw new Error('Could not resolve ledger for Business Unit: ' + draft.businessUnit);
-      const exRate   = draft.conversionRate ?? 1;
-      const period   = derivePeriodName(new Date(draft.receiptDate || today()));
-      const payload: SlaCreatePayload = {
+      const exRate    = draft.conversionRate ?? 1;
+      const period    = derivePeriodName(new Date(draft.receiptDate || today()));
+      const amount    = Math.abs(draft.amount ?? 0);
+      const batchName = `AR-${draft.receiptNumber}-${Date.now()}`;
+
+      // Step 1: Create SLA accounting
+      const slaPayload: SlaCreatePayload = {
         header: {
           moduleName: 'AR', sourceTable: 'AR_RECEIPTS',
           sourceId:     draft.standardReceiptId,
@@ -1268,30 +1272,11 @@ const ManageReceipts: React.FC = () => {
           description:      draft.comments || l.description,
         })),
       };
-      const result = await createAccounting(payload);
-      setAcctModal(m => m ? { ...m, creating: false, slaHeaderId: result.headerId, slaStatus: result.status } : m);
-      setTabs(prev => prev.map(t => t.key === tabKey ? { ...t, slaHeaderId: result.headerId, slaPosted: false } : t));
-      message.success(`SLA created — Header ID ${result.headerId}`);
-    } catch (e: any) {
-      setAcctModal(m => m ? { ...m, creating: false, slaStatus: 'ERROR' } : m);
-      message.error('Create Accounting failed: ' + (e?.message || String(e)));
-    }
-  };
+      const slaResult = await createAccounting(slaPayload);
+      const slaHeaderId = slaResult.headerId;
+      setAcctModal(m => m ? { ...m, slaHeaderId, slaStatus: slaResult.status } : m);
 
-  const handlePostAccounting = async () => {
-    if (!acctModal?.slaHeaderId) return;
-    const { tabKey, lines, slaHeaderId } = acctModal;
-    const tab = tabs.find(t => t.key === tabKey);
-    if (!tab) return;
-    const { draft } = tab;
-    setAcctModal(m => m ? { ...m, posting: true } : m);
-    try {
-      const ledger = await fetchLedgerByBusinessUnit(draft.businessUnit);
-      if (!ledger) throw new Error('Could not resolve ledger');
-      const period   = derivePeriodName(new Date(draft.receiptDate || today()));
-      const exRate   = draft.conversionRate ?? 1;
-      const amount   = Math.abs(draft.amount ?? 0);
-      const batchName = `AR-${draft.receiptNumber}-${Date.now()}`;
+      // Step 2: Post GL Journal
       const glPayload = {
         batch: {
           batchName, batchDescription: `AR Receipt ${draft.receiptNumber}`,
@@ -1345,26 +1330,26 @@ const ManageReceipts: React.FC = () => {
       const glHeaderId = glBody?.headerId ?? glBody?.header_id ?? 0;
       await postToLedger(slaHeaderId, glBatchId, batchName, glHeaderId, currentUser);
 
-      // Stamp ACCOUNTING_STATUS = Accounted and ACCOUNTING_DATE = SYSDATE on the receipt
+      // Step 3: Stamp ACCOUNTING_STATUS = Accounted on the receipt
       try {
         await fetch(`${APEX_AR_RECEIPTS}/${draft.standardReceiptId}/accounting-status`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({}),
         });
-      } catch { /* non-critical — journal already posted */ }
+      } catch { /* non-critical */ }
 
-      // Update tab state
       setTabs(prev => prev.map(t => t.key === tabKey
-        ? { ...t, slaPosted: true, draft: { ...t.draft, accountingStatus: 'Accounted' } }
+        ? { ...t, slaHeaderId, slaPosted: true, draft: { ...t.draft, accountingStatus: 'Accounted' } }
         : t));
-      setAcctModal(m => m ? { ...m, posting: false, glBatchId, slaStatus: 'POSTED' } : m);
-      message.success(`GL Journal posted — Batch ${batchName}`);
+      setAcctModal(m => m ? { ...m, creating: false, glBatchId, slaStatus: 'POSTED' } : m);
+      message.success(`Accounting created and posted — Batch ${batchName}`);
     } catch (e: any) {
-      setAcctModal(m => m ? { ...m, posting: false } : m);
-      message.error('Post Accounting failed: ' + (e?.message || String(e)));
+      setAcctModal(m => m ? { ...m, creating: false } : m);
+      message.error('Create Accounting failed: ' + (e?.message || String(e)));
     }
   };
+
 
   // ── Save ──────────────────────────────────────────────────────────────────
   const handleSave = async (tabKey: string): Promise<boolean> => {
@@ -1477,6 +1462,11 @@ const ManageReceipts: React.FC = () => {
         <Button type="link" style={{ padding: 0, fontSize: 11, fontFamily: 'monospace', fontWeight: 600 }}
           onClick={() => openReceiptTab(r)}>{v || '—'}</Button>
       ) },
+    { title: 'Acctg Status', dataIndex: 'accountingStatus', width: 110, fixed: 'left',
+      render: v => v === 'Accounted'
+        ? <Tag color="green" style={{ fontSize: 11 }}>Accounted</Tag>
+        : v ? <Tag color="blue" style={{ fontSize: 11 }}>{v}</Tag>
+            : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
     { title: 'Type', dataIndex: 'receiptType', width: 70, fixed: 'left',
       render: v => v
         ? <Tag color={v === 'CASH' ? 'blue' : v === 'MISC' ? 'purple' : 'default'} style={{ fontSize: 11, fontWeight: 600 }}>{v}</Tag>
@@ -1507,11 +1497,6 @@ const ManageReceipts: React.FC = () => {
       render: v => <Tag color={stateColor(v)} style={{ fontSize: 11 }}>{v || '—'}</Tag> },
     { title: 'Status', dataIndex: 'status', width: 100,
       render: v => <Tag color={statusColor(v)} style={{ fontSize: 11 }}>{v || '—'}</Tag> },
-    { title: 'Acctg Status', dataIndex: 'accountingStatus', width: 110,
-      render: v => v === 'Accounted'
-        ? <Tag color="green" style={{ fontSize: 11 }}>Accounted</Tag>
-        : v ? <Tag color="blue" style={{ fontSize: 11 }}>{v}</Tag>
-            : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
     { title: 'Remittance Bank', dataIndex: 'remittanceBankName', width: 180, ellipsis: true,
       render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Bank Acct #', dataIndex: 'remittanceBankAccountNumber', width: 140,
@@ -1795,16 +1780,6 @@ const ManageReceipts: React.FC = () => {
                       style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
                       onClick={() => openAcctModal(tabKey)}>
                       Create Accounting
-                    </Button>
-                  </Tooltip>
-                  <Tooltip title={acctModal?.slaHeaderId ? 'Post to GL' : 'Create Accounting first'}>
-                    <Button size="small" icon={<CheckCircleOutlined />}
-                      disabled={!acctModal?.slaHeaderId || acctModal?.slaStatus === 'POSTED'}
-                      style={acctModal?.slaHeaderId && acctModal?.slaStatus !== 'POSTED'
-                        ? { color: '#722ed1', borderColor: '#722ed1' } : {}}
-                      onClick={handlePostAccounting}
-                      loading={acctModal?.posting}>
-                      Post Accounting
                     </Button>
                   </Tooltip>
                 </>
@@ -2976,15 +2951,6 @@ const ManageReceipts: React.FC = () => {
                   onClick={handleCreateAccounting}
                 >
                   Create Accounting
-                </Button>
-                <Button
-                  icon={<CheckCircleOutlined />}
-                  loading={acctModal.posting}
-                  disabled={!acctModal.slaHeaderId || isPosted}
-                  style={acctModal.slaHeaderId && !isPosted ? { color: '#722ed1', borderColor: '#722ed1' } : {}}
-                  onClick={handlePostAccounting}
-                >
-                  Post Accounting
                 </Button>
                 <Button onClick={() => setAcctModal(null)}>Close</Button>
               </Space>
