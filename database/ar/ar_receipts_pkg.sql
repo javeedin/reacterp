@@ -13,7 +13,15 @@ CREATE OR REPLACE PACKAGE RR_AR_RECEIPTS_PKG AS
         p_inserted       OUT NUMBER,
         p_updated        OUT NUMBER,
         p_errors         OUT NUMBER,
-        p_last_id        OUT NUMBER   -- ID assigned to the last inserted row (sequence or caller-supplied)
+        p_last_id        OUT NUMBER
+    );
+
+    PROCEDURE update_receipt (
+        p_receipt_json   IN  CLOB,       -- single receipt JSON object (no wrapper needed)
+        p_receipt_id     IN  NUMBER,      -- StandardReceiptId from URL
+        p_status         OUT VARCHAR2,
+        p_message        OUT VARCHAR2,
+        p_updated        OUT NUMBER
     );
 
 END RR_AR_RECEIPTS_PKG;
@@ -313,6 +321,55 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_RECEIPTS_PKG AS
             p_status  := 'ERROR';
             p_message := SQLERRM;
     END save_receipts_bulk;
+
+    -- -------------------------------------------------------
+    -- update_receipt: update a single existing receipt row
+    -- p_receipt_json  : single JSON object (fields to update)
+    -- p_receipt_id    : StandardReceiptId (from PUT URL :id)
+    -- -------------------------------------------------------
+    PROCEDURE update_receipt (
+        p_receipt_json   IN  CLOB,
+        p_receipt_id     IN  NUMBER,
+        p_status         OUT VARCHAR2,
+        p_message        OUT VARCHAR2,
+        p_updated        OUT NUMBER
+    ) IS
+        l_inserted   NUMBER;
+        l_errors     NUMBER;
+        l_last_id    NUMBER;
+        l_body       CLOB;
+        l_wrapped    CLOB;
+    BEGIN
+        p_updated := 0;
+
+        -- Inject StandardReceiptId from URL into body if not already present,
+        -- then wrap into {"items":[...]} for save_receipts_bulk
+        l_body := p_receipt_json;
+        IF INSTR(l_body, 'StandardReceiptId') = 0 THEN
+            l_body := REGEXP_REPLACE(l_body, '^\s*\{', '{"StandardReceiptId":' || p_receipt_id || ',');
+        END IF;
+        l_wrapped := '{"items":[' || l_body || ']}';
+
+        save_receipts_bulk(
+            p_receipts_json => l_wrapped,
+            p_status        => p_status,
+            p_message       => p_message,
+            p_inserted      => l_inserted,
+            p_updated       => p_updated,
+            p_errors        => l_errors,
+            p_last_id       => l_last_id
+        );
+
+        IF l_errors > 0 THEN
+            p_status  := 'ERROR';
+            p_message := 'Update failed: ' || p_message;
+        END IF;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            p_status  := 'ERROR';
+            p_message := SQLERRM;
+    END update_receipt;
 
 END RR_AR_RECEIPTS_PKG;
 /

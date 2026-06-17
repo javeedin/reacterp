@@ -230,33 +230,19 @@ BEGIN
 DECLARE
     l_status   VARCHAR2(20);
     l_message  VARCHAR2(4000);
-    l_inserted NUMBER;
     l_updated  NUMBER;
-    l_errors   NUMBER;
-    l_last_id  NUMBER;
-    l_body     CLOB;
-    l_wrapped  CLOB;
 BEGIN
-    l_body    := :body_text;
-    -- Inject the StandardReceiptId from the URL if not already in body
-    IF INSTR(l_body, ''StandardReceiptId'') = 0 THEN
-        l_body := REGEXP_REPLACE(l_body, ''^\s*\{'', ''{"StandardReceiptId":'' || :id || '','');
-    END IF;
-    l_wrapped := ''{"items":['' || l_body || '']}'';
-    RR_AR_RECEIPTS_PKG.save_receipts_bulk(
-        p_receipts_json => l_wrapped,
-        p_status        => l_status,
-        p_message       => l_message,
-        p_inserted      => l_inserted,
-        p_updated       => l_updated,
-        p_errors        => l_errors,
-        p_last_id       => l_last_id
+    RR_AR_RECEIPTS_PKG.update_receipt(
+        p_receipt_json => :body_text,
+        p_receipt_id   => :id,
+        p_status       => l_status,
+        p_message      => l_message,
+        p_updated      => l_updated
     );
     :status_code := CASE WHEN l_status = ''SUCCESS'' THEN 200 ELSE 400 END;
     HTP.P(''{"status":"''    || l_status                            ||
           ''","message":"''  || REPLACE(l_message, ''"'', ''\\"'') ||
           ''","updated":''   || l_updated                          ||
-          '',"errors":''     || l_errors                           ||
           '',"receiptId":''  || NVL(TO_CHAR(:id), ''null'') || ''}'');
 END;'
     );
