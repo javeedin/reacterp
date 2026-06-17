@@ -3153,6 +3153,8 @@ const ManageReceipts: React.FC = () => {
         const draft2 = tab?.draft;
         const amount = Math.abs(draft2?.amount ?? 0);
         const isPosted = acctModal.slaStatus === 'POSTED';
+        const exRate = draft2?.conversionRate ?? 1;
+        const period = draft2?.receiptDate ? derivePeriodName(new Date(draft2.receiptDate)) : '—';
         return (
           <Modal
             title={
@@ -3166,7 +3168,7 @@ const ManageReceipts: React.FC = () => {
               </Space>
             }
             open onCancel={() => setAcctModal(null)}
-            width={780}
+            width={900}
             footer={
               <Space>
                 <Button
@@ -3186,35 +3188,105 @@ const ManageReceipts: React.FC = () => {
               <Alert type="success" showIcon style={{ marginBottom: 12, fontSize: 12 }}
                 message={`SLA Journal created — Header ID: ${acctModal.slaHeaderId}${acctModal.glBatchId ? ` · GL Batch ID: ${acctModal.glBatchId}` : ''}`} />
             )}
+
+            {/* ── SLA Header ── */}
+            <div style={{ marginBottom: 10 }}>
+              <Text strong style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 6 }}>
+                SLA Header
+              </Text>
+              <Descriptions bordered size="small" column={3}
+                labelStyle={{ fontSize: 11, fontWeight: 600, background: '#fafafa', whiteSpace: 'nowrap' }}
+                contentStyle={{ fontSize: 11, fontFamily: 'monospace' }}
+              >
+                <Descriptions.Item label="Module">AR</Descriptions.Item>
+                <Descriptions.Item label="Source Table">AR_RECEIPTS</Descriptions.Item>
+                <Descriptions.Item label="Source ID">{draft2?.standardReceiptId}</Descriptions.Item>
+                <Descriptions.Item label="Receipt #">{draft2?.receiptNumber}</Descriptions.Item>
+                <Descriptions.Item label="Event Type">{draft2?.receiptType === 'MISC' ? 'AR_MISC_RECEIPT' : 'AR_CASH_RECEIPT'}</Descriptions.Item>
+                <Descriptions.Item label="Source Type">Receipt</Descriptions.Item>
+                <Descriptions.Item label="Receipt Date">{draft2?.receiptDate || '—'}</Descriptions.Item>
+                <Descriptions.Item label="Accounting Date">{draft2?.accountingDate || draft2?.receiptDate || '—'}</Descriptions.Item>
+                <Descriptions.Item label="Period">{period}</Descriptions.Item>
+                <Descriptions.Item label="Currency">{draft2?.currency || 'AED'}</Descriptions.Item>
+                <Descriptions.Item label="Ledger Currency">AED</Descriptions.Item>
+                <Descriptions.Item label="Exchange Rate">{exRate !== 1 ? exRate : '1 (functional)'}</Descriptions.Item>
+                <Descriptions.Item label="Rate Type">{draft2?.conversionRateType || 'Corporate'}</Descriptions.Item>
+                <Descriptions.Item label="Business Unit">{draft2?.businessUnit}</Descriptions.Item>
+                <Descriptions.Item label="Created By">{currentUser}</Descriptions.Item>
+                <Descriptions.Item label="Description" span={3}>
+                  Receipt {draft2?.receiptNumber}
+                </Descriptions.Item>
+              </Descriptions>
+            </div>
+
+            {/* ── GL Batch / Header ── */}
+            <div style={{ marginBottom: 10 }}>
+              <Text strong style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 6 }}>
+                GL Journal Header
+              </Text>
+              <Descriptions bordered size="small" column={3}
+                labelStyle={{ fontSize: 11, fontWeight: 600, background: '#fafafa', whiteSpace: 'nowrap' }}
+                contentStyle={{ fontSize: 11, fontFamily: 'monospace' }}
+              >
+                <Descriptions.Item label="Batch Name" span={2}>{`AR-${draft2?.receiptNumber}-<timestamp>`}</Descriptions.Item>
+                <Descriptions.Item label="Batch Source">Accounts Receivable</Descriptions.Item>
+                <Descriptions.Item label="JE Category">Receipts</Descriptions.Item>
+                <Descriptions.Item label="JE Source">Receivables</Descriptions.Item>
+                <Descriptions.Item label="Period">{period}</Descriptions.Item>
+                <Descriptions.Item label="Journal Name">{`AR-${draft2?.receiptNumber}`}</Descriptions.Item>
+                <Descriptions.Item label="Effective Date">{draft2?.receiptDate || '—'}</Descriptions.Item>
+                <Descriptions.Item label="Control Total" ><Text style={{ fontFamily: 'monospace', fontWeight: 600 }}>{fmt(amount)}</Text></Descriptions.Item>
+              </Descriptions>
+            </div>
+
+            {/* ── Journal Lines ── */}
+            <div style={{ marginBottom: 6 }}>
+              <Text strong style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 6 }}>
+                Journal Lines
+              </Text>
+            </div>
             <Table
               size="small" pagination={false}
               dataSource={acctModal.lines.map((l, i) => ({ ...l, key: i }))}
               columns={[
                 { title: 'Type', dataIndex: 'lineType', width: 50,
                   render: v => <Tag color={v === 'DR' ? 'blue' : 'green'} style={{ fontSize: 11, fontWeight: 700 }}>{v}</Tag> },
-                { title: 'Class', dataIndex: 'accountingClass', width: 110,
+                { title: 'Class', dataIndex: 'accountingClass', width: 100,
                   render: v => <Text style={{ fontSize: 11 }}>{v}</Text> },
-                { title: 'Account Combination', dataIndex: 'accountCombination',
+                { title: 'Account', dataIndex: 'accountCombination',
                   render: (v, r: any) => (
                     <div>
                       <Text style={{ fontSize: 11, fontFamily: 'monospace', color: v ? REDWOOD.info : '#bfbfbf' }}>{v || '— not set —'}</Text>
                       {r.accountDesc && <div style={{ fontSize: 10, color: '#8c8c8c', marginTop: 1 }}>{r.accountDesc}</div>}
                     </div>
                   ) },
-                { title: 'Debit', dataIndex: 'enteredDr', width: 110, align: 'right' as const,
+                { title: 'Line Description', dataIndex: 'description',
+                  render: (_, r: any) => {
+                    const desc = draft2?.comments || r.description;
+                    return (
+                      <Tooltip title={desc}>
+                        <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }} ellipsis>{desc || '—'}</Text>
+                      </Tooltip>
+                    );
+                  } },
+                { title: 'Ref 1', width: 110,
+                  render: () => <Text style={{ fontSize: 10, fontFamily: 'monospace', color: '#888' }}>{draft2?.receiptNumber}</Text> },
+                { title: 'Ref 2', width: 90,
+                  render: () => <Text style={{ fontSize: 10, fontFamily: 'monospace', color: '#888' }}>{draft2?.standardReceiptId}</Text> },
+                { title: 'Debit', dataIndex: 'enteredDr', width: 100, align: 'right' as const,
                   render: v => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.success }}>{fmt(v)}</Text> : <Text type="secondary">—</Text> },
-                { title: 'Credit', dataIndex: 'enteredCr', width: 110, align: 'right' as const,
+                { title: 'Credit', dataIndex: 'enteredCr', width: 100, align: 'right' as const,
                   render: v => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.primary }}>{fmt(v)}</Text> : <Text type="secondary">—</Text> },
               ]}
               summary={() => (
                 <Table.Summary.Row>
-                  <Table.Summary.Cell index={0} colSpan={3}>
+                  <Table.Summary.Cell index={0} colSpan={6}>
                     <Text strong style={{ fontSize: 11 }}>Total</Text>
                   </Table.Summary.Cell>
-                  <Table.Summary.Cell index={3} align="right">
+                  <Table.Summary.Cell index={6} align="right">
                     <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(amount)}</Text>
                   </Table.Summary.Cell>
-                  <Table.Summary.Cell index={4} align="right">
+                  <Table.Summary.Cell index={7} align="right">
                     <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(amount)}</Text>
                   </Table.Summary.Cell>
                 </Table.Summary.Row>
@@ -3226,6 +3298,7 @@ const ManageReceipts: React.FC = () => {
                 {draft2?.conversionRate && draft2.conversionRate !== 1 && <> · Rate: <strong>{draft2.conversionRate}</strong></>}
                 {' · '}BU: <strong>{draft2?.businessUnit}</strong>
                 {' · '}Reference5: <strong>AR_RECEIPTS</strong>
+                {' · '}Line description sourced from: <strong>Comments</strong>
               </Text>
             </div>
           </Modal>
