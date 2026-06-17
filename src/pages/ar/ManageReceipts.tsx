@@ -2196,7 +2196,7 @@ const ManageReceipts: React.FC = () => {
                         )}
                         {field('Rec. Specialist',   inp('receivablesSpecialist'))}
                         {field('Comments',
-                          <Input.TextArea size="small" style={{ fontSize: 12 }} rows={2}
+                          <Input.TextArea size="small" style={{ fontSize: 12 }} autoSize={{ minRows: 2 }}
                             value={draft.comments} readOnly={fieldDisabled}
                             onChange={e => !fieldDisabled && updateDraft(tabKey, { comments: e.target.value })} />
                         , true)}
@@ -2384,7 +2384,7 @@ const ManageReceipts: React.FC = () => {
                 label: <span><FileTextOutlined style={{ marginRight: 4 }} />Notes</span>,
                 children: (
                   <div style={{ padding: '10px 8px 14px' }}>
-                    <Input.TextArea rows={6} style={{ fontSize: 12 }}
+                    <Input.TextArea autoSize={{ minRows: 3 }} style={{ fontSize: 12 }}
                       value={draft.comments} readOnly={fieldDisabled}
                       placeholder="Enter comments…"
                       onChange={e => !fieldDisabled && updateDraft(tabKey, { comments: e.target.value })} />
