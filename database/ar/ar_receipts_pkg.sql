@@ -78,6 +78,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_RECEIPTS_PKG AS
                 MISC_PAYMENT_SOURCE                 VARCHAR2(50)   PATH '$.MiscPaymentSource',
                 BUSINESS_UNIT                       VARCHAR2(240)  PATH '$.BusinessUnit',
                 RECEIPT_METHOD                      VARCHAR2(240)  PATH '$.ReceiptMethod',
+                RECEIPT_METHOD_ID                   NUMBER         PATH '$.ReceiptMethodId',
                 RECEIPT_DATE_STR                    VARCHAR2(50)   PATH '$.ReceiptDate',
                 ACCOUNTING_DATE_STR                 VARCHAR2(50)   PATH '$.AccountingDate',
                 MATURITY_DATE_STR                   VARCHAR2(50)   PATH '$.MaturityDate',
@@ -226,6 +227,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_RECEIPTS_PKG AS
                     FUSION_LAST_UPDATE_DATE             = l_upd_ts,
                     DR_ACCOUNT                          = rec.DR_ACCOUNT,
                     CR_ACCOUNT                          = rec.CR_ACCOUNT,
+                    RECEIPT_METHOD_ID                   = rec.RECEIPT_METHOD_ID,
                     LAST_UPDATED_BY                     = USER,
                     LAST_UPDATE_DATE                    = SYSTIMESTAMP,
                     SYNC_DATE                           = SYSTIMESTAMP,
@@ -259,7 +261,8 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_RECEIPTS_PKG AS
                     STRUCTURED_PAYMENT_REFERENCE,       FUSION_CREATED_BY,
                     FUSION_CREATION_DATE,               FUSION_LAST_UPDATED_BY,
                     FUSION_LAST_UPDATE_DATE,            DR_ACCOUNT,
-                    CR_ACCOUNT,                         SYNC_STATUS
+                    CR_ACCOUNT,                         RECEIPT_METHOD_ID,
+                    SYNC_STATUS
                 ) VALUES (
                     l_receipt_id,                       rec.RECEIPT_NUMBER,
                     rec.DOCUMENT_NUMBER,                rec.RECEIPT_TYPE,
@@ -289,7 +292,8 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_RECEIPTS_PKG AS
                     rec.STRUCTURED_PAYMENT_REFERENCE,   rec.FUSION_CREATED_BY,
                     l_cr_ts,                            rec.FUSION_LAST_UPDATED_BY,
                     l_upd_ts,                           rec.DR_ACCOUNT,
-                    rec.CR_ACCOUNT,                     'NEW'
+                    rec.CR_ACCOUNT,                     rec.RECEIPT_METHOD_ID,
+                    'NEW'
                 );
 
                 IF l_exists > 0 THEN

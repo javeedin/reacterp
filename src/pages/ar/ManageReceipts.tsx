@@ -86,6 +86,7 @@ interface ReceiptDraft {
   receiptType:                    string;
   businessUnit:                   string;
   receiptMethod:                  string;
+  receiptMethodId:                number | null;
   selectedBankAccountId:          number | null;
   receiptDate:                    string;
   accountingDate:                 string;
@@ -183,7 +184,7 @@ function blankDraft(): ReceiptDraft {
   return {
     standardReceiptId: 0,
     receiptNumber: '', documentNumber: null, receiptType: '',
-    businessUnit: '', receiptMethod: '', selectedBankAccountId: null,
+    businessUnit: '', receiptMethod: '', receiptMethodId: null, selectedBankAccountId: null,
     receiptDate: today(), accountingDate: today(), maturityDate: today(),
     amount: null, unappliedAmount: null, accountedAmount: null,
     currency: 'AED', conversionRateType: '', conversionRate: null,
@@ -575,6 +576,7 @@ const ManageReceipts: React.FC = () => {
       receiptType:                 row.receiptType,
       businessUnit:                row.businessUnit,
       receiptMethod:               row.receiptMethod,
+      receiptMethodId:             null,
       selectedBankAccountId:       null,
       receiptDate:                 row.receiptDate,
       accountingDate:              row.accountingDate,
@@ -624,6 +626,7 @@ const ManageReceipts: React.FC = () => {
         receiptType:                 r.receipt_type            ?? row.receiptType,
         businessUnit:                r.business_unit           ?? row.businessUnit,
         receiptMethod:               r.receipt_method          ?? row.receiptMethod,
+        receiptMethodId:             r.receipt_method_id       ?? null,
         selectedBankAccountId:       null,
         receiptDate:                 r.receipt_date            ? r.receipt_date.substring(0, 10) : row.receiptDate,
         accountingDate:              r.accounting_date         ? r.accounting_date.substring(0, 10) : row.accountingDate,
@@ -658,10 +661,15 @@ const ManageReceipts: React.FC = () => {
       };
 
       setTabs(prev => prev.map(t => t.key === key ? { ...t, draft: fullDraft } : t));
+
+      // Auto-load receipt methods for this BU so the dropdown is populated
+      if (fullDraft.businessUnit) {
+        await fetchMethodAccountsByBU(key, fullDraft.businessUnit);
+      }
     } catch {
       // Tab already open with placeholder data — silent fail
     }
-  }, [tabs]);
+  }, [tabs, fetchMethodAccountsByBU]);
 
   // ── New receipt tab ───────────────────────────────────────────────────────
   const openNewTab = () => {
@@ -706,6 +714,27 @@ const ManageReceipts: React.FC = () => {
       if (t.draft.standardReceiptId > 0) loadAttachments(t.key, t.draft.standardReceiptId);
     });
   }, [tabs, loadAttachments]);
+
+  // After methods load for any tab, restore selectedBankAccountId by matching
+  // the saved bank account number or receipt method id
+  useEffect(() => {
+    if (allMethodAccounts.length === 0) return;
+    setTabs(prev => prev.map(t => {
+      if (t.draft.selectedBankAccountId != null) return t; // already set
+      const { remittanceBankAccountNumber, receiptMethodId, receiptMethod } = t.draft;
+      let match = remittanceBankAccountNumber
+        ? allMethodAccounts.find(a => a.bankAccountNum === remittanceBankAccountNumber && (receiptMethodId ? a.receiptMethodId === receiptMethodId : a.receiptMethodName === receiptMethod))
+        : undefined;
+      if (!match && receiptMethodId) {
+        match = allMethodAccounts.find(a => a.receiptMethodId === receiptMethodId);
+      }
+      if (!match && receiptMethod) {
+        match = allMethodAccounts.find(a => a.receiptMethodName === receiptMethod);
+      }
+      if (!match) return t;
+      return { ...t, draft: { ...t.draft, selectedBankAccountId: match.id } };
+    }));
+  }, [allMethodAccounts]);
 
   const makeBlobUrl = (base64: string, mimeType: string) => {
     const bytes = atob(base64);
@@ -1030,6 +1059,7 @@ const ManageReceipts: React.FC = () => {
       ReceiptType:                 draft.receiptType                  || undefined,
       BusinessUnit:                draft.businessUnit,
       ReceiptMethod:               draft.receiptMethod,
+      ReceiptMethodId:             draft.receiptMethodId      ?? undefined,
       ReceiptDate:                 draft.receiptDate,
       AccountingDate:              draft.accountingDate               || draft.receiptDate,
       MaturityDate:                draft.maturityDate                 || undefined,
@@ -1750,9 +1780,17 @@ const ManageReceipts: React.FC = () => {
                         , true)}
                         {field('Receipt Method',
                           <div>
-                            <Text type="secondary" style={{ fontSize: 10, display: 'block', marginBottom: 4 }}>
-                              {allMethodAccountsLoading[tabKey] ? 'Loading…' : `${receiptMethods.length} methods loaded`}
-                            </Text>
+                            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4, gap: 6 }}>
+                              <Text type="secondary" style={{ fontSize: 10 }}>
+                                {allMethodAccountsLoading[tabKey] ? 'Loading…' : `${receiptMethods.length} methods loaded`}
+                              </Text>
+                              <Tooltip title="Reload methods for this Business Unit">
+                                <Button size="small" type="text" icon={<ReloadOutlined spin={!!allMethodAccountsLoading[tabKey]} />}
+                                  style={{ fontSize: 11, padding: '0 4px', height: 18, lineHeight: '18px' }}
+                                  disabled={!draft.businessUnit}
+                                  onClick={() => fetchMethodAccountsByBU(tabKey, draft.businessUnit)} />
+                              </Tooltip>
+                            </div>
                             <Select
                               size="small"
                               style={{ width: '100%', fontSize: 12 }}
@@ -1770,10 +1808,11 @@ const ManageReceipts: React.FC = () => {
                               onChange={(v) => {
                                 const acct = allMethodAccounts.find(a => a.id === v);
                                 updateDraft(tabKey, {
-                                  receiptMethod:        acct?.receiptMethodName ?? '',
-                                  selectedBankAccountId: v ?? null,
-                                  remittanceBankName:   acct?.bankName          ?? '',
-                                  remittanceBankAccountNumber: acct?.bankAccountNum ?? '',
+                                  receiptMethod:               acct?.receiptMethodName ?? '',
+                                  receiptMethodId:             acct?.receiptMethodId   ?? null,
+                                  selectedBankAccountId:       v ?? null,
+                                  remittanceBankName:          acct?.bankName          ?? '',
+                                  remittanceBankAccountNumber: acct?.bankAccountNum    ?? '',
                                 });
                               }}
                             >

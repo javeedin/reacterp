@@ -119,6 +119,11 @@ ALTER TABLE RR_AR_RECEIPTS ADD (
     CR_ACCOUNT   VARCHAR2(100)
 );
 
+-- Receipt Method ID (run once on existing DBs)
+ALTER TABLE RR_AR_RECEIPTS ADD (
+    RECEIPT_METHOD_ID   NUMBER
+);
+
 -- =====================================================
 -- Sequence for locally created receipts
 -- Run once on each DB. Start value (9000000000) is well
