@@ -70,11 +70,13 @@ interface ReceiptRow {
   currency:              string;
   state:                 string;
   status:                string;
-  remittanceBankName:    string;
-  customerName:          string;
-  customerAccountNumber: string;
-  comments:              string;
-  syncStatus:            string;
+  remittanceBankName:          string;
+  remittanceBankAccountNumber: string;
+  maturityDate:                string;
+  customerName:                string;
+  customerAccountNumber:       string;
+  comments:                    string;
+  syncStatus:                  string;
 }
 
 interface ReceiptDraft {
@@ -545,11 +547,13 @@ const ManageReceipts: React.FC = () => {
         currency:              r.currency                ?? 'AED',
         state:                 r.state                   ?? '',
         status:                r.status                  ?? '',
-        remittanceBankName:    r.remittance_bank_name    ?? '',
-        customerName:          r.customer_name           ?? '',
-        customerAccountNumber: r.customer_account_number ?? '',
-        comments:              r.comments                ?? '',
-        syncStatus:            r.sync_status             ?? '',
+        remittanceBankName:          r.remittance_bank_name             ?? '',
+        remittanceBankAccountNumber: r.remittance_bank_account_number   ?? '',
+        maturityDate:                (r.maturity_date || '').slice(0, 10),
+        customerName:                r.customer_name                    ?? '',
+        customerAccountNumber:       r.customer_account_number          ?? '',
+        comments:                    r.comments                         ?? '',
+        syncStatus:                  r.sync_status                      ?? '',
       }));
 
       setSearchRows(rows);
@@ -1367,6 +1371,11 @@ const ManageReceipts: React.FC = () => {
   const searchColumns: ColumnsType<ReceiptRow> = [
     { title: '#', key: 'seq', width: 42, fixed: 'left',
       render: (_,__,i) => <Text type="secondary" style={{ fontSize: 12 }}>{i + 1}</Text> },
+    { title: 'ID', dataIndex: 'standardReceiptId', width: 100, fixed: 'left',
+      render: (v, r) => (
+        <Button type="link" style={{ padding: 0, fontSize: 11, fontFamily: 'monospace', fontWeight: 600 }}
+          onClick={() => openReceiptTab(r)}>{v || '—'}</Button>
+      ) },
     { title: 'Type', dataIndex: 'receiptType', width: 70, fixed: 'left',
       render: v => v
         ? <Tag color={v === 'CASH' ? 'blue' : v === 'MISC' ? 'purple' : 'default'} style={{ fontSize: 11, fontWeight: 600 }}>{v}</Tag>
@@ -1398,6 +1407,10 @@ const ManageReceipts: React.FC = () => {
     { title: 'Status', dataIndex: 'status', width: 100,
       render: v => <Tag color={statusColor(v)} style={{ fontSize: 11 }}>{v || '—'}</Tag> },
     { title: 'Remittance Bank', dataIndex: 'remittanceBankName', width: 180, ellipsis: true,
+      render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+    { title: 'Bank Acct #', dataIndex: 'remittanceBankAccountNumber', width: 140,
+      render: v => <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>{v || '—'}</Text> },
+    { title: 'Maturity Date', dataIndex: 'maturityDate', width: 110,
       render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Business Unit', dataIndex: 'businessUnit', width: 200, ellipsis: true,
       render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
