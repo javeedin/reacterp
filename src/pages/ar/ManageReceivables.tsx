@@ -3100,6 +3100,8 @@ const ManageReceivables: React.FC = () => {
           <Modal
             open={splitOpen}
             onCancel={() => setSplitOpen(false)}
+            maskClosable={false}
+            keyboard={false}
             width={700}
             title={
               <Space>
