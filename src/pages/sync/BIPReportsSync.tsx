@@ -22,8 +22,8 @@ const { Text } = Typography;
 const { Option } = Select;
 
 const APEX_BASE = APEX_DB_CONFIG.baseUrl;
-const EXCEL_BATCH_SIZE   = 5000;
-const LARGE_ROW_THRESHOLD = 10000;
+const EXCEL_BATCH_SIZE   = 15000;
+const LARGE_ROW_THRESHOLD = 15000;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
