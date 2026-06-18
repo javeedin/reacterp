@@ -2471,9 +2471,19 @@ const ManageReceivables: React.FC = () => {
                           <Alert type="info" showIcon message="Save the invoice first to view installments." />
                         ) : (
                           <>
+                            <Table<InstTabRow>
+                              dataSource={rows}
+                              rowKey="key"
+                              size="small"
+                              loading={instState?.loading ?? false}
+                              pagination={false}
+                              columns={instCols}
+                              style={{ borderRadius: 6 }}
+                            />
+
                             {/* KPI strip */}
                             {instState?.fetched && rows.length > 0 && (
-                              <Row gutter={12} style={{ marginBottom: 10 }}>
+                              <Row gutter={12} style={{ marginTop: 10 }}>
                                 {[
                                   { title: 'Installments', value: rows.length,    color: undefined },
                                   { title: 'Original',     value: fmtAmt(totalOriginal), color: undefined },
@@ -2489,16 +2499,6 @@ const ManageReceivables: React.FC = () => {
                                 ))}
                               </Row>
                             )}
-
-                            <Table<InstTabRow>
-                              dataSource={rows}
-                              rowKey="key"
-                              size="small"
-                              loading={instState?.loading ?? false}
-                              pagination={false}
-                              columns={instCols}
-                              style={{ borderRadius: 6 }}
-                            />
 
                             <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               {!isLocked && (
