@@ -790,7 +790,7 @@ const ManageReceivables: React.FC = () => {
       .then(r => r.json())
       .then(data => {
         const units = ((data.items || []) as any[])
-          .map((i: any) => ({ name: i.business_unit_name || i.businessUnitName || '', companyCode: i.company_code || i.companyCode || '' }))
+          .map((i: any) => ({ name: i.business_unit_name || i.businessUnitName || '', companyCode: i.company || i.company_code || i.companyCode || '' }))
           .filter(u => u.name)
           .sort((a, b) => a.name.localeCompare(b.name));
         setBusinessUnits(units);
