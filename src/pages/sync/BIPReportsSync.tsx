@@ -1,15 +1,16 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Modal, Layout, Tabs, Button, Table, Space, Tag, Spin,
   Alert, Tooltip, Typography, Badge, Divider, Input, message,
-  Select, Form, Collapse, Popconfirm,
+  Select, Form, Collapse, Popconfirm, Checkbox, Progress,
 } from 'antd';
 import {
   CloudDownloadOutlined, FileExcelOutlined, SyncOutlined,
   InfoCircleOutlined, SearchOutlined, CheckCircleOutlined,
   ClockCircleOutlined, ApiOutlined, CopyOutlined, UnorderedListOutlined,
   TableOutlined, CloudUploadOutlined, PlusOutlined, DeleteOutlined,
-  AppstoreOutlined, HistoryOutlined, ReloadOutlined,
+  AppstoreOutlined, HistoryOutlined, ReloadOutlined, FileDoneOutlined,
+  DownloadOutlined, LoadingOutlined, CloseCircleOutlined,
 } from '@ant-design/icons';
 import { ORACLE_SOAP_CONFIG, APEX_DB_CONFIG } from '../../config/api.config';
 import { callSoapBip, insertToApex } from '../../services/sync-http';
@@ -18,10 +19,11 @@ import { saveAs } from 'file-saver';
 
 const { Sider, Content } = Layout;
 const { Text } = Typography;
-const { Panel } = Collapse;
 const { Option } = Select;
 
 const APEX_BASE = APEX_DB_CONFIG.baseUrl;
+const EXCEL_BATCH_SIZE   = 5000;
+const LARGE_ROW_THRESHOLD = 10000;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -48,12 +50,21 @@ interface TabState {
   decodedXml:     string | null;
 }
 
+interface FetchAllStatus {
+  phase:        'pending' | 'fetching' | 'exporting' | 'done' | 'error';
+  rowCount:     number;
+  downloadDone: boolean;
+  exportDone:   boolean;
+  fileType:     'xlsx' | 'csv' | null;
+  error:        string | null;
+}
+
 // ── SOAP helpers ──────────────────────────────────────────────────────────────
 
 const buildSoapEnvelope = (
   reportPath: string,
-  username: string,
-  password: string,
+  username:   string,
+  password:   string,
 ): string => `<?xml version="1.0" encoding="utf-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:v2="http://xmlns.oracle.com/oxp/service/v2">
   <soapenv:Header/>
@@ -76,7 +87,7 @@ const parseGenericXml = (xmlString: string): { columns: string[]; rows: Record<s
   const doc     = parser.parseFromString(xmlString, 'text/xml');
   let elements: NodeListOf<Element> | Element[] = doc.querySelectorAll('G_1');
   if (elements.length === 0) {
-    const root       = doc.documentElement;
+    const root        = doc.documentElement;
     const childCounts = new Map<string, number>();
     Array.from(root.children).forEach(c =>
       childCounts.set(c.tagName, (childCounts.get(c.tagName) || 0) + 1));
@@ -87,7 +98,6 @@ const parseGenericXml = (xmlString: string): { columns: string[]; rows: Record<s
   if (elements.length === 0) return { columns: [], rows: [] };
   const colSet: Set<string> = new Set();
   const colOrder: string[]  = [];
-  // Scan ALL rows so sparse columns are never missed
   Array.from(elements).forEach(el =>
     Array.from(el.children).forEach(c => {
       if (!colSet.has(c.tagName)) { colSet.add(c.tagName); colOrder.push(c.tagName); }
@@ -99,6 +109,61 @@ const parseGenericXml = (xmlString: string): { columns: string[]; rows: Record<s
     return row;
   });
   return { columns: colOrder, rows };
+};
+
+// ── Export helper: Excel (batched) → CSV fallback ─────────────────────────────
+
+const exportToFile = async (
+  reportName: string,
+  columns:    string[],
+  rows:       Record<string, string>[],
+): Promise<'xlsx' | 'csv'> => {
+  const fname = reportName.replace(/[^a-zA-Z0-9_\-]/g, '_');
+  const eAPI  = (window as any).electronAPI;
+
+  // ── Try Excel ──────────────────────────────────────────────────────────────
+  try {
+    const wb = XLSX.utils.book_new();
+    if (rows.length <= LARGE_ROW_THRESHOLD) {
+      // Single sheet — fast path
+      const ws = XLSX.utils.json_to_sheet(rows);
+      XLSX.utils.book_append_sheet(wb, ws, reportName.slice(0, 31));
+    } else {
+      // Multiple sheets of EXCEL_BATCH_SIZE rows each
+      let sheetNum = 1;
+      for (let i = 0; i < rows.length; i += EXCEL_BATCH_SIZE) {
+        const chunk = rows.slice(i, i + EXCEL_BATCH_SIZE);
+        const ws    = XLSX.utils.json_to_sheet(chunk);
+        XLSX.utils.book_append_sheet(wb, ws, `Sheet${sheetNum}`);
+        sheetNum++;
+      }
+    }
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    if (eAPI?.openExcel) {
+      eAPI.openExcel(buf, `${fname}.xlsx`);
+    } else {
+      saveAs(
+        new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+        `${fname}.xlsx`,
+      );
+    }
+    return 'xlsx';
+  } catch {
+    // ── Fallback: CSV ────────────────────────────────────────────────────────
+  }
+
+  const lines: string[] = [columns.map(c => `"${c}"`).join(',')];
+  for (const row of rows) {
+    lines.push(columns.map(c => {
+      const v = String(row[c] ?? '');
+      return v.includes(',') || v.includes('"') || v.includes('\n')
+        ? `"${v.replace(/"/g, '""')}"`
+        : v;
+    }).join(','));
+  }
+  const csvBlob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  saveAs(csvBlob, `${fname}.csv`);
+  return 'csv';
 };
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -136,6 +201,117 @@ const BIPReportsSync: React.FC<Props> = ({ open, onClose }) => {
 
   // XML preview
   const [xmlPreview, setXmlPreview]     = useState<{ reportName: string; xml: string } | null>(null);
+
+  // ── Fetch All ─────────────────────────────────────────────────────────────
+  const [selectedIds, setSelectedIds]   = useState<Set<number>>(new Set());
+  const [fetchAllOpen, setFetchAllOpen] = useState(false);
+  const [fetchAllStatus, setFetchAllStatus] = useState<Record<number, FetchAllStatus>>({});
+  const [fetchAllRunning, setFetchAllRunning] = useState(false);
+  const fetchAllAbortRef = useRef(false);
+
+  const toggleSelect = (reportId: number, checked: boolean) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (checked) next.add(reportId); else next.delete(reportId);
+      return next;
+    });
+  };
+  const selectAll = (checked: boolean) => {
+    setSelectedIds(checked ? new Set(reports.map(r => r.reportId)) : new Set());
+  };
+  const allSelected   = reports.length > 0 && selectedIds.size === reports.length;
+  const someSelected  = selectedIds.size > 0 && !allSelected;
+
+  const openFetchAll = () => {
+    const init: Record<number, FetchAllStatus> = {};
+    reports.filter(r => selectedIds.has(r.reportId)).forEach(r => {
+      init[r.reportId] = { phase: 'pending', rowCount: 0, downloadDone: false, exportDone: false, fileType: null, error: null };
+    });
+    setFetchAllStatus(init);
+    fetchAllAbortRef.current = false;
+    setFetchAllOpen(true);
+  };
+
+  const handleFetchAll = async () => {
+    setFetchAllRunning(true);
+    fetchAllAbortRef.current = false;
+
+    const selected = reports.filter(r => selectedIds.has(r.reportId));
+    const env      = ORACLE_SOAP_CONFIG.prod;
+
+    for (const report of selected) {
+      if (fetchAllAbortRef.current) break;
+
+      // ── Phase: fetching ─────────────────────────────────────────────────
+      setFetchAllStatus(prev => ({
+        ...prev,
+        [report.reportId]: { ...prev[report.reportId], phase: 'fetching', error: null },
+      }));
+
+      const envelope = buildSoapEnvelope(report.path, env.username, env.password);
+      const result   = await callSoapBip(env.baseUrl, envelope);
+
+      if (!result.success || !result.decodedXml) {
+        const errMsg = result.error || 'SOAP call failed';
+        setFetchAllStatus(prev => ({
+          ...prev,
+          [report.reportId]: { ...prev[report.reportId], phase: 'error', error: errMsg },
+        }));
+        await recordHistory(report, 'ERROR', 0, errMsg);
+        continue;
+      }
+
+      const { columns, rows } = parseGenericXml(result.decodedXml);
+
+      // Update tab state so report is available in main grid too
+      const key = getTabKey(report);
+      const displayEnv = envelope.replace(/<v2:password>[^<]*<\/v2:password>/, '<v2:password>••••••••</v2:password>');
+      setTabStates(prev => ({
+        ...prev,
+        [key]: {
+          loading: false, error: null, rawErrorDetail: null,
+          columns, rows, duration: result.duration ?? null,
+          gridSearch: '', rawEnvelope: displayEnv,
+          soapUrl: env.baseUrl, decodedXml: result.decodedXml ?? null,
+        },
+      }));
+      if (!openTabs.includes(key)) setOpenTabs(prev => [...prev, key]);
+
+      setFetchAllStatus(prev => ({
+        ...prev,
+        [report.reportId]: { ...prev[report.reportId], downloadDone: true, rowCount: rows.length },
+      }));
+      await recordHistory(report, 'SUCCESS', rows.length);
+
+      // ── Phase: exporting ────────────────────────────────────────────────
+      setFetchAllStatus(prev => ({
+        ...prev,
+        [report.reportId]: { ...prev[report.reportId], phase: 'exporting' },
+      }));
+
+      let fileType: 'xlsx' | 'csv' = 'xlsx';
+      try {
+        fileType = await exportToFile(report.reportName, columns, rows);
+      } catch (exportErr: any) {
+        setFetchAllStatus(prev => ({
+          ...prev,
+          [report.reportId]: {
+            ...prev[report.reportId],
+            phase: 'error',
+            error: `Export failed: ${exportErr?.message || exportErr}`,
+          },
+        }));
+        continue;
+      }
+
+      setFetchAllStatus(prev => ({
+        ...prev,
+        [report.reportId]: { ...prev[report.reportId], phase: 'done', exportDone: true, fileType },
+      }));
+    }
+
+    setFetchAllRunning(false);
+  };
 
   // ── Load registered reports ───────────────────────────────────────────────
   const loadReports = useCallback(async () => {
@@ -225,7 +401,7 @@ const BIPReportsSync: React.FC<Props> = ({ open, onClose }) => {
           errorMessage:    errorMessage || null,
         }),
       });
-    } catch { /* silent — history is non-critical */ }
+    } catch { /* silent */ }
   };
 
   // ── Load execution history ────────────────────────────────────────────────
@@ -335,18 +511,17 @@ const BIPReportsSync: React.FC<Props> = ({ open, onClose }) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabStates]);
 
-  // ── Export to Excel ───────────────────────────────────────────────────────
-  const exportToExcel = (report: BIPReport) => {
+  // ── Export Excel from tab ─────────────────────────────────────────────────
+  const exportToExcel = async (report: BIPReport) => {
     const key   = getTabKey(report);
     const state = tabStates[key];
     if (!state?.rows.length) return;
-    const ws  = XLSX.utils.json_to_sheet(state.rows);
-    const wb  = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, report.reportName.slice(0, 31));
-    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    const eAPI = (window as any).electronAPI;
-    if (eAPI?.openExcel) eAPI.openExcel(buf, `${report.reportName}.xlsx`);
-    else saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `${report.reportName}.xlsx`);
+    try {
+      const type = await exportToFile(report.reportName, state.columns, state.rows);
+      message.success(`Exported as ${type.toUpperCase()}: ${report.reportName}`);
+    } catch (e: any) {
+      message.error(`Export failed: ${e.message}`);
+    }
   };
 
   // ── Render API info panel ─────────────────────────────────────────────────
@@ -495,7 +670,9 @@ const BIPReportsSync: React.FC<Props> = ({ open, onClose }) => {
         <Space style={{ marginBottom: 12 }} wrap>
           <Button type="primary" icon={<CloudDownloadOutlined />} onClick={() => fetchReport(report)}>Fetch Data</Button>
           <Button icon={<FileExcelOutlined />} disabled={!state.rows.length} onClick={() => exportToExcel(report)}
-            style={{ borderColor: '#1D6F42', color: '#1D6F42' }}>Export Excel</Button>
+            style={{ borderColor: '#1D6F42', color: '#1D6F42' }}>
+            Export {state.rows.length > LARGE_ROW_THRESHOLD ? `(${Math.ceil(state.rows.length / EXCEL_BATCH_SIZE)} sheets)` : 'Excel'}
+          </Button>
           <Button icon={<UnorderedListOutlined />} disabled={!state.columns.length}
             onClick={() => setColModal({ reportId: key, columns: state.columns })}
             style={{ borderColor: '#722ed1', color: '#722ed1' }}>
@@ -524,6 +701,11 @@ const BIPReportsSync: React.FC<Props> = ({ open, onClose }) => {
             onChange={e => setTabStates(prev => ({ ...prev, [key]: { ...prev[key], gridSearch: e.target.value } }))} />
           {state.duration !== null && <Tag icon={<ClockCircleOutlined />} color="blue">{(state.duration / 1000).toFixed(1)}s</Tag>}
           {state.rows.length > 0 && <Tag icon={<CheckCircleOutlined />} color="green">{filtered.length.toLocaleString()} / {state.rows.length.toLocaleString()} rows</Tag>}
+          {state.rows.length > LARGE_ROW_THRESHOLD && (
+            <Tag color="orange" style={{ fontSize: 11 }}>
+              Large dataset — Excel split into {Math.ceil(state.rows.length / EXCEL_BATCH_SIZE)} sheets of {EXCEL_BATCH_SIZE.toLocaleString()}
+            </Tag>
+          )}
         </Space>
 
         {/* APEX result */}
@@ -549,8 +731,139 @@ const BIPReportsSync: React.FC<Props> = ({ open, onClose }) => {
     );
   };
 
+  // ── Fetch All modal ───────────────────────────────────────────────────────
+  const renderFetchAllModal = () => {
+    const selected = reports.filter(r => selectedIds.has(r.reportId));
+    const doneCount = selected.filter(r => fetchAllStatus[r.reportId]?.phase === 'done').length;
+    const errCount  = selected.filter(r => fetchAllStatus[r.reportId]?.phase === 'error').length;
+
+    const statusIcon = (s: FetchAllStatus | undefined) => {
+      if (!s || s.phase === 'pending')  return <Tag color="default" style={{ fontSize: 11 }}>Pending</Tag>;
+      if (s.phase === 'fetching')       return <Tag icon={<LoadingOutlined />} color="processing" style={{ fontSize: 11 }}>Downloading…</Tag>;
+      if (s.phase === 'exporting')      return <Tag icon={<LoadingOutlined />} color="blue" style={{ fontSize: 11 }}>Exporting…</Tag>;
+      if (s.phase === 'error')          return <Tag icon={<CloseCircleOutlined />} color="error" style={{ fontSize: 11 }}>Error</Tag>;
+      if (s.phase === 'done')           return <Tag icon={<CheckCircleOutlined />} color="success" style={{ fontSize: 11 }}>Done</Tag>;
+      return null;
+    };
+
+    const cols = [
+      {
+        title: 'Module', dataIndex: 'module', width: 70,
+        render: (v: string) => <Tag color={moduleColors[v] || 'default'} style={{ fontSize: 11 }}>{v}</Tag>,
+      },
+      {
+        title: 'Report', dataIndex: 'reportName', ellipsis: true,
+        render: (v: string) => <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>{v}</Text>,
+      },
+      {
+        title: 'Rows', width: 80, align: 'right' as const,
+        render: (_: any, r: BIPReport) => {
+          const s = fetchAllStatus[r.reportId];
+          return s?.rowCount ? <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>{s.rowCount.toLocaleString()}</Text> : '—';
+        },
+      },
+      {
+        title: 'Download', width: 100, align: 'center' as const,
+        render: (_: any, r: BIPReport) => {
+          const s = fetchAllStatus[r.reportId];
+          if (!s || s.phase === 'pending') return <span style={{ color: '#d9d9d9', fontSize: 18 }}>○</span>;
+          if (s.phase === 'fetching')      return <LoadingOutlined style={{ color: '#1677ff', fontSize: 16 }} />;
+          if (s.downloadDone)              return <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 18 }} />;
+          if (s.phase === 'error')         return <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 18 }} />;
+          return null;
+        },
+      },
+      {
+        title: 'Export', width: 120, align: 'center' as const,
+        render: (_: any, r: BIPReport) => {
+          const s = fetchAllStatus[r.reportId];
+          if (!s || s.phase === 'pending' || s.phase === 'fetching') return <span style={{ color: '#d9d9d9', fontSize: 18 }}>○</span>;
+          if (s.phase === 'exporting') return <LoadingOutlined style={{ color: '#1677ff', fontSize: 16 }} />;
+          if (s.exportDone)            return (
+            <Space size={4}>
+              <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 18 }} />
+              <Tag color={s.fileType === 'csv' ? 'orange' : 'green'} style={{ fontSize: 10, margin: 0 }}>
+                {s.fileType?.toUpperCase()}
+              </Tag>
+            </Space>
+          );
+          if (s.phase === 'error')     return <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 18 }} />;
+          return null;
+        },
+      },
+      {
+        title: 'Status', width: 130,
+        render: (_: any, r: BIPReport) => statusIcon(fetchAllStatus[r.reportId]),
+      },
+      {
+        title: 'Error', ellipsis: true,
+        render: (_: any, r: BIPReport) => {
+          const s = fetchAllStatus[r.reportId];
+          return s?.error ? <Text type="danger" style={{ fontSize: 11 }}>{s.error}</Text> : null;
+        },
+      },
+    ];
+
+    return (
+      <Modal
+        open={fetchAllOpen}
+        onCancel={() => { if (!fetchAllRunning) setFetchAllOpen(false); }}
+        width={820}
+        title={
+          <Space>
+            <DownloadOutlined style={{ color: '#1677ff' }} />
+            <span>Fetch All Selected Reports</span>
+            <Tag color="blue">{selected.length} report{selected.length !== 1 ? 's' : ''}</Tag>
+            {doneCount > 0 && <Tag color="success">{doneCount} done</Tag>}
+            {errCount  > 0 && <Tag color="error">{errCount} errors</Tag>}
+          </Space>
+        }
+        footer={
+          <Space>
+            {fetchAllRunning && (
+              <Button danger onClick={() => { fetchAllAbortRef.current = true; }}>
+                Stop
+              </Button>
+            )}
+            <Button onClick={() => { if (!fetchAllRunning) setFetchAllOpen(false); }} disabled={fetchAllRunning}>
+              Close
+            </Button>
+            <Button
+              type="primary"
+              icon={fetchAllRunning ? <SyncOutlined spin /> : <DownloadOutlined />}
+              loading={fetchAllRunning}
+              disabled={fetchAllRunning || selected.length === 0}
+              onClick={handleFetchAll}
+            >
+              {fetchAllRunning ? 'Fetching…' : 'Fetch & Export'}
+            </Button>
+          </Space>
+        }
+      >
+        {fetchAllRunning && (
+          <Progress
+            percent={Math.round((doneCount + errCount) / selected.length * 100)}
+            status={errCount > 0 && !fetchAllRunning ? 'exception' : 'active'}
+            style={{ marginBottom: 12 }}
+          />
+        )}
+        <Alert
+          type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }}
+          message={`Files > ${LARGE_ROW_THRESHOLD.toLocaleString()} rows are split into Excel sheets of ${EXCEL_BATCH_SIZE.toLocaleString()} rows each. If Excel export fails, CSV is used as fallback.`}
+        />
+        <Table
+          dataSource={selected.map(r => ({ ...r, key: r.reportId }))}
+          columns={cols}
+          size="small"
+          pagination={false}
+          bordered
+        />
+      </Modal>
+    );
+  };
+
   // ── Sidebar: grouped by module ────────────────────────────────────────────
-  const filtered = sideSearch.trim()
+  const filteredReports = sideSearch.trim()
     ? reports.filter(r =>
         r.reportName.toLowerCase().includes(sideSearch.toLowerCase()) ||
         r.description.toLowerCase().includes(sideSearch.toLowerCase()) ||
@@ -558,7 +871,7 @@ const BIPReportsSync: React.FC<Props> = ({ open, onClose }) => {
       )
     : reports;
 
-  const byModule = filtered.reduce<Record<string, BIPReport[]>>((acc, r) => {
+  const byModule = filteredReports.reduce<Record<string, BIPReport[]>>((acc, r) => {
     const m = r.module || 'Other';
     if (!acc[m]) acc[m] = [];
     acc[m].push(r);
@@ -626,15 +939,13 @@ const BIPReportsSync: React.FC<Props> = ({ open, onClose }) => {
   const renderXmlPreview = () => {
     if (!xmlPreview) return null;
     const { reportName, xml } = xmlPreview;
-    // Pretty-print: indent XML with 2 spaces
     const pretty = (() => {
       try {
         const parser = new DOMParser();
         const doc    = parser.parseFromString(xml, 'text/xml');
         const ser    = new XMLSerializer();
         let raw      = ser.serializeToString(doc);
-        // Basic indent via regex
-        let indent = 0;
+        let indent   = 0;
         return raw
           .replace(/></g, '>\n<')
           .split('\n')
@@ -645,9 +956,7 @@ const BIPReportsSync: React.FC<Props> = ({ open, onClose }) => {
             return padded;
           })
           .join('\n');
-      } catch {
-        return xml;
-      }
+      } catch { return xml; }
     })();
 
     const previewLines = pretty.split('\n').slice(0, 300).join('\n');
@@ -670,10 +979,7 @@ const BIPReportsSync: React.FC<Props> = ({ open, onClose }) => {
             Copy Full XML
           </Button>
           <Button size="small" icon={<FileExcelOutlined />} style={{ borderColor: '#1D6F42', color: '#1D6F42' }}
-            onClick={() => {
-              const blob = new Blob([xml], { type: 'text/xml' });
-              saveAs(blob, `${reportName}.xml`);
-            }}>
+            onClick={() => { saveAs(new Blob([xml], { type: 'text/xml' }), `${reportName}.xml`); }}>
             Download .xml
           </Button>
         </div>
@@ -705,14 +1011,12 @@ const BIPReportsSync: React.FC<Props> = ({ open, onClose }) => {
       return;
     }
     const scripts = fetched.map(r => {
-      const cols   = tabStates[getTabKey(r)].columns;
+      const cols    = tabStates[getTabKey(r)].columns;
       const tblName = `RR_${r.module}_${r.reportName}`.toUpperCase();
       return [
         `-- ${r.module} · ${r.reportName}${r.description ? ' · ' + r.description : ''}`,
         `CREATE TABLE ${tblName} (`,
-        cols.map((c, i) =>
-          `  ${c.padEnd(40)} VARCHAR2(400)${i < cols.length - 1 ? ',' : ''}`
-        ).join('\n'),
+        cols.map((c, i) => `  ${c.padEnd(40)} VARCHAR2(400)${i < cols.length - 1 ? ',' : ''}`).join('\n'),
         `);`,
       ].join('\n');
     }).join('\n\n');
@@ -751,7 +1055,21 @@ const BIPReportsSync: React.FC<Props> = ({ open, onClose }) => {
             <span style={{ fontWeight: 700 }}>Sync BIP Reports</span>
             <Tag color="orange">{reports.length} Reports</Tag>
             <Tag color="blue" style={{ fontSize: 11 }}>Dynamic Registry</Tag>
+            {selectedIds.size > 0 && (
+              <Tag color="geekblue" style={{ fontSize: 11 }}>{selectedIds.size} selected</Tag>
+            )}
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+              {selectedIds.size > 0 && (
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<DownloadOutlined />}
+                  onClick={openFetchAll}
+                  style={{ background: '#1677ff' }}
+                >
+                  Fetch All ({selectedIds.size})
+                </Button>
+              )}
               <Button size="small" icon={<CopyOutlined />} onClick={copyAllTableScripts}
                 style={{ borderColor: '#722ed1', color: '#722ed1' }}>
                 Copy All Table Scripts
@@ -768,19 +1086,42 @@ const BIPReportsSync: React.FC<Props> = ({ open, onClose }) => {
       >
         <Layout style={{ height: '100%', background: '#fff' }}>
           {/* ── Left sidebar ─────────────────────────────────────────── */}
-          <Sider width={270} style={{ background: '#fafafa', borderRight: '1px solid #f0f0f0', height: '100%', overflowY: 'auto' }}>
+          <Sider width={280} style={{ background: '#fafafa', borderRight: '1px solid #f0f0f0', height: '100%', overflowY: 'auto' }}>
             <div style={{ padding: '10px 12px 6px' }}>
               <Input prefix={<SearchOutlined style={{ color: '#aaa' }} />} placeholder="Search reports…"
                 size="small" allowClear value={sideSearch} onChange={e => setSideSearch(e.target.value)} />
             </div>
-            <div style={{ padding: '4px 12px 8px' }}>
-              <Button size="small" type="dashed" block icon={<PlusOutlined />}
+            <div style={{ padding: '4px 12px 8px', display: 'flex', gap: 6 }}>
+              <Button size="small" type="dashed" flex="1" icon={<PlusOutlined />}
                 onClick={() => setRegisterOpen(true)}
-                style={{ borderColor: '#C74634', color: '#C74634', fontSize: 12 }}>
+                style={{ flex: 1, borderColor: '#C74634', color: '#C74634', fontSize: 12 }}>
                 Register Report
               </Button>
             </div>
-            <Divider style={{ margin: '0 0 0' }} />
+
+            {/* Select All row */}
+            {reports.length > 0 && (
+              <div style={{
+                padding: '5px 12px 5px 14px', borderBottom: '1px solid #ebebeb',
+                background: '#f0f5ff', display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                <Checkbox
+                  checked={allSelected}
+                  indeterminate={someSelected}
+                  onChange={e => selectAll(e.target.checked)}
+                />
+                <Text style={{ fontSize: 11, color: '#595959' }}>
+                  {allSelected ? 'Deselect All' : 'Select All'} ({reports.length})
+                </Text>
+                {selectedIds.size > 0 && (
+                  <Tag color="geekblue" style={{ fontSize: 10, marginLeft: 'auto', padding: '0 4px' }}>
+                    {selectedIds.size} ✓
+                  </Tag>
+                )}
+              </div>
+            )}
+
+            <Divider style={{ margin: 0 }} />
 
             {loadingReports && <div style={{ textAlign: 'center', padding: 24 }}><Spin size="small" /></div>}
 
@@ -806,9 +1147,9 @@ const BIPReportsSync: React.FC<Props> = ({ open, onClose }) => {
                   const isOpen   = openTabs.includes(key);
                   const isActive = activeTab === key;
                   const state    = tabStates[key];
+                  const isChecked = selectedIds.has(report.reportId);
                   return (
                     <div key={key}
-                      onClick={() => openReport(report)}
                       style={{
                         padding: '7px 12px 7px 14px', cursor: 'pointer',
                         background: isActive ? '#fff2e8' : isOpen ? '#f6ffed' : 'transparent',
@@ -817,8 +1158,18 @@ const BIPReportsSync: React.FC<Props> = ({ open, onClose }) => {
                         transition: 'background 0.15s',
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <Text style={{ fontFamily: 'monospace', fontSize: 11, fontWeight: isActive ? 700 : 500, flex: 1 }} ellipsis>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Checkbox
+                          checked={isChecked}
+                          onChange={e => { e.stopPropagation(); toggleSelect(report.reportId, e.target.checked); }}
+                          onClick={e => e.stopPropagation()}
+                          style={{ flexShrink: 0 }}
+                        />
+                        <Text
+                          style={{ fontFamily: 'monospace', fontSize: 11, fontWeight: isActive ? 700 : 500, flex: 1 }}
+                          ellipsis
+                          onClick={() => openReport(report)}
+                        >
                           {report.reportName}
                         </Text>
                         {state?.loading && <SyncOutlined spin style={{ fontSize: 10, color: '#C74634' }} />}
@@ -835,7 +1186,7 @@ const BIPReportsSync: React.FC<Props> = ({ open, onClose }) => {
                         </Popconfirm>
                       </div>
                       {report.description && (
-                        <Text type="secondary" style={{ fontSize: 10 }} ellipsis>{report.description}</Text>
+                        <Text type="secondary" style={{ fontSize: 10, marginLeft: 22 }} ellipsis>{report.description}</Text>
                       )}
                     </div>
                   );
@@ -865,6 +1216,7 @@ const BIPReportsSync: React.FC<Props> = ({ open, onClose }) => {
       {renderHistoryModal()}
       {renderColModal()}
       {renderXmlPreview()}
+      {renderFetchAllModal()}
     </>
   );
 };
