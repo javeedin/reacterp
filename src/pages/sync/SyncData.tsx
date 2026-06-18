@@ -4208,6 +4208,7 @@ const SyncData: React.FC = () => {
                   </div>
 
                   <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                    {!isARDistributions && (
                     <Button
                       icon={<ApiOutlined />}
                       onClick={handleTestConnection}
@@ -4219,6 +4220,7 @@ const SyncData: React.FC = () => {
                     >
                       Test Connection
                     </Button>
+                    )}
 
                     {isGLBatchesOnly && !isSyncing && (
                       <div style={{
@@ -7714,7 +7716,7 @@ const SyncData: React.FC = () => {
                   size="small"
                   pagination={{ pageSize: 20, size: 'small' }}
                   scroll={{ y: 400 }}
-                  locale={{ emptyText: 'No sync logs yet. Click "Test Connection" or "Start Sync" to begin.' }}
+                  locale={{ emptyText: isARDistributions ? 'No sync logs yet. Click "Start Sync" to begin.' : 'No sync logs yet. Click "Test Connection" or "Start Sync" to begin.' }}
                   style={{ borderRadius: '0 0 12px 12px' }}
                 />
               </Card>
