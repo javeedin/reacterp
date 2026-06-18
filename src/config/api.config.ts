@@ -520,6 +520,22 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
     ],
   },
   {
+    id: 'ar-invoice-distributions',
+    name: 'AR Invoice Distributions',
+    description: 'Sync AR Invoice Distributions from Oracle Fusion receivablesInvoiceDistributions. Provide Customer Transaction ID to sync one invoice, or leave blank to sync all.',
+    oracleEndpoint: 'receivablesInvoices',
+    apexEndpoint: 'ar/invoices/:id/distributions',
+    parameters: [
+      {
+        key: 'CustomerTransactionId',
+        label: 'Customer Transaction ID',
+        type: 'text',
+        required: false,
+        placeholder: 'e.g. 300000089305592 — leave blank to sync all',
+      },
+    ],
+  },
+  {
     id: 'ar-lookups',
     name: 'AR Lookups',
     description: 'Sync all AR lookup tables in one pass — Payment Terms, Transaction Sources, Transaction Types, Memo Lines, Revenue Scheduling Rules.',

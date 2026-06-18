@@ -80,6 +80,7 @@ import { syncARCreditMemos, testARCreditMemoConnection, type ARCreditMemoSyncPro
 import { syncARInstallments, type ARInstallmentsSyncProgress } from '../../services/ar-installments-sync.service';
 import { syncARInvoiceDff, type ARInvoiceDffProgress } from '../../services/ar-invoice-dff-sync.service';
 import { syncARInstallmentNotes, type ARInstallmentNotesProgress } from '../../services/ar-installment-notes-sync.service';
+import { syncARDistributions, type ARDistributionsSyncProgress } from '../../services/ar-invoice-distributions-sync.service';
 import { syncAllARLookups, type ARAllLookupsProgress } from '../../services/ar-lookups-sync.service';
 import { useSyncWorker, type WorkerSyncProgress, type WorkerLog } from '../../hooks/useSyncWorker';
 import Autopilot from '../../components/Autopilot';
@@ -785,6 +786,7 @@ const SyncData: React.FC = () => {
   const isARInstallments        = selectedObject?.id === 'ar-invoice-installments';
   const isARInvoiceDff          = selectedObject?.id === 'ar-invoice-dff';
   const isARInstallmentNotes    = selectedObject?.id === 'ar-installment-notes';
+  const isARDistributions       = selectedObject?.id === 'ar-invoice-distributions';
   const isARLookups             = selectedObject?.id === 'ar-lookups';
   const isARCreditMemos         = selectedObject?.id === 'ar-credit-memos';
   const isAPPayments = selectedObject?.id === 'ap-payments';
@@ -999,6 +1001,13 @@ const SyncData: React.FC = () => {
     totalInvoices: 0, processedInvoices: 0,
     totalInstallments: 0, processedInstallments: 0,
     totalNotes: 0, insertedNotes: 0,
+    errors: 0, lastError: '',
+    startTime: null, endTime: null,
+  });
+  const [arDistributionsProgress, setArDistributionsProgress] = useState<ARDistributionsSyncProgress>({
+    status: 'idle',
+    totalInvoices: 0, processedInvoices: 0,
+    totalDistributions: 0, insertedDistributions: 0,
     errors: 0, lastError: '',
     startTime: null, endTime: null,
   });
@@ -2395,6 +2404,17 @@ const SyncData: React.FC = () => {
         abortControllerRef.current.signal
       );
       syncResult = { inserted: result.insertedNotes, errors: result.errors, type: 'AR Installment Notes' };
+    } else if (isARDistributions) {
+      abortControllerRef.current = new AbortController();
+      const result = await syncARDistributions(
+        syncParameters,
+        testMode,
+        addLog,
+        (p) => setArDistributionsProgress(prev => ({ ...prev, ...p })),
+        abortControllerRef.current.signal
+      );
+      setArDistributionsProgress(prev => ({ ...prev, ...result }));
+      syncResult = { inserted: result.insertedDistributions, errors: result.errors, type: 'AR Invoice Distributions' };
     } else if (isARLookups) {
       setArLookupsProg({ status: 'running', currentObject: '', completedCount: 0, totalInserted: 0, totalUpdated: 0, totalErrors: 0 });
       const result = await syncAllARLookups(
@@ -3661,6 +3681,8 @@ const SyncData: React.FC = () => {
     ? arDffProgress.status
     : isARInstallmentNotes
     ? arInstNotesProg.status
+    : isARDistributions
+    ? arDistributionsProgress.status
     : isARLookups
     ? arLookupsProg.status
     : isARAdj
@@ -5004,6 +5026,81 @@ const SyncData: React.FC = () => {
                       {arInstNotesProg.lastError && (
                         <Tooltip title={arInstNotesProg.lastError}>
                           <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>{arInstNotesProg.lastError}</Text>
+                        </Tooltip>
+                      )}
+                    </Card>
+                  </Col>
+                </Row>
+              ) : isARDistributions ? (
+                /* AR Invoice Distributions KPI Cards */
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  <Col xs={24} sm={6}>
+                    <Card
+                      style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <BankOutlined style={{ fontSize: 20, color: REDWOOD.info, marginRight: 8 }} />
+                        <Text strong>Total Invoices</Text>
+                      </div>
+                      <div style={{ fontSize: 26, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {arDistributionsProgress.totalInvoices}
+                      </div>
+                    </Card>
+                  </Col>
+                  <Col xs={24} sm={6}>
+                    <Card
+                      style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <SyncOutlined style={{ fontSize: 20, color: '#fa8c16', marginRight: 8 }} />
+                        <Text strong>Processed</Text>
+                      </div>
+                      <div style={{ fontSize: 26, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        {arDistributionsProgress.processedInvoices}
+                        <Text type="secondary" style={{ fontSize: 13, marginLeft: 6 }}>/ {arDistributionsProgress.totalInvoices}</Text>
+                      </div>
+                      <Progress
+                        percent={arDistributionsProgress.totalInvoices > 0 ? Math.round((arDistributionsProgress.processedInvoices / arDistributionsProgress.totalInvoices) * 100) : 0}
+                        showInfo={false} strokeColor="#fa8c16" style={{ marginTop: 8 }}
+                      />
+                    </Card>
+                  </Col>
+                  <Col xs={24} sm={6}>
+                    <Card
+                      style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <CloudUploadOutlined style={{ fontSize: 20, color: REDWOOD.success, marginRight: 8 }} />
+                        <Text strong>Distributions</Text>
+                      </div>
+                      <div style={{ fontSize: 24, fontWeight: 600, color: REDWOOD.textPrimary }}>
+                        <span style={{ color: REDWOOD.success }}>{arDistributionsProgress.insertedDistributions}</span>
+                        <Text type="secondary" style={{ fontSize: 13, marginLeft: 6 }}>inserted</Text>
+                        <Text type="secondary" style={{ fontSize: 13, margin: '0 6px' }}>of</Text>
+                        <span style={{ color: REDWOOD.info }}>{arDistributionsProgress.totalDistributions}</span>
+                      </div>
+                    </Card>
+                  </Col>
+                  <Col xs={24} sm={6}>
+                    <Card
+                      style={{ borderRadius: 12, border: `1px solid ${REDWOOD.border}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}
+                      bodyStyle={{ padding: 16 }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                        <WarningOutlined style={{ fontSize: 20, color: arDistributionsProgress.errors > 0 ? REDWOOD.error : REDWOOD.textSecondary, marginRight: 8 }} />
+                        <Text strong>Errors</Text>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: arDistributionsProgress.errors > 0 ? REDWOOD.error : REDWOOD.textPrimary }}>
+                        {arDistributionsProgress.errors}
+                      </div>
+                      {arDistributionsProgress.lastError && (
+                        <Tooltip title={arDistributionsProgress.lastError}>
+                          <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }} ellipsis>
+                            {arDistributionsProgress.lastError}
+                          </Text>
                         </Tooltip>
                       )}
                     </Card>
