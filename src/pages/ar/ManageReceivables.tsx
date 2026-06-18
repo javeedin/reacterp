@@ -189,7 +189,7 @@ const today = () => dayjs().format('YYYY-MM-DD');
 function blankDraft(): ARInvoiceDraft {
   return {
     customerTransactionId: 0,
-    transactionClass: 'Invoice', businessUnit: '', companyCode: '', transactionSource: 'Manual',
+    transactionClass: 'Invoice', businessUnit: '', companyCode: '', transactionSource: '',
     transactionType: 'Invoice', transactionNumber: '', crossReference: '',
     documentNumber: '', transactionDate: today(), accountingDate: today(),
     salesperson: '', invoicingRule: '', currency: 'AED',
@@ -391,9 +391,10 @@ const ManageReceivables: React.FC = () => {
 
   // Transaction sources, types, memo lines, tax codes
   const [txnSources, setTxnSources] = useState<string[]>([]);
-  const [txnTypes, setTxnTypes] = useState<string[]>([]);
+  const [txnTypes, setTxnTypes]   = useState<string[]>([]);
   const [memoLines, setMemoLines] = useState<string[]>([]);
-  const [taxCodes, setTaxCodes] = useState<string[]>([]);
+  const [taxCodes, setTaxCodes]   = useState<string[]>([]);
+  const [showLookupApi, setShowLookupApi] = useState(false);
 
   // Search tab state
   const [searchRows, setSearchRows]     = useState<SearchRow[]>([]);
@@ -1374,6 +1375,32 @@ const ManageReceivables: React.FC = () => {
             <Row gutter={24}>
               {/* Left column */}
               <Col span={8}>
+                {/* API debug panel */}
+                <div style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Tooltip title="Show lookup API endpoints">
+                    <Button size="small" icon={<ApiOutlined />}
+                      type={showLookupApi ? 'primary' : 'default'}
+                      onClick={() => setShowLookupApi(v => !v)} />
+                  </Tooltip>
+                  {showLookupApi && (
+                    <div style={{ background: '#0d1117', border: '1px solid #30363d', borderRadius: 4, padding: '4px 8px', flex: 1 }}>
+                      {([
+                        ['BU',     'gl/businessunits',       businessUnits.length],
+                        ['Source', 'ar/transaction-sources', txnSources.length],
+                        ['Type',   'ar/transaction-types',   txnTypes.length],
+                        ['Memo',   'ar/memo-lines',          memoLines.length],
+                        ['Tax',    'ar/tax-rates',           taxCodes.length],
+                        ['Cust',   'ar/customers',           lovAllRows.length],
+                      ] as [string, string, number][]).map(([lbl, ep, cnt]) => (
+                        <div key={ep} style={{ display: 'flex', gap: 6, marginBottom: 2 }}>
+                          <span style={{ fontFamily: 'monospace', fontSize: 10, color: cnt > 0 ? '#3fb950' : '#f85149', minWidth: 44 }}>{lbl}</span>
+                          <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#58a6ff', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{APEX_DB_CONFIG.baseUrl}/{ep}</span>
+                          <span style={{ fontFamily: 'monospace', fontSize: 10, color: cnt > 0 ? '#3fb950' : '#f85149' }}>{cnt > 0 ? `✓ ${cnt}` : '✗ 0'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 {field('Transaction Class', sel('transactionClass', ['Invoice', 'Credit Memo', 'Debit Memo', 'Chargeback']))}
                 {field('Business Unit',
                   <Select size="small" style={{ width: '100%', fontSize: 12 }} value={draft.businessUnit || undefined}
@@ -1386,8 +1413,24 @@ const ManageReceivables: React.FC = () => {
                     {businessUnits.map(bu => <Option key={bu.name} value={bu.name}>{bu.name}</Option>)}
                   </Select>, true)}
                 {field('Company Code', <Input size="small" style={{ fontSize: 12 }} value={draft.companyCode} readOnly />)}
-                {field('Transaction Source', sel('transactionSource', txnSources.length > 0 ? txnSources : ['Manual', 'AutoInvoice', 'Projects']))}
-                {field('Transaction Type',  sel('transactionType', txnTypes.length > 0 ? txnTypes : ['Invoice']), true)}
+                {field('Transaction Source', (
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <div style={{ flex: 1 }}>{sel('transactionSource', txnSources)}</div>
+                    <Tooltip title={`${APEX_DB_CONFIG.baseUrl}/ar/transaction-sources  →  ${txnSources.length} records`}>
+                      <Button size="small" icon={<ApiOutlined />}
+                        style={{ color: txnSources.length > 0 ? '#52c41a' : '#ff4d4f', borderColor: txnSources.length > 0 ? '#52c41a' : '#ff4d4f', flexShrink: 0 }} />
+                    </Tooltip>
+                  </div>
+                ))}
+                {field('Transaction Type', (
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <div style={{ flex: 1 }}>{sel('transactionType', txnTypes)}</div>
+                    <Tooltip title={`${APEX_DB_CONFIG.baseUrl}/ar/transaction-types  →  ${txnTypes.length} records`}>
+                      <Button size="small" icon={<ApiOutlined />}
+                        style={{ color: txnTypes.length > 0 ? '#52c41a' : '#ff4d4f', borderColor: txnTypes.length > 0 ? '#52c41a' : '#ff4d4f', flexShrink: 0 }} />
+                    </Tooltip>
+                  </div>
+                ), true)}
                 {field('Transaction Number', inp('transactionNumber', 'Auto-generated if blank'))}
                 {field('Cross Reference',   inp('crossReference'))}
                 {field('Document Number',   <Input size="small" style={{ fontSize: 12 }} value={draft.documentNumber} readOnly />)}
@@ -1454,26 +1497,33 @@ const ManageReceivables: React.FC = () => {
                       <Row gutter={32}>
                         <Col span={8}>
                           <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>Bill-to</Text>
-                          {field('Customer',
-                            <Select
-                              size="small" style={{ width: '100%', fontSize: 12 }}
-                              showSearch allowClear disabled={isLocked}
-                              placeholder="Search customer…"
-                              value={draft.billToAccountNumber || undefined}
-                              filterOption={(input, opt) => {
-                                const label = String(opt?.label ?? '');
-                                return label.toLowerCase().includes(input.toLowerCase());
-                              }}
-                              onChange={(val) => {
-                                const c = lovAllRows.find(r => r.accountNumber === val);
-                                if (c) updateDraft(tabKey, { billToName: c.accountName, billToAccountNumber: c.accountNumber });
-                                else updateDraft(tabKey, { billToAccountNumber: val ?? '' });
-                              }}
-                              options={lovAllRows.map(c => ({
-                                value: c.accountNumber,
-                                label: `${c.accountName}${c.accountNumber ? ` (${c.accountNumber})` : ''}`,
-                              }))}
-                            />, true)}
+                          {field('Customer', (
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              <Select
+                                size="small" style={{ width: '100%', fontSize: 12 }}
+                                showSearch allowClear disabled={isLocked}
+                                placeholder="Search customer…"
+                                value={draft.billToAccountNumber || undefined}
+                                filterOption={(input, opt) => {
+                                  const label = String(opt?.label ?? '');
+                                  return label.toLowerCase().includes(input.toLowerCase());
+                                }}
+                                onChange={(val) => {
+                                  const c = lovAllRows.find(r => r.accountNumber === val);
+                                  if (c) updateDraft(tabKey, { billToName: c.accountName, billToAccountNumber: c.accountNumber });
+                                  else updateDraft(tabKey, { billToAccountNumber: val ?? '' });
+                                }}
+                                options={lovAllRows.map(c => ({
+                                  value: c.accountNumber,
+                                  label: `${c.accountName}${c.accountNumber ? ` (${c.accountNumber})` : ''}`,
+                                }))}
+                              />
+                              <Tooltip title={`${APEX_DB_CONFIG.baseUrl}/ar/customers  →  ${lovAllRows.length} records`}>
+                                <Button size="small" icon={<ApiOutlined />}
+                                  style={{ color: lovAllRows.length > 0 ? '#52c41a' : '#ff4d4f', borderColor: lovAllRows.length > 0 ? '#52c41a' : '#ff4d4f', flexShrink: 0 }} />
+                              </Tooltip>
+                            </div>
+                          ), true)}
                           {field('Name',           inp('billToName'), true)}
                           {field('Account Number', inp('billToAccountNumber'), true)}
                           {field('Third-Party Tax Reg #', inp('billToTaxRegNumber'))}
