@@ -7,6 +7,7 @@ import {
 import {
   HomeOutlined, SearchOutlined, PlusOutlined, CloseOutlined,
   FileTextOutlined, SaveOutlined, EditOutlined, DeleteOutlined,
+  ScissorOutlined,
   UserOutlined, CreditCardOutlined, SettingOutlined, FilePdfOutlined,
   LockOutlined, EyeOutlined, DownloadOutlined, FilterOutlined, ReloadOutlined,
   ApiOutlined, DownOutlined, ProfileOutlined, ApartmentOutlined, AuditOutlined, AccountBookOutlined,
@@ -750,6 +751,100 @@ const ManageReceivables: React.FC = () => {
   }
   const [instTabMap, setInstTabMap] = useState<Record<string, { loading: boolean; rows: InstTabRow[]; fetched: boolean }>>({});
   const fetchedInstTabsRef = useRef<Set<string>>(new Set());
+
+  // ── Split Installments modal ──────────────────────────────────────────────
+  interface SplitRow { id: string; sequenceNumber: number; dueDate: string; amount: number | null; }
+  const [splitOpen,    setSplitOpen]    = useState(false);
+  const [splitTxnId,   setSplitTxnId]   = useState(0);
+  const [splitTabKey,  setSplitTabKey]  = useState('');
+  const [splitInvoiceAmt, setSplitInvoiceAmt] = useState(0);
+  const [splitRows,    setSplitRows]    = useState<SplitRow[]>([]);
+  const [splitSaving,  setSplitSaving]  = useState(false);
+
+  const openSplitModal = (tabKey: string, txnId: number, invoiceAmt: number, existingRows: InstTabRow[]) => {
+    setSplitTxnId(txnId);
+    setSplitTabKey(tabKey);
+    setSplitInvoiceAmt(invoiceAmt);
+    setSplitRows(
+      existingRows.length > 0
+        ? existingRows.map((r, i) => ({
+            id: String(i),
+            sequenceNumber: r.sequenceNumber,
+            dueDate: r.dueDate ? r.dueDate.substring(0, 10) : '',
+            amount: r.originalAmount,
+          }))
+        : [{ id: '0', sequenceNumber: 1, dueDate: '', amount: invoiceAmt }]
+    );
+    setSplitOpen(true);
+  };
+
+  const addSplitRow = () => {
+    setSplitRows(prev => {
+      const used = prev.reduce((s, r) => s + (r.amount ?? 0), 0);
+      const remaining = Math.max(0, splitInvoiceAmt - used);
+      return [...prev, {
+        id: Date.now().toString(),
+        sequenceNumber: prev.length + 1,
+        dueDate: '',
+        amount: remaining > 0 ? Number(remaining.toFixed(2)) : null,
+      }];
+    });
+  };
+
+  const removeSplitRow = (id: string) => {
+    setSplitRows(prev => {
+      const next = prev.filter(r => r.id !== id);
+      return next.map((r, i) => ({ ...r, sequenceNumber: i + 1 }));
+    });
+  };
+
+  const updateSplitRow = (id: string, field: 'dueDate' | 'amount', value: any) => {
+    setSplitRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
+  };
+
+  const saveSplitInstallments = async () => {
+    const total = splitRows.reduce((s, r) => s + (r.amount ?? 0), 0);
+    if (Math.abs(total - splitInvoiceAmt) > 0.01) {
+      message.error(`Total installments (${total.toFixed(2)}) must equal invoice amount (${splitInvoiceAmt.toFixed(2)})`);
+      return;
+    }
+    if (splitRows.some(r => !r.dueDate)) {
+      message.error('All installments must have a Due Date'); return;
+    }
+    if (splitRows.some(r => !r.amount || r.amount <= 0)) {
+      message.error('All installment amounts must be greater than 0'); return;
+    }
+
+    setSplitSaving(true);
+    try {
+      const body = {
+        items: splitRows.map(r => ({
+          SequenceNumber: r.sequenceNumber,
+          DueDate:        r.dueDate,
+          Amount:         r.amount,
+        })),
+      };
+      const res = await fetch(`${APEX_AR}/${splitTxnId}/installments`, {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+      });
+      const result = await res.json().catch(() => ({} as any));
+      if (result?.status === 'ERROR' || !res.ok) {
+        message.error(result?.message || `Save failed: HTTP ${res.status}`); return;
+      }
+      message.success(`${splitRows.length} installment${splitRows.length !== 1 ? 's' : ''} saved`);
+      setSplitOpen(false);
+      // Refresh the installments tab
+      fetchedInstTabsRef.current.delete(splitTabKey);
+      setInstTabMap(prev => { const n = { ...prev }; delete n[splitTabKey]; return n; });
+      fetchInstTab(splitTabKey, splitTxnId);
+    } catch (e: any) {
+      message.error(`Save error: ${e.message}`);
+    } finally {
+      setSplitSaving(false);
+    }
+  };
 
   const fetchInstTab = useCallback(async (tabKey: string, customerTransactionId: number) => {
     if (!customerTransactionId || fetchedInstTabsRef.current.has(tabKey)) return;
@@ -2402,7 +2497,18 @@ const ManageReceivables: React.FC = () => {
                               style={{ borderRadius: 6 }}
                             />
 
-                            <div style={{ marginTop: 10, textAlign: 'right' }}>
+                            <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              {!isLocked && (
+                                <Button
+                                  size="small"
+                                  type="primary"
+                                  icon={<ScissorOutlined />}
+                                  onClick={() => openSplitModal(tabKey, draft.customerTransactionId, draft.lines.reduce((s, l) => s + (l.amount || 0), 0), rows)}
+                                  style={{ background: '#722ed1', borderColor: '#722ed1' }}
+                                >
+                                  Split Installments
+                                </Button>
+                              )}
                               <Button size="small" icon={<ReloadOutlined />}
                                 onClick={() => {
                                   fetchedInstTabsRef.current.delete(tabKey);
@@ -2980,6 +3086,127 @@ const ManageReceivables: React.FC = () => {
           ]}
         />
       </Modal>
+
+      {/* ── Split Installments Modal ───────────────────────────────────── */}
+      {(() => {
+        const splitTotal  = splitRows.reduce((s, r) => s + (r.amount ?? 0), 0);
+        const diff        = splitInvoiceAmt - splitTotal;
+        const balanced    = Math.abs(diff) <= 0.01;
+        const fmtA        = (v: number) => v.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return (
+          <Modal
+            open={splitOpen}
+            onCancel={() => setSplitOpen(false)}
+            width={700}
+            title={
+              <Space>
+                <ScissorOutlined style={{ color: '#722ed1' }} />
+                <span style={{ fontWeight: 700 }}>Split Installments</span>
+                <Tag color="purple">Invoice Amount: {fmtA(splitInvoiceAmt)}</Tag>
+              </Space>
+            }
+            footer={
+              <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                <Space>
+                  <Tag color={balanced ? 'success' : 'error'} style={{ fontSize: 12 }}>
+                    Total: {fmtA(splitTotal)}
+                  </Tag>
+                  {!balanced && (
+                    <Tag color="warning" style={{ fontSize: 12 }}>
+                      {diff > 0 ? `Remaining: ${fmtA(diff)}` : `Over by: ${fmtA(Math.abs(diff))}`}
+                    </Tag>
+                  )}
+                  {balanced && <Tag color="success" style={{ fontSize: 12 }}>✓ Balanced</Tag>}
+                </Space>
+                <Space>
+                  <Button onClick={() => setSplitOpen(false)}>Cancel</Button>
+                  <Button
+                    type="primary"
+                    loading={splitSaving}
+                    disabled={!balanced}
+                    onClick={saveSplitInstallments}
+                    style={{ background: '#722ed1', borderColor: '#722ed1' }}
+                    icon={<SaveOutlined />}
+                  >
+                    Save Installments
+                  </Button>
+                </Space>
+              </Space>
+            }
+          >
+            {/* Balance progress bar */}
+            <div style={{
+              height: 6, borderRadius: 3, background: '#f0f0f0',
+              marginBottom: 14, overflow: 'hidden',
+            }}>
+              <div style={{
+                height: '100%', borderRadius: 3, transition: 'width 0.3s, background 0.3s',
+                width: `${Math.min(100, splitInvoiceAmt > 0 ? (splitTotal / splitInvoiceAmt) * 100 : 0).toFixed(1)}%`,
+                background: balanced ? '#52c41a' : splitTotal > splitInvoiceAmt ? '#ff4d4f' : '#722ed1',
+              }} />
+            </div>
+
+            <Table
+              dataSource={splitRows}
+              rowKey="id"
+              size="small"
+              pagination={false}
+              columns={[
+                {
+                  title: '#', dataIndex: 'sequenceNumber', width: 45, align: 'center' as const,
+                  render: (v: number) => <Text type="secondary" style={{ fontSize: 12 }}>{v}</Text>,
+                },
+                {
+                  title: 'Due Date', dataIndex: 'dueDate', width: 160,
+                  render: (v: string, r: SplitRow) => (
+                    <DatePicker
+                      size="small"
+                      value={v ? dayjs(v) : null}
+                      format="YYYY-MM-DD"
+                      style={{ width: '100%' }}
+                      onChange={d => updateSplitRow(r.id, 'dueDate', d ? d.format('YYYY-MM-DD') : '')}
+                    />
+                  ),
+                },
+                {
+                  title: 'Amount', dataIndex: 'amount', align: 'right' as const,
+                  render: (v: number | null, r: SplitRow) => (
+                    <InputNumber
+                      size="small"
+                      value={v}
+                      min={0.01}
+                      precision={2}
+                      style={{ width: '100%' }}
+                      formatter={val => val !== undefined && val !== null ? String(val).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''}
+                      parser={(val) => val ? parseFloat(val.replace(/,/g, '')) as any : null}
+                      onChange={val => updateSplitRow(r.id, 'amount', val)}
+                    />
+                  ),
+                },
+                {
+                  title: '', width: 40, align: 'center' as const,
+                  render: (_: any, r: SplitRow) => (
+                    <Button
+                      size="small" danger type="text" icon={<DeleteOutlined />}
+                      disabled={splitRows.length <= 1}
+                      onClick={() => removeSplitRow(r.id)}
+                    />
+                  ),
+                },
+              ]}
+              footer={() => (
+                <Button
+                  size="small" type="dashed" block icon={<PlusOutlined />}
+                  onClick={addSplitRow}
+                  style={{ borderColor: '#722ed1', color: '#722ed1' }}
+                >
+                  Add Installment
+                </Button>
+              )}
+            />
+          </Modal>
+        );
+      })()}
 
       {/* ── Review Distributions Modal ─────────────────────────────────── */}
       <Modal
