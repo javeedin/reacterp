@@ -997,56 +997,85 @@ const ManageReceivables: React.FC = () => {
     if (!draft.billToAccountNumber && !draft.billToName) {
       message.error('Bill-to Customer is required'); return false;
     }
-    if (!draft.transactionDate) { message.error('Transaction Date is required'); return false; }
-    if (!draft.currency)        { message.error('Currency is required');          return false; }
+    if (!draft.businessUnit)    { message.error('Business Unit is required');     return false; }
+    if (!draft.transactionDate) { message.error('Transaction Date is required');  return false; }
+    if (!draft.currency)        { message.error('Currency is required');           return false; }
 
     setSaving(prev => ({ ...prev, [tabKey]: true }));
     try {
       const isNew = draft.customerTransactionId === 0;
+      const validLines = draft.lines.filter(l => l.description || l.quantity != null || l.unitPrice != null);
+
       const body = {
-        transactionClass:   draft.transactionClass,
-        businessUnit:       draft.businessUnit,
-        transactionSource:  draft.transactionSource,
-        transactionType:    draft.transactionType,
-        transactionNumber:  draft.transactionNumber || undefined,
-        crossReference:     draft.crossReference,
-        transactionDate:    draft.transactionDate,
-        accountingDate:     draft.accountingDate,
-        currency:           draft.currency,
-        billToName:         draft.billToName,
-        billToAccountNumber: draft.billToAccountNumber,
-        billToSite:         draft.billToSite,
-        shipToName:         draft.shipToName,
-        shipToSite:         draft.shipToSite,
-        paymentTerms:       draft.paymentTerms,
-        legalEntity:        draft.legalEntity,
-        poNumber:           draft.poNumber,
-        specialInstructions: draft.specialInstructions,
-        comments:           draft.comments,
-        lines: draft.lines.filter(l => l.description || l.quantity || l.unitPrice).map(l => ({
-          lineNumber:    l.lineNumber,
-          item:          l.item,
-          description:   l.description,
-          memoLine:      l.memoLine,
-          uom:           l.uom,
-          quantity:      l.quantity,
-          unitSellingPrice: l.unitPrice,
-          taxClassificationCode: l.taxClassification,
+        // PK — only sent for PUT
+        ...(isNew ? {} : { CustomerTransactionId: draft.customerTransactionId }),
+        // Header fields — PascalCase matches JSON_VALUE keys in PL/SQL
+        TransactionClass:    draft.transactionClass,
+        BusinessUnit:        draft.businessUnit,
+        TransactionSource:   draft.transactionSource,
+        TransactionType:     draft.transactionType,
+        TransactionNumber:   draft.transactionNumber || undefined,
+        CrossReference:      draft.crossReference    || undefined,
+        TransactionDate:     draft.transactionDate,
+        AccountingDate:      draft.accountingDate,
+        InvoiceCurrencyCode: draft.currency,
+        ConversionType:      draft.conversionType    || undefined,
+        ConversionDate:      draft.conversionDate    || undefined,
+        ConversionRate:      draft.conversionRate    ?? undefined,
+        BillToCustomerName:    draft.billToName,
+        BillToCustomerNumber:  draft.billToAccountNumber,
+        BillToSite:            draft.billToSite      || undefined,
+        BillToContact:         draft.billToContact   || undefined,
+        ShipToCustomerName:    draft.shipToName      || undefined,
+        ShipToSite:            draft.shipToSite      || undefined,
+        ShipToContact:         draft.shipToContact   || undefined,
+        PayingCustomerName:    draft.payingCustomerName    || undefined,
+        PayingCustomerSite:    draft.payingCustomerSite    || undefined,
+        PayingCustomerAccount: draft.payingCustomerAccount || undefined,
+        PaymentTerms:          draft.paymentTerms    || undefined,
+        LegalEntityIdentifier: draft.legalEntity     || undefined,
+        PurchaseOrder:         draft.poNumber        || undefined,
+        SpecialInstructions:   draft.specialInstructions || undefined,
+        Comments:              draft.comments        || undefined,
+        InvoicingRule:         draft.invoicingRule   || undefined,
+        RemitToAddress:        draft.remitToAddress  || undefined,
+        lines: validLines.map(l => ({
+          LineNumber:            l.lineNumber,
+          Description:           l.description,
+          ItemNumber:            l.item           || undefined,
+          UnitOfMeasure:         l.uom            || undefined,
+          MemoLine:              l.memoLine       || undefined,
+          Quantity:              l.quantity       ?? undefined,
+          UnitSellingPrice:      l.unitPrice      ?? undefined,
+          LineAmount:            l.amount         || undefined,
+          TaxClassificationCode: l.taxClassification || undefined,
+          TransactionBusinessCategory: l.transactionBusinessCategory || undefined,
         })),
       };
 
       const url = isNew ? APEX_AR : `${APEX_AR}/${draft.customerTransactionId}`;
       const res  = await fetch(url, {
-        method: isNew ? 'POST' : 'PUT',
+        method:  isNew ? 'POST' : 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body:    JSON.stringify(body),
       });
-      const result = await res.json().catch(() => ({}));
-      if (!res.ok) { message.error(result?.message || `Save failed: HTTP ${res.status}`); return false; }
+      const result = await res.json().catch(() => ({} as any));
 
-      message.success(isNew ? `Invoice created: ${result.transactionNumber || ''}` : 'Invoice saved');
-      if (isNew && result.customerTransactionId) {
-        updateDraft(tabKey, { customerTransactionId: result.customerTransactionId, transactionNumber: result.transactionNumber || draft.transactionNumber });
+      if (result?.status === 'ERROR' || !res.ok) {
+        message.error(result?.message || `Save failed: HTTP ${res.status}`);
+        return false;
+      }
+
+      if (isNew) {
+        const newId  = result.customerTransactionId as number;
+        const newNum = result.transactionNumber     as string;
+        message.success(`Invoice created — ID: ${newId}, Txn #: ${newNum || ''}`);
+        updateDraft(tabKey, {
+          customerTransactionId: newId,
+          transactionNumber:     newNum || draft.transactionNumber,
+        } as any);
+      } else {
+        message.success('Invoice saved');
       }
       return true;
     } catch (e: any) { message.error(`Save error: ${e.message}`); return false; }
