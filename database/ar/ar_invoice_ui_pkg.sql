@@ -55,6 +55,16 @@ CREATE OR REPLACE PACKAGE RR_AR_INVOICE_UI_PKG AS
         p_message         OUT VARCHAR2
     );
 
+    -- Replace all installments for a transaction (DELETE + INSERT).
+    -- Validates that sum of amounts equals the invoice ENTERED_AMOUNT.
+    -- JSON shape: {"items":[{"DueDate":"YYYY-MM-DD","Amount":nnn,"SequenceNumber":n},...]}
+    PROCEDURE save_installments (
+        p_transaction_id     IN  NUMBER,
+        p_installments_json  IN  CLOB,
+        p_status             OUT VARCHAR2,
+        p_message            OUT VARCHAR2
+    );
+
 END RR_AR_INVOICE_UI_PKG;
 /
 
@@ -469,6 +479,94 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICE_UI_PKG AS
             p_message := SQLERRM;
     END delete_line;
 
+    -- ── save_installments ─────────────────────────────
+    -- Full replace: delete all installments for the transaction,
+    -- insert the new split set, then validate total = ENTERED_AMOUNT.
+    -- Rolls back and returns ERROR if totals do not match.
+    PROCEDURE save_installments (
+        p_transaction_id     IN  NUMBER,
+        p_installments_json  IN  CLOB,
+        p_status             OUT VARCHAR2,
+        p_message            OUT VARCHAR2
+    ) IS
+        l_header_total  NUMBER;
+        l_inst_total    NUMBER := 0;
+        l_inst_count    NUMBER := 0;
+        l_seq           NUMBER;
+        l_due_date      DATE;
+        l_amount        NUMBER;
+        l_inst_id       NUMBER;
+    BEGIN
+        -- Get the invoice total to validate against
+        SELECT NVL(ENTERED_AMOUNT, 0)
+        INTO   l_header_total
+        FROM   RR_AR_INVOICE_HEADERS
+        WHERE  CUSTOMER_TRANSACTION_ID = p_transaction_id;
+
+        -- Pre-sum submitted installment amounts for validation
+        SELECT NVL(SUM(NVL(JSON_VALUE(j.item_clob, '$.Amount' RETURNING NUMBER), 0)), 0),
+               COUNT(*)
+        INTO   l_inst_total, l_inst_count
+        FROM   JSON_TABLE(p_installments_json, '$.items[*]'
+               COLUMNS (item_clob CLOB FORMAT JSON PATH '$')) j;
+
+        -- Validate: total must match invoice entered amount
+        IF ABS(l_inst_total - l_header_total) > 0.01 THEN
+            p_status  := 'ERROR';
+            p_message := 'Installment total (' || TO_CHAR(l_inst_total) ||
+                         ') does not match invoice total (' || TO_CHAR(l_header_total) || ')';
+            RETURN;
+        END IF;
+
+        IF l_inst_count = 0 THEN
+            p_status  := 'ERROR';
+            p_message := 'At least one installment is required';
+            RETURN;
+        END IF;
+
+        -- Wipe existing installments
+        DELETE FROM RR_AR_INVOICE_INSTALLMENTS
+        WHERE  CUSTOMER_TRANSACTION_ID = p_transaction_id;
+
+        -- Insert new split installments
+        FOR rec IN (
+            SELECT j.item_clob
+            FROM JSON_TABLE(p_installments_json, '$.items[*]'
+                 COLUMNS (item_clob CLOB FORMAT JSON PATH '$')) j
+        ) LOOP
+            l_inst_count := l_inst_count + 1;
+            l_seq      := NVL(JSON_VALUE(rec.item_clob, '$.SequenceNumber' RETURNING NUMBER), l_inst_count);
+                              RR_AR_INVOICE_INSTALLMENTS_S.NEXTVAL);
+            l_due_date := to_date_safe(JSON_VALUE(rec.item_clob, '$.DueDate'));
+            l_amount   := NVL(JSON_VALUE(rec.item_clob, '$.Amount' RETURNING NUMBER), 0);
+            l_inst_id  := RR_AR_INVOICE_INSTALLMENTS_S.NEXTVAL;
+
+            INSERT INTO RR_AR_INVOICE_INSTALLMENTS (
+                INSTALLMENT_ID,                    CUSTOMER_TRANSACTION_ID,
+                INSTALLMENT_SEQUENCE_NUMBER,       INSTALLMENT_STATUS,
+                INSTALLMENT_DUE_DATE,              ORIGINAL_AMOUNT,
+                INSTALLMENT_BALANCE_DUE,           ACCOUNTED_BALANCE_DUE,
+                INSTALLMENT_LINE_AMOUNT_ORIGINAL,  SYNC_STATUS,
+                LAST_UPDATED_BY,                   LAST_UPDATE_DATE,  SYNC_DATE
+            ) VALUES (
+                l_inst_id,   p_transaction_id,
+                l_seq,       'Open',
+                NVL(l_due_date, TRUNC(SYSDATE)),
+                l_amount,    l_amount,   l_amount,   l_amount,
+                'UI_UPDATED', USER,  SYSTIMESTAMP,  SYSTIMESTAMP
+            );
+        END LOOP;
+
+        COMMIT;
+        p_status  := 'SUCCESS';
+        p_message := 'Installments saved: ' || l_inst_count || ', Total: ' || TO_CHAR(l_inst_total);
+    EXCEPTION
+        WHEN OTHERS THEN
+            ROLLBACK;
+            p_status  := 'ERROR';
+            p_message := SQLERRM;
+    END save_installments;
+
 END RR_AR_INVOICE_UI_PKG;
 /
 
@@ -845,6 +943,56 @@ BEGIN
         p_line_id        => TO_NUMBER(:line_id),
         p_status         => l_status,
         p_message        => l_message
+    );
+    :status_code := CASE WHEN l_status = 'SUCCESS' THEN 200 ELSE 400 END;
+    HTP.P('{"status":"' || l_status ||
+          '","message":"' || NVL(l_message, '') || '"}');
+END;
+]'
+    );
+    COMMIT;
+END;
+/
+
+-- Drop + recreate invoicesUI/:id/installments template
+BEGIN
+    ORDS.DELETE_TEMPLATE(p_module_name => 'ar', p_pattern => 'invoicesUI/:id/installments');
+    COMMIT;
+EXCEPTION WHEN OTHERS THEN NULL;
+END;
+/
+
+BEGIN
+    ORDS.DEFINE_TEMPLATE(
+        p_module_name => 'ar',
+        p_pattern     => 'invoicesUI/:id/installments',
+        p_comments    => 'AR Invoice installments — full replace with validation'
+    );
+    COMMIT;
+END;
+/
+
+-- PUT /ar/invoicesUI/:id/installments
+-- Body: {"items":[{"SequenceNumber":1,"DueDate":"YYYY-MM-DD","Amount":nnn},...]};
+-- Validates sum(Amount) = invoice ENTERED_AMOUNT before replacing.
+BEGIN
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'ar',
+        p_pattern        => 'invoicesUI/:id/installments',
+        p_method         => 'PUT',
+        p_source_type    => 'plsql/block',
+        p_mimes_allowed  => 'application/json',
+        p_comments       => 'UI: Replace installment schedule with validation',
+        p_source         => q'[
+DECLARE
+    l_status  VARCHAR2(20);
+    l_message VARCHAR2(4000);
+BEGIN
+    RR_AR_INVOICE_UI_PKG.save_installments(
+        p_transaction_id    => TO_NUMBER(:id),
+        p_installments_json => :body_text,
+        p_status            => l_status,
+        p_message           => l_message
     );
     :status_code := CASE WHEN l_status = 'SUCCESS' THEN 200 ELSE 400 END;
     HTP.P('{"status":"' || l_status ||
