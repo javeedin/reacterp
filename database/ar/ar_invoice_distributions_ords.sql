@@ -73,8 +73,8 @@ BEGIN
         p_module_name    => 'ar',
         p_pattern        => 'invoices/:id/distributions',
         p_method         => 'GET',
-        p_source_type    => 'json/collection',
-        p_items_per_page => 500,
+        p_source_type    => 'collection/query',
+        p_items_per_page => 0,
         p_comments       => 'Fetch all distributions for an AR invoice',
         p_source         => q'[SELECT *
 FROM RR_AR_INVOICE_DISTRIBUTIONS
