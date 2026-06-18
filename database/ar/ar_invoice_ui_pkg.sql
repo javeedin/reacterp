@@ -5,10 +5,11 @@
 -- is reserved for bulk sync from Oracle Fusion.
 --
 -- ORDS endpoints wired here:
---   POST   /ar/invoices          → create_invoice
---   PUT    /ar/invoices/:id      → update_invoice
---   PUT    /ar/invoices/:id/lines → save_lines  (full replace)
---   DELETE /ar/invoices/:id/lines/:line_id → delete_line
+--   POST   /ar/invoicesUI                     → create_invoice
+--   GET    /ar/invoicesUI/:id                → get invoice + lines + installments
+--   PUT    /ar/invoicesUI/:id      → update_invoice
+--   PUT    /ar/invoicesUI/:id/lines → save_lines  (full replace)
+--   DELETE /ar/invoicesUI/:id/lines/:line_id → delete_line
 --
 -- Sequences (created by ar_invoices_create_patch.sql):
 --   RR_AR_INVOICE_HEADERS_S
@@ -474,14 +475,13 @@ END RR_AR_INVOICE_UI_PKG;
 
 -- =====================================================
 -- ORDS HANDLERS
--- Wire the new package to the existing ar/invoices
--- endpoints (replaces the handlers from
--- ar_invoices_create_patch.sql — safe to re-run)
+-- New UI-only endpoints under ar/invoicesUI.
+-- Does NOT touch the existing ar/invoices (sync) endpoints.
 -- =====================================================
 
 -- Drop + recreate invoices template to ensure clean handlers
 BEGIN
-    ORDS.DELETE_TEMPLATE(p_module_name => 'ar', p_pattern => 'invoices');
+    ORDS.DELETE_TEMPLATE(p_module_name => 'ar', p_pattern => 'invoicesUI');
     COMMIT;
 EXCEPTION WHEN OTHERS THEN NULL;
 END;
@@ -490,18 +490,18 @@ END;
 BEGIN
     ORDS.DEFINE_TEMPLATE(
         p_module_name => 'ar',
-        p_pattern     => 'invoices',
+        p_pattern     => 'invoicesUI',
         p_comments    => 'AR Invoices — UI create/update'
     );
     COMMIT;
 END;
 /
 
--- POST /ar/invoices — create new invoice, returns customerTransactionId
+-- POST /ar/invoicesUI — create new invoice, returns customerTransactionId
 BEGIN
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'ar',
-        p_pattern        => 'invoices',
+        p_pattern        => 'invoicesUI',
         p_method         => 'POST',
         p_source_type    => 'plsql/block',
         p_mimes_allowed  => 'application/json',
@@ -532,9 +532,9 @@ END;
 END;
 /
 
--- Drop + recreate invoices/:id template
+-- Drop + recreate invoicesUI/:id template
 BEGIN
-    ORDS.DELETE_TEMPLATE(p_module_name => 'ar', p_pattern => 'invoices/:id');
+    ORDS.DELETE_TEMPLATE(p_module_name => 'ar', p_pattern => 'invoicesUI/:id');
     COMMIT;
 EXCEPTION WHEN OTHERS THEN NULL;
 END;
@@ -543,18 +543,18 @@ END;
 BEGIN
     ORDS.DEFINE_TEMPLATE(
         p_module_name => 'ar',
-        p_pattern     => 'invoices/:id',
+        p_pattern     => 'invoicesUI/:id',
         p_comments    => 'AR Invoice by ID'
     );
     COMMIT;
 END;
 /
 
--- PUT /ar/invoices/:id — update existing invoice header
+-- PUT /ar/invoicesUI/:id — update existing invoice header
 BEGIN
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'ar',
-        p_pattern        => 'invoices/:id',
+        p_pattern        => 'invoicesUI/:id',
         p_method         => 'PUT',
         p_source_type    => 'plsql/block',
         p_mimes_allowed  => 'application/json',
@@ -579,9 +579,9 @@ END;
 END;
 /
 
--- Drop + recreate invoices/:id/lines template
+-- Drop + recreate invoicesUI/:id/lines template
 BEGIN
-    ORDS.DELETE_TEMPLATE(p_module_name => 'ar', p_pattern => 'invoices/:id/lines');
+    ORDS.DELETE_TEMPLATE(p_module_name => 'ar', p_pattern => 'invoicesUI/:id/lines');
     COMMIT;
 EXCEPTION WHEN OTHERS THEN NULL;
 END;
@@ -590,18 +590,18 @@ END;
 BEGIN
     ORDS.DEFINE_TEMPLATE(
         p_module_name => 'ar',
-        p_pattern     => 'invoices/:id/lines',
+        p_pattern     => 'invoicesUI/:id/lines',
         p_comments    => 'AR Invoice lines — full replace'
     );
     COMMIT;
 END;
 /
 
--- PUT /ar/invoices/:id/lines — replace all lines
+-- PUT /ar/invoicesUI/:id/lines — replace all lines
 BEGIN
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'ar',
-        p_pattern        => 'invoices/:id/lines',
+        p_pattern        => 'invoicesUI/:id/lines',
         p_method         => 'PUT',
         p_source_type    => 'plsql/block',
         p_mimes_allowed  => 'application/json',
@@ -627,11 +627,11 @@ END;
 END;
 /
 
--- GET /ar/invoices/:id — fetch header + lines + installments as JSON
+-- GET /ar/invoicesUI/:id — fetch header + lines + installments as JSON
 BEGIN
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'ar',
-        p_pattern        => 'invoices/:id',
+        p_pattern        => 'invoicesUI/:id',
         p_method         => 'GET',
         p_source_type    => 'plsql/block',
         p_mimes_allowed  => NULL,
@@ -808,9 +808,9 @@ END;
 END;
 /
 
--- Drop + recreate invoices/:id/lines/:line_id template
+-- Drop + recreate invoicesUI/:id/lines/:line_id template
 BEGIN
-    ORDS.DELETE_TEMPLATE(p_module_name => 'ar', p_pattern => 'invoices/:id/lines/:line_id');
+    ORDS.DELETE_TEMPLATE(p_module_name => 'ar', p_pattern => 'invoicesUI/:id/lines/:line_id');
     COMMIT;
 EXCEPTION WHEN OTHERS THEN NULL;
 END;
@@ -819,18 +819,18 @@ END;
 BEGIN
     ORDS.DEFINE_TEMPLATE(
         p_module_name => 'ar',
-        p_pattern     => 'invoices/:id/lines/:line_id',
+        p_pattern     => 'invoicesUI/:id/lines/:line_id',
         p_comments    => 'AR Invoice — delete a single line'
     );
     COMMIT;
 END;
 /
 
--- DELETE /ar/invoices/:id/lines/:line_id — delete one line
+-- DELETE /ar/invoicesUI/:id/lines/:line_id — delete one line
 BEGIN
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'ar',
-        p_pattern        => 'invoices/:id/lines/:line_id',
+        p_pattern        => 'invoicesUI/:id/lines/:line_id',
         p_method         => 'DELETE',
         p_source_type    => 'plsql/block',
         p_mimes_allowed  => NULL,
