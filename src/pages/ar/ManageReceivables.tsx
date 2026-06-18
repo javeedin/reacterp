@@ -10,7 +10,7 @@ import {
   UserOutlined, CreditCardOutlined, SettingOutlined, FilePdfOutlined,
   LockOutlined, EyeOutlined, DownloadOutlined, FilterOutlined, ReloadOutlined,
   ApiOutlined, DownOutlined, ProfileOutlined, ApartmentOutlined, AuditOutlined, AccountBookOutlined,
-  OrderedListOutlined, SyncOutlined,
+  OrderedListOutlined, SyncOutlined, CopyOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -406,6 +406,12 @@ const ManageReceivables: React.FC = () => {
 
   // Per-tab saving state
   const [saving, setSaving]             = useState<Record<string, boolean>>({});
+
+  // API test modal state
+  const [apiTestVisible,  setApiTestVisible]  = useState(false);
+  const [apiTestTabKey,   setApiTestTabKey]   = useState('');
+  const [apiTestRunning,  setApiTestRunning]  = useState(false);
+  const [apiTestResponse, setApiTestResponse] = useState<{ status: number; body: string } | null>(null);
 
   // PDF preview state
   const [pdfPreviewVisible, setPdfPreviewVisible] = useState(false);
@@ -1035,6 +1041,61 @@ const ManageReceivables: React.FC = () => {
   };
 
   // ── Save (create or update) ────────────────────────────────────────────────
+  // Build the POST/PUT payload for a tab without sending it
+  const buildSavePayload = (tabKey: string) => {
+    const tab = tabs.find(t => t.key === tabKey);
+    if (!tab) return null;
+    const { draft } = tab;
+    const isNew = draft.customerTransactionId === 0;
+    const validLines = draft.lines.filter(l => l.description || l.quantity != null || l.unitPrice != null);
+    const body = {
+      ...(isNew ? {} : { CustomerTransactionId: draft.customerTransactionId }),
+      TransactionClass:    draft.transactionClass,
+      BusinessUnit:        draft.businessUnit,
+      TransactionSource:   draft.transactionSource,
+      TransactionType:     draft.transactionType,
+      TransactionNumber:   draft.transactionNumber || undefined,
+      CrossReference:      draft.crossReference    || undefined,
+      TransactionDate:     draft.transactionDate,
+      AccountingDate:      draft.accountingDate,
+      InvoiceCurrencyCode: draft.currency,
+      ConversionType:      draft.conversionType    || undefined,
+      ConversionDate:      draft.conversionDate    || undefined,
+      ConversionRate:      draft.conversionRate    ?? undefined,
+      BillToCustomerName:    draft.billToName,
+      BillToCustomerNumber:  draft.billToAccountNumber,
+      BillToSite:            draft.billToSite      || undefined,
+      BillToContact:         draft.billToContact   || undefined,
+      ShipToCustomerName:    draft.shipToName      || undefined,
+      ShipToSite:            draft.shipToSite      || undefined,
+      ShipToContact:         draft.shipToContact   || undefined,
+      PayingCustomerName:    draft.payingCustomerName    || undefined,
+      PayingCustomerSite:    draft.payingCustomerSite    || undefined,
+      PayingCustomerAccount: draft.payingCustomerAccount || undefined,
+      PaymentTerms:          draft.paymentTerms    || undefined,
+      LegalEntityIdentifier: draft.legalEntity     || undefined,
+      PurchaseOrder:         draft.poNumber        || undefined,
+      SpecialInstructions:   draft.specialInstructions || undefined,
+      Comments:              draft.comments        || undefined,
+      InvoicingRule:         draft.invoicingRule   || undefined,
+      RemitToAddress:        draft.remitToAddress  || undefined,
+      lines: validLines.map(l => ({
+        LineNumber:            l.lineNumber,
+        Description:           l.description,
+        ItemNumber:            l.item           || undefined,
+        UnitOfMeasure:         l.uom            || undefined,
+        MemoLine:              l.memoLine       || undefined,
+        Quantity:              l.quantity       ?? undefined,
+        UnitSellingPrice:      l.unitPrice      ?? undefined,
+        LineAmount:            l.amount         || undefined,
+        TaxClassificationCode: l.taxClassification || undefined,
+        TransactionBusinessCategory: l.transactionBusinessCategory || undefined,
+      })),
+    };
+    const url = isNew ? APEX_AR : `${APEX_AR}/${draft.customerTransactionId}`;
+    return { url, method: isNew ? 'POST' : 'PUT', body };
+  };
+
   const handleSave = async (tabKey: string): Promise<boolean> => {
     const tab = tabs.find(t => t.key === tabKey);
     if (!tab) return false;
@@ -1398,6 +1459,17 @@ const ManageReceivables: React.FC = () => {
                 PDF
               </Button>
               {!isLocked && <>
+                <Tooltip title="Test API: preview payload and fire request">
+                  <Button size="small" icon={<ApiOutlined />}
+                    style={{ color: '#722ed1', borderColor: '#722ed1' }}
+                    onClick={() => {
+                      setApiTestTabKey(tabKey);
+                      setApiTestResponse(null);
+                      setApiTestVisible(true);
+                    }}>
+                    Test POST
+                  </Button>
+                </Tooltip>
                 <Button size="small" type="primary" icon={<SaveOutlined />} loading={isSaving}
                   style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
                   onClick={() => handleSave(tabKey)}>
@@ -2915,6 +2987,128 @@ const ManageReceivables: React.FC = () => {
           ]}
         />
       </Modal>
+
+      {/* ── API Test Modal ─────────────────────────────────────────────── */}
+      {(() => {
+        const payload = apiTestVisible ? buildSavePayload(apiTestTabKey) : null;
+        return (
+          <Modal
+            open={apiTestVisible}
+            onCancel={() => { setApiTestVisible(false); setApiTestResponse(null); }}
+            title={
+              <Space>
+                <ApiOutlined style={{ color: '#722ed1' }} />
+                <span style={{ fontWeight: 700 }}>API Test — Save Invoice</span>
+                {payload && (
+                  <Tag color={payload.method === 'POST' ? 'green' : 'blue'} style={{ fontWeight: 700, fontSize: 13 }}>
+                    {payload.method}
+                  </Tag>
+                )}
+              </Space>
+            }
+            width={820}
+            footer={
+              <Space>
+                <Button
+                  type="primary"
+                  icon={<ApiOutlined />}
+                  loading={apiTestRunning}
+                  style={{ background: '#722ed1', borderColor: '#722ed1' }}
+                  disabled={!payload}
+                  onClick={async () => {
+                    if (!payload) return;
+                    setApiTestRunning(true);
+                    setApiTestResponse(null);
+                    try {
+                      const res = await fetch(payload.url, {
+                        method:  payload.method,
+                        headers: { 'Content-Type': 'application/json' },
+                        body:    JSON.stringify(payload.body),
+                      });
+                      const text = await res.text();
+                      let pretty = text;
+                      try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* not JSON */ }
+                      setApiTestResponse({ status: res.status, body: pretty });
+                    } catch (err: any) {
+                      setApiTestResponse({ status: 0, body: String(err) });
+                    } finally {
+                      setApiTestRunning(false);
+                    }
+                  }}>
+                  Send Request
+                </Button>
+                <Button onClick={() => { setApiTestVisible(false); setApiTestResponse(null); }}>Close</Button>
+              </Space>
+            }
+          >
+            {payload ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {/* URL */}
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#595959', marginBottom: 4 }}>ENDPOINT</div>
+                  <div style={{
+                    background: '#f6f0ff', border: '1px solid #d3adf7', borderRadius: 6,
+                    padding: '6px 10px', fontFamily: 'monospace', fontSize: 12,
+                    wordBreak: 'break-all', color: '#531dab',
+                    display: 'flex', alignItems: 'center', gap: 8,
+                  }}>
+                    <Tag color={payload.method === 'POST' ? 'green' : 'blue'} style={{ fontWeight: 700, margin: 0 }}>
+                      {payload.method}
+                    </Tag>
+                    {payload.url}
+                    <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginLeft: 'auto', flexShrink: 0 }}
+                      onClick={() => { navigator.clipboard?.writeText(payload.url); message.success('URL copied'); }} />
+                  </div>
+                </div>
+
+                {/* Request body */}
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#595959', marginBottom: 4 }}>
+                    REQUEST BODY (JSON)
+                    <Button size="small" type="link" icon={<CopyOutlined />} style={{ marginLeft: 8 }}
+                      onClick={() => { navigator.clipboard?.writeText(JSON.stringify(payload.body, null, 2)); message.success('Body copied'); }}>
+                      Copy
+                    </Button>
+                  </div>
+                  <pre style={{
+                    background: '#1e1e1e', color: '#d4d4d4', borderRadius: 6,
+                    padding: '10px 12px', fontSize: 11, fontFamily: 'monospace',
+                    maxHeight: 320, overflowY: 'auto', margin: 0, whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                  }}>
+                    {JSON.stringify(payload.body, null, 2)}
+                  </pre>
+                </div>
+
+                {/* Response */}
+                {apiTestResponse && (
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: '#595959', marginBottom: 4 }}>
+                      RESPONSE
+                      <Tag
+                        color={apiTestResponse.status >= 200 && apiTestResponse.status < 300 ? 'green' : 'red'}
+                        style={{ marginLeft: 8 }}>
+                        HTTP {apiTestResponse.status || 'ERROR'}
+                      </Tag>
+                    </div>
+                    <pre style={{
+                      background: apiTestResponse.status >= 200 && apiTestResponse.status < 300 ? '#f6ffed' : '#fff2f0',
+                      border: `1px solid ${apiTestResponse.status >= 200 && apiTestResponse.status < 300 ? '#b7eb8f' : '#ffccc7'}`,
+                      borderRadius: 6, padding: '10px 12px', fontSize: 11,
+                      fontFamily: 'monospace', maxHeight: 200, overflowY: 'auto',
+                      margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                    }}>
+                      {apiTestResponse.body}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <Alert type="warning" message="Could not build payload — tab not found." />
+            )}
+          </Modal>
+        );
+      })()}
     </Layout>
   );
 };
