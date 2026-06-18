@@ -995,8 +995,7 @@ BEGIN
         p_message           => l_message
     );
     :status_code := CASE WHEN l_status = 'SUCCESS' THEN 200 ELSE 400 END;
-    HTP.P('{"status":"' || l_status ||
-          '","message":"' || NVL(l_message, '') || '"}');
+    HTP.P('{"status":"' || l_status || '","message":"' || NVL(l_message,'') || '"}');
 END;
 ]'
     );
