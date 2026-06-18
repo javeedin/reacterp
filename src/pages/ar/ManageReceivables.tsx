@@ -1173,15 +1173,74 @@ const ManageReceivables: React.FC = () => {
         return false;
       }
 
+      const savedId = isNew ? (result.customerTransactionId as number) : draft.customerTransactionId;
+      const savedNum = isNew ? (result.transactionNumber as string) : draft.transactionNumber;
+
+      // ── Save lines (full replace DELETE+INSERT) ─────────────────────────────
+      const linesPayload = {
+        items: validLines.map(l => ({
+          LineNumber:            l.lineNumber,
+          Description:           l.description,
+          ItemNumber:            l.item           || undefined,
+          UnitOfMeasure:         l.uom            || undefined,
+          MemoLine:              l.memoLine       || undefined,
+          Quantity:              l.quantity       ?? undefined,
+          UnitSellingPrice:      l.unitPrice      ?? undefined,
+          LineAmount:            l.amount         || undefined,
+          TaxClassificationCode: l.taxClassification || undefined,
+          TransactionBusinessCategory: l.transactionBusinessCategory || undefined,
+        })),
+      };
+      try {
+        await fetch(`${APEX_AR}/${savedId}/lines`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(linesPayload),
+        });
+      } catch { /* non-fatal — header was already saved */ }
+
+      // ── Refresh lines from DB ───────────────────────────────────────────────
+      const refreshLines = async (txnId: number): Promise<ARInvoiceLine[]> => {
+        try {
+          const r = await fetch(`${APEX_AR_RO}/${txnId}/lines`);
+          const d = await r.json();
+          return (d.items || []).map((l: any, i: number) => ({
+            key:          String(l.customer_transaction_line_id ?? i),
+            lineNumber:   l.line_number ?? i + 1,
+            item:         l.inventory_item ?? '',
+            description:  l.description ?? '',
+            memoLine:     l.memo_line ?? '',
+            uom:          l.unit_of_measure ?? '',
+            quantity:     l.quantity ?? null,
+            unitPrice:    l.unit_selling_price ?? null,
+            amount:       l.line_amount ?? 0,
+            taxClassification: l.tax_classification_code ?? '',
+            transactionBusinessCategory: l.transaction_business_category ?? '',
+          }));
+        } catch { return draft.lines; }
+      };
+
       if (isNew) {
-        const newId  = result.customerTransactionId as number;
-        const newNum = result.transactionNumber     as string;
-        message.success(`Invoice created — ID: ${newId}, Txn #: ${newNum || ''}`);
-        updateDraft(tabKey, {
-          customerTransactionId: newId,
-          transactionNumber:     newNum || draft.transactionNumber,
-        } as any);
+        const newKey = `inv-${savedId}`;
+        const freshLines = await refreshLines(savedId);
+        // Rename tab key and update draft with new ID + fresh lines
+        setTabs(prev => prev.map(t =>
+          t.key === tabKey
+            ? { ...t, key: newKey, draft: { ...t.draft, customerTransactionId: savedId, transactionNumber: savedNum || t.draft.transactionNumber, lines: freshLines } }
+            : t
+        ));
+        setActiveKey(newKey);
+        // Seed the installment cache for the new key
+        fetchedInstTabsRef.current.delete(newKey);
+        fetchInstTab(newKey, savedId);
+        fetchTabKpis(savedId);
+        message.success(`Invoice created — ID: ${savedId}, Txn #: ${savedNum || ''}`);
       } else {
+        const freshLines = await refreshLines(savedId);
+        updateDraft(tabKey, { lines: freshLines } as any);
+        // Refresh installments silently
+        fetchedInstTabsRef.current.delete(tabKey);
+        fetchInstTab(tabKey, savedId);
         message.success('Invoice saved');
       }
       return true;
