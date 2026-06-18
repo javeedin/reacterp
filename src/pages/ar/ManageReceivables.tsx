@@ -512,31 +512,34 @@ const ManageReceivables: React.FC = () => {
   // ── Distributions modal ───────────────────────────────────────────────────
   interface DistributionRow {
     distributionId: number; lineNumber: number | null; taxLineNumber: number | null;
-    accountClass: string; accountCombination: string;
+    accountClass: string; accountCombination: string; accountCombinationDesc: string;
     amount: number; accountedAmount: number; percent: number; comments: string;
   }
   const [distVisible, setDistVisible] = useState(false);
   const [distLoading, setDistLoading] = useState(false);
   const [distRows,    setDistRows]    = useState<DistributionRow[]>([]);
   const [distTxnId,   setDistTxnId]   = useState<number>(0);
+  const [distSearch,  setDistSearch]  = useState('');
 
   const openDistributions = (txnId: number) => {
     setDistTxnId(txnId);
     setDistRows([]);
+    setDistSearch('');
     setDistVisible(true);
     setDistLoading(true);
     fetch(`${APEX_AR_RO}/${txnId}/distributions`, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
       .then(d => setDistRows(((d.items ?? []) as any[]).map((x: any) => ({
-        distributionId:    x.distribution_id         ?? x.DISTRIBUTION_ID         ?? 0,
-        lineNumber:        x.invoice_line_number      ?? x.INVOICE_LINE_NUMBER      ?? null,
-        taxLineNumber:     x.detailed_tax_line_number ?? x.DETAILED_TAX_LINE_NUMBER ?? null,
-        accountClass:      x.account_class            ?? x.ACCOUNT_CLASS            ?? '',
-        accountCombination:x.account_combination      ?? x.ACCOUNT_COMBINATION      ?? '',
-        amount:            x.amount                   ?? x.AMOUNT                   ?? 0,
-        accountedAmount:   x.accounted_amount         ?? x.ACCOUNTED_AMOUNT         ?? 0,
-        percent:           x.percent                  ?? x.PERCENT                  ?? 0,
-        comments:          x.comments                 ?? x.COMMENTS                 ?? '',
+        distributionId:       x.distribution_id              ?? x.DISTRIBUTION_ID              ?? 0,
+        lineNumber:           x.invoice_line_number          ?? x.INVOICE_LINE_NUMBER           ?? null,
+        taxLineNumber:        x.detailed_tax_line_number     ?? x.DETAILED_TAX_LINE_NUMBER      ?? null,
+        accountClass:         x.account_class                ?? x.ACCOUNT_CLASS                 ?? '',
+        accountCombination:   x.account_combination          ?? x.ACCOUNT_COMBINATION           ?? '',
+        accountCombinationDesc: x.account_combination_desc   ?? x.ACCOUNT_COMBINATION_DESC      ?? '',
+        amount:               x.amount                       ?? x.AMOUNT                        ?? 0,
+        accountedAmount:      x.accounted_amount             ?? x.ACCOUNTED_AMOUNT              ?? 0,
+        percent:              x.percent                      ?? x.PERCENT                       ?? 0,
+        comments:             x.comments                     ?? x.COMMENTS                      ?? '',
       }))))
       .catch(err => { console.error('[AR distributions]', err); setDistRows([]); })
       .finally(() => setDistLoading(false));
@@ -3008,11 +3011,30 @@ const ManageReceivables: React.FC = () => {
             <Button onClick={() => setDistVisible(false)}>Close</Button>
           </div>
         }
-        width={1100}
+        width={1200}
         styles={{ body: { padding: '12px 24px' } }}
       >
+        {/* Search bar */}
+        <Input.Search
+          placeholder="Search account class, combination, description, comments…"
+          allowClear
+          size="small"
+          value={distSearch}
+          onChange={e => setDistSearch(e.target.value)}
+          style={{ marginBottom: 10, width: 480 }}
+        />
         <Table<DistributionRow>
-          dataSource={distRows}
+          dataSource={(() => {
+            if (!distSearch.trim()) return distRows;
+            const q = distSearch.toLowerCase();
+            return distRows.filter(r =>
+              r.accountClass.toLowerCase().includes(q) ||
+              r.accountCombination.toLowerCase().includes(q) ||
+              r.accountCombinationDesc.toLowerCase().includes(q) ||
+              r.comments.toLowerCase().includes(q) ||
+              String(r.lineNumber ?? '').includes(q)
+            );
+          })()}
           rowKey="distributionId"
           loading={distLoading}
           size="small"
@@ -3044,8 +3066,15 @@ const ManageReceivables: React.FC = () => {
                 const color: Record<string,string> = { Receivable: 'blue', Revenue: 'green', Tax: 'orange', Rounding: 'default' };
                 return <Tag color={color[v] ?? 'default'} style={{ fontSize: 11 }}>{v || '—'}</Tag>;
               }},
-            { title: 'Distribution (Account)', dataIndex: 'accountCombination', width: 260, ellipsis: true,
-              render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v || '—'}</Text> },
+            { title: 'Distribution (Account)', dataIndex: 'accountCombination', width: 280,
+              render: (v, r) => (
+                <div>
+                  <Text style={{ fontSize: 11, fontFamily: 'monospace', display: 'block' }}>{v || '—'}</Text>
+                  {r.accountCombinationDesc && (
+                    <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 1 }}>{r.accountCombinationDesc}</Text>
+                  )}
+                </div>
+              )},
             { title: 'Debit', dataIndex: 'amount', width: 130, align: 'right',
               render: v => v > 0
                 ? <Text style={{ fontSize: 12, fontFamily: 'monospace', color: '#237804', fontWeight: 600 }}>{fmt(v)}</Text>

@@ -76,10 +76,30 @@ BEGIN
         p_source_type    => 'collection/query',
         p_items_per_page => 0,
         p_comments       => 'Fetch all distributions for an AR invoice',
-        p_source         => q'[SELECT *
-FROM RR_AR_INVOICE_DISTRIBUTIONS
-WHERE CUSTOMER_TRANSACTION_ID = :id
-ORDER BY INVOICE_LINE_NUMBER, DISTRIBUTION_ID]'
+        p_source         => q'[SELECT
+    d.DISTRIBUTION_ID,
+    d.CUSTOMER_TRANSACTION_ID,
+    d.INVOICE_LINE_NUMBER,
+    d.DETAILED_TAX_LINE_NUMBER,
+    d.ACCOUNT_CLASS,
+    d.ACCOUNT_COMBINATION,
+    vsv.DESCRIPTION                              AS ACCOUNT_COMBINATION_DESC,
+    d.AMOUNT,
+    d.ACCOUNTED_AMOUNT,
+    d.PERCENT,
+    d.COMMENTS,
+    d.FUSION_CREATED_BY,
+    d.FUSION_CREATION_DATE,
+    d.FUSION_LAST_UPDATED_BY,
+    d.FUSION_LAST_UPDATE_DATE,
+    d.SYNC_DATE,
+    d.SYNC_STATUS
+FROM RR_AR_INVOICE_DISTRIBUTIONS d
+LEFT JOIN RR_VALUE_SET_VALUES vsv
+       ON vsv.VALUE_SET_CODE = 'BUIMERC_FIN_GLB_COA_ACCOUNT'
+      AND vsv.VALUE = NULLIF(TRIM(REGEXP_SUBSTR(d.ACCOUNT_COMBINATION, '[^-]+', 1, 4)), '')
+WHERE d.CUSTOMER_TRANSACTION_ID = :id
+ORDER BY d.INVOICE_LINE_NUMBER, d.DISTRIBUTION_ID]'
     );
     COMMIT;
 END;
