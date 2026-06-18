@@ -800,7 +800,7 @@ const ManageReceivables: React.FC = () => {
       .then(r => r.json())
       .then(data => {
         const sources = ((data.items || []) as any[])
-          .map((i: any) => i.source_name ?? i.TRANSACTION_SOURCE_NAME ?? '')
+          .map((i: any) => i.name ?? i.source_name ?? i.TRANSACTION_SOURCE_NAME ?? '')
           .filter(Boolean);
         setTxnSources(sources);
       })
@@ -809,7 +809,7 @@ const ManageReceivables: React.FC = () => {
       .then(r => r.json())
       .then(data => {
         const types = ((data.items || []) as any[])
-          .map((i: any) => i.transaction_type_name ?? i.TRANSACTION_TYPE_NAME ?? '')
+          .map((i: any) => i.name ?? i.transaction_type_name ?? i.TRANSACTION_TYPE_NAME ?? '')
           .filter(Boolean);
         setTxnTypes(types);
       })
@@ -827,7 +827,7 @@ const ManageReceivables: React.FC = () => {
       .then(r => r.json())
       .then(data => {
         const codes = ((data.items || []) as any[])
-          .map((i: any) => i.tax_rate_code ?? i.TAX_RATE_CODE ?? '')
+          .map((i: any) => i.tax_rate_code ?? i.TAX_RATE_CODE ?? i.name ?? '')
           .filter(Boolean);
         setTaxCodes(codes);
       })
