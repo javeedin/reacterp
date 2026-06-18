@@ -760,6 +760,9 @@ const ManageReceivables: React.FC = () => {
   const [splitInvoiceAmt, setSplitInvoiceAmt] = useState(0);
   const [splitRows,    setSplitRows]    = useState<SplitRow[]>([]);
   const [splitSaving,  setSplitSaving]  = useState(false);
+  const [splitApiOpen, setSplitApiOpen] = useState(false);
+  const [splitApiResp, setSplitApiResp] = useState<any>(null);
+  const [splitApiRunning, setSplitApiRunning] = useState(false);
 
   const openSplitModal = (tabKey: string, txnId: number, invoiceAmt: number, existingRows: InstTabRow[]) => {
     setSplitTxnId(txnId);
@@ -3103,6 +3106,13 @@ const ManageReceivables: React.FC = () => {
                 <ScissorOutlined style={{ color: '#722ed1' }} />
                 <span style={{ fontWeight: 700 }}>Split Installments</span>
                 <Tag color="purple">Invoice Amount: {fmtA(splitInvoiceAmt)}</Tag>
+                <Tooltip title="Show API details">
+                  <Button
+                    size="small" type="text" icon={<ApiOutlined />}
+                    style={{ color: '#722ed1' }}
+                    onClick={() => { setSplitApiOpen(v => !v); setSplitApiResp(null); }}
+                  />
+                </Tooltip>
               </Space>
             }
             footer={
@@ -3134,6 +3144,68 @@ const ManageReceivables: React.FC = () => {
               </Space>
             }
           >
+            {/* API debug panel */}
+            {splitApiOpen && (() => {
+              const url  = `${APEX_AR}/${splitTxnId}/installments`;
+              const body = {
+                items: splitRows.map(r => ({
+                  SequenceNumber: r.sequenceNumber,
+                  DueDate:        r.dueDate,
+                  Amount:         r.amount,
+                })),
+              };
+              return (
+                <div style={{ marginBottom: 14, border: '1px solid #d3adf7', borderRadius: 6, overflow: 'hidden' }}>
+                  <div style={{ background: '#f9f0ff', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Tag color="purple" style={{ fontWeight: 700 }}>PUT</Tag>
+                    <code style={{ fontSize: 11, flex: 1, color: '#531dab', wordBreak: 'break-all' }}>{url}</code>
+                    <Button
+                      size="small" type="primary"
+                      loading={splitApiRunning}
+                      style={{ background: '#722ed1', borderColor: '#722ed1', flexShrink: 0 }}
+                      onClick={async () => {
+                        setSplitApiRunning(true);
+                        setSplitApiResp(null);
+                        try {
+                          const res = await fetch(url, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(body),
+                          });
+                          const text = await res.text();
+                          let parsed: any;
+                          try { parsed = JSON.parse(text); } catch { parsed = text; }
+                          setSplitApiResp({ status: res.status, ok: res.ok, body: parsed });
+                        } catch (e: any) {
+                          setSplitApiResp({ status: 0, ok: false, body: e.message });
+                        } finally {
+                          setSplitApiRunning(false);
+                        }
+                      }}
+                    >
+                      Send
+                    </Button>
+                  </div>
+                  <div style={{ padding: '8px 12px', background: '#1e1e1e' }}>
+                    <Text style={{ fontSize: 10, color: '#aaa', display: 'block', marginBottom: 4 }}>Request Body:</Text>
+                    <pre style={{ margin: 0, color: '#9cdcfe', fontSize: 11, maxHeight: 160, overflow: 'auto', whiteSpace: 'pre' }}>
+                      {JSON.stringify(body, null, 2)}
+                    </pre>
+                  </div>
+                  {splitApiResp && (
+                    <div style={{ padding: '8px 12px', background: '#141414', borderTop: '1px solid #333' }}>
+                      <Text style={{ fontSize: 10, color: '#aaa', display: 'block', marginBottom: 4 }}>
+                        Response: <Tag color={splitApiResp.ok ? 'success' : 'error'} style={{ fontSize: 10 }}>HTTP {splitApiResp.status}</Tag>
+                      </Text>
+                      <pre style={{ margin: 0, color: splitApiResp.ok ? '#b5cea8' : '#f48771', fontSize: 11, maxHeight: 120, overflow: 'auto', whiteSpace: 'pre' }}>
+                        {typeof splitApiResp.body === 'string' ? splitApiResp.body : JSON.stringify(splitApiResp.body, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             {/* Balance progress bar */}
             <div style={{
               height: 6, borderRadius: 3, background: '#f0f0f0',
