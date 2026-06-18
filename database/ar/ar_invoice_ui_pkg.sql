@@ -521,10 +521,10 @@ BEGIN
         p_message             => l_message
     );
     :status_code := CASE WHEN l_status = 'SUCCESS' THEN 201 ELSE 400 END;
-    HTP.P('{"status":"'  || l_status ||
+    HTP.P('{"status":"' || l_status ||
           '","customerTransactionId":' || NVL(TO_CHAR(l_trx_id), 'null') ||
-          ',"transactionNumber":"' || NVL(REPLACE(l_trx_num, '"', '\"'), '') ||
-          '","message":"' || REPLACE(NVL(l_message,''), '"', '\"') || '"}');
+          ',"transactionNumber":"' || NVL(l_trx_num, '') ||
+          '","message":"' || NVL(l_message, '') || '"}');
 END;
 ]'
     );
@@ -571,7 +571,7 @@ BEGIN
     );
     :status_code := CASE WHEN l_status = 'SUCCESS' THEN 200 ELSE 400 END;
     HTP.P('{"status":"' || l_status ||
-          '","message":"' || REPLACE(NVL(l_message,''), '"', '\"') || '"}');
+          '","message":"' || NVL(l_message, '') || '"}');
 END;
 ]'
     );
@@ -619,7 +619,7 @@ BEGIN
     );
     :status_code := CASE WHEN l_status = 'SUCCESS' THEN 200 ELSE 400 END;
     HTP.P('{"status":"' || l_status ||
-          '","message":"' || REPLACE(NVL(l_message,''), '"', '\"') || '"}');
+          '","message":"' || NVL(l_message, '') || '"}');
 END;
 ]'
     );
@@ -848,7 +848,7 @@ BEGIN
     );
     :status_code := CASE WHEN l_status = 'SUCCESS' THEN 200 ELSE 400 END;
     HTP.P('{"status":"' || l_status ||
-          '","message":"' || REPLACE(NVL(l_message,''), '"', '\"') || '"}');
+          '","message":"' || NVL(l_message, '') || '"}');
 END;
 ]'
     );
