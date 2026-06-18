@@ -2407,7 +2407,7 @@ const SyncData: React.FC = () => {
     } else if (isARDistributions) {
       abortControllerRef.current = new AbortController();
       const result = await syncARDistributions(
-        syncParameters,
+        parameters,
         testMode,
         addLog,
         (p) => setArDistributionsProgress(prev => ({ ...prev, ...p })),
