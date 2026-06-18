@@ -832,6 +832,8 @@ const ManageReceivables: React.FC = () => {
         setTaxCodes(codes);
       })
       .catch(() => {});
+    // Pre-load customers so the dropdown is ready when user opens invoice form
+    fetchAllCustomers();
   }, []);
 
   // ── Open a fetched invoice in a new tab ────────────────────────────────────
@@ -1221,7 +1223,8 @@ const ManageReceivables: React.FC = () => {
 
     const sel = (f: keyof ARInvoiceDraft, options: string[], placeholder = '') => (
       <Select size="small" style={{ width: '100%', fontSize: 12 }} value={draft[f] as string || undefined}
-        placeholder={placeholder} allowClear disabled={isLocked}
+        placeholder={placeholder} allowClear disabled={isLocked} showSearch
+        filterOption={(input, opt) => String(opt?.value ?? '').toLowerCase().includes(input.toLowerCase())}
         onChange={v => updateDraft(tabKey, { [f]: v ?? '' } as any)}>
         {options.map(o => <Option key={o} value={o}>{o}</Option>)}
       </Select>
