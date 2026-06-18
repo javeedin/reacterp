@@ -186,7 +186,14 @@ export const syncARDistributions = async (
       }
 
       const invoice = invoices[i];
-      const txnId = (invoice as any).customer_transaction_id;
+      const txnId = (invoice as any).customer_transaction_id
+                 ?? (invoice as any).CUSTOMER_TRANSACTION_ID;
+
+      if (!txnId) {
+        log?.('warning', `  [${i + 1}/${invoices.length}] Skipping — no customer_transaction_id in: ${JSON.stringify(invoice)}`);
+        updateProgress({ processedInvoices: i + 1 });
+        continue;
+      }
 
       log?.('info', `\n[${i + 1}/${invoices.length}] Invoice: ${txnId}`);
 
