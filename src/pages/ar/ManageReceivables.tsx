@@ -2993,11 +2993,17 @@ const ManageReceivables: React.FC = () => {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
               {distLoading ? 'Loading…' : `${distRows.length} distribution${distRows.length !== 1 ? 's' : ''}`}
-              {!distLoading && distRows.length > 0 && (
-                <span style={{ marginLeft: 16 }}>
-                  Total Amount: <strong>{fmt(distRows.reduce((s, r) => s + r.amount, 0))}</strong> AED
-                </span>
-              )}
+              {!distLoading && distRows.length > 0 && (() => {
+                const dr = distRows.reduce((s, r) => s + (r.amount > 0 ? r.amount : 0), 0);
+                const cr = distRows.reduce((s, r) => s + (r.amount < 0 ? Math.abs(r.amount) : 0), 0);
+                return (
+                  <span style={{ marginLeft: 16 }}>
+                    <span style={{ color: '#237804', fontWeight: 600 }}>Dr: {fmt(dr)}</span>
+                    <span style={{ margin: '0 10px', color: '#d9d9d9' }}>|</span>
+                    <span style={{ color: '#cf1322', fontWeight: 600 }}>Cr: {fmt(cr)}</span>
+                  </span>
+                );
+              })()}
             </Text>
             <Button onClick={() => setDistVisible(false)}>Close</Button>
           </div>
@@ -3011,36 +3017,52 @@ const ManageReceivables: React.FC = () => {
           loading={distLoading}
           size="small"
           pagination={false}
-          scroll={{ x: 1050, y: 400 }}
+          scroll={{ x: 1100, y: 400 }}
           summary={rows => {
-            const totalAmt  = rows.reduce((s, r) => s + r.amount,         0);
-            const totalAcct = rows.reduce((s, r) => s + r.accountedAmount, 0);
+            const totalDebit  = rows.reduce((s, r) => s + (r.amount > 0 ? r.amount : 0), 0);
+            const totalCredit = rows.reduce((s, r) => s + (r.amount < 0 ? Math.abs(r.amount) : 0), 0);
+            const totalAcctDr = rows.reduce((s, r) => s + (r.accountedAmount > 0 ? r.accountedAmount : 0), 0);
+            const totalAcctCr = rows.reduce((s, r) => s + (r.accountedAmount < 0 ? Math.abs(r.accountedAmount) : 0), 0);
             return (
               <Table.Summary.Row style={{ fontWeight: 700, background: '#fafafa' }}>
                 <Table.Summary.Cell index={0} colSpan={4}><Text strong>Total</Text></Table.Summary.Cell>
-                <Table.Summary.Cell index={4} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{fmt(totalAmt)}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell index={5} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{fmt(totalAcct)}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell index={6} colSpan={2} />
+                <Table.Summary.Cell index={4} align="right"><Text strong style={{ fontFamily: 'monospace', color: '#237804' }}>{totalDebit > 0 ? fmt(totalDebit) : '—'}</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={5} align="right"><Text strong style={{ fontFamily: 'monospace', color: '#cf1322' }}>{totalCredit > 0 ? fmt(totalCredit) : '—'}</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={6} align="right"><Text strong style={{ fontFamily: 'monospace', color: '#237804' }}>{totalAcctDr > 0 ? fmt(totalAcctDr) : '—'}</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={7} align="right"><Text strong style={{ fontFamily: 'monospace', color: '#cf1322' }}>{totalAcctCr > 0 ? fmt(totalAcctCr) : '—'}</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={8} colSpan={2} />
               </Table.Summary.Row>
             );
           }}
           columns={[
             { title: 'Line #', dataIndex: 'lineNumber', width: 65, align: 'center',
               render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
-            { title: 'Detail Tax Line', dataIndex: 'taxLineNumber', width: 110, align: 'center',
+            { title: 'Tax Line', dataIndex: 'taxLineNumber', width: 80, align: 'center',
               render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
             { title: 'Account Class', dataIndex: 'accountClass', width: 120,
               render: v => {
                 const color: Record<string,string> = { Receivable: 'blue', Revenue: 'green', Tax: 'orange', Rounding: 'default' };
                 return <Tag color={color[v] ?? 'default'} style={{ fontSize: 11 }}>{v || '—'}</Tag>;
               }},
-            { title: 'Distribution (Account)', dataIndex: 'accountCombination', width: 300, ellipsis: true,
+            { title: 'Distribution (Account)', dataIndex: 'accountCombination', width: 260, ellipsis: true,
               render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v || '—'}</Text> },
-            { title: 'Amount (AED)', dataIndex: 'amount', width: 130, align: 'right',
-              render: v => <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>{fmt(v)}</Text> },
-            { title: 'Accounted Amt (AED)', dataIndex: 'accountedAmount', width: 150, align: 'right',
-              render: v => <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>{fmt(v)}</Text> },
-            { title: 'Percent', dataIndex: 'percent', width: 80, align: 'right',
+            { title: 'Debit', dataIndex: 'amount', width: 130, align: 'right',
+              render: v => v > 0
+                ? <Text style={{ fontSize: 12, fontFamily: 'monospace', color: '#237804', fontWeight: 600 }}>{fmt(v)}</Text>
+                : <Text style={{ color: '#d9d9d9', fontSize: 12 }}>—</Text> },
+            { title: 'Credit', dataIndex: 'amount', key: 'credit', width: 130, align: 'right',
+              render: v => v < 0
+                ? <Text style={{ fontSize: 12, fontFamily: 'monospace', color: '#cf1322', fontWeight: 600 }}>{fmt(Math.abs(v))}</Text>
+                : <Text style={{ color: '#d9d9d9', fontSize: 12 }}>—</Text> },
+            { title: 'Acctd Debit', dataIndex: 'accountedAmount', width: 120, align: 'right',
+              render: v => v > 0
+                ? <Text style={{ fontSize: 12, fontFamily: 'monospace', color: '#237804' }}>{fmt(v)}</Text>
+                : <Text style={{ color: '#d9d9d9', fontSize: 12 }}>—</Text> },
+            { title: 'Acctd Credit', dataIndex: 'accountedAmount', key: 'acctdCredit', width: 120, align: 'right',
+              render: v => v < 0
+                ? <Text style={{ fontSize: 12, fontFamily: 'monospace', color: '#cf1322' }}>{fmt(Math.abs(v))}</Text>
+                : <Text style={{ color: '#d9d9d9', fontSize: 12 }}>—</Text> },
+            { title: 'Percent', dataIndex: 'percent', width: 75, align: 'right',
               render: v => <Text style={{ fontSize: 12 }}>{v != null ? `${v}%` : '—'}</Text> },
             { title: 'Comments', dataIndex: 'comments', ellipsis: true,
               render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
