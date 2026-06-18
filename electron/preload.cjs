@@ -27,6 +27,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExcel: (buffer, filename) =>
     ipcRenderer.invoke('open-excel', { buffer, filename }),
 
+  // Folder picker + save file directly to folder
+  selectFolder: () =>
+    ipcRenderer.invoke('select-folder'),
+  saveFileToFolder: (buffer, folderPath, filename) =>
+    ipcRenderer.invoke('save-file-to-folder', { buffer, folderPath, filename }),
+
   // Screen recording
   getScreenSources: () => ipcRenderer.invoke('get-screen-sources'),
   saveRecording: (buffer, metadata) => ipcRenderer.invoke('save-recording', { buffer, metadata }),

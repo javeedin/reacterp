@@ -111,58 +111,76 @@ const parseGenericXml = (xmlString: string): { columns: string[]; rows: Record<s
   return { columns: colOrder, rows };
 };
 
+// ── Timestamp suffix: _YYYYMMDD_HHMMSS ───────────────────────────────────────
+const tsStamp = () => {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `_${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+};
+
 // ── Export helper: Excel (batched) → CSV fallback ─────────────────────────────
 
 const exportToFile = async (
-  reportName: string,
-  columns:    string[],
-  rows:       Record<string, string>[],
+  reportName:  string,
+  columns:     string[],
+  rows:        Record<string, string>[],
+  folderPath?: string,           // Electron folder path — if provided, save directly there
 ): Promise<'xlsx' | 'csv'> => {
-  const fname = reportName.replace(/[^a-zA-Z0-9_\-]/g, '_');
-  const eAPI  = (window as any).electronAPI;
+  const safeName = reportName.replace(/[^a-zA-Z0-9_\-]/g, '_');
+  const ts       = tsStamp();
+  const eAPI     = (window as any).electronAPI;
 
-  // ── Try Excel ──────────────────────────────────────────────────────────────
-  try {
-    const wb = XLSX.utils.book_new();
-    if (rows.length <= LARGE_ROW_THRESHOLD) {
-      // Single sheet — fast path
-      const ws = XLSX.utils.json_to_sheet(rows);
-      XLSX.utils.book_append_sheet(wb, ws, reportName.slice(0, 31));
-    } else {
-      // Multiple sheets of EXCEL_BATCH_SIZE rows each
-      let sheetNum = 1;
-      for (let i = 0; i < rows.length; i += EXCEL_BATCH_SIZE) {
-        const chunk = rows.slice(i, i + EXCEL_BATCH_SIZE);
-        const ws    = XLSX.utils.json_to_sheet(chunk);
-        XLSX.utils.book_append_sheet(wb, ws, `Sheet${sheetNum}`);
-        sheetNum++;
+  // ── Build workbook ─────────────────────────────────────────────────────────
+  const tryExcel = async (): Promise<'xlsx' | null> => {
+    try {
+      const wb = XLSX.utils.book_new();
+      if (rows.length <= LARGE_ROW_THRESHOLD) {
+        const ws = XLSX.utils.json_to_sheet(rows);
+        XLSX.utils.book_append_sheet(wb, ws, reportName.slice(0, 31));
+      } else {
+        let sheetNum = 1;
+        for (let i = 0; i < rows.length; i += EXCEL_BATCH_SIZE) {
+          const ws = XLSX.utils.json_to_sheet(rows.slice(i, i + EXCEL_BATCH_SIZE));
+          XLSX.utils.book_append_sheet(wb, ws, `Sheet${sheetNum++}`);
+        }
       }
-    }
-    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    if (eAPI?.openExcel) {
-      eAPI.openExcel(buf, `${fname}.xlsx`);
-    } else {
-      saveAs(
-        new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
-        `${fname}.xlsx`,
-      );
-    }
-    return 'xlsx';
-  } catch {
-    // ── Fallback: CSV ────────────────────────────────────────────────────────
-  }
+      const buf      = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      const filename = `${safeName}${ts}.xlsx`;
 
+      if (folderPath && eAPI?.saveFileToFolder) {
+        await eAPI.saveFileToFolder(buf, folderPath, filename);
+      } else if (eAPI?.openExcel) {
+        eAPI.openExcel(buf, filename);
+      } else {
+        saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), filename);
+      }
+      return 'xlsx';
+    } catch {
+      return null;
+    }
+  };
+
+  const result = await tryExcel();
+  if (result) return result;
+
+  // ── CSV fallback ───────────────────────────────────────────────────────────
   const lines: string[] = [columns.map(c => `"${c}"`).join(',')];
   for (const row of rows) {
     lines.push(columns.map(c => {
       const v = String(row[c] ?? '');
       return v.includes(',') || v.includes('"') || v.includes('\n')
-        ? `"${v.replace(/"/g, '""')}"`
-        : v;
+        ? `"${v.replace(/"/g, '""')}"` : v;
     }).join(','));
   }
-  const csvBlob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
-  saveAs(csvBlob, `${fname}.csv`);
+  const filename = `${safeName}${ts}.csv`;
+  const csvBlob  = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+
+  if (folderPath && eAPI?.saveFileToFolder) {
+    const csvArr = await csvBlob.arrayBuffer();
+    await eAPI.saveFileToFolder(Array.from(new Uint8Array(csvArr)), folderPath, filename);
+  } else {
+    saveAs(csvBlob, filename);
+  }
   return 'csv';
 };
 
@@ -208,6 +226,8 @@ const BIPReportsSync: React.FC<Props> = ({ open, onClose }) => {
   const [fetchAllStatus, setFetchAllStatus] = useState<Record<number, FetchAllStatus>>({});
   const [fetchAllRunning, setFetchAllRunning] = useState(false);
   const fetchAllAbortRef = useRef(false);
+  const [exportFolder, setExportFolder] = useState<string>('');
+  const [selectingFolder, setSelectingFolder] = useState(false);
 
   const toggleSelect = (reportId: number, checked: boolean) => {
     setSelectedIds(prev => {
@@ -222,7 +242,32 @@ const BIPReportsSync: React.FC<Props> = ({ open, onClose }) => {
   const allSelected   = reports.length > 0 && selectedIds.size === reports.length;
   const someSelected  = selectedIds.size > 0 && !allSelected;
 
-  const openFetchAll = () => {
+  const handleSelectFolder = async () => {
+    const eAPI = (window as any).electronAPI;
+    if (eAPI?.selectFolder) {
+      setSelectingFolder(true);
+      try {
+        const result = await eAPI.selectFolder();
+        if (!result.cancelled) setExportFolder(result.folderPath);
+      } finally {
+        setSelectingFolder(false);
+      }
+    }
+  };
+
+  const openFetchAll = async () => {
+    // Prompt for folder first (Electron only)
+    const eAPI = (window as any).electronAPI;
+    if (eAPI?.selectFolder) {
+      setSelectingFolder(true);
+      try {
+        const result = await eAPI.selectFolder();
+        if (result.cancelled) return;
+        setExportFolder(result.folderPath);
+      } finally {
+        setSelectingFolder(false);
+      }
+    }
     const init: Record<number, FetchAllStatus> = {};
     reports.filter(r => selectedIds.has(r.reportId)).forEach(r => {
       init[r.reportId] = { phase: 'pending', rowCount: 0, downloadDone: false, exportDone: false, fileType: null, error: null };
@@ -291,7 +336,7 @@ const BIPReportsSync: React.FC<Props> = ({ open, onClose }) => {
 
       let fileType: 'xlsx' | 'csv' = 'xlsx';
       try {
-        fileType = await exportToFile(report.reportName, columns, rows);
+        fileType = await exportToFile(report.reportName, columns, rows, exportFolder || undefined);
       } catch (exportErr: any) {
         setFetchAllStatus(prev => ({
           ...prev,
@@ -840,6 +885,24 @@ const BIPReportsSync: React.FC<Props> = ({ open, onClose }) => {
           </Space>
         }
       >
+        {/* Folder display */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12,
+          padding: '8px 12px', background: exportFolder ? '#f6ffed' : '#fffbe6',
+          border: `1px solid ${exportFolder ? '#b7eb8f' : '#ffe58f'}`, borderRadius: 6,
+        }}>
+          <FileDoneOutlined style={{ color: exportFolder ? '#52c41a' : '#faad14', fontSize: 16, flexShrink: 0 }} />
+          <Text style={{ flex: 1, fontSize: 12, fontFamily: 'monospace', color: exportFolder ? '#237804' : '#d46b08' }} ellipsis>
+            {exportFolder || 'No folder selected — files will download via browser'}
+          </Text>
+          {!fetchAllRunning && (
+            <Button size="small" loading={selectingFolder} onClick={handleSelectFolder}
+              style={{ flexShrink: 0 }}>
+              {exportFolder ? 'Change Folder' : 'Select Folder'}
+            </Button>
+          )}
+        </div>
+
         {fetchAllRunning && (
           <Progress
             percent={Math.round((doneCount + errCount) / selected.length * 100)}
@@ -849,7 +912,7 @@ const BIPReportsSync: React.FC<Props> = ({ open, onClose }) => {
         )}
         <Alert
           type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }}
-          message={`Files > ${LARGE_ROW_THRESHOLD.toLocaleString()} rows are split into Excel sheets of ${EXCEL_BATCH_SIZE.toLocaleString()} rows each. If Excel export fails, CSV is used as fallback.`}
+          message={`Files saved with timestamp (e.g. ReportName_20250618_143022.xlsx). Files > ${LARGE_ROW_THRESHOLD.toLocaleString()} rows split into ${EXCEL_BATCH_SIZE.toLocaleString()}-row sheets. CSV used as fallback if Excel fails.`}
         />
         <Table
           dataSource={selected.map(r => ({ ...r, key: r.reportId }))}

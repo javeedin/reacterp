@@ -720,6 +720,25 @@ ipcMain.on('show-notification', (event, title, body) => {
 const { shell } = require('electron');
 const os = require('os');
 
+ipcMain.handle('select-folder', async () => {
+  const result = await dialog.showOpenDialog({
+    title: 'Select Export Folder',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (result.canceled || !result.filePaths.length) return { cancelled: true };
+  return { cancelled: false, folderPath: result.filePaths[0] };
+});
+
+ipcMain.handle('save-file-to-folder', async (_event, { buffer, folderPath, filename }) => {
+  try {
+    const filePath = path.join(folderPath, filename);
+    fs.writeFileSync(filePath, Buffer.from(buffer));
+    return { success: true, filePath };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle('open-excel', async (_event, { buffer, filename }) => {
   try {
     const tmpPath = path.join(os.tmpdir(), filename);
