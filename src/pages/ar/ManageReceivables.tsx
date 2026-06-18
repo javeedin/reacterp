@@ -438,7 +438,7 @@ const ManageReceivables: React.FC = () => {
       .then(r => r.json())
       .then(data => {
         const rows = ((data.items ?? []) as any[]).map((c: any) => ({
-          custAccountId: c.cust_account_id ?? c.CUST_ACCOUNT_ID ?? 0,
+          custAccountId: Number(c.cust_account_id ?? c.CUST_ACCOUNT_ID ?? 0),
           accountNumber: c.account_number  ?? c.ACCOUNT_NUMBER  ?? '',
           accountName:   c.account_name    ?? c.ACCOUNT_NAME    ?? '',
         }));
