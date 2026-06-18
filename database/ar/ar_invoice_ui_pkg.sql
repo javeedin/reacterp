@@ -7,8 +7,8 @@
 -- ORDS endpoints wired here:
 --   POST   /ar/invoicesUI                     → create_invoice
 --   GET    /ar/invoicesUI/:id                → get invoice + lines + installments
---   PUT    /ar/invoicesUI/:id      → update_invoice
---   PUT    /ar/invoicesUI/:id/lines → save_lines  (full replace)
+--   PUT    /ar/invoicesUI/:id               → update_invoice
+--   PUT    /ar/invoicesUI/:id/lines         → save_lines  (full replace)
 --   DELETE /ar/invoicesUI/:id/lines/:line_id → delete_line
 --
 -- Sequences (created by ar_invoices_create_patch.sql):
