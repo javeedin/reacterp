@@ -37,7 +37,8 @@ const REDWOOD = {
   border:     '#E5E5E5',
 };
 
-const APEX_AR = `${APEX_DB_CONFIG.baseUrl}/ar/invoices`;
+const APEX_AR    = `${APEX_DB_CONFIG.baseUrl}/ar/invoicesUI`;
+const APEX_AR_RO = `${APEX_DB_CONFIG.baseUrl}/ar/invoices`;  // read-only sync endpoints (lines, installments, etc.)
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -486,7 +487,7 @@ const ManageReceivables: React.FC = () => {
     setInstRows([]);
     setInstVisible(true);
     setInstLoading(true);
-    fetch(`${APEX_DB_CONFIG.baseUrl}/ar/invoices/${txnId}/installments`, { headers: { Accept: 'application/json' } })
+    fetch(`${APEX_AR_RO}/${txnId}/installments`, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
       .then(d => setInstRows(((d.items ?? []) as any[]).map((x: any) => ({
         installmentId:        x.installment_id          ?? x.INSTALLMENT_ID          ?? 0,
@@ -524,7 +525,7 @@ const ManageReceivables: React.FC = () => {
     setDistRows([]);
     setDistVisible(true);
     setDistLoading(true);
-    fetch(`${APEX_DB_CONFIG.baseUrl}/ar/invoices/${txnId}/distributions`, { headers: { Accept: 'application/json' } })
+    fetch(`${APEX_AR_RO}/${txnId}/distributions`, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
       .then(d => setDistRows(((d.items ?? []) as any[]).map((x: any) => ({
         distributionId:    x.distribution_id         ?? x.DISTRIBUTION_ID         ?? 0,
@@ -551,8 +552,8 @@ const ManageReceivables: React.FC = () => {
   const fetchTabKpis = (txnId: number) => {
     if (!txnId || tabKpis[txnId]) return; // already loaded
     Promise.all([
-      fetch(`${APEX_DB_CONFIG.baseUrl}/ar/invoices/${txnId}/installments`, { headers: { Accept: 'application/json' } }).then(r => r.json()).catch(() => ({ items: [] })),
-      fetch(`${APEX_DB_CONFIG.baseUrl}/ar/invoices/${txnId}/distributions`, { headers: { Accept: 'application/json' } }).then(r => r.json()).catch(() => ({ items: [] })),
+      fetch(`${APEX_AR_RO}/${txnId}/installments`, { headers: { Accept: 'application/json' } }).then(r => r.json()).catch(() => ({ items: [] })),
+      fetch(`${APEX_AR_RO}/${txnId}/distributions`, { headers: { Accept: 'application/json' } }).then(r => r.json()).catch(() => ({ items: [] })),
     ]).then(([instData, distData]) => {
       const insts = (instData.items ?? []) as any[];
       const dists = (distData.items ?? []) as any[];
@@ -700,7 +701,7 @@ const ManageReceivables: React.FC = () => {
     fetchedDffTabsRef.current.add(tabKey);
     setDffMap(prev => ({ ...prev, [tabKey]: { loading: true, data: null, fetched: false } }));
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/ar/invoices/${customerTransactionId}/dff`;
+      const url = `${APEX_AR_RO}/${customerTransactionId}/dff`;
       const res = await fetch(url, { headers: { Accept: 'application/json' } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json();
@@ -752,7 +753,7 @@ const ManageReceivables: React.FC = () => {
     fetchedInstTabsRef.current.add(tabKey);
     setInstTabMap(prev => ({ ...prev, [tabKey]: { loading: true, rows: [], fetched: false } }));
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/ar/invoices/${customerTransactionId}/installments`;
+      const url = `${APEX_AR_RO}/${customerTransactionId}/installments`;
       const res = await fetch(url, { headers: { Accept: 'application/json' } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json();
@@ -794,7 +795,7 @@ const ManageReceivables: React.FC = () => {
     fetchedInstNotesRef.current.add(tabKey);
     setInstNoteMap(prev => ({ ...prev, [tabKey]: { loading: true, rows: [], fetched: false } }));
     try {
-      const url = `${APEX_DB_CONFIG.baseUrl}/ar/invoices/${customerTransactionId}/installments/notes`;
+      const url = `${APEX_AR_RO}/${customerTransactionId}/installments/notes`;
       const res = await fetch(url, { headers: { Accept: 'application/json' } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json();
@@ -892,7 +893,7 @@ const ManageReceivables: React.FC = () => {
     // Fetch lines
     let lines: ARInvoiceLine[] = [];
     try {
-      const r = await fetch(`${APEX_AR}/${row.customerTransactionId}/lines`);
+      const r = await fetch(`${APEX_AR_RO}/${row.customerTransactionId}/lines`);
       const d = await r.json();
       lines = (d.items || []).map((l: any, i: number) => ({
         key:  String(l.customer_transaction_line_id ?? i),
@@ -1012,7 +1013,7 @@ const ManageReceivables: React.FC = () => {
       if (v.dateRange?.[0])    p.set('date_from', v.dateRange[0].format('YYYY-MM-DD'));
       if (v.dateRange?.[1])    p.set('date_to',   v.dateRange[1].format('YYYY-MM-DD'));
       p.set('limit', '200');
-      const res  = await fetch(`${APEX_AR}?${p}`);
+      const res  = await fetch(`${APEX_AR_RO}?${p}`);
       const data = await res.json();
       const rows: SearchRow[] = (data.items || []).map((r: any, i: number) => ({
         key:                   String(r.customer_transaction_id ?? i),
