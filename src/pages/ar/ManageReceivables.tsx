@@ -736,6 +736,7 @@ const ManageReceivables: React.FC = () => {
     originalAmount: number; balanceDue: number; amountPaid: number;
     taxAmountOriginal: number; lineAmountOriginal: number; freightAmountOriginal: number;
     daysLate: number | null;
+    noteNumber: string; noteTitle: string; noteText: string;
   }
   const [instTabMap, setInstTabMap] = useState<Record<string, { loading: boolean; rows: InstTabRow[]; fetched: boolean }>>({});
   const fetchedInstTabsRef = useRef<Set<string>>(new Set());
@@ -762,10 +763,51 @@ const ManageReceivables: React.FC = () => {
         lineAmountOriginal:   x.installment_line_amount_original    ?? x.INSTALLMENT_LINE_AMOUNT_ORIGINAL    ?? 0,
         freightAmountOriginal:x.installment_freight_amount_original ?? x.INSTALLMENT_FREIGHT_AMOUNT_ORIGINAL ?? 0,
         daysLate:             x.payment_days_late           ?? x.PAYMENT_DAYS_LATE           ?? null,
+        noteNumber:           x.note_number                 ?? '',
+        noteTitle:            x.note_title                  ?? '',
+        noteText:             x.note_text                   ?? '',
       }));
       setInstTabMap(prev => ({ ...prev, [tabKey]: { loading: false, rows, fetched: true } }));
     } catch {
       setInstTabMap(prev => ({ ...prev, [tabKey]: { loading: false, rows: [], fetched: true } }));
+    }
+  }, []);
+
+  // ── Installment Notes per invoice tab ────────────────────────────────────
+  interface InstNoteRow {
+    key: string; noteId: number; installmentId: number;
+    noteNumber: string; noteTitle: string; noteText: string;
+    noteTypeCode: string; visibilityCode: string;
+    partyName: string; createdBy: string; creationDate: string;
+  }
+  const [instNoteMap, setInstNoteMap] = useState<Record<string, { loading: boolean; rows: InstNoteRow[]; fetched: boolean }>>({});
+  const fetchedInstNotesRef = useRef<Set<string>>(new Set());
+
+  const fetchInstNotes = useCallback(async (tabKey: string, customerTransactionId: number) => {
+    if (!customerTransactionId || fetchedInstNotesRef.current.has(tabKey)) return;
+    fetchedInstNotesRef.current.add(tabKey);
+    setInstNoteMap(prev => ({ ...prev, [tabKey]: { loading: true, rows: [], fetched: false } }));
+    try {
+      const url = `${APEX_DB_CONFIG.baseUrl}/ar/invoices/${customerTransactionId}/installments/notes`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = await res.json();
+      const rows: InstNoteRow[] = (d.items ?? []).map((x: any, i: number) => ({
+        key:            String(x.note_id ?? i),
+        noteId:         x.note_id          ?? 0,
+        installmentId:  x.installment_id   ?? 0,
+        noteNumber:     x.note_number      ?? '',
+        noteTitle:      x.note_title       ?? '',
+        noteText:       x.note_text        ?? '',
+        noteTypeCode:   x.note_type_code   ?? '',
+        visibilityCode: x.visibility_code  ?? '',
+        partyName:      x.party_name       ?? '',
+        createdBy:      x.created_by       ?? '',
+        creationDate:   x.creation_date    ?? '',
+      }));
+      setInstNoteMap(prev => ({ ...prev, [tabKey]: { loading: false, rows, fetched: true } }));
+    } catch {
+      setInstNoteMap(prev => ({ ...prev, [tabKey]: { loading: false, rows: [], fetched: true } }));
     }
   }, []);
 
@@ -1488,7 +1530,8 @@ const ManageReceivables: React.FC = () => {
                 if (key === 'adjustments' && !isNew) fetchAdjustments(tabKey, draft.transactionNumber);
                 if (key === 'balance'     && !isNew) fetchBalance(tabKey, draft.customerTransactionId, draft.transactionNumber);
                 if (key === 'dff'         && !isNew) fetchDff(tabKey, draft.customerTransactionId);
-                if (key === 'installments'&& !isNew) fetchInstTab(tabKey, draft.customerTransactionId);
+                if (key === 'installments' && !isNew) fetchInstTab(tabKey, draft.customerTransactionId);
+                if (key === 'instNotes'    && !isNew) fetchInstNotes(tabKey, draft.customerTransactionId);
               }}
               items={[
                 // ── Customer ─────────────────────────────────────────────
@@ -2085,6 +2128,68 @@ const ManageReceivables: React.FC = () => {
                   })(),
                 },
 
+                // ── Installment Notes ─────────────────────────────────────
+                {
+                  key: 'instNotes',
+                  label: <span><FileTextOutlined style={{ marginRight: 4 }} />Installment Notes</span>,
+                  children: (() => {
+                    const noteState = instNoteMap[tabKey];
+                    const rows = noteState?.rows ?? [];
+
+                    const noteCols = [
+                      { title: 'Note #', dataIndex: 'noteNumber', width: 100,
+                        render: (v: string) => <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>{v || '—'}</Text> },
+                      { title: 'Installment ID', dataIndex: 'installmentId', width: 110,
+                        render: (v: number) => <Text type="secondary" style={{ fontSize: 12 }}>{v || '—'}</Text> },
+                      { title: 'Title', dataIndex: 'noteTitle', width: 220, ellipsis: true,
+                        render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+                      { title: 'Note Text', dataIndex: 'noteText', ellipsis: true,
+                        render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+                      { title: 'Type', dataIndex: 'noteTypeCode', width: 120,
+                        render: (v: string) => v ? <Tag style={{ fontSize: 11 }}>{v}</Tag> : <Text type="secondary">—</Text> },
+                      { title: 'Visibility', dataIndex: 'visibilityCode', width: 110,
+                        render: (v: string) => v ? <Tag color="blue" style={{ fontSize: 11 }}>{v}</Tag> : <Text type="secondary">—</Text> },
+                      { title: 'Party', dataIndex: 'partyName', width: 160, ellipsis: true,
+                        render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+                      { title: 'Created By', dataIndex: 'createdBy', width: 140, ellipsis: true,
+                        render: (v: string) => <Text type="secondary" style={{ fontSize: 12 }}>{v || '—'}</Text> },
+                      { title: 'Creation Date', dataIndex: 'creationDate', width: 130,
+                        render: (v: string) => <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>{v ? v.substring(0, 10) : '—'}</Text> },
+                    ];
+
+                    return (
+                      <div style={{ padding: '8px 4px 12px' }}>
+                        {isNew ? (
+                          <Alert type="info" showIcon message="Save the invoice first to view installment notes." />
+                        ) : (
+                          <>
+                            <Table<InstNoteRow>
+                              dataSource={rows}
+                              rowKey="key"
+                              size="small"
+                              loading={noteState?.loading ?? false}
+                              pagination={rows.length > 20 ? { pageSize: 20, size: 'small' } : false}
+                              columns={noteCols}
+                              scroll={{ x: 1200 }}
+                              style={{ borderRadius: 6 }}
+                              locale={{ emptyText: noteState?.fetched ? 'No notes for this invoice' : 'Click to load' }}
+                            />
+                            <div style={{ marginTop: 10, textAlign: 'right' }}>
+                              <Button size="small" icon={<ReloadOutlined />}
+                                onClick={() => {
+                                  fetchedInstNotesRef.current.delete(tabKey);
+                                  setInstNoteMap(prev => { const n = { ...prev }; delete n[tabKey]; return n; });
+                                  fetchInstNotes(tabKey, draft.customerTransactionId);
+                                }}>
+                                Refresh
+                              </Button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })(),
+                },
                 // ── Installment Details ───────────────────────────────────
                 {
                   key: 'installments',
@@ -2119,6 +2224,12 @@ const ManageReceivables: React.FC = () => {
                         render: (v: number | null) => v !== null
                           ? <Tag color={v > 0 ? 'red' : 'green'} style={{ fontSize: 11 }}>{v}</Tag>
                           : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
+                      { title: 'Note #', dataIndex: 'noteNumber', width: 100,
+                        render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+                      { title: 'Note Title', dataIndex: 'noteTitle', width: 200, ellipsis: true,
+                        render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+                      { title: 'Note', dataIndex: 'noteText', width: 300, ellipsis: true,
+                        render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
                     ];
 
                     return (
