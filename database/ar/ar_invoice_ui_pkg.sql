@@ -492,6 +492,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICE_UI_PKG AS
         l_header_total  NUMBER;
         l_inst_total    NUMBER := 0;
         l_inst_count    NUMBER := 0;
+        l_row_num       NUMBER := 0;
         l_seq           NUMBER;
         l_due_date      DATE;
         l_amount        NUMBER;
@@ -534,9 +535,8 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_INVOICE_UI_PKG AS
             FROM JSON_TABLE(p_installments_json, '$.items[*]'
                  COLUMNS (item_clob CLOB FORMAT JSON PATH '$')) j
         ) LOOP
-            l_inst_count := l_inst_count + 1;
-            l_seq      := NVL(JSON_VALUE(rec.item_clob, '$.SequenceNumber' RETURNING NUMBER), l_inst_count);
-                              RR_AR_INVOICE_INSTALLMENTS_S.NEXTVAL);
+            l_row_num  := l_row_num + 1;
+            l_seq      := NVL(JSON_VALUE(rec.item_clob, '$.SequenceNumber' RETURNING NUMBER), l_row_num);
             l_due_date := to_date_safe(JSON_VALUE(rec.item_clob, '$.DueDate'));
             l_amount   := NVL(JSON_VALUE(rec.item_clob, '$.Amount' RETURNING NUMBER), 0);
             l_inst_id  := RR_AR_INVOICE_INSTALLMENTS_S.NEXTVAL;
