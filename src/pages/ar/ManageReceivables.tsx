@@ -60,6 +60,7 @@ interface ARInvoiceDraft {
   // General
   transactionClass:            string;
   businessUnit:                string;
+  companyCode:                 string;
   transactionSource:           string;
   transactionType:             string;
   transactionNumber:           string;
@@ -70,6 +71,9 @@ interface ARInvoiceDraft {
   salesperson:                 string;
   invoicingRule:               string;
   currency:                    string;
+  conversionDate:              string;
+  conversionType:              string;
+  conversionRate:              number | null;
   // Customer tab
   billToName:                  string;
   billToAccountNumber:         string;
@@ -185,10 +189,11 @@ const today = () => dayjs().format('YYYY-MM-DD');
 function blankDraft(): ARInvoiceDraft {
   return {
     customerTransactionId: 0,
-    transactionClass: 'Invoice', businessUnit: '', transactionSource: 'Manual',
+    transactionClass: 'Invoice', businessUnit: '', companyCode: '', transactionSource: 'Manual',
     transactionType: 'Invoice', transactionNumber: '', crossReference: '',
     documentNumber: '', transactionDate: today(), accountingDate: today(),
     salesperson: '', invoicingRule: '', currency: 'AED',
+    conversionDate: '', conversionType: '', conversionRate: null,
     billToName: '', billToAccountNumber: '', billToTaxRegNumber: '',
     billToSite: '', billToAddress: '', billToContact: '',
     shipToName: '', shipToSite: '', shipToAddress: '', shipToContact: '',
@@ -382,7 +387,13 @@ const ManageReceivables: React.FC = () => {
   const [searchForm] = Form.useForm();
 
   // Business units
-  const [businessUnits, setBusinessUnits] = useState<string[]>([]);
+  const [businessUnits, setBusinessUnits] = useState<{ name: string; companyCode: string }[]>([]);
+
+  // Transaction sources, types, memo lines, tax codes
+  const [txnSources, setTxnSources] = useState<string[]>([]);
+  const [txnTypes, setTxnTypes] = useState<string[]>([]);
+  const [memoLines, setMemoLines] = useState<string[]>([]);
+  const [taxCodes, setTaxCodes] = useState<string[]>([]);
 
   // Search tab state
   const [searchRows, setSearchRows]     = useState<SearchRow[]>([]);
@@ -777,11 +788,47 @@ const ManageReceivables: React.FC = () => {
     fetch(`${APEX_DB_CONFIG.baseUrl}/gl/businessunits`, { headers: { Accept: 'application/json' } })
       .then(r => r.json())
       .then(data => {
-        const names: string[] = ((data.items || []) as any[])
-          .map((i: any) => i.business_unit_name || i.businessUnitName || '')
-          .filter(Boolean)
-          .sort();
-        setBusinessUnits(names);
+        const units = ((data.items || []) as any[])
+          .map((i: any) => ({ name: i.business_unit_name || i.businessUnitName || '', companyCode: i.company_code || i.companyCode || '' }))
+          .filter(u => u.name)
+          .sort((a, b) => a.name.localeCompare(b.name));
+        setBusinessUnits(units);
+      })
+      .catch(() => {});
+    fetch(`${APEX_DB_CONFIG.baseUrl}/ar/transaction-sources`, { headers: { Accept: 'application/json' } })
+      .then(r => r.json())
+      .then(data => {
+        const sources = ((data.items || []) as any[])
+          .map((i: any) => i.source_name ?? i.TRANSACTION_SOURCE_NAME ?? '')
+          .filter(Boolean);
+        setTxnSources(sources);
+      })
+      .catch(() => {});
+    fetch(`${APEX_DB_CONFIG.baseUrl}/ar/transaction-types`, { headers: { Accept: 'application/json' } })
+      .then(r => r.json())
+      .then(data => {
+        const types = ((data.items || []) as any[])
+          .map((i: any) => i.transaction_type_name ?? i.TRANSACTION_TYPE_NAME ?? '')
+          .filter(Boolean);
+        setTxnTypes(types);
+      })
+      .catch(() => {});
+    fetch(`${APEX_DB_CONFIG.baseUrl}/ar/memo-lines`, { headers: { Accept: 'application/json' } })
+      .then(r => r.json())
+      .then(data => {
+        const lines = ((data.items || []) as any[])
+          .map((i: any) => i.memo_line_name ?? i.MEMO_LINE_NAME ?? i.name ?? '')
+          .filter(Boolean);
+        setMemoLines(lines);
+      })
+      .catch(() => {});
+    fetch(`${APEX_DB_CONFIG.baseUrl}/ar/tax-rates`, { headers: { Accept: 'application/json' } })
+      .then(r => r.json())
+      .then(data => {
+        const codes = ((data.items || []) as any[])
+          .map((i: any) => i.tax_rate_code ?? i.TAX_RATE_CODE ?? '')
+          .filter(Boolean);
+        setTaxCodes(codes);
       })
       .catch(() => {});
   }, []);
@@ -815,8 +862,9 @@ const ManageReceivables: React.FC = () => {
       customerTransactionId: row.customerTransactionId,
       transactionClass:   row.transactionClass   || 'Invoice',
       businessUnit:       row.businessUnit       || '',
-      transactionSource:  'Manual',
-      transactionType:    row.transactionType    || 'Invoice',
+      companyCode:        '',
+      transactionSource:  row.transactionSource  || '',
+      transactionType:    row.transactionType    || '',
       transactionNumber:  row.transactionNumber  || '',
       crossReference:     '',
       documentNumber:     '',
@@ -824,6 +872,7 @@ const ManageReceivables: React.FC = () => {
       accountingDate:     row.accountingDate     || today(),
       salesperson: '', invoicingRule: '',
       currency:           row.invoiceCurrencyCode || 'AED',
+      conversionDate: '', conversionType: '', conversionRate: null,
       billToName:         row.billToCustomerName  || '',
       billToAccountNumber: row.billToCustomerNumber || '',
       billToTaxRegNumber: '', billToSite: '', billToAddress: '', billToContact: '',
@@ -1164,9 +1213,13 @@ const ManageReceivables: React.FC = () => {
       { title: <span><span style={{ color: REDWOOD.primary }}>*</span> Description</span>, dataIndex: 'description', width: 180,
         render: (v, r) => <Input size="small" style={{ fontSize: 12 }} value={v} readOnly={isLocked}
           onChange={e => !isLocked && updateLine(tabKey, r.key, { description: e.target.value })} /> },
-      { title: 'Memo Line', dataIndex: 'memoLine', width: 120,
-        render: (v, r) => <Input size="small" style={{ fontSize: 12 }} value={v} readOnly={isLocked}
-          onChange={e => !isLocked && updateLine(tabKey, r.key, { memoLine: e.target.value })} /> },
+      { title: 'Memo Line', dataIndex: 'memoLine', width: 150,
+        render: (v, r) => (
+          <Select size="small" style={{ width: '100%', fontSize: 12 }} value={v || undefined}
+            placeholder="Select…" showSearch allowClear disabled={isLocked}
+            onChange={val => !isLocked && updateLine(tabKey, r.key, { memoLine: val ?? '' })}
+            options={memoLines.map(m => ({ value: m, label: m }))} />
+        ) },
       { title: 'UOM', dataIndex: 'uom', width: 80,
         render: (v, r) => <Input size="small" style={{ fontSize: 12 }} value={v} readOnly={isLocked}
           onChange={e => !isLocked && updateLine(tabKey, r.key, { uom: e.target.value })} /> },
@@ -1178,9 +1231,13 @@ const ManageReceivables: React.FC = () => {
           precision={2} disabled={isLocked} onChange={val => !isLocked && updateLine(tabKey, r.key, { unitPrice: val })} /> },
       { title: 'Amount', dataIndex: 'amount', width: 110, align: 'right',
         render: v => <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>{fmt(v || 0)}</Text> },
-      { title: 'Tax Classification', dataIndex: 'taxClassification', width: 130,
-        render: (v, r) => <Input size="small" style={{ fontSize: 12 }} value={v} readOnly={isLocked}
-          onChange={e => !isLocked && updateLine(tabKey, r.key, { taxClassification: e.target.value })} /> },
+      { title: 'Tax Classification', dataIndex: 'taxClassification', width: 150,
+        render: (v, r) => (
+          <Select size="small" style={{ width: '100%', fontSize: 12 }} value={v || undefined}
+            placeholder="Select…" showSearch allowClear disabled={isLocked}
+            onChange={val => !isLocked && updateLine(tabKey, r.key, { taxClassification: val ?? '' })}
+            options={taxCodes.map(t => ({ value: t, label: t }))} />
+        ) },
       { title: 'Txn Business Category', dataIndex: 'transactionBusinessCategory', width: 160,
         render: (v, r) => <Input size="small" style={{ fontSize: 12 }} value={v} readOnly={isLocked}
           onChange={e => !isLocked && updateLine(tabKey, r.key, { transactionBusinessCategory: e.target.value })} /> },
@@ -1289,9 +1346,19 @@ const ManageReceivables: React.FC = () => {
               {/* Left column */}
               <Col span={8}>
                 {field('Transaction Class', sel('transactionClass', ['Invoice', 'Credit Memo', 'Debit Memo', 'Chargeback']))}
-                {field('Business Unit',     inp('businessUnit', 'e.g. BUIMERC CORP_DIFC_INVS'), true)}
-                {field('Transaction Source', sel('transactionSource', ['Manual', 'AutoInvoice', 'Projects']))}
-                {field('Transaction Type',  inp('transactionType', 'e.g. Invoice'), true)}
+                {field('Business Unit',
+                  <Select size="small" style={{ width: '100%', fontSize: 12 }} value={draft.businessUnit || undefined}
+                    placeholder="" allowClear disabled={isLocked} showSearch
+                    filterOption={(input, opt) => String(opt?.value ?? '').toLowerCase().includes(input.toLowerCase())}
+                    onChange={v => {
+                      const bu = businessUnits.find(u => u.name === v);
+                      updateDraft(tabKey, { businessUnit: v ?? '', companyCode: bu?.companyCode ?? '' } as any);
+                    }}>
+                    {businessUnits.map(bu => <Option key={bu.name} value={bu.name}>{bu.name}</Option>)}
+                  </Select>, true)}
+                {field('Company Code', <Input size="small" style={{ fontSize: 12 }} value={draft.companyCode} readOnly />)}
+                {field('Transaction Source', sel('transactionSource', txnSources.length > 0 ? txnSources : ['Manual', 'AutoInvoice', 'Projects']))}
+                {field('Transaction Type',  sel('transactionType', txnTypes.length > 0 ? txnTypes : ['Invoice']), true)}
                 {field('Transaction Number', inp('transactionNumber', 'Auto-generated if blank'))}
                 {field('Cross Reference',   inp('crossReference'))}
                 {field('Document Number',   <Input size="small" style={{ fontSize: 12 }} value={draft.documentNumber} readOnly />)}
@@ -1303,6 +1370,19 @@ const ManageReceivables: React.FC = () => {
                 {field('Salesperson',       inp('salesperson'))}
                 {field('Invoicing Rule',    sel('invoicingRule', ['Bill in Advance', 'Bill in Arrears']))}
                 {field('Currency',          sel('currency', ['AED', 'USD', 'EUR', 'GBP', 'SAR', 'QAR', 'KWD', 'BHD', 'OMR']), true)}
+                {field('Conversion Date',
+                  <DatePicker size="small" style={{ width: '100%', fontSize: 12 }}
+                    value={draft.conversionDate ? dayjs(draft.conversionDate) : null}
+                    format="DD-MMM-YYYY" disabled={isLocked}
+                    onChange={d => updateDraft(tabKey, { conversionDate: d ? d.format('YYYY-MM-DD') : '' })} />)}
+                {field('Conversion Type',
+                  <Select size="small" style={{ width: '100%', fontSize: 12 }} value={draft.conversionType || undefined}
+                    allowClear disabled={isLocked}
+                    onChange={v => updateDraft(tabKey, { conversionType: v ?? '' })}>
+                    {['Corporate', 'Spot', 'User'].map(o => <Option key={o} value={o}>{o}</Option>)}
+                  </Select>)}
+                {field('Conversion Rate',
+                  <InputNumber size="small" style={{ width: '100%', fontSize: 12 }} value={draft.conversionRate} readOnly />)}
               </Col>
               {/* Right: totals */}
               <Col span={8}>
@@ -1328,6 +1408,7 @@ const ManageReceivables: React.FC = () => {
           <Card size="small" style={{ marginBottom: 10, borderRadius: 8 }} bodyStyle={{ padding: 0 }}>
             <Tabs size="small" style={{ padding: '0 12px' }}
               onChange={(key) => {
+                if (key === 'customer')                fetchAllCustomers();
                 if (key === 'receipts'    && !isNew) fetchReceiptApps(tabKey, draft.transactionNumber);
                 if (key === 'adjustments' && !isNew) fetchAdjustments(tabKey, draft.transactionNumber);
                 if (key === 'balance'     && !isNew) fetchBalance(tabKey, draft.customerTransactionId, draft.transactionNumber);
@@ -1344,6 +1425,26 @@ const ManageReceivables: React.FC = () => {
                       <Row gutter={32}>
                         <Col span={8}>
                           <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>Bill-to</Text>
+                          {field('Customer',
+                            <Select
+                              size="small" style={{ width: '100%', fontSize: 12 }}
+                              showSearch allowClear disabled={isLocked}
+                              placeholder="Search customer…"
+                              value={draft.billToAccountNumber || undefined}
+                              filterOption={(input, opt) => {
+                                const label = String(opt?.label ?? '');
+                                return label.toLowerCase().includes(input.toLowerCase());
+                              }}
+                              onChange={(val) => {
+                                const c = lovAllRows.find(r => r.accountNumber === val);
+                                if (c) updateDraft(tabKey, { billToName: c.accountName, billToAccountNumber: c.accountNumber });
+                                else updateDraft(tabKey, { billToAccountNumber: val ?? '' });
+                              }}
+                              options={lovAllRows.map(c => ({
+                                value: c.accountNumber,
+                                label: `${c.accountName}${c.accountNumber ? ` (${c.accountNumber})` : ''}`,
+                              }))}
+                            />, true)}
                           {field('Name',           inp('billToName'), true)}
                           {field('Account Number', inp('billToAccountNumber'), true)}
                           {field('Third-Party Tax Reg #', inp('billToTaxRegNumber'))}
@@ -1995,17 +2096,19 @@ const ManageReceivables: React.FC = () => {
 
           {/* ── Invoice Lines ─────────────────────────────────────────── */}
           <Card size="small" style={{ borderRadius: 8 }}
-            title={<Text strong style={{ fontSize: 13 }}>Invoice Lines</Text>}
-            extra={!isLocked && (
-              <Button size="small" type="dashed" icon={<PlusOutlined />}
-                onClick={() => addLine(tabKey)}>
-                Add Line
-              </Button>
-            )}>
+            title={<Text strong style={{ fontSize: 13 }}>Invoice Lines</Text>}>
             <Table<ARInvoiceLine>
               dataSource={draft.lines} columns={lineColumns} rowKey="key"
               size="small" pagination={false} scroll={{ x: 1200 }}
             />
+            {!isLocked && (
+              <div style={{ marginTop: 8 }}>
+                <Button size="small" type="dashed" icon={<PlusOutlined />}
+                  onClick={() => addLine(tabKey)}>
+                  Add Line
+                </Button>
+              </div>
+            )}
             {/* Totals footer */}
             <Row justify="end" style={{ marginTop: 8, paddingRight: 50 }}>
               <Space direction="vertical" align="end" size={2}>
@@ -2171,7 +2274,7 @@ const ManageReceivables: React.FC = () => {
                           filterOption={(input, opt) =>
                             String(opt?.value ?? '').toLowerCase().includes(input.toLowerCase())
                           }>
-                          {businessUnits.map(bu => <Option key={bu} value={bu}>{bu}</Option>)}
+                          {businessUnits.map(bu => <Option key={bu.name} value={bu.name}>{bu.name}</Option>)}
                         </Select>
                       </Form.Item>
                       <Form.Item name="transactionNumber" label="Transaction #">
