@@ -2719,29 +2719,37 @@ const ManagePayments: React.FC = () => {
     setViewAcctData(null);
     setViewAcctAllEvents([]);
     try {
-      // Fetch SLA lines (original payment + any void) AND GL clearing journal lines (by reference2=checkId) in parallel
+      // Single journal lines fetch + GL clearing lines in parallel — no sla/accounting call needed
       const glLinesUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${record.checkId}&limit=500`;
-      const [result, allLinesData, glClearLines] = await Promise.all([
-        getAccounting('AP_PAYMENTS', record.checkId),
+      const [allLinesData, glClearLines] = await Promise.all([
         getAccountingLinesBySourceId(record.checkId, 'AP_PAYMENTS', 'AP').catch(() => ({ items: [] })),
         fetch(glLinesUrl, { headers: { Accept: 'application/json' } }).then(r => r.json()).catch(() => ({ items: [] })),
       ]);
-      // Enrich main result lines with account descriptions
-      if (result.headerId) {
-        try {
-          const linesData = await getLinesByHeaderId(result.headerId);
-          const descMap = new Map(linesData.items.map(l => [l.lineId, l.accountDescription]));
-          result.lines = result.lines.map(l => ({ ...l, accountDescription: descMap.get(l.lineId) || undefined }));
-        } catch { /* non-critical */ }
-      }
-      setViewAcctData(result);
-      // Filter SLA lines to this payment
+      // Filter SLA lines to this checkId
       const paymentLines = (allLinesData.items || []).filter((line: any) => {
         const st  = (line.sourceTable || line.SOURCE_TABLE || '').toUpperCase();
         const sid = line.sourceId ?? line.SOURCE_ID;
         return (!st || st === 'AP_PAYMENTS')
             && (!sid || String(sid) === String(record.checkId));
       });
+      // Derive viewAcctData from the first SLA header found (needed for Post to GL)
+      if (paymentLines.length > 0) {
+        const first = paymentLines[0];
+        const hid = first.headerId as number;
+        setViewAcctData({
+          found:           true,
+          headerId:        hid,
+          accountingStatus: first.accountingStatus || '',
+          periodName:      first.periodName || first.period_name || '',
+          accountingDate:  first.accountingDate || first.accounting_date || '',
+          description:     first.description || '',
+          postedDate:      first.postedDate || null,
+          eventTypeCode:   first.eventTypeCode || '',
+          lines:           paymentLines.filter((l: any) => l.headerId === hid),
+        } as any);
+      } else {
+        setViewAcctData({ found: false } as any);
+      }
       // Group SLA lines by headerId → per-event sections (Payment Created, Void, etc.)
       const eventsMap = new Map<number, { headerId: number; eventTypeCode: string; accountingStatus: string; accountingDate: string; lines: any[] }>();
       for (const line of paymentLines) {
