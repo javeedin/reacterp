@@ -5390,7 +5390,6 @@ const ManagePayments: React.FC = () => {
                           try { data = JSON.parse(text); } catch { /* non-JSON */ }
                           if (res.ok && data?.status !== 'error') {
                             message.success('Maturity date updated');
-                            handleSearch();
                           } else {
                             Modal.error({
                               title: 'Maturity Date Save Failed',
