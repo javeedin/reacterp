@@ -53,7 +53,7 @@ BEGIN
         RETURN;
     END IF;
 
-    UPDATE RR_AP_PAYMENTS
+    UPDATE RR_AP_PAYMENTS_ALL
     SET    PAYMENT_STATUS   = l_payment_status,
            CLEARING_DATE    = l_clearing_date,
            LAST_UPDATE_DATE = SYSTIMESTAMP,

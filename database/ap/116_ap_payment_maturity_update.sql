@@ -60,7 +60,7 @@ BEGIN
         l_existing_maturity DATE;
     BEGIN
         SELECT MATURITY_DATE INTO l_existing_maturity
-        FROM   RR_AP_PAYMENTS
+        FROM   RR_AP_PAYMENTS_ALL
         WHERE  CHECK_ID = l_check_id;
 
         IF l_existing_maturity IS NOT NULL AND l_maturity_date < l_existing_maturity THEN
@@ -74,7 +74,7 @@ BEGIN
     EXCEPTION WHEN NO_DATA_FOUND THEN NULL;
     END;
 
-    UPDATE RR_AP_PAYMENTS
+    UPDATE RR_AP_PAYMENTS_ALL
     SET    MATURITY_DATE    = l_maturity_date,
            LAST_UPDATE_DATE = SYSTIMESTAMP,
            LAST_UPDATED_BY  = l_updated_by
