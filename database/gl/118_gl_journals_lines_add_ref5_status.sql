@@ -32,7 +32,7 @@ SELECT
     l.JE_LINE_NUMBER            AS line_num,
     l.JE_HEADER_ID              AS je_header_id,
     b.JE_BATCH_ID               AS je_batch_id,
-    h.NAME                      AS journal_name,
+    h.JOURNAL_NAME              AS journal_name,
     b.NAME                      AS batch_name,
     h.PERIOD_NAME               AS period_name,
     h.DEFAULT_EFFECTIVE_DATE    AS accounting_date,
@@ -59,6 +59,7 @@ JOIN RR_GL_JE_BATCHES    b ON b.JE_BATCH_ID  = h.JE_BATCH_ID
 WHERE (:period_name IS NULL OR h.PERIOD_NAME   = :period_name)
   AND (:reference1  IS NULL OR l.REFERENCE1    = :reference1)
   AND (:reference2  IS NULL OR l.REFERENCE2    = :reference2)
+  AND (:reference5  IS NULL OR l.REFERENCE5    = :reference5)
   AND (:account     IS NULL OR l.ACCOUNT_COMBINATION LIKE '%' || :account || '%')
   AND (:date_from   IS NULL OR h.DEFAULT_EFFECTIVE_DATE >= TO_DATE(:date_from, 'YYYY-MM-DD'))
   AND (:date_to     IS NULL OR h.DEFAULT_EFFECTIVE_DATE <= TO_DATE(:date_to,   'YYYY-MM-DD'))
