@@ -38,7 +38,7 @@ DECLARE
     l_rows           NUMBER;
 BEGIN
     l_check_id       := TO_NUMBER(JSON_VALUE(l_body, '$.CheckId'));
-    l_payment_status := NVL(JSON_VALUE(l_body, '$.PaymentStatus'), 'Cleared');
+    l_payment_status := NVL(JSON_VALUE(l_body, '$.PaymentStatus'), 'Negotiable');
     l_clearing_date  := TO_DATE(JSON_VALUE(l_body, '$.ClearingDate'), 'YYYY-MM-DD');
 
     IF l_check_id IS NULL THEN

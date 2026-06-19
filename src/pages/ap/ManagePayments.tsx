@@ -2677,7 +2677,7 @@ const ManagePayments: React.FC = () => {
     try {
       const today = clearCtxRef.current.clearDate || dayjs().format('YYYY-MM-DD');
       const url = `${APEX_PAYMENTS_URL}/clear`;
-      const body = { CheckId: clearTargetPayment.checkId, PaymentStatus: 'Cleared', ClearingDate: today };
+      const body = { CheckId: clearTargetPayment.checkId, PaymentStatus: 'Negotiable', ClearingDate: today };
       const res = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data?.status === 'error') {
@@ -2719,10 +2719,12 @@ const ManagePayments: React.FC = () => {
     setViewAcctData(null);
     setViewAcctAllEvents([]);
     try {
-      // Fetch all SLA lines for this specific payment (by checkId) and the primary header in parallel
-      const [result, allLinesData] = await Promise.all([
+      // Fetch SLA lines (original payment + any void) AND GL clearing journal lines (by reference2=checkId) in parallel
+      const glLinesUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${record.checkId}&limit=500`;
+      const [result, allLinesData, glClearLines] = await Promise.all([
         getAccounting('AP_PAYMENTS', record.checkId),
         getAccountingLinesBySourceId(record.checkId, 'AP_PAYMENTS', 'AP').catch(() => ({ items: [] })),
+        fetch(glLinesUrl, { headers: { Accept: 'application/json' } }).then(r => r.json()).catch(() => ({ items: [] })),
       ]);
       // Enrich main result lines with account descriptions
       if (result.headerId) {
@@ -2733,14 +2735,14 @@ const ManagePayments: React.FC = () => {
         } catch { /* non-critical */ }
       }
       setViewAcctData(result);
-      // Filter to only lines that belong to this specific payment (AP_PAYMENTS + checkId)
+      // Filter SLA lines to this payment
       const paymentLines = (allLinesData.items || []).filter((line: any) => {
         const st  = (line.sourceTable || line.SOURCE_TABLE || '').toUpperCase();
         const sid = line.sourceId ?? line.SOURCE_ID;
         return (!st || st === 'AP_PAYMENTS')
             && (!sid || String(sid) === String(record.checkId));
       });
-      // Group lines by headerId to build per-event sections (Payment, Void, etc.)
+      // Group SLA lines by headerId → per-event sections (Payment Created, Void, etc.)
       const eventsMap = new Map<number, { headerId: number; eventTypeCode: string; accountingStatus: string; accountingDate: string; lines: any[] }>();
       for (const line of paymentLines) {
         const hid = line.headerId as number;
@@ -2754,6 +2756,40 @@ const ManagePayments: React.FC = () => {
           });
         }
         eventsMap.get(hid)!.lines.push(line);
+      }
+      // Add GL clearing journal lines as a synthetic event group (PDC Clearing)
+      const clearGlItems: any[] = glClearLines.items ?? [];
+      if (clearGlItems.length > 0) {
+        // Group by je_header_id
+        const glHeaderMap = new Map<number, any[]>();
+        for (const gl of clearGlItems) {
+          const hid = gl.je_header_id ?? gl.JE_HEADER_ID;
+          if (!glHeaderMap.has(hid)) glHeaderMap.set(hid, []);
+          glHeaderMap.get(hid)!.push(gl);
+        }
+        for (const [hid, glLines] of glHeaderMap) {
+          if (!eventsMap.has(hid)) {
+            eventsMap.set(hid, {
+              headerId:         hid,
+              eventTypeCode:    'AP_PDC_CLEARING',
+              accountingStatus: 'POSTED',
+              accountingDate:   glLines[0]?.period_name ?? '',
+              lines: glLines.map(gl => ({
+                lineType:           gl.entered_dr > 0 ? 'DR' : 'CR',
+                accountCombination: gl.account ?? '',
+                description:        gl.description ?? '',
+                enteredDr:          gl.entered_dr ?? 0,
+                enteredCr:          gl.entered_cr ?? 0,
+                accountedDr:        gl.accounted_dr ?? 0,
+                accountedCr:        gl.accounted_cr ?? 0,
+                currencyCode:       gl.currency_code ?? '',
+                eventTypeCode:      'AP_PDC_CLEARING',
+                accountingStatus:   'POSTED',
+                headerId:           hid,
+              })),
+            });
+          }
+        }
       }
       setViewAcctAllEvents(Array.from(eventsMap.values()).sort((a, b) => a.headerId - b.headerId));
     } catch (err: any) {
@@ -5632,7 +5668,7 @@ const ManagePayments: React.FC = () => {
                   { key: 'gl_create' as ClearStepKey, step: 2, method: 'POST', methodColor: 'green',  label: 'Create GL Journal',               url: `${APEX_DB_CONFIG.baseUrl}/journals/create` },
                   { key: 'gl_post'   as ClearStepKey, step: 3, method: 'PUT',  methodColor: 'orange', label: 'Post GL Journal',                  url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/:batchId/post` },
                   { key: 'sla_stamp' as ClearStepKey, step: 4, method: 'POST', methodColor: 'green',  label: 'Stamp SLA as POSTED',             url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post` },
-                  { key: 'patch'     as ClearStepKey, step: 5, method: 'PUT',  methodColor: 'orange', label: 'Update Payment Status → Cleared',  url: `${APEX_PAYMENTS_URL}/clear` },
+                  { key: 'patch'     as ClearStepKey, step: 5, method: 'PUT',  methodColor: 'orange', label: 'Update Payment Status → Negotiable',  url: `${APEX_PAYMENTS_URL}/clear` },
                 ];
                 return stepDefs.map(card => {
                   const st = clearStepMap[card.key];
@@ -5979,9 +6015,12 @@ const ManagePayments: React.FC = () => {
             { title: 'Acc. Cr',  dataIndex: 'accountedCr', width: 105, align: 'right' as const, render: (v: number) => v ? v.toLocaleString('en-US', { minimumFractionDigits: 2 }) : <span style={{ color: '#bbb' }}>—</span> },
             { title: 'CCY', dataIndex: 'currencyCode', width: 55 },
           ];
-          const isVoid   = (code: string) => code?.includes('VOID') || code?.includes('void');
-          const eventLabel = (code: string) =>
-            isVoid(code) ? 'Void Reversal' : code?.includes('PAYMENT') ? 'Payment Accounting' : code || 'Accounting';
+          const isVoid      = (code: string) => code?.includes('VOID') || code?.includes('void');
+          const isClearing  = (code: string) => code?.includes('PDC_CLEARING') || code?.includes('pdc_clearing');
+          const eventLabel  = (code: string) =>
+            isVoid(code)     ? 'Void Reversal'    :
+            isClearing(code) ? 'PDC Clearing'     :
+            code?.includes('PAYMENT') ? 'Payment Accounting' : code || 'Accounting';
 
           // Show multi-event Collapse if multiple events; otherwise show flat view
           if (viewAcctAllEvents.length > 1) {
@@ -5993,7 +6032,7 @@ const ManagePayments: React.FC = () => {
                   key: String(event.headerId),
                   label: (
                     <Space>
-                      <Tag color={isVoid(event.eventTypeCode) ? 'orange' : 'blue'} style={{ fontWeight: 600 }}>
+                      <Tag color={isVoid(event.eventTypeCode) ? 'orange' : isClearing(event.eventTypeCode) ? 'green' : 'blue'} style={{ fontWeight: 600 }}>
                         {eventLabel(event.eventTypeCode)}
                       </Tag>
                       <Tag color={event.accountingStatus === 'POSTED' ? 'green' : event.accountingStatus === 'DRAFT' ? 'blue' : 'default'}>
