@@ -3851,7 +3851,10 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     },
     { title: 'Business Unit', dataIndex: 'businessUnitName', ellipsis: true, width: 160,
       render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
-    { title: 'Date', dataIndex: 'transactionDate', width: 105, render: fmtDate },
+    { title: 'Date', dataIndex: 'transactionDate', width: 105, render: fmtDate,
+      sorter: (a: any, b: any) => (a.transactionDate ?? '').localeCompare(b.transactionDate ?? ''),
+      defaultSortOrder: 'descend' as const,
+    },
     {
       title: 'Amount', dataIndex: 'amount', width: 150, align: 'right',
       render: (v, r) => {
@@ -3937,7 +3940,9 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     { title: 'Created By', dataIndex: 'createdBy', ellipsis: true, width: 160,
       render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Created', dataIndex: 'creationDate', width: 115,
-      render: v => <Text style={{ fontSize: 12 }}>{fmtDate(v)}</Text> },
+      render: v => <Text style={{ fontSize: 12 }}>{fmtDate(v)}</Text>,
+      sorter: (a: any, b: any) => (a.creationDate ?? '').localeCompare(b.creationDate ?? ''),
+    },
   ];
 
   const [searchOpen, setSearchOpen] = useState(true);
