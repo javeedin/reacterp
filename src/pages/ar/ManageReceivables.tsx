@@ -587,6 +587,101 @@ const ManageReceivables: React.FC = () => {
     loading: boolean; rows: InvoiceAdj[]; url: string; fetched: boolean;
   }>>({});
   const fetchedAdjTabsRef = useRef<Set<string>>(new Set());
+
+  // ── Create Adjustment modal ───────────────────────────────────────────────
+  const [adjModalOpen,    setAdjModalOpen]    = useState(false);
+  const [adjModalTabKey,  setAdjModalTabKey]  = useState('');
+  const [adjModalTxnId,   setAdjModalTxnId]   = useState(0);
+  const [adjModalTxnNum,  setAdjModalTxnNum]  = useState('');
+  const [adjSaving,       setAdjSaving]       = useState(false);
+  const [adjActivities,   setAdjActivities]   = useState<{ label: string; value: string }[]>([]);
+  const [adjTypes,        setAdjTypes]        = useState<{ label: string; value: string }[]>([]);
+  const [adjReasons,      setAdjReasons]      = useState<{ label: string; value: string }[]>([]);
+  const [adjInstRows,     setAdjInstRows]     = useState<{ label: string; value: number; balance: number }[]>([]);
+  const [adjInstBalance,  setAdjInstBalance]  = useState<number | null>(null);
+  const [adjForm] = Form.useForm();
+
+  const APEX_ADJ_BASE = APEX_DB_CONFIG.baseUrl;
+
+  const openAdjModal = async (tabKey: string, txnId: number, txnNum: string, instRows: InstTabRow[]) => {
+    setAdjModalTabKey(tabKey);
+    setAdjModalTxnId(txnId);
+    setAdjModalTxnNum(txnNum);
+    setAdjInstBalance(null);
+    adjForm.resetFields();
+    adjForm.setFieldsValue({
+      adjustmentDate: dayjs(),
+      accountingDate: dayjs(),
+    });
+
+    // Build installment options from already-loaded rows
+    setAdjInstRows(instRows.map(r => ({
+      label: `${r.sequenceNumber}  ${r.dueDate}`,
+      value: r.sequenceNumber,
+      balance: r.balanceDue,
+    })));
+
+    // Fetch lookups in parallel (only if not already loaded)
+    const [acts, types, reasons] = await Promise.all([
+      adjActivities.length ? Promise.resolve(adjActivities) :
+        fetch(`${APEX_ADJ_BASE}/ar/Receivablesactivities`, { headers: { Accept: 'application/json' } })
+          .then(r => r.json()).then(d => (d.items ?? []).map((x: any) => ({ label: x.name ?? x.NAME ?? '', value: x.name ?? x.NAME ?? '' })))
+          .catch(() => []),
+      adjTypes.length ? Promise.resolve(adjTypes) :
+        fetch(`${APEX_ADJ_BASE}/ar/adjustmenttypes`, { headers: { Accept: 'application/json' } })
+          .then(r => r.json()).then(d => (d.items ?? []).map((x: any) => ({ label: x.name ?? x.NAME ?? x.type ?? x.TYPE ?? '', value: x.name ?? x.NAME ?? x.type ?? x.TYPE ?? '' })))
+          .catch(() => []),
+      adjReasons.length ? Promise.resolve(adjReasons) :
+        fetch(`${APEX_ADJ_BASE}/ar/adjustmentreasons`, { headers: { Accept: 'application/json' } })
+          .then(r => r.json()).then(d => (d.items ?? []).map((x: any) => ({ label: x.name ?? x.NAME ?? x.reason ?? x.REASON ?? '', value: x.name ?? x.NAME ?? x.reason ?? x.REASON ?? '' })))
+          .catch(() => []),
+    ]);
+    if (acts.length)    setAdjActivities(acts);
+    if (types.length)   setAdjTypes(types);
+    if (reasons.length) setAdjReasons(reasons);
+
+    setAdjModalOpen(true);
+  };
+
+  const submitAdjustment = async () => {
+    try {
+      await adjForm.validateFields();
+    } catch { return; }
+    const vals = adjForm.getFieldsValue();
+    const body = {
+      TransactionNumber:    adjModalTxnNum,
+      CustomerTransactionId: adjModalTxnId,
+      ReceivablesActivity:  vals.receivablesActivity,
+      AdjustmentType:       vals.adjustmentType,
+      AdjustmentAmount:     vals.adjustmentAmount,
+      AdjustmentDate:       vals.adjustmentDate?.format('YYYY-MM-DD'),
+      AccountingDate:       vals.accountingDate?.format('YYYY-MM-DD'),
+      InstallmentNumber:    vals.installmentNumber,
+      AdjustmentReason:     vals.adjustmentReason,
+      Comments:             vals.comments,
+    };
+    setAdjSaving(true);
+    try {
+      const res = await fetch(`${APEX_ADJ_BASE}/ar/adjustments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(`HTTP ${res.status}: ${txt}`);
+      }
+      message.success('Adjustment submitted successfully');
+      setAdjModalOpen(false);
+      // Refresh adjustments list
+      fetchedAdjTabsRef.current.delete(adjModalTabKey);
+      fetchAdjustments(adjModalTabKey, adjModalTxnNum);
+    } catch (err: any) {
+      message.error(`Submit failed: ${err.message}`);
+    } finally {
+      setAdjSaving(false);
+    }
+  };
   const [showAdjApiUrl, setShowAdjApiUrl] = useState<Record<string, boolean>>({});
 
   const fetchAdjustments = useCallback(async (tabKey: string, transactionNumber: string) => {
@@ -2028,24 +2123,35 @@ const ManageReceivables: React.FC = () => {
                       { title: 'Reason', dataIndex: 'adjustmentReason', width: 130, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
                       { title: 'Approved By', dataIndex: 'approvedBy', width: 140, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
                     ];
+                    const adjInstTabRows = instTabMap[tabKey]?.rows ?? [];
                     return (
                       <div style={{ padding: '8px 4px 12px' }}>
-                        <Space style={{ marginBottom: 8 }}>
-                          <Tooltip title="Show API URL">
-                            <Button size="small" icon={<ApiOutlined />}
-                              type={showAdjApiUrl[tabKey] ? 'primary' : 'default'}
-                              onClick={() => setShowAdjApiUrl(p => ({ ...p, [tabKey]: !p[tabKey] }))}
-                            />
-                          </Tooltip>
-                          <Tooltip title="Refresh">
-                            <Button size="small" icon={<ReloadOutlined />}
-                              onClick={() => {
-                                fetchedAdjTabsRef.current.delete(tabKey);
-                                fetchAdjustments(tabKey, draft.transactionNumber);
-                              }}
-                            />
-                          </Tooltip>
-                        </Space>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <Space>
+                            <Tooltip title="Show API URL">
+                              <Button size="small" icon={<ApiOutlined />}
+                                type={showAdjApiUrl[tabKey] ? 'primary' : 'default'}
+                                onClick={() => setShowAdjApiUrl(p => ({ ...p, [tabKey]: !p[tabKey] }))}
+                              />
+                            </Tooltip>
+                            <Tooltip title="Refresh">
+                              <Button size="small" icon={<ReloadOutlined />}
+                                onClick={() => {
+                                  fetchedAdjTabsRef.current.delete(tabKey);
+                                  fetchAdjustments(tabKey, draft.transactionNumber);
+                                }}
+                              />
+                            </Tooltip>
+                          </Space>
+                          {!isNew && !isLocked && (
+                            <Button
+                              size="small" type="primary" icon={<PlusOutlined />}
+                              onClick={() => openAdjModal(tabKey, draft.customerTransactionId, draft.transactionNumber, adjInstTabRows)}
+                            >
+                              Add Adjustment
+                            </Button>
+                          )}
+                        </div>
                         {showAdjApiUrl[tabKey] && (
                           <div
                             title="Click to copy URL"
@@ -3521,6 +3627,75 @@ const ManageReceivables: React.FC = () => {
           </Modal>
         );
       })()}
+      {/* ── Create Adjustment Modal ─────────────────────────────────────── */}
+      <Modal
+        open={adjModalOpen}
+        onCancel={() => setAdjModalOpen(false)}
+        maskClosable={false}
+        keyboard={false}
+        title={<span style={{ fontWeight: 700 }}>Create Adjustment</span>}
+        width={780}
+        footer={[
+          <Button key="cancel" onClick={() => setAdjModalOpen(false)}>Cancel</Button>,
+          <Button key="submit" type="primary" loading={adjSaving} onClick={submitAdjustment}>Submit</Button>,
+        ]}
+      >
+        <Form form={adjForm} layout="horizontal" labelCol={{ span: 8 }} wrapperCol={{ span: 16 }} size="small" style={{ marginTop: 8 }}>
+          <Row gutter={24}>
+            {/* Left column */}
+            <Col span={12}>
+              <Form.Item label={<span><span style={{ color: 'red' }}>*</span> Receivables Activity</span>} name="receivablesActivity"
+                rules={[{ required: true, message: 'Required' }]}>
+                <Select showSearch placeholder="Select activity" options={adjActivities} filterOption={(i, o) => (o?.label ?? '').toLowerCase().includes(i.toLowerCase())} />
+              </Form.Item>
+              <Form.Item label={<span><span style={{ color: 'red' }}>*</span> Adjustment Type</span>} name="adjustmentType"
+                rules={[{ required: true, message: 'Required' }]}>
+                <Select showSearch placeholder="Select type" options={adjTypes} filterOption={(i, o) => (o?.label ?? '').toLowerCase().includes(i.toLowerCase())} />
+              </Form.Item>
+              <Form.Item label={<span><span style={{ color: 'red' }}>*</span> Adjustment Amount</span>} name="adjustmentAmount"
+                rules={[{ required: true, message: 'Required' }, { type: 'number', message: 'Must be a number' }]}>
+                <InputNumber style={{ width: '100%' }} placeholder="0.00" precision={2} />
+              </Form.Item>
+              <Form.Item label={<span><span style={{ color: 'red' }}>*</span> Adjustment Date</span>} name="adjustmentDate"
+                rules={[{ required: true, message: 'Required' }]}>
+                <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
+              </Form.Item>
+              <Form.Item label={<span><span style={{ color: 'red' }}>*</span> Accounting Date</span>} name="accountingDate"
+                rules={[{ required: true, message: 'Required' }]}>
+                <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
+              </Form.Item>
+              <Form.Item label={<span><span style={{ color: 'red' }}>*</span> Installment Number</span>} name="installmentNumber"
+                rules={[{ required: true, message: 'Required' }]}>
+                <Select
+                  placeholder="Select installment"
+                  options={adjInstRows.map(r => ({ label: r.label, value: r.value }))}
+                  onChange={(val: number) => {
+                    const row = adjInstRows.find(r => r.value === val);
+                    setAdjInstBalance(row ? row.balance : null);
+                  }}
+                />
+              </Form.Item>
+              {adjInstBalance !== null && (
+                <Form.Item label="Installment Balance" wrapperCol={{ span: 16 }}>
+                  <span style={{ fontFamily: 'monospace', fontWeight: 700, color: adjInstBalance > 0 ? '#C74634' : '#52c41a' }}>
+                    {adjInstBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} AED
+                  </span>
+                </Form.Item>
+              )}
+            </Col>
+            {/* Right column */}
+            <Col span={12}>
+              <Form.Item label="Adjustment Reason" name="adjustmentReason">
+                <Select showSearch placeholder="Select reason" options={adjReasons} allowClear filterOption={(i, o) => (o?.label ?? '').toLowerCase().includes(i.toLowerCase())} />
+              </Form.Item>
+              <Form.Item label="Comments" name="comments">
+                <Input.TextArea rows={4} placeholder="Optional comments" />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Form>
+      </Modal>
+
     </Layout>
   );
 };
