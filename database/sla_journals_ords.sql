@@ -30,8 +30,10 @@ CREATE OR REPLACE PACKAGE RR_SLA_JOURNALS_PKG AS
     -- Returns JSON {"items":[...]} for SLA accounting lines (joined to headers)
     FUNCTION get_lines(
         p_header_id           NUMBER   DEFAULT NULL,
+        p_source_id           NUMBER   DEFAULT NULL,
         p_accounting_status  VARCHAR2 DEFAULT NULL,
         p_module_name        VARCHAR2 DEFAULT NULL,
+        p_source_table       VARCHAR2 DEFAULT NULL,
         p_line_type          VARCHAR2 DEFAULT NULL,
         p_accounting_class   VARCHAR2 DEFAULT NULL,
         p_account_combination VARCHAR2 DEFAULT NULL,

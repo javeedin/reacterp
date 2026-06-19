@@ -114,8 +114,10 @@ BEGIN
 BEGIN
   v_result := RR_SLA_JOURNALS_PKG.get_lines(
     p_header_id           => TO_NUMBER(:headerId),
+    p_source_id           => TO_NUMBER(:sourceId),
     p_accounting_status   => :accountingStatus,
     p_module_name         => :moduleName,
+    p_source_table        => :sourceTable,
     p_line_type           => :lineType,
     p_accounting_class    => :accountingClass,
     p_account_combination => :accountCombination,
