@@ -367,23 +367,13 @@ const StatementSelector: React.FC<StatementSelectorProps> = ({
   const [jlLoading, setJlLoading] = useState(false);
   const [jlStmt,    setJlStmt]    = useState<BankStatement | null>(null);
   const [jlLines,   setJlLines]   = useState<any[]>([]);
+  const [jlFrom,    setJlFrom]    = useState<Dayjs | null>(null);
+  const [jlTo,      setJlTo]      = useState<Dayjs | null>(null);
+  const [jlAcct,    setJlAcct]    = useState('');
 
-  const openJournalLines = async (e: React.MouseEvent, r: BankStatement) => {
-    e.stopPropagation();
-    const matched = bankAccounts.find(b => {
-      const cleanName = r.bankAccountName?.split('(')[0]?.trim().toLowerCase() ?? '';
-      const bl = b.label.replace(/\s*\(.*?\)\s*$/, '').toLowerCase();
-      return bl === cleanName || bl.includes(cleanName) || cleanName.includes(bl);
-    });
-    const cashAcct = matched?.cashAccount ?? '';
-    setJlStmt(r);
-    setJlLines([]);
-    setJlOpen(true);
+  const fetchJournalLines = async (dateFrom: string, dateTo: string, cashAcct: string) => {
     setJlLoading(true);
     try {
-      const d        = dayjs(r.statementDate);
-      const dateFrom = d.startOf('month').format('YYYY-MM-DD');
-      const dateTo   = d.endOf('month').format('YYYY-MM-DD');
       const qs = new URLSearchParams({ date_from: dateFrom, date_to: dateTo, limit: '2000' });
       if (cashAcct) qs.set('account', cashAcct);
       const res  = await fetch(`${APEX_BASE}/gl/journals/lines?${qs}`, { headers: { Accept: 'application/json' } });
@@ -394,6 +384,31 @@ const StatementSelector: React.FC<StatementSelectorProps> = ({
     } finally {
       setJlLoading(false);
     }
+  };
+
+  const openJournalLines = (e: React.MouseEvent, r: BankStatement) => {
+    e.stopPropagation();
+    const matched = bankAccounts.find(b => {
+      const cleanName = r.bankAccountName?.split('(')[0]?.trim().toLowerCase() ?? '';
+      const bl = b.label.replace(/\s*\(.*?\)\s*$/, '').toLowerCase();
+      return bl === cleanName || bl.includes(cleanName) || cleanName.includes(bl);
+    });
+    const cashAcct = matched?.cashAccount ?? '';
+    const d        = dayjs(r.statementDate);
+    const from     = d.startOf('month');
+    const to       = d.endOf('month');
+    setJlStmt(r);
+    setJlLines([]);
+    setJlFrom(from);
+    setJlTo(to);
+    setJlAcct(cashAcct);
+    setJlOpen(true);
+    fetchJournalLines(from.format('YYYY-MM-DD'), to.format('YYYY-MM-DD'), cashAcct);
+  };
+
+  const handleJlSearch = () => {
+    if (!jlFrom || !jlTo) { message.warning('Please select both dates'); return; }
+    fetchJournalLines(jlFrom.format('YYYY-MM-DD'), jlTo.format('YYYY-MM-DD'), jlAcct);
   };
 
   const columns: ColumnsType<BankStatement> = [
@@ -535,36 +550,60 @@ const StatementSelector: React.FC<StatementSelectorProps> = ({
     <Modal
       open={jlOpen}
       onCancel={() => setJlOpen(false)}
-      footer={null}
+      maskClosable={false}
+      footer={
+        <div style={{ textAlign: 'right' }}>
+          <Button onClick={() => setJlOpen(false)}>Close</Button>
+        </div>
+      }
       width={1200}
       title={
-        <Space size={10}>
+        <Space size={8} wrap>
           <ReadOutlined style={{ color: REDWOOD.info }} />
-          <span>Journal Entries — {jlStmt?.bankAccountName ?? ''}</span>
-          {jlStmt && (
-            <Tag color="blue" style={{ fontSize: 11 }}>
-              {(() => { const d = dayjs(jlStmt.statementDate); return `${d.startOf('month').format('DD-MMM-YYYY')} → ${d.endOf('month').format('DD-MMM-YYYY')}`; })()}
-            </Tag>
-          )}
-          {(() => {
-            const matched = jlStmt ? bankAccounts.find(b => {
-              const cleanName = jlStmt.bankAccountName?.split('(')[0]?.trim().toLowerCase() ?? '';
-              const bl = b.label.replace(/\s*\(.*?\)\s*$/, '').toLowerCase();
-              return bl === cleanName || bl.includes(cleanName) || cleanName.includes(bl);
-            }) : null;
-            return matched?.cashAccount ? <Tag color="geekblue" style={{ fontSize: 11 }}>{matched.cashAccount}</Tag> : null;
-          })()}
+          <span style={{ fontWeight: 600 }}>Journal Entries</span>
+          <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>{jlStmt?.bankAccountName ?? ''}</Text>
+          {jlAcct && <Tag color="geekblue" style={{ fontSize: 11 }}>{jlAcct}</Tag>}
         </Space>
       }
-      styles={{ body: { padding: '12px 0' } }}
+      styles={{ body: { padding: '0' } }}
     >
+      {/* Search bar */}
+      <div style={{ padding: '12px 16px', borderBottom: `1px solid #f0f0f0`, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <Text style={{ fontSize: 12 }}>Date From:</Text>
+        <DatePicker
+          value={jlFrom}
+          onChange={v => setJlFrom(v)}
+          format="DD-MMM-YYYY"
+          size="small"
+          style={{ width: 130 }}
+          allowClear={false}
+        />
+        <Text style={{ fontSize: 12 }}>To:</Text>
+        <DatePicker
+          value={jlTo}
+          onChange={v => setJlTo(v)}
+          format="DD-MMM-YYYY"
+          size="small"
+          style={{ width: 130 }}
+          allowClear={false}
+        />
+        <Button
+          type="primary" size="small" icon={<SearchOutlined />}
+          loading={jlLoading}
+          onClick={handleJlSearch}
+          style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+        >
+          Search
+        </Button>
+      </div>
+
       {jlLoading ? (
         <div style={{ textAlign: 'center', padding: 40, color: REDWOOD.neutral600 }}>Loading journal lines…</div>
       ) : jlLines.length === 0 ? (
         <Empty description="No journal lines found for this cash account and period" style={{ padding: 40 }} />
       ) : (
         <>
-          <div style={{ padding: '0 16px 8px', display: 'flex', justifyContent: 'space-between' }}>
+          <div style={{ padding: '8px 16px', display: 'flex', justifyContent: 'space-between' }}>
             <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>{jlLines.length} lines</Text>
             <Space size={16}>
               <Text style={{ fontSize: 12 }}>Dr: <Text strong style={{ color: REDWOOD.success }}>{jlLines.reduce((s, l) => s + (Number(l.entered_dr) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text></Text>
