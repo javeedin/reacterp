@@ -38,7 +38,10 @@ SELECT
     h.JE_CATEGORY               AS je_category,
     h.JE_SOURCE                 AS je_source,
     h.STATUS                    AS journal_status,
-    h.STATUS                    AS batch_status,
+    CASE WHEN h.STATUS = 'P' THEN 'POSTED'
+         WHEN h.STATUS = 'U' THEN 'UNPOSTED'
+         ELSE NVL(h.STATUS, 'UNKNOWN')
+    END                         AS posting_status,
     l.REFERENCE1                AS reference1,
     l.REFERENCE2                AS reference2,
     l.REFERENCE3                AS reference3,
