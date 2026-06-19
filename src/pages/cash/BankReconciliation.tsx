@@ -370,13 +370,16 @@ const StatementSelector: React.FC<StatementSelectorProps> = ({
   const [jlFrom,    setJlFrom]    = useState<Dayjs | null>(null);
   const [jlTo,      setJlTo]      = useState<Dayjs | null>(null);
   const [jlAcct,    setJlAcct]    = useState('');
+  const [jlLastUrl, setJlLastUrl] = useState('');
 
   const fetchJournalLines = async (dateFrom: string, dateTo: string, cashAcct: string) => {
     setJlLoading(true);
     try {
       const qs = new URLSearchParams({ date_from: dateFrom, date_to: dateTo, limit: '2000' });
       if (cashAcct) qs.set('account', cashAcct);
-      const res  = await fetch(`${APEX_BASE}/gl/journals/lines?${qs}`, { headers: { Accept: 'application/json' } });
+      const url = `${APEX_BASE}/gl/journals/lines?${qs}`;
+      setJlLastUrl(url);
+      const res  = await fetch(url, { headers: { Accept: 'application/json' } });
       const data = await res.json().catch(() => ({ items: [] }));
       setJlLines(data.items ?? []);
     } catch {
@@ -595,6 +598,23 @@ const StatementSelector: React.FC<StatementSelectorProps> = ({
         >
           Search
         </Button>
+        {jlLastUrl && (
+          <Tooltip title="Show API URL">
+            <Button size="small" icon={<ApiOutlined />} onClick={() =>
+              Modal.info({
+                title: 'API Request URL',
+                width: 800,
+                content: (
+                  <div style={{ marginTop: 8 }}>
+                    <Text copyable style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>
+                      {jlLastUrl}
+                    </Text>
+                  </div>
+                ),
+              })
+            } />
+          </Tooltip>
+        )}
       </div>
 
       {jlLoading ? (
