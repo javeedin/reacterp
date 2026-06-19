@@ -2437,8 +2437,12 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
                   render: v => <Tag style={{ fontSize: 10 }}>{v || '—'}</Tag>,
                 },
                 {
-                  title: 'Status', dataIndex: 'batch_status', width: 75,
-                  render: v => <Tag color={v === 'P' ? 'green' : 'orange'} style={{ fontSize: 10 }}>{v === 'P' ? 'POSTED' : (v || '—')}</Tag>,
+                  title: 'Status', dataIndex: 'journal_status', width: 80,
+                  render: (v: any) => {
+                    const val = (v ?? '').toString().toUpperCase();
+                    const isPosted = val === 'P' || val === 'POSTED';
+                    return <Tag color={isPosted ? 'green' : val ? 'orange' : 'default'} style={{ fontSize: 10 }}>{isPosted ? 'POSTED' : (v || '—')}</Tag>;
+                  },
                 },
               ]}
             />

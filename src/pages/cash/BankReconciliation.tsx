@@ -706,8 +706,14 @@ const StatementSelector: React.FC<StatementSelectorProps> = ({
                   render: (v: any) => Number(v) ? <Text style={{ fontSize: 11, color: REDWOOD.error }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> : <Text style={{ color: '#bbb' }}>—</Text> },
                 { title: 'CCY', dataIndex: 'currency_code', width: 55,
                   render: (v: any) => <Tag style={{ fontSize: 10 }}>{v || '—'}</Tag> },
-                { title: 'Status', dataIndex: 'journal_status', width: 75,
-                  render: (v: any) => <Tag color={v === 'P' ? 'green' : 'orange'} style={{ fontSize: 10 }}>{v === 'P' ? 'POSTED' : (v || '—')}</Tag> },
+                { title: 'Status', dataIndex: 'journal_status', width: 80,
+                  render: (v: any) => {
+                    const val = (v ?? '').toString().toUpperCase();
+                    const isPosted = val === 'P' || val === 'POSTED';
+                    return <Tag color={isPosted ? 'green' : val ? 'orange' : 'default'} style={{ fontSize: 10 }}>
+                      {isPosted ? 'POSTED' : (v || '—')}
+                    </Tag>;
+                  } },
               ]}
             />
           </>
