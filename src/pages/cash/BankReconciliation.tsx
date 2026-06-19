@@ -628,11 +628,17 @@ const StatementSelector: React.FC<StatementSelectorProps> = ({
                 Journal:     l.journal_name ?? '',
                 Account:     l.account ?? '',
                 Description: l.description ?? '',
-                Ref1:        l.reference1 ?? '',
                 'Ent. Dr':   l.entered_dr ?? '',
                 'Ent. Cr':   l.entered_cr ?? '',
                 CCY:         l.currency_code ?? '',
-                Status:      l.journal_status ?? '',
+                Category:    l.je_category ?? '',
+                Source:      l.je_source ?? '',
+                Ref1:        l.reference1 ?? '',
+                Ref2:        l.reference2 ?? '',
+                Ref3:        l.reference3 ?? '',
+                Ref4:        l.reference4 ?? '',
+                Ref5:        l.reference5 ?? '',
+                Status:      l.posting_status || l.journal_status || '',
               }));
               const wb  = XLSX.utils.book_new();
               XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Journal Lines');
@@ -675,6 +681,15 @@ const StatementSelector: React.FC<StatementSelectorProps> = ({
               pagination={{ pageSize: 50, showSizeChanger: true, showTotal: t => `${t} lines` }}
               scroll={{ x: 1100, y: 420 }}
               columns={[
+                { title: 'Status', key: 'status', width: 80,
+                  render: (_: any, r: any) => {
+                    const raw = r.posting_status || r.journal_status || '';
+                    const val = raw.toString().toUpperCase();
+                    const isPosted = val === 'P' || val === 'POSTED';
+                    return <Tag color={isPosted ? 'green' : val ? 'orange' : 'default'} style={{ fontSize: 10 }}>
+                      {isPosted ? 'POSTED' : (raw || '—')}
+                    </Tag>;
+                  } },
                 { title: 'Date', dataIndex: 'accounting_date', width: 100, defaultSortOrder: 'ascend' as const,
                   sorter: (a: any, b: any) => (a.accounting_date ?? '').localeCompare(b.accounting_date ?? ''),
                   render: (v: any) => <Text style={{ fontSize: 11 }}>{v ? String(v).slice(0, 10) : '—'}</Text> },
@@ -696,8 +711,6 @@ const StatementSelector: React.FC<StatementSelectorProps> = ({
                       </div>
                     </Tooltip>
                   ) },
-                { title: 'Ref1', dataIndex: 'reference1', width: 120, ellipsis: true,
-                  render: (v: any) => <Text style={{ fontSize: 10 }}>{v || '—'}</Text> },
                 { title: 'Ent. Dr', dataIndex: 'entered_dr', width: 115, align: 'right' as const,
                   sorter: (a: any, b: any) => (Number(a.entered_dr) || 0) - (Number(b.entered_dr) || 0),
                   render: (v: any) => Number(v) ? <Text style={{ fontSize: 11, color: REDWOOD.success }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> : <Text style={{ color: '#bbb' }}>—</Text> },
@@ -706,15 +719,20 @@ const StatementSelector: React.FC<StatementSelectorProps> = ({
                   render: (v: any) => Number(v) ? <Text style={{ fontSize: 11, color: REDWOOD.error }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> : <Text style={{ color: '#bbb' }}>—</Text> },
                 { title: 'CCY', dataIndex: 'currency_code', width: 55,
                   render: (v: any) => <Tag style={{ fontSize: 10 }}>{v || '—'}</Tag> },
-                { title: 'Status', key: 'status', width: 80,
-                  render: (_: any, r: any) => {
-                    const raw = r.posting_status || r.journal_status || '';
-                    const val = raw.toString().toUpperCase();
-                    const isPosted = val === 'P' || val === 'POSTED';
-                    return <Tag color={isPosted ? 'green' : val ? 'orange' : 'default'} style={{ fontSize: 10 }}>
-                      {isPosted ? 'POSTED' : (raw || '—')}
-                    </Tag>;
-                  } },
+                { title: 'Category', dataIndex: 'je_category', width: 130, ellipsis: true,
+                  render: (v: any) => <Tooltip title={v}><Text style={{ fontSize: 10 }}>{v || '—'}</Text></Tooltip> },
+                { title: 'Source', dataIndex: 'je_source', width: 100, ellipsis: true,
+                  render: (v: any) => <Tooltip title={v}><Text style={{ fontSize: 10 }}>{v || '—'}</Text></Tooltip> },
+                { title: 'Ref1', dataIndex: 'reference1', width: 120, ellipsis: true,
+                  render: (v: any) => <Tooltip title={v}><Text style={{ fontSize: 10 }}>{v || '—'}</Text></Tooltip> },
+                { title: 'Ref2', dataIndex: 'reference2', width: 120, ellipsis: true,
+                  render: (v: any) => <Tooltip title={v}><Text style={{ fontSize: 10 }}>{v || '—'}</Text></Tooltip> },
+                { title: 'Ref3', dataIndex: 'reference3', width: 120, ellipsis: true,
+                  render: (v: any) => <Tooltip title={v}><Text style={{ fontSize: 10 }}>{v || '—'}</Text></Tooltip> },
+                { title: 'Ref4', dataIndex: 'reference4', width: 120, ellipsis: true,
+                  render: (v: any) => <Tooltip title={v}><Text style={{ fontSize: 10 }}>{v || '—'}</Text></Tooltip> },
+                { title: 'Ref5', dataIndex: 'reference5', width: 120, ellipsis: true,
+                  render: (v: any) => <Tooltip title={v}><Text style={{ fontSize: 10 }}>{v || '—'}</Text></Tooltip> },
               ]}
             />
           </>
