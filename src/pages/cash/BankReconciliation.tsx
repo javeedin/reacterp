@@ -371,6 +371,8 @@ const StatementSelector: React.FC<StatementSelectorProps> = ({
   const [jlTo,      setJlTo]      = useState<Dayjs | null>(null);
   const [jlAcct,    setJlAcct]    = useState('');
   const [jlLastUrl, setJlLastUrl] = useState('');
+  const [jlFilter,  setJlFilter]  = useState('');
+  const [jlAcctDesc, setJlAcctDesc] = useState('');
 
   const fetchJournalLines = async (dateFrom: string, dateTo: string, cashAcct: string) => {
     setJlLoading(true);
@@ -405,8 +407,19 @@ const StatementSelector: React.FC<StatementSelectorProps> = ({
     setJlFrom(from);
     setJlTo(to);
     setJlAcct(cashAcct);
+    setJlFilter('');
+    setJlAcctDesc('');
     setJlOpen(true);
     fetchJournalLines(from.format('YYYY-MM-DD'), to.format('YYYY-MM-DD'), cashAcct);
+    // Fetch account segment description (4th segment = account code)
+    if (cashAcct) {
+      const seg4 = cashAcct.split('-')[3]?.trim();
+      if (seg4) {
+        fetch(`${APEX_BASE}/segment-values/description?segment_code=${encodeURIComponent(seg4)}`)
+          .then(r => r.json()).then(d => { if (d.description) setJlAcctDesc(d.description); })
+          .catch(() => {});
+      }
+    }
   };
 
   const handleJlSearch = () => {
@@ -565,54 +578,62 @@ const StatementSelector: React.FC<StatementSelectorProps> = ({
           <ReadOutlined style={{ color: REDWOOD.info }} />
           <span style={{ fontWeight: 600 }}>Journal Entries</span>
           <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>{jlStmt?.bankAccountName ?? ''}</Text>
-          {jlAcct && <Tag color="geekblue" style={{ fontSize: 11 }}>{jlAcct}</Tag>}
+          {jlAcct && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Tag color="geekblue" style={{ fontSize: 11, margin: 0 }}>{jlAcct}</Tag>
+              {jlAcctDesc && <Text style={{ fontSize: 10, color: REDWOOD.neutral600, paddingLeft: 2 }}>{jlAcctDesc}</Text>}
+            </div>
+          )}
         </Space>
       }
       styles={{ body: { padding: '0' } }}
     >
-      {/* Search bar */}
-      <div style={{ padding: '12px 16px', borderBottom: `1px solid #f0f0f0`, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+      {/* Toolbar */}
+      <div style={{ padding: '10px 16px', borderBottom: `1px solid #f0f0f0`, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <Text style={{ fontSize: 12 }}>Date From:</Text>
-        <DatePicker
-          value={jlFrom}
-          onChange={v => setJlFrom(v)}
-          format="DD-MMM-YYYY"
-          size="small"
-          style={{ width: 130 }}
-          allowClear={false}
-        />
+        <DatePicker value={jlFrom} onChange={v => setJlFrom(v)} format="DD-MMM-YYYY" size="small" style={{ width: 130 }} allowClear={false} />
         <Text style={{ fontSize: 12 }}>To:</Text>
-        <DatePicker
-          value={jlTo}
-          onChange={v => setJlTo(v)}
-          format="DD-MMM-YYYY"
-          size="small"
-          style={{ width: 130 }}
-          allowClear={false}
-        />
-        <Button
-          type="primary" size="small" icon={<SearchOutlined />}
-          loading={jlLoading}
-          onClick={handleJlSearch}
-          style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-        >
-          Search
-        </Button>
+        <DatePicker value={jlTo} onChange={v => setJlTo(v)} format="DD-MMM-YYYY" size="small" style={{ width: 130 }} allowClear={false} />
+        <Button type="primary" size="small" icon={<SearchOutlined />} loading={jlLoading} onClick={handleJlSearch}
+          style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Search</Button>
         {jlLastUrl && (
           <Tooltip title="Show API URL">
             <Button size="small" icon={<ApiOutlined />} onClick={() =>
-              Modal.info({
-                title: 'API Request URL',
-                width: 800,
-                content: (
-                  <div style={{ marginTop: 8 }}>
-                    <Text copyable style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>
-                      {jlLastUrl}
-                    </Text>
-                  </div>
-                ),
-              })
-            } />
+              Modal.info({ title: 'API Request URL', width: 800, content: (
+                <Text copyable style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>{jlLastUrl}</Text>
+              )}) } />
+          </Tooltip>
+        )}
+        <div style={{ flex: 1 }} />
+        <Input.Search
+          placeholder="Filter any column…"
+          size="small"
+          allowClear
+          style={{ width: 200 }}
+          value={jlFilter}
+          onChange={e => setJlFilter(e.target.value)}
+        />
+        {jlLines.length > 0 && (
+          <Tooltip title="Export to Excel">
+            <Button size="small" icon={<DownloadOutlined />} onClick={() => {
+              const rows = jlLines.map(l => ({
+                Date:        l.accounting_date ? String(l.accounting_date).slice(0, 10) : '',
+                Period:      l.period_name ?? '',
+                Journal:     l.journal_name ?? '',
+                Account:     l.account ?? '',
+                Description: l.description ?? '',
+                Ref1:        l.reference1 ?? '',
+                'Ent. Dr':   l.entered_dr ?? '',
+                'Ent. Cr':   l.entered_cr ?? '',
+                CCY:         l.currency_code ?? '',
+                Status:      l.journal_status ?? '',
+              }));
+              const wb  = XLSX.utils.book_new();
+              XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Journal Lines');
+              const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+              saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+                `JournalLines_${jlAcct}_${jlFrom?.format('YYYYMMDD') ?? ''}_${jlTo?.format('YYYYMMDD') ?? ''}.xlsx`);
+            }} />
           </Tooltip>
         )}
       </div>
@@ -621,49 +642,67 @@ const StatementSelector: React.FC<StatementSelectorProps> = ({
         <div style={{ textAlign: 'center', padding: 40, color: REDWOOD.neutral600 }}>Loading journal lines…</div>
       ) : jlLines.length === 0 ? (
         <Empty description="No journal lines found for this cash account and period" style={{ padding: 40 }} />
-      ) : (
-        <>
-          <div style={{ padding: '8px 16px', display: 'flex', justifyContent: 'space-between' }}>
-            <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>{jlLines.length} lines</Text>
-            <Space size={16}>
-              <Text style={{ fontSize: 12 }}>Dr: <Text strong style={{ color: REDWOOD.success }}>{jlLines.reduce((s, l) => s + (Number(l.entered_dr) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text></Text>
-              <Text style={{ fontSize: 12 }}>Cr: <Text strong style={{ color: REDWOOD.error }}>{jlLines.reduce((s, l) => s + (Number(l.entered_cr) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text></Text>
-            </Space>
-          </div>
-          <Table
-            dataSource={jlLines.map((l, i) => ({ ...l, _key: i }))}
-            rowKey="_key"
-            size="small"
-            pagination={{ pageSize: 50, showSizeChanger: true, showTotal: t => `${t} lines` }}
-            scroll={{ x: 1100 }}
-            columns={[
-              { title: 'Date', dataIndex: 'accounting_date', width: 100, defaultSortOrder: 'ascend' as const,
-                sorter: (a: any, b: any) => (a.accounting_date ?? '').localeCompare(b.accounting_date ?? ''),
-                render: (v: any) => <Text style={{ fontSize: 11 }}>{v ? String(v).slice(0, 10) : '—'}</Text> },
-              { title: 'Period', dataIndex: 'period_name', width: 90,
-                render: (v: any) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text> },
-              { title: 'Journal', dataIndex: 'journal_name', ellipsis: true,
-                render: (v: any) => <Tooltip title={v}><Text style={{ fontSize: 11 }}>{v || '—'}</Text></Tooltip> },
-              { title: 'Account', dataIndex: 'account', width: 220, ellipsis: true,
-                render: (v: any) => <Text code style={{ fontSize: 10 }}>{v || '—'}</Text> },
-              { title: 'Description', dataIndex: 'description', ellipsis: true,
-                render: (v: any) => <Tooltip title={v}><Text style={{ fontSize: 11 }}>{v || '—'}</Text></Tooltip> },
-              { title: 'Ref1', dataIndex: 'reference1', width: 130, ellipsis: true,
-                render: (v: any) => <Text style={{ fontSize: 10 }}>{v || '—'}</Text> },
-              { title: 'Ent. Dr', dataIndex: 'entered_dr', width: 110, align: 'right' as const,
-                sorter: (a: any, b: any) => (Number(a.entered_dr) || 0) - (Number(b.entered_dr) || 0),
-                render: (v: any) => Number(v) ? <Text style={{ fontSize: 11, color: REDWOOD.success }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> : <Text style={{ color: '#bbb' }}>—</Text> },
-              { title: 'Ent. Cr', dataIndex: 'entered_cr', width: 110, align: 'right' as const,
-                sorter: (a: any, b: any) => (Number(a.entered_cr) || 0) - (Number(b.entered_cr) || 0),
-                render: (v: any) => Number(v) ? <Text style={{ fontSize: 11, color: REDWOOD.error }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> : <Text style={{ color: '#bbb' }}>—</Text> },
-              { title: 'CCY', dataIndex: 'currency_code', width: 60,
-                render: (v: any) => <Tag style={{ fontSize: 10 }}>{v || '—'}</Tag> },
-              { title: 'Status', dataIndex: 'batch_status', width: 75,
-                render: (v: any) => <Tag color={v === 'P' ? 'green' : 'orange'} style={{ fontSize: 10 }}>{v === 'P' ? 'POSTED' : (v || '—')}</Tag> },
-            ]}
-          />
-        </>
-      )}
+      ) : (() => {
+        const q = jlFilter.toLowerCase();
+        const filtered = q
+          ? jlLines.filter(l =>
+              Object.values(l).some(v => v != null && String(v).toLowerCase().includes(q))
+            )
+          : jlLines;
+        const totalDr = filtered.reduce((s, l) => s + (Number(l.entered_dr) || 0), 0);
+        const totalCr = filtered.reduce((s, l) => s + (Number(l.entered_cr) || 0), 0);
+        return (
+          <>
+            <div style={{ padding: '6px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>
+                {filtered.length}{q ? ` of ${jlLines.length}` : ''} lines
+              </Text>
+              <Space size={16}>
+                <Text style={{ fontSize: 12 }}>Dr: <Text strong style={{ color: REDWOOD.success }}>{totalDr.toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text></Text>
+                <Text style={{ fontSize: 12 }}>Cr: <Text strong style={{ color: REDWOOD.error }}>{totalCr.toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text></Text>
+              </Space>
+            </div>
+            <Table
+              dataSource={filtered.map((l, i) => ({ ...l, _key: i }))}
+              rowKey="_key"
+              size="small"
+              pagination={{ pageSize: 50, showSizeChanger: true, showTotal: t => `${t} lines` }}
+              scroll={{ x: 1100, y: 420 }}
+              columns={[
+                { title: 'Date', dataIndex: 'accounting_date', width: 100, defaultSortOrder: 'ascend' as const,
+                  sorter: (a: any, b: any) => (a.accounting_date ?? '').localeCompare(b.accounting_date ?? ''),
+                  render: (v: any) => <Text style={{ fontSize: 11 }}>{v ? String(v).slice(0, 10) : '—'}</Text> },
+                { title: 'Period', dataIndex: 'period_name', width: 85,
+                  render: (v: any) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text> },
+                { title: 'Journal', dataIndex: 'journal_name', width: 160, ellipsis: true,
+                  render: (v: any) => <Tooltip title={v}><Text style={{ fontSize: 11 }}>{v || '—'}</Text></Tooltip> },
+                { title: 'Account', dataIndex: 'account', width: 210, ellipsis: true,
+                  render: (v: any) => <Text code style={{ fontSize: 10 }}>{v || '—'}</Text> },
+                { title: 'Description', dataIndex: 'description', width: 220,
+                  render: (v: any) => (
+                    <Tooltip title={v} placement="topLeft">
+                      <div style={{ fontSize: 11, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden', lineHeight: '1.4em', maxHeight: '4.2em', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                        {v || '—'}
+                      </div>
+                    </Tooltip>
+                  ) },
+                { title: 'Ref1', dataIndex: 'reference1', width: 120, ellipsis: true,
+                  render: (v: any) => <Text style={{ fontSize: 10 }}>{v || '—'}</Text> },
+                { title: 'Ent. Dr', dataIndex: 'entered_dr', width: 115, align: 'right' as const,
+                  sorter: (a: any, b: any) => (Number(a.entered_dr) || 0) - (Number(b.entered_dr) || 0),
+                  render: (v: any) => Number(v) ? <Text style={{ fontSize: 11, color: REDWOOD.success }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> : <Text style={{ color: '#bbb' }}>—</Text> },
+                { title: 'Ent. Cr', dataIndex: 'entered_cr', width: 115, align: 'right' as const,
+                  sorter: (a: any, b: any) => (Number(a.entered_cr) || 0) - (Number(b.entered_cr) || 0),
+                  render: (v: any) => Number(v) ? <Text style={{ fontSize: 11, color: REDWOOD.error }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> : <Text style={{ color: '#bbb' }}>—</Text> },
+                { title: 'CCY', dataIndex: 'currency_code', width: 55,
+                  render: (v: any) => <Tag style={{ fontSize: 10 }}>{v || '—'}</Tag> },
+                { title: 'Status', dataIndex: 'journal_status', width: 75,
+                  render: (v: any) => <Tag color={v === 'P' ? 'green' : 'orange'} style={{ fontSize: 10 }}>{v === 'P' ? 'POSTED' : (v || '—')}</Tag> },
+              ]}
+            />
+          </>
+        );
+      })()}
     </Modal>
     <Card
       size="small"
