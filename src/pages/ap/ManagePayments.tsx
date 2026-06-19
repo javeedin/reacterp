@@ -5337,11 +5337,18 @@ const ManagePayments: React.FC = () => {
             </div>
           )}
 
-          {!clearExistingAcctLoading && clearExistingAcctData && !clearExistingAcctData.found && (
+          {!clearExistingAcctLoading && clearExistingAcctData && !clearExistingAcctData.found && clearTargetPayment?.syncStatus !== 'SYNCED' && (
             <Alert
               type="error" showIcon style={{ marginBottom: 14 }}
               message="Accounting Required"
               description="No SLA accounting entries found for this payment. Create and post accounting first."
+            />
+          )}
+          {!clearExistingAcctLoading && clearTargetPayment?.syncStatus === 'SYNCED' && !clearExistingAcctData?.found && (
+            <Alert
+              type="info" showIcon style={{ marginBottom: 14 }}
+              message="Fusion Synced Payment"
+              description="Original accounting was recorded in Oracle Fusion. Clearing journal entries will be created now."
             />
           )}
 
@@ -5429,7 +5436,7 @@ const ManagePayments: React.FC = () => {
               style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
               icon={clearRunning ? <LoadingOutlined /> : <CheckCircleOutlined />}
               loading={clearRunning}
-              disabled={clearExistingAcctLoading || !clearExistingAcctData?.found}
+              disabled={clearExistingAcctLoading || (!clearExistingAcctData?.found && clearTargetPayment?.syncStatus !== 'SYNCED')}
               onClick={runAllClearSteps}
             >
               {clearRunning ? 'Clearing…' : 'Clear Payment'}
