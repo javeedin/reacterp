@@ -55,6 +55,25 @@ BEGIN
         RETURN;
     END IF;
 
+    -- Validate: new date must not be earlier than existing maturity date
+    DECLARE
+        l_existing_maturity DATE;
+    BEGIN
+        SELECT MATURITY_DATE INTO l_existing_maturity
+        FROM   RR_AP_PAYMENTS
+        WHERE  CHECK_ID = l_check_id;
+
+        IF l_existing_maturity IS NOT NULL AND l_maturity_date < l_existing_maturity THEN
+            :status_code := 400;
+            HTP.P('{"status":"error","message":"New Maturity Date (' ||
+                  TO_CHAR(l_maturity_date, 'YYYY-MM-DD') ||
+                  ') cannot be earlier than the original Maturity Date (' ||
+                  TO_CHAR(l_existing_maturity, 'YYYY-MM-DD') || ')"}');
+            RETURN;
+        END IF;
+    EXCEPTION WHEN NO_DATA_FOUND THEN NULL;
+    END;
+
     UPDATE RR_AP_PAYMENTS
     SET    MATURITY_DATE    = l_maturity_date,
            LAST_UPDATE_DATE = SYSTIMESTAMP,

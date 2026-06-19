@@ -5370,6 +5370,12 @@ const ManagePayments: React.FC = () => {
                       disabled={clearRunning || !clearMaturityDate}
                       onClick={async () => {
                         if (!clearTargetPayment || !clearMaturityDate) return;
+                        const originalMaturity = clearTargetPayment.maturityDate
+                          ? dayjs(clearTargetPayment.maturityDate) : null;
+                        if (originalMaturity && clearMaturityDate.isBefore(originalMaturity, 'day')) {
+                          message.error(`New Maturity Date cannot be earlier than the original (${clearTargetPayment.maturityDate})`);
+                          return;
+                        }
                         const url  = `${APEX_PAYMENTS_URL}/${clearTargetPayment.checkId}/maturity`;
                         const body = { CheckId: clearTargetPayment.checkId, MaturityDate: clearMaturityDate.format('YYYY-MM-DD') };
                         setClearMaturitySaving(true);
