@@ -2719,87 +2719,65 @@ const ManagePayments: React.FC = () => {
     setViewAcctData(null);
     setViewAcctAllEvents([]);
     try {
-      // Single journal lines fetch + GL clearing lines in parallel — no sla/accounting call needed
+      // Fetch GL journal lines by reference2=checkId (covers all event types including PDC clearing)
       const glLinesUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${record.checkId}&limit=500`;
-      const [allLinesData, glClearLines] = await Promise.all([
-        getAccountingLinesBySourceId(record.checkId, 'AP_PAYMENTS', 'AP').catch(() => ({ items: [] })),
-        fetch(glLinesUrl, { headers: { Accept: 'application/json' } }).then(r => r.json()).catch(() => ({ items: [] })),
-      ]);
-      // Filter SLA lines to this checkId
-      const paymentLines = (allLinesData.items || []).filter((line: any) => {
-        const st  = (line.sourceTable || line.SOURCE_TABLE || '').toUpperCase();
-        const sid = line.sourceId ?? line.SOURCE_ID;
-        return (!st || st === 'AP_PAYMENTS')
-            && (!sid || String(sid) === String(record.checkId));
-      });
-      // Derive viewAcctData from the first SLA header found (needed for Post to GL)
-      if (paymentLines.length > 0) {
-        const first = paymentLines[0];
-        const hid = first.headerId as number;
+      const glData = await fetch(glLinesUrl, { headers: { Accept: 'application/json' } })
+        .then(r => r.json()).catch(() => ({ items: [] }));
+      const glItems: any[] = glData.items ?? [];
+
+      // Group lines by je_header_id — each header = one accounting event section
+      const eventsMap = new Map<number, { headerId: number; eventTypeCode: string; accountingStatus: string; accountingDate: string; lines: any[] }>();
+      for (const gl of glItems) {
+        const hid = gl.je_header_id ?? gl.JE_HEADER_ID;
+        if (!eventsMap.has(hid)) {
+          // Derive event type from reference5 (e.g. "AP-PAYMENT" → "AP_PAYMENT_CREATED")
+          const ref5 = (gl.reference5 ?? '').toUpperCase().replace(/-/g, '_');
+          eventsMap.set(hid, {
+            headerId:         hid,
+            eventTypeCode:    ref5 || 'AP_PAYMENT_CREATED',
+            accountingStatus: gl.batch_status === 'P' ? 'POSTED' : (gl.journal_status ?? 'NEW'),
+            accountingDate:   gl.accounting_date ? String(gl.accounting_date).slice(0, 10) : (gl.period_name ?? ''),
+            lines:            [],
+          });
+        }
+        eventsMap.get(hid)!.lines.push({
+          lineType:           (gl.entered_dr ?? 0) > 0 ? 'DR' : 'CR',
+          accountCombination: gl.account ?? '',
+          accountingClass:    gl.reference3 ?? '',
+          description:        gl.description ?? '',
+          enteredDr:          gl.entered_dr ?? null,
+          enteredCr:          gl.entered_cr ?? null,
+          accountedDr:        gl.accounted_dr ?? null,
+          accountedCr:        gl.accounted_cr ?? null,
+          currencyCode:       gl.currency_code ?? '',
+          headerId:           hid,
+          eventTypeCode:      (gl.reference5 ?? '').toUpperCase().replace(/-/g, '_'),
+          accountingStatus:   gl.batch_status === 'P' ? 'POSTED' : (gl.journal_status ?? 'NEW'),
+          accountingDate:     gl.accounting_date ? String(gl.accounting_date).slice(0, 10) : '',
+          periodName:         gl.period_name ?? '',
+        });
+      }
+
+      // Populate viewAcctData from first non-clearing header (needed for Post to GL flow)
+      const allEvents = Array.from(eventsMap.values()).sort((a, b) => a.headerId - b.headerId);
+      if (allEvents.length > 0) {
+        const first = allEvents[0];
         setViewAcctData({
-          found:           true,
-          headerId:        hid,
-          accountingStatus: first.accountingStatus || '',
-          periodName:      first.periodName || first.period_name || '',
-          accountingDate:  first.accountingDate || first.accounting_date || '',
-          description:     first.description || '',
-          postedDate:      first.postedDate || null,
-          eventTypeCode:   first.eventTypeCode || '',
-          lines:           paymentLines.filter((l: any) => l.headerId === hid),
+          found:            true,
+          headerId:         first.headerId,
+          accountingStatus: first.accountingStatus,
+          periodName:       first.lines[0]?.periodName || '',
+          accountingDate:   first.accountingDate,
+          description:      first.lines[0]?.description || '',
+          postedDate:       null,
+          eventTypeCode:    first.eventTypeCode,
+          lines:            first.lines,
         } as any);
       } else {
         setViewAcctData({ found: false } as any);
       }
-      // Group SLA lines by headerId → per-event sections (Payment Created, Void, etc.)
-      const eventsMap = new Map<number, { headerId: number; eventTypeCode: string; accountingStatus: string; accountingDate: string; lines: any[] }>();
-      for (const line of paymentLines) {
-        const hid = line.headerId as number;
-        if (!eventsMap.has(hid)) {
-          eventsMap.set(hid, {
-            headerId:         hid,
-            eventTypeCode:    (line as any).eventTypeCode || '',
-            accountingStatus: (line as any).accountingStatus || '',
-            accountingDate:   (line as any).accountingDate || '',
-            lines:            [],
-          });
-        }
-        eventsMap.get(hid)!.lines.push(line);
-      }
-      // Add GL clearing journal lines as a synthetic event group (PDC Clearing)
-      const clearGlItems: any[] = glClearLines.items ?? [];
-      if (clearGlItems.length > 0) {
-        // Group by je_header_id
-        const glHeaderMap = new Map<number, any[]>();
-        for (const gl of clearGlItems) {
-          const hid = gl.je_header_id ?? gl.JE_HEADER_ID;
-          if (!glHeaderMap.has(hid)) glHeaderMap.set(hid, []);
-          glHeaderMap.get(hid)!.push(gl);
-        }
-        for (const [hid, glLines] of glHeaderMap) {
-          if (!eventsMap.has(hid)) {
-            eventsMap.set(hid, {
-              headerId:         hid,
-              eventTypeCode:    'AP_PDC_CLEARING',
-              accountingStatus: 'POSTED',
-              accountingDate:   glLines[0]?.period_name ?? '',
-              lines: glLines.map(gl => ({
-                lineType:           gl.entered_dr > 0 ? 'DR' : 'CR',
-                accountCombination: gl.account ?? '',
-                description:        gl.description ?? '',
-                enteredDr:          gl.entered_dr ?? 0,
-                enteredCr:          gl.entered_cr ?? 0,
-                accountedDr:        gl.accounted_dr ?? 0,
-                accountedCr:        gl.accounted_cr ?? 0,
-                currencyCode:       gl.currency_code ?? '',
-                eventTypeCode:      'AP_PDC_CLEARING',
-                accountingStatus:   'POSTED',
-                headerId:           hid,
-              })),
-            });
-          }
-        }
-      }
-      setViewAcctAllEvents(Array.from(eventsMap.values()).sort((a, b) => a.headerId - b.headerId));
+
+      setViewAcctAllEvents(allEvents);
     } catch (err: any) {
       message.error(`Failed to fetch accounting: ${err.message}`);
       setViewAcctOpen(false);
@@ -2962,27 +2940,24 @@ const ManagePayments: React.FC = () => {
 
       setPostGLResult({ success: true, data: { batchId: retBatchId, headerId: retHeaderId } });
       message.success('Posted to GL successfully.');
-      const refreshed = await getAccounting('AP_PAYMENTS', viewAcctRecord.checkId);
-      if (refreshed.headerId) {
-        try {
-          const linesData = await getLinesByHeaderId(refreshed.headerId);
-          const descMap = new Map(linesData.items.map(l => [l.lineId, l.accountDescription]));
-          refreshed.lines = refreshed.lines.map(l => ({ ...l, accountDescription: descMap.get(l.lineId) || undefined }));
-        } catch { /* non-critical */ }
-      }
-      setViewAcctData(refreshed);
-      if (viewAcctRecord.paymentNumber) {
-        try {
-          const allData = await getAccountingLinesBySourceId(viewAcctRecord.checkId, 'AP_PAYMENTS', 'AP');
-          const eventsMap = new Map<number, any>();
-          for (const line of (allData.items || [])) {
-            const hid = line.headerId as number;
-            if (!eventsMap.has(hid)) eventsMap.set(hid, { headerId: hid, eventTypeCode: (line as any).eventTypeCode || '', accountingStatus: (line as any).accountingStatus || '', accountingDate: (line as any).accountingDate || '', lines: [] });
-            eventsMap.get(hid)!.lines.push(line);
+      // Refresh view using the same GL lines endpoint
+      try {
+        const glLinesUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${viewAcctRecord.checkId}&limit=500`;
+        const glData = await fetch(glLinesUrl, { headers: { Accept: 'application/json' } }).then(r => r.json()).catch(() => ({ items: [] }));
+        const glItems: any[] = glData.items ?? [];
+        const eventsMap = new Map<number, any>();
+        for (const gl of glItems) {
+          const hid = gl.je_header_id ?? gl.JE_HEADER_ID;
+          if (!eventsMap.has(hid)) {
+            const ref5 = (gl.reference5 ?? '').toUpperCase().replace(/-/g, '_');
+            eventsMap.set(hid, { headerId: hid, eventTypeCode: ref5 || 'AP_PAYMENT_CREATED', accountingStatus: gl.batch_status === 'P' ? 'POSTED' : (gl.journal_status ?? 'NEW'), accountingDate: gl.accounting_date ? String(gl.accounting_date).slice(0, 10) : (gl.period_name ?? ''), lines: [] });
           }
-          setViewAcctAllEvents(Array.from(eventsMap.values()).sort((a, b) => a.headerId - b.headerId));
-        } catch { /* non-critical */ }
-      }
+          eventsMap.get(hid)!.lines.push({ lineType: (gl.entered_dr ?? 0) > 0 ? 'DR' : 'CR', accountCombination: gl.account ?? '', accountingClass: gl.reference3 ?? '', description: gl.description ?? '', enteredDr: gl.entered_dr ?? null, enteredCr: gl.entered_cr ?? null, accountedDr: gl.accounted_dr ?? null, accountedCr: gl.accounted_cr ?? null, currencyCode: gl.currency_code ?? '', headerId: hid, eventTypeCode: (gl.reference5 ?? '').toUpperCase().replace(/-/g, '_'), accountingStatus: gl.batch_status === 'P' ? 'POSTED' : (gl.journal_status ?? 'NEW'), accountingDate: gl.accounting_date ? String(gl.accounting_date).slice(0, 10) : '', periodName: gl.period_name ?? '' });
+        }
+        const allEvents = Array.from(eventsMap.values()).sort((a, b) => a.headerId - b.headerId);
+        setViewAcctAllEvents(allEvents);
+        if (allEvents.length > 0) setViewAcctData({ found: true, headerId: allEvents[0].headerId, accountingStatus: allEvents[0].accountingStatus, periodName: allEvents[0].lines[0]?.periodName || '', accountingDate: allEvents[0].accountingDate, description: allEvents[0].lines[0]?.description || '', postedDate: null, eventTypeCode: allEvents[0].eventTypeCode, lines: allEvents[0].lines } as any);
+      } catch { /* non-critical */ }
     } catch (err: any) {
       setPostGLResult({ success: false, error: err.message });
       message.error(`Post to GL failed: ${err.message}`);
