@@ -21,6 +21,7 @@ const EVENT_TYPE_TO_REF5: Record<string, string> = {
   VOID_PAYMENT:            'AP-PAYMENT-VOID',
   AP_PAYMENT_VOID:         'AP-PAYMENT-VOID',
   PAYMENT_MATURITY:        'AP-PAYMENT-MATURITY',
+  AP_PDC_CLEARING:         'AP-PDC-CLEARING',
 };
 
 export function eventTypeToRef5(eventTypeCode: string): string {

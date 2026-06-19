@@ -502,6 +502,14 @@ const ManagePayments: React.FC = () => {
     pdcAccount: '', cashAccount: '' });
   const setClearStep = (key: ClearStepKey, upd: Partial<ClearStepState>) =>
     setClearStepMap(prev => ({ ...prev, [key]: { ...prev[key], ...upd } }));
+
+  // Editable Maturity Date
+  const [clearMaturityDate,     setClearMaturityDate]     = useState<dayjs.Dayjs | null>(null);
+  const [clearMaturitySaving,   setClearMaturitySaving]   = useState(false);
+
+  // Mandatory Clearing Date
+  const [clearingDate,          setClearingDate]          = useState<dayjs.Dayjs | null>(null);
+  const [clearingPeriod,        setClearingPeriod]        = useState('');
   // ────────────────────────────────────────────────────────────────────────
 
   // ── Void Payment state ───────────────────────────────────────────────────
@@ -2485,6 +2493,9 @@ const ManagePayments: React.FC = () => {
       clearPeriod: '', ledgerId: 300000003259529, ledgerName: 'BCL DIFC',
       clearLines: [], slaHeaderId: null, glBatchId: null, glHeaderId: null, batchName: '',
       pdcAccount: '', cashAccount: '' };
+    setClearMaturityDate(record.maturityDate ? dayjs(record.maturityDate) : null);
+    setClearingDate(null);
+    setClearingPeriod('');
     setClearModalOpen(true);
     // Load existing accounting entries — also used to verify accounting exists
     setClearExistingAcctLoading(true);
@@ -2507,7 +2518,7 @@ const ManagePayments: React.FC = () => {
     if (!clearTargetPayment) return false;
     setClearStep('sla', { status: 'running', response: undefined, error: undefined });
     try {
-      const today = dayjs().format('YYYY-MM-DD');
+      const today = (clearingDate ?? dayjs()).format('YYYY-MM-DD');
       const paymentNum = String(clearTargetPayment.paymentNumber || clearTargetPayment.checkId);
       const buName = clearTargetPayment.businessUnit || '';
       const ccy = clearTargetPayment.paymentCurrency || 'AED';
@@ -2684,6 +2695,7 @@ const ManagePayments: React.FC = () => {
   };
   // Auto-run all 5 clear steps sequentially
   const runAllClearSteps = async () => {
+    if (!clearingDate) { message.error('Please select a Clearing Date before proceeding.'); return; }
     setClearRunning(true);
     setClearStepMap(initClearSteps());
     try {
@@ -5317,22 +5329,94 @@ const ManagePayments: React.FC = () => {
           {/* Payment summary */}
           {clearTargetPayment && (
             <div style={{ background: '#f6fff9', border: `1px solid ${REDWOOD.success}`, borderRadius: 6, padding: '10px 14px', marginBottom: 14 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px 16px', fontSize: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px 16px', fontSize: 12 }}>
                 {[
-                  ['Payee',          clearTargetPayment.payee],
-                  ['Payment #',      String(clearTargetPayment.paymentNumber)],
-                  ['Amount',         `${formatAmount(clearTargetPayment.paymentAmount)} ${clearTargetPayment.paymentCurrency}`],
-                  ['Payment Date',   clearTargetPayment.paymentDate || '—'],
-                  ['Maturity Date',  clearTargetPayment.maturityDate || '—'],
-                  ['Bank Account',   clearTargetPayment.disbursementBankAccount || '—'],
-                  ['Accounting',     clearTargetPayment.accountingStatus || '—'],
-                  ['Business Unit',  clearTargetPayment.businessUnit || '—'],
+                  ['Payee',         clearTargetPayment.payee],
+                  ['Payment #',     String(clearTargetPayment.paymentNumber)],
+                  ['Amount',        `${formatAmount(clearTargetPayment.paymentAmount)} ${clearTargetPayment.paymentCurrency}`],
+                  ['Payment Date',  clearTargetPayment.paymentDate || '—'],
+                  ['Bank Account',  clearTargetPayment.disbursementBankAccount || '—'],
+                  ['Business Unit', clearTargetPayment.businessUnit || '—'],
+                  ['Accounting',    clearTargetPayment.accountingStatus || '—'],
                 ].map(([label, value]) => (
                   <div key={label}>
                     <Text type="secondary" style={{ fontSize: 11 }}>{label}</Text>
                     <div><Text strong style={{ fontSize: 12 }}>{value}</Text></div>
                   </div>
                 ))}
+
+                {/* Editable Maturity Date */}
+                <div style={{ gridColumn: 'span 1' }}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Maturity Date</Text>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                    <DatePicker
+                      size="small"
+                      format="D MMM YYYY"
+                      value={clearMaturityDate}
+                      onChange={val => setClearMaturityDate(val)}
+                      style={{ width: 130 }}
+                      disabled={clearRunning}
+                    />
+                    <Button
+                      size="small"
+                      type="primary"
+                      loading={clearMaturitySaving}
+                      disabled={clearRunning || !clearMaturityDate}
+                      onClick={async () => {
+                        if (!clearTargetPayment || !clearMaturityDate) return;
+                        setClearMaturitySaving(true);
+                        try {
+                          const res = await fetch(`${APEX_PAYMENTS_URL}/${clearTargetPayment.checkId}/maturity`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ MaturityDate: clearMaturityDate.format('YYYY-MM-DD') }),
+                          });
+                          const data = await res.json().catch(() => ({}));
+                          if (res.ok && data?.status !== 'error') {
+                            message.success('Maturity date updated');
+                            handleSearch();
+                          } else {
+                            message.error(data?.message || 'Failed to update maturity date');
+                          }
+                        } catch (e: any) {
+                          message.error('Network error: ' + e.message);
+                        } finally { setClearMaturitySaving(false); }
+                      }}
+                    >
+                      Save
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Mandatory Clearing Date */}
+                <div style={{ gridColumn: 'span 2' }}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    <span style={{ color: '#ff4d4f', marginRight: 2 }}>*</span>
+                    Clearing Date
+                  </Text>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 2, flexWrap: 'wrap' }}>
+                    <DatePicker
+                      size="small"
+                      format="D MMM YYYY"
+                      value={clearingDate}
+                      disabled={clearRunning}
+                      style={{ width: 140 }}
+                      onChange={val => {
+                        setClearingDate(val);
+                        setClearingPeriod(val ? derivePeriodName(val.toDate()) : '');
+                      }}
+                    />
+                    {clearingPeriod && (
+                      <Space size={4}>
+                        <Text type="secondary" style={{ fontSize: 11 }}>Accounting Period:</Text>
+                        <Tag color="blue" style={{ fontSize: 11, fontWeight: 600 }}>{clearingPeriod}</Tag>
+                      </Space>
+                    )}
+                    {!clearingDate && (
+                      <Text type="danger" style={{ fontSize: 11 }}>Required to clear payment</Text>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -5436,7 +5520,7 @@ const ManagePayments: React.FC = () => {
               style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
               icon={clearRunning ? <LoadingOutlined /> : <CheckCircleOutlined />}
               loading={clearRunning}
-              disabled={clearExistingAcctLoading || (!clearExistingAcctData?.found && clearTargetPayment?.syncStatus !== 'SYNCED')}
+              disabled={clearExistingAcctLoading || !clearingDate || (!clearExistingAcctData?.found && clearTargetPayment?.syncStatus !== 'SYNCED')}
               onClick={runAllClearSteps}
             >
               {clearRunning ? 'Clearing…' : 'Clear Payment'}
