@@ -25,7 +25,7 @@ BEGIN
         p_source_type    => 'json/collection',
         p_items_per_page => 0,
         p_mimes_allowed  => NULL,
-        p_comments       => 'GL lines filtered by period_name / reference1 / reference2; includes ref3-5, batch status',
+        p_comments       => 'GL lines filtered by period_name / reference1 / reference2 / account / date range; includes ref3-5, batch status',
         p_source         => q'[
 SELECT
     l.LINE_ID                   AS line_id,
@@ -56,11 +56,14 @@ SELECT
 FROM RR_GL_JE_LINES_ALL  l
 JOIN RR_GL_JE_HEADERS    h ON h.JE_HEADER_ID = l.JE_HEADER_ID
 JOIN RR_GL_JE_BATCHES    b ON b.JE_BATCH_ID  = h.JE_BATCH_ID
-WHERE (:period_name IS NULL OR h.PERIOD_NAME = :period_name)
-  AND (:reference1  IS NULL OR l.REFERENCE1  = :reference1)
-  AND (:reference2  IS NULL OR l.REFERENCE2  = :reference2)
+WHERE (:period_name IS NULL OR h.PERIOD_NAME   = :period_name)
+  AND (:reference1  IS NULL OR l.REFERENCE1    = :reference1)
+  AND (:reference2  IS NULL OR l.REFERENCE2    = :reference2)
+  AND (:account     IS NULL OR l.ACCOUNT_COMBINATION LIKE '%' || :account || '%')
+  AND (:date_from   IS NULL OR h.DEFAULT_EFFECTIVE_DATE >= TO_DATE(:date_from, 'YYYY-MM-DD'))
+  AND (:date_to     IS NULL OR h.DEFAULT_EFFECTIVE_DATE <= TO_DATE(:date_to,   'YYYY-MM-DD'))
 ORDER BY h.DEFAULT_EFFECTIVE_DATE, l.JE_HEADER_ID, l.JE_LINE_NUMBER
-FETCH FIRST NVL(:limit, 1000) ROWS ONLY
+FETCH FIRST NVL(:limit, 2000) ROWS ONLY
 ]'
     );
     COMMIT;

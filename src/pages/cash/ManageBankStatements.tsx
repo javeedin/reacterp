@@ -9,7 +9,7 @@ import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, BankOutlined, PlusOutlined, SearchOutlined, ReloadOutlined,
   EditOutlined, CloseOutlined, DeleteOutlined, UploadOutlined, DownloadOutlined,
-  ApiOutlined,
+  ApiOutlined, ReadOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 
@@ -1986,6 +1986,12 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
   const modulePrefix = module === 'ap' ? '/ap' : '/cash';
   const [searchSelectedBu, setSearchSelectedBu] = useState<string | undefined>();
 
+  // ── Journal Lines dialog (cash account analysis per statement) ─────────────
+  const [jlModalOpen, setJlModalOpen]     = useState(false);
+  const [jlLoading,   setJlLoading]       = useState(false);
+  const [jlStatement, setJlStatement]     = useState<StatementHeader | null>(null);
+  const [jlLines,     setJlLines]         = useState<any[]>([]);
+
   // Search screen bank accounts filtered by legal entity of selected BU
   const searchBuLegalEntity = searchSelectedBu
     ? (businessUnits.find(b => b.value === searchSelectedBu)?.legalEntityName ?? '')
@@ -2107,6 +2113,31 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
   };
 
   // Table columns
+  const openJournalLines = async (r: StatementHeader) => {
+    // Find cash account for this bank
+    const bankAcct = bankAccounts.find(a => a.value === r.bankAccountName);
+    const cashAcct = bankAcct?.cashAccountCombination ?? '';
+    setJlStatement(r);
+    setJlLines([]);
+    setJlModalOpen(true);
+    setJlLoading(true);
+    try {
+      // Date range = first and last day of the statement month
+      const d      = dayjs(r.statementDate);
+      const dateFrom = d.startOf('month').format('YYYY-MM-DD');
+      const dateTo   = d.endOf('month').format('YYYY-MM-DD');
+      const qs = new URLSearchParams({ date_from: dateFrom, date_to: dateTo, limit: '2000' });
+      if (cashAcct) qs.set('account', cashAcct);
+      const res  = await fetch(`${APEX_BASE}/gl/journals/lines?${qs}`, { headers: { Accept: 'application/json' } });
+      const data = await res.json().catch(() => ({ items: [] }));
+      setJlLines(data.items ?? []);
+    } catch {
+      message.error('Failed to load journal lines');
+    } finally {
+      setJlLoading(false);
+    }
+  };
+
   const columns: ColumnsType<StatementHeader> = [
     { title: 'Business Unit', dataIndex: 'businessUnitName', width: 180, ellipsis: true,
       render: v => <Tooltip title={v}><Text style={{ fontSize: 12 }}>{v || '—'}</Text></Tooltip> },
@@ -2151,8 +2182,15 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
       render: v => <Tag color={STATUS_COLOR[v] ?? 'default'} style={{ fontSize: 11 }}>{v}</Tag>,
     },
     {
-      title: '', key: 'actions', width: 60, align: 'center',
-      render: (_, r) => <Button type="text" size="small" icon={<EditOutlined />} onClick={() => openEditTab(r)} />,
+      title: '', key: 'actions', width: 90, align: 'center',
+      render: (_, r) => (
+        <Space size={2}>
+          <Tooltip title="View Journal Entries">
+            <Button type="text" size="small" icon={<ReadOutlined />} onClick={() => openJournalLines(r)} />
+          </Tooltip>
+          <Button type="text" size="small" icon={<EditOutlined />} onClick={() => openEditTab(r)} />
+        </Space>
+      ),
     },
   ];
 
@@ -2303,6 +2341,110 @@ const ManageBankStatements: React.FC<{ module?: 'ap' | 'cash' }> = ({ module = '
             items={tabItems} style={{ marginTop: 8 }} />
         </div>
       </Content>
+
+      {/* ── Journal Lines Dialog ──────────────────────────────────────────── */}
+      <Modal
+        open={jlModalOpen}
+        onCancel={() => setJlModalOpen(false)}
+        footer={null}
+        width={1200}
+        title={
+          <Space size={12}>
+            <ReadOutlined style={{ color: REDWOOD.info }} />
+            <span>
+              Journal Entries — {jlStatement?.bankAccountName ?? ''}{' '}
+              <Tag color="blue" style={{ fontSize: 11, marginLeft: 4 }}>
+                {jlStatement?.statementDate
+                  ? (() => { const d = dayjs(jlStatement.statementDate); return `${d.startOf('month').format('DD-MMM-YYYY')} → ${d.endOf('month').format('DD-MMM-YYYY')}`; })()
+                  : ''}
+              </Tag>
+            </span>
+            {jlStatement && (() => {
+              const bankAcct = bankAccounts.find(a => a.value === jlStatement.bankAccountName);
+              const cashAcct = bankAcct?.cashAccountCombination;
+              return cashAcct ? <Tag color="geekblue" style={{ fontSize: 11 }}>{cashAcct}</Tag> : null;
+            })()}
+          </Space>
+        }
+        styles={{ body: { padding: '12px 0' } }}
+      >
+        {jlLoading ? (
+          <div style={{ textAlign: 'center', padding: 40, color: REDWOOD.neutral600 }}>Loading journal lines…</div>
+        ) : jlLines.length === 0 ? (
+          <Empty description="No journal lines found for this cash account and period" style={{ padding: 40 }} />
+        ) : (
+          <>
+            <div style={{ padding: '0 16px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>{jlLines.length} lines</Text>
+              <Space size={16}>
+                <Text style={{ fontSize: 12 }}>
+                  Total Dr: <Text strong style={{ color: REDWOOD.success }}>
+                    {jlLines.reduce((s, l) => s + (Number(l.entered_dr) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </Text>
+                </Text>
+                <Text style={{ fontSize: 12 }}>
+                  Total Cr: <Text strong style={{ color: REDWOOD.error }}>
+                    {jlLines.reduce((s, l) => s + (Number(l.entered_cr) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </Text>
+                </Text>
+              </Space>
+            </div>
+            <Table
+              dataSource={jlLines.map((l, i) => ({ ...l, _key: i }))}
+              rowKey="_key"
+              size="small"
+              pagination={{ pageSize: 50, showSizeChanger: true, showTotal: t => `${t} lines` }}
+              scroll={{ x: 1100 }}
+              columns={[
+                {
+                  title: 'Date', dataIndex: 'accounting_date', width: 100,
+                  render: v => <Text style={{ fontSize: 11 }}>{v ? String(v).slice(0, 10) : '—'}</Text>,
+                  sorter: (a, b) => (a.accounting_date ?? '').localeCompare(b.accounting_date ?? ''),
+                  defaultSortOrder: 'ascend',
+                },
+                {
+                  title: 'Period', dataIndex: 'period_name', width: 90,
+                  render: v => <Text style={{ fontSize: 11 }}>{v || '—'}</Text>,
+                },
+                {
+                  title: 'Journal', dataIndex: 'journal_name', ellipsis: true,
+                  render: v => <Tooltip title={v}><Text style={{ fontSize: 11 }}>{v || '—'}</Text></Tooltip>,
+                },
+                {
+                  title: 'Account', dataIndex: 'account', width: 220, ellipsis: true,
+                  render: v => <Text code style={{ fontSize: 10 }}>{v || '—'}</Text>,
+                },
+                {
+                  title: 'Description', dataIndex: 'description', ellipsis: true,
+                  render: v => <Tooltip title={v}><Text style={{ fontSize: 11 }}>{v || '—'}</Text></Tooltip>,
+                },
+                {
+                  title: 'Ref1', dataIndex: 'reference1', width: 130, ellipsis: true,
+                  render: v => <Text style={{ fontSize: 10 }}>{v || '—'}</Text>,
+                },
+                {
+                  title: 'Ent. Dr', dataIndex: 'entered_dr', width: 110, align: 'right' as const,
+                  render: v => Number(v) ? <Text style={{ fontSize: 11, color: REDWOOD.success }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> : <Text style={{ color: REDWOOD.neutral300 }}>—</Text>,
+                  sorter: (a, b) => (Number(a.entered_dr) || 0) - (Number(b.entered_dr) || 0),
+                },
+                {
+                  title: 'Ent. Cr', dataIndex: 'entered_cr', width: 110, align: 'right' as const,
+                  render: v => Number(v) ? <Text style={{ fontSize: 11, color: REDWOOD.error }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> : <Text style={{ color: REDWOOD.neutral300 }}>—</Text>,
+                  sorter: (a, b) => (Number(a.entered_cr) || 0) - (Number(b.entered_cr) || 0),
+                },
+                {
+                  title: 'CCY', dataIndex: 'currency_code', width: 60,
+                  render: v => <Tag style={{ fontSize: 10 }}>{v || '—'}</Tag>,
+                },
+                {
+                  title: 'Status', dataIndex: 'batch_status', width: 75,
+                  render: v => <Tag color={v === 'P' ? 'green' : 'orange'} style={{ fontSize: 10 }}>{v === 'P' ? 'POSTED' : (v || '—')}</Tag>,
+                },
+              ]}
+            />
+          </>
+        )}
+      </Modal>
     </Layout>
   );
 };
