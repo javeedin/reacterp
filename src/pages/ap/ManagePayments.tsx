@@ -5345,16 +5345,22 @@ const ManagePayments: React.FC = () => {
                   </div>
                 ))}
 
-                {/* Editable Maturity Date */}
-                <div style={{ gridColumn: 'span 1' }}>
+                {/* Original Maturity Date — read-only */}
+                <div>
                   <Text type="secondary" style={{ fontSize: 11 }}>Maturity Date</Text>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                  <div><Text strong style={{ fontSize: 12 }}>{clearTargetPayment.maturityDate || '—'}</Text></div>
+                </div>
+
+                {/* New Maturity Date — editable + save */}
+                <div style={{ gridColumn: 'span 2' }}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>New Maturity Date</Text>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2, flexWrap: 'wrap' }}>
                     <DatePicker
                       size="small"
                       format="D MMM YYYY"
                       value={clearMaturityDate}
                       onChange={val => setClearMaturityDate(val)}
-                      style={{ width: 130 }}
+                      style={{ width: 140 }}
                       disabled={clearRunning}
                     />
                     <Button
@@ -5364,27 +5370,93 @@ const ManagePayments: React.FC = () => {
                       disabled={clearRunning || !clearMaturityDate}
                       onClick={async () => {
                         if (!clearTargetPayment || !clearMaturityDate) return;
+                        const url  = `${APEX_PAYMENTS_URL}/${clearTargetPayment.checkId}/maturity`;
+                        const body = { CheckId: clearTargetPayment.checkId, MaturityDate: clearMaturityDate.format('YYYY-MM-DD') };
                         setClearMaturitySaving(true);
                         try {
-                          const res = await fetch(`${APEX_PAYMENTS_URL}/${clearTargetPayment.checkId}/maturity`, {
+                          const res  = await fetch(url, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ MaturityDate: clearMaturityDate.format('YYYY-MM-DD') }),
+                            body: JSON.stringify(body),
                           });
-                          const data = await res.json().catch(() => ({}));
+                          const text = await res.text();
+                          let data: any = {};
+                          try { data = JSON.parse(text); } catch { /* non-JSON */ }
                           if (res.ok && data?.status !== 'error') {
                             message.success('Maturity date updated');
                             handleSearch();
                           } else {
-                            message.error(data?.message || 'Failed to update maturity date');
+                            Modal.error({
+                              title: 'Maturity Date Save Failed',
+                              width: 620,
+                              content: (
+                                <div>
+                                  <div style={{ marginBottom: 8 }}>
+                                    <Text type="secondary" style={{ fontSize: 11 }}>URL</Text>
+                                    <div style={{ background: '#0d1117', borderRadius: 4, padding: '4px 8px', marginTop: 2 }}>
+                                      <code style={{ fontSize: 11, color: '#58a6ff' }}>PUT {url}</code>
+                                    </div>
+                                  </div>
+                                  <div style={{ marginBottom: 8 }}>
+                                    <Text type="secondary" style={{ fontSize: 11 }}>Request Body</Text>
+                                    <pre style={{ background: '#0d1117', color: '#9cdcfe', fontSize: 11, borderRadius: 4, padding: 8, marginTop: 2, maxHeight: 160, overflow: 'auto' }}>
+                                      {JSON.stringify(body, null, 2)}
+                                    </pre>
+                                  </div>
+                                  <div>
+                                    <Text type="secondary" style={{ fontSize: 11 }}>Response (HTTP {res.status})</Text>
+                                    <pre style={{ background: '#0d1117', color: '#f97316', fontSize: 11, borderRadius: 4, padding: 8, marginTop: 2, maxHeight: 160, overflow: 'auto' }}>
+                                      {text || '(empty)'}
+                                    </pre>
+                                  </div>
+                                </div>
+                              ),
+                            });
                           }
                         } catch (e: any) {
-                          message.error('Network error: ' + e.message);
+                          Modal.error({
+                            title: 'Network Error',
+                            content: (
+                              <div>
+                                <div style={{ marginBottom: 8 }}>
+                                  <code style={{ fontSize: 11 }}>PUT {url}</code>
+                                </div>
+                                <div style={{ color: '#ff4d4f' }}>{e.message}</div>
+                              </div>
+                            ),
+                          });
                         } finally { setClearMaturitySaving(false); }
                       }}
                     >
                       Save
                     </Button>
+                    <Tooltip title="Show API details">
+                      <Button
+                        size="small"
+                        icon={<ApiOutlined />}
+                        onClick={() => {
+                          if (!clearTargetPayment) return;
+                          const url  = `${APEX_PAYMENTS_URL}/${clearTargetPayment.checkId}/maturity`;
+                          const body = { CheckId: clearTargetPayment.checkId, MaturityDate: clearMaturityDate?.format('YYYY-MM-DD') ?? '(select date)' };
+                          Modal.info({
+                            title: 'Maturity Date Update — API Details',
+                            width: 580,
+                            content: (
+                              <div>
+                                <Text type="secondary" style={{ fontSize: 11 }}>Method & URL</Text>
+                                <div style={{ background: '#0d1117', borderRadius: 4, padding: '4px 8px', marginTop: 2, marginBottom: 10 }}>
+                                  <code style={{ fontSize: 11, color: '#58a6ff' }}>PUT {url}</code>
+                                </div>
+                                <Text type="secondary" style={{ fontSize: 11 }}>Request Body</Text>
+                                <pre style={{ background: '#0d1117', color: '#9cdcfe', fontSize: 11, borderRadius: 4, padding: 8, marginTop: 2, maxHeight: 200, overflow: 'auto' }}>
+                                  {JSON.stringify(body, null, 2)}
+                                </pre>
+                              </div>
+                            ),
+                          });
+                        }}
+                      />
+                    </Tooltip>
                   </div>
                 </div>
 
