@@ -34,6 +34,7 @@ SELECT
     h.JOURNAL_NAME              AS journal_name,
     h.PERIOD_NAME               AS period_name,
     h.ACCOUNTING_DATE           AS accounting_date,
+    h.JE_BATCH_ID               AS je_batch_id,
     h.JE_CATEGORY               AS je_category,
     h.JE_SOURCE                 AS je_source,
     h.STATUS                    AS journal_status,
