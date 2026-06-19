@@ -33,16 +33,15 @@ BEGIN
         p_comments       => 'Update maturity (void) date for a PDC payment',
         p_source         => q'[
 DECLARE
-    l_check_id     NUMBER;
+    l_body          CLOB := :body_text;
+    l_check_id      NUMBER;
     l_maturity_date DATE;
-    l_rows         NUMBER;
+    l_updated_by    VARCHAR2(240);
+    l_rows          NUMBER;
 BEGIN
-    l_check_id := TO_NUMBER(:check_id);
-
-    l_maturity_date := TO_DATE(
-        JSON_VALUE(:body_text, '$.MaturityDate'),
-        'YYYY-MM-DD'
-    );
+    l_check_id      := TO_NUMBER(:check_id);
+    l_maturity_date := TO_DATE(JSON_VALUE(l_body, '$.MaturityDate'), 'YYYY-MM-DD');
+    l_updated_by    := NVL(JSON_VALUE(l_body, '$.UpdatedBy'), 'SYSTEM');
 
     IF l_check_id IS NULL THEN
         :status_code := 400;
@@ -57,10 +56,10 @@ BEGIN
     END IF;
 
     UPDATE RR_AP_PAYMENTS
-    SET    MATURITY_DATE     = l_maturity_date,
-           LAST_UPDATE_DATE  = SYSTIMESTAMP,
-           LAST_UPDATED_BY   = NVL(JSON_VALUE(:body_text, '$.UpdatedBy'), 'SYSTEM')
-    WHERE  CHECK_ID          = l_check_id;
+    SET    MATURITY_DATE    = l_maturity_date,
+           LAST_UPDATE_DATE = SYSTIMESTAMP,
+           LAST_UPDATED_BY  = l_updated_by
+    WHERE  CHECK_ID         = l_check_id;
 
     l_rows := SQL%ROWCOUNT;
     COMMIT;
