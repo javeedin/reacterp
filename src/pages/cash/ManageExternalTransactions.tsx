@@ -995,11 +995,12 @@ const ExternalTxnForm: React.FC<{
 
     const effectiveExtId = initialValues?.externalTransactionId ?? savedExtId ?? savedTxnId ?? null;
     if (isEdit || (saved && effectiveExtId)) {
-      // Edit: update the transaction
+      // Edit: update the transaction via PUT /:id
       const line = extTxnLines[0];
+      const updateId = initialValues?.externalTransactionId ?? effectiveExtId;
       try {
-        const res = await fetch(`${APEX_BASE}/cash/externaltransactions`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
+        const res = await fetch(`${APEX_BASE}/cash/externaltransactions/${updateId}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(buildPayload({ ...values, amount: line.amount, description: line.description ?? '', offsetAccountCombination: line.offsetAccount ?? '' })),
         });
         const data = await res.json();
@@ -2376,7 +2377,7 @@ const ExternalTxnForm: React.FC<{
 
       {/* ── API Inspector Modal ── */}
       <Modal
-        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>API Inspector — POST /cash/externaltransactions</span></Space>}
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>API Inspector — {isEdit ? 'PUT' : 'POST'} /cash/externaltransactions{isEdit && initialValues?.externalTransactionId ? `/${initialValues.externalTransactionId}` : ''}</span></Space>}
         open={apiModal} onCancel={() => setApiModal(false)} width={780} footer={null}
         styles={{ body: { padding: '16px 24px' } }}
       >
