@@ -411,12 +411,16 @@ const StatementSelector: React.FC<StatementSelectorProps> = ({
     setJlAcctDesc('');
     setJlOpen(true);
     fetchJournalLines(from.format('YYYY-MM-DD'), to.format('YYYY-MM-DD'), cashAcct);
-    // Fetch account segment description (4th segment = account code)
+    // Fetch account segment description: segment 4 (index 3) = account code
     if (cashAcct) {
       const seg4 = cashAcct.split('-')[3]?.trim();
       if (seg4) {
-        fetch(`${APEX_BASE}/segment-values/description?segment_code=${encodeURIComponent(seg4)}`)
-          .then(r => r.json()).then(d => { if (d.description) setJlAcctDesc(d.description); })
+        fetch(`${APEX_BASE}/valuesets/getvalues/BUIMERC_FIN_GLB_COA_ACCOUNT`, { headers: { Accept: 'application/json' } })
+          .then(r => r.json())
+          .then(d => {
+            const match = (d.items ?? []).find((i: any) => i.value === seg4);
+            if (match?.description) setJlAcctDesc(match.description);
+          })
           .catch(() => {});
       }
     }
