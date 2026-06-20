@@ -716,6 +716,25 @@ const ManageAssets: React.FC = () => {
                     Search
                   </Button>
                   <Button icon={<ReloadOutlined />} onClick={handleReset}>Reset</Button>
+                  {lastApiUrl && (
+                    <Tooltip title="Show API URL">
+                      <Button
+                        size="small" icon={<ApiOutlined />}
+                        style={{ color: FA_COLOR, borderColor: FA_COLOR }}
+                        onClick={() => Modal.info({
+                          title: 'API Request — fa/assets',
+                          width: 860,
+                          content: (
+                            <div style={{ marginTop: 8 }}>
+                              <Text copyable style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>
+                                {lastApiUrl}
+                              </Text>
+                            </div>
+                          ),
+                        })}
+                      />
+                    </Tooltip>
+                  )}
                 </Space>
               </Form.Item>
             </Col>
