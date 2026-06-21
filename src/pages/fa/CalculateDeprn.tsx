@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layout, Card, Row, Col, Breadcrumb, Typography, Select, Space,
-  Button, Spin, Tag, Descriptions, Divider, Tooltip, message, Badge,
+  Button, Spin, Tag, Descriptions, Divider, Tooltip, message, Badge, Modal,
 } from 'antd';
 import {
   HomeOutlined, LineChartOutlined, ReloadOutlined, PlayCircleOutlined,
-  CheckCircleOutlined, ClockCircleOutlined, SyncOutlined,
+  CheckCircleOutlined, ClockCircleOutlined, SyncOutlined, ApiOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { getBookControls, getDeprnPeriodsCurrent } from '../../services/fa.service';
+import { APEX_DB_CONFIG } from '../../config/api.config';
 import type { BookControlRecord } from '../../services/fa.service';
 
 const { Content } = Layout;
@@ -43,6 +44,7 @@ const CalculateDeprn: React.FC = () => {
   const [periodData,   setPeriodData]   = useState<any[]>([]);
   const [loading,      setLoading]      = useState(false);
   const [calculating,  setCalculating]  = useState(false);
+  const [lastApiUrl,   setLastApiUrl]   = useState('');
 
   useEffect(() => {
     getBookControls().then((bc) => {
@@ -54,6 +56,8 @@ const CalculateDeprn: React.FC = () => {
   const loadPeriod = useCallback(async (book: string) => {
     if (!book) return;
     setLoading(true);
+    const url = `${APEX_DB_CONFIG.baseUrl}/fa/deprn-periods/current?bookTypeCode=${encodeURIComponent(book)}`;
+    setLastApiUrl(url);
     try {
       const items = await getDeprnPeriodsCurrent(book);
       setPeriodData(items);
@@ -132,6 +136,23 @@ const CalculateDeprn: React.FC = () => {
               <Tooltip title="Refresh">
                 <Button icon={<ReloadOutlined />} onClick={() => loadPeriod(selectedBook)} loading={loading} />
               </Tooltip>
+              {lastApiUrl && (
+                <Tooltip title="Show API URL">
+                  <Button
+                    icon={<ApiOutlined />}
+                    style={{ color: '#1677ff', borderColor: '#1677ff' }}
+                    onClick={() => Modal.info({
+                      title: 'API Request — fa/deprn-periods/current',
+                      width: 860,
+                      content: (
+                        <Typography.Text copyable style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>
+                          {lastApiUrl}
+                        </Typography.Text>
+                      ),
+                    })}
+                  />
+                </Tooltip>
+              )}
             </Space>
           </div>
         </div>
