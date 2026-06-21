@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import {
   Layout, Card, Form, Input, Button, Space, Typography, Table, Tag,
   Row, Col, Breadcrumb, Tooltip, Select, Tabs, Descriptions,
-  Spin, Empty, Badge, message, Modal,
+  Spin, Empty, Badge, message, Modal, Switch, Statistic,
 } from 'antd';
 import type { ColumnsType, TableProps } from 'antd/es/table';
 import {
@@ -567,20 +567,27 @@ const ManageAssets: React.FC = () => {
     setGridSearch('');
   };
 
-  // Grid quick-search (client-side filter over current page)
-  const [gridSearch, setGridSearch] = useState('');
-  const displayedRows = gridSearch
-    ? rows.filter(r => {
-        const q = gridSearch.toLowerCase();
-        return (
-          (r.description   || '').toLowerCase().includes(q) ||
-          (r.asset_number  || r.assetNumber || '').toLowerCase().includes(q) ||
-          (r.assetId       || '').toLowerCase().includes(q) ||
-          (r.bookTypeCode  || '').toLowerCase().includes(q) ||
-          (r.assetType     || '').toLowerCase().includes(q)
-        );
-      })
-    : rows;
+  // Grid quick-search + cost filter (client-side)
+  const [gridSearch,  setGridSearch]  = useState('');
+  const [costFilter,  setCostFilter]  = useState(true);
+
+  const displayedRows = rows.filter(r => {
+    if (costFilter && (parseFloat(r.cost) || 0) <= 0) return false;
+    if (gridSearch) {
+      const q = gridSearch.toLowerCase();
+      return (
+        (r.description  || '').toLowerCase().includes(q) ||
+        (r.asset_number || r.assetNumber || '').toLowerCase().includes(q) ||
+        (r.assetId      || '').toLowerCase().includes(q) ||
+        (r.bookTypeCode || '').toLowerCase().includes(q) ||
+        (r.assetType    || '').toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
+
+  const totalCost = displayedRows.reduce((s, r) => s + (parseFloat(r.cost) || 0), 0);
+  const totalNbv  = displayedRows.reduce((s, r) => s + (parseFloat(r.nbv)  || 0), 0);
 
   // Export assets grid to Excel
   const exportAssetsToExcel = () => {
@@ -755,6 +762,15 @@ const ManageAssets: React.FC = () => {
         }
         extra={
           <Space size="small">
+            <Space size={4}>
+              <Switch
+                size="small"
+                checked={costFilter}
+                onChange={setCostFilter}
+                style={costFilter ? { backgroundColor: FA_COLOR } : {}}
+              />
+              <Typography.Text style={{ fontSize: 12 }}>Cost &gt; 0</Typography.Text>
+            </Space>
             <Input
               size="small" allowClear placeholder="Search in grid…"
               prefix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />}
@@ -798,6 +814,28 @@ const ManageAssets: React.FC = () => {
             onChange: (p, ps) => { setPageSize(ps); runSearch(p, ps); },
           }}
         />
+        {displayedRows.length > 0 && (
+          <div style={{
+            display: 'flex', gap: 32, padding: '12px 20px',
+            borderTop: `1px solid ${REDWOOD.neutral200}`,
+            background: REDWOOD.neutral100,
+            borderRadius: '0 0 12px 12px',
+          }}>
+            <Statistic
+              title={<span style={{ fontSize: 12, color: REDWOOD.neutral500 }}>Total Cost ({displayedRows.length} assets)</span>}
+              value={totalCost}
+              precision={2}
+              valueStyle={{ fontSize: 15, fontWeight: 600, color: FA_COLOR }}
+              prefix={<span style={{ fontSize: 13 }}></span>}
+            />
+            <Statistic
+              title={<span style={{ fontSize: 12, color: REDWOOD.neutral500 }}>Total NBV</span>}
+              value={totalNbv}
+              precision={2}
+              valueStyle={{ fontSize: 15, fontWeight: 600, color: '#1677ff' }}
+            />
+          </div>
+        )}
       </Card>
     </div>
   );
