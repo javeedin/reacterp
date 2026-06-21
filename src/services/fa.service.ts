@@ -86,6 +86,7 @@ export interface AssetBook {
   methodCode: string;
   methodName: string;
   lifeInMonths: string;
+  prorateDate: string;
   conventionTypeId: string;
   rateAdjustmentFactor: string;
   deprnReserve: string;

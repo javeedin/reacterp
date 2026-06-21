@@ -246,7 +246,52 @@ const AssetTabContent: React.FC<{
                     <Descriptions.Item label="YTD Deprn">{formatCurrency(b.ytdDeprn)}</Descriptions.Item>
                     <Descriptions.Item label="NBV">{formatCurrency(b.nbv)}</Descriptions.Item>
                     <Descriptions.Item label="Method">{b.methodCode || b.methodName || '—'}</Descriptions.Item>
-                    <Descriptions.Item label="Life (Months)">{b.lifeInMonths || '—'}</Descriptions.Item>
+                    <Descriptions.Item label="Depreciation Method">{b.methodName || b.methodCode || '—'}</Descriptions.Item>
+                    <Descriptions.Item label="Life in Years" span={2}>
+                      {b.lifeInMonths
+                        ? <Space size={16}>
+                            <span><Text type="secondary" style={{ fontSize: 11 }}>Years</Text>{' '}<Text strong>{Math.floor(Number(b.lifeInMonths) / 12)}</Text></span>
+                            <span><Text type="secondary" style={{ fontSize: 11 }}>Months</Text>{' '}<Text strong>{Number(b.lifeInMonths) % 12}</Text></span>
+                          </Space>
+                        : '—'}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="Group Asset Number">{'—'}</Descriptions.Item>
+                    <Descriptions.Item label="Prorate Date">{fmtDate(b.prorateDate)}</Descriptions.Item>
+                    {(() => {
+                      const totalMonths = Number(b.lifeInMonths) || 0;
+                      const calcRemaining = (fromDate: string) => {
+                        if (!fromDate || !totalMonths) return null;
+                        const start = new Date(fromDate);
+                        const now = new Date();
+                        const elapsedMonths = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+                        const rem = Math.max(0, totalMonths - elapsedMonths);
+                        return { years: Math.floor(rem / 12), months: rem % 12 };
+                      };
+                      const remFromService = calcRemaining(b.datePlacedInService);
+                      const remFromProrate = calcRemaining(b.prorateDate);
+                      return (
+                        <>
+                          <Descriptions.Item label="Remaining Life From" span={2}>
+                            <Space direction="vertical" size={4}>
+                              {remFromService && (
+                                <Space size={16}>
+                                  <Text type="secondary" style={{ fontSize: 11 }}>In Service Date</Text>
+                                  <span><Text type="secondary" style={{ fontSize: 11 }}>Years</Text>{' '}<Text strong>{remFromService.years}</Text></span>
+                                  <span><Text type="secondary" style={{ fontSize: 11 }}>Months</Text>{' '}<Text strong>{remFromService.months}</Text></span>
+                                </Space>
+                              )}
+                              {remFromProrate && (
+                                <Space size={16}>
+                                  <Text type="secondary" style={{ fontSize: 11 }}>Prorate Date</Text>
+                                  <span><Text type="secondary" style={{ fontSize: 11 }}>Years</Text>{' '}<Text strong>{remFromProrate.years}</Text></span>
+                                  <span><Text type="secondary" style={{ fontSize: 11 }}>Months</Text>{' '}<Text strong>{remFromProrate.months}</Text></span>
+                                </Space>
+                              )}
+                            </Space>
+                          </Descriptions.Item>
+                        </>
+                      );
+                    })()}
                     <Descriptions.Item label="Depreciate">{b.depreciateFlag}</Descriptions.Item>
                     <Descriptions.Item label="Capitalize">{b.capitalizeFlag}</Descriptions.Item>
                     <Descriptions.Item label="Date Ineffective">{fmtDate(b.dateIneffective)}</Descriptions.Item>
