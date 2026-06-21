@@ -19,6 +19,7 @@ const FAModule                = lazy(() => import('./pages/fa/FAModule'));
 const ManageAssets            = lazy(() => import('./pages/fa/ManageAssets'));
 const CreateAsset             = lazy(() => import('./pages/fa/CreateAsset'));
 const Depreciation            = lazy(() => import('./pages/fa/Depreciation'));
+const CalculateDeprn          = lazy(() => import('./pages/fa/CalculateDeprn'));
 const FARetirements           = lazy(() => import('./pages/fa/Retirements'));
 const FAAssetCategories       = lazy(() => import('./pages/fa/setup/ManageCategories'));
 const FADeprnMethods          = lazy(() => import('./pages/fa/setup/DeprnMethods'));
@@ -211,8 +212,9 @@ function App() {
               <Route path="fa"             element={<FAModule />} />
               <Route path="fa/assets"       element={<ManageAssets />} />
               <Route path="fa/create-asset"  element={<CreateAsset />} />
-              <Route path="fa/depreciation"  element={<Depreciation />} />
-              <Route path="fa/retirements"        element={<FARetirements />} />
+              <Route path="fa/depreciation"         element={<Depreciation />} />
+              <Route path="fa/calculate-deprn"     element={<CalculateDeprn />} />
+              <Route path="fa/retirements"          element={<FARetirements />} />
               <Route path="fa/setup/categories"   element={<FAAssetCategories />} />
               <Route path="fa/setup/methods"       element={<FADeprnMethods />} />
               <Route path="fa/setup/locations"     element={<FALocations />} />

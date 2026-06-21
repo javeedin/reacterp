@@ -73,6 +73,11 @@ const taskMenuItems: MenuItemType[] = [
     color: REDWOOD.success, path: '/fa/create-asset',
   },
   {
+    key: 'calculate-deprn', icon: <LineChartOutlined />,
+    label: 'Calculate Depreciation', description: 'Run depreciation for the open period',
+    color: FA_COLOR, path: '/fa/calculate-deprn',
+  },
+  {
     key: 'depreciation', icon: <LineChartOutlined />,
     label: 'Depreciation Workbench', description: 'Review depreciation by period',
     color: FA_COLOR, path: '/fa/depreciation',
