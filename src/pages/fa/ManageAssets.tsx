@@ -466,6 +466,7 @@ const ManageAssets: React.FC = () => {
     setLoading(true);
 
     const q = new URLSearchParams();
+    if (vals.assetNumber)  q.append('assetNumber',  vals.assetNumber);
     if (vals.description)  q.append('description',  vals.description);
     if (vals.category)     q.append('category',     vals.category);
     if (vals.bookTypeCode) q.append('bookTypeCode', vals.bookTypeCode);
