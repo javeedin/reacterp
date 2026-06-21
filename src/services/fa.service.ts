@@ -40,6 +40,7 @@ export interface AssetRecord {
   retiredFlag: string;   // 'YES' if no active book entry, else 'NO'
   // Legacy / not available from current tables — kept optional for UI compat
   assetNumber?: string;
+  asset_number?: string;  // snake_case from API response
   assetType?: string;
   categoryId?: string;
   tagNumber?: string;

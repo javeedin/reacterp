@@ -572,7 +572,7 @@ const ManageAssets: React.FC = () => {
         const q = gridSearch.toLowerCase();
         return (
           (r.description   || '').toLowerCase().includes(q) ||
-          (r.assetNumber   || '').toLowerCase().includes(q) ||
+          (r.asset_number  || r.assetNumber || '').toLowerCase().includes(q) ||
           (r.assetId       || '').toLowerCase().includes(q) ||
           (r.bookTypeCode  || '').toLowerCase().includes(q) ||
           (r.assetType     || '').toLowerCase().includes(q)
@@ -583,7 +583,7 @@ const ManageAssets: React.FC = () => {
   // Export assets grid to Excel
   const exportAssetsToExcel = () => {
     const data = displayedRows.map(r => ({
-      'Asset Number':      r.assetNumber || r.assetId,
+      'Asset Number':      r.asset_number || r.assetNumber || r.assetId,
       'Description':       r.description,
       'Asset Type':        assetTypeLabel(r.assetType || ''),
       'Book':              r.bookTypeCode,
@@ -607,11 +607,11 @@ const ManageAssets: React.FC = () => {
   // ── Table columns ─────────────────────────────────────────────────────────────
   const columns: ColumnsType<AssetRecord> = [
     {
-      title: 'Asset Number', dataIndex: 'assetNumber', key: 'assetNumber', width: 130,
-      sorter: (a, b) => (a.assetNumber || a.assetId).localeCompare(b.assetNumber || b.assetId),
-      render: (v, record) => (
+      title: 'Asset Number', key: 'assetNumber', width: 130,
+      sorter: (a, b) => (a.asset_number || a.assetNumber || a.assetId).localeCompare(b.asset_number || b.assetNumber || b.assetId),
+      render: (_v, record) => (
         <Button type="link" style={{ padding: 0, fontWeight: 600 }} onClick={(e) => { e.stopPropagation(); openAssetTab(record); }}>
-          {v || record.assetId}
+          {record.asset_number || record.assetNumber || record.assetId}
         </Button>
       ),
     },
