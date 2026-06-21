@@ -160,12 +160,12 @@ BEGIN
     APEX_JSON.CLOSE_ARRAY;
     APEX_JSON.CLOSE_OBJECT;
     :status := 200;
-    :result := APEX_JSON.GET_CLOB_OUTPUT;
+    HTP.P(APEX_JSON.GET_CLOB_OUTPUT);
     APEX_JSON.FREE_OUTPUT;
 EXCEPTION
     WHEN OTHERS THEN
         :status := 500;
-        :result := '{"success":false,"error":"' || REPLACE(SQLERRM,'"','\"') || '"}';
+        HTP.P('{"success":false,"error":"' || REPLACE(SQLERRM,'"','\"') || '"}');
 END;
 ]',
         p_mimes_allowed => NULL
