@@ -30,14 +30,6 @@ const REDWOOD = {
 };
 const FA_COLOR = '#CA7700';
 
-// Oracle-style status cards (stubs — counts from deprn period or zero)
-const STATUS_CARDS = [
-  { key: 'additions',   label: 'Additions',   color: '#1677ff' },
-  { key: 'adjustments', label: 'Adjustments', color: '#1677ff' },
-  { key: 'transfers',   label: 'Transfers',   color: '#1677ff' },
-  { key: 'retirements', label: 'Retirements', color: '#D4620A' },
-];
-
 const CalculateDeprn: React.FC = () => {
   const [bookControls, setBookControls] = useState<BookControlRecord[]>([]);
   const [selectedBook, setSelectedBook] = useState<string>('');
@@ -136,7 +128,7 @@ const CalculateDeprn: React.FC = () => {
               <Tooltip title="Refresh">
                 <Button icon={<ReloadOutlined />} onClick={() => loadPeriod(selectedBook)} loading={loading} />
               </Tooltip>
-              {lastApiUrl && (
+              {selectedBook && (
                 <Tooltip title="Show API URL">
                   <Button
                     icon={<ApiOutlined />}
@@ -146,7 +138,7 @@ const CalculateDeprn: React.FC = () => {
                       width: 860,
                       content: (
                         <Typography.Text copyable style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>
-                          {lastApiUrl}
+                          {lastApiUrl || `${APEX_DB_CONFIG.baseUrl}/fa/deprn-periods/current?bookTypeCode=${encodeURIComponent(selectedBook)}`}
                         </Typography.Text>
                       ),
                     })}
@@ -162,24 +154,9 @@ const CalculateDeprn: React.FC = () => {
             <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>
           ) : (
             <>
-              {/* Status cards row — Oracle-style */}
+              {/* Depreciation period card */}
               <Row gutter={[12, 12]} style={{ marginBottom: 20 }}>
-                {STATUS_CARDS.map(card => (
-                  <Col key={card.key} xs={12} sm={6} md={4}>
-                    <Card
-                      size="small"
-                      style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, textAlign: 'center', minHeight: 120 }}
-                      styles={{ body: { padding: '16px 12px' } }}
-                    >
-                      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>{card.label}</Text>
-                      <div style={{ fontSize: 32, fontWeight: 700, color: card.color, lineHeight: 1 }}>0</div>
-                      <Text type="secondary" style={{ fontSize: 11 }}>Incomplete</Text>
-                    </Card>
-                  </Col>
-                ))}
-
-                {/* Depreciation period card — highlighted */}
-                <Col xs={12} sm={6} md={4}>
+                <Col xs={12} sm={8} md={6}>
                   <Card
                     size="small"
                     style={{
