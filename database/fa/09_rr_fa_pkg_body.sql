@@ -53,9 +53,12 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         FROM   RR_FA_ADDITIONS_TL a
         LEFT JOIN (SELECT * FROM RR_FA_BOOKS WHERE DATE_INEFFECTIVE IS NULL) b
                ON a.ASSET_ID = b.ASSET_ID
+        LEFT JOIN RR_FA_ADDITIONS fa
+               ON fa.ASSET_ID = a.ASSET_ID
         WHERE  a.LANGUAGE = 'US'
-        AND    (p_description IS NULL OR UPPER(a.DESCRIPTION) LIKE UPPER('%' || p_description || '%'))
-        AND    (p_book_type   IS NULL OR b.BOOK_TYPE_CODE = p_book_type);
+        AND    (p_description  IS NULL OR UPPER(a.DESCRIPTION)  LIKE UPPER('%' || p_description  || '%'))
+        AND    (p_book_type    IS NULL OR b.BOOK_TYPE_CODE       =    p_book_type)
+        AND    (p_asset_number IS NULL OR fa.ASSET_NUMBER        LIKE '%' || p_asset_number || '%');
 
         -- JSON header — no envelope, just totalCount + items
         p_result := '{"totalCount":' || v_total
@@ -64,6 +67,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         -- Rows — same query confirmed working in step 2
         FOR r IN (
             SELECT a.ASSET_ID,
+                   fa.ASSET_NUMBER,
                    a.DESCRIPTION,
                    a.CREATION_DATE,
                    a.CREATED_BY,
@@ -84,6 +88,8 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
             FROM   RR_FA_ADDITIONS_TL a
             LEFT JOIN (SELECT * FROM RR_FA_BOOKS WHERE DATE_INEFFECTIVE IS NULL) b
                    ON a.ASSET_ID = b.ASSET_ID
+            LEFT JOIN RR_FA_ADDITIONS fa
+                   ON fa.ASSET_ID = a.ASSET_ID
             LEFT JOIN (
                 SELECT ds1.ASSET_ID, ds1.BOOK_TYPE_CODE, ds1.DEPRN_RESERVE
                 FROM   RR_FA_DEPRN_SUMMARY ds1
@@ -93,8 +99,9 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                     AND    ds2.BOOK_TYPE_CODE = ds1.BOOK_TYPE_CODE)
             ) ds ON a.ASSET_ID = ds.ASSET_ID AND b.BOOK_TYPE_CODE = ds.BOOK_TYPE_CODE
             WHERE  a.LANGUAGE = 'US'
-            AND    (p_description IS NULL OR UPPER(a.DESCRIPTION) LIKE UPPER('%' || p_description || '%'))
-            AND    (p_book_type   IS NULL OR b.BOOK_TYPE_CODE = p_book_type)
+            AND    (p_description  IS NULL OR UPPER(a.DESCRIPTION)  LIKE UPPER('%' || p_description  || '%'))
+            AND    (p_book_type    IS NULL OR b.BOOK_TYPE_CODE       =    p_book_type)
+            AND    (p_asset_number IS NULL OR fa.ASSET_NUMBER        LIKE '%' || p_asset_number || '%')
             ORDER BY a.ASSET_ID
             OFFSET v_offset ROWS FETCH NEXT v_limit ROWS ONLY
         ) LOOP
@@ -104,6 +111,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
             p_result := p_result
                 || '{'
                 || '"assetId":'             || jstr(r.ASSET_ID)
+                || ',"asset_number":'       || jstr(r.ASSET_NUMBER)
                 || ',"description":'        || jstr(r.DESCRIPTION)
                 || ',"creationDate":'       || jstr(r.CREATION_DATE)
                 || ',"createdBy":'          || jstr(r.CREATED_BY)
@@ -138,6 +146,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         p_result      OUT CLOB
     ) IS
         v_asset_id           VARCHAR2(400);
+        v_asset_number       VARCHAR2(400);
         v_description        VARCHAR2(400);
         v_language           VARCHAR2(400);
         v_source_lang        VARCHAR2(400);
@@ -167,7 +176,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         v_convention_type_id VARCHAR2(400);
         v_retirement_id      VARCHAR2(400);
     BEGIN
-        SELECT tl.ASSET_ID, tl.DESCRIPTION, tl.LANGUAGE, tl.SOURCE_LANG,
+        SELECT tl.ASSET_ID, fa.ASSET_NUMBER, tl.DESCRIPTION, tl.LANGUAGE, tl.SOURCE_LANG,
                tl.CREATION_DATE, tl.CREATED_BY, tl.LAST_UPDATE_DATE, tl.LAST_UPDATED_BY,
                b.BOOK_TYPE_CODE, b.DATE_PLACED_IN_SERVICE, b.DATE_EFFECTIVE,
                b.DEPRN_START_DATE, b.COST, b.ORIGINAL_COST, b.ADJUSTED_COST,
@@ -176,7 +185,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                b.PRORATE_DATE, b.RATE_ADJUSTMENT_FACTOR,
                b.SALVAGE_TYPE, b.DEPRN_LIMIT_TYPE, b.CIP_COST,
                b.METHOD_ID, b.CONVENTION_TYPE_ID, b.RETIREMENT_ID
-        INTO   v_asset_id, v_description, v_language, v_source_lang,
+        INTO   v_asset_id, v_asset_number, v_description, v_language, v_source_lang,
                v_creation_date, v_created_by, v_last_update_date, v_last_updated_by,
                v_book_type_code, v_date_placed, v_date_effective,
                v_deprn_start_date, v_cost, v_original_cost, v_adjusted_cost,
@@ -188,12 +197,15 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         FROM   RR_FA_ADDITIONS_TL tl
         LEFT JOIN RR_FA_BOOKS b
                ON b.ASSET_ID = tl.ASSET_ID AND b.DATE_INEFFECTIVE IS NULL
+        LEFT JOIN RR_FA_ADDITIONS fa
+               ON fa.ASSET_ID = tl.ASSET_ID
         WHERE  tl.ASSET_ID = p_asset_id
         AND    tl.LANGUAGE = 'US'
         AND    ROWNUM = 1;
 
         p_result := '{"success":true'
             || ',"assetId":'             || jstr(v_asset_id)
+            || ',"asset_number":'        || jstr(v_asset_number)
             || ',"description":'         || jstr(v_description)
             || ',"language":'            || jstr(v_language)
             || ',"sourceLang":'          || jstr(v_source_lang)

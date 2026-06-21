@@ -175,6 +175,7 @@ const AssetTabContent: React.FC<{
             styles={{ label: { fontWeight: 500, width: 160, background: REDWOOD.neutral100 } }}
             style={{ marginTop: 4 }}
           >
+            <Descriptions.Item label="Asset Number">{asset.asset_number || asset.assetNumber || asset.assetId}</Descriptions.Item>
             <Descriptions.Item label="Asset ID">{asset.assetId}</Descriptions.Item>
             <Descriptions.Item label="Asset Type">{assetTypeLabel(detail?.assetType || asset.assetType || '')}</Descriptions.Item>
             <Descriptions.Item label="Description" span={2}>{detail?.description || asset.description}</Descriptions.Item>
@@ -376,7 +377,7 @@ const AssetTabContent: React.FC<{
           <div>
             <Text type="secondary" style={{ fontSize: 11 }}>Asset</Text>
             {' '}
-            <Text strong style={{ fontSize: 15, color: FA_COLOR }}>{asset.assetId}</Text>
+            <Text strong style={{ fontSize: 15, color: FA_COLOR }}>{asset.asset_number || asset.assetNumber || asset.assetId}</Text>
           </div>
           <span style={{ color: REDWOOD.neutral300 }}>|</span>
           <Text style={{ fontSize: 13, color: REDWOOD.neutral900 }}>{asset.description}</Text>
