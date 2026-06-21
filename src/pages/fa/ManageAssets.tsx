@@ -87,10 +87,16 @@ const AssetTabContent: React.FC<{
   const fyOptions     = Array.from(new Set(deprn.map(r => r.fiscalYear).filter(Boolean))).sort((a, b) => b.localeCompare(a));
   const periodOptions = Array.from(new Set(deprn.map(r => r.periodName).filter(Boolean))).sort((a, b) => b.localeCompare(a));
 
-  const filteredDeprn = deprn.filter(r =>
-    (!deprnFY     || r.fiscalYear  === deprnFY) &&
-    (!deprnPeriod || r.periodName  === deprnPeriod)
-  );
+  const filteredDeprn = deprn
+    .filter(r =>
+      (!deprnFY     || r.fiscalYear  === deprnFY) &&
+      (!deprnPeriod || r.periodName  === deprnPeriod)
+    )
+    .sort((a, b) => {
+      const fyDiff = (a.fiscalYear || '').localeCompare(b.fiscalYear || '');
+      if (fyDiff !== 0) return fyDiff;
+      return (Number(a.periodNum) || 0) - (Number(b.periodNum) || 0);
+    });
 
   const exportDeprnToExcel = () => {
     const data = filteredDeprn.map(r => ({
@@ -402,6 +408,20 @@ const AssetTabContent: React.FC<{
               scroll={{ x: 1000 }}
               pagination={{ pageSize: 15, showSizeChanger: true, pageSizeOptions: ['15','25','50'] }}
               locale={{ emptyText: 'No depreciation records' }}
+              summary={(rows) => {
+                const total = rows.reduce((s, r) => s + (parseFloat(r.deprnAmount) || 0), 0);
+                return (
+                  <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 600 }}>
+                    <Table.Summary.Cell index={0} colSpan={4}>
+                      <Text strong style={{ fontSize: 12 }}>Total ({rows.length} periods)</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={4} align="right">
+                      <Text strong style={{ color: FA_COLOR }}>{formatCurrency(String(total))}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={5} colSpan={4} />
+                  </Table.Summary.Row>
+                );
+              }}
             />
           </>
         ),
