@@ -191,6 +191,53 @@ const AssetTabContent: React.FC<{
             <Descriptions.Item label="Capitalize">{asset.capitalizeFlag || '—'}</Descriptions.Item>
             <Descriptions.Item label="Status">{statusTag(asset.retiredFlag)}</Descriptions.Item>
             <Descriptions.Item label="Date Ineffective">{fmtDate(asset.dateIneffective)}</Descriptions.Item>
+            {books[0] && (() => {
+              const b0 = books[0];
+              const totalMonths = Number(b0.lifeInMonths) || 0;
+              const calcRemaining = (fromDate: string) => {
+                if (!fromDate || !totalMonths) return null;
+                const start = new Date(fromDate);
+                const now = new Date();
+                const elapsed = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+                const rem = Math.max(0, totalMonths - elapsed);
+                return { years: Math.floor(rem / 12), months: rem % 12 };
+              };
+              const remSvc    = calcRemaining(b0.datePlacedInService);
+              const remProrate = calcRemaining(b0.prorateDate);
+              return (
+                <>
+                  <Descriptions.Item label="Depreciation Method">{b0.methodName || b0.methodCode || '—'}</Descriptions.Item>
+                  <Descriptions.Item label="Prorate Date">{fmtDate(b0.prorateDate)}</Descriptions.Item>
+                  <Descriptions.Item label="Life in Years" span={2}>
+                    {totalMonths
+                      ? <Space size={16}>
+                          <span><Text type="secondary" style={{ fontSize: 11 }}>Years</Text>{' '}<Text strong>{Math.floor(totalMonths / 12)}</Text></span>
+                          <span><Text type="secondary" style={{ fontSize: 11 }}>Months</Text>{' '}<Text strong>{totalMonths % 12}</Text></span>
+                        </Space>
+                      : '—'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Group Asset Number">{'—'}</Descriptions.Item>
+                  <Descriptions.Item label="Remaining Life From" span={2}>
+                    <Space direction="vertical" size={4}>
+                      {remSvc && (
+                        <Space size={16}>
+                          <Text type="secondary" style={{ fontSize: 11, width: 100 }}>In Service Date</Text>
+                          <span><Text type="secondary" style={{ fontSize: 11 }}>Years</Text>{' '}<Text strong>{remSvc.years}</Text></span>
+                          <span><Text type="secondary" style={{ fontSize: 11 }}>Months</Text>{' '}<Text strong>{remSvc.months}</Text></span>
+                        </Space>
+                      )}
+                      {remProrate && (
+                        <Space size={16}>
+                          <Text type="secondary" style={{ fontSize: 11, width: 100 }}>Prorate Date</Text>
+                          <span><Text type="secondary" style={{ fontSize: 11 }}>Years</Text>{' '}<Text strong>{remProrate.years}</Text></span>
+                          <span><Text type="secondary" style={{ fontSize: 11 }}>Months</Text>{' '}<Text strong>{remProrate.months}</Text></span>
+                        </Space>
+                      )}
+                    </Space>
+                  </Descriptions.Item>
+                </>
+              );
+            })()}
           </Descriptions>
         ),
     },
