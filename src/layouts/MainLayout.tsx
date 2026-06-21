@@ -18,6 +18,7 @@ import {
   GlobalOutlined,
   BookOutlined,
   WarningOutlined,
+  RobotOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, Link } from 'react-router-dom';
 import { ShowAndTellPanel } from '../features/showAndTell';
@@ -31,6 +32,7 @@ import GlValidationErrorsDrawer from '../components/GlValidationErrorsDrawer';
 import GlobalMenuSearch from '../components/GlobalMenuSearch';
 import NotificationPanel from '../components/NotificationPanel';
 import ApprovalToastWatcher from '../components/ApprovalToastWatcher';
+import Autopilot from '../components/Autopilot';
 import type { MenuProps } from 'antd';
 
 // Type for BeforeInstallPromptEvent
@@ -69,6 +71,7 @@ const MainLayout: React.FC = () => {
   const [showProfile, setShowProfile] = useState(false);
   const [showAndTellOpen, setShowAndTellOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [autopilotOpen, setAutopilotOpen] = useState(false);
   const { unreadCount } = useNotifications();
 
   // Listen for PWA install prompt
@@ -302,6 +305,24 @@ const MainLayout: React.FC = () => {
             </Badge>
           </Tooltip>
           <SupportTicketButton />
+          <Tooltip title="Autopilot Assistant">
+            <Button
+              type="text"
+              icon={<RobotOutlined style={{ fontSize: 18 }} />}
+              onClick={() => setAutopilotOpen(o => !o)}
+              style={{
+                color: '#1677ff',
+                background: autopilotOpen ? 'rgba(22,119,255,0.12)' : 'transparent',
+                border: 'none',
+                width: 36,
+                height: 36,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: 8,
+              }}
+            />
+          </Tooltip>
           <Tooltip title={user?.name || 'User Profile'}>
             <Dropdown menu={{ items: userMenuItems }} placement="bottomRight" trigger={['click']}>
               <Avatar
@@ -406,6 +427,7 @@ const MainLayout: React.FC = () => {
       <GlValidationErrorsDrawer />
       <NotificationPanel open={notifOpen} onClose={() => setNotifOpen(false)} />
       <ApprovalToastWatcher onOpenPanel={() => setNotifOpen(true)} />
+      <Autopilot externalOpen={autopilotOpen} onExternalClose={() => setAutopilotOpen(false)} />
     </Layout>
   );
 };

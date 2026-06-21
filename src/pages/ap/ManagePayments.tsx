@@ -72,7 +72,6 @@ import {
 import { Link, useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import FloatingMenu from '../../components/FloatingMenu';
-import Autopilot from '../../components/Autopilot';
 import AccountSelector from '../../components/AccountSelector';
 import PaymentDetail from './PaymentDetail';
 import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../../config/api.config';
@@ -6148,7 +6147,7 @@ const ManagePayments: React.FC = () => {
         ) : null}
       </Modal>
 
-      <Autopilot module="ap" />
+      
       <FloatingMenu />
 
       {/* ── Create Payment — API panel drawer ─────────────────────────────── */}
@@ -6450,7 +6449,7 @@ const ManagePayments: React.FC = () => {
         lockedFirstSegment={derivedCompany || undefined}
       />
 
-      <Autopilot module="ap" />
+      
       <FloatingMenu />
     </Layout>
   );

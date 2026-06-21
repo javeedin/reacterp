@@ -3,7 +3,6 @@ import { Layout, Card, Table, Typography, Breadcrumb, Tag, Input, Space } from '
 import type { ColumnsType } from 'antd/es/table';
 import { HomeOutlined, SearchOutlined, ScheduleOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import Autopilot from '../../../components/Autopilot';
 import { getMethods } from '../../../services/fa.service';
 import type { MethodRecord } from '../../../services/fa.service';
 
@@ -76,7 +75,7 @@ const DeprnMethods: React.FC = () => {
           </Card>
         </div>
       </Content>
-      <Autopilot />
+      
     </Layout>
   );
 };

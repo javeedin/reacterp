@@ -3,7 +3,6 @@ import { Layout, Card, Table, Typography, Breadcrumb, Input, Space } from 'antd'
 import type { ColumnsType } from 'antd/es/table';
 import { HomeOutlined, SearchOutlined, EnvironmentOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import Autopilot from '../../../components/Autopilot';
 import { getLocations } from '../../../services/fa.service';
 import type { LocationRecord } from '../../../services/fa.service';
 
@@ -72,7 +71,7 @@ const Locations: React.FC = () => {
           </Card>
         </div>
       </Content>
-      <Autopilot />
+      
     </Layout>
   );
 };

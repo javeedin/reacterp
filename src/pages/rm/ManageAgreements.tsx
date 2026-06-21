@@ -14,7 +14,6 @@ import {
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { APEX_DB_CONFIG } from '../../config/api.config';
-import Autopilot from '../../components/Autopilot';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -884,7 +883,7 @@ const ManageAgreements: React.FC = () => {
         </Form>
       </Modal>
 
-      <Autopilot />
+      
     </Layout>
   );
 };

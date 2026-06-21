@@ -60,7 +60,6 @@ const REDWOOD = {
 
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import FloatingMenu from '../../components/FloatingMenu';
-import Autopilot from '../../components/Autopilot';
 import {
   checkAccountingExists,
   createAccounting,
@@ -1662,7 +1661,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
           border-bottom: 2px solid ${REDWOOD.primary} !important;
         }
       `}</style>
-      <Autopilot module="ap" />
+      
       <FloatingMenu />
     </div>
   );

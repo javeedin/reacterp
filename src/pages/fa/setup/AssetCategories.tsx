@@ -3,7 +3,6 @@ import { Layout, Card, Table, Typography, Breadcrumb, Tag, Input, Space } from '
 import type { ColumnsType } from 'antd/es/table';
 import { HomeOutlined, SearchOutlined, TagOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import Autopilot from '../../../components/Autopilot';
 import { getCategories } from '../../../services/fa.service';
 import type { CategoryRecord } from '../../../services/fa.service';
 
@@ -81,7 +80,7 @@ const AssetCategories: React.FC = () => {
           </Card>
         </div>
       </Content>
-      <Autopilot />
+      
     </Layout>
   );
 };

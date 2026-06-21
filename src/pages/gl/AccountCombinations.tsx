@@ -29,7 +29,6 @@ import {
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../../config/api.config';
-import Autopilot from '../../components/Autopilot';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -648,7 +647,7 @@ const AccountCombinations: React.FC = () => {
       </Content>
 
       {/* Autopilot Assistant */}
-      <Autopilot />
+      
     </Layout>
   );
 };

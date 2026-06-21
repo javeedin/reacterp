@@ -51,7 +51,6 @@ import {
   CaretRightOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import Autopilot from '../../components/Autopilot';
 import * as plService from '../../services/pl-templates.service';
 
 const { Content } = Layout;
@@ -2004,7 +2003,7 @@ const IncomeStatementTemplates: React.FC = () => {
       </Content>
 
       {/* Autopilot */}
-      <Autopilot />
+      
     </Layout>
   );
 };

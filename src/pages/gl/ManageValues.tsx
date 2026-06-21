@@ -23,7 +23,6 @@ import {
 } from '@ant-design/icons';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { ORACLE_FUSION_CONFIG, PROXY_CONFIG } from '../../config/api.config';
-import Autopilot from '../../components/Autopilot';
 
 // Detect if running in Electron
 const isElectron = () => {
@@ -436,7 +435,7 @@ const ManageValues: React.FC = () => {
       </Content>
 
       {/* Autopilot Assistant */}
-      <Autopilot />
+      
 
       {/* Compact table styles */}
       <style>{`

@@ -10,7 +10,6 @@ import {
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import FloatingMenu from '../../components/FloatingMenu';
-import Autopilot from '../../components/Autopilot';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -159,7 +158,7 @@ const ARModule: React.FC = () => {
 
       </Content>
       <FloatingMenu />
-      <Autopilot />
+      
     </Layout>
   );
 };

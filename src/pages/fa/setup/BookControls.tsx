@@ -3,7 +3,6 @@ import { Layout, Card, Table, Typography, Breadcrumb, Tag, Input, Space } from '
 import type { ColumnsType } from 'antd/es/table';
 import { HomeOutlined, SearchOutlined, FileTextOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import Autopilot from '../../../components/Autopilot';
 import { getBookControls } from '../../../services/fa.service';
 import type { BookControlRecord } from '../../../services/fa.service';
 
@@ -95,7 +94,7 @@ const BookControls: React.FC = () => {
           </Card>
         </div>
       </Content>
-      <Autopilot />
+      
     </Layout>
   );
 };

@@ -10,7 +10,6 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
 import type { ColumnsType } from 'antd/es/table';
 import FloatingMenu from '../../components/FloatingMenu';
-import Autopilot from '../../components/Autopilot';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 
 const { Content } = Layout;
@@ -373,7 +372,7 @@ const InvoiceDetail: React.FC = () => {
         </Card>
       </Content>
       <FloatingMenu />
-      <Autopilot />
+      
     </Layout>
   );
 };

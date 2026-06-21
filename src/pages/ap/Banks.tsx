@@ -44,7 +44,6 @@ import {
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { ORACLE_FUSION_CONFIG } from '../../config/api.config';
-import Autopilot from '../../components/Autopilot';
 import FloatingMenu from '../../components/FloatingMenu';
 import AccountSelector from '../../components/AccountSelector';
 
@@ -1690,7 +1689,7 @@ const Banks: React.FC = () => {
       </Modal>
 
       {/* Autopilot Assistant */}
-      <Autopilot module="ap" />
+      
       <FloatingMenu />
     </Layout>
   );

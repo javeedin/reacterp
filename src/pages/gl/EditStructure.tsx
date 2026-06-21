@@ -23,7 +23,6 @@ import {
 } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
-import Autopilot from '../../components/Autopilot';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -360,7 +359,7 @@ const EditStructure: React.FC = () => {
       </Content>
 
       {/* Autopilot Assistant */}
-      <Autopilot />
+      
 
       {/* Compact table styles */}
       <style>{`

@@ -11,7 +11,6 @@ import {
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
-import Autopilot from '../../components/Autopilot';
 import {
   getRetirements, getBookControls, retireAsset, formatCurrency,
 } from '../../services/fa.service';
@@ -342,7 +341,7 @@ const Retirements: React.FC = () => {
         </Modal>
       </Content>
 
-      <Autopilot />
+      
     </Layout>
   );
 };

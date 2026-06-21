@@ -608,7 +608,7 @@ const Autopilot: React.FC<AutopilotProps> = ({ module = 'gl', externalOpen, onEx
           ref={panelRef}
           style={{
             position: 'fixed',
-            ...(isControlled ? { right: 76, bottom: 80 } : { left: 24, bottom: 100 }),
+            ...(isControlled ? { right: 16, top: 56 } : { left: 24, bottom: 100 }),
             width: 420,
             height: 520,
             background: REDWOOD.surface,

@@ -12,7 +12,6 @@ import type { ColumnsType } from 'antd/es/table';
 import type { TableProps } from 'antd';
 import dayjs from 'dayjs';
 import FloatingMenu from '../../components/FloatingMenu';
-import Autopilot from '../../components/Autopilot';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 
 const { Content } = Layout;
@@ -667,7 +666,7 @@ const ManageInvoices: React.FC = () => {
       </Modal>
 
       <FloatingMenu />
-      <Autopilot />
+      
     </Layout>
   );
 };

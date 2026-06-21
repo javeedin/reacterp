@@ -9,7 +9,6 @@ import {
   DatabaseOutlined, DollarOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import Autopilot from '../../components/Autopilot';
 import {
   getDeprnWorkbench, getBookControls, getDeprnPeriods,
   formatCurrency,
@@ -263,7 +262,7 @@ const Depreciation: React.FC = () => {
         </div>
       </Content>
 
-      <Autopilot />
+      
     </Layout>
   );
 };

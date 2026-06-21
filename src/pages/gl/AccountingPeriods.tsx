@@ -44,7 +44,6 @@ import {
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { ORACLE_FUSION_CONFIG, APEX_DB_CONFIG } from '../../config/api.config';
-import Autopilot from '../../components/Autopilot';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -1508,7 +1507,7 @@ const AccountingPeriods: React.FC = () => {
       </Content>
 
       {/* Autopilot Assistant */}
-      <Autopilot />
+      
     </Layout>
   );
 };

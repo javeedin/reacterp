@@ -28,7 +28,6 @@ import {
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { Module } from '../types';
-import Autopilot from '../components/Autopilot';
 
 const { Title, Text } = Typography;
 
@@ -820,7 +819,7 @@ const Home: React.FC = () => {
       )}
 
       {/* Autopilot Assistant */}
-      <Autopilot />
+      
 
       {/* CSS Animations */}
       <style>{`

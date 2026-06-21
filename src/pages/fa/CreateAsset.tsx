@@ -10,7 +10,6 @@ import {
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
-import Autopilot from '../../components/Autopilot';
 import {
   createAsset, getCategories, getMethods, getLocations, getBookControls,
   assetTypeLabel, formatCurrency,
@@ -438,7 +437,7 @@ const CreateAsset: React.FC = () => {
         </div>
       </Content>
 
-      <Autopilot />
+      
     </Layout>
   );
 };

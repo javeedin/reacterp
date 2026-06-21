@@ -47,7 +47,6 @@ import {
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import { ORACLE_FUSION_CONFIG, PROXY_CONFIG } from '../../config/api.config';
-import Autopilot from '../../components/Autopilot';
 import dayjs from 'dayjs';
 
 // Detect if running in Electron
@@ -1154,7 +1153,7 @@ const COASegments: React.FC = () => {
         </div>
       </Content>
 
-      <Autopilot />
+      
 
       {/* ── Sync All Modal ─────────────────────────────────────────────── */}
       <Modal

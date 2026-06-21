@@ -83,7 +83,6 @@ import { syncARInstallmentNotes, type ARInstallmentNotesProgress } from '../../s
 import { syncARDistributions, type ARDistributionsSyncProgress } from '../../services/ar-invoice-distributions-sync.service';
 import { syncAllARLookups, type ARAllLookupsProgress } from '../../services/ar-lookups-sync.service';
 import { useSyncWorker, type WorkerSyncProgress, type WorkerLog } from '../../hooks/useSyncWorker';
-import Autopilot from '../../components/Autopilot';
 import { useElectron, useElectronBackgroundSync } from '../../hooks/useElectron';
 
 // Icon imports for AP
@@ -7726,7 +7725,7 @@ const SyncData: React.FC = () => {
       </Content>
 
       {/* Autopilot Assistant */}
-      <Autopilot />
+      
 
       {/* GL Headers API Debug Modal */}
       <Modal

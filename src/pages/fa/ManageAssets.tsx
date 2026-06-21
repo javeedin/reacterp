@@ -14,7 +14,6 @@ import {
   FilterOutlined, DownloadOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
-import Autopilot from '../../components/Autopilot';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
   searchAssets, getAssetDetail, getAssetBooks, getAssetDeprn,
@@ -1084,7 +1083,7 @@ const ManageAssets: React.FC = () => {
         </Modal>
       </Content>
 
-      <Autopilot />
+      
     </Layout>
   );
 };

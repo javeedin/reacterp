@@ -44,7 +44,6 @@ import {
   PaperClipOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
-import Autopilot from '../../components/Autopilot';
 import FloatingMenu from '../../components/FloatingMenu';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 
@@ -842,7 +841,7 @@ const APModule: React.FC = () => {
       </Modal>
 
       {/* Autopilot Assistant */}
-      <Autopilot module="ap" />
+      
       <FloatingMenu />
     </Layout>
   );

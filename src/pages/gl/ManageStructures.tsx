@@ -18,7 +18,6 @@ import {
   EditOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import Autopilot from '../../components/Autopilot';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -298,7 +297,7 @@ const ManageStructures: React.FC = () => {
       </Content>
 
       {/* Autopilot Assistant */}
-      <Autopilot />
+      
 
       {/* Compact table styles */}
       <style>{`

@@ -19,7 +19,6 @@ import {
   AppstoreOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
-import Autopilot from '../../components/Autopilot';
 import FloatingMenu from '../../components/FloatingMenu';
 
 const { Content } = Layout;
@@ -202,7 +201,7 @@ const RMModule: React.FC = () => {
           </Col>
         </Row>
       </Content>
-      <Autopilot />
+      
       <FloatingMenu />
     </Layout>
   );

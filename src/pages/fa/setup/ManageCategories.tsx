@@ -12,7 +12,6 @@ import {
   AccountBookOutlined, DownloadOutlined, TagsOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import Autopilot from '../../../components/Autopilot';
 import {
   searchCategories, getCategoryDetail, getCategoryBooks, getCategoryBookDefaults,
 } from '../../../services/fa.service';
@@ -780,7 +779,7 @@ const ManageCategories: React.FC = () => {
           ]}
         />
       </Content>
-      <Autopilot />
+      
     </Layout>
   );
 };

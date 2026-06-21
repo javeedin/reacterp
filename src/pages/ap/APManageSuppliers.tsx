@@ -67,7 +67,6 @@ import {
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import FloatingMenu from '../../components/FloatingMenu';
-import Autopilot from '../../components/Autopilot';
 import InvoiceDetail from './InvoiceDetail';
 import type { ColumnsType } from 'antd/es/table';
 
@@ -2824,7 +2823,7 @@ const ManageSuppliers: React.FC = () => {
         </Modal>
 
         <FloatingMenu />
-        <Autopilot module="ap" />
+        
       </Content>
     </Layout>
   );

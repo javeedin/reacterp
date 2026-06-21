@@ -26,7 +26,6 @@ import {
   DollarOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
-import Autopilot from '../../components/Autopilot';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -620,7 +619,7 @@ const FAModule: React.FC = () => {
         </div>
       </Content>
 
-      <Autopilot />
+      
 
       <style>{`
         @keyframes slideIn {

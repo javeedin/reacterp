@@ -29,7 +29,6 @@ import {
   RobotOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
-import Autopilot from '../../components/Autopilot';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -731,7 +730,7 @@ const GLModule: React.FC = () => {
       </Content>
 
       {/* Autopilot Assistant */}
-      <Autopilot />
+      
 
       {/* CSS Animations */}
       <style>{`

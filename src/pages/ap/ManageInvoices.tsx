@@ -79,7 +79,6 @@ import { useAuth } from '../../context/AuthContext';
 import { useShowAndTell } from '../../features/showAndTell';
 import type { ColumnsType } from 'antd/es/table';
 import FloatingMenu from '../../components/FloatingMenu';
-import Autopilot from '../../components/Autopilot';
 import InvoiceDetail from './InvoiceDetail';
 import CreateInvoice from './CreateInvoice';
 import type { InvoiceInitialData } from './CreateInvoice';
@@ -3942,7 +3941,7 @@ const ManageInvoices: React.FC = () => {
       </Modal>
 
       </Content>
-      <Autopilot module="ap" />
+      
       <FloatingMenu />
     </Layout>
   );

@@ -25,7 +25,6 @@ import {
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { ORACLE_FUSION_CONFIG } from '../../config/api.config';
-import Autopilot from '../../components/Autopilot';
 import FloatingMenu from '../../components/FloatingMenu';
 
 const { Content } = Layout;
@@ -426,7 +425,7 @@ const InvoiceHolds: React.FC = () => {
       </Content>
 
       {/* Autopilot Assistant */}
-      <Autopilot module="ap" />
+      
       <FloatingMenu />
     </Layout>
   );
