@@ -341,6 +341,7 @@ const TrialBalance: React.FC = () => {
   const [revalChecking,            setRevalChecking]            = useState(false);
   const [revalStatus,              setRevalStatus]              = useState<string | null>(null);
   const [revalExcludedCombos,      setRevalExcludedCombos]      = useState<Set<string>>(new Set());
+  const [revalSelectedRows,        setRevalSelectedRows]        = useState<string[]>([]);
   const [revalComboStatus,         setRevalComboStatus]         = useState<Map<string, { revalueId: number; status: string }>>(new Map());
   const [revalApiError,            setRevalApiError]            = useState<string | null>(null);
   const [revalLastCall,            setRevalLastCall]            = useState<{ url: string; method: string; payload: object; responseText: string; httpStatus: number } | null>(null);
@@ -2795,6 +2796,7 @@ const TrialBalance: React.FC = () => {
     setRevalId(null);
     setRevalStatus(null);
     setRevalExcludedCombos(new Set());
+    setRevalSelectedRows([]);
 
     // Set rate date to last day of the selected period's month
     if (tab?.periodName) {
@@ -3249,8 +3251,15 @@ const TrialBalance: React.FC = () => {
     });
     const comboRows: ComboRow[] = Array.from(comboMap.values());
 
-    // Active rows only (for totals + preview)
-    const activeComboRows = comboRows.filter(r => !r.excluded);
+    // Selectable rows: non-posted, non-excluded
+    const selectableRowKeys = comboRows.filter(r => !isComboPosted(r.combo) && !r.excluded).map(r => r.rowKey);
+    // If user hasn't made a selection yet, default to all selectable rows
+    const effectiveSelected = revalSelectedRows.length > 0
+      ? revalSelectedRows.filter(k => selectableRowKeys.includes(k))
+      : selectableRowKeys;
+
+    // Active rows only (for totals + preview) — intersect with selection
+    const activeComboRows = comboRows.filter(r => !r.excluded && (isComboPosted(r.combo) || effectiveSelected.includes(r.rowKey)));
 
     // Currency-aggregated rows — used for save payload (ccy_rows)
     interface CcyRow {
@@ -3281,7 +3290,7 @@ const TrialBalance: React.FC = () => {
       return /^0+$/.test(seg5) ? '' : seg5;
     };
 
-    // Build journal preview — one line pair per active combination
+    // Build journal preview — one line pair per selected pending combinations
     const buildPreview = () => {
       const rawPeriod = cleanPeriodName(tab.periodName);
       const periodMonth = rawPeriod || tab.periodName;
@@ -3289,7 +3298,9 @@ const TrialBalance: React.FC = () => {
       let ln = 1;
       const gainSubAcct = extractSubAcct(revalGainCombo);
       const lossSubAcct = extractSubAcct(revalLossCombo);
-      activeComboRows.forEach(r => {
+      // Only preview selected, non-posted rows
+      const previewRows = activeComboRows.filter(r => !isComboPosted(r.combo) && effectiveSelected.includes(r.rowKey));
+      previewRows.forEach(r => {
         if (r.revalAmt === 0 || r.newRate === 0) return;
         const abs = Math.abs(r.revalAmt);
         const subAcctPart = r.subAccount ? ` - ${r.subAccount}` : '';
@@ -3766,7 +3777,18 @@ const TrialBalance: React.FC = () => {
             pagination={false}
             scroll={{ x: 1350, y: 300 }}
             style={{ marginBottom: 16 }}
-            rowClassName={(r: ComboRow) => r.excluded ? 'reval-row-excluded' : ''}
+            rowClassName={(r: ComboRow) => isComboPosted(r.combo) ? 'reval-row-posted' : r.excluded ? 'reval-row-excluded' : ''}
+            rowSelection={isPosted ? undefined : {
+              selectedRowKeys: effectiveSelected,
+              onChange: (keys) => setRevalSelectedRows(keys as string[]),
+              getCheckboxProps: (r: ComboRow) => ({
+                disabled: isComboPosted(r.combo) || r.excluded,
+                title: isComboPosted(r.combo) ? `Already posted — ID: ${isComboRevalId(r.combo)}` : undefined,
+              }),
+              renderCell: (_checked, r, _idx, originNode) => isComboPosted(r.combo)
+                ? <Tooltip title={`Already posted — ID: ${isComboRevalId(r.combo)}`}><span style={{ opacity: 0.4, cursor: 'not-allowed' }}>{originNode}</span></Tooltip>
+                : originNode,
+            }}
           />
 
           {/* Gain / Loss totals */}
@@ -3841,7 +3863,7 @@ const TrialBalance: React.FC = () => {
               type="primary"
               icon={<FileTextOutlined />}
               onClick={buildPreview}
-              disabled={isPosted || activeComboRows.every(r => r.newRate === 0)}
+              disabled={isPosted || effectiveSelected.length === 0 || activeComboRows.filter(r => !isComboPosted(r.combo) && effectiveSelected.includes(r.rowKey)).every(r => r.newRate === 0)}
               style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
             >
               Preview Journal Entry
