@@ -3671,7 +3671,45 @@ const TrialBalance: React.FC = () => {
               {revalStatus === 'DRAFT' && (
                 <Tag color="blue">DRAFT</Tag>
               )}
-            </Space>
+              <Popover
+                trigger="click"
+                title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span style={{ color: REDWOOD.info }}>Revaluation Check — API Calls</span></Space>}
+                content={
+                  <div style={{ maxWidth: 560 }}>
+                    <Text style={{ fontSize: 12 }} type="secondary">1. List all revaluation headers (to find matching account + period):</Text>
+                    <div style={{ marginTop: 4, marginBottom: 10, background: '#f5f8ff', borderRadius: 6, padding: '7px 10px', fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
+                      GET {`${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}`}
+                    </div>
+                    <Text style={{ fontSize: 12 }} type="secondary">Filter applied client-side:</Text>
+                    <div style={{ marginTop: 4, marginBottom: 10, background: '#f5f8ff', borderRadius: 6, padding: '7px 10px', fontFamily: 'monospace', fontSize: 11 }}>
+                      account = <strong>{revalAccount || '…'}</strong><br />
+                      ledgerName = <strong>{tab?.ledgerName || '…'}</strong><br />
+                      periodName = <strong>{cleanPeriodName(tab?.periodName ?? '') || '…'}</strong>
+                    </div>
+                    <Text style={{ fontSize: 12 }} type="secondary">2. For each matching header — fetch detail to get per-combo status:</Text>
+                    <div style={{ marginTop: 4, background: '#f5f8ff', borderRadius: 6, padding: '7px 10px', fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
+                      GET {`${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}/{revalueId}`}
+                    </div>
+                    {revalComboStatus.size > 0 && (
+                      <div style={{ marginTop: 10 }}>
+                        <Text style={{ fontSize: 12 }} type="secondary">IDs found for this account/period:</Text>
+                        <div style={{ marginTop: 4 }}>
+                          {[...new Set([...revalComboStatus.values()].map(v => v.revalueId))].map(id => {
+                            const status = [...revalComboStatus.values()].find(v => v.revalueId === id)?.status;
+                            return (
+                              <Tag key={id} color={status === 'ACCOUNTED' ? 'green' : 'blue'} style={{ fontFamily: 'monospace', marginBottom: 4 }}>
+                                ID: {id} — {status}
+                              </Tag>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                }
+              >
+                <Button size="small" icon={<ApiOutlined />} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }} />
+              </Popover>
           }
         >
           {(() => {
