@@ -3187,8 +3187,8 @@ const TrialBalance: React.FC = () => {
     // Per-combo posted check
     const isComboPosted = (combo: string) => revalComboStatus.get(combo)?.status === 'ACCOUNTED';
     const isComboRevalId = (combo: string) => revalComboStatus.get(combo)?.revalueId;
-    // Global isPosted only true when ALL active combos are posted (full period locked)
-    const isPosted = revalStatus === 'ACCOUNTED' && revalComboStatus.size > 0;
+    // Computed after comboRows is available — placeholder here, overridden below
+    let isPosted = false;
 
     // All raw rows for this account
     const allRawRows = tab.rrData.filter(r => r.account === revalAccount);
@@ -3257,6 +3257,9 @@ const TrialBalance: React.FC = () => {
       }
     });
     const comboRows: ComboRow[] = Array.from(comboMap.values());
+
+    // Lock entire dialog only when every combo in the grid is individually posted
+    isPosted = comboRows.length > 0 && comboRows.every(r => isComboPosted(r.combo));
 
     // Selectable rows: non-posted, non-excluded
     const selectableRowKeys = comboRows.filter(r => !isComboPosted(r.combo) && !r.excluded).map(r => r.rowKey);
