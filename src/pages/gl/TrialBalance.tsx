@@ -2840,9 +2840,12 @@ const TrialBalance: React.FC = () => {
           try {
             const detRes  = await fetch(`${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}/${hdr.revalueId}`);
             const detJson = await detRes.json();
-            // Map each combo to this header's id+status
+            // Only track lines whose combo belongs to the current account
+            // (skip offsetting gain/loss account lines in the same journal)
             (detJson.lines || []).forEach((l: any) => {
               if (!l.combo) return;
+              // The combo must contain the account key segment to belong to this account
+              if (!l.combo.includes(accountKey)) return;
               const existing = comboMap.get(l.combo);
               // Prefer ACCOUNTED status; otherwise keep highest revalueId
               if (!existing || hdr.status === 'ACCOUNTED' || hdr.revalueId > existing.revalueId) {
@@ -2861,9 +2864,13 @@ const TrialBalance: React.FC = () => {
         setRevalComboStatus(comboMap);
         if (Object.keys(rates).length > 0) setRevalRates(rates);
 
-        const postedCount = [...comboMap.values()].filter(v => v.status === 'ACCOUNTED').length;
-        if (postedCount > 0) {
-          message.info({ content: `${postedCount} combination(s) already posted — shown as locked`, key: 'reval-check', duration: 4 });
+        const postedCombos  = [...comboMap.entries()].filter(([, v]) => v.status === 'ACCOUNTED');
+        const pendingCombos = [...comboMap.entries()].filter(([, v]) => v.status !== 'ACCOUNTED');
+        if (postedCombos.length > 0) {
+          message.info({
+            content: `${postedCombos.length} combination(s) already posted, ${pendingCombos.length} pending — locked combos shown below`,
+            key: 'reval-check', duration: 4,
+          });
         } else {
           message.info({ content: `Existing revaluation found (ID: ${editableHeader.revalueId}) — editing`, key: 'reval-check', duration: 3 });
         }
@@ -3686,9 +3693,12 @@ const TrialBalance: React.FC = () => {
                       ledgerName = <strong>{tab?.ledgerName || '…'}</strong><br />
                       periodName = <strong>{cleanPeriodName(tab?.periodName ?? '') || '…'}</strong>
                     </div>
-                    <Text style={{ fontSize: 12 }} type="secondary">2. For each matching header — fetch detail to get per-combo status:</Text>
-                    <div style={{ marginTop: 4, background: '#f5f8ff', borderRadius: 6, padding: '7px 10px', fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
+                    <Text style={{ fontSize: 12 }} type="secondary">2. For each matching header — fetch detail lines, keep only lines whose combo contains the account key:</Text>
+                    <div style={{ marginTop: 4, marginBottom: 6, background: '#f5f8ff', borderRadius: 6, padding: '7px 10px', fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
                       GET {`${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}/{revalueId}`}
+                    </div>
+                    <div style={{ background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 4, padding: '5px 8px', fontSize: 11 }}>
+                      Only lines where <code>combo.includes("{revalAccount || '…'}")</code> are tracked — gain/loss offset lines are excluded.
                     </div>
                     {revalComboStatus.size > 0 && (
                       <div style={{ marginTop: 10 }}>
