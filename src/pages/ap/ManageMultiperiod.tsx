@@ -103,6 +103,9 @@ const ManageMultiperiod: React.FC = () => {
   const [accrualLoading,    setAccrualLoading]    = useState(false);
   const [accrualPosting,    setAccrualPosting]    = useState(false);
   const [accrualPosted,     setAccrualPosted]     = useState<{invoiceId:number;invoiceNumber:string;period:string;status:'ok'|'error';note:string}[]>([]);
+  const [accrualSelected,    setAccrualSelected]    = useState<number[]>([]);   // selected invoiceIds
+  const [accrualPreviewOpen, setAccrualPreviewOpen] = useState(false);
+  const [accrualPreviewLines, setAccrualPreviewLines] = useState<any[]>([]);
 
   // ── Fusion data tab ───────────────────────────────────────────────────────
   const [fusionForm]        = Form.useForm();
@@ -470,6 +473,7 @@ const ManageMultiperiod: React.FC = () => {
             const periodOpen    = periodLines.filter(l => l.postingStatus === 'Not Posted').reduce((s, l) => s + (l.periodAmount || 0), 0);
             const postedToDate  = detail.lines.filter(l => l.postingStatus === 'Posted').reduce((s, l) => s + (l.periodAmount || 0), 0);
             const totalScheduled = detail.lines.reduce((s, l) => s + (l.periodAmount || 0), 0);
+            const periodNotPostedLines = periodLines.filter(l => l.postingStatus === 'Not Posted');
             return {
               ...inv,
               periodAmt,
@@ -479,9 +483,10 @@ const ManageMultiperiod: React.FC = () => {
               totalScheduled,
               hasPeriodLines: periodLines.length > 0,
               hasPeriodOpen: periodOpen > 0,
+              periodNotPostedLines,
             };
           } catch {
-            return { ...inv, periodAmt: 0, periodPosted: 0, periodOpen: 0, postedToDate: 0, totalScheduled: inv.totalAmount, hasPeriodLines: false, hasPeriodOpen: false };
+            return { ...inv, periodAmt: 0, periodPosted: 0, periodOpen: 0, postedToDate: 0, totalScheduled: inv.totalAmount, hasPeriodLines: false, hasPeriodOpen: false, periodNotPostedLines: [] };
           }
         })
       );
@@ -1100,6 +1105,71 @@ const ManageMultiperiod: React.FC = () => {
           </Card>
 
           {/* Invoices with open lines in this period */}
+          <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              Select invoices to preview accrual accounting entries
+            </Text>
+            <Button
+              type="primary"
+              icon={<BookOutlined />}
+              disabled={accrualSelected.length === 0}
+              onClick={() => {
+                // Build preview lines for selected invoices
+                const lines: any[] = [];
+                let lineNum = 1;
+                accrualLines
+                  .filter((r: any) => accrualSelected.includes(r.invoiceId))
+                  .forEach((inv: any) => {
+                    (inv.periodNotPostedLines || []).forEach((sl: any) => {
+                      // DR line — Expense (charge account)
+                      lines.push({
+                        lineNum: lineNum++,
+                        scheduleId: sl.scheduleId,
+                        invoiceId: inv.invoiceId,
+                        invoiceNumber: inv.invoiceNumber,
+                        supplier: inv.supplier,
+                        businessUnit: inv.businessUnit,
+                        periodName: sl.periodName,
+                        account: sl.chargeAccount,
+                        accountType: 'Expense (DR)',
+                        dr: sl.periodAmount,
+                        cr: 0,
+                        description: sl.description,
+                        reference1: inv.invoiceNumber,
+                        reference2: inv.supplier,
+                        reference3: sl.periodName,
+                        reference4: String(sl.scheduleId),
+                        reference5: inv.businessUnit,
+                      });
+                      // CR line — Accrual
+                      lines.push({
+                        lineNum: lineNum++,
+                        scheduleId: sl.scheduleId,
+                        invoiceId: inv.invoiceId,
+                        invoiceNumber: inv.invoiceNumber,
+                        supplier: inv.supplier,
+                        businessUnit: inv.businessUnit,
+                        periodName: sl.periodName,
+                        account: sl.accrualAccount,
+                        accountType: 'Accrual (CR)',
+                        dr: 0,
+                        cr: sl.periodAmount,
+                        description: sl.description,
+                        reference1: inv.invoiceNumber,
+                        reference2: inv.supplier,
+                        reference3: sl.periodName,
+                        reference4: String(sl.scheduleId),
+                        reference5: inv.businessUnit,
+                      });
+                    });
+                  });
+                setAccrualPreviewLines(lines);
+                setAccrualPreviewOpen(true);
+              }}
+            >
+              Create Accrual Accounting
+            </Button>
+          </div>
           <Table
             dataSource={accrualLines}
             rowKey="invoiceId"
@@ -1107,6 +1177,13 @@ const ManageMultiperiod: React.FC = () => {
             loading={accrualLoading}
             pagination={{ pageSize: 20, showSizeChanger: true }}
             scroll={{ x: 1300 }}
+            rowSelection={{
+              selectedRowKeys: accrualSelected,
+              onChange: (keys) => setAccrualSelected(keys as number[]),
+              getCheckboxProps: (r: any) => ({
+                disabled: !r.hasPeriodOpen,
+              }),
+            }}
             locale={{ emptyText: accrualPeriod ? `No accrual lines for ${accrualPeriod}` : 'Select a period to see accrual lines' }}
             summary={(rows) => {
               const totSched   = rows.reduce((s, r: any) => s + (r.totalLines      || 0), 0);
@@ -1138,7 +1215,17 @@ const ManageMultiperiod: React.FC = () => {
                   <Button type="link" size="small" style={{ padding: 0 }} onClick={() => openDetail(rec)}>{v}</Button>
                 ),
               },
-              { title: 'Supplier', dataIndex: 'supplier', ellipsis: true, width: 200 },
+              { title: 'Supplier', dataIndex: 'supplier', ellipsis: true, width: 200, render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+              {
+                title: 'Schedule IDs', width: 140,
+                render: (_: any, rec: any) => (
+                  <Space size={2} wrap>
+                    {(rec.periodNotPostedLines || []).map((sl: any) => (
+                      <Tag key={sl.scheduleId} style={{ fontSize: 10, margin: 1 }}>{sl.scheduleId}</Tag>
+                    ))}
+                  </Space>
+                ),
+              },
               {
                 title: 'Total Schedules', dataIndex: 'totalLines', width: 110, align: 'center' as const,
                 render: (v: number) => <Tag style={{ fontSize: 11 }}>{v ?? 0}</Tag>,
@@ -1155,29 +1242,29 @@ const ManageMultiperiod: React.FC = () => {
               },
               {
                 title: 'Invoice Total', dataIndex: 'totalAmount', width: 140, align: 'right' as const,
-                render: (v: number, rec: any) => <Text style={{ color: '#1677ff' }}>{fmtAmt(v, rec.currencyCode)}</Text>,
+                render: (v: number, rec: any) => <Text style={{ color: '#1677ff', fontSize: 11 }}>{fmtAmt(v, rec.currencyCode)}</Text>,
               },
               {
                 title: 'Posted to Date', dataIndex: 'postedToDate', width: 140, align: 'right' as const,
-                render: (v: number, rec: any) => <Text style={{ color: REDWOOD.success, fontWeight: 600 }}>{fmtAmt(v, rec.currencyCode)}</Text>,
+                render: (v: number, rec: any) => <Text style={{ color: REDWOOD.success, fontWeight: 600, fontSize: 11 }}>{fmtAmt(v, rec.currencyCode)}</Text>,
               },
               {
                 title: `${accrualPeriod || 'Period'} — Total`, dataIndex: 'periodAmt', width: 150, align: 'right' as const,
-                render: (v: number, rec: any) => <Text strong style={{ color: '#1677ff' }}>{fmtAmt(v, rec.currencyCode)}</Text>,
+                render: (v: number, rec: any) => <Text strong style={{ color: '#1677ff', fontSize: 11 }}>{fmtAmt(v, rec.currencyCode)}</Text>,
               },
               {
                 title: `${accrualPeriod || 'Period'} — Open`, dataIndex: 'periodOpen', width: 150, align: 'right' as const,
                 render: (v: number, rec: any) => v > 0
-                  ? <Text strong style={{ color: REDWOOD.warning }}>{fmtAmt(v, rec.currencyCode)}</Text>
+                  ? <Text strong style={{ color: REDWOOD.warning, fontSize: 11 }}>{fmtAmt(v, rec.currencyCode)}</Text>
                   : <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: 11 }}>Posted</Tag>,
               },
               {
                 title: `${accrualPeriod || 'Period'} — Status`, width: 130,
                 render: (_: any, rec: any) => rec.periodOpen > 0
-                  ? <Tag color="warning" icon={<WarningOutlined />}>Not Posted</Tag>
+                  ? <Tag color="warning" icon={<WarningOutlined />} style={{ fontSize: 11 }}>Not Posted</Tag>
                   : rec.hasPeriodLines
-                  ? <Tag color="success" icon={<CheckCircleOutlined />}>Posted</Tag>
-                  : <Tag color="default">No Lines</Tag>,
+                  ? <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: 11 }}>Posted</Tag>
+                  : <Tag color="default" style={{ fontSize: 11 }}>No Lines</Tag>,
               },
               {
                 title: 'Action', width: 110, fixed: 'right' as const,
@@ -1187,6 +1274,111 @@ const ManageMultiperiod: React.FC = () => {
               },
             ]}
           />
+          <Modal
+            open={accrualPreviewOpen}
+            onCancel={() => setAccrualPreviewOpen(false)}
+            title={
+              <Space>
+                <BookOutlined style={{ color: REDWOOD.primary }} />
+                <span>Accrual Accounting Preview — {accrualPeriod}</span>
+                <Tag color="blue">{accrualPreviewLines.filter(l => l.dr > 0).length} invoices</Tag>
+              </Space>
+            }
+            width={1300}
+            footer={
+              <Space>
+                <Button onClick={() => setAccrualPreviewOpen(false)}>Close</Button>
+              </Space>
+            }
+            destroyOnClose
+          >
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 12, fontSize: 11 }}
+              message="Accounting Rule: DR Expense Account (Charge A/C) / CR Accrual Account — one journal pair per schedule line"
+            />
+            <Table
+              dataSource={accrualPreviewLines}
+              rowKey={(r: any) => `${r.scheduleId}-${r.accountType}`}
+              size="small"
+              pagination={false}
+              scroll={{ x: 1400, y: 500 }}
+              rowClassName={(r: any) => r.dr > 0 ? 'mpa-preview-dr' : 'mpa-preview-cr'}
+              summary={(rows) => {
+                const totDr = rows.reduce((s: number, r: any) => s + (r.dr || 0), 0);
+                const totCr = rows.reduce((s: number, r: any) => s + (r.cr || 0), 0);
+                return (
+                  <Table.Summary.Row style={{ background: '#f0f5ff', fontWeight: 700 }}>
+                    <Table.Summary.Cell index={0} colSpan={5}><strong>Total</strong></Table.Summary.Cell>
+                    <Table.Summary.Cell index={5} align="right">
+                      <Text strong style={{ color: '#237804', fontSize: 12 }}>{totDr.toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={6} align="right">
+                      <Text strong style={{ color: REDWOOD.primary, fontSize: 12 }}>{totCr.toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={7} colSpan={6} />
+                  </Table.Summary.Row>
+                );
+              }}
+              columns={[
+                {
+                  title: '#', dataIndex: 'lineNum', width: 40,
+                  render: (v: number) => <Text style={{ fontSize: 11 }}>{v}</Text>,
+                },
+                {
+                  title: 'Sched ID', dataIndex: 'scheduleId', width: 80,
+                  render: (v: number) => <Tag style={{ fontSize: 10 }}>{v}</Tag>,
+                },
+                {
+                  title: 'Invoice', dataIndex: 'invoiceNumber', width: 140,
+                  render: (v: string) => <Text style={{ fontSize: 11, fontWeight: 600 }}>{v}</Text>,
+                },
+                {
+                  title: 'Type', dataIndex: 'accountType', width: 110,
+                  render: (v: string) => (
+                    <Tag color={v.startsWith('Expense') ? 'blue' : 'orange'} style={{ fontSize: 10 }}>{v}</Tag>
+                  ),
+                },
+                {
+                  title: 'Account', dataIndex: 'account', width: 210, ellipsis: true,
+                  render: (v: string) => <Text code style={{ fontSize: 10 }}>{v || '—'}</Text>,
+                },
+                {
+                  title: 'Debit', dataIndex: 'dr', width: 120, align: 'right' as const,
+                  render: (v: number) => v > 0
+                    ? <Text style={{ fontFamily: 'monospace', color: '#237804', fontSize: 12, fontWeight: 600 }}>{v.toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text>
+                    : null,
+                },
+                {
+                  title: 'Credit', dataIndex: 'cr', width: 120, align: 'right' as const,
+                  render: (v: number) => v > 0
+                    ? <Text style={{ fontFamily: 'monospace', color: REDWOOD.primary, fontSize: 12, fontWeight: 600 }}>{v.toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text>
+                    : null,
+                },
+                {
+                  title: 'Ref 1 (Invoice)', dataIndex: 'reference1', width: 140, ellipsis: true,
+                  render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text>,
+                },
+                {
+                  title: 'Ref 2 (Supplier)', dataIndex: 'reference2', width: 160, ellipsis: true,
+                  render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text>,
+                },
+                {
+                  title: 'Ref 3 (Period)', dataIndex: 'reference3', width: 90,
+                  render: (v: string) => <Tag color="purple" style={{ fontSize: 10 }}>{v}</Tag>,
+                },
+                {
+                  title: 'Ref 4 (Sched)', dataIndex: 'reference4', width: 90,
+                  render: (v: string) => <Tag style={{ fontSize: 10 }}>{v}</Tag>,
+                },
+                {
+                  title: 'Ref 5 (BU)', dataIndex: 'reference5', ellipsis: true,
+                  render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text>,
+                },
+              ]}
+            />
+          </Modal>
         </div>
       ),
     },
