@@ -30,6 +30,7 @@ import {
   Badge,
   Alert,
   Space as AntSpace,
+  Descriptions,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -480,6 +481,28 @@ const ManageInvoices: React.FC = () => {
   const [invDebugOpen,         setInvDebugOpen]         = useState(false);
   const [invStatusOpen,        setInvStatusOpen]        = useState(false);
   const [invStatusTarget,      setInvStatusTarget]      = useState<InvoiceRecord | null>(null);
+
+  // ── MPA Detail modal ───────────────────────────────────────────────────────
+  const [mpaModalOpen,    setMpaModalOpen]    = useState(false);
+  const [mpaModalRecord,  setMpaModalRecord]  = useState<InvoiceRecord | null>(null);
+  const [mpaModalData,    setMpaModalData]    = useState<import('../../services/multiperiod.service').MpaInvoiceDetail | null>(null);
+  const [mpaModalLoading, setMpaModalLoading] = useState(false);
+
+  const openMpaModal = async (record: InvoiceRecord) => {
+    setMpaModalRecord(record);
+    setMpaModalData(null);
+    setMpaModalOpen(true);
+    setMpaModalLoading(true);
+    try {
+      const { getMpaSchedule } = await import('../../services/multiperiod.service');
+      const detail = await getMpaSchedule(record.invoiceId);
+      setMpaModalData(detail);
+    } catch {
+      setMpaModalData(null);
+    } finally {
+      setMpaModalLoading(false);
+    }
+  };
 
   // ── Invoice Approval handlers ───────────────────────────────────────────────
   const openInvApprovalModal = async (record: InvoiceRecord) => {
@@ -1915,8 +1938,11 @@ const ManageInvoices: React.FC = () => {
             {text}
           </a>
           {record.hasMpa && (
-            <Tooltip title="Multiperiod Accounting">
-              <CalendarOutlined style={{ color: '#722ed1', fontSize: 13 }} />
+            <Tooltip title="View Multiperiod Schedule">
+              <CalendarOutlined
+                style={{ color: '#722ed1', fontSize: 13, cursor: 'pointer' }}
+                onClick={(e) => { e.stopPropagation(); openMpaModal(record); }}
+              />
             </Tooltip>
           )}
         </Space>
@@ -3948,8 +3974,92 @@ const ManageInvoices: React.FC = () => {
         )}
       </Modal>
 
+      {/* ── MPA Schedule Detail Modal ── */}
+      <Modal
+        open={mpaModalOpen}
+        onCancel={() => setMpaModalOpen(false)}
+        footer={<Button onClick={() => setMpaModalOpen(false)}>Close</Button>}
+        width={960}
+        title={
+          <Space>
+            <CalendarOutlined style={{ color: '#722ed1' }} />
+            <span>Multiperiod Schedule — {mpaModalRecord?.invoiceNumber}</span>
+            {mpaModalData && (
+              <Tag color="purple">{mpaModalData.lines.length} period{mpaModalData.lines.length !== 1 ? 's' : ''}</Tag>
+            )}
+          </Space>
+        }
+        styles={{ body: { padding: '16px 20px', maxHeight: '72vh', overflowY: 'auto' } }}
+      >
+        {mpaModalLoading ? (
+          <div style={{ textAlign: 'center', padding: 48 }}><Spin size="large" /></div>
+        ) : mpaModalData ? (
+          <>
+            {/* Header summary */}
+            <Descriptions size="small" column={4} style={{ marginBottom: 16 }}
+              styles={{ label: { fontWeight: 500, color: '#6B6B6B' } }}
+            >
+              <Descriptions.Item label="Supplier">{mpaModalData.supplier}</Descriptions.Item>
+              <Descriptions.Item label="Business Unit">{mpaModalData.businessUnit}</Descriptions.Item>
+              <Descriptions.Item label="Invoice Date">{mpaModalData.invoiceDate}</Descriptions.Item>
+              <Descriptions.Item label="Currency">{mpaModalData.currencyCode}</Descriptions.Item>
+            </Descriptions>
+
+            {/* Schedule lines table */}
+            <Table
+              dataSource={mpaModalData.lines.map((l, i) => ({ ...l, key: i }))}
+              pagination={false}
+              size="small"
+              bordered
+              scroll={{ x: 900 }}
+              summary={(rows) => {
+                const totalOrig   = rows.reduce((s, r) => s + (r.originalAmount || 0), 0);
+                const totalPeriod = rows.reduce((s, r) => s + (r.periodAmount   || 0), 0);
+                return (
+                  <Table.Summary.Row style={{ background: '#f0f5ff', fontWeight: 700 }}>
+                    <Table.Summary.Cell index={0} colSpan={3}><strong>Total</strong></Table.Summary.Cell>
+                    <Table.Summary.Cell index={3} align="right">
+                      <span style={{ color: '#389e0d' }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(totalOrig)}</span>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={4} align="right">
+                      <span style={{ color: '#389e0d' }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(totalPeriod)}</span>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={5} colSpan={5} />
+                  </Table.Summary.Row>
+                );
+              }}
+              columns={[
+                { title: 'Line', dataIndex: 'lineNumber', key: 'lineNumber', width: 55, align: 'center' as const },
+                { title: 'Period', dataIndex: 'periodName', key: 'periodName', width: 100 },
+                { title: 'Period Date', dataIndex: 'periodDate', key: 'periodDate', width: 110 },
+                {
+                  title: 'Original Amt', dataIndex: 'originalAmount', key: 'originalAmount', width: 120, align: 'right' as const,
+                  render: (v: number) => <span style={{ color: '#389e0d', fontWeight: 600 }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(v)}</span>,
+                },
+                {
+                  title: 'Period Amt', dataIndex: 'periodAmount', key: 'periodAmount', width: 120, align: 'right' as const,
+                  render: (v: number) => <span style={{ color: '#389e0d', fontWeight: 600 }}>{new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2 }).format(v)}</span>,
+                },
+                { title: 'Accrual Account', dataIndex: 'accrualAccount', key: 'accrualAccount', width: 200, ellipsis: true, render: (v: string) => <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{v}</span> },
+                { title: 'Charge Account', dataIndex: 'chargeAccount', key: 'chargeAccount', width: 200, ellipsis: true, render: (v: string) => <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{v}</span> },
+                {
+                  title: 'Status', dataIndex: 'postingStatus', key: 'postingStatus', width: 100,
+                  render: (v: string) => <Tag color={v === 'Posted' ? 'success' : 'warning'}>{v || 'Pending'}</Tag>,
+                },
+                {
+                  title: 'Posted Date', dataIndex: 'postedDate', key: 'postedDate', width: 110,
+                  render: (v: string | null) => v || '—',
+                },
+              ]}
+            />
+          </>
+        ) : (
+          <div style={{ textAlign: 'center', padding: 40, color: '#8c8c8c' }}>No schedule data found.</div>
+        )}
+      </Modal>
+
       </Content>
-      
+
       <FloatingMenu />
     </Layout>
   );
