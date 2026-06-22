@@ -115,49 +115,6 @@ const ManageMultiperiod: React.FC = () => {
   const [bulkRunning,       setBulkRunning]        = useState(false);
   const [bulkProgress,      setBulkProgress]      = useState<{ done: number; total: number; current: string; results: { invoiceId: number; invoiceNumber: string; status: 'ok' | 'skip' | 'error'; note: string }[] }>({ done: 0, total: 0, current: '', results: [] });
 
-  const openBulkModal = useCallback(() => {
-    // Distinct invoices where scheduleGenerated = 0
-    const seen = new Set<number>();
-    const pending = fusionRows.filter(r => {
-      if (r.scheduleGenerated || seen.has(r.invoiceId)) return false;
-      seen.add(r.invoiceId);
-      return true;
-    });
-    setBulkInvoices(pending);
-    setBulkSelected(new Set(pending.map(r => r.invoiceId)));
-    setBulkProgress({ done: 0, total: 0, current: '', results: [] });
-    setBulkRunning(false);
-    setBulkModalOpen(true);
-  }, [fusionRows]);
-
-  const handleBulkGenerate = useCallback(async () => {
-    const toProcess = bulkInvoices.filter(r => bulkSelected.has(r.invoiceId));
-    if (toProcess.length === 0) return;
-    setBulkRunning(true);
-    setBulkProgress({ done: 0, total: toProcess.length, current: '', results: [] });
-    const results: typeof bulkProgress.results = [];
-    for (let i = 0; i < toProcess.length; i++) {
-      const row = toProcess[i];
-      setBulkProgress(p => ({ ...p, current: `${row.invoiceNumber} (${row.supplier})`, done: i }));
-      try {
-        // Pre-check: see if schedule already exists
-        const detail = await getMpaSchedule(row.invoiceId);
-        if (detail.lines.length > 0) {
-          results.push({ invoiceId: row.invoiceId, invoiceNumber: row.invoiceNumber, status: 'skip', note: `Already has ${detail.lines.length} schedule line(s)` });
-        } else {
-          await generateMpaSchedule(row.invoiceId);
-          results.push({ invoiceId: row.invoiceId, invoiceNumber: row.invoiceNumber, status: 'ok', note: 'Schedule generated' });
-        }
-      } catch (e: any) {
-        results.push({ invoiceId: row.invoiceId, invoiceNumber: row.invoiceNumber, status: 'error', note: e?.message || 'Failed' });
-      }
-      setBulkProgress(p => ({ ...p, done: i + 1, results: [...results] }));
-    }
-    setBulkRunning(false);
-    // Refresh fusion list so scheduleGenerated flags update
-    handleFusionSearch();
-  }, [bulkInvoices, bulkSelected, handleFusionSearch]);
-
   // Load business units
   useEffect(() => {
     fetch(APEX_BU_URL, { headers: { Accept: 'application/json' } })
@@ -452,6 +409,46 @@ const ManageMultiperiod: React.FC = () => {
     }
     setFusionLoading(false);
   }, [fusionForm]);
+
+  const openBulkModal = useCallback(() => {
+    const seen = new Set<number>();
+    const pending = fusionRows.filter(r => {
+      if (r.scheduleGenerated || seen.has(r.invoiceId)) return false;
+      seen.add(r.invoiceId);
+      return true;
+    });
+    setBulkInvoices(pending);
+    setBulkSelected(new Set(pending.map(r => r.invoiceId)));
+    setBulkProgress({ done: 0, total: 0, current: '', results: [] });
+    setBulkRunning(false);
+    setBulkModalOpen(true);
+  }, [fusionRows]);
+
+  const handleBulkGenerate = useCallback(async () => {
+    const toProcess = bulkInvoices.filter(r => bulkSelected.has(r.invoiceId));
+    if (toProcess.length === 0) return;
+    setBulkRunning(true);
+    setBulkProgress({ done: 0, total: toProcess.length, current: '', results: [] });
+    const results: { invoiceId: number; invoiceNumber: string; status: 'ok' | 'skip' | 'error'; note: string }[] = [];
+    for (let i = 0; i < toProcess.length; i++) {
+      const row = toProcess[i];
+      setBulkProgress(p => ({ ...p, current: `${row.invoiceNumber} (${row.supplier})`, done: i }));
+      try {
+        const detail = await getMpaSchedule(row.invoiceId);
+        if (detail.lines.length > 0) {
+          results.push({ invoiceId: row.invoiceId, invoiceNumber: row.invoiceNumber, status: 'skip', note: `Already has ${detail.lines.length} schedule line(s)` });
+        } else {
+          await generateMpaSchedule(row.invoiceId);
+          results.push({ invoiceId: row.invoiceId, invoiceNumber: row.invoiceNumber, status: 'ok', note: 'Schedule generated' });
+        }
+      } catch (e: any) {
+        results.push({ invoiceId: row.invoiceId, invoiceNumber: row.invoiceNumber, status: 'error', note: e?.message || 'Failed' });
+      }
+      setBulkProgress(p => ({ ...p, done: i + 1, results: [...results] }));
+    }
+    setBulkRunning(false);
+    handleFusionSearch();
+  }, [bulkInvoices, bulkSelected, handleFusionSearch]);
 
   const openFusionDetail = useCallback(async (invoiceId: number, openAsOf?: string) => {
     setDrawerOpen(true);
