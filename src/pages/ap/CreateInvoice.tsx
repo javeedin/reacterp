@@ -1157,10 +1157,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
     activeLines.forEach((l) => {
       const amt = Math.abs(l.amount || 0);
-      // Multi-period: accrualAccount set AND start/end dates span different calendar months
-      const isMpa = !!(l.accrualAccount && l.startDate && l.endDate &&
-        dayjs(l.startDate, ['DD-MMM-YYYY', 'YYYY-MM-DD']).format('YYYY-MM') !==
-        dayjs(l.endDate,   ['DD-MMM-YYYY', 'YYYY-MM-DD']).format('YYYY-MM'));
+      // Multi-period: use accrual account for DR whenever line has one set
+      const isMpa = !!l.accrualAccount;
       const drAccount = isMpa
         ? l.accrualAccount
         : (l.distributionCombination || l.distributionSet || '');
