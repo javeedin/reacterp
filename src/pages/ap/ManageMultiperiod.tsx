@@ -1106,22 +1106,28 @@ const ManageMultiperiod: React.FC = () => {
             size="small"
             loading={accrualLoading}
             pagination={{ pageSize: 20, showSizeChanger: true }}
-            scroll={{ x: 1100 }}
+            scroll={{ x: 1300 }}
             locale={{ emptyText: accrualPeriod ? `No accrual lines for ${accrualPeriod}` : 'Select a period to see accrual lines' }}
             summary={(rows) => {
-              const totInv     = rows.reduce((s, r: any) => s + (r.totalAmount      || 0), 0);
-              const totPosted  = rows.reduce((s, r: any) => s + (r.postedToDate     || 0), 0);
-              const totPeriod  = rows.reduce((s, r: any) => s + (r.periodAmt        || 0), 0);
-              const totOpen    = rows.reduce((s, r: any) => s + (r.periodOpen       || 0), 0);
+              const totSched   = rows.reduce((s, r: any) => s + (r.totalLines      || 0), 0);
+              const totClosed  = rows.reduce((s, r: any) => s + (r.closedLines     || 0), 0);
+              const totOpen    = rows.reduce((s, r: any) => s + (r.openLines       || 0), 0);
+              const totInv     = rows.reduce((s, r: any) => s + (r.totalAmount     || 0), 0);
+              const totPosted  = rows.reduce((s, r: any) => s + (r.postedToDate    || 0), 0);
+              const totPeriod  = rows.reduce((s, r: any) => s + (r.periodAmt       || 0), 0);
+              const totPeriodO = rows.reduce((s, r: any) => s + (r.periodOpen      || 0), 0);
               const cur        = rows[0] as any;
               return (
                 <Table.Summary.Row style={{ background: '#f0f5ff', fontWeight: 700 }}>
                   <Table.Summary.Cell index={0} colSpan={2}><strong>Total</strong></Table.Summary.Cell>
-                  <Table.Summary.Cell index={2} align="right"><span style={{ color: '#1677ff' }}>{fmtAmt(totInv, cur?.currencyCode)}</span></Table.Summary.Cell>
-                  <Table.Summary.Cell index={3} align="right"><span style={{ color: REDWOOD.success }}>{fmtAmt(totPosted, cur?.currencyCode)}</span></Table.Summary.Cell>
-                  <Table.Summary.Cell index={4} align="right"><span style={{ color: '#1677ff' }}>{fmtAmt(totPeriod, cur?.currencyCode)}</span></Table.Summary.Cell>
-                  <Table.Summary.Cell index={5} align="right"><span style={{ color: REDWOOD.warning }}>{fmtAmt(totOpen, cur?.currencyCode)}</span></Table.Summary.Cell>
-                  <Table.Summary.Cell index={6} />
+                  <Table.Summary.Cell index={2} align="center"><Tag>{totSched}</Tag></Table.Summary.Cell>
+                  <Table.Summary.Cell index={3} align="center"><Tag color="success">{totClosed}</Tag></Table.Summary.Cell>
+                  <Table.Summary.Cell index={4} align="center"><Tag color="warning">{totOpen}</Tag></Table.Summary.Cell>
+                  <Table.Summary.Cell index={5} align="right"><span style={{ color: '#1677ff' }}>{fmtAmt(totInv, cur?.currencyCode)}</span></Table.Summary.Cell>
+                  <Table.Summary.Cell index={6} align="right"><span style={{ color: REDWOOD.success }}>{fmtAmt(totPosted, cur?.currencyCode)}</span></Table.Summary.Cell>
+                  <Table.Summary.Cell index={7} align="right"><span style={{ color: '#1677ff' }}>{fmtAmt(totPeriod, cur?.currencyCode)}</span></Table.Summary.Cell>
+                  <Table.Summary.Cell index={8} align="right"><span style={{ color: REDWOOD.warning }}>{fmtAmt(totPeriodO, cur?.currencyCode)}</span></Table.Summary.Cell>
+                  <Table.Summary.Cell index={9} />
                 </Table.Summary.Row>
               );
             }}
@@ -1132,7 +1138,21 @@ const ManageMultiperiod: React.FC = () => {
                   <Button type="link" size="small" style={{ padding: 0 }} onClick={() => openDetail(rec)}>{v}</Button>
                 ),
               },
-              { title: 'Supplier', dataIndex: 'supplier', ellipsis: true },
+              { title: 'Supplier', dataIndex: 'supplier', ellipsis: true, width: 200 },
+              {
+                title: 'Total Schedules', dataIndex: 'totalLines', width: 110, align: 'center' as const,
+                render: (v: number) => <Tag style={{ fontSize: 11 }}>{v ?? 0}</Tag>,
+              },
+              {
+                title: 'Posted', dataIndex: 'closedLines', width: 80, align: 'center' as const,
+                render: (v: number) => <Tag color="success" style={{ fontSize: 11 }}>{v ?? 0}</Tag>,
+              },
+              {
+                title: 'Unposted', dataIndex: 'openLines', width: 85, align: 'center' as const,
+                render: (v: number) => v > 0
+                  ? <Tag color="warning" style={{ fontSize: 11 }}>{v}</Tag>
+                  : <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: 11 }}>0</Tag>,
+              },
               {
                 title: 'Invoice Total', dataIndex: 'totalAmount', width: 140, align: 'right' as const,
                 render: (v: number, rec: any) => <Text style={{ color: '#1677ff' }}>{fmtAmt(v, rec.currencyCode)}</Text>,
@@ -1150,6 +1170,14 @@ const ManageMultiperiod: React.FC = () => {
                 render: (v: number, rec: any) => v > 0
                   ? <Text strong style={{ color: REDWOOD.warning }}>{fmtAmt(v, rec.currencyCode)}</Text>
                   : <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: 11 }}>Posted</Tag>,
+              },
+              {
+                title: `${accrualPeriod || 'Period'} — Status`, width: 130,
+                render: (_: any, rec: any) => rec.periodOpen > 0
+                  ? <Tag color="warning" icon={<WarningOutlined />}>Not Posted</Tag>
+                  : rec.hasPeriodLines
+                  ? <Tag color="success" icon={<CheckCircleOutlined />}>Posted</Tag>
+                  : <Tag color="default">No Lines</Tag>,
               },
               {
                 title: 'Action', width: 110, fixed: 'right' as const,
