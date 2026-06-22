@@ -93,7 +93,7 @@ import AccountSelector, { validateAccountCode } from '../../components/AccountSe
 import { useAuth } from '../../context/AuthContext';
 import InvoiceAttachments from '../../components/InvoiceAttachments';
 import { listAttachments } from '../../services/invoiceAttachment.service';
-import { getMpaSchedule } from '../../services/multiperiod.service';
+import { getMpaSchedule, generateMpaSchedule } from '../../services/multiperiod.service';
 
 const { Text, Title } = Typography;
 const { Option } = Select;
@@ -765,6 +765,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [mpaModalOpen,    setMpaModalOpen]    = useState(false);
   const [mpaSchedule,     setMpaSchedule]     = useState<import('../../services/multiperiod.service').MpaScheduleLine[]>([]);
   const [mpaLoading,      setMpaLoading]      = useState(false);
+  const [mpaTabSchedule,  setMpaTabSchedule]  = useState<import('../../services/multiperiod.service').MpaScheduleLine[]>([]);
+  const [mpaTabChecked,   setMpaTabChecked]   = useState(false);
+  const [mpaTabLoading,   setMpaTabLoading]   = useState(false);
+  const [mpaTabGenerating,setMpaTabGenerating]= useState(false);
+  const [mpaTabApiUrl,    setMpaTabApiUrl]    = useState('');
   const [mpaError,        setMpaError]        = useState<string | null>(null);
   const [unapplyLoading, setUnapplyLoading] = useState(false);
 
@@ -6596,31 +6601,169 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     </Space>
                   );
                 })(),
-                children: (
-                  <Table
-                    columns={multiperiodColumns}
-                    dataSource={lines}
-                    size="small"
-                    pagination={false}
-                    scroll={{ x: 1100 }}
-                    rowSelection={rowSelection}
-                    summary={() => (
-                      <Table.Summary fixed>
-                        <Table.Summary.Row>
-                          <Table.Summary.Cell index={0} colSpan={2}>
-                            <Text strong style={{ fontSize: 12, paddingLeft: 8 }}>Total</Text>
-                          </Table.Summary.Cell>
-                          <Table.Summary.Cell index={2} align="right">
-                            <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>
-                              {formatAmount(linesTotal)}
-                            </Text>
-                          </Table.Summary.Cell>
-                          <Table.Summary.Cell index={3} colSpan={5} />
-                        </Table.Summary.Row>
-                      </Table.Summary>
-                    )}
-                  />
-                ),
+                children: (() => {
+                  const invId = savedInvoiceId || initialData?.invoiceId;
+                  const checkUrl  = invId ? `${APEX_DB_CONFIG.baseUrl}/ap/multiperiod/${invId}` : '';
+                  const genUrl    = invId ? `${APEX_DB_CONFIG.baseUrl}/ap/multiperiod/generate` : '';
+
+                  const handleCheckSchedule = async () => {
+                    if (!invId) { message.warning('Save the invoice first.'); return; }
+                    setMpaTabLoading(true);
+                    setMpaTabApiUrl(checkUrl);
+                    try {
+                      const detail = await getMpaSchedule(invId);
+                      setMpaTabSchedule(detail.lines || []);
+                      setMpaTabChecked(true);
+                    } catch {
+                      setMpaTabSchedule([]);
+                      setMpaTabChecked(true);
+                    } finally {
+                      setMpaTabLoading(false);
+                    }
+                  };
+
+                  const handleGenerateSchedule = async () => {
+                    if (!invId) { message.warning('Save the invoice first.'); return; }
+                    setMpaTabGenerating(true);
+                    setMpaTabApiUrl(genUrl);
+                    try {
+                      await generateMpaSchedule(invId);
+                      message.success('Schedule generated successfully');
+                      const detail = await getMpaSchedule(invId);
+                      setMpaTabSchedule(detail.lines || []);
+                      setMpaTabChecked(true);
+                    } catch (e: any) {
+                      message.error(e?.message || 'Failed to generate schedule');
+                    } finally {
+                      setMpaTabGenerating(false);
+                    }
+                  };
+
+                  const scheduleColumns = [
+                    { title: 'Period',        dataIndex: 'periodName',   key: 'periodName',   width: 120 },
+                    { title: 'Period Date',   dataIndex: 'periodDate',   key: 'periodDate',   width: 120 },
+                    { title: 'Amount',        dataIndex: 'periodAmount', key: 'periodAmount', width: 120, align: 'right' as const,
+                      render: (v: number) => <Text strong>{formatAmount(v)}</Text> },
+                    { title: 'Status',        dataIndex: 'postingStatus',key: 'postingStatus',width: 110,
+                      render: (v: string) => <Tag color={v === 'Posted' ? 'success' : 'warning'}>{v || 'Pending'}</Tag> },
+                    { title: 'Posted Date',   dataIndex: 'postedDate',  key: 'postedDate',   width: 120,
+                      render: (v: string | null) => v || '—' },
+                    { title: 'Accrual Account', dataIndex: 'accrualAccount', key: 'accrualAccount', ellipsis: true },
+                  ];
+
+                  return (
+                    <div>
+                      {/* Lines table */}
+                      <Table
+                        columns={multiperiodColumns}
+                        dataSource={lines}
+                        size="small"
+                        pagination={false}
+                        scroll={{ x: 1100 }}
+                        rowSelection={rowSelection}
+                        summary={() => (
+                          <Table.Summary fixed>
+                            <Table.Summary.Row>
+                              <Table.Summary.Cell index={0} colSpan={2}>
+                                <Text strong style={{ fontSize: 12, paddingLeft: 8 }}>Total</Text>
+                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={2} align="right">
+                                <Text strong style={{ fontSize: 13, color: REDWOOD.primary }}>
+                                  {formatAmount(linesTotal)}
+                                </Text>
+                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={3} colSpan={5} />
+                            </Table.Summary.Row>
+                          </Table.Summary>
+                        )}
+                      />
+
+                      {/* Schedule toolbar */}
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '10px 12px',
+                        borderTop: `1px solid ${REDWOOD.borderColor || '#e5e5e5'}`,
+                        background: '#fafafa',
+                        flexWrap: 'wrap',
+                      }}>
+                        <Text strong style={{ fontSize: 12, marginRight: 4 }}>Schedule:</Text>
+                        <Button
+                          size="small"
+                          icon={<SearchOutlined />}
+                          loading={mpaTabLoading}
+                          onClick={handleCheckSchedule}
+                          disabled={!invId}
+                        >
+                          Check Schedule
+                        </Button>
+                        {mpaTabChecked && mpaTabSchedule.length === 0 && (
+                          <Button
+                            size="small"
+                            type="primary"
+                            icon={<PlayCircleOutlined />}
+                            loading={mpaTabGenerating}
+                            onClick={handleGenerateSchedule}
+                            disabled={!invId}
+                            style={{ background: '#722ed1', borderColor: '#722ed1' }}
+                          >
+                            Generate Schedule
+                          </Button>
+                        )}
+                        {mpaTabApiUrl && (
+                          <Tooltip title="Show API URL">
+                            <Button
+                              size="small"
+                              icon={<ApiOutlined />}
+                              style={{ color: '#1677ff', borderColor: '#1677ff' }}
+                              onClick={() => Modal.info({
+                                title: 'API Request — Multiperiod Schedule',
+                                width: 860,
+                                content: (
+                                  <Typography.Text copyable style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>
+                                    {mpaTabApiUrl}
+                                  </Typography.Text>
+                                ),
+                              })}
+                            />
+                          </Tooltip>
+                        )}
+                        {mpaTabChecked && (
+                          <Text type="secondary" style={{ fontSize: 11, marginLeft: 4 }}>
+                            {mpaTabSchedule.length > 0
+                              ? `${mpaTabSchedule.length} schedule period${mpaTabSchedule.length !== 1 ? 's' : ''} found`
+                              : 'No schedule found — click Generate Schedule to create it'}
+                          </Text>
+                        )}
+                      </div>
+
+                      {/* Schedule results */}
+                      {mpaTabChecked && mpaTabSchedule.length > 0 && (
+                        <Table
+                          columns={scheduleColumns}
+                          dataSource={mpaTabSchedule.map((r, i) => ({ ...r, key: i }))}
+                          size="small"
+                          pagination={false}
+                          scroll={{ x: 800 }}
+                          style={{ borderTop: `1px solid ${REDWOOD.borderColor || '#e5e5e5'}` }}
+                          summary={(rows) => {
+                            const total = rows.reduce((s, r) => s + (r.periodAmount || 0), 0);
+                            return (
+                              <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 600 }}>
+                                <Table.Summary.Cell index={0} colSpan={2}>
+                                  <Text strong style={{ fontSize: 12 }}>Total</Text>
+                                </Table.Summary.Cell>
+                                <Table.Summary.Cell index={2} align="right">
+                                  <Text strong style={{ color: REDWOOD.primary }}>{formatAmount(total)}</Text>
+                                </Table.Summary.Cell>
+                                <Table.Summary.Cell index={3} colSpan={3} />
+                              </Table.Summary.Row>
+                            );
+                          }}
+                        />
+                      )}
+                    </div>
+                  );
+                })(),
               },
               {
                 key: 'purchaseOrders',
