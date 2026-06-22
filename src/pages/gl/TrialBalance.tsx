@@ -3710,6 +3710,7 @@ const TrialBalance: React.FC = () => {
               >
                 <Button size="small" icon={<ApiOutlined />} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }} />
               </Popover>
+            </Space>
           }
         >
           {(() => {
