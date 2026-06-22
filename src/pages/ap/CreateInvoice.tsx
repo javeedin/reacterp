@@ -8338,7 +8338,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                     key: 'description',
                     width: 220,
                     onCell: (record: AcctEntry) => ({ colSpan: record.isGroupHeader || record.isPeriodSubtotal ? 0 : 1 }),
-                    render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text>,
+                    render: (v: string) => (
+                      <Tooltip title={v} placement="topLeft">
+                        <Text style={{ fontSize: 12, display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{v}</Text>
+                      </Tooltip>
+                    ),
                   },
                   {
                     title: 'Class',
@@ -8465,14 +8469,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               periodLines.forEach((l) => {
                 const amt = l.amount || 0;
                 const acctAmt = Math.round(amt * effectiveRate * 100) / 100;
-                // Not MPA if start and end are in the same calendar month
-                const isMpa = !!(l.startDate && l.endDate && l.accrualAccount &&
-                  dayjs(l.startDate, ['DD-MMM-YYYY', 'YYYY-MM-DD']).format('YYYY-MM') !==
-                  dayjs(l.endDate, ['DD-MMM-YYYY', 'YYYY-MM-DD']).format('YYYY-MM'));
-                // Invoice accounting always uses the expense account (Normal), regardless of MPA
-                const debitAccount = l.distributionCombination || l.distributionSet || '—';
+                // MPA: use accrual account for DR when line has one set
+                const isMpa = !!l.accrualAccount;
+                const debitAccount = isMpa ? l.accrualAccount : (l.distributionCombination || l.distributionSet || '—');
                 const debitDesc = l.description || l.type || 'Item';
-                const itemClass = isMpa ? 'Item expense (MPA)' : 'Item expense';
+                const itemClass = isMpa ? 'ACCRUAL' : 'Item expense';
                 allEntries.push({ key: keyIdx++, period, line: `Line ${l.lineNumber}`, account: debitAccount, accountDescription: getAcctDesc(debitAccount, l.accountDescription), description: debitDesc, lineClass: itemClass, debit: amt, credit: 0, accountedDebit: acctAmt, accountedCredit: 0 });
                 periodDebit += amt;
                 periodAccountedDebit += acctAmt;
