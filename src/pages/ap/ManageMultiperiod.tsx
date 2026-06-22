@@ -3,7 +3,7 @@ import dayjs from 'dayjs';
 import {
   Layout, Card, Form, Select, Input, Button, Space, Typography,
   Table, Tag, Row, Col, Breadcrumb, Tabs, Descriptions, Alert,
-  Modal, message, Tooltip, Statistic, Spin, DatePicker, Drawer, Collapse, Popconfirm,
+  Modal, message, Tooltip, Statistic, Spin, DatePicker, Drawer, Collapse, Popconfirm, Radio,
 } from 'antd';
 import {
   HomeOutlined, SearchOutlined, ReloadOutlined, CalendarOutlined,
@@ -77,6 +77,7 @@ const ManageMultiperiod: React.FC = () => {
   const [activeTab,    setActiveTab]    = useState('search');
   const [detailTabs,   setDetailTabs]   = useState<DetailTab[]>([]);
   const [searchResult, setSearchResult] = useState<MpaInvoiceSummary[]>([]);
+  const [mpaStatusFilter, setMpaStatusFilter] = useState<'all'|'open'|'closed'>('all');
   const [searching,    setSearching]    = useState(false);
   const [searchErr,    setSearchErr]    = useState<string | null>(null);
   const [businessUnits, setBusinessUnits] = useState<string[]>([]);
@@ -94,6 +95,14 @@ const ManageMultiperiod: React.FC = () => {
   const [acctModalInvoiceId, setAcctModalInvoiceId] = useState<number | null>(null);
   const [acctData,           setAcctData]           = useState<SlaGetResult | null>(null);
   const [acctLoading,        setAcctLoading]        = useState(false);
+
+  // ── Post Accrual tab ──────────────────────────────────────────────────────
+  const [accrualPeriods,    setAccrualPeriods]    = useState<string[]>([]);
+  const [accrualPeriod,     setAccrualPeriod]     = useState<string>('');
+  const [accrualLines,      setAccrualLines]      = useState<any[]>([]);
+  const [accrualLoading,    setAccrualLoading]    = useState(false);
+  const [accrualPosting,    setAccrualPosting]    = useState(false);
+  const [accrualPosted,     setAccrualPosted]     = useState<{invoiceId:number;invoiceNumber:string;period:string;status:'ok'|'error';note:string}[]>([]);
 
   // ── Fusion data tab ───────────────────────────────────────────────────────
   const [fusionForm]        = Form.useForm();
@@ -409,6 +418,51 @@ const ManageMultiperiod: React.FC = () => {
     }
     setFusionLoading(false);
   }, [fusionForm]);
+
+  // ── Accrual period helpers ────────────────────────────────────────────────
+
+  const loadAccrualPeriods = useCallback(async () => {
+    setAccrualLoading(true);
+    try {
+      const open = await listMpaInvoices({ postingStatus: 'Not Posted' });
+      const dates = open.flatMap((r: MpaInvoiceSummary) => [r.minPeriodDate, r.maxPeriodDate]).filter(Boolean) as string[];
+      if (dates.length === 0) { setAccrualPeriods([]); setAccrualLoading(false); return; }
+      const start = dayjs(dates.reduce((a, b) => a < b ? a : b));
+      const end = dayjs(dates.reduce((a, b) => a > b ? a : b));
+      const periods: string[] = [];
+      let cur = start.startOf('month');
+      while (!cur.isAfter(end, 'month')) {
+        periods.push(cur.format('MMM-YYYY'));
+        cur = cur.add(1, 'month');
+      }
+      setAccrualPeriods(periods);
+      if (periods.length > 0 && !accrualPeriod) {
+        setAccrualPeriod(periods[0]);
+        await loadAccrualLines(periods[0]);
+      }
+    } catch (e: any) {
+      message.error('Failed to load periods: ' + e?.message);
+    }
+    setAccrualLoading(false);
+  }, [accrualPeriod]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const loadAccrualLines = useCallback(async (period: string) => {
+    if (!period) return;
+    setAccrualLoading(true);
+    try {
+      const open = await listMpaInvoices({ postingStatus: 'Not Posted' });
+      const periodDate = dayjs(period, 'MMM-YYYY');
+      const inPeriod = (open as MpaInvoiceSummary[]).filter(r => {
+        const min = dayjs(r.minPeriodDate);
+        const max = dayjs(r.maxPeriodDate);
+        return !periodDate.isBefore(min, 'month') && !periodDate.isAfter(max, 'month');
+      });
+      setAccrualLines(inPeriod);
+    } catch (e: any) {
+      message.error('Failed to load accrual lines: ' + e?.message);
+    }
+    setAccrualLoading(false);
+  }, []);
 
   const openBulkModal = useCallback(() => {
     const seen = new Set<number>();
@@ -833,16 +887,40 @@ const ManageMultiperiod: React.FC = () => {
 
           {searchErr && <Alert type="error" showIcon message={searchErr} style={{ marginBottom: 12 }} />}
 
-          <Table
-            dataSource={searchResult}
-            columns={searchColumns}
-            rowKey="invoiceId"
-            size="small"
-            loading={searching}
-            pagination={{ pageSize: 20, showSizeChanger: true }}
-            scroll={{ x: 1000 }}
-            locale={{ emptyText: 'Run a search to see multiperiod invoices' }}
-          />
+          {(() => {
+            const filteredSearchResult = searchResult.filter(r => {
+              if (mpaStatusFilter === 'open')   return (r.openLines   ?? 0) > 0;
+              if (mpaStatusFilter === 'closed') return (r.closedLines ?? 0) > 0 && (r.openLines ?? 0) === 0;
+              return true;
+            });
+            return (
+              <>
+                <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'flex-end' }}>
+                  <Radio.Group
+                    value={mpaStatusFilter}
+                    onChange={e => setMpaStatusFilter(e.target.value)}
+                    optionType="button"
+                    buttonStyle="solid"
+                    size="small"
+                  >
+                    <Radio.Button value="all">All</Radio.Button>
+                    <Radio.Button value="open">Open</Radio.Button>
+                    <Radio.Button value="closed">Closed</Radio.Button>
+                  </Radio.Group>
+                </div>
+                <Table
+                  dataSource={filteredSearchResult}
+                  columns={searchColumns}
+                  rowKey="invoiceId"
+                  size="small"
+                  loading={searching}
+                  pagination={{ pageSize: 20, showSizeChanger: true }}
+                  scroll={{ x: 1000 }}
+                  locale={{ emptyText: 'Run a search to see multiperiod invoices' }}
+                />
+              </>
+            );
+          })()}
         </>
       ),
     },
@@ -961,6 +1039,81 @@ const ManageMultiperiod: React.FC = () => {
         </>
       ),
     },
+    {
+      key: 'post-accrual',
+      label: <span><CalendarOutlined style={{ marginRight: 4 }} />Post Accrual</span>,
+      children: (
+        <div style={{ padding: '0 4px' }}>
+          {/* Period selector */}
+          <Card size="small" style={{ marginBottom: 12 }}>
+            <Space align="center">
+              <Text strong>Accrual Period:</Text>
+              <Select
+                value={accrualPeriod || undefined}
+                onChange={(v: string) => { setAccrualPeriod(v); loadAccrualLines(v); }}
+                style={{ width: 160 }}
+                placeholder="Select period"
+                loading={accrualLoading}
+              >
+                {accrualPeriods.map(p => <Option key={p} value={p}>{p}</Option>)}
+              </Select>
+              <Button
+                icon={<ReloadOutlined />}
+                size="small"
+                onClick={() => { loadAccrualPeriods(); }}
+              >
+                Refresh Periods
+              </Button>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                Default shows first open (unposted) period
+              </Text>
+            </Space>
+          </Card>
+
+          {/* Invoices with open lines in this period */}
+          <Table
+            dataSource={accrualLines}
+            rowKey="invoiceId"
+            size="small"
+            loading={accrualLoading}
+            pagination={{ pageSize: 20, showSizeChanger: true }}
+            locale={{ emptyText: accrualPeriod ? `No open accrual lines for ${accrualPeriod}` : 'Select a period to see open accrual lines' }}
+            columns={[
+              {
+                title: 'Invoice Number', dataIndex: 'invoiceNumber', width: 160,
+                render: (v: string, rec: any) => (
+                  <Button type="link" size="small" style={{ padding: 0 }} onClick={() => openDetail(rec)}>
+                    {v}
+                  </Button>
+                ),
+              },
+              { title: 'Supplier', dataIndex: 'supplier', ellipsis: true },
+              { title: 'Business Unit', dataIndex: 'businessUnit', width: 180, ellipsis: true },
+              {
+                title: 'Not Posted Amt', dataIndex: 'notPostedAmount', width: 140, align: 'right' as const,
+                render: (v: number, rec: any) => (
+                  <Text type="warning" strong>{fmtAmt(v, rec.currencyCode)}</Text>
+                ),
+              },
+              {
+                title: 'Open Periods', width: 120,
+                render: (_: any, rec: any) => (
+                  <Tag color="warning">{rec.openLines ?? 0} open</Tag>
+                ),
+              },
+              {
+                title: 'Action', width: 100,
+                render: (_: any, rec: any) => (
+                  <Button size="small" type="primary" onClick={() => openDetail(rec)}>
+                    View & Post
+                  </Button>
+                ),
+              },
+            ]}
+          />
+        </div>
+      ),
+    },
     ...detailTabs.map(tab => ({
       key:   tab.key,
       label: (
@@ -1008,7 +1161,10 @@ const ManageMultiperiod: React.FC = () => {
         <Card bodyStyle={{ padding: 12 }}>
           <Tabs
             activeKey={activeTab}
-            onChange={setActiveTab}
+            onChange={(key) => {
+              setActiveTab(key);
+              if (key === 'post-accrual') loadAccrualPeriods();
+            }}
             type="card"
             size="small"
             items={tabItems}
