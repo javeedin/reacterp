@@ -11,6 +11,8 @@ export interface MpaInvoiceSummary {
   invoiceDate: string;
   currencyCode: string;
   totalLines: number;
+  openLines: number;
+  closedLines: number;
   totalAmount: number;
   postedAmount: number;
   notPostedAmount: number;

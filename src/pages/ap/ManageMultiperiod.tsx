@@ -584,13 +584,23 @@ const ManageMultiperiod: React.FC = () => {
       ),
     },
     {
-      title: 'Not Posted', dataIndex: 'notPostedAmount', width: 120, align: 'right',
+      title: 'Schedules', width: 160,
+      render: (_, rec) => (
+        <Space size={6}>
+          <Tag style={{ fontSize: 11 }}>Total: {rec.totalLines ?? 0}</Tag>
+          <Tag color="success" style={{ fontSize: 11 }}>Closed: {rec.closedLines ?? 0}</Tag>
+          <Tag color="warning" style={{ fontSize: 11 }}>Open: {rec.openLines ?? 0}</Tag>
+        </Space>
+      ),
+    },
+    {
+      title: 'Not Posted', dataIndex: 'notPostedAmount', width: 130, align: 'right' as const,
       render: (v, rec) => v > 0
         ? <Text type="warning" style={{ fontSize: 12 }}>{fmtAmt(v, rec.currencyCode)}</Text>
         : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>,
     },
     {
-      title: 'Posted', dataIndex: 'postedAmount', width: 120, align: 'right',
+      title: 'Posted', dataIndex: 'postedAmount', width: 130, align: 'right' as const,
       render: (v, rec) => v > 0
         ? <Text style={{ color: REDWOOD.success, fontSize: 12 }}>{fmtAmt(v, rec.currencyCode)}</Text>
         : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>,
