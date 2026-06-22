@@ -112,7 +112,11 @@ SELECT
      FETCH FIRST 1 ROWS ONLY)                      AS accounting_status,
     TO_CHAR(i.apply_after_date, 'YYYY-MM-DD')    AS apply_after_date,
     NVL(prep.total_prep, 0)                       AS applied_prepayments,
-    i.liability_distribution
+    i.liability_distribution,
+    CASE WHEN EXISTS (
+        SELECT 1 FROM RR_AP_INVOICE_MULTIPERIOD_SCHEDULE m
+        WHERE m.invoice_id = i.invoice_id
+    ) THEN 'Y' ELSE 'N' END                        AS has_mpa
 FROM  RR_AP_INVOICES_ALL i
 -- Cash payments + discount taken rolled up per invoice
 LEFT JOIN (

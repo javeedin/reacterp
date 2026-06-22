@@ -73,6 +73,7 @@ import {
   FileZipOutlined,
   LinkOutlined,
   SyncOutlined,
+  CalendarOutlined,
 } from '@ant-design/icons';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -169,6 +170,7 @@ interface InvoiceRecord {
   approvalApproverEmail?: string;
   approvedDate?: string;
   approvalRef?: string;
+  hasMpa?: boolean;
 }
 
 // Tab item interface
@@ -340,6 +342,7 @@ const mapApiToInvoiceRecord = (item: any, index: number): InvoiceRecord => ({
   approvalApproverEmail:       item.approval_approver_email         || undefined,
   approvedDate:                item.approved_date                   || undefined,
   approvalRef:                 item.approval_ref                    || undefined,
+  hasMpa:                      item.has_mpa === 'Y',
 });
 
 const ManageInvoices: React.FC = () => {
@@ -1911,6 +1914,11 @@ const ManageInvoices: React.FC = () => {
           >
             {text}
           </a>
+          {record.hasMpa && (
+            <Tooltip title="Multiperiod Accounting">
+              <CalendarOutlined style={{ color: '#722ed1', fontSize: 13 }} />
+            </Tooltip>
+          )}
         </Space>
       ),
       sorter: (a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber),
