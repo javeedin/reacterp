@@ -1126,6 +1126,7 @@ const ManageMultiperiod: React.FC = () => {
                 accrualAccount: sl.accrualAccount,
                 description: sl.description,
                 periodName: sl.periodName,
+                lineNumber: sl.lineNumber,
               }))
             );
 
@@ -1210,6 +1211,14 @@ const ManageMultiperiod: React.FC = () => {
                     {
                       title: 'Sched ID', dataIndex: 'scheduleId', width: 80, fixed: 'left' as const,
                       render: (v: number) => <Tag style={{ fontSize: 10, fontFamily: 'monospace' }}>{v}</Tag>,
+                    },
+                    {
+                      title: 'Line', dataIndex: 'lineNumber', width: 55, align: 'center' as const,
+                      render: (v: number) => <Text style={{ fontSize: 11 }}>{v}</Text>,
+                    },
+                    {
+                      title: 'Period', dataIndex: 'periodName', width: 90,
+                      render: (v: string) => <Tag color="purple" style={{ fontSize: 10 }}>{v}</Tag>,
                     },
                     {
                       title: 'Invoice Number', dataIndex: 'invoiceNumber', width: 150, fixed: 'left' as const,
