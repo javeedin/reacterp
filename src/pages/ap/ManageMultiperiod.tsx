@@ -105,6 +105,7 @@ const ManageMultiperiod: React.FC = () => {
   const [accrualPosted,     setAccrualPosted]     = useState<{invoiceId:number;invoiceNumber:string;period:string;status:'ok'|'error';note:string}[]>([]);
   const [accrualSelected,    setAccrualSelected]    = useState<number[]>([]);   // selected invoiceIds
   const [accrualSearch,      setAccrualSearch]      = useState('');
+  const [detailSearch,       setDetailSearch]       = useState<Record<string, string>>({});
   const [accrualPreviewOpen, setAccrualPreviewOpen] = useState(false);
   const [accrualPreviewLines, setAccrualPreviewLines] = useState<any[]>([]);
 
@@ -723,13 +724,18 @@ const ManageMultiperiod: React.FC = () => {
 
   // ── detail schedule columns ───────────────────────────────────────────────
 
-  const scheduleColumns: ColumnsType<MpaScheduleLine> = [
+  const buildScheduleColumns = (lines: MpaScheduleLine[]): ColumnsType<MpaScheduleLine> => {
+    const periodOptions = [...new Set(lines.map(l => l.periodName))].sort().map(v => ({ text: v, value: v }));
+    return [
     {
-      title: 'Period', dataIndex: 'periodName', width: 100,
-      render: v => <Text strong>{v}</Text>,
+      title: 'Period', dataIndex: 'periodName', width: 110,
+      filters: periodOptions,
+      onFilter: (value: any, rec) => rec.periodName === value,
+      render: v => <Text strong style={{ fontSize: 12 }}>{v}</Text>,
     },
     { title: 'Line', dataIndex: 'lineNumber', width: 55, align: 'center' as const },
-    { title: 'Description', dataIndex: 'description', ellipsis: true },
+    { title: 'Description', dataIndex: 'description', ellipsis: true,
+      render: (v: string) => <Tooltip title={v}><Text style={{ fontSize: 12 }}>{v}</Text></Tooltip> },
     {
       title: 'Original Amt', dataIndex: 'originalAmount', width: 130, align: 'right' as const,
       render: v => <Text style={{ fontSize: 12 }}>{fmtAmt(v)}</Text>,
@@ -756,7 +762,7 @@ const ManageMultiperiod: React.FC = () => {
         ? <Text type="secondary" style={{ fontSize: 11 }}>{rec.postedBy}<br />{fmtDate(rec.postedDate)}</Text>
         : null,
     },
-  ];
+  ];};
 
   // ── render detail tab content ─────────────────────────────────────────────
 
@@ -861,15 +867,40 @@ const ManageMultiperiod: React.FC = () => {
         </div>
 
         {/* Schedule table */}
-        <Table
-          dataSource={d.lines}
-          columns={scheduleColumns}
-          rowKey="scheduleId"
-          size="small"
-          pagination={false}
-          scroll={{ x: 1050 }}
-          rowClassName={(rec) => rec.periodName === period && rec.postingStatus === 'Not Posted' ? 'ant-table-row-selected' : ''}
-        />
+        {(() => {
+          const sq = (detailSearch[tab.key] || '').trim().toLowerCase();
+          const filteredLines = sq
+            ? d.lines.filter(l =>
+                [l.periodName, l.description, l.chargeAccount, l.accrualAccount,
+                 l.postingStatus, l.postedBy, String(l.lineNumber), String(l.scheduleId)]
+                  .some(v => v && String(v).toLowerCase().includes(sq))
+              )
+            : d.lines;
+          return (
+            <>
+              <div style={{ marginBottom: 8 }}>
+                <Input.Search
+                  placeholder="Search schedule lines…"
+                  allowClear
+                  size="small"
+                  style={{ width: 260 }}
+                  value={detailSearch[tab.key] || ''}
+                  onChange={e => setDetailSearch(prev => ({ ...prev, [tab.key]: e.target.value }))}
+                  onSearch={v => setDetailSearch(prev => ({ ...prev, [tab.key]: v }))}
+                />
+              </div>
+              <Table
+                dataSource={filteredLines}
+                columns={buildScheduleColumns(d.lines)}
+                rowKey="scheduleId"
+                size="small"
+                pagination={false}
+                scroll={{ x: 1050 }}
+                rowClassName={(rec) => rec.periodName === period && rec.postingStatus === 'Not Posted' ? 'ant-table-row-selected' : ''}
+              />
+            </>
+          );
+        })()}
       </div>
     );
   };
