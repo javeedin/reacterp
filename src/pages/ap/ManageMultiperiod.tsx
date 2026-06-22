@@ -108,6 +108,56 @@ const ManageMultiperiod: React.FC = () => {
   const [drawerLoading,     setDrawerLoading]     = useState(false);
   const [drawerOpenAsOf,    setDrawerOpenAsOf]    = useState<string | undefined>(undefined);
 
+  // ── Bulk generate modal ───────────────────────────────────────────────────
+  const [bulkModalOpen,     setBulkModalOpen]     = useState(false);
+  const [bulkInvoices,      setBulkInvoices]      = useState<FusionMpaLine[]>([]);
+  const [bulkSelected,      setBulkSelected]      = useState<Set<number>>(new Set());
+  const [bulkRunning,       setBulkRunning]        = useState(false);
+  const [bulkProgress,      setBulkProgress]      = useState<{ done: number; total: number; current: string; results: { invoiceId: number; invoiceNumber: string; status: 'ok' | 'skip' | 'error'; note: string }[] }>({ done: 0, total: 0, current: '', results: [] });
+
+  const openBulkModal = useCallback(() => {
+    // Distinct invoices where scheduleGenerated = 0
+    const seen = new Set<number>();
+    const pending = fusionRows.filter(r => {
+      if (r.scheduleGenerated || seen.has(r.invoiceId)) return false;
+      seen.add(r.invoiceId);
+      return true;
+    });
+    setBulkInvoices(pending);
+    setBulkSelected(new Set(pending.map(r => r.invoiceId)));
+    setBulkProgress({ done: 0, total: 0, current: '', results: [] });
+    setBulkRunning(false);
+    setBulkModalOpen(true);
+  }, [fusionRows]);
+
+  const handleBulkGenerate = useCallback(async () => {
+    const toProcess = bulkInvoices.filter(r => bulkSelected.has(r.invoiceId));
+    if (toProcess.length === 0) return;
+    setBulkRunning(true);
+    setBulkProgress({ done: 0, total: toProcess.length, current: '', results: [] });
+    const results: typeof bulkProgress.results = [];
+    for (let i = 0; i < toProcess.length; i++) {
+      const row = toProcess[i];
+      setBulkProgress(p => ({ ...p, current: `${row.invoiceNumber} (${row.supplier})`, done: i }));
+      try {
+        // Pre-check: see if schedule already exists
+        const detail = await getMpaSchedule(row.invoiceId);
+        if (detail.lines.length > 0) {
+          results.push({ invoiceId: row.invoiceId, invoiceNumber: row.invoiceNumber, status: 'skip', note: `Already has ${detail.lines.length} schedule line(s)` });
+        } else {
+          await generateMpaSchedule(row.invoiceId);
+          results.push({ invoiceId: row.invoiceId, invoiceNumber: row.invoiceNumber, status: 'ok', note: 'Schedule generated' });
+        }
+      } catch (e: any) {
+        results.push({ invoiceId: row.invoiceId, invoiceNumber: row.invoiceNumber, status: 'error', note: e?.message || 'Failed' });
+      }
+      setBulkProgress(p => ({ ...p, done: i + 1, results: [...results] }));
+    }
+    setBulkRunning(false);
+    // Refresh fusion list so scheduleGenerated flags update
+    handleFusionSearch();
+  }, [bulkInvoices, bulkSelected, handleFusionSearch]);
+
   // Load business units
   useEffect(() => {
     fetch(APEX_BU_URL, { headers: { Accept: 'application/json' } })
@@ -878,6 +928,19 @@ const ManageMultiperiod: React.FC = () => {
             );
           })()}
 
+          {fusionSearched && !fusionLoading && fusionRows.some(r => !r.scheduleGenerated) && (
+            <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'flex-end' }}>
+              <Button
+                icon={<SyncOutlined />}
+                type="primary"
+                style={{ background: '#722ed1', borderColor: '#722ed1' }}
+                onClick={openBulkModal}
+              >
+                Generate Schedule for All Pending
+              </Button>
+            </div>
+          )}
+
           <Table
             dataSource={fusionRows}
             columns={fusionColumns}
@@ -1388,6 +1451,132 @@ const ManageMultiperiod: React.FC = () => {
 
           {!lastApiUrl && (
             <Alert type="info" showIcon message="Run a search to see the last called API URL here." />
+          )}
+        </Modal>
+
+        {/* ── Bulk Generate Schedule Modal ── */}
+        <Modal
+          open={bulkModalOpen}
+          onCancel={() => { if (!bulkRunning) setBulkModalOpen(false); }}
+          closable={!bulkRunning}
+          maskClosable={!bulkRunning}
+          width={700}
+          title={
+            <Space>
+              <SyncOutlined style={{ color: '#722ed1' }} />
+              <span>Generate Schedule — Pending Invoices</span>
+              <Tag color="purple">{bulkInvoices.length} pending</Tag>
+            </Space>
+          }
+          footer={
+            bulkProgress.total > 0 && bulkProgress.done === bulkProgress.total ? (
+              <Button type="primary" onClick={() => setBulkModalOpen(false)}>Done</Button>
+            ) : (
+              <Space>
+                <Button onClick={() => setBulkModalOpen(false)} disabled={bulkRunning}>Cancel</Button>
+                <Button
+                  type="primary"
+                  icon={<SyncOutlined spin={bulkRunning} />}
+                  loading={bulkRunning}
+                  disabled={bulkSelected.size === 0}
+                  style={{ background: '#722ed1', borderColor: '#722ed1' }}
+                  onClick={handleBulkGenerate}
+                >
+                  Generate Schedule ({bulkSelected.size})
+                </Button>
+              </Space>
+            )
+          }
+          styles={{ body: { maxHeight: '65vh', overflowY: 'auto', padding: '12px 20px' } }}
+        >
+          {bulkProgress.total === 0 ? (
+            /* ── Selection list ── */
+            <>
+              {bulkInvoices.length === 0 ? (
+                <Alert type="success" showIcon message="All invoices in the current search already have schedules generated." />
+              ) : (
+                <>
+                  <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <input
+                      type="checkbox"
+                      id="select-all-bulk"
+                      checked={bulkSelected.size === bulkInvoices.length}
+                      ref={el => { if (el) el.indeterminate = bulkSelected.size > 0 && bulkSelected.size < bulkInvoices.length; }}
+                      onChange={e => setBulkSelected(e.target.checked ? new Set(bulkInvoices.map(r => r.invoiceId)) : new Set())}
+                    />
+                    <label htmlFor="select-all-bulk" style={{ fontWeight: 600, cursor: 'pointer' }}>
+                      Select All ({bulkInvoices.length} invoices)
+                    </label>
+                  </div>
+                  <Table
+                    dataSource={bulkInvoices}
+                    rowKey="invoiceId"
+                    size="small"
+                    pagination={false}
+                    scroll={{ y: 340 }}
+                    columns={[
+                      {
+                        title: '', width: 40,
+                        render: (_, rec) => (
+                          <input
+                            type="checkbox"
+                            checked={bulkSelected.has(rec.invoiceId)}
+                            onChange={e => setBulkSelected(prev => {
+                              const next = new Set(prev);
+                              e.target.checked ? next.add(rec.invoiceId) : next.delete(rec.invoiceId);
+                              return next;
+                            })}
+                          />
+                        ),
+                      },
+                      { title: 'Invoice Number', dataIndex: 'invoiceNumber', width: 160 },
+                      { title: 'Supplier', dataIndex: 'supplier', ellipsis: true },
+                      { title: 'Business Unit', dataIndex: 'businessUnit', width: 160, ellipsis: true },
+                      {
+                        title: 'Amount', dataIndex: 'lineAmount', width: 120, align: 'right' as const,
+                        render: (v: number, rec) => `${rec.invoiceCurrency} ${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
+                      },
+                    ]}
+                  />
+                </>
+              )}
+            </>
+          ) : (
+            /* ── Progress view ── */
+            <>
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <Text strong>{bulkRunning ? `Processing: ${bulkProgress.current}` : 'Completed'}</Text>
+                  <Text type="secondary">{bulkProgress.done} / {bulkProgress.total}</Text>
+                </div>
+                <div style={{ background: '#f0f0f0', borderRadius: 4, height: 8, overflow: 'hidden' }}>
+                  <div style={{
+                    height: '100%', borderRadius: 4, transition: 'width 0.3s',
+                    background: bulkRunning ? '#722ed1' : '#52c41a',
+                    width: `${Math.round(bulkProgress.done / bulkProgress.total * 100)}%`,
+                  }} />
+                </div>
+              </div>
+              <Table
+                dataSource={bulkProgress.results}
+                rowKey="invoiceId"
+                size="small"
+                pagination={false}
+                scroll={{ y: 340 }}
+                columns={[
+                  { title: 'Invoice', dataIndex: 'invoiceNumber', width: 160 },
+                  {
+                    title: 'Result', dataIndex: 'status', width: 90,
+                    render: (v: string) => v === 'ok'
+                      ? <Tag color="success" icon={<CheckCircleOutlined />}>Generated</Tag>
+                      : v === 'skip'
+                      ? <Tag color="blue">Already Exists</Tag>
+                      : <Tag color="error">Error</Tag>,
+                  },
+                  { title: 'Note', dataIndex: 'note', ellipsis: true },
+                ]}
+              />
+            </>
           )}
         </Modal>
       </Content>
