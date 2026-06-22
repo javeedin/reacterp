@@ -450,14 +450,43 @@ const ManageMultiperiod: React.FC = () => {
     if (!period) return;
     setAccrualLoading(true);
     try {
-      const open = await listMpaInvoices({ postingStatus: 'Not Posted' });
+      // First get summaries where period falls within min/max range and has open lines
+      const all = await listMpaInvoices({});
       const periodDate = dayjs(period, 'MMM-YYYY');
-      const inPeriod = (open as MpaInvoiceSummary[]).filter(r => {
+      const candidates = (all as MpaInvoiceSummary[]).filter(r => {
         const min = dayjs(r.minPeriodDate);
         const max = dayjs(r.maxPeriodDate);
         return !periodDate.isBefore(min, 'month') && !periodDate.isAfter(max, 'month');
       });
-      setAccrualLines(inPeriod);
+
+      // Fetch full schedule per invoice to get per-period amounts
+      const enriched = await Promise.all(
+        candidates.map(async (inv) => {
+          try {
+            const detail = await getMpaSchedule(inv.invoiceId);
+            const periodLines   = detail.lines.filter(l => dayjs(l.periodDate).format('MMM-YYYY') === period);
+            const periodAmt     = periodLines.reduce((s, l) => s + (l.periodAmount || 0), 0);
+            const periodPosted  = periodLines.filter(l => l.postingStatus === 'Posted').reduce((s, l) => s + (l.periodAmount || 0), 0);
+            const periodOpen    = periodLines.filter(l => l.postingStatus === 'Not Posted').reduce((s, l) => s + (l.periodAmount || 0), 0);
+            const postedToDate  = detail.lines.filter(l => l.postingStatus === 'Posted').reduce((s, l) => s + (l.periodAmount || 0), 0);
+            const totalScheduled = detail.lines.reduce((s, l) => s + (l.periodAmount || 0), 0);
+            return {
+              ...inv,
+              periodAmt,
+              periodPosted,
+              periodOpen,
+              postedToDate,
+              totalScheduled,
+              hasPeriodLines: periodLines.length > 0,
+              hasPeriodOpen: periodOpen > 0,
+            };
+          } catch {
+            return { ...inv, periodAmt: 0, periodPosted: 0, periodOpen: 0, postedToDate: 0, totalScheduled: inv.totalAmount, hasPeriodLines: false, hasPeriodOpen: false };
+          }
+        })
+      );
+      // Only show invoices that actually have lines in this period
+      setAccrualLines(enriched.filter(r => r.hasPeriodLines));
     } catch (e: any) {
       message.error('Failed to load accrual lines: ' + e?.message);
     }
@@ -1077,36 +1106,55 @@ const ManageMultiperiod: React.FC = () => {
             size="small"
             loading={accrualLoading}
             pagination={{ pageSize: 20, showSizeChanger: true }}
-            locale={{ emptyText: accrualPeriod ? `No open accrual lines for ${accrualPeriod}` : 'Select a period to see open accrual lines' }}
+            scroll={{ x: 1100 }}
+            locale={{ emptyText: accrualPeriod ? `No accrual lines for ${accrualPeriod}` : 'Select a period to see accrual lines' }}
+            summary={(rows) => {
+              const totInv     = rows.reduce((s, r: any) => s + (r.totalAmount      || 0), 0);
+              const totPosted  = rows.reduce((s, r: any) => s + (r.postedToDate     || 0), 0);
+              const totPeriod  = rows.reduce((s, r: any) => s + (r.periodAmt        || 0), 0);
+              const totOpen    = rows.reduce((s, r: any) => s + (r.periodOpen       || 0), 0);
+              const cur        = rows[0] as any;
+              return (
+                <Table.Summary.Row style={{ background: '#f0f5ff', fontWeight: 700 }}>
+                  <Table.Summary.Cell index={0} colSpan={2}><strong>Total</strong></Table.Summary.Cell>
+                  <Table.Summary.Cell index={2} align="right"><span style={{ color: '#1677ff' }}>{fmtAmt(totInv, cur?.currencyCode)}</span></Table.Summary.Cell>
+                  <Table.Summary.Cell index={3} align="right"><span style={{ color: REDWOOD.success }}>{fmtAmt(totPosted, cur?.currencyCode)}</span></Table.Summary.Cell>
+                  <Table.Summary.Cell index={4} align="right"><span style={{ color: '#1677ff' }}>{fmtAmt(totPeriod, cur?.currencyCode)}</span></Table.Summary.Cell>
+                  <Table.Summary.Cell index={5} align="right"><span style={{ color: REDWOOD.warning }}>{fmtAmt(totOpen, cur?.currencyCode)}</span></Table.Summary.Cell>
+                  <Table.Summary.Cell index={6} />
+                </Table.Summary.Row>
+              );
+            }}
             columns={[
               {
-                title: 'Invoice Number', dataIndex: 'invoiceNumber', width: 160,
+                title: 'Invoice Number', dataIndex: 'invoiceNumber', width: 160, fixed: 'left' as const,
                 render: (v: string, rec: any) => (
-                  <Button type="link" size="small" style={{ padding: 0 }} onClick={() => openDetail(rec)}>
-                    {v}
-                  </Button>
+                  <Button type="link" size="small" style={{ padding: 0 }} onClick={() => openDetail(rec)}>{v}</Button>
                 ),
               },
               { title: 'Supplier', dataIndex: 'supplier', ellipsis: true },
-              { title: 'Business Unit', dataIndex: 'businessUnit', width: 180, ellipsis: true },
               {
-                title: 'Not Posted Amt', dataIndex: 'notPostedAmount', width: 140, align: 'right' as const,
-                render: (v: number, rec: any) => (
-                  <Text type="warning" strong>{fmtAmt(v, rec.currencyCode)}</Text>
-                ),
+                title: 'Invoice Total', dataIndex: 'totalAmount', width: 140, align: 'right' as const,
+                render: (v: number, rec: any) => <Text style={{ color: '#1677ff' }}>{fmtAmt(v, rec.currencyCode)}</Text>,
               },
               {
-                title: 'Open Periods', width: 120,
-                render: (_: any, rec: any) => (
-                  <Tag color="warning">{rec.openLines ?? 0} open</Tag>
-                ),
+                title: 'Posted to Date', dataIndex: 'postedToDate', width: 140, align: 'right' as const,
+                render: (v: number, rec: any) => <Text style={{ color: REDWOOD.success, fontWeight: 600 }}>{fmtAmt(v, rec.currencyCode)}</Text>,
               },
               {
-                title: 'Action', width: 100,
+                title: `${accrualPeriod || 'Period'} — Total`, dataIndex: 'periodAmt', width: 150, align: 'right' as const,
+                render: (v: number, rec: any) => <Text strong style={{ color: '#1677ff' }}>{fmtAmt(v, rec.currencyCode)}</Text>,
+              },
+              {
+                title: `${accrualPeriod || 'Period'} — Open`, dataIndex: 'periodOpen', width: 150, align: 'right' as const,
+                render: (v: number, rec: any) => v > 0
+                  ? <Text strong style={{ color: REDWOOD.warning }}>{fmtAmt(v, rec.currencyCode)}</Text>
+                  : <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: 11 }}>Posted</Tag>,
+              },
+              {
+                title: 'Action', width: 110, fixed: 'right' as const,
                 render: (_: any, rec: any) => (
-                  <Button size="small" type="primary" onClick={() => openDetail(rec)}>
-                    View & Post
-                  </Button>
+                  <Button size="small" type="primary" onClick={() => openDetail(rec)}>View & Post</Button>
                 ),
               },
             ]}
