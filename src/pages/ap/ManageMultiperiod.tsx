@@ -1105,175 +1105,153 @@ const ManageMultiperiod: React.FC = () => {
           </Card>
 
           {/* Invoices with open lines in this period */}
-          <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text type="secondary" style={{ fontSize: 11 }}>
-              Select invoices to preview accrual accounting entries
-            </Text>
-            <Button
-              type="primary"
-              icon={<BookOutlined />}
-              disabled={accrualSelected.length === 0}
-              onClick={() => {
-                // Build preview lines for selected invoices
-                const lines: any[] = [];
-                let lineNum = 1;
-                accrualLines
-                  .filter((r: any) => accrualSelected.includes(r.invoiceId))
-                  .forEach((inv: any) => {
-                    (inv.periodNotPostedLines || []).forEach((sl: any) => {
-                      // DR line — Expense (charge account)
-                      lines.push({
-                        lineNum: lineNum++,
-                        scheduleId: sl.scheduleId,
-                        invoiceId: inv.invoiceId,
-                        invoiceNumber: inv.invoiceNumber,
-                        supplier: inv.supplier,
-                        businessUnit: inv.businessUnit,
-                        periodName: sl.periodName,
-                        account: sl.chargeAccount,
-                        accountType: 'Expense (DR)',
-                        dr: sl.periodAmount,
-                        cr: 0,
-                        description: sl.description,
-                        reference1: inv.invoiceNumber,
-                        reference2: inv.supplier,
-                        reference3: sl.periodName,
-                        reference4: String(sl.scheduleId),
-                        reference5: inv.businessUnit,
-                      });
-                      // CR line — Accrual
-                      lines.push({
-                        lineNum: lineNum++,
-                        scheduleId: sl.scheduleId,
-                        invoiceId: inv.invoiceId,
-                        invoiceNumber: inv.invoiceNumber,
-                        supplier: inv.supplier,
-                        businessUnit: inv.businessUnit,
-                        periodName: sl.periodName,
-                        account: sl.accrualAccount,
-                        accountType: 'Accrual (CR)',
-                        dr: 0,
-                        cr: sl.periodAmount,
-                        description: sl.description,
-                        reference1: inv.invoiceNumber,
-                        reference2: inv.supplier,
-                        reference3: sl.periodName,
-                        reference4: String(sl.scheduleId),
-                        reference5: inv.businessUnit,
-                      });
-                    });
-                  });
-                setAccrualPreviewLines(lines);
-                setAccrualPreviewOpen(true);
-              }}
-            >
-              Create Accrual Accounting
-            </Button>
-          </div>
-          <Table
-            dataSource={accrualLines}
-            rowKey="invoiceId"
-            size="small"
-            loading={accrualLoading}
-            pagination={{ pageSize: 20, showSizeChanger: true }}
-            scroll={{ x: 1300 }}
-            rowSelection={{
-              selectedRowKeys: accrualSelected,
-              onChange: (keys) => setAccrualSelected(keys as number[]),
-              getCheckboxProps: (r: any) => ({
-                disabled: !r.hasPeriodOpen,
-              }),
-            }}
-            locale={{ emptyText: accrualPeriod ? `No accrual lines for ${accrualPeriod}` : 'Select a period to see accrual lines' }}
-            summary={(rows) => {
-              const totSched   = rows.reduce((s, r: any) => s + (r.totalLines      || 0), 0);
-              const totClosed  = rows.reduce((s, r: any) => s + (r.closedLines     || 0), 0);
-              const totOpen    = rows.reduce((s, r: any) => s + (r.openLines       || 0), 0);
-              const totInv     = rows.reduce((s, r: any) => s + (r.totalAmount     || 0), 0);
-              const totPosted  = rows.reduce((s, r: any) => s + (r.postedToDate    || 0), 0);
-              const totPeriod  = rows.reduce((s, r: any) => s + (r.periodAmt       || 0), 0);
-              const totPeriodO = rows.reduce((s, r: any) => s + (r.periodOpen      || 0), 0);
-              const cur        = rows[0] as any;
-              return (
-                <Table.Summary.Row style={{ background: '#f0f5ff', fontWeight: 700 }}>
-                  <Table.Summary.Cell index={0} colSpan={2}><strong>Total</strong></Table.Summary.Cell>
-                  <Table.Summary.Cell index={2} align="center"><Tag>{totSched}</Tag></Table.Summary.Cell>
-                  <Table.Summary.Cell index={3} align="center"><Tag color="success">{totClosed}</Tag></Table.Summary.Cell>
-                  <Table.Summary.Cell index={4} align="center"><Tag color="warning">{totOpen}</Tag></Table.Summary.Cell>
-                  <Table.Summary.Cell index={5} align="right"><span style={{ color: '#1677ff' }}>{fmtAmt(totInv, cur?.currencyCode)}</span></Table.Summary.Cell>
-                  <Table.Summary.Cell index={6} align="right"><span style={{ color: REDWOOD.success }}>{fmtAmt(totPosted, cur?.currencyCode)}</span></Table.Summary.Cell>
-                  <Table.Summary.Cell index={7} align="right"><span style={{ color: '#1677ff' }}>{fmtAmt(totPeriod, cur?.currencyCode)}</span></Table.Summary.Cell>
-                  <Table.Summary.Cell index={8} align="right"><span style={{ color: REDWOOD.warning }}>{fmtAmt(totPeriodO, cur?.currencyCode)}</span></Table.Summary.Cell>
-                  <Table.Summary.Cell index={9} />
-                </Table.Summary.Row>
-              );
-            }}
-            columns={[
-              {
-                title: 'Invoice Number', dataIndex: 'invoiceNumber', width: 160, fixed: 'left' as const,
-                render: (v: string, rec: any) => (
-                  <Button type="link" size="small" style={{ padding: 0 }} onClick={() => openDetail(rec)}>{v}</Button>
-                ),
-              },
-              { title: 'Supplier', dataIndex: 'supplier', ellipsis: true, width: 200, render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
-              {
-                title: 'Schedule IDs', width: 140,
-                render: (_: any, rec: any) => (
-                  <Space size={2} wrap>
-                    {(rec.periodNotPostedLines || []).map((sl: any) => (
-                      <Tag key={sl.scheduleId} style={{ fontSize: 10, margin: 1 }}>{sl.scheduleId}</Tag>
-                    ))}
+          {(() => {
+            // Flatten: one row per schedule line for the selected period
+            const flatRows = accrualLines.flatMap((inv: any) =>
+              (inv.periodNotPostedLines || []).map((sl: any) => ({
+                rowKey: `${inv.invoiceId}-${sl.scheduleId}`,
+                scheduleId: sl.scheduleId,
+                invoiceId: inv.invoiceId,
+                invoiceNumber: inv.invoiceNumber,
+                supplier: inv.supplier,
+                businessUnit: inv.businessUnit,
+                currencyCode: inv.currencyCode,
+                totalLines: inv.totalLines,
+                closedLines: inv.closedLines,
+                openLines: inv.openLines,
+                totalAmount: inv.totalAmount,
+                postedToDate: inv.postedToDate,
+                periodAmt: sl.periodAmount,
+                chargeAccount: sl.chargeAccount,
+                accrualAccount: sl.accrualAccount,
+                description: sl.description,
+                periodName: sl.periodName,
+              }))
+            );
+
+            return (
+              <>
+                <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    {accrualSelected.length > 0 ? `${accrualSelected.length} schedule(s) selected` : 'Select schedules to create accrual accounting entries'}
+                  </Text>
+                  <Space>
+                    {accrualSelected.length > 0 && (
+                      <Button size="small" onClick={() => setAccrualSelected([])}>Clear Selection</Button>
+                    )}
+                    <Button
+                      type="primary"
+                      icon={<BookOutlined />}
+                      disabled={accrualSelected.length === 0}
+                      onClick={() => {
+                        const selectedSet = new Set(accrualSelected);
+                        const lines: any[] = [];
+                        let lineNum = 1;
+                        flatRows
+                          .filter((r: any) => selectedSet.has(r.scheduleId))
+                          .forEach((r: any) => {
+                            lines.push({
+                              lineNum: lineNum++, scheduleId: r.scheduleId,
+                              invoiceId: r.invoiceId, invoiceNumber: r.invoiceNumber,
+                              supplier: r.supplier, businessUnit: r.businessUnit,
+                              periodName: r.periodName,
+                              account: r.chargeAccount, accountType: 'Expense (DR)',
+                              dr: r.periodAmt, cr: 0, description: r.description,
+                              reference1: r.invoiceNumber, reference2: r.supplier,
+                              reference3: r.periodName, reference4: String(r.scheduleId),
+                              reference5: r.businessUnit,
+                            });
+                            lines.push({
+                              lineNum: lineNum++, scheduleId: r.scheduleId,
+                              invoiceId: r.invoiceId, invoiceNumber: r.invoiceNumber,
+                              supplier: r.supplier, businessUnit: r.businessUnit,
+                              periodName: r.periodName,
+                              account: r.accrualAccount, accountType: 'Accrual (CR)',
+                              dr: 0, cr: r.periodAmt, description: r.description,
+                              reference1: r.invoiceNumber, reference2: r.supplier,
+                              reference3: r.periodName, reference4: String(r.scheduleId),
+                              reference5: r.businessUnit,
+                            });
+                          });
+                        setAccrualPreviewLines(lines);
+                        setAccrualPreviewOpen(true);
+                      }}
+                    >
+                      Create Accrual Accounting
+                    </Button>
                   </Space>
-                ),
-              },
-              {
-                title: 'Total Schedules', dataIndex: 'totalLines', width: 110, align: 'center' as const,
-                render: (v: number) => <Tag style={{ fontSize: 11 }}>{v ?? 0}</Tag>,
-              },
-              {
-                title: 'Posted', dataIndex: 'closedLines', width: 80, align: 'center' as const,
-                render: (v: number) => <Tag color="success" style={{ fontSize: 11 }}>{v ?? 0}</Tag>,
-              },
-              {
-                title: 'Unposted', dataIndex: 'openLines', width: 85, align: 'center' as const,
-                render: (v: number) => v > 0
-                  ? <Tag color="warning" style={{ fontSize: 11 }}>{v}</Tag>
-                  : <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: 11 }}>0</Tag>,
-              },
-              {
-                title: 'Invoice Total', dataIndex: 'totalAmount', width: 140, align: 'right' as const,
-                render: (v: number, rec: any) => <Text style={{ color: '#1677ff', fontSize: 11 }}>{fmtAmt(v, rec.currencyCode)}</Text>,
-              },
-              {
-                title: 'Posted to Date', dataIndex: 'postedToDate', width: 140, align: 'right' as const,
-                render: (v: number, rec: any) => <Text style={{ color: REDWOOD.success, fontWeight: 600, fontSize: 11 }}>{fmtAmt(v, rec.currencyCode)}</Text>,
-              },
-              {
-                title: `${accrualPeriod || 'Period'} — Total`, dataIndex: 'periodAmt', width: 150, align: 'right' as const,
-                render: (v: number, rec: any) => <Text strong style={{ color: '#1677ff', fontSize: 11 }}>{fmtAmt(v, rec.currencyCode)}</Text>,
-              },
-              {
-                title: `${accrualPeriod || 'Period'} — Open`, dataIndex: 'periodOpen', width: 150, align: 'right' as const,
-                render: (v: number, rec: any) => v > 0
-                  ? <Text strong style={{ color: REDWOOD.warning, fontSize: 11 }}>{fmtAmt(v, rec.currencyCode)}</Text>
-                  : <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: 11 }}>Posted</Tag>,
-              },
-              {
-                title: `${accrualPeriod || 'Period'} — Status`, width: 130,
-                render: (_: any, rec: any) => rec.periodOpen > 0
-                  ? <Tag color="warning" icon={<WarningOutlined />} style={{ fontSize: 11 }}>Not Posted</Tag>
-                  : rec.hasPeriodLines
-                  ? <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: 11 }}>Posted</Tag>
-                  : <Tag color="default" style={{ fontSize: 11 }}>No Lines</Tag>,
-              },
-              {
-                title: 'Action', width: 110, fixed: 'right' as const,
-                render: (_: any, rec: any) => (
-                  <Button size="small" type="primary" onClick={() => openDetail(rec)}>View & Post</Button>
-                ),
-              },
-            ]}
-          />
+                </div>
+                <Table
+                  dataSource={flatRows}
+                  rowKey="scheduleId"
+                  size="small"
+                  loading={accrualLoading}
+                  pagination={{ pageSize: 25, showSizeChanger: true }}
+                  scroll={{ x: 1300 }}
+                  rowSelection={{
+                    selectedRowKeys: accrualSelected,
+                    onChange: (keys) => setAccrualSelected(keys as number[]),
+                  }}
+                  locale={{ emptyText: accrualPeriod ? `No accrual lines for ${accrualPeriod}` : 'Select a period to see accrual lines' }}
+                  summary={(rows) => {
+                    const totPeriod  = rows.reduce((s, r: any) => s + (r.periodAmt || 0), 0);
+                    const cur = rows[0] as any;
+                    return (
+                      <Table.Summary.Row style={{ background: '#f0f5ff', fontWeight: 700 }}>
+                        <Table.Summary.Cell index={0} colSpan={4}><strong>Total ({rows.length} schedules)</strong></Table.Summary.Cell>
+                        <Table.Summary.Cell index={4} align="right">
+                          <Text strong style={{ color: '#1677ff', fontSize: 11 }}>{fmtAmt(totPeriod, cur?.currencyCode)}</Text>
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={5} colSpan={5} />
+                      </Table.Summary.Row>
+                    );
+                  }}
+                  columns={[
+                    {
+                      title: 'Sched ID', dataIndex: 'scheduleId', width: 80, fixed: 'left' as const,
+                      render: (v: number) => <Tag style={{ fontSize: 10, fontFamily: 'monospace' }}>{v}</Tag>,
+                    },
+                    {
+                      title: 'Invoice Number', dataIndex: 'invoiceNumber', width: 150, fixed: 'left' as const,
+                      render: (v: string, rec: any) => (
+                        <Button type="link" size="small" style={{ padding: 0, fontSize: 11 }} onClick={() => openDetail(rec)}>{v}</Button>
+                      ),
+                    },
+                    { title: 'Supplier', dataIndex: 'supplier', ellipsis: true, width: 180,
+                      render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+                    { title: 'Description', dataIndex: 'description', ellipsis: true, width: 200,
+                      render: (v: string) => <Text style={{ fontSize: 11 }} title={v}>{v}</Text> },
+                    {
+                      title: `${accrualPeriod || 'Period'} Amount`, dataIndex: 'periodAmt', width: 140, align: 'right' as const,
+                      render: (v: number, rec: any) => <Text strong style={{ color: '#1677ff', fontSize: 11 }}>{fmtAmt(v, rec.currencyCode)}</Text>,
+                    },
+                    {
+                      title: 'Charge A/C (Expense DR)', dataIndex: 'chargeAccount', ellipsis: true, width: 200,
+                      render: (v: string) => <Text code style={{ fontSize: 10 }}>{v || '—'}</Text>,
+                    },
+                    {
+                      title: 'Accrual A/C (CR)', dataIndex: 'accrualAccount', ellipsis: true, width: 200,
+                      render: (v: string) => <Text code style={{ fontSize: 10 }}>{v || '—'}</Text>,
+                    },
+                    {
+                      title: 'Invoice Total', dataIndex: 'totalAmount', width: 130, align: 'right' as const,
+                      render: (v: number, rec: any) => <Text style={{ color: '#555', fontSize: 11 }}>{fmtAmt(v, rec.currencyCode)}</Text>,
+                    },
+                    {
+                      title: 'Posted to Date', dataIndex: 'postedToDate', width: 130, align: 'right' as const,
+                      render: (v: number, rec: any) => <Text style={{ color: REDWOOD.success, fontSize: 11 }}>{fmtAmt(v, rec.currencyCode)}</Text>,
+                    },
+                    {
+                      title: 'Action', width: 100, fixed: 'right' as const,
+                      render: (_: any, rec: any) => (
+                        <Button size="small" onClick={() => openDetail(rec)}>View & Post</Button>
+                      ),
+                    },
+                  ]}
+                />
+              </>
+            );
+          })()}
           <Modal
             open={accrualPreviewOpen}
             onCancel={() => setAccrualPreviewOpen(false)}
