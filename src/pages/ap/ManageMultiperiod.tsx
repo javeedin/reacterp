@@ -104,6 +104,7 @@ const ManageMultiperiod: React.FC = () => {
   const [accrualPosting,    setAccrualPosting]    = useState(false);
   const [accrualPosted,     setAccrualPosted]     = useState<{invoiceId:number;invoiceNumber:string;period:string;status:'ok'|'error';note:string}[]>([]);
   const [accrualSelected,    setAccrualSelected]    = useState<number[]>([]);   // selected invoiceIds
+  const [accrualSearch,      setAccrualSearch]      = useState('');
   const [accrualPreviewOpen, setAccrualPreviewOpen] = useState(false);
   const [accrualPreviewLines, setAccrualPreviewLines] = useState<any[]>([]);
 
@@ -1107,7 +1108,7 @@ const ManageMultiperiod: React.FC = () => {
           {/* Invoices with open lines in this period */}
           {(() => {
             // Flatten: one row per schedule line for the selected period
-            const flatRows = accrualLines.flatMap((inv: any) =>
+            const allFlatRows = accrualLines.flatMap((inv: any) =>
               (inv.periodNotPostedLines || []).map((sl: any) => ({
                 rowKey: `${inv.invoiceId}-${sl.scheduleId}`,
                 scheduleId: sl.scheduleId,
@@ -1130,8 +1131,34 @@ const ManageMultiperiod: React.FC = () => {
               }))
             );
 
+            // Apply global search filter across all text columns
+            const q = accrualSearch.trim().toLowerCase();
+            const flatRows = q
+              ? allFlatRows.filter((r: any) =>
+                  [r.invoiceNumber, r.supplier, r.description, r.chargeAccount,
+                   r.accrualAccount, r.businessUnit, r.periodName, String(r.scheduleId), String(r.lineNumber)]
+                    .some(v => v && String(v).toLowerCase().includes(q))
+                )
+              : allFlatRows;
+
+            // Unique invoice numbers for column filter
+            const invoiceOptions = [...new Set(allFlatRows.map((r: any) => r.invoiceNumber as string))]
+              .sort()
+              .map(v => ({ text: v, value: v }));
+
             return (
               <>
+                <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Input.Search
+                    placeholder="Search any column…"
+                    allowClear
+                    size="small"
+                    style={{ width: 280 }}
+                    value={accrualSearch}
+                    onChange={e => setAccrualSearch(e.target.value)}
+                    onSearch={v => setAccrualSearch(v)}
+                  />
+                </div>
                 <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <Text type="secondary" style={{ fontSize: 11 }}>
                     {accrualSelected.length > 0 ? `${accrualSelected.length} schedule(s) selected` : 'Select schedules to create accrual accounting entries'}
@@ -1222,6 +1249,9 @@ const ManageMultiperiod: React.FC = () => {
                     },
                     {
                       title: 'Invoice Number', dataIndex: 'invoiceNumber', width: 150, fixed: 'left' as const,
+                      filters: invoiceOptions,
+                      onFilter: (value: any, rec: any) => rec.invoiceNumber === value,
+                      filterSearch: true,
                       render: (v: string, rec: any) => (
                         <Button type="link" size="small" style={{ padding: 0, fontSize: 11 }} onClick={() => openDetail(rec)}>{v}</Button>
                       ),
