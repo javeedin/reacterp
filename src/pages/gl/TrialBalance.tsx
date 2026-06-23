@@ -3339,14 +3339,20 @@ const TrialBalance: React.FC = () => {
       return /^0+$/.test(seg5) ? '' : seg5;
     };
 
+    // Replace segment 5 (sub-account) in a combo string with the given value
+    const withSubAcct = (combo: string, subAcct: string): string => {
+      if (!combo || !subAcct) return combo;
+      const segs = combo.split('-');
+      if (segs.length >= 5) segs[4] = subAcct;
+      return segs.join('-');
+    };
+
     // Build journal preview — one line pair per selected pending combinations
     const buildPreview = () => {
       const rawPeriod = cleanPeriodName(tab.periodName);
       const periodMonth = rawPeriod || tab.periodName;
       const lines: { lineNum: number; combo: string; subAccount: string; desc: string; comment: string; dr: number; cr: number }[] = [];
       let ln = 1;
-      const gainSubAcct = extractSubAcct(revalGainCombo);
-      const lossSubAcct = extractSubAcct(revalLossCombo);
       // Only preview selected, non-posted rows
       const previewRows = activeComboRows.filter(r => !isComboPosted(r.combo) && effectiveSelected.includes(r.rowKey));
       previewRows.forEach(r => {
@@ -3354,12 +3360,17 @@ const TrialBalance: React.FC = () => {
         const abs = Math.abs(r.revalAmt);
         const subAcctPart = r.subAccount ? ` - ${r.subAccount}` : '';
         const lineDesc = `${accountDesc}${subAcctPart} - Revaluation (${periodMonth})`;
+        // Gain/Loss combo: replace 5th segment with this combo's sub-account
+        const gainCombo = r.subAccount ? withSubAcct(revalGainCombo, r.subAccount) : revalGainCombo;
+        const lossCombo = r.subAccount ? withSubAcct(revalLossCombo, r.subAccount) : revalLossCombo;
+        const gainSubAcct = extractSubAcct(gainCombo || revalGainCombo);
+        const lossSubAcct = extractSubAcct(lossCombo || revalLossCombo);
         if (r.isGain) {
-          lines.push({ lineNum: ln++, combo: r.combo,                         subAccount: r.subAccount, desc: lineDesc,                                              comment: '', dr: abs, cr: 0 });
-          lines.push({ lineNum: ln++, combo: revalGainCombo || '[Gain Account]', subAccount: gainSubAcct, desc: `Unrealized FX Gain - ${r.ccy} (${periodMonth})`,    comment: '', dr: 0,   cr: abs });
+          lines.push({ lineNum: ln++, combo: r.combo,                              subAccount: r.subAccount, desc: lineDesc,                                              comment: '', dr: abs, cr: 0 });
+          lines.push({ lineNum: ln++, combo: gainCombo || '[Gain Account]',        subAccount: gainSubAcct,  desc: `Unrealized FX Gain - ${r.ccy} (${periodMonth})`,    comment: '', dr: 0,   cr: abs });
         } else {
-          lines.push({ lineNum: ln++, combo: revalLossCombo || '[Loss Account]', subAccount: lossSubAcct, desc: `Unrealized FX Loss - ${r.ccy} (${periodMonth})`,    comment: '', dr: abs, cr: 0 });
-          lines.push({ lineNum: ln++, combo: r.combo,                         subAccount: r.subAccount, desc: lineDesc,                                              comment: '', dr: 0,   cr: abs });
+          lines.push({ lineNum: ln++, combo: lossCombo || '[Loss Account]',        subAccount: lossSubAcct,  desc: `Unrealized FX Loss - ${r.ccy} (${periodMonth})`,    comment: '', dr: abs, cr: 0 });
+          lines.push({ lineNum: ln++, combo: r.combo,                              subAccount: r.subAccount, desc: lineDesc,                                              comment: '', dr: 0,   cr: abs });
         }
       });
       setRevalPreviewRows(lines);
