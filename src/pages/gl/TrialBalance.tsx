@@ -214,6 +214,8 @@ interface TabData {
   segmentsAfter: string[];
   gridSearch: string;
   showEntered: boolean;
+  ytdAcctTypeFilter: string;   // 'ALL' | 'A' | 'L' | 'O' | 'R' | 'E'
+  ytdRevalOnly: boolean;
 }
 
 interface ApiCallInfo {
@@ -609,7 +611,7 @@ const TrialBalance: React.FC = () => {
       segmentsBefore: [],
       segmentsAfter: [],
       gridSearch: '',
-      showEntered: false,
+      showEntered: false, ytdAcctTypeFilter: 'ALL', ytdRevalOnly: false,
     };
 
     setTabs(prev => [...prev, newTab]);
@@ -674,7 +676,7 @@ const TrialBalance: React.FC = () => {
       segmentsBefore: [],
       segmentsAfter: [],
       gridSearch: '',
-      showEntered: false,
+      showEntered: false, ytdAcctTypeFilter: 'ALL', ytdRevalOnly: false,
     };
 
     setTabs(prev => [...prev, newTab]);
@@ -761,7 +763,7 @@ const TrialBalance: React.FC = () => {
       segmentsBefore: [],
       segmentsAfter: [],
       gridSearch: '',
-      showEntered: false,
+      showEntered: false, ytdAcctTypeFilter: 'ALL', ytdRevalOnly: false,
     };
 
     setTabs(prev => [...prev, newTab]);
@@ -814,7 +816,7 @@ const TrialBalance: React.FC = () => {
       data: [], rrData: [], rrGenerating: false, loading: true, error: null,
       companies: [], currencies: [],
       selectedCompany: null, selectedCurrency: null,
-      segmentsBefore: [], segmentsAfter: [], gridSearch: '', showEntered: false,
+      segmentsBefore: [], segmentsAfter: [], gridSearch: '', showEntered: false, ytdAcctTypeFilter: 'ALL', ytdRevalOnly: false,
     };
     setTabs(prev => [...prev, newTab]);
     setActiveTab(tabKey);
@@ -1245,6 +1247,14 @@ const TrialBalance: React.FC = () => {
 
   const updateTabEntered = useCallback((tabKey: string, show: boolean) => {
     setTabs(prev => prev.map(t => t.key === tabKey ? { ...t, showEntered: show } : t));
+  }, []);
+
+  const updateYtdAcctType = useCallback((tabKey: string, v: string) => {
+    setTabs(prev => prev.map(t => t.key === tabKey ? { ...t, ytdAcctTypeFilter: v } : t));
+  }, []);
+
+  const updateYtdRevalOnly = useCallback((tabKey: string, v: boolean) => {
+    setTabs(prev => prev.map(t => t.key === tabKey ? { ...t, ytdRevalOnly: v } : t));
   }, []);
 
   // Handle segment drop
@@ -6802,7 +6812,14 @@ const TrialBalance: React.FC = () => {
       g.entered_closing     += r.entered_closing     || 0;
     });
 
-    const tableRows = Array.from(grouped.values()).sort((a, b) => a.account.localeCompare(b.account));
+    let tableRows = Array.from(grouped.values()).sort((a, b) => a.account.localeCompare(b.account));
+
+    if (tab.ytdAcctTypeFilter && tab.ytdAcctTypeFilter !== 'ALL') {
+      tableRows = tableRows.filter(r => r.account_type === tab.ytdAcctTypeFilter);
+    }
+    if (tab.ytdRevalOnly) {
+      tableRows = tableRows.filter(r => revalAccountStatus.has(r.account));
+    }
 
     const totals = tableRows.reduce(
       (acc, r) => ({
@@ -7046,7 +7063,7 @@ const TrialBalance: React.FC = () => {
                     segmentsBefore: [],
                     segmentsAfter: [],
                     gridSearch: '',
-                    showEntered: false,
+                    showEntered: false, ytdAcctTypeFilter: 'ALL', ytdRevalOnly: false,
                   };
                   setTabs(prev => [...prev, newTab]);
                   setActiveTab(reCalcKey);
@@ -7342,15 +7359,55 @@ const TrialBalance: React.FC = () => {
           </Col>
         </Row>
 
-        <Space style={{ marginBottom: 10 }} wrap>
-          {Object.entries(accountTypeLabel).map(([k, v]) => (
-            <Tag key={k} color={typeTagColor[k]} style={{ fontSize: 11 }}>
-              {v}{k === 'R' || k === 'E' ? ' — P&L (resets each fiscal year)' : ' — BS (carries forward)'}
-            </Tag>
-          ))}
-          <Tag style={{ fontSize: 11, color: REDWOOD.info, borderColor: REDWOOD.info }}>positive = Dr balance</Tag>
-          <Tag style={{ fontSize: 11, color: REDWOOD.primary, borderColor: REDWOOD.primary }}>(brackets) = Cr balance</Tag>
-        </Space>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+          {/* Account type filter */}
+          <Space size={4}>
+            {[
+              { key: 'ALL', label: 'All' },
+              { key: 'A',   label: 'Asset',     color: 'blue' },
+              { key: 'L',   label: 'Liability',  color: 'orange' },
+              { key: 'O',   label: 'Equity',     color: 'green' },
+              { key: 'R',   label: 'Revenue',    color: 'magenta' },
+              { key: 'E',   label: 'Expense',    color: 'purple' },
+            ].map(({ key, label, color }) => (
+              <Tag
+                key={key}
+                color={tab.ytdAcctTypeFilter === key ? (color || 'default') : undefined}
+                style={{
+                  cursor: 'pointer', fontSize: 11,
+                  opacity: tab.ytdAcctTypeFilter === key ? 1 : 0.55,
+                  fontWeight: tab.ytdAcctTypeFilter === key ? 700 : 400,
+                  border: tab.ytdAcctTypeFilter === key ? undefined : '1px solid #d9d9d9',
+                }}
+                onClick={() => updateYtdAcctType(tab.key, key)}
+              >
+                {label}
+              </Tag>
+            ))}
+          </Space>
+
+          <div style={{ width: 1, height: 20, background: '#e0e0e0' }} />
+
+          {/* Revalued-only toggle */}
+          <Space size={6}>
+            <Switch
+              size="small"
+              checked={tab.ytdRevalOnly}
+              onChange={v => updateYtdRevalOnly(tab.key, v)}
+              style={tab.ytdRevalOnly ? { background: '#1D7B4D' } : {}}
+            />
+            <Text style={{ fontSize: 12, color: tab.ytdRevalOnly ? '#1D7B4D' : REDWOOD.neutral500, fontWeight: tab.ytdRevalOnly ? 600 : 400 }}>
+              Show Revalued Accounts
+            </Text>
+            {tab.ytdRevalOnly && (
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 16, height: 16, borderRadius: '50%', fontSize: 10, fontWeight: 700,
+                background: '#1D7B4D', color: '#fff',
+              }}>R</span>
+            )}
+          </Space>
+        </div>
 
         <Table
           dataSource={tableRows}
