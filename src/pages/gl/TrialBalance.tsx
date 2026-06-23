@@ -3697,6 +3697,7 @@ const TrialBalance: React.FC = () => {
         <Modal
           open={revalVisible}
           onCancel={() => { setRevalVisible(false); setRevalPreviewRows([]); }}
+          maskClosable={false}
           footer={null}
           width={1400}
           title={
@@ -4379,6 +4380,8 @@ const TrialBalance: React.FC = () => {
           onCancel={() => setRevalApiDebugOpen(false)}
           title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>API Debug — Revaluation Save</span></Space>}
           width={820}
+          zIndex={1100}
+          maskClosable={false}
           footer={
             <Space>
               <Button
