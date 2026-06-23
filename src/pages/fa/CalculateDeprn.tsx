@@ -7,6 +7,7 @@ import {
   HomeOutlined, LineChartOutlined, ReloadOutlined,
   CheckCircleOutlined, ClockCircleOutlined, ApiOutlined,
   PlayCircleOutlined, SyncOutlined, CloudUploadOutlined, EyeOutlined,
+  SwapOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import {
@@ -35,7 +36,7 @@ const FA_COLOR = '#CA7700';
 const fmt = (v: number | null | undefined) =>
   v == null ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-type ViewMode = 'last' | 'preview';
+type ViewMode = 'last' | 'preview' | 'compare';
 
 const CalculateDeprn: React.FC = () => {
   const [bookControls, setBookControls] = useState<BookControlRecord[]>([]);
@@ -57,7 +58,7 @@ const CalculateDeprn: React.FC = () => {
   // Posting
   const [posting, setPosting] = useState(false);
 
-  // Which table to show: 'last' = last period actuals, 'preview' = next period calculated
+  // Which table to show
   const [viewMode, setViewMode] = useState<ViewMode>('last');
 
   useEffect(() => {
@@ -228,12 +229,62 @@ const CalculateDeprn: React.FC = () => {
       render: (v: number) => <Text style={{ fontSize: 12, color: REDWOOD.success, fontWeight: 600 }}>{fmt(v)}</Text> },
   ];
 
+  const compareColumns = [
+    { title: 'Asset #',     dataIndex: 'assetNumber', key: 'assetNumber', width: 100, fixed: 'left' as const,
+      render: (v: string) => <Text style={{ fontSize: 12, fontWeight: 600 }}>{v}</Text> },
+    { title: 'Description', dataIndex: 'description', key: 'description', width: 200,
+      render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+    { title: 'Method',      dataIndex: 'methodCode',  key: 'methodCode',  width: 80,
+      render: (v: string) => <Tag style={{ fontSize: 11 }}>{v || '—'}</Tag> },
+    { title: lastPeriod?.lastPeriodName ?? 'Last Deprn', dataIndex: 'lastDeprn', key: 'lastDeprn', width: 130, align: 'right' as const,
+      render: (v: number) => <Text style={{ fontSize: 12 }}>{fmt(v)}</Text> },
+    { title: lastPeriod?.nextPeriodName ?? 'Next Deprn', dataIndex: 'nextDeprn', key: 'nextDeprn', width: 130, align: 'right' as const,
+      render: (v: number) => <Text style={{ fontSize: 12, color: '#1677ff', fontWeight: 600 }}>{fmt(v)}</Text> },
+    { title: 'Difference',  dataIndex: 'difference',  key: 'difference',  width: 130, align: 'right' as const,
+      render: (v: number) => {
+        const color = v > 0 ? REDWOOD.primary : v < 0 ? REDWOOD.success : REDWOOD.neutral500;
+        const prefix = v > 0 ? '+' : '';
+        return <Text style={{ fontSize: 12, fontWeight: 700, color }}>{v === 0 ? '—' : `${prefix}${fmt(v)}`}</Text>;
+      },
+    },
+    { title: `${lastPeriod?.lastPeriodName ?? 'Last'} NBV`, dataIndex: 'lastNbv', key: 'lastNbv', width: 130, align: 'right' as const,
+      render: (v: number) => <Text style={{ fontSize: 12 }}>{fmt(v)}</Text> },
+    { title: `${lastPeriod?.nextPeriodName ?? 'Next'} NBV`, dataIndex: 'nextNbv', key: 'nextNbv', width: 130, align: 'right' as const,
+      render: (v: number) => <Text style={{ fontSize: 12, color: REDWOOD.success }}>{fmt(v)}</Text> },
+  ];
+
   const isPreview = viewMode === 'preview';
-  const activeItems   = isPreview ? previewItems   : wbItems;
-  const activeSummary = isPreview ? previewSummary : wbSummary;
-  const activeLoading = isPreview ? previewLoading : wbLoading;
-  const activeColumns = isPreview ? previewColumns : lastColumns;
-  const activeRowKey  = isPreview ? 'assetId'      : 'assetId';
+  const isCompare = viewMode === 'compare';
+
+  // Build compare rows — join last actuals + preview by assetId
+  const compareRows = React.useMemo(() => {
+    if (!previewed) return [];
+    const lastMap = new Map(wbItems.map(r => [String(r.assetId), r]));
+    return previewItems.map(pr => {
+      const last = lastMap.get(String(pr.assetId));
+      const lastAmt  = Number(last?.deprnAmount  ?? 0);
+      const nextAmt  = Number(pr.deprnAmount      ?? 0);
+      const diff     = nextAmt - lastAmt;
+      return {
+        assetId:      pr.assetId,
+        assetNumber:  pr.assetNumber,
+        description:  pr.description,
+        methodCode:   pr.methodCode,
+        lastPeriod:   lastPeriod?.lastPeriodName  ?? '—',
+        nextPeriod:   lastPeriod?.nextPeriodName  ?? '—',
+        lastDeprn:    lastAmt,
+        nextDeprn:    nextAmt,
+        difference:   diff,
+        lastNbv:      Number(last?.nbv ?? 0),
+        nextNbv:      Number(pr.nbv    ?? 0),
+      };
+    });
+  }, [previewed, wbItems, previewItems, lastPeriod]);
+
+  const activeItems   = isCompare ? compareRows   : isPreview ? previewItems   : wbItems;
+  const activeSummary = isCompare ? null          : isPreview ? previewSummary : wbSummary;
+  const activeLoading = isCompare ? false         : isPreview ? previewLoading : wbLoading;
+  const activeRowKey  = 'assetId';
 
   return (
     <Layout style={{ minHeight: 'calc(100vh - 64px)', background: REDWOOD.neutral100 }}>
@@ -390,18 +441,53 @@ const CalculateDeprn: React.FC = () => {
                       Preview — {lastPeriod?.nextPeriodName}
                     </Button>
                   )}
+                  {previewed && (
+                    <Button
+                      type={viewMode === 'compare' ? 'primary' : 'default'}
+                      size="small"
+                      icon={<SwapOutlined />}
+                      onClick={() => setViewMode('compare')}
+                      style={viewMode === 'compare' ? { background: '#722ed1', borderColor: '#722ed1' } : { color: '#722ed1', borderColor: '#722ed1' }}
+                    >
+                      Compare
+                    </Button>
+                  )}
                 </Space>
               </div>
 
               {/* Preview notice */}
               {isPreview && (
-                <Alert
-                  type="warning"
-                  showIcon
-                  style={{ marginBottom: 12 }}
+                <Alert type="warning" showIcon style={{ marginBottom: 12 }}
                   message={`Depreciation preview for ${lastPeriod?.nextPeriodName} — amounts are calculated but NOT yet posted. Click "Post Depreciation" to commit.`}
                 />
               )}
+
+              {/* Compare notice + summary */}
+              {isCompare && compareRows.length > 0 && (() => {
+                const totalLast = compareRows.reduce((s, r) => s + r.lastDeprn, 0);
+                const totalNext = compareRows.reduce((s, r) => s + r.nextDeprn, 0);
+                const totalDiff = totalNext - totalLast;
+                return (
+                  <Row gutter={[10, 10]} style={{ marginBottom: 12 }}>
+                    {[
+                      { label: `${lastPeriod?.lastPeriodName} Deprn`, value: totalLast, color: REDWOOD.neutral500 },
+                      { label: `${lastPeriod?.nextPeriodName} Deprn`, value: totalNext, color: '#1677ff' },
+                      { label: 'Total Difference', value: totalDiff,
+                        color: totalDiff > 0 ? REDWOOD.primary : totalDiff < 0 ? REDWOOD.success : REDWOOD.neutral500 },
+                    ].map(s => (
+                      <Col xs={8} key={s.label}>
+                        <Card size="small" styles={{ body: { padding: '10px 14px' } }}
+                          style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, background: REDWOOD.neutral100 }}>
+                          <Text style={{ fontSize: 11, color: REDWOOD.neutral500, display: 'block' }}>{s.label}</Text>
+                          <Text style={{ fontSize: 15, fontWeight: 700, color: s.color }}>
+                            {s.label === 'Total Difference' && totalDiff > 0 ? '+' : ''}{fmt(s.value)}
+                          </Text>
+                        </Card>
+                      </Col>
+                    ))}
+                  </Row>
+                );
+              })()}
 
               {/* Details card */}
               <Card
@@ -411,12 +497,19 @@ const CalculateDeprn: React.FC = () => {
                   <Space>
                     <LineChartOutlined style={{ color: isPreview ? FA_COLOR : REDWOOD.success }} />
                     <Text strong>
-                      {isPreview
-                        ? `Calculated Depreciation — ${lastPeriod?.nextPeriodName} (Preview)`
-                        : `Depreciation Details — ${lastPeriod?.lastPeriodName || '—'}`}
+                      {isCompare
+                        ? `Compare — ${lastPeriod?.lastPeriodName} vs ${lastPeriod?.nextPeriodName}`
+                        : isPreview
+                          ? `Calculated Depreciation — ${lastPeriod?.nextPeriodName} (Preview)`
+                          : `Depreciation Details — ${lastPeriod?.lastPeriodName || '—'}`}
                     </Text>
-                    {!isPreview && lastPeriod?.lastPeriodCounter && (
+                    {!isPreview && !isCompare && lastPeriod?.lastPeriodCounter && (
                       <Tag color="green" style={{ fontSize: 11 }}>Counter: {lastPeriod.lastPeriodCounter}</Tag>
+                    )}
+                    {isCompare && (
+                      <Tag color="purple" icon={<SwapOutlined />} style={{ fontSize: 11 }}>
+                        {compareRows.length} assets
+                      </Tag>
                     )}
                   </Space>
                 }
@@ -444,12 +537,16 @@ const CalculateDeprn: React.FC = () => {
 
                     <Table
                       dataSource={activeItems}
-                      columns={activeColumns}
+                      columns={isCompare ? compareColumns : isPreview ? previewColumns : lastColumns}
                       rowKey={activeRowKey}
                       size="small"
-                      scroll={{ x: isPreview ? 1200 : 1100, y: 420 }}
+                      scroll={{ x: isCompare ? 1100 : isPreview ? 1200 : 1100, y: 420 }}
                       pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `${t} assets` }}
-                      locale={{ emptyText: lastPeriod ? 'No depreciation records found' : 'Select a book' }}
+                      locale={{ emptyText: lastPeriod ? 'No records found' : 'Select a book' }}
+                      rowClassName={(r: any) =>
+                        isCompare && r.difference > 0 ? 'row-increase'
+                        : isCompare && r.difference < 0 ? 'row-decrease' : ''
+                      }
                     />
                   </>
                 )}
