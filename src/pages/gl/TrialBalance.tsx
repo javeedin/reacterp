@@ -536,7 +536,7 @@ const TrialBalance: React.FC = () => {
     try {
       const res = await fetch(url);
       const data = await res.json();
-      const names: string[] = (data.items || []).map((i: any) => i.ledger_name).filter(Boolean);
+      const names: string[] = [...new Set<string>((data.items || []).map((i: any) => i.ledger_name).filter(Boolean))];
       resolveCall('ledgers', t0, res.status, res.ok, `${names.length} ledgers`);
       setLedgerOptions(names);
       if (names.length > 0 && !names.includes(selectedLedger)) {
@@ -3374,8 +3374,14 @@ const TrialBalance: React.FC = () => {
       let ln = 1;
       // Only preview selected, non-posted rows
       const previewRows = activeComboRows.filter(r => !isComboPosted(r.combo) && effectiveSelected.includes(r.rowKey));
+      if (previewRows.length === 0) {
+        message.warning('No combinations selected for preview. Select at least one combination and ensure a rate is entered.');
+        return;
+      }
+      const skippedZeroRate  = previewRows.filter(r => r.newRate === 0);
+      const skippedZeroAmt   = previewRows.filter(r => r.newRate !== 0 && Math.abs(r.revalAmt) < 0.001);
       previewRows.forEach(r => {
-        if (r.revalAmt === 0 || r.newRate === 0) return;
+        if (r.newRate === 0 || Math.abs(r.revalAmt) < 0.001) return;
         const abs = Math.abs(r.revalAmt);
         const subAcctPart = r.subAccount ? ` - ${r.subAccount}` : '';
         const lineDesc = `${accountDesc}${subAcctPart} - Revaluation (${periodMonth})`;
@@ -3393,6 +3399,17 @@ const TrialBalance: React.FC = () => {
         }
       });
       setRevalPreviewRows(lines);
+
+      if (lines.length === 0) {
+        if (skippedZeroRate.length > 0) {
+          message.warning(`No journal lines generated — enter a rate for: ${skippedZeroRate.map(r => r.ccy).join(', ')}`);
+        } else if (skippedZeroAmt.length > 0) {
+          message.info('No adjustment needed — revaluation amount is zero at the current rate. Enter a different rate to generate lines.');
+        } else {
+          message.warning('No journal lines generated. Ensure combinations are selected and rates are entered.');
+        }
+        return;
+      }
 
       // Auto-fetch sub-account descriptions and patch descriptions
       const subAccts = [...new Set(lines.map(l => l.subAccount).filter(Boolean))];
