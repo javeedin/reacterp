@@ -33,18 +33,18 @@ const REDWOOD = {
 const APEX = APEX_DB_CONFIG.baseUrl;
 
 const MODULES = [
-  { id: 'gl',   label: 'General Ledger',      icon: <AccountBookOutlined />, path: '/gl/manage-journals',         color: REDWOOD.primary,  desc: 'Journals · Trial Balance · COA' },
-  { id: 'ap',   label: 'Accounts Payable',    icon: <DollarOutlined />,      path: '/ap/manage-invoices',         color: REDWOOD.orange,   desc: 'Invoices · Payments · Suppliers' },
-  { id: 'ar',   label: 'Accounts Receivable', icon: <WalletOutlined />,      path: '/ar/manage-receipts',         color: REDWOOD.success,  desc: 'Receipts · Invoices · Customers' },
-  { id: 'cash', label: 'Cash Management',     icon: <BankOutlined />,        path: '/cash/external-transactions', color: REDWOOD.info,     desc: 'Bank Recon · Transfers · Statements' },
-  { id: 'fa',   label: 'Fixed Assets',        icon: <DatabaseOutlined />,    path: '/fa/manage-assets',           color: REDWOOD.purple,   desc: 'Assets · Depreciation · Retirements' },
-  { id: 'rm',   label: 'Rental Management',   icon: <HomeOutlined />,        path: '/rm/manage-agreements',       color: REDWOOD.teal,     desc: 'Agreements · Properties · Installments' },
-  { id: 'pms',  label: 'Portfolio Mgmt',      icon: <FundOutlined />,        path: '/pms/portfolio',              color: REDWOOD.success,  desc: 'Portfolio · Watchlist · Risk' },
-  { id: 'proc', label: 'Procurement',         icon: <ShopOutlined />,        path: '/proc/manage-suppliers',      color: REDWOOD.warning,  desc: 'Suppliers · Purchase Orders' },
-  { id: 'pc',   label: 'Petty Cash',          icon: <AuditOutlined />,       path: '/pc/petty-cash',              color: REDWOOD.orange,   desc: 'Registers · Expenses' },
-  { id: 'supp', label: 'Support',             icon: <SafetyCertificateOutlined />, path: '/support/manage-tickets', color: REDWOOD.neutral600, desc: 'Tickets · Issues' },
-  { id: 'admin',label: 'Administration',      icon: <SettingOutlined />,     path: '/admin/user-management',      color: REDWOOD.neutral800, desc: 'Users · Settings · AI' },
-  { id: 'sync', label: 'Oracle Sync',         icon: <SyncOutlined />,        path: '/sync',                       color: REDWOOD.primary,  desc: 'Sync GL · AP · AR · Assets' },
+  { id: 'gl',   label: 'General Ledger',      icon: <AccountBookOutlined />, path: '/gl',            color: REDWOOD.primary,   desc: 'Journals · Trial Balance · COA' },
+  { id: 'ap',   label: 'Accounts Payable',    icon: <DollarOutlined />,      path: '/ap',            color: REDWOOD.orange,    desc: 'Invoices · Payments · Suppliers' },
+  { id: 'ar',   label: 'Accounts Receivable', icon: <WalletOutlined />,      path: '/ar',            color: REDWOOD.success,   desc: 'Receipts · Invoices · Customers' },
+  { id: 'cash', label: 'Cash Management',     icon: <BankOutlined />,        path: '/cash',          color: REDWOOD.info,      desc: 'Bank Recon · Transfers · Statements' },
+  { id: 'fa',   label: 'Fixed Assets',        icon: <DatabaseOutlined />,    path: '/fa',            color: REDWOOD.purple,    desc: 'Assets · Depreciation · Retirements' },
+  { id: 'rm',   label: 'Rental Management',   icon: <HomeOutlined />,        path: '/rm',            color: REDWOOD.teal,      desc: 'Agreements · Properties · Installments' },
+  { id: 'pms',  label: 'Portfolio Mgmt',      icon: <FundOutlined />,        path: '/pms',           color: REDWOOD.success,   desc: 'Portfolio · Watchlist · Risk' },
+  { id: 'proc', label: 'Procurement',         icon: <ShopOutlined />,        path: '/procurement',   color: REDWOOD.warning,   desc: 'Suppliers · Purchase Orders' },
+  { id: 'pc',   label: 'Petty Cash',          icon: <AuditOutlined />,       path: '/pc/registers',  color: REDWOOD.orange,    desc: 'Registers · Expenses' },
+  { id: 'supp', label: 'Support',             icon: <SafetyCertificateOutlined />, path: '/support', color: REDWOOD.neutral600, desc: 'Tickets · Issues' },
+  { id: 'admin',label: 'Administration',      icon: <SettingOutlined />,     path: '/admin',         color: REDWOOD.neutral800, desc: 'Users · Settings · AI' },
+  { id: 'sync', label: 'Oracle Sync',         icon: <SyncOutlined />,        path: '/sync',          color: REDWOOD.primary,   desc: 'Sync GL · AP · AR · Assets' },
 ];
 
 const QUICK_ACTIONS = [
@@ -54,6 +54,7 @@ const QUICK_ACTIONS = [
   { label: 'External Transactions', path: '/cash/external-transactions', color: REDWOOD.info    },
   { label: 'Run Depreciation',      path: '/fa/depreciation',            color: REDWOOD.purple  },
   { label: 'Trial Balance',         path: '/gl/trial-balance',           color: REDWOOD.success },
+  { label: 'Manage RM Agreements',  path: '/rm/agreements',              color: REDWOOD.teal    },
   { label: 'Sync Oracle Data',      path: '/sync',                       color: REDWOOD.primary },
 ];
 
@@ -123,15 +124,15 @@ const Home: React.FC = () => {
     setLoading(true);
     try {
       const [apRes, periodRes, approvalsRes, jnlRes] = await Promise.allSettled([
-        fetch(`${APEX}/ap/invoices/stats`,              { cache: 'no-store', headers: { Accept: 'application/json' } }),
-        fetch(`${APEX}/gl/periodsstatus?limit=1`,       { cache: 'no-store', headers: { Accept: 'application/json' } }),
-        fetch(`${APEX}/approvals/requests?status=PENDING&limit=5`, { cache: 'no-store', headers: { Accept: 'application/json' } }),
-        fetch(`${APEX}/gl/journals/headers?limit=5`,   { cache: 'no-store', headers: { Accept: 'application/json' } }),
+        fetch(`${APEX}/ap/invoices/stats`,                              { cache: 'no-store', headers: { Accept: 'application/json' } }),
+        fetch(`${APEX}/gl/periodsstatus`,                               { cache: 'no-store', headers: { Accept: 'application/json' } }),
+        fetch(`${APEX}/approvals/requests?status=PENDING`,              { cache: 'no-store', headers: { Accept: 'application/json' } }),
+        fetch(`${APEX}/gl/journals/headers?p_offset=0&p_limit=5`,      { cache: 'no-store', headers: { Accept: 'application/json' } }),
       ]);
-      if (apRes.status === 'fulfilled' && apRes.value.ok)        { const d = await apRes.value.json();        setApStats(d); }
-      if (periodRes.status === 'fulfilled' && periodRes.value.ok) { const d = await periodRes.value.json();   setGlPeriod((d.items || [])[0] ?? null); }
+      if (apRes.status === 'fulfilled' && apRes.value.ok)               { const d = await apRes.value.json(); setApStats(d?.items?.[0] ?? d); }
+      if (periodRes.status === 'fulfilled' && periodRes.value.ok)       { const d = await periodRes.value.json(); setGlPeriod((d.items || [])[0] ?? null); }
       if (approvalsRes.status === 'fulfilled' && approvalsRes.value.ok) { const d = await approvalsRes.value.json(); setApprovals(d.items || []); }
-      if (jnlRes.status === 'fulfilled' && jnlRes.value.ok)      { const d = await jnlRes.value.json();       setRecentJnls(d.items || []); }
+      if (jnlRes.status === 'fulfilled' && jnlRes.value.ok)             { const d = await jnlRes.value.json(); setRecentJnls(d.items || []); }
     } finally { setLoading(false); }
   }, []);
 
@@ -171,23 +172,26 @@ const Home: React.FC = () => {
       {/* KPI Row */}
       <Row gutter={[14, 14]} style={{ marginBottom: 18 }}>
         <Col xs={24} sm={12} lg={6}>
-          <KpiCard label="Pending AP Invoices" icon={<FileTextOutlined />} color={REDWOOD.orange}
-            value={fmt(pendingCount)} sub={pendingAmt ? `${fmtAmt(pendingAmt)} outstanding` : 'None pending'}
-            trend={pendingCount > 0 ? 'down' : 'none'} loading={loading} onClick={() => navigate('/ap/manage-invoices')} />
+          <KpiCard label="Recent Journals" icon={<FileTextOutlined />} color={REDWOOD.primary}
+            value={loading ? '…' : fmt(recentJnls.length)} sub="Latest batch loaded"
+            trend="none" loading={loading} onClick={() => navigate('/gl/manage-journals')} />
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <KpiCard label="Overdue Invoices" icon={<ExclamationCircleOutlined />} color={REDWOOD.primary}
-            value={fmt(overdueCount)} sub={overdueCount > 0 ? 'Requires attention' : 'None overdue'}
-            trend={overdueCount > 0 ? 'down' : 'none'} loading={loading} onClick={() => navigate('/ap/manage-invoices')} />
+          <KpiCard label="GL Period" icon={<CalendarOutlined />} color={REDWOOD.info}
+            value={loading ? '…' : (periodName !== '—' ? periodName : 'No period')}
+            sub={periodStatus !== '—' ? `Status: ${periodStatus}` : 'Check accounting periods'}
+            trend={isOpen ? 'up' : 'none'} loading={loading} onClick={() => navigate('/gl/accounting-periods')} />
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <KpiCard label="AP Paid This Month" icon={<CheckCircleOutlined />} color={REDWOOD.success}
-            value={fmtAmt(paidThisMonth)} sub="Payments processed"
-            trend={paidThisMonth > 0 ? 'up' : 'none'} loading={loading} onClick={() => navigate('/ap/manage-payments')} />
+          <KpiCard label="AP Invoices" icon={<DollarOutlined />} color={REDWOOD.orange}
+            value={loading ? '…' : (apStats ? fmt(apStats.pending_count ?? apStats.pendingCount ?? apStats.total_count ?? apStats.totalCount ?? '—') : '—')}
+            sub={apStats ? 'Pending invoices' : 'Click to view invoices'}
+            trend="none" loading={loading} onClick={() => navigate('/ap/manage-invoices')} />
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <KpiCard label="Pending Approvals" icon={<ClockCircleOutlined />} color={REDWOOD.warning}
-            value={fmt(approvals.length)} sub={approvals.length > 0 ? 'Awaiting your action' : 'All clear'}
+            value={loading ? '…' : fmt(approvals.length)}
+            sub={approvals.length > 0 ? 'Awaiting your action' : 'All clear'}
             trend={approvals.length > 0 ? 'down' : 'none'} loading={loading} />
         </Col>
       </Row>
