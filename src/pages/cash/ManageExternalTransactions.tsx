@@ -2948,10 +2948,28 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
   // ── Search ────────────────────────────────────────────────────────────────
   const handleSearch = useCallback(async () => {
     const values = searchForm.getFieldsValue();
-    if (!values.dateFrom || !values.dateTo) {
-      message.warning('Please select both Date From and Date To before searching.');
+
+    // Resolve date range from preset
+    let dateFrom: Dayjs | undefined;
+    let dateTo: Dayjs | undefined;
+    const preset = values.datePreset as string | undefined;
+    if (preset === 'today') {
+      dateFrom = dayjs(); dateTo = dayjs();
+    } else if (preset === 'last5') {
+      dateFrom = dayjs().subtract(4, 'day'); dateTo = dayjs();
+    } else if (preset === 'last10') {
+      dateFrom = dayjs().subtract(9, 'day'); dateTo = dayjs();
+    } else if (preset === 'last30') {
+      dateFrom = dayjs().subtract(29, 'day'); dateTo = dayjs();
+    } else if (preset === 'range') {
+      dateFrom = values.dateRangeFrom as Dayjs | undefined;
+      dateTo   = values.dateRangeTo   as Dayjs | undefined;
+    }
+    if (!dateFrom || !dateTo) {
+      message.warning('Please select a date filter before searching.');
       return;
     }
+
     const params = new URLSearchParams();
     if (values.transactionNumber)  params.set('transaction_number', values.transactionNumber);
     if (values.bankAccount)        params.set('bank_account',       values.bankAccount);
@@ -2961,8 +2979,8 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     if (values.source)             params.set('source',             values.source);
     if (values.status)             params.set('status',             values.status);
     if (values.reference)          params.set('reference',          values.reference);
-    if (values.dateFrom)           params.set('date_from', (values.dateFrom as Dayjs).format('YYYY-MM-DD'));
-    if (values.dateTo)             params.set('date_to',   (values.dateTo   as Dayjs).format('YYYY-MM-DD'));
+    params.set('date_from', dateFrom.format('YYYY-MM-DD'));
+    params.set('date_to',   dateTo.format('YYYY-MM-DD'));
     if (values.amountFrom != null) params.set('amount_from', String(values.amountFrom));
     if (values.amountTo   != null) params.set('amount_to',   String(values.amountTo));
 
@@ -3020,7 +3038,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
 
   const handleReset = () => {
     searchForm.resetFields();
-    searchForm.setFieldsValue({ createdPreset: undefined, createdFrom: undefined, createdTo: undefined });
+    searchForm.setFieldsValue({ datePreset: 'last5', dateRangeFrom: undefined, dateRangeTo: undefined, createdPreset: undefined, createdFrom: undefined, createdTo: undefined });
     setTransactions([]);
     setHasSearched(false);
     setSelectedRowKeys([]);
@@ -3954,10 +3972,6 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     },
     { title: 'Created By', dataIndex: 'createdBy', ellipsis: true, width: 160,
       render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
-    { title: 'Created', dataIndex: 'creationDate', width: 115,
-      render: v => <Text style={{ fontSize: 12 }}>{fmtDate(v)}</Text>,
-      sorter: (a: any, b: any) => (a.creationDate ?? '').localeCompare(b.creationDate ?? ''),
-    },
   ];
 
   const [searchOpen, setSearchOpen] = useState(true);
@@ -3997,7 +4011,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           ),
           children: (
         <Form form={searchForm} layout="horizontal" labelCol={{ span: 8 }} wrapperCol={{ span: 16 }}
-          initialValues={{ createdPreset: 'last7' }}>
+          initialValues={{ datePreset: 'last5', createdPreset: 'last7' }}>
           <Row gutter={[16, 0]}>
 
             <Col xs={24} md={12}>
@@ -4019,8 +4033,17 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
-              <Form.Item label="Date From" name="dateFrom" style={{ marginBottom: 4 }} rules={[{ required: true, message: 'Date From is required' }]}>
-                <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
+              <Form.Item label="Transaction Date" name="datePreset" style={{ marginBottom: 4 }} rules={[{ required: true, message: 'Select a date filter' }]}>
+                <Select placeholder="Select date filter"
+                  onChange={(val: string) => {
+                    if (val !== 'range') searchForm.setFieldsValue({ dateRangeFrom: undefined, dateRangeTo: undefined });
+                  }}>
+                  <Option value="today">Date = Today</Option>
+                  <Option value="last5">Last 5 days</Option>
+                  <Option value="last10">Last 10 days</Option>
+                  <Option value="last30">Last 30 days</Option>
+                  <Option value="range">Range…</Option>
+                </Select>
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
@@ -4033,11 +4056,22 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                 </Select>
               </Form.Item>
             </Col>
-            <Col xs={24} md={12}>
-              <Form.Item label="Date To" name="dateTo" style={{ marginBottom: 4 }} rules={[{ required: true, message: 'Date To is required' }]}>
-                <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
-              </Form.Item>
-            </Col>
+            <Form.Item noStyle shouldUpdate={(prev, cur) => prev.datePreset !== cur.datePreset}>
+              {({ getFieldValue }) => getFieldValue('datePreset') === 'range' && (
+                <>
+                  <Col xs={24} md={12}>
+                    <Form.Item label="Date From" name="dateRangeFrom" style={{ marginBottom: 4 }} rules={[{ required: true, message: 'Required' }]}>
+                      <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} md={12}>
+                    <Form.Item label="Date To" name="dateRangeTo" style={{ marginBottom: 4 }} rules={[{ required: true, message: 'Required' }]}>
+                      <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
+                    </Form.Item>
+                  </Col>
+                </>
+              )}
+            </Form.Item>
             <Col xs={24} md={12}>
               <Form.Item label="Transaction #" name="transactionNumber" style={{ marginBottom: 4 }}>
                 <Input placeholder="Transaction number" />
