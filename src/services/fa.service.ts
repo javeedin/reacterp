@@ -475,6 +475,15 @@ export const getDeprnPeriodsCurrent = async (bookTypeCode?: string): Promise<any
   } catch { return []; }
 };
 
+export const getDeprnLastPeriod = async (bookTypeCode?: string): Promise<any | null> => {
+  try {
+    const qs = bookTypeCode ? `?bookTypeCode=${encodeURIComponent(bookTypeCode)}` : '';
+    const d = await fetchFromApex(`fa/deprn-periods/last${qs}`);
+    const items = d.items || [];
+    return items.length > 0 ? items[0] : null;
+  } catch { return null; }
+};
+
 export const getRetirements = async (bookTypeCode?: string): Promise<RetirementRecord[]> => {
   try {
     const qs = bookTypeCode ? `?bookTypeCode=${encodeURIComponent(bookTypeCode)}` : '';

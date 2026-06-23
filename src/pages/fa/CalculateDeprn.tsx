@@ -8,7 +8,7 @@ import {
   CheckCircleOutlined, ClockCircleOutlined, SyncOutlined, ApiOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import { getBookControls, getDeprnPeriodsCurrent } from '../../services/fa.service';
+import { getBookControls, getDeprnPeriodsCurrent, getDeprnLastPeriod } from '../../services/fa.service';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import type { BookControlRecord } from '../../services/fa.service';
 
@@ -34,6 +34,7 @@ const CalculateDeprn: React.FC = () => {
   const [bookControls, setBookControls] = useState<BookControlRecord[]>([]);
   const [selectedBook, setSelectedBook] = useState<string>('');
   const [periodData,   setPeriodData]   = useState<any[]>([]);
+  const [lastPeriod,   setLastPeriod]   = useState<any | null>(null);
   const [loading,      setLoading]      = useState(false);
   const [calculating,  setCalculating]  = useState(false);
   const [lastApiUrl,   setLastApiUrl]   = useState('');
@@ -51,8 +52,12 @@ const CalculateDeprn: React.FC = () => {
     const url = `${APEX_DB_CONFIG.baseUrl}/fa/deprn-periods/current?bookTypeCode=${encodeURIComponent(book)}`;
     setLastApiUrl(url);
     try {
-      const items = await getDeprnPeriodsCurrent(book);
+      const [items, last] = await Promise.all([
+        getDeprnPeriodsCurrent(book),
+        getDeprnLastPeriod(book),
+      ]);
       setPeriodData(items);
+      setLastPeriod(last);
     } finally {
       setLoading(false);
     }
@@ -154,9 +159,42 @@ const CalculateDeprn: React.FC = () => {
             <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>
           ) : (
             <>
-              {/* Depreciation period card */}
+              {/* Period status cards */}
               <Row gutter={[12, 12]} style={{ marginBottom: 20 }}>
-                <Col xs={12} sm={8} md={6}>
+                {/* Last Run Period */}
+                <Col xs={12} sm={8} md={5}>
+                  <Card
+                    size="small"
+                    style={{
+                      borderRadius: 8,
+                      border: `2px solid ${REDWOOD.success}`,
+                      textAlign: 'center', minHeight: 120,
+                      background: '#f6ffed',
+                    }}
+                    styles={{ body: { padding: '16px 12px' } }}
+                  >
+                    <Text style={{ fontSize: 11, color: REDWOOD.success, display: 'block', marginBottom: 8, fontWeight: 600 }}>
+                      Last Depreciation Run
+                    </Text>
+                    {lastPeriod?.lastPeriodName ? (
+                      <>
+                        <div style={{ fontSize: 22, fontWeight: 700, color: REDWOOD.success, lineHeight: 1.2 }}>
+                          {lastPeriod.lastPeriodName}
+                        </div>
+                        <div style={{ marginTop: 6 }}>
+                          <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: 11 }}>
+                            FY {lastPeriod.fiscalYear}
+                          </Tag>
+                        </div>
+                      </>
+                    ) : (
+                      <Text type="secondary" style={{ fontSize: 12 }}>Never Run</Text>
+                    )}
+                  </Card>
+                </Col>
+
+                {/* Next Period to Run */}
+                <Col xs={12} sm={8} md={5}>
                   <Card
                     size="small"
                     style={{
@@ -167,19 +205,16 @@ const CalculateDeprn: React.FC = () => {
                     }}
                     styles={{ body: { padding: '16px 12px' } }}
                   >
-                    <Text style={{ fontSize: 12, color: '#1677ff', display: 'block', marginBottom: 8, fontWeight: 600 }}>
-                      Depreciation
+                    <Text style={{ fontSize: 11, color: '#1677ff', display: 'block', marginBottom: 8, fontWeight: 600 }}>
+                      Next Period to Run
                     </Text>
-                    {currentBook?.openPeriodName ? (
+                    {lastPeriod?.nextPeriodName ? (
                       <>
-                        <div style={{ fontSize: 20, fontWeight: 700, color: '#1677ff', lineHeight: 1.2 }}>
-                          {currentBook.openPeriodName}
+                        <div style={{ fontSize: 22, fontWeight: 700, color: '#1677ff', lineHeight: 1.2 }}>
+                          {lastPeriod.nextPeriodName}
                         </div>
                         <div style={{ marginTop: 6 }}>
-                          {deprnAlreadyRun
-                            ? <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: 11 }}>Calculated</Tag>
-                            : <Tag color="warning" icon={<ClockCircleOutlined />} style={{ fontSize: 11 }}>Pending</Tag>
-                          }
+                          <Tag color="processing" icon={<ClockCircleOutlined />} style={{ fontSize: 11 }}>Pending</Tag>
                         </div>
                       </>
                     ) : (
