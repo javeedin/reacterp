@@ -2871,12 +2871,13 @@ const TrialBalance: React.FC = () => {
             // (skip offsetting gain/loss account lines in the same journal)
             (detJson.lines || []).forEach((l: any) => {
               if (!l.combo) return;
+              const lineCombo = l.combo.trim();
               // The combo must contain the account key segment to belong to this account
-              if (!l.combo.includes(accountKey)) return;
-              const existing = comboMap.get(l.combo);
+              if (!lineCombo.includes(accountKey)) return;
+              const existing = comboMap.get(lineCombo);
               // Prefer ACCOUNTED status; otherwise keep highest revalueId
               if (!existing || hdr.status === 'ACCOUNTED' || hdr.revalueId > existing.revalueId) {
-                comboMap.set(l.combo, { revalueId: hdr.revalueId, status: hdr.status || 'DRAFT' });
+                comboMap.set(lineCombo, { revalueId: hdr.revalueId, status: hdr.status || 'DRAFT' });
               }
             });
             // Restore rates from the editable header
@@ -3212,8 +3213,19 @@ const TrialBalance: React.FC = () => {
     if (!tab) return null;
 
     // Per-combo posted check
-    const isComboPosted = (combo: string) => revalComboStatus.get(combo)?.status === 'ACCOUNTED';
-    const isComboRevalId = (combo: string) => revalComboStatus.get(combo)?.revalueId;
+    // Normalize and look up — also try case-insensitive fallback if exact match fails
+    const lookupComboStatus = (combo: string) => {
+      const c = combo.trim();
+      if (revalComboStatus.has(c)) return revalComboStatus.get(c);
+      // Fallback: case-insensitive match
+      const cl = c.toLowerCase();
+      for (const [k, v] of revalComboStatus.entries()) {
+        if (k.toLowerCase() === cl) return v;
+      }
+      return undefined;
+    };
+    const isComboPosted  = (combo: string) => lookupComboStatus(combo)?.status === 'ACCOUNTED';
+    const isComboRevalId = (combo: string) => lookupComboStatus(combo)?.revalueId;
     // Computed after comboRows is available — placeholder here, overridden below
     let isPosted = false;
 
