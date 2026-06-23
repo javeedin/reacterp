@@ -3958,7 +3958,7 @@ const TrialBalance: React.FC = () => {
                 setRevalSaving(true);
                 setRevalApiError(null);
                 const rawPeriod = cleanPeriodName(tab.periodName);
-                const isUpdate  = revalId != null;
+                const isUpdate  = revalId != null && revalStatus !== 'ACCOUNTED';
                 const payload   = {
                   ledger_id:      Number((allRawRows[0] as any)?.ledger_id) || 0,
                   ledger_name:    tab.ledgerName,
@@ -3973,7 +3973,12 @@ const TrialBalance: React.FC = () => {
                   total_loss:     totalLoss,
                   notes:          '',
                   created_by:     user?.username || 'SYSTEM',
-                  ccy_rows: ccyRows.filter(r => r.newRate > 0 && !r.combos.every(c => isComboPosted(c))).map(r => ({
+                  ccy_rows: ccyRows.filter(r =>
+                    r.newRate > 0 &&
+                    r.combos.some(c => effectiveSelected.includes(
+                      comboRows.find(cr => cr.combo === c)?.rowKey ?? ''
+                    ))
+                  ).map(r => ({
                     currency_code:  r.ccy,
                     ent_closing:    r.entClosing,
                     acct_closing:   r.acctClosing,
@@ -4146,10 +4151,15 @@ const TrialBalance: React.FC = () => {
                   doc.text('Section 1: Currency Rates', 14, y);
                   y += 4;
 
+                  // Only print selected (non-posted) combos
+                  const selectedCombos = new Set(revalPreviewRows.map(r => r.combo));
+                  const printCcyRows   = ccyRows.filter(r => r.combos.some(c => selectedCombos.has(c)));
+                  const printPreviewRows = revalPreviewRows; // already filtered to selected
+
                   autoTable(doc, {
                     startY: y,
                     head: [['Currency', 'Ent. Balance', 'Acctd Balance', 'Book Rate', 'New Rate', 'Inverse Rate', 'New Acctd Value', 'Adjustment']],
-                    body: ccyRows.map(r => [
+                    body: printCcyRows.map(r => [
                       r.ccy,
                       r.entClosing.toLocaleString('en-US', { minimumFractionDigits: 2 }),
                       r.acctClosing.toLocaleString('en-US', { minimumFractionDigits: 2 }),
@@ -4189,14 +4199,14 @@ const TrialBalance: React.FC = () => {
                   doc.text('Section 3: Journal Preview Lines', 14, y);
                   y += 4;
 
-                  const totalDr = revalPreviewRows.reduce((s, r) => s + r.dr, 0);
-                  const totalCr = revalPreviewRows.reduce((s, r) => s + r.cr, 0);
+                  const totalDr = printPreviewRows.reduce((s, r) => s + r.dr, 0);
+                  const totalCr = printPreviewRows.reduce((s, r) => s + r.cr, 0);
 
                   autoTable(doc, {
                     startY: y,
                     head: [['Line#', 'Account Combination', 'Description', 'Comment', 'Debit', 'Credit']],
                     body: [
-                      ...revalPreviewRows.map(r => [
+                      ...printPreviewRows.map(r => [
                         r.lineNum,
                         r.combo,
                         r.desc,
