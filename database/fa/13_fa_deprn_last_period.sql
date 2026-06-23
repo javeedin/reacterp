@@ -53,6 +53,7 @@ DECLARE
     v_last_open_date  VARCHAR2(400);
     v_next_period     VARCHAR2(400);
     v_deprn_run       VARCHAR2(10);
+    v_period_counter  VARCHAR2(400);
 
     CURSOR c_books IS
         SELECT DISTINCT BOOK_TYPE_CODE
@@ -73,12 +74,14 @@ BEGIN
                    FISCAL_YEAR,
                    PERIOD_NAME,
                    TO_CHAR(PERIOD_OPEN_DATE),
-                   DEPRN_RUN
+                   DEPRN_RUN,
+                   TO_CHAR(PERIOD_COUNTER)
             INTO   v_book,
                    v_fiscal_year,
                    v_last_period,
                    v_last_open_date,
-                   v_deprn_run
+                   v_deprn_run,
+                   v_period_counter
             FROM   RR_FA_DEPRN_PERIODS
             WHERE  BOOK_TYPE_CODE = b.BOOK_TYPE_CODE
             AND    PERIOD_OPEN_DATE = (
@@ -106,12 +109,13 @@ BEGIN
         END IF;
 
         APEX_JSON.OPEN_OBJECT;
-        APEX_JSON.WRITE('bookTypeCode',    v_book);
-        APEX_JSON.WRITE('fiscalYear',      v_fiscal_year);
-        APEX_JSON.WRITE('lastPeriodName',  v_last_period);
+        APEX_JSON.WRITE('bookTypeCode',       v_book);
+        APEX_JSON.WRITE('fiscalYear',         v_fiscal_year);
+        APEX_JSON.WRITE('lastPeriodName',     v_last_period);
+        APEX_JSON.WRITE('lastPeriodCounter',  v_period_counter);
         APEX_JSON.WRITE('lastPeriodOpenDate', v_last_open_date);
-        APEX_JSON.WRITE('deprnRun',        v_deprn_run);
-        APEX_JSON.WRITE('nextPeriodName',  v_next_period);
+        APEX_JSON.WRITE('deprnRun',           v_deprn_run);
+        APEX_JSON.WRITE('nextPeriodName',     v_next_period);
         APEX_JSON.CLOSE_OBJECT;
 
     END LOOP;
