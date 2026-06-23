@@ -72,7 +72,7 @@ BEGIN
             SELECT BOOK_TYPE_CODE,
                    FISCAL_YEAR,
                    PERIOD_NAME,
-                   TO_CHAR(PERIOD_OPEN_DATE, 'YYYY-MM-DD"T"HH24:MI:SS".000+00:00"'),
+                   TO_CHAR(PERIOD_OPEN_DATE),
                    DEPRN_RUN
             INTO   v_book,
                    v_fiscal_year,
