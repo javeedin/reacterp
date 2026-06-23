@@ -353,6 +353,12 @@ const TrialBalance: React.FC = () => {
   const [revalAmountsLoading,      setRevalAmountsLoading]      = useState(false);
   const [revalAmountsData,         setRevalAmountsData]         = useState<any[]>([]);
   const [revalAccountStatus,       setRevalAccountStatus]       = useState<Map<string, 'ACCOUNTED' | 'DRAFT'>>(new Map());
+  const [ytdRevalPopupOpen,        setYtdRevalPopupOpen]        = useState(false);
+  const [ytdRevalPopupAccount,     setYtdRevalPopupAccount]     = useState('');
+  const [ytdRevalPopupPeriod,      setYtdRevalPopupPeriod]      = useState('');
+  const [ytdRevalPopupLedger,      setYtdRevalPopupLedger]      = useState('');
+  const [ytdRevalPopupLoading,     setYtdRevalPopupLoading]     = useState(false);
+  const [ytdRevalPopupData,        setYtdRevalPopupData]        = useState<any[]>([]);
   const [revalApiError,            setRevalApiError]            = useState<string | null>(null);
   const [revalLastCall,            setRevalLastCall]            = useState<{ url: string; method: string; payload: object; responseText: string; httpStatus: number } | null>(null);
   const [revalApiDebugOpen,        setRevalApiDebugOpen]        = useState(false);
@@ -7092,13 +7098,45 @@ const TrialBalance: React.FC = () => {
             <Space size={4}>
               <Text strong style={{ fontFamily: 'monospace', color: '#d46b08' }}>{v}</Text>
               {rvalStatus && (
-                <Tooltip title={rvalStatus === 'ACCOUNTED' ? 'Revaluation Posted' : 'Revaluation Draft'}>
-                  <span style={{
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    width: 16, height: 16, borderRadius: '50%', fontSize: 10, fontWeight: 700,
-                    background: rvalStatus === 'ACCOUNTED' ? '#1D7B4D' : '#D4A800',
-                    color: '#fff', cursor: 'default', flexShrink: 0,
-                  }}>R</span>
+                <Tooltip title={`${rvalStatus === 'ACCOUNTED' ? 'Revaluation Posted' : 'Revaluation Draft'} — click to view entries`}>
+                  <span
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      width: 16, height: 16, borderRadius: '50%', fontSize: 10, fontWeight: 700,
+                      background: rvalStatus === 'ACCOUNTED' ? '#1D7B4D' : '#D4A800',
+                      color: '#fff', cursor: 'pointer', flexShrink: 0,
+                    }}
+                    onClick={async () => {
+                      const periodClean = tab.periodName.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '').replace(/\s*·.*$/, '').trim();
+                      setYtdRevalPopupAccount(v);
+                      setYtdRevalPopupPeriod(periodClean);
+                      setYtdRevalPopupLedger(tab.ledgerName);
+                      setYtdRevalPopupOpen(true);
+                      setYtdRevalPopupLoading(true);
+                      setYtdRevalPopupData([]);
+                      try {
+                        const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}`);
+                        const json = await res.json();
+                        const matching = (json.items || [])
+                          .filter((r: any) =>
+                            r.account    === v &&
+                            r.ledgerName === tab.ledgerName &&
+                            (r.periodName === periodClean || r.periodName === tab.periodName)
+                          )
+                          .sort((a: any, b: any) => b.revalueId - a.revalueId);
+                        const details = await Promise.all(matching.map(async (hdr: any) => {
+                          try {
+                            const dr = await fetch(`${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}/${hdr.revalueId}`);
+                            const dj = await dr.json();
+                            return { ...hdr, lines: dj.lines || [], ccyRows: dj.ccyRows || [] };
+                          } catch { return { ...hdr, lines: [], ccyRows: [] }; }
+                        }));
+                        setYtdRevalPopupData(details);
+                      } catch { /* ignore */ } finally {
+                        setYtdRevalPopupLoading(false);
+                      }
+                    }}
+                  >R</span>
                 </Tooltip>
               )}
               <Tooltip title="View combinations">
@@ -8439,6 +8477,71 @@ const TrialBalance: React.FC = () => {
               />
             </>
           )}
+        </Modal>
+
+        {/* ── YTD R-icon: Revaluation History Popup ── */}
+        <Modal
+          open={ytdRevalPopupOpen}
+          onCancel={() => setYtdRevalPopupOpen(false)}
+          title={
+            <Space>
+              <HistoryOutlined style={{ color: REDWOOD.info }} />
+              <span>Revaluation Entries — {ytdRevalPopupAccount}</span>
+              <Tag color="purple">{ytdRevalPopupPeriod}</Tag>
+              <Tag color="default">{ytdRevalPopupLedger}</Tag>
+            </Space>
+          }
+          width={960}
+          footer={<Button onClick={() => setYtdRevalPopupOpen(false)}>Close</Button>}
+          destroyOnClose
+        >
+          <Spin spinning={ytdRevalPopupLoading} tip="Loading revaluation history…">
+            {!ytdRevalPopupLoading && ytdRevalPopupData.length === 0 && (
+              <div style={{ color: '#999', textAlign: 'center', padding: 32 }}>No revaluation entries found.</div>
+            )}
+            {ytdRevalPopupData.map((entry: any) => (
+              <div key={entry.revalueId} style={{ marginBottom: 20, border: `1px solid ${REDWOOD.border}`, borderRadius: 8, overflow: 'hidden' }}>
+                <div style={{ background: entry.status === 'ACCOUNTED' ? '#f6ffed' : '#e6f4ff', padding: '8px 12px', borderBottom: `1px solid ${REDWOOD.border}`, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <Tag color={entry.status === 'ACCOUNTED' ? 'green' : 'blue'} style={{ fontFamily: 'monospace' }}>ID: {entry.revalueId}</Tag>
+                  <Tag color={entry.status === 'ACCOUNTED' ? 'success' : 'processing'}>{entry.status}</Tag>
+                  <Text style={{ fontSize: 12 }}>Period: <strong>{entry.periodName}</strong></Text>
+                  <Text style={{ fontSize: 12, marginLeft: 8 }}>Gain: <strong style={{ color: '#237804' }}>{Number(entry.totalGain || 0).toLocaleString('en-US', { minimumFractionDigits: 3 })}</strong></Text>
+                  <Text style={{ fontSize: 12, marginLeft: 8 }}>Loss: <strong style={{ color: REDWOOD.error }}>{Number(entry.totalLoss || 0).toLocaleString('en-US', { minimumFractionDigits: 3 })}</strong></Text>
+                </div>
+                {(entry.ccyRows || []).length > 0 && (
+                  <Table
+                    dataSource={entry.ccyRows}
+                    rowKey={(r: any, i?: number) => `ccy-${entry.revalueId}-${r.currencyCode ?? i}`}
+                    size="small"
+                    pagination={false}
+                    style={{ borderBottom: `1px solid ${REDWOOD.border}` }}
+                    columns={[
+                      { title: 'Currency', dataIndex: 'currencyCode', key: 'ccy', width: 80 },
+                      { title: 'Ent. Balance',    dataIndex: 'entClosing',   key: 'ent',  align: 'right' as const, width: 140, render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> },
+                      { title: 'Acctd Balance',   dataIndex: 'acctClosing',  key: 'acct', align: 'right' as const, width: 140, render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> },
+                      { title: 'Book Rate',       dataIndex: 'bookRate',     key: 'book', align: 'right' as const, width: 120, render: (v: number) => <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{Number(v).toFixed(8)}</Text> },
+                      { title: 'New Rate',        dataIndex: 'newRate',      key: 'new',  align: 'right' as const, width: 120, render: (v: number) => <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{Number(v).toFixed(8)}</Text> },
+                      { title: 'New Acctd Value', dataIndex: 'newAcctValue', key: 'nav',  align: 'right' as const, width: 140, render: (v: number) => <Text style={{ fontFamily: 'monospace', color: REDWOOD.info }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> },
+                      { title: 'Adjustment',      dataIndex: 'revalAmt',     key: 'adj',  align: 'right' as const, width: 120, render: (v: number) => <Tag color={v >= 0 ? 'green' : 'red'} style={{ fontFamily: 'monospace' }}>{v >= 0 ? '+' : ''}{Number(v).toLocaleString('en-US', { minimumFractionDigits: 3 })}</Tag> },
+                    ]}
+                  />
+                )}
+                <Table
+                  dataSource={(entry.lines || []).filter((l: any) => (l.combo || '').includes(ytdRevalPopupAccount))}
+                  rowKey={(r: any, i?: number) => `line-${entry.revalueId}-${r.lineNum ?? i}`}
+                  size="small"
+                  pagination={false}
+                  columns={[
+                    { title: '#', dataIndex: 'lineNum', key: 'lineNum', width: 40 },
+                    { title: 'Combination', dataIndex: 'combo', key: 'combo', ellipsis: true, render: (v: string) => <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{v}</Text> },
+                    { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+                    { title: 'Debit',  dataIndex: 'drAmount', key: 'dr', align: 'right' as const, width: 130, render: (v: number) => v ? <Text style={{ fontFamily: 'monospace', color: '#237804' }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 3 })}</Text> : null },
+                    { title: 'Credit', dataIndex: 'crAmount', key: 'cr', align: 'right' as const, width: 130, render: (v: number) => v ? <Text style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 3 })}</Text> : null },
+                  ]}
+                />
+              </div>
+            ))}
+          </Spin>
         </Modal>
       </Content>
     </Layout>
