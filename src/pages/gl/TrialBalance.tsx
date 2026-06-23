@@ -3300,15 +3300,15 @@ const TrialBalance: React.FC = () => {
     // Lock entire dialog only when every combo in the grid is individually posted
     isPosted = comboRows.length > 0 && comboRows.every(r => isComboPosted(r.combo));
 
-    // Selectable rows: non-posted, non-excluded
-    const selectableRowKeys = comboRows.filter(r => !isComboPosted(r.combo) && !r.excluded).map(r => r.rowKey);
+    // Selectable rows: non-posted
+    const selectableRowKeys = comboRows.filter(r => !isComboPosted(r.combo)).map(r => r.rowKey);
     // If user hasn't made a selection yet, default to all selectable rows
     const effectiveSelected = revalSelectedRows.length > 0
       ? revalSelectedRows.filter(k => selectableRowKeys.includes(k))
       : selectableRowKeys;
 
     // Active rows only (for totals + preview) — intersect with selection
-    const activeComboRows = comboRows.filter(r => !r.excluded && (isComboPosted(r.combo) || effectiveSelected.includes(r.rowKey)));
+    const activeComboRows = comboRows.filter(r => isComboPosted(r.combo) || effectiveSelected.includes(r.rowKey));
 
     // Currency-aggregated rows — used for save payload (ccy_rows)
     interface CcyRow {
@@ -3440,63 +3440,45 @@ const TrialBalance: React.FC = () => {
             <Tooltip title={`Posted — Reval ID: ${isComboRevalId(r.combo)}`}>
               <span style={{ fontSize: 14, color: '#52c41a', padding: '0 4px' }}>🔒</span>
             </Tooltip>
-          ) : r.excluded
-          ? (
-            <Tooltip title="Restore this combination">
-              <Button
-                type="text" size="small" icon={<span style={{ fontSize: 12 }}>↩</span>}
-                style={{ color: REDWOOD.info }}
-                onClick={() => setRevalExcludedCombos(prev => { const s = new Set(prev); s.delete(r.combo); return s; })}
-              />
-            </Tooltip>
-          ) : (
-            <Tooltip title="Exclude this combination">
-              <Button
-                type="text" size="small" danger
-                icon={<span style={{ fontSize: 14, lineHeight: 1 }}>×</span>}
-                onClick={() => setRevalExcludedCombos(prev => new Set([...prev, r.combo]))}
-              />
-            </Tooltip>
-          ),
+          ) : null,
       },
       { title: 'Combination', dataIndex: 'combo', key: 'combo', width: 320, ellipsis: true,
-        render: (v: string, r: ComboRow) => (
-          <Tooltip title={v}>
-            <span>
-              <Text
-                style={{
-                  fontFamily: 'monospace', fontSize: 11,
-                  opacity: r.excluded ? 0.4 : 1,
-                  textDecoration: r.excluded ? 'line-through' : 'none',
-                }}
-              >{v}</Text>
-              {isComboPosted(r.combo) && (
-                <Tag color="green" style={{ marginLeft: 6, fontSize: 10, padding: '0 4px' }}>
-                  ID: {isComboRevalId(r.combo)}
-                </Tag>
-              )}
-            </span>
-          </Tooltip>
-        ),
+        render: (v: string, r: ComboRow) => {
+          const revalIdForCombo = isComboRevalId(r.combo);
+          const isPostedCombo   = isComboPosted(r.combo);
+          return (
+            <Tooltip title={v}>
+              <span>
+                <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{v}</Text>
+                {revalIdForCombo && (
+                  <Tag
+                    color={isPostedCombo ? 'green' : 'blue'}
+                    style={{ marginLeft: 6, fontSize: 10, padding: '0 4px' }}
+                  >
+                    ID: {revalIdForCombo}
+                  </Tag>
+                )}
+              </span>
+            </Tooltip>
+          );
+        },
       },
       { title: 'Ccy', dataIndex: 'ccy', key: 'ccy', width: 60,
-        render: (v: string, r: ComboRow) => <Tag color={r.excluded ? 'default' : 'blue'} style={{ opacity: r.excluded ? 0.4 : 1 }}>{v}</Tag> },
+        render: (v: string) => <Tag color="blue">{v}</Tag> },
       { title: 'Entered Balance', dataIndex: 'entClosing', key: 'entClosing', align: 'right' as const, width: 140,
-        render: (v: number, r: ComboRow) => (
-          <Text style={{ fontFamily: 'monospace', color: r.excluded ? '#aaa' : (v >= 0 ? '#237804' : REDWOOD.primary) }}>
+        render: (v: number) => (
+          <Text style={{ fontFamily: 'monospace', color: v >= 0 ? '#237804' : REDWOOD.primary }}>
             {v >= 0 ? fmtN(v) : `(${fmtN(v)})`}
           </Text>
         )},
       { title: 'Acctd Balance', dataIndex: 'acctClosing', key: 'acctClosing', align: 'right' as const, width: 140,
-        render: (v: number, r: ComboRow) => (
-          <Text style={{ fontFamily: 'monospace', color: r.excluded ? '#aaa' : (v >= 0 ? '#237804' : REDWOOD.primary) }}>
+        render: (v: number) => (
+          <Text style={{ fontFamily: 'monospace', color: v >= 0 ? '#237804' : REDWOOD.primary }}>
             {v >= 0 ? fmtN(v) : `(${fmtN(v)})`}
           </Text>
         )},
       { title: 'Book Rate', dataIndex: 'bookRate', key: 'bookRate', align: 'right' as const, width: 160,
-        render: (v: number, r: ComboRow) => r.excluded
-          ? <Text style={{ color: '#aaa', fontFamily: 'monospace' }}>—</Text>
-          : (
+        render: (v: number, r: ComboRow) => (
           <Tooltip
             title={
               <div style={{ fontSize: 12 }}>
@@ -3517,9 +3499,7 @@ const TrialBalance: React.FC = () => {
           </Tooltip>
         )},
       { title: 'New Rate (FCY→Func)', key: 'newRate', align: 'right' as const, width: 150,
-        render: (_: any, r: ComboRow) => r.excluded
-          ? <Text style={{ color: '#aaa', fontFamily: 'monospace' }}>—</Text>
-          : (isPosted || isComboPosted(r.combo))
+        render: (_: any, r: ComboRow) => (isPosted || isComboPosted(r.combo))
           ? <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{revalRates[r.ccy] || '—'}</Text>
           : (
           <Space.Compact>
@@ -3549,9 +3529,7 @@ const TrialBalance: React.FC = () => {
           </Space.Compact>
         )},
       { title: 'Func. Rate (Func→FCY)', key: 'funcRate', align: 'right' as const, width: 160,
-        render: (_: any, r: ComboRow) => r.excluded
-          ? <Text style={{ color: '#aaa', fontFamily: 'monospace' }}>—</Text>
-          : (isPosted || isComboPosted(r.combo))
+        render: (_: any, r: ComboRow) => (isPosted || isComboPosted(r.combo))
           ? <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>
               {revalRates[r.ccy] && parseFloat(revalRates[r.ccy]) !== 0
                 ? (1 / parseFloat(revalRates[r.ccy])).toFixed(10) : '—'}
@@ -3574,11 +3552,11 @@ const TrialBalance: React.FC = () => {
           />
         )},
       { title: 'New Acctd Value', dataIndex: 'newAcctValue', key: 'newAcctValue', align: 'right' as const, width: 140,
-        render: (v: number, r: ComboRow) => r.excluded || r.newRate === 0
+        render: (v: number, r: ComboRow) => r.newRate === 0
           ? <Text style={{ color: '#aaa' }}>—</Text>
           : <Text style={{ fontFamily: 'monospace', color: REDWOOD.info }}>{v >= 0 ? fmtN(v) : `(${fmtN(v)})`}</Text> },
       { title: 'Adjustment', key: 'revalAmt', align: 'right' as const, width: 140,
-        render: (_: any, r: ComboRow) => r.excluded || r.newRate === 0
+        render: (_: any, r: ComboRow) => r.newRate === 0
           ? <Text style={{ color: '#aaa' }}>—</Text>
           : (
           <Tag color={r.isGain ? 'green' : 'red'} style={{ fontFamily: 'monospace', fontWeight: 700 }}>
@@ -3828,7 +3806,7 @@ const TrialBalance: React.FC = () => {
                   icon={<SyncOutlined />}
                   loading={Object.values(revalBmsFetching).some(Boolean)}
                   onClick={() => {
-                    const ccys = [...new Set(comboRows.filter(r => !r.excluded && r.ccy && r.ccy !== 'AED').map(r => r.ccy))];
+                    const ccys = [...new Set(comboRows.filter(r => r.ccy && r.ccy !== 'AED').map(r => r.ccy))];
                     if (ccys.length === 0) { message.info('No foreign currency rows to fetch rates for'); return; }
                     fetchRevalBmsRate(ccys);
                   }}
@@ -3880,12 +3858,12 @@ const TrialBalance: React.FC = () => {
             pagination={false}
             scroll={{ x: 1350, y: 300 }}
             style={{ marginBottom: 16 }}
-            rowClassName={(r: ComboRow) => isComboPosted(r.combo) ? 'reval-row-posted' : r.excluded ? 'reval-row-excluded' : ''}
+            rowClassName={(r: ComboRow) => isComboPosted(r.combo) ? 'reval-row-posted' : ''}
             rowSelection={isPosted ? undefined : {
               selectedRowKeys: effectiveSelected,
               onChange: (keys) => setRevalSelectedRows(keys as string[]),
               getCheckboxProps: (r: ComboRow) => ({
-                disabled: isComboPosted(r.combo) || r.excluded,
+                disabled: isComboPosted(r.combo),
                 title: isComboPosted(r.combo) ? `Already posted — ID: ${isComboRevalId(r.combo)}` : undefined,
               }),
               renderCell: (_checked, r, _idx, originNode) => isComboPosted(r.combo)
