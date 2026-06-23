@@ -2962,8 +2962,9 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     } else if (preset === 'last30') {
       dateFrom = dayjs().subtract(29, 'day'); dateTo = dayjs();
     } else if (preset === 'range') {
-      dateFrom = values.dateRangeFrom as Dayjs | undefined;
-      dateTo   = values.dateRangeTo   as Dayjs | undefined;
+      const range = values.dateRange as [Dayjs, Dayjs] | undefined;
+      dateFrom = range?.[0];
+      dateTo   = range?.[1];
     }
     if (!dateFrom || !dateTo) {
       message.warning('Please select a date filter before searching.');
@@ -3038,7 +3039,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
 
   const handleReset = () => {
     searchForm.resetFields();
-    searchForm.setFieldsValue({ datePreset: 'last5', dateRangeFrom: undefined, dateRangeTo: undefined, createdPreset: undefined, createdFrom: undefined, createdTo: undefined });
+    searchForm.setFieldsValue({ datePreset: 'last5', dateRange: undefined, createdPreset: undefined, createdFrom: undefined, createdTo: undefined });
     setTransactions([]);
     setHasSearched(false);
     setSelectedRowKeys([]);
@@ -4058,18 +4059,11 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
             </Col>
             <Form.Item noStyle shouldUpdate={(prev, cur) => prev.datePreset !== cur.datePreset}>
               {({ getFieldValue }) => getFieldValue('datePreset') === 'range' && (
-                <>
-                  <Col xs={24} md={12}>
-                    <Form.Item label="Date From" name="dateRangeFrom" style={{ marginBottom: 4 }} rules={[{ required: true, message: 'Required' }]}>
-                      <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
-                    </Form.Item>
-                  </Col>
-                  <Col xs={24} md={12}>
-                    <Form.Item label="Date To" name="dateRangeTo" style={{ marginBottom: 4 }} rules={[{ required: true, message: 'Required' }]}>
-                      <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
-                    </Form.Item>
-                  </Col>
-                </>
+                <Col xs={24} md={24}>
+                  <Form.Item label="Date Range" name="dateRange" style={{ marginBottom: 4 }} rules={[{ required: true, message: 'Select date range' }]}>
+                    <DatePicker.RangePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
+                  </Form.Item>
+                </Col>
               )}
             </Form.Item>
             <Col xs={24} md={12}>
@@ -4118,38 +4112,6 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
               </Form.Item>
             </Col>
 
-            {/* ── Creation Date ───────────────────────────── */}
-            <Col xs={24} md={12}>
-              <Form.Item label="Created" name="createdPreset" style={{ marginBottom: 4 }}>
-                <Select placeholder="Any date" allowClear
-                  onChange={(val: string | undefined) => {
-                    if (val && val !== 'range') {
-                      searchForm.setFieldsValue({ createdFrom: undefined, createdTo: undefined });
-                    }
-                  }}>
-                  <Option value="today">Today</Option>
-                  <Option value="last7">Last 7 days</Option>
-                  <Option value="last10">Last 10 days</Option>
-                  <Option value="range">Custom range…</Option>
-                </Select>
-              </Form.Item>
-            </Col>
-            <Form.Item noStyle shouldUpdate={(prev, cur) => prev.createdPreset !== cur.createdPreset}>
-              {({ getFieldValue }) => getFieldValue('createdPreset') === 'range' && (
-                <>
-                  <Col xs={24} md={12}>
-                    <Form.Item label="Created From" name="createdFrom" style={{ marginBottom: 4 }}>
-                      <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
-                    </Form.Item>
-                  </Col>
-                  <Col xs={24} md={12}>
-                    <Form.Item label="Created To" name="createdTo" style={{ marginBottom: 4 }}>
-                      <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
-                    </Form.Item>
-                  </Col>
-                </>
-              )}
-            </Form.Item>
 
           </Row>
           <Text type="secondary" style={{ fontSize: 11 }}>Select a Business Unit to filter banks and legal entity</Text>
