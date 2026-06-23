@@ -343,6 +343,7 @@ const TrialBalance: React.FC = () => {
   const [revalExcludedCombos,      setRevalExcludedCombos]      = useState<Set<string>>(new Set());
   const [revalSelectedRows,        setRevalSelectedRows]        = useState<string[]>([]);
   const [revalComboStatus,         setRevalComboStatus]         = useState<Map<string, { revalueId: number; status: string }>>(new Map());
+  const [revalAccountStatus,       setRevalAccountStatus]       = useState<Map<string, 'ACCOUNTED' | 'DRAFT'>>(new Map());
   const [revalApiError,            setRevalApiError]            = useState<string | null>(null);
   const [revalLastCall,            setRevalLastCall]            = useState<{ url: string; method: string; payload: object; responseText: string; httpStatus: number } | null>(null);
   const [revalApiDebugOpen,        setRevalApiDebugOpen]        = useState(false);
@@ -898,6 +899,22 @@ const TrialBalance: React.FC = () => {
       setTabs(prev => prev.map(t =>
         t.key === tabKey ? { ...t, rrData: items, loading: false, companies, currencies } : t
       ));
+
+      // Fetch revaluation headers and build account-level status map
+      try {
+        const rvalRes  = await fetch(`${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}`);
+        const rvalJson = await rvalRes.json();
+        const accountMap = new Map<string, 'ACCOUNTED' | 'DRAFT'>();
+        for (const h of (rvalJson.items || [])) {
+          if (!h.account) continue;
+          const prev = accountMap.get(h.account);
+          // ACCOUNTED takes priority over DRAFT
+          if (!prev || (prev === 'DRAFT' && h.status === 'ACCOUNTED')) {
+            accountMap.set(h.account, h.status === 'ACCOUNTED' ? 'ACCOUNTED' : 'DRAFT');
+          }
+        }
+        setRevalAccountStatus(accountMap);
+      } catch { /* non-fatal */ }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to fetch YTD TB';
       setTabs(prev => prev.map(t =>
@@ -6822,17 +6839,30 @@ const TrialBalance: React.FC = () => {
         title: <span style={{ color: '#d46b08' }}>Account</span>, dataIndex: 'account', key: 'account', width: 145,
         sorter: (a: YtdGroupRow, b: YtdGroupRow) => a.account.localeCompare(b.account),
         defaultSortOrder: 'ascend' as const,
-        render: (v: string) => (
-          <Space size={4}>
-            <Text strong style={{ fontFamily: 'monospace', color: '#d46b08' }}>{v}</Text>
-            <Tooltip title="View combinations">
-              <ApartmentOutlined
-                style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 13 }}
-                onClick={() => openDrillCombo(v, tab.rrData, tab.ledgerName, tab.periodName.replace(/^YTD:\s*/, ''), tab.key)}
-              />
-            </Tooltip>
-          </Space>
-        ),
+        render: (v: string) => {
+          const rvalStatus = revalAccountStatus.get(v);
+          return (
+            <Space size={4}>
+              <Text strong style={{ fontFamily: 'monospace', color: '#d46b08' }}>{v}</Text>
+              {rvalStatus && (
+                <Tooltip title={rvalStatus === 'ACCOUNTED' ? 'Revaluation Posted' : 'Revaluation Draft'}>
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    width: 16, height: 16, borderRadius: '50%', fontSize: 10, fontWeight: 700,
+                    background: rvalStatus === 'ACCOUNTED' ? '#1D7B4D' : '#D4A800',
+                    color: '#fff', cursor: 'default', flexShrink: 0,
+                  }}>R</span>
+                </Tooltip>
+              )}
+              <Tooltip title="View combinations">
+                <ApartmentOutlined
+                  style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 13 }}
+                  onClick={() => openDrillCombo(v, tab.rrData, tab.ledgerName, tab.periodName.replace(/^YTD:\s*/, ''), tab.key)}
+                />
+              </Tooltip>
+            </Space>
+          );
+        },
       },
       {
         title: 'Description', dataIndex: 'account_desc', key: 'account_desc',
