@@ -3508,27 +3508,34 @@ const TrialBalance: React.FC = () => {
           return null;
         },
       },
-      { title: 'Combination', dataIndex: 'combo', key: 'combo', width: 340, ellipsis: true,
-        render: (v: string) => {
+      { title: 'Combination', dataIndex: 'combo', key: 'combo', width: 340,
+        render: (v: string, r: ComboRow) => {
           const allIds = getAllComboIds(v);
           const unlocked = revalUnlockedCombos.has(v.trim());
+          const subAcctDesc = r.subAccount ? subAcctDescMap[r.subAccount] : '';
+          const descLine = [accountDesc, subAcctDesc ? `${r.subAccount} — ${subAcctDesc}` : r.subAccount].filter(Boolean).join(' · ');
           return (
             <Tooltip title={v}>
-              <span>
-                <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{v}</Text>
-                {allIds.map(entry => (
-                  <Tag
-                    key={entry.revalueId}
-                    color={entry.status === 'ACCOUNTED' ? 'green' : 'blue'}
-                    style={{ marginLeft: 4, fontSize: 10, padding: '0 4px' }}
-                  >
-                    ID: {entry.revalueId}
-                  </Tag>
-                ))}
-                {unlocked && (
-                  <Tag color="orange" style={{ marginLeft: 4, fontSize: 10, padding: '0 4px' }}>Unlocked</Tag>
+              <div>
+                <div>
+                  <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{v}</Text>
+                  {allIds.map(entry => (
+                    <Tag
+                      key={entry.revalueId}
+                      color={entry.status === 'ACCOUNTED' ? 'green' : 'blue'}
+                      style={{ marginLeft: 4, fontSize: 10, padding: '0 4px' }}
+                    >
+                      ID: {entry.revalueId}
+                    </Tag>
+                  ))}
+                  {unlocked && (
+                    <Tag color="orange" style={{ marginLeft: 4, fontSize: 10, padding: '0 4px' }}>Unlocked</Tag>
+                  )}
+                </div>
+                {descLine && (
+                  <div style={{ fontSize: 10, color: '#888', marginTop: 2 }}>{descLine}</div>
                 )}
-              </span>
+              </div>
             </Tooltip>
           );
         },
