@@ -3458,7 +3458,11 @@ const TrialBalance: React.FC = () => {
                 <Button
                   type="text" size="small"
                   icon={<UnlockOutlined style={{ color: '#faad14', fontSize: 14 }} />}
-                  onClick={() => setRevalUnlockedCombos(prev => new Set([...prev, r.combo.trim()]))}
+                  onClick={() => {
+                    setRevalUnlockedCombos(prev => new Set([...prev, r.combo.trim()]));
+                    // Auto-select the unlocked combo so preview includes it immediately
+                    setRevalSelectedRows(prev => [...new Set([...prev, r.rowKey])]);
+                  }}
                 />
               </Tooltip>
               <Tooltip title={`Posted — Reval ID: ${primary.revalueId}`}>
@@ -3471,7 +3475,10 @@ const TrialBalance: React.FC = () => {
               <Button
                 type="text" size="small"
                 icon={<LockOutlined style={{ color: '#faad14', fontSize: 14 }} />}
-                onClick={() => setRevalUnlockedCombos(prev => { const s = new Set(prev); s.delete(r.combo.trim()); return s; })}
+                onClick={() => {
+                  setRevalUnlockedCombos(prev => { const s = new Set(prev); s.delete(r.combo.trim()); return s; });
+                  setRevalSelectedRows(prev => prev.filter(k => k !== r.rowKey));
+                }}
               />
             </Tooltip>
           );
@@ -3984,7 +3991,7 @@ const TrialBalance: React.FC = () => {
               type="primary"
               icon={<FileTextOutlined />}
               onClick={buildPreview}
-              disabled={isPosted || effectiveSelected.length === 0 || activeComboRows.filter(r => !isComboPosted(r.combo) && effectiveSelected.includes(r.rowKey)).every(r => r.newRate === 0)}
+              disabled={isPosted || effectiveSelected.length === 0 || (() => { const rows = activeComboRows.filter(r => !isComboPosted(r.combo) && effectiveSelected.includes(r.rowKey)); return rows.length > 0 && rows.every(r => r.newRate === 0); })()}
               style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
             >
               Preview Journal Entry
