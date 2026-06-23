@@ -1,909 +1,287 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Card, Row, Col, Typography, Space, Progress, Divider, Tooltip, Modal, Input } from 'antd';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Row, Col, Typography, Card, Tag, Spin } from 'antd';
 import {
-  AccountBookOutlined,
-  ShoppingCartOutlined,
-  TeamOutlined,
-  ProjectOutlined,
-  BarChartOutlined,
-  SettingOutlined,
-  DollarOutlined,
-  InboxOutlined,
-  TruckOutlined,
-  ToolOutlined,
-  SyncOutlined,
-  StockOutlined,
-  LockOutlined,
-  ArrowUpOutlined,
-  ArrowDownOutlined,
-  ClockCircleOutlined,
-  CheckCircleOutlined,
-  FileTextOutlined,
-  BankOutlined,
-  AppstoreOutlined,
-  CloseOutlined,
-  KeyOutlined,
-  BugOutlined,
-  DatabaseOutlined,
+  AccountBookOutlined, BankOutlined, DollarOutlined,
+  FileTextOutlined, SyncOutlined, DatabaseOutlined,
+  CheckCircleOutlined, ClockCircleOutlined, ExclamationCircleOutlined,
+  SafetyCertificateOutlined, BookOutlined, CalendarOutlined,
+  ThunderboltOutlined, WalletOutlined, AuditOutlined, FundOutlined,
+  ShopOutlined, HomeOutlined, SettingOutlined, ArrowUpOutlined, ArrowDownOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import type { Module } from '../types';
+import { useAuth } from '../context/AuthContext';
+import { APEX_DB_CONFIG } from '../config/api.config';
+import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
 
-// Oracle Redwood Color Palette
 const REDWOOD = {
-  primary: '#C74634',
-  primaryLight: '#E85D4A',
-  success: '#1D7B4D',
-  warning: '#D4A800',
-  info: '#0572CE',
-  neutral100: '#F7F7F7',
-  neutral200: '#E5E5E5',
+  primary:    '#C74634',
+  success:    '#1D7B4D',
+  warning:    '#D4A800',
+  info:       '#0572CE',
+  purple:     '#7B5EA7',
+  teal:       '#00857C',
+  orange:     '#E06C00',
+  neutral50:  '#FAFAFA',
+  neutral100: '#F5F5F5',
+  neutral200: '#E8E8E8',
   neutral600: '#6B6B6B',
-  neutral900: '#1A1A1A',
-  surface: '#FFFFFF',
-  moduleOrange: '#FA8C16',
+  neutral800: '#333333',
 };
 
-// KPI Data (placeholder - will be replaced with API calls)
-const kpiData = {
-  revenue: { value: 0, change: 0, label: 'Total Revenue', prefix: '$' },
-  expenses: { value: 0, change: 0, label: 'Total Expenses', prefix: '$' },
-  receivables: { value: 0, label: 'Open Receivables', prefix: '$' },
-  payables: { value: 0, label: 'Open Payables', prefix: '$' },
-  pendingJournals: { value: 0, label: 'Pending Journals' },
-  openPOs: { value: 0, label: 'Open POs' },
-};
+const APEX = APEX_DB_CONFIG.baseUrl;
 
-const modules: Module[] = [
-  {
-    id: 'gl',
-    name: 'General Ledger',
-    description: 'Chart of Accounts, Journal Entries, Financial Reports',
-    icon: <AccountBookOutlined style={{ fontSize: 32 }} />,
-    path: '/gl',
-    color: REDWOOD.primary,
-  },
-  {
-    id: 'fa',
-    name: 'Fixed Assets',
-    description: 'Asset Register, Depreciation, Retirements, NBV',
-    icon: <DatabaseOutlined style={{ fontSize: 32 }} />,
-    path: '/fa',
-    color: '#CA7700',
-  },
-  {
-    id: 'ap',
-    name: 'Accounts Payable',
-    description: 'Vendor Management, Invoices, Payments',
-    icon: <DollarOutlined style={{ fontSize: 32 }} />,
-    path: '/ap',
-    color: REDWOOD.success,
-  },
-  {
-    id: 'cash',
-    name: 'Cash Management',
-    description: 'Bank Transfers, Reconciliation, Cash Position',
-    icon: <BankOutlined style={{ fontSize: 32 }} />,
-    path: '/cash',
-    color: '#0572CE',
-  },
-  {
-    id: 'ar',
-    name: 'Accounts Receivable',
-    description: 'Customer Management, Billing, Collections',
-    icon: <ShoppingCartOutlined style={{ fontSize: 32 }} />,
-    path: '/ar',
-    color: '#fa8c16',
-  },
-  {
-    id: 'inventory',
-    name: 'Inventory',
-    description: 'Items, Stock Management, Warehouses',
-    icon: <InboxOutlined style={{ fontSize: 32 }} />,
-    path: '/inventory',
-    color: '#722ed1',
-  },
-  {
-    id: 'procurement',
-    name: 'Procurement',
-    description: 'Purchase Orders, Requisitions, Suppliers',
-    icon: <TruckOutlined style={{ fontSize: 32 }} />,
-    path: '/procurement',
-    color: '#13c2c2',
-  },
-  {
-    id: 'om',
-    name: 'Order Management',
-    description: 'Sales Orders, Customers, On-Hand Inventory',
-    icon: <ShoppingCartOutlined style={{ fontSize: 32 }} />,
-    path: '/om',
-    color: '#C25700',
-  },
-  {
-    id: 'hr',
-    name: 'Human Resources',
-    description: 'Employees, Payroll, Leave Management',
-    icon: <TeamOutlined style={{ fontSize: 32 }} />,
-    path: '/hr',
-    color: '#eb2f96',
-  },
-  {
-    id: 'pms',
-    name: 'Portfolio Management',
-    description: 'Watchlists, Portfolio Tracking, Stock Monitoring',
-    icon: <StockOutlined style={{ fontSize: 32 }} />,
-    path: '/pms',
-    color: '#6B4C9A',
-  },
-  {
-    id: 'projects',
-    name: 'Projects',
-    description: 'Project Planning, Tasks, Time & Expense',
-    icon: <ProjectOutlined style={{ fontSize: 32 }} />,
-    path: '/projects',
-    color: '#faad14',
-  },
-  {
-    id: 'manufacturing',
-    name: 'Manufacturing',
-    description: 'BOM, Work Orders, Production',
-    icon: <ToolOutlined style={{ fontSize: 32 }} />,
-    path: '/manufacturing',
-    color: '#f5222d',
-  },
-  {
-    id: 'reports',
-    name: 'Reports & Analytics',
-    description: 'Dashboards, KPIs, Business Intelligence',
-    icon: <BarChartOutlined style={{ fontSize: 32 }} />,
-    path: '/reports',
-    color: REDWOOD.info,
-  },
-  {
-    id: 'admin',
-    name: 'Administration',
-    description: 'Users, Roles, System Settings',
-    icon: <SettingOutlined style={{ fontSize: 32 }} />,
-    path: '/admin',
-    color: '#595959',
-  },
-  {
-    id: 'rm',
-    name: 'Rental Management',
-    description: 'Agreements, Tenants, Installments, Revenue Split — Dubai',
-    icon: <KeyOutlined style={{ fontSize: 32 }} />,
-    path: '/rm',
-    color: '#0B6E6E',
-  },
-  {
-    id: 'sync',
-    name: 'Sync Data',
-    description: 'Sync data from Oracle Fusion ERP',
-    icon: <SyncOutlined style={{ fontSize: 32 }} />,
-    path: '/sync',
-    color: REDWOOD.info,
-  },
-  {
-    id: 'support',
-    name: 'Support',
-    description: 'Raise tickets, track issues, view resolutions',
-    icon: <BugOutlined style={{ fontSize: 32 }} />,
-    path: '/support',
-    color: '#C74634',
-  },
+const MODULES = [
+  { id: 'gl',   label: 'General Ledger',      icon: <AccountBookOutlined />, path: '/gl/manage-journals',         color: REDWOOD.primary,  desc: 'Journals · Trial Balance · COA' },
+  { id: 'ap',   label: 'Accounts Payable',    icon: <DollarOutlined />,      path: '/ap/manage-invoices',         color: REDWOOD.orange,   desc: 'Invoices · Payments · Suppliers' },
+  { id: 'ar',   label: 'Accounts Receivable', icon: <WalletOutlined />,      path: '/ar/manage-receipts',         color: REDWOOD.success,  desc: 'Receipts · Invoices · Customers' },
+  { id: 'cash', label: 'Cash Management',     icon: <BankOutlined />,        path: '/cash/external-transactions', color: REDWOOD.info,     desc: 'Bank Recon · Transfers · Statements' },
+  { id: 'fa',   label: 'Fixed Assets',        icon: <DatabaseOutlined />,    path: '/fa/manage-assets',           color: REDWOOD.purple,   desc: 'Assets · Depreciation · Retirements' },
+  { id: 'rm',   label: 'Rental Management',   icon: <HomeOutlined />,        path: '/rm/manage-agreements',       color: REDWOOD.teal,     desc: 'Agreements · Properties · Installments' },
+  { id: 'pms',  label: 'Portfolio Mgmt',      icon: <FundOutlined />,        path: '/pms/portfolio',              color: REDWOOD.success,  desc: 'Portfolio · Watchlist · Risk' },
+  { id: 'proc', label: 'Procurement',         icon: <ShopOutlined />,        path: '/proc/manage-suppliers',      color: REDWOOD.warning,  desc: 'Suppliers · Purchase Orders' },
+  { id: 'pc',   label: 'Petty Cash',          icon: <AuditOutlined />,       path: '/pc/petty-cash',              color: REDWOOD.orange,   desc: 'Registers · Expenses' },
+  { id: 'supp', label: 'Support',             icon: <SafetyCertificateOutlined />, path: '/support/manage-tickets', color: REDWOOD.neutral600, desc: 'Tickets · Issues' },
+  { id: 'admin',label: 'Administration',      icon: <SettingOutlined />,     path: '/admin/user-management',      color: REDWOOD.neutral800, desc: 'Users · Settings · AI' },
+  { id: 'sync', label: 'Oracle Sync',         icon: <SyncOutlined />,        path: '/sync',                       color: REDWOOD.primary,  desc: 'Sync GL · AP · AR · Assets' },
 ];
 
-// KPI Card Component
-const KPICard = ({
-  icon,
-  label,
-  value,
-  prefix = '',
-  suffix = '',
-  change,
-  color,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: number;
-  prefix?: string;
-  suffix?: string;
-  change?: number;
-  color: string;
-}) => (
-  <Card
-    style={{
-      borderRadius: 12,
-      border: `1px solid ${REDWOOD.neutral200}`,
-      height: '100%',
-    }}
-    styles={{ body: { padding: 20 } }}
-  >
-    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+const QUICK_ACTIONS = [
+  { label: 'Create Journal',        path: '/gl/create-journal',          color: REDWOOD.primary },
+  { label: 'Manage AP Invoices',    path: '/ap/manage-invoices',         color: REDWOOD.orange  },
+  { label: 'Bank Reconciliation',   path: '/cash/bank-reconciliation',   color: REDWOOD.info    },
+  { label: 'External Transactions', path: '/cash/external-transactions', color: REDWOOD.info    },
+  { label: 'Run Depreciation',      path: '/fa/depreciation',            color: REDWOOD.purple  },
+  { label: 'Trial Balance',         path: '/gl/trial-balance',           color: REDWOOD.success },
+  { label: 'Sync Oracle Data',      path: '/sync',                       color: REDWOOD.primary },
+];
+
+// ── Sub-components ─────────────────────────────────────────────────────────
+
+const KpiCard: React.FC<{
+  label: string; value: string; sub?: string; trend?: 'up' | 'down' | 'none';
+  icon: React.ReactNode; color: string; loading: boolean; onClick?: () => void;
+}> = ({ label, value, sub, trend, icon, color, loading, onClick }) => (
+  <Card hoverable={!!onClick} onClick={onClick}
+    style={{ borderRadius: 10, border: `1px solid ${REDWOOD.neutral200}`, height: '100%', cursor: onClick ? 'pointer' : 'default' }}
+    styles={{ body: { padding: '16px 20px' } }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
       <div>
-        <Text type="secondary" style={{ fontSize: 13, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-          {label}
-        </Text>
-        <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.neutral900, marginTop: 4 }}>
-          {prefix}{value.toLocaleString()}{suffix}
-        </div>
-        {change !== undefined && (
-          <Space style={{ marginTop: 8 }}>
-            {change >= 0 ? (
-              <ArrowUpOutlined style={{ color: REDWOOD.success, fontSize: 12 }} />
-            ) : (
-              <ArrowDownOutlined style={{ color: REDWOOD.primary, fontSize: 12 }} />
-            )}
-            <Text style={{ color: change >= 0 ? REDWOOD.success : REDWOOD.primary, fontSize: 13 }}>
-              {Math.abs(change)}% vs last month
-            </Text>
-          </Space>
+        <Text style={{ fontSize: 11, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>{label}</Text>
+        {loading
+          ? <div style={{ marginTop: 8 }}><Spin size="small" /></div>
+          : <div style={{ fontSize: 22, fontWeight: 700, color: REDWOOD.neutral800, marginTop: 4 }}>{value}</div>}
+        {sub && !loading && (
+          <Text style={{ fontSize: 11, color: trend === 'up' ? REDWOOD.success : trend === 'down' ? REDWOOD.primary : REDWOOD.neutral600, marginTop: 2, display: 'block' }}>
+            {trend === 'up' && <ArrowUpOutlined style={{ marginRight: 2 }} />}
+            {trend === 'down' && <ArrowDownOutlined style={{ marginRight: 2 }} />}
+            {sub}
+          </Text>
         )}
       </div>
-      <div
-        style={{
-          width: 48,
-          height: 48,
-          borderRadius: 12,
-          background: `${color}15`,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: color,
-          fontSize: 22,
-        }}
-      >
+      <div style={{ width: 42, height: 42, borderRadius: 10, background: `${color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, color }}>
         {icon}
       </div>
     </div>
   </Card>
 );
 
-// Quick Action Card
-const QuickActionCard = ({
-  icon,
-  label,
-  count,
-  color,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  count: number;
-  color: string;
-  onClick?: () => void;
-}) => (
-  <Card
-    hoverable
-    onClick={onClick}
-    style={{
-      borderRadius: 12,
-      border: `1px solid ${REDWOOD.neutral200}`,
-      cursor: 'pointer',
-    }}
-    styles={{ body: { padding: 16 } }}
-  >
-    <Space>
-      <div
-        style={{
-          width: 40,
-          height: 40,
-          borderRadius: 10,
-          background: `${color}15`,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: color,
-          fontSize: 18,
-        }}
-      >
-        {icon}
+const ModuleTile: React.FC<{ mod: typeof MODULES[0]; onClick: () => void }> = ({ mod, onClick }) => (
+  <Card hoverable onClick={onClick}
+    style={{ borderRadius: 10, border: `1px solid ${REDWOOD.neutral200}`, cursor: 'pointer' }}
+    styles={{ body: { padding: '12px 14px' } }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ width: 36, height: 36, borderRadius: 8, background: `${mod.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, color: mod.color, flexShrink: 0 }}>
+        {mod.icon}
       </div>
-      <div>
-        <Text strong style={{ display: 'block' }}>{label}</Text>
-        <Text type="secondary" style={{ fontSize: 12 }}>{count} pending</Text>
+      <div style={{ minWidth: 0 }}>
+        <Text style={{ fontWeight: 600, fontSize: 13, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mod.label}</Text>
+        <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{mod.desc}</Text>
       </div>
-    </Space>
+    </div>
   </Card>
 );
 
-const LOCKED_MODULES: Record<string, string> = {
-  '/om': 'MIT12345',
-};
+// ── Main ───────────────────────────────────────────────────────────────────
 
 const Home: React.FC = () => {
   const navigate = useNavigate();
-  const [isModulesOpen, setIsModulesOpen] = useState(false);
-  const [isClosing, setIsClosing] = useState(false);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const floatingIconRef = useRef<HTMLDivElement>(null);
+  const { user } = useAuth();
+  const userName  = (user as any)?.name ?? (user as any)?.email?.split('@')[0] ?? 'User';
+  const today     = dayjs();
+  const hour      = today.hour();
+  const greeting  = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
-  const [pwdModalOpen, setPwdModalOpen] = useState(false);
-  const [pwdPendingPath, setPwdPendingPath] = useState('');
-  const [pwdInput, setPwdInput] = useState('');
-  const [pwdError, setPwdError] = useState(false);
-  const pwdInputRef = useRef<any>(null);
+  const [apStats,    setApStats]    = useState<any>(null);
+  const [glPeriod,   setGlPeriod]   = useState<any>(null);
+  const [approvals,  setApprovals]  = useState<any[]>([]);
+  const [recentJnls, setRecentJnls] = useState<any[]>([]);
+  const [loading,    setLoading]    = useState(true);
 
-  // Click outside handler
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as Node;
-      const isOutsidePanel = panelRef.current && !panelRef.current.contains(target);
-      const isOutsideFloatingIcon = floatingIconRef.current && !floatingIconRef.current.contains(target);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [apRes, periodRes, approvalsRes, jnlRes] = await Promise.allSettled([
+        fetch(`${APEX}/ap/invoices/stats`,              { cache: 'no-store', headers: { Accept: 'application/json' } }),
+        fetch(`${APEX}/gl/periodsstatus?limit=1`,       { cache: 'no-store', headers: { Accept: 'application/json' } }),
+        fetch(`${APEX}/approvals/requests?status=PENDING&limit=5`, { cache: 'no-store', headers: { Accept: 'application/json' } }),
+        fetch(`${APEX}/gl/journals/headers?limit=5`,   { cache: 'no-store', headers: { Accept: 'application/json' } }),
+      ]);
+      if (apRes.status === 'fulfilled' && apRes.value.ok)        { const d = await apRes.value.json();        setApStats(d); }
+      if (periodRes.status === 'fulfilled' && periodRes.value.ok) { const d = await periodRes.value.json();   setGlPeriod((d.items || [])[0] ?? null); }
+      if (approvalsRes.status === 'fulfilled' && approvalsRes.value.ok) { const d = await approvalsRes.value.json(); setApprovals(d.items || []); }
+      if (jnlRes.status === 'fulfilled' && jnlRes.value.ok)      { const d = await jnlRes.value.json();       setRecentJnls(d.items || []); }
+    } finally { setLoading(false); }
+  }, []);
 
-      if (isOutsidePanel && isOutsideFloatingIcon) {
-        closePanel();
-      }
-    };
+  useEffect(() => { load(); }, [load]);
 
-    if (isModulesOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
+  const fmt = (n: number) =>
+    n == null ? '—' : n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n / 1_000).toFixed(0)}K` : `${n}`;
 
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isModulesOpen]);
+  const fmtAmt = (n: number) =>
+    n == null ? '—' : `AED ${Math.abs(n).toLocaleString('en-AE', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 
-  const closePanel = () => {
-    setIsClosing(true);
-    setTimeout(() => {
-      setIsModulesOpen(false);
-      setIsClosing(false);
-    }, 250);
-  };
+  const pendingCount  = apStats?.pending_count  ?? apStats?.pendingCount  ?? 0;
+  const pendingAmt    = apStats?.pending_amount ?? apStats?.pendingAmount ?? 0;
+  const overdueCount  = apStats?.overdue_count  ?? apStats?.overdueCount  ?? 0;
+  const paidThisMonth = apStats?.paid_this_month ?? apStats?.paidThisMonth ?? 0;
 
-  const toggleModulesPanel = () => {
-    if (isModulesOpen) {
-      closePanel();
-    } else {
-      setIsClosing(false);
-      setIsModulesOpen(true);
-    }
-  };
-
-  const handleModuleClick = (module: Module) => {
-    if (LOCKED_MODULES[module.path]) {
-      closePanel();
-      setPwdPendingPath(module.path);
-      setPwdInput('');
-      setPwdError(false);
-      setPwdModalOpen(true);
-      setTimeout(() => pwdInputRef.current?.focus(), 100);
-      return;
-    }
-    closePanel();
-    navigate(module.path);
-  };
-
-  const handlePwdConfirm = () => {
-    if (pwdInput === LOCKED_MODULES[pwdPendingPath]) {
-      setPwdModalOpen(false);
-      navigate(pwdPendingPath);
-    } else {
-      setPwdError(true);
-      setPwdInput('');
-      pwdInputRef.current?.focus();
-    }
-  };
+  const periodName   = glPeriod?.period_name ?? glPeriod?.periodName   ?? '—';
+  const periodStatus = glPeriod?.status      ?? glPeriod?.glStatus     ?? '—';
+  const isOpen       = periodStatus.toLowerCase().includes('open');
 
   return (
-    <div style={{ padding: '24px', paddingRight: 100, background: REDWOOD.neutral100, minHeight: 'calc(100vh - 64px)' }}>
+    <div style={{ padding: '20px 24px', background: REDWOOD.neutral50, minHeight: '100vh' }}>
+
       {/* Header */}
-      <div style={{ marginBottom: 24 }}>
-        <Space align="center">
-          <div
-            style={{
-              width: 56,
-              height: 56,
-              borderRadius: 12,
-              background: `linear-gradient(135deg, ${REDWOOD.primary} 0%, ${REDWOOD.primaryLight} 100%)`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: `0 4px 12px ${REDWOOD.primary}40`,
-            }}
-          >
-            <BarChartOutlined style={{ fontSize: 28, color: '#fff' }} />
-          </div>
-          <div>
-            <Title level={2} style={{ margin: 0, color: REDWOOD.neutral900 }}>
-              Dashboard
-            </Title>
-            <Text type="secondary">Welcome back! Here's your business overview.</Text>
-          </div>
-        </Space>
+      <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 8 }}>
+        <div>
+          <Title level={3} style={{ margin: 0, color: REDWOOD.neutral800 }}>{greeting}, {userName} 👋</Title>
+          <Text style={{ color: REDWOOD.neutral600, fontSize: 13 }}>{today.format('dddd, D MMMM YYYY')} · Re-ERP Enterprise Platform</Text>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {periodName !== '—' && <Tag icon={<CalendarOutlined />} style={{ padding: '4px 10px', borderRadius: 6 }}>Period: <strong>{periodName}</strong></Tag>}
+          {periodStatus !== '—' && <Tag color={isOpen ? 'success' : 'error'} style={{ padding: '4px 10px', borderRadius: 6 }}>GL: {periodStatus}</Tag>}
+          <Tag icon={<CheckCircleOutlined />} color="success" style={{ padding: '4px 10px', borderRadius: 6 }}>System Online</Tag>
+        </div>
       </div>
 
-      {/* KPI Cards */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+      {/* KPI Row */}
+      <Row gutter={[14, 14]} style={{ marginBottom: 18 }}>
         <Col xs={24} sm={12} lg={6}>
-          <KPICard
-            icon={<DollarOutlined />}
-            label={kpiData.revenue.label}
-            value={kpiData.revenue.value}
-            prefix="$"
-            change={kpiData.revenue.change}
-            color={REDWOOD.success}
-          />
+          <KpiCard label="Pending AP Invoices" icon={<FileTextOutlined />} color={REDWOOD.orange}
+            value={fmt(pendingCount)} sub={pendingAmt ? `${fmtAmt(pendingAmt)} outstanding` : 'None pending'}
+            trend={pendingCount > 0 ? 'down' : 'none'} loading={loading} onClick={() => navigate('/ap/manage-invoices')} />
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <KPICard
-            icon={<BankOutlined />}
-            label={kpiData.expenses.label}
-            value={kpiData.expenses.value}
-            prefix="$"
-            change={kpiData.expenses.change}
-            color={REDWOOD.primary}
-          />
+          <KpiCard label="Overdue Invoices" icon={<ExclamationCircleOutlined />} color={REDWOOD.primary}
+            value={fmt(overdueCount)} sub={overdueCount > 0 ? 'Requires attention' : 'None overdue'}
+            trend={overdueCount > 0 ? 'down' : 'none'} loading={loading} onClick={() => navigate('/ap/manage-invoices')} />
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <KPICard
-            icon={<ShoppingCartOutlined />}
-            label={kpiData.receivables.label}
-            value={kpiData.receivables.value}
-            prefix="$"
-            color={REDWOOD.warning}
-          />
+          <KpiCard label="AP Paid This Month" icon={<CheckCircleOutlined />} color={REDWOOD.success}
+            value={fmtAmt(paidThisMonth)} sub="Payments processed"
+            trend={paidThisMonth > 0 ? 'up' : 'none'} loading={loading} onClick={() => navigate('/ap/manage-payments')} />
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <KPICard
-            icon={<TruckOutlined />}
-            label={kpiData.payables.label}
-            value={kpiData.payables.value}
-            prefix="$"
-            color={REDWOOD.info}
-          />
+          <KpiCard label="Pending Approvals" icon={<ClockCircleOutlined />} color={REDWOOD.warning}
+            value={fmt(approvals.length)} sub={approvals.length > 0 ? 'Awaiting your action' : 'All clear'}
+            trend={approvals.length > 0 ? 'down' : 'none'} loading={loading} />
         </Col>
       </Row>
 
-      {/* Quick Actions */}
-      <Card
-        style={{
-          borderRadius: 12,
-          border: `1px solid ${REDWOOD.neutral200}`,
-          marginBottom: 24,
-        }}
-        styles={{ body: { padding: 20 } }}
-      >
-        <Text
-          strong
-          style={{
-            display: 'block',
-            marginBottom: 16,
-            color: REDWOOD.neutral600,
-            textTransform: 'uppercase',
-            fontSize: 12,
-            letterSpacing: 1,
-          }}
-        >
-          Quick Actions
-        </Text>
-        <Row gutter={[16, 16]}>
-          <Col xs={24} sm={12} md={6}>
-            <QuickActionCard
-              icon={<FileTextOutlined />}
-              label="Pending Journals"
-              count={kpiData.pendingJournals.value}
-              color={REDWOOD.primary}
-              onClick={() => navigate('/gl')}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={6}>
-            <QuickActionCard
-              icon={<ClockCircleOutlined />}
-              label="Open POs"
-              count={kpiData.openPOs.value}
-              color={REDWOOD.info}
-              onClick={() => navigate('/procurement')}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={6}>
-            <QuickActionCard
-              icon={<CheckCircleOutlined />}
-              label="Pending Approvals"
-              count={0}
-              color={REDWOOD.warning}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={6}>
-            <QuickActionCard
-              icon={<SyncOutlined />}
-              label="Sync Data"
-              count={0}
-              color={REDWOOD.success}
-              onClick={() => navigate('/sync')}
-            />
-          </Col>
-        </Row>
-      </Card>
+      {/* Body */}
+      <Row gutter={[14, 14]}>
 
-      {/* Period Status */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        <Col xs={24} lg={12}>
-          <Card
-            style={{
-              borderRadius: 12,
-              border: `1px solid ${REDWOOD.neutral200}`,
-              height: '100%',
-            }}
-            styles={{ body: { padding: 20 } }}
-          >
-            <Text
-              strong
-              style={{
-                display: 'block',
-                marginBottom: 16,
-                color: REDWOOD.neutral600,
-                textTransform: 'uppercase',
-                fontSize: 12,
-                letterSpacing: 1,
-              }}
-            >
-              Period Status
-            </Text>
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                <Text>Current Period</Text>
-                <Text strong>--</Text>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                <Text>GL Period Status</Text>
-                <Text strong style={{ color: REDWOOD.neutral600 }}>--</Text>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <Text>AP Period Status</Text>
-                <Text strong style={{ color: REDWOOD.neutral600 }}>--</Text>
-              </div>
-            </div>
-            <Divider style={{ margin: '16px 0' }} />
-            <div>
-              <Text type="secondary" style={{ fontSize: 12 }}>Period Progress</Text>
-              <Progress percent={0} strokeColor={REDWOOD.primary} style={{ marginTop: 8 }} />
-            </div>
+        {/* Module grid */}
+        <Col xs={24} lg={16}>
+          <Card style={{ borderRadius: 12, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 14 }}
+            styles={{ body: { padding: '16px 18px' } }}
+            title={<Text strong style={{ fontSize: 13 }}><ThunderboltOutlined style={{ color: REDWOOD.primary, marginRight: 6 }} />Modules</Text>}>
+            <Row gutter={[10, 10]}>
+              {MODULES.map(mod => (
+                <Col key={mod.id} xs={24} sm={12} xl={8}>
+                  <ModuleTile mod={mod} onClick={() => navigate(mod.path)} />
+                </Col>
+              ))}
+            </Row>
           </Card>
         </Col>
-        <Col xs={24} lg={12}>
-          <Card
-            style={{
-              borderRadius: 12,
-              border: `1px solid ${REDWOOD.neutral200}`,
-              height: '100%',
-            }}
-            styles={{ body: { padding: 20 } }}
-          >
-            <Text
-              strong
-              style={{
-                display: 'block',
-                marginBottom: 16,
-                color: REDWOOD.neutral600,
-                textTransform: 'uppercase',
-                fontSize: 12,
-                letterSpacing: 1,
-              }}
-            >
-              Recent Activity
-            </Text>
-            <div style={{ textAlign: 'center', padding: '20px 0', color: REDWOOD.neutral600 }}>
-              <ClockCircleOutlined style={{ fontSize: 32, marginBottom: 8, opacity: 0.5 }} />
-              <div>No recent activity</div>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                Activity will appear here once you start using the system
-              </Text>
+
+        {/* Right panel */}
+        <Col xs={24} lg={8}>
+
+          {/* Period status */}
+          <Card style={{ borderRadius: 12, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 14 }}
+            styles={{ body: { padding: '16px 18px' } }}
+            title={<Text strong style={{ fontSize: 13 }}><CalendarOutlined style={{ color: REDWOOD.info, marginRight: 6 }} />Accounting Period</Text>}>
+            {loading ? <Spin size="small" /> : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {[
+                  { label: 'Current Period', value: <Text strong>{periodName}</Text> },
+                  { label: 'GL Status',      value: <Tag color={isOpen ? 'success' : 'error'} style={{ margin: 0 }}>{periodStatus}</Tag> },
+                  { label: 'Today',          value: <Text>{today.format('D MMM YYYY')}</Text> },
+                ].map((row, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
+                    <Text style={{ color: REDWOOD.neutral600 }}>{row.label}</Text>
+                    {row.value}
+                  </div>
+                ))}
+                <div style={{ borderTop: `1px solid ${REDWOOD.neutral200}`, paddingTop: 8, display: 'flex', gap: 12 }}>
+                  <a onClick={() => navigate('/gl/accounting-periods')} style={{ fontSize: 12, color: REDWOOD.info }}>Periods →</a>
+                  <a onClick={() => navigate('/gl/trial-balance')}      style={{ fontSize: 12, color: REDWOOD.info }}>Trial Balance →</a>
+                  <a onClick={() => navigate('/gl/manage-journals')}    style={{ fontSize: 12, color: REDWOOD.info }}>Journals →</a>
+                </div>
+              </div>
+            )}
+          </Card>
+
+          {/* Recent journals */}
+          <Card style={{ borderRadius: 12, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 14 }}
+            styles={{ body: { padding: '16px 18px' } }}
+            title={<Text strong style={{ fontSize: 13 }}><BookOutlined style={{ color: REDWOOD.purple, marginRight: 6 }} />Recent Journals</Text>}
+            extra={<a onClick={() => navigate('/gl/manage-journals')} style={{ fontSize: 12, color: REDWOOD.info }}>View all</a>}>
+            {loading ? <Spin size="small" /> : recentJnls.length === 0
+              ? <Text style={{ color: REDWOOD.neutral600, fontSize: 13 }}>No journals found</Text>
+              : recentJnls.slice(0, 5).map((j: any, i: number) => {
+                  const name   = j.batchName || j.batch_name || j.journalName || `Journal #${j.jeHeaderId ?? j.je_header_id ?? i}`;
+                  const period = j.periodName || j.period_name || j.defaultPeriodName || j.default_period_name || '';
+                  const status = j.status || j.approvalStatus || j.approval_status || 'Draft';
+                  const sc     = status.toLowerCase() === 'posted' ? 'success' : status.toLowerCase() === 'unposted' ? 'default' : 'processing';
+                  return (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: i < 4 ? `1px solid ${REDWOOD.neutral100}` : 'none' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <Text style={{ fontSize: 12, fontWeight: 600, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</Text>
+                        <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{period}</Text>
+                      </div>
+                      <Tag color={sc} style={{ fontSize: 10, marginLeft: 8, flexShrink: 0 }}>{status}</Tag>
+                    </div>
+                  );
+                })
+            }
+          </Card>
+
+          {/* Quick actions */}
+          <Card style={{ borderRadius: 12, border: `1px solid ${REDWOOD.neutral200}` }}
+            styles={{ body: { padding: '16px 18px' } }}
+            title={<Text strong style={{ fontSize: 13 }}><AuditOutlined style={{ color: REDWOOD.teal, marginRight: 6 }} />Quick Actions</Text>}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {QUICK_ACTIONS.map((item, i) => (
+                <div key={i} onClick={() => navigate(item.path)}
+                  style={{ padding: '7px 10px', borderRadius: 7, cursor: 'pointer', background: REDWOOD.neutral50, display: 'flex', alignItems: 'center', gap: 8 }}
+                  onMouseEnter={e => (e.currentTarget.style.background = REDWOOD.neutral100)}
+                  onMouseLeave={e => (e.currentTarget.style.background = REDWOOD.neutral50)}>
+                  <div style={{ width: 7, height: 7, borderRadius: '50%', background: item.color, flexShrink: 0 }} />
+                  <Text style={{ fontSize: 13, color: REDWOOD.neutral800 }}>{item.label}</Text>
+                </div>
+              ))}
             </div>
           </Card>
+
         </Col>
       </Row>
-
-      {/* Modules Grid */}
-      <Card
-        style={{
-          borderRadius: 12,
-          border: `1px solid ${REDWOOD.neutral200}`,
-        }}
-        styles={{ body: { padding: 20 } }}
-      >
-        <Text
-          strong
-          style={{
-            display: 'block',
-            marginBottom: 16,
-            color: REDWOOD.neutral600,
-            textTransform: 'uppercase',
-            fontSize: 12,
-            letterSpacing: 1,
-          }}
-        >
-          Modules
-        </Text>
-        <Row gutter={[16, 16]}>
-          {modules.map((module) => (
-            <Col xs={12} sm={8} md={6} lg={4} xl={3} key={module.id}>
-              <Card
-                hoverable
-                onClick={() => handleModuleClick(module)}
-                style={{
-                  borderRadius: 12,
-                  textAlign: 'center',
-                  border: `1px solid ${REDWOOD.neutral200}`,
-                  transition: 'all 0.3s ease',
-                }}
-                styles={{ body: { padding: 16 } }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = module.color;
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                  e.currentTarget.style.boxShadow = `0 4px 12px ${module.color}20`;
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = REDWOOD.neutral200;
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = 'none';
-                }}
-              >
-                <div
-                  style={{
-                    width: 56,
-                    height: 56,
-                    borderRadius: 12,
-                    background: `${module.color}15`,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    margin: '0 auto 12px',
-                    color: module.color,
-                  }}
-                >
-                  {module.icon}
-                </div>
-                <Text strong style={{ fontSize: 13, display: 'block' }}>
-                  {module.name}
-                </Text>
-              </Card>
-            </Col>
-          ))}
-        </Row>
-      </Card>
-
-      {/* Floating Modules Icon */}
-      <div
-        ref={floatingIconRef}
-        style={{
-          position: 'fixed',
-          right: 24,
-          top: '50%',
-          transform: 'translateY(-50%)',
-          zIndex: 1000,
-        }}
-      >
-        <Tooltip title={isModulesOpen ? '' : 'Modules'} placement="left">
-          <div
-            onClick={toggleModulesPanel}
-            style={{
-              width: 56,
-              height: 56,
-              borderRadius: 12,
-              background: isModulesOpen ? REDWOOD.moduleOrange : REDWOOD.surface,
-              border: `2px solid ${REDWOOD.moduleOrange}`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              transition: 'all 0.3s ease',
-              boxShadow: isModulesOpen ? `0 4px 12px ${REDWOOD.moduleOrange}40` : '0 2px 8px rgba(0,0,0,0.1)',
-              color: isModulesOpen ? '#fff' : REDWOOD.moduleOrange,
-              fontSize: 24,
-            }}
-          >
-            <AppstoreOutlined />
-          </div>
-        </Tooltip>
-      </div>
-
-      {/* Backdrop Overlay */}
-      {isModulesOpen && (
-        <div
-          onClick={closePanel}
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0,0,0,0.3)',
-            zIndex: 1000,
-            animation: isClosing ? 'fadeOut 0.25s ease forwards' : 'fadeIn 0.3s ease forwards',
-          }}
-        />
-      )}
-
-      {/* Modules Slide-out Panel */}
-      {isModulesOpen && (
-        <div
-          ref={panelRef}
-          style={{
-            position: 'fixed',
-            right: 0,
-            top: 0,
-            bottom: 0,
-            width: 400,
-            background: REDWOOD.surface,
-            boxShadow: '-4px 0 24px rgba(0,0,0,0.15)',
-            overflow: 'hidden',
-            animation: isClosing ? 'slideOut 0.25s ease-in forwards' : 'slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards',
-            zIndex: 1001,
-            display: 'flex',
-            flexDirection: 'column',
-          }}
-        >
-          {/* Panel Header */}
-          <div style={{
-            padding: '20px 24px',
-            background: REDWOOD.moduleOrange,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexShrink: 0,
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <AppstoreOutlined style={{ fontSize: 22, color: '#fff' }} />
-              <Text strong style={{ color: '#fff', fontSize: 18 }}>Modules</Text>
-            </div>
-            <CloseOutlined
-              style={{ color: '#fff', cursor: 'pointer', fontSize: 16, padding: 8 }}
-              onClick={closePanel}
-            />
-          </div>
-
-          {/* Panel Content */}
-          <div style={{ padding: 16, flex: 1, overflowY: 'auto' }}>
-            {modules.map((module, index) => (
-              <div
-                key={module.id}
-                onClick={() => handleModuleClick(module)}
-                style={{
-                  padding: '16px 20px',
-                  borderRadius: 12,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 16,
-                  transition: 'all 0.2s ease',
-                  marginBottom: 8,
-                  border: `1px solid ${REDWOOD.neutral200}`,
-                  background: REDWOOD.surface,
-                  opacity: 0,
-                  animation: `fadeInItem 0.3s ease-out ${index * 0.03}s forwards`,
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = REDWOOD.neutral100;
-                  e.currentTarget.style.borderColor = module.color;
-                  e.currentTarget.style.transform = 'translateX(-4px)';
-                  e.currentTarget.style.boxShadow = `0 2px 8px ${module.color}20`;
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = REDWOOD.surface;
-                  e.currentTarget.style.borderColor = REDWOOD.neutral200;
-                  e.currentTarget.style.transform = 'translateX(0)';
-                  e.currentTarget.style.boxShadow = 'none';
-                }}
-              >
-                <div style={{
-                  width: 48,
-                  height: 48,
-                  borderRadius: 12,
-                  background: `${module.color}15`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: module.color,
-                  fontSize: 24,
-                  flexShrink: 0,
-                }}>
-                  {React.isValidElement(module.icon) && React.cloneElement(module.icon as React.ReactElement<{ style?: React.CSSProperties }>, { style: { fontSize: 24 } })}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <Text strong style={{ display: 'block', color: REDWOOD.neutral900, fontSize: 15 }}>
-                    {module.name}
-                  </Text>
-                  <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.4 }}>
-                    {module.description}
-                  </Text>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Autopilot Assistant */}
-      
-
-      {/* CSS Animations */}
-      <style>{`
-        @keyframes slideIn {
-          from {
-            transform: translateX(100%);
-          }
-          to {
-            transform: translateX(0);
-          }
-        }
-        @keyframes slideOut {
-          from {
-            transform: translateX(0);
-          }
-          to {
-            transform: translateX(100%);
-          }
-        }
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-          }
-          to {
-            opacity: 1;
-          }
-        }
-        @keyframes fadeOut {
-          from {
-            opacity: 1;
-          }
-          to {
-            opacity: 0;
-          }
-        }
-        @keyframes fadeInItem {
-          from {
-            opacity: 0;
-            transform: translateX(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateX(0);
-          }
-        }
-      `}</style>
-
-      {/* ── Module Password Modal ──────────────────────────────── */}
-      <Modal
-        open={pwdModalOpen}
-        onCancel={() => setPwdModalOpen(false)}
-        onOk={handlePwdConfirm}
-        okText="Unlock"
-        okButtonProps={{ style: { background: '#C74634', borderColor: '#C74634' } }}
-        title={
-          <Space>
-            <LockOutlined style={{ color: '#C74634' }} />
-            <span>Access Restricted</span>
-          </Space>
-        }
-        width={380}
-        destroyOnClose
-      >
-        <div style={{ padding: '8px 0 4px' }}>
-          <div style={{ marginBottom: 12, color: '#6B6B6B', fontSize: 13 }}>
-            Enter the password to access <strong>Order Management</strong>.
-          </div>
-          <Input.Password
-            ref={pwdInputRef}
-            value={pwdInput}
-            onChange={e => { setPwdInput(e.target.value); setPwdError(false); }}
-            onPressEnter={handlePwdConfirm}
-            placeholder="Enter password"
-            status={pwdError ? 'error' : undefined}
-            size="large"
-            prefix={<LockOutlined style={{ color: '#C7C7C7' }} />}
-          />
-          {pwdError && (
-            <div style={{ color: '#C74634', fontSize: 12, marginTop: 6 }}>
-              Incorrect password. Please try again.
-            </div>
-          )}
-        </div>
-      </Modal>
     </div>
   );
 };
