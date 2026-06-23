@@ -664,7 +664,7 @@ const ExternalTxnForm: React.FC<{
   useEffect(() => {
     if (skipInverseSync.current) return;
     if (watchedRate && watchedRate > 0) {
-      setInverseRateVal(Math.round((1 / watchedRate) * 100000000) / 100000000);
+      setInverseRateVal(Math.round((1 / watchedRate) * 10000000000) / 10000000000);
     }
   }, [watchedRate]);
 
@@ -872,7 +872,7 @@ const ExternalTxnForm: React.FC<{
     doc.setFontSize(10);
     doc.text('Transaction Details', 14, y);
     y += 2;
-    const inverseRate = watchedRate && watchedRate > 0 ? Math.round((1 / watchedRate) * 100000000) / 100000000 : null;
+    const inverseRate = watchedRate && watchedRate > 0 ? Math.round((1 / watchedRate) * 10000000000) / 10000000000 : null;
     autoTable(doc, {
       startY: y,
       body: [
@@ -1728,12 +1728,12 @@ const ExternalTxnForm: React.FC<{
                   )}
                 >
                   <InputNumber
-                    variant="borderless" precision={8} min={0}
+                    variant="borderless" precision={10} min={0}
                     placeholder="e.g. 3.6725"
                     disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)}
                     style={{ width: '100%' }}
                     onChange={v => {
-                      if (v && v > 0) setInverseRateVal(Math.round((1 / v) * 100000000) / 100000000);
+                      if (v && v > 0) setInverseRateVal(Math.round((1 / v) * 10000000000) / 10000000000);
                       else setInverseRateVal(undefined);
                     }}
                   />
@@ -1750,7 +1750,7 @@ const ExternalTxnForm: React.FC<{
               </div>
               <div className="ext-val">
                 <InputNumber
-                  variant="borderless" precision={8} min={0}
+                  variant="borderless" precision={10} min={0}
                   placeholder="e.g. 0.2724"
                   disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)}
                   value={inverseRateVal}
@@ -1758,7 +1758,7 @@ const ExternalTxnForm: React.FC<{
                   onChange={v => {
                     skipInverseSync.current = true;
                     setInverseRateVal(v ?? undefined);
-                    if (v && v > 0) form.setFieldValue('bankConversionRate', Math.round((1 / v) * 100000000) / 100000000);
+                    if (v && v > 0) form.setFieldValue('bankConversionRate', Math.round((1 / v) * 10000000000) / 10000000000);
                     else form.setFieldValue('bankConversionRate', undefined);
                     // Clear flag after React has flushed the watchedRate effect
                     setTimeout(() => { skipInverseSync.current = false; }, 0);
@@ -3601,7 +3601,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     doc.text('Transaction Details', 14, y);
     y += 2;
     const inverseRate = r.bankConversionRate && r.bankConversionRate > 0
-      ? Math.round((1 / r.bankConversionRate) * 100000000) / 100000000
+      ? Math.round((1 / r.bankConversionRate) * 10000000000) / 10000000000
       : null;
     autoTable(doc, {
       startY: y,
