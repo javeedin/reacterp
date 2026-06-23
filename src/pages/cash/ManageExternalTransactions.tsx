@@ -4037,7 +4037,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
               <Form.Item label="Transaction Date" name="datePreset" style={{ marginBottom: 4 }} rules={[{ required: true, message: 'Select a date filter' }]}>
                 <Select placeholder="Select date filter"
                   onChange={(val: string) => {
-                    if (val !== 'range') searchForm.setFieldsValue({ dateRangeFrom: undefined, dateRangeTo: undefined });
+                    if (val !== 'range') searchForm.setFieldsValue({ dateRange: undefined });
                   }}>
                   <Option value="today">Date = Today</Option>
                   <Option value="last5">Last 5 days</Option>
@@ -4045,6 +4045,13 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                   <Option value="last30">Last 30 days</Option>
                   <Option value="range">Range…</Option>
                 </Select>
+              </Form.Item>
+              <Form.Item noStyle shouldUpdate={(prev, cur) => prev.datePreset !== cur.datePreset}>
+                {({ getFieldValue }) => getFieldValue('datePreset') === 'range' && (
+                  <Form.Item name="dateRange" style={{ marginBottom: 4 }} rules={[{ required: true, message: 'Select date range' }]}>
+                    <DatePicker.RangePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
+                  </Form.Item>
+                )}
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
@@ -4057,15 +4064,6 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                 </Select>
               </Form.Item>
             </Col>
-            <Form.Item noStyle shouldUpdate={(prev, cur) => prev.datePreset !== cur.datePreset}>
-              {({ getFieldValue }) => getFieldValue('datePreset') === 'range' && (
-                <Col xs={24} md={24}>
-                  <Form.Item label="Date Range" name="dateRange" style={{ marginBottom: 4 }} rules={[{ required: true, message: 'Select date range' }]}>
-                    <DatePicker.RangePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
-                  </Form.Item>
-                </Col>
-              )}
-            </Form.Item>
             <Col xs={24} md={12}>
               <Form.Item label="Transaction #" name="transactionNumber" style={{ marginBottom: 4 }}>
                 <Input placeholder="Transaction number" />
