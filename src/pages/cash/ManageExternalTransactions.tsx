@@ -2284,24 +2284,19 @@ const ExternalTxnForm: React.FC<{
                   Delete
                 </Button>
               </Popconfirm>
-              <Tooltip title="Show DELETE API URL">
+              <Tooltip title="Show API Inspector (PUT / DELETE)">
                 <Button size="large" icon={<ApiOutlined />} style={{ color: REDWOOD.neutral600 }}
-                  onClick={() => {
+                  onClick={async () => {
                     const extId = savedExtId ?? initialValues?.externalTransactionId;
-                    const url = `${APEX_BASE}/cash/externaltransactions/${extId}`;
-                    setDeleteApiUrl(url);
-                    Modal.info({
-                      title: 'DELETE API URL',
-                      width: 640,
-                      content: (
-                        <div>
-                          <div style={{ marginBottom: 6, fontSize: 12, color: REDWOOD.neutral600 }}>Method: <strong>DELETE</strong></div>
-                          <div style={{ background: '#f5f5f5', borderRadius: 4, padding: '8px 12px', fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>
-                            {url}
-                          </div>
-                        </div>
-                      ),
-                    });
+                    const baseUrl = `${APEX_BASE}/cash/externaltransactions/${extId}`;
+                    let values: any;
+                    try { values = await form.validateFields(); } catch { values = form.getFieldsValue(); }
+                    const line = extTxnLines[0];
+                    const merged = { ...values, amount: line?.amount, description: line?.description ?? '', offsetAccountCombination: line?.offsetAccount ?? '' };
+                    const putBody = JSON.stringify(buildPayload(merged), null, 2);
+                    setApiPayload(putBody);
+                    setApiResponse(null);
+                    setApiModal(true);
                   }}
                 />
               </Tooltip>
