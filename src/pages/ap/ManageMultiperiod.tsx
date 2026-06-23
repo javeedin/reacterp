@@ -1229,7 +1229,7 @@ const ManageMultiperiod: React.FC = () => {
                               supplier: r.supplier, businessUnit: r.businessUnit,
                               periodName: r.periodName,
                               account: r.accrualAccount, accountType: 'Accrual (CR)',
-                              description: r.description,
+                              description: `MPA Accrual — ${r.periodName} (${r.invoiceNumber})`,
                               dr: 0, cr: r.periodAmt,
                               reference1: r.invoiceNumber,
                               reference2: String(r.scheduleId),
