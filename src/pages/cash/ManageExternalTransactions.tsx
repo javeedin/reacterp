@@ -1121,8 +1121,13 @@ const ExternalTxnForm: React.FC<{
 
   const handleApiOpen = async () => {
     let values: any;
-    try { values = await form.validateFields(); } catch { return; }
-    setApiPayload(JSON.stringify(buildPayload(values), null, 2));
+    try { values = await form.validateFields(); } catch (e) {
+      // Use getFieldsValue so inspector works even with validation errors
+      values = form.getFieldsValue();
+    }
+    const line = extTxnLines[0];
+    const merged = { ...values, amount: line?.amount, description: line?.description ?? '', offsetAccountCombination: line?.offsetAccount ?? '' };
+    setApiPayload(JSON.stringify(buildPayload(merged), null, 2));
     setApiResponse(null);
     setApiModal(true);
   };
@@ -1130,9 +1135,14 @@ const ExternalTxnForm: React.FC<{
   const handleApiPost = async () => {
     setApiPosting(true);
     setApiResponse(null);
+    const updateId = initialValues?.externalTransactionId ?? savedExtId ?? savedTxnId ?? null;
+    const url = isEdit && updateId
+      ? `${APEX_BASE}/cash/externaltransactions/${updateId}`
+      : `${APEX_BASE}/cash/externaltransactions`;
+    const method = isEdit && updateId ? 'PUT' : 'POST';
     try {
-      const res = await fetch(`${APEX_BASE}/cash/externaltransactions`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: apiPayload,
+      const res = await fetch(url, {
+        method, headers: { 'Content-Type': 'application/json' }, body: apiPayload,
       });
       const text = await res.text();
       setApiResponse({ status: res.status, body: (() => { try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return text; } })() });
@@ -2387,7 +2397,12 @@ const ExternalTxnForm: React.FC<{
         styles={{ body: { padding: '16px 24px' } }}
       >
         <Text type="secondary" style={{ fontSize: 12 }}>
-          Endpoint: <Text code copyable style={{ fontSize: 12 }}>{APEX_BASE}/cash/externaltransactions</Text>
+          Endpoint: <Text code copyable style={{ fontSize: 12 }}>
+            {isEdit && initialValues?.externalTransactionId
+              ? `${APEX_BASE}/cash/externaltransactions/${initialValues.externalTransactionId}`
+              : `${APEX_BASE}/cash/externaltransactions`}
+          </Text>
+          <Tag color={isEdit ? 'orange' : 'green'} style={{ marginLeft: 8 }}>{isEdit ? 'PUT' : 'POST'}</Tag>
         </Text>
         <div style={{ marginTop: 12, marginBottom: 8 }}><Text strong>Request Body (JSON)</Text></div>
         <pre style={{ background: '#1e1e2e', color: '#cdd6f4', padding: 16, borderRadius: 6, fontSize: 12, overflowX: 'auto', maxHeight: 320, whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>
@@ -2396,7 +2411,7 @@ const ExternalTxnForm: React.FC<{
         <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
           <Button type="primary" icon={<ApiOutlined />} loading={apiPosting} onClick={handleApiPost}
             style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}>
-            POST Request
+            {isEdit ? 'PUT Request' : 'POST Request'}
           </Button>
         </div>
         {apiResponse && (
