@@ -4033,7 +4033,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                   optionFilterProp="label" options={filteredBankAccounts} allowClear style={{ width: '100%' }} />
               </Form.Item>
             </Col>
-            <Col xs={24} md={12}>
+            <Col xs={24} md={12} style={{ overflow: 'hidden' }}>
               <Form.Item label="Transaction Date" name="datePreset" style={{ marginBottom: 4 }} rules={[{ required: true, message: 'Select a date filter' }]}>
                 <Select placeholder="Select date filter"
                   onChange={(val: string) => {
@@ -4048,7 +4048,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
               </Form.Item>
               <Form.Item noStyle shouldUpdate={(prev, cur) => prev.datePreset !== cur.datePreset}>
                 {({ getFieldValue }) => getFieldValue('datePreset') === 'range' && (
-                  <Form.Item name="dateRange" style={{ marginBottom: 4 }} rules={[{ required: true, message: 'Select date range' }]}>
+                  <Form.Item name="dateRange" label=" " colon={false} style={{ marginBottom: 4 }} rules={[{ required: true, message: 'Select date range' }]}>
                     <DatePicker.RangePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
                   </Form.Item>
                 )}
