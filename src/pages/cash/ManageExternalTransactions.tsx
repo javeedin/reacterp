@@ -778,6 +778,7 @@ const ExternalTxnForm: React.FC<{
       BankConversionRate:    values.bankConversionRate ?? null,
       BankConversionRateType: values.bankConversionRateType ?? null,
       BankConversionDate:    values.bankConversionDate ? (values.bankConversionDate as Dayjs).format('YYYY-MM-DD') : null,
+      ClearedDate:          values.clearedDate ? (values.clearedDate as Dayjs).format('YYYY-MM-DD') : null,
       PaymentMethod:        values.paymentMethod ?? null,
       PaymentDocument:      values.paymentDocument ?? null,
       PaperDocumentNumber:  values.paperDocumentNumber ?? null,
@@ -999,17 +1000,21 @@ const ExternalTxnForm: React.FC<{
       const line = extTxnLines[0];
       const updateId = initialValues?.externalTransactionId ?? effectiveExtId;
       try {
+        const putPayload = buildPayload({ ...values, amount: line.amount, description: line.description ?? '', offsetAccountCombination: line.offsetAccount ?? '' });
         const res = await fetch(`${APEX_BASE}/cash/externaltransactions/${updateId}`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(buildPayload({ ...values, amount: line.amount, description: line.description ?? '', offsetAccountCombination: line.offsetAccount ?? '' })),
+          body: JSON.stringify(putPayload),
         });
-        const data = await res.json();
+        const rawText = await res.text();
+        setLastSaveResponse(rawText);
+        let data: any = {};
+        try { data = JSON.parse(rawText); } catch { /* non-JSON */ }
         if (data.status === 'success') {
           message.success('Transaction updated.');
           setEditingEnabled(false);
           if (isEdit) onSave();
         } else {
-          message.error(data.message || 'Update failed.');
+          message.error(data.message || `Update failed (HTTP ${res.status}).`);
         }
       } catch (e: any) {
         message.error('Network error: ' + e.message);
@@ -1626,7 +1631,7 @@ const ExternalTxnForm: React.FC<{
             <div className="ext-row">
               <div className="ext-lbl">Payment Method</div>
               <div className="ext-val">
-                <Form.Item name="paymentMethod" rules={[{ required: true, message: 'Required' }]}>
+                <Form.Item name="paymentMethod">
                   <Select variant="borderless" placeholder="Select method" allowClear disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)}>
                     {['CHECK', 'EFT', 'WIRE', 'CASH', 'MISC'].map(m => <Option key={m} value={m}>{m}</Option>)}
                   </Select>
@@ -1683,7 +1688,7 @@ const ExternalTxnForm: React.FC<{
             <div className="ext-row">
               <div className="ext-lbl">Payment Document</div>
               <div className="ext-val">
-                <Form.Item name="paymentDocument" rules={[{ required: true, message: 'Required' }]}>
+                <Form.Item name="paymentDocument">
                   <Input variant="borderless" placeholder="e.g. Cheque Book Name" disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)} />
                 </Form.Item>
               </div>
