@@ -1001,7 +1001,7 @@ const ExternalTxnForm: React.FC<{
       const updateId = initialValues?.externalTransactionId ?? effectiveExtId;
       try {
         const putPayload = buildPayload({ ...values, amount: line.amount, description: line.description ?? '', offsetAccountCombination: line.offsetAccount ?? '' });
-        const res = await fetch(`${APEX_BASE}/cash/externaltransactions/${updateId}`, {
+        const res = await fetch(`${APEX_BASE}/cash/externaltransactions/${updateId}/updatetrx`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(putPayload),
         });
@@ -1137,7 +1137,7 @@ const ExternalTxnForm: React.FC<{
     setApiResponse(null);
     const updateId = initialValues?.externalTransactionId ?? savedExtId ?? savedTxnId ?? null;
     const url = isEdit && updateId
-      ? `${APEX_BASE}/cash/externaltransactions/${updateId}`
+      ? `${APEX_BASE}/cash/externaltransactions/${updateId}/updatetrx`
       : `${APEX_BASE}/cash/externaltransactions`;
     const method = isEdit && updateId ? 'PUT' : 'POST';
     try {
@@ -2394,7 +2394,7 @@ const ExternalTxnForm: React.FC<{
         <Text type="secondary" style={{ fontSize: 12 }}>
           Endpoint: <Text code copyable style={{ fontSize: 12 }}>
             {isEdit && initialValues?.externalTransactionId
-              ? `${APEX_BASE}/cash/externaltransactions/${initialValues.externalTransactionId}`
+              ? `${APEX_BASE}/cash/externaltransactions/${initialValues.externalTransactionId}/updatetrx`
               : `${APEX_BASE}/cash/externaltransactions`}
           </Text>
           <Tag color={isEdit ? 'orange' : 'green'} style={{ marginLeft: 8 }}>{isEdit ? 'PUT' : 'POST'}</Tag>
