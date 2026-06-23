@@ -4061,7 +4061,7 @@ const TrialBalance: React.FC = () => {
                 }
               }}
             >
-              {revalId ? 'Update Revaluation' : 'Save Revaluation'}
+              {revalId && revalStatus !== 'ACCOUNTED' ? 'Update Revaluation' : 'Save Revaluation'}
             </Button>
 
             {revalId && revalStatus !== 'ACCOUNTED' && (
