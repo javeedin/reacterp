@@ -484,6 +484,25 @@ export const getDeprnLastPeriod = async (bookTypeCode?: string): Promise<any | n
   } catch { return null; }
 };
 
+export const getDeprnPreview = async (bookTypeCode: string, periodName: string): Promise<any> => {
+  try {
+    const qs = `?bookTypeCode=${encodeURIComponent(bookTypeCode)}&periodName=${encodeURIComponent(periodName)}`;
+    return await fetchFromApex(`fa/deprn-calculate/preview${qs}`);
+  } catch { return { success: false, items: [], summary: null }; }
+};
+
+export const postDeprnCalculate = async (params: {
+  bookTypeCode: string;
+  periodName: string;
+  periodCounter: number;
+}): Promise<any> => {
+  try {
+    return await insertToApex('fa/deprn-calculate', params);
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
+  }
+};
+
 export const getRetirements = async (bookTypeCode?: string): Promise<RetirementRecord[]> => {
   try {
     const qs = bookTypeCode ? `?bookTypeCode=${encodeURIComponent(bookTypeCode)}` : '';
