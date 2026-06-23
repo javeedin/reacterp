@@ -687,7 +687,8 @@ const ManageJournals: React.FC = () => {
     let fetchedLines: JournalLine[] = journal.lines || [];
     try {
       const linesRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/${journal.jeHeaderId}/lines`, {
-        headers: { Accept: 'application/json' },
+        headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' },
+        cache: 'no-store',
       });
       if (linesRes.ok) {
         const linesData = await linesRes.json();
@@ -1031,7 +1032,7 @@ const ManageJournals: React.FC = () => {
 
         addDebugLog('request', `Page ${pageCount} - GET Request`, { url, offset, limit: PAGE_SIZE });
 
-        const response = await fetch(url);
+        const response = await fetch(url, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
         const responseText = await response.text();
 
         setLastSearchStatus(response.status);
@@ -1264,7 +1265,7 @@ const ManageJournals: React.FC = () => {
 
       setApTransactionType(transType);
       setApTransactionLastUrl(url);
-      const response = await fetch(url, { headers: { Accept: 'application/json' } });
+      const response = await fetch(url, { headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' }, cache: 'no-store' });
       const data = await response.json();
       const items = data.items || (Array.isArray(data) ? data : [data]);
 
