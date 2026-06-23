@@ -65,6 +65,9 @@ import {
   ExclamationCircleOutlined,
   ReconciliationOutlined,
   CheckOutlined,
+  LockOutlined,
+  UnlockOutlined,
+  HistoryOutlined,
 } from '@ant-design/icons';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -344,7 +347,11 @@ const TrialBalance: React.FC = () => {
   const [revalStatus,              setRevalStatus]              = useState<string | null>(null);
   const [revalExcludedCombos,      setRevalExcludedCombos]      = useState<Set<string>>(new Set());
   const [revalSelectedRows,        setRevalSelectedRows]        = useState<string[]>([]);
-  const [revalComboStatus,         setRevalComboStatus]         = useState<Map<string, { revalueId: number; status: string }>>(new Map());
+  const [revalComboStatus,         setRevalComboStatus]         = useState<Map<string, Array<{ revalueId: number; status: string }>>>(new Map());
+  const [revalUnlockedCombos,      setRevalUnlockedCombos]      = useState<Set<string>>(new Set());
+  const [revalAmountsOpen,         setRevalAmountsOpen]         = useState(false);
+  const [revalAmountsLoading,      setRevalAmountsLoading]      = useState(false);
+  const [revalAmountsData,         setRevalAmountsData]         = useState<any[]>([]);
   const [revalAccountStatus,       setRevalAccountStatus]       = useState<Map<string, 'ACCOUNTED' | 'DRAFT'>>(new Map());
   const [revalApiError,            setRevalApiError]            = useState<string | null>(null);
   const [revalLastCall,            setRevalLastCall]            = useState<{ url: string; method: string; payload: object; responseText: string; httpStatus: number } | null>(null);
@@ -2824,6 +2831,9 @@ const TrialBalance: React.FC = () => {
     setRevalStatus(null);
     setRevalExcludedCombos(new Set());
     setRevalSelectedRows([]);
+    setRevalUnlockedCombos(new Set());
+    setRevalAmountsOpen(false);
+    setRevalAmountsData([]);
 
     // Set rate date to last day of the selected period's month
     if (tab?.periodName) {
@@ -2860,7 +2870,7 @@ const TrialBalance: React.FC = () => {
         setRevalStatus(editableHeader.status || 'DRAFT');
 
         // Fetch detail for ALL matching headers to build per-combo status map
-        const comboMap = new Map<string, { revalueId: number; status: string }>();
+        const comboMap = new Map<string, Array<{ revalueId: number; status: string }>>();
         const rates: Record<string, string> = {};
 
         await Promise.all(matchingHeaders.map(async (hdr: any) => {
@@ -2868,17 +2878,15 @@ const TrialBalance: React.FC = () => {
             const detRes  = await fetch(`${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}/${hdr.revalueId}`);
             const detJson = await detRes.json();
             // Only track lines whose combo belongs to the current account
-            // (skip offsetting gain/loss account lines in the same journal)
             (detJson.lines || []).forEach((l: any) => {
               if (!l.combo) return;
               const lineCombo = l.combo.trim();
-              // The combo must contain the account key segment to belong to this account
               if (!lineCombo.includes(accountKey)) return;
-              const existing = comboMap.get(lineCombo);
-              // Prefer ACCOUNTED status; otherwise keep highest revalueId
-              if (!existing || hdr.status === 'ACCOUNTED' || hdr.revalueId > existing.revalueId) {
-                comboMap.set(lineCombo, { revalueId: hdr.revalueId, status: hdr.status || 'DRAFT' });
+              const arr = comboMap.get(lineCombo) || [];
+              if (!arr.find(e => e.revalueId === hdr.revalueId)) {
+                arr.push({ revalueId: hdr.revalueId, status: hdr.status || 'DRAFT' });
               }
+              comboMap.set(lineCombo, arr);
             });
             // Restore rates from the editable header
             if (hdr.revalueId === editableHeader.revalueId) {
@@ -2892,8 +2900,8 @@ const TrialBalance: React.FC = () => {
         setRevalComboStatus(comboMap);
         if (Object.keys(rates).length > 0) setRevalRates(rates);
 
-        const postedCombos  = [...comboMap.entries()].filter(([, v]) => v.status === 'ACCOUNTED');
-        const pendingCombos = [...comboMap.entries()].filter(([, v]) => v.status !== 'ACCOUNTED');
+        const postedCombos  = [...comboMap.entries()].filter(([, arr]) => arr.some(e => e.status === 'ACCOUNTED'));
+        const pendingCombos = [...comboMap.entries()].filter(([, arr]) => arr.every(e => e.status !== 'ACCOUNTED'));
         if (postedCombos.length > 0) {
           message.info({
             content: `${postedCombos.length} combination(s) already posted, ${pendingCombos.length} pending — locked combos shown below`,
@@ -3214,17 +3222,22 @@ const TrialBalance: React.FC = () => {
 
     // Per-combo posted check
     // Normalize and look up — also try case-insensitive fallback if exact match fails
-    const lookupComboStatus = (combo: string) => {
+    const getAllComboIds = (combo: string): Array<{ revalueId: number; status: string }> => {
       const c = combo.trim();
-      if (revalComboStatus.has(c)) return revalComboStatus.get(c);
-      // Fallback: case-insensitive match
+      if (revalComboStatus.has(c)) return revalComboStatus.get(c) || [];
       const cl = c.toLowerCase();
       for (const [k, v] of revalComboStatus.entries()) {
         if (k.toLowerCase() === cl) return v;
       }
-      return undefined;
+      return [];
     };
-    const isComboPosted  = (combo: string) => lookupComboStatus(combo)?.status === 'ACCOUNTED';
+    // Returns the "primary" entry — prefer ACCOUNTED, then highest revalueId
+    const lookupComboStatus = (combo: string) => {
+      const arr = getAllComboIds(combo);
+      if (!arr.length) return undefined;
+      return arr.find(e => e.status === 'ACCOUNTED') || arr.reduce((a, b) => b.revalueId > a.revalueId ? b : a);
+    };
+    const isComboPosted  = (combo: string) => !revalUnlockedCombos.has(combo.trim()) && lookupComboStatus(combo)?.status === 'ACCOUNTED';
     const isComboRevalId = (combo: string) => lookupComboStatus(combo)?.revalueId;
     // Computed after comboRows is available — placeholder here, overridden below
     let isPosted = false;
@@ -3434,29 +3447,56 @@ const TrialBalance: React.FC = () => {
       : distComboList;
 
     const ccyColumns = [
-      { title: '', key: 'action', width: 36,
-        render: (_: any, r: ComboRow) => isComboPosted(r.combo)
-          ? (
-            <Tooltip title={`Posted — Reval ID: ${isComboRevalId(r.combo)}`}>
-              <span style={{ fontSize: 14, color: '#52c41a', padding: '0 4px' }}>🔒</span>
+      { title: '', key: 'action', width: 64,
+        render: (_: any, r: ComboRow) => {
+          const primary   = lookupComboStatus(r.combo);
+          const isLocked  = primary?.status === 'ACCOUNTED' && !revalUnlockedCombos.has(r.combo.trim());
+          const isUnlocked = primary?.status === 'ACCOUNTED' && revalUnlockedCombos.has(r.combo.trim());
+          if (isLocked) return (
+            <Space size={2}>
+              <Tooltip title="Unlock to add another revaluation">
+                <Button
+                  type="text" size="small"
+                  icon={<UnlockOutlined style={{ color: '#faad14', fontSize: 14 }} />}
+                  onClick={() => setRevalUnlockedCombos(prev => new Set([...prev, r.combo.trim()]))}
+                />
+              </Tooltip>
+              <Tooltip title={`Posted — Reval ID: ${primary.revalueId}`}>
+                <LockOutlined style={{ fontSize: 14, color: '#52c41a' }} />
+              </Tooltip>
+            </Space>
+          );
+          if (isUnlocked) return (
+            <Tooltip title="Re-lock this combination">
+              <Button
+                type="text" size="small"
+                icon={<LockOutlined style={{ color: '#faad14', fontSize: 14 }} />}
+                onClick={() => setRevalUnlockedCombos(prev => { const s = new Set(prev); s.delete(r.combo.trim()); return s; })}
+              />
             </Tooltip>
-          ) : null,
+          );
+          return null;
+        },
       },
-      { title: 'Combination', dataIndex: 'combo', key: 'combo', width: 320, ellipsis: true,
-        render: (v: string, r: ComboRow) => {
-          const revalIdForCombo = isComboRevalId(r.combo);
-          const isPostedCombo   = isComboPosted(r.combo);
+      { title: 'Combination', dataIndex: 'combo', key: 'combo', width: 340, ellipsis: true,
+        render: (v: string) => {
+          const allIds = getAllComboIds(v);
+          const unlocked = revalUnlockedCombos.has(v.trim());
           return (
             <Tooltip title={v}>
               <span>
                 <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{v}</Text>
-                {revalIdForCombo && (
+                {allIds.map(entry => (
                   <Tag
-                    color={isPostedCombo ? 'green' : 'blue'}
-                    style={{ marginLeft: 6, fontSize: 10, padding: '0 4px' }}
+                    key={entry.revalueId}
+                    color={entry.status === 'ACCOUNTED' ? 'green' : 'blue'}
+                    style={{ marginLeft: 4, fontSize: 10, padding: '0 4px' }}
                   >
-                    ID: {revalIdForCombo}
+                    ID: {entry.revalueId}
                   </Tag>
+                ))}
+                {unlocked && (
+                  <Tag color="orange" style={{ marginLeft: 4, fontSize: 10, padding: '0 4px' }}>Unlocked</Tag>
                 )}
               </span>
             </Tooltip>
@@ -3685,7 +3725,7 @@ const TrialBalance: React.FC = () => {
       <>
         <Modal
           open={revalVisible}
-          onCancel={() => { setRevalVisible(false); setRevalPreviewRows([]); }}
+          onCancel={() => { setRevalVisible(false); setRevalPreviewRows([]); setRevalUnlockedCombos(new Set()); setRevalAmountsOpen(false); }}
           maskClosable={false}
           footer={null}
           width={1400}
@@ -3736,8 +3776,8 @@ const TrialBalance: React.FC = () => {
                       <div style={{ marginTop: 10 }}>
                         <Text style={{ fontSize: 12 }} type="secondary">IDs found for this account/period:</Text>
                         <div style={{ marginTop: 4 }}>
-                          {[...new Set([...revalComboStatus.values()].map(v => v.revalueId))].map(id => {
-                            const status = [...revalComboStatus.values()].find(v => v.revalueId === id)?.status;
+                          {[...new Set([...revalComboStatus.values()].flatMap(arr => arr.map(e => e.revalueId)))].map(id => {
+                            const status = [...revalComboStatus.values()].flatMap(arr => arr).find(e => e.revalueId === id)?.status;
                             return (
                               <Tag key={id} color={status === 'ACCOUNTED' ? 'green' : 'blue'} style={{ fontFamily: 'monospace', marginBottom: 4 }}>
                                 ID: {id} — {status}
@@ -3756,23 +3796,23 @@ const TrialBalance: React.FC = () => {
           }
         >
           {(() => {
-            const postedCombos = [...revalComboStatus.entries()].filter(([, v]) => v.status === 'ACCOUNTED');
-            const pendingCombos = [...revalComboStatus.entries()].filter(([, v]) => v.status !== 'ACCOUNTED');
+            const postedCombos  = [...revalComboStatus.entries()].filter(([, arr]) => arr.some(e => e.status === 'ACCOUNTED'));
+            const pendingCombos = [...revalComboStatus.entries()].filter(([, arr]) => arr.every(e => e.status !== 'ACCOUNTED'));
             if (postedCombos.length === 0) return null;
             if (isPosted) return (
               <Alert type="warning" showIcon style={{ marginBottom: 12 }}
                 message="All Combinations Posted — No Changes Allowed"
-                description={`All code combinations for this account/period have been posted to the General Ledger. To make corrections, reverse the GL batch and create a new revaluation.`}
+                description="All code combinations have been posted. Unlock individual combos to add another revaluation."
               />
             );
             return (
               <Alert type="info" showIcon style={{ marginBottom: 12 }}
-                message={`${postedCombos.length} combination(s) already posted — shown locked below`}
+                message={`${postedCombos.length} combination(s) already posted — unlock to re-revalue`}
                 description={
                   <span>
-                    {postedCombos.map(([combo, v]) => (
+                    {postedCombos.map(([combo, arr]) => (
                       <Tag key={combo} color="green" style={{ marginBottom: 4, fontFamily: 'monospace', fontSize: 11 }}>
-                        {combo} — ID: {v.revalueId}
+                        {combo} — {arr.map(e => `ID: ${e.revalueId}`).join(', ')}
                       </Tag>
                     ))}
                     {pendingCombos.length > 0 && <span style={{ marginLeft: 8, color: '#555' }}>{pendingCombos.length} combination(s) pending revaluation.</span>}
@@ -3951,9 +3991,43 @@ const TrialBalance: React.FC = () => {
             </Button>
 
             <Button
+              icon={<HistoryOutlined />}
+              disabled={revalComboStatus.size === 0}
+              onClick={async () => {
+                setRevalAmountsOpen(true);
+                setRevalAmountsLoading(true);
+                setRevalAmountsData([]);
+                try {
+                  const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}`);
+                  const json = await res.json();
+                  const rawPeriod = cleanPeriodName(tab.periodName);
+                  const matching  = (json.items || [])
+                    .filter((r: any) =>
+                      r.account    === revalAccount &&
+                      r.ledgerName === tab.ledgerName &&
+                      (r.periodName === rawPeriod || r.periodName === tab.periodName)
+                    )
+                    .sort((a: any, b: any) => b.revalueId - a.revalueId);
+                  const details = await Promise.all(matching.map(async (hdr: any) => {
+                    try {
+                      const dr = await fetch(`${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}/${hdr.revalueId}`);
+                      const dj = await dr.json();
+                      return { ...hdr, lines: dj.lines || [], ccyRows: dj.ccyRows || [] };
+                    } catch { return { ...hdr, lines: [], ccyRows: [] }; }
+                  }));
+                  setRevalAmountsData(details);
+                } catch { /* ignore */ } finally {
+                  setRevalAmountsLoading(false);
+                }
+              }}
+            >
+              Show Revalued Amounts
+            </Button>
+
+            <Button
               type="primary"
               icon={<SaveOutlined />}
-              disabled={isPosted || revalPreviewRows.length === 0}
+              disabled={revalPreviewRows.length === 0}
               loading={revalSaving}
               style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
               onClick={async () => {
@@ -4527,6 +4601,55 @@ const TrialBalance: React.FC = () => {
               No API call made yet. Click Save / Update Revaluation first.
             </div>
           )}
+        </Modal>
+
+        {/* ── Show Revalued Amounts Modal ── */}
+        <Modal
+          open={revalAmountsOpen}
+          onCancel={() => setRevalAmountsOpen(false)}
+          title={<Space><HistoryOutlined style={{ color: REDWOOD.info }} /><span>Revalued Amounts — {revalAccount}</span></Space>}
+          width={940}
+          zIndex={1100}
+          maskClosable={false}
+          footer={<Button onClick={() => setRevalAmountsOpen(false)}>Close</Button>}
+          destroyOnClose
+        >
+          <Spin spinning={revalAmountsLoading} tip="Loading revaluation history…">
+            {!revalAmountsLoading && revalAmountsData.length === 0 && (
+              <div style={{ color: '#999', textAlign: 'center', padding: 32 }}>No revaluation entries found for this account / period.</div>
+            )}
+            {revalAmountsData.map((entry: any) => (
+              <div key={entry.revalueId} style={{ marginBottom: 20, border: `1px solid ${REDWOOD.border}`, borderRadius: 8, overflow: 'hidden' }}>
+                <div style={{ background: entry.status === 'ACCOUNTED' ? '#f6ffed' : '#e6f4ff', padding: '8px 12px', borderBottom: `1px solid ${REDWOOD.border}`, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <Tag color={entry.status === 'ACCOUNTED' ? 'green' : 'blue'} style={{ fontFamily: 'monospace' }}>ID: {entry.revalueId}</Tag>
+                  <Tag color={entry.status === 'ACCOUNTED' ? 'success' : 'processing'}>{entry.status}</Tag>
+                  <Text style={{ fontSize: 12 }}>Period: <strong>{entry.periodName}</strong></Text>
+                  <Text style={{ fontSize: 12, marginLeft: 8 }}>
+                    Gain: <strong style={{ color: '#237804' }}>{Number(entry.totalGain || 0).toLocaleString('en-US', { minimumFractionDigits: 3 })}</strong>
+                  </Text>
+                  <Text style={{ fontSize: 12, marginLeft: 8 }}>
+                    Loss: <strong style={{ color: REDWOOD.error }}>{Number(entry.totalLoss || 0).toLocaleString('en-US', { minimumFractionDigits: 3 })}</strong>
+                  </Text>
+                </div>
+                <Table
+                  dataSource={(entry.lines || []).filter((l: any) => (l.combo || '').includes(revalAccount))}
+                  rowKey={(r: any, i?: number) => `${entry.revalueId}-${r.lineNum ?? i}`}
+                  size="small"
+                  pagination={false}
+                  columns={[
+                    { title: '#', dataIndex: 'lineNum', key: 'lineNum', width: 40 },
+                    { title: 'Combination', dataIndex: 'combo', key: 'combo', ellipsis: true,
+                      render: (v: string) => <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{v}</Text> },
+                    { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+                    { title: 'Debit', dataIndex: 'drAmount', key: 'drAmount', align: 'right' as const, width: 130,
+                      render: (v: number) => v ? <Text style={{ fontFamily: 'monospace', color: '#237804' }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 3 })}</Text> : null },
+                    { title: 'Credit', dataIndex: 'crAmount', key: 'crAmount', align: 'right' as const, width: 130,
+                      render: (v: number) => v ? <Text style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 3 })}</Text> : null },
+                  ]}
+                />
+              </div>
+            ))}
+          </Spin>
         </Modal>
 
         {/* ── Bank Recon Status Modal ── */}
