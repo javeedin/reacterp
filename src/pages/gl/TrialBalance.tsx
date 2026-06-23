@@ -3986,21 +3986,32 @@ const TrialBalance: React.FC = () => {
                   total_loss:     totalLoss,
                   notes:          '',
                   created_by:     user?.username || 'SYSTEM',
-                  ccy_rows: ccyRows.filter(r =>
-                    r.newRate > 0 &&
-                    r.combos.some(c => effectiveSelected.includes(
-                      comboRows.find(cr => cr.combo === c)?.rowKey ?? ''
-                    ))
-                  ).map(r => ({
-                    currency_code:  r.ccy,
-                    ent_closing:    r.entClosing,
-                    acct_closing:   r.acctClosing,
-                    book_rate:      r.bookRate,
-                    new_rate:       r.newRate,
-                    new_acct_value: r.newAcctValue,
-                    reval_amt:      r.revalAmt,
-                    is_gain:        r.isGain ? 1 : 0,
-                  })),
+                  ccy_rows: (() => {
+                    // Rebuild per-currency rows from only selected non-posted combos
+                    const saveCcyMap = new Map<string, { ccy: string; entClosing: number; acctClosing: number; bookRate: number; newRate: number; newAcctValue: number; revalAmt: number; isGain: boolean }>();
+                    comboRows
+                      .filter(r => effectiveSelected.includes(r.rowKey) && !isComboPosted(r.combo) && r.newRate > 0)
+                      .forEach(r => {
+                        if (!saveCcyMap.has(r.ccy)) saveCcyMap.set(r.ccy, { ccy: r.ccy, entClosing: 0, acctClosing: 0, bookRate: 0, newRate: r.newRate, newAcctValue: 0, revalAmt: 0, isGain: true });
+                        const g = saveCcyMap.get(r.ccy)!;
+                        g.entClosing  += r.entClosing;
+                        g.acctClosing += r.acctClosing;
+                        g.newAcctValue += r.newAcctValue;
+                        g.revalAmt    += r.revalAmt;
+                        g.isGain       = g.revalAmt >= 0;
+                        g.bookRate     = g.entClosing !== 0 ? g.acctClosing / g.entClosing : 0;
+                      });
+                    return Array.from(saveCcyMap.values()).map(r => ({
+                      currency_code:  r.ccy,
+                      ent_closing:    r.entClosing,
+                      acct_closing:   r.acctClosing,
+                      book_rate:      r.bookRate,
+                      new_rate:       r.newRate,
+                      new_acct_value: r.newAcctValue,
+                      reval_amt:      r.revalAmt,
+                      is_gain:        r.isGain ? 1 : 0,
+                    }));
+                  })(),
                   lines: revalPreviewRows.filter(r => !isComboPosted(r.combo)).map(r => ({
                     line_num:     r.lineNum,
                     combo:        r.combo,
@@ -4435,18 +4446,22 @@ const TrialBalance: React.FC = () => {
               loss_account:   revalLossCombo,
               total_gain:     totalGain,
               total_loss:     totalLoss,
-              ccy_rows: ccyRows.filter(r =>
-                r.newRate > 0 &&
-                r.combos.some(c => effectiveSelected.includes(comboRows.find(cr => cr.combo === c)?.rowKey ?? ''))
-              ).map(r => ({
-                currency_code:  r.ccy,
-                ent_closing:    r.entClosing,
-                acct_closing:   r.acctClosing,
-                book_rate:      r.bookRate,
-                new_rate:       r.newRate,
-                new_acct_value: r.newAcctValue,
-                reval_amt:      r.revalAmt,
-              })),
+              ccy_rows: (() => {
+                const previewCcyMap = new Map<string, { ccy: string; entClosing: number; acctClosing: number; bookRate: number; newRate: number; newAcctValue: number; revalAmt: number }>();
+                comboRows
+                  .filter(r => effectiveSelected.includes(r.rowKey) && !isComboPosted(r.combo) && r.newRate > 0)
+                  .forEach(r => {
+                    if (!previewCcyMap.has(r.ccy)) previewCcyMap.set(r.ccy, { ccy: r.ccy, entClosing: 0, acctClosing: 0, bookRate: 0, newRate: r.newRate, newAcctValue: 0, revalAmt: 0 });
+                    const g = previewCcyMap.get(r.ccy)!;
+                    g.entClosing += r.entClosing; g.acctClosing += r.acctClosing;
+                    g.newAcctValue += r.newAcctValue; g.revalAmt += r.revalAmt;
+                    g.bookRate = g.entClosing !== 0 ? g.acctClosing / g.entClosing : 0;
+                  });
+                return Array.from(previewCcyMap.values()).map(r => ({
+                  currency_code: r.ccy, ent_closing: r.entClosing, acct_closing: r.acctClosing,
+                  book_rate: r.bookRate, new_rate: r.newRate, new_acct_value: r.newAcctValue, reval_amt: r.revalAmt,
+                }));
+              })(),
               lines: revalPreviewRows.filter(r => !isComboPosted(r.combo)).map(r => ({
                 line_num:     r.lineNum,
                 combo:        r.combo,
