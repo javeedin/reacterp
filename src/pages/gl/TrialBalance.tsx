@@ -4163,10 +4163,26 @@ const TrialBalance: React.FC = () => {
                   doc.text('Section 1: Currency Rates', 14, y);
                   y += 4;
 
-                  // Only print selected (non-posted) combos
-                  const selectedCombos = new Set(revalPreviewRows.map(r => r.combo));
-                  const printCcyRows   = ccyRows.filter(r => r.combos.some(c => selectedCombos.has(c)));
-                  const printPreviewRows = revalPreviewRows; // already filtered to selected
+                  // Only print selected (non-posted) combos — rebuild ccyRows from scratch
+                  const printNonPostedCombos = comboRows.filter(r =>
+                    effectiveSelected.includes(r.rowKey) && !isComboPosted(r.combo)
+                  );
+                  const printCcyMapRebuild = new Map<string, { ccy: string; entClosing: number; acctClosing: number; bookRate: number; newRate: number; newAcctValue: number; revalAmt: number; isGain: boolean; combos: string[] }>();
+                  printNonPostedCombos.forEach(r => {
+                    if (!printCcyMapRebuild.has(r.ccy)) {
+                      printCcyMapRebuild.set(r.ccy, { ccy: r.ccy, entClosing: 0, acctClosing: 0, bookRate: 0, newRate: r.newRate, newAcctValue: 0, revalAmt: 0, isGain: true, combos: [] });
+                    }
+                    const g = printCcyMapRebuild.get(r.ccy)!;
+                    g.entClosing  += r.entClosing;
+                    g.acctClosing += r.acctClosing;
+                    g.newAcctValue += r.newAcctValue;
+                    g.revalAmt    += r.revalAmt;
+                    g.isGain       = g.revalAmt >= 0;
+                    g.bookRate     = g.entClosing !== 0 ? g.acctClosing / g.entClosing : 0;
+                    if (!g.combos.includes(r.combo)) g.combos.push(r.combo);
+                  });
+                  const printCcyRows    = Array.from(printCcyMapRebuild.values());
+                  const printPreviewRows = revalPreviewRows.filter(r => !isComboPosted(r.combo));
 
                   autoTable(doc, {
                     startY: y,
@@ -4196,8 +4212,8 @@ const TrialBalance: React.FC = () => {
                     startY: y,
                     head: [['', 'Amount']],
                     body: [
-                      ['Total Gain', totalGain.toLocaleString('en-US', { minimumFractionDigits: 2 })],
-                      ['Total Loss', totalLoss.toLocaleString('en-US', { minimumFractionDigits: 2 })],
+                      ['Total Gain', printNonPostedCombos.filter(r => r.isGain && r.revalAmt !== 0).reduce((s, r) => s + r.revalAmt, 0).toLocaleString('en-US', { minimumFractionDigits: 2 })],
+                      ['Total Loss', printNonPostedCombos.filter(r => !r.isGain).reduce((s, r) => s + Math.abs(r.revalAmt), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })],
                     ],
                     styles: { fontSize: 9 },
                     headStyles: { fillColor: [29, 123, 77] },
@@ -4398,6 +4414,61 @@ const TrialBalance: React.FC = () => {
             </Space>
           }
         >
+          {/* ── Pending Request Preview (always shown) ── */}
+          {(() => {
+            const pendingIsUpdate = revalId != null && revalStatus !== 'ACCOUNTED';
+            const pendingUrl = pendingIsUpdate
+              ? `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}/${revalId}`
+              : `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.revaluation}`;
+            const pendingMethod = pendingIsUpdate ? 'PUT' : 'POST';
+            const rawPeriodPreview = tabs.find(t => t.key === revalTabKey)?.periodName?.replace(/^(?:ReERP|Dynamic|YTD):\s*/, '').replace(/\s*·.*$/, '').trim() ?? '';
+            const pendingPayload = {
+              ledger_id:      Number((allRawRows[0] as any)?.ledger_id) || 0,
+              ledger_name:    tabs.find(t => t.key === revalTabKey)?.ledgerName ?? '',
+              period_name:    rawPeriodPreview,
+              account:        revalAccount,
+              functional_ccy: functionalCcy,
+              gain_account:   revalGainCombo,
+              loss_account:   revalLossCombo,
+              total_gain:     totalGain,
+              total_loss:     totalLoss,
+              ccy_rows: ccyRows.filter(r =>
+                r.newRate > 0 &&
+                r.combos.some(c => effectiveSelected.includes(comboRows.find(cr => cr.combo === c)?.rowKey ?? ''))
+              ).map(r => ({
+                currency_code:  r.ccy,
+                ent_closing:    r.entClosing,
+                acct_closing:   r.acctClosing,
+                book_rate:      r.bookRate,
+                new_rate:       r.newRate,
+                new_acct_value: r.newAcctValue,
+                reval_amt:      r.revalAmt,
+              })),
+              lines: revalPreviewRows.filter(r => !isComboPosted(r.combo)).map(r => ({
+                line_num:     r.lineNum,
+                combo:        r.combo,
+                description:  r.desc,
+                dr_amount:    r.dr,
+                cr_amount:    r.cr,
+              })),
+            };
+            return (
+              <div style={{ marginBottom: 14, padding: '10px 12px', background: '#f0f9ff', borderRadius: 6, border: '1px solid #bae0ff', fontSize: 12 }}>
+                <Text strong style={{ fontSize: 12, color: '#0958d9' }}>Pending Request (what will be sent on Save)</Text>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                  <Tag color={pendingMethod === 'POST' ? 'green' : 'blue'} style={{ fontFamily: 'monospace', fontSize: 12 }}>{pendingMethod}</Tag>
+                  <code style={{ background: '#fff', padding: '2px 8px', borderRadius: 4, fontSize: 11, wordBreak: 'break-all', border: '1px solid #d9d9d9' }}>{pendingUrl}</code>
+                </div>
+                <div style={{ marginTop: 8 }}>
+                  <Text strong style={{ fontSize: 11 }}>Body (JSON):</Text>
+                  <pre style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 10, borderRadius: 6, maxHeight: 260, overflowY: 'auto', fontSize: 11, margin: '4px 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                    {JSON.stringify(pendingPayload, null, 2)}
+                  </pre>
+                </div>
+              </div>
+            );
+          })()}
+
           {revalLastCall ? (
             <div style={{ fontSize: 12 }}>
               {/* URL + method */}
