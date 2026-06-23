@@ -1215,10 +1215,13 @@ const ManageMultiperiod: React.FC = () => {
                               supplier: r.supplier, businessUnit: r.businessUnit,
                               periodName: r.periodName,
                               account: r.chargeAccount, accountType: 'Expense (DR)',
-                              dr: r.periodAmt, cr: 0, description: r.description,
-                              reference1: r.invoiceNumber, reference2: r.supplier,
-                              reference3: r.periodName, reference4: String(r.scheduleId),
-                              reference5: r.businessUnit,
+                              description: r.description,
+                              dr: r.periodAmt, cr: 0,
+                              reference1: r.invoiceNumber,
+                              reference2: String(r.scheduleId),
+                              reference3: r.periodName,
+                              reference4: r.invoiceNumber,
+                              reference5: 'MPA_ACCRUAL',
                             });
                             lines.push({
                               lineNum: lineNum++, scheduleId: r.scheduleId,
@@ -1226,10 +1229,13 @@ const ManageMultiperiod: React.FC = () => {
                               supplier: r.supplier, businessUnit: r.businessUnit,
                               periodName: r.periodName,
                               account: r.accrualAccount, accountType: 'Accrual (CR)',
-                              dr: 0, cr: r.periodAmt, description: r.description,
-                              reference1: r.invoiceNumber, reference2: r.supplier,
-                              reference3: r.periodName, reference4: String(r.scheduleId),
-                              reference5: r.businessUnit,
+                              description: r.description,
+                              dr: 0, cr: r.periodAmt,
+                              reference1: r.invoiceNumber,
+                              reference2: String(r.scheduleId),
+                              reference3: r.periodName,
+                              reference4: r.invoiceNumber,
+                              reference5: 'MPA_ACCRUAL',
                             });
                           });
                         setAccrualPreviewLines(lines);
@@ -1332,7 +1338,8 @@ const ManageMultiperiod: React.FC = () => {
                 <Tag color="blue">{accrualPreviewLines.filter(l => l.dr > 0).length} invoices</Tag>
               </Space>
             }
-            width={1300}
+            width="95vw"
+            style={{ maxWidth: 1600 }}
             footer={
               <Space>
                 <Button onClick={() => setAccrualPreviewOpen(false)}>Close</Button>
@@ -1344,14 +1351,14 @@ const ManageMultiperiod: React.FC = () => {
               type="info"
               showIcon
               style={{ marginBottom: 12, fontSize: 11 }}
-              message="Accounting Rule: DR Expense Account (Charge A/C) / CR Accrual Account — one journal pair per schedule line"
+              message="DR Expense Account (Charge A/C) / CR Accrual Account — one journal pair per schedule line. Ref 5 class = MPA_ACCRUAL"
             />
             <Table
               dataSource={accrualPreviewLines}
               rowKey={(r: any) => `${r.scheduleId}-${r.accountType}`}
               size="small"
               pagination={false}
-              scroll={{ x: 1400, y: 500 }}
+              scroll={{ x: 1700, y: 480 }}
               rowClassName={(r: any) => r.dr > 0 ? 'mpa-preview-dr' : 'mpa-preview-cr'}
               summary={(rows) => {
                 const totDr = rows.reduce((s: number, r: any) => s + (r.dr || 0), 0);
@@ -1365,32 +1372,41 @@ const ManageMultiperiod: React.FC = () => {
                     <Table.Summary.Cell index={6} align="right">
                       <Text strong style={{ color: REDWOOD.primary, fontSize: 12 }}>{totCr.toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text>
                     </Table.Summary.Cell>
-                    <Table.Summary.Cell index={7} colSpan={6} />
+                    <Table.Summary.Cell index={7} colSpan={5} />
                   </Table.Summary.Row>
                 );
               }}
               columns={[
                 {
-                  title: '#', dataIndex: 'lineNum', width: 40,
+                  title: '#', dataIndex: 'lineNum', width: 42,
                   render: (v: number) => <Text style={{ fontSize: 11 }}>{v}</Text>,
                 },
                 {
-                  title: 'Sched ID', dataIndex: 'scheduleId', width: 80,
-                  render: (v: number) => <Tag style={{ fontSize: 10 }}>{v}</Tag>,
+                  title: 'Sched ID', dataIndex: 'scheduleId', width: 75,
+                  render: (v: number) => <Tag style={{ fontSize: 10, fontFamily: 'monospace' }}>{v}</Tag>,
                 },
                 {
-                  title: 'Invoice', dataIndex: 'invoiceNumber', width: 140,
+                  title: 'Invoice', dataIndex: 'invoiceNumber', width: 130,
                   render: (v: string) => <Text style={{ fontSize: 11, fontWeight: 600 }}>{v}</Text>,
                 },
                 {
-                  title: 'Type', dataIndex: 'accountType', width: 110,
+                  title: 'Type', dataIndex: 'accountType', width: 105,
                   render: (v: string) => (
                     <Tag color={v.startsWith('Expense') ? 'blue' : 'orange'} style={{ fontSize: 10 }}>{v}</Tag>
                   ),
                 },
                 {
-                  title: 'Account', dataIndex: 'account', width: 210, ellipsis: true,
-                  render: (v: string) => <Text code style={{ fontSize: 10 }}>{v || '—'}</Text>,
+                  title: 'Account / Description', dataIndex: 'account', width: 240,
+                  render: (v: string, r: any) => (
+                    <div>
+                      <Text code style={{ fontSize: 10 }}>{v || '—'}</Text>
+                      {r.description && (
+                        <div style={{ fontSize: 10, color: '#666', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={r.description}>
+                          {r.description}
+                        </div>
+                      )}
+                    </div>
+                  ),
                 },
                 {
                   title: 'Debit', dataIndex: 'dr', width: 120, align: 'right' as const,
@@ -1405,24 +1421,24 @@ const ManageMultiperiod: React.FC = () => {
                     : null,
                 },
                 {
-                  title: 'Ref 1 (Invoice)', dataIndex: 'reference1', width: 140, ellipsis: true,
+                  title: 'Ref 1 — Invoice No', dataIndex: 'reference1', width: 140, ellipsis: true,
                   render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text>,
                 },
                 {
-                  title: 'Ref 2 (Supplier)', dataIndex: 'reference2', width: 160, ellipsis: true,
-                  render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text>,
+                  title: 'Ref 2 — Schedule ID', dataIndex: 'reference2', width: 120,
+                  render: (v: string) => <Tag style={{ fontSize: 10, fontFamily: 'monospace' }}>{v}</Tag>,
                 },
                 {
-                  title: 'Ref 3 (Period)', dataIndex: 'reference3', width: 90,
+                  title: 'Ref 3 — Period', dataIndex: 'reference3', width: 95,
                   render: (v: string) => <Tag color="purple" style={{ fontSize: 10 }}>{v}</Tag>,
                 },
                 {
-                  title: 'Ref 4 (Sched)', dataIndex: 'reference4', width: 90,
-                  render: (v: string) => <Tag style={{ fontSize: 10 }}>{v}</Tag>,
+                  title: 'Ref 4 — Invoice No', dataIndex: 'reference4', width: 140, ellipsis: true,
+                  render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text>,
                 },
                 {
-                  title: 'Ref 5 (BU)', dataIndex: 'reference5', ellipsis: true,
-                  render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text>,
+                  title: 'Ref 5 — Class', dataIndex: 'reference5', width: 110,
+                  render: (v: string) => <Tag color="geekblue" style={{ fontSize: 10 }}>{v}</Tag>,
                 },
               ]}
             />
