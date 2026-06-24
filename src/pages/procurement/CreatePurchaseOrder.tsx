@@ -252,6 +252,9 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
   const [generatePoModalOpen, setGeneratePoModalOpen] = useState(false);
   const [confettiPieces, setConfettiPieces]           = useState<{ id: number; x: number; color: string; delay: number; size: number }[]>([]);
 
+  // Init modal API inspector
+  const [initApiOpen, setInitApiOpen] = useState(false);
+
   // Approval
   const [approvalOpen, setApprovalOpen]     = useState(false);
   const [approverEmail, setApproverEmail]   = useState('');
@@ -1598,7 +1601,19 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
       <Content>
 
         {/* ── Init Modal ──────────────────────────────── */}
-        <Modal open={showInitModal} title={<Text strong style={{ fontSize: 15 }}>New Purchase Order</Text>}
+        <Modal open={showInitModal}
+          title={
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 8 }}>
+              <Text strong style={{ fontSize: 15 }}>New Purchase Order</Text>
+              <Tooltip title="API Inspector — view web services called in this dialog">
+                <Button size="small" icon={<ApiOutlined />}
+                  style={{ borderColor: C.blue, color: C.blue, fontSize: 11, marginLeft: 12 }}
+                  onClick={() => setInitApiOpen(true)}>
+                  API
+                </Button>
+              </Tooltip>
+            </div>
+          }
           width={680} closable={false} maskClosable={false}
           styles={{ body: { padding: '12px 20px' } }}
           footer={
@@ -1723,6 +1738,82 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
               </Row>
             </Form>
           )}
+        </Modal>
+
+        {/* ── Init Modal API Inspector ─────────────────── */}
+        <Modal
+          open={initApiOpen}
+          onCancel={() => setInitApiOpen(false)}
+          footer={<Button onClick={() => setInitApiOpen(false)}>Close</Button>}
+          width={760}
+          title={<Space><ApiOutlined style={{ color: C.blue }} /><Text strong>New PO Dialog — Web Services</Text></Space>}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {[
+              {
+                label: 'Business Units (Procurement BU / Bill To BU)',
+                method: 'GET', tag: 'blue',
+                url: `${FUSION_BASE}/finBusinessUnitsLOV?limit=500&offset=0`,
+                note: 'Oracle Fusion: list of available business units for PO creation',
+                source: 'Oracle Fusion REST',
+              },
+              {
+                label: 'Currencies',
+                method: 'GET', tag: 'blue',
+                url: `${GL_ORDS_BASE}/currencies?enabled=Y`,
+                note: 'Re-ERP ORDS: active currencies for the currency dropdown',
+                source: 'ORDS / Re-ERP',
+              },
+              {
+                label: 'Inventory Organizations (Ship To Org)',
+                method: 'GET', tag: 'blue',
+                url: `${FUSION_BASE}/inventoryOrganizations?limit=500&offset=0`,
+                note: 'Oracle Fusion: list of inventory organizations for ship-to selection',
+                source: 'Oracle Fusion REST',
+              },
+              {
+                label: 'Subinventories',
+                method: 'GET', tag: 'blue',
+                url: `${ORDS_BASE}/inventory/inventorywarehousesubinventory?limit=500&offset=0`,
+                note: 'ORDS: warehouse sub-inventory codes, filtered client-side by selected ship-to org',
+                source: 'ORDS / Fusion Client ERP',
+              },
+            ].map((api, i) => (
+              <div key={i} style={{ padding: '10px 14px', borderRadius: 8, border: `1px solid #e5e5e5`, background: '#fafafa' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <Tag color={api.tag} style={{ fontWeight: 700, fontSize: 11 }}>{api.method}</Tag>
+                  <Text strong style={{ fontSize: 13 }}>{api.label}</Text>
+                  <Tag style={{ marginLeft: 'auto', fontSize: 10 }}>{api.source}</Tag>
+                </div>
+                <div style={{ fontFamily: 'monospace', fontSize: 11, color: C.blue, wordBreak: 'break-all', padding: '6px 10px', background: '#f0f5ff', borderRadius: 5, marginBottom: 6 }}>
+                  {api.url}
+                </div>
+                <Text style={{ fontSize: 12, color: C.textMid }}>{api.note}</Text>
+              </div>
+            ))}
+            <div style={{ padding: '8px 14px', borderRadius: 8, border: `1px solid #e5e5e5`, background: '#fafafa' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <Tag color="orange" style={{ fontWeight: 700, fontSize: 11 }}>GET</Tag>
+                <Text strong style={{ fontSize: 13 }}>Supplier Search (on-demand)</Text>
+                <Tag style={{ marginLeft: 'auto', fontSize: 10 }}>Oracle Fusion REST</Tag>
+              </div>
+              <div style={{ fontFamily: 'monospace', fontSize: 11, color: C.blue, wordBreak: 'break-all', padding: '6px 10px', background: '#f0f5ff', borderRadius: 5, marginBottom: 6 }}>
+                {`${FUSION_BASE}/suppliers?q=Supplier LIKE '*<term>*'&limit=20`}
+              </div>
+              <Text style={{ fontSize: 12, color: C.textMid }}>Fired when searching for a supplier — called live with the typed search term</Text>
+            </div>
+            <div style={{ padding: '8px 14px', borderRadius: 8, border: `1px solid #e5e5e5`, background: '#fafafa' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <Tag color="orange" style={{ fontWeight: 700, fontSize: 11 }}>GET</Tag>
+                <Text strong style={{ fontSize: 13 }}>Supplier Sites (on-demand)</Text>
+                <Tag style={{ marginLeft: 'auto', fontSize: 10 }}>Oracle Fusion REST</Tag>
+              </div>
+              <div style={{ fontFamily: 'monospace', fontSize: 11, color: C.blue, wordBreak: 'break-all', padding: '6px 10px', background: '#f0f5ff', borderRadius: 5, marginBottom: 6 }}>
+                {`${FUSION_BASE}/suppliers/<supplierId>/child/sites?limit=100`}
+              </div>
+              <Text style={{ fontSize: 12, color: C.textMid }}>Fired after a supplier is selected — loads available sites for that supplier</Text>
+            </div>
+          </div>
         </Modal>
 
         {/* ── Main PO Page ─────────────────────────────── */}
