@@ -3024,17 +3024,27 @@ const RegisterDetail: React.FC<{
         const q = txnSearch.trim().toLowerCase();
         const filteredTxns = q
           ? transactions.filter(t =>
-              (t.referenceNo     ?? '').toLowerCase().includes(q) ||
-              (t.transactionType ?? '').toLowerCase().includes(q) ||
-              (t.expenseType     ?? '').toLowerCase().includes(q) ||
-              (t.comments        ?? '').toLowerCase().includes(q) ||
-              (t.employeeName    ?? '').toLowerCase().includes(q) ||
-              (t.createdBy       ?? '').toLowerCase().includes(q) ||
-              (t.postingStatus   ?? '').toLowerCase().includes(q) ||
-              (t.transactionDate ?? '').includes(q) ||
-              String(t.lineNumber    ?? '').includes(q) ||
-              String(t.debitAmount   ?? '').includes(q) ||
-              String(t.creditAmount  ?? '').includes(q)
+              (t.referenceNo             ?? '').toLowerCase().includes(q) ||
+              (t.transactionType         ?? '').toLowerCase().includes(q) ||
+              (t.expenseType             ?? '').toLowerCase().includes(q) ||
+              (t.comments                ?? '').toLowerCase().includes(q) ||
+              (t.employeeName            ?? '').toLowerCase().includes(q) ||
+              (t.createdBy               ?? '').toLowerCase().includes(q) ||
+              (t.postingStatus           ?? '').toLowerCase().includes(q) ||
+              (t.transactionDate         ?? '').toLowerCase().includes(q) ||
+              (t.accountingPeriod        ?? '').toLowerCase().includes(q) ||
+              (t.currency                ?? '').toLowerCase().includes(q) ||
+              (t.chargeAccountDesc       ?? '').toLowerCase().includes(q) ||
+              (t.accountingDate          ?? '').toLowerCase().includes(q) ||
+              (t.receiptStatus           ?? '').toLowerCase().includes(q) ||
+              String(t.transactionId     ?? '').includes(q) ||
+              String(t.lineNumber        ?? '').includes(q) ||
+              String(t.bankTxnId         ?? '').includes(q) ||
+              String(t.debitAmount       ?? '').includes(q) ||
+              String(t.creditAmount      ?? '').includes(q) ||
+              String(t.suspenseAmount    ?? '').includes(q) ||
+              String(t.originalSuspenseAmount ?? '').includes(q) ||
+              String(t.runningBalance    ?? '').includes(q)
             )
           : transactions;
       const _content = (<>
