@@ -269,7 +269,13 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
     setLovLoading(true);
     try {
       const [buRes, ccyRes, orgRes, subRes] = await Promise.allSettled([
-        fetch(`${ORDS_BASE}/BUSINESS_UNITS`).then(r => r.json()).then(d => d.items ?? (Array.isArray(d) ? d : [])),
+        fetch(`${ORDS_BASE}/BUSINESS_UNITS`).then(async r => {
+          const text = await r.text();
+          console.log('[BU] status:', r.status, 'raw:', text.slice(0, 500));
+          const d = JSON.parse(text);
+          // ORDS can return: { items: [] } or [] or { BUSINESS_UNITS: [] } or top-level object
+          return d.items ?? d.BUSINESS_UNITS ?? d.data ?? (Array.isArray(d) ? d : Object.values(d).find(v => Array.isArray(v)) ?? []);
+        }),
         fetch(`${GL_ORDS_BASE}/currencies?enabled=Y`).then(r => r.json()).then(d => d.items ?? d.data ?? (Array.isArray(d) ? d : [])),
         fetchLOV(`${FUSION_BASE}/inventoryOrganizations`),
         fetch(`${ORDS_BASE}/inventory/inventorywarehousesubinventory`).then(r => r.json()).then(d => d.items ?? (Array.isArray(d) ? d : [])),
