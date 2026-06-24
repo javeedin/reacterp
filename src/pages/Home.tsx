@@ -3,10 +3,11 @@ import { Row, Col, Typography, Card, Tag, Spin } from 'antd';
 import {
   AccountBookOutlined, BankOutlined, DollarOutlined,
   FileTextOutlined, SyncOutlined, DatabaseOutlined,
-  CheckCircleOutlined, ClockCircleOutlined, ExclamationCircleOutlined,
+  CheckCircleOutlined, ClockCircleOutlined,
   SafetyCertificateOutlined, BookOutlined, CalendarOutlined,
   ThunderboltOutlined, WalletOutlined, AuditOutlined, FundOutlined,
   ShopOutlined, HomeOutlined, SettingOutlined, ArrowUpOutlined, ArrowDownOutlined,
+  EditOutlined, SwapOutlined, CalculatorOutlined, BarChartOutlined, TeamOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -48,14 +49,14 @@ const MODULES = [
 ];
 
 const QUICK_ACTIONS = [
-  { label: 'Create Journal',        path: '/gl/create-journal',          color: REDWOOD.primary },
-  { label: 'Manage AP Invoices',    path: '/ap/manage-invoices',         color: REDWOOD.orange  },
-  { label: 'Bank Reconciliation',   path: '/cash/bank-reconciliation',   color: REDWOOD.info    },
-  { label: 'External Transactions', path: '/cash/external-transactions', color: REDWOOD.info    },
-  { label: 'Run Depreciation',      path: '/fa/depreciation',            color: REDWOOD.purple  },
-  { label: 'Trial Balance',         path: '/gl/trial-balance',           color: REDWOOD.success },
-  { label: 'Manage RM Agreements',  path: '/rm/agreements',              color: REDWOOD.teal    },
-  { label: 'Sync Oracle Data',      path: '/sync',                       color: REDWOOD.primary },
+  { label: 'Create Journal',        path: '/gl/create-journal',          color: REDWOOD.primary, icon: <EditOutlined />        },
+  { label: 'Manage AP Invoices',    path: '/ap/manage-invoices',         color: REDWOOD.orange,  icon: <FileTextOutlined />    },
+  { label: 'Bank Reconciliation',   path: '/cash/bank-reconciliation',   color: REDWOOD.info,    icon: <BankOutlined />        },
+  { label: 'External Transactions', path: '/cash/external-transactions', color: REDWOOD.info,    icon: <SwapOutlined />        },
+  { label: 'Run Depreciation',      path: '/fa/depreciation',            color: REDWOOD.purple,  icon: <CalculatorOutlined />  },
+  { label: 'Trial Balance',         path: '/gl/trial-balance',           color: REDWOOD.success, icon: <BarChartOutlined />    },
+  { label: 'Manage RM Agreements',  path: '/rm/agreements',              color: REDWOOD.teal,    icon: <TeamOutlined />        },
+  { label: 'Sync Oracle Data',      path: '/sync',                       color: REDWOOD.primary, icon: <SyncOutlined />        },
 ];
 
 // ── Sub-components ─────────────────────────────────────────────────────────
@@ -217,29 +218,23 @@ const Home: React.FC = () => {
         {/* Right panel */}
         <Col xs={24} lg={8}>
 
-          {/* Period status */}
+          {/* Quick actions */}
           <Card style={{ borderRadius: 12, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 14 }}
             styles={{ body: { padding: '16px 18px' } }}
-            title={<Text strong style={{ fontSize: 13 }}><CalendarOutlined style={{ color: REDWOOD.info, marginRight: 6 }} />Accounting Period</Text>}>
-            {loading ? <Spin size="small" /> : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {[
-                  { label: 'Current Period', value: <Text strong>{periodName}</Text> },
-                  { label: 'GL Status',      value: <Tag color={isOpen ? 'success' : 'error'} style={{ margin: 0 }}>{periodStatus}</Tag> },
-                  { label: 'Today',          value: <Text>{today.format('D MMM YYYY')}</Text> },
-                ].map((row, i) => (
-                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
-                    <Text style={{ color: REDWOOD.neutral600 }}>{row.label}</Text>
-                    {row.value}
+            title={<Text strong style={{ fontSize: 13 }}><ThunderboltOutlined style={{ color: REDWOOD.primary, marginRight: 6 }} />Quick Actions</Text>}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {QUICK_ACTIONS.map((item, i) => (
+                <div key={i} onClick={() => navigate(item.path)}
+                  style={{ padding: '8px 10px', borderRadius: 8, cursor: 'pointer', background: REDWOOD.neutral50, display: 'flex', alignItems: 'center', gap: 10, border: `1px solid ${REDWOOD.neutral200}` }}
+                  onMouseEnter={e => { (e.currentTarget.style.background = `${item.color}10`); (e.currentTarget.style.borderColor = item.color); }}
+                  onMouseLeave={e => { (e.currentTarget.style.background = REDWOOD.neutral50); (e.currentTarget.style.borderColor = REDWOOD.neutral200); }}>
+                  <div style={{ width: 30, height: 30, borderRadius: 7, background: `${item.color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: item.color, flexShrink: 0 }}>
+                    {item.icon}
                   </div>
-                ))}
-                <div style={{ borderTop: `1px solid ${REDWOOD.neutral200}`, paddingTop: 8, display: 'flex', gap: 12 }}>
-                  <a onClick={() => navigate('/gl/accounting-periods')} style={{ fontSize: 12, color: REDWOOD.info }}>Periods →</a>
-                  <a onClick={() => navigate('/gl/trial-balance')}      style={{ fontSize: 12, color: REDWOOD.info }}>Trial Balance →</a>
-                  <a onClick={() => navigate('/gl/manage-journals')}    style={{ fontSize: 12, color: REDWOOD.info }}>Journals →</a>
+                  <Text style={{ fontSize: 13, color: REDWOOD.neutral800, fontWeight: 500 }}>{item.label}</Text>
                 </div>
-              </div>
-            )}
+              ))}
+            </div>
           </Card>
 
           {/* Recent journals */}
@@ -267,21 +262,29 @@ const Home: React.FC = () => {
             }
           </Card>
 
-          {/* Quick actions */}
+          {/* Period status */}
           <Card style={{ borderRadius: 12, border: `1px solid ${REDWOOD.neutral200}` }}
             styles={{ body: { padding: '16px 18px' } }}
-            title={<Text strong style={{ fontSize: 13 }}><AuditOutlined style={{ color: REDWOOD.teal, marginRight: 6 }} />Quick Actions</Text>}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {QUICK_ACTIONS.map((item, i) => (
-                <div key={i} onClick={() => navigate(item.path)}
-                  style={{ padding: '7px 10px', borderRadius: 7, cursor: 'pointer', background: REDWOOD.neutral50, display: 'flex', alignItems: 'center', gap: 8 }}
-                  onMouseEnter={e => (e.currentTarget.style.background = REDWOOD.neutral100)}
-                  onMouseLeave={e => (e.currentTarget.style.background = REDWOOD.neutral50)}>
-                  <div style={{ width: 7, height: 7, borderRadius: '50%', background: item.color, flexShrink: 0 }} />
-                  <Text style={{ fontSize: 13, color: REDWOOD.neutral800 }}>{item.label}</Text>
+            title={<Text strong style={{ fontSize: 13 }}><CalendarOutlined style={{ color: REDWOOD.info, marginRight: 6 }} />Accounting Period</Text>}>
+            {loading ? <Spin size="small" /> : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {[
+                  { label: 'Current Period', value: <Text strong>{periodName}</Text> },
+                  { label: 'GL Status',      value: <Tag color={isOpen ? 'success' : 'error'} style={{ margin: 0 }}>{periodStatus}</Tag> },
+                  { label: 'Today',          value: <Text>{today.format('D MMM YYYY')}</Text> },
+                ].map((row, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
+                    <Text style={{ color: REDWOOD.neutral600 }}>{row.label}</Text>
+                    {row.value}
+                  </div>
+                ))}
+                <div style={{ borderTop: `1px solid ${REDWOOD.neutral200}`, paddingTop: 8, display: 'flex', gap: 12 }}>
+                  <a onClick={() => navigate('/gl/accounting-periods')} style={{ fontSize: 12, color: REDWOOD.info }}>Periods →</a>
+                  <a onClick={() => navigate('/gl/trial-balance')}      style={{ fontSize: 12, color: REDWOOD.info }}>Trial Balance →</a>
+                  <a onClick={() => navigate('/gl/manage-journals')}    style={{ fontSize: 12, color: REDWOOD.info }}>Journals →</a>
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
           </Card>
 
         </Col>
