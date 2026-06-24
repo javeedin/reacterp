@@ -57,6 +57,7 @@ const QUICK_ACTIONS = [
   { label: 'Trial Balance',         path: '/gl/trial-balance',           color: REDWOOD.success, icon: <BarChartOutlined />    },
   { label: 'Manage RM Agreements',  path: '/rm/agreements',              color: REDWOOD.teal,    icon: <TeamOutlined />        },
   { label: 'Sync Oracle Data',      path: '/sync',                       color: REDWOOD.primary, icon: <SyncOutlined />        },
+  { label: 'Investment Holdings',   path: '/pms/investment-holdings',    color: REDWOOD.teal,    icon: <FundOutlined />        },
 ];
 
 // ── Sub-components ─────────────────────────────────────────────────────────
