@@ -190,6 +190,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
 
   const [busUnits, setBusUnits] = useState<any[]>([]);
+  const [selectedBuCompanyCode, setSelectedBuCompanyCode] = useState('');
   const [currencies, setCurrencies] = useState<any[]>([]);
   const [currencyInput, setCurrencyInput] = useState('');
   const [fxRate, setFxRate] = useState<{ rate: number; inverseRate: number; rateDate: string; rateType: string } | null>(null);
@@ -268,21 +269,47 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
     setLovLoading(true);
     try {
       const [buRes, ccyRes, orgRes, subRes] = await Promise.allSettled([
-        fetchLOV(`${FUSION_BASE}/finBusinessUnitsLOV`),
+        fetch(`${ORDS_BASE}/BUSINESS_UNITS`).then(r => r.json()).then(d => d.items ?? (Array.isArray(d) ? d : [])),
         fetch(`${GL_ORDS_BASE}/currencies?enabled=Y`).then(r => r.json()).then(d => d.items ?? d.data ?? (Array.isArray(d) ? d : [])),
         fetchLOV(`${FUSION_BASE}/inventoryOrganizations`),
         fetch(`${ORDS_BASE}/inventory/inventorywarehousesubinventory`).then(r => r.json()).then(d => d.items ?? (Array.isArray(d) ? d : [])),
       ]);
-      if (buRes.status === 'fulfilled') setBusUnits(buRes.value);
+      if (buRes.status === 'fulfilled') {
+        setBusUnits(buRes.value);
+        // Auto-select default BU currency if BU matches default
+        const defaultBu = buRes.value.find((b: any) =>
+          (b.BUSINESS_UNIT_NAME ?? b.BusinessUnitName ?? b.NAME ?? '') === PO_DEFAULTS.procurementBU
+        );
+        if (defaultBu) {
+          const ccy = defaultBu.CURRENCY_CODE ?? defaultBu.DEFAULT_CURRENCY ?? defaultBu.LEDGER_CURRENCY ?? '';
+          const cc  = defaultBu.COMPANY_CODE  ?? defaultBu.SET_OF_BOOKS_ID  ?? defaultBu.LEDGER_NAME     ?? '';
+          if (ccy) headerForm.setFieldValue('currency', ccy);
+          if (cc)  setSelectedBuCompanyCode(String(cc));
+        }
+      }
       if (ccyRes.status === 'fulfilled') setCurrencies(ccyRes.value);
       if (orgRes.status === 'fulfilled') setInventoryOrgs(orgRes.value);
       if (subRes.status === 'fulfilled') {
         const all = subRes.value;
         setAllSubinventories(all);
-        // Pre-filter for the default ship-to org so subinventory dropdown is ready
         setSubinventories(all.filter((s: any) => s.warehouse_code === PO_DEFAULTS.shipToOrg));
       }
     } finally { setLovLoading(false); }
+  };
+
+  const handleProcurementBuChange = (buName: string) => {
+    headerForm.setFieldValue('billTo', buName);
+    const bu = busUnits.find((b: any) =>
+      (b.BUSINESS_UNIT_NAME ?? b.BusinessUnitName ?? b.NAME ?? '') === buName
+    );
+    if (bu) {
+      const ccy = bu.CURRENCY_CODE ?? bu.DEFAULT_CURRENCY ?? bu.LEDGER_CURRENCY ?? '';
+      const cc  = bu.COMPANY_CODE  ?? bu.SET_OF_BOOKS_ID  ?? bu.LEDGER_NAME     ?? '';
+      if (ccy) headerForm.setFieldValue('currency', ccy);
+      setSelectedBuCompanyCode(cc ? String(cc) : '');
+    } else {
+      setSelectedBuCompanyCode('');
+    }
   };
 
   const fetchFxRate = async (currency: string) => {
@@ -1636,19 +1663,51 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
               <Row gutter={[12, 0]}>
                 <Col span={12}>
                   <Form.Item name="procurementBU" label="Procurement BU" rules={[{ required: true }]}>
-                    <Select showSearch allowClear placeholder="Select Procurement BU" optionFilterProp="children"
-                      onChange={v => headerForm.setFieldValue('billTo', v)}>
-                      {busUnits.map(bu => <Option key={bu.BusinessUnitId ?? bu.BusinessUnitName} value={bu.BusinessUnitName}>{bu.BusinessUnitName}</Option>)}
-                    </Select>
+                    <Select showSearch allowClear placeholder="Select Procurement BU" optionFilterProp="label"
+                      onChange={handleProcurementBuChange}
+                      options={busUnits.map(bu => {
+                        const name = bu.BUSINESS_UNIT_NAME ?? bu.BusinessUnitName ?? bu.NAME ?? '';
+                        const cc   = bu.COMPANY_CODE  ?? bu.SET_OF_BOOKS_ID ?? bu.LEDGER_NAME ?? '';
+                        const ccy  = bu.CURRENCY_CODE ?? bu.DEFAULT_CURRENCY ?? bu.LEDGER_CURRENCY ?? '';
+                        return {
+                          value: name, label: name,
+                          cc, ccy,
+                        };
+                      })}
+                      optionRender={(opt) => (
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 500 }}>{opt.data.label}</div>
+                          {(opt.data.cc || opt.data.ccy) && (
+                            <div style={{ fontSize: 11, color: C.textLight, marginTop: 1 }}>
+                              {opt.data.cc && <span>Code: <strong>{opt.data.cc}</strong></span>}
+                              {opt.data.cc && opt.data.ccy && <span style={{ margin: '0 6px' }}>·</span>}
+                              {opt.data.ccy && <span>CCY: <strong>{opt.data.ccy}</strong></span>}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    />
                   </Form.Item>
                 </Col>
                 <Col span={12}>
                   <Form.Item name="billTo" label="Bill To BU" rules={[{ required: true }]}>
-                    <Select showSearch allowClear placeholder="Select Bill To" optionFilterProp="children">
-                      {busUnits.map(bu => <Option key={`bt-${bu.BusinessUnitId ?? bu.BusinessUnitName}`} value={bu.BusinessUnitName}>{bu.BusinessUnitName}</Option>)}
-                    </Select>
+                    <Select showSearch allowClear placeholder="Select Bill To" optionFilterProp="label"
+                      options={busUnits.map(bu => {
+                        const name = bu.BUSINESS_UNIT_NAME ?? bu.BusinessUnitName ?? bu.NAME ?? '';
+                        return { value: name, label: name };
+                      })}
+                    />
                   </Form.Item>
                 </Col>
+                {selectedBuCompanyCode && (
+                  <Col span={24}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '6px 10px', background: '#f0f5ff', borderRadius: 6, border: '1px solid #d6e4ff' }}>
+                      <BuildOutlined style={{ color: C.blue, fontSize: 13 }} />
+                      <Text style={{ fontSize: 12, color: C.textMid }}>Company Code:</Text>
+                      <Text strong style={{ fontSize: 13, color: C.blue, fontFamily: 'monospace' }}>{selectedBuCompanyCode}</Text>
+                    </div>
+                  </Col>
+                )}
                 <Col span={8}>
                   <Form.Item name="orderDate" label="Order Date" rules={[{ required: true }]}>
                     <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
@@ -1753,9 +1812,9 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
               {
                 label: 'Business Units (Procurement BU / Bill To BU)',
                 method: 'GET', tag: 'blue',
-                url: `${FUSION_BASE}/finBusinessUnitsLOV?limit=500&offset=0`,
-                note: 'Oracle Fusion: list of available business units for PO creation',
-                source: 'Oracle Fusion REST',
+                url: `${ORDS_BASE}/BUSINESS_UNITS`,
+                note: 'ORDS: list of business units with Company Code and default Currency — used to populate BU dropdowns and auto-fill currency on selection',
+                source: 'ORDS / Fusion Client ERP',
               },
               {
                 label: 'Currencies',
