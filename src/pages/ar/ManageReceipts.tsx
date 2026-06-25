@@ -3170,26 +3170,49 @@ const ManageReceipts: React.FC = () => {
                           }
                         },
                       }}
-                      summary={() => (
-                        <Table.Summary fixed>
-                          <Table.Summary.Row style={{ background: '#fafafa' }}>
-                            <Table.Summary.Cell index={0} colSpan={5} align="right">
-                              <Text strong style={{ fontSize: 11 }}>Totals</Text>
-                            </Table.Summary.Cell>
-                            <Table.Summary.Cell index={1} align="right">
-                              <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.neutral600 }}>
-                                {pickerRows.reduce((s, r) => s + r.originalAmount, 0).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </Text>
-                            </Table.Summary.Cell>
-                            <Table.Summary.Cell index={2} align="right">
-                              <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.primary }}>
-                                {pickerRows.reduce((s, r) => s + r.balanceDue, 0).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </Text>
-                            </Table.Summary.Cell>
-                            <Table.Summary.Cell index={3} colSpan={3} />
-                          </Table.Summary.Row>
-                        </Table.Summary>
-                      )}
+                      summary={() => {
+                        const selRows = allPickerRows.filter(r => selectedKeys.includes(r.key));
+                        const totalOrig    = pickerRows.reduce((s, r) => s + r.originalAmount, 0);
+                        const totalBal     = pickerRows.reduce((s, r) => s + r.balanceDue, 0);
+                        const totalApplyS  = selRows.reduce((s, r) => s + (r.applyAmount ?? r.balanceDue), 0);
+                        const totalAdjS    = selRows.reduce((s, r) => s + (r.adjustmentAmount ?? 0), 0);
+                        return (
+                          <Table.Summary fixed>
+                            <Table.Summary.Row style={{ background: '#fafafa' }}>
+                              {/* checkbox col + Invoice# + Inst# + Txn Date + Due Date + CCY = colSpan 6 */}
+                              <Table.Summary.Cell index={0} colSpan={6} align="right">
+                                <Text strong style={{ fontSize: 11 }}>Totals</Text>
+                              </Table.Summary.Cell>
+                              {/* Original Amt */}
+                              <Table.Summary.Cell index={1} align="right">
+                                <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.neutral600 }}>
+                                  {totalOrig.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </Text>
+                              </Table.Summary.Cell>
+                              {/* Balance Due */}
+                              <Table.Summary.Cell index={2} align="right">
+                                <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.primary }}>
+                                  {totalBal.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </Text>
+                              </Table.Summary.Cell>
+                              {/* Apply Amount (selected only) */}
+                              <Table.Summary.Cell index={3} align="right">
+                                <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.success }}>
+                                  {totalApplyS > 0 ? totalApplyS.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
+                                </Text>
+                              </Table.Summary.Cell>
+                              {/* Adjustment Amt (selected only) */}
+                              <Table.Summary.Cell index={4} align="right">
+                                <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: totalAdjS < 0 ? REDWOOD.primary : REDWOOD.warning }}>
+                                  {totalAdjS !== 0 ? `${totalAdjS > 0 ? '+' : ''}${totalAdjS.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''}
+                                </Text>
+                              </Table.Summary.Cell>
+                              {/* Balance After + Adj Reason */}
+                              <Table.Summary.Cell index={5} colSpan={2} />
+                            </Table.Summary.Row>
+                          </Table.Summary>
+                        );
+                      }}
                     />
                   </>
                 )}
