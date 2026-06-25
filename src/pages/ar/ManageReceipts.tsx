@@ -2996,15 +2996,19 @@ const ManageReceipts: React.FC = () => {
                   {/* 3. POST receipt application */}
                   {(() => {
                     const url = APEX_RECEIPT_APPS;
+                    const selKeys = instPickerSel[tabKey] ?? [];
+                    const allRows = instPickerRows[tabKey] ?? [];
+                    const exRow   = allRows.find(r => selKeys.includes(r.key)) ?? allRows[0];
+                    const applyAmt = exRow ? (exRow.applyAmount ?? exRow.balanceDue) : null;
                     const body = JSON.stringify({
                       StandardReceiptId:          draft.standardReceiptId || 0,
                       ApplicationDate:            draft.receiptDate || dayjs().format('YYYY-MM-DD'),
                       AccountingDate:             draft.accountingDate || dayjs().format('YYYY-MM-DD'),
-                      ApplicationAmount:          '<applyAmount or balanceDue>',
+                      ApplicationAmount:          applyAmt ?? '<applyAmount>',
                       ApplicationStatus:          'APP',
-                      ReferenceTransactionId:     '<customerTransactionId>',
-                      ReferenceTransactionNumber: '<transactionNumber>',
-                      ReferenceInstallmentId:     '<installmentId>',
+                      ReferenceTransactionId:     exRow?.customerTransactionId ?? '<customerTransactionId>',
+                      ReferenceTransactionNumber: exRow?.transactionNumber      ?? '<transactionNumber>',
+                      ReferenceInstallmentId:     exRow?.installmentId          ?? '<installmentId>',
                       ActivityName:               'Invoice',
                       ProcessStatus:              'PENDING',
                       IsLatestApplication:        'Y',
@@ -3021,6 +3025,7 @@ const ManageReceipts: React.FC = () => {
                         </div>
                         <div style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.success, wordBreak: 'break-all', padding: '4px 10px', background: '#f0fff0', borderRadius: 5, marginBottom: 8 }}>{url}</div>
                         <div style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 10, borderRadius: 6, fontFamily: 'monospace', fontSize: 11, maxHeight: 200, overflowY: 'auto', whiteSpace: 'pre' }}>{body}</div>
+                        {exRow && <Text style={{ fontSize: 10, color: REDWOOD.neutral600 }}>Showing values for installment: {exRow.transactionNumber} / Inst #{exRow.sequenceNumber}</Text>}
                       </div>
                     );
                   })()}
@@ -3028,20 +3033,25 @@ const ManageReceipts: React.FC = () => {
                   {/* 4. POST adjustment */}
                   {(() => {
                     const url = `${APEX_DB_CONFIG.baseUrl}/ar/adjustments`;
+                    const selKeys = instPickerSel[tabKey] ?? [];
+                    const allRows = instPickerRows[tabKey] ?? [];
+                    const exRow   = allRows.find(r => selKeys.includes(r.key)) ?? allRows[0];
+                    const applyAmt = exRow ? (exRow.applyAmount ?? exRow.balanceDue) : 0;
+                    const adjAmt   = exRow?.adjustmentAmount ?? 0;
                     const body = JSON.stringify({
-                      CustomerTransactionId: '<customerTransactionId>',
-                      TransactionNumber:     '<transactionNumber>',
-                      AdjustmentAmount:      '<adjustmentAmount>',
+                      CustomerTransactionId: exRow?.customerTransactionId ?? '<customerTransactionId>',
+                      TransactionNumber:     exRow?.transactionNumber      ?? '<transactionNumber>',
+                      AdjustmentAmount:      exRow ? adjAmt : '<adjustmentAmount>',
                       AdjustmentDate:        draft.receiptDate || dayjs().format('YYYY-MM-DD'),
                       AccountingDate:        draft.accountingDate || dayjs().format('YYYY-MM-DD'),
                       AdjustmentType:        'LINE',
                       Status:                'Approved',
                       ReceivablesActivity:   'Adjustment',
                       BusinessUnit:          draft.businessUnit || '',
-                      Currency:              draft.currency || 'AED',
-                      InstallmentNumber:     '<sequenceNumber>',
-                      InstallmentBalance:    '<balanceDue - applyAmount - adjustmentAmount>',
-                      AdjustmentReason:      '<adjustmentReason>',
+                      Currency:              exRow?.currency || draft.currency || 'AED',
+                      InstallmentNumber:     exRow?.sequenceNumber ?? '<sequenceNumber>',
+                      InstallmentBalance:    exRow ? Math.max(0, exRow.balanceDue - applyAmt - adjAmt) : '<remaining balance>',
+                      AdjustmentReason:      exRow?.adjustmentReason || '<adjustmentReason>',
                       Comments:              `Auto-created from receipt ${draft.receiptNumber || ''}`,
                     }, null, 2);
                     return (
