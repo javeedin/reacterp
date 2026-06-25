@@ -1818,6 +1818,8 @@ const ManageReceipts: React.FC = () => {
           InstallmentBalance:    Math.max(0, row.balanceDue - row.applyAmount - row.adjustmentAmount),
           AdjustmentReason:      row.adjustmentReason || 'Receipt adjustment',
           Comments:              `Auto-created from receipt ${draft.receiptNumber || ''}`,
+          CreatedBy:             currentUser,
+          LastUpdatedBy:         currentUser,
         };
         const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/ar/adjustments`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(adjBody) });
         if (!res.ok) adjErrors.push(`${row.transactionNumber}/#${row.sequenceNumber}: HTTP ${res.status}`);
@@ -1914,6 +1916,8 @@ const ManageReceipts: React.FC = () => {
           InstallmentBalance:    Math.max(0, row.balanceDue - row.applyAmount - row.adjustmentAmount),
           AdjustmentReason:      row.adjustmentReason || 'Receipt adjustment',
           Comments:              `Auto-created from receipt ${draft.receiptNumber || ''}`,
+          CreatedBy:             currentUser,
+          LastUpdatedBy:         currentUser,
         }, null, 2),
         response: '', running: false, done: false,
       })),
