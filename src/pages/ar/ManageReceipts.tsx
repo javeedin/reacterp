@@ -51,7 +51,7 @@ const REDWOOD = {
 const APEX_AR_RECEIPTS     = `${APEX_DB_CONFIG.baseUrl}/ar/receipts`;
 const APEX_RECEIPT_APPS    = `${APEX_DB_CONFIG.baseUrl}/ar/receipt-applications`;
 const APEX_RECEIPT_METHODS = `${APEX_DB_CONFIG.baseUrl}/ar/receiptmethods`;
-const GL_ORDS_BASE         = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp';
+const APEX_AR_INVOICES = `${APEX_DB_CONFIG.baseUrl}/ar/invoices`;
 const ORDS_RECEIPT_METHOD_ACCOUNTS = `${GL_ORDS_BASE}/ar/receipt-method-accounts`;
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -391,6 +391,74 @@ const ManageReceipts: React.FC = () => {
   const [receiptApplications, setReceiptApplications] = useState<
     Record<string, { loading: boolean; rows: AppRow[] }>
   >({});
+
+  // ── Installment picker (per tab) ─────────────────────────────────────────
+  interface InstPickerRow {
+    key: string;
+    customerTransactionId: number;
+    transactionNumber: string;
+    transactionDate: string;
+    dueDate: string;
+    sequenceNumber: number;
+    installmentId: number;
+    originalAmount: number;
+    balanceDue: number;
+    currency: string;
+    applyAmount: number | null;
+  }
+  const [instPickerOpen,    setInstPickerOpen]    = useState<Record<string, boolean>>({});
+  const [instPickerLoading, setInstPickerLoading] = useState<Record<string, boolean>>({});
+  const [instPickerRows,    setInstPickerRows]    = useState<Record<string, InstPickerRow[]>>({});
+  const [instPickerSel,     setInstPickerSel]     = useState<Record<string, React.Key[]>>({});
+
+  const fetchOpenInstallments = useCallback(async (tabKey: string, customerAccountNumber: string) => {
+    if (!customerAccountNumber) return;
+    setInstPickerLoading(p => ({ ...p, [tabKey]: true }));
+    setInstPickerRows(p => ({ ...p, [tabKey]: [] }));
+    try {
+      const params = new URLSearchParams({ bill_to_customer: customerAccountNumber, limit: '200' });
+      const invRes = await fetch(`${APEX_AR_INVOICES}?${params}`, { headers: { Accept: 'application/json' } });
+      if (!invRes.ok) throw new Error(`Invoices HTTP ${invRes.status}`);
+      const invData = await invRes.json();
+      const invoices: any[] = invData.items ?? [];
+
+      const allRows: InstPickerRow[] = [];
+      await Promise.allSettled(invoices.map(async (inv: any) => {
+        const txnId = inv.CustomerTransactionId ?? inv.customer_transaction_id ?? inv.CUSTOMER_TRANSACTION_ID;
+        const txnNum = inv.TransactionNumber ?? inv.transaction_number ?? inv.TRANSACTION_NUMBER ?? '';
+        const txnDate = (inv.TransactionDate ?? inv.transaction_date ?? inv.TRANSACTION_DATE ?? '').slice(0, 10);
+        const ccy = inv.InvoiceCurrencyCode ?? inv.invoice_currency_code ?? inv.INVOICE_CURRENCY_CODE ?? '';
+        if (!txnId) return;
+        const instRes = await fetch(`${APEX_AR_INVOICES}/${txnId}/installments`, { headers: { Accept: 'application/json' } });
+        if (!instRes.ok) return;
+        const instData = await instRes.json();
+        (instData.items ?? []).forEach((x: any) => {
+          const bal = x.installment_balance_due ?? x.INSTALLMENT_BALANCE_DUE ?? 0;
+          if (bal <= 0) return; // only open installments
+          allRows.push({
+            key: `${txnId}-${x.installment_id ?? x.INSTALLMENT_ID}`,
+            customerTransactionId: txnId,
+            transactionNumber: txnNum,
+            transactionDate: txnDate,
+            installmentId: x.installment_id ?? x.INSTALLMENT_ID ?? 0,
+            sequenceNumber: x.installment_sequence_number ?? x.INSTALLMENT_SEQUENCE_NUMBER ?? 0,
+            dueDate: (x.installment_due_date ?? x.INSTALLMENT_DUE_DATE ?? '').slice(0, 10),
+            originalAmount: x.original_amount ?? x.ORIGINAL_AMOUNT ?? 0,
+            balanceDue: bal,
+            currency: ccy,
+            applyAmount: null,
+          });
+        });
+      }));
+
+      allRows.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+      setInstPickerRows(p => ({ ...p, [tabKey]: allRows }));
+    } catch (e: any) {
+      message.error(`Failed to load installments: ${e.message}`);
+    } finally {
+      setInstPickerLoading(p => ({ ...p, [tabKey]: false }));
+    }
+  }, []);
 
   // Attachments (per tab)
   type AttachItem = { id?: number; uid: string; name: string; fileType: string; fileSize: number; content?: string; rawFile?: File; status: 'done' | 'uploading' | 'error' };
@@ -2525,6 +2593,22 @@ const ManageReceipts: React.FC = () => {
             }
             extra={
               <Space size="small">
+                {draft.receiptType === 'CASH' && draft.customerAccountNumber && (
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={<FileTextOutlined />}
+                    style={{ background: REDWOOD.success, borderColor: REDWOOD.success, fontSize: 11 }}
+                    onClick={() => {
+                      setInstPickerOpen(p => ({ ...p, [tabKey]: true }));
+                      if (!instPickerRows[tabKey]?.length) {
+                        fetchOpenInstallments(tabKey, draft.customerAccountNumber);
+                      }
+                    }}
+                  >
+                    Select Invoices &amp; Installments
+                  </Button>
+                )}
                 {/* API debug icon — hover to see the URL being called */}
                 <Tooltip
                   title={
@@ -2591,6 +2675,150 @@ const ManageReceipts: React.FC = () => {
               />
             )}
           </Card>
+
+          {/* ── Open Installments Picker Modal ── */}
+          {(() => {
+            const pickerRows   = instPickerRows[tabKey]   ?? [];
+            const pickerLoading = instPickerLoading[tabKey] ?? false;
+            const selectedKeys  = instPickerSel[tabKey]   ?? [];
+            const totalApply    = pickerRows
+              .filter(r => selectedKeys.includes(r.key))
+              .reduce((s, r) => s + (r.applyAmount ?? r.balanceDue), 0);
+
+            const instPickerCols: ColumnsType<InstPickerRow> = [
+              { title: 'Invoice #', dataIndex: 'transactionNumber', width: 130,
+                render: v => <Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.info }}>{v}</Text> },
+              { title: 'Inst #', dataIndex: 'sequenceNumber', width: 60, align: 'center',
+                render: v => <Tag style={{ fontSize: 11 }}>{v}</Tag> },
+              { title: 'Txn Date', dataIndex: 'transactionDate', width: 100,
+                render: v => <Text style={{ fontSize: 12 }}>{v}</Text> },
+              { title: 'Due Date', dataIndex: 'dueDate', width: 100,
+                render: v => {
+                  const overdue = v && v < dayjs().format('YYYY-MM-DD');
+                  return <Text style={{ fontSize: 12, color: overdue ? REDWOOD.primary : undefined, fontWeight: overdue ? 600 : 400 }}>{v || '—'}</Text>;
+                }},
+              { title: 'CCY', dataIndex: 'currency', width: 55, align: 'center',
+                render: v => <Tag style={{ fontSize: 10 }}>{v}</Tag> },
+              { title: 'Original Amt', dataIndex: 'originalAmount', width: 120, align: 'right',
+                render: v => <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>{v != null ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}</Text> },
+              { title: 'Balance Due', dataIndex: 'balanceDue', width: 120, align: 'right',
+                render: v => <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.primary }}>{Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text> },
+              { title: 'Apply Amount', dataIndex: 'applyAmount', width: 140, align: 'right',
+                render: (v, rec) => (
+                  <InputNumber
+                    size="small" style={{ width: '100%' }} precision={2}
+                    min={0} max={rec.balanceDue}
+                    placeholder={Number(rec.balanceDue).toFixed(2)}
+                    value={v}
+                    onChange={val => setInstPickerRows(p => ({
+                      ...p,
+                      [tabKey]: (p[tabKey] ?? []).map(r => r.key === rec.key ? { ...r, applyAmount: val } : r),
+                    }))}
+                  />
+                )},
+            ];
+
+            return (
+              <Modal
+                open={!!instPickerOpen[tabKey]}
+                onCancel={() => setInstPickerOpen(p => ({ ...p, [tabKey]: false }))}
+                width={920}
+                title={
+                  <Space>
+                    <FileTextOutlined style={{ color: REDWOOD.success }} />
+                    <Text strong>Open Invoices &amp; Installments</Text>
+                    <Tag color="blue">{draft.customerName || draft.customerAccountNumber}</Tag>
+                  </Space>
+                }
+                footer={
+                  <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                    <Space>
+                      <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>
+                        {selectedKeys.length} selected
+                      </Text>
+                      {selectedKeys.length > 0 && (
+                        <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>
+                          Total to Apply: {totalApply.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {draft.currency}
+                        </Text>
+                      )}
+                    </Space>
+                    <Space>
+                      <Button onClick={() => setInstPickerOpen(p => ({ ...p, [tabKey]: false }))}>Cancel</Button>
+                      <Button
+                        onClick={() => {
+                          setInstPickerRows(p => ({ ...p, [tabKey]: [] }));
+                          setInstPickerSel(p => ({ ...p, [tabKey]: [] }));
+                          fetchOpenInstallments(tabKey, draft.customerAccountNumber);
+                        }}
+                        icon={<ReloadOutlined />}
+                      >
+                        Refresh
+                      </Button>
+                      <Button
+                        type="primary"
+                        disabled={selectedKeys.length === 0}
+                        style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+                        onClick={() => {
+                          const selected = pickerRows.filter(r => selectedKeys.includes(r.key));
+                          message.success(`${selected.length} installment(s) selected — apply logic to be wired to save`);
+                          setInstPickerOpen(p => ({ ...p, [tabKey]: false }));
+                        }}
+                      >
+                        Apply Selected
+                      </Button>
+                    </Space>
+                  </Space>
+                }
+              >
+                {pickerLoading ? (
+                  <div style={{ textAlign: 'center', padding: 48 }}>
+                    <Spin size="large" />
+                    <div style={{ marginTop: 12, fontSize: 12, color: REDWOOD.neutral600 }}>
+                      Loading open installments for <strong>{draft.customerAccountNumber}</strong>…
+                    </div>
+                  </div>
+                ) : pickerRows.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: 48, color: REDWOOD.neutral600, fontSize: 13 }}>
+                    No open installments found for this customer.
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ marginBottom: 10, padding: '6px 10px', background: '#f0f5ff', borderRadius: 6, fontSize: 12, color: REDWOOD.neutral600 }}>
+                      Showing <strong>{pickerRows.length}</strong> open installment(s). Select rows and optionally enter an Apply Amount (defaults to full balance due).
+                    </div>
+                    <Table<InstPickerRow>
+                      columns={instPickerCols}
+                      dataSource={pickerRows}
+                      rowKey="key"
+                      size="small"
+                      pagination={false}
+                      scroll={{ x: 820, y: 400 }}
+                      rowSelection={{
+                        selectedRowKeys: selectedKeys,
+                        onChange: keys => setInstPickerSel(p => ({ ...p, [tabKey]: keys })),
+                      }}
+                      summary={() => (
+                        <Table.Summary fixed>
+                          <Table.Summary.Row style={{ background: '#fafafa' }}>
+                            <Table.Summary.Cell index={0} colSpan={6} align="right">
+                              <Text strong style={{ fontSize: 12 }}>Total Balance Due</Text>
+                            </Table.Summary.Cell>
+                            <Table.Summary.Cell index={1} align="right">
+                              <Text strong style={{ fontFamily: 'monospace', fontSize: 12, color: REDWOOD.primary }}>
+                                {pickerRows.reduce((s, r) => s + r.balanceDue, 0)
+                                  .toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </Text>
+                            </Table.Summary.Cell>
+                            <Table.Summary.Cell index={2} />
+                          </Table.Summary.Row>
+                        </Table.Summary>
+                      )}
+                    />
+                  </>
+                )}
+              </Modal>
+            );
+          })()}
 
         </div>
       </div>
