@@ -3113,13 +3113,17 @@ const ManageReceipts: React.FC = () => {
               { title: 'Apply Amount', dataIndex: 'applyAmount', width: 120, align: 'right',
                 render: (v, rec) => (
                   <InputNumber size="small" style={{ width: '100%' }} precision={2} min={0} max={rec.balanceDue}
-                    placeholder={Number(rec.balanceDue).toFixed(2)} value={v}
+                    placeholder={Number(rec.balanceDue).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} value={v}
+                    formatter={val => val !== undefined && val !== null && val !== '' ? Number(val).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
+                    parser={val => parseFloat((val ?? '').replace(/,/g, '')) || 0}
                     onChange={val => updateRow(rec.key, { applyAmount: val })} />
                 )},
               { title: 'Adjustment Amt', dataIndex: 'adjustmentAmount', width: 130, align: 'right',
                 render: (v, rec) => (
                   <InputNumber size="small" style={{ width: '100%' }} precision={2}
                     placeholder="±0.00" value={v}
+                    formatter={val => val !== undefined && val !== null && val !== '' ? Number(val).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
+                    parser={val => parseFloat((val ?? '').replace(/,/g, '')) || 0}
                     onChange={val => updateRow(rec.key, { adjustmentAmount: val })} />
                 )},
               { title: 'Balance After', width: 115, align: 'right',
@@ -3195,10 +3199,10 @@ const ManageReceipts: React.FC = () => {
                         onClick={() => { setInstPickerSel(p => ({ ...p, [tabKey]: [] })); fetchOpenInstallments(tabKey, draft.customerAccountNumber); }}>
                         Refresh
                       </Button>
-                      <Tooltip title={selectedKeys.length === 0 ? 'Select at least one installment' : undefined}>
-                        <Button type="primary" loading={pickerSaving} disabled={selectedKeys.length === 0}
-                          style={{ background: selectedKeys.length > 0 ? REDWOOD.success : undefined,
-                                   borderColor: selectedKeys.length > 0 ? REDWOOD.success : undefined }}
+                      <Tooltip title={selectedKeys.length === 0 ? 'Select at least one installment' : remaining < -0.01 ? 'Applied amount exceeds receipt amount' : undefined}>
+                        <Button type="primary" loading={pickerSaving} disabled={selectedKeys.length === 0 || remaining < -0.01}
+                          style={{ background: selectedKeys.length > 0 && remaining >= -0.01 ? REDWOOD.success : undefined,
+                                   borderColor: selectedKeys.length > 0 && remaining >= -0.01 ? REDWOOD.success : undefined }}
                           onClick={() => applySelectedInstallments(tabKey, draft)}>
                           Add to Applications
                         </Button>
