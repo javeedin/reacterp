@@ -2611,12 +2611,52 @@ const ManageReceipts: React.FC = () => {
                             </Text>
                           </div>
                         )}
-                        {/* Unapplied display */}
+                        {/* Unapplied / Applied / On-Account live breakdown */}
                         {field('Unapplied Amount',
-                          <Text style={{ fontSize: 18, fontFamily: 'monospace', fontWeight: 600,
-                            color: (draft.unappliedAmount ?? 0) > 0 ? REDWOOD.warning : REDWOOD.success }}>
-                            {fmt(draft.unappliedAmount ?? 0)}
-                          </Text>
+                          (() => {
+                            const rAmt      = draft.amount ?? 0;
+                            const pndApps   = pendingApplications[tabKey] ?? [];
+                            const svdApps   = receiptApplications[tabKey]?.rows ?? [];
+                            const applied   = pndApps.reduce((s, r) => s + r.applyAmount, 0)
+                                            + svdApps.reduce((s, r) => s + r.applicationAmount, 0);
+                            const unapp     = Math.max(0, rAmt - applied);
+                            const onAcct    = applied === 0;
+                            return (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                {/* Big unapplied / on-account number */}
+                                <Text style={{ fontSize: 18, fontFamily: 'monospace', fontWeight: 700,
+                                  color: onAcct ? '#722ed1' : unapp > 0.01 ? REDWOOD.warning : REDWOOD.success }}>
+                                  {fmt(onAcct ? rAmt : unapp)}
+                                </Text>
+                                {/* Breakdown tags */}
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 2 }}>
+                                  {onAcct && rAmt > 0 && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                      <Tag color="purple" style={{ fontSize: 10, margin: 0 }}>On Account</Tag>
+                                      <Text style={{ fontSize: 11, fontFamily: 'monospace', color: '#722ed1', fontWeight: 600 }}>{fmt(rAmt)}</Text>
+                                    </div>
+                                  )}
+                                  {applied > 0 && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                      <Tag color="green" style={{ fontSize: 10, margin: 0 }}>Applied</Tag>
+                                      <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.success, fontWeight: 600 }}>{fmt(applied)}</Text>
+                                    </div>
+                                  )}
+                                  {!onAcct && unapp > 0.01 && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                      <Tag color="orange" style={{ fontSize: 10, margin: 0 }}>Unapplied</Tag>
+                                      <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.warning, fontWeight: 600 }}>{fmt(unapp)}</Text>
+                                    </div>
+                                  )}
+                                  {!onAcct && unapp < 0.01 && applied > 0 && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                      <Tag color="green" style={{ fontSize: 10, margin: 0 }}>Fully Applied</Tag>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()
                         )}
                         {field('Rec. Specialist',   inp('receivablesSpecialist'))}
                         {field('Comments',
@@ -2997,7 +3037,6 @@ const ManageReceipts: React.FC = () => {
                       } : {})}
                       summary={() => (
                         <Table.Summary fixed>
-                          {/* Totals row — colSpan matches: #(1)+Inst#(1)+AppRef(1)+Activity(1)+ProcStatus(1) = 5 before Original Amt */}
                           <Table.Summary.Row style={{ background: '#fafafa' }}>
                             <Table.Summary.Cell index={0} colSpan={5} align="right">
                               <Text strong style={{ fontSize: 11 }}>Total Applied</Text>
@@ -3010,33 +3049,6 @@ const ManageReceipts: React.FC = () => {
                               </Text>
                             </Table.Summary.Cell>
                             <Table.Summary.Cell index={4} colSpan={7} />
-                          </Table.Summary.Row>
-                          {/* Applied / Unapplied / On-Account strip */}
-                          <Table.Summary.Row style={{ background: '#f0f5ff' }}>
-                            <Table.Summary.Cell index={0} colSpan={15}>
-                              <Space size={24} style={{ padding: '4px 8px' }}>
-                                <Space size={6}>
-                                  <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Receipt Amount:</Text>
-                                  <Text strong style={{ fontSize: 12, fontFamily: 'monospace' }}>{fmt(receiptTotal)}</Text>
-                                </Space>
-                                <Space size={6}>
-                                  <Tag color="green" style={{ fontSize: 11, margin: 0 }}>Applied</Tag>
-                                  <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(totalApplied)}</Text>
-                                </Space>
-                                {unapplied > 0.01 && !isOnAccount && (
-                                  <Space size={6}>
-                                    <Tag color="blue" style={{ fontSize: 11, margin: 0 }}>Unapplied</Tag>
-                                    <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.info }}>{fmt(unapplied)}</Text>
-                                  </Space>
-                                )}
-                                {isOnAccount && (
-                                  <Space size={6}>
-                                    <Tag color="purple" style={{ fontSize: 11, margin: 0 }}>On Account</Tag>
-                                    <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: '#722ed1' }}>{fmt(receiptTotal)}</Text>
-                                  </Space>
-                                )}
-                              </Space>
-                            </Table.Summary.Cell>
                           </Table.Summary.Row>
                         </Table.Summary>
                       )}
