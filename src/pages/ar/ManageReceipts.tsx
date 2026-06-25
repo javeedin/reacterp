@@ -2268,9 +2268,9 @@ const ManageReceipts: React.FC = () => {
       { title: 'Adj Amount', key: 'adjAmount', width: 115, align: 'right',
         render: (_, r) => r._pending && r._pendingKey
           ? <InputNumber size="small" style={{ width: '100%' }} precision={2}
-              placeholder="±0.00" value={r._adjAmount ?? undefined}
+              placeholder="±0.00" value={r._adjAmount || undefined}
               formatter={val => val !== undefined && val !== null && val !== '' ? Number(val).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
-              parser={val => parseFloat((val ?? '').replace(/,/g, '')) || 0}
+              parser={val => { const s = (val ?? '').replace(/,/g, ''); const n = parseFloat(s); return isNaN(n) ? (s === '-' ? '-' as any : 0) : n; }}
               onChange={val => setPendingApplications(prev => {
                 const rows = prev[tabKey] ?? [];
                 return { ...prev, [tabKey]: rows.map(p => p.key === r._pendingKey ? { ...p, adjustmentAmount: val ?? 0 } : p) };
