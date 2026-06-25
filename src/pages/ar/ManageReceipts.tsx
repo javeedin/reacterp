@@ -1827,23 +1827,20 @@ const ManageReceipts: React.FC = () => {
       : i === 4 ? { ...s, status: 'process' } : s
     ) } : p);
 
-    // ── Step 7: PUT Installments ───────────────────────────────────────────────
+    // ── Step 7: PUT Installments — update AMOUNT_PAID and INSTALLMENT_AMOUNT_ADJUSTED ────
     let instErrors: string[] = [];
-    for (let i = 0; i < postedAppIds.length; i++) {
-      const appId = postedAppIds[i];
-      const row   = pending[i];
-      if (!appId || !row) continue;
+    for (const row of pending) {
+      if (!row.installmentId || !row.customerTransactionId) continue;
       try {
         const putBody = {
-          ApplicationAmount:          row.applyAmount,
-          ReferenceInstallmentId:     row.installmentId,
-          ReferenceTransactionId:     row.customerTransactionId,
-          ReferenceTransactionNumber: row.transactionNumber,
-          LastUpdatedBy:              'REERP',
+          AmountPaid:                   row.applyAmount,
+          InstallmentAmountAdjusted:    row.adjustmentAmount ?? 0,
+          LastUpdatedBy:                'REERP',
         };
-        const res = await fetch(`${APEX_RECEIPT_APPS}/${appId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(putBody) });
-        if (!res.ok) instErrors.push(`App ${appId}: HTTP ${res.status}`);
-      } catch (e: any) { instErrors.push(`App ${appId}: ${e.message}`); }
+        const url = `${APEX_AR_INVOICES}/${row.customerTransactionId}/installments/${row.installmentId}`;
+        const res = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(putBody) });
+        if (!res.ok) instErrors.push(`${row.transactionNumber}/#${row.sequenceNumber}: HTTP ${res.status}`);
+      } catch (e: any) { instErrors.push(`${row.transactionNumber}/#${row.sequenceNumber}: ${e.message}`); }
     }
 
     setSaveProgress(p => p ? { ...p, done: true, steps: p.steps.map((s, i) =>
@@ -1918,18 +1915,17 @@ const ManageReceipts: React.FC = () => {
         }, null, 2),
         response: '', running: false, done: false,
       })),
-      {
-        label: `PUT Installment balance — per application`,
-        method: 'PUT', url: `${APEX_RECEIPT_APPS}/{applicationId}`,
+      ...pending.map((row, i) => ({
+        label: `PUT Installment — ${row.transactionNumber}/#${row.sequenceNumber}`,
+        method: 'PUT',
+        url: `${APEX_AR_INVOICES}/${row.customerTransactionId}/installments/${row.installmentId}`,
         body: JSON.stringify({
-          ApplicationAmount:          exRow?.applyAmount ?? 0,
-          ReferenceInstallmentId:     exRow?.installmentId ?? 0,
-          ReferenceTransactionId:     exRow?.customerTransactionId ?? 0,
-          ReferenceTransactionNumber: exRow?.transactionNumber ?? '',
-          LastUpdatedBy:              'REERP',
+          AmountPaid:                row.applyAmount,
+          InstallmentAmountAdjusted: row.adjustmentAmount ?? 0,
+          LastUpdatedBy:             'REERP',
         }, null, 2),
         response: '', running: false, done: false,
-      },
+      })),
     ];
     setDebugModal({ open: true, tabKey, steps });
   };
