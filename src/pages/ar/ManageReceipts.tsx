@@ -545,8 +545,8 @@ const ManageReceipts: React.FC = () => {
         errors.push(`App for ${row.transactionNumber}: ${e.message}`);
       }
 
-      // 2. Create adjustment if adjustmentAmount > 0
-      if (adjAmt > 0) {
+      // 2. Create adjustment if adjustmentAmount is non-zero (can be positive or negative)
+      if (adjAmt !== 0) {
         try {
           const adjBody = {
             CustomerTransactionId: row.customerTransactionId,
@@ -2346,14 +2346,14 @@ const ManageReceipts: React.FC = () => {
                         {/* Accounted Amount display */}
                         {field('Accounted Amount',
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <Text style={{ fontSize: 14, fontFamily: 'monospace', fontWeight: 700, color: '#1a1a1a' }}>
+                            <Text style={{ fontSize: 20, fontFamily: 'monospace', fontWeight: 700, color: '#1a1a1a' }}>
                               {fmt(draft.accountedAmount ?? 0)}
                             </Text>
                           </div>
                         )}
                         {/* Unapplied display */}
                         {field('Unapplied Amount',
-                          <Text style={{ fontSize: 13, fontFamily: 'monospace',
+                          <Text style={{ fontSize: 18, fontFamily: 'monospace', fontWeight: 600,
                             color: (draft.unappliedAmount ?? 0) > 0 ? REDWOOD.warning : REDWOOD.success }}>
                             {fmt(draft.unappliedAmount ?? 0)}
                           </Text>
@@ -2375,6 +2375,106 @@ const ManageReceipts: React.FC = () => {
                         {field('Conv. Rate Type',  inp('conversionRateType'))}
                         {field('Conv. Rate',       num('conversionRate'))}
                         {field('Struct. Pay. Ref', inp('structuredPaymentReference'))}
+
+                        {/* ── Attachments (inline) ── */}
+                        <div style={{ marginTop: 10, borderTop: `1px solid ${REDWOOD.border}`, paddingTop: 8 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                            <Space size={4}>
+                              <PaperClipOutlined style={{ color: REDWOOD.neutral600, fontSize: 12 }} />
+                              <Text strong style={{ fontSize: 12 }}>Attachments</Text>
+                              {(tabAttachments[tabKey] || []).length > 0 && (
+                                <Badge count={(tabAttachments[tabKey] || []).length} style={{ backgroundColor: REDWOOD.info }} />
+                              )}
+                            </Space>
+                            <Space size={4}>
+                              <Tooltip title="Show API request details">
+                                <Button size="small" icon={<ApiOutlined />} onClick={() => {
+                                  const pending = (tabAttachments[tabKey] || []).filter((a: any) => !a.id);
+                                  const url = `${APEX_AR_RECEIPTS}/${draft.standardReceiptId}/attachments`;
+                                  const body = pending.length > 0
+                                    ? JSON.stringify({ fileName: pending[0].name, fileType: pending[0].fileType || '', fileSize: pending[0].fileSize, content: '(base64 omitted)' }, null, 2)
+                                    : '(no pending attachments)';
+                                  setAttApiDebug({ url, body });
+                                }} />
+                              </Tooltip>
+                              <Tooltip title={!hasSavedId ? 'Save the receipt first' : undefined}>
+                                <Button size="small" icon={<UploadOutlined />}
+                                  disabled={!hasSavedId} loading={attSaving[tabKey]}
+                                  onClick={() => handleSaveAttachments(tabKey, draft.standardReceiptId)}>
+                                  Save Attachments
+                                </Button>
+                              </Tooltip>
+                            </Space>
+                          </div>
+                          <Upload
+                            fileList={(tabAttachments[tabKey] || []).map((a: any) => ({ uid: a.uid, name: a.name, status: a.status, size: a.fileSize, type: a.fileType }))}
+                            beforeUpload={(file) => {
+                              const reader = new FileReader();
+                              reader.onload = (e) => {
+                                const base64 = (e.target?.result as string)?.split(',')[1] || '';
+                                setTabAttachments(prev => ({
+                                  ...prev,
+                                  [tabKey]: [...(prev[tabKey] || []), { uid: `new-${Date.now()}`, name: file.name, fileType: file.type, fileSize: file.size, content: base64, rawFile: file, status: 'done' }],
+                                }));
+                              };
+                              reader.readAsDataURL(file);
+                              return false;
+                            }}
+                            onRemove={(file) => new Promise((resolve) => {
+                              Modal.confirm({
+                                title: 'Delete attachment?',
+                                content: `"${file.name}" will be permanently removed.`,
+                                okText: 'Delete', okButtonProps: { danger: true }, cancelText: 'Cancel',
+                                onOk: async () => {
+                                  const att = (tabAttachments[tabKey] || []).find((a: any) => a.uid === file.uid);
+                                  if ((att as any)?.id && draft.standardReceiptId) {
+                                    await fetch(`${APEX_AR_RECEIPTS}/${draft.standardReceiptId}/attachments/${(att as any).id}`, { method: 'DELETE' }).catch(() => {});
+                                  }
+                                  setTabAttachments(prev => ({ ...prev, [tabKey]: (prev[tabKey] || []).filter((a: any) => a.uid !== file.uid) }));
+                                  resolve(false);
+                                },
+                                onCancel: () => resolve(false),
+                              });
+                            })}
+                            showUploadList={false}
+                            multiple
+                            disabled={!hasSavedId}
+                          >
+                            <Tooltip title={!hasSavedId ? 'Save the receipt first to attach files' : undefined}>
+                              <Button icon={<UploadOutlined />} disabled={!hasSavedId} size="small">Attach Files</Button>
+                            </Tooltip>
+                          </Upload>
+                          {(tabAttachments[tabKey] || []).length === 0 && (
+                            <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>No attachments</Text>
+                          )}
+                          <div style={{ marginTop: 6 }}>
+                            {(tabAttachments[tabKey] || []).map((att: any) => (
+                              <div key={att.uid} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 0', fontSize: 12 }}>
+                                <PaperClipOutlined style={{ color: REDWOOD.neutral600, flexShrink: 0, fontSize: 11 }} />
+                                <span style={{ flex: '0 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }} title={att.name}>{att.name}</span>
+                                {!att.id && <Tag color="orange" style={{ fontSize: 10, margin: 0 }}>Pending</Tag>}
+                                <Button type="text" size="small" icon={<EyeOutlined />} style={{ padding: '0 3px' }}
+                                  onClick={() => handlePreviewAtt(tabKey, att, draft.standardReceiptId)} />
+                                <Button type="text" size="small" icon={<DownloadOutlined />} style={{ padding: '0 3px' }}
+                                  onClick={() => handleDownloadAtt(tabKey, att, draft.standardReceiptId)} />
+                                <Button type="text" size="small" icon={<DeleteOutlined />} style={{ padding: '0 3px', color: '#ff4d4f' }}
+                                  onClick={() => {
+                                    Modal.confirm({
+                                      title: 'Delete attachment?',
+                                      content: `"${att.name}" will be permanently removed.`,
+                                      okText: 'Delete', okButtonProps: { danger: true }, cancelText: 'Cancel',
+                                      onOk: async () => {
+                                        if (att.id && draft.standardReceiptId) {
+                                          await fetch(`${APEX_AR_RECEIPTS}/${draft.standardReceiptId}/attachments/${att.id}`, { method: 'DELETE' }).catch(() => {});
+                                        }
+                                        setTabAttachments(prev => ({ ...prev, [tabKey]: (prev[tabKey] || []).filter((a: any) => a.uid !== att.uid) }));
+                                      },
+                                    });
+                                  }} />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       </Col>
 
                     </Row>
@@ -2558,124 +2658,6 @@ const ManageReceipts: React.FC = () => {
             ]} />
           </Card>
 
-          {/* ── Attachments ── */}
-          <Card size="small" style={{ marginBottom: 10, borderRadius: 8 }}
-            title={
-              <Space>
-                <PaperClipOutlined style={{ color: REDWOOD.neutral600 }} />
-                <Text strong style={{ fontSize: 13 }}>Attachments</Text>
-                {(tabAttachments[tabKey] || []).length > 0 && (
-                  <Badge count={(tabAttachments[tabKey] || []).length} style={{ backgroundColor: REDWOOD.info }} />
-                )}
-              </Space>
-            }
-            extra={
-              <Space size={4}>
-                <Tooltip title="Show API request details (URL & JSON body)">
-                  <Button size="small" icon={<ApiOutlined />} onClick={() => {
-                    const pending = (tabAttachments[tabKey] || []).filter(a => !a.id);
-                    const url = `${APEX_AR_RECEIPTS}/${draft.standardReceiptId}/attachments`;
-                    const body = pending.length > 0
-                      ? JSON.stringify({ fileName: pending[0].name, fileType: pending[0].fileType || '', fileSize: pending[0].fileSize, content: '(base64 content omitted for brevity)' }, null, 2)
-                      : '(no pending attachments — add a file first)';
-                    setAttApiDebug({ url, body });
-                  }} />
-                </Tooltip>
-                <Tooltip title={!hasSavedId ? 'Save the receipt first' : undefined}>
-                  <Button size="small" icon={<UploadOutlined />}
-                    disabled={!hasSavedId}
-                    loading={attSaving[tabKey]}
-                    onClick={() => handleSaveAttachments(tabKey, draft.standardReceiptId)}>
-                    Save Attachments
-                  </Button>
-                </Tooltip>
-              </Space>
-            }
-          >
-            <div style={{ padding: '8px 12px' }}>
-              <Upload
-                fileList={(tabAttachments[tabKey] || []).map(a => ({ uid: a.uid, name: a.name, status: a.status, size: a.fileSize, type: a.fileType }))}
-                beforeUpload={(file) => {
-                  const reader = new FileReader();
-                  reader.onload = (e) => {
-                    const base64 = (e.target?.result as string)?.split(',')[1] || '';
-                    setTabAttachments(prev => ({
-                      ...prev,
-                      [tabKey]: [...(prev[tabKey] || []), { uid: `new-${Date.now()}`, name: file.name, fileType: file.type, fileSize: file.size, content: base64, rawFile: file, status: 'done' }],
-                    }));
-                  };
-                  reader.readAsDataURL(file);
-                  return false;
-                }}
-                onRemove={(file) => new Promise((resolve) => {
-                  Modal.confirm({
-                    title: 'Delete attachment?',
-                    content: `"${file.name}" will be permanently removed.`,
-                    okText: 'Delete', okButtonProps: { danger: true }, cancelText: 'Cancel',
-                    onOk: async () => {
-                      const att = (tabAttachments[tabKey] || []).find(a => a.uid === file.uid);
-                      if (att?.id && draft.standardReceiptId) {
-                        await fetch(`${APEX_AR_RECEIPTS}/${draft.standardReceiptId}/attachments/${att.id}`, { method: 'DELETE' }).catch(() => {});
-                      }
-                      setTabAttachments(prev => ({ ...prev, [tabKey]: (prev[tabKey] || []).filter(a => a.uid !== file.uid) }));
-                      resolve(false);
-                    },
-                    onCancel: () => resolve(false),
-                  });
-                })}
-                showUploadList={false}
-                multiple
-                disabled={!hasSavedId}
-              >
-                <Tooltip title={!hasSavedId ? 'Save the receipt first to attach files' : undefined}>
-                  <Button icon={<UploadOutlined />} disabled={!hasSavedId} size="small">
-                    Attach Files
-                  </Button>
-                </Tooltip>
-              </Upload>
-
-              <div style={{ marginTop: 8 }}>
-                {(tabAttachments[tabKey] || []).map(att => (
-                  <div key={att.uid} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 0', fontSize: 13 }}>
-                    <PaperClipOutlined style={{ color: REDWOOD.neutral600, flexShrink: 0 }} />
-                    <span style={{ flex: '0 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 300 }} title={att.name}>
-                      {att.name}
-                    </span>
-                    {att.fileSize > 0 && (
-                      <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>
-                        ({att.fileSize < 1024 ? `${att.fileSize} B` : att.fileSize < 1048576 ? `${(att.fileSize / 1024).toFixed(1)} KB` : `${(att.fileSize / 1048576).toFixed(1)} MB`})
-                      </Text>
-                    )}
-                    {!att.id && <Tag color="orange" style={{ fontSize: 10, margin: 0 }}>Pending</Tag>}
-                    <Button type="text" size="small" icon={<EyeOutlined />} style={{ flexShrink: 0, padding: '0 4px' }}
-                      onClick={() => handlePreviewAtt(tabKey, att, draft.standardReceiptId)} />
-                    <Button type="text" size="small" icon={<DownloadOutlined />} style={{ flexShrink: 0, padding: '0 4px' }}
-                      onClick={() => handleDownloadAtt(tabKey, att, draft.standardReceiptId)} />
-                    <Button type="text" size="small" icon={<DeleteOutlined />} style={{ flexShrink: 0, padding: '0 4px', color: '#ff4d4f' }}
-                      onClick={() => {
-                        Modal.confirm({
-                          title: 'Delete attachment?',
-                          content: `"${att.name}" will be permanently removed.`,
-                          okText: 'Delete', okButtonProps: { danger: true }, cancelText: 'Cancel',
-                          onOk: async () => {
-                            if (att.id && draft.standardReceiptId) {
-                              await fetch(`${APEX_AR_RECEIPTS}/${draft.standardReceiptId}/attachments/${att.id}`, { method: 'DELETE' }).catch(() => {});
-                            }
-                            setTabAttachments(prev => ({ ...prev, [tabKey]: (prev[tabKey] || []).filter(a => a.uid !== att.uid) }));
-                          },
-                        });
-                      }}
-                    />
-                  </div>
-                ))}
-                {previewLoading && <Spin size="small" style={{ marginTop: 8 }} />}
-                {(tabAttachments[tabKey] || []).length === 0 && (
-                  <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>No attachments</Text>
-                )}
-              </div>
-            </div>
-          </Card>
-
           {/* ── Receipt Applications ── */}
           <Card size="small" style={{ borderRadius: 8 }} bodyStyle={{ padding: 0 }}
             title={
@@ -2826,12 +2808,24 @@ const ManageReceipts: React.FC = () => {
                     placeholder={Number(rec.balanceDue).toFixed(2)} value={v}
                     onChange={val => updateRow(rec.key, { applyAmount: val })} />
                 )},
-              { title: 'Adjustment Amt', dataIndex: 'adjustmentAmount', width: 120, align: 'right',
+              { title: 'Adjustment Amt', dataIndex: 'adjustmentAmount', width: 130, align: 'right',
                 render: (v, rec) => (
-                  <InputNumber size="small" style={{ width: '100%' }} precision={2} min={0}
-                    placeholder="0.00" value={v}
+                  <InputNumber size="small" style={{ width: '100%' }} precision={2}
+                    placeholder="±0.00" value={v}
                     onChange={val => updateRow(rec.key, { adjustmentAmount: val })} />
                 )},
+              { title: 'Balance After', width: 115, align: 'right',
+                render: (_v, rec) => {
+                  const apply = rec.applyAmount ?? rec.balanceDue;
+                  const adj   = rec.adjustmentAmount ?? 0;
+                  const after = Math.max(0, rec.balanceDue - apply - adj);
+                  return (
+                    <Text style={{ fontSize: 11, fontFamily: 'monospace',
+                      color: after === 0 ? REDWOOD.success : after < 0 ? REDWOOD.primary : REDWOOD.neutral600 }}>
+                      {after.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </Text>
+                  );
+                }},
               { title: 'Adj Reason', dataIndex: 'adjustmentReason', width: 140,
                 render: (v, rec) => (
                   <Input size="small" placeholder="Reason…" value={v}
@@ -2869,7 +2863,7 @@ const ManageReceipts: React.FC = () => {
                       {selectedKeys.length > 0 && (
                         <>
                           <Tag color="green">Apply: {totalApply.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {draft.currency}</Tag>
-                          {totalAdj > 0 && <Tag color="orange">Adj: {totalAdj.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {draft.currency}</Tag>}
+                          {totalAdj !== 0 && <Tag color={totalAdj > 0 ? 'orange' : 'red'}>Adj: {totalAdj > 0 ? '+' : ''}{totalAdj.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {draft.currency}</Tag>}
                         </>
                       )}
                     </Space>
