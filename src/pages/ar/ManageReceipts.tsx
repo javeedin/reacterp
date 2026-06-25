@@ -2082,7 +2082,6 @@ const ManageReceipts: React.FC = () => {
     const amtNum = (f: keyof ReceiptDraft) => (
       <InputNumber size="small" style={{ width: '100%', fontSize: 13, fontWeight: 600, fontFamily: 'monospace' }}
         value={draft[f] as number} precision={2} disabled={fieldDisabled}
-        prefix="AED"
         formatter={v => v !== undefined && v !== null && v !== '' ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
         parser={v => parseFloat((v ?? '').replace(/,/g, '')) || 0}
         onChange={v => updateDraft(tabKey, { [f]: v } as any)} />
@@ -2186,11 +2185,13 @@ const ManageReceipts: React.FC = () => {
     const appStatusColor = (s: string) => ({ Applied: 'green', Unapplied: 'blue', Reversed: 'red' }[s] || 'default');
     const procStatusColor = (s: string) => ({ Closed: 'green', Open: 'blue', Reversed: 'red' }[s] || 'default');
 
+    type ExtAppRow = AppRow & { _pending?: boolean; _pendingKey?: string; _instSeq?: number; _adjAmount?: number; _origAmt?: number; _balDue?: number };
+
     const pendingRows = pendingApplications[tabKey] ?? [];
-    const savedRows   = (receiptApplications[tabKey]?.rows ?? []) as (AppRow & { _pending?: boolean; _instSeq?: number; _adjAmount?: number })[];
+    const savedRows   = (receiptApplications[tabKey]?.rows ?? []) as ExtAppRow[];
 
     // Convert pending rows into AppRow shape so they can share the same table
-    const pendingAsAppRows: (AppRow & { _pending?: boolean; _instSeq?: number; _adjAmount?: number })[] = pendingRows.map(r => ({
+    const pendingAsAppRows: ExtAppRow[] = pendingRows.map(r => ({
       key:                        `pending-${r.key}`,
       applicationId:              0,
       applicationDate:            draft.receiptDate || dayjs().format('YYYY-MM-DD'),
@@ -2208,59 +2209,82 @@ const ManageReceipts: React.FC = () => {
       custAccountId:              null,
       customerSite:               draft.customerSite || '',
       _pending:                   true,
+      _pendingKey:                r.key,
       _instSeq:                   r.sequenceNumber,
       _adjAmount:                 r.adjustmentAmount,
+      _origAmt:                   r.balanceDue,   // original ≈ balanceDue at time of staging
+      _balDue:                    r.balanceDue,
     }));
 
     const allAppRows = [...pendingAsAppRows, ...savedRows];
 
-    const appColumns: ColumnsType<AppRow & { _pending?: boolean; _instSeq?: number; _adjAmount?: number }> = [
+    // ── Applied / Unapplied / On-Account summary ──────────────────────────────
+    const receiptTotal   = draft.amount ?? 0;
+    const totalApplied   = allAppRows.reduce((s, r) => s + (r.applicationAmount || 0), 0);
+    const unapplied      = Math.max(0, receiptTotal - totalApplied);
+    const isOnAccount    = totalApplied === 0 && receiptTotal > 0;
+
+    const appColumns: ColumnsType<ExtAppRow> = [
       { title: '#', key: 'seq', width: 36,
         render: (_,__,i) => <Text type="secondary" style={{ fontSize: 11 }}>{i + 1}</Text> },
       { title: 'Inst #', key: 'instSeq', width: 60, align: 'center',
         render: (_, r) => r._instSeq != null
           ? <Tag style={{ fontSize: 11, margin: 0 }}>#{r._instSeq}</Tag>
           : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
-      { title: 'Application Reference', dataIndex: 'referenceTransactionNumber', width: 160, ellipsis: true,
+      { title: 'Application Reference', dataIndex: 'referenceTransactionNumber', width: 155, ellipsis: true,
         render: (v, r) => (
           <Space size={4}>
             {r._pending && <Tag color="orange" style={{ fontSize: 10, margin: 0, lineHeight: '16px' }}>Pending</Tag>}
             <Text style={{ fontSize: 12, fontWeight: 600 }}>{v || '—'}</Text>
           </Space>
         ) },
-      { title: 'Receivables Activity', dataIndex: 'activityName', width: 150, ellipsis: true,
+      { title: 'Receivables Activity', dataIndex: 'activityName', width: 130, ellipsis: true,
         render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
-      { title: 'Cust Account', dataIndex: 'custAccountId', width: 110,
-        render: v => <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>{v ?? '—'}</Text> },
-      { title: 'Process Status', dataIndex: 'processStatus', width: 110,
+      { title: 'Process Status', dataIndex: 'processStatus', width: 100,
         render: v => v ? <Tag color={procStatusColor(v)} style={{ fontSize: 11 }}>{v}</Tag> : <Text type="secondary">—</Text> },
-      { title: 'Applied Amount', dataIndex: 'applicationAmount', width: 130, align: 'right',
-        render: v => (
-          <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600,
-            color: v > 0 ? REDWOOD.success : undefined }}>
-            {fmt(v || 0)}
-          </Text>
-        ) },
-      { title: 'Adj Amount', key: 'adjAmount', width: 110, align: 'right',
+      { title: 'Original Amt', key: 'origAmt', width: 120, align: 'right',
+        render: (_, r) => r._origAmt != null
+          ? <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{fmt(r._origAmt)}</Text>
+          : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
+      { title: 'Balance Due', key: 'balDue', width: 120, align: 'right',
+        render: (_, r) => r._balDue != null
+          ? <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(r._balDue)}</Text>
+          : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
+      { title: 'Apply Amount', dataIndex: 'applicationAmount', width: 130, align: 'right',
+        render: (v, r) => r._pending
+          ? <InputNumber size="small" style={{ width: '100%' }} precision={2} min={0}
+              value={v}
+              formatter={val => val !== undefined && val !== null ? Number(val).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
+              parser={val => parseFloat((val ?? '').replace(/,/g, '')) || 0}
+              onChange={val => {
+                if (r._pendingKey) {
+                  setPendingApplications(prev => ({
+                    ...prev,
+                    [tabKey]: (prev[tabKey] ?? []).map(p => p.key === r._pendingKey ? { ...p, applyAmount: val ?? 0 } : p),
+                  }));
+                }
+              }} />
+          : <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: v > 0 ? REDWOOD.success : undefined }}>{fmt(v || 0)}</Text> },
+      { title: 'Adj Amount', key: 'adjAmount', width: 105, align: 'right',
         render: (_, r) => r._adjAmount && r._adjAmount !== 0
           ? <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600,
               color: r._adjAmount < 0 ? REDWOOD.primary : REDWOOD.warning }}>
               {r._adjAmount > 0 ? '+' : ''}{fmt(r._adjAmount)}
             </Text>
           : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
-      { title: 'CCY', dataIndex: 'enteredCurrency', width: 55,
+      { title: 'CCY', dataIndex: 'enteredCurrency', width: 52,
         render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
-      { title: 'App. Status', dataIndex: 'applicationStatus', width: 100,
+      { title: 'App. Status', dataIndex: 'applicationStatus', width: 95,
         render: v => v ? <Tag color={appStatusColor(v)} style={{ fontSize: 11 }}>{v}</Tag> : <Text type="secondary">—</Text> },
-      { title: 'Ref Txn Status', dataIndex: 'referenceTransactionStatus', width: 110,
+      { title: 'Ref Txn Status', dataIndex: 'referenceTransactionStatus', width: 105,
         render: v => v ? <Tag color={procStatusColor(v)} style={{ fontSize: 11 }}>{v}</Tag> : <Text type="secondary">—</Text> },
-      { title: 'Latest', dataIndex: 'isLatestApplication', width: 56, align: 'center',
+      { title: 'Latest', dataIndex: 'isLatestApplication', width: 52, align: 'center',
         render: v => v === 'Y'
           ? <Tag color="green" style={{ fontSize: 10, margin: 0 }}>Y</Tag>
           : <Text type="secondary" style={{ fontSize: 11 }}>N</Text> },
-      { title: 'Application Date', dataIndex: 'applicationDate', width: 115,
+      { title: 'Application Date', dataIndex: 'applicationDate', width: 112,
         render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
-      { title: 'Accounting Date', dataIndex: 'accountingDate', width: 115,
+      { title: 'Accounting Date', dataIndex: 'accountingDate', width: 112,
         render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     ];
 
@@ -2971,24 +2995,51 @@ const ManageReceipts: React.FC = () => {
                       onRow={r => ((r as any)._pending ? {
                         style: { background: '#fffbe6' },
                       } : {})}
-                      summary={rows => {
-                        const total = rows.reduce((s, r) => s + (r.applicationAmount || 0), 0);
-                        return total > 0 ? (
-                          <Table.Summary fixed>
-                            <Table.Summary.Row>
-                              <Table.Summary.Cell index={0} colSpan={6}>
-                                <Text strong style={{ fontSize: 12 }}>Total</Text>
-                              </Table.Summary.Cell>
-                              <Table.Summary.Cell index={6} align="right">
-                                <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success }}>
-                                  {fmt(total)}
-                                </Text>
-                              </Table.Summary.Cell>
-                              <Table.Summary.Cell index={7} colSpan={7} />
-                            </Table.Summary.Row>
-                          </Table.Summary>
-                        ) : null;
-                      }}
+                      summary={() => (
+                        <Table.Summary fixed>
+                          {/* Totals row — colSpan matches: #(1)+Inst#(1)+AppRef(1)+Activity(1)+ProcStatus(1) = 5 before Original Amt */}
+                          <Table.Summary.Row style={{ background: '#fafafa' }}>
+                            <Table.Summary.Cell index={0} colSpan={5} align="right">
+                              <Text strong style={{ fontSize: 11 }}>Total Applied</Text>
+                            </Table.Summary.Cell>
+                            <Table.Summary.Cell index={1} />
+                            <Table.Summary.Cell index={2} />
+                            <Table.Summary.Cell index={3} align="right">
+                              <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success }}>
+                                {fmt(totalApplied)}
+                              </Text>
+                            </Table.Summary.Cell>
+                            <Table.Summary.Cell index={4} colSpan={7} />
+                          </Table.Summary.Row>
+                          {/* Applied / Unapplied / On-Account strip */}
+                          <Table.Summary.Row style={{ background: '#f0f5ff' }}>
+                            <Table.Summary.Cell index={0} colSpan={15}>
+                              <Space size={24} style={{ padding: '4px 8px' }}>
+                                <Space size={6}>
+                                  <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Receipt Amount:</Text>
+                                  <Text strong style={{ fontSize: 12, fontFamily: 'monospace' }}>{fmt(receiptTotal)}</Text>
+                                </Space>
+                                <Space size={6}>
+                                  <Tag color="green" style={{ fontSize: 11, margin: 0 }}>Applied</Tag>
+                                  <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(totalApplied)}</Text>
+                                </Space>
+                                {unapplied > 0.01 && !isOnAccount && (
+                                  <Space size={6}>
+                                    <Tag color="blue" style={{ fontSize: 11, margin: 0 }}>Unapplied</Tag>
+                                    <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.info }}>{fmt(unapplied)}</Text>
+                                  </Space>
+                                )}
+                                {isOnAccount && (
+                                  <Space size={6}>
+                                    <Tag color="purple" style={{ fontSize: 11, margin: 0 }}>On Account</Tag>
+                                    <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: '#722ed1' }}>{fmt(receiptTotal)}</Text>
+                                  </Space>
+                                )}
+                              </Space>
+                            </Table.Summary.Cell>
+                          </Table.Summary.Row>
+                        </Table.Summary>
+                      )}
                     />
                   )}
                 </>
