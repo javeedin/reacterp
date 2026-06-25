@@ -8,6 +8,7 @@ import {
   ThunderboltOutlined, WalletOutlined, AuditOutlined, FundOutlined,
   ShopOutlined, HomeOutlined, SettingOutlined, ArrowUpOutlined, ArrowDownOutlined,
   EditOutlined, SwapOutlined, CalculatorOutlined, BarChartOutlined, TeamOutlined,
+  CreditCardOutlined, ReconciliationOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -49,16 +50,19 @@ const MODULES = [
 ];
 
 const QUICK_ACTIONS = [
-  { label: 'Create Journal',        path: '/gl/create-journal',          color: REDWOOD.primary, icon: <EditOutlined />        },
-  { label: 'Manage AP Invoices',    path: '/ap/manage-invoices',         color: REDWOOD.orange,  icon: <FileTextOutlined />    },
-  { label: 'Bank Reconciliation',   path: '/cash/bank-reconciliation',   color: REDWOOD.info,    icon: <BankOutlined />        },
-  { label: 'External Transactions', path: '/cash/external-transactions', color: REDWOOD.info,    icon: <SwapOutlined />        },
-  { label: 'Run Depreciation',      path: '/fa/depreciation',            color: REDWOOD.purple,  icon: <CalculatorOutlined />  },
-  { label: 'Trial Balance',         path: '/gl/trial-balance',           color: REDWOOD.success, icon: <BarChartOutlined />    },
-  { label: 'Manage RM Agreements',  path: '/rm/agreements',              color: REDWOOD.teal,    icon: <TeamOutlined />        },
-  { label: 'Sync Oracle Data',      path: '/sync',                       color: REDWOOD.primary, icon: <SyncOutlined />        },
-  { label: 'Investment Holdings',   path: '/pms/investment-holdings',    color: REDWOOD.teal,    icon: <FundOutlined />        },
-  { label: 'Petty Cash Registers',  path: '/pc/registers',               color: REDWOOD.orange,  icon: <WalletOutlined />      },
+  { label: 'Create Journal',        path: '/gl/create-journal',          color: REDWOOD.primary, icon: <EditOutlined />              },
+  { label: 'AR Invoices',           path: '/ar/manage-invoices',         color: REDWOOD.success, icon: <ReconciliationOutlined />    },
+  { label: 'Manage AP Invoices',    path: '/ap/manage-invoices',         color: REDWOOD.orange,  icon: <FileTextOutlined />          },
+  { label: 'AR Receipts',           path: '/ar/manage-receipts',         color: REDWOOD.success, icon: <DollarOutlined />            },
+  { label: 'Bank Reconciliation',   path: '/cash/bank-reconciliation',   color: REDWOOD.info,    icon: <BankOutlined />              },
+  { label: 'AP Payments',           path: '/ap/payments',                color: REDWOOD.orange,  icon: <CreditCardOutlined />        },
+  { label: 'External Transactions', path: '/cash/external-transactions', color: REDWOOD.info,    icon: <SwapOutlined />              },
+  { label: 'Run Depreciation',      path: '/fa/depreciation',            color: REDWOOD.purple,  icon: <CalculatorOutlined />        },
+  { label: 'Trial Balance',         path: '/gl/trial-balance',           color: REDWOOD.success, icon: <BarChartOutlined />          },
+  { label: 'Manage RM Agreements',  path: '/rm/agreements',              color: REDWOOD.teal,    icon: <TeamOutlined />              },
+  { label: 'Investment Holdings',   path: '/pms/investment-holdings',    color: REDWOOD.teal,    icon: <FundOutlined />              },
+  { label: 'Petty Cash Registers',  path: '/pc/registers',               color: REDWOOD.orange,  icon: <WalletOutlined />            },
+  { label: 'Sync Oracle Data',      path: '/sync',                       color: REDWOOD.primary, icon: <SyncOutlined />              },
 ];
 
 // ── Sub-components ─────────────────────────────────────────────────────────
@@ -224,16 +228,16 @@ const Home: React.FC = () => {
           <Card style={{ borderRadius: 12, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 14 }}
             styles={{ body: { padding: '16px 18px' } }}
             title={<Text strong style={{ fontSize: 13 }}><ThunderboltOutlined style={{ color: REDWOOD.primary, marginRight: 6 }} />Quick Actions</Text>}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
               {QUICK_ACTIONS.map((item, i) => (
                 <div key={i} onClick={() => navigate(item.path)}
-                  style={{ padding: '8px 10px', borderRadius: 8, cursor: 'pointer', background: REDWOOD.neutral50, display: 'flex', alignItems: 'center', gap: 10, border: `1px solid ${REDWOOD.neutral200}` }}
+                  style={{ padding: '7px 10px', borderRadius: 8, cursor: 'pointer', background: REDWOOD.neutral50, display: 'flex', alignItems: 'center', gap: 8, border: `1px solid ${REDWOOD.neutral200}` }}
                   onMouseEnter={e => { (e.currentTarget.style.background = `${item.color}10`); (e.currentTarget.style.borderColor = item.color); }}
                   onMouseLeave={e => { (e.currentTarget.style.background = REDWOOD.neutral50); (e.currentTarget.style.borderColor = REDWOOD.neutral200); }}>
-                  <div style={{ width: 30, height: 30, borderRadius: 7, background: `${item.color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: item.color, flexShrink: 0 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: 7, background: `${item.color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: item.color, flexShrink: 0 }}>
                     {item.icon}
                   </div>
-                  <Text style={{ fontSize: 13, color: REDWOOD.neutral800, fontWeight: 500 }}>{item.label}</Text>
+                  <Text style={{ fontSize: 12, color: REDWOOD.neutral800, fontWeight: 500, lineHeight: 1.3 }}>{item.label}</Text>
                 </div>
               ))}
             </div>
