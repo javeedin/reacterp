@@ -409,12 +409,13 @@ const ManageReceipts: React.FC = () => {
     adjustmentAmount: number | null;
     adjustmentReason: string;
   }
-  const [instPickerOpen,    setInstPickerOpen]    = useState<Record<string, boolean>>({});
-  const [instPickerLoading, setInstPickerLoading] = useState<Record<string, boolean>>({});
-  const [instPickerSaving,  setInstPickerSaving]  = useState<Record<string, boolean>>({});
-  const [instPickerRows,    setInstPickerRows]    = useState<Record<string, InstPickerRow[]>>({});
-  const [instPickerSel,     setInstPickerSel]     = useState<Record<string, React.Key[]>>({});
-  const [instPickerSearch,  setInstPickerSearch]  = useState<Record<string, string>>({});
+  const [instPickerOpen,      setInstPickerOpen]      = useState<Record<string, boolean>>({});
+  const [instPickerLoading,   setInstPickerLoading]   = useState<Record<string, boolean>>({});
+  const [instPickerSaving,    setInstPickerSaving]    = useState<Record<string, boolean>>({});
+  const [instPickerRows,      setInstPickerRows]      = useState<Record<string, InstPickerRow[]>>({});
+  const [instPickerSel,       setInstPickerSel]       = useState<Record<string, React.Key[]>>({});
+  const [instPickerSearch,    setInstPickerSearch]    = useState<Record<string, string>>({});
+  const [instPickerApiOpen,   setInstPickerApiOpen]   = useState(false);
 
   const fetchOpenInstallments = useCallback(async (tabKey: string, customerAccountNumber: string) => {
     if (!customerAccountNumber) return;
@@ -2844,12 +2845,21 @@ const ManageReceipts: React.FC = () => {
                 onCancel={() => setInstPickerOpen(p => ({ ...p, [tabKey]: false }))}
                 width={1100}
                 title={
-                  <Space>
-                    <FileTextOutlined style={{ color: REDWOOD.success }} />
-                    <Text strong>Open Invoices &amp; Installments</Text>
-                    <Tag color="blue">{draft.customerName || draft.customerAccountNumber}</Tag>
-                    {allPickerRows.length > 0 && <Tag>{allPickerRows.length} open</Tag>}
-                  </Space>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 32 }}>
+                    <Space>
+                      <FileTextOutlined style={{ color: REDWOOD.success }} />
+                      <Text strong>Open Invoices &amp; Installments</Text>
+                      <Tag color="blue">{draft.customerName || draft.customerAccountNumber}</Tag>
+                      {allPickerRows.length > 0 && <Tag>{allPickerRows.length} open</Tag>}
+                    </Space>
+                    <Tooltip title="API Inspector — view all webservices and JSON bodies">
+                      <Button size="small" icon={<ApiOutlined />}
+                        style={{ borderColor: REDWOOD.info, color: REDWOOD.info, fontSize: 11 }}
+                        onClick={e => { e.stopPropagation(); setInstPickerApiOpen(true); }}>
+                        API
+                      </Button>
+                    </Tooltip>
+                  </div>
                 }
                 footer={
                   <Space style={{ width: '100%', justifyContent: 'space-between' }}>
@@ -2936,6 +2946,119 @@ const ManageReceipts: React.FC = () => {
                     />
                   </>
                 )}
+              </Modal>
+
+              {/* ── Installment Picker API Inspector ── */}
+              <Modal
+                open={instPickerApiOpen}
+                onCancel={() => setInstPickerApiOpen(false)}
+                footer={<Button onClick={() => setInstPickerApiOpen(false)}>Close</Button>}
+                width={820}
+                title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><Text strong>Open Invoices &amp; Installments — API Inspector</Text></Space>}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+                  {/* 1. Fetch invoices */}
+                  {(() => {
+                    const url = `${APEX_AR_INVOICES}?bill_to_customer=${draft.customerAccountNumber || '{customerAccountNumber}'}&limit=200`;
+                    return (
+                      <div style={{ border: '1px solid #e5e5e5', borderRadius: 8, padding: '12px 14px', background: '#fafafa' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                          <Tag color="blue" style={{ fontWeight: 700 }}>GET</Tag>
+                          <Text strong style={{ fontSize: 13 }}>1. Fetch Open Invoices by Customer</Text>
+                          <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginLeft: 'auto', color: REDWOOD.info }}
+                            onClick={() => { navigator.clipboard.writeText(url); message.success('URL copied'); }} />
+                        </div>
+                        <div style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info, wordBreak: 'break-all', padding: '6px 10px', background: '#f0f5ff', borderRadius: 5, marginBottom: 6 }}>{url}</div>
+                        <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Returns all AR invoices for the selected customer. Each invoice's <code>CustomerTransactionId</code> is then used to fetch installments.</Text>
+                      </div>
+                    );
+                  })()}
+
+                  {/* 2. Fetch installments */}
+                  {(() => {
+                    const url = `${APEX_AR_INVOICES}/{CustomerTransactionId}/installments`;
+                    return (
+                      <div style={{ border: '1px solid #e5e5e5', borderRadius: 8, padding: '12px 14px', background: '#fafafa' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                          <Tag color="blue" style={{ fontWeight: 700 }}>GET</Tag>
+                          <Text strong style={{ fontSize: 13 }}>2. Fetch Installments per Invoice</Text>
+                          <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginLeft: 'auto', color: REDWOOD.info }}
+                            onClick={() => { navigator.clipboard.writeText(url); message.success('URL copied'); }} />
+                        </div>
+                        <div style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info, wordBreak: 'break-all', padding: '6px 10px', background: '#f0f5ff', borderRadius: 5, marginBottom: 6 }}>{url}</div>
+                        <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Called in parallel for each invoice. Only installments with <code>installment_balance_due &gt; 0</code> are shown.</Text>
+                      </div>
+                    );
+                  })()}
+
+                  {/* 3. POST receipt application */}
+                  {(() => {
+                    const url = APEX_RECEIPT_APPS;
+                    const body = JSON.stringify({
+                      StandardReceiptId:          draft.standardReceiptId || 0,
+                      ApplicationDate:            draft.receiptDate || dayjs().format('YYYY-MM-DD'),
+                      AccountingDate:             draft.accountingDate || dayjs().format('YYYY-MM-DD'),
+                      ApplicationAmount:          '<applyAmount or balanceDue>',
+                      ApplicationStatus:          'APP',
+                      ReferenceTransactionId:     '<customerTransactionId>',
+                      ReferenceTransactionNumber: '<transactionNumber>',
+                      ReferenceInstallmentId:     '<installmentId>',
+                      ActivityName:               'Invoice',
+                      ProcessStatus:              'PENDING',
+                      IsLatestApplication:        'Y',
+                      CustomerSite:               draft.customerSite || '',
+                    }, null, 2);
+                    return (
+                      <div style={{ border: `1px solid #b7eb8f`, borderRadius: 8, padding: '12px 14px', background: '#f6ffed' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                          <Tag color="green" style={{ fontWeight: 700 }}>POST</Tag>
+                          <Text strong style={{ fontSize: 13 }}>3. Create Receipt Application</Text>
+                          <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>— called once per selected installment</Text>
+                          <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginLeft: 'auto', color: REDWOOD.info }}
+                            onClick={() => { navigator.clipboard.writeText(`${url}\n\n${body}`); message.success('Copied'); }} />
+                        </div>
+                        <div style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.success, wordBreak: 'break-all', padding: '4px 10px', background: '#f0fff0', borderRadius: 5, marginBottom: 8 }}>{url}</div>
+                        <div style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 10, borderRadius: 6, fontFamily: 'monospace', fontSize: 11, maxHeight: 200, overflowY: 'auto', whiteSpace: 'pre' }}>{body}</div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* 4. POST adjustment */}
+                  {(() => {
+                    const url = `${APEX_DB_CONFIG.baseUrl}/ar/adjustments`;
+                    const body = JSON.stringify({
+                      CustomerTransactionId: '<customerTransactionId>',
+                      TransactionNumber:     '<transactionNumber>',
+                      AdjustmentAmount:      '<adjustmentAmount>',
+                      AdjustmentDate:        draft.receiptDate || dayjs().format('YYYY-MM-DD'),
+                      AccountingDate:        draft.accountingDate || dayjs().format('YYYY-MM-DD'),
+                      AdjustmentType:        'LINE',
+                      Status:                'Approved',
+                      ReceivablesActivity:   'Adjustment',
+                      BusinessUnit:          draft.businessUnit || '',
+                      Currency:              draft.currency || 'AED',
+                      InstallmentNumber:     '<sequenceNumber>',
+                      InstallmentBalance:    '<balanceDue - applyAmount - adjustmentAmount>',
+                      AdjustmentReason:      '<adjustmentReason>',
+                      Comments:              `Auto-created from receipt ${draft.receiptNumber || ''}`,
+                    }, null, 2);
+                    return (
+                      <div style={{ border: `1px solid #ffd591`, borderRadius: 8, padding: '12px 14px', background: '#fffbe6' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                          <Tag color="orange" style={{ fontWeight: 700 }}>POST</Tag>
+                          <Text strong style={{ fontSize: 13 }}>4. Create AR Adjustment</Text>
+                          <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>— only when Adjustment Amount &gt; 0</Text>
+                          <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginLeft: 'auto', color: REDWOOD.info }}
+                            onClick={() => { navigator.clipboard.writeText(`${url}\n\n${body}`); message.success('Copied'); }} />
+                        </div>
+                        <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#d46b08', wordBreak: 'break-all', padding: '4px 10px', background: '#fff7e6', borderRadius: 5, marginBottom: 8 }}>{url}</div>
+                        <div style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 10, borderRadius: 6, fontFamily: 'monospace', fontSize: 11, maxHeight: 200, overflowY: 'auto', whiteSpace: 'pre' }}>{body}</div>
+                      </div>
+                    );
+                  })()}
+
+                </div>
               </Modal>
             );
           })()}
