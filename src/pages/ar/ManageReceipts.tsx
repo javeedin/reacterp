@@ -2873,11 +2873,17 @@ const ManageReceipts: React.FC = () => {
                         onClick={() => { setInstPickerSel(p => ({ ...p, [tabKey]: [] })); fetchOpenInstallments(tabKey, draft.customerAccountNumber); }}>
                         Refresh
                       </Button>
-                      <Button type="primary" loading={pickerSaving} disabled={selectedKeys.length === 0 || !draft.standardReceiptId}
-                        style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
-                        onClick={() => applySelectedInstallments(tabKey, draft)}>
-                        Apply &amp; Save Selected
-                      </Button>
+                      <Tooltip title={
+                        !draft.standardReceiptId ? 'Save the receipt first before applying installments' :
+                        selectedKeys.length === 0 ? 'Select at least one installment' : undefined
+                      }>
+                        <Button type="primary" loading={pickerSaving} disabled={selectedKeys.length === 0 || !draft.standardReceiptId}
+                          style={{ background: selectedKeys.length > 0 && draft.standardReceiptId ? REDWOOD.success : undefined,
+                                   borderColor: selectedKeys.length > 0 && draft.standardReceiptId ? REDWOOD.success : undefined }}
+                          onClick={() => applySelectedInstallments(tabKey, draft)}>
+                          Apply &amp; Save Selected
+                        </Button>
+                      </Tooltip>
                     </Space>
                   </Space>
                 }
