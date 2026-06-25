@@ -406,11 +406,15 @@ const ManageReceipts: React.FC = () => {
     balanceDue: number;
     currency: string;
     applyAmount: number | null;
+    adjustmentAmount: number | null;
+    adjustmentReason: string;
   }
   const [instPickerOpen,    setInstPickerOpen]    = useState<Record<string, boolean>>({});
   const [instPickerLoading, setInstPickerLoading] = useState<Record<string, boolean>>({});
+  const [instPickerSaving,  setInstPickerSaving]  = useState<Record<string, boolean>>({});
   const [instPickerRows,    setInstPickerRows]    = useState<Record<string, InstPickerRow[]>>({});
   const [instPickerSel,     setInstPickerSel]     = useState<Record<string, React.Key[]>>({});
+  const [instPickerSearch,  setInstPickerSearch]  = useState<Record<string, string>>({});
 
   const fetchOpenInstallments = useCallback(async (tabKey: string, customerAccountNumber: string) => {
     if (!customerAccountNumber) return;
@@ -425,29 +429,31 @@ const ManageReceipts: React.FC = () => {
 
       const allRows: InstPickerRow[] = [];
       await Promise.allSettled(invoices.map(async (inv: any) => {
-        const txnId = inv.CustomerTransactionId ?? inv.customer_transaction_id ?? inv.CUSTOMER_TRANSACTION_ID;
+        const txnId  = inv.CustomerTransactionId ?? inv.customer_transaction_id ?? inv.CUSTOMER_TRANSACTION_ID;
         const txnNum = inv.TransactionNumber ?? inv.transaction_number ?? inv.TRANSACTION_NUMBER ?? '';
         const txnDate = (inv.TransactionDate ?? inv.transaction_date ?? inv.TRANSACTION_DATE ?? '').slice(0, 10);
-        const ccy = inv.InvoiceCurrencyCode ?? inv.invoice_currency_code ?? inv.INVOICE_CURRENCY_CODE ?? '';
+        const ccy    = inv.InvoiceCurrencyCode ?? inv.invoice_currency_code ?? inv.INVOICE_CURRENCY_CODE ?? '';
         if (!txnId) return;
         const instRes = await fetch(`${APEX_AR_INVOICES}/${txnId}/installments`, { headers: { Accept: 'application/json' } });
         if (!instRes.ok) return;
         const instData = await instRes.json();
         (instData.items ?? []).forEach((x: any) => {
           const bal = x.installment_balance_due ?? x.INSTALLMENT_BALANCE_DUE ?? 0;
-          if (bal <= 0) return; // only open installments
+          if (bal <= 0) return;
           allRows.push({
             key: `${txnId}-${x.installment_id ?? x.INSTALLMENT_ID}`,
             customerTransactionId: txnId,
             transactionNumber: txnNum,
             transactionDate: txnDate,
-            installmentId: x.installment_id ?? x.INSTALLMENT_ID ?? 0,
-            sequenceNumber: x.installment_sequence_number ?? x.INSTALLMENT_SEQUENCE_NUMBER ?? 0,
-            dueDate: (x.installment_due_date ?? x.INSTALLMENT_DUE_DATE ?? '').slice(0, 10),
-            originalAmount: x.original_amount ?? x.ORIGINAL_AMOUNT ?? 0,
+            installmentId:   x.installment_id ?? x.INSTALLMENT_ID ?? 0,
+            sequenceNumber:  x.installment_sequence_number ?? x.INSTALLMENT_SEQUENCE_NUMBER ?? 0,
+            dueDate:         (x.installment_due_date ?? x.INSTALLMENT_DUE_DATE ?? '').slice(0, 10),
+            originalAmount:  x.original_amount ?? x.ORIGINAL_AMOUNT ?? 0,
             balanceDue: bal,
             currency: ccy,
             applyAmount: null,
+            adjustmentAmount: null,
+            adjustmentReason: '',
           });
         });
       }));
@@ -460,6 +466,94 @@ const ManageReceipts: React.FC = () => {
       setInstPickerLoading(p => ({ ...p, [tabKey]: false }));
     }
   }, []);
+
+  const applySelectedInstallments = useCallback(async (tabKey: string, draft: ReceiptDraft) => {
+    const allRows    = instPickerRows[tabKey] ?? [];
+    const selectedKeys = instPickerSel[tabKey] ?? [];
+    const selected   = allRows.filter(r => selectedKeys.includes(r.key));
+    if (!selected.length) return;
+
+    setInstPickerSaving(p => ({ ...p, [tabKey]: true }));
+    const today = dayjs().format('YYYY-MM-DD');
+    let appOk = 0, adjOk = 0, errors: string[] = [];
+
+    for (const row of selected) {
+      const applyAmt = row.applyAmount ?? row.balanceDue;
+      const adjAmt   = row.adjustmentAmount ?? 0;
+
+      // 1. Save receipt application
+      try {
+        const appBody = {
+          StandardReceiptId:          draft.standardReceiptId,
+          ApplicationDate:            draft.receiptDate || today,
+          AccountingDate:             draft.accountingDate || today,
+          ApplicationAmount:          applyAmt,
+          ApplicationStatus:          'APP',
+          ReferenceTransactionId:     row.customerTransactionId,
+          ReferenceTransactionNumber: row.transactionNumber,
+          ReferenceInstallmentId:     row.installmentId,
+          ActivityName:               'Invoice',
+          ProcessStatus:              'PENDING',
+          IsLatestApplication:        'Y',
+          CustAccountId:              draft.customerAccountNumber ? null : null,
+          CustomerSite:               draft.customerSite || '',
+        };
+        const res = await fetch(`${APEX_RECEIPT_APPS}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(appBody),
+        });
+        if (res.ok) appOk++;
+        else errors.push(`App for ${row.transactionNumber}/${row.sequenceNumber}: HTTP ${res.status}`);
+      } catch (e: any) {
+        errors.push(`App for ${row.transactionNumber}: ${e.message}`);
+      }
+
+      // 2. Create adjustment if adjustmentAmount > 0
+      if (adjAmt > 0) {
+        try {
+          const adjBody = {
+            CustomerTransactionId: row.customerTransactionId,
+            TransactionNumber:     row.transactionNumber,
+            AdjustmentAmount:      adjAmt,
+            AdjustmentDate:        draft.receiptDate || today,
+            AccountingDate:        draft.accountingDate || today,
+            AdjustmentType:        'LINE',
+            Status:                'Approved',
+            ReceivablesActivity:   'Adjustment',
+            BusinessUnit:          draft.businessUnit || '',
+            Currency:              row.currency,
+            InstallmentNumber:     row.sequenceNumber,
+            InstallmentBalance:    Math.max(0, row.balanceDue - applyAmt - adjAmt),
+            AdjustmentReason:      row.adjustmentReason || 'Receipt adjustment',
+            Comments:              `Auto-created from receipt ${draft.receiptNumber}`,
+          };
+          const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/ar/adjustments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify(adjBody),
+          });
+          if (res.ok) adjOk++;
+          else errors.push(`Adj for ${row.transactionNumber}/${row.sequenceNumber}: HTTP ${res.status}`);
+        } catch (e: any) {
+          errors.push(`Adj for ${row.transactionNumber}: ${e.message}`);
+        }
+      }
+    }
+
+    setInstPickerSaving(p => ({ ...p, [tabKey]: false }));
+
+    if (errors.length === 0) {
+      message.success(`Applied ${appOk} installment(s)${adjOk > 0 ? ` + ${adjOk} adjustment(s) created` : ''}`);
+    } else {
+      message.warning(`Partial: ${appOk} applied, ${adjOk} adj. Errors: ${errors.join(' | ')}`);
+    }
+
+    // Refresh applications table
+    setInstPickerOpen(p => ({ ...p, [tabKey]: false }));
+    fetchedAppsRef.current.delete(tabKey);
+    fetchApplications(tabKey, draft.standardReceiptId);
+  }, [instPickerRows, instPickerSel, fetchApplications]);
 
   // Attachments (per tab)
   type AttachItem = { id?: number; uid: string; name: string; fileType: string; fileSize: number; content?: string; rawFile?: File; status: 'done' | 'uploading' | 'error' };
@@ -2679,43 +2773,68 @@ const ManageReceipts: React.FC = () => {
 
           {/* ── Open Installments Picker Modal ── */}
           {(() => {
-            const pickerRows   = instPickerRows[tabKey]   ?? [];
-            const pickerLoading = instPickerLoading[tabKey] ?? false;
-            const selectedKeys  = instPickerSel[tabKey]   ?? [];
-            const totalApply    = pickerRows
+            const allPickerRows  = instPickerRows[tabKey]   ?? [];
+            const pickerLoading  = instPickerLoading[tabKey] ?? false;
+            const pickerSaving   = instPickerSaving[tabKey]  ?? false;
+            const selectedKeys   = instPickerSel[tabKey]    ?? [];
+            const searchQ        = (instPickerSearch[tabKey] ?? '').toLowerCase();
+            const pickerRows     = searchQ
+              ? allPickerRows.filter(r =>
+                  r.transactionNumber.toLowerCase().includes(searchQ) ||
+                  r.transactionDate.includes(searchQ) ||
+                  r.dueDate.includes(searchQ) ||
+                  r.currency.toLowerCase().includes(searchQ) ||
+                  String(r.sequenceNumber).includes(searchQ) ||
+                  String(r.balanceDue).includes(searchQ) ||
+                  String(r.originalAmount).includes(searchQ))
+              : allPickerRows;
+            const totalApply = allPickerRows
               .filter(r => selectedKeys.includes(r.key))
               .reduce((s, r) => s + (r.applyAmount ?? r.balanceDue), 0);
+            const totalAdj = allPickerRows
+              .filter(r => selectedKeys.includes(r.key))
+              .reduce((s, r) => s + (r.adjustmentAmount ?? 0), 0);
+
+            const updateRow = (key: string, patch: Partial<InstPickerRow>) =>
+              setInstPickerRows(p => ({
+                ...p,
+                [tabKey]: (p[tabKey] ?? []).map(r => r.key === key ? { ...r, ...patch } : r),
+              }));
 
             const instPickerCols: ColumnsType<InstPickerRow> = [
-              { title: 'Invoice #', dataIndex: 'transactionNumber', width: 130,
+              { title: 'Invoice #', dataIndex: 'transactionNumber', width: 120,
                 render: v => <Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.info }}>{v}</Text> },
-              { title: 'Inst #', dataIndex: 'sequenceNumber', width: 60, align: 'center',
+              { title: 'Inst #', dataIndex: 'sequenceNumber', width: 55, align: 'center',
                 render: v => <Tag style={{ fontSize: 11 }}>{v}</Tag> },
-              { title: 'Txn Date', dataIndex: 'transactionDate', width: 100,
+              { title: 'Txn Date', dataIndex: 'transactionDate', width: 95,
                 render: v => <Text style={{ fontSize: 12 }}>{v}</Text> },
-              { title: 'Due Date', dataIndex: 'dueDate', width: 100,
+              { title: 'Due Date', dataIndex: 'dueDate', width: 95,
                 render: v => {
                   const overdue = v && v < dayjs().format('YYYY-MM-DD');
                   return <Text style={{ fontSize: 12, color: overdue ? REDWOOD.primary : undefined, fontWeight: overdue ? 600 : 400 }}>{v || '—'}</Text>;
                 }},
-              { title: 'CCY', dataIndex: 'currency', width: 55, align: 'center',
+              { title: 'CCY', dataIndex: 'currency', width: 50, align: 'center',
                 render: v => <Tag style={{ fontSize: 10 }}>{v}</Tag> },
-              { title: 'Original Amt', dataIndex: 'originalAmount', width: 120, align: 'right',
-                render: v => <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>{v != null ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}</Text> },
-              { title: 'Balance Due', dataIndex: 'balanceDue', width: 120, align: 'right',
+              { title: 'Original Amt', dataIndex: 'originalAmount', width: 110, align: 'right',
+                render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text> },
+              { title: 'Balance Due', dataIndex: 'balanceDue', width: 110, align: 'right',
                 render: v => <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.primary }}>{Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text> },
-              { title: 'Apply Amount', dataIndex: 'applyAmount', width: 140, align: 'right',
+              { title: 'Apply Amount', dataIndex: 'applyAmount', width: 120, align: 'right',
                 render: (v, rec) => (
-                  <InputNumber
-                    size="small" style={{ width: '100%' }} precision={2}
-                    min={0} max={rec.balanceDue}
-                    placeholder={Number(rec.balanceDue).toFixed(2)}
-                    value={v}
-                    onChange={val => setInstPickerRows(p => ({
-                      ...p,
-                      [tabKey]: (p[tabKey] ?? []).map(r => r.key === rec.key ? { ...r, applyAmount: val } : r),
-                    }))}
-                  />
+                  <InputNumber size="small" style={{ width: '100%' }} precision={2} min={0} max={rec.balanceDue}
+                    placeholder={Number(rec.balanceDue).toFixed(2)} value={v}
+                    onChange={val => updateRow(rec.key, { applyAmount: val })} />
+                )},
+              { title: 'Adjustment Amt', dataIndex: 'adjustmentAmount', width: 120, align: 'right',
+                render: (v, rec) => (
+                  <InputNumber size="small" style={{ width: '100%' }} precision={2} min={0}
+                    placeholder="0.00" value={v}
+                    onChange={val => updateRow(rec.key, { adjustmentAmount: val })} />
+                )},
+              { title: 'Adj Reason', dataIndex: 'adjustmentReason', width: 140,
+                render: (v, rec) => (
+                  <Input size="small" placeholder="Reason…" value={v}
+                    onChange={e => updateRow(rec.key, { adjustmentReason: e.target.value })} />
                 )},
             ];
 
@@ -2723,54 +2842,56 @@ const ManageReceipts: React.FC = () => {
               <Modal
                 open={!!instPickerOpen[tabKey]}
                 onCancel={() => setInstPickerOpen(p => ({ ...p, [tabKey]: false }))}
-                width={920}
+                width={1100}
                 title={
                   <Space>
                     <FileTextOutlined style={{ color: REDWOOD.success }} />
                     <Text strong>Open Invoices &amp; Installments</Text>
                     <Tag color="blue">{draft.customerName || draft.customerAccountNumber}</Tag>
+                    {allPickerRows.length > 0 && <Tag>{allPickerRows.length} open</Tag>}
                   </Space>
                 }
                 footer={
                   <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-                    <Space>
-                      <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>
-                        {selectedKeys.length} selected
-                      </Text>
+                    <Space wrap>
+                      <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>{selectedKeys.length} selected</Text>
                       {selectedKeys.length > 0 && (
-                        <Text strong style={{ fontSize: 13, color: REDWOOD.success }}>
-                          Total to Apply: {totalApply.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {draft.currency}
-                        </Text>
+                        <>
+                          <Tag color="green">Apply: {totalApply.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {draft.currency}</Tag>
+                          {totalAdj > 0 && <Tag color="orange">Adj: {totalAdj.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {draft.currency}</Tag>}
+                        </>
                       )}
                     </Space>
                     <Space>
                       <Button onClick={() => setInstPickerOpen(p => ({ ...p, [tabKey]: false }))}>Cancel</Button>
-                      <Button
-                        onClick={() => {
-                          setInstPickerRows(p => ({ ...p, [tabKey]: [] }));
-                          setInstPickerSel(p => ({ ...p, [tabKey]: [] }));
-                          fetchOpenInstallments(tabKey, draft.customerAccountNumber);
-                        }}
-                        icon={<ReloadOutlined />}
-                      >
+                      <Button icon={<ReloadOutlined />}
+                        onClick={() => { setInstPickerSel(p => ({ ...p, [tabKey]: [] })); fetchOpenInstallments(tabKey, draft.customerAccountNumber); }}>
                         Refresh
                       </Button>
-                      <Button
-                        type="primary"
-                        disabled={selectedKeys.length === 0}
+                      <Button type="primary" loading={pickerSaving} disabled={selectedKeys.length === 0 || !draft.standardReceiptId}
                         style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
-                        onClick={() => {
-                          const selected = pickerRows.filter(r => selectedKeys.includes(r.key));
-                          message.success(`${selected.length} installment(s) selected — apply logic to be wired to save`);
-                          setInstPickerOpen(p => ({ ...p, [tabKey]: false }));
-                        }}
-                      >
-                        Apply Selected
+                        onClick={() => applySelectedInstallments(tabKey, draft)}>
+                        Apply &amp; Save Selected
                       </Button>
                     </Space>
                   </Space>
                 }
               >
+                {/* Search bar */}
+                {!pickerLoading && allPickerRows.length > 0 && (
+                  <div style={{ marginBottom: 10 }}>
+                    <Input.Search allowClear placeholder="Filter by invoice #, date, currency, amount…"
+                      style={{ width: 340 }} size="small"
+                      value={instPickerSearch[tabKey] ?? ''}
+                      onChange={e => setInstPickerSearch(p => ({ ...p, [tabKey]: e.target.value }))}
+                    />
+                    {searchQ && (
+                      <Text style={{ fontSize: 11, color: REDWOOD.neutral600, marginLeft: 8 }}>
+                        {pickerRows.length} / {allPickerRows.length} shown
+                      </Text>
+                    )}
+                  </div>
+                )}
                 {pickerLoading ? (
                   <div style={{ textAlign: 'center', padding: 48 }}>
                     <Spin size="large" />
@@ -2778,39 +2899,37 @@ const ManageReceipts: React.FC = () => {
                       Loading open installments for <strong>{draft.customerAccountNumber}</strong>…
                     </div>
                   </div>
-                ) : pickerRows.length === 0 ? (
+                ) : allPickerRows.length === 0 ? (
                   <div style={{ textAlign: 'center', padding: 48, color: REDWOOD.neutral600, fontSize: 13 }}>
                     No open installments found for this customer.
                   </div>
                 ) : (
                   <>
-                    <div style={{ marginBottom: 10, padding: '6px 10px', background: '#f0f5ff', borderRadius: 6, fontSize: 12, color: REDWOOD.neutral600 }}>
-                      Showing <strong>{pickerRows.length}</strong> open installment(s). Select rows and optionally enter an Apply Amount (defaults to full balance due).
-                    </div>
+                    {!draft.standardReceiptId && (
+                      <Alert type="warning" showIcon style={{ marginBottom: 8, fontSize: 12 }}
+                        message="Save the receipt first before applying installments." />
+                    )}
                     <Table<InstPickerRow>
-                      columns={instPickerCols}
-                      dataSource={pickerRows}
-                      rowKey="key"
-                      size="small"
-                      pagination={false}
-                      scroll={{ x: 820, y: 400 }}
-                      rowSelection={{
-                        selectedRowKeys: selectedKeys,
-                        onChange: keys => setInstPickerSel(p => ({ ...p, [tabKey]: keys })),
-                      }}
+                      columns={instPickerCols} dataSource={pickerRows} rowKey="key"
+                      size="small" pagination={false} scroll={{ x: 1000, y: 380 }}
+                      rowSelection={{ selectedRowKeys: selectedKeys, onChange: keys => setInstPickerSel(p => ({ ...p, [tabKey]: keys })) }}
                       summary={() => (
                         <Table.Summary fixed>
                           <Table.Summary.Row style={{ background: '#fafafa' }}>
-                            <Table.Summary.Cell index={0} colSpan={6} align="right">
-                              <Text strong style={{ fontSize: 12 }}>Total Balance Due</Text>
+                            <Table.Summary.Cell index={0} colSpan={5} align="right">
+                              <Text strong style={{ fontSize: 11 }}>Totals</Text>
                             </Table.Summary.Cell>
                             <Table.Summary.Cell index={1} align="right">
-                              <Text strong style={{ fontFamily: 'monospace', fontSize: 12, color: REDWOOD.primary }}>
-                                {pickerRows.reduce((s, r) => s + r.balanceDue, 0)
-                                  .toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.neutral600 }}>
+                                {pickerRows.reduce((s, r) => s + r.originalAmount, 0).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </Text>
                             </Table.Summary.Cell>
-                            <Table.Summary.Cell index={2} />
+                            <Table.Summary.Cell index={2} align="right">
+                              <Text strong style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.primary }}>
+                                {pickerRows.reduce((s, r) => s + r.balanceDue, 0).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </Text>
+                            </Table.Summary.Cell>
+                            <Table.Summary.Cell index={3} colSpan={3} />
                           </Table.Summary.Row>
                         </Table.Summary>
                       )}
