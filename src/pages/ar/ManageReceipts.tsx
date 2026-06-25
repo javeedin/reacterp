@@ -2840,6 +2840,7 @@ const ManageReceipts: React.FC = () => {
             ];
 
             return (
+              <>
               <Modal
                 open={!!instPickerOpen[tabKey]}
                 onCancel={() => setInstPickerOpen(p => ({ ...p, [tabKey]: false }))}
@@ -3060,6 +3061,7 @@ const ManageReceipts: React.FC = () => {
 
                 </div>
               </Modal>
+              </>
             );
           })()}
 
