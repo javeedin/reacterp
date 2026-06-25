@@ -3235,10 +3235,6 @@ const ManageReceipts: React.FC = () => {
                   </div>
                 ) : (
                   <>
-                    {!draft.standardReceiptId && (
-                      <Alert type="warning" showIcon style={{ marginBottom: 8, fontSize: 12 }}
-                        message="Save the receipt first before applying installments." />
-                    )}
                     <Table<InstPickerRow>
                       columns={instPickerCols} dataSource={pickerRows} rowKey="key"
                       size="small" pagination={false} scroll={{ x: 1000, y: 380 }}
