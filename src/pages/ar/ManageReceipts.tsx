@@ -1873,14 +1873,22 @@ const ManageReceipts: React.FC = () => {
     const today = dayjs().format('YYYY-MM-DD');
     const exRow = pending[0];
     const steps = [
+      // GET installment balance for each pending row — before anything is posted
+      ...pending.map((row, i) => ({
+        label: `${i + 1}. GET Installment Balance — ${row.transactionNumber}/#${row.sequenceNumber}`,
+        method: 'GET',
+        url: `${APEX_AR_INVOICES}/${row.customerTransactionId}/installments/${row.installmentId}`,
+        body: '',
+        response: '', running: false, done: false,
+      })),
       {
-        label: '1. POST Receipt',
+        label: `${pending.length + 1}. POST Receipt`,
         method: 'POST', url: APEX_AR_RECEIPTS,
         body: JSON.stringify(buildPayload(draft, null), null, 2),
         response: '', running: false, done: false,
       },
       ...pending.map((row, i) => ({
-        label: `${i + 2}. POST Receipt Application — ${row.transactionNumber}/#${row.sequenceNumber}`,
+        label: `${pending.length + i + 2}. POST Receipt Application — ${row.transactionNumber}/#${row.sequenceNumber}`,
         method: 'POST', url: APEX_RECEIPT_APPS,
         body: JSON.stringify({
           StandardReceiptId:          '{from Step 1}',
@@ -3568,7 +3576,9 @@ const ManageReceipts: React.FC = () => {
                           </Button>
                         </div>
                         <div style={{ fontFamily: 'monospace', fontSize: 10, color: REDWOOD.info, wordBreak: 'break-all', padding: '3px 8px', background: '#f0f5ff', borderRadius: 4, marginBottom: 6 }}>{step.url}</div>
-                        <div style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 5, fontFamily: 'monospace', fontSize: 10, maxHeight: 120, overflowY: 'auto', whiteSpace: 'pre' }}>{step.body}</div>
+                        {step.method !== 'GET' && (
+                          <div style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 5, fontFamily: 'monospace', fontSize: 10, maxHeight: 120, overflowY: 'auto', whiteSpace: 'pre' }}>{step.body}</div>
+                        )}
                         {step.response && (
                           <div style={{ marginTop: 6, background: step.response.includes('error') || step.response.includes('Error') ? '#fff1f0' : '#f6ffed', border: `1px solid ${step.response.includes('error') || step.response.includes('Error') ? '#ffccc7' : '#b7eb8f'}`, padding: 6, borderRadius: 4, fontFamily: 'monospace', fontSize: 10, whiteSpace: 'pre-wrap' }}>
                             {step.response}
