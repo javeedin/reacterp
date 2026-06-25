@@ -2186,11 +2186,48 @@ const ManageReceipts: React.FC = () => {
     const appStatusColor = (s: string) => ({ Applied: 'green', Unapplied: 'blue', Reversed: 'red' }[s] || 'default');
     const procStatusColor = (s: string) => ({ Closed: 'green', Open: 'blue', Reversed: 'red' }[s] || 'default');
 
-    const appColumns: ColumnsType<AppRow> = [
+    const pendingRows = pendingApplications[tabKey] ?? [];
+    const savedRows   = (receiptApplications[tabKey]?.rows ?? []) as (AppRow & { _pending?: boolean; _instSeq?: number; _adjAmount?: number })[];
+
+    // Convert pending rows into AppRow shape so they can share the same table
+    const pendingAsAppRows: (AppRow & { _pending?: boolean; _instSeq?: number; _adjAmount?: number })[] = pendingRows.map(r => ({
+      key:                        `pending-${r.key}`,
+      applicationId:              0,
+      applicationDate:            draft.receiptDate || dayjs().format('YYYY-MM-DD'),
+      applicationAmount:          r.applyAmount,
+      applicationStatus:          'APP',
+      accountingDate:             draft.accountingDate || dayjs().format('YYYY-MM-DD'),
+      referenceTransactionNumber: r.transactionNumber,
+      referenceTransactionId:     r.customerTransactionId,
+      referenceTransactionStatus: 'OP',
+      activityName:               'Invoice',
+      standardReceiptId:          draft.standardReceiptId,
+      enteredCurrency:            r.currency,
+      processStatus:              'PENDING',
+      isLatestApplication:        'Y',
+      custAccountId:              null,
+      customerSite:               draft.customerSite || '',
+      _pending:                   true,
+      _instSeq:                   r.sequenceNumber,
+      _adjAmount:                 r.adjustmentAmount,
+    }));
+
+    const allAppRows = [...pendingAsAppRows, ...savedRows];
+
+    const appColumns: ColumnsType<AppRow & { _pending?: boolean; _instSeq?: number; _adjAmount?: number }> = [
       { title: '#', key: 'seq', width: 36,
         render: (_,__,i) => <Text type="secondary" style={{ fontSize: 11 }}>{i + 1}</Text> },
+      { title: 'Inst #', key: 'instSeq', width: 60, align: 'center',
+        render: (_, r) => r._instSeq != null
+          ? <Tag style={{ fontSize: 11, margin: 0 }}>#{r._instSeq}</Tag>
+          : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
       { title: 'Application Reference', dataIndex: 'referenceTransactionNumber', width: 160, ellipsis: true,
-        render: v => <Text style={{ fontSize: 12, fontWeight: 600 }}>{v || '—'}</Text> },
+        render: (v, r) => (
+          <Space size={4}>
+            {r._pending && <Tag color="orange" style={{ fontSize: 10, margin: 0, lineHeight: '16px' }}>Pending</Tag>}
+            <Text style={{ fontSize: 12, fontWeight: 600 }}>{v || '—'}</Text>
+          </Space>
+        ) },
       { title: 'Receivables Activity', dataIndex: 'activityName', width: 150, ellipsis: true,
         render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
       { title: 'Cust Account', dataIndex: 'custAccountId', width: 110,
@@ -2204,6 +2241,13 @@ const ManageReceipts: React.FC = () => {
             {fmt(v || 0)}
           </Text>
         ) },
+      { title: 'Adj Amount', key: 'adjAmount', width: 110, align: 'right',
+        render: (_, r) => r._adjAmount && r._adjAmount !== 0
+          ? <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600,
+              color: r._adjAmount < 0 ? REDWOOD.primary : REDWOOD.warning }}>
+              {r._adjAmount > 0 ? '+' : ''}{fmt(r._adjAmount)}
+            </Text>
+          : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
       { title: 'CCY', dataIndex: 'enteredCurrency', width: 55,
         render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
       { title: 'App. Status', dataIndex: 'applicationStatus', width: 100,
@@ -2907,56 +2951,40 @@ const ManageReceipts: React.FC = () => {
             }
           >
             {(() => {
-              const pendingRows = pendingApplications[tabKey] ?? [];
-              const savedRows   = apps?.rows ?? [];
-              const totalPending = pendingRows.reduce((s, r) => s + r.applyAmount + r.adjustmentAmount, 0);
-              const totalSaved   = savedRows.reduce((s, r) => s + r.applicationAmount, 0);
-
               return (
                 <>
-                  {pendingRows.length > 0 && (
-                    <div style={{ borderBottom: `1px solid ${REDWOOD.border}`, padding: '8px 12px', background: '#fffbe6' }}>
-                      <Space wrap>
-                        <Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.warning }}>
-                          {pendingRows.length} pending application(s) — not yet saved
-                        </Text>
-                        {pendingRows.map(r => (
-                          <Tag key={r.key} color="orange" closable
-                            onClose={() => setPendingApplications(prev => ({ ...prev, [tabKey]: (prev[tabKey] ?? []).filter(x => x.key !== r.key) }))}>
-                            {r.transactionNumber}/#{r.sequenceNumber} — {r.applyAmount.toLocaleString('en-AE', { minimumFractionDigits: 2 })}
-                          </Tag>
-                        ))}
-                      </Space>
-                    </div>
-                  )}
                   {apps?.loading ? (
                     <div style={{ padding: 32, textAlign: 'center' }}>
                       <Spin size="small" />
                       <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>Loading applications…</Text>
                     </div>
                   ) : (
-                    <Table<AppRow>
-                      dataSource={savedRows}
+                    <Table
+                      dataSource={allAppRows}
                       columns={appColumns}
                       rowKey="key"
                       size="small"
                       pagination={false}
-                      scroll={{ x: 1150 }}
-                      locale={{ emptyText: pendingRows.length > 0 ? 'No saved applications yet — click Save to post' : 'No applications found for this receipt' }}
+                      scroll={{ x: 1300 }}
+                      locale={{ emptyText: 'No applications found for this receipt' }}
+                      rowClassName={r => (r as any)._pending ? 'pending-app-row' : ''}
+                      onRow={r => ((r as any)._pending ? {
+                        style: { background: '#fffbe6' },
+                      } : {})}
                       summary={rows => {
                         const total = rows.reduce((s, r) => s + (r.applicationAmount || 0), 0);
                         return total > 0 ? (
                           <Table.Summary fixed>
                             <Table.Summary.Row>
-                              <Table.Summary.Cell index={0} colSpan={5}>
+                              <Table.Summary.Cell index={0} colSpan={6}>
                                 <Text strong style={{ fontSize: 12 }}>Total</Text>
                               </Table.Summary.Cell>
-                              <Table.Summary.Cell index={5} align="right">
+                              <Table.Summary.Cell index={6} align="right">
                                 <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success }}>
                                   {fmt(total)}
                                 </Text>
                               </Table.Summary.Cell>
-                              <Table.Summary.Cell index={6} colSpan={6} />
+                              <Table.Summary.Cell index={7} colSpan={7} />
                             </Table.Summary.Row>
                           </Table.Summary>
                         ) : null;
