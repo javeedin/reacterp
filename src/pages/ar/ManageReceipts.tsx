@@ -1783,6 +1783,8 @@ const ManageReceipts: React.FC = () => {
           ProcessStatus:              'PENDING',
           IsLatestApplication:        'Y',
           CustomerSite:               draft.customerSite || '',
+          CreatedBy:                  currentUser,
+          LastUpdatedBy:              currentUser,
         };
         const res = await fetch(APEX_RECEIPT_APPS, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(appBody) });
         const result = await res.json().catch(() => ({}));
@@ -1835,7 +1837,7 @@ const ManageReceipts: React.FC = () => {
         const putBody = {
           AmountPaid:                   row.applyAmount,
           InstallmentAmountAdjusted:    row.adjustmentAmount ?? 0,
-          LastUpdatedBy:                'REERP',
+          LastUpdatedBy:                currentUser,
         };
         const url = `${APEX_AR_INVOICES}/${row.customerTransactionId}/installments/${row.installmentId}`;
         const res = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(putBody) });
@@ -1922,7 +1924,7 @@ const ManageReceipts: React.FC = () => {
         body: JSON.stringify({
           AmountPaid:                row.applyAmount,
           InstallmentAmountAdjusted: row.adjustmentAmount ?? 0,
-          LastUpdatedBy:             'REERP',
+          LastUpdatedBy:             currentUser,
         }, null, 2),
         response: '', running: false, done: false,
       })),
@@ -3442,6 +3444,8 @@ const ManageReceipts: React.FC = () => {
                       ProcessStatus:              'PENDING',
                       IsLatestApplication:        'Y',
                       CustomerSite:               draft.customerSite || '',
+                      CreatedBy:                  currentUser,
+                      LastUpdatedBy:              currentUser,
                     }, null, 2);
                     return (
                       <div style={{ border: `1px solid #b7eb8f`, borderRadius: 8, padding: '12px 14px', background: '#f6ffed' }}>
