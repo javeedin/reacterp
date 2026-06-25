@@ -343,6 +343,8 @@ const ManageReceipts: React.FC = () => {
   const [fxRateLoading, setFxRateLoading] = useState<Record<string, boolean>>({});
   const [apiModal, setApiModal]           = useState<{ tabKey: string; testResult: string | null; testing: boolean } | null>(null);
   const [pendingApplications, setPendingApplications] = useState<Record<string, PendingAppRow[]>>({});
+  const pendingApplicationsRef = useRef<Record<string, PendingAppRow[]>>({});
+  useEffect(() => { pendingApplicationsRef.current = pendingApplications; }, [pendingApplications]);
   const [saveProgress, setSaveProgress] = useState<{
     open: boolean;
     steps: { title: string; status: 'wait' | 'process' | 'finish' | 'error'; detail: string }[];
@@ -486,7 +488,13 @@ const ManageReceipts: React.FC = () => {
       }));
 
       allRows.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-      setInstPickerRows(p => ({ ...p, [tabKey]: allRows }));
+      // Restore apply/adj amounts from any already-staged pending rows
+      const pendingSnap = pendingApplicationsRef.current[tabKey] ?? [];
+      const pendingMap  = Object.fromEntries(pendingSnap.map(r => [r.key, r]));
+      const patchedRows = allRows.map(r => pendingMap[r.key]
+        ? { ...r, applyAmount: pendingMap[r.key].applyAmount, adjustmentAmount: pendingMap[r.key].adjustmentAmount, adjustmentReason: pendingMap[r.key].adjustmentReason }
+        : r);
+      setInstPickerRows(p => ({ ...p, [tabKey]: patchedRows }));
     } catch (e: any) {
       message.error(`Failed to load installments: ${e.message}`);
     } finally {
@@ -2185,7 +2193,7 @@ const ManageReceipts: React.FC = () => {
     const appStatusColor = (s: string) => ({ Applied: 'green', Unapplied: 'blue', Reversed: 'red' }[s] || 'default');
     const procStatusColor = (s: string) => ({ Closed: 'green', Open: 'blue', Reversed: 'red' }[s] || 'default');
 
-    type ExtAppRow = AppRow & { _pending?: boolean; _pendingKey?: string; _instSeq?: number; _adjAmount?: number; _origAmt?: number; _balDue?: number };
+    type ExtAppRow = AppRow & { _pending?: boolean; _pendingKey?: string; _instSeq?: number; _adjAmount?: number; _origAmt?: number; _balDue?: number; _installmentId?: number; _txnId?: number };
 
     const pendingRows = pendingApplications[tabKey] ?? [];
     const savedRows   = (receiptApplications[tabKey]?.rows ?? []) as ExtAppRow[];
@@ -2212,8 +2220,10 @@ const ManageReceipts: React.FC = () => {
       _pendingKey:                r.key,
       _instSeq:                   r.sequenceNumber,
       _adjAmount:                 r.adjustmentAmount,
-      _origAmt:                   r.balanceDue,   // original ≈ balanceDue at time of staging
+      _origAmt:                   r.balanceDue,
       _balDue:                    r.balanceDue,
+      _installmentId:             r.installmentId,
+      _txnId:                     r.customerTransactionId,
     }));
 
     const allAppRows = [...pendingAsAppRows, ...savedRows];
@@ -2295,6 +2305,14 @@ const ManageReceipts: React.FC = () => {
         render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
       { title: 'Accounting Date', dataIndex: 'accountingDate', width: 112,
         render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+      { title: 'Installment ID', key: 'installmentId', width: 100, align: 'right',
+        render: (_, r) => r._installmentId
+          ? <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{r._installmentId}</Text>
+          : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
+      { title: 'Txn ID', key: 'txnId', width: 90, align: 'right',
+        render: (_, r) => r._txnId ?? r.referenceTransactionId
+          ? <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{r._txnId ?? r.referenceTransactionId}</Text>
+          : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
     ];
 
     return (
@@ -2983,6 +3001,20 @@ const ManageReceipts: React.FC = () => {
                         return;
                       }
                       setInstPickerOpen(p => ({ ...p, [tabKey]: true }));
+                      // Auto-select + restore amounts for already-staged installments
+                      const alreadyPending = pendingApplications[tabKey] ?? [];
+                      if (alreadyPending.length > 0) {
+                        setInstPickerSel(p => ({ ...p, [tabKey]: alreadyPending.map(r => r.key) }));
+                        // Patch picker rows with saved apply/adj amounts
+                        setInstPickerRows(prev => {
+                          const rows = prev[tabKey];
+                          if (!rows?.length) return prev;
+                          const pendingMap = Object.fromEntries(alreadyPending.map(r => [r.key, r]));
+                          return { ...prev, [tabKey]: rows.map(r => pendingMap[r.key]
+                            ? { ...r, applyAmount: pendingMap[r.key].applyAmount, adjustmentAmount: pendingMap[r.key].adjustmentAmount, adjustmentReason: pendingMap[r.key].adjustmentReason }
+                            : r) };
+                        });
+                      }
                       if (!instPickerRows[tabKey]?.length) {
                         fetchOpenInstallments(tabKey, draft.customerAccountNumber);
                       }
@@ -3143,6 +3175,10 @@ const ManageReceipts: React.FC = () => {
                   <Input size="small" placeholder="Reason…" value={v}
                     onChange={e => updateRow(rec.key, { adjustmentReason: e.target.value })} />
                 )},
+              { title: 'Installment ID', dataIndex: 'installmentId', width: 100, align: 'right',
+                render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{v || '—'}</Text> },
+              { title: 'Txn ID', dataIndex: 'customerTransactionId', width: 90, align: 'right',
+                render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{v || '—'}</Text> },
             ];
 
             return (
