@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Layout, Card, Form, Select, Input, Button, Space, Typography, Table, Tag,
   Row, Col, Breadcrumb, Tooltip, DatePicker, message, Tabs, Divider,
-  Badge, Alert, Modal, InputNumber, Radio, Spin, Descriptions, Dropdown,
+  Badge, Alert, Modal, InputNumber, Radio, Spin, Descriptions, Dropdown, Steps,
 } from 'antd';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -150,6 +150,20 @@ interface AppRow {
   isLatestApplication:        string;
   custAccountId:              number | null;
   customerSite:               string;
+}
+
+interface PendingAppRow {
+  key: string;
+  customerTransactionId: number;
+  transactionNumber: string;
+  installmentId: number;
+  sequenceNumber: number;
+  applyAmount: number;
+  adjustmentAmount: number;
+  adjustmentReason: string;
+  currency: string;
+  balanceDue: number;
+  dueDate: string;
 }
 
 interface ReceiptMethodAccount {
@@ -328,6 +342,18 @@ const ManageReceipts: React.FC = () => {
   const [deleting, setDeleting]           = useState<Record<string, boolean>>({});
   const [fxRateLoading, setFxRateLoading] = useState<Record<string, boolean>>({});
   const [apiModal, setApiModal]           = useState<{ tabKey: string; testResult: string | null; testing: boolean } | null>(null);
+  const [pendingApplications, setPendingApplications] = useState<Record<string, PendingAppRow[]>>({});
+  const [saveProgress, setSaveProgress] = useState<{
+    open: boolean;
+    steps: { title: string; status: 'wait' | 'process' | 'finish' | 'error'; detail: string }[];
+    current: number;
+    done: boolean;
+  } | null>(null);
+  const [debugModal, setDebugModal] = useState<{
+    open: boolean;
+    tabKey: string;
+    steps: { label: string; method: string; url: string; body: string; response: string; running: boolean; done: boolean }[];
+  } | null>(null);
   const [apiInfoVisible, setApiInfoVisible] = useState(false);
   const [gridFilter, setGridFilter]       = useState('');
   const [lastSearchUrl, setLastSearchUrl] = useState('');
@@ -503,93 +529,35 @@ const ManageReceipts: React.FC = () => {
       });
   }, []);
 
-  const applySelectedInstallments = useCallback(async (tabKey: string, draft: ReceiptDraft) => {
-    const allRows    = instPickerRows[tabKey] ?? [];
+  const applySelectedInstallments = useCallback((tabKey: string, _draft: ReceiptDraft) => {
+    const allRows = instPickerRows[tabKey] ?? [];
     const selectedKeys = instPickerSel[tabKey] ?? [];
-    const selected   = allRows.filter(r => selectedKeys.includes(r.key));
+    const selected = allRows.filter(r => selectedKeys.includes(r.key));
     if (!selected.length) return;
 
-    setInstPickerSaving(p => ({ ...p, [tabKey]: true }));
-    const today = dayjs().format('YYYY-MM-DD');
-    let appOk = 0, adjOk = 0, errors: string[] = [];
+    const newPending: PendingAppRow[] = selected.map(row => ({
+      key: row.key,
+      customerTransactionId: row.customerTransactionId,
+      transactionNumber: row.transactionNumber,
+      installmentId: row.installmentId,
+      sequenceNumber: row.sequenceNumber,
+      applyAmount: row.applyAmount ?? row.balanceDue,
+      adjustmentAmount: row.adjustmentAmount ?? 0,
+      adjustmentReason: row.adjustmentReason || '',
+      currency: row.currency,
+      balanceDue: row.balanceDue,
+      dueDate: row.dueDate,
+    }));
 
-    for (const row of selected) {
-      const applyAmt = row.applyAmount ?? row.balanceDue;
-      const adjAmt   = row.adjustmentAmount ?? 0;
+    setPendingApplications(prev => {
+      const existing = prev[tabKey] ?? [];
+      const newKeys = new Set(newPending.map(r => r.key));
+      return { ...prev, [tabKey]: [...existing.filter(r => !newKeys.has(r.key)), ...newPending] };
+    });
 
-      // 1. Save receipt application
-      try {
-        const appBody = {
-          StandardReceiptId:          draft.standardReceiptId,
-          ApplicationDate:            draft.receiptDate || today,
-          AccountingDate:             draft.accountingDate || today,
-          ApplicationAmount:          applyAmt,
-          ApplicationStatus:          'APP',
-          ReferenceTransactionId:     row.customerTransactionId,
-          ReferenceTransactionNumber: row.transactionNumber,
-          ReferenceInstallmentId:     row.installmentId,
-          ActivityName:               'Invoice',
-          ProcessStatus:              'PENDING',
-          IsLatestApplication:        'Y',
-          CustAccountId:              draft.customerAccountNumber ? null : null,
-          CustomerSite:               draft.customerSite || '',
-        };
-        const res = await fetch(`${APEX_RECEIPT_APPS}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify(appBody),
-        });
-        if (res.ok) appOk++;
-        else errors.push(`App for ${row.transactionNumber}/${row.sequenceNumber}: HTTP ${res.status}`);
-      } catch (e: any) {
-        errors.push(`App for ${row.transactionNumber}: ${e.message}`);
-      }
-
-      // 2. Create adjustment if adjustmentAmount is non-zero (can be positive or negative)
-      if (adjAmt !== 0) {
-        try {
-          const adjBody = {
-            CustomerTransactionId: row.customerTransactionId,
-            TransactionNumber:     row.transactionNumber,
-            AdjustmentAmount:      adjAmt,
-            AdjustmentDate:        draft.receiptDate || today,
-            AccountingDate:        draft.accountingDate || today,
-            AdjustmentType:        'LINE',
-            Status:                'Approved',
-            ReceivablesActivity:   'Adjustment',
-            BusinessUnit:          draft.businessUnit || '',
-            Currency:              row.currency,
-            InstallmentNumber:     row.sequenceNumber,
-            InstallmentBalance:    Math.max(0, row.balanceDue - applyAmt - adjAmt),
-            AdjustmentReason:      row.adjustmentReason || 'Receipt adjustment',
-            Comments:              `Auto-created from receipt ${draft.receiptNumber}`,
-          };
-          const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/ar/adjustments`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify(adjBody),
-          });
-          if (res.ok) adjOk++;
-          else errors.push(`Adj for ${row.transactionNumber}/${row.sequenceNumber}: HTTP ${res.status}`);
-        } catch (e: any) {
-          errors.push(`Adj for ${row.transactionNumber}: ${e.message}`);
-        }
-      }
-    }
-
-    setInstPickerSaving(p => ({ ...p, [tabKey]: false }));
-
-    if (errors.length === 0) {
-      message.success(`Applied ${appOk} installment(s)${adjOk > 0 ? ` + ${adjOk} adjustment(s) created` : ''}`);
-    } else {
-      message.warning(`Partial: ${appOk} applied, ${adjOk} adj. Errors: ${errors.join(' | ')}`);
-    }
-
-    // Refresh applications table
     setInstPickerOpen(p => ({ ...p, [tabKey]: false }));
-    fetchedAppsRef.current.delete(tabKey);
-    fetchApplications(tabKey, draft.standardReceiptId);
-  }, [instPickerRows, instPickerSel, fetchApplications]);
+    message.success(`${selected.length} installment(s) staged — click Save to post`);
+  }, [instPickerRows, instPickerSel]);
 
   // Attachments (per tab)
   type AttachItem = { id?: number; uid: string; name: string; fileType: string; fileSize: number; content?: string; rawFile?: File; status: 'done' | 'uploading' | 'error' };
@@ -936,6 +904,7 @@ const ManageReceipts: React.FC = () => {
   const closeTab = (key: string) => {
     fetchedAppsRef.current.delete(key);
     setReceiptApplications(prev => { const n = { ...prev }; delete n[key]; return n; });
+    setPendingApplications(prev => { const n = { ...prev }; delete n[key]; return n; });
     setTabAttachments(prev => { const n = { ...prev }; delete n[key]; return n; });
     setEditingEnabled(prev => { const n = { ...prev }; delete n[key]; return n; });
     setTabs(prev => {
@@ -1684,70 +1653,267 @@ const ManageReceipts: React.FC = () => {
     const tab = tabs.find(t => t.key === tabKey);
     if (!tab) return false;
     const { draft } = tab;
+    const pending = pendingApplications[tabKey] ?? [];
+    const todayStr = dayjs().format('YYYY-MM-DD');
 
-    // Required field validation
     const missing: string[] = [];
-    if (!draft.businessUnit)                  missing.push('Business Unit');
-    if (!draft.receiptType)                   missing.push('Receipt Type');
-    if (!draft.receiptMethod)                 missing.push('Receipt Method');
-    if (!draft.receiptDate)                   missing.push('Receipt Date');
-    if (!draft.currency)                      missing.push('Currency');
-    if (!draft.amount || draft.amount <= 0)   missing.push('Amount (must be > 0)');
-    if (draft.receiptType === 'MISC') {
-      if (!draft.customerName)                missing.push('Customer');
-    } else {
-      if (!draft.customerAccountNumber && !draft.customerName) missing.push('Customer');
-    }
-    if (!draft.comments)                      missing.push('Comments');
-
+    if (!draft.businessUnit) missing.push('Business Unit');
+    if (!draft.receiptType) missing.push('Receipt Type');
+    if (!draft.receiptMethod) missing.push('Receipt Method');
+    if (!draft.receiptDate) missing.push('Receipt Date');
+    if (!draft.currency) missing.push('Currency');
+    if (!draft.amount || draft.amount <= 0) missing.push('Amount (must be > 0)');
+    if (!draft.customerAccountNumber && !draft.customerName) missing.push('Customer');
+    if (!draft.comments) missing.push('Comments');
     if (missing.length > 0) {
-      message.warning({ content: `Please fill required fields: ${missing.join(' · ')}`, duration: 5 });
+      message.warning({ content: `Missing required fields: ${missing.join(' · ')}`, duration: 5 });
       return false;
     }
 
-    const isNew     = draft.standardReceiptId === 0;
-    // null → DB assigns ID via RR_AR_RECEIPTS_LOCAL_SEQ; existing → pass the existing ID for UPDATE
-    const receiptId = isNew ? null : draft.standardReceiptId;
+    const savedApps = receiptApplications[tabKey]?.rows ?? [];
+    const totalPendingApply = pending.reduce((s, r) => s + r.applyAmount + r.adjustmentAmount, 0);
+    const totalSavedApply = savedApps.reduce((s, r) => s + r.applicationAmount, 0);
+    const totalApplied = totalPendingApply + totalSavedApply;
+    const receiptAmt = draft.amount ?? 0;
+
+    if (pending.length > 0 && Math.abs(totalApplied - receiptAmt) > 0.01) {
+      message.warning({
+        content: `Receipt amount ${receiptAmt.toLocaleString('en-AE', { minimumFractionDigits: 2 })} ≠ total applications ${totalApplied.toLocaleString('en-AE', { minimumFractionDigits: 2 })}. Please adjust apply amounts.`,
+        duration: 8,
+      });
+      return false;
+    }
+
+    if (pending.length > 0) {
+      setSaveProgress({
+        open: true, current: 0, done: false,
+        steps: [
+          { title: 'Checking installment balances', status: 'process', detail: '' },
+          { title: 'POST Receipt', status: 'wait', detail: '' },
+          { title: 'POST Receipt Applications', status: 'wait', detail: '' },
+          { title: 'POST Adjustments', status: 'wait', detail: '' },
+          { title: 'PUT Installments', status: 'wait', detail: '' },
+        ],
+      });
+
+      for (const row of pending) {
+        try {
+          const res = await fetch(`${APEX_AR_INVOICES}/${row.customerTransactionId}/installments`, { headers: { Accept: 'application/json' } });
+          const data = await res.json();
+          const inst = (data.items ?? []).find((x: any) =>
+            (x.installment_id ?? x.INSTALLMENT_ID) === row.installmentId
+          );
+          if (!inst) {
+            setSaveProgress(p => p ? { ...p, done: true, steps: p.steps.map((s, i) => i === 0 ? { ...s, status: 'error', detail: `Installment ${row.transactionNumber}/#${row.sequenceNumber} not found` } : s) } : p);
+            return false;
+          }
+          const liveBal = inst.installment_balance_due ?? inst.INSTALLMENT_BALANCE_DUE ?? 0;
+          if (liveBal <= 0) {
+            setSaveProgress(p => p ? { ...p, done: true, steps: p.steps.map((s, i) => i === 0 ? { ...s, status: 'error', detail: `Installment ${row.transactionNumber}/#${row.sequenceNumber} is already CLOSED (balance 0). Please remove it.` } : s) } : p);
+            message.error(`Installment ${row.transactionNumber}/#${row.sequenceNumber} is already closed. Remove it from applications.`);
+            return false;
+          }
+          if (row.applyAmount > liveBal + 0.01) {
+            setSaveProgress(p => p ? { ...p, done: true, steps: p.steps.map((s, i) => i === 0 ? { ...s, status: 'error', detail: `Apply amount ${row.applyAmount} exceeds live balance ${liveBal} for ${row.transactionNumber}/#${row.sequenceNumber}` } : s) } : p);
+            message.error(`Apply amount exceeds balance for ${row.transactionNumber}/#${row.sequenceNumber}`);
+            return false;
+          }
+        } catch { /* non-fatal */ }
+      }
+
+      setSaveProgress(p => p ? { ...p, current: 1, steps: p.steps.map((s, i) => i === 0 ? { ...s, status: 'finish', detail: 'All installments verified' } : i === 1 ? { ...s, status: 'process' } : s) } : p);
+    }
 
     setSaving(prev => ({ ...prev, [tabKey]: true }));
+    const isNew = draft.standardReceiptId === 0;
+    let newReceiptId = draft.standardReceiptId;
+
     try {
-      const body = buildPayload(draft, receiptId);
-
-      // POST for new receipts, PUT for existing ones
-      const url    = isNew ? APEX_AR_RECEIPTS : `${APEX_AR_RECEIPTS}/${draft.standardReceiptId}`;
+      const body = buildPayload(draft, isNew ? null : draft.standardReceiptId);
+      const url = isNew ? APEX_AR_RECEIPTS : `${APEX_AR_RECEIPTS}/${draft.standardReceiptId}`;
       const method = isNew ? 'POST' : 'PUT';
-
-      const res    = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(body),
-      });
+      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const result = await res.json().catch(() => ({}));
-
       if (!res.ok || (result?.errors ?? 0) > 0) {
+        setSaveProgress(p => p ? { ...p, done: true, steps: p.steps.map((s, i) => i === 1 ? { ...s, status: 'error', detail: result?.message || `HTTP ${res.status}` } : s) } : p);
         message.error(result?.message || `Save failed (HTTP ${res.status})`);
+        setSaving(prev => ({ ...prev, [tabKey]: false }));
         return false;
       }
-
-      // Persist the DB-assigned sequence ID so subsequent saves do UPDATE
       if (isNew && result?.receiptId) {
+        newReceiptId = result.receiptId;
         updateDraft(tabKey, { standardReceiptId: result.receiptId });
       }
-      // Lock the form after save — user clicks Edit to make further changes
-      setEditingEnabled(prev => ({ ...prev, [tabKey]: false }));
-
-      message.success(
-        isNew
-          ? `Receipt created (ID: ${result?.receiptId ?? '—'})`
-          : `Receipt updated`
-      );
-      return true;
+      setSaveProgress(p => p ? { ...p, current: 2, steps: p.steps.map((s, i) => i === 1 ? { ...s, status: 'finish', detail: `Receipt ID: ${newReceiptId}` } : i === 2 ? { ...s, status: 'process' } : s) } : p);
     } catch (e: any) {
+      setSaveProgress(p => p ? { ...p, done: true, steps: p.steps.map((s, i) => i === 1 ? { ...s, status: 'error', detail: e.message } : s) } : p);
       message.error(`Save error: ${e.message}`);
-      return false;
-    } finally {
       setSaving(prev => ({ ...prev, [tabKey]: false }));
+      return false;
     }
+
+    const appErrors: string[] = [];
+    const postedAppIds: number[] = [];
+    for (const row of pending) {
+      try {
+        const appBody = {
+          StandardReceiptId: newReceiptId,
+          ApplicationDate: draft.receiptDate || todayStr,
+          AccountingDate: draft.accountingDate || todayStr,
+          ApplicationAmount: row.applyAmount,
+          ApplicationStatus: 'APP',
+          ReferenceTransactionId: row.customerTransactionId,
+          ReferenceTransactionNumber: row.transactionNumber,
+          ReferenceInstallmentId: row.installmentId,
+          ActivityName: 'Invoice',
+          ProcessStatus: 'PENDING',
+          IsLatestApplication: 'Y',
+          CustomerSite: draft.customerSite || '',
+        };
+        const res = await fetch(APEX_RECEIPT_APPS, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(appBody) });
+        const result = await res.json().catch(() => ({}));
+        if (res.ok) postedAppIds.push(result?.applicationId ?? result?.application_id ?? 0);
+        else appErrors.push(`${row.transactionNumber}/#${row.sequenceNumber}: HTTP ${res.status}`);
+      } catch (e: any) { appErrors.push(`${row.transactionNumber}: ${e.message}`); }
+    }
+
+    setSaveProgress(p => p ? { ...p, current: 3, steps: p.steps.map((s, i) =>
+      i === 2 ? { ...s, status: appErrors.length > 0 ? 'error' : 'finish', detail: appErrors.length > 0 ? appErrors.join('; ') : `${pending.length} application(s) posted` }
+      : i === 3 ? { ...s, status: 'process' } : s
+    ) } : p);
+
+    const adjErrors: string[] = [];
+    for (const row of pending) {
+      if (row.adjustmentAmount === 0) continue;
+      try {
+        const adjBody = {
+          CustomerTransactionId: row.customerTransactionId,
+          TransactionNumber: row.transactionNumber,
+          AdjustmentAmount: row.adjustmentAmount,
+          AdjustmentDate: draft.receiptDate || todayStr,
+          AccountingDate: draft.accountingDate || todayStr,
+          AdjustmentType: 'LINE',
+          Status: 'Approved',
+          ReceivablesActivity: 'Adjustment',
+          BusinessUnit: draft.businessUnit || '',
+          Currency: row.currency,
+          InstallmentNumber: row.sequenceNumber,
+          InstallmentBalance: Math.max(0, row.balanceDue - row.applyAmount - row.adjustmentAmount),
+          AdjustmentReason: row.adjustmentReason || 'Receipt adjustment',
+          Comments: `Auto-created from receipt ${draft.receiptNumber || ''}`,
+        };
+        const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/ar/adjustments`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(adjBody) });
+        if (!res.ok) adjErrors.push(`${row.transactionNumber}/#${row.sequenceNumber}: HTTP ${res.status}`);
+      } catch (e: any) { adjErrors.push(`${row.transactionNumber}: ${e.message}`); }
+    }
+
+    setSaveProgress(p => p ? { ...p, current: 4, steps: p.steps.map((s, i) =>
+      i === 3 ? { ...s, status: adjErrors.length > 0 ? 'error' : 'finish', detail: adjErrors.length > 0 ? adjErrors.join('; ') : 'Adjustments done' }
+      : i === 4 ? { ...s, status: 'process' } : s
+    ) } : p);
+
+    const instErrors: string[] = [];
+    for (let i = 0; i < postedAppIds.length; i++) {
+      const appId = postedAppIds[i];
+      const row = pending[i];
+      if (!appId || !row) continue;
+      try {
+        const putBody = {
+          ApplicationAmount: row.applyAmount,
+          ReferenceInstallmentId: row.installmentId,
+          ReferenceTransactionId: row.customerTransactionId,
+          ReferenceTransactionNumber: row.transactionNumber,
+          LastUpdatedBy: 'REERP',
+        };
+        const res = await fetch(`${APEX_RECEIPT_APPS}/${appId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(putBody) });
+        if (!res.ok) instErrors.push(`App ${appId}: HTTP ${res.status}`);
+      } catch (e: any) { instErrors.push(`App ${appId}: ${e.message}`); }
+    }
+
+    setSaveProgress(p => p ? { ...p, done: true, steps: p.steps.map((s, i) =>
+      i === 4 ? { ...s, status: instErrors.length > 0 ? 'error' : 'finish', detail: instErrors.length > 0 ? instErrors.join('; ') : 'Installments updated' } : s
+    ) } : p);
+
+    setPendingApplications(prev => { const n = { ...prev }; delete n[tabKey]; return n; });
+    setEditingEnabled(prev => ({ ...prev, [tabKey]: false }));
+    fetchedAppsRef.current.delete(tabKey);
+    fetchApplications(tabKey, newReceiptId);
+
+    const allErrors = [...appErrors, ...adjErrors, ...instErrors];
+    if (allErrors.length === 0) {
+      message.success(isNew ? `Receipt created (ID: ${newReceiptId})` : 'Receipt updated & applications saved');
+    } else {
+      message.warning(`Saved with some errors: ${allErrors.join(' | ')}`);
+    }
+    setSaving(prev => ({ ...prev, [tabKey]: false }));
+    return true;
+  };
+
+  const openDebugModal = (tabKey: string, draft: ReceiptDraft) => {
+    const pending = pendingApplications[tabKey] ?? [];
+    const todayStr = dayjs().format('YYYY-MM-DD');
+    const exRow = pending[0];
+    const steps = [
+      {
+        label: '1. POST Receipt',
+        method: 'POST', url: APEX_AR_RECEIPTS,
+        body: JSON.stringify(buildPayload(draft, null), null, 2),
+        response: '', running: false, done: false,
+      },
+      ...pending.map((row, i) => ({
+        label: `${i + 2}. POST Receipt Application — ${row.transactionNumber}/#${row.sequenceNumber}`,
+        method: 'POST', url: APEX_RECEIPT_APPS,
+        body: JSON.stringify({
+          StandardReceiptId: '{from Step 1}',
+          ApplicationDate: draft.receiptDate || todayStr,
+          AccountingDate: draft.accountingDate || todayStr,
+          ApplicationAmount: row.applyAmount,
+          ApplicationStatus: 'APP',
+          ReferenceTransactionId: row.customerTransactionId,
+          ReferenceTransactionNumber: row.transactionNumber,
+          ReferenceInstallmentId: row.installmentId,
+          ActivityName: 'Invoice',
+          ProcessStatus: 'PENDING',
+          IsLatestApplication: 'Y',
+          CustomerSite: draft.customerSite || '',
+        }, null, 2),
+        response: '', running: false, done: false,
+      })),
+      ...pending.filter(r => r.adjustmentAmount !== 0).map((row) => ({
+        label: `Adj. POST Adjustment — ${row.transactionNumber}/#${row.sequenceNumber}`,
+        method: 'POST', url: `${APEX_DB_CONFIG.baseUrl}/ar/adjustments`,
+        body: JSON.stringify({
+          CustomerTransactionId: row.customerTransactionId,
+          TransactionNumber: row.transactionNumber,
+          AdjustmentAmount: row.adjustmentAmount,
+          AdjustmentDate: draft.receiptDate || todayStr,
+          AccountingDate: draft.accountingDate || todayStr,
+          AdjustmentType: 'LINE',
+          Status: 'Approved',
+          ReceivablesActivity: 'Adjustment',
+          BusinessUnit: draft.businessUnit || '',
+          Currency: row.currency,
+          InstallmentNumber: row.sequenceNumber,
+          InstallmentBalance: Math.max(0, row.balanceDue - row.applyAmount - row.adjustmentAmount),
+          AdjustmentReason: row.adjustmentReason || 'Receipt adjustment',
+          Comments: `Auto-created from receipt ${draft.receiptNumber || ''}`,
+        }, null, 2),
+        response: '', running: false, done: false,
+      })),
+      {
+        label: 'PUT Installment balance — per application',
+        method: 'PUT', url: `${APEX_RECEIPT_APPS}/{applicationId}`,
+        body: JSON.stringify({
+          ApplicationAmount: exRow?.applyAmount ?? 0,
+          ReferenceInstallmentId: exRow?.installmentId ?? 0,
+          ReferenceTransactionId: exRow?.customerTransactionId ?? 0,
+          ReferenceTransactionNumber: exRow?.transactionNumber ?? '',
+          LastUpdatedBy: 'REERP',
+        }, null, 2),
+        response: '', running: false, done: false,
+      },
+    ];
+    setDebugModal({ open: true, tabKey, steps });
   };
 
   // ── Export Excel ──────────────────────────────────────────────────────────
@@ -2127,6 +2293,13 @@ const ManageReceipts: React.FC = () => {
                   onClick={async () => { const ok = await handleSave(tabKey); if (ok) closeTab(tabKey); }}>
                   Save and Close
                 </Button>
+                {(pendingApplications[tabKey]?.length ?? 0) > 0 && (
+                  <Button size="small" icon={<CodeOutlined />}
+                    style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}
+                    onClick={() => openDebugModal(tabKey, draft)}>
+                    Save &amp; Debug
+                  </Button>
+                )}
                 {hasSavedId && (
                   <Button size="small" onClick={() => setEditingEnabled(prev => ({ ...prev, [tabKey]: false }))}>
                     Cancel
@@ -2665,7 +2838,7 @@ const ManageReceipts: React.FC = () => {
                 <UnorderedListOutlined style={{ color: REDWOOD.info }} />
                 <Text strong style={{ fontSize: 13 }}>Receipt Applications</Text>
                 {apps && !apps.loading && (
-                  <Badge count={apps.rows.length} style={{ backgroundColor: REDWOOD.info }} overflowCount={9999} />
+                  <Badge count={(apps?.rows?.length ?? 0) + (pendingApplications[tabKey]?.length ?? 0)} style={{ backgroundColor: REDWOOD.info }} overflowCount={9999} />
                 )}
               </Space>
             }
@@ -2678,6 +2851,10 @@ const ManageReceipts: React.FC = () => {
                     icon={<FileTextOutlined />}
                     style={{ background: REDWOOD.success, borderColor: REDWOOD.success, fontSize: 11 }}
                     onClick={() => {
+                      if (!draft.amount || draft.amount <= 0) {
+                        message.warning('Enter the receipt amount first before selecting installments');
+                        return;
+                      }
                       setInstPickerOpen(p => ({ ...p, [tabKey]: true }));
                       if (!instPickerRows[tabKey]?.length) {
                         fetchOpenInstallments(tabKey, draft.customerAccountNumber);
@@ -2710,28 +2887,40 @@ const ManageReceipts: React.FC = () => {
               </Space>
             }
           >
-            {!draft.standardReceiptId ? (
-              <div style={{ padding: 24, textAlign: 'center' }}>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  Save the receipt first to load applications.
-                </Text>
-              </div>
-            ) : apps?.loading ? (
-              <div style={{ padding: 32, textAlign: 'center' }}>
-                <Spin size="small" />
-                <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
-                  Loading applications…
-                </Text>
-              </div>
-            ) : (
-              <Table<AppRow>
-                dataSource={apps?.rows || []}
-                columns={appColumns}
-                rowKey="key"
-                size="small"
-                pagination={false}
-                scroll={{ x: 1150 }}
-                locale={{ emptyText: 'No applications found for this receipt' }}
+            {(() => {
+              const pendingRows = pendingApplications[tabKey] ?? [];
+              const savedRows   = apps?.rows ?? [];
+              return (
+                <>
+                  {pendingRows.length > 0 && (
+                    <div style={{ borderBottom: `1px solid ${REDWOOD.border}`, padding: '8px 12px', background: '#fffbe6' }}>
+                      <Space wrap>
+                        <Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.warning }}>
+                          {pendingRows.length} pending application(s) — not yet saved
+                        </Text>
+                        {pendingRows.map(r => (
+                          <Tag key={r.key} color="orange" closable
+                            onClose={() => setPendingApplications(prev => ({ ...prev, [tabKey]: (prev[tabKey] ?? []).filter(x => x.key !== r.key) }))}>
+                            {r.transactionNumber}/#{r.sequenceNumber} — {r.applyAmount.toLocaleString('en-AE', { minimumFractionDigits: 2 })}
+                          </Tag>
+                        ))}
+                      </Space>
+                    </div>
+                  )}
+                  {apps?.loading ? (
+                    <div style={{ padding: 32, textAlign: 'center' }}>
+                      <Spin size="small" />
+                      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>Loading applications…</Text>
+                    </div>
+                  ) : (
+                    <Table<AppRow>
+                      dataSource={savedRows}
+                      columns={appColumns}
+                      rowKey="key"
+                      size="small"
+                      pagination={false}
+                      scroll={{ x: 1150 }}
+                      locale={{ emptyText: pendingRows.length > 0 ? 'No saved applications yet — click Save to post' : 'No applications found for this receipt' }}
                 summary={rows => {
                   const total = rows.reduce((s, r) => s + (r.applicationAmount || 0), 0);
                   return total > 0 ? (
@@ -2750,8 +2939,11 @@ const ManageReceipts: React.FC = () => {
                     </Table.Summary>
                   ) : null;
                 }}
-              />
-            )}
+                    />
+                  )}
+                </>
+              );
+            })()}
           </Card>
 
           {/* ── Open Installments Picker Modal ── */}
@@ -2777,6 +2969,9 @@ const ManageReceipts: React.FC = () => {
             const totalAdj = allPickerRows
               .filter(r => selectedKeys.includes(r.key))
               .reduce((s, r) => s + (r.adjustmentAmount ?? 0), 0);
+            const receiptAmt = draft.amount ?? 0;
+            const totalUsed = totalApply + totalAdj;
+            const remaining = receiptAmt - totalUsed;
 
             const updateRow = (key: string, patch: Partial<InstPickerRow>) =>
               setInstPickerRows(p => ({
@@ -2841,11 +3036,20 @@ const ManageReceipts: React.FC = () => {
                 width={1100}
                 title={
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 32 }}>
-                    <Space>
+                    <Space wrap>
                       <FileTextOutlined style={{ color: REDWOOD.success }} />
                       <Text strong>Open Invoices &amp; Installments</Text>
                       <Tag color="blue">{draft.customerName || draft.customerAccountNumber}</Tag>
                       {allPickerRows.length > 0 && <Tag>{allPickerRows.length} open</Tag>}
+                      {receiptAmt > 0 && (
+                        <>
+                          <Tag color="geekblue">Receipt: {receiptAmt.toLocaleString('en-AE', { minimumFractionDigits: 2 })} {draft.currency}</Tag>
+                          <Tag color="green">Applied: {totalUsed.toLocaleString('en-AE', { minimumFractionDigits: 2 })}</Tag>
+                          <Tag color={Math.abs(remaining) < 0.01 ? 'success' : remaining < 0 ? 'error' : 'warning'}>
+                            Remaining: {remaining.toLocaleString('en-AE', { minimumFractionDigits: 2 })}
+                          </Tag>
+                        </>
+                      )}
                     </Space>
                     <Tooltip title="API Inspector — view all webservices and JSON bodies">
                       <Button size="small" icon={<ApiOutlined />}
@@ -2873,15 +3077,12 @@ const ManageReceipts: React.FC = () => {
                         onClick={() => { setInstPickerSel(p => ({ ...p, [tabKey]: [] })); fetchOpenInstallments(tabKey, draft.customerAccountNumber); }}>
                         Refresh
                       </Button>
-                      <Tooltip title={
-                        !draft.standardReceiptId ? 'Save the receipt first before applying installments' :
-                        selectedKeys.length === 0 ? 'Select at least one installment' : undefined
-                      }>
-                        <Button type="primary" loading={pickerSaving} disabled={selectedKeys.length === 0 || !draft.standardReceiptId}
-                          style={{ background: selectedKeys.length > 0 && draft.standardReceiptId ? REDWOOD.success : undefined,
-                                   borderColor: selectedKeys.length > 0 && draft.standardReceiptId ? REDWOOD.success : undefined }}
+                      <Tooltip title={selectedKeys.length === 0 ? 'Select at least one installment' : undefined}>
+                        <Button type="primary" loading={pickerSaving} disabled={selectedKeys.length === 0}
+                          style={{ background: selectedKeys.length > 0 ? REDWOOD.success : undefined,
+                                   borderColor: selectedKeys.length > 0 ? REDWOOD.success : undefined }}
                           onClick={() => applySelectedInstallments(tabKey, draft)}>
-                          Apply &amp; Save Selected
+                          Add to Applications
                         </Button>
                       </Tooltip>
                     </Space>
@@ -2916,14 +3117,27 @@ const ManageReceipts: React.FC = () => {
                   </div>
                 ) : (
                   <>
-                    {!draft.standardReceiptId && (
-                      <Alert type="warning" showIcon style={{ marginBottom: 8, fontSize: 12 }}
-                        message="Save the receipt first before applying installments." />
-                    )}
                     <Table<InstPickerRow>
                       columns={instPickerCols} dataSource={pickerRows} rowKey="key"
                       size="small" pagination={false} scroll={{ x: 1000, y: 380 }}
-                      rowSelection={{ selectedRowKeys: selectedKeys, onChange: keys => setInstPickerSel(p => ({ ...p, [tabKey]: keys })) }}
+                      rowSelection={{
+                        selectedRowKeys: selectedKeys,
+                        onChange: (keys) => {
+                          setInstPickerSel(p => ({ ...p, [tabKey]: keys }));
+                          const prevKeys = new Set(selectedKeys);
+                          const newlySelected = (keys as string[]).filter(k => !prevKeys.has(k));
+                          if (newlySelected.length > 0) {
+                            setInstPickerRows(p => ({
+                              ...p,
+                              [tabKey]: (p[tabKey] ?? []).map(r =>
+                                newlySelected.includes(r.key) && r.applyAmount === null
+                                  ? { ...r, applyAmount: r.balanceDue }
+                                  : r
+                              ),
+                            }));
+                          }
+                        },
+                      }}
                       summary={() => (
                         <Table.Summary fixed>
                           <Table.Summary.Row style={{ background: '#fafafa' }}>
@@ -3592,6 +3806,74 @@ const ManageReceipts: React.FC = () => {
           ]}
         />
       </Modal>
+
+      {/* ── Save Progress Modal ── */}
+      {saveProgress?.open && (
+        <Modal
+          open={saveProgress.open}
+          title={<Space><SaveOutlined style={{ color: REDWOOD.success }} /><Text strong>Saving Receipt</Text></Space>}
+          footer={saveProgress.done ? <Button type="primary" onClick={() => setSaveProgress(null)}>Close</Button> : null}
+          closable={saveProgress.done}
+          onCancel={() => saveProgress.done && setSaveProgress(null)}
+          width={500}
+        >
+          <Steps
+            direction="vertical"
+            size="small"
+            current={saveProgress.current}
+            items={saveProgress.steps.map(s => ({
+              title: s.title,
+              status: s.status,
+              description: s.detail ? <Text style={{ fontSize: 11, color: s.status === 'error' ? REDWOOD.primary : REDWOOD.neutral600 }}>{s.detail}</Text> : undefined,
+            }))}
+          />
+        </Modal>
+      )}
+
+      {/* ── Save & Debug Modal ── */}
+      {debugModal?.open && (
+        <Modal
+          open={debugModal.open}
+          title={<Space><CodeOutlined style={{ color: REDWOOD.info }} /><Text strong>Save &amp; Debug — API Step Runner</Text></Space>}
+          onCancel={() => setDebugModal(null)}
+          footer={<Button onClick={() => setDebugModal(null)}>Close</Button>}
+          width={860}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {debugModal.steps.map((step, idx) => (
+              <div key={idx} style={{ border: `1px solid ${REDWOOD.border}`, borderRadius: 8, padding: '10px 14px', background: step.done ? '#f6ffed' : '#fafafa' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <Tag color={step.method === 'POST' ? 'green' : step.method === 'PUT' ? 'orange' : 'blue'} style={{ fontWeight: 700 }}>{step.method}</Tag>
+                  <Text strong style={{ fontSize: 12, flex: 1 }}>{step.label}</Text>
+                  <Button size="small" type="primary" loading={step.running} disabled={step.done}
+                    style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+                    onClick={async () => {
+                      setDebugModal(prev => prev ? { ...prev, steps: prev.steps.map((s, i) => i === idx ? { ...s, running: true } : s) } : prev);
+                      try {
+                        const res = await fetch(step.url, {
+                          method: step.method,
+                          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                          body: step.method !== 'GET' ? step.body : undefined,
+                        });
+                        const text = await res.text();
+                        setDebugModal(prev => prev ? { ...prev, steps: prev.steps.map((s, i) => i === idx ? { ...s, running: false, done: true, response: `HTTP ${res.status}\n${text}` } : s) } : prev);
+                      } catch (e: any) {
+                        setDebugModal(prev => prev ? { ...prev, steps: prev.steps.map((s, i) => i === idx ? { ...s, running: false, response: `Error: ${e.message}` } : s) } : prev);
+                      }
+                    }}>▶ Run</Button>
+                </div>
+                <div style={{ fontFamily: 'monospace', fontSize: 10, color: REDWOOD.info, wordBreak: 'break-all', padding: '3px 8px', background: '#f0f5ff', borderRadius: 4, marginBottom: 6 }}>{step.url}</div>
+                <div style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 5, fontFamily: 'monospace', fontSize: 10, maxHeight: 120, overflowY: 'auto', whiteSpace: 'pre' }}>{step.body}</div>
+                {step.response && (
+                  <div style={{ marginTop: 6, background: step.response.includes('Error') ? '#fff1f0' : '#f6ffed', border: `1px solid ${step.response.includes('Error') ? '#ffccc7' : '#b7eb8f'}`, padding: 6, borderRadius: 4, fontFamily: 'monospace', fontSize: 10, whiteSpace: 'pre-wrap' }}>
+                    {step.response}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
 
       {/* ── AccountSelector for Dr / Cr Account ── */}
       {miscAcctVisible && (() => {
