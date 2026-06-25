@@ -2671,6 +2671,24 @@ const ManageReceipts: React.FC = () => {
                                       <Text style={{ fontSize: 15, fontFamily: 'monospace', color: REDWOOD.success, fontWeight: 700 }}>{fmt(applied)}</Text>
                                     </div>
                                   )}
+                                  {/* Balance row — always show when there are applications */}
+                                  {(applied > 0 || !onAcct) && (() => {
+                                    const balance = rAmt - applied;
+                                    const over    = balance < -0.01;
+                                    const exact   = Math.abs(balance) < 0.01;
+                                    return (
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, borderTop: `1px solid ${REDWOOD.border}`, paddingTop: 4, marginTop: 2 }}>
+                                        <Tag color={over ? 'red' : exact ? 'green' : 'default'}
+                                          style={{ fontSize: 12, margin: 0, minWidth: 88, textAlign: 'center', padding: '1px 6px' }}>
+                                          {over ? 'Over' : exact ? 'Balanced' : 'Balance'}
+                                        </Tag>
+                                        <Text style={{ fontSize: 15, fontFamily: 'monospace', fontWeight: 700,
+                                          color: over ? REDWOOD.primary : exact ? REDWOOD.success : REDWOOD.neutral600 }}>
+                                          {over ? '-' : ''}{fmt(Math.abs(balance))}
+                                        </Text>
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                               </Col>
                             </Row>
