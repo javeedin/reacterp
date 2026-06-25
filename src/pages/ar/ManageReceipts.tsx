@@ -2231,8 +2231,10 @@ const ManageReceipts: React.FC = () => {
     // ── Applied / Unapplied / On-Account summary ──────────────────────────────
     const receiptTotal   = draft.amount ?? 0;
     const totalApplied   = allAppRows.reduce((s, r) => s + (r.applicationAmount || 0), 0);
-    const unapplied      = Math.max(0, receiptTotal - totalApplied);
-    const isOnAccount    = totalApplied === 0 && receiptTotal > 0;
+    const totalAdjAll    = (pendingApplications[tabKey] ?? []).reduce((s, r) => s + (r.adjustmentAmount ?? 0), 0);
+    const netTotal       = totalApplied + totalAdjAll;
+    const unapplied      = Math.max(0, receiptTotal - netTotal);
+    const isOnAccount    = netTotal === 0 && receiptTotal > 0;
 
     const appColumns: ColumnsType<ExtAppRow> = [
       { title: '#', key: 'seq', width: 36,
@@ -2641,8 +2643,10 @@ const ManageReceipts: React.FC = () => {
                           const svdApps = receiptApplications[tabKey]?.rows ?? [];
                           const applied = pndApps.reduce((s, r) => s + r.applyAmount, 0)
                                         + svdApps.reduce((s, r) => s + r.applicationAmount, 0);
-                          const unapp   = Math.max(0, rAmt - applied);
-                          const onAcct  = applied === 0;
+                          const totalAdj = pndApps.reduce((s, r) => s + (r.adjustmentAmount ?? 0), 0);
+                          const netApplied = applied + totalAdj;
+                          const unapp   = Math.max(0, rAmt - netApplied);
+                          const onAcct  = netApplied === 0;
                           return (
                             <Row style={{ marginBottom: 5 }}>
                               <Col span={9} />
@@ -2660,7 +2664,7 @@ const ManageReceipts: React.FC = () => {
                                       <Text style={{ fontSize: 15, fontFamily: 'monospace', color: REDWOOD.warning, fontWeight: 700 }}>{fmt(unapp)}</Text>
                                     </div>
                                   )}
-                                  {!onAcct && unapp < 0.01 && applied > 0 && (
+                                  {!onAcct && unapp < 0.01 && netApplied > 0 && (
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                       <Tag color="green" style={{ fontSize: 12, margin: 0, minWidth: 88, textAlign: 'center', padding: '1px 6px' }}>Fully Applied</Tag>
                                     </div>
@@ -2671,9 +2675,17 @@ const ManageReceipts: React.FC = () => {
                                       <Text style={{ fontSize: 15, fontFamily: 'monospace', color: REDWOOD.success, fontWeight: 700 }}>{fmt(applied)}</Text>
                                     </div>
                                   )}
-                                  {/* Balance row — always show when there are applications */}
-                                  {(applied > 0 || !onAcct) && (() => {
-                                    const balance = rAmt - applied;
+                                  {totalAdj !== 0 && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                      <Tag color={totalAdj < 0 ? 'volcano' : 'orange'} style={{ fontSize: 12, margin: 0, minWidth: 88, textAlign: 'center', padding: '1px 6px' }}>Adjustment</Tag>
+                                      <Text style={{ fontSize: 15, fontFamily: 'monospace', color: totalAdj < 0 ? REDWOOD.primary : REDWOOD.warning, fontWeight: 700 }}>
+                                        {totalAdj > 0 ? '+' : ''}{fmt(totalAdj)}
+                                      </Text>
+                                    </div>
+                                  )}
+                                  {/* Balance row — receipt minus (apply + adj) */}
+                                  {netApplied !== 0 && (() => {
+                                    const balance = rAmt - netApplied;
                                     const over    = balance < -0.01;
                                     const exact   = Math.abs(balance) < 0.01;
                                     return (
@@ -3098,7 +3110,14 @@ const ManageReceipts: React.FC = () => {
                                 {fmt(totalApplied)}
                               </Text>
                             </Table.Summary.Cell>
-                            <Table.Summary.Cell index={4} colSpan={7} />
+                            <Table.Summary.Cell index={4} align="right">
+                              {totalAdjAll !== 0 && (
+                                <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: totalAdjAll < 0 ? REDWOOD.primary : REDWOOD.warning }}>
+                                  {totalAdjAll > 0 ? '+' : ''}{fmt(totalAdjAll)}
+                                </Text>
+                              )}
+                            </Table.Summary.Cell>
+                            <Table.Summary.Cell index={5} colSpan={6} />
                           </Table.Summary.Row>
                         </Table.Summary>
                       )}
