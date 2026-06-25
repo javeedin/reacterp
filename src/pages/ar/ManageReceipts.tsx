@@ -468,6 +468,41 @@ const ManageReceipts: React.FC = () => {
     }
   }, []);
 
+  // ── Fetch receipt applications ────────────────────────────────────────────
+  const fetchApplications = useCallback((tabKey: string, standardReceiptId: number) => {
+    if (!standardReceiptId) return;
+    fetchedAppsRef.current.add(tabKey);
+    setReceiptApplications(prev => ({ ...prev, [tabKey]: { loading: true, rows: [] } }));
+    fetch(`${APEX_RECEIPT_APPS}?standard_receipt_id=${standardReceiptId}&limit=200`, {
+      headers: { Accept: 'application/json' },
+    })
+      .then(r => r.json())
+      .then(data => {
+        const rows: AppRow[] = ((data.items || []) as any[]).map((a: any) => ({
+          key:                        String(a.application_id ?? Math.random()),
+          applicationId:              a.application_id              ?? 0,
+          applicationDate:            (a.application_date  || '').slice(0, 10),
+          applicationAmount:          a.application_amount          ?? 0,
+          applicationStatus:          a.application_status          ?? '',
+          accountingDate:             (a.accounting_date   || '').slice(0, 10),
+          referenceTransactionNumber: a.reference_transaction_number ?? '',
+          referenceTransactionId:     a.reference_transaction_id    ?? null,
+          referenceTransactionStatus: a.reference_transaction_status ?? '',
+          activityName:               a.activity_name               ?? '',
+          standardReceiptId:          a.standard_receipt_id         ?? 0,
+          enteredCurrency:            a.entered_currency             ?? '',
+          processStatus:              a.process_status               ?? '',
+          isLatestApplication:        a.is_latest_application        ?? '',
+          custAccountId:              a.cust_account_id              ?? null,
+          customerSite:               a.customer_site                ?? '',
+        }));
+        setReceiptApplications(prev => ({ ...prev, [tabKey]: { loading: false, rows } }));
+      })
+      .catch(() => {
+        setReceiptApplications(prev => ({ ...prev, [tabKey]: { loading: false, rows: [] } }));
+      });
+  }, []);
+
   const applySelectedInstallments = useCallback(async (tabKey: string, draft: ReceiptDraft) => {
     const allRows    = instPickerRows[tabKey] ?? [];
     const selectedKeys = instPickerSel[tabKey] ?? [];
@@ -650,41 +685,6 @@ const ManageReceipts: React.FC = () => {
       .catch(() => {})
       .finally(() => setLovLoading(false));
   };
-
-  // ── Fetch receipt applications ────────────────────────────────────────────
-  const fetchApplications = useCallback((tabKey: string, standardReceiptId: number) => {
-    if (!standardReceiptId) return;
-    fetchedAppsRef.current.add(tabKey);
-    setReceiptApplications(prev => ({ ...prev, [tabKey]: { loading: true, rows: [] } }));
-    fetch(`${APEX_RECEIPT_APPS}?standard_receipt_id=${standardReceiptId}&limit=200`, {
-      headers: { Accept: 'application/json' },
-    })
-      .then(r => r.json())
-      .then(data => {
-        const rows: AppRow[] = ((data.items || []) as any[]).map((a: any) => ({
-          key:                        String(a.application_id ?? Math.random()),
-          applicationId:              a.application_id              ?? 0,
-          applicationDate:            (a.application_date  || '').slice(0, 10),
-          applicationAmount:          a.application_amount          ?? 0,
-          applicationStatus:          a.application_status          ?? '',
-          accountingDate:             (a.accounting_date   || '').slice(0, 10),
-          referenceTransactionNumber: a.reference_transaction_number ?? '',
-          referenceTransactionId:     a.reference_transaction_id    ?? null,
-          referenceTransactionStatus: a.reference_transaction_status ?? '',
-          activityName:               a.activity_name               ?? '',
-          standardReceiptId:          a.standard_receipt_id         ?? 0,
-          enteredCurrency:            a.entered_currency             ?? '',
-          processStatus:              a.process_status               ?? '',
-          isLatestApplication:        a.is_latest_application        ?? '',
-          custAccountId:              a.cust_account_id              ?? null,
-          customerSite:               a.customer_site                ?? '',
-        }));
-        setReceiptApplications(prev => ({ ...prev, [tabKey]: { loading: false, rows } }));
-      })
-      .catch(() => {
-        setReceiptApplications(prev => ({ ...prev, [tabKey]: { loading: false, rows: [] } }));
-      });
-  }, []);
 
   useEffect(() => {
     if (!activeKey || activeKey === 'search') return;
