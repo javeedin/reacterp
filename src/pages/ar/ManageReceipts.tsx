@@ -2079,6 +2079,15 @@ const ManageReceipts: React.FC = () => {
         onChange={v => updateDraft(tabKey, { [f]: v } as any)} />
     );
 
+    const amtNum = (f: keyof ReceiptDraft) => (
+      <InputNumber size="small" style={{ width: '100%', fontSize: 13, fontWeight: 600, fontFamily: 'monospace' }}
+        value={draft[f] as number} precision={2} disabled={fieldDisabled}
+        prefix="AED"
+        formatter={v => v !== undefined && v !== null && v !== '' ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
+        parser={v => parseFloat((v ?? '').replace(/,/g, '')) || 0}
+        onChange={v => updateDraft(tabKey, { [f]: v } as any)} />
+    );
+
     const roVal = (v: React.ReactNode, mono = false) => (
       <Text style={{ fontSize: 12, fontFamily: mono ? 'monospace' : undefined }}>{v || '—'}</Text>
     );
@@ -2525,7 +2534,7 @@ const ManageReceipts: React.FC = () => {
                       <Col span={8} style={{ paddingLeft: 16, paddingRight: 16, borderRight: `1px solid ${REDWOOD.border}` }}>
                         {field('Currency',          currSel(), true)}
                         {/* Entered Amount input */}
-                        {field('Entered Amount',    num('amount'), true)}
+                        {field('Entered Amount',    amtNum('amount'), true)}
                         {/* Accounted Amount display */}
                         {field('Accounted Amount',
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
