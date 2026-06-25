@@ -2265,13 +2265,22 @@ const ManageReceipts: React.FC = () => {
                 }
               }} />
           : <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: v > 0 ? REDWOOD.success : undefined }}>{fmt(v || 0)}</Text> },
-      { title: 'Adj Amount', key: 'adjAmount', width: 105, align: 'right',
-        render: (_, r) => r._adjAmount && r._adjAmount !== 0
-          ? <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600,
-              color: r._adjAmount < 0 ? REDWOOD.primary : REDWOOD.warning }}>
-              {r._adjAmount > 0 ? '+' : ''}{fmt(r._adjAmount)}
-            </Text>
-          : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
+      { title: 'Adj Amount', key: 'adjAmount', width: 115, align: 'right',
+        render: (_, r) => r._pending && r._pendingKey
+          ? <InputNumber size="small" style={{ width: '100%' }} precision={2}
+              placeholder="±0.00" value={r._adjAmount ?? undefined}
+              formatter={val => val !== undefined && val !== null && val !== '' ? Number(val).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
+              parser={val => parseFloat((val ?? '').replace(/,/g, '')) || 0}
+              onChange={val => setPendingApplications(prev => {
+                const rows = prev[tabKey] ?? [];
+                return { ...prev, [tabKey]: rows.map(p => p.key === r._pendingKey ? { ...p, adjustmentAmount: val ?? 0 } : p) };
+              })} />
+          : r._adjAmount && r._adjAmount !== 0
+            ? <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600,
+                color: r._adjAmount < 0 ? REDWOOD.primary : REDWOOD.warning }}>
+                {r._adjAmount > 0 ? '+' : ''}{fmt(r._adjAmount)}
+              </Text>
+            : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
       { title: 'CCY', dataIndex: 'enteredCurrency', width: 52,
         render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
       { title: 'App. Status', dataIndex: 'applicationStatus', width: 95,
@@ -2628,29 +2637,29 @@ const ManageReceipts: React.FC = () => {
                                   color: onAcct ? '#722ed1' : unapp > 0.01 ? REDWOOD.warning : REDWOOD.success }}>
                                   {fmt(onAcct ? rAmt : unapp)}
                                 </Text>
-                                {/* Breakdown tags */}
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 2 }}>
+                                {/* Breakdown tags — order: On-Account → Unapplied → Applied */}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 2 }}>
                                   {onAcct && rAmt > 0 && (
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                      <Tag color="purple" style={{ fontSize: 10, margin: 0 }}>On Account</Tag>
-                                      <Text style={{ fontSize: 11, fontFamily: 'monospace', color: '#722ed1', fontWeight: 600 }}>{fmt(rAmt)}</Text>
-                                    </div>
-                                  )}
-                                  {applied > 0 && (
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                      <Tag color="green" style={{ fontSize: 10, margin: 0 }}>Applied</Tag>
-                                      <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.success, fontWeight: 600 }}>{fmt(applied)}</Text>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                      <Tag color="purple" style={{ fontSize: 10, margin: 0, minWidth: 76, textAlign: 'center' }}>On Account</Tag>
+                                      <Text style={{ fontSize: 12, fontFamily: 'monospace', color: '#722ed1', fontWeight: 600 }}>{fmt(rAmt)}</Text>
                                     </div>
                                   )}
                                   {!onAcct && unapp > 0.01 && (
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                      <Tag color="orange" style={{ fontSize: 10, margin: 0 }}>Unapplied</Tag>
-                                      <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.warning, fontWeight: 600 }}>{fmt(unapp)}</Text>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                      <Tag color="orange" style={{ fontSize: 10, margin: 0, minWidth: 76, textAlign: 'center' }}>Unapplied</Tag>
+                                      <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.warning, fontWeight: 600 }}>{fmt(unapp)}</Text>
                                     </div>
                                   )}
                                   {!onAcct && unapp < 0.01 && applied > 0 && (
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                      <Tag color="green" style={{ fontSize: 10, margin: 0 }}>Fully Applied</Tag>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                      <Tag color="green" style={{ fontSize: 10, margin: 0, minWidth: 76, textAlign: 'center' }}>Fully Applied</Tag>
+                                    </div>
+                                  )}
+                                  {applied > 0 && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                      <Tag color="green" style={{ fontSize: 10, margin: 0, minWidth: 76, textAlign: 'center' }}>Applied</Tag>
+                                      <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success, fontWeight: 600 }}>{fmt(applied)}</Text>
                                     </div>
                                   )}
                                 </div>
