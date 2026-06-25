@@ -2524,32 +2524,28 @@ const ManageReceipts: React.FC = () => {
                                 );
                               })}
                             </Select>
-                            {/* Selected: show class + chosen bank account */}
+                            {/* Selected: show class + chosen bank account on its own row */}
                             {draft.receiptMethod && (() => {
                               const m     = receiptMethods.find(x => x.name === draft.receiptMethod);
                               const accts = draft.selectedBankAccountId
                                 ? allMethodAccounts.filter(a => a.id === draft.selectedBankAccountId)
                                 : allMethodAccounts.filter(a => a.receiptMethodName === draft.receiptMethod);
                               return (
-                                <div style={{ marginTop: 4 }}>
+                                <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
                                   {m?.receiptClass && (
                                     <Text type="secondary" style={{ fontSize: 11 }}>
                                       Class: <strong>{m.receiptClass}</strong>
                                     </Text>
                                   )}
-                                  {accts.length > 0 && (
-                                    <div style={{ marginTop: 3, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                                      {accts.map(a => (
-                                        <Tag key={a.id} color="blue" icon={<BankOutlined />}
-                                          style={{ fontSize: 10, margin: 0 }}>
-                                          {a.bankAccountName
-                                            ? `${a.bankAccountName}${a.bankAccountNum ? ' · ' + a.bankAccountNum : ''}`
-                                            : a.bankAccountNum || `Acct ${a.bankAccountId}`}
-                                          {a.primaryFlag === 'Y' ? ' ★' : ''}
-                                        </Tag>
-                                      ))}
-                                    </div>
-                                  )}
+                                  {accts.map(a => (
+                                    <Tag key={a.id} color="blue" icon={<BankOutlined />}
+                                      style={{ fontSize: 10, margin: 0, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                      {a.bankAccountName
+                                        ? `${a.bankAccountName}${a.bankAccountNum ? ' · ' + a.bankAccountNum : ''}`
+                                        : a.bankAccountNum || `Acct ${a.bankAccountId}`}
+                                      {a.primaryFlag === 'Y' ? ' ★' : ''}
+                                    </Tag>
+                                  ))}
                                 </div>
                               );
                             })()}
@@ -2620,53 +2616,48 @@ const ManageReceipts: React.FC = () => {
                             </Text>
                           </div>
                         )}
-                        {/* Unapplied / Applied / On-Account live breakdown */}
-                        {field('Unapplied Amount',
-                          (() => {
-                            const rAmt      = draft.amount ?? 0;
-                            const pndApps   = pendingApplications[tabKey] ?? [];
-                            const svdApps   = receiptApplications[tabKey]?.rows ?? [];
-                            const applied   = pndApps.reduce((s, r) => s + r.applyAmount, 0)
-                                            + svdApps.reduce((s, r) => s + r.applicationAmount, 0);
-                            const unapp     = Math.max(0, rAmt - applied);
-                            const onAcct    = applied === 0;
-                            return (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                {/* Big unapplied / on-account number */}
-                                <Text style={{ fontSize: 18, fontFamily: 'monospace', fontWeight: 700,
-                                  color: onAcct ? '#722ed1' : unapp > 0.01 ? REDWOOD.warning : REDWOOD.success }}>
-                                  {fmt(onAcct ? rAmt : unapp)}
-                                </Text>
-                                {/* Breakdown tags — order: On-Account → Unapplied → Applied */}
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 2 }}>
+                        {/* Unapplied / Applied / On-Account live breakdown — no label, spans full width */}
+                        {(() => {
+                          const rAmt    = draft.amount ?? 0;
+                          const pndApps = pendingApplications[tabKey] ?? [];
+                          const svdApps = receiptApplications[tabKey]?.rows ?? [];
+                          const applied = pndApps.reduce((s, r) => s + r.applyAmount, 0)
+                                        + svdApps.reduce((s, r) => s + r.applicationAmount, 0);
+                          const unapp   = Math.max(0, rAmt - applied);
+                          const onAcct  = applied === 0;
+                          return (
+                            <Row style={{ marginBottom: 5 }}>
+                              <Col span={9} />
+                              <Col span={15}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                                   {onAcct && rAmt > 0 && (
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                      <Tag color="purple" style={{ fontSize: 10, margin: 0, minWidth: 76, textAlign: 'center' }}>On Account</Tag>
-                                      <Text style={{ fontSize: 12, fontFamily: 'monospace', color: '#722ed1', fontWeight: 600 }}>{fmt(rAmt)}</Text>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                      <Tag color="purple" style={{ fontSize: 12, margin: 0, minWidth: 88, textAlign: 'center', padding: '1px 6px' }}>On Account</Tag>
+                                      <Text style={{ fontSize: 15, fontFamily: 'monospace', color: '#722ed1', fontWeight: 700 }}>{fmt(rAmt)}</Text>
                                     </div>
                                   )}
                                   {!onAcct && unapp > 0.01 && (
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                      <Tag color="orange" style={{ fontSize: 10, margin: 0, minWidth: 76, textAlign: 'center' }}>Unapplied</Tag>
-                                      <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.warning, fontWeight: 600 }}>{fmt(unapp)}</Text>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                      <Tag color="orange" style={{ fontSize: 12, margin: 0, minWidth: 88, textAlign: 'center', padding: '1px 6px' }}>Unapplied</Tag>
+                                      <Text style={{ fontSize: 15, fontFamily: 'monospace', color: REDWOOD.warning, fontWeight: 700 }}>{fmt(unapp)}</Text>
                                     </div>
                                   )}
                                   {!onAcct && unapp < 0.01 && applied > 0 && (
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                      <Tag color="green" style={{ fontSize: 10, margin: 0, minWidth: 76, textAlign: 'center' }}>Fully Applied</Tag>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                      <Tag color="green" style={{ fontSize: 12, margin: 0, minWidth: 88, textAlign: 'center', padding: '1px 6px' }}>Fully Applied</Tag>
                                     </div>
                                   )}
                                   {applied > 0 && (
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                      <Tag color="green" style={{ fontSize: 10, margin: 0, minWidth: 76, textAlign: 'center' }}>Applied</Tag>
-                                      <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success, fontWeight: 600 }}>{fmt(applied)}</Text>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                      <Tag color="green" style={{ fontSize: 12, margin: 0, minWidth: 88, textAlign: 'center', padding: '1px 6px' }}>Applied</Tag>
+                                      <Text style={{ fontSize: 15, fontFamily: 'monospace', color: REDWOOD.success, fontWeight: 700 }}>{fmt(applied)}</Text>
                                     </div>
                                   )}
                                 </div>
-                              </div>
-                            );
-                          })()
-                        )}
+                              </Col>
+                            </Row>
+                          );
+                        })()}
                         {field('Rec. Specialist',   inp('receivablesSpecialist'))}
                         {field('Comments',
                           <Input.TextArea size="small" style={{ fontSize: 12 }} autoSize={{ minRows: 2 }}
