@@ -826,7 +826,7 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
     }
     setJournalData(prev => ({
       ...prev,
-      accountingDate: periodEndDate,
+      accountingDate: dayjs().format('D-MMM-YYYY'),
       conversionDate: dayjs().format('D-MMM-YYYY'),
     }));
   }, [batchData.accountingPeriod, periods]);
@@ -2569,7 +2569,8 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
                         showSearch
                         disabled={isViewMode || isPosted}
                         filterOption={(input, option) =>
-                          String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                          String(option?.value ?? '').toLowerCase().includes(input.toLowerCase()) ||
+                          String(option?.children ?? '').toLowerCase().includes(input.toLowerCase())
                         }
                       >
                         {glCategories.length > 0
