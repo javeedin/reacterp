@@ -2624,25 +2624,13 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
                         }
                       </Select>
                       {journalData.currency && journalData.currency !== 'AED' && (
-                        <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <div style={{ flex: 1, fontSize: 11, color: REDWOOD.neutral600 }}>
-                            {bmsRateLoading
-                              ? <span style={{ color: REDWOOD.info }}>Fetching rate…</span>
-                              : bmsRate
-                              ? <span>Rate: <strong>{bmsRate.rate}</strong> ({bmsRate.rateType}, {bmsRate.rateDate})</span>
-                              : <span style={{ color: REDWOOD.warning }}>No rate found</span>
-                            }
-                          </div>
-                          <Tooltip title="Refresh conversion rate">
-                            <Button size="small" icon={<ReloadOutlined />} loading={bmsRateLoading}
-                              style={{ fontSize: 11, padding: '0 6px', height: 22, color: REDWOOD.info, borderColor: REDWOOD.info }}
-                              onClick={() => fetchBmsRate(journalData.currency, journalData.conversionDate, true)} />
-                          </Tooltip>
-                          <Tooltip title="API Inspector — view rate lookup request">
-                            <Button size="small" icon={<ApiOutlined />}
-                              style={{ fontSize: 11, padding: '0 6px', height: 22, color: REDWOOD.neutral600 }}
-                              onClick={() => setBmsRateApiModal(true)} />
-                          </Tooltip>
+                        <div style={{ marginTop: 4, fontSize: 11, color: REDWOOD.neutral600 }}>
+                          {bmsRateLoading
+                            ? <span style={{ color: REDWOOD.info }}>Fetching rate…</span>
+                            : bmsRate
+                            ? <span>Rate: <strong>{bmsRate.rate}</strong> ({bmsRate.rateType}, {bmsRate.rateDate})</span>
+                            : <span style={{ color: REDWOOD.warning }}>No rate found</span>
+                          }
                         </div>
                       )}
                     </Col>
@@ -2681,7 +2669,21 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
                       </Select>
                     </Col>
 
-                    <Col span={12}><Text style={{ fontSize: 13 }}>Conversion Rate</Text></Col>
+                    <Col span={12}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Text style={{ fontSize: 13 }}>Conversion Rate</Text>
+                        <Tooltip title="Refresh rate from BMS">
+                          <Button size="small" icon={<ReloadOutlined />} loading={bmsRateLoading}
+                            style={{ padding: '0 4px', height: 20, fontSize: 11, color: REDWOOD.info, borderColor: REDWOOD.info }}
+                            onClick={() => fetchBmsRate(journalData.currency, journalData.conversionDate, true)} />
+                        </Tooltip>
+                        <Tooltip title="API Inspector — view rate lookup request">
+                          <Button size="small" icon={<ApiOutlined />}
+                            style={{ padding: '0 4px', height: 20, fontSize: 11, color: REDWOOD.neutral600 }}
+                            onClick={() => setBmsRateApiModal(true)} />
+                        </Tooltip>
+                      </div>
+                    </Col>
                     <Col span={12}>
                       <InputNumber
                         value={journalData.conversionRate}
