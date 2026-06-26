@@ -112,16 +112,17 @@ BEGIN
         p_comments       => 'Update AMOUNT_PAID and INSTALLMENT_AMOUNT_ADJUSTED for a specific installment',
         p_source         => q'[
 DECLARE
-    l_body               CLOB          := :body_text;
-    l_txn_id             NUMBER        := :id;
-    l_inst_id            NUMBER        := :installmentId;
-    l_amount_paid        NUMBER;
-    l_amount_adj         NUMBER;
-    l_updated_by         VARCHAR2(240);
-    l_rows_updated       NUMBER;
-    l_orig_amount        NUMBER;
-    l_new_status         VARCHAR2(30);
-    l_closed_date        DATE;
+    l_body                      CLOB         := :body_text;
+    l_txn_id                    NUMBER       := :id;
+    l_inst_id                   NUMBER       := :installmentId;
+    l_amount_paid               NUMBER;
+    l_amount_adj                NUMBER;
+    l_updated_by                VARCHAR2(240);
+    l_rows_updated              NUMBER;
+    l_orig_amount               NUMBER;
+    l_new_status                VARCHAR2(30);
+    l_closed_date               DATE;
+    l_remaining_balance         NUMBER;
 BEGIN
     APEX_JSON.parse(l_body);
 
@@ -129,32 +130,44 @@ BEGIN
     l_amount_adj  := NVL(APEX_JSON.get_number(p_path => 'InstallmentAmountAdjusted'), 0);
     l_updated_by  := NVL(APEX_JSON.get_varchar2(p_path => 'LastUpdatedBy'), 'REERP');
 
-    -- Fetch the original installment amount to determine if fully paid/adjusted
+    -- Fetch original line amount
     SELECT NVL(INSTALLMENT_LINE_AMOUNT_ORIGINAL, 0)
     INTO   l_orig_amount
     FROM   RR_AR_INVOICE_INSTALLMENTS
     WHERE  INSTALLMENT_ID  = l_inst_id
       AND  CUSTOMER_TRX_ID = l_txn_id;
 
-    -- Close if: AmountPaid + ABS(AdjustedAmount) >= OriginalAmount
+    -- Remaining balance = Original - Paid - ABS(Adjusted)
+    l_remaining_balance := l_orig_amount - l_amount_paid - ABS(l_amount_adj);
+
+    -- Determine status: Closed when fully paid/adjusted
     IF (l_amount_paid + ABS(l_amount_adj)) >= l_orig_amount THEN
-        l_new_status  := 'Closed';
-        l_closed_date := SYSDATE;
+        l_new_status        := 'Closed';
+        l_closed_date       := SYSDATE;
+        l_remaining_balance := 0;
     ELSE
         l_new_status  := 'Open';
         l_closed_date := NULL;
     END IF;
 
     UPDATE RR_AR_INVOICE_INSTALLMENTS
-    SET    AMOUNT_PAID                  = l_amount_paid,
-           INSTALLMENT_AMOUNT_ADJUSTED  = l_amount_adj,
-           INSTALLMENT_STATUS           = l_new_status,
-           INSTALLMENT_CLOSED_DATE      = l_closed_date,
-           INSTALLMENT_GL_CLOSED_DATE   = l_closed_date,
-           LAST_UPDATED_BY              = l_updated_by,
-           LAST_UPDATE_DATE             = SYSDATE
-    WHERE  INSTALLMENT_ID              = l_inst_id
-      AND  CUSTOMER_TRX_ID             = l_txn_id;
+    SET    AMOUNT_PAID                    = l_amount_paid,
+           INSTALLMENT_AMOUNT_ADJUSTED    = l_amount_adj,
+           -- Balance columns: 0 when closed, remaining balance when open
+           INSTALLMENT_BALANCE_DUE        = l_remaining_balance,
+           ACCOUNTED_BALANCE_DUE          = l_remaining_balance,
+           INSTALLMENT_LINE_AMOUNT_DUE    = l_remaining_balance,
+           -- Freight and Tax go to 0 when closed, unchanged when open
+           INSTALLMENT_FREIGHT_AMOUNT_DUE = CASE WHEN l_new_status = 'Closed' THEN 0 ELSE INSTALLMENT_FREIGHT_AMOUNT_DUE END,
+           INSTALLMENT_TAX_AMOUNT_DUE     = CASE WHEN l_new_status = 'Closed' THEN 0 ELSE INSTALLMENT_TAX_AMOUNT_DUE END,
+           -- Status and close dates
+           INSTALLMENT_STATUS             = l_new_status,
+           INSTALLMENT_CLOSED_DATE        = l_closed_date,
+           INSTALLMENT_GL_CLOSED_DATE     = l_closed_date,
+           LAST_UPDATED_BY                = l_updated_by,
+           LAST_UPDATE_DATE               = SYSDATE
+    WHERE  INSTALLMENT_ID                = l_inst_id
+      AND  CUSTOMER_TRX_ID              = l_txn_id;
 
     l_rows_updated := SQL%ROWCOUNT;
 
@@ -168,14 +181,15 @@ BEGIN
         COMMIT;
         :status := 200;
         APEX_JSON.open_object;
-        APEX_JSON.write('status',             'success');
-        APEX_JSON.write('installmentId',       l_inst_id);
-        APEX_JSON.write('txnId',               l_txn_id);
-        APEX_JSON.write('amountPaid',          l_amount_paid);
-        APEX_JSON.write('amountAdjusted',      l_amount_adj);
-        APEX_JSON.write('installmentStatus',   l_new_status);
-        APEX_JSON.write('closedDate',          l_closed_date);
-        APEX_JSON.write('rowsUpdated',         l_rows_updated);
+        APEX_JSON.write('status',              'success');
+        APEX_JSON.write('installmentId',        l_inst_id);
+        APEX_JSON.write('txnId',                l_txn_id);
+        APEX_JSON.write('amountPaid',           l_amount_paid);
+        APEX_JSON.write('amountAdjusted',       l_amount_adj);
+        APEX_JSON.write('remainingBalance',     l_remaining_balance);
+        APEX_JSON.write('installmentStatus',    l_new_status);
+        APEX_JSON.write('closedDate',           l_closed_date);
+        APEX_JSON.write('rowsUpdated',          l_rows_updated);
         APEX_JSON.close_object;
     END IF;
 
