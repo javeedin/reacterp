@@ -827,7 +827,7 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
     setJournalData(prev => ({
       ...prev,
       accountingDate: periodEndDate,
-      conversionDate: periodEndDate,
+      conversionDate: dayjs().format('D-MMM-YYYY'),
     }));
   }, [batchData.accountingPeriod, periods]);
 
