@@ -1685,14 +1685,14 @@ const ManageReceipts: React.FC = () => {
 
     // ── Step 2: Amount balance check ───────────────────────────────────────────
     const savedApps = receiptApplications[tabKey]?.rows ?? [];
-    const totalPendingApply = pending.reduce((s, r) => s + r.applyAmount + r.adjustmentAmount, 0);
+    const totalPendingApply = pending.reduce((s, r) => s + r.applyAmount, 0);
     const totalSavedApply   = savedApps.reduce((s, r) => s + r.applicationAmount, 0);
     const totalApplied      = totalPendingApply + totalSavedApply;
     const receiptAmt        = draft.amount ?? 0;
 
     if (pending.length > 0 && Math.abs(totalApplied - receiptAmt) > 0.01) {
       message.warning({
-        content: `Receipt amount ${receiptAmt.toLocaleString('en-AE', { minimumFractionDigits: 2 })} ≠ total applications ${totalApplied.toLocaleString('en-AE', { minimumFractionDigits: 2 })}. Please adjust apply amounts.`,
+        content: `Receipt amount ${receiptAmt.toLocaleString('en-AE', { minimumFractionDigits: 2 })} ≠ total applied ${totalApplied.toLocaleString('en-AE', { minimumFractionDigits: 2 })}. Apply amounts must equal the receipt amount (adjustments are separate).`,
         duration: 8,
       });
       return false;
@@ -2256,9 +2256,8 @@ const ManageReceipts: React.FC = () => {
     const receiptTotal   = draft.amount ?? 0;
     const totalApplied   = allAppRows.reduce((s, r) => s + (r.applicationAmount || 0), 0);
     const totalAdjAll    = (pendingApplications[tabKey] ?? []).reduce((s, r) => s + (r.adjustmentAmount ?? 0), 0);
-    const netTotal       = totalApplied + totalAdjAll;
-    const unapplied      = Math.max(0, receiptTotal - netTotal);
-    const isOnAccount    = netTotal === 0 && receiptTotal > 0;
+    const unapplied      = Math.max(0, receiptTotal - totalApplied);
+    const isOnAccount    = totalApplied === 0 && receiptTotal > 0;
 
     const appColumns: ColumnsType<ExtAppRow> = [
       { title: '#', key: 'seq', width: 36,
@@ -2685,9 +2684,8 @@ const ManageReceipts: React.FC = () => {
                           const applied = pndApps.reduce((s, r) => s + r.applyAmount, 0)
                                         + svdApps.reduce((s, r) => s + r.applicationAmount, 0);
                           const totalAdj = pndApps.reduce((s, r) => s + (r.adjustmentAmount ?? 0), 0);
-                          const netApplied = applied + totalAdj;
-                          const unapp   = Math.max(0, rAmt - netApplied);
-                          const onAcct  = netApplied === 0;
+                          const unapp   = Math.max(0, rAmt - applied);
+                          const onAcct  = applied === 0;
                           return (
                             <Row style={{ marginBottom: 5 }}>
                               <Col span={9} />
@@ -2705,7 +2703,7 @@ const ManageReceipts: React.FC = () => {
                                       <Text style={{ fontSize: 15, fontFamily: 'monospace', color: REDWOOD.warning, fontWeight: 700 }}>{fmt(unapp)}</Text>
                                     </div>
                                   )}
-                                  {!onAcct && unapp < 0.01 && netApplied > 0 && (
+                                  {!onAcct && unapp < 0.01 && applied > 0 && (
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                       <Tag color="green" style={{ fontSize: 12, margin: 0, minWidth: 88, textAlign: 'center', padding: '1px 6px' }}>Fully Applied</Tag>
                                     </div>
@@ -2724,9 +2722,9 @@ const ManageReceipts: React.FC = () => {
                                       </Text>
                                     </div>
                                   )}
-                                  {/* Balance row — receipt minus (apply + adj) */}
-                                  {netApplied !== 0 && (() => {
-                                    const balance = rAmt - netApplied;
+                                  {/* Balance row — receipt minus apply only (adj is separate write-off) */}
+                                  {applied !== 0 && (() => {
+                                    const balance = rAmt - applied;
                                     const over    = balance < -0.01;
                                     const exact   = Math.abs(balance) < 0.01;
                                     return (
@@ -3195,8 +3193,7 @@ const ManageReceipts: React.FC = () => {
               .filter(r => selectedKeys.includes(r.key))
               .reduce((s, r) => s + (r.adjustmentAmount ?? 0), 0);
             const receiptAmt  = draft.amount ?? 0;
-            const totalUsed   = totalApply + totalAdj;
-            const remaining   = receiptAmt - totalUsed;
+            const remaining   = receiptAmt - totalApply;
 
             const updateRow = (key: string, patch: Partial<InstPickerRow>) =>
               setInstPickerRows(p => ({
@@ -3238,16 +3235,25 @@ const ManageReceipts: React.FC = () => {
                     parser={val => parseFloat((val ?? '').replace(/,/g, '')) || 0}
                     onChange={val => updateRow(rec.key, { adjustmentAmount: val })} />
                 )},
-              { title: 'Balance After', width: 115, align: 'right',
+              { title: 'Balance After', width: 140, align: 'right',
                 render: (_v, rec) => {
                   const apply = rec.applyAmount ?? rec.balanceDue;
-                  const adj   = rec.adjustmentAmount ?? 0;
-                  const after = Math.max(0, rec.balanceDue - apply - adj);
+                  const after = Math.max(0, rec.balanceDue - apply);
+                  const canPush = after > 0.001;
                   return (
-                    <Text style={{ fontSize: 11, fontFamily: 'monospace',
-                      color: after === 0 ? REDWOOD.success : after < 0 ? REDWOOD.primary : REDWOOD.neutral600 }}>
-                      {after.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </Text>
+                    <Space size={4} style={{ justifyContent: 'flex-end', width: '100%' }}>
+                      <Text style={{ fontSize: 11, fontFamily: 'monospace',
+                        color: after === 0 ? REDWOOD.success : REDWOOD.neutral600 }}>
+                        {after.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </Text>
+                      {canPush && (
+                        <Tooltip title="Move remaining balance to Adjustment">
+                          <Button size="small" type="text" icon={<RollbackOutlined style={{ fontSize: 10 }} />}
+                            style={{ padding: '0 2px', height: 18, color: REDWOOD.warning }}
+                            onClick={() => updateRow(rec.key, { adjustmentAmount: after })} />
+                        </Tooltip>
+                      )}
+                    </Space>
                   );
                 }},
               { title: 'Adj Reason', dataIndex: 'adjustmentReason', width: 140,
@@ -3282,7 +3288,7 @@ const ManageReceipts: React.FC = () => {
                       </div>
                       <div style={{ textAlign: 'right' }}>
                         <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block' }}>Applied</Text>
-                        <Text strong style={{ fontSize: 14, fontFamily: 'monospace', color: REDWOOD.info }}>{totalUsed.toLocaleString('en-AE', { minimumFractionDigits: 2 })}</Text>
+                        <Text strong style={{ fontSize: 14, fontFamily: 'monospace', color: REDWOOD.info }}>{totalApply.toLocaleString('en-AE', { minimumFractionDigits: 2 })}</Text>
                       </div>
                       <div style={{ textAlign: 'right' }}>
                         <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block' }}>Remaining</Text>
@@ -3315,7 +3321,7 @@ const ManageReceipts: React.FC = () => {
                         onClick={() => { setInstPickerSel(p => ({ ...p, [tabKey]: [] })); fetchOpenInstallments(tabKey, draft.customerAccountNumber); }}>
                         Refresh
                       </Button>
-                      <Tooltip title={selectedKeys.length === 0 ? 'Select at least one installment' : remaining < -0.01 ? 'Applied amount exceeds receipt amount' : undefined}>
+                      <Tooltip title={selectedKeys.length === 0 ? 'Select at least one installment' : remaining < -0.01 ? 'Apply amount exceeds receipt amount' : undefined}>
                         <Button type="primary" loading={pickerSaving} disabled={selectedKeys.length === 0 || remaining < -0.01}
                           style={{ background: selectedKeys.length > 0 && remaining >= -0.01 ? REDWOOD.success : undefined,
                                    borderColor: selectedKeys.length > 0 && remaining >= -0.01 ? REDWOOD.success : undefined }}
