@@ -22,7 +22,55 @@ BEGIN
 END;
 /
 
--- Step 2: PUT handler
+-- Step 2: GET handler — fetch single installment with current balance
+BEGIN
+    ORDS.DEFINE_HANDLER(
+        p_module_name    => 'ar',
+        p_pattern        => 'invoices/:id/installments/:installmentId',
+        p_method         => 'GET',
+        p_source_type    => 'plsql/block',
+        p_comments       => 'Get single installment with balance fields',
+        p_source         => q'[
+DECLARE
+    l_txn_id  NUMBER := :id;
+    l_inst_id NUMBER := :installmentId;
+BEGIN
+    APEX_JSON.open_object;
+    FOR r IN (
+        SELECT INSTALLMENT_ID,
+               CUSTOMER_TRX_ID,
+               INSTALLMENT_SEQUENCE_NUMBER,
+               INSTALLMENT_DUE_DATE,
+               INSTALLMENT_BALANCE_DUE,
+               AMOUNT_PAID,
+               INSTALLMENT_AMOUNT_ADJUSTED,
+               ORIGINAL_AMOUNT,
+               LAST_UPDATE_DATE,
+               LAST_UPDATED_BY
+        FROM   RR_AR_INVOICE_INSTALLMENTS
+        WHERE  INSTALLMENT_ID   = l_inst_id
+          AND  CUSTOMER_TRX_ID = l_txn_id
+    ) LOOP
+        APEX_JSON.write('installmentId',    r.INSTALLMENT_ID);
+        APEX_JSON.write('customerTrxId',    r.CUSTOMER_TRX_ID);
+        APEX_JSON.write('sequenceNumber',   r.INSTALLMENT_SEQUENCE_NUMBER);
+        APEX_JSON.write('dueDate',          r.INSTALLMENT_DUE_DATE);
+        APEX_JSON.write('balanceDue',       r.INSTALLMENT_BALANCE_DUE);
+        APEX_JSON.write('amountPaid',       r.AMOUNT_PAID);
+        APEX_JSON.write('amountAdjusted',   r.INSTALLMENT_AMOUNT_ADJUSTED);
+        APEX_JSON.write('originalAmount',   r.ORIGINAL_AMOUNT);
+        APEX_JSON.write('lastUpdateDate',   r.LAST_UPDATE_DATE);
+        APEX_JSON.write('lastUpdatedBy',    r.LAST_UPDATED_BY);
+    END LOOP;
+    APEX_JSON.close_object;
+END;
+]'
+    );
+    COMMIT;
+END;
+/
+
+-- Step 3: PUT handler
 BEGIN
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'ar',
