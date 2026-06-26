@@ -2327,6 +2327,34 @@ const ManageReceipts: React.FC = () => {
                 {r._adjAmount > 0 ? '+' : ''}{fmt(r._adjAmount)}
               </Text>
             : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
+      { title: 'Balance', key: 'balAfter', width: 130, align: 'right',
+        render: (_, r) => {
+          if (r._balDue == null) return <Text type="secondary" style={{ fontSize: 11 }}>—</Text>;
+          const applyAmt = r.applicationAmount ?? 0;
+          const adjAmt   = r._adjAmount ?? 0;
+          const balance  = Math.max(0, r._balDue - applyAmt - Math.abs(adjAmt));
+          const canPush  = r._pending && r._pendingKey && balance > 0.001;
+          return (
+            <Space size={4} style={{ justifyContent: 'flex-end', width: '100%' }}>
+              <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600,
+                color: balance === 0 ? REDWOOD.success : REDWOOD.neutral600 }}>
+                {fmt(balance)}
+              </Text>
+              {canPush && (
+                <Tooltip title="Move balance to Adjustment">
+                  <Button size="small" type="text" icon={<RollbackOutlined style={{ fontSize: 10 }} />}
+                    style={{ padding: '0 2px', height: 18, color: REDWOOD.warning }}
+                    onClick={() => setPendingApplications(prev => ({
+                      ...prev,
+                      [tabKey]: (prev[tabKey] ?? []).map(p =>
+                        p.key === r._pendingKey ? { ...p, adjustmentAmount: balance } : p
+                      ),
+                    }))} />
+                </Tooltip>
+              )}
+            </Space>
+          );
+        }},
       { title: 'CCY', dataIndex: 'enteredCurrency', width: 52,
         render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
       { title: 'App. Status', dataIndex: 'applicationStatus', width: 95,
@@ -3158,7 +3186,8 @@ const ManageReceipts: React.FC = () => {
                                 </Text>
                               )}
                             </Table.Summary.Cell>
-                            <Table.Summary.Cell index={5} colSpan={6} />
+                            <Table.Summary.Cell index={5} />
+                            <Table.Summary.Cell index={6} colSpan={6} />
                           </Table.Summary.Row>
                         </Table.Summary>
                       )}
