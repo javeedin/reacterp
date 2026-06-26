@@ -45,6 +45,7 @@ import {
   InfoCircleOutlined,
   FilePdfOutlined,
   ApiOutlined,
+  ReloadOutlined,
   CheckSquareOutlined,
   CopyOutlined,
   CheckOutlined,
@@ -350,6 +351,8 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
   const [derivedCompany, setDerivedCompany] = useState('');
   const [bmsRate, setBmsRate] = useState<{ rate: number; inverseRate: number; rateType: string; rateDate: string } | null>(null);
   const [bmsRateLoading, setBmsRateLoading] = useState(false);
+  const [bmsRateApiModal, setBmsRateApiModal] = useState(false);
+  const [lastBmsRateUrl, setLastBmsRateUrl] = useState('');
   const [distCombinations, setDistCombinations] = useState<DistCombination[]>([]);
   const [loadingDist, setLoadingDist] = useState(false);
   // Category list (from RR_GL_CATEGORIES via API)
@@ -996,7 +999,9 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
     setBmsRateLoading(true);
     setBmsRate(null);
     const dateParam = convDate ? `&rate_date=${encodeURIComponent(dayjs(convDate, 'D-MMM-YYYY').format('YYYY-MM-DD'))}` : '';
-    fetch(`${APEX_DB_CONFIG.baseUrl}/currencies/bmsrate?source_cur=${currency}&target_cur=AED${dateParam}`)
+    const bmsUrl = `${APEX_DB_CONFIG.baseUrl}/currencies/bmsrate?source_cur=${currency}&target_cur=AED${dateParam}`;
+    setLastBmsRateUrl(bmsUrl);
+    fetch(bmsUrl)
       .then(r => r.json())
       .then(data => {
         if (data.status === 'ok') {
@@ -2619,17 +2624,25 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
                         }
                       </Select>
                       {journalData.currency && journalData.currency !== 'AED' && (
-                        <div style={{ marginTop: 4, fontSize: 11, color: REDWOOD.neutral600 }}>
-                          {bmsRateLoading
-                            ? <span style={{ color: REDWOOD.info }}>Fetching rate...</span>
-                            : bmsRate
-                            ? <span>
-                                Rate: <strong>{bmsRate.rate}</strong> ({bmsRate.rateType}, {bmsRate.rateDate})
-                                &nbsp;
-                                <a style={{ color: REDWOOD.info, cursor: 'pointer' }} onClick={() => fetchBmsRate(journalData.currency, journalData.conversionDate, true)}>↻ Refresh</a>
-                              </span>
-                            : <span style={{ color: REDWOOD.warning }}>No rate found</span>
-                          }
+                        <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <div style={{ flex: 1, fontSize: 11, color: REDWOOD.neutral600 }}>
+                            {bmsRateLoading
+                              ? <span style={{ color: REDWOOD.info }}>Fetching rate…</span>
+                              : bmsRate
+                              ? <span>Rate: <strong>{bmsRate.rate}</strong> ({bmsRate.rateType}, {bmsRate.rateDate})</span>
+                              : <span style={{ color: REDWOOD.warning }}>No rate found</span>
+                            }
+                          </div>
+                          <Tooltip title="Refresh conversion rate">
+                            <Button size="small" icon={<ReloadOutlined />} loading={bmsRateLoading}
+                              style={{ fontSize: 11, padding: '0 6px', height: 22, color: REDWOOD.info, borderColor: REDWOOD.info }}
+                              onClick={() => fetchBmsRate(journalData.currency, journalData.conversionDate, true)} />
+                          </Tooltip>
+                          <Tooltip title="API Inspector — view rate lookup request">
+                            <Button size="small" icon={<ApiOutlined />}
+                              style={{ fontSize: 11, padding: '0 6px', height: 22, color: REDWOOD.neutral600 }}
+                              onClick={() => setBmsRateApiModal(true)} />
+                          </Tooltip>
                         </div>
                       )}
                     </Col>
@@ -3953,6 +3966,54 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
               })()}
             </div>
           )}
+        </Modal>
+
+        {/* ── BMS Rate API Inspector Modal ── */}
+        <Modal
+          open={bmsRateApiModal}
+          onCancel={() => setBmsRateApiModal(false)}
+          footer={<Button onClick={() => setBmsRateApiModal(false)}>Close</Button>}
+          width={700}
+          title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><Text strong>Conversion Rate — API Inspector</Text></Space>}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ border: '1px solid #e5e5e5', borderRadius: 8, padding: '12px 14px', background: '#fafafa' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <Tag color="blue" style={{ fontWeight: 700 }}>GET</Tag>
+                <Text strong style={{ fontSize: 13 }}>Fetch Daily Exchange Rate (BMS Rate)</Text>
+                <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginLeft: 'auto', color: REDWOOD.info }}
+                  onClick={() => { navigator.clipboard.writeText(lastBmsRateUrl || ''); message.success('URL copied'); }} />
+              </div>
+              <div style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info, wordBreak: 'break-all',
+                padding: '6px 10px', background: '#f0f5ff', borderRadius: 5, marginBottom: 8 }}>
+                {lastBmsRateUrl || `${APEX_DB_CONFIG.baseUrl}/currencies/bmsrate?source_cur=${journalData.currency}&target_cur=AED&rate_date=YYYY-MM-DD`}
+              </div>
+              <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 6 }}>
+                <Text strong>Parameters:</Text>
+                <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                  <li><code>source_cur</code> — source currency (e.g. {journalData.currency || 'USD'})</li>
+                  <li><code>target_cur</code> — always AED (functional currency)</li>
+                  <li><code>rate_date</code> — conversion date in YYYY-MM-DD format</li>
+                </ul>
+              </div>
+              <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
+                <Text strong>Current values:</Text>
+                <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                  <li>Currency: <strong>{journalData.currency || '—'}</strong></li>
+                  <li>Conversion Date: <strong>{journalData.conversionDate || '—'}</strong></li>
+                  <li>Rate Type: <strong>{journalData.conversionRateType || '—'}</strong></li>
+                  <li>Rate fetched: <strong>{bmsRate ? `${bmsRate.rate} (${bmsRate.rateType}, ${bmsRate.rateDate})` : bmsRateLoading ? 'Loading…' : 'Not found'}</strong></li>
+                </ul>
+              </div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <Button icon={<ReloadOutlined />} loading={bmsRateLoading}
+                type="primary" size="small"
+                onClick={() => { fetchBmsRate(journalData.currency, journalData.conversionDate, true); setBmsRateApiModal(false); }}>
+                Refresh Rate Now
+              </Button>
+            </div>
+          </div>
         </Modal>
       </Content>
     </Layout>
