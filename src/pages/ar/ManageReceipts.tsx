@@ -11,7 +11,7 @@ import {
   DollarOutlined, SaveOutlined, FilterOutlined, ReloadOutlined,
   DownloadOutlined, UserOutlined, BankOutlined, LockOutlined,
   FileTextOutlined, EyeOutlined, UnorderedListOutlined, InfoCircleOutlined,
-  ApiOutlined, DeleteOutlined, ExclamationCircleOutlined, SendOutlined, CodeOutlined,
+  ApiOutlined, DeleteOutlined, CloseCircleOutlined, ExclamationCircleOutlined, SendOutlined, CodeOutlined,
   BookOutlined, CheckCircleOutlined, PaperClipOutlined, UploadOutlined, PrinterOutlined, EditOutlined,
   CopyOutlined, RollbackOutlined, DownOutlined,
 } from '@ant-design/icons';
@@ -164,6 +164,7 @@ interface PendingAppRow {
   currency: string;
   balanceDue: number;
   dueDate: string;
+  _closed?: boolean;
 }
 
 interface ReceiptMethodAccount {
@@ -1710,31 +1711,41 @@ const ManageReceipts: React.FC = () => {
         ],
       });
 
+      const closedKeys: string[] = [];
       for (const row of pending) {
         try {
-          const res = await fetch(`${APEX_AR_INVOICES}/${row.customerTransactionId}/installments`, { headers: { Accept: 'application/json' } });
-          const data = await res.json();
-          const inst = (data.items ?? []).find((x: any) =>
-            (x.installment_id ?? x.INSTALLMENT_ID) === row.installmentId
-          );
-          if (!inst) {
+          const res  = await fetch(`${APEX_AR_INVOICES}/${row.customerTransactionId}/installments/${row.installmentId}`, { headers: { Accept: 'application/json' } });
+          const inst = await res.json();
+          if (!res.ok || !inst) {
             setSaveProgress(p => p ? { ...p, done: true, steps: p.steps.map((s, i) => i === 0 ? { ...s, status: 'error', detail: `Installment ${row.transactionNumber}/#${row.sequenceNumber} not found` } : s) } : p);
             return false;
           }
-          const liveBal = inst.installment_balance_due ?? inst.INSTALLMENT_BALANCE_DUE ?? 0;
-          if (liveBal <= 0) {
-            setSaveProgress(p => p ? { ...p, done: true, steps: p.steps.map((s, i) => i === 0 ? { ...s, status: 'error', detail: `Installment ${row.transactionNumber}/#${row.sequenceNumber} is already CLOSED (balance 0). Please remove it.` } : s) } : p);
-            message.error(`Installment ${row.transactionNumber}/#${row.sequenceNumber} is already closed. Remove it from applications.`);
-            return false;
-          }
-          if (row.applyAmount > liveBal + 0.01) {
-            setSaveProgress(p => p ? { ...p, done: true, steps: p.steps.map((s, i) => i === 0 ? { ...s, status: 'error', detail: `Apply amount ${row.applyAmount} exceeds live balance ${liveBal} for ${row.transactionNumber}/#${row.sequenceNumber}` } : s) } : p);
+          const calcStatus = inst.installmentStatus ?? inst.calculatedBalance !== undefined
+            ? ((inst.calculatedBalance ?? 1) <= 0 ? 'Closed' : 'Open')
+            : null;
+          const isClosed = calcStatus === 'Closed' || (inst.calculatedBalance ?? 1) <= 0;
+          if (isClosed) {
+            closedKeys.push(row.key);
+          } else if (row.applyAmount > (inst.calculatedBalance ?? inst.storedBalanceDue ?? 0) + 0.01) {
+            setSaveProgress(p => p ? { ...p, done: true, steps: p.steps.map((s, i) => i === 0 ? { ...s, status: 'error', detail: `Apply amount ${row.applyAmount} exceeds live balance for ${row.transactionNumber}/#${row.sequenceNumber}` } : s) } : p);
             message.error(`Apply amount exceeds balance for ${row.transactionNumber}/#${row.sequenceNumber}`);
             return false;
           }
         } catch {
           // non-fatal — proceed if balance check fails (network error)
         }
+      }
+
+      // If any installments are already closed — remove them from pending, show error, stop save
+      if (closedKeys.length > 0) {
+        setPendingApplications(prev => ({
+          ...prev,
+          [tabKey]: (prev[tabKey] ?? []).map(r => closedKeys.includes(r.key) ? { ...r, _closed: true } as any : r),
+        }));
+        const closedNames = pending.filter(r => closedKeys.includes(r.key)).map(r => `${r.transactionNumber}/#${r.sequenceNumber}`).join(', ');
+        setSaveProgress(p => p ? { ...p, done: true, steps: p.steps.map((s, i) => i === 0 ? { ...s, status: 'error', detail: `Closed installments detected — remove them and retry: ${closedNames}` } : s) } : p);
+        message.error({ content: `These installments are already Closed: ${closedNames}. They have been flagged — please remove them.`, duration: 8 });
+        return false;
       }
 
       setSaveProgress(p => p ? { ...p, current: 1, steps: p.steps.map((s, i) => i === 0 ? { ...s, status: 'finish', detail: 'All installments verified' } : i === 1 ? { ...s, status: 'process' } : s) } : p);
@@ -2205,7 +2216,7 @@ const ManageReceipts: React.FC = () => {
     const appStatusColor = (s: string) => ({ Applied: 'green', Unapplied: 'blue', Reversed: 'red' }[s] || 'default');
     const procStatusColor = (s: string) => ({ Closed: 'green', Open: 'blue', Reversed: 'red' }[s] || 'default');
 
-    type ExtAppRow = AppRow & { _pending?: boolean; _pendingKey?: string; _instSeq?: number; _adjAmount?: number; _origAmt?: number; _balDue?: number; _installmentId?: number; _txnId?: number };
+    type ExtAppRow = AppRow & { _pending?: boolean; _pendingKey?: string; _instSeq?: number; _adjAmount?: number; _origAmt?: number; _balDue?: number; _installmentId?: number; _txnId?: number; _closed?: boolean };
 
     const pendingRows = pendingApplications[tabKey] ?? [];
     const savedRows   = (receiptApplications[tabKey]?.rows ?? []) as ExtAppRow[];
@@ -2236,6 +2247,7 @@ const ManageReceipts: React.FC = () => {
       _balDue:                    r.balanceDue,
       _installmentId:             r.installmentId,
       _txnId:                     r.customerTransactionId,
+      _closed:                    r._closed,
     }));
 
     const allAppRows = [...pendingAsAppRows, ...savedRows];
@@ -2255,11 +2267,22 @@ const ManageReceipts: React.FC = () => {
         render: (_, r) => r._instSeq != null
           ? <Tag style={{ fontSize: 11, margin: 0 }}>#{r._instSeq}</Tag>
           : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
-      { title: 'Application Reference', dataIndex: 'referenceTransactionNumber', width: 155, ellipsis: true,
+      { title: 'Application Reference', dataIndex: 'referenceTransactionNumber', width: 185, ellipsis: true,
         render: (v, r) => (
           <Space size={4}>
-            {r._pending && <Tag color="orange" style={{ fontSize: 10, margin: 0, lineHeight: '16px' }}>Pending</Tag>}
-            <Text style={{ fontSize: 12, fontWeight: 600 }}>{v || '—'}</Text>
+            {r._closed
+              ? <Tag color="red" icon={<CloseCircleOutlined />} style={{ fontSize: 10, margin: 0, lineHeight: '16px' }}>Closed</Tag>
+              : r._pending && <Tag color="orange" style={{ fontSize: 10, margin: 0, lineHeight: '16px' }}>Pending</Tag>}
+            <Text style={{ fontSize: 12, fontWeight: 600, color: r._closed ? REDWOOD.primary : undefined }}>{v || '—'}</Text>
+            {r._closed && r._pendingKey && (
+              <Tooltip title="Remove this closed installment">
+                <Button size="small" type="text" danger icon={<DeleteOutlined />} style={{ padding: '0 2px', height: 18 }}
+                  onClick={() => setPendingApplications(prev => ({
+                    ...prev,
+                    [tabKey]: (prev[tabKey] ?? []).filter(p => p.key !== r._pendingKey),
+                  }))} />
+              </Tooltip>
+            )}
           </Space>
         ) },
       { title: 'Receivables Activity', dataIndex: 'activityName', width: 130, ellipsis: true,
@@ -3112,9 +3135,11 @@ const ManageReceipts: React.FC = () => {
                       scroll={{ x: 1300 }}
                       locale={{ emptyText: 'No applications found for this receipt' }}
                       rowClassName={r => (r as any)._pending ? 'pending-app-row' : ''}
-                      onRow={r => ((r as any)._pending ? {
-                        style: { background: '#fffbe6' },
-                      } : {})}
+                      onRow={r => ((r as any)._closed
+                        ? { style: { background: '#fff1f0', borderLeft: '3px solid #ff4d4f' } }
+                        : (r as any)._pending
+                          ? { style: { background: '#fffbe6' } }
+                          : {})}
                       summary={() => (
                         <Table.Summary fixed>
                           <Table.Summary.Row style={{ background: '#fafafa' }}>
@@ -3563,7 +3588,8 @@ const ManageReceipts: React.FC = () => {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                           <Tag color={step.method === 'POST' ? 'green' : step.method === 'PUT' ? 'orange' : 'blue'} style={{ fontWeight: 700 }}>{step.method}</Tag>
                           <Text strong style={{ fontSize: 12, flex: 1 }}>{step.label}</Text>
-                          <Button size="small" type="primary" loading={step.running} disabled={step.done}
+                          <Button size="small" type="primary" loading={step.running}
+                            disabled={step.done || (debugModal?.steps.slice(0, idx).some(s => s.response?.includes('"installmentStatus":"Closed"') || s.response?.includes('"installmentStatus": "Closed"')))}
                             style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
                             onClick={async () => {
                               setDebugModal(prev => prev ? { ...prev, steps: prev.steps.map((s, i) => i === idx ? { ...s, running: true } : s) } : prev);
@@ -3575,7 +3601,29 @@ const ManageReceipts: React.FC = () => {
                                   body: step.method !== 'GET' ? step.body : undefined,
                                 });
                                 const text = await res.text();
-                                setDebugModal(prev => prev ? { ...prev, steps: prev.steps.map((s, i) => i === idx ? { ...s, running: false, done: true, response: `HTTP ${res.status}\n${text}` } : s) } : prev);
+                                const isClosed = step.method === 'GET' && (() => {
+                                  try { const j = JSON.parse(text); return j.installmentStatus === 'Closed'; } catch { return false; }
+                                })();
+                                setDebugModal(prev => {
+                                  if (!prev) return prev;
+                                  const steps = prev.steps.map((s, i) => {
+                                    if (i === idx) return { ...s, running: false, done: true, response: `HTTP ${res.status}\n${text}` };
+                                    if (isClosed && i > idx) return { ...s, done: true, response: '⛔ Blocked — installment is Closed. Remove it from Receipt Applications and retry.' };
+                                    return s;
+                                  });
+                                  return { ...prev, steps };
+                                });
+                                if (isClosed) {
+                                  message.error({ content: 'Installment is already Closed — all subsequent steps blocked. Remove it from Receipt Applications.', duration: 8 });
+                                  // Flag the matching pending row as closed
+                                  if (debugModal?.tabKey) {
+                                    const tk = debugModal.tabKey;
+                                    setPendingApplications(prev => {
+                                      const instId = parseInt(url.split('/installments/')[1]);
+                                      return { ...prev, [tk]: (prev[tk] ?? []).map(r => r.installmentId === instId ? { ...r, _closed: true } : r) };
+                                    });
+                                  }
+                                }
                               } catch (e: any) {
                                 setDebugModal(prev => prev ? { ...prev, steps: prev.steps.map((s, i) => i === idx ? { ...s, running: false, response: `Error: ${e.message}` } : s) } : prev);
                               }
