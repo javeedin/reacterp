@@ -1674,6 +1674,8 @@ const ManageReceipts: React.FC = () => {
     if (!draft.amount || draft.amount <= 0) missing.push('Amount (must be > 0)');
     if (!draft.customerAccountNumber && !draft.customerName) missing.push('Customer');
     if (!draft.comments)                    missing.push('Comments');
+    if (!draft.drAccount)                   missing.push('Dr. Account');
+    if (!draft.crAccount)                   missing.push('Cr. Account');
 
     if (missing.length > 0) {
       message.warning({ content: `Missing required fields: ${missing.join(' · ')}`, duration: 5 });
@@ -2418,7 +2420,13 @@ const ManageReceipts: React.FC = () => {
                 {(pendingApplications[tabKey]?.length ?? 0) > 0 && (
                   <Button size="small" icon={<CodeOutlined />}
                     style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}
-                    onClick={() => openDebugModal(tabKey, draft)}>
+                    onClick={() => {
+                      const m: string[] = [];
+                      if (!draft.drAccount) m.push('Dr. Account');
+                      if (!draft.crAccount) m.push('Cr. Account');
+                      if (m.length > 0) { message.warning(`Missing required fields: ${m.join(' · ')}`); return; }
+                      openDebugModal(tabKey, draft);
+                    }}>
                     Save &amp; Debug
                   </Button>
                 )}
