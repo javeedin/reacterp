@@ -32,8 +32,14 @@ BEGIN
         p_comments       => 'Get single installment with balance fields',
         p_source         => q'[
 DECLARE
-    l_txn_id  NUMBER := :id;
-    l_inst_id NUMBER := :installmentId;
+    l_txn_id       NUMBER := :id;
+    l_inst_id      NUMBER := :installmentId;
+    l_paid         NUMBER;
+    l_adj          NUMBER;
+    l_orig         NUMBER;
+    l_calc_balance NUMBER;
+    l_calc_status  VARCHAR2(30);
+    l_closed_date  DATE;
 BEGIN
     APEX_JSON.open_object;
     FOR r IN (
@@ -41,9 +47,13 @@ BEGIN
                CUSTOMER_TRX_ID,
                INSTALLMENT_SEQUENCE_NUMBER,
                INSTALLMENT_DUE_DATE,
+               INSTALLMENT_LINE_AMOUNT_ORIGINAL,
                INSTALLMENT_BALANCE_DUE,
                AMOUNT_PAID,
                INSTALLMENT_AMOUNT_ADJUSTED,
+               INSTALLMENT_STATUS,
+               INSTALLMENT_CLOSED_DATE,
+               INSTALLMENT_GL_CLOSED_DATE,
                ORIGINAL_AMOUNT,
                LAST_UPDATE_DATE,
                LAST_UPDATED_BY
@@ -51,16 +61,37 @@ BEGIN
         WHERE  INSTALLMENT_ID   = l_inst_id
           AND  CUSTOMER_TRX_ID = l_txn_id
     ) LOOP
-        APEX_JSON.write('installmentId',    r.INSTALLMENT_ID);
-        APEX_JSON.write('customerTrxId',    r.CUSTOMER_TRX_ID);
-        APEX_JSON.write('sequenceNumber',   r.INSTALLMENT_SEQUENCE_NUMBER);
-        APEX_JSON.write('dueDate',          r.INSTALLMENT_DUE_DATE);
-        APEX_JSON.write('balanceDue',       r.INSTALLMENT_BALANCE_DUE);
-        APEX_JSON.write('amountPaid',       r.AMOUNT_PAID);
-        APEX_JSON.write('amountAdjusted',   r.INSTALLMENT_AMOUNT_ADJUSTED);
-        APEX_JSON.write('originalAmount',   r.ORIGINAL_AMOUNT);
-        APEX_JSON.write('lastUpdateDate',   r.LAST_UPDATE_DATE);
-        APEX_JSON.write('lastUpdatedBy',    r.LAST_UPDATED_BY);
+        l_paid  := NVL(r.AMOUNT_PAID, 0);
+        l_adj   := NVL(r.INSTALLMENT_AMOUNT_ADJUSTED, 0);
+        l_orig  := NVL(r.INSTALLMENT_LINE_AMOUNT_ORIGINAL, NVL(r.ORIGINAL_AMOUNT, 0));
+
+        -- Calculate live balance
+        l_calc_balance := l_orig - l_paid - ABS(l_adj);
+
+        -- Derive status using same rule as PUT
+        IF (l_paid + ABS(l_adj)) >= l_orig THEN
+            l_calc_status := 'Closed';
+            l_closed_date := NVL(r.INSTALLMENT_CLOSED_DATE, SYSDATE);
+        ELSE
+            l_calc_status := 'Open';
+            l_closed_date := NULL;
+        END IF;
+
+        APEX_JSON.write('installmentId',         r.INSTALLMENT_ID);
+        APEX_JSON.write('customerTrxId',         r.CUSTOMER_TRX_ID);
+        APEX_JSON.write('sequenceNumber',        r.INSTALLMENT_SEQUENCE_NUMBER);
+        APEX_JSON.write('dueDate',               r.INSTALLMENT_DUE_DATE);
+        APEX_JSON.write('originalAmount',        l_orig);
+        APEX_JSON.write('amountPaid',            l_paid);
+        APEX_JSON.write('amountAdjusted',        l_adj);
+        APEX_JSON.write('calculatedBalance',     l_calc_balance);
+        APEX_JSON.write('storedBalanceDue',      r.INSTALLMENT_BALANCE_DUE);
+        APEX_JSON.write('installmentStatus',     l_calc_status);
+        APEX_JSON.write('storedStatus',          r.INSTALLMENT_STATUS);
+        APEX_JSON.write('closedDate',            l_closed_date);
+        APEX_JSON.write('glClosedDate',          r.INSTALLMENT_GL_CLOSED_DATE);
+        APEX_JSON.write('lastUpdateDate',        r.LAST_UPDATE_DATE);
+        APEX_JSON.write('lastUpdatedBy',         r.LAST_UPDATED_BY);
     END LOOP;
     APEX_JSON.close_object;
 END;
