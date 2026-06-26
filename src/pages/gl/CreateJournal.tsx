@@ -2605,7 +2605,7 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
                         showSearch
                         disabled={isViewMode || isPosted}
                         filterOption={(input, option) =>
-                          String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                          String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())
                         }
                       >
                         {currencies.length > 0
