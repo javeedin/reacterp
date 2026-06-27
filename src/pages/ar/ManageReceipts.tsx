@@ -724,7 +724,7 @@ const ManageReceipts: React.FC = () => {
       .then(data => {
         setBusinessUnits(
           ((data.items || []) as any[])
-            .map((i: any) => ({ name: i.business_unit_name || '', companyCode: i.company_code ?? '' }))
+            .map((i: any) => ({ name: i.business_unit_name || '', companyCode: i.company_code ?? i.company ?? '' }))
             .filter(b => b.name)
             .sort((a, b) => a.name.localeCompare(b.name))
         );
