@@ -13,7 +13,7 @@ import {
   FileTextOutlined, EyeOutlined, UnorderedListOutlined, InfoCircleOutlined,
   ApiOutlined, DeleteOutlined, CloseCircleOutlined, ExclamationCircleOutlined, SendOutlined, CodeOutlined,
   BookOutlined, CheckCircleOutlined, PaperClipOutlined, UploadOutlined, PrinterOutlined, EditOutlined,
-  CopyOutlined, RollbackOutlined, DownOutlined,
+  CopyOutlined, RollbackOutlined, DownOutlined, ScissorOutlined, PlusCircleOutlined,
 } from '@ant-design/icons';
 import { Upload } from 'antd';
 import { Link } from 'react-router-dom';
@@ -152,6 +152,14 @@ interface AppRow {
   customerSite:               string;
 }
 
+interface AdjSplit {
+  id: string;
+  amount: number;
+  activityName: string;
+  accountCombination: string;
+  reason: string;
+}
+
 interface PendingAppRow {
   key: string;
   customerTransactionId: number;
@@ -164,6 +172,7 @@ interface PendingAppRow {
   currency: string;
   balanceDue: number;
   dueDate: string;
+  adjSplits?: AdjSplit[];
   _closed?: boolean;
 }
 
@@ -445,6 +454,39 @@ const ManageReceipts: React.FC = () => {
   const [instPickerSel,       setInstPickerSel]       = useState<Record<string, React.Key[]>>({});
   const [instPickerSearch,    setInstPickerSearch]    = useState<Record<string, string>>({});
   const [instPickerApiOpen,   setInstPickerApiOpen]   = useState(false);
+
+  // ── Adj Split dialog ─────────────────────────────────────────────────────
+  interface RecvActivity { name: string; type: string; accountCombination: string; }
+  const [recvActivities,        setRecvActivities]        = useState<RecvActivity[]>([]);
+  const [recvActivitiesLoading, setRecvActivitiesLoading] = useState(false);
+  const [adjSplitModal, setAdjSplitModal] = useState<{
+    tabKey: string; pendingKey: string; totalAdj: number; currency: string;
+    splits: AdjSplit[];
+  } | null>(null);
+
+  const fetchRecvActivities = useCallback(async () => {
+    if (recvActivities.length > 0) return;
+    setRecvActivitiesLoading(true);
+    try {
+      const res  = await fetch('https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/ar/Receivablesactivities', { headers: { Accept: 'application/json' } });
+      const data = await res.json();
+      const items = (data.items ?? data ?? []) as any[];
+      setRecvActivities(items.map((a: any) => ({
+        name:               a.ACTIVITY_NAME   ?? a.activity_name   ?? a.name   ?? '',
+        type:               a.ACTIVITY_TYPE   ?? a.activity_type   ?? a.type   ?? '',
+        accountCombination: a.ACCOUNT_COMBINATION ?? a.account_combination ?? a.gl_account ?? '',
+      })).filter(a => a.name));
+    } catch { /* silent */ }
+    finally { setRecvActivitiesLoading(false); }
+  }, [recvActivities.length]);
+
+  const openAdjSplitModal = (tabKey: string, pendingKey: string, totalAdj: number, currency: string, existingSplits?: AdjSplit[]) => {
+    fetchRecvActivities();
+    const splits = existingSplits?.length
+      ? existingSplits
+      : [{ id: `sp-${Date.now()}`, amount: totalAdj, activityName: '', accountCombination: '', reason: '' }];
+    setAdjSplitModal({ tabKey, pendingKey, totalAdj, currency, splits });
+  };
 
   const fetchOpenInstallments = useCallback(async (tabKey: string, customerAccountNumber: string) => {
     if (!customerAccountNumber) return;
@@ -1815,28 +1857,36 @@ const ManageReceipts: React.FC = () => {
     let adjErrors: string[] = [];
     for (const row of pending) {
       if (row.adjustmentAmount === 0) continue;
-      try {
-        const adjBody = {
-          CustomerTransactionId: row.customerTransactionId,
-          TransactionNumber:     row.transactionNumber,
-          AdjustmentAmount:      row.adjustmentAmount,
-          AdjustmentDate:        draft.receiptDate || today,
-          AccountingDate:        draft.accountingDate || today,
-          AdjustmentType:        'LINE',
-          Status:                'Approved',
-          ReceivablesActivity:   'Adjustment',
-          BusinessUnit:          draft.businessUnit || '',
-          Currency:              row.currency,
-          InstallmentNumber:     row.sequenceNumber,
-          InstallmentBalance:    Math.max(0, row.balanceDue - row.applyAmount - row.adjustmentAmount),
-          AdjustmentReason:      row.adjustmentReason || 'Receipt adjustment',
-          Comments:              `Auto-created from receipt ${draft.receiptNumber || ''}`,
-          CreatedBy:             currentUser,
-          LastUpdatedBy:         currentUser,
-        };
-        const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/ar/adjustments`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(adjBody) });
-        if (!res.ok) adjErrors.push(`${row.transactionNumber}/#${row.sequenceNumber}: HTTP ${res.status}`);
-      } catch (e: any) { adjErrors.push(`${row.transactionNumber}: ${e.message}`); }
+      // Use splits if defined, otherwise single adjustment
+      const splitsToPost: { amount: number; activityName: string; accountCombination: string; reason: string }[] =
+        row.adjSplits && row.adjSplits.length > 0
+          ? row.adjSplits.map(sp => ({ amount: sp.amount, activityName: sp.activityName || 'Adjustment', accountCombination: sp.accountCombination, reason: sp.reason || row.adjustmentReason || 'Receipt adjustment' }))
+          : [{ amount: row.adjustmentAmount, activityName: 'Adjustment', accountCombination: '', reason: row.adjustmentReason || 'Receipt adjustment' }];
+      for (const sp of splitsToPost) {
+        try {
+          const adjBody = {
+            CustomerTransactionId: row.customerTransactionId,
+            TransactionNumber:     row.transactionNumber,
+            AdjustmentAmount:      sp.amount,
+            AdjustmentDate:        draft.receiptDate || today,
+            AccountingDate:        draft.accountingDate || today,
+            AdjustmentType:        'LINE',
+            Status:                'Approved',
+            ReceivablesActivity:   sp.activityName,
+            AccountCombination:    sp.accountCombination || undefined,
+            BusinessUnit:          draft.businessUnit || '',
+            Currency:              row.currency,
+            InstallmentNumber:     row.sequenceNumber,
+            InstallmentBalance:    Math.max(0, row.balanceDue - row.applyAmount - row.adjustmentAmount),
+            AdjustmentReason:      sp.reason,
+            Comments:              `Auto-created from receipt ${draft.receiptNumber || ''}`,
+            CreatedBy:             currentUser,
+            LastUpdatedBy:         currentUser,
+          };
+          const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/ar/adjustments`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(adjBody) });
+          if (!res.ok) adjErrors.push(`${row.transactionNumber}/#${row.sequenceNumber} (${sp.activityName}): HTTP ${res.status}`);
+        } catch (e: any) { adjErrors.push(`${row.transactionNumber}: ${e.message}`); }
+      }
     }
 
     setSaveProgress(p => p ? { ...p, current: 4, steps: p.steps.map((s, i) =>
@@ -1919,29 +1969,35 @@ const ManageReceipts: React.FC = () => {
         }, null, 2),
         response: '', running: false, done: false,
       })),
-      ...pending.filter(r => r.adjustmentAmount !== 0).map((row, i) => ({
-        label: `Adj. POST Adjustment — ${row.transactionNumber}/#${row.sequenceNumber}`,
-        method: 'POST', url: `${APEX_DB_CONFIG.baseUrl}/ar/adjustments`,
-        body: JSON.stringify({
-          CustomerTransactionId: row.customerTransactionId,
-          TransactionNumber:     row.transactionNumber,
-          AdjustmentAmount:      row.adjustmentAmount,
-          AdjustmentDate:        draft.receiptDate || today,
-          AccountingDate:        draft.accountingDate || today,
-          AdjustmentType:        'LINE',
-          Status:                'Approved',
-          ReceivablesActivity:   'Adjustment',
-          BusinessUnit:          draft.businessUnit || '',
-          Currency:              row.currency,
-          InstallmentNumber:     row.sequenceNumber,
-          InstallmentBalance:    Math.max(0, row.balanceDue - row.applyAmount - row.adjustmentAmount),
-          AdjustmentReason:      row.adjustmentReason || 'Receipt adjustment',
-          Comments:              `Auto-created from receipt ${draft.receiptNumber || ''}`,
-          CreatedBy:             currentUser,
-          LastUpdatedBy:         currentUser,
-        }, null, 2),
-        response: '', running: false, done: false,
-      })),
+      ...pending.filter(r => r.adjustmentAmount !== 0).flatMap((row) => {
+        const splitsToShow = row.adjSplits && row.adjSplits.length > 0
+          ? row.adjSplits.map(sp => ({ amount: sp.amount, activityName: sp.activityName || 'Adjustment', accountCombination: sp.accountCombination, reason: sp.reason || row.adjustmentReason || 'Receipt adjustment' }))
+          : [{ amount: row.adjustmentAmount, activityName: 'Adjustment', accountCombination: '', reason: row.adjustmentReason || 'Receipt adjustment' }];
+        return splitsToShow.map((sp, si) => ({
+          label: `Adj. POST Adjustment${splitsToShow.length > 1 ? ` (${si + 1}/${splitsToShow.length})` : ''} — ${row.transactionNumber}/#${row.sequenceNumber} [${sp.activityName}]`,
+          method: 'POST', url: `${APEX_DB_CONFIG.baseUrl}/ar/adjustments`,
+          body: JSON.stringify({
+            CustomerTransactionId: row.customerTransactionId,
+            TransactionNumber:     row.transactionNumber,
+            AdjustmentAmount:      sp.amount,
+            AdjustmentDate:        draft.receiptDate || today,
+            AccountingDate:        draft.accountingDate || today,
+            AdjustmentType:        'LINE',
+            Status:                'Approved',
+            ReceivablesActivity:   sp.activityName,
+            AccountCombination:    sp.accountCombination || undefined,
+            BusinessUnit:          draft.businessUnit || '',
+            Currency:              row.currency,
+            InstallmentNumber:     row.sequenceNumber,
+            InstallmentBalance:    Math.max(0, row.balanceDue - row.applyAmount - row.adjustmentAmount),
+            AdjustmentReason:      sp.reason,
+            Comments:              `Auto-created from receipt ${draft.receiptNumber || ''}`,
+            CreatedBy:             currentUser,
+            LastUpdatedBy:         currentUser,
+          }, null, 2),
+          response: '', running: false, done: false,
+        }));
+      }),
       ...pending.map((row, i) => ({
         label: `PUT Installment — ${row.transactionNumber}/#${row.sequenceNumber}`,
         method: 'PUT',
@@ -2311,22 +2367,41 @@ const ManageReceipts: React.FC = () => {
                 }
               }} />
           : <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: v > 0 ? REDWOOD.success : undefined }}>{fmt(v || 0)}</Text> },
-      { title: 'Adj Amount', key: 'adjAmount', width: 115, align: 'right',
-        render: (_, r) => r._pending && r._pendingKey
-          ? <InputNumber size="small" style={{ width: '100%' }} precision={2}
-              placeholder="±0.00" value={r._adjAmount || undefined}
-              formatter={val => val !== undefined && val !== null && val !== '' ? Number(val).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
-              parser={val => { const s = (val ?? '').replace(/,/g, ''); const n = parseFloat(s); return isNaN(n) ? (s === '-' ? '-' as any : 0) : n; }}
-              onChange={val => setPendingApplications(prev => {
-                const rows = prev[tabKey] ?? [];
-                return { ...prev, [tabKey]: rows.map(p => p.key === r._pendingKey ? { ...p, adjustmentAmount: val ?? 0 } : p) };
-              })} />
-          : r._adjAmount && r._adjAmount !== 0
+      { title: 'Adj Amount', key: 'adjAmount', width: 150, align: 'right',
+        render: (_, r) => {
+          const pendingRow = r._pendingKey ? (pendingApplications[tabKey] ?? []).find(p => p.key === r._pendingKey) : null;
+          const splits = pendingRow?.adjSplits;
+          const hasSplits = splits && splits.length > 1;
+          if (r._pending && r._pendingKey) {
+            return (
+              <Space size={4} style={{ width: '100%', justifyContent: 'flex-end' }}>
+                <InputNumber size="small" style={{ flex: 1, minWidth: 80 }} precision={2}
+                  placeholder="±0.00" value={r._adjAmount || undefined}
+                  formatter={val => val !== undefined && val !== null && val !== '' ? Number(val).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
+                  parser={val => { const s = (val ?? '').replace(/,/g, ''); const n = parseFloat(s); return isNaN(n) ? (s === '-' ? '-' as any : 0) : n; }}
+                  onChange={val => setPendingApplications(prev => {
+                    const rows = prev[tabKey] ?? [];
+                    return { ...prev, [tabKey]: rows.map(p => p.key === r._pendingKey ? { ...p, adjustmentAmount: val ?? 0, adjSplits: undefined } : p) };
+                  })} />
+                {(r._adjAmount ?? 0) !== 0 && (
+                  <Tooltip title={hasSplits ? `${splits.length} splits — click to edit` : 'Split adjustment into multiple activities'}>
+                    <Button size="small" type={hasSplits ? 'primary' : 'text'}
+                      icon={<ScissorOutlined style={{ fontSize: 11 }} />}
+                      style={{ padding: '0 4px', height: 24, color: hasSplits ? undefined : REDWOOD.warning,
+                               borderColor: hasSplits ? undefined : REDWOOD.warning }}
+                      onClick={() => openAdjSplitModal(tabKey, r._pendingKey!, Math.abs(r._adjAmount ?? 0), r.enteredCurrency || draft.currency, pendingRow?.adjSplits)} />
+                  </Tooltip>
+                )}
+              </Space>
+            );
+          }
+          return r._adjAmount && r._adjAmount !== 0
             ? <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600,
                 color: r._adjAmount < 0 ? REDWOOD.primary : REDWOOD.warning }}>
                 {r._adjAmount > 0 ? '+' : ''}{fmt(r._adjAmount)}
               </Text>
-            : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
+            : <Text type="secondary" style={{ fontSize: 11 }}>—</Text>;
+        }},
       { title: 'Balance', key: 'balAfter', width: 130, align: 'right',
         render: (_, r) => {
           if (r._balDue == null) return <Text type="secondary" style={{ fontSize: 11 }}>—</Text>;
@@ -3459,6 +3534,143 @@ const ManageReceipts: React.FC = () => {
                   </>
                 )}
               </Modal>
+
+              {/* ── Adjustment Split Dialog ── */}
+              {adjSplitModal && adjSplitModal.tabKey === tabKey && (() => {
+                const { pendingKey, totalAdj, currency, splits } = adjSplitModal;
+                const splitTotal = splits.reduce((s, r) => s + (r.amount || 0), 0);
+                const remaining  = Math.round((totalAdj - splitTotal) * 100) / 100;
+                const isBalanced = Math.abs(remaining) < 0.01;
+                const updateSplit = (id: string, patch: Partial<AdjSplit>) =>
+                  setAdjSplitModal(m => m ? { ...m, splits: m.splits.map(s => s.id === id ? { ...s, ...patch } : s) } : m);
+                const addSplit = () =>
+                  setAdjSplitModal(m => m ? { ...m, splits: [...m.splits, { id: `sp-${Date.now()}`, amount: Math.max(0, remaining), activityName: '', accountCombination: '', reason: '' }] } : m);
+                const removeSplit = (id: string) =>
+                  setAdjSplitModal(m => m ? { ...m, splits: m.splits.filter(s => s.id !== id) } : m);
+                return (
+                  <Modal
+                    open
+                    width={860}
+                    title={
+                      <Space>
+                        <ScissorOutlined style={{ color: REDWOOD.warning }} />
+                        <Text strong>Split Adjustment</Text>
+                        <Tag color="orange">{fmt(totalAdj)} {currency}</Tag>
+                      </Space>
+                    }
+                    onCancel={() => setAdjSplitModal(null)}
+                    footer={
+                      <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                        <Space>
+                          <Text style={{ fontSize: 12 }}>
+                            Total: <Text strong style={{ fontFamily: 'monospace', color: isBalanced ? REDWOOD.success : REDWOOD.primary }}>
+                              {fmt(splitTotal)}
+                            </Text>
+                            {' / '}{fmt(totalAdj)}
+                            {!isBalanced && <Text style={{ color: REDWOOD.primary, marginLeft: 8 }}>({remaining > 0 ? '+' : ''}{fmt(remaining)} remaining)</Text>}
+                          </Text>
+                        </Space>
+                        <Space>
+                          <Button onClick={() => setAdjSplitModal(null)}>Cancel</Button>
+                          <Button icon={<PlusCircleOutlined />} onClick={addSplit}>Add Line</Button>
+                          <Button type="primary" disabled={!isBalanced || splits.some(s => !s.activityName)}
+                            style={{ background: isBalanced ? REDWOOD.success : undefined, borderColor: isBalanced ? REDWOOD.success : undefined }}
+                            onClick={() => {
+                              setPendingApplications(prev => ({
+                                ...prev,
+                                [tabKey]: (prev[tabKey] ?? []).map(p =>
+                                  p.key === pendingKey ? { ...p, adjSplits: splits } : p
+                                ),
+                              }));
+                              setAdjSplitModal(null);
+                              message.success(`Adjustment split into ${splits.length} line(s)`);
+                            }}>
+                            Apply Split
+                          </Button>
+                        </Space>
+                      </Space>
+                    }
+                  >
+                    <div style={{ marginBottom: 8, fontSize: 12, color: REDWOOD.neutral600 }}>
+                      Split <Text strong style={{ fontFamily: 'monospace' }}>{fmt(totalAdj)} {currency}</Text> across multiple receivable activities. Total must equal the adjustment amount.
+                    </div>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ background: '#fafafa', borderBottom: '1px solid #e5e5e5' }}>
+                          <th style={{ padding: '6px 8px', textAlign: 'left', width: 40 }}>#</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'right', width: 140 }}>Amount</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'left', width: 220 }}>Receivable Activity</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'left' }}>Account Combination</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'left', width: 160 }}>Reason</th>
+                          <th style={{ width: 32 }} />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {splits.map((sp, idx) => (
+                          <tr key={sp.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                            <td style={{ padding: '6px 8px', color: REDWOOD.neutral600 }}>{idx + 1}</td>
+                            <td style={{ padding: '6px 4px' }}>
+                              <InputNumber size="small" style={{ width: '100%' }} precision={2} min={0}
+                                value={sp.amount}
+                                formatter={v => v !== undefined && v !== null ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
+                                parser={v => parseFloat((v ?? '').replace(/,/g, '')) || 0}
+                                onChange={val => updateSplit(sp.id, { amount: val ?? 0 })} />
+                            </td>
+                            <td style={{ padding: '6px 4px' }}>
+                              <Select size="small" style={{ width: '100%' }} showSearch
+                                placeholder="Select activity…"
+                                loading={recvActivitiesLoading}
+                                value={sp.activityName || undefined}
+                                filterOption={(input, option) =>
+                                  String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+                                }
+                                onChange={val => {
+                                  const act = recvActivities.find(a => a.name === val);
+                                  updateSplit(sp.id, { activityName: val, accountCombination: act?.accountCombination || '' });
+                                }}>
+                                {recvActivities.map(a => (
+                                  <Option key={a.name} value={a.name}>
+                                    {a.name}{a.type ? ` (${a.type})` : ''}
+                                  </Option>
+                                ))}
+                              </Select>
+                            </td>
+                            <td style={{ padding: '6px 8px' }}>
+                              <Text style={{ fontSize: 11, fontFamily: 'monospace', color: sp.accountCombination ? REDWOOD.info : REDWOOD.neutral600 }}>
+                                {sp.accountCombination || '—'}
+                              </Text>
+                            </td>
+                            <td style={{ padding: '6px 4px' }}>
+                              <Input size="small" placeholder="Reason…" value={sp.reason}
+                                onChange={e => updateSplit(sp.id, { reason: e.target.value })} />
+                            </td>
+                            <td style={{ padding: '6px 4px' }}>
+                              {splits.length > 1 && (
+                                <Button size="small" type="text" danger icon={<DeleteOutlined />}
+                                  style={{ padding: '0 4px' }}
+                                  onClick={() => removeSplit(sp.id)} />
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {!isBalanced && (
+                      <div style={{ marginTop: 8, textAlign: 'right' }}>
+                        <Button size="small" type="link" style={{ color: REDWOOD.info }}
+                          onClick={() => {
+                            if (splits.length > 0) {
+                              const last = splits[splits.length - 1];
+                              updateSplit(last.id, { amount: Math.round((last.amount + remaining) * 100) / 100 });
+                            }
+                          }}>
+                          Auto-fill remaining {fmt(Math.abs(remaining))} to last line
+                        </Button>
+                      </div>
+                    )}
+                  </Modal>
+                );
+              })()}
 
               {/* ── Installment Picker API Inspector ── */}
               <Modal
