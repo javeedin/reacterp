@@ -157,6 +157,7 @@ interface AdjSplit {
   amount: number;
   activityName: string;
   accountCombination: string;
+  accountDescription: string;
   reason: string;
 }
 
@@ -474,7 +475,7 @@ const ManageReceipts: React.FC = () => {
       setRecvActivities(items.map((a: any) => ({
         name:               a.ACTIVITY_NAME   ?? a.activity_name   ?? a.name   ?? '',
         type:               a.ACTIVITY_TYPE   ?? a.activity_type   ?? a.type   ?? '',
-        accountCombination: a.ACCOUNT_COMBINATION ?? a.account_combination ?? a.gl_account ?? '',
+        accountCombination: a.gl_account_combination ?? a.ACCOUNT_COMBINATION ?? a.account_combination ?? a.gl_account ?? '',
       })).filter(a => a.name));
     } catch { /* silent */ }
     finally { setRecvActivitiesLoading(false); }
@@ -484,7 +485,7 @@ const ManageReceipts: React.FC = () => {
     fetchRecvActivities();
     const splits = existingSplits?.length
       ? existingSplits
-      : [{ id: `sp-${Date.now()}`, amount: totalAdj, activityName: '', accountCombination: '', reason: '' }];
+      : [{ id: `sp-${Date.now()}`, amount: totalAdj, activityName: '', accountCombination: '', accountDescription: '', reason: '' }];
     setAdjSplitModal({ tabKey, pendingKey, totalAdj, currency, splits });
   };
 
@@ -3544,13 +3545,15 @@ const ManageReceipts: React.FC = () => {
                 const updateSplit = (id: string, patch: Partial<AdjSplit>) =>
                   setAdjSplitModal(m => m ? { ...m, splits: m.splits.map(s => s.id === id ? { ...s, ...patch } : s) } : m);
                 const addSplit = () =>
-                  setAdjSplitModal(m => m ? { ...m, splits: [...m.splits, { id: `sp-${Date.now()}`, amount: Math.max(0, remaining), activityName: '', accountCombination: '', reason: '' }] } : m);
+                  setAdjSplitModal(m => m ? { ...m, splits: [...m.splits, { id: `sp-${Date.now()}`, amount: Math.max(0, remaining), activityName: '', accountCombination: '', accountDescription: '', reason: '' }] } : m);
                 const removeSplit = (id: string) =>
                   setAdjSplitModal(m => m ? { ...m, splits: m.splits.filter(s => s.id !== id) } : m);
                 return (
                   <Modal
                     open
-                    width={860}
+                    width={960}
+                    keyboard={false}
+                    maskClosable={false}
                     title={
                       <Space>
                         <ScissorOutlined style={{ color: REDWOOD.warning }} />
@@ -3597,11 +3600,11 @@ const ManageReceipts: React.FC = () => {
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                       <thead>
                         <tr style={{ background: '#fafafa', borderBottom: '1px solid #e5e5e5' }}>
-                          <th style={{ padding: '6px 8px', textAlign: 'left', width: 40 }}>#</th>
-                          <th style={{ padding: '6px 8px', textAlign: 'right', width: 140 }}>Amount</th>
-                          <th style={{ padding: '6px 8px', textAlign: 'left', width: 220 }}>Receivable Activity</th>
-                          <th style={{ padding: '6px 8px', textAlign: 'left' }}>Account Combination</th>
-                          <th style={{ padding: '6px 8px', textAlign: 'left', width: 160 }}>Reason</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'left', width: 36 }}>#</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'right', width: 130 }}>Amount</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'left', width: 200 }}>Receivable Activity</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'left', width: 300 }}>Account Combination</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'left', width: 140 }}>Reason</th>
                           <th style={{ width: 32 }} />
                         </tr>
                       </thead>
@@ -3624,9 +3627,17 @@ const ManageReceipts: React.FC = () => {
                                 filterOption={(input, option) =>
                                   String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())
                                 }
-                                onChange={val => {
+                                onChange={async val => {
                                   const act = recvActivities.find(a => a.name === val);
-                                  updateSplit(sp.id, { activityName: val, accountCombination: act?.accountCombination || '' });
+                                  const combo = act?.accountCombination || '';
+                                  let desc = '';
+                                  if (combo) {
+                                    try {
+                                      const r = await validateAccountCode(combo.replace(/\./g, '-'));
+                                      desc = Object.values(r.segmentDetails ?? {}).map((s: any) => s.description).filter(Boolean).join(' · ');
+                                    } catch { /* silent */ }
+                                  }
+                                  updateSplit(sp.id, { activityName: val, accountCombination: combo, accountDescription: desc });
                                 }}>
                                 {recvActivities.map(a => (
                                   <Option key={a.name} value={a.name}>
@@ -3635,10 +3646,27 @@ const ManageReceipts: React.FC = () => {
                                 ))}
                               </Select>
                             </td>
-                            <td style={{ padding: '6px 8px' }}>
-                              <Text style={{ fontSize: 11, fontFamily: 'monospace', color: sp.accountCombination ? REDWOOD.info : REDWOOD.neutral600 }}>
-                                {sp.accountCombination || '—'}
-                              </Text>
+                            <td style={{ padding: '6px 4px' }}>
+                              <Input size="small"
+                                placeholder="e.g. 01-00-00-1234567-0000-000-00-000-000"
+                                value={sp.accountCombination}
+                                style={{ fontFamily: 'monospace', fontSize: 11 }}
+                                onChange={e => updateSplit(sp.id, { accountCombination: e.target.value, accountDescription: '' })}
+                                onBlur={async e => {
+                                  const combo = e.target.value.trim();
+                                  if (!combo) return;
+                                  try {
+                                    const r = await validateAccountCode(combo.replace(/\./g, '-'));
+                                    const desc = Object.values(r.segmentDetails ?? {}).map((s: any) => s.description).filter(Boolean).join(' · ');
+                                    updateSplit(sp.id, { accountDescription: desc });
+                                  } catch { updateSplit(sp.id, { accountDescription: 'Invalid account' }); }
+                                }}
+                              />
+                              {sp.accountDescription && (
+                                <div style={{ fontSize: 10, color: sp.accountDescription === 'Invalid account' ? REDWOOD.primary : REDWOOD.info, marginTop: 2, lineHeight: 1.3 }}>
+                                  {sp.accountDescription}
+                                </div>
+                              )}
                             </td>
                             <td style={{ padding: '6px 4px' }}>
                               <Input size="small" placeholder="Reason…" value={sp.reason}
