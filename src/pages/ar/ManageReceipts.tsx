@@ -3473,18 +3473,24 @@ const ManageReceipts: React.FC = () => {
                         selectedRowKeys: selectedKeys,
                         onChange: (keys) => {
                           setInstPickerSel(p => ({ ...p, [tabKey]: keys }));
-                          // Auto-fill applyAmount with balanceDue for newly selected rows
                           const prevKeys = new Set(selectedKeys);
                           const newlySelected = (keys as string[]).filter(k => !prevKeys.has(k));
                           if (newlySelected.length > 0) {
-                            setInstPickerRows(p => ({
-                              ...p,
-                              [tabKey]: (p[tabKey] ?? []).map(r =>
-                                newlySelected.includes(r.key) && r.applyAmount === null
-                                  ? { ...r, applyAmount: r.balanceDue }
-                                  : r
-                              ),
-                            }));
+                            setInstPickerRows(p => {
+                              const rows = p[tabKey] ?? [];
+                              // Calculate already-consumed receipt amount from existing selections
+                              const alreadyApplied = rows
+                                .filter(r => prevKeys.has(r.key))
+                                .reduce((s, r) => s + (r.applyAmount ?? r.balanceDue), 0);
+                              let remaining = Math.max(0, receiptAmt - alreadyApplied);
+                              const updated = rows.map(r => {
+                                if (!newlySelected.includes(r.key) || r.applyAmount !== null) return r;
+                                const apply = Math.min(r.balanceDue, remaining);
+                                remaining = Math.max(0, Math.round((remaining - apply) * 100) / 100);
+                                return { ...r, applyAmount: apply };
+                              });
+                              return { ...p, [tabKey]: updated };
+                            });
                           }
                         },
                       }}
