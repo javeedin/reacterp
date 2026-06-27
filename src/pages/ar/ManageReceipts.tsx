@@ -470,7 +470,7 @@ const ManageReceipts: React.FC = () => {
     if (recvActivities.length > 0) return;
     setRecvActivitiesLoading(true);
     try {
-      const res  = await fetch('https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/ar/Receivablesactivities', { headers: { Accept: 'application/json' } });
+      const res  = await fetch(`${GL_ORDS_BASE}/ar/Receivablesactivities`, { headers: { Accept: 'application/json' } });
       const data = await res.json();
       const items = (data.items ?? data ?? []) as any[];
       setRecvActivities(items.map((a: any) => ({
