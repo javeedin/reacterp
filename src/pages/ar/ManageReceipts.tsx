@@ -3631,7 +3631,19 @@ const ManageReceipts: React.FC = () => {
                                 value={sp.amount}
                                 formatter={v => v !== undefined && v !== null ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
                                 parser={v => parseFloat((v ?? '').replace(/,/g, '')) || 0}
-                                onChange={val => updateSplit(sp.id, { amount: val ?? 0 })} />
+                                onChange={val => {
+                                  const newAmt = val ?? 0;
+                                  setAdjSplitModal(m => {
+                                    if (!m) return m;
+                                    const updated = m.splits.map(s => s.id === sp.id ? { ...s, amount: newAmt } : s);
+                                    if (idx !== 0 && updated.length > 1) {
+                                      const othersSum = updated.slice(1).reduce((s, r) => s + (r.amount || 0), 0);
+                                      const firstAmt  = Math.round(Math.max(0, totalAdj - othersSum) * 100) / 100;
+                                      updated[0] = { ...updated[0], amount: firstAmt };
+                                    }
+                                    return { ...m, splits: updated };
+                                  });
+                                }} />
                             </td>
                             <td style={{ padding: '6px 4px' }}>
                               <Select size="small" style={{ width: '100%' }} showSearch
