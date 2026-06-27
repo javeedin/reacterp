@@ -373,6 +373,7 @@ const ManageReceipts: React.FC = () => {
   const [miscAcctVisible, setMiscAcctVisible] = useState(false);
   const [miscAcctTabKey, setMiscAcctTabKey]   = useState('');
   const [miscAcctField, setMiscAcctField]     = useState<'drAccount' | 'crAccount'>('crAccount');
+  const [splitAcctPickerSplitId, setSplitAcctPickerSplitId] = useState<string | null>(null);
   // Per-tab edit mode: false = view/locked, true = editing enabled
   const [editingEnabled, setEditingEnabled]   = useState<Record<string, boolean>>({});
   const [acctModal, setAcctModal] = useState<{
@@ -3653,10 +3654,11 @@ const ManageReceipts: React.FC = () => {
                               </Select>
                             </td>
                             <td style={{ padding: '6px 4px' }}>
-                              <Input size="small"
+                              <Input.Search size="small"
                                 placeholder="e.g. 01-00-00-1234567-0000-000-00-000-000"
                                 value={sp.accountCombination}
                                 style={{ fontFamily: 'monospace', fontSize: 11 }}
+                                enterButton={<SearchOutlined />}
                                 onChange={e => updateSplit(sp.id, { accountCombination: e.target.value, accountDescription: '' })}
                                 onBlur={async e => {
                                   const combo = e.target.value.trim();
@@ -3667,6 +3669,7 @@ const ManageReceipts: React.FC = () => {
                                     updateSplit(sp.id, { accountDescription: desc });
                                   } catch { updateSplit(sp.id, { accountDescription: 'Invalid account' }); }
                                 }}
+                                onSearch={() => setSplitAcctPickerSplitId(sp.id)}
                               />
                               {sp.accountDescription && (
                                 <div style={{ fontSize: 10, color: sp.accountDescription === 'Invalid account' ? REDWOOD.primary : REDWOOD.info, marginTop: 2, lineHeight: 1.3 }}>
@@ -4468,6 +4471,25 @@ const ManageReceipts: React.FC = () => {
           />
         );
       })()}
+
+      {/* ── AccountSelector for Adj Split account combination ── */}
+      {splitAcctPickerSplitId && (
+        <AccountSelector
+          visible
+          onSelect={async (code, segments) => {
+            const desc = Object.values(segments ?? {})
+              .map((s: any) => s.description).filter(Boolean).join(' · ');
+            setAdjSplitModal(m => m ? {
+              ...m,
+              splits: m.splits.map(s => s.id === splitAcctPickerSplitId
+                ? { ...s, accountCombination: code, accountDescription: desc }
+                : s),
+            } : m);
+            setSplitAcctPickerSplitId(null);
+          }}
+          onCancel={() => setSplitAcctPickerSplitId(null)}
+        />
+      )}
 
       {/* ── View Accounting Modal ── */}
       {viewAcctModal && (() => {
