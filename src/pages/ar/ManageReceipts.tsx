@@ -466,11 +466,11 @@ const ManageReceipts: React.FC = () => {
     splits: AdjSplit[];
   } | null>(null);
 
-  const fetchRecvActivities = useCallback(async () => {
-    if (recvActivities.length > 0) return;
+  const fetchRecvActivities = useCallback(async (force = false) => {
+    if (!force && recvActivities.length > 0) return;
     setRecvActivitiesLoading(true);
     try {
-      const res  = await fetch(`${GL_ORDS_BASE}/ar/Receivablesactivities`, { headers: { Accept: 'application/json' } });
+      const res  = await fetch(`${GL_ORDS_BASE}/ar/Receivablesactivities?limit=500`, { headers: { Accept: 'application/json' } });
       const data = await res.json();
       const items = (data.items ?? data ?? []) as any[];
       setRecvActivities(items.map((a: any) => ({
@@ -478,7 +478,7 @@ const ManageReceipts: React.FC = () => {
         type:               a.description        ?? a.ACTIVITY_TYPE   ?? a.activity_type   ?? '',
         accountCombination: a.gl_account_combination ?? a.ACCOUNT_COMBINATION ?? a.account_combination ?? '',
       })).filter(a => a.name));
-    } catch { /* silent */ }
+    } catch { message.error('Failed to load receivable activities'); }
     finally { setRecvActivitiesLoading(false); }
   }, [recvActivities.length]);
 
@@ -3562,11 +3562,18 @@ const ManageReceipts: React.FC = () => {
                     keyboard={false}
                     maskClosable={false}
                     title={
-                      <Space>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <ScissorOutlined style={{ color: REDWOOD.warning }} />
                         <Text strong>Split Adjustment</Text>
                         <Tag color="orange">{fmt(totalAdj)} {currency}</Tag>
-                      </Space>
+                        <Tooltip title={`Refresh activities (${recvActivities.length} loaded)`}>
+                          <Button size="small" icon={<ReloadOutlined />} loading={recvActivitiesLoading}
+                            style={{ fontSize: 11, marginLeft: 8 }}
+                            onClick={() => fetchRecvActivities(true)}>
+                            {recvActivities.length > 0 ? `${recvActivities.length} activities` : 'Load activities'}
+                          </Button>
+                        </Tooltip>
+                      </div>
                     }
                     onCancel={() => setAdjSplitModal(null)}
                     footer={
