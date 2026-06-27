@@ -3649,7 +3649,11 @@ const ManageReceipts: React.FC = () => {
                                   if (combo) {
                                     try {
                                       const r = await validateAccountCode(combo.replace(/\./g, '-'));
-                                      desc = Object.values(r.segmentDetails ?? {}).map((s: any) => s.description).filter(Boolean).join(' · ');
+                                      const sd = r.segmentDetails ?? {};
+                                      const acctEntry = Object.values(sd).find((s: any) => { const n = (s.name ?? '').toLowerCase(); return n === 'account' || (n.includes('account') && !n.includes('sub') && !n.includes('chart') && !n.includes('offset')); });
+                                      const subEntry  = Object.values(sd).find((s: any) => (s.name ?? '').toLowerCase().includes('sub'));
+                                      const parts = [acctEntry?.description, subEntry?.description].filter(Boolean);
+                                      desc = parts.length ? parts.join(' · ') : Object.values(sd).map((s: any) => s.description).filter(Boolean).join(' · ');
                                     } catch { /* silent */ }
                                   }
                                   updateSplit(sp.id, { activityName: val, accountCombination: combo, accountDescription: desc });
@@ -3678,7 +3682,11 @@ const ManageReceipts: React.FC = () => {
                                   if (!combo) return;
                                   try {
                                     const r = await validateAccountCode(combo.replace(/\./g, '-'));
-                                    const desc = Object.values(r.segmentDetails ?? {}).map((s: any) => s.description).filter(Boolean).join(' · ');
+                                    const sd = r.segmentDetails ?? {};
+                                    const acctEntry = Object.values(sd).find((s: any) => { const n = (s.name ?? '').toLowerCase(); return n === 'account' || (n.includes('account') && !n.includes('sub') && !n.includes('chart') && !n.includes('offset')); });
+                                    const subEntry  = Object.values(sd).find((s: any) => (s.name ?? '').toLowerCase().includes('sub'));
+                                    const parts = [acctEntry?.description, subEntry?.description].filter(Boolean);
+                                    const desc = parts.length ? parts.join(' · ') : Object.values(sd).map((s: any) => s.description).filter(Boolean).join(' · ');
                                     updateSplit(sp.id, { accountDescription: desc });
                                   } catch { updateSplit(sp.id, { accountDescription: 'Invalid account' }); }
                                 }}
@@ -4486,23 +4494,35 @@ const ManageReceipts: React.FC = () => {
       })()}
 
       {/* ── AccountSelector for Adj Split account combination ── */}
-      {splitAcctPickerSplitId && (
-        <AccountSelector
-          visible
-          onSelect={async (code, segments) => {
-            const desc = Object.values(segments ?? {})
-              .map((s: any) => s.description).filter(Boolean).join(' · ');
-            setAdjSplitModal(m => m ? {
-              ...m,
-              splits: m.splits.map(s => s.id === splitAcctPickerSplitId
-                ? { ...s, accountCombination: code, accountDescription: desc }
-                : s),
-            } : m);
-            setSplitAcctPickerSplitId(null);
-          }}
-          onCancel={() => setSplitAcctPickerSplitId(null)}
-        />
-      )}
+      {splitAcctPickerSplitId && adjSplitModal && (() => {
+        const splitTab = tabs.find(t => t.key === adjSplitModal.tabKey);
+        const splitCompanyCode = businessUnits.find(b => b.name === splitTab?.draft.businessUnit)?.companyCode ?? '';
+        const splitCurrentCombo = adjSplitModal.splits.find(s => s.id === splitAcctPickerSplitId)?.accountCombination ?? '';
+        return (
+          <AccountSelector
+            visible
+            initialValue={splitCurrentCombo || undefined}
+            lockedFirstSegment={splitCompanyCode || undefined}
+            onSelect={(code, segments) => {
+              const acctEntry  = Object.values(segments ?? {}).find((s: any) => {
+                const n = (s.name ?? '').toLowerCase();
+                return n === 'account' || (n.includes('account') && !n.includes('sub') && !n.includes('chart') && !n.includes('offset'));
+              });
+              const subEntry   = Object.values(segments ?? {}).find((s: any) => (s.name ?? '').toLowerCase().includes('sub'));
+              const descParts  = [acctEntry?.description, subEntry?.description].filter(Boolean);
+              const desc       = descParts.length ? descParts.join(' · ') : Object.values(segments ?? {}).map((s: any) => s.description).filter(Boolean).join(' · ');
+              setAdjSplitModal(m => m ? {
+                ...m,
+                splits: m.splits.map(s => s.id === splitAcctPickerSplitId
+                  ? { ...s, accountCombination: code, accountDescription: desc }
+                  : s),
+              } : m);
+              setSplitAcctPickerSplitId(null);
+            }}
+            onCancel={() => setSplitAcctPickerSplitId(null)}
+          />
+        );
+      })()}
 
       {/* ── View Accounting Modal ── */}
       {viewAcctModal && (() => {
