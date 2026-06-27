@@ -474,9 +474,9 @@ const ManageReceipts: React.FC = () => {
       const data = await res.json();
       const items = (data.items ?? data ?? []) as any[];
       setRecvActivities(items.map((a: any) => ({
-        name:               a.ACTIVITY_NAME   ?? a.activity_name   ?? a.name   ?? '',
-        type:               a.ACTIVITY_TYPE   ?? a.activity_type   ?? a.type   ?? '',
-        accountCombination: a.gl_account_combination ?? a.ACCOUNT_COMBINATION ?? a.account_combination ?? a.gl_account ?? '',
+        name:               a.name               ?? a.ACTIVITY_NAME   ?? a.activity_name   ?? '',
+        type:               a.description        ?? a.ACTIVITY_TYPE   ?? a.activity_type   ?? '',
+        accountCombination: a.gl_account_combination ?? a.ACCOUNT_COMBINATION ?? a.account_combination ?? '',
       })).filter(a => a.name));
     } catch { /* silent */ }
     finally { setRecvActivitiesLoading(false); }
@@ -3632,7 +3632,8 @@ const ManageReceipts: React.FC = () => {
                                 loading={recvActivitiesLoading}
                                 value={sp.activityName || undefined}
                                 filterOption={(input, option) =>
-                                  String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+                                  String(option?.value ?? '').toLowerCase().includes(input.toLowerCase()) ||
+                                  String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
                                 }
                                 onChange={async val => {
                                   const act = recvActivities.find(a => a.name === val);
@@ -3647,8 +3648,13 @@ const ManageReceipts: React.FC = () => {
                                   updateSplit(sp.id, { activityName: val, accountCombination: combo, accountDescription: desc });
                                 }}>
                                 {recvActivities.map(a => (
-                                  <Option key={a.name} value={a.name}>
-                                    {a.name}{a.type ? ` (${a.type})` : ''}
+                                  <Option key={a.name} value={a.name} label={a.name}>
+                                    <div style={{ lineHeight: 1.3 }}>
+                                      <div style={{ fontSize: 12, fontWeight: 600 }}>{a.name}</div>
+                                      {a.accountCombination && (
+                                        <div style={{ fontSize: 10, fontFamily: 'monospace', color: '#8c8c8c' }}>{a.accountCombination}</div>
+                                      )}
+                                    </div>
                                   </Option>
                                 ))}
                               </Select>
