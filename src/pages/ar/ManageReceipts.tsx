@@ -2346,7 +2346,7 @@ const ManageReceipts: React.FC = () => {
               ? <Tag color="red" icon={<CloseCircleOutlined />} style={{ fontSize: 10, margin: 0, lineHeight: '16px' }}>Closed</Tag>
               : r._pending && <Tag color="orange" style={{ fontSize: 10, margin: 0, lineHeight: '16px' }}>Pending</Tag>}
             <Text style={{ fontSize: 12, fontWeight: 600, color: r._closed ? REDWOOD.primary : undefined }}>{v || '—'}</Text>
-            {r._closed && r._pendingKey && (
+            {r._closed && r._pendingKey && isEditing && (
               <Tooltip title="Remove this closed installment">
                 <Button size="small" type="text" danger icon={<DeleteOutlined />} style={{ padding: '0 2px', height: 18 }}
                   onClick={() => setPendingApplications(prev => ({
@@ -2370,7 +2370,7 @@ const ManageReceipts: React.FC = () => {
           ? <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(r._balDue)}</Text>
           : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
       { title: 'Apply Amount', dataIndex: 'applicationAmount', width: 130, align: 'right',
-        render: (v, r) => r._pending
+        render: (v, r) => r._pending && isEditing
           ? <InputNumber size="small" style={{ width: '100%' }} precision={2} min={0}
               value={v}
               formatter={val => val !== undefined && val !== null ? Number(val).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
@@ -2389,7 +2389,7 @@ const ManageReceipts: React.FC = () => {
           const pendingRow = r._pendingKey ? (pendingApplications[tabKey] ?? []).find(p => p.key === r._pendingKey) : null;
           const splits = pendingRow?.adjSplits;
           const hasSplits = splits && splits.length > 1;
-          if (r._pending && r._pendingKey) {
+          if (r._pending && r._pendingKey && isEditing) {
             return (
               <Space size={4} style={{ width: '100%', justifyContent: 'flex-end' }}>
                 <InputNumber size="small" style={{ flex: 1, minWidth: 80 }} precision={2}
@@ -2425,7 +2425,7 @@ const ManageReceipts: React.FC = () => {
           const applyAmt = r.applicationAmount ?? 0;
           const adjAmt   = r._adjAmount ?? 0;
           const balance  = Math.max(0, r._balDue - applyAmt - Math.abs(adjAmt));
-          const canPush  = r._pending && r._pendingKey && balance > 0.001;
+          const canPush  = r._pending && r._pendingKey && isEditing && balance > 0.001;
           return (
             <Space size={4} style={{ justifyContent: 'flex-end', width: '100%' }}>
               <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600,
@@ -3178,7 +3178,7 @@ const ManageReceipts: React.FC = () => {
             }
             extra={
               <Space size="small">
-                {draft.receiptType === 'CASH' && draft.customerAccountNumber && (
+                {draft.receiptType === 'CASH' && draft.customerAccountNumber && isEditing && (
                   <Button
                     size="small"
                     type="primary"
