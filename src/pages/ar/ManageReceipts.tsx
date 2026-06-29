@@ -1825,6 +1825,8 @@ const ManageReceipts: React.FC = () => {
     // ── Step 5: POST Receipt Applications ─────────────────────────────────────
     let appErrors: string[] = [];
     const postedAppIds: number[] = [];
+    // Map row key → returned application_id so adjustments can link back
+    const rowAppIdMap: Record<string, number> = {};
     for (const row of pending) {
       try {
         const appBody = {
@@ -1832,6 +1834,7 @@ const ManageReceipts: React.FC = () => {
           ApplicationDate:            draft.receiptDate || today,
           AccountingDate:             draft.accountingDate || today,
           ApplicationAmount:          row.applyAmount,
+          AdjustmentAmount:           row.adjustmentAmount || undefined,
           ApplicationStatus:          'APP',
           ReferenceTransactionId:     row.customerTransactionId,
           ReferenceTransactionNumber: row.transactionNumber,
@@ -1845,8 +1848,13 @@ const ManageReceipts: React.FC = () => {
         };
         const res = await fetch(APEX_RECEIPT_APPS, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(appBody) });
         const result = await res.json().catch(() => ({}));
-        if (res.ok) postedAppIds.push(result?.applicationId ?? result?.application_id ?? 0);
-        else appErrors.push(`${row.transactionNumber}/#${row.sequenceNumber}: HTTP ${res.status}`);
+        if (res.ok) {
+          const appId = result?.applicationId ?? result?.application_id ?? 0;
+          postedAppIds.push(appId);
+          rowAppIdMap[row.key] = appId;
+        } else {
+          appErrors.push(`${row.transactionNumber}/#${row.sequenceNumber}: HTTP ${res.status}`);
+        }
       } catch (e: any) { appErrors.push(`${row.transactionNumber}: ${e.message}`); }
     }
 
@@ -1881,6 +1889,7 @@ const ManageReceipts: React.FC = () => {
             InstallmentNumber:     row.sequenceNumber,
             InstallmentBalance:    Math.max(0, row.balanceDue - row.applyAmount - row.adjustmentAmount),
             AdjustmentReason:      sp.reason,
+            ApplicationId:         rowAppIdMap[row.key] || undefined,
             Comments:              `Auto-created from receipt ${draft.receiptNumber || ''}`,
             CreatedBy:             currentUser,
             LastUpdatedBy:         currentUser,
