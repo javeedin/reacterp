@@ -671,7 +671,11 @@ const TBPanel: React.FC = () => {
         onCell: () => ({ style: { overflow: 'visible', whiteSpace: 'nowrap' } }),
         render: (_: any, r: any) => r.isTotals
           ? <Text strong style={{ fontSize: 11 }}>Total ({filteredData.length} accounts)</Text>
-          : <Text code style={{ fontSize: 10 }}>{r.account_combination || r.account || '—'}</Text> },
+          : (
+            <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 12 }}>{r.account_combination || r.account}</span>} placement="topLeft">
+              <Text code style={{ fontSize: 10 }}>{r.account_combination || r.account || '—'}</Text>
+            </Tooltip>
+          ) },
       { title: 'Description', key: 'desc', ellipsis: true,
         render: (_: any, r: any) => r.isTotals ? null : (
           <Tooltip title={r.account_desc}>
@@ -2235,7 +2239,11 @@ const AAPanel: React.FC = () => {
           if (r.isOpeningBalance) return <Text strong style={{ fontSize: 10, color: REDWOOD.warning }}>Opening Balance</Text>;
           if (r.isClosingBalance) return <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>Closing Balance</Text>;
           const display = _ || [r.segCompany, r.segLob, r.segDept, r.segAccount, r.segSubAcct, r.segAnalysis, r.segInterco].filter(Boolean).join('-');
-          return <Text style={{ fontSize: 10, color: REDWOOD.info }}>{display || '—'}</Text>;
+          return (
+            <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 12 }}>{display}</span>} placement="topLeft">
+              <Text style={{ fontSize: 10, color: REDWOOD.info }}>{display || '—'}</Text>
+            </Tooltip>
+          );
         } },
       { title: 'Description', dataIndex: 'jeLineDescription', key: 'lineDesc', width: 200, ellipsis: true,
         render: (t: string, r: JournalLine) => isTot(r) ? null : (
@@ -2341,7 +2349,11 @@ const AAPanel: React.FC = () => {
           if (r.isOpeningBalance) return <Text strong style={{ fontSize: 10, color: '#b45309' }}>{display || '—'}</Text>;
           if (r.isClosingBalance) return <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{display || '—'}</Text>;
           if (r.isTotals)        return <Text strong style={{ fontSize: 10 }}>—</Text>;
-          return <Text style={{ fontSize: 10, color: REDWOOD.info, fontFamily: 'monospace' }}>{display || '—'}</Text>;
+          return (
+            <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 12 }}>{display}</span>} placement="topLeft">
+              <Text style={{ fontSize: 10, color: REDWOOD.info, fontFamily: 'monospace' }}>{display || '—'}</Text>
+            </Tooltip>
+          );
         } },
       { title: 'Description', dataIndex: 'jeLineDescription', key: 'bDesc', ellipsis: true, width: 200,
         render: (v: string, r: JournalLine) => {
