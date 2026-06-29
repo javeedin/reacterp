@@ -668,9 +668,10 @@ const TBPanel: React.FC = () => {
 
     return [
       { title: 'Account', key: 'account', width: 320,
+        onCell: () => ({ style: { overflow: 'visible', whiteSpace: 'nowrap' } }),
         render: (_: any, r: any) => r.isTotals
           ? <Text strong style={{ fontSize: 11 }}>Total ({filteredData.length} accounts)</Text>
-          : <Text code style={{ fontSize: 10, whiteSpace: 'nowrap' }}>{r.account_combination || r.account || '—'}</Text> },
+          : <Text code style={{ fontSize: 10 }}>{r.account_combination || r.account || '—'}</Text> },
       { title: 'Description', key: 'desc', ellipsis: true,
         render: (_: any, r: any) => r.isTotals ? null : (
           <Tooltip title={r.account_desc}>
@@ -2228,12 +2229,13 @@ const AAPanel: React.FC = () => {
 
     return [
       { title: 'Account', dataIndex: 'concatenatedSegments', key: 'account', width: 320,
+        onCell: () => ({ style: { overflow: 'visible', whiteSpace: 'nowrap' } }),
         render: (_: string, r: JournalLine) => {
           if (isTot(r)) return <Text strong style={{ fontSize: 11 }}>Total for Report</Text>;
           if (r.isOpeningBalance) return <Text strong style={{ fontSize: 10, color: REDWOOD.warning }}>Opening Balance</Text>;
           if (r.isClosingBalance) return <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>Closing Balance</Text>;
           const display = _ || [r.segCompany, r.segLob, r.segDept, r.segAccount, r.segSubAcct, r.segAnalysis, r.segInterco].filter(Boolean).join('-');
-          return <Text style={{ fontSize: 10, color: REDWOOD.info, whiteSpace: 'nowrap' }}>{display || '—'}</Text>;
+          return <Text style={{ fontSize: 10, color: REDWOOD.info }}>{display || '—'}</Text>;
         } },
       { title: 'Description', dataIndex: 'jeLineDescription', key: 'lineDesc', width: 200, ellipsis: true,
         render: (t: string, r: JournalLine) => isTot(r) ? null : (
@@ -2333,12 +2335,13 @@ const AAPanel: React.FC = () => {
     return [
       { title: 'Account Combination', dataIndex: 'concatenatedSegments', key: 'bCombo',
         width: 320,
+        onCell: () => ({ style: { overflow: 'visible', whiteSpace: 'nowrap' } }),
         render: (v: string, r: JournalLine) => {
           const display = v || [r.segCompany, r.segLob, r.segDept, r.segAccount, r.segSubAcct, r.segAnalysis, r.segInterco].filter(Boolean).join('-');
           if (r.isOpeningBalance) return <Text strong style={{ fontSize: 10, color: '#b45309' }}>{display || '—'}</Text>;
           if (r.isClosingBalance) return <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{display || '—'}</Text>;
           if (r.isTotals)        return <Text strong style={{ fontSize: 10 }}>—</Text>;
-          return <Text style={{ fontSize: 10, color: REDWOOD.info, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{display || '—'}</Text>;
+          return <Text style={{ fontSize: 10, color: REDWOOD.info, fontFamily: 'monospace' }}>{display || '—'}</Text>;
         } },
       { title: 'Description', dataIndex: 'jeLineDescription', key: 'bDesc', ellipsis: true, width: 200,
         render: (v: string, r: JournalLine) => {
