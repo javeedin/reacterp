@@ -390,12 +390,12 @@ const DrillModal: React.FC<{
   const drillCols: ColumnsType<any> = [
     { title: '#', key: 'lineNo', width: 44,
       render: (_: any, r: any) => <span style={{ fontSize: 10, color: REDWOOD.neutral600 }}>{r.je_line_number || r.jeLineNumber || ''}</span> },
-    { title: 'Account', key: 'acct', width: 190,
+    { title: 'Account', key: 'acct', width: 280,
       render: (_: any, r: any) => {
         const combo = r.account_combination || r.accountCombination || r.concatenatedSegments ||
           [r.company, r.lob, r.department, r.account, r.sub_account || r.subAccount, r.analysis, r.intercompany]
             .filter(Boolean).join('-');
-        return <Text code style={{ fontSize: 10 }}>{combo || '—'}</Text>;
+        return <Text code style={{ fontSize: 10, whiteSpace: 'nowrap' }}>{combo || '—'}</Text>;
       } },
     { title: 'Description', key: 'desc', ellipsis: true,
       render: (_: any, r: any) => (
@@ -667,10 +667,10 @@ const TBPanel: React.FC = () => {
     ];
 
     return [
-      { title: 'Account', key: 'account', width: 200, fixed: 'left', ellipsis: true,
+      { title: 'Account', key: 'account', width: 280, fixed: 'left',
         render: (_: any, r: any) => r.isTotals
           ? <Text strong style={{ fontSize: 11 }}>Total ({filteredData.length} accounts)</Text>
-          : <Text code style={{ fontSize: 10 }}>{r.account_combination || r.account || '—'}</Text> },
+          : <Text code style={{ fontSize: 10, whiteSpace: 'nowrap' }}>{r.account_combination || r.account || '—'}</Text> },
       { title: 'Description', key: 'desc', ellipsis: true,
         render: (_: any, r: any) => r.isTotals ? null : (
           <Tooltip title={r.account_desc}>
