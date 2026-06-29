@@ -472,6 +472,7 @@ const ManageReceipts: React.FC = () => {
     applicationId?: number;    // saved applicationId this dialog is linked to
     adjCreated?: boolean;      // true after "Create Adjustment" completes
     creating?: boolean;        // true while POSTing adjustments
+    viewOnly?: boolean;        // true when opened outside edit mode (read-only view)
     // snapshot of key row fields needed to build adjustment POST body
     rowSnap?: {
       customerTransactionId?: number;
@@ -515,6 +516,7 @@ const ManageReceipts: React.FC = () => {
       balanceDue?: number; applyAmount?: number; adjustmentAmount?: number;
       transactionClass?: string; billToSiteUseId?: number;
     },
+    viewOnly?: boolean,
   ) => {
     fetchRecvActivities();
     const adjApiUrl = applicationId
@@ -549,7 +551,7 @@ const ManageReceipts: React.FC = () => {
               reason:             a.adjustment_reason ?? a.ADJUSTMENT_REASON ?? '',
             };
           }));
-          setAdjSplitModal({ tabKey, pendingKey, totalAdj, currency, splits: loadedSplits, apiUrl: adjApiUrl, applicationId, rowSnap });
+          setAdjSplitModal({ tabKey, pendingKey, totalAdj, currency, splits: loadedSplits, apiUrl: adjApiUrl, applicationId, rowSnap, viewOnly });
           return;
         }
       } catch { /* fall through to blank */ }
@@ -557,7 +559,7 @@ const ManageReceipts: React.FC = () => {
     const splits = existingSplits?.length
       ? existingSplits
       : [{ id: `sp-${Date.now()}`, amount: totalAdj, activityName: '', accountCombination: '', accountDescription: '', reason: '' }];
-    setAdjSplitModal({ tabKey, pendingKey, totalAdj, currency, splits, apiUrl: adjApiUrl, applicationId, rowSnap });
+    setAdjSplitModal({ tabKey, pendingKey, totalAdj, currency, splits, apiUrl: adjApiUrl, applicationId, rowSnap, viewOnly });
   };
 
   const fetchOpenInstallments = useCallback(async (tabKey: string, customerAccountNumber: string) => {
@@ -2558,32 +2560,30 @@ const ManageReceipts: React.FC = () => {
                     color: r._adjAmount < 0 ? REDWOOD.primary : REDWOOD.warning }}>
                   {r._adjAmount > 0 ? '+' : ''}{fmt(r._adjAmount)}
                 </Text>
-                {isEditing && (
-                  <Tooltip title="View / edit adjustment splits">
-                    <Button size="small" type="text" icon={<ScissorOutlined style={{ fontSize: 11 }} />}
-                      style={{ padding: '0 4px', height: 24, color: REDWOOD.warning }}
-                      onClick={() => {
-                        const savedPending = (pendingApplications[tabKey] ?? []).find(p => p.key === r.key);
-                        // Find matching installment row to get installmentId / sequenceNumber
-                        const instRow = (instPickerRows[tabKey] ?? []).find(ir => ir.customerTransactionId === r.referenceTransactionId);
-                        openAdjSplitModal(
-                          tabKey, r.key, Math.abs(r._adjAmount!), r.enteredCurrency || draft.currency,
-                          savedPending?.adjSplits, r.applicationId,
-                          {
-                            customerTransactionId: r.referenceTransactionId ?? undefined,
-                            transactionNumber:     r.referenceTransactionNumber || undefined,
-                            installmentId:         instRow?.installmentId,
-                            sequenceNumber:        instRow?.sequenceNumber,
-                            balanceDue:            instRow?.balanceDue,
-                            applyAmount:           r.applicationAmount,
-                            adjustmentAmount:      r.adjustmentAmount,
-                            transactionClass:      instRow?.transactionClass,
-                            billToSiteUseId:       instRow?.billToSiteUseId,
-                          },
-                        );
+                <Tooltip title={isEditing ? 'View / edit adjustment splits' : 'View adjustment splits'}>
+                  <Button size="small" type="text" icon={<ScissorOutlined style={{ fontSize: 11 }} />}
+                    style={{ padding: '0 4px', height: 24, color: REDWOOD.warning }}
+                    onClick={() => {
+                      const savedPending = (pendingApplications[tabKey] ?? []).find(p => p.key === r.key);
+                      const instRow = (instPickerRows[tabKey] ?? []).find(ir => ir.customerTransactionId === r.referenceTransactionId);
+                      openAdjSplitModal(
+                        tabKey, r.key, Math.abs(r._adjAmount!), r.enteredCurrency || draft.currency,
+                        savedPending?.adjSplits, r.applicationId,
+                        {
+                          customerTransactionId: r.referenceTransactionId ?? undefined,
+                          transactionNumber:     r.referenceTransactionNumber || undefined,
+                          installmentId:         instRow?.installmentId,
+                          sequenceNumber:        instRow?.sequenceNumber,
+                          balanceDue:            instRow?.balanceDue,
+                          applyAmount:           r.applicationAmount,
+                          adjustmentAmount:      r.adjustmentAmount,
+                          transactionClass:      instRow?.transactionClass,
+                          billToSiteUseId:       instRow?.billToSiteUseId,
+                        },
+                        !isEditing, // viewOnly when not in edit mode
+                      );
                     }} />
-                  </Tooltip>
-                )}
+                </Tooltip>
               </Space>
             );
           }
@@ -3735,13 +3735,13 @@ const ManageReceipts: React.FC = () => {
 
               {/* ── Adjustment Split Dialog ── */}
               {adjSplitModal && adjSplitModal.tabKey === tabKey && (() => {
-                const { pendingKey, totalAdj, currency, splits, applicationId: adjAppId, adjCreated, creating } = adjSplitModal;
+                const { pendingKey, totalAdj, currency, splits, applicationId: adjAppId, adjCreated, creating, viewOnly } = adjSplitModal;
                 const splitTotal  = splits.reduce((s, r) => s + (r.amount || 0), 0);
                 const remaining   = Math.round((totalAdj - splitTotal) * 100) / 100;
                 const isBalanced  = Math.abs(remaining) < 0.01;
                 const hasAppId    = !!adjAppId;
-                const isLiveMode  = hasAppId; // live POST mode when applicationId known
-                const isReadOnly  = adjCreated;
+                const isLiveMode  = hasAppId && !viewOnly; // live POST only when editing
+                const isReadOnly  = adjCreated || viewOnly;
                 const updateSplit = (id: string, patch: Partial<AdjSplit>) =>
                   setAdjSplitModal(m => m ? { ...m, splits: m.splits.map(s => s.id === id ? { ...s, ...patch } : s) } : m);
                 const addSplit = () =>
@@ -3811,7 +3811,7 @@ const ManageReceipts: React.FC = () => {
                     title={
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                         <ScissorOutlined style={{ color: REDWOOD.warning }} />
-                        <Text strong>Split Adjustment</Text>
+                        <Text strong>{viewOnly ? 'View Adjustments' : 'Split Adjustment'}</Text>
                         <Tag color="orange">{fmt(totalAdj)} {currency}</Tag>
                         {adjAppId && (
                           <Tag color="blue" style={{ fontSize: 10 }}>App ID: {adjAppId}</Tag>
