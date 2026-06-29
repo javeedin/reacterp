@@ -669,7 +669,7 @@ const TBPanel: React.FC = () => {
     ];
 
     return [
-      { title: 'Account', key: 'account', width: 200,
+      { title: 'Account', key: 'account', width: 250,
         onCell: () => ({ style: { overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' } }),
         render: (_: any, r: any) => r.isTotals
           ? <Text strong style={{ fontSize: 11 }}>Total ({filteredData.length} accounts)</Text>
@@ -2245,7 +2245,7 @@ const AAPanel: React.FC = () => {
     ] : [];
 
     return [
-      { title: 'Account', dataIndex: 'concatenatedSegments', key: 'account', width: 200,
+      { title: 'Account', dataIndex: 'concatenatedSegments', key: 'account', width: 250,
         onCell: () => ({ style: { overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' } }),
         render: (_: string, r: JournalLine) => {
           if (isTot(r)) return <Text strong style={{ fontSize: 11 }}>Total for Report</Text>;
@@ -2355,7 +2355,7 @@ const AAPanel: React.FC = () => {
     ] : [];
     return [
       { title: 'Account Combination', dataIndex: 'concatenatedSegments', key: 'bCombo',
-        width: 200,
+        width: 250,
         onCell: () => ({ style: { overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' } }),
         render: (v: string, r: JournalLine) => {
           const display = v || [r.segCompany, r.segLob, r.segDept, r.segAccount, r.segSubAcct, r.segAnalysis, r.segInterco, r.segFuture1, r.segFuture2].filter(Boolean).join('-');
