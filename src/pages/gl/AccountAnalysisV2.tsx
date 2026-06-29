@@ -2227,13 +2227,13 @@ const AAPanel: React.FC = () => {
     ] : [];
 
     return [
-      { title: 'Account', dataIndex: 'concatenatedSegments', key: 'account', width: 220, fixed: 'left', ellipsis: true,
+      { title: 'Account', dataIndex: 'concatenatedSegments', key: 'account', width: 300, fixed: 'left',
         render: (_: string, r: JournalLine) => {
           if (isTot(r)) return <Text strong style={{ fontSize: 11 }}>Total for Report</Text>;
           if (r.isOpeningBalance) return <Text strong style={{ fontSize: 10, color: REDWOOD.warning }}>Opening Balance</Text>;
           if (r.isClosingBalance) return <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>Closing Balance</Text>;
           const display = _ || [r.segCompany, r.segLob, r.segDept, r.segAccount, r.segSubAcct, r.segAnalysis, r.segInterco].filter(Boolean).join('-');
-          return <Text style={{ fontSize: 10, color: REDWOOD.info }}>{display || '—'}</Text>;
+          return <Text style={{ fontSize: 10, color: REDWOOD.info, whiteSpace: 'nowrap' }}>{display || '—'}</Text>;
         } },
       { title: 'Description', dataIndex: 'jeLineDescription', key: 'lineDesc', width: 200, ellipsis: true,
         render: (t: string, r: JournalLine) => isTot(r) ? null : (
@@ -2332,13 +2332,13 @@ const AAPanel: React.FC = () => {
     ] : [];
     return [
       { title: 'Account Combination', dataIndex: 'concatenatedSegments', key: 'bCombo',
-        width: 240, fixed: 'left' as const, ellipsis: true,
+        width: 300, fixed: 'left' as const,
         render: (v: string, r: JournalLine) => {
           const display = v || [r.segCompany, r.segLob, r.segDept, r.segAccount, r.segSubAcct, r.segAnalysis, r.segInterco].filter(Boolean).join('-');
           if (r.isOpeningBalance) return <Text strong style={{ fontSize: 10, color: '#b45309' }}>{display || '—'}</Text>;
           if (r.isClosingBalance) return <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{display || '—'}</Text>;
           if (r.isTotals)        return <Text strong style={{ fontSize: 10 }}>—</Text>;
-          return <Tooltip title={display}><Text style={{ fontSize: 10, color: REDWOOD.info, fontFamily: 'monospace' }}>{display || '—'}</Text></Tooltip>;
+          return <Text style={{ fontSize: 10, color: REDWOOD.info, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{display || '—'}</Text>;
         } },
       { title: 'Description', dataIndex: 'jeLineDescription', key: 'bDesc', ellipsis: true, width: 200,
         render: (v: string, r: JournalLine) => {
