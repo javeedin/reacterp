@@ -138,6 +138,7 @@ interface AppRow {
   applicationId:              number;
   applicationDate:            string;
   applicationAmount:          number;
+  adjustmentAmount:           number;
   applicationStatus:          string;
   accountingDate:             string;
   referenceTransactionNumber: string;
@@ -482,8 +483,42 @@ const ManageReceipts: React.FC = () => {
     finally { setRecvActivitiesLoading(false); }
   }, [recvActivities.length]);
 
-  const openAdjSplitModal = (tabKey: string, pendingKey: string, totalAdj: number, currency: string, existingSplits?: AdjSplit[]) => {
+  const openAdjSplitModal = async (tabKey: string, pendingKey: string, totalAdj: number, currency: string, existingSplits?: AdjSplit[], applicationId?: number) => {
     fetchRecvActivities();
+    // If we have a saved applicationId, try to load existing splits from adjustments webservice
+    if (applicationId && (!existingSplits || existingSplits.length === 0)) {
+      try {
+        const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/ar/adjustments?application_id=${applicationId}&limit=500`, { headers: { Accept: 'application/json' } });
+        const data = await res.json();
+        const items: any[] = data.items ?? [];
+        if (items.length > 0) {
+          const loadedSplits: AdjSplit[] = await Promise.all(items.map(async (a: any) => {
+            const combo = a.account_combination ?? a.ACCOUNT_COMBINATION ?? '';
+            let desc = '';
+            if (combo) {
+              try {
+                const r = await validateAccountCode(combo.replace(/\./g, '-'));
+                const sd = r.segmentDetails ?? {};
+                const acctEntry = Object.values(sd).find((s: any) => { const n = (s.name ?? '').toLowerCase(); return n === 'account' || (n.includes('account') && !n.includes('sub') && !n.includes('chart') && !n.includes('offset')); });
+                const subEntry  = Object.values(sd).find((s: any) => (s.name ?? '').toLowerCase().includes('sub'));
+                const parts = [acctEntry?.description, subEntry?.description].filter(Boolean);
+                desc = parts.length ? parts.join(' · ') : Object.values(sd).map((s: any) => s.description).filter(Boolean).join(' · ');
+              } catch { /* silent */ }
+            }
+            return {
+              id:                 `sp-saved-${a.adjustment_id ?? a.ADJUSTMENT_ID ?? Math.random()}`,
+              amount:             a.adjustment_amount ?? a.ADJUSTMENT_AMOUNT ?? 0,
+              activityName:       a.receivables_activity ?? a.RECEIVABLES_ACTIVITY ?? '',
+              accountCombination: combo,
+              accountDescription: desc,
+              reason:             a.adjustment_reason ?? a.ADJUSTMENT_REASON ?? '',
+            };
+          }));
+          setAdjSplitModal({ tabKey, pendingKey, totalAdj, currency, splits: loadedSplits });
+          return;
+        }
+      } catch { /* fall through to blank */ }
+    }
     const splits = existingSplits?.length
       ? existingSplits
       : [{ id: `sp-${Date.now()}`, amount: totalAdj, activityName: '', accountCombination: '', accountDescription: '', reason: '' }];
@@ -562,6 +597,7 @@ const ManageReceipts: React.FC = () => {
           applicationId:              a.application_id              ?? 0,
           applicationDate:            (a.application_date  || '').slice(0, 10),
           applicationAmount:          a.application_amount          ?? 0,
+          adjustmentAmount:           a.adjustment_amount           ?? 0,
           applicationStatus:          a.application_status          ?? '',
           accountingDate:             (a.accounting_date   || '').slice(0, 10),
           referenceTransactionNumber: a.reference_transaction_number ?? '',
@@ -1727,7 +1763,20 @@ const ManageReceipts: React.FC = () => {
       return false;
     }
 
-    // ── Step 2: Amount balance check ───────────────────────────────────────────
+    // ── Step 2a: Split validation — any adj row must have balanced splits ─────
+    const unsplitRows = pending.filter(r => {
+      if (!r.adjustmentAmount || r.adjustmentAmount === 0) return false;
+      if (!r.adjSplits || r.adjSplits.length === 0) return true;
+      const splitTotal = r.adjSplits.reduce((s, sp) => s + (sp.amount || 0), 0);
+      return Math.abs(splitTotal - Math.abs(r.adjustmentAmount)) > 0.01;
+    });
+    if (unsplitRows.length > 0) {
+      const names = unsplitRows.map(r => `${r.transactionNumber}/#${r.sequenceNumber}`).join(', ');
+      message.warning({ content: `Adjustment split required for: ${names}. Open the split dialog (✂) and allocate the full amount before saving.`, duration: 8 });
+      return false;
+    }
+
+    // ── Step 2b: Amount balance check ─────────────────────────────────────────
     const savedApps = receiptApplications[tabKey]?.rows ?? [];
     const totalPendingApply = pending.reduce((s, r) => s + r.applyAmount, 0);
     const totalSavedApply   = savedApps.reduce((s, r) => s + r.applicationAmount, 0);
@@ -2300,6 +2349,7 @@ const ManageReceipts: React.FC = () => {
       applicationId:              0,
       applicationDate:            draft.receiptDate || dayjs().format('YYYY-MM-DD'),
       applicationAmount:          r.applyAmount,
+      adjustmentAmount:           r.adjustmentAmount,
       applicationStatus:          'APP',
       accountingDate:             draft.accountingDate || dayjs().format('YYYY-MM-DD'),
       referenceTransactionNumber: r.transactionNumber,
@@ -2323,7 +2373,9 @@ const ManageReceipts: React.FC = () => {
       _closed:                    r._closed,
     }));
 
-    const allAppRows = [...pendingAsAppRows, ...savedRows];
+    // Attach _adjAmount to saved rows from the DB adjustment_amount column
+    const savedRowsWithAdj = savedRows.map(r => ({ ...r, _adjAmount: r.adjustmentAmount || 0 }));
+    const allAppRows = [...pendingAsAppRows, ...savedRowsWithAdj];
 
     // ── Applied / Unapplied / On-Account summary ──────────────────────────────
     const receiptTotal   = draft.amount ?? 0;
@@ -2409,6 +2461,21 @@ const ManageReceipts: React.FC = () => {
                       onClick={() => openAdjSplitModal(tabKey, r._pendingKey!, Math.abs(r._adjAmount ?? 0), r.enteredCurrency || draft.currency, pendingRow?.adjSplits)} />
                   </Tooltip>
                 )}
+              </Space>
+            );
+          }
+          if (r._adjAmount && r._adjAmount !== 0 && r.applicationId) {
+            return (
+              <Space size={4} style={{ width: '100%', justifyContent: 'flex-end' }}>
+                <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600,
+                    color: r._adjAmount < 0 ? REDWOOD.primary : REDWOOD.warning }}>
+                  {r._adjAmount > 0 ? '+' : ''}{fmt(r._adjAmount)}
+                </Text>
+                <Tooltip title="View / edit adjustment splits">
+                  <Button size="small" type="text" icon={<ScissorOutlined style={{ fontSize: 11 }} />}
+                    style={{ padding: '0 4px', height: 24, color: REDWOOD.warning }}
+                    onClick={() => openAdjSplitModal(tabKey, r.key, Math.abs(r._adjAmount!), r.enteredCurrency || draft.currency, undefined, r.applicationId)} />
+                </Tooltip>
               </Space>
             );
           }
