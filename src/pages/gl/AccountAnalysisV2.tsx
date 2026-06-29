@@ -124,6 +124,8 @@ interface JournalLine {
   segSubAcct?: string;
   segAnalysis?: string;
   segInterco?: string;
+  segFuture1?: string;
+  segFuture2?: string;
   approvalStatus?: string;
   isOpeningBalance?: boolean;
   isClosingBalance?: boolean;
@@ -1341,7 +1343,9 @@ const AAPanel: React.FC = () => {
               segAccount:  String(item.account      || item.ACCOUNT      || ''),
               segSubAcct:  String(item.subAccount   || item.sub_account  || item.SUB_ACCOUNT || ''),
               segAnalysis: String(item.analysis     || item.ANALYSIS     || ''),
-              segInterco:     String(item.intercompany || item.INTERCOMPANY || item.interco || ''),
+              segInterco:  String(item.intercompany || item.INTERCOMPANY || item.interco || ''),
+              segFuture1:  String(item.future1 || item.FUTURE1 || ''),
+              segFuture2:  String(item.future2 || item.FUTURE2 || ''),
               approvalStatus: String(item.approvalStatusMeaning || item.approval_status_meaning || ''),
             } as JournalLine];
           });
@@ -1628,7 +1632,7 @@ const AAPanel: React.FC = () => {
           isOpeningBalance:  isOpen,
           isClosingBalance: !isOpen,
           segAccount: account, segCompany: '', segLob: '', segDept: '',
-          segSubAcct: '', segAnalysis: '', segInterco: '', approvalStatus: '',
+          segSubAcct: '', segAnalysis: '', segInterco: '', segFuture1: '', segFuture2: '', approvalStatus: '',
         } as JournalLine;
       };
       setComboAccountBal({
@@ -1788,7 +1792,7 @@ const AAPanel: React.FC = () => {
           accountedCr: acctOpenAcc < 0 ? Math.abs(acctOpenAcc) : 0,
           jeHeaderId: 0, isOpeningBalance: true, isClosingBalance: false,
           segAccount: acct, segCompany: '', segLob: '', segDept: '',
-          segSubAcct: '', segAnalysis: '', segInterco: '', approvalStatus: '',
+          segSubAcct: '', segAnalysis: '', segInterco: '', segFuture1: '', segFuture2: '', approvalStatus: '',
         } as JournalLine;
         sc2AccountBals[acct] = { openRow: acctOpenRow };
 
@@ -1840,7 +1844,9 @@ const AAPanel: React.FC = () => {
               segDept: String(item.department || item.dept || ''),
               segSubAcct: String(item.subAccount || item.sub_account || ''),
               segAnalysis: String(item.analysis || ''),
-              segInterco: String(item.intercompany || item.interco || ''),
+              segInterco:  String(item.intercompany || item.interco || ''),
+              segFuture1:  String(item.future1 || ''),
+              segFuture2:  String(item.future2 || ''),
               approvalStatus: String(item.approvalStatusMeaning || item.approval_status_meaning || ''),
               isOpeningBalance: false, isClosingBalance: false,
             } as JournalLine;
@@ -1880,7 +1886,7 @@ const AAPanel: React.FC = () => {
               accountedDr: coAcc > 0 ? coAcc : 0, accountedCr: coAcc < 0 ? Math.abs(coAcc) : 0,
               jeHeaderId: 0, isOpeningBalance: true, isClosingBalance: false,
               segAccount: acct, segCompany: '', segLob: '', segDept: '',
-              segSubAcct: '', segAnalysis: '', segInterco: '', approvalStatus: '',
+              segSubAcct: '', segAnalysis: '', segInterco: '', segFuture1: '', segFuture2: '', approvalStatus: '',
             } as JournalLine : null;
 
             let accRun = openRow ? (openRow.accountedDr||0)-(openRow.accountedCr||0) : 0;
@@ -2023,6 +2029,8 @@ const AAPanel: React.FC = () => {
           segSubAcct:  String(item.subAccount   || item.sub_account || item.SUB_ACCOUNT || ''),
           segAnalysis: String(item.analysis     || item.ANALYSIS    || ''),
           segInterco:  String(item.intercompany || item.INTERCOMPANY || item.interco || ''),
+          segFuture1:  String(item.future1 || item.FUTURE1 || ''),
+          segFuture2:  String(item.future2 || item.FUTURE2 || ''),
           approvalStatus: String(item.approvalStatusMeaning || item.approval_status_meaning || ''),
           isOpeningBalance: false, isClosingBalance: false,
         } as JournalLine;
@@ -2068,7 +2076,7 @@ const AAPanel: React.FC = () => {
           accountedCr: acctOpenAcc < 0 ? Math.abs(acctOpenAcc) : 0,
           jeHeaderId: 0, isOpeningBalance: true, isClosingBalance: false,
           segAccount: acct, segCompany: '', segLob: '', segDept: '',
-          segSubAcct: '', segAnalysis: '', segInterco: '', approvalStatus: '',
+          segSubAcct: '', segAnalysis: '', segInterco: '', segFuture1: '', segFuture2: '', approvalStatus: '',
         } as JournalLine;
         accountBals[acct] = { openRow: acctOpenRow };
 
@@ -2091,7 +2099,7 @@ const AAPanel: React.FC = () => {
               accountedDr: coAcc > 0 ? coAcc : 0, accountedCr: coAcc < 0 ? Math.abs(coAcc) : 0,
               jeHeaderId: 0, isOpeningBalance: true, isClosingBalance: false,
               segAccount: acct, segCompany: '', segLob: '', segDept: '',
-              segSubAcct: '', segAnalysis: '', segInterco: '', approvalStatus: '',
+              segSubAcct: '', segAnalysis: '', segInterco: '', segFuture1: '', segFuture2: '', approvalStatus: '',
             } as JournalLine : null;
 
             let accRun = openRow ? (openRow.accountedDr||0)-(openRow.accountedCr||0) : 0;
@@ -2238,7 +2246,7 @@ const AAPanel: React.FC = () => {
           if (isTot(r)) return <Text strong style={{ fontSize: 11 }}>Total for Report</Text>;
           if (r.isOpeningBalance) return <Text strong style={{ fontSize: 10, color: REDWOOD.warning }}>Opening Balance</Text>;
           if (r.isClosingBalance) return <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>Closing Balance</Text>;
-          const display = _ || [r.segCompany, r.segLob, r.segDept, r.segAccount, r.segSubAcct, r.segAnalysis, r.segInterco].filter(Boolean).join('-');
+          const display = _ || [r.segCompany, r.segLob, r.segDept, r.segAccount, r.segSubAcct, r.segAnalysis, r.segInterco, r.segFuture1, r.segFuture2].filter(Boolean).join('-');
           return (
             <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 12 }}>{display}</span>} placement="topLeft">
               <Text style={{ fontSize: 10, color: REDWOOD.info }}>{display || '—'}</Text>
@@ -2345,7 +2353,7 @@ const AAPanel: React.FC = () => {
         width: 320,
         onCell: () => ({ style: { overflow: 'visible', whiteSpace: 'nowrap' } }),
         render: (v: string, r: JournalLine) => {
-          const display = v || [r.segCompany, r.segLob, r.segDept, r.segAccount, r.segSubAcct, r.segAnalysis, r.segInterco].filter(Boolean).join('-');
+          const display = v || [r.segCompany, r.segLob, r.segDept, r.segAccount, r.segSubAcct, r.segAnalysis, r.segInterco, r.segFuture1, r.segFuture2].filter(Boolean).join('-');
           if (r.isOpeningBalance) return <Text strong style={{ fontSize: 10, color: '#b45309' }}>{display || '—'}</Text>;
           if (r.isClosingBalance) return <Text strong style={{ fontSize: 10, color: REDWOOD.success }}>{display || '—'}</Text>;
           if (r.isTotals)        return <Text strong style={{ fontSize: 10 }}>—</Text>;
@@ -2744,7 +2752,7 @@ const AAPanel: React.FC = () => {
             xlTotAccDr += safeN(r.accountedDr); xlTotAccCr += safeN(r.accountedCr);
             xlTotEntDr += safeN(r.enteredDr);   xlTotEntCr += safeN(r.enteredCr);
             const rowCombo = r.concatenatedSegments ||
-              [r.segCompany, r.segLob, r.segDept, r.segAccount, r.segSubAcct, r.segAnalysis, r.segInterco]
+              [r.segCompany, r.segLob, r.segDept, r.segAccount, r.segSubAcct, r.segAnalysis, r.segInterco, r.segFuture1, r.segFuture2]
                 .filter((v: any) => v != null && v !== '').join('-');
             writeDetailRow(r, idx, false, false, xlAccRun, xlEntRun, rowCombo);
           });
@@ -2756,7 +2764,7 @@ const AAPanel: React.FC = () => {
         const resolvedComboXl = brk.combo || (() => {
           const s = brk.linesWithBal.find((l: any) => !l.isOpeningBalance && !l.isClosingBalance) || brk.linesWithBal[0];
           if (!s) return '';
-          return [s.segCompany, s.segLob, s.segDept, s.segAccount, s.segSubAcct, s.segAnalysis, s.segInterco]
+          return [s.segCompany, s.segLob, s.segDept, s.segAccount, s.segSubAcct, s.segAnalysis, s.segInterco, s.segFuture1, s.segFuture2]
             .filter((v: any) => v != null && v !== '').join('-');
         })();
         ws.mergeCells(ri, 1, ri, NCOLS_BRK);
@@ -3070,7 +3078,7 @@ const AAPanel: React.FC = () => {
         const resolvedCombo = brk.combo || (() => {
           const sample = brk.linesWithBal.find(l => !l.isOpeningBalance && !l.isClosingBalance && !l.isTotals) || brk.linesWithBal[0];
           if (!sample) return '';
-          return [sample.segCompany, sample.segLob, sample.segDept, sample.segAccount, sample.segSubAcct, sample.segAnalysis, sample.segInterco]
+          return [sample.segCompany, sample.segLob, sample.segDept, sample.segAccount, sample.segSubAcct, sample.segAnalysis, sample.segInterco, sample.segFuture1, sample.segFuture2]
             .filter((v: any) => v != null && v !== '').join('-');
         })();
         // Draw combo + description sub-title above each break table
@@ -3497,7 +3505,7 @@ const AAPanel: React.FC = () => {
                     defaultPeriodName: '', accountingDate: '', batchName: '', userJeSourceName: '',
                     userJeCategoryName: '', currencyCode: '', jeHeaderId: 0,
                     segAccount: acct, segCompany: '', segLob: '', segDept: '',
-                    segSubAcct: '', segAnalysis: '', segInterco: '', approvalStatus: '',
+                    segSubAcct: '', segAnalysis: '', segInterco: '', segFuture1: '', segFuture2: '', approvalStatus: '',
                   } as any);
                   const acctDesc = openRow?.accountDescription || '';
                   elements.push(
