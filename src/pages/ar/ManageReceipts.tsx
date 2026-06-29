@@ -450,6 +450,8 @@ const ManageReceipts: React.FC = () => {
     applyAmount: number | null;
     adjustmentAmount: number | null;
     adjustmentReason: string;
+    transactionClass?: string;
+    billToSiteUseId?: number;
   }
   const [instPickerOpen,      setInstPickerOpen]      = useState<Record<string, boolean>>({});
   const [instPickerLoading,   setInstPickerLoading]   = useState<Record<string, boolean>>({});
@@ -479,6 +481,8 @@ const ManageReceipts: React.FC = () => {
       balanceDue?: number;
       applyAmount?: number;
       adjustmentAmount?: number;
+      transactionClass?: string;
+      billToSiteUseId?: number;
     };
   } | null>(null);
 
@@ -509,6 +513,7 @@ const ManageReceipts: React.FC = () => {
       customerTransactionId?: number; transactionNumber?: string;
       installmentId?: number; sequenceNumber?: number;
       balanceDue?: number; applyAmount?: number; adjustmentAmount?: number;
+      transactionClass?: string; billToSiteUseId?: number;
     },
   ) => {
     fetchRecvActivities();
@@ -572,6 +577,8 @@ const ManageReceipts: React.FC = () => {
         const txnNum = inv.TransactionNumber ?? inv.transaction_number ?? inv.TRANSACTION_NUMBER ?? '';
         const txnDate = (inv.TransactionDate ?? inv.transaction_date ?? inv.TRANSACTION_DATE ?? '').slice(0, 10);
         const ccy    = inv.InvoiceCurrencyCode ?? inv.invoice_currency_code ?? inv.INVOICE_CURRENCY_CODE ?? '';
+        const txnClass = inv.TransactionClass ?? inv.transaction_class ?? inv.TRANSACTION_CLASS ?? '';
+        const billSiteId = inv.BillToSiteUseId ?? inv.bill_to_site_use_id ?? inv.BILL_TO_SITE_USE_ID ?? null;
         if (!txnId) return;
         const instRes = await fetch(`${APEX_AR_INVOICES}/${txnId}/installments`, { headers: { Accept: 'application/json' } });
         if (!instRes.ok) return;
@@ -593,6 +600,8 @@ const ManageReceipts: React.FC = () => {
             applyAmount: null,
             adjustmentAmount: null,
             adjustmentReason: '',
+            transactionClass: txnClass || undefined,
+            billToSiteUseId:  billSiteId ?? undefined,
           });
         });
       }));
@@ -2533,7 +2542,10 @@ const ManageReceipts: React.FC = () => {
                       icon={<ScissorOutlined style={{ fontSize: 11 }} />}
                       style={{ padding: '0 4px', height: 24, color: hasSplits ? undefined : REDWOOD.warning,
                                borderColor: hasSplits ? undefined : REDWOOD.warning }}
-                      onClick={() => openAdjSplitModal(tabKey, r._pendingKey!, Math.abs(r._adjAmount ?? 0), r.enteredCurrency || draft.currency, pendingRow?.adjSplits, undefined, pendingRow ? { customerTransactionId: pendingRow.customerTransactionId, transactionNumber: pendingRow.transactionNumber, installmentId: pendingRow.installmentId, sequenceNumber: pendingRow.sequenceNumber, balanceDue: pendingRow.balanceDue, applyAmount: pendingRow.applyAmount, adjustmentAmount: pendingRow.adjustmentAmount } : undefined)} />
+                      onClick={() => {
+                        const instRow2 = pendingRow ? (instPickerRows[tabKey] ?? []).find(ir => ir.installmentId === pendingRow.installmentId) : undefined;
+                        openAdjSplitModal(tabKey, r._pendingKey!, Math.abs(r._adjAmount ?? 0), r.enteredCurrency || draft.currency, pendingRow?.adjSplits, undefined, pendingRow ? { customerTransactionId: pendingRow.customerTransactionId, transactionNumber: pendingRow.transactionNumber, installmentId: pendingRow.installmentId, sequenceNumber: pendingRow.sequenceNumber, balanceDue: pendingRow.balanceDue, applyAmount: pendingRow.applyAmount, adjustmentAmount: pendingRow.adjustmentAmount, transactionClass: instRow2?.transactionClass, billToSiteUseId: instRow2?.billToSiteUseId } : undefined);
+                      }} />
                   </Tooltip>
                 )}
               </Space>
@@ -2565,6 +2577,8 @@ const ManageReceipts: React.FC = () => {
                             balanceDue:            instRow?.balanceDue,
                             applyAmount:           r.applicationAmount,
                             adjustmentAmount:      r.adjustmentAmount,
+                            transactionClass:      instRow?.transactionClass,
+                            billToSiteUseId:       instRow?.billToSiteUseId,
                           },
                         );
                     }} />
@@ -3740,10 +3754,13 @@ const ManageReceipts: React.FC = () => {
                 // rowSnap carries the relevant row fields regardless of whether row is pending or saved
                 const snap = adjSplitModal.rowSnap
                   ?? (() => { const p = (pendingApplications[tabKey] ?? []).find(r => r.key === pendingKey); return p ? { customerTransactionId: p.customerTransactionId, transactionNumber: p.transactionNumber, installmentId: p.installmentId, sequenceNumber: p.sequenceNumber, balanceDue: p.balanceDue, applyAmount: p.applyAmount, adjustmentAmount: p.adjustmentAmount } : undefined; })();
+                const nowIso = new Date().toISOString().slice(0, 19) + 'Z';
                 const buildAdjBody = (sp: AdjSplit) => ({
                   CustomerTransactionId: snap?.customerTransactionId,
                   TransactionNumber:     snap?.transactionNumber,
-                  AdjustmentAmount:      -(Math.abs(sp.amount)), // always negative (write-off/credit)
+                  TransactionClass:      snap?.transactionClass,
+                  AdjustmentAmount:      -(Math.abs(sp.amount)),
+                  AccountedAmount:       -(Math.abs(sp.amount)),
                   AdjustmentDate:        draft.receiptDate || today(),
                   AccountingDate:        draft.accountingDate || today(),
                   AdjustmentType:        'LINE',
@@ -3756,10 +3773,14 @@ const ManageReceipts: React.FC = () => {
                   InstallmentId:         snap?.installmentId,
                   InstallmentBalance:    snap ? Math.max(0, (snap.balanceDue ?? 0) - (snap.applyAmount ?? 0) - Math.abs(snap.adjustmentAmount ?? 0)) : undefined,
                   AdjustmentReason:      sp.reason,
+                  ApprovedBy:            currentUser,
+                  BillToSiteUseId:       snap?.billToSiteUseId,
                   ApplicationId:         adjAppId,
                   Comments:              `Auto-created from receipt ${draft.receiptNumber || ''}`,
                   CreatedBy:             currentUser,
+                  CreationDate:          nowIso,
                   LastUpdatedBy:         currentUser,
+                  LastUpdateDate:        nowIso,
                 });
 
                 const doCreateAdjustments = async () => {
