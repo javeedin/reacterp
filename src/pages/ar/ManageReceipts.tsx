@@ -378,11 +378,13 @@ const ManageReceipts: React.FC = () => {
   const [splitAcctPickerSplitId, setSplitAcctPickerSplitId] = useState<string | null>(null);
   // Per-tab edit mode: false = view/locked, true = editing enabled
   const [editingEnabled, setEditingEnabled]   = useState<Record<string, boolean>>({});
+  type AcctLine = { lineType: string; accountingClass: string; accountCombination: string;
+                   accountDesc: string; enteredDr: number; enteredCr: number; description: string; ref?: string };
   const [acctModal, setAcctModal] = useState<{
     visible: boolean; tabKey: string; creating: boolean; posting: boolean;
     slaHeaderId: number | null; slaStatus: string; glBatchId: number | null;
-    lines: { lineType: string; accountingClass: string; accountCombination: string;
-             accountDesc: string; enteredDr: number; enteredCr: number; description: string }[];
+    lines: AcctLine[];
+    adjLines: AcctLine[];  // accounting lines for adjustments (separate journal)
   } | null>(null);
 
   const [viewAcctModal, setViewAcctModal] = useState<{
@@ -1620,32 +1622,84 @@ const ManageReceipts: React.FC = () => {
     const tab = tabs.find(t => t.key === tabKey);
     if (!tab) return;
     const { draft, slaHeaderId, slaPosted } = tab;
-    const acct   = allMethodAccounts.find(a => a.id === draft.selectedBankAccountId);
-    const amount = Math.abs(draft.amount ?? 0);
-    const isMisc = draft.receiptType === 'MISC';
-    const cashDesc       = acct?.cashCcid     ? (acctDescCache[acct.cashCcid]?.description      ?? '') : '';
+    const acct           = allMethodAccounts.find(a => a.id === draft.selectedBankAccountId);
+    const amount         = Math.abs(draft.amount ?? 0);
+    const isMisc         = draft.receiptType === 'MISC';
+    const cashCombo      = acct?.cashCombination?.replace(/\./g, '-')      || draft.drAccount || '';
+    const unappliedCombo = acct?.unappliedCombination?.replace(/\./g, '-') || '';
+    const cashDesc       = acct?.cashCcid      ? (acctDescCache[acct.cashCcid]?.description      ?? '') : '';
     const unappliedDesc  = acct?.unappliedCcid ? (acctDescCache[acct.unappliedCcid]?.description ?? '') : '';
-    const crDesc         = draft.crAccountDesc || '';
-    let lines: NonNullable<typeof acctModal>['lines'] = [];
+    const drDesc         = `${draft.comments || ''} ${draft.receiptNumber}`.trim();
+    const savedApps      = receiptApplications[tabKey]?.rows ?? [];
+
+    let lines: AcctLine[] = [];
     if (isMisc) {
       lines = [
-        { lineType: 'DR', accountingClass: 'CASH', accountCombination: acct?.cashCombination?.replace(/\./g, '-') || draft.drAccount || '', accountDesc: cashDesc || draft.drAccountDesc, enteredDr: amount, enteredCr: 0,      description: `Receipt ${draft.receiptNumber} — Cash DR` },
-        { lineType: 'CR', accountingClass: 'MISC', accountCombination: draft.crAccount || '',                                               accountDesc: crDesc,                           enteredDr: 0,      enteredCr: amount, description: `Receipt ${draft.receiptNumber} — Cr Account CR` },
+        { lineType: 'DR', accountingClass: 'CASH', accountCombination: cashCombo, accountDesc: cashDesc || draft.drAccountDesc,
+          enteredDr: amount, enteredCr: 0, description: drDesc },
+        { lineType: 'CR', accountingClass: 'MISC', accountCombination: draft.crAccount || '', accountDesc: draft.crAccountDesc || '',
+          enteredDr: 0, enteredCr: amount, description: `${draft.receiptNumber}` },
       ];
+    } else if (savedApps.length > 0) {
+      // DR: Bank — full receipt amount
+      lines.push({ lineType: 'DR', accountingClass: 'CASH', accountCombination: cashCombo,
+        accountDesc: cashDesc || draft.drAccountDesc, enteredDr: amount, enteredCr: 0, description: drDesc });
+      // CR: one line per application
+      for (const app of savedApps) {
+        const appAmount = Math.abs(app.applicationAmount);
+        if (appAmount === 0) continue;
+        const crLineDesc = `${app.referenceTransactionNumber} — App Ref ${app.applicationId}`;
+        lines.push({ lineType: 'CR', accountingClass: 'RECEIVABLE', accountCombination: unappliedCombo,
+          accountDesc: unappliedDesc, enteredDr: 0, enteredCr: appAmount,
+          description: crLineDesc, ref: String(app.applicationId) });
+      }
+      // If total CR < DR (unapplied remainder), add unapplied line
+      const crTotal = lines.filter(l => l.lineType === 'CR').reduce((s, l) => s + l.enteredCr, 0);
+      const remainder = Math.round((amount - crTotal) * 100) / 100;
+      if (remainder > 0.001) {
+        lines.push({ lineType: 'CR', accountingClass: 'UNAPPLIED', accountCombination: unappliedCombo,
+          accountDesc: unappliedDesc, enteredDr: 0, enteredCr: remainder,
+          description: `${draft.receiptNumber} — Unapplied` });
+      }
     } else {
       lines = [
-        { lineType: 'DR', accountingClass: 'CASH',      accountCombination: acct?.cashCombination?.replace(/\./g, '-') || draft.drAccount || '',      accountDesc: cashDesc || draft.drAccountDesc,    enteredDr: amount, enteredCr: 0,      description: `Receipt ${draft.receiptNumber} — Cash DR` },
-        { lineType: 'CR', accountingClass: 'UNAPPLIED', accountCombination: acct?.unappliedCombination?.replace(/\./g, '-') || '',                    accountDesc: unappliedDesc,                      enteredDr: 0,      enteredCr: amount, description: `Receipt ${draft.receiptNumber} — Unapplied CR` },
+        { lineType: 'DR', accountingClass: 'CASH',      accountCombination: cashCombo,      accountDesc: cashDesc || draft.drAccountDesc, enteredDr: amount, enteredCr: 0,      description: drDesc },
+        { lineType: 'CR', accountingClass: 'UNAPPLIED', accountCombination: unappliedCombo, accountDesc: unappliedDesc,                   enteredDr: 0,      enteredCr: amount, description: `${draft.receiptNumber} — Unapplied` },
       ];
     }
+
+    // ── Adjustment accounting lines ──
+    const adjLines: AcctLine[] = [];
+    const pendingRows = pendingApplications[tabKey] ?? [];
+    // From pending rows with splits
+    for (const row of pendingRows) {
+      if (!row.adjustmentAmount || row.adjustmentAmount === 0) continue;
+      const splits = row.adjSplits?.length
+        ? row.adjSplits
+        : [{ id: '', amount: Math.abs(row.adjustmentAmount), activityName: 'Adjustment', accountCombination: '', accountDescription: '', reason: row.adjustmentReason || '' }];
+      for (const sp of splits) {
+        const adjAmt = Math.abs(sp.amount);
+        adjLines.push({ lineType: 'DR', accountingClass: 'ADJUSTMENT',
+          accountCombination: sp.accountCombination || '',
+          accountDesc: sp.accountDescription || '',
+          enteredDr: adjAmt, enteredCr: 0,
+          description: `${row.transactionNumber} — ${sp.activityName || 'Adjustment'}` });
+        adjLines.push({ lineType: 'CR', accountingClass: 'RECEIVABLE',
+          accountCombination: unappliedCombo,
+          accountDesc: unappliedDesc,
+          enteredDr: 0, enteredCr: adjAmt,
+          description: `${row.transactionNumber} — AR Receivable` });
+      }
+    }
+
     setAcctModal({ visible: true, tabKey, creating: false, posting: false,
-      slaHeaderId: slaHeaderId, slaStatus: slaPosted ? 'POSTED' : (slaHeaderId ? 'CREATED' : ''),
-      glBatchId: null, lines });
+      slaHeaderId, slaStatus: slaPosted ? 'POSTED' : (slaHeaderId ? 'CREATED' : ''),
+      glBatchId: null, lines, adjLines });
   };
 
   const handleCreateAccounting = async () => {
     if (!acctModal) return;
-    const { tabKey, lines } = acctModal;
+    const { tabKey, lines, adjLines } = acctModal;
     const tab = tabs.find(t => t.key === tabKey);
     if (!tab) return;
     const { draft } = tab;
@@ -1757,7 +1811,70 @@ const ManageReceipts: React.FC = () => {
         message.warning(`Journal created but posting failed: ${postResult.error || postResult.message || 'unknown'}`);
       }
 
-      // Step 3: Stamp ACCOUNTING_STATUS = Accounted on the receipt
+      // Step 3a: Post adjustment journal if there are adj lines
+      if (adjLines && adjLines.length > 0) {
+        try {
+          const adjAmt    = adjLines.filter(l => l.lineType === 'DR').reduce((s, l) => s + l.enteredDr, 0);
+          const adjBatch  = `AR-ADJ-${draft.receiptNumber}-${Date.now()}`;
+          const adjGlPayload = {
+            batch: {
+              batchName: adjBatch, batchDescription: `AR Adjustments — Receipt ${draft.receiptNumber}`,
+              ledgerName: ledger.ledgerName, ledgerId: ledger.ledgerId, status: 'NEW',
+              accountingPeriod: period, controlTotal: adjAmt,
+              runningTotalDr: adjAmt, runningTotalCr: adjAmt,
+              batchSource: 'Accounts Receivable', createdBy: currentUser,
+            },
+            header: {
+              ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName,
+              jeCategory: 'Adjustments', jeSource: 'Receivables',
+              periodName: period,
+              journalName: `AR-ADJ-${draft.receiptNumber}`,
+              description: `Adjustments for Receipt ${draft.receiptNumber}`,
+              currencyCode: draft.currency || 'AED',
+              currencyConversionType: draft.conversionRateType || 'Corporate',
+              currencyConversionDate: draft.receiptDate || today(),
+              currencyConversionRate: exRate,
+              defaultEffectiveDate: draft.receiptDate || today(),
+              status: 'NEW', runningTotalDr: adjAmt, runningTotalCr: adjAmt, createdBy: currentUser,
+            },
+            lines: adjLines.map(l => ({
+              enteredDr:  l.lineType === 'DR' ? l.enteredDr : null,
+              enteredCr:  l.lineType === 'CR' ? l.enteredCr : null,
+              accountedDr: l.lineType === 'DR' ? l.enteredDr * exRate : null,
+              accountedCr: l.lineType === 'CR' ? l.enteredCr * exRate : null,
+              statAmount: null,
+              description: l.description,
+              currencyCode: draft.currency || 'AED',
+              currencyConversionDate: draft.receiptDate || today(),
+              currencyConversionRate: exRate,
+              userCurrencyConversionType: draft.conversionRateType || 'Corporate',
+              accountCombination: l.accountCombination,
+              chartOfAccountsName: 'Chart of Accounts',
+              reference1: draft.receiptNumber,
+              reference2: String(draft.standardReceiptId),
+              reference3: l.accountingClass,
+              reference4: draft.businessUnit,
+              reference5: 'AR_ADJUSTMENTS',
+              createdBy: currentUser,
+            })),
+          };
+          const adjGlRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/journals/create`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify(adjGlPayload),
+          });
+          const adjGlBody = await adjGlRes.json();
+          if (adjGlRes.ok) {
+            const adjBatchId = adjGlBody?.batchId ?? adjGlBody?.batch_id ?? 0;
+            await postJournal(adjBatchId);
+          } else {
+            message.warning(`Adjustment journal failed: ${adjGlBody?.message || `HTTP ${adjGlRes.status}`}`);
+          }
+        } catch (adjErr: any) {
+          message.warning(`Adjustment journal error: ${adjErr.message}`);
+        }
+      }
+
+      // Step 3b: Stamp ACCOUNTING_STATUS = Accounted on the receipt
       try {
         await fetch(`${APEX_AR_RECEIPTS}/${draft.standardReceiptId}/accounting-status`, {
           method: 'PUT',
@@ -1770,7 +1887,7 @@ const ManageReceipts: React.FC = () => {
         ? { ...t, slaHeaderId, slaPosted: true, draft: { ...t.draft, accountingStatus: 'Accounted' } }
         : t));
       setAcctModal(m => m ? { ...m, creating: false, glBatchId, slaStatus: 'POSTED' } : m);
-      message.success(`Accounting created and posted — Batch ${batchName}`);
+      message.success(`Accounting created and posted — Batch ${batchName}${adjLines?.length ? ' + Adjustment journal' : ''}`);
     } catch (e: any) {
       setAcctModal(m => m ? { ...m, creating: false } : m);
       message.error('Create Accounting failed: ' + (e?.message || String(e)));
@@ -5103,60 +5220,91 @@ const ManageReceipts: React.FC = () => {
                       </Tooltip>
                     );
                   } },
-                { title: 'Line Description', dataIndex: 'description', width: 280,
-                  render: (_, r: any) => {
-                    const desc = draft2?.comments || r.description;
-                    return (
-                      <Tooltip title={desc} placement="topLeft">
-                        <div style={{
-                          fontSize: 11, color: REDWOOD.neutral600,
-                          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-                          overflow: 'hidden', wordBreak: 'break-word', cursor: 'default',
-                        }}>{desc || '—'}</div>
-                      </Tooltip>
-                    );
-                  } },
-                { title: 'Ref 1', width: 100,
-                  render: () => {
-                    const ref1 = draft2?.receiptNumber;
-                    return (
-                      <Tooltip title={ref1} placement="topLeft">
-                        <div style={{
-                          fontSize: 10, fontFamily: 'monospace', color: '#888',
-                          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-                          overflow: 'hidden', wordBreak: 'break-all', cursor: 'default',
-                        }}>{ref1}</div>
-                      </Tooltip>
-                    );
-                  } },
-                { title: 'Ref 2', width: 100,
-                  render: () => <Text style={{ fontSize: 10, fontFamily: 'monospace', color: '#888', whiteSpace: 'nowrap' }}>{draft2?.standardReceiptId}</Text> },
+                { title: 'Line Description', dataIndex: 'description', width: 240,
+                  render: (v: any) => (
+                    <Tooltip title={v} placement="topLeft">
+                      <div style={{ fontSize: 11, color: REDWOOD.neutral600,
+                        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden', wordBreak: 'break-word', cursor: 'default' }}>{v || '—'}</div>
+                    </Tooltip>
+                  ) },
+                { title: 'App Ref', dataIndex: 'ref', width: 80,
+                  render: v => v ? <Text style={{ fontSize: 10, fontFamily: 'monospace', color: '#888' }}>{v}</Text> : <Text type="secondary">—</Text> },
                 { title: 'Debit', dataIndex: 'enteredDr', width: 110, align: 'right' as const,
                   render: v => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.success, whiteSpace: 'nowrap' }}>{fmt(v)}</Text> : <Text type="secondary">—</Text> },
                 { title: 'Credit', dataIndex: 'enteredCr', width: 110, align: 'right' as const,
                   render: v => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.primary, whiteSpace: 'nowrap' }}>{fmt(v)}</Text> : <Text type="secondary">—</Text> },
               ]}
-              summary={() => (
-                <Table.Summary.Row>
-                  <Table.Summary.Cell index={0} colSpan={6}>
-                    <Text strong style={{ fontSize: 11 }}>Total</Text>
-                  </Table.Summary.Cell>
-                  <Table.Summary.Cell index={6} align="right">
-                    <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(amount)}</Text>
-                  </Table.Summary.Cell>
-                  <Table.Summary.Cell index={7} align="right">
-                    <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(amount)}</Text>
-                  </Table.Summary.Cell>
-                </Table.Summary.Row>
-              )}
+              summary={() => {
+                const totalDr = acctModal.lines.reduce((s, l) => s + l.enteredDr, 0);
+                const totalCr = acctModal.lines.reduce((s, l) => s + l.enteredCr, 0);
+                return (
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell index={0} colSpan={5}><Text strong style={{ fontSize: 11 }}>Total</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={5} align="right">
+                      <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(totalDr)}</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={6} align="right">
+                      <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(totalCr)}</Text>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                );
+              }}
             />
+
+            {/* ── Adjustment Journal Lines ── */}
+            {acctModal.adjLines.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <Text strong style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 6 }}>
+                  Adjustment Journal Lines
+                  <Tag color="orange" style={{ marginLeft: 8, fontSize: 10 }}>{acctModal.adjLines.length} lines — separate journal AR-ADJ-{draft2?.receiptNumber}</Tag>
+                </Text>
+                <Table size="small" pagination={false}
+                  dataSource={acctModal.adjLines.map((l, i) => ({ ...l, key: i }))}
+                  scroll={{ x: 800 }}
+                  columns={[
+                    { title: 'Type', dataIndex: 'lineType', width: 55,
+                      render: v => <Tag color={v === 'DR' ? 'blue' : 'green'} style={{ fontSize: 11, fontWeight: 700 }}>{v}</Tag> },
+                    { title: 'Class', dataIndex: 'accountingClass', width: 100,
+                      render: v => <Text style={{ fontSize: 11 }}>{v}</Text> },
+                    { title: 'Account', dataIndex: 'accountCombination', width: 160,
+                      render: (v, r: any) => (
+                        <Tooltip title={<><div>{v}</div>{r.accountDesc && <div style={{ fontSize: 10 }}>{r.accountDesc}</div>}</>}>
+                          <Text style={{ fontSize: 11, fontFamily: 'monospace', color: v ? REDWOOD.info : '#bfbfbf' }}>{v || '— not set —'}</Text>
+                        </Tooltip>
+                      ) },
+                    { title: 'Description', dataIndex: 'description', width: 240,
+                      render: v => <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{v}</Text> },
+                    { title: 'Debit', dataIndex: 'enteredDr', width: 110, align: 'right' as const,
+                      render: v => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.success }}>{fmt(v)}</Text> : <Text type="secondary">—</Text> },
+                    { title: 'Credit', dataIndex: 'enteredCr', width: 110, align: 'right' as const,
+                      render: v => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.primary }}>{fmt(v)}</Text> : <Text type="secondary">—</Text> },
+                  ]}
+                  summary={() => {
+                    const adjDr = acctModal.adjLines.reduce((s, l) => s + l.enteredDr, 0);
+                    const adjCr = acctModal.adjLines.reduce((s, l) => s + l.enteredCr, 0);
+                    return (
+                      <Table.Summary.Row>
+                        <Table.Summary.Cell index={0} colSpan={4}><Text strong style={{ fontSize: 11 }}>Total</Text></Table.Summary.Cell>
+                        <Table.Summary.Cell index={4} align="right">
+                          <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(adjDr)}</Text>
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={5} align="right">
+                          <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(adjCr)}</Text>
+                        </Table.Summary.Cell>
+                      </Table.Summary.Row>
+                    );
+                  }}
+                />
+              </div>
+            )}
+
             <div style={{ marginTop: 10, padding: '8px 12px', background: '#f5f5f5', borderRadius: 6, fontSize: 11 }}>
               <Text type="secondary">
                 Currency: <strong>{draft2?.currency || 'AED'}</strong>
                 {draft2?.conversionRate && draft2.conversionRate !== 1 && <> · Rate: <strong>{draft2.conversionRate}</strong></>}
                 {' · '}BU: <strong>{draft2?.businessUnit}</strong>
-                {' · '}Reference5: <strong>AR_RECEIPTS</strong>
-                {' · '}Line description sourced from: <strong>Comments</strong>
+                {' · '}DR description: Comments + Receipt# · CR description: Invoice# + App Ref
               </Text>
             </div>
           </Modal>
