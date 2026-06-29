@@ -667,7 +667,7 @@ const TBPanel: React.FC = () => {
     ];
 
     return [
-      { title: 'Account', key: 'account', width: 280, fixed: 'left',
+      { title: 'Account', key: 'account', width: 320,
         render: (_: any, r: any) => r.isTotals
           ? <Text strong style={{ fontSize: 11 }}>Total ({filteredData.length} accounts)</Text>
           : <Text code style={{ fontSize: 10, whiteSpace: 'nowrap' }}>{r.account_combination || r.account || '—'}</Text> },
@@ -2227,7 +2227,7 @@ const AAPanel: React.FC = () => {
     ] : [];
 
     return [
-      { title: 'Account', dataIndex: 'concatenatedSegments', key: 'account', width: 300, fixed: 'left',
+      { title: 'Account', dataIndex: 'concatenatedSegments', key: 'account', width: 320,
         render: (_: string, r: JournalLine) => {
           if (isTot(r)) return <Text strong style={{ fontSize: 11 }}>Total for Report</Text>;
           if (r.isOpeningBalance) return <Text strong style={{ fontSize: 10, color: REDWOOD.warning }}>Opening Balance</Text>;
@@ -2332,7 +2332,7 @@ const AAPanel: React.FC = () => {
     ] : [];
     return [
       { title: 'Account Combination', dataIndex: 'concatenatedSegments', key: 'bCombo',
-        width: 300, fixed: 'left' as const,
+        width: 320,
         render: (v: string, r: JournalLine) => {
           const display = v || [r.segCompany, r.segLob, r.segDept, r.segAccount, r.segSubAcct, r.segAnalysis, r.segInterco].filter(Boolean).join('-');
           if (r.isOpeningBalance) return <Text strong style={{ fontSize: 10, color: '#b45309' }}>{display || '—'}</Text>;
