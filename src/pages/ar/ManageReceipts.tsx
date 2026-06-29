@@ -5153,6 +5153,7 @@ const ManageReceipts: React.FC = () => {
             }
             open onCancel={() => setAcctModal(null)}
             width={900}
+            styles={{ body: { maxHeight: '75vh', overflowY: 'auto', paddingRight: 4 } }}
             footer={
               <Space>
                 <Button
