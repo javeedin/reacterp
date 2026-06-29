@@ -13,7 +13,7 @@ import {
   FileTextOutlined, EyeOutlined, UnorderedListOutlined, InfoCircleOutlined,
   ApiOutlined, DeleteOutlined, CloseCircleOutlined, ExclamationCircleOutlined, SendOutlined, CodeOutlined,
   BookOutlined, CheckCircleOutlined, PaperClipOutlined, UploadOutlined, PrinterOutlined, EditOutlined,
-  CopyOutlined, RollbackOutlined, DownOutlined, ScissorOutlined, PlusCircleOutlined,
+  CopyOutlined, RollbackOutlined, DownOutlined, ScissorOutlined, PlusCircleOutlined, LinkOutlined,
 } from '@ant-design/icons';
 import { Upload } from 'antd';
 import { Link } from 'react-router-dom';
@@ -386,6 +386,7 @@ const ManageReceipts: React.FC = () => {
     lines: AcctLine[];
     adjLines: AcctLine[];
     adjLoading: boolean;
+    adjApiUrls: string[];
   } | null>(null);
 
   const [viewAcctModal, setViewAcctModal] = useState<{
@@ -1636,7 +1637,7 @@ const ManageReceipts: React.FC = () => {
     // Open modal immediately with loading state
     setAcctModal({ visible: true, tabKey, creating: false, posting: false,
       slaHeaderId, slaStatus: slaPosted ? 'POSTED' : (slaHeaderId ? 'CREATED' : ''),
-      glBatchId: null, lines: [], adjLines: [], adjLoading: true });
+      glBatchId: null, lines: [], adjLines: [], adjLoading: true, adjApiUrls: [] });
 
     let lines: AcctLine[] = [];
     if (isMisc) {
@@ -1679,11 +1680,12 @@ const ManageReceipts: React.FC = () => {
 
     // 1. Fetch saved adjustments for each application
     const appIds = savedApps.map(a => a.applicationId).filter(Boolean);
+    const adjApiUrls: string[] = appIds.map(appId =>
+      `${APEX_DB_CONFIG.baseUrl}/ar/adjustments?application_id=${appId}&limit=500`
+    );
     if (appIds.length > 0) {
-      const adjFetches = appIds.map(appId =>
-        fetch(`${APEX_DB_CONFIG.baseUrl}/ar/adjustments?application_id=${appId}&limit=500`)
-          .then(r => r.ok ? r.json() : { items: [] })
-          .catch(() => ({ items: [] }))
+      const adjFetches = adjApiUrls.map(url =>
+        fetch(url).then(r => r.ok ? r.json() : { items: [] }).catch(() => ({ items: [] }))
       );
       const adjResults = await Promise.all(adjFetches);
       for (const res of adjResults) {
@@ -1726,7 +1728,7 @@ const ManageReceipts: React.FC = () => {
       }
     }
 
-    setAcctModal(prev => prev ? { ...prev, lines, adjLines, adjLoading: false } : null);
+    setAcctModal(prev => prev ? { ...prev, lines, adjLines, adjLoading: false, adjApiUrls } : null);
   };
 
   const handleCreateAccounting = async () => {
@@ -5287,14 +5289,25 @@ const ManageReceipts: React.FC = () => {
 
             {/* ── Adjustment Journal Lines ── */}
             <div style={{ marginTop: 16 }}>
-              <Text strong style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 6 }}>
-                Adjustment Journal Lines
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                <Text strong style={{ fontSize: 12, color: REDWOOD.neutral600 }}>
+                  Adjustment Journal Lines
+                </Text>
                 {acctModal.adjLoading
-                  ? <Tag color="blue" style={{ marginLeft: 8, fontSize: 10 }}>Loading...</Tag>
+                  ? <Tag color="blue" style={{ fontSize: 10 }}>Loading...</Tag>
                   : acctModal.adjLines.length > 0
-                    ? <Tag color="orange" style={{ marginLeft: 8, fontSize: 10 }}>{acctModal.adjLines.length} lines — separate journal AR-ADJ-{draft2?.receiptNumber}</Tag>
-                    : <Tag style={{ marginLeft: 8, fontSize: 10 }}>No adjustments found</Tag>}
-              </Text>
+                    ? <Tag color="orange" style={{ fontSize: 10 }}>{acctModal.adjLines.length} lines — separate journal AR-ADJ-{draft2?.receiptNumber}</Tag>
+                    : <Tag style={{ fontSize: 10 }}>No adjustments found</Tag>}
+                {acctModal.adjApiUrls.length > 0 && (
+                  <Tooltip title={
+                    <div style={{ fontFamily: 'monospace', fontSize: 11 }}>
+                      {acctModal.adjApiUrls.map((u, i) => <div key={i}>{u}</div>)}
+                    </div>
+                  } placement="topLeft">
+                    <LinkOutlined style={{ fontSize: 12, color: REDWOOD.info, cursor: 'pointer' }} />
+                  </Tooltip>
+                )}
+              </div>
               {acctModal.adjLoading
                 ? <div style={{ padding: 16, textAlign: 'center' }}><Spin size="small" /></div>
                 : acctModal.adjLines.length > 0 && (
