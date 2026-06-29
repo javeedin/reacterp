@@ -367,6 +367,7 @@ const ManageReceipts: React.FC = () => {
     open: boolean;
     tabKey: string;
     steps: { label: string; method: string; url: string; body: string; response: string; running: boolean; done: boolean }[];
+    capturedAppIds: number[]; // application IDs captured from POST receipt-applications steps, in order
   } | null>(null);
   const [apiInfoVisible, setApiInfoVisible] = useState(false);
   const [gridFilter, setGridFilter]       = useState('');
@@ -1936,6 +1937,7 @@ const ManageReceipts: React.FC = () => {
             BusinessUnit:          draft.businessUnit || '',
             Currency:              row.currency,
             InstallmentNumber:     row.sequenceNumber,
+            InstallmentId:         row.installmentId,
             InstallmentBalance:    Math.max(0, row.balanceDue - row.applyAmount - row.adjustmentAmount),
             AdjustmentReason:      sp.reason,
             ApplicationId:         rowAppIdMap[row.key] || undefined,
@@ -2054,6 +2056,7 @@ const ManageReceipts: React.FC = () => {
             BusinessUnit:          draft.businessUnit || '',
             Currency:              row.currency,
             InstallmentNumber:     row.sequenceNumber,
+            InstallmentId:         row.installmentId,
             InstallmentBalance:    Math.max(0, row.balanceDue - row.applyAmount - row.adjustmentAmount),
             AdjustmentReason:      sp.reason,
             ApplicationId:         '{from Application POST}',
@@ -2076,7 +2079,7 @@ const ManageReceipts: React.FC = () => {
         response: '', running: false, done: false,
       })),
     ];
-    setDebugModal({ open: true, tabKey, steps });
+    setDebugModal({ open: true, tabKey, steps, capturedAppIds: [] });
   };
 
   // ── Export Excel ──────────────────────────────────────────────────────────
@@ -3990,13 +3993,33 @@ const ManageReceipts: React.FC = () => {
                             onClick={async () => {
                               setDebugModal(prev => prev ? { ...prev, steps: prev.steps.map((s, i) => i === idx ? { ...s, running: true } : s) } : prev);
                               try {
-                                const url = step.url.replace('{from Step 1}', '').replace('{applicationId}', '0');
+                                const url = step.url;
+                                // For adjustment POSTs, substitute the captured applicationId placeholder
+                                let bodyToSend = step.body;
+                                if (step.method !== 'GET' && bodyToSend.includes('"ApplicationId"')) {
+                                  const capturedIds = debugModal?.capturedAppIds ?? [];
+                                  // Count how many adj steps preceded this one to pick the right appId
+                                  const adjStepsBefore = debugModal?.steps.slice(0, idx).filter(s => s.url.includes('/ar/adjustments') && s.method === 'POST').length ?? 0;
+                                  const appId = capturedIds[adjStepsBefore] ?? capturedIds[capturedIds.length - 1] ?? 0;
+                                  bodyToSend = bodyToSend.replace(/"ApplicationId"\s*:\s*"[^"]*"/, `"ApplicationId": ${appId}`);
+                                  bodyToSend = bodyToSend.replace(/"ApplicationId"\s*:\s*<[^>]*>/, `"ApplicationId": ${appId}`);
+                                }
                                 const res = await fetch(url, {
                                   method: step.method,
                                   headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-                                  body: step.method !== 'GET' ? step.body : undefined,
+                                  body: step.method !== 'GET' ? bodyToSend : undefined,
                                 });
                                 const text = await res.text();
+                                // After a successful receipt-application POST, capture the returned applicationId
+                                if (step.method === 'POST' && step.url.includes('/ar/receipt-applications') && res.ok) {
+                                  try {
+                                    const j = JSON.parse(text);
+                                    const appId = j.applicationId ?? j.application_id;
+                                    if (appId) {
+                                      setDebugModal(prev => prev ? { ...prev, capturedAppIds: [...(prev.capturedAppIds ?? []), Number(appId)] } : prev);
+                                    }
+                                  } catch { /* non-fatal */ }
+                                }
                                 const isClosed = step.method === 'GET' && (() => {
                                   try { const j = JSON.parse(text); return j.installmentStatus === 'Closed'; } catch { return false; }
                                 })();
@@ -4011,7 +4034,6 @@ const ManageReceipts: React.FC = () => {
                                 });
                                 if (isClosed) {
                                   message.error({ content: 'Installment is already Closed — all subsequent steps blocked. Remove it from Receipt Applications.', duration: 8 });
-                                  // Flag the matching pending row as closed
                                   if (debugModal?.tabKey) {
                                     const tk = debugModal.tabKey;
                                     setPendingApplications(prev => {
