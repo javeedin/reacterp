@@ -3692,24 +3692,11 @@ const ManageReceipts: React.FC = () => {
                             </td>
                             <td style={{ padding: '6px 4px' }}>
                               <Input.Search size="small"
-                                placeholder="e.g. 01-00-00-1234567-0000-000-00-000-000"
+                                placeholder="Select from segments popup →"
                                 value={sp.accountCombination}
-                                style={{ fontFamily: 'monospace', fontSize: 11 }}
+                                readOnly
+                                style={{ fontFamily: 'monospace', fontSize: 11, cursor: 'default' }}
                                 enterButton={<SearchOutlined />}
-                                onChange={e => updateSplit(sp.id, { accountCombination: e.target.value, accountDescription: '' })}
-                                onBlur={async e => {
-                                  const combo = e.target.value.trim();
-                                  if (!combo) return;
-                                  try {
-                                    const r = await validateAccountCode(combo.replace(/\./g, '-'));
-                                    const sd = r.segmentDetails ?? {};
-                                    const acctEntry = Object.values(sd).find((s: any) => { const n = (s.name ?? '').toLowerCase(); return n === 'account' || (n.includes('account') && !n.includes('sub') && !n.includes('chart') && !n.includes('offset')); });
-                                    const subEntry  = Object.values(sd).find((s: any) => (s.name ?? '').toLowerCase().includes('sub'));
-                                    const parts = [acctEntry?.description, subEntry?.description].filter(Boolean);
-                                    const desc = parts.length ? parts.join(' · ') : Object.values(sd).map((s: any) => s.description).filter(Boolean).join(' · ');
-                                    updateSplit(sp.id, { accountDescription: desc });
-                                  } catch { updateSplit(sp.id, { accountDescription: 'Invalid account' }); }
-                                }}
                                 onSearch={() => setSplitAcctPickerSplitId(sp.id)}
                               />
                               {sp.accountDescription && (
