@@ -466,6 +466,8 @@ const ManageReceipts: React.FC = () => {
   const [adjSplitModal, setAdjSplitModal] = useState<{
     tabKey: string; pendingKey: string; totalAdj: number; currency: string;
     splits: AdjSplit[];
+    apiUrl?: string;        // URL used to fetch splits (for inspector)
+    applicationId?: number; // saved applicationId this dialog is linked to
   } | null>(null);
 
   const fetchRecvActivities = useCallback(async (force = false) => {
@@ -486,10 +488,13 @@ const ManageReceipts: React.FC = () => {
 
   const openAdjSplitModal = async (tabKey: string, pendingKey: string, totalAdj: number, currency: string, existingSplits?: AdjSplit[], applicationId?: number) => {
     fetchRecvActivities();
+    const adjApiUrl = applicationId
+      ? `${APEX_DB_CONFIG.baseUrl}/ar/adjustments?application_id=${applicationId}&limit=500`
+      : undefined;
     // If we have a saved applicationId, try to load existing splits from adjustments webservice
-    if (applicationId && (!existingSplits || existingSplits.length === 0)) {
+    if (applicationId && adjApiUrl && (!existingSplits || existingSplits.length === 0)) {
       try {
-        const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/ar/adjustments?application_id=${applicationId}&limit=500`, { headers: { Accept: 'application/json' } });
+        const res  = await fetch(adjApiUrl, { headers: { Accept: 'application/json' } });
         const data = await res.json();
         const items: any[] = data.items ?? [];
         if (items.length > 0) {
@@ -515,7 +520,7 @@ const ManageReceipts: React.FC = () => {
               reason:             a.adjustment_reason ?? a.ADJUSTMENT_REASON ?? '',
             };
           }));
-          setAdjSplitModal({ tabKey, pendingKey, totalAdj, currency, splits: loadedSplits });
+          setAdjSplitModal({ tabKey, pendingKey, totalAdj, currency, splits: loadedSplits, apiUrl: adjApiUrl, applicationId });
           return;
         }
       } catch { /* fall through to blank */ }
@@ -523,7 +528,7 @@ const ManageReceipts: React.FC = () => {
     const splits = existingSplits?.length
       ? existingSplits
       : [{ id: `sp-${Date.now()}`, amount: totalAdj, activityName: '', accountCombination: '', accountDescription: '', reason: '' }];
-    setAdjSplitModal({ tabKey, pendingKey, totalAdj, currency, splits });
+    setAdjSplitModal({ tabKey, pendingKey, totalAdj, currency, splits, apiUrl: adjApiUrl, applicationId });
   };
 
   const fetchOpenInstallments = useCallback(async (tabKey: string, customerAccountNumber: string) => {
@@ -1995,90 +2000,133 @@ const ManageReceipts: React.FC = () => {
   // ── Debug Modal ────────────────────────────────────────────────────────────
   const openDebugModal = (tabKey: string, draft: ReceiptDraft) => {
     const pending = pendingApplications[tabKey] ?? [];
+    const savedApps = receiptApplications[tabKey]?.rows ?? [];
     const today = dayjs().format('YYYY-MM-DD');
-    const exRow = pending[0];
     const isNewReceipt = !draft.standardReceiptId || draft.standardReceiptId === 0;
     const rcptUrl    = isNewReceipt ? APEX_AR_RECEIPTS : `${APEX_AR_RECEIPTS}/${draft.standardReceiptId}`;
     const rcptMethod = isNewReceipt ? 'POST' : 'PUT';
     const rcptIdPlaceholder = isNewReceipt ? '{from Step 1}' : draft.standardReceiptId;
-    const steps = [
-      // GET installment balance for each pending row — before anything is posted
-      ...pending.map((row, i) => ({
-        label: `${i + 1}. GET Installment Balance — ${row.transactionNumber}/#${row.sequenceNumber}`,
-        method: 'GET',
-        url: `${APEX_AR_INVOICES}/${row.customerTransactionId}/installments/${row.installmentId}`,
-        body: '',
-        response: '', running: false, done: false,
-      })),
-      {
-        label: `${pending.length + 1}. ${rcptMethod} Receipt${!isNewReceipt ? ` (ID: ${draft.standardReceiptId})` : ''}`,
-        method: rcptMethod, url: rcptUrl,
-        body: JSON.stringify(buildPayload(draft, isNewReceipt ? null : draft.standardReceiptId), null, 2),
-        response: '', running: false, done: false,
-      },
-      ...pending.map((row, i) => ({
-        label: `${pending.length + i + 2}. POST Receipt Application — ${row.transactionNumber}/#${row.sequenceNumber}`,
-        method: 'POST', url: APEX_RECEIPT_APPS,
-        body: JSON.stringify({
-          StandardReceiptId:          rcptIdPlaceholder,
-          ApplicationDate:            draft.receiptDate || today,
-          AccountingDate:             draft.accountingDate || today,
-          ApplicationAmount:          row.applyAmount,
-          AdjustmentAmount:           row.adjustmentAmount || undefined,
-          ApplicationStatus:          'APP',
-          ReferenceTransactionId:     row.customerTransactionId,
-          ReferenceTransactionNumber: row.transactionNumber,
-          ReferenceInstallmentId:     row.installmentId,
-          ActivityName:               'Invoice',
-          ProcessStatus:              'PENDING',
-          IsLatestApplication:        'Y',
-          CustomerSite:               draft.customerSite || '',
-        }, null, 2),
-        response: '', running: false, done: false,
-      })),
-      ...pending.filter(r => r.adjustmentAmount !== 0).flatMap((row) => {
-        const splitsToShow = row.adjSplits && row.adjSplits.length > 0
-          ? row.adjSplits.map(sp => ({ amount: sp.amount, activityName: sp.activityName || 'Adjustment', accountCombination: sp.accountCombination, reason: sp.reason || row.adjustmentReason || 'Receipt adjustment' }))
-          : [{ amount: row.adjustmentAmount, activityName: 'Adjustment', accountCombination: '', reason: row.adjustmentReason || 'Receipt adjustment' }];
-        return splitsToShow.map((sp, si) => ({
-          label: `Adj. POST Adjustment${splitsToShow.length > 1 ? ` (${si + 1}/${splitsToShow.length})` : ''} — ${row.transactionNumber}/#${row.sequenceNumber} [${sp.activityName}]`,
-          method: 'POST', url: `${APEX_DB_CONFIG.baseUrl}/ar/adjustments`,
-          body: JSON.stringify({
-            CustomerTransactionId: row.customerTransactionId,
-            TransactionNumber:     row.transactionNumber,
-            AdjustmentAmount:      sp.amount,
-            AdjustmentDate:        draft.receiptDate || today,
-            AccountingDate:        draft.accountingDate || today,
-            AdjustmentType:        'LINE',
-            Status:                'Approved',
-            ReceivablesActivity:   sp.activityName,
-            AccountCombination:    sp.accountCombination || undefined,
-            BusinessUnit:          draft.businessUnit || '',
-            Currency:              row.currency,
-            InstallmentNumber:     row.sequenceNumber,
-            InstallmentId:         row.installmentId,
-            InstallmentBalance:    Math.max(0, row.balanceDue - row.applyAmount - row.adjustmentAmount),
-            AdjustmentReason:      sp.reason,
-            ApplicationId:         '{from Application POST}',
-            Comments:              `Auto-created from receipt ${draft.receiptNumber || ''}`,
-            CreatedBy:             currentUser,
-            LastUpdatedBy:         currentUser,
-          }, null, 2),
-          response: '', running: false, done: false,
-        }));
-      }),
-      ...pending.map((row, i) => ({
-        label: `PUT Installment — ${row.transactionNumber}/#${row.sequenceNumber}`,
-        method: 'PUT',
-        url: `${APEX_AR_INVOICES}/${row.customerTransactionId}/installments/${row.installmentId}`,
-        body: JSON.stringify({
-          AmountPaid:                row.applyAmount,
-          InstallmentAmountAdjusted: row.adjustmentAmount ?? 0,
-          LastUpdatedBy:             currentUser,
-        }, null, 2),
-        response: '', running: false, done: false,
-      })),
-    ];
+
+    // If receipt applications are already saved, skip GET/PUT receipt + POST applications —
+    // only show the pending adjustment splits that still need to be posted.
+    const appsAlreadySaved = savedApps.length > 0;
+
+    const steps = appsAlreadySaved
+      ? [
+          // Only show adjustment POSTs for pending rows that have adj amounts
+          ...pending.filter(r => r.adjustmentAmount !== 0).flatMap((row) => {
+            const splitsToShow = row.adjSplits && row.adjSplits.length > 0
+              ? row.adjSplits.map(sp => ({ amount: sp.amount, activityName: sp.activityName || 'Adjustment', accountCombination: sp.accountCombination, reason: sp.reason || row.adjustmentReason || 'Receipt adjustment' }))
+              : [{ amount: row.adjustmentAmount, activityName: 'Adjustment', accountCombination: '', reason: row.adjustmentReason || 'Receipt adjustment' }];
+            // Find the saved application linked to this installment to get the real applicationId
+            const linkedApp = savedApps.find((a: any) => a.referenceTransactionId === row.customerTransactionId);
+            const linkedAppId = linkedApp?.applicationId ?? undefined;
+            return splitsToShow.map((sp, si) => ({
+              label: `POST Adjustment${splitsToShow.length > 1 ? ` (${si + 1}/${splitsToShow.length})` : ''} — ${row.transactionNumber}/#${row.sequenceNumber} [${sp.activityName}]`,
+              method: 'POST', url: `${APEX_DB_CONFIG.baseUrl}/ar/adjustments`,
+              body: JSON.stringify({
+                CustomerTransactionId: row.customerTransactionId,
+                TransactionNumber:     row.transactionNumber,
+                AdjustmentAmount:      sp.amount,
+                AdjustmentDate:        draft.receiptDate || today,
+                AccountingDate:        draft.accountingDate || today,
+                AdjustmentType:        'LINE',
+                Status:                'Approved',
+                ReceivablesActivity:   sp.activityName,
+                AccountCombination:    sp.accountCombination || undefined,
+                BusinessUnit:          draft.businessUnit || '',
+                Currency:              row.currency,
+                InstallmentNumber:     row.sequenceNumber,
+                InstallmentId:         row.installmentId,
+                InstallmentBalance:    Math.max(0, row.balanceDue - row.applyAmount - row.adjustmentAmount),
+                AdjustmentReason:      sp.reason,
+                ApplicationId:         linkedAppId,
+                Comments:              `Auto-created from receipt ${draft.receiptNumber || ''}`,
+                CreatedBy:             currentUser,
+                LastUpdatedBy:         currentUser,
+              }, null, 2),
+              response: '', running: false, done: false,
+            }));
+          }),
+        ]
+      : [
+          // Full flow: GET installment checks → PUT/POST receipt → POST applications → POST adjustments → PUT installments
+          ...pending.map((row, i) => ({
+            label: `${i + 1}. GET Installment Balance — ${row.transactionNumber}/#${row.sequenceNumber}`,
+            method: 'GET',
+            url: `${APEX_AR_INVOICES}/${row.customerTransactionId}/installments/${row.installmentId}`,
+            body: '',
+            response: '', running: false, done: false,
+          })),
+          {
+            label: `${pending.length + 1}. ${rcptMethod} Receipt${!isNewReceipt ? ` (ID: ${draft.standardReceiptId})` : ''}`,
+            method: rcptMethod, url: rcptUrl,
+            body: JSON.stringify(buildPayload(draft, isNewReceipt ? null : draft.standardReceiptId), null, 2),
+            response: '', running: false, done: false,
+          },
+          ...pending.map((row, i) => ({
+            label: `${pending.length + i + 2}. POST Receipt Application — ${row.transactionNumber}/#${row.sequenceNumber}`,
+            method: 'POST', url: APEX_RECEIPT_APPS,
+            body: JSON.stringify({
+              StandardReceiptId:          rcptIdPlaceholder,
+              ApplicationDate:            draft.receiptDate || today,
+              AccountingDate:             draft.accountingDate || today,
+              ApplicationAmount:          row.applyAmount,
+              AdjustmentAmount:           row.adjustmentAmount || undefined,
+              ApplicationStatus:          'APP',
+              ReferenceTransactionId:     row.customerTransactionId,
+              ReferenceTransactionNumber: row.transactionNumber,
+              ReferenceInstallmentId:     row.installmentId,
+              ActivityName:               'Invoice',
+              ProcessStatus:              'PENDING',
+              IsLatestApplication:        'Y',
+              CustomerSite:               draft.customerSite || '',
+            }, null, 2),
+            response: '', running: false, done: false,
+          })),
+          ...pending.filter(r => r.adjustmentAmount !== 0).flatMap((row) => {
+            const splitsToShow = row.adjSplits && row.adjSplits.length > 0
+              ? row.adjSplits.map(sp => ({ amount: sp.amount, activityName: sp.activityName || 'Adjustment', accountCombination: sp.accountCombination, reason: sp.reason || row.adjustmentReason || 'Receipt adjustment' }))
+              : [{ amount: row.adjustmentAmount, activityName: 'Adjustment', accountCombination: '', reason: row.adjustmentReason || 'Receipt adjustment' }];
+            return splitsToShow.map((sp, si) => ({
+              label: `Adj. POST Adjustment${splitsToShow.length > 1 ? ` (${si + 1}/${splitsToShow.length})` : ''} — ${row.transactionNumber}/#${row.sequenceNumber} [${sp.activityName}]`,
+              method: 'POST', url: `${APEX_DB_CONFIG.baseUrl}/ar/adjustments`,
+              body: JSON.stringify({
+                CustomerTransactionId: row.customerTransactionId,
+                TransactionNumber:     row.transactionNumber,
+                AdjustmentAmount:      sp.amount,
+                AdjustmentDate:        draft.receiptDate || today,
+                AccountingDate:        draft.accountingDate || today,
+                AdjustmentType:        'LINE',
+                Status:                'Approved',
+                ReceivablesActivity:   sp.activityName,
+                AccountCombination:    sp.accountCombination || undefined,
+                BusinessUnit:          draft.businessUnit || '',
+                Currency:              row.currency,
+                InstallmentNumber:     row.sequenceNumber,
+                InstallmentId:         row.installmentId,
+                InstallmentBalance:    Math.max(0, row.balanceDue - row.applyAmount - row.adjustmentAmount),
+                AdjustmentReason:      sp.reason,
+                ApplicationId:         '{from Application POST}',
+                Comments:              `Auto-created from receipt ${draft.receiptNumber || ''}`,
+                CreatedBy:             currentUser,
+                LastUpdatedBy:         currentUser,
+              }, null, 2),
+              response: '', running: false, done: false,
+            }));
+          }),
+          ...pending.map((row, i) => ({
+            label: `PUT Installment — ${row.transactionNumber}/#${row.sequenceNumber}`,
+            method: 'PUT',
+            url: `${APEX_AR_INVOICES}/${row.customerTransactionId}/installments/${row.installmentId}`,
+            body: JSON.stringify({
+              AmountPaid:                row.applyAmount,
+              InstallmentAmountAdjusted: row.adjustmentAmount ?? 0,
+              LastUpdatedBy:             currentUser,
+            }, null, 2),
+            response: '', running: false, done: false,
+          })),
+        ];
     setDebugModal({ open: true, tabKey, steps, capturedAppIds: [] });
   };
 
@@ -3651,13 +3699,26 @@ const ManageReceipts: React.FC = () => {
                         <ScissorOutlined style={{ color: REDWOOD.warning }} />
                         <Text strong>Split Adjustment</Text>
                         <Tag color="orange">{fmt(totalAdj)} {currency}</Tag>
+                        {adjSplitModal?.applicationId && (
+                          <Tag color="blue" style={{ fontSize: 10 }}>App ID: {adjSplitModal.applicationId}</Tag>
+                        )}
                         <Tooltip title={`Refresh activities (${recvActivities.length} loaded)`}>
                           <Button size="small" icon={<ReloadOutlined />} loading={recvActivitiesLoading}
-                            style={{ fontSize: 11, marginLeft: 8 }}
+                            style={{ fontSize: 11 }}
                             onClick={() => fetchRecvActivities(true)}>
                             {recvActivities.length > 0 ? `${recvActivities.length} activities` : 'Load activities'}
                           </Button>
                         </Tooltip>
+                        {adjSplitModal?.apiUrl && (
+                          <Tooltip title={
+                            <div style={{ fontSize: 11 }}>
+                              <div style={{ fontWeight: 600, marginBottom: 4 }}>GET — Adjustments by Application ID</div>
+                              <code style={{ wordBreak: 'break-all', fontSize: 10 }}>{adjSplitModal.apiUrl}</code>
+                            </div>
+                          } placement="bottomLeft">
+                            <Button size="small" icon={<ApiOutlined style={{ color: REDWOOD.info }} />} />
+                          </Tooltip>
+                        )}
                       </div>
                     }
                     onCancel={() => setAdjSplitModal(null)}
