@@ -3656,7 +3656,15 @@ const ManageReceipts: React.FC = () => {
                                 }
                                 onChange={async val => {
                                   const act = recvActivities.find(a => a.name === val);
-                                  const combo = act?.accountCombination || '';
+                                  let combo = act?.accountCombination || '';
+                                  // Override first segment with BU company code
+                                  const buName = tabs.find(t => t.key === adjSplitModal!.tabKey)?.draft.businessUnit ?? '';
+                                  const coCode = businessUnits.find(b => b.name === buName)?.companyCode ?? '';
+                                  if (coCode && combo) {
+                                    const segs = combo.split('-');
+                                    segs[0] = coCode;
+                                    combo = segs.join('-');
+                                  }
                                   let desc = '';
                                   if (combo) {
                                     try {
