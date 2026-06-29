@@ -59,7 +59,10 @@ BEGIN
     IF l_app_id IS NULL THEN
         l_app_id := RR_AR_RCPT_APPS_SEQ.NEXTVAL;
         -- Inject the generated id into the JSON body
-        l_body := JSON_MERGEPATCH(l_body, ''{"ApplicationId":'' || l_app_id || ''}'');
+        -- Inject id by stripping trailing } and appending the field
+        -- (JSON_MERGEPATCH requires Oracle 21c; this approach works on 19c and below)
+        l_body := SUBSTR(TRIM(l_body), 1, LENGTH(TRIM(l_body)) - 1)
+                  || '',"ApplicationId":'' || l_app_id || ''}'';
     END IF;
 
     l_wrapped := ''{"items":['' || l_body || '']}'';
