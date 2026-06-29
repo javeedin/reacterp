@@ -384,7 +384,8 @@ const ManageReceipts: React.FC = () => {
     visible: boolean; tabKey: string; creating: boolean; posting: boolean;
     slaHeaderId: number | null; slaStatus: string; glBatchId: number | null;
     lines: AcctLine[];
-    adjLines: AcctLine[];  // accounting lines for adjustments (separate journal)
+    adjLines: AcctLine[];
+    adjLoading: boolean;
   } | null>(null);
 
   const [viewAcctModal, setViewAcctModal] = useState<{
@@ -1635,7 +1636,7 @@ const ManageReceipts: React.FC = () => {
     // Open modal immediately with loading state
     setAcctModal({ visible: true, tabKey, creating: false, posting: false,
       slaHeaderId, slaStatus: slaPosted ? 'POSTED' : (slaHeaderId ? 'CREATED' : ''),
-      glBatchId: null, lines: [], adjLines: [] });
+      glBatchId: null, lines: [], adjLines: [], adjLoading: true });
 
     let lines: AcctLine[] = [];
     if (isMisc) {
@@ -1725,7 +1726,7 @@ const ManageReceipts: React.FC = () => {
       }
     }
 
-    setAcctModal(prev => prev ? { ...prev, lines, adjLines } : null);
+    setAcctModal(prev => prev ? { ...prev, lines, adjLines, adjLoading: false } : null);
   };
 
   const handleCreateAccounting = async () => {
@@ -5284,12 +5285,18 @@ const ManageReceipts: React.FC = () => {
             />
 
             {/* ── Adjustment Journal Lines ── */}
-            {acctModal.adjLines.length > 0 && (
-              <div style={{ marginTop: 16 }}>
-                <Text strong style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 6 }}>
-                  Adjustment Journal Lines
-                  <Tag color="orange" style={{ marginLeft: 8, fontSize: 10 }}>{acctModal.adjLines.length} lines — separate journal AR-ADJ-{draft2?.receiptNumber}</Tag>
-                </Text>
+            <div style={{ marginTop: 16 }}>
+              <Text strong style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 6 }}>
+                Adjustment Journal Lines
+                {acctModal.adjLoading
+                  ? <Tag color="blue" style={{ marginLeft: 8, fontSize: 10 }}>Loading...</Tag>
+                  : acctModal.adjLines.length > 0
+                    ? <Tag color="orange" style={{ marginLeft: 8, fontSize: 10 }}>{acctModal.adjLines.length} lines — separate journal AR-ADJ-{draft2?.receiptNumber}</Tag>
+                    : <Tag style={{ marginLeft: 8, fontSize: 10 }}>No adjustments found</Tag>}
+              </Text>
+              {acctModal.adjLoading
+                ? <div style={{ padding: 16, textAlign: 'center' }}><Spin size="small" /></div>
+                : acctModal.adjLines.length > 0 && (
                 <Table size="small" pagination={false}
                   dataSource={acctModal.adjLines.map((l, i) => ({ ...l, key: i }))}
                   scroll={{ x: 800 }}
@@ -5327,8 +5334,8 @@ const ManageReceipts: React.FC = () => {
                     );
                   }}
                 />
-              </div>
-            )}
+              )}
+            </div>
 
             <div style={{ marginTop: 10, padding: '8px 12px', background: '#f5f5f5', borderRadius: 6, fontSize: 11 }}>
               <Text type="secondary">
