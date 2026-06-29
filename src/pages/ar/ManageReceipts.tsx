@@ -1849,9 +1849,9 @@ const ManageReceipts: React.FC = () => {
         const res = await fetch(APEX_RECEIPT_APPS, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(appBody) });
         const result = await res.json().catch(() => ({}));
         if (res.ok) {
-          const appId = result?.applicationId ?? result?.application_id ?? 0;
+          const appId = result?.applicationId ?? result?.application_id ?? result?.ApplicationId ?? 0;
           postedAppIds.push(appId);
-          rowAppIdMap[row.key] = appId;
+          if (appId) rowAppIdMap[row.key] = appId;
         } else {
           appErrors.push(`${row.transactionNumber}/#${row.sequenceNumber}: HTTP ${res.status}`);
         }
@@ -1946,6 +1946,10 @@ const ManageReceipts: React.FC = () => {
     const pending = pendingApplications[tabKey] ?? [];
     const today = dayjs().format('YYYY-MM-DD');
     const exRow = pending[0];
+    const isNewReceipt = !draft.standardReceiptId || draft.standardReceiptId === 0;
+    const rcptUrl    = isNewReceipt ? APEX_AR_RECEIPTS : `${APEX_AR_RECEIPTS}/${draft.standardReceiptId}`;
+    const rcptMethod = isNewReceipt ? 'POST' : 'PUT';
+    const rcptIdPlaceholder = isNewReceipt ? '{from Step 1}' : draft.standardReceiptId;
     const steps = [
       // GET installment balance for each pending row — before anything is posted
       ...pending.map((row, i) => ({
@@ -1956,16 +1960,16 @@ const ManageReceipts: React.FC = () => {
         response: '', running: false, done: false,
       })),
       {
-        label: `${pending.length + 1}. POST Receipt`,
-        method: 'POST', url: APEX_AR_RECEIPTS,
-        body: JSON.stringify(buildPayload(draft, null), null, 2),
+        label: `${pending.length + 1}. ${rcptMethod} Receipt${!isNewReceipt ? ` (ID: ${draft.standardReceiptId})` : ''}`,
+        method: rcptMethod, url: rcptUrl,
+        body: JSON.stringify(buildPayload(draft, isNewReceipt ? null : draft.standardReceiptId), null, 2),
         response: '', running: false, done: false,
       },
       ...pending.map((row, i) => ({
         label: `${pending.length + i + 2}. POST Receipt Application — ${row.transactionNumber}/#${row.sequenceNumber}`,
         method: 'POST', url: APEX_RECEIPT_APPS,
         body: JSON.stringify({
-          StandardReceiptId:          '{from Step 1}',
+          StandardReceiptId:          rcptIdPlaceholder,
           ApplicationDate:            draft.receiptDate || today,
           AccountingDate:             draft.accountingDate || today,
           ApplicationAmount:          row.applyAmount,
