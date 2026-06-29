@@ -1690,11 +1690,11 @@ const ManageReceipts: React.FC = () => {
       const adjResults = await Promise.all(adjFetches);
       for (const res of adjResults) {
         for (const adj of (res.items ?? [])) {
-          const adjAmt = Math.abs(adj.ADJUSTMENT_AMOUNT ?? adj.adjustmentAmount ?? 0);
+          const adjAmt = Math.abs(adj.adjustment_amount ?? adj.ADJUSTMENT_AMOUNT ?? adj.adjustmentAmount ?? 0);
           if (adjAmt === 0) continue;
-          const txnNum = adj.TRANSACTION_NUMBER ?? adj.transactionNumber ?? '';
-          const activity = adj.RECEIVABLES_ACTIVITY ?? adj.receivablesActivity ?? 'Adjustment';
-          const adjCombo = (adj.ACCOUNT_COMBINATION ?? adj.accountCombination ?? '').replace(/\./g, '-');
+          const txnNum  = adj.transaction_number  ?? adj.TRANSACTION_NUMBER  ?? adj.transactionNumber  ?? '';
+          const activity = adj.receivables_activity ?? adj.RECEIVABLES_ACTIVITY ?? adj.receivablesActivity ?? 'Adjustment';
+          const adjCombo = (adj.account_combination ?? adj.ACCOUNT_COMBINATION ?? adj.accountCombination ?? '').replace(/\./g, '-');
           adjLines.push({ lineType: 'DR', accountingClass: 'ADJUSTMENT',
             accountCombination: adjCombo, accountDesc: activity,
             enteredDr: adjAmt, enteredCr: 0,
