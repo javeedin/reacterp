@@ -1316,9 +1316,10 @@ const AAPanel: React.FC = () => {
             const dk = `${item.jeHeaderId ?? item.je_header_id}-${item.jeLineNumber ?? item.je_line_number}`;
             if (seen.has(dk)) return [];
             seen.add(dk);
-            const combo = item.accountCombination || item.account_combination || item.concatenatedSegments ||
-              [item.company, item.lob, item.department, item.account,
-                item.subAccount || item.sub_account, item.analysis, item.intercompany].filter(v => v != null && v !== '').join('-');
+            const segCombo = [item.company, item.lob, item.department, item.account,
+              item.subAccount || item.sub_account, item.analysis, item.intercompany,
+              item.future1, item.future2].filter(v => v != null && v !== '').join('-');
+            const combo = segCombo || item.accountCombination || item.account_combination || item.concatenatedSegments || '';
             const fccy = item.ledger_currency || item.functional_currency || '';
             if (fccy) setFunctionalCcy(fccy);
             return [{
@@ -1821,7 +1822,10 @@ const AAPanel: React.FC = () => {
             const dk = `${item.jeHeaderId ?? item.je_header_id}-${item.jeLineNumber ?? item.je_line_number}`;
             if (seen.has(dk)) return;
             seen.add(dk);
-            const combo = item.accountCombination || item.account_combination || item.concatenatedSegments || '';
+            const segCombo2 = [item.company, item.lob, item.department, item.account,
+              item.subAccount || item.sub_account, item.analysis, item.intercompany,
+              item.future1, item.future2].filter(v => v != null && v !== '').join('-');
+            const combo = segCombo2 || item.accountCombination || item.account_combination || item.concatenatedSegments || '';
             const line: JournalLine = {
               key: `acc-${acct}-${idx}`,
               concatenatedSegments: combo,
@@ -2003,9 +2007,10 @@ const AAPanel: React.FC = () => {
         seen.add(dk);
         const acct = String(item.account || item.ACCOUNT || '');
         if (!acct) return;
-        const combo = item.accountCombination || item.account_combination || item.concatenatedSegments ||
-          [item.company, item.lob, item.department, item.account,
-            item.subAccount || item.sub_account, item.analysis, item.intercompany].filter(v => v != null && v !== '').join('-');
+        const segCombo3 = [item.company, item.lob, item.department, item.account,
+          item.subAccount || item.sub_account, item.analysis, item.intercompany,
+          item.future1, item.future2].filter(v => v != null && v !== '').join('-');
+        const combo = segCombo3 || item.accountCombination || item.account_combination || item.concatenatedSegments || '';
         const line: JournalLine = {
           key: `acc-${acct}-${idx}`,
           concatenatedSegments: combo,
@@ -3037,7 +3042,7 @@ const AAPanel: React.FC = () => {
               pdfTotAccDr += (r.accountedDr||0); pdfTotAccCr += (r.accountedCr||0);
               pdfTotEntDr += (r.enteredDr||0);   pdfTotEntCr += (r.enteredCr||0);
               const rowCombo = r.concatenatedSegments ||
-                [r.segCompany, r.segLob, r.segDept, r.segAccount, r.segSubAcct, r.segAnalysis, r.segInterco]
+                [r.segCompany, r.segLob, r.segDept, r.segAccount, r.segSubAcct, r.segAnalysis, r.segInterco, r.segFuture1, r.segFuture2]
                   .filter((v: any) => v != null && v !== '').join('-');
               const base = [rowCombo, r.defaultPeriodName||'', (r.accountingDate||'').slice(0,10), r.jeLineDescription||'', r.batchName||'', r.userJeSourceName||'', r.currencyCode||''];
               const entCols = showEntered ? [fmtN(r.enteredDr||0), fmtN(r.enteredCr||0), fmtN(pdfEntRun)] : [];
