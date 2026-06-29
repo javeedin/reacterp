@@ -466,8 +466,10 @@ const ManageReceipts: React.FC = () => {
   const [adjSplitModal, setAdjSplitModal] = useState<{
     tabKey: string; pendingKey: string; totalAdj: number; currency: string;
     splits: AdjSplit[];
-    apiUrl?: string;        // URL used to fetch splits (for inspector)
-    applicationId?: number; // saved applicationId this dialog is linked to
+    apiUrl?: string;           // URL used to fetch splits (for inspector)
+    applicationId?: number;    // saved applicationId this dialog is linked to
+    adjCreated?: boolean;      // true after "Create Adjustment" completes
+    creating?: boolean;        // true while POSTing adjustments
   } | null>(null);
 
   const fetchRecvActivities = useCallback(async (force = false) => {
@@ -2522,11 +2524,16 @@ const ManageReceipts: React.FC = () => {
                     color: r._adjAmount < 0 ? REDWOOD.primary : REDWOOD.warning }}>
                   {r._adjAmount > 0 ? '+' : ''}{fmt(r._adjAmount)}
                 </Text>
-                <Tooltip title="View / edit adjustment splits">
-                  <Button size="small" type="text" icon={<ScissorOutlined style={{ fontSize: 11 }} />}
-                    style={{ padding: '0 4px', height: 24, color: REDWOOD.warning }}
-                    onClick={() => openAdjSplitModal(tabKey, r.key, Math.abs(r._adjAmount!), r.enteredCurrency || draft.currency, undefined, r.applicationId)} />
-                </Tooltip>
+                {isEditing && (
+                  <Tooltip title="View / edit adjustment splits">
+                    <Button size="small" type="text" icon={<ScissorOutlined style={{ fontSize: 11 }} />}
+                      style={{ padding: '0 4px', height: 24, color: REDWOOD.warning }}
+                      onClick={() => {
+                      const savedPending = (pendingApplications[tabKey] ?? []).find(p => p.key === r.key);
+                      openAdjSplitModal(tabKey, r.key, Math.abs(r._adjAmount!), r.enteredCurrency || draft.currency, savedPending?.adjSplits, r.applicationId);
+                    }} />
+                  </Tooltip>
+                )}
               </Space>
             );
           }
@@ -3678,37 +3685,91 @@ const ManageReceipts: React.FC = () => {
 
               {/* ── Adjustment Split Dialog ── */}
               {adjSplitModal && adjSplitModal.tabKey === tabKey && (() => {
-                const { pendingKey, totalAdj, currency, splits } = adjSplitModal;
-                const splitTotal = splits.reduce((s, r) => s + (r.amount || 0), 0);
-                const remaining  = Math.round((totalAdj - splitTotal) * 100) / 100;
-                const isBalanced = Math.abs(remaining) < 0.01;
+                const { pendingKey, totalAdj, currency, splits, applicationId: adjAppId, adjCreated, creating } = adjSplitModal;
+                const splitTotal  = splits.reduce((s, r) => s + (r.amount || 0), 0);
+                const remaining   = Math.round((totalAdj - splitTotal) * 100) / 100;
+                const isBalanced  = Math.abs(remaining) < 0.01;
+                const hasAppId    = !!adjAppId;
+                const isLiveMode  = hasAppId; // live POST mode when applicationId known
+                const isReadOnly  = adjCreated;
                 const updateSplit = (id: string, patch: Partial<AdjSplit>) =>
                   setAdjSplitModal(m => m ? { ...m, splits: m.splits.map(s => s.id === id ? { ...s, ...patch } : s) } : m);
                 const addSplit = () =>
                   setAdjSplitModal(m => m ? { ...m, splits: [...m.splits, { id: `sp-${Date.now()}`, amount: Math.max(0, remaining), activityName: '', accountCombination: '', accountDescription: '', reason: '' }] } : m);
                 const removeSplit = (id: string) =>
                   setAdjSplitModal(m => m ? { ...m, splits: m.splits.filter(s => s.id !== id) } : m);
+
+                // Build POST JSON payloads for preview (one per split)
+                const adjPostUrl  = `${APEX_DB_CONFIG.baseUrl}/ar/adjustments`;
+                const pendingRowForModal = (pendingApplications[tabKey] ?? []).find(p => p.key === pendingKey);
+                const buildAdjBody = (sp: AdjSplit) => ({
+                  CustomerTransactionId: pendingRowForModal?.customerTransactionId,
+                  TransactionNumber:     pendingRowForModal?.transactionNumber,
+                  AdjustmentAmount:      sp.amount,
+                  AdjustmentDate:        draft.receiptDate || today(),
+                  AccountingDate:        draft.accountingDate || today(),
+                  AdjustmentType:        'LINE',
+                  Status:                'Approved',
+                  ReceivablesActivity:   sp.activityName,
+                  AccountCombination:    sp.accountCombination || undefined,
+                  BusinessUnit:          draft.businessUnit || '',
+                  Currency:              currency,
+                  InstallmentNumber:     pendingRowForModal?.sequenceNumber,
+                  InstallmentId:         pendingRowForModal?.installmentId,
+                  InstallmentBalance:    pendingRowForModal ? Math.max(0, pendingRowForModal.balanceDue - pendingRowForModal.applyAmount - pendingRowForModal.adjustmentAmount) : undefined,
+                  AdjustmentReason:      sp.reason,
+                  ApplicationId:         adjAppId,
+                  Comments:              `Auto-created from receipt ${draft.receiptNumber || ''}`,
+                  CreatedBy:             currentUser,
+                  LastUpdatedBy:         currentUser,
+                });
+
+                const doCreateAdjustments = async () => {
+                  setAdjSplitModal(m => m ? { ...m, creating: true } : m);
+                  let errors: string[] = [];
+                  for (const sp of splits) {
+                    try {
+                      const body = buildAdjBody(sp);
+                      const res = await fetch(adjPostUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) });
+                      if (!res.ok) errors.push(`${sp.activityName}: HTTP ${res.status}`);
+                    } catch (e: any) { errors.push(`${sp.activityName}: ${e.message}`); }
+                  }
+                  if (errors.length > 0) {
+                    message.error(`Adjustment error(s): ${errors.join('; ')}`);
+                    setAdjSplitModal(m => m ? { ...m, creating: false } : m);
+                  } else {
+                    message.success(`${splits.length} adjustment(s) created successfully`);
+                    setAdjSplitModal(m => m ? { ...m, creating: false, adjCreated: true } : m);
+                  }
+                };
+
                 return (
                   <Modal
                     open
-                    width={960}
+                    width={1020}
                     keyboard={false}
                     maskClosable={false}
                     title={
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                         <ScissorOutlined style={{ color: REDWOOD.warning }} />
                         <Text strong>Split Adjustment</Text>
                         <Tag color="orange">{fmt(totalAdj)} {currency}</Tag>
-                        {adjSplitModal?.applicationId && (
-                          <Tag color="blue" style={{ fontSize: 10 }}>App ID: {adjSplitModal.applicationId}</Tag>
+                        {adjAppId && (
+                          <Tag color="blue" style={{ fontSize: 10 }}>App ID: {adjAppId}</Tag>
                         )}
-                        <Tooltip title={`Refresh activities (${recvActivities.length} loaded)`}>
-                          <Button size="small" icon={<ReloadOutlined />} loading={recvActivitiesLoading}
-                            style={{ fontSize: 11 }}
-                            onClick={() => fetchRecvActivities(true)}>
-                            {recvActivities.length > 0 ? `${recvActivities.length} activities` : 'Load activities'}
-                          </Button>
-                        </Tooltip>
+                        {adjCreated && (
+                          <Tag color="green" style={{ fontSize: 10 }}>Adjustments Created</Tag>
+                        )}
+                        {!isReadOnly && (
+                          <Tooltip title={`Refresh activities (${recvActivities.length} loaded)`}>
+                            <Button size="small" icon={<ReloadOutlined />} loading={recvActivitiesLoading}
+                              style={{ fontSize: 11 }}
+                              onClick={() => fetchRecvActivities(true)}>
+                              {recvActivities.length > 0 ? `${recvActivities.length} activities` : 'Load activities'}
+                            </Button>
+                          </Tooltip>
+                        )}
+                        {/* GET inspector — only when applicationId present */}
                         {adjSplitModal?.apiUrl && (
                           <Tooltip title={
                             <div style={{ fontSize: 11 }}>
@@ -3717,6 +3778,29 @@ const ManageReceipts: React.FC = () => {
                             </div>
                           } placement="bottomLeft">
                             <Button size="small" icon={<ApiOutlined style={{ color: REDWOOD.info }} />} />
+                          </Tooltip>
+                        )}
+                        {/* POST inspector — shows URL + payload for each split */}
+                        {isLiveMode && (
+                          <Tooltip
+                            overlayStyle={{ maxWidth: 700 }}
+                            title={
+                              <div style={{ fontSize: 11 }}>
+                                <div style={{ fontWeight: 700, marginBottom: 6 }}>POST — Create Adjustments</div>
+                                <div style={{ marginBottom: 4 }}><Tag color="blue" style={{ fontSize: 10 }}>POST</Tag><code style={{ fontSize: 10, wordBreak: 'break-all' }}>{adjPostUrl}</code></div>
+                                {splits.map((sp, i) => (
+                                  <div key={sp.id} style={{ marginTop: 8, borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: 6 }}>
+                                    <div style={{ fontWeight: 600, marginBottom: 2 }}>Line {i + 1}: {sp.activityName || '(no activity)'}</div>
+                                    <pre style={{ fontSize: 9, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                                      {JSON.stringify(buildAdjBody(sp), null, 2)}
+                                    </pre>
+                                  </div>
+                                ))}
+                              </div>
+                            }
+                            placement="bottomLeft"
+                          >
+                            <Button size="small" icon={<ApiOutlined style={{ color: REDWOOD.warning }} />} />
                           </Tooltip>
                         )}
                       </div>
@@ -3734,150 +3818,187 @@ const ManageReceipts: React.FC = () => {
                           </Text>
                         </Space>
                         <Space>
-                          <Button onClick={() => setAdjSplitModal(null)}>Cancel</Button>
-                          <Button icon={<PlusCircleOutlined />} onClick={addSplit}>Add Line</Button>
-                          <Button type="primary" disabled={!isBalanced || splits.some(s => !s.activityName)}
-                            style={{ background: isBalanced ? REDWOOD.success : undefined, borderColor: isBalanced ? REDWOOD.success : undefined }}
-                            onClick={() => {
-                              setPendingApplications(prev => ({
-                                ...prev,
-                                [tabKey]: (prev[tabKey] ?? []).map(p =>
-                                  p.key === pendingKey ? { ...p, adjSplits: splits } : p
-                                ),
-                              }));
-                              setAdjSplitModal(null);
-                              message.success(`Adjustment split into ${splits.length} line(s)`);
-                            }}>
-                            Apply Split
-                          </Button>
+                          <Button onClick={() => setAdjSplitModal(null)}>{adjCreated ? 'Close' : 'Cancel'}</Button>
+                          {!isReadOnly && !isLiveMode && (
+                            <>
+                              <Button icon={<PlusCircleOutlined />} onClick={addSplit}>Add Line</Button>
+                              <Button type="primary" disabled={!isBalanced || splits.some(s => !s.activityName)}
+                                style={{ background: isBalanced ? REDWOOD.success : undefined, borderColor: isBalanced ? REDWOOD.success : undefined }}
+                                onClick={() => {
+                                  setPendingApplications(prev => ({
+                                    ...prev,
+                                    [tabKey]: (prev[tabKey] ?? []).map(p =>
+                                      p.key === pendingKey ? { ...p, adjSplits: splits } : p
+                                    ),
+                                  }));
+                                  setAdjSplitModal(null);
+                                  message.success(`Adjustment split into ${splits.length} line(s)`);
+                                }}>
+                                Apply Split
+                              </Button>
+                            </>
+                          )}
+                          {!isReadOnly && isLiveMode && (
+                            <>
+                              <Button icon={<PlusCircleOutlined />} onClick={addSplit}>Add Line</Button>
+                              <Button type="primary" loading={creating}
+                                disabled={!isBalanced || splits.some(s => !s.activityName)}
+                                style={{ background: isBalanced ? REDWOOD.warning : undefined, borderColor: isBalanced ? REDWOOD.warning : undefined }}
+                                onClick={doCreateAdjustments}>
+                                Create Adjustment{splits.length > 1 ? 's' : ''}
+                              </Button>
+                            </>
+                          )}
                         </Space>
                       </Space>
                     }
                   >
-                    <div style={{ marginBottom: 8, fontSize: 12, color: REDWOOD.neutral600 }}>
-                      Split <Text strong style={{ fontFamily: 'monospace' }}>{fmt(totalAdj)} {currency}</Text> across multiple receivable activities. Total must equal the adjustment amount.
-                    </div>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                      <thead>
-                        <tr style={{ background: '#fafafa', borderBottom: '1px solid #e5e5e5' }}>
-                          <th style={{ padding: '6px 8px', textAlign: 'left', width: 36 }}>#</th>
-                          <th style={{ padding: '6px 8px', textAlign: 'right', width: 130 }}>Amount</th>
-                          <th style={{ padding: '6px 8px', textAlign: 'left', width: 200 }}>Receivable Activity</th>
-                          <th style={{ padding: '6px 8px', textAlign: 'left', width: 300 }}>Account Combination</th>
-                          <th style={{ padding: '6px 8px', textAlign: 'left', width: 140 }}>Reason</th>
-                          <th style={{ width: 32 }} />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {splits.map((sp, idx) => (
-                          <tr key={sp.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                            <td style={{ padding: '6px 8px', color: REDWOOD.neutral600 }}>{idx + 1}</td>
-                            <td style={{ padding: '6px 4px' }}>
-                              <InputNumber size="small" style={{ width: '100%' }} precision={2} min={0}
-                                value={sp.amount}
-                                formatter={v => v !== undefined && v !== null ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
-                                parser={v => parseFloat((v ?? '').replace(/,/g, '')) || 0}
-                                onChange={val => {
-                                  const newAmt = val ?? 0;
-                                  setAdjSplitModal(m => {
-                                    if (!m) return m;
-                                    const updated = m.splits.map(s => s.id === sp.id ? { ...s, amount: newAmt } : s);
-                                    if (idx !== 0 && updated.length > 1) {
-                                      const othersSum = updated.slice(1).reduce((s, r) => s + (r.amount || 0), 0);
-                                      const firstAmt  = Math.round(Math.max(0, totalAdj - othersSum) * 100) / 100;
-                                      updated[0] = { ...updated[0], amount: firstAmt };
-                                    }
-                                    return { ...m, splits: updated };
-                                  });
-                                }} />
-                            </td>
-                            <td style={{ padding: '6px 4px' }}>
-                              <Select size="small" style={{ width: '100%' }} showSearch
-                                placeholder="Select activity…"
-                                loading={recvActivitiesLoading}
-                                value={sp.activityName || undefined}
-                                filterOption={(input, option) =>
-                                  String(option?.value ?? '').toLowerCase().includes(input.toLowerCase()) ||
-                                  String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-                                }
-                                onChange={async val => {
-                                  const act = recvActivities.find(a => a.name === val);
-                                  let combo = act?.accountCombination || '';
-                                  // Override first segment with BU company code
-                                  const buName = tabs.find(t => t.key === adjSplitModal!.tabKey)?.draft.businessUnit ?? '';
-                                  const coCode = businessUnits.find(b => b.name === buName)?.companyCode ?? '';
-                                  if (coCode && combo) {
-                                    const segs = combo.split('-');
-                                    segs[0] = coCode;
-                                    combo = segs.join('-');
-                                  }
-                                  let desc = '';
-                                  if (combo) {
-                                    try {
-                                      const r = await validateAccountCode(combo.replace(/\./g, '-'));
-                                      const sd = r.segmentDetails ?? {};
-                                      const acctEntry = Object.values(sd).find((s: any) => { const n = (s.name ?? '').toLowerCase(); return n === 'account' || (n.includes('account') && !n.includes('sub') && !n.includes('chart') && !n.includes('offset')); });
-                                      const subEntry  = Object.values(sd).find((s: any) => (s.name ?? '').toLowerCase().includes('sub'));
-                                      const parts = [acctEntry?.description, subEntry?.description].filter(Boolean);
-                                      desc = parts.length ? parts.join(' · ') : Object.values(sd).map((s: any) => s.description).filter(Boolean).join(' · ');
-                                    } catch { /* silent */ }
-                                  }
-                                  updateSplit(sp.id, { activityName: val, accountCombination: combo, accountDescription: desc });
-                                }}>
-                                {recvActivities.map(a => (
-                                  <Option key={a.name} value={a.name} label={a.name}>
-                                    <div style={{ lineHeight: 1.3 }}>
-                                      <div style={{ fontSize: 12, fontWeight: 600 }}>{a.name}</div>
-                                      {a.accountCombination && (
-                                        <div style={{ fontSize: 10, fontFamily: 'monospace', color: '#8c8c8c' }}>{a.accountCombination}</div>
-                                      )}
-                                    </div>
-                                  </Option>
-                                ))}
-                              </Select>
-                            </td>
-                            <td style={{ padding: '6px 4px' }}>
-                              <Input.Search size="small"
-                                placeholder="Select from segments popup →"
-                                value={sp.accountCombination}
-                                readOnly
-                                style={{ fontFamily: 'monospace', fontSize: 11, cursor: 'default' }}
-                                enterButton={<SearchOutlined />}
-                                onSearch={() => setSplitAcctPickerSplitId(sp.id)}
-                              />
-                              {sp.accountDescription && (
-                                <div style={{ fontSize: 10, color: sp.accountDescription === 'Invalid account' ? REDWOOD.primary : REDWOOD.info, marginTop: 2, lineHeight: 1.3 }}>
-                                  {sp.accountDescription}
-                                </div>
-                              )}
-                            </td>
-                            <td style={{ padding: '6px 4px' }}>
-                              <Input size="small" placeholder="Reason…" value={sp.reason}
-                                onChange={e => updateSplit(sp.id, { reason: e.target.value })} />
-                            </td>
-                            <td style={{ padding: '6px 4px' }}>
-                              {splits.length > 1 && (
-                                <Button size="small" type="text" danger icon={<DeleteOutlined />}
-                                  style={{ padding: '0 4px' }}
-                                  onClick={() => removeSplit(sp.id)} />
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    {!isBalanced && (
-                      <div style={{ marginTop: 8, textAlign: 'right' }}>
-                        <Button size="small" type="link" style={{ color: REDWOOD.info }}
-                          onClick={() => {
-                            if (splits.length > 0) {
-                              const last = splits[splits.length - 1];
-                              updateSplit(last.id, { amount: Math.round((last.amount + remaining) * 100) / 100 });
-                            }
-                          }}>
-                          Auto-fill remaining {fmt(Math.abs(remaining))} to last line
-                        </Button>
+                    {adjCreated ? (
+                      <div style={{ textAlign: 'center', padding: '24px 0' }}>
+                        <div style={{ fontSize: 40, color: REDWOOD.success, marginBottom: 12 }}>✓</div>
+                        <Text strong style={{ fontSize: 14 }}>{splits.length} adjustment{splits.length > 1 ? 's' : ''} created for App ID {adjAppId}</Text>
+                        <div style={{ marginTop: 8 }}>
+                          {splits.map((sp, i) => (
+                            <div key={sp.id} style={{ fontSize: 12, color: REDWOOD.neutral600 }}>
+                              Line {i + 1}: {fmt(sp.amount)} — {sp.activityName}
+                            </div>
+                          ))}
+                        </div>
                       </div>
+                    ) : (
+                      <>
+                        <div style={{ marginBottom: 8, fontSize: 12, color: REDWOOD.neutral600 }}>
+                          {isLiveMode
+                            ? <>App ID <Text strong style={{ fontFamily: 'monospace' }}>{adjAppId}</Text> is ready. Configure splits then click <Text strong>Create Adjustment{splits.length > 1 ? 's' : ''}</Text> to POST directly.</>
+                            : <>Split <Text strong style={{ fontFamily: 'monospace' }}>{fmt(totalAdj)} {currency}</Text> across multiple receivable activities. Total must equal the adjustment amount.</>
+                          }
+                        </div>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                          <thead>
+                            <tr style={{ background: '#fafafa', borderBottom: '1px solid #e5e5e5' }}>
+                              <th style={{ padding: '6px 8px', textAlign: 'left', width: 36 }}>#</th>
+                              <th style={{ padding: '6px 8px', textAlign: 'right', width: 130 }}>Amount</th>
+                              <th style={{ padding: '6px 8px', textAlign: 'left', width: 200 }}>Receivable Activity</th>
+                              <th style={{ padding: '6px 8px', textAlign: 'left', width: 300 }}>Account Combination</th>
+                              <th style={{ padding: '6px 8px', textAlign: 'left', width: 140 }}>Reason</th>
+                              <th style={{ width: 32 }} />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {splits.map((sp, idx) => (
+                              <tr key={sp.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                                <td style={{ padding: '6px 8px', color: REDWOOD.neutral600 }}>{idx + 1}</td>
+                                <td style={{ padding: '6px 4px' }}>
+                                  <InputNumber size="small" style={{ width: '100%' }} precision={2} min={0}
+                                    value={sp.amount}
+                                    disabled={isReadOnly}
+                                    formatter={v => v !== undefined && v !== null ? Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
+                                    parser={v => parseFloat((v ?? '').replace(/,/g, '')) || 0}
+                                    onChange={val => {
+                                      const newAmt = val ?? 0;
+                                      setAdjSplitModal(m => {
+                                        if (!m) return m;
+                                        const updated = m.splits.map(s => s.id === sp.id ? { ...s, amount: newAmt } : s);
+                                        if (idx !== 0 && updated.length > 1) {
+                                          const othersSum = updated.slice(1).reduce((s, r) => s + (r.amount || 0), 0);
+                                          const firstAmt  = Math.round(Math.max(0, totalAdj - othersSum) * 100) / 100;
+                                          updated[0] = { ...updated[0], amount: firstAmt };
+                                        }
+                                        return { ...m, splits: updated };
+                                      });
+                                    }} />
+                                </td>
+                                <td style={{ padding: '6px 4px' }}>
+                                  <Select size="small" style={{ width: '100%' }} showSearch
+                                    placeholder="Select activity…"
+                                    loading={recvActivitiesLoading}
+                                    value={sp.activityName || undefined}
+                                    disabled={isReadOnly}
+                                    filterOption={(input, option) =>
+                                      String(option?.value ?? '').toLowerCase().includes(input.toLowerCase()) ||
+                                      String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                                    }
+                                    onChange={async val => {
+                                      const act = recvActivities.find(a => a.name === val);
+                                      let combo = act?.accountCombination || '';
+                                      const buName = tabs.find(t => t.key === adjSplitModal!.tabKey)?.draft.businessUnit ?? '';
+                                      const coCode = businessUnits.find(b => b.name === buName)?.companyCode ?? '';
+                                      if (coCode && combo) {
+                                        const segs = combo.split('-');
+                                        segs[0] = coCode;
+                                        combo = segs.join('-');
+                                      }
+                                      let desc = '';
+                                      if (combo) {
+                                        try {
+                                          const r = await validateAccountCode(combo.replace(/\./g, '-'));
+                                          const sd = r.segmentDetails ?? {};
+                                          const acctEntry = Object.values(sd).find((s: any) => { const n = (s.name ?? '').toLowerCase(); return n === 'account' || (n.includes('account') && !n.includes('sub') && !n.includes('chart') && !n.includes('offset')); });
+                                          const subEntry  = Object.values(sd).find((s: any) => (s.name ?? '').toLowerCase().includes('sub'));
+                                          const parts = [acctEntry?.description, subEntry?.description].filter(Boolean);
+                                          desc = parts.length ? parts.join(' · ') : Object.values(sd).map((s: any) => s.description).filter(Boolean).join(' · ');
+                                        } catch { /* silent */ }
+                                      }
+                                      updateSplit(sp.id, { activityName: val, accountCombination: combo, accountDescription: desc });
+                                    }}>
+                                    {recvActivities.map(a => (
+                                      <Option key={a.name} value={a.name} label={a.name}>
+                                        <div style={{ lineHeight: 1.3 }}>
+                                          <div style={{ fontSize: 12, fontWeight: 600 }}>{a.name}</div>
+                                          {a.accountCombination && (
+                                            <div style={{ fontSize: 10, fontFamily: 'monospace', color: '#8c8c8c' }}>{a.accountCombination}</div>
+                                          )}
+                                        </div>
+                                      </Option>
+                                    ))}
+                                  </Select>
+                                </td>
+                                <td style={{ padding: '6px 4px' }}>
+                                  <Input.Search size="small"
+                                    placeholder="Select from segments popup →"
+                                    value={sp.accountCombination}
+                                    readOnly
+                                    disabled={isReadOnly}
+                                    style={{ fontFamily: 'monospace', fontSize: 11, cursor: 'default' }}
+                                    enterButton={<SearchOutlined />}
+                                    onSearch={() => !isReadOnly && setSplitAcctPickerSplitId(sp.id)}
+                                  />
+                                  {sp.accountDescription && (
+                                    <div style={{ fontSize: 10, color: sp.accountDescription === 'Invalid account' ? REDWOOD.primary : REDWOOD.info, marginTop: 2, lineHeight: 1.3 }}>
+                                      {sp.accountDescription}
+                                    </div>
+                                  )}
+                                </td>
+                                <td style={{ padding: '6px 4px' }}>
+                                  <Input size="small" placeholder="Reason…" value={sp.reason}
+                                    disabled={isReadOnly}
+                                    onChange={e => updateSplit(sp.id, { reason: e.target.value })} />
+                                </td>
+                                <td style={{ padding: '6px 4px' }}>
+                                  {splits.length > 1 && !isReadOnly && (
+                                    <Button size="small" type="text" danger icon={<DeleteOutlined />}
+                                      style={{ padding: '0 4px' }}
+                                      onClick={() => removeSplit(sp.id)} />
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {!isBalanced && (
+                          <div style={{ marginTop: 8, textAlign: 'right' }}>
+                            <Button size="small" type="link" style={{ color: REDWOOD.info }}
+                              onClick={() => {
+                                if (splits.length > 0) {
+                                  const last = splits[splits.length - 1];
+                                  updateSplit(last.id, { amount: Math.round((last.amount + remaining) * 100) / 100 });
+                                }
+                              }}>
+                              Auto-fill remaining {fmt(Math.abs(remaining))} to last line
+                            </Button>
+                          </div>
+                        )}
+                      </>
                     )}
                   </Modal>
                 );
