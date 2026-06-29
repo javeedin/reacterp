@@ -1618,7 +1618,7 @@ const ManageReceipts: React.FC = () => {
   };
 
   // ── Open Accounting Modal ────────────────────────────────────────────────
-  const openAcctModal = (tabKey: string) => {
+  const openAcctModal = async (tabKey: string) => {
     const tab = tabs.find(t => t.key === tabKey);
     if (!tab) return;
     const { draft, slaHeaderId, slaPosted } = tab;
@@ -1631,6 +1631,11 @@ const ManageReceipts: React.FC = () => {
     const unappliedDesc  = acct?.unappliedCcid ? (acctDescCache[acct.unappliedCcid]?.description ?? '') : '';
     const drDesc         = `${draft.comments || ''} ${draft.receiptNumber}`.trim();
     const savedApps      = receiptApplications[tabKey]?.rows ?? [];
+
+    // Open modal immediately with loading state
+    setAcctModal({ visible: true, tabKey, creating: false, posting: false,
+      slaHeaderId, slaStatus: slaPosted ? 'POSTED' : (slaHeaderId ? 'CREATED' : ''),
+      glBatchId: null, lines: [], adjLines: [] });
 
     let lines: AcctLine[] = [];
     if (isMisc) {
@@ -1668,10 +1673,39 @@ const ManageReceipts: React.FC = () => {
       ];
     }
 
-    // ── Adjustment accounting lines ──
+    // ── Adjustment accounting lines — fetch saved adjustments from API ──
     const adjLines: AcctLine[] = [];
+
+    // 1. Fetch saved adjustments for each application
+    const appIds = savedApps.map(a => a.applicationId).filter(Boolean);
+    if (appIds.length > 0) {
+      const adjFetches = appIds.map(appId =>
+        fetch(`${APEX_DB_CONFIG.baseUrl}/ar/adjustments?application_id=${appId}&limit=500`)
+          .then(r => r.ok ? r.json() : { items: [] })
+          .catch(() => ({ items: [] }))
+      );
+      const adjResults = await Promise.all(adjFetches);
+      for (const res of adjResults) {
+        for (const adj of (res.items ?? [])) {
+          const adjAmt = Math.abs(adj.ADJUSTMENT_AMOUNT ?? adj.adjustmentAmount ?? 0);
+          if (adjAmt === 0) continue;
+          const txnNum = adj.TRANSACTION_NUMBER ?? adj.transactionNumber ?? '';
+          const activity = adj.RECEIVABLES_ACTIVITY ?? adj.receivablesActivity ?? 'Adjustment';
+          const adjCombo = (adj.ACCOUNT_COMBINATION ?? adj.accountCombination ?? '').replace(/\./g, '-');
+          adjLines.push({ lineType: 'DR', accountingClass: 'ADJUSTMENT',
+            accountCombination: adjCombo, accountDesc: activity,
+            enteredDr: adjAmt, enteredCr: 0,
+            description: `${txnNum} — ${activity}` });
+          adjLines.push({ lineType: 'CR', accountingClass: 'RECEIVABLE',
+            accountCombination: unappliedCombo, accountDesc: unappliedDesc,
+            enteredDr: 0, enteredCr: adjAmt,
+            description: `${txnNum} — AR Receivable` });
+        }
+      }
+    }
+
+    // 2. Also include any pending (unsaved) rows with adjustment splits
     const pendingRows = pendingApplications[tabKey] ?? [];
-    // From pending rows with splits
     for (const row of pendingRows) {
       if (!row.adjustmentAmount || row.adjustmentAmount === 0) continue;
       const splits = row.adjSplits?.length
@@ -1685,16 +1719,13 @@ const ManageReceipts: React.FC = () => {
           enteredDr: adjAmt, enteredCr: 0,
           description: `${row.transactionNumber} — ${sp.activityName || 'Adjustment'}` });
         adjLines.push({ lineType: 'CR', accountingClass: 'RECEIVABLE',
-          accountCombination: unappliedCombo,
-          accountDesc: unappliedDesc,
+          accountCombination: unappliedCombo, accountDesc: unappliedDesc,
           enteredDr: 0, enteredCr: adjAmt,
           description: `${row.transactionNumber} — AR Receivable` });
       }
     }
 
-    setAcctModal({ visible: true, tabKey, creating: false, posting: false,
-      slaHeaderId, slaStatus: slaPosted ? 'POSTED' : (slaHeaderId ? 'CREATED' : ''),
-      glBatchId: null, lines, adjLines });
+    setAcctModal(prev => prev ? { ...prev, lines, adjLines } : null);
   };
 
   const handleCreateAccounting = async () => {
