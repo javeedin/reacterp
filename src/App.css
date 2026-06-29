@@ -107,6 +107,16 @@
 }
 
 
+/* Account combination column — never clip text */
+.aa-v2-grid td:first-child {
+  overflow: visible !important;
+  white-space: nowrap !important;
+}
+.aa-v2-grid .ant-table-cell:first-child {
+  overflow: visible !important;
+  white-space: nowrap !important;
+}
+
 /* Account Analysis search tabs */
 .aa-search-tabs > .ant-tabs-nav .ant-tabs-nav-add {
   display: none !important;
