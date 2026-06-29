@@ -470,6 +470,16 @@ const ManageReceipts: React.FC = () => {
     applicationId?: number;    // saved applicationId this dialog is linked to
     adjCreated?: boolean;      // true after "Create Adjustment" completes
     creating?: boolean;        // true while POSTing adjustments
+    // snapshot of key row fields needed to build adjustment POST body
+    rowSnap?: {
+      customerTransactionId?: number;
+      transactionNumber?: string;
+      installmentId?: number;
+      sequenceNumber?: number;
+      balanceDue?: number;
+      applyAmount?: number;
+      adjustmentAmount?: number;
+    };
   } | null>(null);
 
   const fetchRecvActivities = useCallback(async (force = false) => {
@@ -488,7 +498,19 @@ const ManageReceipts: React.FC = () => {
     finally { setRecvActivitiesLoading(false); }
   }, [recvActivities.length]);
 
-  const openAdjSplitModal = async (tabKey: string, pendingKey: string, totalAdj: number, currency: string, existingSplits?: AdjSplit[], applicationId?: number) => {
+  const openAdjSplitModal = async (
+    tabKey: string,
+    pendingKey: string,
+    totalAdj: number,
+    currency: string,
+    existingSplits?: AdjSplit[],
+    applicationId?: number,
+    rowSnap?: {
+      customerTransactionId?: number; transactionNumber?: string;
+      installmentId?: number; sequenceNumber?: number;
+      balanceDue?: number; applyAmount?: number; adjustmentAmount?: number;
+    },
+  ) => {
     fetchRecvActivities();
     const adjApiUrl = applicationId
       ? `${APEX_DB_CONFIG.baseUrl}/ar/adjustments?application_id=${applicationId}&limit=500`
@@ -522,7 +544,7 @@ const ManageReceipts: React.FC = () => {
               reason:             a.adjustment_reason ?? a.ADJUSTMENT_REASON ?? '',
             };
           }));
-          setAdjSplitModal({ tabKey, pendingKey, totalAdj, currency, splits: loadedSplits, apiUrl: adjApiUrl, applicationId });
+          setAdjSplitModal({ tabKey, pendingKey, totalAdj, currency, splits: loadedSplits, apiUrl: adjApiUrl, applicationId, rowSnap });
           return;
         }
       } catch { /* fall through to blank */ }
@@ -530,7 +552,7 @@ const ManageReceipts: React.FC = () => {
     const splits = existingSplits?.length
       ? existingSplits
       : [{ id: `sp-${Date.now()}`, amount: totalAdj, activityName: '', accountCombination: '', accountDescription: '', reason: '' }];
-    setAdjSplitModal({ tabKey, pendingKey, totalAdj, currency, splits, apiUrl: adjApiUrl, applicationId });
+    setAdjSplitModal({ tabKey, pendingKey, totalAdj, currency, splits, apiUrl: adjApiUrl, applicationId, rowSnap });
   };
 
   const fetchOpenInstallments = useCallback(async (tabKey: string, customerAccountNumber: string) => {
@@ -2511,7 +2533,7 @@ const ManageReceipts: React.FC = () => {
                       icon={<ScissorOutlined style={{ fontSize: 11 }} />}
                       style={{ padding: '0 4px', height: 24, color: hasSplits ? undefined : REDWOOD.warning,
                                borderColor: hasSplits ? undefined : REDWOOD.warning }}
-                      onClick={() => openAdjSplitModal(tabKey, r._pendingKey!, Math.abs(r._adjAmount ?? 0), r.enteredCurrency || draft.currency, pendingRow?.adjSplits)} />
+                      onClick={() => openAdjSplitModal(tabKey, r._pendingKey!, Math.abs(r._adjAmount ?? 0), r.enteredCurrency || draft.currency, pendingRow?.adjSplits, undefined, pendingRow ? { customerTransactionId: pendingRow.customerTransactionId, transactionNumber: pendingRow.transactionNumber, installmentId: pendingRow.installmentId, sequenceNumber: pendingRow.sequenceNumber, balanceDue: pendingRow.balanceDue, applyAmount: pendingRow.applyAmount, adjustmentAmount: pendingRow.adjustmentAmount } : undefined)} />
                   </Tooltip>
                 )}
               </Space>
@@ -2529,8 +2551,22 @@ const ManageReceipts: React.FC = () => {
                     <Button size="small" type="text" icon={<ScissorOutlined style={{ fontSize: 11 }} />}
                       style={{ padding: '0 4px', height: 24, color: REDWOOD.warning }}
                       onClick={() => {
-                      const savedPending = (pendingApplications[tabKey] ?? []).find(p => p.key === r.key);
-                      openAdjSplitModal(tabKey, r.key, Math.abs(r._adjAmount!), r.enteredCurrency || draft.currency, savedPending?.adjSplits, r.applicationId);
+                        const savedPending = (pendingApplications[tabKey] ?? []).find(p => p.key === r.key);
+                        // Find matching installment row to get installmentId / sequenceNumber
+                        const instRow = (instPickerRows[tabKey] ?? []).find(ir => ir.customerTransactionId === r.referenceTransactionId);
+                        openAdjSplitModal(
+                          tabKey, r.key, Math.abs(r._adjAmount!), r.enteredCurrency || draft.currency,
+                          savedPending?.adjSplits, r.applicationId,
+                          {
+                            customerTransactionId: r.referenceTransactionId ?? undefined,
+                            transactionNumber:     r.referenceTransactionNumber || undefined,
+                            installmentId:         instRow?.installmentId,
+                            sequenceNumber:        instRow?.sequenceNumber,
+                            balanceDue:            instRow?.balanceDue,
+                            applyAmount:           r.applicationAmount,
+                            adjustmentAmount:      r.adjustmentAmount,
+                          },
+                        );
                     }} />
                   </Tooltip>
                 )}
@@ -3701,11 +3737,13 @@ const ManageReceipts: React.FC = () => {
 
                 // Build POST JSON payloads for preview (one per split)
                 const adjPostUrl  = `${APEX_DB_CONFIG.baseUrl}/ar/adjustments`;
-                const pendingRowForModal = (pendingApplications[tabKey] ?? []).find(p => p.key === pendingKey);
+                // rowSnap carries the relevant row fields regardless of whether row is pending or saved
+                const snap = adjSplitModal.rowSnap
+                  ?? (() => { const p = (pendingApplications[tabKey] ?? []).find(r => r.key === pendingKey); return p ? { customerTransactionId: p.customerTransactionId, transactionNumber: p.transactionNumber, installmentId: p.installmentId, sequenceNumber: p.sequenceNumber, balanceDue: p.balanceDue, applyAmount: p.applyAmount, adjustmentAmount: p.adjustmentAmount } : undefined; })();
                 const buildAdjBody = (sp: AdjSplit) => ({
-                  CustomerTransactionId: pendingRowForModal?.customerTransactionId,
-                  TransactionNumber:     pendingRowForModal?.transactionNumber,
-                  AdjustmentAmount:      sp.amount,
+                  CustomerTransactionId: snap?.customerTransactionId,
+                  TransactionNumber:     snap?.transactionNumber,
+                  AdjustmentAmount:      -(Math.abs(sp.amount)), // always negative (write-off/credit)
                   AdjustmentDate:        draft.receiptDate || today(),
                   AccountingDate:        draft.accountingDate || today(),
                   AdjustmentType:        'LINE',
@@ -3714,9 +3752,9 @@ const ManageReceipts: React.FC = () => {
                   AccountCombination:    sp.accountCombination || undefined,
                   BusinessUnit:          draft.businessUnit || '',
                   Currency:              currency,
-                  InstallmentNumber:     pendingRowForModal?.sequenceNumber,
-                  InstallmentId:         pendingRowForModal?.installmentId,
-                  InstallmentBalance:    pendingRowForModal ? Math.max(0, pendingRowForModal.balanceDue - pendingRowForModal.applyAmount - pendingRowForModal.adjustmentAmount) : undefined,
+                  InstallmentNumber:     snap?.sequenceNumber,
+                  InstallmentId:         snap?.installmentId,
+                  InstallmentBalance:    snap ? Math.max(0, (snap.balanceDue ?? 0) - (snap.applyAmount ?? 0) - Math.abs(snap.adjustmentAmount ?? 0)) : undefined,
                   AdjustmentReason:      sp.reason,
                   ApplicationId:         adjAppId,
                   Comments:              `Auto-created from receipt ${draft.receiptNumber || ''}`,
