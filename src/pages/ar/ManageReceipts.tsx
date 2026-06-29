@@ -1969,6 +1969,7 @@ const ManageReceipts: React.FC = () => {
           ApplicationDate:            draft.receiptDate || today,
           AccountingDate:             draft.accountingDate || today,
           ApplicationAmount:          row.applyAmount,
+          AdjustmentAmount:           row.adjustmentAmount || undefined,
           ApplicationStatus:          'APP',
           ReferenceTransactionId:     row.customerTransactionId,
           ReferenceTransactionNumber: row.transactionNumber,
@@ -2002,6 +2003,7 @@ const ManageReceipts: React.FC = () => {
             InstallmentNumber:     row.sequenceNumber,
             InstallmentBalance:    Math.max(0, row.balanceDue - row.applyAmount - row.adjustmentAmount),
             AdjustmentReason:      sp.reason,
+            ApplicationId:         '{from Application POST}',
             Comments:              `Auto-created from receipt ${draft.receiptNumber || ''}`,
             CreatedBy:             currentUser,
             LastUpdatedBy:         currentUser,
@@ -3802,6 +3804,7 @@ const ManageReceipts: React.FC = () => {
                       ApplicationDate:            draft.receiptDate || dayjs().format('YYYY-MM-DD'),
                       AccountingDate:             draft.accountingDate || dayjs().format('YYYY-MM-DD'),
                       ApplicationAmount:          applyAmt ?? '<applyAmount>',
+                      AdjustmentAmount:           exRow?.adjustmentAmount || undefined,
                       ApplicationStatus:          'APP',
                       ReferenceTransactionId:     exRow?.customerTransactionId ?? '<customerTransactionId>',
                       ReferenceTransactionNumber: exRow?.transactionNumber      ?? '<transactionNumber>',
@@ -3851,6 +3854,7 @@ const ManageReceipts: React.FC = () => {
                       InstallmentNumber:     exRow?.sequenceNumber ?? '<sequenceNumber>',
                       InstallmentBalance:    exRow ? Math.max(0, exRow.balanceDue - applyAmt - adjAmt) : '<remaining balance>',
                       AdjustmentReason:      exRow?.adjustmentReason || '<adjustmentReason>',
+                      ApplicationId:         '<from Application POST>',
                       Comments:              `Auto-created from receipt ${draft.receiptNumber || ''}`,
                     }, null, 2);
                     return (
