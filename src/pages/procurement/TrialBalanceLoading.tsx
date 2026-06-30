@@ -355,15 +355,24 @@ const TrialBalanceLoading: React.FC = () => {
     </Table.Summary>
   ) : undefined;
 
-  const handleExport = () => {
-    const ws = XLSX.utils.json_to_sheet(filteredRows.map(r => { const c = { ...r }; delete c.__rowIdx; return c; }));
+  const downloadXlsx = (data: TBRow[], sheetName: string, dlFileName: string) => {
+    const clean = data.map(r => { const c = { ...r }; delete (c as any).__rowIdx; return c; });
+    const ws = XLSX.utils.json_to_sheet(clean);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Trial Balance');
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
     const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
     const blob = new Blob([buf], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `TB_Filtered_${fileName || 'export'}`; a.click();
+    const a = document.createElement('a'); a.href = url; a.download = dlFileName; a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleExport = () => downloadXlsx(filteredRows, 'Trial Balance', `TB_Filtered_${fileName || 'export'}`);
+
+  const handleExportInvalid = () => {
+    const invalidRows = rows.filter(r => invalidRowIdxSet.has((r as any).__rowIdx));
+    if (invalidRows.length === 0) { message.info('No invalid rows to export.'); return; }
+    downloadXlsx(invalidRows, 'Invalid Rows', `TB_InvalidSegments_${fileName || 'export'}`);
   };
 
   const totalInvalid = validationResults.reduce((s, r) => s + r.invalidValues.length, 0);
@@ -394,6 +403,11 @@ const TrialBalanceLoading: React.FC = () => {
               </Button>
               <Button size="small" icon={<UploadOutlined />} onClick={() => fileInputRef.current?.click()}>Load Another</Button>
               <Button size="small" icon={<DownloadOutlined />} onClick={handleExport}>Export Filtered</Button>
+              {validated && invalidRowIdxSet.size > 0 && (
+                <Button size="small" icon={<DownloadOutlined />} danger onClick={handleExportInvalid}>
+                  Export Invalid ({invalidRowIdxSet.size})
+                </Button>
+              )}
               <Button size="small" icon={<ClearOutlined />} danger
                 onClick={() => { setRows([]); setColumns([]); setFileName(''); setFilters({}); setGlobalSearch(''); setValidationResults([]); setValidated(false); }}>
                 Clear
@@ -457,7 +471,12 @@ const TrialBalanceLoading: React.FC = () => {
 
             {validated && validationResults.length > 0 && (
               <Card size="small" style={{ borderRadius: 8, marginBottom: 12 }}
-                title={<Space><SafetyCertificateOutlined style={{ color: REDWOOD.info }} /><Text strong style={{ fontSize: 12 }}>Validation Results by Segment</Text></Space>}>
+                title={<Space><SafetyCertificateOutlined style={{ color: REDWOOD.info }} /><Text strong style={{ fontSize: 12 }}>Validation Results by Segment</Text></Space>}
+                extra={invalidRowIdxSet.size > 0 && (
+                  <Button size="small" danger icon={<DownloadOutlined />} onClick={handleExportInvalid}>
+                    Download Invalid Rows ({invalidRowIdxSet.size})
+                  </Button>
+                )}>
                 <Row gutter={[8, 8]}>
                   {validationResults.map(vr => (
                     <Col key={vr.coaSegmentKey} xs={24} sm={12} md={8} lg={6}>
