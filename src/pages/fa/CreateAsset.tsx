@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import {
   Layout, Card, Form, Input, Select, Button, Space, Typography, Row, Col,
   Steps, InputNumber, DatePicker, Descriptions, message, Breadcrumb, Divider,
+  Modal, Tag, Alert, Spin,
 } from 'antd';
 import {
   HomeOutlined, SaveOutlined, LeftOutlined, RightOutlined,
   CheckCircleOutlined, DatabaseOutlined, BookOutlined, EnvironmentOutlined,
-  BarcodeOutlined, DollarOutlined,
+  BarcodeOutlined, DollarOutlined, BugOutlined, CopyOutlined, SendOutlined,
 } from '@ant-design/icons';
+import { APEX_DB_CONFIG } from '../../config/api.config';
 import { Link, useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 import {
@@ -49,6 +51,38 @@ const CreateAsset: React.FC = () => {
 
   // Collected values across steps (merged on submit)
   const [stepData, setStepData] = useState<Record<string, any>>({});
+
+  // Debug modal
+  const [debugModal, setDebugModal] = useState(false);
+  const [testResult, setTestResult] = useState<{ status: number; body: string } | null>(null);
+  const [testing, setTesting] = useState(false);
+
+  const FA_ASSETS_URL = `${APEX_DB_CONFIG.baseUrl}/fa/assets`;
+
+  const buildPayload = () => {
+    const vals = form.getFieldsValue();
+    const payload = { ...stepData, ...vals };
+    if (payload.datePlacedInService && dayjs.isDayjs(payload.datePlacedInService))
+      payload.datePlacedInService = payload.datePlacedInService.format('YYYY-MM-DD');
+    return payload;
+  };
+
+  const handleTest = async () => {
+    setTesting(true); setTestResult(null);
+    try {
+      const res = await fetch(FA_ASSETS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(buildPayload()),
+      });
+      const text = await res.text();
+      setTestResult({ status: res.status, body: text });
+    } catch (e: any) {
+      setTestResult({ status: 0, body: e.message });
+    } finally {
+      setTesting(false);
+    }
+  };
 
   useEffect(() => {
     getCategories().then(setCategories);
@@ -424,20 +458,105 @@ const CreateAsset: React.FC = () => {
                 </Button>
               )}
               {current === STEPS.length - 1 && (
-                <Button
-                  type="primary" icon={<SaveOutlined />} loading={saving}
-                  style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
-                  onClick={handleSubmit}
-                >
-                  Create Asset
-                </Button>
+                <Space>
+                  <Button
+                    icon={<BugOutlined />}
+                    style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}
+                    onClick={() => { setTestResult(null); setDebugModal(true); }}
+                  >
+                    Debug
+                  </Button>
+                  <Button
+                    type="primary" icon={<SaveOutlined />} loading={saving}
+                    style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+                    onClick={handleSubmit}
+                  >
+                    Create Asset
+                  </Button>
+                </Space>
               )}
             </Space>
           </div>
         </div>
       </Content>
 
-      
+      {/* ── Debug Modal ── */}
+      <Modal
+        open={debugModal}
+        onCancel={() => setDebugModal(false)}
+        width={780}
+        title={<Space><BugOutlined style={{ color: REDWOOD.info }} /><span>Create Asset — Debug</span></Space>}
+        footer={
+          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+            <Button icon={<CopyOutlined />} size="small"
+              onClick={() => { navigator.clipboard.writeText(JSON.stringify(buildPayload(), null, 2)); message.success('Payload copied'); }}>
+              Copy Payload
+            </Button>
+            <Space>
+              <Button onClick={() => setDebugModal(false)}>Close</Button>
+              <Button type="primary" icon={testing ? <Spin size="small" /> : <SendOutlined />}
+                loading={testing}
+                style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}
+                onClick={handleTest}>
+                Test POST
+              </Button>
+            </Space>
+          </Space>
+        }
+      >
+        {/* Endpoint */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: '#888', marginBottom: 4, fontWeight: 600 }}>ENDPOINT</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Tag color="blue" style={{ fontSize: 11, fontFamily: 'monospace' }}>POST</Tag>
+            <code style={{ fontSize: 11, wordBreak: 'break-all', background: '#f5f5f5', padding: '4px 8px', borderRadius: 4, flex: 1 }}>
+              {FA_ASSETS_URL}
+            </code>
+            <Button size="small" icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(FA_ASSETS_URL); message.success('URL copied'); }} />
+          </div>
+        </div>
+
+        <Divider style={{ margin: '10px 0' }} />
+
+        {/* Payload */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: '#888', marginBottom: 4, fontWeight: 600 }}>REQUEST PAYLOAD (JSON)</div>
+          <pre style={{
+            background: '#1e293b', color: '#e2e8f0', fontSize: 11,
+            fontFamily: 'monospace', padding: 12, borderRadius: 6,
+            maxHeight: 280, overflowY: 'auto', margin: 0,
+          }}>
+            {JSON.stringify(buildPayload(), null, 2)}
+          </pre>
+        </div>
+
+        {/* Test result */}
+        {testResult && (
+          <>
+            <Divider style={{ margin: '10px 0' }} />
+            <div>
+              <div style={{ fontSize: 11, color: '#888', marginBottom: 4, fontWeight: 600 }}>
+                RESPONSE
+                <Tag color={testResult.status >= 200 && testResult.status < 300 ? 'success' : 'error'}
+                  style={{ marginLeft: 8, fontSize: 11 }}>
+                  HTTP {testResult.status || 'Error'}
+                </Tag>
+              </div>
+              {testResult.status >= 200 && testResult.status < 300
+                ? <Alert type="success" showIcon message="Request succeeded" style={{ marginBottom: 8 }} />
+                : <Alert type="error" showIcon message="Request failed" style={{ marginBottom: 8 }} />
+              }
+              <pre style={{
+                background: '#1e293b', color: '#e2e8f0', fontSize: 11,
+                fontFamily: 'monospace', padding: 12, borderRadius: 6,
+                maxHeight: 200, overflowY: 'auto', margin: 0,
+              }}>
+                {(() => { try { return JSON.stringify(JSON.parse(testResult.body), null, 2); } catch { return testResult.body; } })()}
+              </pre>
+            </div>
+          </>
+        )}
+      </Modal>
     </Layout>
   );
 };
