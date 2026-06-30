@@ -8,7 +8,7 @@ import {
   HomeOutlined, UploadOutlined, ClearOutlined, DownloadOutlined,
   FilterOutlined, FileExcelOutlined, TableOutlined, SafetyCertificateOutlined,
   CheckCircleOutlined, CloseCircleOutlined, PlusOutlined, DeleteOutlined,
-  SyncOutlined, InfoCircleOutlined, SaveOutlined, FolderOpenOutlined,
+  SyncOutlined, InfoCircleOutlined, SaveOutlined, FolderOpenOutlined, LinkOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -60,6 +60,7 @@ interface ValidationResult {
   coaSegmentKey: string;
   excelColumn: string;
   coaLabel: string;
+  apiUrl: string;
   totalValues: number;
   validCount: number;
   invalidValues: { value: string; count: number }[];
@@ -204,9 +205,11 @@ const TrialBalanceLoading: React.FC = () => {
       const results: ValidationResult[] = await Promise.all(
         validMaps.map(async (m) => {
           const seg = COA_SEGMENTS.find(s => s.key === m.coaSegmentKey)!;
+          const apiUrl = coaValuesUrl(seg.valueSet);
           const result: ValidationResult = {
             coaSegmentKey: m.coaSegmentKey, excelColumn: m.excelColumn,
-            coaLabel: seg.label, totalValues: 0, validCount: 0,
+            coaLabel: seg.label, apiUrl,
+            totalValues: 0, validCount: 0,
             invalidValues: [], error: '',
           };
           try {
@@ -451,7 +454,12 @@ const TrialBalanceLoading: React.FC = () => {
                       <Card size="small" style={{ borderRadius: 6, border: `1px solid ${vr.error ? REDWOOD.warning : vr.invalidValues.length > 0 ? REDWOOD.primary : REDWOOD.success}` }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                           <Text strong style={{ fontSize: 11 }}>{vr.excelColumn}</Text>
-                          <Tag style={{ fontSize: 10, margin: 0 }}>{vr.coaLabel}</Tag>
+                          <Space size={4}>
+                            <Tag style={{ fontSize: 10, margin: 0 }}>{vr.coaLabel}</Tag>
+                            <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>{vr.apiUrl}</span>} placement="topRight">
+                              <LinkOutlined style={{ fontSize: 11, color: REDWOOD.info, cursor: 'pointer' }} />
+                            </Tooltip>
+                          </Space>
                         </div>
                         {vr.error
                           ? <Alert type="warning" message={vr.error} style={{ fontSize: 10, padding: '2px 6px' }} />
