@@ -268,8 +268,8 @@ const CreateAsset: React.FC = () => {
         <Form.Item name="methodId" label="Depreciation Method">
           <Select showSearch optionFilterProp="children" allowClear placeholder="Select method">
             {methods.map(m => (
-              <Option key={m.methodId} value={m.methodId}>
-                {m.methodCode} — {m.name} ({m.lifeInMonths}m)
+              <Option key={m.methodId || m.methodCode} value={m.methodId || m.methodCode}>
+                {m.methodCode}{m.lifeInMonths ? ` — ${m.lifeInMonths}m` : ''}{m.name && m.name !== m.methodCode ? ` (${m.name})` : ''}
               </Option>
             ))}
           </Select>
