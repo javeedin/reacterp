@@ -128,6 +128,7 @@ const ManagePurchaseOrders    = lazy(() => import('./pages/procurement').then(m 
 const CreatePurchaseOrder     = lazy(() => import('./pages/procurement').then(m => ({ default: m.CreatePurchaseOrder })));
 const ManageExpectedReceipts  = lazy(() => import('./pages/procurement').then(m => ({ default: m.ManageExpectedReceipts })));
 const UATDiagnostics          = lazy(() => import('./pages/procurement').then(m => ({ default: m.UATDiagnostics })));
+const TrialBalanceLoading     = lazy(() => import('./pages/procurement').then(m => ({ default: m.TrialBalanceLoading })));
 
 // Placeholder component for modules under development
 const ComingSoon = ({ moduleName }: { moduleName: string }) => (
@@ -260,6 +261,7 @@ function App() {
               <Route path="procurement/legal-entities" element={<LegalEntities />} />
               <Route path="procurement/expected-receipts" element={<ManageExpectedReceipts />} />
               <Route path="procurement/uat" element={<UATDiagnostics />} />
+              <Route path="procurement/tb-loading" element={<TrialBalanceLoading />} />
               <Route path="ap/suppliers" element={<APManageSuppliers />} />
               <Route path="suppliers/manage" element={<ManageSuppliers />} />
               <Route path="suppliers/balance/:supplierNumber" element={<SupplierBalance />} />

@@ -5,3 +5,4 @@ export { default as LegalEntities } from './LegalEntities';
 export { default as CreatePurchaseOrder } from './CreatePurchaseOrder';
 export { default as ManageExpectedReceipts } from './ManageExpectedReceipts';
 export { default as UATDiagnostics } from './UATDiagnostics';
+export { default as TrialBalanceLoading } from './TrialBalanceLoading';

@@ -109,6 +109,7 @@ export const ALL_MENU_ITEMS: MenuSearchItem[] = [
 
   // ── Procurement / Suppliers ─────────────────────────────────────────────────
   { key: 'proc-suppliers',        label: 'Manage Suppliers',            module: 'PROC', moduleLabel: 'Procurement',             path: '/procurement/suppliers',          description: 'Supplier master data management', keywords: 'vendor supplier party' },
+  { key: 'proc-tb-loading',      label: 'Trial Balance Loading',       module: 'PROC', moduleLabel: 'Procurement',             path: '/procurement/tb-loading',         description: 'Load trial balance from Excel, filter and review data', keywords: 'trial balance tb excel upload load procurement' },
 
   // ── Admin ────────────────────────────────────────────────────────────────────
   { key: 'admin',                 label: 'Administration',              module: 'ADMIN', moduleLabel: 'Administration',         path: '/admin',                          description: 'System administration', keywords: 'admin system settings' },

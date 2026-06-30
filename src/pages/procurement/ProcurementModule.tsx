@@ -111,6 +111,14 @@ const procurementItems: MenuItemType[] = [
     color: '#7c3aed',
     path: '/procurement/uat',
   },
+  {
+    key: 'tb-loading',
+    icon: <DatabaseOutlined />,
+    label: 'Trial Balance Loading',
+    description: 'Load trial balance from Excel, filter and review the data',
+    color: '#0572CE',
+    path: '/procurement/tb-loading',
+  },
 ];
 
 const TaskCard: React.FC<{ item: MenuItemType; onClick: () => void }> = ({ item, onClick }) => (
