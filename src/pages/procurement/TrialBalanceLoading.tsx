@@ -24,7 +24,11 @@ const REDWOOD = {
 };
 
 const COA_BASE = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05/valueSets';
-const HDRS = { 'Content-Type': 'application/json', Accept: 'application/json' };
+const HDRS = {
+  'Content-Type': 'application/json',
+  Accept: 'application/json',
+  Authorization: `Basic ${btoa('emparun:Fusion@1234')}`,
+};
 
 const COA_SEGMENTS = [
   { key: 'coa-company',          label: 'Company',          valueSet: 'Company_VS'          },
