@@ -271,6 +271,9 @@ const TrialBalanceLoading: React.FC = () => {
   });
 
   const numericCols = columns.filter(c => rows.some(r => typeof r[c] === 'number'));
+  // Only format columns whose name suggests a monetary amount
+  const AMOUNT_KEYWORDS = /amount|debit|credit|balance|value|total|dr|cr/i;
+  const amountCols = new Set(numericCols.filter(c => AMOUNT_KEYWORDS.test(c)));
   const totals: Record<string, number> = {};
   numericCols.forEach(c => {
     totals[c] = filteredRows.reduce((s, r) => s + (typeof r[c] === 'number' ? (r[c] as number) : 0), 0);
@@ -295,9 +298,10 @@ const TrialBalanceLoading: React.FC = () => {
 
   // ── Table columns ─────────────────────────────────────────────────────────────
   const tableColumns = columns.map(col => {
-    const isNum = numericCols.includes(col);
-    const vr    = validated ? validationResults.find(r => r.excelColumn === col) : undefined;
-    const badSet = new Set(vr?.invalidValues.map(iv => iv.value) ?? []);
+    const isNum    = numericCols.includes(col);
+    const isAmount = amountCols.has(col);
+    const vr       = validated ? validationResults.find(r => r.excelColumn === col) : undefined;
+    const badSet   = new Set(vr?.invalidValues.map(iv => iv.value) ?? []);
 
     return {
       title: (
@@ -310,16 +314,18 @@ const TrialBalanceLoading: React.FC = () => {
         </Space>
       ),
       dataIndex: col, key: col,
-      width: isNum ? 140 : 160,
+      width: isAmount ? 140 : 120,
       ellipsis: true,
-      align: (isNum ? 'right' : 'left') as 'right' | 'left',
+      align: (isAmount ? 'right' : 'left') as 'right' | 'left',
       render: (v: string | number | null) => {
         if (v === null || v === '') return <Text type="secondary">—</Text>;
-        if (isNum) return (
+        if (isAmount) return (
           <Text style={{ fontFamily: 'monospace', fontSize: 11, color: (v as number) < 0 ? REDWOOD.primary : REDWOOD.neutral900 }}>
             {fmt(v as number)}
           </Text>
         );
+        // Non-amount numeric (segment codes etc.) — show as plain text
+        if (isNum) return <Text style={{ fontSize: 11 }}>{String(v)}</Text>;
         const strV = String(v).trim();
         if (vr && badSet.has(strV)) return (
           <Tooltip title={`"${strV}" not found in ${vr.coaLabel}`}>
@@ -333,14 +339,14 @@ const TrialBalanceLoading: React.FC = () => {
     };
   });
 
-  const summaryRow = numericCols.length > 0 ? () => (
+  const summaryRow = amountCols.size > 0 ? () => (
     <Table.Summary fixed>
       <Table.Summary.Row style={{ background: '#1e293b' }}>
         {columns.map((col, i) => (
-          <Table.Summary.Cell index={i} key={col} align={numericCols.includes(col) ? 'right' : 'left'}>
+          <Table.Summary.Cell index={i} key={col} align={amountCols.has(col) ? 'right' : 'left'}>
             {i === 0
               ? <Text strong style={{ fontSize: 11, color: '#f1f5f9' }}>Total</Text>
-              : numericCols.includes(col)
+              : amountCols.has(col)
                 ? <Text strong style={{ fontSize: 11, fontFamily: 'monospace', color: '#f1f5f9' }}>{fmt(totals[col] ?? 0)}</Text>
                 : null}
           </Table.Summary.Cell>
@@ -441,7 +447,7 @@ const TrialBalanceLoading: React.FC = () => {
                     valueStyle={{ fontSize: 18, color: invalidRowIdxSet.size === 0 ? REDWOOD.success : REDWOOD.primary }} />
                 </Card></Col>
               )}
-              {numericCols.slice(0, 3).map(col => (
+              {[...amountCols].slice(0, 3).map(col => (
                 <Col key={col}><Card size="small" style={{ borderRadius: 8, minWidth: 140 }}>
                   <Statistic title={col} value={fmt(totals[col] ?? 0)}
                     valueStyle={{ fontSize: 14, fontFamily: 'monospace', color: (totals[col] ?? 0) < 0 ? REDWOOD.primary : REDWOOD.success }} />
