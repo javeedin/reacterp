@@ -133,13 +133,13 @@ const CreateAsset: React.FC = () => {
 
   // ── Step 0 — Asset Details ──────────────────────────────────────────────────
   const StepDetails = () => (
-    <Row gutter={[24, 0]}>
-      <Col xs={24} sm={12}>
+    <Row gutter={[16, 0]}>
+      <Col xs={24} sm={8}>
         <Form.Item name="assetNumber" label="Asset Number" rules={[{ required: true, message: 'Required' }]}>
           <Input placeholder="e.g. FA-0001" prefix={<BarcodeOutlined />} />
         </Form.Item>
       </Col>
-      <Col xs={24} sm={12}>
+      <Col xs={24} sm={8}>
         <Form.Item name="assetType" label="Asset Type" rules={[{ required: true, message: 'Required' }]}>
           <Select placeholder="Select type">
             <Option value="CAPITALIZED">Capitalized</Option>
@@ -148,12 +148,7 @@ const CreateAsset: React.FC = () => {
           </Select>
         </Form.Item>
       </Col>
-      <Col xs={24}>
-        <Form.Item name="description" label="Description" rules={[{ required: true, message: 'Required' }]}>
-          <Input.TextArea rows={2} placeholder="Asset description" />
-        </Form.Item>
-      </Col>
-      <Col xs={24} sm={12}>
+      <Col xs={24} sm={8}>
         <Form.Item name="categoryId" label="Category" rules={[{ required: true, message: 'Required' }]}>
           <Select showSearch optionFilterProp="children" placeholder="Select category">
             {categories.map(c => (
@@ -164,32 +159,37 @@ const CreateAsset: React.FC = () => {
           </Select>
         </Form.Item>
       </Col>
-      <Col xs={24} sm={12}>
+      <Col xs={24}>
+        <Form.Item name="description" label="Description" rules={[{ required: true, message: 'Required' }]}>
+          <Input.TextArea rows={2} placeholder="Asset description" />
+        </Form.Item>
+      </Col>
+      <Col xs={24} sm={6}>
         <Form.Item name="tagNumber" label="Tag Number">
           <Input placeholder="Physical tag / barcode" />
         </Form.Item>
       </Col>
-      <Col xs={24} sm={12}>
+      <Col xs={24} sm={6}>
         <Form.Item name="serialNumber" label="Serial Number">
           <Input placeholder="Manufacturer serial" />
         </Form.Item>
       </Col>
-      <Col xs={24} sm={12}>
+      <Col xs={24} sm={6}>
         <Form.Item name="manufacturerName" label="Manufacturer">
           <Input placeholder="e.g. Dell, Cisco" />
         </Form.Item>
       </Col>
-      <Col xs={24} sm={12}>
+      <Col xs={24} sm={6}>
         <Form.Item name="modelNumber" label="Model Number">
           <Input placeholder="Model / part number" />
         </Form.Item>
       </Col>
-      <Col xs={24} sm={4}>
+      <Col xs={12} sm={4}>
         <Form.Item name="units" label="Units" initialValue={1}>
           <InputNumber min={1} style={{ width: '100%' }} />
         </Form.Item>
       </Col>
-      <Col xs={24} sm={6}>
+      <Col xs={12} sm={5}>
         <Form.Item name="inUseFlag" label="In Use" initialValue="YES">
           <Select>
             <Option value="YES">Yes</Option>
@@ -197,7 +197,7 @@ const CreateAsset: React.FC = () => {
           </Select>
         </Form.Item>
       </Col>
-      <Col xs={24} sm={7}>
+      <Col xs={12} sm={8}>
         <Form.Item name="ownedLeased" label="Owned / Leased" initialValue="OWNED">
           <Select>
             <Option value="OWNED">Owned</Option>
@@ -205,7 +205,7 @@ const CreateAsset: React.FC = () => {
           </Select>
         </Form.Item>
       </Col>
-      <Col xs={24} sm={7}>
+      <Col xs={12} sm={7}>
         <Form.Item name="newUsed" label="New / Used" initialValue="NEW">
           <Select>
             <Option value="NEW">New</Option>
@@ -218,7 +218,7 @@ const CreateAsset: React.FC = () => {
 
   // ── Step 1 — Book & Financials ──────────────────────────────────────────────
   const StepBook = () => (
-    <Row gutter={[24, 0]}>
+    <Row gutter={[16, 0]}>
       <Col xs={24} sm={12}>
         <Form.Item name="bookTypeCode" label="Book Type" rules={[{ required: true, message: 'Required' }]}>
           <Select showSearch optionFilterProp="children" placeholder="Select book">
@@ -275,7 +275,7 @@ const CreateAsset: React.FC = () => {
           </Select>
         </Form.Item>
       </Col>
-      <Col xs={24} sm={12}>
+      <Col xs={24} sm={6}>
         <Form.Item name="capitalizedFlag" label="Capitalize?" initialValue="YES">
           <Select>
             <Option value="YES">Yes</Option>
@@ -283,7 +283,7 @@ const CreateAsset: React.FC = () => {
           </Select>
         </Form.Item>
       </Col>
-      <Col xs={24} sm={12}>
+      <Col xs={24} sm={6}>
         <Form.Item name="propertyTypeCode" label="Property Type">
           <Select allowClear placeholder="Select">
             <Option value="REAL">Real</Option>
@@ -388,9 +388,9 @@ const CreateAsset: React.FC = () => {
           ]} />
         </div>
 
-        <div style={{ padding: 24, maxWidth: 900, margin: '0 auto' }}>
+        <div style={{ padding: '16px 24px', maxWidth: 1100, margin: '0 auto' }}>
           {/* Header */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 28 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
             <div style={{
               width: 44, height: 44, borderRadius: 10,
               background: `linear-gradient(135deg, ${FA_COLOR} 0%, #9E5C00 100%)`,
@@ -411,14 +411,14 @@ const CreateAsset: React.FC = () => {
               title: s,
               icon: current > i ? <CheckCircleOutlined /> : undefined,
             }))}
-            style={{ marginBottom: 28 }}
+            style={{ marginBottom: 16 }}
             size="small"
           />
 
           {/* Step card */}
           <Card
             style={{ borderRadius: 12, border: 'none', boxShadow: '0 2px 12px rgba(0,0,0,0.07)' }}
-            bodyStyle={{ padding: 28 }}
+            bodyStyle={{ padding: '16px 20px' }}
             title={
               <Space>
                 {current === 0 && <BarcodeOutlined style={{ color: FA_COLOR }} />}
