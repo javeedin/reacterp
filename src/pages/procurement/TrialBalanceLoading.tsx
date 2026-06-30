@@ -370,9 +370,27 @@ const TrialBalanceLoading: React.FC = () => {
   const handleExport = () => downloadXlsx(filteredRows, 'Trial Balance', `TB_Filtered_${fileName || 'export'}`);
 
   const handleExportInvalid = () => {
-    const invalidRows = rows.filter(r => invalidRowIdxSet.has((r as any).__rowIdx));
-    if (invalidRows.length === 0) { message.info('No invalid rows to export.'); return; }
-    downloadXlsx(invalidRows, 'Invalid Rows', `TB_InvalidSegments_${fileName || 'export'}`);
+    const resultsWithInvalid = validationResults.filter(vr => vr.invalidValues.length > 0);
+    if (resultsWithInvalid.length === 0) { message.info('No invalid segment values to export.'); return; }
+    const wb = XLSX.utils.book_new();
+    resultsWithInvalid.forEach(vr => {
+      const sheetData = vr.invalidValues.map(iv => ({
+        'Invalid Value': iv.value,
+        'Occurrences in File': iv.count,
+        'Excel Column': vr.excelColumn,
+        'COA Segment': vr.coaLabel,
+      }));
+      const ws = XLSX.utils.json_to_sheet(sheetData);
+      // Sheet name max 31 chars, no special chars
+      const sheetName = `${vr.excelColumn}-${vr.coaLabel}`.replace(/[:\\/?*[\]]/g, '').slice(0, 31);
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    });
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([buf], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `TB_InvalidValues_${fileName || 'export'}`; a.click();
+    URL.revokeObjectURL(url);
   };
 
   const totalInvalid = validationResults.reduce((s, r) => s + r.invalidValues.length, 0);
