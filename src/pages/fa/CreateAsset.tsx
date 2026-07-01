@@ -71,7 +71,7 @@ const CreateAsset: React.FC = () => {
       payload.datePlacedInService = payload.datePlacedInService.format('YYYY-MM-DD');
     // Resolve methodCode from selected methodId
     if (payload.methodId) {
-      const m = methods.find(x => (x.methodId || x.methodCode) === payload.methodId);
+      const m = methods.find((x, i) => (x.methodId || x.methodCode || String(i)) === payload.methodId);
       if (m) { payload.methodCode = m.methodCode; payload.lifeInMonths = m.lifeInMonths; }
     }
     const loginUser = user?.username || user?.name || 'REACTERP';
@@ -131,7 +131,7 @@ const CreateAsset: React.FC = () => {
     }
     // Enrich method fields
     if (payload.methodId) {
-      const m = methods.find(x => (x.methodId || x.methodCode) === payload.methodId);
+      const m = methods.find((x, i) => (x.methodId || x.methodCode || String(i)) === payload.methodId);
       if (m) { payload.methodCode = m.methodCode; payload.lifeInMonths = m.lifeInMonths; }
     }
     const loginUser = user?.username || user?.name || 'REACTERP';
@@ -307,21 +307,28 @@ const CreateAsset: React.FC = () => {
           <Select
             showSearch optionFilterProp="children" allowClear placeholder="Select method"
             onChange={val => {
-              const m = methods.find(x => (x.methodId || x.methodCode) === val);
+              const m = methods.find((x, i) => (x.methodId || x.methodCode || String(i)) === val);
               setSelectedMethodLife(m?.lifeInMonths || '');
             }}
             onClear={() => setSelectedMethodLife('')}
           >
-            {methods.map(m => {
+            {methods.map((m, idx) => {
               const months = Number(m.lifeInMonths);
-              const years = m.lifeInMonths && months > 0
-                ? ` / ${(months / 12).toFixed(months % 12 === 0 ? 0 : 1)} yrs`
-                : '';
+              const lifeStr = m.lifeInMonths && months > 0
+                ? `${months} months / ${(months / 12).toFixed(months % 12 === 0 ? 0 : 1)} yrs`
+                : null;
+              const code = m.methodCode || '';
+              const name = m.name || code;
+              const id   = m.methodId   || code || String(idx);
+              const label = [
+                name,
+                code && code !== name ? `(${code})` : '',
+                lifeStr ? `— ${lifeStr}` : '',
+                !lifeStr && id ? `[${id}]` : '',
+              ].filter(Boolean).join(' ');
               return (
-                <Option key={m.methodId || m.methodCode} value={m.methodId || m.methodCode}>
-                  {m.name || m.methodCode}
-                  {m.methodCode && m.name && m.methodCode !== m.name ? ` (${m.methodCode})` : ''}
-                  {m.lifeInMonths ? ` — ${m.lifeInMonths} months${years}` : ''}
+                <Option key={`${id}-${idx}`} value={id}>
+                  {label}
                 </Option>
               );
             })}
