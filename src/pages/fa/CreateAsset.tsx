@@ -445,42 +445,42 @@ const CreateAsset: React.FC = () => {
             {/* Inject auto-filled entry at top so it appears selected */}
             {autoCcid && !ccids.find(c => c.ccid === autoCcid.ccid) && (
               <Option key={autoCcid.ccid} value={autoCcid.ccid}>
-                {autoCcid.label} [{autoCcid.ccid}]
+                {autoCcid.label}
               </Option>
             )}
             {ccids.map(c => (
               <Option key={c.ccid} value={c.ccid}>
-                {c.label} [{c.ccid}]
+                {c.label}
               </Option>
             ))}
           </Select>
         </Form.Item>
 
-        {/* Auto-filled CCID breakdown card */}
+        {/* Segment breakdown — shown below the CCID dropdown */}
         {autoCcid && (
           <div style={{
             background: '#f0f7ff', border: `1px solid ${REDWOOD.info}30`,
             borderRadius: 6, padding: '8px 12px', marginTop: -8, marginBottom: 16,
           }}>
-            <Text style={{ fontSize: 11, color: REDWOOD.info, fontWeight: 600, display: 'block', marginBottom: 4 }}>
-              Auto-filled from category — CCID: {autoCcid.ccid}
+            <Text style={{ fontSize: 11, color: REDWOOD.info, fontWeight: 600, display: 'block', marginBottom: 6 }}>
+              Account Segments (auto-filled from category)
             </Text>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '4px 12px' }}>
               {[
-                { label: 'Co',      val: autoCcid.segCo },
-                { label: 'LOB',     val: autoCcid.segLob },
-                { label: 'Dept',    val: autoCcid.segDept },
-                { label: 'Acct',    val: autoCcid.segAccount },
-                { label: 'Sub',     val: autoCcid.segSubAcc },
-                { label: 'Alys',    val: autoCcid.segAlys },
-                { label: 'IC',      val: autoCcid.segIc },
-                { label: 'Fut1',    val: autoCcid.segFut1 },
-                { label: 'Fut2',    val: autoCcid.segFut2 },
+                { label: 'Company',    val: autoCcid.segCo },
+                { label: 'LOB',        val: autoCcid.segLob },
+                { label: 'Department', val: autoCcid.segDept },
+                { label: 'Account',    val: autoCcid.segAccount },
+                { label: 'Sub-Account',val: autoCcid.segSubAcc },
+                { label: 'Analysis',   val: autoCcid.segAlys },
+                { label: 'Interco',    val: autoCcid.segIc },
+                { label: 'Future 1',   val: autoCcid.segFut1 },
+                { label: 'Future 2',   val: autoCcid.segFut2 },
               ].filter(s => s.val).map(s => (
-                <Tag key={s.label} style={{ fontSize: 11, margin: 0 }}>
-                  <span style={{ color: '#888', marginRight: 2 }}>{s.label}:</span>
-                  <strong>{s.val}</strong>
-                </Tag>
+                <div key={s.label}>
+                  <Text type="secondary" style={{ fontSize: 10, display: 'block', lineHeight: '14px' }}>{s.label}</Text>
+                  <Text strong style={{ fontSize: 12 }}>{s.val}</Text>
+                </div>
               ))}
             </div>
           </div>
