@@ -179,10 +179,19 @@ const CreateAsset: React.FC = () => {
       </Col>
       <Col xs={24} sm={8}>
         <Form.Item name="categoryId" label="Category" rules={[{ required: true, message: 'Required' }]}>
-          <Select showSearch optionFilterProp="children" placeholder="Select category">
+          <Select
+            showSearch optionFilterProp="children" placeholder="Select category"
+            onChange={val => {
+              const cat = categories.find(c => c.categoryId === val);
+              if (cat?.assetCostAccountCcid) {
+                form.setFieldValue('codeCombinationId', String(cat.assetCostAccountCcid));
+              }
+            }}
+          >
             {categories.map(c => (
               <Option key={c.categoryId} value={c.categoryId}>
                 {[c.segment1, c.segment2].filter(Boolean).join(' / ')} — {c.description}
+                {c.assetCostAccount ? ` [${c.assetCostAccount}]` : ''}
               </Option>
             ))}
           </Select>
@@ -403,11 +412,19 @@ const CreateAsset: React.FC = () => {
               </Tooltip>
             </span>
           }
+          help={(() => {
+            const val = form.getFieldValue('codeCombinationId');
+            const cat = categories.find(c => c.categoryId === (stepData.categoryId || form.getFieldValue('categoryId')));
+            if (cat?.assetCostAccountCcid && String(cat.assetCostAccountCcid) === String(val) && cat.assetCostAccount) {
+              return <span style={{ fontSize: 11, color: REDWOOD.info }}>Auto-filled from category: {cat.assetCostAccount}</span>;
+            }
+            return null;
+          })()}
         >
           <Select
             showSearch allowClear
             loading={ccidLoading}
-            placeholder="Search account combination…"
+            placeholder="Search by account combination or CCID…"
             filterOption={(input, option) =>
               String(option?.children ?? '').toLowerCase().includes(input.toLowerCase())
             }

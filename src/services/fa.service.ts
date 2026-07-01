@@ -185,6 +185,11 @@ export interface CategoryRecord {
   capitalizeFlag: string;
   summaryFlag: string;
   enabledFlag: string;
+  // Asset cost CCID + resolved segments (populated by 19_fa_categories_with_ccid.sql)
+  assetCostAccountCcid?: string;
+  assetCostAccount?: string;
+  segCo?: string; segLob?: string; segDept?: string; segAccount?: string;
+  segSubAcc?: string; segAlys?: string; segIc?: string; segFut1?: string; segFut2?: string;
 }
 
 export interface CategoryDetail extends CategoryRecord {
@@ -440,7 +445,31 @@ export const getCategoryBookDefaults = async (categoryId: string): Promise<{ suc
 };
 
 export const getCategories = async (): Promise<CategoryRecord[]> => {
-  try { const d = await fetchFromApex('fa/categories'); return d.items || []; }
+  try {
+    const d = await fetchFromApex('fa/categories');
+    return (d.items || []).map((r: any): CategoryRecord => ({
+      categoryId:          r.categoryId          ?? r.category_id          ?? '',
+      segment1:            r.segment1            ?? r.SEGMENT1             ?? '',
+      segment2:            r.segment2            ?? r.SEGMENT2             ?? '',
+      description:         r.description         ?? '',
+      categoryType:        r.categoryType        ?? r.category_type        ?? '',
+      ownedLeased:         r.ownedLeased         ?? r.owned_leased         ?? '',
+      capitalizeFlag:      r.capitalizeFlag      ?? r.capitalize_flag      ?? '',
+      summaryFlag:         r.summaryFlag         ?? r.summary_flag         ?? '',
+      enabledFlag:         r.enabledFlag         ?? r.enabled_flag         ?? '',
+      assetCostAccountCcid: r.assetCostAccountCcid ?? r.asset_cost_account_ccid ?? undefined,
+      assetCostAccount:    r.assetCostAccount    ?? r.asset_cost_account   ?? undefined,
+      segCo:      r.segCo      ?? r.seg_co      ?? undefined,
+      segLob:     r.segLob     ?? r.seg_lob     ?? undefined,
+      segDept:    r.segDept    ?? r.seg_dept     ?? undefined,
+      segAccount: r.segAccount ?? r.seg_account  ?? undefined,
+      segSubAcc:  r.segSubAcc  ?? r.seg_sub_acc  ?? undefined,
+      segAlys:    r.segAlys    ?? r.seg_alys     ?? undefined,
+      segIc:      r.segIc      ?? r.seg_ic       ?? undefined,
+      segFut1:    r.segFut1    ?? r.seg_fut1     ?? undefined,
+      segFut2:    r.segFut2    ?? r.seg_fut2     ?? undefined,
+    }));
+  }
   catch { return []; }
 };
 
