@@ -63,6 +63,56 @@ const CreateAsset: React.FC = () => {
   // Selected method life display
   const [selectedMethodLife, setSelectedMethodLife] = useState<string>('');
 
+  // Depreciation preview modal
+  const [deprnModal, setDeprnModal] = useState(false);
+  const [deprnFromDate, setDeprnFromDate] = useState<dayjs.Dayjs | null>(null);
+  const [deprnToDate, setDeprnToDate]     = useState<dayjs.Dayjs>(dayjs());
+
+  interface DeprnRow { period: string; openingNbv: number; depreciation: number; closingNbv: number; }
+  const [deprnRows, setDeprnRows] = useState<DeprnRow[]>([]);
+
+  const openDeprnPreview = () => {
+    const vals = { ...stepData, ...form.getFieldsValue() };
+    const dpis = vals.datePlacedInService;
+    setDeprnFromDate(dayjs.isDayjs(dpis) ? dpis : dpis ? dayjs(dpis) : null);
+    setDeprnToDate(dayjs());
+    setDeprnRows([]);
+    setDeprnModal(true);
+  };
+
+  const calcDeprn = () => {
+    const vals = { ...stepData, ...form.getFieldsValue() };
+    const cost       = Number(vals.cost ?? 0);
+    const salvage    = Number(vals.salvageValue ?? 0);
+    const lifeMonths = Number(selectedMethodLife || 0);
+    const depFlag    = (vals.depreciateFlag ?? 'YES') === 'YES';
+
+    if (!depFlag || lifeMonths <= 0 || cost <= 0 || !deprnFromDate || !deprnToDate) {
+      setDeprnRows([]);
+      return;
+    }
+
+    const monthlyDeprn = (cost - salvage) / lifeMonths;
+    const rows: DeprnRow[] = [];
+    let nbv = cost;
+    let cur = deprnFromDate.startOf('month');
+    const end = deprnToDate.startOf('month');
+
+    while (cur.isBefore(end) || cur.isSame(end, 'month')) {
+      const depr = Math.min(monthlyDeprn, nbv - salvage);
+      if (depr <= 0) { cur = cur.add(1, 'month'); continue; }
+      rows.push({
+        period:       cur.format('MMM-YYYY'),
+        openingNbv:   nbv,
+        depreciation: depr,
+        closingNbv:   nbv - depr,
+      });
+      nbv -= depr;
+      cur = cur.add(1, 'month');
+    }
+    setDeprnRows(rows);
+  };
+
   // Auto-filled CCID info from selected category
   const [autoCcid, setAutoCcid] = useState<{ ccid: string; label: string; segCo?: string; segLob?: string; segDept?: string; segAccount?: string; segSubAcc?: string; segAlys?: string; segIc?: string; segFut1?: string; segFut2?: string } | null>(null);
 
@@ -396,6 +446,21 @@ const CreateAsset: React.FC = () => {
           </Select>
         </Form.Item>
       </Col>
+      <Col xs={24} style={{ paddingTop: 4 }}>
+        <Button
+          icon={<DollarOutlined />}
+          style={{ borderColor: FA_COLOR, color: FA_COLOR }}
+          onClick={openDeprnPreview}
+          disabled={!selectedMethodLife}
+        >
+          Preview Depreciation
+        </Button>
+        {!selectedMethodLife && (
+          <Text type="secondary" style={{ marginLeft: 10, fontSize: 12 }}>
+            Select a depreciation method to enable preview
+          </Text>
+        )}
+      </Col>
     </Row>
   );
 
@@ -667,6 +732,117 @@ const CreateAsset: React.FC = () => {
           </div>
         </div>
       </Content>
+
+      {/* ── Depreciation Preview Modal ── */}
+      <Modal
+        open={deprnModal}
+        onCancel={() => setDeprnModal(false)}
+        width={820}
+        title={<Space><DollarOutlined style={{ color: FA_COLOR }} /><span>Depreciation Preview (Straight-Line)</span></Space>}
+        footer={<Button onClick={() => setDeprnModal(false)}>Close</Button>}
+      >
+        <Row gutter={[12, 0]} style={{ marginBottom: 12 }}>
+          <Col xs={24} sm={8}>
+            <div style={{ marginBottom: 4 }}>
+              <Text type="secondary" style={{ fontSize: 11 }}>From Date (Date Placed in Service)</Text>
+            </div>
+            <DatePicker
+              style={{ width: '100%' }}
+              value={deprnFromDate}
+              format="DD-MMM-YYYY"
+              onChange={v => setDeprnFromDate(v)}
+            />
+          </Col>
+          <Col xs={24} sm={8}>
+            <div style={{ marginBottom: 4 }}>
+              <Text type="secondary" style={{ fontSize: 11 }}>To Date</Text>
+            </div>
+            <DatePicker
+              style={{ width: '100%' }}
+              value={deprnToDate}
+              format="DD-MMM-YYYY"
+              onChange={v => setDeprnToDate(v || dayjs())}
+            />
+          </Col>
+          <Col xs={24} sm={8} style={{ display: 'flex', alignItems: 'flex-end' }}>
+            <Button
+              type="primary"
+              style={{ background: FA_COLOR, borderColor: FA_COLOR, width: '100%' }}
+              onClick={calcDeprn}
+              disabled={!deprnFromDate}
+            >
+              Calculate
+            </Button>
+          </Col>
+        </Row>
+
+        {deprnRows.length > 0 && (() => {
+          const totalDeprn = deprnRows.reduce((s, r) => s + r.depreciation, 0);
+          const finalNbv   = deprnRows[deprnRows.length - 1].closingNbv;
+          const fmt = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          return (
+            <>
+              <div style={{
+                border: `1px solid ${REDWOOD.neutral200}`,
+                borderRadius: 6, overflow: 'hidden', marginBottom: 8,
+              }}>
+                {/* Header row */}
+                <div style={{
+                  display: 'grid', gridTemplateColumns: '120px 1fr 1fr 1fr',
+                  background: REDWOOD.neutral100, padding: '6px 12px',
+                  fontSize: 12, fontWeight: 600, borderBottom: `1px solid ${REDWOOD.neutral200}`,
+                }}>
+                  <span>Period</span>
+                  <span style={{ textAlign: 'right' }}>Opening NBV</span>
+                  <span style={{ textAlign: 'right' }}>Depreciation</span>
+                  <span style={{ textAlign: 'right' }}>Closing NBV</span>
+                </div>
+                {/* Data rows — scrollable */}
+                <div style={{ maxHeight: 340, overflowY: 'auto' }}>
+                  {deprnRows.map((r, i) => (
+                    <div key={r.period} style={{
+                      display: 'grid', gridTemplateColumns: '120px 1fr 1fr 1fr',
+                      padding: '5px 12px', fontSize: 12,
+                      background: i % 2 === 0 ? '#fff' : REDWOOD.neutral100,
+                      borderBottom: `1px solid ${REDWOOD.neutral200}`,
+                    }}>
+                      <span style={{ fontFamily: 'monospace' }}>{r.period}</span>
+                      <span style={{ textAlign: 'right', fontFamily: 'monospace' }}>{fmt(r.openingNbv)}</span>
+                      <span style={{ textAlign: 'right', fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(r.depreciation)}</span>
+                      <span style={{ textAlign: 'right', fontFamily: 'monospace' }}>{fmt(r.closingNbv)}</span>
+                    </div>
+                  ))}
+                </div>
+                {/* Totals row */}
+                <div style={{
+                  display: 'grid', gridTemplateColumns: '120px 1fr 1fr 1fr',
+                  padding: '6px 12px', fontSize: 12, fontWeight: 700,
+                  background: '#fff3cd', borderTop: `2px solid ${REDWOOD.warning}`,
+                }}>
+                  <span>Total ({deprnRows.length} months)</span>
+                  <span />
+                  <span style={{ textAlign: 'right', fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(totalDeprn)}</span>
+                  <span style={{ textAlign: 'right', fontFamily: 'monospace' }}>{fmt(finalNbv)}</span>
+                </div>
+              </div>
+              <Space>
+                <Tag color="orange">Total Depreciation: {fmt(totalDeprn)}</Tag>
+                <Tag color="blue">Final NBV: {fmt(finalNbv)}</Tag>
+                <Tag color="green">{deprnRows.length} months</Tag>
+              </Space>
+            </>
+          );
+        })()}
+
+        {deprnRows.length === 0 && deprnFromDate && (
+          <Text type="secondary" style={{ display: 'block', textAlign: 'center', padding: '20px 0' }}>
+            Click "Calculate" to generate the depreciation schedule.
+          </Text>
+        )}
+        {!deprnFromDate && (
+          <Alert type="warning" showIcon message="Date Placed in Service is not set — please set it in the Book & Financials step first." />
+        )}
+      </Modal>
 
       {/* ── Debug Modal ── */}
       <Modal
