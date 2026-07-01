@@ -445,7 +445,18 @@ export const getCategories = async (): Promise<CategoryRecord[]> => {
 };
 
 export const getMethods = async (): Promise<MethodRecord[]> => {
-  try { const d = await fetchFromApex('fa/methods'); return d.items || []; }
+  try {
+    const d = await fetchFromApex('fa/methods');
+    return (d.items || []).map((m: any): MethodRecord => ({
+      methodId:      m.methodId      ?? m.method_id      ?? '',
+      methodCode:    m.methodCode    ?? m.method_code    ?? '',
+      name:          m.name         ?? '',
+      lifeInMonths:  m.lifeInMonths  ?? m.life_in_months  ?? '',
+      stlMethodFlag: m.stlMethodFlag ?? m.stl_method_flag ?? '',
+      rateSourceRule: m.rateSourceRule ?? m.rate_source_rule ?? '',
+      deprnBasisRule: m.deprnBasisRule ?? m.deprn_basis_rule ?? '',
+    }));
+  }
   catch { return []; }
 };
 
