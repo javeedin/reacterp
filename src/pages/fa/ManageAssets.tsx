@@ -73,6 +73,8 @@ interface OpenAssetTab {
   transactions: TransactionRecord[];
   categoryBooks: CategoryBookRecord[];
   categoryName: string;
+  categoryId: string;
+  categoryApiUrl: string;
   activeSubTab: string;
 }
 
@@ -81,7 +83,7 @@ const AssetTabContent: React.FC<{
   tab: OpenAssetTab;
   onSubTabChange: (key: string, subTab: string) => void;
 }> = ({ tab, onSubTabChange }) => {
-  const { asset, detail, books, deprn, distributions, invoices, transactions, categoryBooks, categoryName, loading, activeSubTab } = tab;
+  const { asset, detail, books, deprn, distributions, invoices, transactions, categoryBooks, categoryName, categoryId, categoryApiUrl, loading, activeSubTab } = tab;
 
   // Depreciation filter state
   const [deprnFY,     setDeprnFY]     = useState('');
@@ -603,9 +605,50 @@ const AssetTabContent: React.FC<{
       label: <span><BookOutlined style={{ marginRight: 4 }} />Category Accounts</span>,
       children: loading
         ? <Spin style={{ display: 'block', margin: '40px auto' }} />
-        : categoryBooks.length === 0
-          ? <Empty description="No category account records" style={{ marginTop: 32 }} />
-          : (
+        : (
+          <>
+            {/* API info strip */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0 10px', flexWrap: 'wrap' }}>
+              <Text type="secondary" style={{ fontSize: 11 }}>Category ID:</Text>
+              {categoryId
+                ? <Tag color="blue" style={{ fontFamily: 'monospace', fontSize: 11 }}>{categoryId}</Tag>
+                : <Tag color="error" style={{ fontSize: 11 }}>Not resolved — re-run 09_rr_fa_pkg_body.sql in Oracle</Tag>
+              }
+              <div style={{ marginLeft: 'auto' }}>
+                <Tooltip title={categoryApiUrl}>
+                  <Button
+                    size="small" icon={<ApiOutlined />}
+                    style={{ color: FA_COLOR, borderColor: FA_COLOR, fontSize: 11 }}
+                    onClick={() => Modal.info({
+                      title: 'Category Accounts API',
+                      width: 760,
+                      content: (
+                        <div style={{ marginTop: 8 }}>
+                          <div style={{ fontSize: 11, color: '#888', marginBottom: 4, fontWeight: 600 }}>ENDPOINT (GET)</div>
+                          <Text copyable style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>
+                            {categoryApiUrl}
+                          </Text>
+                          {!categoryId && (
+                            <div style={{ marginTop: 12, padding: '8px 12px', background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 6 }}>
+                              <Text style={{ fontSize: 12, color: '#cf1322' }}>
+                                <strong>Category ID is empty.</strong> The asset detail API ({APEX_DB_CONFIG.baseUrl}/fa/assets/{asset.assetId})
+                                must return <code>assetCategoryId</code>. Please re-run <code>09_rr_fa_pkg_body.sql</code> in Oracle to deploy the updated package.
+                              </Text>
+                            </div>
+                          )}
+                        </div>
+                      ),
+                    })}
+                  >
+                    API
+                  </Button>
+                </Tooltip>
+              </div>
+            </div>
+
+            {categoryBooks.length === 0
+              ? <Empty description={categoryId ? 'No category account records found for this category' : 'Category ID not available — cannot load accounts'} style={{ marginTop: 24 }} />
+              : (
             <div style={{ marginTop: 8 }}>
               {categoryBooks.map((cb, i) => {
                 const accounts = [
@@ -652,7 +695,10 @@ const AssetTabContent: React.FC<{
                 );
               })}
             </div>
-          ),
+              )
+            }
+          </>
+        ),
     },
   ];
 
@@ -820,7 +866,7 @@ const ManageAssets: React.FC = () => {
     setOpenAssetTabs(prev => [...prev, {
       key: tabKey, asset, loading: true,
       detail: null, books: [], deprn: [], distributions: [], invoices: [], transactions: [],
-      categoryBooks: [], categoryName: '',
+      categoryBooks: [], categoryName: '', categoryId: '', categoryApiUrl: '',
       activeSubTab: 'general',
     }]);
     setActiveTabKey(tabKey);
@@ -836,7 +882,10 @@ const ManageAssets: React.FC = () => {
       ]);
 
       // Load category info using the assetCategoryId from the detail response
-      const catId = (det as any).assetCategoryId || asset.categoryId || '';
+      const catId = (det as any).assetCategoryId || (asset as any).assetCategoryId || '';
+      const catApiUrl = catId
+        ? `${APEX_DB_CONFIG.baseUrl}/fa/categories/${catId}/books`
+        : `${APEX_DB_CONFIG.baseUrl}/fa/categories/(no-category-id)/books`;
       let catName = '';
       let catBooks: CategoryBookRecord[] = [];
       if (catId) {
@@ -858,6 +907,8 @@ const ManageAssets: React.FC = () => {
         transactions:  txn.items || [],
         categoryBooks: catBooks,
         categoryName:  catName,
+        categoryId:    catId,
+        categoryApiUrl: catApiUrl,
       } : t));
     } catch {
       message.error('Failed to load asset details');
