@@ -491,6 +491,29 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
 
   // Unified invoice lines - shared across both tabs
   const [lines, setLines] = useState<InvoiceLine[]>([createBlankLine(1, { accountingDate: initialData?.invoiceId ? '' : dayjs().format('DD-MMM-YYYY') })]);
+  // Track lines whose description was manually edited (not auto-synced from header)
+  const [manuallyEditedDescLines, setManuallyEditedDescLines] = useState<Set<string>>(new Set());
+  // Ref so the useEffect below always reads the latest set without needing it as a dep
+  const manuallyEditedDescLinesRef = React.useRef(manuallyEditedDescLines);
+  React.useEffect(() => { manuallyEditedDescLinesRef.current = manuallyEditedDescLines; }, [manuallyEditedDescLines]);
+  // Watch header description — syncs to lines (including the initial first line) reliably.
+  // onValuesChange alone misses the first line when it's created before the field changes.
+  const watchedHeaderDesc = Form.useWatch('description', form);
+  React.useEffect(() => {
+    if (watchedHeaderDesc === undefined) return;
+    setLines(prev => {
+      const edited = manuallyEditedDescLinesRef.current;
+      const needsUpdate = prev.some(l => !edited.has(l.key) && l.description !== watchedHeaderDesc);
+      if (!needsUpdate) return prev;
+      return prev.map(l => ({
+        ...l,
+        description: edited.has(l.key) ? l.description : watchedHeaderDesc,
+      }));
+    });
+  }, [watchedHeaderDesc]);
+  // State for description edit modals
+  const [headerDescModal, setHeaderDescModal] = useState(false);
+  const [lineDescModal, setLineDescModal] = useState<{ open: boolean; lineKey: string; value: string }>({ open: false, lineKey: '', value: '' });
 
   // Distribution combinations (AP + ALL modules)
   const [distCombinations, setDistCombinations] = useState<DistCombination[]>([]);
@@ -4923,14 +4946,28 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       key: 'description',
       width: 220,
       render: (val: string, record: InvoiceLine) => (
-        <Input
-          size="small"
-          value={val}
-          onChange={(e) => updateLine(record.key, 'description', e.target.value)}
-          placeholder=""
-          variant="borderless"
-          disabled={isReadOnly}
-        />
+        <div
+          style={{ display: 'flex', alignItems: 'flex-start', gap: 4, cursor: isReadOnly ? 'default' : 'pointer' }}
+          onClick={!isReadOnly ? () => setLineDescModal({ open: true, lineKey: record.key, value: val || '' }) : undefined}
+        >
+          <span style={{
+            flex: 1, fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+            color: val ? undefined : '#bfbfbf', minHeight: 20, lineHeight: '20px',
+          }}>
+            {val || 'Click to add description…'}
+          </span>
+          {!isReadOnly && (
+            <Tooltip title="Edit description">
+              <EditOutlined
+                style={{ fontSize: 12, color: '#1677ff', cursor: 'pointer', marginTop: 2, flexShrink: 0 }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLineDescModal({ open: true, lineKey: record.key, value: val || '' });
+                }}
+              />
+            </Tooltip>
+          )}
+        </div>
       ),
     },
     {
@@ -12384,6 +12421,63 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           );
         })()}
       </Modal>
+<<<<<<< HEAD
+=======
+
+      {/* Header Description Edit Modal */}
+      <Modal
+        title="Edit Invoice Description"
+        open={headerDescModal}
+        onOk={() => setHeaderDescModal(false)}
+        onCancel={() => setHeaderDescModal(false)}
+        width={520}
+        destroyOnClose
+      >
+        <div style={{ marginBottom: 8, fontSize: 12, color: '#8c8c8c' }}>
+          Changes here automatically copy to all line descriptions that haven't been manually edited.
+        </div>
+        <Input.TextArea
+          rows={6}
+          autoFocus
+          value={form.getFieldValue('description') || ''}
+          onChange={(e) => {
+            form.setFieldValue('description', e.target.value);
+            setLines((prev) => prev.map((line) => ({
+              ...line,
+              description: manuallyEditedDescLines.has(line.key)
+                ? line.description
+                : e.target.value,
+            })));
+          }}
+          placeholder="Enter description"
+          style={{ fontSize: 13 }}
+        />
+      </Modal>
+
+      {/* Line Description Edit Modal */}
+      <Modal
+        title="Edit Line Description"
+        open={lineDescModal.open}
+        onOk={() => {
+          setManuallyEditedDescLines((prev) => new Set(prev).add(lineDescModal.lineKey));
+          updateLine(lineDescModal.lineKey, 'description', lineDescModal.value);
+          setLineDescModal({ open: false, lineKey: '', value: '' });
+        }}
+        onCancel={() => setLineDescModal({ open: false, lineKey: '', value: '' })}
+        okText="Save"
+        width={520}
+        destroyOnClose
+      >
+        <Input.TextArea
+          rows={6}
+          autoFocus
+          value={lineDescModal.value}
+          onChange={(e) => setLineDescModal((prev) => ({ ...prev, value: e.target.value }))}
+          placeholder="Enter line description (supports multiple lines)"
+          style={{ fontSize: 13 }}
+        />
+      </Modal>
+>>>>>>> a84fb81 (Fix header description sync to first line; improve line description UX)
     </div>
   );
 };
