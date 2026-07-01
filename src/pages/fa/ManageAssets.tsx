@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import * as XLSX from 'xlsx';
+import dayjs from 'dayjs';
 import {
   Layout, Card, Form, Input, Button, Space, Typography, Table, Tag,
   Row, Col, Breadcrumb, Tooltip, Select, Tabs, Descriptions,
-  Spin, Empty, Badge, message, Modal, Switch, Statistic,
+  Spin, Empty, Badge, message, Modal, Switch, Statistic, DatePicker,
 } from 'antd';
 import type { ColumnsType, TableProps } from 'antd/es/table';
 import {
@@ -11,7 +12,7 @@ import {
   FileTextOutlined, LineChartOutlined,
   EnvironmentOutlined, DatabaseOutlined, InfoCircleOutlined,
   BookOutlined, HistoryOutlined, BarcodeOutlined, ApiOutlined, CheckOutlined,
-  FilterOutlined, DownloadOutlined,
+  FilterOutlined, DownloadOutlined, DollarOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
@@ -82,6 +83,45 @@ const AssetTabContent: React.FC<{
   // Depreciation filter state
   const [deprnFY,     setDeprnFY]     = useState('');
   const [deprnPeriod, setDeprnPeriod] = useState('');
+
+  // Depreciation preview modal state
+  interface DeprnRow { period: string; openingNbv: number; depreciation: number; closingNbv: number; }
+  const [deprnModal,    setDeprnModal]    = useState(false);
+  const [deprnFromDate, setDeprnFromDate] = useState<dayjs.Dayjs | null>(null);
+  const [deprnToDate,   setDeprnToDate]   = useState<dayjs.Dayjs>(dayjs());
+  const [deprnRows,     setDeprnRows]     = useState<DeprnRow[]>([]);
+
+  const openDeprnPreview = () => {
+    const dpis = asset.datePlacedInService;
+    setDeprnFromDate(dpis ? dayjs(dpis) : null);
+    setDeprnToDate(dayjs());
+    setDeprnRows([]);
+    setDeprnModal(true);
+  };
+
+  const calcDeprn = () => {
+    const b0 = books[0];
+    const cost       = parseFloat(asset.cost)       || 0;
+    const salvage    = parseFloat(b0?.salvageValue ?? asset.salvageValue) || 0;
+    const lifeMonths = Number(b0?.lifeInMonths)     || 0;
+
+    if (lifeMonths <= 0 || cost <= 0 || !deprnFromDate) { setDeprnRows([]); return; }
+
+    const monthlyDeprn = (cost - salvage) / lifeMonths;
+    const rows: DeprnRow[] = [];
+    let nbv = cost;
+    let cur = deprnFromDate.startOf('month');
+    const end = deprnToDate.startOf('month');
+
+    while (cur.isBefore(end) || cur.isSame(end, 'month')) {
+      const depr = Math.min(monthlyDeprn, nbv - salvage);
+      if (depr <= 0) { cur = cur.add(1, 'month'); continue; }
+      rows.push({ period: cur.format('MMM-YYYY'), openingNbv: nbv, depreciation: depr, closingNbv: nbv - depr });
+      nbv -= depr;
+      cur = cur.add(1, 'month');
+    }
+    setDeprnRows(rows);
+  };
 
   // Derived unique option lists for filter dropdowns
   const fyOptions     = Array.from(new Set(deprn.map(r => r.fiscalYear).filter(Boolean))).sort((a, b) => b.localeCompare(a));
@@ -399,6 +439,15 @@ const AssetTabContent: React.FC<{
                     </Button>
                   </Tooltip>
                 )}
+                <Button
+                  size="small"
+                  icon={<DollarOutlined />}
+                  style={{ borderColor: FA_COLOR, color: FA_COLOR }}
+                  onClick={openDeprnPreview}
+                  disabled={!books[0]?.lifeInMonths}
+                >
+                  Preview Depreciation
+                </Button>
               </div>
             </div>
             <Table
@@ -423,6 +472,84 @@ const AssetTabContent: React.FC<{
                 );
               }}
             />
+
+            {/* ── Preview Depreciation Modal ── */}
+            <Modal
+              open={deprnModal}
+              onCancel={() => setDeprnModal(false)}
+              width={820}
+              title={<Space><DollarOutlined style={{ color: FA_COLOR }} /><span>Depreciation Preview — {asset.asset_number || asset.assetNumber}</span></Space>}
+              footer={<Button onClick={() => setDeprnModal(false)}>Close</Button>}
+            >
+              {/* Info strip */}
+              {books[0] && (
+                <div style={{ background: REDWOOD.neutral100, borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 12 }}>
+                  <Space size={20}>
+                    <span><Text type="secondary">Method: </Text><Text strong>{books[0].methodName || books[0].methodCode || '—'}</Text></span>
+                    <span><Text type="secondary">Life: </Text><Text strong>{books[0].lifeInMonths} months</Text></span>
+                    <span><Text type="secondary">Cost: </Text><Text strong>{formatCurrency(asset.cost)}</Text></span>
+                    <span><Text type="secondary">Salvage: </Text><Text strong>{formatCurrency(books[0].salvageValue ?? asset.salvageValue)}</Text></span>
+                  </Space>
+                </div>
+              )}
+              <Row gutter={[12, 0]} style={{ marginBottom: 12 }}>
+                <Col xs={24} sm={8}>
+                  <div style={{ marginBottom: 4 }}><Text type="secondary" style={{ fontSize: 11 }}>From Date (Date in Service)</Text></div>
+                  <DatePicker style={{ width: '100%' }} value={deprnFromDate} format="DD-MMM-YYYY" onChange={v => setDeprnFromDate(v)} />
+                </Col>
+                <Col xs={24} sm={8}>
+                  <div style={{ marginBottom: 4 }}><Text type="secondary" style={{ fontSize: 11 }}>To Date</Text></div>
+                  <DatePicker style={{ width: '100%' }} value={deprnToDate} format="DD-MMM-YYYY" onChange={v => setDeprnToDate(v || dayjs())} />
+                </Col>
+                <Col xs={24} sm={8} style={{ display: 'flex', alignItems: 'flex-end' }}>
+                  <Button type="primary" style={{ background: FA_COLOR, borderColor: FA_COLOR, width: '100%' }} onClick={calcDeprn} disabled={!deprnFromDate}>
+                    Calculate
+                  </Button>
+                </Col>
+              </Row>
+
+              {deprnRows.length > 0 && (() => {
+                const totalDeprn = deprnRows.reduce((s, r) => s + r.depreciation, 0);
+                const finalNbv   = deprnRows[deprnRows.length - 1].closingNbv;
+                const fmt = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                return (
+                  <>
+                    <div style={{ border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, overflow: 'hidden', marginBottom: 8 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 1fr 1fr', background: REDWOOD.neutral100, padding: '6px 12px', fontSize: 12, fontWeight: 600, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+                        <span>Period</span>
+                        <span style={{ textAlign: 'right' }}>Opening NBV</span>
+                        <span style={{ textAlign: 'right' }}>Depreciation</span>
+                        <span style={{ textAlign: 'right' }}>Closing NBV</span>
+                      </div>
+                      <div style={{ maxHeight: 340, overflowY: 'auto' }}>
+                        {deprnRows.map((r, i) => (
+                          <div key={r.period} style={{ display: 'grid', gridTemplateColumns: '120px 1fr 1fr 1fr', padding: '5px 12px', fontSize: 12, background: i % 2 === 0 ? '#fff' : REDWOOD.neutral100, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+                            <span style={{ fontFamily: 'monospace' }}>{r.period}</span>
+                            <span style={{ textAlign: 'right', fontFamily: 'monospace' }}>{fmt(r.openingNbv)}</span>
+                            <span style={{ textAlign: 'right', fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(r.depreciation)}</span>
+                            <span style={{ textAlign: 'right', fontFamily: 'monospace' }}>{fmt(r.closingNbv)}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 1fr 1fr', padding: '6px 12px', fontSize: 12, fontWeight: 700, background: '#fff3cd', borderTop: `2px solid ${REDWOOD.warning}` }}>
+                        <span>Total ({deprnRows.length} months)</span>
+                        <span />
+                        <span style={{ textAlign: 'right', fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(totalDeprn)}</span>
+                        <span style={{ textAlign: 'right', fontFamily: 'monospace' }}>{fmt(finalNbv)}</span>
+                      </div>
+                    </div>
+                    <Space>
+                      <Tag color="orange">Total Depreciation: {fmt(totalDeprn)}</Tag>
+                      <Tag color="blue">Final NBV: {fmt(finalNbv)}</Tag>
+                      <Tag color="green">{deprnRows.length} months</Tag>
+                    </Space>
+                  </>
+                );
+              })()}
+              {deprnRows.length === 0 && deprnFromDate && (
+                <Text type="secondary" style={{ display: 'block', textAlign: 'center', padding: '20px 0' }}>Click "Calculate" to generate the depreciation schedule.</Text>
+              )}
+            </Modal>
           </>
         ),
     },
