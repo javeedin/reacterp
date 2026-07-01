@@ -10,6 +10,7 @@ import {
   BarcodeOutlined, DollarOutlined, BugOutlined, CopyOutlined, SendOutlined,
 } from '@ant-design/icons';
 import { APEX_DB_CONFIG } from '../../config/api.config';
+import { useAuth } from '../../context/AuthContext';
 import { Link, useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 import {
@@ -39,6 +40,7 @@ const STEPS = ['Asset Details', 'Book & Financials', 'Assignment', 'Review & Sub
 
 const CreateAsset: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [form]    = Form.useForm();
   const [current, setCurrent] = useState(0);
   const [saving,  setSaving]  = useState(false);
@@ -52,6 +54,9 @@ const CreateAsset: React.FC = () => {
   // Collected values across steps (merged on submit)
   const [stepData, setStepData] = useState<Record<string, any>>({});
 
+  // Selected method life display
+  const [selectedMethodLife, setSelectedMethodLife] = useState<string>('');
+
   // Debug modal
   const [debugModal, setDebugModal] = useState(false);
   const [testResult, setTestResult] = useState<{ status: number; body: string } | null>(null);
@@ -64,6 +69,14 @@ const CreateAsset: React.FC = () => {
     const payload = { ...stepData, ...vals };
     if (payload.datePlacedInService && dayjs.isDayjs(payload.datePlacedInService))
       payload.datePlacedInService = payload.datePlacedInService.format('YYYY-MM-DD');
+    // Resolve methodCode from selected methodId
+    if (payload.methodId) {
+      const m = methods.find(x => (x.methodId || x.methodCode) === payload.methodId);
+      if (m) { payload.methodCode = m.methodCode; payload.lifeInMonths = m.lifeInMonths; }
+    }
+    const loginUser = user?.username || user?.name || 'REACTERP';
+    payload.createdBy = loginUser;
+    payload.lastUpdatedBy = loginUser;
     return payload;
   };
 
@@ -116,6 +129,14 @@ const CreateAsset: React.FC = () => {
     if (payload.datePlacedInService && dayjs.isDayjs(payload.datePlacedInService)) {
       payload.datePlacedInService = payload.datePlacedInService.format('YYYY-MM-DD');
     }
+    // Enrich method fields
+    if (payload.methodId) {
+      const m = methods.find(x => (x.methodId || x.methodCode) === payload.methodId);
+      if (m) { payload.methodCode = m.methodCode; payload.lifeInMonths = m.lifeInMonths; }
+    }
+    const loginUser = user?.username || user?.name || 'REACTERP';
+    payload.createdBy = loginUser;
+    payload.lastUpdatedBy = loginUser;
 
     setSaving(true);
     try {
@@ -265,11 +286,29 @@ const CreateAsset: React.FC = () => {
         </Form.Item>
       </Col>
       <Col xs={24} sm={12}>
-        <Form.Item name="methodId" label="Depreciation Method">
-          <Select showSearch optionFilterProp="children" allowClear placeholder="Select method">
+        <Form.Item
+          name="methodId"
+          label={
+            <span>
+              Depreciation Method
+              {selectedMethodLife && (
+                <Tag color="blue" style={{ marginLeft: 8, fontSize: 11 }}>Life: {selectedMethodLife} months</Tag>
+              )}
+            </span>
+          }
+        >
+          <Select
+            showSearch optionFilterProp="children" allowClear placeholder="Select method"
+            onChange={val => {
+              const m = methods.find(x => (x.methodId || x.methodCode) === val);
+              setSelectedMethodLife(m?.lifeInMonths || '');
+            }}
+            onClear={() => setSelectedMethodLife('')}
+          >
             {methods.map(m => (
               <Option key={m.methodId || m.methodCode} value={m.methodId || m.methodCode}>
-                {m.methodCode}{m.lifeInMonths ? ` — ${m.lifeInMonths}m` : ''}{m.name && m.name !== m.methodCode ? ` (${m.name})` : ''}
+                {m.methodCode}{m.lifeInMonths ? ` — ${m.lifeInMonths} months` : ''}
+                {m.name && m.name !== m.methodCode ? ` (${m.name})` : ''}
               </Option>
             ))}
           </Select>
@@ -358,7 +397,7 @@ const CreateAsset: React.FC = () => {
           <Descriptions.Item label="Cost">{formatCurrency(all.cost ?? 0)}</Descriptions.Item>
           <Descriptions.Item label="Salvage Value">{formatCurrency(all.salvageValue ?? 0)}</Descriptions.Item>
           <Descriptions.Item label="Depreciate">{all.depreciateFlag || '—'}</Descriptions.Item>
-          <Descriptions.Item label="Method">{method ? `${method.methodCode} (${method.lifeInMonths}m)` : all.methodId || '—'}</Descriptions.Item>
+          <Descriptions.Item label="Method">{method ? `${method.methodCode}${method.lifeInMonths ? ` — ${method.lifeInMonths} months` : ''}${method.name && method.name !== method.methodCode ? ` (${method.name})` : ''}` : all.methodId || '—'}</Descriptions.Item>
           <Descriptions.Item label="Property Type">{all.propertyTypeCode || '—'}</Descriptions.Item>
           <Descriptions.Item label="Capitalize">{all.capitalizedFlag || '—'}</Descriptions.Item>
         </Descriptions>

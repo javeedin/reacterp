@@ -64,11 +64,17 @@ CREATE OR REPLACE PROCEDURE RR_FA_CREATE_ASSET (
     v_salvage_value       NUMBER;
     v_depreciate_flag     VARCHAR2(10);
     v_method_id           VARCHAR2(100);
+    v_method_code         VARCHAR2(100);
+    v_life_in_months      VARCHAR2(100);
     v_convention_type_id  VARCHAR2(100);
 
     -- Assignment
     v_location_id         VARCHAR2(100);
     v_ccid                VARCHAR2(100);
+
+    -- Audit
+    v_created_by          VARCHAR2(400);
+    v_updated_by          VARCHAR2(400);
 
     -- Generated IDs (use sequences or max+1 fallback)
     v_asset_id            NUMBER;
@@ -101,10 +107,25 @@ BEGIN
     v_salvage_value    := NVL(APEX_JSON.GET_NUMBER(p_path => 'salvageValue'), 0);
     v_depreciate_flag  := NVL(APEX_JSON.GET_VARCHAR2(p_path => 'depreciateFlag'), 'YES');
     v_method_id        := APEX_JSON.GET_VARCHAR2(p_path => 'methodId');
+    v_method_code      := APEX_JSON.GET_VARCHAR2(p_path => 'methodCode');
+    v_life_in_months   := APEX_JSON.GET_VARCHAR2(p_path => 'lifeInMonths');
+    -- If methodId not provided but methodCode is, look up by methodCode
+    IF v_method_id IS NULL AND v_method_code IS NOT NULL THEN
+        BEGIN
+            SELECT METHOD_ID INTO v_method_id
+            FROM   RR_FA_METHODS
+            WHERE  METHOD_CODE = v_method_code
+            AND    ROWNUM = 1;
+        EXCEPTION WHEN NO_DATA_FOUND THEN NULL;
+        END;
+    END IF;
     v_convention_type_id := APEX_JSON.GET_VARCHAR2(p_path => 'conventionTypeId');
 
     v_location_id      := APEX_JSON.GET_VARCHAR2(p_path => 'locationId');
     v_ccid             := APEX_JSON.GET_VARCHAR2(p_path => 'codeCombinationId');
+
+    v_created_by       := NVL(APEX_JSON.GET_VARCHAR2(p_path => 'createdBy'), 'REACTERP');
+    v_updated_by       := NVL(APEX_JSON.GET_VARCHAR2(p_path => 'lastUpdatedBy'), v_created_by);
 
     -- Validate required fields
     IF v_asset_number IS NULL OR v_description IS NULL OR v_category_id IS NULL THEN
@@ -152,7 +173,7 @@ BEGIN
         v_in_use_flag, v_owned_leased, v_new_used, v_units, v_units,
         v_capitalized_flag, 'NO', 'NO', v_property_type,
         'REACTERP', 1,
-        SYSTIMESTAMP, 'REACTERP', SYSTIMESTAMP, 'REACTERP'
+        SYSTIMESTAMP, v_created_by, SYSTIMESTAMP, v_updated_by
     );
 
     -- 2. Insert into RR_FA_ADDITIONS_TL
@@ -162,7 +183,7 @@ BEGIN
         OBJECT_VERSION_NUMBER
     ) VALUES (
         v_asset_id, 'US', 'US', v_description,
-        SYSTIMESTAMP, 'REACTERP', SYSTIMESTAMP, 'REACTERP', 1
+        SYSTIMESTAMP, v_created_by, SYSTIMESTAMP, v_updated_by, 1
     );
 
     -- 3. Insert into RR_FA_BOOKS (if book info provided)
@@ -188,7 +209,7 @@ BEGIN
             1, 'PERCENT', 'NO_LIMIT',
             0, v_cost,
             1,
-            SYSTIMESTAMP, 'REACTERP', SYSTIMESTAMP, 'REACTERP'
+            SYSTIMESTAMP, v_created_by, SYSTIMESTAMP, v_updated_by
         );
     END IF;
 
@@ -206,7 +227,7 @@ BEGIN
         v_txn_header_id, v_book_type_code, v_asset_id,
         'ADDITION', SYSDATE, SYSDATE,
         'REACTERP', 1,
-        SYSTIMESTAMP, 'REACTERP', SYSTIMESTAMP, 'REACTERP'
+        SYSTIMESTAMP, v_created_by, SYSTIMESTAMP, v_updated_by
     );
 
     -- 5. Insert distribution history (if location provided)
@@ -228,7 +249,7 @@ BEGIN
             v_ccid, v_location_id,
             v_txn_header_id, SYSDATE,
             1,
-            SYSTIMESTAMP, 'REACTERP', SYSTIMESTAMP, 'REACTERP'
+            SYSTIMESTAMP, v_created_by, SYSTIMESTAMP, v_updated_by
         );
     END IF;
 
