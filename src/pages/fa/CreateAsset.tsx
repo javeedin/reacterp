@@ -291,9 +291,16 @@ const CreateAsset: React.FC = () => {
           label={
             <span>
               Depreciation Method
-              {selectedMethodLife && (
-                <Tag color="blue" style={{ marginLeft: 8, fontSize: 11 }}>Life: {selectedMethodLife} months</Tag>
-              )}
+              {selectedMethodLife && (() => {
+                const months = Number(selectedMethodLife);
+                const years = months > 0 ? (months / 12).toFixed(months % 12 === 0 ? 0 : 1) : null;
+                return (
+                  <>
+                    <Tag color="blue" style={{ marginLeft: 8, fontSize: 11 }}>{selectedMethodLife} months</Tag>
+                    {years && <Tag color="geekblue" style={{ fontSize: 11 }}>{years} years</Tag>}
+                  </>
+                );
+              })()}
             </span>
           }
         >
@@ -305,12 +312,19 @@ const CreateAsset: React.FC = () => {
             }}
             onClear={() => setSelectedMethodLife('')}
           >
-            {methods.map(m => (
-              <Option key={m.methodId || m.methodCode} value={m.methodId || m.methodCode}>
-                {m.methodCode}{m.lifeInMonths ? ` — ${m.lifeInMonths} months` : ''}
-                {m.name && m.name !== m.methodCode ? ` (${m.name})` : ''}
-              </Option>
-            ))}
+            {methods.map(m => {
+              const months = Number(m.lifeInMonths);
+              const years = m.lifeInMonths && months > 0
+                ? ` / ${(months / 12).toFixed(months % 12 === 0 ? 0 : 1)} yrs`
+                : '';
+              return (
+                <Option key={m.methodId || m.methodCode} value={m.methodId || m.methodCode}>
+                  {m.name || m.methodCode}
+                  {m.methodCode && m.name && m.methodCode !== m.name ? ` (${m.methodCode})` : ''}
+                  {m.lifeInMonths ? ` — ${m.lifeInMonths} months${years}` : ''}
+                </Option>
+              );
+            })}
           </Select>
         </Form.Item>
       </Col>
@@ -397,7 +411,11 @@ const CreateAsset: React.FC = () => {
           <Descriptions.Item label="Cost">{formatCurrency(all.cost ?? 0)}</Descriptions.Item>
           <Descriptions.Item label="Salvage Value">{formatCurrency(all.salvageValue ?? 0)}</Descriptions.Item>
           <Descriptions.Item label="Depreciate">{all.depreciateFlag || '—'}</Descriptions.Item>
-          <Descriptions.Item label="Method">{method ? `${method.methodCode}${method.lifeInMonths ? ` — ${method.lifeInMonths} months` : ''}${method.name && method.name !== method.methodCode ? ` (${method.name})` : ''}` : all.methodId || '—'}</Descriptions.Item>
+          <Descriptions.Item label="Method">{method ? (() => {
+              const months = Number(method.lifeInMonths);
+              const yrs = method.lifeInMonths && months > 0 ? ` / ${(months / 12).toFixed(months % 12 === 0 ? 0 : 1)} years` : '';
+              return `${method.name || method.methodCode}${method.methodCode && method.name && method.methodCode !== method.name ? ` (${method.methodCode})` : ''}${method.lifeInMonths ? ` — ${method.lifeInMonths} months${yrs}` : ''}`;
+            })() : all.methodId || '—'}</Descriptions.Item>
           <Descriptions.Item label="Property Type">{all.propertyTypeCode || '—'}</Descriptions.Item>
           <Descriptions.Item label="Capitalize">{all.capitalizedFlag || '—'}</Descriptions.Item>
         </Descriptions>
