@@ -461,7 +461,45 @@ export const getMethods = async (): Promise<MethodRecord[]> => {
 };
 
 export const getLocations = async (): Promise<LocationRecord[]> => {
-  try { const d = await fetchFromApex('fa/locations'); return d.items || []; }
+  try {
+    const d = await fetchFromApex('fa/locations');
+    return (d.items || []).map((r: any) => ({
+      locationId:   r.locationId   ?? r.location_id   ?? '',
+      segment1:     r.segment1     ?? r.SEGMENT1       ?? '',
+      segment2:     r.segment2     ?? r.SEGMENT2       ?? '',
+      segment3:     r.segment3     ?? r.SEGMENT3       ?? '',
+      segment4:     r.segment4     ?? r.SEGMENT4       ?? '',
+      fullLocation: r.fullLocation ?? r.full_location  ?? '',
+      summaryFlag:  r.summaryFlag  ?? r.summary_flag   ?? '',
+      enabledFlag:  r.enabledFlag  ?? r.enabled_flag   ?? '',
+    }));
+  }
+  catch { return []; }
+};
+
+export interface CcidRecord {
+  ccid: string;
+  label: string;
+  co: string; lob: string; dept: string; account: string; subAcc: string; alys: string; ic: string; accountType: string;
+}
+
+export const getCcids = async (search?: string): Promise<CcidRecord[]> => {
+  try {
+    const qs = search ? `?search=${encodeURIComponent(search)}` : '';
+    const d = await fetchFromApex(`fa/ccid${qs}`);
+    return (d.items || []).map((r: any): CcidRecord => ({
+      ccid:        String(r.ccid   ?? r.CCID   ?? ''),
+      label:       r.label        ?? r.LABEL   ?? '',
+      co:          r.co           ?? '',
+      lob:         r.lob          ?? '',
+      dept:        r.dept         ?? '',
+      account:     r.account      ?? '',
+      subAcc:      r.subAcc       ?? r.sub_acc ?? '',
+      alys:        r.alys         ?? '',
+      ic:          r.ic           ?? '',
+      accountType: r.accountType  ?? r.account_type ?? '',
+    }));
+  }
   catch { return []; }
 };
 

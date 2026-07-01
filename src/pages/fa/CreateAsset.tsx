@@ -2,22 +2,22 @@ import React, { useState, useEffect } from 'react';
 import {
   Layout, Card, Form, Input, Select, Button, Space, Typography, Row, Col,
   Steps, InputNumber, DatePicker, Descriptions, message, Breadcrumb, Divider,
-  Modal, Tag, Alert, Spin,
+  Modal, Tag, Alert, Spin, Tooltip,
 } from 'antd';
 import {
   HomeOutlined, SaveOutlined, LeftOutlined, RightOutlined,
   CheckCircleOutlined, DatabaseOutlined, BookOutlined, EnvironmentOutlined,
-  BarcodeOutlined, DollarOutlined, BugOutlined, CopyOutlined, SendOutlined,
+  BarcodeOutlined, DollarOutlined, BugOutlined, CopyOutlined, SendOutlined, LinkOutlined,
 } from '@ant-design/icons';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import { useAuth } from '../../context/AuthContext';
 import { Link, useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 import {
-  createAsset, getCategories, getMethods, getLocations, getBookControls,
+  createAsset, getCategories, getMethods, getLocations, getBookControls, getCcids,
   assetTypeLabel, formatCurrency,
 } from '../../services/fa.service';
-import type { CategoryRecord, MethodRecord, LocationRecord, BookControlRecord } from '../../services/fa.service';
+import type { CategoryRecord, MethodRecord, LocationRecord, BookControlRecord, CcidRecord } from '../../services/fa.service';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -50,6 +50,12 @@ const CreateAsset: React.FC = () => {
   const [methods,      setMethods]      = useState<MethodRecord[]>([]);
   const [locations,    setLocations]    = useState<LocationRecord[]>([]);
   const [bookControls, setBookControls] = useState<BookControlRecord[]>([]);
+  const [ccids,        setCcids]        = useState<CcidRecord[]>([]);
+  const [ccidLoading,  setCcidLoading]  = useState(false);
+
+  const FA_BASE = `${APEX_DB_CONFIG.baseUrl}`;
+  const LOCATIONS_URL = `${FA_BASE}/fa/locations`;
+  const CCID_URL      = `${FA_BASE}/fa/ccid`;
 
   // Collected values across steps (merged on submit)
   const [stepData, setStepData] = useState<Record<string, any>>({});
@@ -102,6 +108,8 @@ const CreateAsset: React.FC = () => {
     getMethods().then(setMethods);
     getLocations().then(setLocations);
     getBookControls().then(setBookControls);
+    setCcidLoading(true);
+    getCcids().then(r => { setCcids(r); setCcidLoading(false); });
   }, []);
 
   // ── Navigation ──────────────────────────────────────────────────────────────
@@ -356,19 +364,61 @@ const CreateAsset: React.FC = () => {
 
   // ── Step 2 — Assignment ─────────────────────────────────────────────────────
   const StepAssignment = () => (
-    <Row gutter={[24, 0]}>
+    <Row gutter={[16, 0]}>
       <Col xs={24} sm={12}>
-        <Form.Item name="locationId" label="Location">
+        <Form.Item
+          name="locationId"
+          label={
+            <span>
+              Location
+              <Tooltip title={LOCATIONS_URL}>
+                <LinkOutlined
+                  style={{ marginLeft: 6, fontSize: 11, color: REDWOOD.info, cursor: 'pointer' }}
+                  onClick={() => window.open(LOCATIONS_URL, '_blank')}
+                />
+              </Tooltip>
+            </span>
+          }
+        >
           <Select showSearch optionFilterProp="children" allowClear placeholder="Select location">
             {locations.map(l => (
-              <Option key={l.locationId} value={l.locationId}>{l.fullLocation}</Option>
+              <Option key={l.locationId || l.fullLocation} value={l.locationId || l.fullLocation}>
+                {l.fullLocation}
+              </Option>
             ))}
           </Select>
         </Form.Item>
       </Col>
       <Col xs={24} sm={12}>
-        <Form.Item name="codeCombinationId" label="Account (CCID)">
-          <Input placeholder="GL Code Combination ID" />
+        <Form.Item
+          name="codeCombinationId"
+          label={
+            <span>
+              Account (CCID)
+              <Tooltip title={CCID_URL}>
+                <LinkOutlined
+                  style={{ marginLeft: 6, fontSize: 11, color: REDWOOD.info, cursor: 'pointer' }}
+                  onClick={() => window.open(CCID_URL, '_blank')}
+                />
+              </Tooltip>
+            </span>
+          }
+        >
+          <Select
+            showSearch allowClear
+            loading={ccidLoading}
+            placeholder="Search account combination…"
+            filterOption={(input, option) =>
+              String(option?.children ?? '').toLowerCase().includes(input.toLowerCase())
+            }
+            notFoundContent={ccidLoading ? <Spin size="small" /> : 'No combinations found'}
+          >
+            {ccids.map(c => (
+              <Option key={c.ccid} value={c.ccid}>
+                {c.label} [{c.ccid}]
+              </Option>
+            ))}
+          </Select>
         </Form.Item>
       </Col>
       <Col xs={24}>
