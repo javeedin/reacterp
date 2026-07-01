@@ -19,11 +19,12 @@ import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
   searchAssets, getAssetDetail, getAssetBooks, getAssetDeprn,
   getAssetDistributions, getAssetInvoices, getAssetTransactions,
+  getCategoryDetail, getCategoryBooks,
   formatCurrency, assetTypeLabel, assetStatusLabel,
 } from '../../services/fa.service';
 import type {
   AssetRecord, AssetDetail, AssetBook, DeprnRecord,
-  DistributionRecord, InvoiceRecord, TransactionRecord,
+  DistributionRecord, InvoiceRecord, TransactionRecord, CategoryBookRecord,
 } from '../../services/fa.service';
 
 const { Content } = Layout;
@@ -70,6 +71,8 @@ interface OpenAssetTab {
   distributions: DistributionRecord[];
   invoices: InvoiceRecord[];
   transactions: TransactionRecord[];
+  categoryBooks: CategoryBookRecord[];
+  categoryName: string;
   activeSubTab: string;
 }
 
@@ -78,7 +81,7 @@ const AssetTabContent: React.FC<{
   tab: OpenAssetTab;
   onSubTabChange: (key: string, subTab: string) => void;
 }> = ({ tab, onSubTabChange }) => {
-  const { asset, detail, books, deprn, distributions, invoices, transactions, loading, activeSubTab } = tab;
+  const { asset, detail, books, deprn, distributions, invoices, transactions, categoryBooks, categoryName, loading, activeSubTab } = tab;
 
   // Depreciation filter state
   const [deprnFY,     setDeprnFY]     = useState('');
@@ -595,6 +598,62 @@ const AssetTabContent: React.FC<{
           />
         ),
     },
+    {
+      key: 'categoryAccounts',
+      label: <span><BookOutlined style={{ marginRight: 4 }} />Category Accounts</span>,
+      children: loading
+        ? <Spin style={{ display: 'block', margin: '40px auto' }} />
+        : categoryBooks.length === 0
+          ? <Empty description="No category account records" style={{ marginTop: 32 }} />
+          : (
+            <div style={{ marginTop: 8 }}>
+              {categoryBooks.map((cb, i) => {
+                const accounts = [
+                  { label: 'Asset Cost',                val: cb.assetCostAccount },
+                  { label: 'Asset Clearing',            val: cb.assetClearingAccount },
+                  { label: 'Depreciation Expense',      val: cb.deprnExpenseAccount },
+                  { label: 'Depreciation Reserve',      val: cb.reserveAccount },
+                  { label: 'Bonus Deprn Expense',       val: cb.bonusExpenseAccount },
+                  { label: 'Bonus Deprn Reserve',       val: cb.bonusReserveAccount },
+                  { label: 'CIP Cost',                  val: cb.cipCostAccount },
+                  { label: 'CIP Clearing',              val: cb.cipClearingAccount },
+                  { label: 'Unplanned Deprn Expense',   val: cb.unplannedDeprnExpAccount },
+                  { label: 'Impairment Expense',        val: cb.impairmentExpenseAccount },
+                  { label: 'Impairment Reserve',        val: cb.impairmentReserveAccount },
+                  { label: 'Revaluation Reserve',       val: cb.revalReserveAccount },
+                  { label: 'Reval Amortization',        val: cb.revalAmortAccount },
+                  { label: 'Reval Loss Expense',        val: cb.revalLossExpAccount },
+                ];
+                return (
+                  <Card key={i} size="small"
+                    style={{ marginBottom: 12, borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
+                    title={<Space><BookOutlined style={{ color: FA_COLOR }} /><Text strong>{cb.bookTypeCode}</Text>{cb.bookTypeName && <Text type="secondary" style={{ fontSize: 12 }}>— {cb.bookTypeName}</Text>}</Space>}
+                  >
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))',
+                      gap: '0 16px',
+                    }}>
+                      {accounts.map(a => (
+                        <div key={a.label} style={{
+                          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                          padding: '7px 0', borderBottom: `1px solid ${REDWOOD.neutral200}`,
+                          minHeight: 36,
+                        }}>
+                          <Text style={{ fontSize: 12, color: REDWOOD.neutral600, minWidth: 180 }}>{a.label}</Text>
+                          {a.val
+                            ? <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.neutral900 }}>{a.val}</Text>
+                            : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
+                          }
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+          ),
+    },
   ];
 
   return (
@@ -619,6 +678,11 @@ const AssetTabContent: React.FC<{
           </div>
           <span style={{ color: REDWOOD.neutral300 }}>|</span>
           <Text style={{ fontSize: 13, color: REDWOOD.neutral900 }}>{asset.description}</Text>
+          {categoryName && (
+            <Tag style={{ borderRadius: 4, fontSize: 11, color: REDWOOD.neutral600, background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}` }}>
+              {categoryName}
+            </Tag>
+          )}
           <div style={{ marginLeft: 'auto' }}>{statusTag(asset.retiredFlag)}</div>
         </div>
         {/* Bottom row: key metrics */}
@@ -756,6 +820,7 @@ const ManageAssets: React.FC = () => {
     setOpenAssetTabs(prev => [...prev, {
       key: tabKey, asset, loading: true,
       detail: null, books: [], deprn: [], distributions: [], invoices: [], transactions: [],
+      categoryBooks: [], categoryName: '',
       activeSubTab: 'general',
     }]);
     setActiveTabKey(tabKey);
@@ -769,6 +834,20 @@ const ManageAssets: React.FC = () => {
         getAssetInvoices(asset.assetId),
         getAssetTransactions(asset.assetId),
       ]);
+
+      // Load category info using the assetCategoryId from the detail response
+      const catId = (det as any).assetCategoryId || asset.categoryId || '';
+      let catName = '';
+      let catBooks: CategoryBookRecord[] = [];
+      if (catId) {
+        const [catDet, catBks] = await Promise.all([
+          getCategoryDetail(catId),
+          getCategoryBooks(catId),
+        ]);
+        catName  = catDet.description || '';
+        catBooks = catBks.items || [];
+      }
+
       setOpenAssetTabs(prev => prev.map(t => t.key === tabKey ? {
         ...t, loading: false,
         detail:        det.success !== false ? det : null,
@@ -777,6 +856,8 @@ const ManageAssets: React.FC = () => {
         distributions: dist.items || [],
         invoices:      inv.items || [],
         transactions:  txn.items || [],
+        categoryBooks: catBooks,
+        categoryName:  catName,
       } : t));
     } catch {
       message.error('Failed to load asset details');

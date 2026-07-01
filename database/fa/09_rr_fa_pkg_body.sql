@@ -66,6 +66,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
             SELECT a.ASSET_ID,
                    a.ASSET_NUMBER,
                    a.DESCRIPTION,
+                   a.ASSET_CATEGORY_ID,
                    a.CREATION_DATE,
                    a.CREATED_BY,
                    a.LAST_UPDATE_DATE,
@@ -107,6 +108,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                 || '"assetId":'             || jstr(r.ASSET_ID)
                 || ',"asset_number":'       || jstr(r.ASSET_NUMBER)
                 || ',"description":'        || jstr(r.DESCRIPTION)
+                || ',"assetCategoryId":'    || jstr(r.ASSET_CATEGORY_ID)
                 || ',"creationDate":'       || jstr(r.CREATION_DATE)
                 || ',"createdBy":'          || jstr(r.CREATED_BY)
                 || ',"lastUpdateDate":'     || jstr(r.LAST_UPDATE_DATE)
@@ -142,6 +144,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         v_asset_id           VARCHAR2(400);
         v_asset_number       VARCHAR2(400);
         v_description        VARCHAR2(400);
+        v_asset_category_id  VARCHAR2(400);
         v_creation_date      VARCHAR2(400);
         v_created_by         VARCHAR2(400);
         v_last_update_date   VARCHAR2(400);
@@ -168,7 +171,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         v_convention_type_id VARCHAR2(400);
         v_retirement_id      VARCHAR2(400);
     BEGIN
-        SELECT a.ASSET_ID, a.ASSET_NUMBER, a.DESCRIPTION,
+        SELECT a.ASSET_ID, a.ASSET_NUMBER, a.DESCRIPTION, a.ASSET_CATEGORY_ID,
                a.CREATION_DATE, a.CREATED_BY, a.LAST_UPDATE_DATE, a.LAST_UPDATED_BY,
                b.BOOK_TYPE_CODE, b.DATE_PLACED_IN_SERVICE, b.DATE_EFFECTIVE,
                b.DEPRN_START_DATE, b.COST, b.ORIGINAL_COST, b.ADJUSTED_COST,
@@ -177,7 +180,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                b.PRORATE_DATE, b.RATE_ADJUSTMENT_FACTOR,
                b.SALVAGE_TYPE, b.DEPRN_LIMIT_TYPE, b.CIP_COST,
                b.METHOD_ID, b.CONVENTION_TYPE_ID, b.RETIREMENT_ID
-        INTO   v_asset_id, v_asset_number, v_description,
+        INTO   v_asset_id, v_asset_number, v_description, v_asset_category_id,
                v_creation_date, v_created_by, v_last_update_date, v_last_updated_by,
                v_book_type_code, v_date_placed, v_date_effective,
                v_deprn_start_date, v_cost, v_original_cost, v_adjusted_cost,
@@ -196,6 +199,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
             || ',"assetId":'             || jstr(v_asset_id)
             || ',"asset_number":'        || jstr(v_asset_number)
             || ',"description":'         || jstr(v_description)
+            || ',"assetCategoryId":'     || jstr(v_asset_category_id)
             || ',"creationDate":'        || jstr(v_creation_date)
             || ',"createdBy":'           || jstr(v_created_by)
             || ',"lastUpdateDate":'      || jstr(v_last_update_date)
