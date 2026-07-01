@@ -70,6 +70,7 @@ export interface AssetDetail extends AssetRecord {
 export interface AssetBook {
   bookTypeCode: string;
   bookTypeName: string;
+  companyCode: string;
   datePlacedInService: string;
   dateEffective: string;
   deprnStartDate: string;

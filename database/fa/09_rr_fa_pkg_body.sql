@@ -241,7 +241,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         p_result      OUT CLOB
     ) IS
         CURSOR c_books IS
-            SELECT b.BOOK_TYPE_CODE, bc.BOOK_TYPE_NAME,
+            SELECT b.BOOK_TYPE_CODE, bc.BOOK_TYPE_NAME, bc.COMPANY_CODE,
                    b.DATE_PLACED_IN_SERVICE, b.DATE_EFFECTIVE, b.DEPRN_START_DATE,
                    b.COST, b.ORIGINAL_COST, b.ADJUSTED_COST, b.SALVAGE_VALUE,
                    b.RECOVERABLE_COST, b.DEPRECIATE_FLAG, b.CAPITALIZE_FLAG,
@@ -276,6 +276,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
             APEX_JSON.OPEN_OBJECT;
             APEX_JSON.WRITE('bookTypeCode',         r.BOOK_TYPE_CODE);
             APEX_JSON.WRITE('bookTypeName',         r.BOOK_TYPE_NAME);
+            APEX_JSON.WRITE('companyCode',          r.COMPANY_CODE);
             APEX_JSON.WRITE('datePlacedInService',  r.DATE_PLACED_IN_SERVICE);
             APEX_JSON.WRITE('dateEffective',        r.DATE_EFFECTIVE);
             APEX_JSON.WRITE('deprnStartDate',       r.DEPRN_START_DATE);

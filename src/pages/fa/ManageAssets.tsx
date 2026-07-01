@@ -330,9 +330,20 @@ const AssetTabContent: React.FC<{
               {books.map((b, i) => (
                 <Card key={i} size="small"
                   style={{ marginBottom: 12, borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
-                  title={<Space><BookOutlined style={{ color: FA_COLOR }} /><Text strong>{b.bookTypeCode}</Text></Space>}
+                  title={
+                    <Space>
+                      <BookOutlined style={{ color: FA_COLOR }} />
+                      <Text strong>{b.bookTypeCode}</Text>
+                      {b.companyCode && (
+                        <Tag color="blue" style={{ fontSize: 11, fontFamily: 'monospace' }}>
+                          Company: {b.companyCode}
+                        </Tag>
+                      )}
+                    </Space>
+                  }
                 >
                   <Descriptions column={2} size="small">
+                    <Descriptions.Item label="Company Code">{b.companyCode || '—'}</Descriptions.Item>
                     <Descriptions.Item label="Date in Service">{fmtDate(b.datePlacedInService)}</Descriptions.Item>
                     <Descriptions.Item label="Deprn Start">{fmtDate(b.deprnStartDate)}</Descriptions.Item>
                     <Descriptions.Item label="Cost">{formatCurrency(b.cost)}</Descriptions.Item>
@@ -614,6 +625,13 @@ const AssetTabContent: React.FC<{
                 ? <Tag color="blue" style={{ fontFamily: 'monospace', fontSize: 11 }}>{categoryId}</Tag>
                 : <Tag color="error" style={{ fontSize: 11 }}>Not resolved — re-run 09_rr_fa_pkg_body.sql in Oracle</Tag>
               }
+              {books[0]?.companyCode && (
+                <>
+                  <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>Company Code (from Book):</Text>
+                  <Tag color="geekblue" style={{ fontFamily: 'monospace', fontSize: 11 }}>{books[0].companyCode}</Tag>
+                  <Text type="secondary" style={{ fontSize: 11 }}>— defaulted as first segment in accounts below</Text>
+                </>
+              )}
               <div style={{ marginLeft: 'auto' }}>
                 <Tooltip title={categoryApiUrl}>
                   <Button
@@ -670,26 +688,52 @@ const AssetTabContent: React.FC<{
                 return (
                   <Card key={i} size="small"
                     style={{ marginBottom: 12, borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
-                    title={<Space><BookOutlined style={{ color: FA_COLOR }} /><Text strong>{cb.bookTypeCode}</Text>{cb.bookTypeName && <Text type="secondary" style={{ fontSize: 12 }}>— {cb.bookTypeName}</Text>}</Space>}
+                    title={
+                      <Space>
+                        <BookOutlined style={{ color: FA_COLOR }} />
+                        <Text strong>{cb.bookTypeCode}</Text>
+                        {cb.bookTypeName && <Text type="secondary" style={{ fontSize: 12 }}>— {cb.bookTypeName}</Text>}
+                      </Space>
+                    }
                   >
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))',
-                      gap: '0 16px',
-                    }}>
-                      {accounts.map(a => (
-                        <div key={a.label} style={{
-                          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                          padding: '7px 0', borderBottom: `1px solid ${REDWOOD.neutral200}`,
-                          minHeight: 36,
-                        }}>
-                          <Text style={{ fontSize: 12, color: REDWOOD.neutral600, minWidth: 180 }}>{a.label}</Text>
-                          {a.val
-                            ? <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.neutral900 }}>{a.val}</Text>
-                            : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
-                          }
-                        </div>
-                      ))}
+                    {/* Column header */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: '0 16px', padding: '4px 0 6px', borderBottom: `2px solid ${REDWOOD.neutral200}` }}>
+                      <Text type="secondary" style={{ fontSize: 11, fontWeight: 600 }}>Account Type</Text>
+                      <Text type="secondary" style={{ fontSize: 11, fontWeight: 600 }}>Account Combination</Text>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(480px, 1fr))', gap: '0 16px' }}>
+                      {accounts.map(a => {
+                        const companyCode = books[0]?.companyCode || '';
+                        const segments = a.val ? a.val.split('-') : [];
+                        const firstSeg = segments[0] || '';
+                        const rest = segments.slice(1).join('-');
+                        const isCompanyMatch = companyCode && firstSeg === companyCode;
+                        return (
+                          <div key={a.label} style={{
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                            padding: '7px 0', borderBottom: `1px solid ${REDWOOD.neutral200}`,
+                            minHeight: 36,
+                          }}>
+                            <Text style={{ fontSize: 12, color: REDWOOD.neutral600, minWidth: 200 }}>{a.label}</Text>
+                            {a.val ? (
+                              <span style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 600 }}>
+                                {isCompanyMatch ? (
+                                  <>
+                                    <Tag color="geekblue" style={{ fontFamily: 'monospace', fontSize: 11, marginRight: 0 }}>
+                                      {firstSeg}
+                                    </Tag>
+                                    <span style={{ color: REDWOOD.neutral900 }}>{rest ? `-${rest}` : ''}</span>
+                                  </>
+                                ) : (
+                                  <span style={{ color: REDWOOD.neutral900 }}>{a.val}</span>
+                                )}
+                              </span>
+                            ) : (
+                              <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </Card>
                 );
@@ -741,6 +785,17 @@ const AssetTabContent: React.FC<{
             <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Date in Service</Text>
             <Text strong style={{ fontSize: 12 }}>{fmtDate(asset.datePlacedInService)}</Text>
           </Col>
+          {books[0]?.companyCode && (
+            <Col xs={12} sm={8} md={3}>
+              <div style={{
+                padding: '6px 12px', borderRadius: 6,
+                background: '#f0f7ff', border: '1px solid #bdd7f5',
+              }}>
+                <Text type="secondary" style={{ fontSize: 10, display: 'block' }}>Company</Text>
+                <Text strong style={{ fontSize: 13, color: REDWOOD.info }}>{books[0].companyCode}</Text>
+              </div>
+            </Col>
+          )}
           <Col xs={8} sm={8} md={5}>
             <div style={{
               padding: '6px 12px', borderRadius: 6,
