@@ -63,6 +63,9 @@ const CreateAsset: React.FC = () => {
   // Selected method life display
   const [selectedMethodLife, setSelectedMethodLife] = useState<string>('');
 
+  // Auto-filled CCID info from selected category
+  const [autoCcid, setAutoCcid] = useState<{ ccid: string; label: string; segCo?: string; segLob?: string; segDept?: string; segAccount?: string; segSubAcc?: string; segAlys?: string; segIc?: string; segFut1?: string; segFut2?: string } | null>(null);
+
   // Debug modal
   const [debugModal, setDebugModal] = useState(false);
   const [testResult, setTestResult] = useState<{ status: number; body: string } | null>(null);
@@ -184,7 +187,23 @@ const CreateAsset: React.FC = () => {
             onChange={val => {
               const cat = categories.find(c => c.categoryId === val);
               if (cat?.assetCostAccountCcid) {
-                form.setFieldValue('codeCombinationId', String(cat.assetCostAccountCcid));
+                const ccidStr = String(cat.assetCostAccountCcid);
+                form.setFieldValue('codeCombinationId', ccidStr);
+                setAutoCcid({
+                  ccid:       ccidStr,
+                  label:      cat.assetCostAccount || ccidStr,
+                  segCo:      cat.segCo,
+                  segLob:     cat.segLob,
+                  segDept:    cat.segDept,
+                  segAccount: cat.segAccount,
+                  segSubAcc:  cat.segSubAcc,
+                  segAlys:    cat.segAlys,
+                  segIc:      cat.segIc,
+                  segFut1:    cat.segFut1,
+                  segFut2:    cat.segFut2,
+                });
+              } else {
+                setAutoCcid(null);
               }
             }}
           >
@@ -412,14 +431,6 @@ const CreateAsset: React.FC = () => {
               </Tooltip>
             </span>
           }
-          help={(() => {
-            const val = form.getFieldValue('codeCombinationId');
-            const cat = categories.find(c => c.categoryId === (stepData.categoryId || form.getFieldValue('categoryId')));
-            if (cat?.assetCostAccountCcid && String(cat.assetCostAccountCcid) === String(val) && cat.assetCostAccount) {
-              return <span style={{ fontSize: 11, color: REDWOOD.info }}>Auto-filled from category: {cat.assetCostAccount}</span>;
-            }
-            return null;
-          })()}
         >
           <Select
             showSearch allowClear
@@ -429,7 +440,14 @@ const CreateAsset: React.FC = () => {
               String(option?.children ?? '').toLowerCase().includes(input.toLowerCase())
             }
             notFoundContent={ccidLoading ? <Spin size="small" /> : 'No combinations found'}
+            onChange={() => setAutoCcid(null)}
           >
+            {/* Inject auto-filled entry at top so it appears selected */}
+            {autoCcid && !ccids.find(c => c.ccid === autoCcid.ccid) && (
+              <Option key={autoCcid.ccid} value={autoCcid.ccid}>
+                {autoCcid.label} [{autoCcid.ccid}]
+              </Option>
+            )}
             {ccids.map(c => (
               <Option key={c.ccid} value={c.ccid}>
                 {c.label} [{c.ccid}]
@@ -437,6 +455,36 @@ const CreateAsset: React.FC = () => {
             ))}
           </Select>
         </Form.Item>
+
+        {/* Auto-filled CCID breakdown card */}
+        {autoCcid && (
+          <div style={{
+            background: '#f0f7ff', border: `1px solid ${REDWOOD.info}30`,
+            borderRadius: 6, padding: '8px 12px', marginTop: -8, marginBottom: 16,
+          }}>
+            <Text style={{ fontSize: 11, color: REDWOOD.info, fontWeight: 600, display: 'block', marginBottom: 4 }}>
+              Auto-filled from category — CCID: {autoCcid.ccid}
+            </Text>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {[
+                { label: 'Co',      val: autoCcid.segCo },
+                { label: 'LOB',     val: autoCcid.segLob },
+                { label: 'Dept',    val: autoCcid.segDept },
+                { label: 'Acct',    val: autoCcid.segAccount },
+                { label: 'Sub',     val: autoCcid.segSubAcc },
+                { label: 'Alys',    val: autoCcid.segAlys },
+                { label: 'IC',      val: autoCcid.segIc },
+                { label: 'Fut1',    val: autoCcid.segFut1 },
+                { label: 'Fut2',    val: autoCcid.segFut2 },
+              ].filter(s => s.val).map(s => (
+                <Tag key={s.label} style={{ fontSize: 11, margin: 0 }}>
+                  <span style={{ color: '#888', marginRight: 2 }}>{s.label}:</span>
+                  <strong>{s.val}</strong>
+                </Tag>
+              ))}
+            </div>
+          </div>
+        )}
       </Col>
       <Col xs={24}>
         <Card size="small" style={{ background: REDWOOD.neutral100, borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
