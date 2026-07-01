@@ -190,7 +190,7 @@ BEGIN
     IF v_book_type_code IS NOT NULL THEN
         INSERT INTO RR_FA_BOOKS (
             ASSET_ID, BOOK_TYPE_CODE,
-            DATE_PLACED_IN_SERVICE, DATE_EFFECTIVE, DEPRN_START_DATE,
+            DATE_PLACED_IN_SERVICE, DATE_EFFECTIVE, DEPRN_START_DATE, PRORATE_DATE,
             COST, ORIGINAL_COST, ADJUSTED_COST,
             SALVAGE_VALUE, RECOVERABLE_COST, ADJUSTED_RECOVERABLE_COST,
             DEPRECIATE_FLAG, CAPITALIZE_FLAG,
@@ -201,7 +201,7 @@ BEGIN
             CREATION_DATE, CREATED_BY, LAST_UPDATE_DATE, LAST_UPDATED_BY
         ) VALUES (
             v_asset_id, v_book_type_code,
-            v_date_placed, SYSDATE, v_date_placed,
+            v_date_placed, SYSTIMESTAMP, v_date_placed, v_date_placed,
             v_cost, v_cost, v_cost,
             v_salvage_value, v_cost - v_salvage_value, v_cost - v_salvage_value,
             v_depreciate_flag, v_capitalized_flag,
@@ -225,7 +225,7 @@ BEGIN
         CREATION_DATE, CREATED_BY, LAST_UPDATE_DATE, LAST_UPDATED_BY
     ) VALUES (
         v_txn_header_id, v_book_type_code, v_asset_id,
-        'ADDITION', SYSDATE, SYSDATE,
+        'ADDITION', SYSTIMESTAMP, SYSTIMESTAMP,
         'REACTERP', 1,
         SYSTIMESTAMP, v_created_by, SYSTIMESTAMP, v_updated_by
     );
@@ -247,7 +247,7 @@ BEGIN
             v_distribution_id, v_book_type_code, v_asset_id,
             v_units, v_units,
             v_ccid, v_location_id,
-            v_txn_header_id, SYSDATE,
+            v_txn_header_id, SYSTIMESTAMP,
             1,
             SYSTIMESTAMP, v_created_by, SYSTIMESTAMP, v_updated_by
         );
