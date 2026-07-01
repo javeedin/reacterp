@@ -128,23 +128,28 @@ BEGIN
     v_updated_by       := NVL(APEX_JSON.GET_VARCHAR2(p_path => 'lastUpdatedBy'), v_created_by);
 
     -- Validate required fields
-    IF v_asset_number IS NULL OR v_description IS NULL OR v_category_id IS NULL THEN
+    IF v_description IS NULL OR v_category_id IS NULL THEN
         p_status  := 400;
         APEX_JSON.INITIALIZE_CLOB_OUTPUT;
         APEX_JSON.OPEN_OBJECT;
         APEX_JSON.WRITE('success', FALSE);
-        APEX_JSON.WRITE('error',   'assetNumber, description and categoryId are required');
+        APEX_JSON.WRITE('error',   'description and categoryId are required');
         APEX_JSON.CLOSE_OBJECT;
         p_message := APEX_JSON.GET_CLOB_OUTPUT;
         APEX_JSON.FREE_OUTPUT;
         RETURN;
     END IF;
 
-    -- Check duplicate asset number
+    -- Assign asset number from sequence (NEXTVAL called here at submit time)
+    SELECT RR_FA_ASSET_NUMBER_SEQ.NEXTVAL INTO v_asset_id FROM DUAL;
+    v_asset_number := TO_CHAR(v_asset_id);
+
+    -- Check duplicate asset number (safety check)
     SELECT COUNT(*) INTO v_exists
     FROM RR_FA_ADDITIONS WHERE ASSET_NUMBER = v_asset_number;
 
     IF v_exists > 0 THEN
+        -- Sequence collision — should not happen; surface for diagnosis
         p_status  := 409;
         APEX_JSON.INITIALIZE_CLOB_OUTPUT;
         APEX_JSON.OPEN_OBJECT;
@@ -155,9 +160,6 @@ BEGIN
         APEX_JSON.FREE_OUTPUT;
         RETURN;
     END IF;
-
-    -- Generate asset ID (max+1 fallback — replace with sequence if available)
-    SELECT NVL(MAX(TO_NUMBER(ASSET_ID)),0)+1 INTO v_asset_id FROM RR_FA_ADDITIONS;
 
     -- 1. Insert into RR_FA_ADDITIONS
     INSERT INTO RR_FA_ADDITIONS (

@@ -14,7 +14,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Link, useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 import {
-  createAsset, getCategories, getMethods, getLocations, getBookControls, getCcids, getNextAssetNumber,
+  createAsset, getCategories, getMethods, getLocations, getBookControls, getCcids, peekAssetNumber,
   assetTypeLabel, formatCurrency,
 } from '../../services/fa.service';
 import type { CategoryRecord, MethodRecord, LocationRecord, BookControlRecord, CcidRecord } from '../../services/fa.service';
@@ -113,8 +113,8 @@ const CreateAsset: React.FC = () => {
     getBookControls().then(setBookControls);
     setCcidLoading(true);
     getCcids().then(r => { setCcids(r); setCcidLoading(false); });
-    // Auto-fill next asset number from sequence
-    getNextAssetNumber().then(num => {
+    // Preview next asset number (reads LAST_NUMBER — no NEXTVAL consumed here)
+    peekAssetNumber().then(num => {
       if (num) form.setFieldValue('assetNumber', num);
     });
   }, []);
@@ -172,7 +172,12 @@ const CreateAsset: React.FC = () => {
     <Row gutter={[16, 0]}>
       <Col xs={24} sm={8}>
         <Form.Item name="assetNumber" label="Asset Number" rules={[{ required: true, message: 'Required' }]}>
-          <Input placeholder="Auto-generated…" prefix={<BarcodeOutlined />} />
+          <Input
+            placeholder="Auto-generated on save…"
+            prefix={<BarcodeOutlined />}
+            readOnly
+            style={{ background: '#f9f9f9', cursor: 'default' }}
+          />
         </Form.Item>
       </Col>
       <Col xs={24} sm={8}>

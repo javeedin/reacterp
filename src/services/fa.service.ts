@@ -537,9 +537,11 @@ export const getBookControls = async (): Promise<BookControlRecord[]> => {
   catch { return []; }
 };
 
-export const getNextAssetNumber = async (): Promise<string> => {
+// Peek: reads LAST_NUMBER from sequence dictionary — does NOT consume NEXTVAL
+// NEXTVAL is called inside the POST procedure at submit time
+export const peekAssetNumber = async (): Promise<string> => {
   try {
-    const d = await fetchFromApex('fa/next-asset-number');
+    const d = await fetchFromApex('fa/peek-asset-number');
     return d.assetNumber ?? d.asset_number ?? '';
   }
   catch { return ''; }
