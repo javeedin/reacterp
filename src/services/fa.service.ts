@@ -537,6 +537,14 @@ export const getBookControls = async (): Promise<BookControlRecord[]> => {
   catch { return []; }
 };
 
+export const getNextAssetNumber = async (): Promise<string> => {
+  try {
+    const d = await fetchFromApex('fa/next-asset-number');
+    return d.assetNumber ?? d.asset_number ?? '';
+  }
+  catch { return ''; }
+};
+
 export const getDeprnPeriods = async (bookTypeCode?: string): Promise<any[]> => {
   try {
     const qs = bookTypeCode ? `?bookTypeCode=${encodeURIComponent(bookTypeCode)}` : '';
