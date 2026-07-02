@@ -89,7 +89,8 @@ interface OpenAssetTab {
 const AssetTabContent: React.FC<{
   tab: OpenAssetTab;
   onSubTabChange: (key: string, subTab: string) => void;
-}> = ({ tab, onSubTabChange }) => {
+  onRefresh: () => void;
+}> = ({ tab, onSubTabChange, onRefresh }) => {
   const { asset, detail, books, deprn, distributions, invoices, transactions, categoryBooks, categoryName, categoryId, categoryApiUrl, loading, activeSubTab } = tab;
   const { user } = useAuth();
   const loggedUser = user?.username || user?.name || 'REACTERP';
@@ -1255,7 +1256,18 @@ const AssetTabContent: React.FC<{
               {categoryName}
             </Tag>
           )}
-          <div style={{ marginLeft: 'auto' }}>{statusTag(asset.retiredFlag)}</div>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+            {statusTag(asset.retiredFlag)}
+            <Tooltip title="Refresh asset data">
+              <Button
+                size="small"
+                icon={<ReloadOutlined />}
+                loading={loading}
+                onClick={onRefresh}
+                style={{ color: FA_COLOR, borderColor: FA_COLOR }}
+              />
+            </Tooltip>
+          </div>
         </div>
         {/* Bottom row: key metrics */}
         <Row gutter={[12, 0]} align="middle">
@@ -1586,6 +1598,39 @@ const ManageAssets: React.FC = () => {
       } : t));
     } catch {
       message.error('Failed to load asset details');
+      setOpenAssetTabs(prev => prev.map(t => t.key === tabKey ? { ...t, loading: false } : t));
+    }
+  };
+
+  const refreshAssetTab = async (tabKey: string, asset: AssetRecord) => {
+    setOpenAssetTabs(prev => prev.map(t => t.key === tabKey ? { ...t, loading: true } : t));
+    try {
+      const [det, bks, dep, dist, inv, txn] = await Promise.all([
+        getAssetDetail(asset.assetId),
+        getAssetBooks(asset.assetId),
+        getAssetDeprn(asset.assetId),
+        getAssetDistributions(asset.assetId),
+        getAssetInvoices(asset.assetId),
+        getAssetTransactions(asset.assetId),
+      ]);
+      const catId = (det as any).assetCategoryId || (asset as any).assetCategoryId || '';
+      let catName = '';
+      let catBooks: CategoryBookRecord[] = [];
+      if (catId) {
+        const [catDet, catBks] = await Promise.all([getCategoryDetail(catId), getCategoryBooks(catId)]);
+        catName  = catDet.description || '';
+        catBooks = catBks.items || [];
+      }
+      setOpenAssetTabs(prev => prev.map(t => t.key === tabKey ? {
+        ...t, loading: false,
+        detail: det.success !== false ? det : null,
+        books: bks.items || [], deprn: dep.items || [],
+        distributions: dist.items || [], invoices: inv.items || [], transactions: txn.items || [],
+        categoryBooks: catBooks, categoryName: catName, categoryId: catId,
+      } : t));
+      message.success('Asset data refreshed');
+    } catch {
+      message.error('Failed to refresh asset data');
       setOpenAssetTabs(prev => prev.map(t => t.key === tabKey ? { ...t, loading: false } : t));
     }
   };
@@ -1989,6 +2034,7 @@ const ManageAssets: React.FC = () => {
                   key={tab.key}
                   tab={tab}
                   onSubTabChange={onSubTabChange}
+                  onRefresh={() => refreshAssetTab(tab.key, tab.asset)}
                 />
               ),
             })),
