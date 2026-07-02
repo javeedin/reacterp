@@ -193,13 +193,14 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
         p_response    OUT CLOB
     ) IS
         v_asset_number      VARCHAR2(100);
+        v_asset_category    VARCHAR2(200);
         v_description       VARCHAR2(500);
         v_category_id       NUMBER;
         v_deprn_amount      NUMBER;
         v_period_counter    NUMBER;
         v_acct_status       VARCHAR2(30);
         v_acct_date         VARCHAR2(30);
-        v_accounting_date   VARCHAR2(10);
+        v_accounting_date   VARCHAR2(10);  -- LAST_DAY of period close
         -- account CCIDs
         v_expense_ccid      NUMBER;
         v_reserve_ccid      NUMBER;
@@ -211,14 +212,14 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
         v_ledger_id         NUMBER;
         v_currency_code     VARCHAR2(15);
     BEGIN
-        -- Get asset + period deprn data
+        -- Get asset + period deprn data; accounting date = LAST_DAY of period close
         BEGIN
             SELECT a.ASSET_NUMBER, a.DESCRIPTION, a.ASSET_CATEGORY_ID,
                    NVL(dd.DEPRN_AMOUNT, 0),
                    dd.PERIOD_COUNTER,
                    NVL(dd.ACCOUNTED_STATUS, 'UNACCOUNTED'),
                    TO_CHAR(dd.ACCOUNTED_DATE, 'YYYY-MM-DD'),
-                   TO_CHAR(TRUNC(dd.DEPRN_RUN_DATE), 'YYYY-MM-DD')
+                   TO_CHAR(LAST_DAY(NVL(dp.PERIOD_CLOSE_DATE, dd.DEPRN_RUN_DATE)), 'YYYY-MM-DD')
             INTO   v_asset_number, v_description, v_category_id,
                    v_deprn_amount, v_period_counter,
                    v_acct_status, v_acct_date, v_accounting_date
@@ -238,15 +239,18 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
             RETURN;
         END;
 
-        -- Get deprn expense and reserve CCIDs from category books
+        -- Get deprn expense and reserve CCIDs + category name from category books
         BEGIN
-            SELECT cb.DEPRN_EXPENSE_ACCOUNT_CCID, cb.RESERVE_ACCOUNT_CCID
-            INTO   v_expense_ccid, v_reserve_ccid
+            SELECT cb.DEPRN_EXPENSE_ACCOUNT_CCID, cb.RESERVE_ACCOUNT_CCID,
+                   NVL(c.CATEGORY_TYPE || ' — ' || c.OWNED_LEASED, 'Depreciation')
+            INTO   v_expense_ccid, v_reserve_ccid, v_asset_category
             FROM   RR_FA_CATEGORY_BOOKS cb
+            JOIN   RR_FA_ASSET_CATEGORIES c ON c.CATEGORY_ID = cb.CATEGORY_ID
             WHERE  cb.CATEGORY_ID = v_category_id
             AND    ROWNUM = 1;
         EXCEPTION WHEN NO_DATA_FOUND THEN
             v_expense_ccid := NULL; v_reserve_ccid := NULL;
+            v_asset_category := 'Depreciation';
         END;
 
         -- Get book controls
@@ -261,9 +265,9 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
         v_expense_combo := get_account_combo(v_expense_ccid, v_company_code);
         v_reserve_combo := get_account_combo(v_reserve_ccid, v_company_code);
 
-        -- Fall back accounting date to today if deprn_run_date was null
+        -- Fall back accounting date to last day of current month
         IF v_accounting_date IS NULL THEN
-            v_accounting_date := TO_CHAR(SYSDATE, 'YYYY-MM-DD');
+            v_accounting_date := TO_CHAR(LAST_DAY(SYSDATE), 'YYYY-MM-DD');
         END IF;
 
         p_status := 200;
@@ -273,6 +277,9 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
          || ',"accountedDate":' || NVL(jstr(v_acct_date), 'null')
          || ',"header":{'
          ||   '"moduleName":"FA"'
+         ||   ',"source":"Fixed Assets"'
+         ||   ',"category":"Depreciation"'
+         ||   ',"assetCategory":' || jstr(v_asset_category)
          ||   ',"sourceTable":"RR_FA_DEPRN_DETAIL"'
          ||   ',"sourceId":' || p_asset_id
          ||   ',"sourceNumber":' || jstr(v_asset_number)
@@ -290,10 +297,12 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
          ||   ',"bookTypeCode":' || jstr(p_book)
          ||   ',"assetNumber":' || jstr(v_asset_number)
          ||   ',"periodCounter":' || NVL(TO_CHAR(v_period_counter), 'null')
+         ||   ',"totalAmount":' || NVL(TO_CHAR(v_deprn_amount), '0')
          ||   ',"deprnAmount":' || NVL(TO_CHAR(v_deprn_amount), '0')
          || '}'
          || ',"lines":['
          -- Line 1: Dr Depreciation Expense
+         -- reference2 = PERIOD_COUNTER (deprn ID), reference5 = FA_DEPRECIATION
          ||   '{"lineNumber":1,"lineType":"DR","accountingClass":"DEPRN_EXPENSE"'
          ||    ',"description":"Depreciation Expense — ' || REPLACE(v_asset_number, '"', '\"')
          ||                                          ' ' || REPLACE(p_period_name, '"', '\"') || '"'
@@ -304,8 +313,8 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
          ||    ',"ccid":' || NVL(TO_CHAR(v_expense_ccid), 'null')
          ||    ',"accountCombination":' || NVL(jstr(v_expense_combo), 'null')
          ||    ',"reference1":' || jstr(v_asset_number)
-         ||    ',"reference2":' || jstr(p_asset_id)
-         ||    ',"reference5":"FA_DEPRN"'
+         ||    ',"reference2":' || NVL(TO_CHAR(v_period_counter), 'null')
+         ||    ',"reference5":"FA_DEPRECIATION"'
          ||   '},'
          -- Line 2: Cr Depreciation Reserve
          ||   '{"lineNumber":2,"lineType":"CR","accountingClass":"DEPRN_RESERVE"'
@@ -318,8 +327,8 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
          ||    ',"ccid":' || NVL(TO_CHAR(v_reserve_ccid), 'null')
          ||    ',"accountCombination":' || NVL(jstr(v_reserve_combo), 'null')
          ||    ',"reference1":' || jstr(v_asset_number)
-         ||    ',"reference2":' || jstr(p_asset_id)
-         ||    ',"reference5":"FA_DEPRN"'
+         ||    ',"reference2":' || NVL(TO_CHAR(v_period_counter), 'null')
+         ||    ',"reference5":"FA_DEPRECIATION"'
          ||   '}'
          || ']}';
 

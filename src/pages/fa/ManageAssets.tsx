@@ -552,6 +552,101 @@ const AssetTabContent: React.FC<{
   const [deprnAcctStepsVis,  setDeprnAcctStepsVis]   = useState(false);
   const [deprnGlLines,       setDeprnGlLines]        = useState<any[]>([]);
   const [deprnGlLoading,     setDeprnGlLoading]      = useState(false);
+  const [deprnDebugVisible,  setDeprnDebugVisible]   = useState(false);
+  const [deprnDbgSteps,      setDeprnDbgSteps]       = useState<DbgStep[]>([]);
+  const [deprnDbgSlaId,      setDeprnDbgSlaId]       = useState<number | null>(null);
+  const [deprnDbgBatchId,    setDeprnDbgBatchId]     = useState<number | null>(null);
+  const [deprnDbgGlId,       setDeprnDbgGlId]        = useState<number | null>(null);
+
+  const buildDeprnDbgSteps = (h: any, lines: any[]): DbgStep[] => {
+    const base    = APEX_DB_CONFIG.baseUrl;
+    const slaId   = deprnDbgSlaId;
+    const batchId = deprnDbgBatchId;
+    const glId    = deprnDbgGlId;
+    const amount  = h.totalAmount || h.deprnAmount || 0;
+    return [
+      {
+        method: 'POST', url: `${base}/sla/accounting/create`,
+        body: {
+          header: { moduleName: h.moduleName, sourceTable: h.sourceTable, sourceId: h.sourceId,
+            sourceNumber: h.sourceNumber, sourceType: h.sourceType, eventTypeCode: h.eventTypeCode,
+            eventDate: h.eventDate, accountingDate: h.accountingDate, periodName: h.periodName,
+            ledgerId: h.ledgerId, ledgerName: h.ledgerName, currencyCode: h.currencyCode,
+            ledgerCurrency: h.ledgerCurrency, description: h.description, createdBy: loggedUser },
+          lines: lines.map(l => ({ lineNumber: l.lineNumber, lineType: l.lineType,
+            accountingClass: l.accountingClass, accountCombo: l.accountCombination,
+            enteredDr: l.enteredDr, enteredCr: l.enteredCr,
+            accountedDr: l.accountedDr, accountedCr: l.accountedCr,
+            currencyCode: h.currencyCode, description: l.description,
+            sourceLineId: h.sourceId, sourceLineNum: l.lineNumber })),
+        },
+        response: null, loading: false,
+      },
+      {
+        method: 'POST', url: `${base}/journals/create`,
+        body: slaId ? {
+          batch: { batchName: `FA-DEPRN-${h.sourceNumber}-${h.periodName}`,
+            batchDescription: `FA Depreciation — ${h.sourceNumber} ${h.periodName}`,
+            ledgerName: h.ledgerName, ledgerId: h.ledgerId, status: 'NEW',
+            accountingPeriod: h.periodName,
+            controlTotal: amount, runningTotalDr: amount, runningTotalCr: amount,
+            batchSource: 'Fixed Assets', createdBy: loggedUser },
+          header: { ledgerId: h.ledgerId, ledgerName: h.ledgerName,
+            jeCategory: 'Depreciation', jeSource: 'Fixed Assets',
+            periodName: h.periodName,
+            journalName: `FA Depreciation — ${h.sourceNumber} ${h.periodName}`,
+            description: h.description, currencyCode: h.currencyCode,
+            currencyConversionType: 'User', currencyConversionDate: h.accountingDate,
+            currencyConversionRate: 1, defaultEffectiveDate: h.accountingDate, status: 'NEW',
+            runningTotalDr: amount, runningTotalCr: amount, createdBy: loggedUser },
+          lines: lines.map(l => ({ enteredDr: l.enteredDr || null, enteredCr: l.enteredCr || null,
+            accountedDr: l.accountedDr || null, accountedCr: l.accountedCr || null,
+            description: l.description, currencyCode: h.currencyCode,
+            currencyConversionDate: h.accountingDate, currencyConversionRate: 1,
+            userCurrencyConversionType: 'User', accountCombination: l.accountCombination,
+            reference1: l.reference1, reference2: l.reference2, reference5: l.reference5,
+            reconciledFlag: 'N', createdBy: loggedUser })),
+        } : '⚠ Run Step 1 first to get slaHeaderId',
+        response: null, loading: false,
+      },
+      {
+        method: 'PUT', url: batchId ? `${base}/gl/journals/${batchId}/post` : `${base}/gl/journals/{batchId}/post`,
+        body: null, response: null, loading: false,
+      },
+      {
+        method: 'POST', url: `${base}/sla/accounting/post`,
+        body: (slaId && batchId) ? { headerId: slaId, glBatchId: batchId,
+          glBatchName: `FA-DEPRN-${h.sourceNumber}-${h.periodName}`, glHeaderId: glId, postedBy: loggedUser }
+          : '⚠ Run Steps 1 & 2 first',
+        response: null, loading: false,
+      },
+      {
+        method: 'POST', url: `${base}/fa/accounting/mark-deprn-accounted`,
+        body: { assetId: h.sourceId, bookTypeCode: h.bookTypeCode, periodName: h.periodName,
+          slaHeaderId: slaId, glHeaderId: glId, createdBy: loggedUser },
+        response: null, loading: false,
+      },
+    ];
+  };
+
+  const runDeprnDbgStep = async (idx: number) => {
+    if (!deprnAcctPreview) return;
+    const h     = deprnAcctPreview.header;
+    const steps = buildDeprnDbgSteps(h, deprnAcctPreview.lines);
+    const step  = steps[idx];
+    setDeprnDbgSteps(prev => { const n = [...prev]; n[idx] = { ...n[idx], loading: true, response: null }; return n; });
+    try {
+      const opts: RequestInit = { method: step.method, headers: { 'Content-Type': 'application/json', Accept: 'application/json' } };
+      if (step.body && typeof step.body === 'object') opts.body = JSON.stringify(step.body);
+      const res  = await fetch(step.url, opts);
+      const data = await res.json();
+      setDeprnDbgSteps(prev => { const n = [...prev]; n[idx] = { ...n[idx], loading: false, response: data }; return n; });
+      if (idx === 0 && data.headerId) setDeprnDbgSlaId(data.headerId);
+      if (idx === 1 && data.jeBatchId) { setDeprnDbgBatchId(data.jeBatchId); setDeprnDbgGlId(data.jeHeaderId); }
+    } catch (e: any) {
+      setDeprnDbgSteps(prev => { const n = [...prev]; n[idx] = { ...n[idx], loading: false, response: { error: e.message } }; return n; });
+    }
+  };
 
   const DEPRN_ACCT_STEPS_INIT: AcctStep[] = [
     { label: 'Create SLA Accounting',    detail: 'POST sla/accounting/create',            status: 'wait' },
@@ -572,14 +667,20 @@ const AssetTabContent: React.FC<{
     setDeprnAcctVisible(true);
     setDeprnAcctSteps(DEPRN_ACCT_STEPS_INIT);
     setDeprnAcctStepsVis(false);
+    setDeprnDebugVisible(false);
+    setDeprnDbgSteps([]);
+    setDeprnDbgSlaId(null);
+    setDeprnDbgBatchId(null);
+    setDeprnDbgGlId(null);
     setDeprnGlLines([]);
     try {
       const preview = await getDeprnAccountingPreview(asset.assetId, book, record.periodName);
       setDeprnAcctPreview(preview);
-      // If already accounted, load actual GL lines
-      if (preview.accountedStatus === 'ACCOUNTED') {
+      // Load GL lines based on reference2=periodCounter (deprn ID), reference5=FA_DEPRECIATION
+      const periodCtr = preview.header?.periodCounter || record.periodCounter;
+      if (periodCtr) {
         setDeprnGlLoading(true);
-        fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${encodeURIComponent(asset.assetId)}&reference5=FA_DEPRN`, {
+        fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${encodeURIComponent(String(periodCtr))}&reference5=FA_DEPRECIATION`, {
           headers: { Accept: 'application/json' },
         })
           .then(r => r.json())
@@ -640,7 +741,7 @@ const AssetTabContent: React.FC<{
         currency:       h.currencyCode,
         accountingDate: h.accountingDate,
         legalEntity: '', businessUnit: '',
-        jeCategory:    'Assets',
+        jeCategory:    'Depreciation',
         jeSource:      'Fixed Assets',
         batchSource:   'Fixed Assets',
         journalName:   `FA Depreciation — ${h.sourceNumber || h.assetNumber} — ${h.periodName}`,
@@ -676,11 +777,12 @@ const AssetTabContent: React.FC<{
       updateDeprnStep(2, 'finish', `${markRes.rowsUpdated || 1} row(s) updated`);
       message.success(`Depreciation ${deprnAcctRecord.periodName} accounted and posted to GL`);
 
-      // Reload GL lines + refresh preview
+      // Reload GL lines by periodCounter + refresh preview
       const updatedPreview = await getDeprnAccountingPreview(asset.assetId, book, deprnAcctRecord.periodName);
       setDeprnAcctPreview(updatedPreview);
+      const periodCtr = updatedPreview.header?.periodCounter || deprnAcctRecord.periodCounter;
       setDeprnGlLoading(true);
-      fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${encodeURIComponent(asset.assetId)}&reference5=FA_DEPRN`, {
+      fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${encodeURIComponent(String(periodCtr))}&reference5=FA_DEPRECIATION`, {
         headers: { Accept: 'application/json' },
       })
         .then(r => r.json())
@@ -2032,10 +2134,24 @@ const AssetTabContent: React.FC<{
         onCancel={() => { setDeprnAcctVisible(false); setDeprnAcctStepsVis(false); }}
         width={720}
         footer={[
-          <Button key="close" onClick={() => { setDeprnAcctVisible(false); setDeprnAcctStepsVis(false); }}>
+          <Button key="close" onClick={() => { setDeprnAcctVisible(false); setDeprnAcctStepsVis(false); setDeprnDebugVisible(false); }}>
             Close
           </Button>,
-          deprnAcctRecord?.accountedStatus !== 'ACCOUNTED' && (
+          deprnGlLines.length === 0 && (
+            <Button
+              key="debug"
+              icon={<ApiOutlined />}
+              style={{ color: deprnDebugVisible ? FA_COLOR : '#888', borderColor: deprnDebugVisible ? FA_COLOR : undefined }}
+              onClick={() => {
+                setDeprnDebugVisible(v => !v);
+                if (!deprnDebugVisible && deprnAcctPreview)
+                  setDeprnDbgSteps(buildDeprnDbgSteps(deprnAcctPreview.header, deprnAcctPreview.lines));
+              }}
+            >
+              Debug
+            </Button>
+          ),
+          deprnGlLines.length === 0 && (
             <Button
               key="create"
               type="primary"
@@ -2071,107 +2187,154 @@ const AssetTabContent: React.FC<{
             </div>
           )}
 
-          {deprnAcctRecord?.accountedStatus === 'ACCOUNTED' ? (
-            /* ── Already accounted: show summary + GL lines ── */
+          {/* Debug panel */}
+          {deprnDebugVisible && deprnAcctPreview && (() => {
+            const steps = buildDeprnDbgSteps(deprnAcctPreview.header, deprnAcctPreview.lines);
+            const labels = [
+              'Step 1 — Create SLA Accounting',
+              'Step 2 — Create GL Journal (batch+header+lines)',
+              'Step 3 — Post GL Journal',
+              'Step 4 — Post SLA (stamp GL IDs)',
+              'Step 5 — Mark Deprn Period as Accounted',
+            ];
+            return (
+              <div style={{ marginBottom: 14, border: `1px solid ${FA_COLOR}40`, borderRadius: 6, overflow: 'hidden' }}>
+                <div style={{ background: `${FA_COLOR}15`, padding: '8px 14px', borderBottom: `1px solid ${FA_COLOR}30` }}>
+                  <Text strong style={{ fontSize: 12, color: FA_COLOR }}>Depreciation Accounting Debug — run each step individually</Text>
+                </div>
+                {steps.map((step, idx) => {
+                  const dbg     = deprnDbgSteps[idx];
+                  const resp    = dbg?.response;
+                  const loading = dbg?.loading ?? false;
+                  return (
+                    <div key={idx} style={{ borderBottom: idx < steps.length - 1 ? `1px solid ${REDWOOD.neutral200}` : undefined, padding: '10px 14px' }}>
+                      <div style={{ marginBottom: 4 }}>
+                        <Text type="secondary" style={{ fontSize: 10, fontWeight: 600 }}>{labels[idx]}</Text>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                        <Tag style={{ fontSize: 10, fontWeight: 700 }} color={step.method === 'POST' ? 'blue' : step.method === 'PUT' ? 'orange' : 'green'}>{step.method}</Tag>
+                        <Text style={{ fontFamily: 'monospace', fontSize: 11, flex: 1, wordBreak: 'break-all' }}>{step.url}</Text>
+                        <Button size="small" type="primary" loading={loading}
+                          style={{ background: FA_COLOR, borderColor: FA_COLOR, fontSize: 11 }}
+                          onClick={() => {
+                            const s = buildDeprnDbgSteps(deprnAcctPreview.header, deprnAcctPreview.lines);
+                            setDeprnDbgSteps(s.map((x, i) => ({ ...x, response: deprnDbgSteps[i]?.response ?? null, loading: false })));
+                            runDeprnDbgStep(idx);
+                          }}>Run</Button>
+                        <Tooltip title="Copy URL">
+                          <Button size="small" icon={<ApiOutlined />} style={{ fontSize: 10 }} onClick={() => navigator.clipboard.writeText(step.url)} />
+                        </Tooltip>
+                      </div>
+                      {step.body && typeof step.body === 'object' && (
+                        <div style={{ position: 'relative' }}>
+                          <pre style={{ background: '#1a1a2e', color: '#a8d8ea', fontSize: 10, borderRadius: 4, padding: '8px 10px', margin: '0 0 6px', overflowX: 'auto', maxHeight: 160 }}>
+                            {JSON.stringify(step.body, null, 2)}
+                          </pre>
+                          <Button size="small" style={{ position: 'absolute', top: 4, right: 4, fontSize: 10, opacity: 0.7 }}
+                            onClick={() => navigator.clipboard.writeText(JSON.stringify(step.body, null, 2))}>Copy</Button>
+                        </div>
+                      )}
+                      {typeof step.body === 'string' && (
+                        <Text type="warning" style={{ fontSize: 11 }}>{step.body}</Text>
+                      )}
+                      {resp && (
+                        <pre style={{ background: resp.error || resp.success === false ? '#2a0a0a' : '#0a2a0a', color: resp.error || resp.success === false ? '#ffaaaa' : '#aaffaa', fontSize: 10, borderRadius: 4, padding: '8px 10px', margin: 0, overflowX: 'auto', maxHeight: 120 }}>
+                          {JSON.stringify(resp, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          {deprnGlLines.length > 0 ? (
+            /* ── GL lines exist: show summary + posted lines ── */
             <>
               {deprnAcctPreview?.header && (
                 <div style={{
-                  display: 'flex', gap: 16, flexWrap: 'wrap',
-                  background: REDWOOD.surface, border: `1px solid ${REDWOOD.neutral200}`,
+                  display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center',
+                  background: '#f6ffed', border: '1px solid #b7eb8f',
                   borderRadius: 8, padding: '10px 16px', marginBottom: 14,
                 }}>
-                  <Space>
-                    <CheckOutlined style={{ color: REDWOOD.success }} />
-                    <Text style={{ fontWeight: 600, color: REDWOOD.success }}>POSTED</Text>
+                  <Space size={6}>
+                    <CheckOutlined style={{ color: REDWOOD.success, fontSize: 14 }} />
+                    <Text strong style={{ color: REDWOOD.success, fontSize: 13 }}>Posted</Text>
                   </Space>
                   <Divider type="vertical" style={{ margin: '0 4px' }} />
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    Period: <strong>{deprnAcctPreview.header.periodName}</strong>
-                  </Text>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    Currency: <strong>{deprnAcctPreview.header.currencyCode}</strong>
-                  </Text>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    Amount: <strong>{formatCurrency(String(deprnAcctPreview.header.totalAmount || deprnAcctRecord?.deprnAmount || 0))}</strong>
-                  </Text>
+                  {[
+                    { label: 'Period', val: deprnAcctPreview.header.periodName },
+                    { label: 'Acctg Date', val: deprnAcctPreview.header.accountingDate },
+                    { label: 'Currency', val: deprnAcctPreview.header.currencyCode },
+                    { label: 'Amount', val: formatCurrency(String(deprnAcctPreview.header.totalAmount || deprnAcctRecord?.deprnAmount || 0)) },
+                  ].map(f => (
+                    <Text key={f.label} type="secondary" style={{ fontSize: 12 }}>
+                      {f.label}: <strong>{f.val || '—'}</strong>
+                    </Text>
+                  ))}
+                  <div style={{ marginTop: 2, width: '100%' }}>
+                    <Text type="secondary" style={{ fontSize: 10 }}>
+                      Source: <strong>{APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2={deprnAcctPreview.header.periodCounter}&amp;reference5=FA_DEPRECIATION</strong>
+                    </Text>
+                  </div>
                 </div>
               )}
               <Card size="small" title={<Text style={{ fontSize: 12, fontWeight: 600 }}>GL Journal Lines</Text>}
                 style={{ borderRadius: 8 }} styles={{ body: { padding: '8px 12px' } }}>
                 <Spin spinning={deprnGlLoading}>
-                  {deprnGlLines.length > 0 ? (
-                    <>
-                      {/* Header row */}
-                      <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: '36px 1fr 140px 140px 80px',
-                        gap: '0 8px', padding: '4px 0',
-                        borderBottom: `2px solid ${REDWOOD.neutral300}`,
-                        marginBottom: 4,
-                      }}>
-                        <Text style={{ fontSize: 10, color: REDWOOD.neutral500, fontWeight: 600 }}>#</Text>
-                        <Text style={{ fontSize: 10, color: REDWOOD.neutral500, fontWeight: 600 }}>Account</Text>
-                        <Text style={{ fontSize: 10, color: REDWOOD.neutral500, fontWeight: 600, textAlign: 'right' }}>Debit</Text>
-                        <Text style={{ fontSize: 10, color: REDWOOD.neutral500, fontWeight: 600, textAlign: 'right' }}>Credit</Text>
-                        <Text style={{ fontSize: 10, color: REDWOOD.neutral500, fontWeight: 600 }}>Status</Text>
+                  <div style={{
+                    display: 'grid', gridTemplateColumns: '36px 1fr 140px 140px 80px',
+                    gap: '0 8px', padding: '4px 0',
+                    borderBottom: `2px solid ${REDWOOD.neutral300}`, marginBottom: 4,
+                  }}>
+                    {['#','Account','Debit','Credit','Status'].map((h, i) => (
+                      <Text key={h} style={{ fontSize: 10, color: REDWOOD.neutral500, fontWeight: 600, textAlign: i >= 2 && i <= 3 ? 'right' : 'left' }}>{h}</Text>
+                    ))}
+                  </div>
+                  {deprnGlLines.map((l: any, idx: number) => (
+                    <div key={idx} style={{
+                      display: 'grid', gridTemplateColumns: '36px 1fr 140px 140px 80px',
+                      gap: '0 8px', padding: '6px 0',
+                      borderBottom: `1px solid ${REDWOOD.neutral200}`, alignItems: 'start',
+                    }}>
+                      <Text style={{ fontSize: 11, color: REDWOOD.neutral500, paddingTop: 2 }}>{l.line_num ?? idx + 1}</Text>
+                      <div>
+                        <div style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', color: REDWOOD.neutral900 }}>{l.account}</div>
+                        {l.description && <div style={{ fontSize: 11, color: REDWOOD.neutral500, marginTop: 2 }}>{l.description}</div>}
                       </div>
-                      {deprnGlLines.map((l: any, idx: number) => (
-                        <div key={idx} style={{
-                          display: 'grid',
-                          gridTemplateColumns: '36px 1fr 140px 140px 80px',
-                          gap: '0 8px', padding: '6px 0',
-                          borderBottom: `1px solid ${REDWOOD.neutral200}`,
-                          alignItems: 'start',
-                        }}>
-                          <Text style={{ fontSize: 11, color: REDWOOD.neutral500, paddingTop: 2 }}>
-                            {l.line_num ?? idx + 1}
-                          </Text>
-                          <div>
-                            <div style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', color: REDWOOD.neutral900 }}>
-                              {l.account}
-                            </div>
-                            {l.description && (
-                              <div style={{ fontSize: 11, color: REDWOOD.neutral500, marginTop: 2 }}>{l.description}</div>
-                            )}
-                          </div>
-                          <div style={{ textAlign: 'right', fontFamily: 'monospace' }}>
-                            {l.accounted_dr ? <Text style={{ color: REDWOOD.info, fontWeight: 600 }}>{formatCurrency(String(l.accounted_dr))}</Text> : <Text type="secondary">—</Text>}
-                          </div>
-                          <div style={{ textAlign: 'right', fontFamily: 'monospace' }}>
-                            {l.accounted_cr ? <Text style={{ color: REDWOOD.primary, fontWeight: 600 }}>{formatCurrency(String(l.accounted_cr))}</Text> : <Text type="secondary">—</Text>}
-                          </div>
-                          <div>
-                            <Tag color={l.posting_status === 'P' ? 'success' : 'default'} style={{ fontSize: 10, padding: '0 4px' }}>
-                              {l.posting_status === 'P' ? 'Posted' : l.posting_status || '—'}
-                            </Tag>
-                          </div>
-                        </div>
-                      ))}
-                      {/* Totals */}
-                      <div style={{
-                        display: 'grid', gridTemplateColumns: '36px 1fr 140px 140px 80px',
-                        gap: '0 8px', padding: '6px 0',
-                        borderTop: `2px solid ${REDWOOD.neutral300}`, marginTop: 4,
-                      }}>
-                        <span />
-                        <Text style={{ fontSize: 11, fontWeight: 600 }}>Total</Text>
-                        <Text style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.info }}>
-                          {formatCurrency(String(deprnGlLines.reduce((s: number, l: any) => s + (Number(l.accounted_dr) || 0), 0)))}
-                        </Text>
-                        <Text style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.primary }}>
-                          {formatCurrency(String(deprnGlLines.reduce((s: number, l: any) => s + (Number(l.accounted_cr) || 0), 0)))}
-                        </Text>
-                        <span />
+                      <div style={{ textAlign: 'right', fontFamily: 'monospace' }}>
+                        {l.accounted_dr ? <Text style={{ color: REDWOOD.info, fontWeight: 600 }}>{formatCurrency(String(l.accounted_dr))}</Text> : <Text type="secondary">—</Text>}
                       </div>
-                    </>
-                  ) : (
-                    <Empty description="No GL lines found" style={{ padding: '12px 0' }} />
-                  )}
+                      <div style={{ textAlign: 'right', fontFamily: 'monospace' }}>
+                        {l.accounted_cr ? <Text style={{ color: REDWOOD.primary, fontWeight: 600 }}>{formatCurrency(String(l.accounted_cr))}</Text> : <Text type="secondary">—</Text>}
+                      </div>
+                      <div>
+                        <Tag color={l.posting_status === 'P' ? 'success' : 'default'} style={{ fontSize: 10, padding: '0 4px' }}>
+                          {l.posting_status === 'P' ? 'Posted' : l.posting_status || '—'}
+                        </Tag>
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{
+                    display: 'grid', gridTemplateColumns: '36px 1fr 140px 140px 80px',
+                    gap: '0 8px', padding: '6px 0',
+                    borderTop: `2px solid ${REDWOOD.neutral300}`, marginTop: 4,
+                  }}>
+                    <span /><Text style={{ fontSize: 11, fontWeight: 600 }}>Total ({deprnGlLines.length} lines)</Text>
+                    <Text style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.info }}>
+                      {formatCurrency(String(deprnGlLines.reduce((s: number, l: any) => s + (Number(l.accounted_dr) || 0), 0)))}
+                    </Text>
+                    <Text style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.primary }}>
+                      {formatCurrency(String(deprnGlLines.reduce((s: number, l: any) => s + (Number(l.accounted_cr) || 0), 0)))}
+                    </Text>
+                    <span />
+                  </div>
                 </Spin>
               </Card>
             </>
           ) : (
-            /* ── Not yet accounted: show preview ── */
+            /* ── Not posted: show preview ── */
             deprnAcctPreview && (
               <>
                 <Card size="small"
@@ -2181,12 +2344,13 @@ const AssetTabContent: React.FC<{
                 >
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
                     {[
-                      { label: 'Source', val: deprnAcctPreview.header.source },
-                      { label: 'Category', val: deprnAcctPreview.header.category },
-                      { label: 'Ledger', val: deprnAcctPreview.header.ledgerName },
-                      { label: 'Period', val: deprnAcctPreview.header.periodName },
-                      { label: 'Currency', val: deprnAcctPreview.header.currencyCode },
-                      { label: 'Total Amount', val: formatCurrency(String(deprnAcctPreview.header.totalAmount || 0)) },
+                      { label: 'Source',        val: (deprnAcctPreview.header as any).source || 'Fixed Assets' },
+                      { label: 'Category',      val: (deprnAcctPreview.header as any).category || 'Depreciation' },
+                      { label: 'Ledger',        val: deprnAcctPreview.header.ledgerName },
+                      { label: 'Period',        val: deprnAcctPreview.header.periodName },
+                      { label: 'Acctg Date',    val: deprnAcctPreview.header.accountingDate },
+                      { label: 'Currency',      val: deprnAcctPreview.header.currencyCode },
+                      { label: 'Total Amount',  val: formatCurrency(String((deprnAcctPreview.header as any).totalAmount || (deprnAcctPreview.header as any).deprnAmount || 0)) },
                     ].map(f => (
                       <div key={f.label}>
                         <Text style={{ fontSize: 10, color: REDWOOD.neutral500 }}>{f.label}</Text>
@@ -2200,16 +2364,14 @@ const AssetTabContent: React.FC<{
                   style={{ borderRadius: 8 }}
                   styles={{ body: { padding: '8px 12px' } }}
                 >
-                  {/* Header row */}
                   <div style={{
                     display: 'grid', gridTemplateColumns: '36px 1fr 140px 140px',
                     gap: '0 8px', padding: '4px 0',
                     borderBottom: `2px solid ${REDWOOD.neutral300}`, marginBottom: 4,
                   }}>
-                    <Text style={{ fontSize: 10, color: REDWOOD.neutral500, fontWeight: 600 }}>#</Text>
-                    <Text style={{ fontSize: 10, color: REDWOOD.neutral500, fontWeight: 600 }}>Account</Text>
-                    <Text style={{ fontSize: 10, color: REDWOOD.neutral500, fontWeight: 600, textAlign: 'right' }}>Debit</Text>
-                    <Text style={{ fontSize: 10, color: REDWOOD.neutral500, fontWeight: 600, textAlign: 'right' }}>Credit</Text>
+                    {['#','Account','Debit','Credit'].map((h, i) => (
+                      <Text key={h} style={{ fontSize: 10, color: REDWOOD.neutral500, fontWeight: 600, textAlign: i >= 2 ? 'right' : 'left' }}>{h}</Text>
+                    ))}
                   </div>
                   {deprnAcctPreview.lines.map((l, idx) => (
                     <div key={idx} style={{
@@ -2220,22 +2382,21 @@ const AssetTabContent: React.FC<{
                       <Text style={{ fontSize: 11, color: REDWOOD.neutral500, paddingTop: 2 }}>{idx + 1}</Text>
                       <div>
                         <div style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', color: REDWOOD.neutral900 }}>
-                          {l.accountCombination || l.accountCode}
+                          {l.accountCombination || (l as any).accountCode}
                         </div>
-                        {l.accountDescription && (
-                          <div style={{ fontSize: 11, color: REDWOOD.neutral500, marginTop: 2 }}>{l.accountDescription}</div>
-                        )}
-                        <div style={{ fontSize: 11, color: REDWOOD.neutral400, marginTop: 1 }}>{l.description}</div>
+                        <div style={{ fontSize: 11, color: REDWOOD.neutral500, marginTop: 2 }}>{l.description}</div>
+                        <Text type="secondary" style={{ fontSize: 10 }}>
+                          ref1={l.reference1} · ref2={(l as any).reference2} · ref5={(l as any).reference5 || 'FA_DEPRECIATION'}
+                        </Text>
                       </div>
                       <div style={{ textAlign: 'right', fontFamily: 'monospace' }}>
-                        {l.debit ? <Text style={{ color: REDWOOD.info, fontWeight: 600 }}>{formatCurrency(String(l.debit))}</Text> : <Text type="secondary">—</Text>}
+                        {l.accountedDr ? <Text style={{ color: REDWOOD.info, fontWeight: 600 }}>{formatCurrency(String(l.accountedDr))}</Text> : <Text type="secondary">—</Text>}
                       </div>
                       <div style={{ textAlign: 'right', fontFamily: 'monospace' }}>
-                        {l.credit ? <Text style={{ color: REDWOOD.primary, fontWeight: 600 }}>{formatCurrency(String(l.credit))}</Text> : <Text type="secondary">—</Text>}
+                        {l.accountedCr ? <Text style={{ color: REDWOOD.primary, fontWeight: 600 }}>{formatCurrency(String(l.accountedCr))}</Text> : <Text type="secondary">—</Text>}
                       </div>
                     </div>
                   ))}
-                  {/* Totals */}
                   <div style={{
                     display: 'grid', gridTemplateColumns: '36px 1fr 140px 140px',
                     gap: '0 8px', padding: '6px 0',
@@ -2243,10 +2404,10 @@ const AssetTabContent: React.FC<{
                   }}>
                     <span /><Text style={{ fontSize: 11, fontWeight: 600 }}>Total</Text>
                     <Text style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.info }}>
-                      {formatCurrency(String(deprnAcctPreview.lines.reduce((s, l) => s + (l.debit || 0), 0)))}
+                      {formatCurrency(String(deprnAcctPreview.lines.reduce((s, l) => s + (l.accountedDr || 0), 0)))}
                     </Text>
                     <Text style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.primary }}>
-                      {formatCurrency(String(deprnAcctPreview.lines.reduce((s, l) => s + (l.credit || 0), 0)))}
+                      {formatCurrency(String(deprnAcctPreview.lines.reduce((s, l) => s + (l.accountedCr || 0), 0)))}
                     </Text>
                   </div>
                 </Card>
