@@ -588,6 +588,7 @@ const AssetTabContent: React.FC<{
               Create Accounting
             </Button>
           </div>
+          </>
         ),
     },
     {
