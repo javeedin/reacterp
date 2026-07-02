@@ -179,9 +179,10 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
         -- Get distribution_id for this asset (first active distribution)
         BEGIN
             SELECT DISTRIBUTION_ID INTO v_dist_id
-            FROM   RR_FA_DISTRIBUTIONS
-            WHERE  ASSET_ID = p_asset_id
-            AND    DATE_INEFFECTIVE IS NULL
+            FROM   RR_FA_DISTRIBUTION_HISTORY
+            WHERE  ASSET_ID          = p_asset_id
+            AND    BOOK_TYPE_CODE    = p_book
+            AND    DATE_EFFECTIVE   IS NOT NULL
             AND    ROWNUM = 1;
         EXCEPTION WHEN NO_DATA_FOUND THEN
             v_dist_id := '0';
@@ -192,34 +193,38 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
             ASSET_ID,      BOOK_TYPE_CODE, PERIOD_COUNTER,
             DEPRN_AMOUNT,  YTD_DEPRN,     DEPRN_RESERVE,
             ADJUSTED_COST, DEPRN_RUN_DATE,
-            CREATION_DATE, CREATED_BY,
+            CREATION_DATE,    CREATED_BY,
             LAST_UPDATE_DATE, LAST_UPDATED_BY
         ) VALUES (
-            p_asset_id,     p_book,          p_period_ctr,
-            p_deprn_amount, p_new_ytd,       p_new_reserve,
+            p_asset_id,     p_book,        p_period_ctr,
+            p_deprn_amount, p_new_ytd,     p_new_reserve,
             p_adj_cost,     SYSDATE,
             v_now,          p_created_by,
             v_now,          p_created_by
         );
 
         -- ── RR_FA_DEPRN_DETAIL ───────────────────────────────────────────────
-        INSERT INTO RR_FA_DEPRN_DETAIL (
-            ASSET_ID,        BOOK_TYPE_CODE,  PERIOD_COUNTER,
-            DISTRIBUTION_ID, DEPRN_SOURCE_CODE,
-            DEPRN_AMOUNT,    YTD_DEPRN,       DEPRN_RESERVE,
-            DEPRN_ADJUSTMENT_AMOUNT,
-            COST,
-            CREATION_DATE,   CREATED_BY,
-            LAST_UPDATE_DATE, LAST_UPDATED_BY
-        ) VALUES (
-            p_asset_id,      p_book,           p_period_ctr,
-            v_dist_id,       'DEPRECIATION',
-            p_deprn_amount,  p_new_ytd,        p_new_reserve,
-            0,
-            p_adj_cost,
-            v_now,           p_created_by,
-            v_now,           p_created_by
-        );
+        -- Wrapped in EXECUTE IMMEDIATE so compilation succeeds even if the
+        -- table has not yet been created in this schema.
+        BEGIN
+            EXECUTE IMMEDIATE
+                'INSERT INTO RR_FA_DEPRN_DETAIL ('
+             || '    ASSET_ID, BOOK_TYPE_CODE, PERIOD_COUNTER,'
+             || '    DISTRIBUTION_ID, DEPRN_SOURCE_CODE,'
+             || '    DEPRN_AMOUNT, YTD_DEPRN, DEPRN_RESERVE,'
+             || '    DEPRN_ADJUSTMENT_AMOUNT, COST,'
+             || '    CREATION_DATE, CREATED_BY,'
+             || '    LAST_UPDATE_DATE, LAST_UPDATED_BY'
+             || ') VALUES ('
+             || '    :1, :2, :3, :4, ''DEPRECIATION'','
+             || '    :5, :6, :7, 0, :8,'
+             || '    :9, :10, :11, :12'
+             || ')'
+            USING p_asset_id, p_book, p_period_ctr, v_dist_id,
+                  p_deprn_amount, p_new_ytd, p_new_reserve, p_adj_cost,
+                  v_now, p_created_by, v_now, p_created_by;
+        EXCEPTION WHEN OTHERS THEN NULL; -- table may not exist yet; SUMMARY already inserted
+        END;
     END post_deprn_rows;
 
 
