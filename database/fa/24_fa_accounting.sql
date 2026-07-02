@@ -159,6 +159,10 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
         p_status := 200;
         p_response :=
             '{"success":true'
+         || ',"_debug":{"categoryId":' || NVL(TO_CHAR(v_category_id), 'null')
+         ||            ',"costCcid":'  || NVL(TO_CHAR(v_cost_ccid), 'null')
+         ||            ',"clearingCcid":' || NVL(TO_CHAR(v_clearing_ccid), 'null')
+         ||            ',"companyCode":' || NVL(jstr(v_company_code), 'null') || '}'
          || ',"accountedStatus":' || jstr(v_acct_status)
          || ',"accountedDate":' || NVL(jstr(v_acct_date), 'null')
          -- Header template to pass to sla/accounting/create
