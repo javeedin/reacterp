@@ -1277,55 +1277,22 @@ const AssetTabContent: React.FC<{
             </Tooltip>
           </div>
         </div>
-        {/* Bottom row: key metrics */}
-        <Row gutter={[12, 0]} align="middle">
-          <Col xs={12} sm={8} md={4}>
-            <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Book</Text>
-            <Text strong style={{ fontSize: 12 }}>{asset.bookTypeCode || '—'}</Text>
-          </Col>
-          <Col xs={12} sm={8} md={4}>
-            <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Date in Service</Text>
-            <Text strong style={{ fontSize: 12 }}>{fmtDate(asset.datePlacedInService)}</Text>
-          </Col>
-          {books[0]?.companyCode && (
-            <Col xs={12} sm={8} md={3}>
-              <div style={{
-                padding: '6px 12px', borderRadius: 6,
-                background: '#f0f7ff', border: '1px solid #bdd7f5',
-              }}>
-                <Text type="secondary" style={{ fontSize: 10, display: 'block' }}>Company</Text>
-                <Text strong style={{ fontSize: 13, color: REDWOOD.info }}>{books[0].companyCode}</Text>
-              </div>
-            </Col>
-          )}
-          <Col xs={8} sm={8} md={5}>
-            <div style={{
-              padding: '6px 12px', borderRadius: 6,
-              background: `${FA_COLOR}10`, border: `1px solid ${FA_COLOR}25`,
-            }}>
-              <Text type="secondary" style={{ fontSize: 10, display: 'block' }}>Cost</Text>
-              <Text strong style={{ color: FA_COLOR, fontSize: 13 }}>{formatCurrency(asset.cost)}</Text>
+        {/* Bottom row: key metrics — all consistent cards */}
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {[
+            { label: 'Book',            value: asset.bookTypeCode || '—',              color: REDWOOD.neutral600, bg: REDWOOD.neutral100, border: REDWOOD.neutral200 },
+            { label: 'Date in Service', value: fmtDate(asset.datePlacedInService),     color: REDWOOD.neutral600, bg: REDWOOD.neutral100, border: REDWOOD.neutral200 },
+            { label: 'Company',         value: books[0]?.companyCode || '—',           color: REDWOOD.info,       bg: '#f0f7ff',          border: '#bdd7f5' },
+            { label: 'Cost',            value: formatCurrency(asset.cost),             color: FA_COLOR,           bg: `${FA_COLOR}10`,    border: `${FA_COLOR}30` },
+            { label: 'NBV',             value: formatCurrency(asset.nbv),              color: REDWOOD.info,       bg: `${REDWOOD.info}10`,border: `${REDWOOD.info}30` },
+            { label: 'Deprn Reserve',   value: formatCurrency(asset.deprnReserve),     color: REDWOOD.warning,    bg: `${REDWOOD.warning}10`, border: `${REDWOOD.warning}30` },
+          ].map(({ label, value, color, bg, border }) => (
+            <div key={label} style={{ padding: '6px 14px', borderRadius: 6, background: bg, border: `1px solid ${border}`, minWidth: 110 }}>
+              <Text type="secondary" style={{ fontSize: 10, display: 'block', whiteSpace: 'nowrap' }}>{label}</Text>
+              <Text strong style={{ fontSize: 13, color, whiteSpace: 'nowrap' }}>{value}</Text>
             </div>
-          </Col>
-          <Col xs={8} sm={8} md={5}>
-            <div style={{
-              padding: '6px 12px', borderRadius: 6,
-              background: `${REDWOOD.info}10`, border: `1px solid ${REDWOOD.info}25`,
-            }}>
-              <Text type="secondary" style={{ fontSize: 10, display: 'block' }}>NBV</Text>
-              <Text strong style={{ color: REDWOOD.info, fontSize: 13 }}>{formatCurrency(asset.nbv)}</Text>
-            </div>
-          </Col>
-          <Col xs={8} sm={8} md={5}>
-            <div style={{
-              padding: '6px 12px', borderRadius: 6,
-              background: `${REDWOOD.warning}10`, border: `1px solid ${REDWOOD.warning}25`,
-            }}>
-              <Text type="secondary" style={{ fontSize: 10, display: 'block' }}>Deprn Reserve</Text>
-              <Text strong style={{ color: REDWOOD.warning, fontSize: 13 }}>{formatCurrency(asset.deprnReserve)}</Text>
-            </div>
-          </Col>
-        </Row>
+          ))}
+        </div>
       </Card>
 
       {/* Sub-tabs */}
