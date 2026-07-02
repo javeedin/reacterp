@@ -891,6 +891,44 @@ export const markFaAdditionAccounted = async (payload: {
   }
 };
 
+// GET depreciation accounting preview for one period
+export const getDeprnAccountingPreview = async (
+  assetId: string,
+  bookTypeCode: string,
+  periodName: string,
+): Promise<AccountingPreview> => {
+  try {
+    const qs = `assetId=${encodeURIComponent(assetId)}&bookTypeCode=${encodeURIComponent(bookTypeCode)}&periodName=${encodeURIComponent(periodName)}`;
+    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/fa/accounting/deprn-preview?${qs}`, {
+      headers: { Accept: 'application/json' },
+    });
+    return await res.json();
+  } catch (e: any) {
+    return { success: false, accountedStatus: 'UNACCOUNTED', accountedDate: null, header: {} as any, lines: [], error: e.message };
+  }
+};
+
+// Mark depreciation period as ACCOUNTED in RR_FA_DEPRN_DETAIL
+export const markFaDeprnAccounted = async (payload: {
+  assetId: string;
+  bookTypeCode: string;
+  periodName: string;
+  slaHeaderId: number;
+  glHeaderId?: number;
+  createdBy?: string;
+}): Promise<{ success: boolean; rowsUpdated?: number; status?: string; message?: string; error?: string }> => {
+  try {
+    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/fa/accounting/mark-deprn-accounted`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return await res.json();
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
+};
+
 // ── Formatting helpers ────────────────────────────────────────────────────────
 
 export const formatCurrency = (value: string | number, decimals = 2): string => {

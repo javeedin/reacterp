@@ -4,7 +4,7 @@ import dayjs from 'dayjs';
 import {
   Layout, Card, Form, Input, Button, Space, Typography, Table, Tag,
   Row, Col, Breadcrumb, Tooltip, Select, Tabs, Descriptions,
-  Spin, Empty, Badge, message, Modal, Switch, Statistic, DatePicker, Popconfirm,
+  Spin, Empty, Badge, message, Modal, Switch, Statistic, DatePicker, Popconfirm, Divider,
 } from 'antd';
 import type { ColumnsType, TableProps } from 'antd/es/table';
 import {
@@ -24,8 +24,9 @@ import {
   getAssetDistributions, getAssetInvoices, getAssetTransactions,
   getCategoryDetail, getCategoryBooks, postAssetDeprn, postSingleDeprn, deleteAssetDeprn,
   getBookControls,
-  getAdditionsAccountingPreview, checkSlaAccountingExists, getSlaAccounting,
-  createSlaAccounting, markFaAdditionAccounted,
+  getAdditionsAccountingPreview, getDeprnAccountingPreview,
+  checkSlaAccountingExists, getSlaAccounting,
+  createSlaAccounting, markFaAdditionAccounted, markFaDeprnAccounted,
   formatCurrency, assetTypeLabel, assetStatusLabel,
 } from '../../services/fa.service';
 import type { JournalLine } from '../../services/manage-journals.service';
@@ -93,7 +94,8 @@ const AssetTabContent: React.FC<{
   onSubTabChange: (key: string, subTab: string) => void;
   onRefresh: () => void;
   onSlaStatusChange: (tabKey: string, status: SlaExistsResult) => void;
-}> = ({ tab, onSubTabChange, onRefresh, onSlaStatusChange }) => {
+  setOpenAssetTabs: React.Dispatch<React.SetStateAction<OpenAssetTab[]>>;
+}> = ({ tab, onSubTabChange, onRefresh, onSlaStatusChange, setOpenAssetTabs }) => {
   const { asset, detail, books, deprn, distributions, invoices, transactions, categoryBooks, categoryName, categoryId, categoryApiUrl, loading, activeSubTab } = tab;
   const { user } = useAuth();
   const loggedUser = user?.username || user?.name || 'REACTERP';
@@ -540,6 +542,164 @@ const AssetTabContent: React.FC<{
     }
   };
 
+  // ── Depreciation Accounting state ────────────────────────────────────────────
+  const [deprnAcctVisible,   setDeprnAcctVisible]   = useState(false);
+  const [deprnAcctRecord,    setDeprnAcctRecord]     = useState<DeprnRecord | null>(null);
+  const [deprnAcctPreview,   setDeprnAcctPreview]    = useState<AccountingPreview | null>(null);
+  const [deprnAcctLoading,   setDeprnAcctLoading]    = useState(false);
+  const [deprnAcctCreating,  setDeprnAcctCreating]   = useState(false);
+  const [deprnAcctSteps,     setDeprnAcctSteps]      = useState<AcctStep[]>([]);
+  const [deprnAcctStepsVis,  setDeprnAcctStepsVis]   = useState(false);
+  const [deprnGlLines,       setDeprnGlLines]        = useState<any[]>([]);
+  const [deprnGlLoading,     setDeprnGlLoading]      = useState(false);
+
+  const DEPRN_ACCT_STEPS_INIT: AcctStep[] = [
+    { label: 'Create SLA Accounting',    detail: 'POST sla/accounting/create',            status: 'wait' },
+    { label: 'Create & Post GL Journal', detail: 'POST journals/create → PUT post',       status: 'wait' },
+    { label: 'Mark Period as Accounted', detail: 'POST fa/accounting/mark-deprn-accounted', status: 'wait' },
+  ];
+
+  const updateDeprnStep = (index: number, status: StepStatus, resultOrError?: string) =>
+    setDeprnAcctSteps(prev => prev.map((s, i) => i === index
+      ? { ...s, status, result: status === 'finish' ? resultOrError : undefined, error: status === 'error' ? resultOrError : undefined }
+      : s));
+
+  const openDeprnAccounting = async (record: DeprnRecord) => {
+    const book = record.bookTypeCode || asset.bookTypeCode || books[0]?.bookTypeCode || '';
+    setDeprnAcctRecord(record);
+    setDeprnAcctPreview(null);
+    setDeprnAcctLoading(true);
+    setDeprnAcctVisible(true);
+    setDeprnAcctSteps(DEPRN_ACCT_STEPS_INIT);
+    setDeprnAcctStepsVis(false);
+    setDeprnGlLines([]);
+    try {
+      const preview = await getDeprnAccountingPreview(asset.assetId, book, record.periodName);
+      setDeprnAcctPreview(preview);
+      // If already accounted, load actual GL lines
+      if (preview.accountedStatus === 'ACCOUNTED') {
+        setDeprnGlLoading(true);
+        fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${encodeURIComponent(asset.assetId)}&reference5=FA_DEPRN`, {
+          headers: { Accept: 'application/json' },
+        })
+          .then(r => r.json())
+          .then(d => setDeprnGlLines(Array.isArray(d?.items) ? d.items : (Array.isArray(d) ? d : [])))
+          .catch(() => setDeprnGlLines([]))
+          .finally(() => setDeprnGlLoading(false));
+      }
+    } catch {
+      message.error('Failed to load depreciation accounting preview');
+    } finally {
+      setDeprnAcctLoading(false);
+    }
+  };
+
+  const handleCreateDeprnAccounting = async () => {
+    if (!deprnAcctPreview || !deprnAcctRecord) return;
+    const book = deprnAcctRecord.bookTypeCode || asset.bookTypeCode || books[0]?.bookTypeCode || '';
+    setDeprnAcctCreating(true);
+    setDeprnAcctSteps(DEPRN_ACCT_STEPS_INIT);
+    setDeprnAcctStepsVis(true);
+    try {
+      const h = deprnAcctPreview.header;
+
+      // Step 0: Create SLA
+      updateDeprnStep(0, 'process');
+      const slaRes = await createSlaAccounting({
+        header: {
+          moduleName: h.moduleName, sourceTable: h.sourceTable, sourceId: h.sourceId,
+          sourceNumber: h.sourceNumber, sourceType: h.sourceType, eventTypeCode: h.eventTypeCode,
+          eventDate: h.eventDate, accountingDate: h.accountingDate, periodName: h.periodName,
+          ledgerId: h.ledgerId, ledgerName: h.ledgerName, currencyCode: h.currencyCode,
+          ledgerCurrency: h.ledgerCurrency, description: h.description, createdBy: loggedUser,
+        },
+        lines: deprnAcctPreview.lines.map(l => ({
+          lineNumber: l.lineNumber, lineType: l.lineType, accountingClass: l.accountingClass,
+          accountCombo: l.accountCombination, enteredDr: l.enteredDr, enteredCr: l.enteredCr,
+          accountedDr: l.accountedDr, accountedCr: l.accountedCr, currencyCode: h.currencyCode,
+          description: l.description, sourceLineId: h.sourceId, sourceLineNum: l.lineNumber,
+        })),
+      });
+      if (!slaRes.headerId) {
+        const err = slaRes.error || slaRes.message || 'Failed to create SLA accounting';
+        updateDeprnStep(0, 'error', err); message.error(err); return;
+      }
+      updateDeprnStep(0, 'finish', `SLA Header ID: ${slaRes.headerId}`);
+      const slaHeaderId = slaRes.headerId;
+
+      // Step 1: Create + post GL journal
+      updateDeprnStep(1, 'process');
+      const glRes = await postSlaToGL({
+        slaHeaderId,
+        sourceNumber:   String(h.sourceNumber || h.assetNumber),
+        sourceId:       h.sourceId,
+        eventTypeCode:  h.eventTypeCode,
+        periodName:     h.periodName,
+        ledgerName:     h.ledgerName,
+        ledgerId:       h.ledgerId,
+        currency:       h.currencyCode,
+        accountingDate: h.accountingDate,
+        legalEntity: '', businessUnit: '',
+        jeCategory:    'Assets',
+        jeSource:      'Fixed Assets',
+        batchSource:   'Fixed Assets',
+        journalName:   `FA Depreciation — ${h.sourceNumber || h.assetNumber} — ${h.periodName}`,
+        journalDescription: h.description,
+        createdBy: loggedUser,
+        lines: deprnAcctPreview.lines.map(l => ({
+          lineType: l.lineType, enteredDr: l.enteredDr || null, enteredCr: l.enteredCr || null,
+          accountedDr: l.accountedDr || null, accountedCr: l.accountedCr || null,
+          description: l.description, currencyCode: h.currencyCode, accountingDate: h.accountingDate,
+          accountCombination: l.accountCombination, accountingClass: l.accountingClass, legalEntity: null,
+        })),
+      });
+      if (!glRes.success) {
+        const err = glRes.error || 'Failed to create/post GL journal';
+        updateDeprnStep(1, 'error', err); message.error(err); return;
+      }
+      updateDeprnStep(1, 'finish', `GL Batch: ${glRes.batchId} | Header: ${glRes.headerId}`);
+
+      // Step 2: Mark deprn period as ACCOUNTED
+      updateDeprnStep(2, 'process');
+      const markRes = await markFaDeprnAccounted({
+        assetId:      asset.assetId,
+        bookTypeCode: book,
+        periodName:   deprnAcctRecord.periodName,
+        slaHeaderId,
+        glHeaderId:   glRes.headerId ?? slaHeaderId,
+        createdBy:    loggedUser,
+      });
+      if (markRes?.success === false) {
+        const err = markRes.error || 'Failed to mark as accounted';
+        updateDeprnStep(2, 'error', err); message.error(err); return;
+      }
+      updateDeprnStep(2, 'finish', `${markRes.rowsUpdated || 1} row(s) updated`);
+      message.success(`Depreciation ${deprnAcctRecord.periodName} accounted and posted to GL`);
+
+      // Reload GL lines + refresh preview
+      const updatedPreview = await getDeprnAccountingPreview(asset.assetId, book, deprnAcctRecord.periodName);
+      setDeprnAcctPreview(updatedPreview);
+      setDeprnGlLoading(true);
+      fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${encodeURIComponent(asset.assetId)}&reference5=FA_DEPRN`, {
+        headers: { Accept: 'application/json' },
+      })
+        .then(r => r.json())
+        .then(d => setDeprnGlLines(Array.isArray(d?.items) ? d.items : (Array.isArray(d) ? d : [])))
+        .catch(() => setDeprnGlLines([]))
+        .finally(() => setDeprnGlLoading(false));
+
+      // Update the deprn row status in the parent tab
+      setOpenAssetTabs((prev: OpenAssetTab[]) => prev.map((t: OpenAssetTab) => t.key === `asset-${asset.assetId}`
+        ? { ...t, deprn: t.deprn.map(r => r.periodName === deprnAcctRecord.periodName ? { ...r, accountedStatus: 'ACCOUNTED', accountedDate: new Date().toISOString().slice(0,10) } : r) }
+        : t));
+
+    } catch (err: any) {
+      message.error(err.message || 'Depreciation accounting failed');
+    } finally {
+      setDeprnAcctCreating(false);
+    }
+  };
+
   const [deletingPeriod, setDeletingPeriod] = useState<string | null>(null);
 
   const handleDeleteDeprn = async (record: DeprnRecord) => {
@@ -598,16 +758,17 @@ const AssetTabContent: React.FC<{
       fixed: 'right' as const,
       render: (_: any, record: DeprnRecord) => (
         <Space size={4}>
-          {(!record.accountedStatus || record.accountedStatus !== 'ACCOUNTED') && (
-            <Tooltip title="Create Accounting">
-              <Button
-                size="small"
-                icon={<AccountBookOutlined />}
-                style={{ color: '#0572CE', borderColor: '#0572CE' }}
-                onClick={() => message.info('Depreciation accounting coming soon')}
-              />
-            </Tooltip>
-          )}
+          <Tooltip title={record.accountedStatus === 'ACCOUNTED' ? 'View Accounting' : 'Create Accounting'}>
+            <Button
+              size="small"
+              icon={record.accountedStatus === 'ACCOUNTED' ? <CheckOutlined /> : <AccountBookOutlined />}
+              style={{
+                color: record.accountedStatus === 'ACCOUNTED' ? REDWOOD.success : '#0572CE',
+                borderColor: record.accountedStatus === 'ACCOUNTED' ? REDWOOD.success : '#0572CE',
+              }}
+              onClick={() => openDeprnAccounting(record)}
+            />
+          </Tooltip>
           <Popconfirm
             title={`Delete depreciation for ${record.periodName}?`}
             description="This cannot be undone if the period has been transferred to GL."
@@ -1851,6 +2012,250 @@ const AssetTabContent: React.FC<{
           )}
         </Spin>
       </Modal>
+
+      {/* ── Depreciation Accounting Modal ── */}
+      <Modal
+        open={deprnAcctVisible}
+        title={
+          <Space>
+            <AccountBookOutlined style={{ color: REDWOOD.primary }} />
+            <span>Depreciation Accounting</span>
+            {deprnAcctRecord && (
+              <Tag color="blue" style={{ marginLeft: 4 }}>
+                {deprnAcctRecord.periodName}
+              </Tag>
+            )}
+          </Space>
+        }
+        onCancel={() => { setDeprnAcctVisible(false); setDeprnAcctStepsVis(false); }}
+        width={720}
+        footer={[
+          <Button key="close" onClick={() => { setDeprnAcctVisible(false); setDeprnAcctStepsVis(false); }}>
+            Close
+          </Button>,
+          deprnAcctRecord?.accountedStatus !== 'ACCOUNTED' && (
+            <Button
+              key="create"
+              type="primary"
+              icon={<AccountBookOutlined />}
+              loading={deprnAcctCreating}
+              onClick={handleCreateDeprnAccounting}
+              disabled={!deprnAcctPreview}
+            >
+              Create Accounting
+            </Button>
+          ),
+        ]}
+      >
+        <Spin spinning={deprnAcctLoading}>
+          {/* Step progress */}
+          {deprnAcctStepsVis && (
+            <div style={{ marginBottom: 16 }}>
+              {deprnAcctSteps.map((s, i) => (
+                <div key={i} style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '6px 0', borderBottom: `1px solid ${REDWOOD.neutral200}`,
+                }}>
+                  <div style={{ width: 22, textAlign: 'center' }}>
+                    {s.status === 'done' && <CheckOutlined style={{ color: REDWOOD.success }} />}
+                    {s.status === 'running' && <Spin size="small" />}
+                    {s.status === 'error' && <span style={{ color: REDWOOD.error }}>✕</span>}
+                    {s.status === 'pending' && <span style={{ color: REDWOOD.neutral400 }}>○</span>}
+                  </div>
+                  <Text style={{ fontSize: 13, flex: 1 }}>{s.label}</Text>
+                  {s.detail && <Text type="secondary" style={{ fontSize: 11 }}>{s.detail}</Text>}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {deprnAcctRecord?.accountedStatus === 'ACCOUNTED' ? (
+            /* ── Already accounted: show summary + GL lines ── */
+            <>
+              {deprnAcctPreview?.header && (
+                <div style={{
+                  display: 'flex', gap: 16, flexWrap: 'wrap',
+                  background: REDWOOD.surface, border: `1px solid ${REDWOOD.neutral200}`,
+                  borderRadius: 8, padding: '10px 16px', marginBottom: 14,
+                }}>
+                  <Space>
+                    <CheckOutlined style={{ color: REDWOOD.success }} />
+                    <Text style={{ fontWeight: 600, color: REDWOOD.success }}>POSTED</Text>
+                  </Space>
+                  <Divider type="vertical" style={{ margin: '0 4px' }} />
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    Period: <strong>{deprnAcctPreview.header.periodName}</strong>
+                  </Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    Currency: <strong>{deprnAcctPreview.header.currencyCode}</strong>
+                  </Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    Amount: <strong>{formatCurrency(String(deprnAcctPreview.header.totalAmount || deprnAcctRecord?.deprnAmount || 0))}</strong>
+                  </Text>
+                </div>
+              )}
+              <Card size="small" title={<Text style={{ fontSize: 12, fontWeight: 600 }}>GL Journal Lines</Text>}
+                style={{ borderRadius: 8 }} styles={{ body: { padding: '8px 12px' } }}>
+                <Spin spinning={deprnGlLoading}>
+                  {deprnGlLines.length > 0 ? (
+                    <>
+                      {/* Header row */}
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: '36px 1fr 140px 140px 80px',
+                        gap: '0 8px', padding: '4px 0',
+                        borderBottom: `2px solid ${REDWOOD.neutral300}`,
+                        marginBottom: 4,
+                      }}>
+                        <Text style={{ fontSize: 10, color: REDWOOD.neutral500, fontWeight: 600 }}>#</Text>
+                        <Text style={{ fontSize: 10, color: REDWOOD.neutral500, fontWeight: 600 }}>Account</Text>
+                        <Text style={{ fontSize: 10, color: REDWOOD.neutral500, fontWeight: 600, textAlign: 'right' }}>Debit</Text>
+                        <Text style={{ fontSize: 10, color: REDWOOD.neutral500, fontWeight: 600, textAlign: 'right' }}>Credit</Text>
+                        <Text style={{ fontSize: 10, color: REDWOOD.neutral500, fontWeight: 600 }}>Status</Text>
+                      </div>
+                      {deprnGlLines.map((l: any, idx: number) => (
+                        <div key={idx} style={{
+                          display: 'grid',
+                          gridTemplateColumns: '36px 1fr 140px 140px 80px',
+                          gap: '0 8px', padding: '6px 0',
+                          borderBottom: `1px solid ${REDWOOD.neutral200}`,
+                          alignItems: 'start',
+                        }}>
+                          <Text style={{ fontSize: 11, color: REDWOOD.neutral500, paddingTop: 2 }}>
+                            {l.line_num ?? idx + 1}
+                          </Text>
+                          <div>
+                            <div style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', color: REDWOOD.neutral900 }}>
+                              {l.account}
+                            </div>
+                            {l.description && (
+                              <div style={{ fontSize: 11, color: REDWOOD.neutral500, marginTop: 2 }}>{l.description}</div>
+                            )}
+                          </div>
+                          <div style={{ textAlign: 'right', fontFamily: 'monospace' }}>
+                            {l.accounted_dr ? <Text style={{ color: REDWOOD.info, fontWeight: 600 }}>{formatCurrency(String(l.accounted_dr))}</Text> : <Text type="secondary">—</Text>}
+                          </div>
+                          <div style={{ textAlign: 'right', fontFamily: 'monospace' }}>
+                            {l.accounted_cr ? <Text style={{ color: REDWOOD.primary, fontWeight: 600 }}>{formatCurrency(String(l.accounted_cr))}</Text> : <Text type="secondary">—</Text>}
+                          </div>
+                          <div>
+                            <Tag color={l.posting_status === 'P' ? 'success' : 'default'} style={{ fontSize: 10, padding: '0 4px' }}>
+                              {l.posting_status === 'P' ? 'Posted' : l.posting_status || '—'}
+                            </Tag>
+                          </div>
+                        </div>
+                      ))}
+                      {/* Totals */}
+                      <div style={{
+                        display: 'grid', gridTemplateColumns: '36px 1fr 140px 140px 80px',
+                        gap: '0 8px', padding: '6px 0',
+                        borderTop: `2px solid ${REDWOOD.neutral300}`, marginTop: 4,
+                      }}>
+                        <span />
+                        <Text style={{ fontSize: 11, fontWeight: 600 }}>Total</Text>
+                        <Text style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.info }}>
+                          {formatCurrency(String(deprnGlLines.reduce((s: number, l: any) => s + (Number(l.accounted_dr) || 0), 0)))}
+                        </Text>
+                        <Text style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.primary }}>
+                          {formatCurrency(String(deprnGlLines.reduce((s: number, l: any) => s + (Number(l.accounted_cr) || 0), 0)))}
+                        </Text>
+                        <span />
+                      </div>
+                    </>
+                  ) : (
+                    <Empty description="No GL lines found" style={{ padding: '12px 0' }} />
+                  )}
+                </Spin>
+              </Card>
+            </>
+          ) : (
+            /* ── Not yet accounted: show preview ── */
+            deprnAcctPreview && (
+              <>
+                <Card size="small"
+                  title={<Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.neutral600 }}>Journal Header (Preview)</Text>}
+                  style={{ borderRadius: 8, marginBottom: 12 }}
+                  styles={{ body: { padding: '10px 14px' } }}
+                >
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
+                    {[
+                      { label: 'Source', val: deprnAcctPreview.header.source },
+                      { label: 'Category', val: deprnAcctPreview.header.category },
+                      { label: 'Ledger', val: deprnAcctPreview.header.ledgerName },
+                      { label: 'Period', val: deprnAcctPreview.header.periodName },
+                      { label: 'Currency', val: deprnAcctPreview.header.currencyCode },
+                      { label: 'Total Amount', val: formatCurrency(String(deprnAcctPreview.header.totalAmount || 0)) },
+                    ].map(f => (
+                      <div key={f.label}>
+                        <Text style={{ fontSize: 10, color: REDWOOD.neutral500 }}>{f.label}</Text>
+                        <div style={{ fontSize: 12, fontWeight: 600 }}>{f.val || '—'}</div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+                <Card size="small"
+                  title={<Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.neutral600 }}>Journal Lines (Preview)</Text>}
+                  style={{ borderRadius: 8 }}
+                  styles={{ body: { padding: '8px 12px' } }}
+                >
+                  {/* Header row */}
+                  <div style={{
+                    display: 'grid', gridTemplateColumns: '36px 1fr 140px 140px',
+                    gap: '0 8px', padding: '4px 0',
+                    borderBottom: `2px solid ${REDWOOD.neutral300}`, marginBottom: 4,
+                  }}>
+                    <Text style={{ fontSize: 10, color: REDWOOD.neutral500, fontWeight: 600 }}>#</Text>
+                    <Text style={{ fontSize: 10, color: REDWOOD.neutral500, fontWeight: 600 }}>Account</Text>
+                    <Text style={{ fontSize: 10, color: REDWOOD.neutral500, fontWeight: 600, textAlign: 'right' }}>Debit</Text>
+                    <Text style={{ fontSize: 10, color: REDWOOD.neutral500, fontWeight: 600, textAlign: 'right' }}>Credit</Text>
+                  </div>
+                  {deprnAcctPreview.lines.map((l, idx) => (
+                    <div key={idx} style={{
+                      display: 'grid', gridTemplateColumns: '36px 1fr 140px 140px',
+                      gap: '0 8px', padding: '6px 0',
+                      borderBottom: `1px solid ${REDWOOD.neutral200}`, alignItems: 'start',
+                    }}>
+                      <Text style={{ fontSize: 11, color: REDWOOD.neutral500, paddingTop: 2 }}>{idx + 1}</Text>
+                      <div>
+                        <div style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', color: REDWOOD.neutral900 }}>
+                          {l.accountCombination || l.accountCode}
+                        </div>
+                        {l.accountDescription && (
+                          <div style={{ fontSize: 11, color: REDWOOD.neutral500, marginTop: 2 }}>{l.accountDescription}</div>
+                        )}
+                        <div style={{ fontSize: 11, color: REDWOOD.neutral400, marginTop: 1 }}>{l.description}</div>
+                      </div>
+                      <div style={{ textAlign: 'right', fontFamily: 'monospace' }}>
+                        {l.debit ? <Text style={{ color: REDWOOD.info, fontWeight: 600 }}>{formatCurrency(String(l.debit))}</Text> : <Text type="secondary">—</Text>}
+                      </div>
+                      <div style={{ textAlign: 'right', fontFamily: 'monospace' }}>
+                        {l.credit ? <Text style={{ color: REDWOOD.primary, fontWeight: 600 }}>{formatCurrency(String(l.credit))}</Text> : <Text type="secondary">—</Text>}
+                      </div>
+                    </div>
+                  ))}
+                  {/* Totals */}
+                  <div style={{
+                    display: 'grid', gridTemplateColumns: '36px 1fr 140px 140px',
+                    gap: '0 8px', padding: '6px 0',
+                    borderTop: `2px solid ${REDWOOD.neutral300}`, marginTop: 4,
+                  }}>
+                    <span /><Text style={{ fontSize: 11, fontWeight: 600 }}>Total</Text>
+                    <Text style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.info }}>
+                      {formatCurrency(String(deprnAcctPreview.lines.reduce((s, l) => s + (l.debit || 0), 0)))}
+                    </Text>
+                    <Text style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.primary }}>
+                      {formatCurrency(String(deprnAcctPreview.lines.reduce((s, l) => s + (l.credit || 0), 0)))}
+                    </Text>
+                  </div>
+                </Card>
+              </>
+            )
+          )}
+          {!deprnAcctPreview && !deprnAcctLoading && (
+            <Empty description="No depreciation accounting data" />
+          )}
+        </Spin>
+      </Modal>
     </div>
   );
 };
@@ -2436,6 +2841,7 @@ const ManageAssets: React.FC = () => {
                   onSlaStatusChange={(tabKey, status) =>
                     setOpenAssetTabs(prev => prev.map(t => t.key === tabKey ? { ...t, additionSlaStatus: status } : t))
                   }
+                  setOpenAssetTabs={setOpenAssetTabs}
                 />
               ),
             })),
