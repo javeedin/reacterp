@@ -115,7 +115,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
             FROM RR_FA_ADDITIONS a
             LEFT JOIN RR_FA_BOOKS b ON b.ASSET_ID = a.ASSET_ID AND b.BOOK_TYPE_CODE = p_book
             WHERE a.ASSET_ID = p_asset_id
-            FETCH FIRST 1 ROWS ONLY;
+            AND ROWNUM = 1;
         EXCEPTION WHEN NO_DATA_FOUND THEN
             p_status   := 404;
             p_response := '{"success":false,"error":"Asset not found: ' || p_asset_id || '"}';
@@ -129,7 +129,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
             FROM   RR_FA_CATEGORY_BOOKS cb
             WHERE  cb.CATEGORY_ID    = v_category_id
             AND    cb.BOOK_TYPE_CODE = p_book
-            FETCH FIRST 1 ROWS ONLY;
+            AND    ROWNUM = 1;
         EXCEPTION WHEN NO_DATA_FOUND THEN
             v_cost_ccid     := NULL;
             v_clearing_ccid := NULL;
