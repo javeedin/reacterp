@@ -58,12 +58,13 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
     FUNCTION jstr(p IN VARCHAR2) RETURN VARCHAR2 IS
     BEGIN RETURN '"' || REPLACE(REPLACE(p, '\', '\\'), '"', '\"') || '"'; END;
 
-    FUNCTION get_account_combo(p_ccid IN NUMBER) RETURN VARCHAR2 IS
+    -- p_company overrides the first segment (Co) with the book's company code
+    FUNCTION get_account_combo(p_ccid IN NUMBER, p_company IN VARCHAR2 DEFAULT NULL) RETURN VARCHAR2 IS
         v_combo VARCHAR2(750);
     BEGIN
         IF p_ccid IS NULL OR p_ccid = 0 THEN RETURN NULL; END IF;
         SELECT
-            NVL("buimercFinGlbCoaCo", '')         || '-' ||
+            NVL(p_company, NVL("buimercFinGlbCoaCo", '')) || '-' ||
             NVL("buimercFinGlbCoaLob", '')        || '-' ||
             NVL("buimercFinGlbCoaDepartment", '') || '-' ||
             NVL("buimercFinGlbCoaAccount", '')    || '-' ||
@@ -101,6 +102,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
         v_cost_combo     VARCHAR2(750);
         v_clearing_combo VARCHAR2(750);
         v_period_name    VARCHAR2(15);
+        v_company_code   VARCHAR2(30);
     BEGIN
         -- Get asset data
         BEGIN
@@ -135,8 +137,16 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
             v_clearing_ccid := NULL;
         END;
 
-        v_cost_combo     := get_account_combo(v_cost_ccid);
-        v_clearing_combo := get_account_combo(v_clearing_ccid);
+        -- Get company code from book controls (overrides first segment)
+        BEGIN
+            SELECT COMPANY_CODE INTO v_company_code
+            FROM   RR_FA_BOOK_CONTROLS
+            WHERE  BOOK_TYPE_CODE = p_book
+            AND    ROWNUM = 1;
+        EXCEPTION WHEN NO_DATA_FOUND THEN v_company_code := NULL; END;
+
+        v_cost_combo     := get_account_combo(v_cost_ccid,     v_company_code);
+        v_clearing_combo := get_account_combo(v_clearing_ccid, v_company_code);
         DECLARE
             v_dt DATE := NVL(TO_DATE(SUBSTR(v_date_svc, 1, 10), 'YYYY-MM-DD'), SYSDATE);
         BEGIN
