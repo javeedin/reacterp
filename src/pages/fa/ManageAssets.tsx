@@ -174,7 +174,7 @@ const AssetTabContent: React.FC<{
     while (cur.isBefore(end) || cur.isSame(end, 'month')) {
       const depr = Math.min(monthlyDeprn, nbv - salvage);
       if (depr <= 0) { cur = cur.add(1, 'month'); continue; }
-      rows.push({ period: cur.format('MMM-YYYY'), openingNbv: nbv, depreciation: depr, closingNbv: nbv - depr });
+      rows.push({ period: cur.format('MMM-YY'), openingNbv: nbv, depreciation: depr, closingNbv: nbv - depr });
       nbv -= depr;
       cur = cur.add(1, 'month');
     }
@@ -860,7 +860,7 @@ const AssetTabContent: React.FC<{
                             periodName:   sampleRow.period,
                             deprnAmount:  parseFloat(sampleRow.depreciation.toFixed(2)),
                             createdBy:    loggedUser,
-                          } : { assetId: asset.assetId, bookTypeCode: book, periodName: 'MMM-YYYY', deprnAmount: 0, createdBy: loggedUser };
+                          } : { assetId: asset.assetId, bookTypeCode: book, periodName: 'MMM-YY', deprnAmount: 0, createdBy: loggedUser };
                           Modal.info({
                             title: 'Depreciation API — POST Request',
                             width: 680,
