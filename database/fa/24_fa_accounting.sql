@@ -108,7 +108,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
         BEGIN
             SELECT
                 a.ASSET_NUMBER, a.DESCRIPTION,
-                NVL(b.COST, a.COST),
+                b.COST,
                 a.ASSET_CATEGORY_ID, b.DATE_PLACED_IN_SERVICE,
                 NVL(a.ACCOUNTED_STATUS, 'UNACCOUNTED'),
                 TO_CHAR(a.ACCOUNTED_DATE, 'YYYY-MM-DD')
