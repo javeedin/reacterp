@@ -28,6 +28,8 @@ import {
   createSlaAccounting, markFaAdditionAccounted,
   formatCurrency, assetTypeLabel, assetStatusLabel,
 } from '../../services/fa.service';
+import { getJournalLines } from '../../services/manage-journals.service';
+import type { JournalLine } from '../../services/manage-journals.service';
 import type {
   AssetRecord, AssetDetail, AssetBook, DeprnRecord,
   DistributionRecord, InvoiceRecord, TransactionRecord, CategoryBookRecord,
@@ -83,6 +85,7 @@ interface OpenAssetTab {
   categoryId: string;
   categoryApiUrl: string;
   activeSubTab: string;
+  additionSlaStatus: SlaExistsResult | null;
 }
 
 // ── Asset tab content ──────────────────────────────────────────────────────────
@@ -90,7 +93,8 @@ const AssetTabContent: React.FC<{
   tab: OpenAssetTab;
   onSubTabChange: (key: string, subTab: string) => void;
   onRefresh: () => void;
-}> = ({ tab, onSubTabChange, onRefresh }) => {
+  onSlaStatusChange: (tabKey: string, status: SlaExistsResult) => void;
+}> = ({ tab, onSubTabChange, onRefresh, onSlaStatusChange }) => {
   const { asset, detail, books, deprn, distributions, invoices, transactions, categoryBooks, categoryName, categoryId, categoryApiUrl, loading, activeSubTab } = tab;
   const { user } = useAuth();
   const loggedUser = user?.username || user?.name || 'REACTERP';
@@ -231,10 +235,12 @@ const AssetTabContent: React.FC<{
   // Create Accounting state
   const [acctPreviewVisible, setAcctPreviewVisible] = useState(false);
   const [acctPreview,        setAcctPreview]        = useState<AccountingPreview | null>(null);
-  const [acctSlaExists,      setAcctSlaExists]      = useState<SlaExistsResult | null>(null);
+  const [acctSlaExists,      setAcctSlaExists]      = useState<SlaExistsResult | null>(tab.additionSlaStatus);
   const [acctExistingJournal,setAcctExistingJournal]= useState<any>(null);
   const [acctPreviewLoading, setAcctPreviewLoading] = useState(false);
   const [creatingAccounting, setCreatingAccounting] = useState(false);
+  const [viewGlLines,        setViewGlLines]        = useState<JournalLine[]>([]);
+  const [viewGlLoading,      setViewGlLoading]      = useState(false);
 
   type StepStatus = 'wait' | 'process' | 'finish' | 'error';
   interface AcctStep { label: string; detail: string; status: StepStatus; result?: string; error?: string; }
@@ -363,6 +369,7 @@ const AssetTabContent: React.FC<{
     setDbgSlaHeaderId(null);
     setDbgGlBatchId(null);
     setDbgGlHeaderId(null);
+    setViewGlLines([]);
     try {
       // Parallel: preview data + SLA exists check
       const [preview, slaExists] = await Promise.all([
@@ -371,10 +378,18 @@ const AssetTabContent: React.FC<{
       ]);
       setAcctPreview(preview);
       setAcctSlaExists(slaExists);
-      // If accounting already exists, load the actual journal details
+      // If accounting already exists, load the actual SLA + GL journal
       if (slaExists.exists && slaExists.headerId) {
         const existing = await getSlaAccounting('RR_FA_ADDITIONS', asset.assetId);
         setAcctExistingJournal(existing);
+        // Try to fetch actual GL lines using the glHeaderId stamped on the SLA record
+        const glHeaderId = existing?.glHeaderId || existing?.header?.glHeaderId;
+        if (glHeaderId) {
+          setViewGlLoading(true);
+          getJournalLines(Number(glHeaderId))
+            .then(r => setViewGlLines(r.lines || []))
+            .finally(() => setViewGlLoading(false));
+        }
       }
     } catch {
       message.error('Failed to load accounting preview');
@@ -502,9 +517,18 @@ const AssetTabContent: React.FC<{
       ]);
       setAcctPreview(updatedPreview);
       setAcctSlaExists(updatedExists);
+      // Propagate status back to parent so the Financial tab button updates
+      onSlaStatusChange(`asset-${asset.assetId}`, updatedExists);
       if (updatedExists.exists) {
         const existing = await getSlaAccounting('RR_FA_ADDITIONS', asset.assetId);
         setAcctExistingJournal(existing);
+        const glHeaderId = existing?.glHeaderId || existing?.header?.glHeaderId;
+        if (glHeaderId) {
+          setViewGlLoading(true);
+          getJournalLines(Number(glHeaderId))
+            .then(r => setViewGlLines(r.lines || []))
+            .finally(() => setViewGlLoading(false));
+        }
       }
     } catch (err: any) {
       message.error(err.message || 'Accounting creation failed');
@@ -707,14 +731,32 @@ const AssetTabContent: React.FC<{
               );
             })()}
           </Descriptions>
-          {/* Create Accounting button */}
-          <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+          {/* Accounting status + button */}
+          <div style={{ marginTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            {acctSlaExists?.exists ? (
+              <Space size={8}>
+                <Tag color="success" style={{ fontSize: 12, padding: '2px 8px' }}>
+                  <CheckOutlined style={{ marginRight: 4 }} />ACCOUNTED
+                </Tag>
+                {acctSlaExists.headerId && (
+                  <Text type="secondary" style={{ fontSize: 11 }}>SLA #{acctSlaExists.headerId}</Text>
+                )}
+                {acctSlaExists.accountingStatus && acctSlaExists.accountingStatus !== 'ACCOUNTED' && (
+                  <Text type="secondary" style={{ fontSize: 11 }}>— {acctSlaExists.accountingStatus}</Text>
+                )}
+              </Space>
+            ) : (
+              <Tag color="orange" style={{ fontSize: 12, padding: '2px 8px' }}>UNACCOUNTED</Tag>
+            )}
             <Button
-              icon={<AccountBookOutlined />}
-              style={{ borderColor: FA_COLOR, color: FA_COLOR }}
+              icon={acctSlaExists?.exists ? <CheckOutlined /> : <AccountBookOutlined />}
+              style={{
+                borderColor: acctSlaExists?.exists ? REDWOOD.success : FA_COLOR,
+                color: acctSlaExists?.exists ? REDWOOD.success : FA_COLOR,
+              }}
               onClick={openAccountingPreview}
             >
-              Create Accounting
+              {acctSlaExists?.exists ? 'View Accounting' : 'Create Accounting'}
             </Button>
           </div>
           </>
@@ -1437,8 +1479,8 @@ const AssetTabContent: React.FC<{
         width={820}
         title={
           <Space>
-            <AuditOutlined style={{ color: FA_COLOR }} />
-            <span>Create Accounting — Addition {asset.asset_number || asset.assetNumber}</span>
+            {acctSlaExists?.exists ? <CheckOutlined style={{ color: REDWOOD.success }} /> : <AuditOutlined style={{ color: FA_COLOR }} />}
+            <span>{acctSlaExists?.exists ? 'View Accounting' : 'Create Accounting'} — Addition {asset.asset_number || asset.assetNumber}</span>
           </Space>
         }
         footer={
@@ -1478,16 +1520,18 @@ const AssetTabContent: React.FC<{
                 Debug
               </Button>
               <Button onClick={() => setAcctPreviewVisible(false)}>Close</Button>
-              <Button
-                type="primary"
-                icon={<AccountBookOutlined />}
-                loading={creatingAccounting}
-                disabled={acctSlaExists?.exists || !acctPreview}
-                style={{ background: acctSlaExists?.exists ? undefined : REDWOOD.success, borderColor: acctSlaExists?.exists ? undefined : REDWOOD.success }}
-                onClick={handleCreateAccounting}
-              >
-                {acctSlaExists?.exists ? 'Already Accounted' : 'Create Accounting'}
-              </Button>
+              {!acctSlaExists?.exists && (
+                <Button
+                  type="primary"
+                  icon={<AccountBookOutlined />}
+                  loading={creatingAccounting}
+                  disabled={!acctPreview}
+                  style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+                  onClick={handleCreateAccounting}
+                >
+                  Create Accounting
+                </Button>
+              )}
             </Space>
           </div>
         }
@@ -1593,11 +1637,88 @@ const AssetTabContent: React.FC<{
                   <Space>
                     <CheckOutlined style={{ color: REDWOOD.success }} />
                     <Text style={{ color: REDWOOD.success }}>
-                      Accounting already created{acctPreview.accountedDate ? ` on ${acctPreview.accountedDate}` : ''}.
+                      Accounting created{acctPreview.accountedDate ? ` on ${acctPreview.accountedDate}` : ''}.
                       SLA Header #{acctSlaExists.headerId} — Status: {acctSlaExists.accountingStatus}
                     </Text>
                   </Space>
                 </div>
+              )}
+
+              {/* Actual GL Journal Lines (when accounting exists) */}
+              {acctSlaExists?.exists && (
+                <Card
+                  size="small"
+                  title={
+                    <Space>
+                      <CheckOutlined style={{ color: REDWOOD.success }} />
+                      <span>Actual GL Journal Lines</span>
+                      {viewGlLoading && <Spin size="small" />}
+                      {!viewGlLoading && viewGlLines.length === 0 && (
+                        <Tag color="warning" style={{ fontSize: 10 }}>GL lines not found (check glHeaderId in SLA record)</Tag>
+                      )}
+                    </Space>
+                  }
+                  style={{ marginBottom: 12, borderRadius: 6, border: `1px solid ${REDWOOD.success}40` }}
+                >
+                  {viewGlLines.length > 0 ? (
+                    <>
+                      <Table
+                        size="small"
+                        pagination={false}
+                        dataSource={viewGlLines}
+                        rowKey={(r: JournalLine) => String(r.lineSyncId || r.lineNum)}
+                        columns={[
+                          { title: '#', dataIndex: 'lineNum', key: 'lineNum', width: 40 },
+                          {
+                            title: 'Account',
+                            dataIndex: 'account',
+                            key: 'account',
+                            render: (v: string) => <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{v || '—'}</Text>,
+                          },
+                          { title: 'Description', dataIndex: 'description', key: 'desc', ellipsis: true },
+                          {
+                            title: 'Debit',
+                            dataIndex: 'accountedDr',
+                            key: 'dr',
+                            align: 'right' as const,
+                            width: 120,
+                            render: (v: number) => v ? <Text style={{ color: REDWOOD.info, fontFamily: 'monospace' }}>{formatCurrency(String(v))}</Text> : '—',
+                          },
+                          {
+                            title: 'Credit',
+                            dataIndex: 'accountedCr',
+                            key: 'cr',
+                            align: 'right' as const,
+                            width: 120,
+                            render: (v: number) => v ? <Text style={{ color: REDWOOD.primary, fontFamily: 'monospace' }}>{formatCurrency(String(v))}</Text> : '—',
+                          },
+                          {
+                            title: 'Currency',
+                            dataIndex: 'currency',
+                            key: 'currency',
+                            width: 80,
+                          },
+                        ]}
+                      />
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, padding: '4px 8px', background: REDWOOD.neutral100, borderRadius: 4 }}>
+                        <Text type="secondary" style={{ fontSize: 11 }}>
+                          {viewGlLines.length} GL lines · Reference2 = {asset.assetId} (Asset ID)
+                        </Text>
+                      </div>
+                    </>
+                  ) : !viewGlLoading ? (
+                    <div style={{ padding: '8px 0' }}>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        GL lines could not be loaded automatically. The SLA record should contain a GL Header ID after posting.
+                      </Text>
+                      {acctExistingJournal && (
+                        <pre style={{ marginTop: 8, background: '#f5f5f5', borderRadius: 4, padding: '8px 10px', fontSize: 10, maxHeight: 120, overflow: 'auto' }}>
+                          {JSON.stringify(acctExistingJournal, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  ) : null}
+                </Card>
               )}
 
               {/* Journal Header */}
@@ -1769,18 +1890,19 @@ const ManageAssets: React.FC = () => {
       key: tabKey, asset, loading: true,
       detail: null, books: [], deprn: [], distributions: [], invoices: [], transactions: [],
       categoryBooks: [], categoryName: '', categoryId: '', categoryApiUrl: '',
-      activeSubTab: 'general',
+      activeSubTab: 'general', additionSlaStatus: null,
     }]);
     setActiveTabKey(tabKey);
 
     try {
-      const [det, bks, dep, dist, inv, txn] = await Promise.all([
+      const [det, bks, dep, dist, inv, txn, slaStatus] = await Promise.all([
         getAssetDetail(asset.assetId),
         getAssetBooks(asset.assetId),
         getAssetDeprn(asset.assetId),
         getAssetDistributions(asset.assetId),
         getAssetInvoices(asset.assetId),
         getAssetTransactions(asset.assetId),
+        checkSlaAccountingExists('RR_FA_ADDITIONS', asset.assetId, 'FA_ADDITION'),
       ]);
 
       // Load category info using the assetCategoryId from the detail response
@@ -1811,6 +1933,7 @@ const ManageAssets: React.FC = () => {
         categoryName:  catName,
         categoryId:    catId,
         categoryApiUrl: catApiUrl,
+        additionSlaStatus: slaStatus,
       } : t));
     } catch {
       message.error('Failed to load asset details');
@@ -1821,13 +1944,14 @@ const ManageAssets: React.FC = () => {
   const refreshAssetTab = async (tabKey: string, asset: AssetRecord) => {
     setOpenAssetTabs(prev => prev.map(t => t.key === tabKey ? { ...t, loading: true } : t));
     try {
-      const [det, bks, dep, dist, inv, txn] = await Promise.all([
+      const [det, bks, dep, dist, inv, txn, slaStatus] = await Promise.all([
         getAssetDetail(asset.assetId),
         getAssetBooks(asset.assetId),
         getAssetDeprn(asset.assetId),
         getAssetDistributions(asset.assetId),
         getAssetInvoices(asset.assetId),
         getAssetTransactions(asset.assetId),
+        checkSlaAccountingExists('RR_FA_ADDITIONS', asset.assetId, 'FA_ADDITION'),
       ]);
       const catId = (det as any).assetCategoryId || (asset as any).assetCategoryId || '';
       let catName = '';
@@ -1843,6 +1967,7 @@ const ManageAssets: React.FC = () => {
         books: bks.items || [], deprn: dep.items || [],
         distributions: dist.items || [], invoices: inv.items || [], transactions: txn.items || [],
         categoryBooks: catBooks, categoryName: catName, categoryId: catId,
+        additionSlaStatus: slaStatus,
       } : t));
       message.success('Asset data refreshed');
     } catch {
@@ -2251,6 +2376,9 @@ const ManageAssets: React.FC = () => {
                   tab={tab}
                   onSubTabChange={onSubTabChange}
                   onRefresh={() => refreshAssetTab(tab.key, tab.asset)}
+                  onSlaStatusChange={(tabKey, status) =>
+                    setOpenAssetTabs(prev => prev.map(t => t.key === tabKey ? { ...t, additionSlaStatus: status } : t))
+                  }
                 />
               ),
             })),
