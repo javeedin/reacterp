@@ -35,9 +35,9 @@ CREATE OR REPLACE PACKAGE RR_FA_DEPRN_PKG AS
     -- -------------------------------------------------------------------------
     -- DELETE_DEPRECIATION
     -- Removes a depreciation record for one asset / one period.
-    -- Blocked when the period has been transferred to GL
-    -- (RR_FA_DEPRN_PERIODS.GL_TRANSFER_RUN = 'Y').
-    -- p_http_status    200 = deleted, 400 = GL-posted / not found, 500 = error.
+    -- Blocked when PERIOD_CLOSE_DATE is set on RR_FA_DEPRN_PERIODS
+    -- (closed period cannot be reversed).
+    -- p_http_status    200 = deleted, 404 = not found, 409 = period closed, 500 = error.
     -- -------------------------------------------------------------------------
     PROCEDURE DELETE_DEPRECIATION (
         p_asset_id     IN  VARCHAR2,
@@ -83,11 +83,10 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
     END jstr;
 
     -- ── Private: resolve period_counter from period_name + book ──────────────
-    -- Returns the period_counter for v_period_name within v_book.
     -- Search order:
-    --   1. RR_FA_DEPRN_PERIODS (exact match, case-insensitive)
-    --   2. RR_FA_CALENDAR_PERIODS (fallback — name without book prefix)
-    --   3. Auto-generate: max existing counter + 1
+    --   1. RR_FA_DEPRN_PERIODS (PERIOD_COUNTER, FISCAL_YEAR, PERIOD_NUM exist)
+    --   2. Auto-generate: max existing counter + 1, derive FY/num from name
+    -- NOTE: RR_FA_CALENDAR_PERIODS has no PERIOD_COUNTER column — not used.
     PROCEDURE resolve_period (
         p_book         IN  VARCHAR2,
         p_period_name  IN  VARCHAR2,
@@ -110,27 +109,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
         EXCEPTION WHEN NO_DATA_FOUND THEN NULL;
         END;
 
-        -- 2. Fall back to RR_FA_CALENDAR_PERIODS (no FISCAL_YEAR / PERIOD_NUM columns)
-        BEGIN
-            SELECT TO_NUMBER(PERIOD_COUNTER)
-            INTO   p_counter
-            FROM   RR_FA_CALENDAR_PERIODS
-            WHERE  UPPER(PERIOD_NAME) = UPPER(p_period_name)
-            AND    ROWNUM = 1;
-            -- Derive FY and period_num from the name (MMM-YYYY)
-            p_fiscal_year := TO_NUMBER(SUBSTR(p_period_name, INSTR(p_period_name,'-')+1));
-            p_period_num  := CASE UPPER(SUBSTR(p_period_name,1,3))
-                WHEN 'JAN' THEN 1  WHEN 'FEB' THEN 2  WHEN 'MAR' THEN 3
-                WHEN 'APR' THEN 4  WHEN 'MAY' THEN 5  WHEN 'JUN' THEN 6
-                WHEN 'JUL' THEN 7  WHEN 'AUG' THEN 8  WHEN 'SEP' THEN 9
-                WHEN 'OCT' THEN 10 WHEN 'NOV' THEN 11 WHEN 'DEC' THEN 12
-                ELSE 1
-            END;
-            RETURN;
-        EXCEPTION WHEN NO_DATA_FOUND THEN NULL;
-        END;
-
-        -- 3. Auto-generate counter; derive FY and period_num from name (MMM-YYYY)
+        -- 2. Auto-generate counter; derive FY and period_num from name (MMM-YYYY)
         SELECT NVL(MAX(TO_NUMBER(PERIOD_COUNTER)), 0) + 1
         INTO   p_counter
         FROM   RR_FA_DEPRN_PERIODS
@@ -341,7 +320,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
         v_period_ctr    NUMBER;
         v_fiscal_year   NUMBER;
         v_period_num    NUMBER;
-        v_gl_transfer   VARCHAR2(10);
+        v_gl_transfer   VARCHAR2(400);
         v_exists        NUMBER;
         v_deprn_amount  NUMBER;
     BEGIN
@@ -354,25 +333,26 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
         -- Resolve period_counter
         resolve_period(p_book, p_period_name, v_period_ctr, v_fiscal_year, v_period_num);
 
-        -- Check if the period has been transferred to GL
+        -- Guard: block delete if the period is already closed
+        -- (RR_FA_DEPRN_PERIODS has no GL_TRANSFER_RUN; use PERIOD_CLOSE_DATE instead)
         BEGIN
-            SELECT NVL(GL_TRANSFER_RUN, 'N')
+            SELECT NVL(PERIOD_CLOSE_DATE, 'OPEN')
             INTO   v_gl_transfer
             FROM   RR_FA_DEPRN_PERIODS
             WHERE  BOOK_TYPE_CODE = p_book
             AND    PERIOD_COUNTER = v_period_ctr
             AND    ROWNUM = 1;
         EXCEPTION WHEN NO_DATA_FOUND THEN
-            v_gl_transfer := 'N';
+            v_gl_transfer := 'OPEN';
         END;
 
-        IF UPPER(v_gl_transfer) = 'Y' THEN
+        IF v_gl_transfer <> 'OPEN' THEN
             p_http_status := 409;
-            p_result := '{"success":false,"status":"GL_TRANSFERRED"'
+            p_result := '{"success":false,"status":"PERIOD_CLOSED"'
                 || ',"assetId":'      || jstr(p_asset_id)
                 || ',"bookTypeCode":' || jstr(p_book)
                 || ',"periodName":'   || jstr(p_period_name)
-                || ',"error":"Cannot delete — period has been transferred to GL"}';
+                || ',"error":"Cannot delete — period is closed"}';
             RETURN;
         END IF;
 

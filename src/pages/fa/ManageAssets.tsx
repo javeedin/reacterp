@@ -227,8 +227,8 @@ const AssetTabContent: React.FC<{
       });
       if (res.success) {
         message.success(`Depreciation deleted for period ${record.periodName}`);
-      } else if (res.status === 'GL_TRANSFERRED') {
-        message.error(`Period ${record.periodName} has been transferred to GL and cannot be deleted`);
+      } else if (res.status === 'PERIOD_CLOSED') {
+        message.error(`Period ${record.periodName} is closed and cannot be deleted`);
       } else {
         message.error(res.error || 'Delete failed');
       }
