@@ -1320,13 +1320,31 @@ const AssetTabContent: React.FC<{
         }
         footer={
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>
+            <Space size={8}>
               {acctSlaExists?.exists && (
                 <Tag color="success" style={{ fontSize: 12 }}>
                   <CheckOutlined /> SLA Header #{acctSlaExists.headerId} — {acctSlaExists.accountingStatus}
                 </Tag>
               )}
-            </span>
+              <Tooltip
+                title={
+                  <div style={{ fontFamily: 'monospace', fontSize: 11 }}>
+                    <div style={{ color: '#aaa', marginBottom: 4 }}>GET (preview)</div>
+                    <div style={{ wordBreak: 'break-all' }}>
+                      {`${APEX_DB_CONFIG.baseUrl}/fa/accounting/additions-preview?assetId=${asset.assetId}&bookTypeCode=${encodeURIComponent(asset.bookTypeCode || books[0]?.bookTypeCode || '')}`}
+                    </div>
+                    <div style={{ color: '#aaa', marginTop: 8, marginBottom: 4 }}>GET (SLA exists check)</div>
+                    <div style={{ wordBreak: 'break-all' }}>
+                      {`${APEX_DB_CONFIG.baseUrl}/sla/accounting/exists?sourceTable=RR_FA_ADDITIONS&sourceId=${asset.assetId}&eventType=FA_ADDITION`}
+                    </div>
+                  </div>
+                }
+                overlayStyle={{ maxWidth: 520 }}
+                placement="topLeft"
+              >
+                <Button size="small" icon={<ApiOutlined />} style={{ color: '#888' }} />
+              </Tooltip>
+            </Space>
             <Space>
               <Button onClick={() => setAcctPreviewVisible(false)}>Close</Button>
               <Button
