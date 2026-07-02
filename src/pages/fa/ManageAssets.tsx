@@ -1649,173 +1649,201 @@ const AssetTabContent: React.FC<{
                 );
               })()}
 
-              {/* Status banner if SLA accounting already exists */}
-              {acctSlaExists?.exists && (
-                <div style={{ background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6, padding: '10px 14px', marginBottom: 14 }}>
-                  <Space>
-                    <CheckOutlined style={{ color: REDWOOD.success }} />
-                    <Text style={{ color: REDWOOD.success }}>
-                      Accounting created{acctPreview.accountedDate ? ` on ${acctPreview.accountedDate}` : ''}.
-                      SLA Header #{acctSlaExists.headerId} — Status: {acctSlaExists.accountingStatus}
-                    </Text>
-                  </Space>
-                </div>
-              )}
-
-              {/* Actual GL Journal Lines (when accounting exists) */}
-              {acctSlaExists?.exists && (
-                <Card
-                  size="small"
-                  title={
-                    <Space>
-                      <CheckOutlined style={{ color: REDWOOD.success }} />
-                      <span>Actual GL Journal Lines</span>
-                      {viewGlLoading && <Spin size="small" />}
-                      {!viewGlLoading && viewGlLines.length === 0 && (
-                        <Tag color="warning" style={{ fontSize: 10 }}>GL lines not found (check glHeaderId in SLA record)</Tag>
-                      )}
+              {/* ── POSTED: show actual GL journal lines only ── */}
+              {acctSlaExists?.exists ? (
+                <>
+                  {/* Summary strip */}
+                  <div style={{
+                    display: 'flex', gap: 24, alignItems: 'center',
+                    background: '#f6ffed', border: '1px solid #b7eb8f',
+                    borderRadius: 8, padding: '10px 16px', marginBottom: 14,
+                  }}>
+                    <Space size={6}>
+                      <CheckOutlined style={{ color: REDWOOD.success, fontSize: 14 }} />
+                      <Text strong style={{ color: REDWOOD.success, fontSize: 13 }}>Posted</Text>
                     </Space>
-                  }
-                  style={{ marginBottom: 12, borderRadius: 6, border: `1px solid ${REDWOOD.success}40` }}
-                >
-                  {viewGlLines.length > 0 ? (
-                    <>
-                      <Table
-                        size="small"
-                        pagination={false}
-                        dataSource={viewGlLines}
-                        rowKey={(_: any, i: any) => String(i)}
-                        columns={[
-                          { title: '#', dataIndex: 'line_num', key: 'line_num', width: 40 },
-                          {
-                            title: 'Journal',
-                            dataIndex: 'journal_name',
-                            key: 'journal_name',
-                            ellipsis: true,
-                            width: 160,
-                            render: (v: string) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text>,
-                          },
-                          {
-                            title: 'Account',
-                            dataIndex: 'account',
-                            key: 'account',
-                            render: (v: string) => <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{v || '—'}</Text>,
-                          },
-                          { title: 'Description', dataIndex: 'description', key: 'desc', ellipsis: true },
-                          {
-                            title: 'Debit',
-                            dataIndex: 'accounted_dr',
-                            key: 'dr',
-                            align: 'right' as const,
-                            width: 120,
-                            render: (v: number) => v ? <Text style={{ color: REDWOOD.info, fontFamily: 'monospace' }}>{formatCurrency(String(v))}</Text> : '—',
-                          },
-                          {
-                            title: 'Credit',
-                            dataIndex: 'accounted_cr',
-                            key: 'cr',
-                            align: 'right' as const,
-                            width: 120,
-                            render: (v: number) => v ? <Text style={{ color: REDWOOD.primary, fontFamily: 'monospace' }}>{formatCurrency(String(v))}</Text> : '—',
-                          },
-                          { title: 'Period', dataIndex: 'period_name', key: 'period', width: 80 },
-                          { title: 'Status', dataIndex: 'posting_status', key: 'status', width: 80,
-                            render: (v: string) => <Tag color={v === 'POSTED' ? 'success' : 'default'} style={{ fontSize: 10 }}>{v || '—'}</Tag> },
-                        ]}
-                      />
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, padding: '4px 8px', background: REDWOOD.neutral100, borderRadius: 4 }}>
-                        <Text type="secondary" style={{ fontSize: 11 }}>
-                          {viewGlLines.length} GL lines · reference2 = {asset.assetId}
-                        </Text>
+                    {[
+                      { label: 'SLA Header', val: `#${acctSlaExists.headerId}` },
+                      { label: 'Period',     val: acctPreview.header?.periodName },
+                      { label: 'Acctg Date', val: acctPreview.header?.accountingDate || acctPreview.accountedDate },
+                      { label: 'Currency',   val: acctPreview.header?.currencyCode },
+                      { label: 'Cost',       val: formatCurrency(String(acctPreview.header?.cost)) },
+                    ].map(({ label, val }) => val ? (
+                      <div key={label} style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
+                        <Text type="secondary" style={{ fontSize: 10 }}>{label}</Text>
+                        <Text strong style={{ fontSize: 12 }}>{val}</Text>
                       </div>
-                    </>
-                  ) : !viewGlLoading ? (
-                    <div style={{ padding: '8px 0' }}>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        GL lines could not be loaded automatically. The SLA record should contain a GL Header ID after posting.
-                      </Text>
-                      {acctExistingJournal && (
-                        <pre style={{ marginTop: 8, background: '#f5f5f5', borderRadius: 4, padding: '8px 10px', fontSize: 10, maxHeight: 120, overflow: 'auto' }}>
-                          {JSON.stringify(acctExistingJournal, null, 2)}
-                        </pre>
-                      )}
+                    ) : null)}
+                  </div>
+
+                  {/* Actual GL lines */}
+                  <Spin spinning={viewGlLoading}>
+                    {viewGlLines.length > 0 ? (
+                      <>
+                        {/* Custom table — no wrapping account column */}
+                        <div style={{ border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 8, overflow: 'hidden' }}>
+                          {/* Header row */}
+                          <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: '36px 1fr 140px 140px 80px',
+                            padding: '7px 14px',
+                            background: REDWOOD.neutral100,
+                            borderBottom: `1px solid ${REDWOOD.neutral200}`,
+                            fontSize: 11, fontWeight: 600, color: REDWOOD.neutral600,
+                          }}>
+                            <span>#</span>
+                            <span>Account Combination</span>
+                            <span style={{ textAlign: 'right' }}>Debit (AED)</span>
+                            <span style={{ textAlign: 'right' }}>Credit (AED)</span>
+                            <span style={{ textAlign: 'center' }}>Status</span>
+                          </div>
+                          {viewGlLines.map((line: any, idx: number) => (
+                            <div key={idx} style={{
+                              borderBottom: idx < viewGlLines.length - 1 ? `1px solid ${REDWOOD.neutral200}` : undefined,
+                              background: idx % 2 === 0 ? '#fff' : REDWOOD.neutral100,
+                            }}>
+                              <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: '36px 1fr 140px 140px 80px',
+                                padding: '8px 14px',
+                                alignItems: 'start',
+                              }}>
+                                <Text type="secondary" style={{ fontSize: 11, paddingTop: 2 }}>{line.line_num}</Text>
+                                <div>
+                                  {/* Account combination — single line, monospace */}
+                                  <div style={{
+                                    fontFamily: 'monospace', fontSize: 12, fontWeight: 600,
+                                    color: REDWOOD.neutral900, whiteSpace: 'nowrap',
+                                    letterSpacing: '0.02em',
+                                  }}>
+                                    {line.account || '—'}
+                                  </div>
+                                  {/* Description below */}
+                                  <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 2 }}>
+                                    {line.description || ''}
+                                  </div>
+                                </div>
+                                <div style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 12 }}>
+                                  {line.accounted_dr
+                                    ? <Text style={{ color: REDWOOD.info, fontWeight: 600 }}>{formatCurrency(String(line.accounted_dr))}</Text>
+                                    : <Text type="secondary">—</Text>}
+                                </div>
+                                <div style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 12 }}>
+                                  {line.accounted_cr
+                                    ? <Text style={{ color: REDWOOD.primary, fontWeight: 600 }}>{formatCurrency(String(line.accounted_cr))}</Text>
+                                    : <Text type="secondary">—</Text>}
+                                </div>
+                                <div style={{ textAlign: 'center' }}>
+                                  <Tag
+                                    color={line.posting_status === 'POSTED' ? 'success' : 'default'}
+                                    style={{ fontSize: 10, margin: 0 }}
+                                  >
+                                    {line.posting_status || '—'}
+                                  </Tag>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                          {/* Totals row */}
+                          {(() => {
+                            const totalDr = viewGlLines.reduce((s: number, l: any) => s + (Number(l.accounted_dr) || 0), 0);
+                            const totalCr = viewGlLines.reduce((s: number, l: any) => s + (Number(l.accounted_cr) || 0), 0);
+                            return (
+                              <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: '36px 1fr 140px 140px 80px',
+                                padding: '7px 14px',
+                                background: '#fff8e1',
+                                borderTop: `2px solid ${REDWOOD.warning}`,
+                                fontSize: 12, fontWeight: 700,
+                              }}>
+                                <span />
+                                <Text strong style={{ fontSize: 12 }}>Total ({viewGlLines.length} lines)</Text>
+                                <Text strong style={{ textAlign: 'right', display: 'block', color: REDWOOD.info, fontFamily: 'monospace' }}>{formatCurrency(String(totalDr))}</Text>
+                                <Text strong style={{ textAlign: 'right', display: 'block', color: REDWOOD.primary, fontFamily: 'monospace' }}>{formatCurrency(String(totalCr))}</Text>
+                                <span />
+                              </div>
+                            );
+                          })()}
+                        </div>
+                        <div style={{ marginTop: 6, padding: '3px 4px' }}>
+                          <Text type="secondary" style={{ fontSize: 10 }}>
+                            Source: reerp/gl/journals/lines?reference2={asset.assetId} · Journal: {viewGlLines[0]?.journal_name}
+                          </Text>
+                        </div>
+                      </>
+                    ) : (
+                      <Empty description="No GL lines found for this asset (reference2)" style={{ padding: '20px 0' }} />
+                    )}
+                  </Spin>
+                </>
+              ) : (
+                <>
+                  {/* ── NOT YET POSTED: show preview header + lines ── */}
+                  <Card size="small" title={<Space><FileTextOutlined /><span>Journal Header (Preview)</span></Space>}
+                    style={{ marginBottom: 12, borderRadius: 6 }}
+                  >
+                    <Descriptions column={2} size="small">
+                      <Descriptions.Item label="Asset Number">{acctPreview.header.assetNumber || acctPreview.header.sourceNumber}</Descriptions.Item>
+                      <Descriptions.Item label="Asset ID">{acctPreview.header.assetId || acctPreview.header.sourceId}</Descriptions.Item>
+                      <Descriptions.Item label="Description" span={2}>{acctPreview.header.description}</Descriptions.Item>
+                      <Descriptions.Item label="Book">{acctPreview.header.bookTypeCode}</Descriptions.Item>
+                      <Descriptions.Item label="Period">{acctPreview.header.periodName}</Descriptions.Item>
+                      <Descriptions.Item label="Accounting Date">{acctPreview.header.accountingDate}</Descriptions.Item>
+                      <Descriptions.Item label="Event Type">{acctPreview.header.eventTypeCode}</Descriptions.Item>
+                      <Descriptions.Item label="Source Table">{acctPreview.header.sourceTable}</Descriptions.Item>
+                      <Descriptions.Item label="Module">{acctPreview.header.moduleName}</Descriptions.Item>
+                      <Descriptions.Item label="Cost" span={2}>
+                        <Text strong style={{ color: FA_COLOR }}>{formatCurrency(String(acctPreview.header.cost))}</Text>
+                      </Descriptions.Item>
+                    </Descriptions>
+                  </Card>
+
+                  <Card size="small" title={<Space><DatabaseOutlined /><span>Journal Lines (Preview)</span></Space>} style={{ borderRadius: 6 }}>
+                    <div style={{ border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, overflow: 'hidden' }}>
+                      <div style={{
+                        display: 'grid', gridTemplateColumns: '36px 60px 90px 1fr 130px 130px',
+                        padding: '6px 12px', background: REDWOOD.neutral100,
+                        borderBottom: `1px solid ${REDWOOD.neutral200}`,
+                        fontSize: 11, fontWeight: 600, color: REDWOOD.neutral600,
+                      }}>
+                        <span>#</span><span>Dr/Cr</span><span>Class</span><span>Account Combination</span>
+                        <span style={{ textAlign: 'right' }}>Debit</span><span style={{ textAlign: 'right' }}>Credit</span>
+                      </div>
+                      {acctPreview.lines.map((l: any, idx: number) => (
+                        <div key={idx} style={{
+                          display: 'grid', gridTemplateColumns: '36px 60px 90px 1fr 130px 130px',
+                          padding: '7px 12px', fontSize: 12,
+                          background: idx % 2 === 0 ? '#fff' : REDWOOD.neutral100,
+                          borderBottom: idx < acctPreview.lines.length - 1 ? `1px solid ${REDWOOD.neutral200}` : undefined,
+                          alignItems: 'start',
+                        }}>
+                          <Text type="secondary" style={{ fontSize: 11 }}>{l.lineNumber}</Text>
+                          <Tag color={l.lineType === 'DR' ? 'blue' : 'orange'} style={{ fontSize: 10, fontWeight: 700, margin: 0 }}>{l.lineType}</Tag>
+                          <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{l.accountingClass}</Text>
+                          <div>
+                            <div style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                              {l.accountCombination || <Text type="secondary" style={{ fontSize: 11 }}>CCID: {l.ccid ?? '—'}</Text>}
+                            </div>
+                            {l.description && <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 1 }}>{l.description}</div>}
+                          </div>
+                          <div style={{ textAlign: 'right', fontFamily: 'monospace' }}>
+                            {l.accountedDr ? <Text style={{ color: REDWOOD.info, fontWeight: 600 }}>{formatCurrency(String(l.accountedDr))}</Text> : <Text type="secondary">—</Text>}
+                          </div>
+                          <div style={{ textAlign: 'right', fontFamily: 'monospace' }}>
+                            {l.accountedCr ? <Text style={{ color: REDWOOD.primary, fontWeight: 600 }}>{formatCurrency(String(l.accountedCr))}</Text> : <Text type="secondary">—</Text>}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ) : null}
-                </Card>
+                    <div style={{ marginTop: 6, padding: '3px 4px' }}>
+                      <Text type="secondary" style={{ fontSize: 10 }}>
+                        Reference1={asset.asset_number || asset.assetNumber} · Reference2={asset.assetId} · Reference5=FA_ADDITIONS
+                      </Text>
+                    </div>
+                  </Card>
+                </>
               )}
-
-              {/* Journal Header */}
-              <Card size="small" title={<Space><FileTextOutlined /><span>Journal Header</span></Space>}
-                style={{ marginBottom: 12, borderRadius: 6 }}
-              >
-                <Descriptions column={2} size="small">
-                  <Descriptions.Item label="Asset Number">{acctPreview.header.assetNumber || acctPreview.header.sourceNumber}</Descriptions.Item>
-                  <Descriptions.Item label="Asset ID">{acctPreview.header.assetId || acctPreview.header.sourceId}</Descriptions.Item>
-                  <Descriptions.Item label="Description" span={2}>{acctPreview.header.description}</Descriptions.Item>
-                  <Descriptions.Item label="Book">{acctPreview.header.bookTypeCode}</Descriptions.Item>
-                  <Descriptions.Item label="Period">{acctPreview.header.periodName}</Descriptions.Item>
-                  <Descriptions.Item label="Accounting Date">{acctPreview.header.accountingDate}</Descriptions.Item>
-                  <Descriptions.Item label="Event Type">{acctPreview.header.eventTypeCode}</Descriptions.Item>
-                  <Descriptions.Item label="Source Table">{acctPreview.header.sourceTable}</Descriptions.Item>
-                  <Descriptions.Item label="Module">{acctPreview.header.moduleName}</Descriptions.Item>
-                  <Descriptions.Item label="Cost" span={2}>
-                    <Text strong style={{ color: FA_COLOR }}>{formatCurrency(String(acctPreview.header.cost))}</Text>
-                  </Descriptions.Item>
-                </Descriptions>
-              </Card>
-
-              {/* Journal Lines */}
-              <Card size="small" title={<Space><DatabaseOutlined /><span>Journal Lines</span></Space>} style={{ borderRadius: 6 }}>
-                <Table
-                  size="small"
-                  pagination={false}
-                  dataSource={acctPreview.lines}
-                  rowKey="lineNumber"
-                  columns={[
-                    { title: '#',       dataIndex: 'lineNumber',          key: 'lineNumber', width: 40 },
-                    {
-                      title: 'Dr/Cr',
-                      dataIndex: 'lineType',
-                      key: 'lineType',
-                      width: 55,
-                      render: (v: string) => (
-                        <Tag color={v === 'DR' ? 'blue' : 'orange'} style={{ fontWeight: 700, fontSize: 11 }}>{v}</Tag>
-                      ),
-                    },
-                    { title: 'Class',   dataIndex: 'accountingClass',     key: 'class',   width: 90 },
-                    {
-                      title: 'Account',
-                      dataIndex: 'accountCombination',
-                      key: 'account',
-                      render: (v: string, r: any) => v
-                        ? <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{v}</Text>
-                        : <Text type="secondary" style={{ fontSize: 11 }}>CCID: {r.ccid ?? '—'}</Text>,
-                    },
-                    {
-                      title: 'Debit',
-                      dataIndex: 'accountedDr',
-                      key: 'dr',
-                      align: 'right' as const,
-                      width: 120,
-                      render: (v: number) => v ? <Text style={{ color: REDWOOD.info, fontFamily: 'monospace' }}>{formatCurrency(String(v))}</Text> : '—',
-                    },
-                    {
-                      title: 'Credit',
-                      dataIndex: 'accountedCr',
-                      key: 'cr',
-                      align: 'right' as const,
-                      width: 120,
-                      render: (v: number) => v ? <Text style={{ color: REDWOOD.primary, fontFamily: 'monospace' }}>{formatCurrency(String(v))}</Text> : '—',
-                    },
-                    { title: 'Description', dataIndex: 'description', key: 'desc', ellipsis: true },
-                  ]}
-                />
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, padding: '4px 8px', background: REDWOOD.neutral100, borderRadius: 4 }}>
-                  <Text type="secondary" style={{ fontSize: 11 }}>
-                    Reference1={asset.asset_number || asset.assetNumber} · Reference2={asset.assetId} · Reference5=FA_ADDITIONS
-                  </Text>
-                </div>
-              </Card>
             </>
           )}
           {!acctPreview && !acctPreviewLoading && (
