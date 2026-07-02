@@ -1690,14 +1690,16 @@ const AssetTabContent: React.FC<{
               >
                 <Button size="small" icon={<ApiOutlined />} style={{ color: '#888' }} />
               </Tooltip>
-              <Button
-                size="small"
-                icon={<ApiOutlined />}
-                style={{ color: acctDebugVisible ? FA_COLOR : '#888', borderColor: acctDebugVisible ? FA_COLOR : undefined }}
-                onClick={() => { setAcctDebugVisible(v => !v); if (!acctDebugVisible && acctPreview) setDbgSteps(buildDbgSteps(acctPreview.header, acctPreview.lines)); }}
-              >
-                Debug
-              </Button>
+              {!acctSlaExists?.exists && (
+                <Button
+                  size="small"
+                  icon={<ApiOutlined />}
+                  style={{ color: acctDebugVisible ? FA_COLOR : '#888', borderColor: acctDebugVisible ? FA_COLOR : undefined }}
+                  onClick={() => { setAcctDebugVisible(v => !v); if (!acctDebugVisible && acctPreview) setDbgSteps(buildDbgSteps(acctPreview.header, acctPreview.lines)); }}
+                >
+                  Debug
+                </Button>
+              )}
               <Button onClick={() => setAcctPreviewVisible(false)}>Close</Button>
               {!acctSlaExists?.exists && (
                 <Button
