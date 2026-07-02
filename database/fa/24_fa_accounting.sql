@@ -130,7 +130,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
             INTO   v_cost_ccid, v_clearing_ccid
             FROM   RR_FA_CATEGORY_BOOKS cb
             WHERE  cb.CATEGORY_ID    = v_category_id
-            AND    cb.BOOK_TYPE_CODE = p_book
+            -- AND    cb.BOOK_TYPE_CODE = p_book
             AND    ROWNUM = 1;
         EXCEPTION WHEN NO_DATA_FOUND THEN
             v_cost_ccid     := NULL;
