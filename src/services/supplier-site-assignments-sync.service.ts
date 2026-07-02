@@ -26,15 +26,17 @@ export type SiteAssignmentsPayloadCallback = (
   error?: string
 ) => void;
 
-// Fetch sites from APEX (already synced)
+// Fetch sites from APEX (already synced), optionally filtered by supplierId
 const fetchSitesFromApex = async (
   log?: LogCallback,
-  verbose = true
+  verbose = true,
+  supplierId?: number
 ): Promise<any> => {
   if (verbose) {
     log?.('step', '──── [GET] APEX Database - Sites ────');
   }
-  const data = await fetchFromApex('suppliers/sites', {}, log, verbose);
+  const params: Record<string, string> = supplierId ? { supplierId: String(supplierId) } : {};
+  const data = await fetchFromApex('suppliers/sites', params, log, verbose);
   return { success: true, items: data.items || [] };
 };
 
@@ -114,7 +116,7 @@ export const testSiteAssignmentsConnection = async (
 
 // Main sync function
 export const syncSiteAssignments = async (
-  _parameters: Record<string, string>,
+  parameters: Record<string, string>,
   testMode: boolean | 'single',
   log: LogCallback,
   onProgress: ProgressCallback,
@@ -142,9 +144,13 @@ export const syncSiteAssignments = async (
     log('info', `Starting Site Assignments sync (${testMode === 'single' ? 'Single Site Test' : testMode ? 'Test Mode - 25 sites' : 'Full Sync'})`);
     log('step', `═══════════════════════════════════════`);
 
-    // Step 1: Fetch sites from APEX
+    // Step 1: Fetch sites from APEX (filter by supplierId when provided)
     log('step', `\n──── Fetching Sites from APEX ────`);
-    const sitesResult = await fetchSitesFromApex(log, true);
+    const filterSupplierId = parameters.SupplierId ? Number(parameters.SupplierId) : undefined;
+    if (filterSupplierId) {
+      log('info', `Filtering sites for SupplierId: ${filterSupplierId}`);
+    }
+    const sitesResult = await fetchSitesFromApex(log, true, filterSupplierId);
 
     if (!sitesResult.success || !sitesResult.items) {
       throw new Error('Failed to fetch sites from APEX');

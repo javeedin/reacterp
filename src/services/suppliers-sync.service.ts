@@ -1,4 +1,7 @@
 import { fetchFromFusion, insertToApex } from './sync-http';
+import { syncSupplierAddresses } from './supplier-address-sync.service';
+import { syncSupplierSites } from './supplier-sites-sync.service';
+import { syncSiteAssignments } from './supplier-site-assignments-sync.service';
 
 // Types
 export interface SuppliersSyncProgress {
@@ -85,6 +88,7 @@ export const syncSuppliers = async (
     let hasMore = true;
     let pageNum = 0;
     const BATCH_SIZE = 50; // Records per POST
+    const fetchedSuppliers: any[] = []; // track for cascade
 
     log('step', `═══════════════════════════════════════`);
     log('info', `Starting Suppliers sync (${testMode === 'single' ? 'Single Record Test' : testMode ? 'Test Mode - 25 records' : 'Full Sync'})`);
@@ -129,6 +133,7 @@ export const syncSuppliers = async (
         break;
       }
 
+      fetchedSuppliers.push(...suppliers);
       progress.totalRecords += suppliers.length;
       onProgress({ totalRecords: progress.totalRecords });
 
@@ -196,6 +201,29 @@ export const syncSuppliers = async (
       }
 
       offset += pageSize;
+    }
+
+    // ── Cascade: sync addresses, sites, and site assignments for specific supplier ──
+    const { SupplierNumber } = parameters;
+    if (SupplierNumber && !signal?.aborted && fetchedSuppliers.length > 0) {
+      const supplierId = fetchedSuppliers[0].SupplierId;
+      log('step', `\n═══════════════════════════════════════`);
+      log('info', `Cascading to related data for supplier ${SupplierNumber} (ID: ${supplierId})...`);
+
+      log('step', `\n──── Syncing Addresses ────`);
+      await syncSupplierAddresses(parameters, testMode, log, () => {}, signal);
+
+      log('step', `\n──── Syncing Sites ────`);
+      await syncSupplierSites(parameters, testMode, log, () => {}, signal);
+
+      log('step', `\n──── Syncing Site Assignments ────`);
+      await syncSiteAssignments(
+        { ...parameters, SupplierId: String(supplierId) },
+        testMode,
+        log,
+        () => {},
+        signal
+      );
     }
 
     progress.status = signal?.aborted ? 'stopped' : 'completed';
