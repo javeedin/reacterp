@@ -93,7 +93,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
         v_description    VARCHAR2(500);
         v_cost           NUMBER;
         v_category_id    NUMBER;
-        v_date_svc       DATE;
+        v_date_svc       VARCHAR2(30);
         v_acct_status    VARCHAR2(30);
         v_acct_date      VARCHAR2(30);
         v_cost_ccid      NUMBER;
@@ -137,10 +137,14 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
 
         v_cost_combo     := get_account_combo(v_cost_ccid);
         v_clearing_combo := get_account_combo(v_clearing_ccid);
-        v_period_name    :=
-            UPPER(SUBSTR(TO_CHAR(NVL(v_date_svc, SYSDATE), 'Mon'), 1, 1)) ||
-            LOWER(SUBSTR(TO_CHAR(NVL(v_date_svc, SYSDATE), 'Mon'), 2)) ||
-            TO_CHAR(NVL(v_date_svc, SYSDATE), '-YYYY');
+        DECLARE
+            v_dt DATE := NVL(TO_DATE(SUBSTR(v_date_svc, 1, 10), 'YYYY-MM-DD'), SYSDATE);
+        BEGIN
+            v_period_name :=
+                UPPER(SUBSTR(TO_CHAR(v_dt, 'Mon'), 1, 1)) ||
+                LOWER(SUBSTR(TO_CHAR(v_dt, 'Mon'), 2)) ||
+                TO_CHAR(v_dt, '-YY');
+        END;
 
         p_status := 200;
         p_response :=
@@ -155,7 +159,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
          ||   ',"sourceNumber":' || jstr(v_asset_number)
          ||   ',"sourceType":"ADDITION"'
          ||   ',"eventTypeCode":"FA_ADDITION"'
-         ||   ',"eventDate":' || jstr(TO_CHAR(NVL(v_date_svc, SYSDATE), 'YYYY-MM-DD'))
+         ||   ',"eventDate":' || jstr(NVL(SUBSTR(v_date_svc, 1, 10), TO_CHAR(SYSDATE, 'YYYY-MM-DD')))
          ||   ',"accountingDate":' || jstr(TO_CHAR(SYSDATE, 'YYYY-MM-DD'))
          ||   ',"periodName":' || jstr(v_period_name)
          ||   ',"ledgerId":1'
