@@ -20,11 +20,13 @@ import {
   searchAssets, getAssetDetail, getAssetBooks, getAssetDeprn,
   getAssetDistributions, getAssetInvoices, getAssetTransactions,
   getCategoryDetail, getCategoryBooks, postAssetDeprn, deleteAssetDeprn,
+  getBookControls,
   formatCurrency, assetTypeLabel, assetStatusLabel,
 } from '../../services/fa.service';
 import type {
   AssetRecord, AssetDetail, AssetBook, DeprnRecord,
   DistributionRecord, InvoiceRecord, TransactionRecord, CategoryBookRecord,
+  BookControlRecord,
 } from '../../services/fa.service';
 
 const { Content } = Layout;
@@ -544,6 +546,50 @@ const AssetTabContent: React.FC<{
                     </Button>
                   </Tooltip>
                 )}
+                <Tooltip title="Show Depreciation APIs">
+                  <Button
+                    size="small"
+                    icon={<ApiOutlined />}
+                    style={{ color: FA_COLOR, borderColor: FA_COLOR }}
+                    onClick={() => Modal.info({
+                      title: 'Depreciation API Endpoints',
+                      width: 780,
+                      content: (
+                        <div style={{ marginTop: 8 }}>
+                          <Text strong style={{ fontSize: 12 }}>GET — Depreciation records for this asset</Text>
+                          <div style={{ margin: '6px 0 14px' }}>
+                            <Text copyable style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
+                              {`${APEX_DB_CONFIG.baseUrl}/fa/assets/${asset.assetId}/deprn`}
+                            </Text>
+                          </div>
+                          <Text strong style={{ fontSize: 12 }}>POST — Post depreciation for this asset (check-then-post)</Text>
+                          <div style={{ margin: '6px 0 14px' }}>
+                            <Text copyable style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
+                              {`${APEX_DB_CONFIG.baseUrl}/fa/deprn-post-single`}
+                            </Text>
+                          </div>
+                          <Text type="secondary" style={{ fontSize: 11 }}>Request body: {'{'} "assetId", "bookTypeCode", "periodName", "deprnAmount" {'}'}</Text>
+                          <div style={{ marginTop: 14 }}>
+                            <Text strong style={{ fontSize: 12 }}>POST — Create depreciation (errors on duplicate)</Text>
+                            <div style={{ marginTop: 6 }}>
+                              <Text copyable style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
+                                {`${APEX_DB_CONFIG.baseUrl}/fa/deprn-post-asset`}
+                              </Text>
+                            </div>
+                          </div>
+                          <div style={{ marginTop: 14 }}>
+                            <Text strong style={{ fontSize: 12 }}>DELETE — Delete depreciation (blocked if period closed)</Text>
+                            <div style={{ marginTop: 6 }}>
+                              <Text copyable style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
+                                {`${APEX_DB_CONFIG.baseUrl}/fa/deprn-post-asset`}
+                              </Text>
+                            </div>
+                          </div>
+                        </div>
+                      ),
+                    })}
+                  />
+                </Tooltip>
                 <Button
                   size="small"
                   icon={<DollarOutlined />}
@@ -1036,6 +1082,11 @@ const ManageAssets: React.FC = () => {
   const [page,       setPage]       = useState(1);
   const [pageSize,   setPageSize]   = useState(25);
   const [searched,   setSearched]   = useState(false);
+  const [bookList,   setBookList]   = useState<BookControlRecord[]>([]);
+
+  useEffect(() => {
+    getBookControls().then(setBookList);
+  }, []);
 
   // API modal
   const [lastApiUrl,      setLastApiUrl]      = useState<string | null>(null);
@@ -1287,6 +1338,17 @@ const ManageAssets: React.FC = () => {
         <Form form={form} layout="vertical" onFinish={() => runSearch(1, pageSize)}>
           <Row gutter={[16, 0]}>
             <Col xs={24} sm={12} md={6}>
+              <Form.Item name="bookTypeCode" label="Book" style={{ marginBottom: 8 }}>
+                <Select allowClear placeholder="All books" showSearch optionFilterProp="children">
+                  {bookList.map(b => (
+                    <Option key={b.bookTypeCode} value={b.bookTypeCode}>
+                      {b.bookTypeCode}
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12} md={6}>
               <Form.Item name="assetNumber" label="Asset Number" style={{ marginBottom: 8 }}>
                 <Input placeholder="e.g. FA-0001" allowClear prefix={<BarcodeOutlined />} />
               </Form.Item>
@@ -1313,12 +1375,7 @@ const ManageAssets: React.FC = () => {
                 </Select>
               </Form.Item>
             </Col>
-            <Col xs={24} sm={12} md={8}>
-              <Form.Item name="bookTypeCode" label="Book" style={{ marginBottom: 8 }}>
-                <Input placeholder="Book type code" allowClear />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12} md={8}>
+            <Col xs={24} sm={12} md={6}>
               <Form.Item name="category" label="Category" style={{ marginBottom: 8 }}>
                 <Input placeholder="Category segment" allowClear />
               </Form.Item>
