@@ -88,15 +88,22 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
         EXCEPTION WHEN NO_DATA_FOUND THEN NULL;
         END;
 
-        -- 2. Fall back to RR_FA_CALENDAR_PERIODS
+        -- 2. Fall back to RR_FA_CALENDAR_PERIODS (no FISCAL_YEAR / PERIOD_NUM columns)
         BEGIN
-            SELECT TO_NUMBER(PERIOD_COUNTER),
-                   TO_NUMBER(FISCAL_YEAR),
-                   TO_NUMBER(PERIOD_NUM)
-            INTO   p_counter, p_fiscal_year, p_period_num
+            SELECT TO_NUMBER(PERIOD_COUNTER)
+            INTO   p_counter
             FROM   RR_FA_CALENDAR_PERIODS
             WHERE  UPPER(PERIOD_NAME) = UPPER(p_period_name)
             AND    ROWNUM = 1;
+            -- Derive FY and period_num from the name (MMM-YYYY)
+            p_fiscal_year := TO_NUMBER(SUBSTR(p_period_name, INSTR(p_period_name,'-')+1));
+            p_period_num  := CASE UPPER(SUBSTR(p_period_name,1,3))
+                WHEN 'JAN' THEN 1  WHEN 'FEB' THEN 2  WHEN 'MAR' THEN 3
+                WHEN 'APR' THEN 4  WHEN 'MAY' THEN 5  WHEN 'JUN' THEN 6
+                WHEN 'JUL' THEN 7  WHEN 'AUG' THEN 8  WHEN 'SEP' THEN 9
+                WHEN 'OCT' THEN 10 WHEN 'NOV' THEN 11 WHEN 'DEC' THEN 12
+                ELSE 1
+            END;
             RETURN;
         EXCEPTION WHEN NO_DATA_FOUND THEN NULL;
         END;
