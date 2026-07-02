@@ -4,7 +4,7 @@ import dayjs from 'dayjs';
 import {
   Layout, Card, Form, Input, Button, Space, Typography, Table, Tag,
   Row, Col, Breadcrumb, Tooltip, Select, Tabs, Descriptions,
-  Spin, Empty, Badge, message, Modal, Switch, Statistic, DatePicker,
+  Spin, Empty, Badge, message, Modal, Switch, Statistic, DatePicker, Popconfirm,
 } from 'antd';
 import type { ColumnsType, TableProps } from 'antd/es/table';
 import {
@@ -12,14 +12,14 @@ import {
   FileTextOutlined, LineChartOutlined,
   EnvironmentOutlined, DatabaseOutlined, InfoCircleOutlined,
   BookOutlined, HistoryOutlined, BarcodeOutlined, ApiOutlined, CheckOutlined,
-  FilterOutlined, DownloadOutlined, DollarOutlined, SaveOutlined,
+  FilterOutlined, DownloadOutlined, DollarOutlined, SaveOutlined, DeleteOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
   searchAssets, getAssetDetail, getAssetBooks, getAssetDeprn,
   getAssetDistributions, getAssetInvoices, getAssetTransactions,
-  getCategoryDetail, getCategoryBooks, postAssetDeprn,
+  getCategoryDetail, getCategoryBooks, postAssetDeprn, deleteAssetDeprn,
   formatCurrency, assetTypeLabel, assetStatusLabel,
 } from '../../services/fa.service';
 import type {
@@ -213,6 +213,30 @@ const AssetTabContent: React.FC<{
     XLSX.writeFile(wb, `deprn_asset${asset.assetId}_${new Date().toISOString().slice(0,10)}.xlsx`);
   };
 
+  const [deletingPeriod, setDeletingPeriod] = useState<string | null>(null);
+
+  const handleDeleteDeprn = async (record: DeprnRecord) => {
+    const book = books[0]?.bookTypeCode || '';
+    if (!book) { message.error('No book found for this asset'); return; }
+    setDeletingPeriod(record.periodName);
+    try {
+      const res = await deleteAssetDeprn({
+        assetId: asset.assetId,
+        bookTypeCode: book,
+        periodName: record.periodName,
+      });
+      if (res.success) {
+        message.success(`Depreciation deleted for period ${record.periodName}`);
+      } else if (res.status === 'GL_TRANSFERRED') {
+        message.error(`Period ${record.periodName} has been transferred to GL and cannot be deleted`);
+      } else {
+        message.error(res.error || 'Delete failed');
+      }
+    } finally {
+      setDeletingPeriod(null);
+    }
+  };
+
   const deprnColumns: ColumnsType<DeprnRecord> = [
     { title: 'FY',          dataIndex: 'fiscalYear',               key: 'fiscalYear',  width: 60  },
     { title: 'Period Num',  dataIndex: 'periodNum',                key: 'periodNum',   width: 80  },
@@ -224,6 +248,28 @@ const AssetTabContent: React.FC<{
     { title: 'Bonus Deprn Adjustment',  dataIndex: 'bonusDeprnAdjustmentAmount', key: 'bonusAdj',  align: 'right' as const, render: (v) => formatCurrency(v) },
     { title: 'YTD Deprn',               dataIndex: 'ytdDeprn',                   key: 'ytdDeprn',  align: 'right' as const, render: (v) => formatCurrency(v) },
     { title: 'Deprn Reserve',           dataIndex: 'deprnReserve',               key: 'reserve',   align: 'right' as const, render: (v) => formatCurrency(v) },
+    {
+      title: '',
+      key: 'action',
+      width: 70,
+      fixed: 'right' as const,
+      render: (_: any, record: DeprnRecord) => (
+        <Popconfirm
+          title={`Delete depreciation for ${record.periodName}?`}
+          description="This cannot be undone if the period has been transferred to GL."
+          onConfirm={() => handleDeleteDeprn(record)}
+          okText="Delete"
+          okButtonProps={{ danger: true }}
+        >
+          <Button
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            loading={deletingPeriod === record.periodName}
+          />
+        </Popconfirm>
+      ),
+    },
   ];
 
   const distColumns: ColumnsType<DistributionRecord> = [
