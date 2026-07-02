@@ -20,7 +20,7 @@ import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
   searchAssets, getAssetDetail, getAssetBooks, getAssetDeprn,
   getAssetDistributions, getAssetInvoices, getAssetTransactions,
-  getCategoryDetail, getCategoryBooks, postAssetDeprn, deleteAssetDeprn,
+  getCategoryDetail, getCategoryBooks, postAssetDeprn, postSingleDeprn, deleteAssetDeprn,
   getBookControls,
   formatCurrency, assetTypeLabel, assetStatusLabel,
 } from '../../services/fa.service';
@@ -132,7 +132,7 @@ const AssetTabContent: React.FC<{
     setPostResults([]);
     const results: PostResult[] = [];
     for (const row of toPost) {
-      const res = await postAssetDeprn({
+      const res = await postSingleDeprn({
         assetId:      asset.assetId,
         bookTypeCode: asset.bookTypeCode || books[0]?.bookTypeCode || '',
         periodName:   row.period,
@@ -141,8 +141,8 @@ const AssetTabContent: React.FC<{
       });
       results.push({
         period:  row.period,
-        status:  res.success ? 'POSTED' : (res.status === 'ALREADY_EXISTS' ? 'ALREADY_EXISTS' : 'ERROR'),
-        message: res.error,
+        status:  res.status || (res.success ? 'POSTED' : 'ERROR'),
+        message: res.error || res.message,
       });
     }
     setPostResults(results);

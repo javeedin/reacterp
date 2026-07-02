@@ -567,6 +567,26 @@ export const postAssetDeprn = async (payload: {
   }
 };
 
+export const postSingleDeprn = async (payload: {
+  assetId: string;
+  bookTypeCode: string;
+  periodName: string;
+  deprnAmount?: number;
+  createdBy?: string;
+}): Promise<{ success: boolean; status?: string; message?: string; error?: string }> => {
+  try {
+    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/fa/deprn-post-single`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    return { ...data, error: data.message };
+  } catch (e: any) {
+    return { success: false, status: 'ERROR', error: e.message };
+  }
+};
+
 export const deleteAssetDeprn = async (payload: {
   assetId: string;
   bookTypeCode: string;
