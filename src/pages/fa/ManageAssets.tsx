@@ -510,6 +510,7 @@ const AssetTabContent: React.FC<{
       children: loading
         ? <Spin style={{ display: 'block', margin: '40px auto' }} />
         : (
+          <>
           <Descriptions column={2} size="small" bordered
             styles={{ label: { fontWeight: 500, width: 160, background: REDWOOD.neutral100 } }}
             style={{ marginTop: 4 }}
