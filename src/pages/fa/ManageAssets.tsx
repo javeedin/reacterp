@@ -704,10 +704,13 @@ const AssetTabContent: React.FC<{
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(480px, 1fr))', gap: '0 16px' }}>
                       {accounts.map(a => {
                         const companyCode = books[0]?.companyCode || '';
-                        const segments = a.val ? a.val.split('-') : [];
-                        const firstSeg = segments[0] || '';
-                        const rest = segments.slice(1).join('-');
-                        const isCompanyMatch = companyCode && firstSeg === companyCode;
+                        let displayVal = a.val || '';
+                        if (a.val && companyCode) {
+                          const segments = a.val.split('-');
+                          segments[0] = companyCode;
+                          displayVal = segments.join('-');
+                        }
+                        const rest = displayVal ? displayVal.split('-').slice(1).join('-') : '';
                         return (
                           <div key={a.label} style={{
                             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -717,16 +720,10 @@ const AssetTabContent: React.FC<{
                             <Text style={{ fontSize: 12, color: REDWOOD.neutral600, minWidth: 200 }}>{a.label}</Text>
                             {a.val ? (
                               <span style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 600 }}>
-                                {isCompanyMatch ? (
-                                  <>
-                                    <Tag color="geekblue" style={{ fontFamily: 'monospace', fontSize: 11, marginRight: 0 }}>
-                                      {firstSeg}
-                                    </Tag>
-                                    <span style={{ color: REDWOOD.neutral900 }}>{rest ? `-${rest}` : ''}</span>
-                                  </>
-                                ) : (
-                                  <span style={{ color: REDWOOD.neutral900 }}>{a.val}</span>
-                                )}
+                                <Tag color="geekblue" style={{ fontFamily: 'monospace', fontSize: 11, marginRight: 0 }}>
+                                  {companyCode || displayVal.split('-')[0]}
+                                </Tag>
+                                <span style={{ color: REDWOOD.neutral900 }}>{rest ? `-${rest}` : ''}</span>
                               </span>
                             ) : (
                               <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
