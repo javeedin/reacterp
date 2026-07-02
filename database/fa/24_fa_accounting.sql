@@ -103,6 +103,9 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
         v_clearing_combo VARCHAR2(750);
         v_period_name    VARCHAR2(15);
         v_company_code   VARCHAR2(30);
+        v_ledger_name    VARCHAR2(100);
+        v_ledger_id      NUMBER;
+        v_currency_code  VARCHAR2(15);
     BEGIN
         -- Get asset data
         BEGIN
@@ -137,13 +140,19 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
             v_clearing_ccid := NULL;
         END;
 
-        -- Get company code from book controls (overrides first segment)
+        -- Get company code, ledger name/id, currency from book controls
         BEGIN
-            SELECT COMPANY_CODE INTO v_company_code
+            SELECT COMPANY_CODE, LEDGER_NAME, LEDGER_ID, NVL(CURRENCY_CODE, 'AED')
+            INTO   v_company_code, v_ledger_name, v_ledger_id, v_currency_code
             FROM   RR_FA_BOOK_CONTROLS
             WHERE  BOOK_TYPE_CODE = p_book
             AND    ROWNUM = 1;
-        EXCEPTION WHEN NO_DATA_FOUND THEN v_company_code := NULL; END;
+        EXCEPTION WHEN NO_DATA_FOUND THEN
+            v_company_code  := NULL;
+            v_ledger_name   := 'Primary Ledger';
+            v_ledger_id     := 1;
+            v_currency_code := 'AED';
+        END;
 
         v_cost_combo     := get_account_combo(v_cost_ccid,     v_company_code);
         v_clearing_combo := get_account_combo(v_clearing_ccid, v_company_code);
@@ -172,10 +181,10 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
          ||   ',"eventDate":' || jstr(NVL(SUBSTR(v_date_svc, 1, 10), TO_CHAR(SYSDATE, 'YYYY-MM-DD')))
          ||   ',"accountingDate":' || jstr(NVL(SUBSTR(v_date_svc, 1, 10), TO_CHAR(SYSDATE, 'YYYY-MM-DD')))
          ||   ',"periodName":' || jstr(v_period_name)
-         ||   ',"ledgerId":1'
-         ||   ',"ledgerName":"Primary Ledger"'
-         ||   ',"currencyCode":"AED"'
-         ||   ',"ledgerCurrency":"AED"'
+         ||   ',"ledgerId":' || NVL(TO_CHAR(v_ledger_id), '1')
+         ||   ',"ledgerName":' || jstr(NVL(v_ledger_name, 'Primary Ledger'))
+         ||   ',"currencyCode":' || jstr(v_currency_code)
+         ||   ',"ledgerCurrency":' || jstr(v_currency_code)
          ||   ',"description":"FA Addition — ' || REPLACE(v_asset_number, '"', '\"')
          ||                                  ' — ' || REPLACE(SUBSTR(v_description,1,200), '"', '\"') || '"'
          ||   ',"bookTypeCode":' || jstr(p_book)
