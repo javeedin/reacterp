@@ -166,14 +166,18 @@ const AssetTabContent: React.FC<{
 
     if (lifeMonths <= 0 || cost <= 0 || !deprnFromDate) { setDeprnRows([]); return; }
 
-    const monthlyDeprn = (cost - salvage) / lifeMonths;
+    const startDate = deprnFromDate.startOf('month');
+    let totalLifeDays = 0;
+    for (let i = 0; i < lifeMonths; i++) totalLifeDays += startDate.add(i, 'month').daysInMonth();
+    const dailyRate = (cost - salvage) / totalLifeDays;
+
     const rows: DeprnRow[] = [];
     let nbv = cost;
-    let cur = deprnFromDate.startOf('month');
+    let cur = startDate;
     const end = deprnToDate.startOf('month');
 
     while (cur.isBefore(end) || cur.isSame(end, 'month')) {
-      const depr = Math.min(monthlyDeprn, nbv - salvage);
+      const depr = Math.min(dailyRate * cur.daysInMonth(), nbv - salvage);
       if (depr <= 0) { cur = cur.add(1, 'month'); continue; }
       rows.push({ period: cur.format('MMM-YY'), openingNbv: nbv, depreciation: depr, closingNbv: nbv - depr });
       nbv -= depr;
