@@ -236,6 +236,8 @@ const AssetTabContent: React.FC<{
   const [acctPreviewVisible, setAcctPreviewVisible] = useState(false);
   const [acctPreview,        setAcctPreview]        = useState<AccountingPreview | null>(null);
   const [acctSlaExists,      setAcctSlaExists]      = useState<SlaExistsResult | null>(tab.additionSlaStatus);
+  // Sync when parent tab finishes loading the SLA status
+  useEffect(() => { setAcctSlaExists(tab.additionSlaStatus); }, [tab.additionSlaStatus]);
   const [acctExistingJournal,setAcctExistingJournal]= useState<any>(null);
   const [acctPreviewLoading, setAcctPreviewLoading] = useState(false);
   const [creatingAccounting, setCreatingAccounting] = useState(false);
@@ -683,6 +685,16 @@ const AssetTabContent: React.FC<{
             <Descriptions.Item label="Capitalize">{asset.capitalizeFlag || '—'}</Descriptions.Item>
             <Descriptions.Item label="Status">{statusTag(asset.retiredFlag)}</Descriptions.Item>
             <Descriptions.Item label="Date Ineffective">{fmtDate(asset.dateIneffective)}</Descriptions.Item>
+            <Descriptions.Item label="Addition Accounting" span={2}>
+              {acctSlaExists?.exists
+                ? <Space size={8}>
+                    <Tag color="success" style={{ fontSize: 12 }}><CheckOutlined /> ACCOUNTED</Tag>
+                    {acctSlaExists.headerId && <Text type="secondary" style={{ fontSize: 11 }}>SLA #{acctSlaExists.headerId}</Text>}
+                    {acctSlaExists.accountingStatus && <Text type="secondary" style={{ fontSize: 11 }}>— {acctSlaExists.accountingStatus}</Text>}
+                  </Space>
+                : <Tag color="orange" style={{ fontSize: 12 }}>UNACCOUNTED</Tag>
+              }
+            </Descriptions.Item>
             {books[0] && (() => {
               const b0 = books[0];
               const totalMonths = Number(b0.lifeInMonths) || 0;
