@@ -13,6 +13,7 @@ import {
   EnvironmentOutlined, DatabaseOutlined, InfoCircleOutlined,
   BookOutlined, HistoryOutlined, BarcodeOutlined, ApiOutlined, CheckOutlined,
   FilterOutlined, DownloadOutlined, DollarOutlined, SaveOutlined, DeleteOutlined,
+  AccountBookOutlined, AuditOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -21,13 +22,13 @@ import {
   searchAssets, getAssetDetail, getAssetBooks, getAssetDeprn,
   getAssetDistributions, getAssetInvoices, getAssetTransactions,
   getCategoryDetail, getCategoryBooks, postAssetDeprn, postSingleDeprn, deleteAssetDeprn,
-  getBookControls,
+  getBookControls, getAdditionsAccountingPreview, createAdditionsAccounting,
   formatCurrency, assetTypeLabel, assetStatusLabel,
 } from '../../services/fa.service';
 import type {
   AssetRecord, AssetDetail, AssetBook, DeprnRecord,
   DistributionRecord, InvoiceRecord, TransactionRecord, CategoryBookRecord,
-  BookControlRecord,
+  BookControlRecord, AccountingPreview,
 } from '../../services/fa.service';
 
 const { Content } = Layout;
@@ -219,6 +220,50 @@ const AssetTabContent: React.FC<{
     XLSX.writeFile(wb, `deprn_asset${asset.assetId}_${new Date().toISOString().slice(0,10)}.xlsx`);
   };
 
+  // Create Accounting state
+  const [acctPreviewVisible, setAcctPreviewVisible] = useState(false);
+  const [acctPreview,        setAcctPreview]        = useState<AccountingPreview | null>(null);
+  const [acctPreviewLoading, setAcctPreviewLoading] = useState(false);
+  const [creatingAccounting, setCreatingAccounting] = useState(false);
+
+  const openAccountingPreview = async () => {
+    const book = asset.bookTypeCode || books[0]?.bookTypeCode || '';
+    if (!book) { message.error('No book found for this asset'); return; }
+    setAcctPreviewLoading(true);
+    setAcctPreviewVisible(true);
+    setAcctPreview(null);
+    try {
+      const data = await getAdditionsAccountingPreview(asset.assetId, book);
+      setAcctPreview(data);
+    } catch {
+      message.error('Failed to load accounting preview');
+    } finally {
+      setAcctPreviewLoading(false);
+    }
+  };
+
+  const handleCreateAccounting = async () => {
+    const book = asset.bookTypeCode || books[0]?.bookTypeCode || '';
+    setCreatingAccounting(true);
+    try {
+      const res = await createAdditionsAccounting({
+        assetId: asset.assetId,
+        bookTypeCode: book,
+        createdBy: loggedUser,
+      });
+      if (res.success || res.status === 'ALREADY_EXISTS') {
+        message.success(res.status === 'ALREADY_EXISTS' ? 'Accounting already exists' : 'Accounting created and posted successfully');
+        // Refresh preview
+        const updated = await getAdditionsAccountingPreview(asset.assetId, book);
+        setAcctPreview(updated);
+      } else {
+        message.error(res.error || 'Failed to create accounting');
+      }
+    } finally {
+      setCreatingAccounting(false);
+    }
+  };
+
   const [deletingPeriod, setDeletingPeriod] = useState<string | null>(null);
 
   const handleDeleteDeprn = async (record: DeprnRecord) => {
@@ -255,25 +300,53 @@ const AssetTabContent: React.FC<{
     { title: 'YTD Deprn',               dataIndex: 'ytdDeprn',                   key: 'ytdDeprn',  align: 'right' as const, render: (v) => formatCurrency(v) },
     { title: 'Deprn Reserve',           dataIndex: 'deprnReserve',               key: 'reserve',   align: 'right' as const, render: (v) => formatCurrency(v) },
     {
+      title: 'Acctd Status',
+      dataIndex: 'accountedStatus',
+      key: 'accountedStatus',
+      width: 110,
+      render: (v: string) => v
+        ? <Tag color={v === 'ACCOUNTED' ? 'success' : 'default'} style={{ borderRadius: 4, fontSize: 10 }}>{v}</Tag>
+        : <Tag color="default" style={{ borderRadius: 4, fontSize: 10 }}>UNACCOUNTED</Tag>,
+    },
+    {
+      title: 'Acctd Date',
+      dataIndex: 'accountedDate',
+      key: 'accountedDate',
+      width: 100,
+      render: (v: string) => v ? fmtDate(v) : '—',
+    },
+    {
       title: '',
       key: 'action',
-      width: 70,
+      width: 120,
       fixed: 'right' as const,
       render: (_: any, record: DeprnRecord) => (
-        <Popconfirm
-          title={`Delete depreciation for ${record.periodName}?`}
-          description="This cannot be undone if the period has been transferred to GL."
-          onConfirm={() => handleDeleteDeprn(record)}
-          okText="Delete"
-          okButtonProps={{ danger: true }}
-        >
-          <Button
-            size="small"
-            danger
-            icon={<DeleteOutlined />}
-            loading={deletingPeriod === record.periodName}
-          />
-        </Popconfirm>
+        <Space size={4}>
+          {(!record.accountedStatus || record.accountedStatus !== 'ACCOUNTED') && (
+            <Tooltip title="Create Accounting">
+              <Button
+                size="small"
+                icon={<AccountBookOutlined />}
+                style={{ color: '#0572CE', borderColor: '#0572CE' }}
+                onClick={() => message.info('Depreciation accounting coming soon')}
+              />
+            </Tooltip>
+          )}
+          <Popconfirm
+            title={`Delete depreciation for ${record.periodName}?`}
+            description="This cannot be undone if the period has been transferred to GL."
+            onConfirm={() => handleDeleteDeprn(record)}
+            okText="Delete"
+            okButtonProps={{ danger: true }}
+          >
+            <Button
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              loading={deletingPeriod === record.periodName}
+            />
+          </Popconfirm>
+        </Space>
       ),
     },
   ];
@@ -384,6 +457,16 @@ const AssetTabContent: React.FC<{
               );
             })()}
           </Descriptions>
+          {/* Create Accounting button */}
+          <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+            <Button
+              icon={<AccountBookOutlined />}
+              style={{ borderColor: FA_COLOR, color: FA_COLOR }}
+              onClick={openAccountingPreview}
+            >
+              Create Accounting
+            </Button>
+          </div>
         ),
     },
     {
@@ -1070,6 +1153,138 @@ const AssetTabContent: React.FC<{
         }}
         items={subTabs}
       />
+
+      {/* ── Accounting Preview Modal ── */}
+      <Modal
+        open={acctPreviewVisible}
+        onCancel={() => setAcctPreviewVisible(false)}
+        width={820}
+        title={
+          <Space>
+            <AuditOutlined style={{ color: FA_COLOR }} />
+            <span>Create Accounting — Addition {asset.asset_number || asset.assetNumber}</span>
+          </Space>
+        }
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>
+              {acctPreview?.alreadyAccounted && (
+                <Tag color="success" style={{ fontSize: 12 }}>
+                  <CheckOutlined /> Accounting created — SLA #{acctPreview.slaHeaderId}
+                </Tag>
+              )}
+            </span>
+            <Space>
+              <Button onClick={() => setAcctPreviewVisible(false)}>Close</Button>
+              <Button
+                type="primary"
+                icon={<AccountBookOutlined />}
+                loading={creatingAccounting}
+                disabled={!acctPreview || acctPreview.alreadyAccounted}
+                style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+                onClick={handleCreateAccounting}
+              >
+                {acctPreview?.alreadyAccounted ? 'Already Accounted' : 'Create Accounting'}
+              </Button>
+            </Space>
+          </div>
+        }
+      >
+        <Spin spinning={acctPreviewLoading}>
+          {acctPreview && (
+            <>
+              {/* Status banner if already accounted */}
+              {acctPreview.alreadyAccounted && (
+                <div style={{ background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6, padding: '10px 14px', marginBottom: 14 }}>
+                  <Space>
+                    <CheckOutlined style={{ color: REDWOOD.success }} />
+                    <Text style={{ color: REDWOOD.success }}>
+                      Accounting already created{acctPreview.accountedDate ? ` on ${acctPreview.accountedDate}` : ''}.
+                      SLA Header #{acctPreview.slaHeaderId} — Status: {acctPreview.slaStatus}
+                    </Text>
+                  </Space>
+                </div>
+              )}
+
+              {/* Journal Header */}
+              <Card size="small" title={<Space><FileTextOutlined /><span>Journal Header</span></Space>}
+                style={{ marginBottom: 12, borderRadius: 6 }}
+              >
+                <Descriptions column={2} size="small">
+                  <Descriptions.Item label="Asset Number">{acctPreview.header.assetNumber}</Descriptions.Item>
+                  <Descriptions.Item label="Asset ID">{acctPreview.header.assetId}</Descriptions.Item>
+                  <Descriptions.Item label="Description" span={2}>{acctPreview.header.description}</Descriptions.Item>
+                  <Descriptions.Item label="Book">{acctPreview.header.bookTypeCode}</Descriptions.Item>
+                  <Descriptions.Item label="Period">{acctPreview.header.periodName}</Descriptions.Item>
+                  <Descriptions.Item label="Accounting Date">{acctPreview.header.accountingDate}</Descriptions.Item>
+                  <Descriptions.Item label="Event Type">{acctPreview.header.eventType}</Descriptions.Item>
+                  <Descriptions.Item label="Source Table">{acctPreview.header.sourceTable}</Descriptions.Item>
+                  <Descriptions.Item label="Module">{acctPreview.header.moduleName}</Descriptions.Item>
+                  <Descriptions.Item label="Cost" span={2}>
+                    <Text strong style={{ color: FA_COLOR }}>{formatCurrency(String(acctPreview.header.cost))}</Text>
+                  </Descriptions.Item>
+                </Descriptions>
+              </Card>
+
+              {/* Journal Lines */}
+              <Card size="small" title={<Space><DatabaseOutlined /><span>Journal Lines</span></Space>} style={{ borderRadius: 6 }}>
+                <Table
+                  size="small"
+                  pagination={false}
+                  dataSource={acctPreview.lines}
+                  rowKey="lineNumber"
+                  columns={[
+                    { title: '#',       dataIndex: 'lineNumber',          key: 'lineNumber', width: 40 },
+                    {
+                      title: 'Dr/Cr',
+                      dataIndex: 'lineType',
+                      key: 'lineType',
+                      width: 55,
+                      render: (v: string) => (
+                        <Tag color={v === 'DR' ? 'blue' : 'orange'} style={{ fontWeight: 700, fontSize: 11 }}>{v}</Tag>
+                      ),
+                    },
+                    { title: 'Class',   dataIndex: 'accountingClass',     key: 'class',   width: 90 },
+                    {
+                      title: 'Account',
+                      dataIndex: 'accountCombination',
+                      key: 'account',
+                      render: (v: string, r: any) => v
+                        ? <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{v}</Text>
+                        : <Text type="secondary" style={{ fontSize: 11 }}>CCID: {r.ccid ?? '—'}</Text>,
+                    },
+                    {
+                      title: 'Debit',
+                      dataIndex: 'accountedDr',
+                      key: 'dr',
+                      align: 'right' as const,
+                      width: 120,
+                      render: (v: number) => v ? <Text style={{ color: REDWOOD.info, fontFamily: 'monospace' }}>{formatCurrency(String(v))}</Text> : '—',
+                    },
+                    {
+                      title: 'Credit',
+                      dataIndex: 'accountedCr',
+                      key: 'cr',
+                      align: 'right' as const,
+                      width: 120,
+                      render: (v: number) => v ? <Text style={{ color: REDWOOD.primary, fontFamily: 'monospace' }}>{formatCurrency(String(v))}</Text> : '—',
+                    },
+                    { title: 'Description', dataIndex: 'description', key: 'desc', ellipsis: true },
+                  ]}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, padding: '4px 8px', background: REDWOOD.neutral100, borderRadius: 4 }}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    Reference1={asset.asset_number || asset.assetNumber} · Reference2={asset.assetId} · Reference5=FA_ADDITIONS
+                  </Text>
+                </div>
+              </Card>
+            </>
+          )}
+          {!acctPreview && !acctPreviewLoading && (
+            <Empty description="Failed to load accounting preview" />
+          )}
+        </Spin>
+      </Modal>
     </div>
   );
 };

@@ -698,6 +698,76 @@ export const adjustAsset = async (assetId: string, payload: any): Promise<{ succ
   catch (e) { return { success: false, error: e instanceof Error ? e.message : 'Unknown error' }; }
 };
 
+// ── FA Accounting ─────────────────────────────────────────────────────────────
+
+export interface AccountingPreviewLine {
+  lineNumber: number;
+  lineType: 'DR' | 'CR';
+  accountingClass: string;
+  description: string;
+  accountedDr: number;
+  accountedCr: number;
+  ccid: number | null;
+  accountCombination: string | null;
+}
+
+export interface AccountingPreview {
+  success: boolean;
+  alreadyAccounted: boolean;
+  accountedStatus: string;
+  accountedDate: string | null;
+  slaHeaderId: number | null;
+  slaStatus: string | null;
+  glHeaderId: number | null;
+  header: {
+    assetId: string;
+    assetNumber: string;
+    description: string;
+    bookTypeCode: string;
+    periodName: string;
+    accountingDate: string;
+    eventType: string;
+    sourceTable: string;
+    moduleName: string;
+    cost: number;
+  };
+  lines: AccountingPreviewLine[];
+  error?: string;
+}
+
+export const getAdditionsAccountingPreview = async (
+  assetId: string,
+  bookTypeCode: string,
+): Promise<AccountingPreview> => {
+  try {
+    const qs = `assetId=${encodeURIComponent(assetId)}&bookTypeCode=${encodeURIComponent(bookTypeCode)}`;
+    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/fa/accounting/additions-preview?${qs}`, {
+      headers: { Accept: 'application/json' },
+    });
+    return await res.json();
+  } catch (e: any) {
+    return { success: false, alreadyAccounted: false, accountedStatus: 'UNACCOUNTED', accountedDate: null, slaHeaderId: null, slaStatus: null, glHeaderId: null, header: {} as any, lines: [], error: e.message };
+  }
+};
+
+export const createAdditionsAccounting = async (payload: {
+  assetId: string;
+  bookTypeCode: string;
+  createdBy?: string;
+}): Promise<{ success: boolean; status?: string; slaHeaderId?: number; glHeaderId?: number; message?: string; error?: string }> => {
+  try {
+    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/fa/accounting/create-addition`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    return { ...data, error: data.error };
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
+};
+
 // ── Formatting helpers ────────────────────────────────────────────────────────
 
 export const formatCurrency = (value: string | number, decimals = 2): string => {
