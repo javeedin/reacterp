@@ -1387,13 +1387,13 @@ const AssetTabContent: React.FC<{
                 style={{ marginBottom: 12, borderRadius: 6 }}
               >
                 <Descriptions column={2} size="small">
-                  <Descriptions.Item label="Asset Number">{acctPreview.header.assetNumber}</Descriptions.Item>
-                  <Descriptions.Item label="Asset ID">{acctPreview.header.assetId}</Descriptions.Item>
+                  <Descriptions.Item label="Asset Number">{acctPreview.header.assetNumber || acctPreview.header.sourceNumber}</Descriptions.Item>
+                  <Descriptions.Item label="Asset ID">{acctPreview.header.assetId || acctPreview.header.sourceId}</Descriptions.Item>
                   <Descriptions.Item label="Description" span={2}>{acctPreview.header.description}</Descriptions.Item>
                   <Descriptions.Item label="Book">{acctPreview.header.bookTypeCode}</Descriptions.Item>
                   <Descriptions.Item label="Period">{acctPreview.header.periodName}</Descriptions.Item>
                   <Descriptions.Item label="Accounting Date">{acctPreview.header.accountingDate}</Descriptions.Item>
-                  <Descriptions.Item label="Event Type">{acctPreview.header.eventType}</Descriptions.Item>
+                  <Descriptions.Item label="Event Type">{acctPreview.header.eventTypeCode}</Descriptions.Item>
                   <Descriptions.Item label="Source Table">{acctPreview.header.sourceTable}</Descriptions.Item>
                   <Descriptions.Item label="Module">{acctPreview.header.moduleName}</Descriptions.Item>
                   <Descriptions.Item label="Cost" span={2}>

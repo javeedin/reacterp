@@ -170,7 +170,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
          ||   ',"sourceType":"ADDITION"'
          ||   ',"eventTypeCode":"FA_ADDITION"'
          ||   ',"eventDate":' || jstr(NVL(SUBSTR(v_date_svc, 1, 10), TO_CHAR(SYSDATE, 'YYYY-MM-DD')))
-         ||   ',"accountingDate":' || jstr(TO_CHAR(SYSDATE, 'YYYY-MM-DD'))
+         ||   ',"accountingDate":' || jstr(NVL(SUBSTR(v_date_svc, 1, 10), TO_CHAR(SYSDATE, 'YYYY-MM-DD')))
          ||   ',"periodName":' || jstr(v_period_name)
          ||   ',"ledgerId":1'
          ||   ',"ledgerName":"Primary Ledger"'
