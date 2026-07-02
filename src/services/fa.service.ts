@@ -4,6 +4,7 @@
  */
 
 import { fetchFromApex, insertToApex, putToApex } from './sync-http';
+import { APEX_DB_CONFIG } from '../config/api.config';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

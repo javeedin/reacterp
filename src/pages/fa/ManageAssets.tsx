@@ -846,6 +846,49 @@ const AssetTabContent: React.FC<{
                     {selectedPeriods.size > 0 ? `${selectedPeriods.size} period(s) selected` : 'Select rows to post depreciation'}
                   </Text>
                   <Space>
+                    <Tooltip title="Show API request details">
+                      <Button
+                        size="small"
+                        icon={<ApiOutlined />}
+                        style={{ color: FA_COLOR, borderColor: FA_COLOR }}
+                        onClick={() => {
+                          const book = asset.bookTypeCode || books[0]?.bookTypeCode || '';
+                          const sampleRow = deprnRows.find(r => selectedPeriods.has(r.period)) || deprnRows[0];
+                          const samplePayload = sampleRow ? {
+                            assetId:      asset.assetId,
+                            bookTypeCode: book,
+                            periodName:   sampleRow.period,
+                            deprnAmount:  parseFloat(sampleRow.depreciation.toFixed(2)),
+                            createdBy:    loggedUser,
+                          } : { assetId: asset.assetId, bookTypeCode: book, periodName: 'MMM-YYYY', deprnAmount: 0, createdBy: loggedUser };
+                          Modal.info({
+                            title: 'Depreciation API — POST Request',
+                            width: 680,
+                            content: (
+                              <div style={{ marginTop: 8 }}>
+                                <Text strong style={{ fontSize: 12 }}>Endpoint</Text>
+                                <div style={{ margin: '6px 0 14px' }}>
+                                  <Text copyable style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
+                                    POST {APEX_DB_CONFIG.baseUrl}/fa/deprn-post-single
+                                  </Text>
+                                </div>
+                                <Text strong style={{ fontSize: 12 }}>Request Body {selectedPeriods.size > 0 ? `(sample — ${selectedPeriods.size} request(s) will be sent)` : '(example)'}</Text>
+                                <div style={{ marginTop: 6, background: '#f5f5f5', borderRadius: 4, padding: '8px 12px' }}>
+                                  <Text copyable={{ text: JSON.stringify(samplePayload, null, 2) }} style={{ fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre' }}>
+                                    {JSON.stringify(samplePayload, null, 2)}
+                                  </Text>
+                                </div>
+                                <div style={{ marginTop: 12 }}>
+                                  <Text type="secondary" style={{ fontSize: 11 }}>
+                                    One POST is sent per selected period. The periodName follows the format shown above (e.g., Apr-2025).
+                                  </Text>
+                                </div>
+                              </div>
+                            ),
+                          });
+                        }}
+                      />
+                    </Tooltip>
                     <Button onClick={() => { setDeprnModal(false); setPostResults([]); }}>Close</Button>
                     <Button
                       type="primary"
