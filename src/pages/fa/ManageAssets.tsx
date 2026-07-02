@@ -1344,7 +1344,12 @@ const AssetTabContent: React.FC<{
         }
       >
         <Spin spinning={acctPreviewLoading}>
-          {acctPreview && (
+          {acctPreview && !acctPreview.success && (
+            <div style={{ background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 6, padding: '10px 14px' }}>
+              <Text type="danger">Failed to load accounting preview: {acctPreview.error || 'Unknown error'}</Text>
+            </div>
+          )}
+          {acctPreview && acctPreview.success && acctPreview.header && (
             <>
               {/* Status banner if SLA accounting already exists */}
               {acctSlaExists?.exists && (
@@ -1434,7 +1439,7 @@ const AssetTabContent: React.FC<{
             </>
           )}
           {!acctPreview && !acctPreviewLoading && (
-            <Empty description="Failed to load accounting preview" />
+            <Empty description="No accounting preview data" />
           )}
         </Spin>
       </Modal>
