@@ -245,11 +245,108 @@ const AssetTabContent: React.FC<{
   ];
   const [acctSteps, setAcctSteps] = useState<AcctStep[]>(ACCT_STEPS_INIT);
   const [acctStepsVisible, setAcctStepsVisible] = useState(false);
+  const [acctDebugVisible, setAcctDebugVisible] = useState(false);
+
+  // Debug panel: per-step { response, loading }
+  interface DbgStep { method: string; url: string; body: object | null; response: any; loading: boolean; }
+  const [dbgSteps, setDbgSteps] = useState<DbgStep[]>([]);
+  // Carry IDs between debug steps
+  const [dbgSlaHeaderId, setDbgSlaHeaderId] = useState<number | null>(null);
+  const [dbgGlBatchId,   setDbgGlBatchId]   = useState<number | null>(null);
+  const [dbgGlHeaderId,  setDbgGlHeaderId]  = useState<number | null>(null);
 
   const updateStep = (index: number, status: StepStatus, resultOrError?: string) =>
     setAcctSteps(prev => prev.map((s, i) => i === index
       ? { ...s, status, result: status === 'finish' ? resultOrError : undefined, error: status === 'error' ? resultOrError : undefined }
       : s));
+
+  // Build debug steps from current preview data
+  const buildDbgSteps = (h: any, lines: any[]): DbgStep[] => {
+    const base = APEX_DB_CONFIG.baseUrl;
+    const slaId  = dbgSlaHeaderId;
+    const batchId = dbgGlBatchId;
+    const glId   = dbgGlHeaderId;
+    return [
+      {
+        method: 'POST', url: `${base}/sla/accounting/create`,
+        body: {
+          header: { moduleName: h.moduleName, sourceTable: h.sourceTable, sourceId: h.sourceId,
+            sourceNumber: h.sourceNumber, sourceType: h.sourceType, eventTypeCode: h.eventTypeCode,
+            eventDate: h.eventDate, accountingDate: h.accountingDate, periodName: h.periodName,
+            ledgerId: h.ledgerId, ledgerName: h.ledgerName, currencyCode: h.currencyCode,
+            ledgerCurrency: h.ledgerCurrency, description: h.description, createdBy: loggedUser },
+          lines: lines.map(l => ({ lineNumber: l.lineNumber, lineType: l.lineType,
+            accountingClass: l.accountingClass, accountCombo: l.accountCombination,
+            enteredDr: l.enteredDr, enteredCr: l.enteredCr, accountedDr: l.accountedDr,
+            accountedCr: l.accountedCr, currencyCode: h.currencyCode, description: l.description,
+            sourceLineId: h.sourceId, sourceLineNum: l.lineNumber })),
+        },
+        response: null, loading: false,
+      },
+      {
+        method: 'POST', url: `${base}/journals/create`,
+        body: slaId ? {
+          batch: { batchName: `FA-ADDITION-${h.sourceNumber}-${new Date().toISOString().slice(0,10).replace(/-/g,'')}`,
+            batchDescription: `FA Addition — ${h.sourceNumber}`, ledgerName: h.ledgerName,
+            ledgerId: h.ledgerId, status: 'NEW', accountingPeriod: h.periodName,
+            controlTotal: h.cost, runningTotalDr: h.cost, runningTotalCr: h.cost,
+            batchSource: 'Fixed Assets', createdBy: loggedUser },
+          header: { ledgerId: h.ledgerId, ledgerName: h.ledgerName, jeCategory: 'Assets',
+            jeSource: 'Fixed Assets', periodName: h.periodName,
+            journalName: `FA Addition — ${h.sourceNumber}`, description: h.description,
+            currencyCode: h.currencyCode, currencyConversionType: 'User',
+            currencyConversionDate: h.accountingDate, currencyConversionRate: 1,
+            defaultEffectiveDate: h.accountingDate, status: 'NEW',
+            runningTotalDr: h.cost, runningTotalCr: h.cost, createdBy: loggedUser },
+          lines: lines.map(l => ({ enteredDr: l.enteredDr || null, enteredCr: l.enteredCr || null,
+            accountedDr: l.accountedDr || null, accountedCr: l.accountedCr || null,
+            description: l.description, currencyCode: h.currencyCode,
+            currencyConversionDate: h.accountingDate, currencyConversionRate: 1,
+            userCurrencyConversionType: 'User', accountCombination: l.accountCombination,
+            reference1: l.reference1, reference2: l.reference2, reference5: l.reference5,
+            reconciledFlag: 'N', createdBy: loggedUser })),
+        } : '⚠ Run Step 1 first to get slaHeaderId',
+        response: null, loading: false,
+      },
+      {
+        method: 'PUT', url: batchId ? `${base}/gl/journals/${batchId}/post` : `${base}/gl/journals/{batchId}/post`,
+        body: null, response: null, loading: false,
+      },
+      {
+        method: 'POST', url: `${base}/sla/accounting/post`,
+        body: (slaId && batchId) ? { headerId: slaId, glBatchId: batchId,
+          glBatchName: `FA-ADDITION-${h.sourceNumber}`, glHeaderId: glId, postedBy: loggedUser }
+          : '⚠ Run Steps 1 & 2 first',
+        response: null, loading: false,
+      },
+      {
+        method: 'POST', url: `${base}/fa/accounting/mark-accounted`,
+        body: { assetId: h.sourceId, slaHeaderId: slaId, glHeaderId: glId, createdBy: loggedUser },
+        response: null, loading: false,
+      },
+    ];
+  };
+
+  const runDbgStep = async (idx: number) => {
+    if (!acctPreview) return;
+    const h = acctPreview.header;
+    const steps = buildDbgSteps(h, acctPreview.lines);
+    const step = steps[idx];
+
+    setDbgSteps(prev => { const n = [...prev]; n[idx] = { ...n[idx], loading: true, response: null }; return n; });
+    try {
+      const fetchOpts: RequestInit = { method: step.method, headers: { 'Content-Type': 'application/json', Accept: 'application/json' } };
+      if (step.body && typeof step.body === 'object') fetchOpts.body = JSON.stringify(step.body);
+      const res = await fetch(step.url, fetchOpts);
+      const data = await res.json();
+      setDbgSteps(prev => { const n = [...prev]; n[idx] = { ...n[idx], loading: false, response: data }; return n; });
+      // Capture IDs for downstream steps
+      if (idx === 0 && data.headerId) setDbgSlaHeaderId(data.headerId);
+      if (idx === 1 && data.jeBatchId) { setDbgGlBatchId(data.jeBatchId); setDbgGlHeaderId(data.jeHeaderId); }
+    } catch (e: any) {
+      setDbgSteps(prev => { const n = [...prev]; n[idx] = { ...n[idx], loading: false, response: { error: e.message } }; return n; });
+    }
+  };
 
   const openAccountingPreview = async () => {
     const book = asset.bookTypeCode || books[0]?.bookTypeCode || '';
@@ -261,6 +358,11 @@ const AssetTabContent: React.FC<{
     setAcctExistingJournal(null);
     setAcctSteps(ACCT_STEPS_INIT);
     setAcctStepsVisible(false);
+    setAcctDebugVisible(false);
+    setDbgSteps([]);
+    setDbgSlaHeaderId(null);
+    setDbgGlBatchId(null);
+    setDbgGlHeaderId(null);
     try {
       // Parallel: preview data + SLA exists check
       const [preview, slaExists] = await Promise.all([
@@ -1367,6 +1469,14 @@ const AssetTabContent: React.FC<{
               >
                 <Button size="small" icon={<ApiOutlined />} style={{ color: '#888' }} />
               </Tooltip>
+              <Button
+                size="small"
+                icon={<ApiOutlined />}
+                style={{ color: acctDebugVisible ? FA_COLOR : '#888', borderColor: acctDebugVisible ? FA_COLOR : undefined }}
+                onClick={() => { setAcctDebugVisible(v => !v); if (!acctDebugVisible && acctPreview) setDbgSteps(buildDbgSteps(acctPreview.header, acctPreview.lines)); }}
+              >
+                Debug
+              </Button>
               <Button onClick={() => setAcctPreviewVisible(false)}>Close</Button>
               <Button
                 type="primary"
@@ -1415,6 +1525,67 @@ const AssetTabContent: React.FC<{
                   })}
                 </div>
               )}
+
+              {/* Create Accounting Debug Panel */}
+              {acctDebugVisible && (() => {
+                const steps = buildDbgSteps(acctPreview.header, acctPreview.lines);
+                const labels = [
+                  'Step 1 — Create SLA Accounting',
+                  'Step 2 — Create GL Journal (batch+header+lines)',
+                  'Step 3 — Post GL Journal',
+                  'Step 4 — Post SLA (stamp GL IDs)',
+                  'Step 5 — Mark FA Addition as Accounted',
+                ];
+                return (
+                  <div style={{ marginBottom: 14, border: `1px solid ${FA_COLOR}40`, borderRadius: 6, overflow: 'hidden' }}>
+                    <div style={{ background: `${FA_COLOR}15`, padding: '8px 14px', borderBottom: `1px solid ${FA_COLOR}30` }}>
+                      <Text strong style={{ fontSize: 12, color: FA_COLOR }}>Create Accounting Debug — run each step individually</Text>
+                    </div>
+                    {steps.map((step, idx) => {
+                      const dbg = dbgSteps[idx];
+                      const resp = dbg?.response;
+                      const loading = dbg?.loading ?? false;
+                      return (
+                        <div key={idx} style={{ borderBottom: idx < steps.length - 1 ? `1px solid ${REDWOOD.neutral200}` : undefined, padding: '10px 14px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                            <Tag style={{ fontSize: 10, fontWeight: 700 }} color={step.method === 'POST' ? 'blue' : step.method === 'PUT' ? 'orange' : 'green'}>{step.method}</Tag>
+                            <Text style={{ fontFamily: 'monospace', fontSize: 11, flex: 1, wordBreak: 'break-all' }}>{step.url}</Text>
+                            <Button
+                              size="small" type="primary" loading={loading}
+                              style={{ background: FA_COLOR, borderColor: FA_COLOR, fontSize: 11 }}
+                              onClick={() => { const s = buildDbgSteps(acctPreview.header, acctPreview.lines); setDbgSteps(s.map((x,i) => ({ ...x, response: dbgSteps[i]?.response ?? null, loading: false }))); runDbgStep(idx); }}
+                            >
+                              Run
+                            </Button>
+                            <Tooltip title="Copy URL">
+                              <Button size="small" icon={<ApiOutlined />} style={{ fontSize: 10 }} onClick={() => navigator.clipboard.writeText(step.url)} />
+                            </Tooltip>
+                          </div>
+                          {step.body && typeof step.body === 'object' && (
+                            <div style={{ position: 'relative' }}>
+                              <pre style={{ background: '#1a1a2e', color: '#a8d8ea', fontSize: 10, borderRadius: 4, padding: '8px 10px', margin: '0 0 6px', overflowX: 'auto', maxHeight: 160 }}>
+                                {JSON.stringify(step.body, null, 2)}
+                              </pre>
+                              <Button size="small" style={{ position: 'absolute', top: 4, right: 4, fontSize: 10, opacity: 0.7 }}
+                                onClick={() => navigator.clipboard.writeText(JSON.stringify(step.body, null, 2))}>Copy</Button>
+                            </div>
+                          )}
+                          {typeof step.body === 'string' && (
+                            <Text type="warning" style={{ fontSize: 11 }}>{step.body}</Text>
+                          )}
+                          {resp && (
+                            <div style={{ position: 'relative' }}>
+                              <pre style={{ background: resp.error || resp.success === false ? '#2a0a0a' : '#0a2a0a', color: resp.error || resp.success === false ? '#ffaaaa' : '#aaffaa', fontSize: 10, borderRadius: 4, padding: '8px 10px', margin: 0, overflowX: 'auto', maxHeight: 120 }}>
+                                {JSON.stringify(resp, null, 2)}
+                              </pre>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
 
               {/* Status banner if SLA accounting already exists */}
               {acctSlaExists?.exists && (
