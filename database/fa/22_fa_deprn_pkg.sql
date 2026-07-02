@@ -6,6 +6,8 @@
 --   CREATE_DEPRECIATION  — post depreciation for one asset / one period
 --   DELETE_DEPRECIATION  — reverse/delete depreciation if NOT yet posted to GL
 --
+--   POST_ASSET_DEPRECIATION — check-then-post for one asset (PL/SQL-callable)
+--
 -- Run this file BEFORE 21_fa_deprn_post_asset.sql (handlers reference the pkg).
 -- =============================================================================
 
@@ -44,6 +46,26 @@ CREATE OR REPLACE PACKAGE RR_FA_DEPRN_PKG AS
         p_deleted_by   IN  VARCHAR2 DEFAULT 'REACTERP',
         p_http_status  OUT NUMBER,
         p_result       OUT CLOB
+    );
+
+    -- -------------------------------------------------------------------------
+    -- POST_ASSET_DEPRECIATION
+    -- Check-then-post for a single asset.  Pure PL/SQL — no HTTP codes.
+    --
+    -- p_deprn_amount   0 = recalculate server-side (STL)
+    -- p_status    OUT  'POSTED'         — inserted successfully
+    --                  'ALREADY_EXISTS' — record found, skipped
+    --                  'ERROR'          — unexpected failure (see p_message)
+    -- p_message   OUT  human-readable detail
+    -- -------------------------------------------------------------------------
+    PROCEDURE POST_ASSET_DEPRECIATION (
+        p_asset_id     IN  VARCHAR2,
+        p_book         IN  VARCHAR2,
+        p_period_name  IN  VARCHAR2,
+        p_deprn_amount IN  NUMBER   DEFAULT 0,
+        p_created_by   IN  VARCHAR2 DEFAULT 'REACTERP',
+        p_status       OUT VARCHAR2,
+        p_message      OUT VARCHAR2
     );
 
 END RR_FA_DEPRN_PKG;
@@ -412,6 +434,140 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
             p_http_status := 500;
             p_result := '{"success":false,"error":"' || REPLACE(SQLERRM,'"','\"') || '"}';
     END DELETE_DEPRECIATION;
+
+
+    -- =========================================================================
+    -- POST_ASSET_DEPRECIATION
+    -- Check-then-post for a single asset.  Pure PL/SQL — no HTTP codes.
+    -- Callers: batch jobs, other packages, APEX processes.
+    -- =========================================================================
+    PROCEDURE POST_ASSET_DEPRECIATION (
+        p_asset_id     IN  VARCHAR2,
+        p_book         IN  VARCHAR2,
+        p_period_name  IN  VARCHAR2,
+        p_deprn_amount IN  NUMBER   DEFAULT 0,
+        p_created_by   IN  VARCHAR2 DEFAULT 'REACTERP',
+        p_status       OUT VARCHAR2,
+        p_message      OUT VARCHAR2
+    ) IS
+        v_period_ctr    NUMBER;
+        v_fiscal_year   NUMBER;
+        v_period_num    NUMBER;
+        v_exists        NUMBER;
+        v_prior_reserve NUMBER := 0;
+        v_prior_ytd     NUMBER := 0;
+        v_adj_cost      NUMBER := 0;
+        v_salvage       NUMBER := 0;
+        v_life_months   NUMBER := 0;
+        v_calc_amount   NUMBER := 0;
+        v_final_amount  NUMBER;
+        v_new_reserve   NUMBER;
+        v_new_ytd       NUMBER;
+    BEGIN
+        -- ── 1. Validate ──────────────────────────────────────────────────────
+        IF p_asset_id IS NULL OR p_book IS NULL OR p_period_name IS NULL THEN
+            p_status  := 'ERROR';
+            p_message := 'assetId, bookTypeCode and periodName are required';
+            RETURN;
+        END IF;
+
+        -- ── 2. Resolve period_counter ────────────────────────────────────────
+        resolve_period(p_book, p_period_name, v_period_ctr, v_fiscal_year, v_period_num);
+
+        -- ── 3. Check if depreciation already exists for this asset / period ──
+        SELECT COUNT(*) INTO v_exists
+        FROM   RR_FA_DEPRN_SUMMARY
+        WHERE  ASSET_ID       = p_asset_id
+        AND    BOOK_TYPE_CODE = p_book
+        AND    PERIOD_COUNTER = v_period_ctr;
+
+        IF v_exists > 0 THEN
+            p_status  := 'ALREADY_EXISTS';
+            p_message := 'Depreciation already posted for asset ' || p_asset_id
+                      || ' period ' || p_period_name || ' — skipped';
+            RETURN;
+        END IF;
+
+        -- ── 4. Get prior reserve / YTD from last posted period ───────────────
+        BEGIN
+            SELECT NVL(DEPRN_RESERVE, 0), NVL(YTD_DEPRN, 0)
+            INTO   v_prior_reserve, v_prior_ytd
+            FROM   RR_FA_DEPRN_SUMMARY
+            WHERE  ASSET_ID       = p_asset_id
+            AND    BOOK_TYPE_CODE = p_book
+            AND    PERIOD_COUNTER = (
+                SELECT MAX(TO_NUMBER(PERIOD_COUNTER))
+                FROM   RR_FA_DEPRN_SUMMARY
+                WHERE  ASSET_ID       = p_asset_id
+                AND    BOOK_TYPE_CODE = p_book
+            );
+        EXCEPTION WHEN NO_DATA_FOUND THEN
+            v_prior_reserve := 0;
+            v_prior_ytd     := 0;
+        END;
+
+        -- ── 5. Server-side STL calculation ───────────────────────────────────
+        BEGIN
+            SELECT NVL(b.ADJUSTED_COST, 0),
+                   NVL(b.SALVAGE_VALUE,  0),
+                   NVL(m.LIFE_IN_MONTHS, 0)
+            INTO   v_adj_cost, v_salvage, v_life_months
+            FROM   RR_FA_BOOKS b
+            LEFT JOIN RR_FA_METHODS m ON m.METHOD_ID = b.METHOD_ID
+            WHERE  b.ASSET_ID       = p_asset_id
+            AND    b.BOOK_TYPE_CODE = p_book
+            AND    b.DATE_INEFFECTIVE IS NULL
+            AND    ROWNUM = 1;
+
+            IF v_life_months > 0 THEN
+                v_calc_amount := ROUND((v_adj_cost - v_salvage) / v_life_months, 2);
+            END IF;
+        EXCEPTION WHEN NO_DATA_FOUND THEN NULL;
+        END;
+
+        -- Prefer caller-supplied amount; fall back to STL
+        v_final_amount := CASE
+            WHEN NVL(p_deprn_amount, 0) > 0 THEN p_deprn_amount
+            ELSE v_calc_amount
+        END;
+
+        -- Cap: cannot depreciate below salvage value
+        v_final_amount := LEAST(
+            v_final_amount,
+            GREATEST(0, (v_adj_cost - v_salvage) - v_prior_reserve)
+        );
+
+        v_new_reserve := v_prior_reserve + v_final_amount;
+        v_new_ytd     := v_prior_ytd    + v_final_amount;
+
+        -- ── 6. Insert into RR_FA_DEPRN_SUMMARY ──────────────────────────────
+        INSERT INTO RR_FA_DEPRN_SUMMARY (
+            ASSET_ID, BOOK_TYPE_CODE, PERIOD_COUNTER,
+            DEPRN_AMOUNT, YTD_DEPRN, DEPRN_RESERVE,
+            ADJUSTED_COST, DEPRN_RUN_DATE
+        ) VALUES (
+            p_asset_id, p_book, v_period_ctr,
+            v_final_amount, v_new_ytd, v_new_reserve,
+            v_adj_cost, SYSDATE
+        );
+
+        -- ── 7. Ensure period row exists in RR_FA_DEPRN_PERIODS ──────────────
+        ensure_period_row(p_book, p_period_name, v_period_ctr, v_fiscal_year, v_period_num);
+
+        COMMIT;
+
+        p_status  := 'POSTED';
+        p_message := 'Depreciation posted for asset ' || p_asset_id
+                  || ' period '      || p_period_name
+                  || ' amount '      || TO_CHAR(v_final_amount)
+                  || ' new reserve ' || TO_CHAR(v_new_reserve);
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            ROLLBACK;
+            p_status  := 'ERROR';
+            p_message := SQLERRM;
+    END POST_ASSET_DEPRECIATION;
 
 END RR_FA_DEPRN_PKG;
 /
