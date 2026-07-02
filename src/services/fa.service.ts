@@ -548,6 +548,24 @@ export const peekAssetNumber = async (): Promise<string> => {
   catch { return ''; }
 };
 
+export const postAssetDeprn = async (payload: {
+  assetId: string;
+  bookTypeCode: string;
+  periodName: string;
+  deprnAmount: number;
+}): Promise<{ success: boolean; status?: string; periodCounter?: number; newReserve?: number; newNbv?: number; error?: string }> => {
+  try {
+    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/fa/deprn-post-asset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return await res.json();
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
+};
+
 export const getDeprnPeriods = async (bookTypeCode?: string): Promise<any[]> => {
   try {
     const qs = bookTypeCode ? `?bookTypeCode=${encodeURIComponent(bookTypeCode)}` : '';

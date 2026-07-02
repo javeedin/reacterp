@@ -12,14 +12,14 @@ import {
   FileTextOutlined, LineChartOutlined,
   EnvironmentOutlined, DatabaseOutlined, InfoCircleOutlined,
   BookOutlined, HistoryOutlined, BarcodeOutlined, ApiOutlined, CheckOutlined,
-  FilterOutlined, DownloadOutlined, DollarOutlined,
+  FilterOutlined, DownloadOutlined, DollarOutlined, SaveOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
   searchAssets, getAssetDetail, getAssetBooks, getAssetDeprn,
   getAssetDistributions, getAssetInvoices, getAssetTransactions,
-  getCategoryDetail, getCategoryBooks,
+  getCategoryDetail, getCategoryBooks, postAssetDeprn,
   formatCurrency, assetTypeLabel, assetStatusLabel,
 } from '../../services/fa.service';
 import type {
@@ -91,17 +91,60 @@ const AssetTabContent: React.FC<{
 
   // Depreciation preview modal state
   interface DeprnRow { period: string; openingNbv: number; depreciation: number; closingNbv: number; }
-  const [deprnModal,    setDeprnModal]    = useState(false);
-  const [deprnFromDate, setDeprnFromDate] = useState<dayjs.Dayjs | null>(null);
-  const [deprnToDate,   setDeprnToDate]   = useState<dayjs.Dayjs>(dayjs());
-  const [deprnRows,     setDeprnRows]     = useState<DeprnRow[]>([]);
+  interface PostResult { period: string; status: 'POSTED' | 'ALREADY_EXISTS' | 'ERROR'; message?: string; }
+  const [deprnModal,     setDeprnModal]     = useState(false);
+  const [deprnFromDate,  setDeprnFromDate]  = useState<dayjs.Dayjs | null>(null);
+  const [deprnToDate,    setDeprnToDate]    = useState<dayjs.Dayjs>(dayjs());
+  const [deprnRows,      setDeprnRows]      = useState<DeprnRow[]>([]);
+  const [selectedPeriods,setSelectedPeriods]= useState<Set<string>>(new Set());
+  const [postResults,    setPostResults]    = useState<PostResult[]>([]);
+  const [posting,        setPosting]        = useState(false);
 
   const openDeprnPreview = () => {
     const dpis = asset.datePlacedInService;
     setDeprnFromDate(dpis ? dayjs(dpis) : null);
     setDeprnToDate(dayjs());
     setDeprnRows([]);
+    setSelectedPeriods(new Set());
+    setPostResults([]);
     setDeprnModal(true);
+  };
+
+  // Normalise a period string to "YYYY-MM" for duplicate detection
+  const normPeriod = (p: string) => {
+    const d = dayjs(p, ['MMM-YYYY', 'MMM-YY', 'MMMM-YYYY']);
+    return d.isValid() ? d.format('YYYY-MM') : p.toUpperCase();
+  };
+
+  // Periods already posted for this asset (from deprn tab data)
+  const postedPeriods = new Set(deprn.map(r => normPeriod(r.periodName)));
+  const isPosted = (period: string) => postedPeriods.has(normPeriod(period));
+
+  const handleCreateDeprn = async () => {
+    const toPost = deprnRows.filter(r => selectedPeriods.has(r.period) && !isPosted(r.period));
+    if (!toPost.length) return;
+    setPosting(true);
+    setPostResults([]);
+    const results: PostResult[] = [];
+    for (const row of toPost) {
+      const res = await postAssetDeprn({
+        assetId:      asset.assetId,
+        bookTypeCode: asset.bookTypeCode || books[0]?.bookTypeCode || '',
+        periodName:   row.period,
+        deprnAmount:  row.depreciation,
+      });
+      results.push({
+        period:  row.period,
+        status:  res.success ? 'POSTED' : (res.status === 'ALREADY_EXISTS' ? 'ALREADY_EXISTS' : 'ERROR'),
+        message: res.error,
+      });
+    }
+    setPostResults(results);
+    setSelectedPeriods(new Set());
+    setPosting(false);
+    // Refresh deprn tab in background by reloading (handled via message)
+    const posted = results.filter(r => r.status === 'POSTED').length;
+    if (posted > 0) message.success(`${posted} period(s) posted successfully`);
   };
 
   const calcDeprn = () => {
@@ -492,30 +535,51 @@ const AssetTabContent: React.FC<{
             {/* ── Preview Depreciation Modal ── */}
             <Modal
               open={deprnModal}
-              onCancel={() => setDeprnModal(false)}
-              width={820}
+              onCancel={() => { setDeprnModal(false); setPostResults([]); }}
+              width={900}
               title={<Space><DollarOutlined style={{ color: FA_COLOR }} /><span>Depreciation Preview — {asset.asset_number || asset.assetNumber}</span></Space>}
-              footer={<Button onClick={() => setDeprnModal(false)}>Close</Button>}
+              footer={
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    {selectedPeriods.size > 0 ? `${selectedPeriods.size} period(s) selected` : 'Select rows to post depreciation'}
+                  </Text>
+                  <Space>
+                    <Button onClick={() => { setDeprnModal(false); setPostResults([]); }}>Close</Button>
+                    <Button
+                      type="primary"
+                      icon={<SaveOutlined />}
+                      loading={posting}
+                      disabled={selectedPeriods.size === 0}
+                      style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+                      onClick={handleCreateDeprn}
+                    >
+                      Create Depreciation ({selectedPeriods.size})
+                    </Button>
+                  </Space>
+                </div>
+              }
             >
               {/* Info strip */}
               {books[0] && (
                 <div style={{ background: REDWOOD.neutral100, borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 12 }}>
-                  <Space size={20}>
+                  <Space size={20} wrap>
                     <span><Text type="secondary">Method: </Text><Text strong>{books[0].methodName || books[0].methodCode || '—'}</Text></span>
                     <span><Text type="secondary">Life: </Text><Text strong>{books[0].lifeInMonths} months</Text></span>
                     <span><Text type="secondary">Cost: </Text><Text strong>{formatCurrency(asset.cost)}</Text></span>
                     <span><Text type="secondary">Salvage: </Text><Text strong>{formatCurrency(books[0].salvageValue ?? asset.salvageValue)}</Text></span>
+                    <span><Text type="secondary">Book: </Text><Text strong>{books[0].bookTypeCode}</Text></span>
                   </Space>
                 </div>
               )}
+
               <Row gutter={[12, 0]} style={{ marginBottom: 12 }}>
                 <Col xs={24} sm={8}>
                   <div style={{ marginBottom: 4 }}><Text type="secondary" style={{ fontSize: 11 }}>From Date (Date in Service)</Text></div>
-                  <DatePicker style={{ width: '100%' }} value={deprnFromDate} format="DD-MMM-YYYY" onChange={v => setDeprnFromDate(v)} />
+                  <DatePicker style={{ width: '100%' }} value={deprnFromDate} format="DD-MMM-YYYY" onChange={v => { setDeprnFromDate(v); setDeprnRows([]); setSelectedPeriods(new Set()); }} />
                 </Col>
                 <Col xs={24} sm={8}>
                   <div style={{ marginBottom: 4 }}><Text type="secondary" style={{ fontSize: 11 }}>To Date</Text></div>
-                  <DatePicker style={{ width: '100%' }} value={deprnToDate} format="DD-MMM-YYYY" onChange={v => setDeprnToDate(v || dayjs())} />
+                  <DatePicker style={{ width: '100%' }} value={deprnToDate} format="DD-MMM-YYYY" onChange={v => { setDeprnToDate(v || dayjs()); setDeprnRows([]); setSelectedPeriods(new Set()); }} />
                 </Col>
                 <Col xs={24} sm={8} style={{ display: 'flex', alignItems: 'flex-end' }}>
                   <Button type="primary" style={{ background: FA_COLOR, borderColor: FA_COLOR, width: '100%' }} onClick={calcDeprn} disabled={!deprnFromDate}>
@@ -524,40 +588,116 @@ const AssetTabContent: React.FC<{
                 </Col>
               </Row>
 
+              {/* Post results banner */}
+              {postResults.length > 0 && (
+                <div style={{ marginBottom: 10 }}>
+                  {postResults.map(r => (
+                    <div key={r.period} style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '5px 10px', marginBottom: 4, borderRadius: 4, fontSize: 12,
+                      background: r.status === 'POSTED' ? '#f6ffed' : r.status === 'ALREADY_EXISTS' ? '#fffbe6' : '#fff2f0',
+                      border: `1px solid ${r.status === 'POSTED' ? '#b7eb8f' : r.status === 'ALREADY_EXISTS' ? '#ffe58f' : '#ffccc7'}`,
+                    }}>
+                      <Tag color={r.status === 'POSTED' ? 'success' : r.status === 'ALREADY_EXISTS' ? 'warning' : 'error'} style={{ fontSize: 11 }}>
+                        {r.status === 'POSTED' ? 'Posted' : r.status === 'ALREADY_EXISTS' ? 'Already Posted' : 'Error'}
+                      </Tag>
+                      <Text strong style={{ fontSize: 12 }}>{r.period}</Text>
+                      {r.message && <Text type="secondary" style={{ fontSize: 11 }}>— {r.message}</Text>}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {deprnRows.length > 0 && (() => {
                 const totalDeprn = deprnRows.reduce((s, r) => s + r.depreciation, 0);
                 const finalNbv   = deprnRows[deprnRows.length - 1].closingNbv;
                 const fmt = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                const selectableCount = deprnRows.filter(r => !isPosted(r.period)).length;
+                const allSelected = selectableCount > 0 && deprnRows.filter(r => !isPosted(r.period)).every(r => selectedPeriods.has(r.period));
+
+                const toggleAll = () => {
+                  if (allSelected) {
+                    setSelectedPeriods(new Set());
+                  } else {
+                    setSelectedPeriods(new Set(deprnRows.filter(r => !isPosted(r.period)).map(r => r.period)));
+                  }
+                };
+                const toggle = (period: string) => {
+                  setSelectedPeriods(prev => {
+                    const next = new Set(prev);
+                    next.has(period) ? next.delete(period) : next.add(period);
+                    return next;
+                  });
+                };
+
                 return (
                   <>
+                    {/* Table header */}
                     <div style={{ border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, overflow: 'hidden', marginBottom: 8 }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 1fr 1fr', background: REDWOOD.neutral100, padding: '6px 12px', fontSize: 12, fontWeight: 600, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '36px 110px 1fr 1fr 1fr 90px', background: REDWOOD.neutral100, padding: '6px 12px', fontSize: 12, fontWeight: 600, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+                        <span>
+                          <input type="checkbox" checked={allSelected} onChange={toggleAll}
+                            title="Select all unposted" style={{ cursor: 'pointer' }} />
+                        </span>
                         <span>Period</span>
                         <span style={{ textAlign: 'right' }}>Opening NBV</span>
                         <span style={{ textAlign: 'right' }}>Depreciation</span>
                         <span style={{ textAlign: 'right' }}>Closing NBV</span>
+                        <span style={{ textAlign: 'center' }}>Status</span>
                       </div>
-                      <div style={{ maxHeight: 340, overflowY: 'auto' }}>
-                        {deprnRows.map((r, i) => (
-                          <div key={r.period} style={{ display: 'grid', gridTemplateColumns: '120px 1fr 1fr 1fr', padding: '5px 12px', fontSize: 12, background: i % 2 === 0 ? '#fff' : REDWOOD.neutral100, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
-                            <span style={{ fontFamily: 'monospace' }}>{r.period}</span>
-                            <span style={{ textAlign: 'right', fontFamily: 'monospace' }}>{fmt(r.openingNbv)}</span>
-                            <span style={{ textAlign: 'right', fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(r.depreciation)}</span>
-                            <span style={{ textAlign: 'right', fontFamily: 'monospace' }}>{fmt(r.closingNbv)}</span>
-                          </div>
-                        ))}
+                      <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+                        {deprnRows.map((r, i) => {
+                          const posted     = isPosted(r.period);
+                          const selected   = selectedPeriods.has(r.period);
+                          const postResult = postResults.find(p => p.period === r.period);
+                          return (
+                            <div key={r.period} style={{
+                              display: 'grid', gridTemplateColumns: '36px 110px 1fr 1fr 1fr 90px',
+                              padding: '5px 12px', fontSize: 12,
+                              background: posted ? '#f6ffed' : selected ? '#e6f4ff' : i % 2 === 0 ? '#fff' : REDWOOD.neutral100,
+                              borderBottom: `1px solid ${REDWOOD.neutral200}`,
+                              opacity: posted ? 0.75 : 1,
+                            }}>
+                              <span>
+                                {!posted && (
+                                  <input type="checkbox" checked={selected} onChange={() => toggle(r.period)}
+                                    style={{ cursor: 'pointer' }} />
+                                )}
+                              </span>
+                              <span style={{ fontFamily: 'monospace', fontWeight: selected ? 600 : 400 }}>{r.period}</span>
+                              <span style={{ textAlign: 'right', fontFamily: 'monospace' }}>{fmt(r.openingNbv)}</span>
+                              <span style={{ textAlign: 'right', fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(r.depreciation)}</span>
+                              <span style={{ textAlign: 'right', fontFamily: 'monospace' }}>{fmt(r.closingNbv)}</span>
+                              <span style={{ textAlign: 'center' }}>
+                                {postResult?.status === 'POSTED'
+                                  ? <Tag color="success" style={{ fontSize: 10 }}>Posted</Tag>
+                                  : postResult?.status === 'ALREADY_EXISTS'
+                                    ? <Tag color="warning" style={{ fontSize: 10 }}>Duplicate</Tag>
+                                    : postResult?.status === 'ERROR'
+                                      ? <Tag color="error" style={{ fontSize: 10 }}>Error</Tag>
+                                      : posted
+                                        ? <Tag color="green" style={{ fontSize: 10 }}>✓ Posted</Tag>
+                                        : null
+                                }
+                              </span>
+                            </div>
+                          );
+                        })}
                       </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 1fr 1fr', padding: '6px 12px', fontSize: 12, fontWeight: 700, background: '#fff3cd', borderTop: `2px solid ${REDWOOD.warning}` }}>
-                        <span>Total ({deprnRows.length} months)</span>
+                      {/* Totals */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '36px 110px 1fr 1fr 1fr 90px', padding: '6px 12px', fontSize: 12, fontWeight: 700, background: '#fff3cd', borderTop: `2px solid ${REDWOOD.warning}` }}>
+                        <span /><span>Total ({deprnRows.length} months)</span>
                         <span />
                         <span style={{ textAlign: 'right', fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(totalDeprn)}</span>
                         <span style={{ textAlign: 'right', fontFamily: 'monospace' }}>{fmt(finalNbv)}</span>
+                        <span />
                       </div>
                     </div>
                     <Space>
                       <Tag color="orange">Total Depreciation: {fmt(totalDeprn)}</Tag>
                       <Tag color="blue">Final NBV: {fmt(finalNbv)}</Tag>
                       <Tag color="green">{deprnRows.length} months</Tag>
+                      {postedPeriods.size > 0 && <Tag color="success">{deprnRows.filter(r => isPosted(r.period)).length} already posted</Tag>}
                     </Space>
                   </>
                 );
