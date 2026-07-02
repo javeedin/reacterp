@@ -16,6 +16,7 @@ import {
   AccountBookOutlined, AuditOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
+import { postSlaToGL } from '../../services/glPosting.service';
 import { useAuth } from '../../context/AuthContext';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
@@ -24,8 +25,7 @@ import {
   getCategoryDetail, getCategoryBooks, postAssetDeprn, postSingleDeprn, deleteAssetDeprn,
   getBookControls,
   getAdditionsAccountingPreview, checkSlaAccountingExists, getSlaAccounting,
-  createSlaAccounting, createGlJournalHeader, createGlJournalLines,
-  postSlaAccounting, markFaAdditionAccounted,
+  createSlaAccounting, markFaAdditionAccounted,
   formatCurrency, assetTypeLabel, assetStatusLabel,
 } from '../../services/fa.service';
 import type {
@@ -239,11 +239,9 @@ const AssetTabContent: React.FC<{
   type StepStatus = 'wait' | 'process' | 'finish' | 'error';
   interface AcctStep { label: string; detail: string; status: StepStatus; result?: string; error?: string; }
   const ACCT_STEPS_INIT: AcctStep[] = [
-    { label: 'Create SLA Accounting',   detail: 'POST sla/accounting/create',    status: 'wait' },
-    { label: 'Create GL Journal Header',detail: 'POST gl/journals/headers',      status: 'wait' },
-    { label: 'Create GL Journal Lines', detail: 'POST gl/journals/lines',        status: 'wait' },
-    { label: 'Post SLA to GL',          detail: 'POST sla/accounting/post',      status: 'wait' },
-    { label: 'Mark as Accounted',       detail: 'POST fa/accounting/mark-accounted', status: 'wait' },
+    { label: 'Create SLA Accounting',              detail: 'POST sla/accounting/create',          status: 'wait' },
+    { label: 'Create & Post GL Journal',           detail: 'POST journals/create → PUT gl/journals/{id}/post → POST sla/accounting/post', status: 'wait' },
+    { label: 'Mark Addition as Accounted',         detail: 'POST fa/accounting/mark-accounted',   status: 'wait' },
   ];
   const [acctSteps, setAcctSteps] = useState<AcctStep[]>(ACCT_STEPS_INIT);
   const [acctStepsVisible, setAcctStepsVisible] = useState(false);
@@ -328,7 +326,6 @@ const AssetTabContent: React.FC<{
           sourceLineNum:   l.lineNumber,
         })),
       });
-
       if (!slaRes.headerId) {
         const errMsg = slaRes.error || slaRes.message || 'Failed to create SLA accounting';
         updateStep(0, 'error', errMsg);
@@ -336,92 +333,63 @@ const AssetTabContent: React.FC<{
         return;
       }
       updateStep(0, 'finish', `SLA Header ID: ${slaRes.headerId}`);
-
       const slaHeaderId = slaRes.headerId;
-      const glHeaderId  = slaHeaderId;
-      const batchName   = `FA-ADDITION-${h.sourceNumber}-${now.replace(/-/g, '')}`;
 
-      // Step 1: Create GL journal header
+      // Step 1: Create GL batch+header+lines in one call, then post journal, then stamp SLA
       updateStep(1, 'process');
-      const glHeaderRes = await createGlJournalHeader(slaHeaderId, {
-        JeHeaderId:         glHeaderId,
-        JournalName:        `FA Addition — ${h.sourceNumber}`,
-        JournalDescription: h.description,
-        PeriodName:         h.periodName,
-        DefaultEffectiveDate: h.accountingDate,
-        CurrencyCode:       h.currencyCode,
-        LedgerCurrencyCode: h.ledgerCurrency,
-        RunningTotalDr:     h.cost,
-        RunningTotalCr:     h.cost,
-        RunningTotalAccountedDr: h.cost,
-        RunningTotalAccountedCr: h.cost,
-        UserJeCategoryName: 'Assets',
-        CreatedBy:          loggedUser,
-        CreationDate:       now + 'T00:00:00.000+00:00',
-        LastUpdateDate:     now + 'T00:00:00.000+00:00',
-        LastUpdatedBy:      loggedUser,
+      const glRes = await postSlaToGL({
+        slaHeaderId,
+        sourceNumber:   String(h.sourceNumber || h.assetNumber),
+        sourceId:       h.sourceId,
+        eventTypeCode:  h.eventTypeCode,
+        periodName:     h.periodName,
+        ledgerName:     h.ledgerName,
+        ledgerId:       h.ledgerId,
+        currency:       h.currencyCode,
+        accountingDate: h.accountingDate,
+        legalEntity:    '',
+        businessUnit:   '',
+        jeCategory:     'Assets',
+        jeSource:       'Fixed Assets',
+        batchSource:    'Fixed Assets',
+        journalName:    `FA Addition — ${h.sourceNumber || h.assetNumber}`,
+        journalDescription: h.description,
+        createdBy:      loggedUser,
+        lines: acctPreview.lines.map(l => ({
+          lineType:           l.lineType,
+          enteredDr:          l.enteredDr || null,
+          enteredCr:          l.enteredCr || null,
+          accountedDr:        l.accountedDr || null,
+          accountedCr:        l.accountedCr || null,
+          description:        l.description,
+          currencyCode:       h.currencyCode,
+          accountingDate:     h.accountingDate,
+          accountCombination: l.accountCombination,
+          accountingClass:    l.accountingClass,
+          legalEntity:        null,
+        })),
       });
-      if (glHeaderRes?.success === false) {
-        updateStep(1, 'error', glHeaderRes.error || 'Failed to create GL header');
-        message.error(glHeaderRes.error || 'Failed to create GL journal header');
+      if (!glRes.success) {
+        updateStep(1, 'error', glRes.error || 'Failed to create/post GL journal');
+        message.error(glRes.error || 'Failed to create GL journal');
         return;
       }
-      updateStep(1, 'finish', `GL Header ID: ${glHeaderId}`);
+      updateStep(1, 'finish', `GL Batch: ${glRes.batchId} | Header: ${glRes.headerId}`);
 
-      // Step 2: Create GL journal lines
+      // Step 2: Mark FA addition as ACCOUNTED
       updateStep(2, 'process');
-      const glLinesRes = await createGlJournalLines(glHeaderId,
-        acctPreview.lines.map(l => ({
-          JeLineNumber:       l.lineNumber,
-          EnteredDr:          l.enteredDr,
-          EnteredCr:          l.enteredCr,
-          AccountedDr:        l.accountedDr,
-          AccountedCr:        l.accountedCr,
-          Description:        l.description,
-          CurrencyCode:       h.currencyCode,
-          AccountCombination: l.accountCombination,
-          Reference1:         l.reference1,
-          Reference2:         l.reference2,
-          Reference5:         l.reference5,
-        }))
-      );
-      if (glLinesRes?.success === false) {
-        updateStep(2, 'error', glLinesRes.error || 'Failed to create GL lines');
-        message.error(glLinesRes.error || 'Failed to create GL journal lines');
-        return;
-      }
-      updateStep(2, 'finish', `${acctPreview.lines.length} lines created`);
-
-      // Step 3: Post SLA to GL
-      updateStep(3, 'process');
-      const postRes = await postSlaAccounting({
-        headerId:    slaHeaderId,
-        postedBy:    loggedUser,
-        glBatchId:   slaHeaderId,
-        glBatchName: batchName,
-        glHeaderId:  glHeaderId,
-      });
-      if (postRes?.success === false) {
-        updateStep(3, 'error', postRes.error || 'Failed to post SLA');
-        message.error(postRes.error || 'Failed to post SLA to GL');
-        return;
-      }
-      updateStep(3, 'finish', 'SLA posted to GL');
-
-      // Step 4: Mark FA addition as ACCOUNTED
-      updateStep(4, 'process');
       const markRes = await markFaAdditionAccounted({
         assetId:      asset.assetId,
         slaHeaderId:  slaHeaderId,
-        glHeaderId:   glHeaderId,
+        glHeaderId:   glRes.headerId ?? slaHeaderId,
         createdBy:    loggedUser,
       });
       if (markRes?.success === false) {
-        updateStep(4, 'error', markRes.error || 'Failed to mark as accounted');
+        updateStep(2, 'error', markRes.error || 'Failed to mark as accounted');
         message.error(markRes.error || 'Failed to mark addition as accounted');
         return;
       }
-      updateStep(4, 'finish', 'Addition marked as ACCOUNTED');
+      updateStep(2, 'finish', 'Addition marked as ACCOUNTED');
 
       message.success('Accounting created and posted to GL successfully');
 
