@@ -28,7 +28,6 @@ import {
   createSlaAccounting, markFaAdditionAccounted,
   formatCurrency, assetTypeLabel, assetStatusLabel,
 } from '../../services/fa.service';
-import { getJournalLines } from '../../services/manage-journals.service';
 import type { JournalLine } from '../../services/manage-journals.service';
 import type {
   AssetRecord, AssetDetail, AssetBook, DeprnRecord,
@@ -380,18 +379,19 @@ const AssetTabContent: React.FC<{
       ]);
       setAcctPreview(preview);
       setAcctSlaExists(slaExists);
-      // If accounting already exists, load the actual SLA + GL journal
+      // If accounting already exists, load SLA record + actual GL lines by reference2=assetId
       if (slaExists.exists && slaExists.headerId) {
         const existing = await getSlaAccounting('RR_FA_ADDITIONS', asset.assetId);
         setAcctExistingJournal(existing);
-        // Try to fetch actual GL lines using the glHeaderId stamped on the SLA record
-        const glHeaderId = existing?.glHeaderId || existing?.header?.glHeaderId;
-        if (glHeaderId) {
-          setViewGlLoading(true);
-          getJournalLines(Number(glHeaderId))
-            .then(r => setViewGlLines(r.lines || []))
-            .finally(() => setViewGlLoading(false));
-        }
+        // Fetch actual GL lines via GET /gl/journals/lines?reference2={assetId}
+        setViewGlLoading(true);
+        fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${encodeURIComponent(asset.assetId)}`, {
+          headers: { Accept: 'application/json' },
+        })
+          .then(r => r.json())
+          .then(data => setViewGlLines(Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : [])))
+          .catch(() => setViewGlLines([]))
+          .finally(() => setViewGlLoading(false));
       }
     } catch {
       message.error('Failed to load accounting preview');
@@ -524,13 +524,14 @@ const AssetTabContent: React.FC<{
       if (updatedExists.exists) {
         const existing = await getSlaAccounting('RR_FA_ADDITIONS', asset.assetId);
         setAcctExistingJournal(existing);
-        const glHeaderId = existing?.glHeaderId || existing?.header?.glHeaderId;
-        if (glHeaderId) {
-          setViewGlLoading(true);
-          getJournalLines(Number(glHeaderId))
-            .then(r => setViewGlLines(r.lines || []))
-            .finally(() => setViewGlLoading(false));
-        }
+        setViewGlLoading(true);
+        fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${encodeURIComponent(asset.assetId)}`, {
+          headers: { Accept: 'application/json' },
+        })
+          .then(r => r.json())
+          .then(data => setViewGlLines(Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : [])))
+          .catch(() => setViewGlLines([]))
+          .finally(() => setViewGlLoading(false));
       }
     } catch (err: any) {
       message.error(err.message || 'Accounting creation failed');
@@ -1683,9 +1684,17 @@ const AssetTabContent: React.FC<{
                         size="small"
                         pagination={false}
                         dataSource={viewGlLines}
-                        rowKey={(r: JournalLine) => String(r.lineSyncId || r.lineNum)}
+                        rowKey={(_: any, i: any) => String(i)}
                         columns={[
-                          { title: '#', dataIndex: 'lineNum', key: 'lineNum', width: 40 },
+                          { title: '#', dataIndex: 'line_num', key: 'line_num', width: 40 },
+                          {
+                            title: 'Journal',
+                            dataIndex: 'journal_name',
+                            key: 'journal_name',
+                            ellipsis: true,
+                            width: 160,
+                            render: (v: string) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text>,
+                          },
                           {
                             title: 'Account',
                             dataIndex: 'account',
@@ -1695,7 +1704,7 @@ const AssetTabContent: React.FC<{
                           { title: 'Description', dataIndex: 'description', key: 'desc', ellipsis: true },
                           {
                             title: 'Debit',
-                            dataIndex: 'accountedDr',
+                            dataIndex: 'accounted_dr',
                             key: 'dr',
                             align: 'right' as const,
                             width: 120,
@@ -1703,23 +1712,20 @@ const AssetTabContent: React.FC<{
                           },
                           {
                             title: 'Credit',
-                            dataIndex: 'accountedCr',
+                            dataIndex: 'accounted_cr',
                             key: 'cr',
                             align: 'right' as const,
                             width: 120,
                             render: (v: number) => v ? <Text style={{ color: REDWOOD.primary, fontFamily: 'monospace' }}>{formatCurrency(String(v))}</Text> : '—',
                           },
-                          {
-                            title: 'Currency',
-                            dataIndex: 'currency',
-                            key: 'currency',
-                            width: 80,
-                          },
+                          { title: 'Period', dataIndex: 'period_name', key: 'period', width: 80 },
+                          { title: 'Status', dataIndex: 'posting_status', key: 'status', width: 80,
+                            render: (v: string) => <Tag color={v === 'POSTED' ? 'success' : 'default'} style={{ fontSize: 10 }}>{v || '—'}</Tag> },
                         ]}
                       />
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, padding: '4px 8px', background: REDWOOD.neutral100, borderRadius: 4 }}>
                         <Text type="secondary" style={{ fontSize: 11 }}>
-                          {viewGlLines.length} GL lines · Reference2 = {asset.assetId} (Asset ID)
+                          {viewGlLines.length} GL lines · reference2 = {asset.assetId}
                         </Text>
                       </div>
                     </>
