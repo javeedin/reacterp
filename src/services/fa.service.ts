@@ -553,6 +553,7 @@ export const postAssetDeprn = async (payload: {
   bookTypeCode: string;
   periodName: string;
   deprnAmount: number;
+  createdBy?: string;
 }): Promise<{ success: boolean; status?: string; periodCounter?: number; newReserve?: number; newNbv?: number; error?: string }> => {
   try {
     const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/fa/deprn-post-asset`, {

@@ -15,6 +15,7 @@ import {
   FilterOutlined, DownloadOutlined, DollarOutlined, SaveOutlined, DeleteOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
   searchAssets, getAssetDetail, getAssetBooks, getAssetDeprn,
@@ -86,6 +87,8 @@ const AssetTabContent: React.FC<{
   onSubTabChange: (key: string, subTab: string) => void;
 }> = ({ tab, onSubTabChange }) => {
   const { asset, detail, books, deprn, distributions, invoices, transactions, categoryBooks, categoryName, categoryId, categoryApiUrl, loading, activeSubTab } = tab;
+  const { user } = useAuth();
+  const loggedUser = user?.username || user?.name || 'REACTERP';
 
   // Depreciation filter state
   const [deprnFY,     setDeprnFY]     = useState('');
@@ -134,6 +137,7 @@ const AssetTabContent: React.FC<{
         bookTypeCode: asset.bookTypeCode || books[0]?.bookTypeCode || '',
         periodName:   row.period,
         deprnAmount:  row.depreciation,
+        createdBy:    loggedUser,
       });
       results.push({
         period:  row.period,

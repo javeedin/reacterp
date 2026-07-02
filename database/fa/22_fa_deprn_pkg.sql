@@ -160,6 +160,68 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
         END IF;
     END ensure_period_row;
 
+    -- ── Private: insert one row into DEPRN_SUMMARY + DEPRN_DETAIL ────────────
+    -- Called by both CREATE_DEPRECIATION and POST_ASSET_DEPRECIATION.
+    -- DISTRIBUTION_ID defaults to 0 when the asset has no distribution rows.
+    PROCEDURE post_deprn_rows (
+        p_asset_id      IN VARCHAR2,
+        p_book          IN VARCHAR2,
+        p_period_ctr    IN NUMBER,
+        p_deprn_amount  IN NUMBER,
+        p_new_ytd       IN NUMBER,
+        p_new_reserve   IN NUMBER,
+        p_adj_cost      IN NUMBER,
+        p_created_by    IN VARCHAR2
+    ) IS
+        v_dist_id   VARCHAR2(400) := '0';
+        v_now       VARCHAR2(50)  := TO_CHAR(SYSDATE, 'YYYY-MM-DD"T"HH24:MI:SS".000+00:00"');
+    BEGIN
+        -- Get distribution_id for this asset (first active distribution)
+        BEGIN
+            SELECT DISTRIBUTION_ID INTO v_dist_id
+            FROM   RR_FA_DISTRIBUTIONS
+            WHERE  ASSET_ID = p_asset_id
+            AND    DATE_INEFFECTIVE IS NULL
+            AND    ROWNUM = 1;
+        EXCEPTION WHEN NO_DATA_FOUND THEN
+            v_dist_id := '0';
+        END;
+
+        -- ── RR_FA_DEPRN_SUMMARY ──────────────────────────────────────────────
+        INSERT INTO RR_FA_DEPRN_SUMMARY (
+            ASSET_ID,      BOOK_TYPE_CODE, PERIOD_COUNTER,
+            DEPRN_AMOUNT,  YTD_DEPRN,     DEPRN_RESERVE,
+            ADJUSTED_COST, DEPRN_RUN_DATE,
+            CREATION_DATE, CREATED_BY,
+            LAST_UPDATE_DATE, LAST_UPDATED_BY
+        ) VALUES (
+            p_asset_id,     p_book,          p_period_ctr,
+            p_deprn_amount, p_new_ytd,       p_new_reserve,
+            p_adj_cost,     SYSDATE,
+            v_now,          p_created_by,
+            v_now,          p_created_by
+        );
+
+        -- ── RR_FA_DEPRN_DETAIL ───────────────────────────────────────────────
+        INSERT INTO RR_FA_DEPRN_DETAIL (
+            ASSET_ID,        BOOK_TYPE_CODE,  PERIOD_COUNTER,
+            DISTRIBUTION_ID, DEPRN_SOURCE_CODE,
+            DEPRN_AMOUNT,    YTD_DEPRN,       DEPRN_RESERVE,
+            DEPRN_ADJUSTMENT_AMOUNT,
+            COST,
+            CREATION_DATE,   CREATED_BY,
+            LAST_UPDATE_DATE, LAST_UPDATED_BY
+        ) VALUES (
+            p_asset_id,      p_book,           p_period_ctr,
+            v_dist_id,       'DEPRECIATION',
+            p_deprn_amount,  p_new_ytd,        p_new_reserve,
+            0,
+            p_adj_cost,
+            v_now,           p_created_by,
+            v_now,           p_created_by
+        );
+    END post_deprn_rows;
+
 
     -- =========================================================================
     -- CREATE_DEPRECIATION
@@ -268,15 +330,16 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
         v_new_reserve := v_prior_reserve + v_final_amount;
         v_new_ytd     := v_prior_ytd    + v_final_amount;
 
-        -- Insert into RR_FA_DEPRN_SUMMARY
-        INSERT INTO RR_FA_DEPRN_SUMMARY (
-            ASSET_ID, BOOK_TYPE_CODE, PERIOD_COUNTER,
-            DEPRN_AMOUNT, YTD_DEPRN, DEPRN_RESERVE,
-            ADJUSTED_COST, DEPRN_RUN_DATE
-        ) VALUES (
-            p_asset_id, p_book, v_period_ctr,
-            v_final_amount, v_new_ytd, v_new_reserve,
-            v_adj_cost, SYSDATE
+        -- Insert into RR_FA_DEPRN_SUMMARY + RR_FA_DEPRN_DETAIL with audit columns
+        post_deprn_rows(
+            p_asset_id     => p_asset_id,
+            p_book         => p_book,
+            p_period_ctr   => v_period_ctr,
+            p_deprn_amount => v_final_amount,
+            p_new_ytd      => v_new_ytd,
+            p_new_reserve  => v_new_reserve,
+            p_adj_cost     => v_adj_cost,
+            p_created_by   => p_created_by
         );
 
         -- Ensure period exists in RR_FA_DEPRN_PERIODS
@@ -520,15 +583,16 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
         v_new_reserve := v_prior_reserve + v_final_amount;
         v_new_ytd     := v_prior_ytd    + v_final_amount;
 
-        -- ── 6. Insert into RR_FA_DEPRN_SUMMARY ──────────────────────────────
-        INSERT INTO RR_FA_DEPRN_SUMMARY (
-            ASSET_ID, BOOK_TYPE_CODE, PERIOD_COUNTER,
-            DEPRN_AMOUNT, YTD_DEPRN, DEPRN_RESERVE,
-            ADJUSTED_COST, DEPRN_RUN_DATE
-        ) VALUES (
-            p_asset_id, p_book, v_period_ctr,
-            v_final_amount, v_new_ytd, v_new_reserve,
-            v_adj_cost, SYSDATE
+        -- ── 6. Insert into RR_FA_DEPRN_SUMMARY + RR_FA_DEPRN_DETAIL ────────
+        post_deprn_rows(
+            p_asset_id     => p_asset_id,
+            p_book         => p_book,
+            p_period_ctr   => v_period_ctr,
+            p_deprn_amount => v_final_amount,
+            p_new_ytd      => v_new_ytd,
+            p_new_reserve  => v_new_reserve,
+            p_adj_cost     => v_adj_cost,
+            p_created_by   => p_created_by
         );
 
         -- ── 7. Ensure period row exists in RR_FA_DEPRN_PERIODS ──────────────
