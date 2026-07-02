@@ -686,11 +686,11 @@ const AssetTabContent: React.FC<{
             <Descriptions.Item label="Status">{statusTag(asset.retiredFlag)}</Descriptions.Item>
             <Descriptions.Item label="Date Ineffective">{fmtDate(asset.dateIneffective)}</Descriptions.Item>
             <Descriptions.Item label="Addition Accounting" span={2}>
-              {acctSlaExists?.exists
+              {(acctSlaExists?.exists || asset.accountedStatus === 'ACCOUNTED')
                 ? <Space size={8}>
                     <Tag color="success" style={{ fontSize: 12 }}><CheckOutlined /> ACCOUNTED</Tag>
-                    {acctSlaExists.headerId && <Text type="secondary" style={{ fontSize: 11 }}>SLA #{acctSlaExists.headerId}</Text>}
-                    {acctSlaExists.accountingStatus && <Text type="secondary" style={{ fontSize: 11 }}>— {acctSlaExists.accountingStatus}</Text>}
+                    {acctSlaExists?.headerId && <Text type="secondary" style={{ fontSize: 11 }}>SLA #{acctSlaExists.headerId}</Text>}
+                    {asset.accountedDate && <Text type="secondary" style={{ fontSize: 11 }}>— {asset.accountedDate}</Text>}
                   </Space>
                 : <Tag color="orange" style={{ fontSize: 12 }}>UNACCOUNTED</Tag>
               }
@@ -744,33 +744,38 @@ const AssetTabContent: React.FC<{
             })()}
           </Descriptions>
           {/* Accounting status + button */}
-          <div style={{ marginTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            {acctSlaExists?.exists ? (
-              <Space size={8}>
-                <Tag color="success" style={{ fontSize: 12, padding: '2px 8px' }}>
-                  <CheckOutlined style={{ marginRight: 4 }} />ACCOUNTED
-                </Tag>
-                {acctSlaExists.headerId && (
-                  <Text type="secondary" style={{ fontSize: 11 }}>SLA #{acctSlaExists.headerId}</Text>
+          {(() => {
+            const isAccounted = acctSlaExists?.exists || asset.accountedStatus === 'ACCOUNTED';
+            return (
+              <div style={{ marginTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                {isAccounted ? (
+                  <Space size={8}>
+                    <Tag color="success" style={{ fontSize: 12, padding: '2px 8px' }}>
+                      <CheckOutlined style={{ marginRight: 4 }} />ACCOUNTED
+                    </Tag>
+                    {acctSlaExists?.headerId && (
+                      <Text type="secondary" style={{ fontSize: 11 }}>SLA #{acctSlaExists.headerId}</Text>
+                    )}
+                    {asset.accountedDate && (
+                      <Text type="secondary" style={{ fontSize: 11 }}>— {asset.accountedDate}</Text>
+                    )}
+                  </Space>
+                ) : (
+                  <Tag color="orange" style={{ fontSize: 12, padding: '2px 8px' }}>UNACCOUNTED</Tag>
                 )}
-                {acctSlaExists.accountingStatus && acctSlaExists.accountingStatus !== 'ACCOUNTED' && (
-                  <Text type="secondary" style={{ fontSize: 11 }}>— {acctSlaExists.accountingStatus}</Text>
-                )}
-              </Space>
-            ) : (
-              <Tag color="orange" style={{ fontSize: 12, padding: '2px 8px' }}>UNACCOUNTED</Tag>
-            )}
-            <Button
-              icon={acctSlaExists?.exists ? <CheckOutlined /> : <AccountBookOutlined />}
-              style={{
-                borderColor: acctSlaExists?.exists ? REDWOOD.success : FA_COLOR,
-                color: acctSlaExists?.exists ? REDWOOD.success : FA_COLOR,
-              }}
-              onClick={openAccountingPreview}
-            >
-              {acctSlaExists?.exists ? 'View Accounting' : 'Create Accounting'}
-            </Button>
-          </div>
+                <Button
+                  icon={isAccounted ? <CheckOutlined /> : <AccountBookOutlined />}
+                  style={{
+                    borderColor: isAccounted ? REDWOOD.success : FA_COLOR,
+                    color: isAccounted ? REDWOOD.success : FA_COLOR,
+                  }}
+                  onClick={openAccountingPreview}
+                >
+                  {isAccounted ? 'View Accounting' : 'Create Accounting'}
+                </Button>
+              </div>
+            );
+          })()}
           </>
         ),
     },
@@ -2098,6 +2103,12 @@ const ManageAssets: React.FC = () => {
       title: 'Status', dataIndex: 'retiredFlag', key: 'status', width: 90,
       sorter: (a, b) => (a.retiredFlag || '').localeCompare(b.retiredFlag || ''),
       render: (v) => statusTag(v),
+    },
+    {
+      title: 'Acctd', dataIndex: 'accountedStatus', key: 'accountedStatus', width: 100,
+      render: (v: string) => v === 'ACCOUNTED'
+        ? <Tag color="success" style={{ borderRadius: 4, fontSize: 10 }}><CheckOutlined /> Accounted</Tag>
+        : <Tag color="default" style={{ borderRadius: 4, fontSize: 10 }}>Unaccounted</Tag>,
     },
     {
       title: '', key: 'actions', width: 60, align: 'center' as const,

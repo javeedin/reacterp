@@ -39,6 +39,8 @@ export interface AssetRecord {
   deprnReserve: string;
   nbv: string;
   retiredFlag: string;   // 'YES' if no active book entry, else 'NO'
+  accountedStatus?: string;   // 'ACCOUNTED' | 'UNACCOUNTED'
+  accountedDate?: string | null;
   // Legacy / not available from current tables — kept optional for UI compat
   assetNumber?: string;
   asset_number?: string;  // snake_case from API response
@@ -130,6 +132,8 @@ export interface DeprnRecord {
   generalFund: string;
   backlogDeprnReserve: string;
   ytdBacklogDeprn: string;
+  accountedStatus?: string;
+  accountedDate?: string | null;
 }
 
 export interface DistributionRecord {

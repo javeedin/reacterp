@@ -82,7 +82,9 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                    b.DATE_INEFFECTIVE,
                    NVL(ds.DEPRN_RESERVE, 0)                    AS DEPRN_RESERVE,
                    NVL(b.COST, 0) - NVL(ds.DEPRN_RESERVE, 0)  AS NBV,
-                   CASE WHEN b.ASSET_ID IS NULL THEN 'YES' ELSE 'NO' END AS RETIRED_FLAG
+                   CASE WHEN b.ASSET_ID IS NULL THEN 'YES' ELSE 'NO' END AS RETIRED_FLAG,
+                   NVL(a.ACCOUNTED_STATUS, 'UNACCOUNTED')       AS ACCOUNTED_STATUS,
+                   TO_CHAR(a.ACCOUNTED_DATE, 'YYYY-MM-DD')      AS ACCOUNTED_DATE
             FROM   RR_FA_ADDITIONS a
             LEFT JOIN (SELECT * FROM RR_FA_BOOKS WHERE DATE_INEFFECTIVE IS NULL) b
                    ON b.ASSET_ID = a.ASSET_ID
@@ -125,6 +127,8 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                 || ',"deprnReserve":'       || TO_CHAR(r.DEPRN_RESERVE)
                 || ',"nbv":'               || TO_CHAR(r.NBV)
                 || ',"retiredFlag":'        || jstr(r.RETIRED_FLAG)
+                || ',"accountedStatus":'   || jstr(r.ACCOUNTED_STATUS)
+                || ',"accountedDate":'     || NVL(jstr(r.ACCOUNTED_DATE), 'null')
                 || '}';
         END LOOP;
 
@@ -338,7 +342,9 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                    dd.REVAL_AMORTIZATION, dd.REVAL_AMORT_BALANCE,
                    dd.IMPAIRMENT_AMOUNT, dd.IMPAIRMENT_RESERVE, dd.YTD_IMPAIRMENT,
                    dd.CAPITAL_ADJUSTMENT, dd.GENERAL_FUND,
-                   dd.BACKLOG_DEPRN_RESERVE, dd.YTD_BACKLOG_DEPRN
+                   dd.BACKLOG_DEPRN_RESERVE, dd.YTD_BACKLOG_DEPRN,
+                   NVL(dd.ACCOUNTED_STATUS, 'UNACCOUNTED')  AS ACCOUNTED_STATUS,
+                   TO_CHAR(dd.ACCOUNTED_DATE, 'YYYY-MM-DD') AS ACCOUNTED_DATE
             FROM   RR_FA_DEPRN_DETAIL dd
             LEFT JOIN RR_FA_DEPRN_PERIODS dp
                    ON dp.BOOK_TYPE_CODE = dd.BOOK_TYPE_CODE
@@ -387,6 +393,8 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
             APEX_JSON.WRITE('generalFund',                 r.GENERAL_FUND);
             APEX_JSON.WRITE('backlogDeprnReserve',         r.BACKLOG_DEPRN_RESERVE);
             APEX_JSON.WRITE('ytdBacklogDeprn',             r.YTD_BACKLOG_DEPRN);
+            APEX_JSON.WRITE('accountedStatus',             r.ACCOUNTED_STATUS);
+            APEX_JSON.WRITE('accountedDate',               r.ACCOUNTED_DATE);
             APEX_JSON.CLOSE_OBJECT;
         END LOOP;
 
