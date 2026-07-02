@@ -1320,12 +1320,14 @@ const AssetTabContent: React.FC<{
         }
         footer={
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Space size={8}>
+            <span>
               {acctSlaExists?.exists && (
                 <Tag color="success" style={{ fontSize: 12 }}>
                   <CheckOutlined /> SLA Header #{acctSlaExists.headerId} — {acctSlaExists.accountingStatus}
                 </Tag>
               )}
+            </span>
+            <Space>
               <Tooltip
                 title={
                   <div style={{ fontFamily: 'monospace', fontSize: 11 }}>
@@ -1344,8 +1346,6 @@ const AssetTabContent: React.FC<{
               >
                 <Button size="small" icon={<ApiOutlined />} style={{ color: '#888' }} />
               </Tooltip>
-            </Space>
-            <Space>
               <Button onClick={() => setAcctPreviewVisible(false)}>Close</Button>
               <Button
                 type="primary"
