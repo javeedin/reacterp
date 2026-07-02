@@ -236,6 +236,23 @@ const AssetTabContent: React.FC<{
   const [acctPreviewLoading, setAcctPreviewLoading] = useState(false);
   const [creatingAccounting, setCreatingAccounting] = useState(false);
 
+  type StepStatus = 'wait' | 'process' | 'finish' | 'error';
+  interface AcctStep { label: string; detail: string; status: StepStatus; result?: string; error?: string; }
+  const ACCT_STEPS_INIT: AcctStep[] = [
+    { label: 'Create SLA Accounting',   detail: 'POST sla/accounting/create',    status: 'wait' },
+    { label: 'Create GL Journal Header',detail: 'POST gl/journals/headers',      status: 'wait' },
+    { label: 'Create GL Journal Lines', detail: 'POST gl/journals/lines',        status: 'wait' },
+    { label: 'Post SLA to GL',          detail: 'POST sla/accounting/post',      status: 'wait' },
+    { label: 'Mark as Accounted',       detail: 'POST fa/accounting/mark-accounted', status: 'wait' },
+  ];
+  const [acctSteps, setAcctSteps] = useState<AcctStep[]>(ACCT_STEPS_INIT);
+  const [acctStepsVisible, setAcctStepsVisible] = useState(false);
+
+  const updateStep = (index: number, status: StepStatus, resultOrError?: string) =>
+    setAcctSteps(prev => prev.map((s, i) => i === index
+      ? { ...s, status, result: status === 'finish' ? resultOrError : undefined, error: status === 'error' ? resultOrError : undefined }
+      : s));
+
   const openAccountingPreview = async () => {
     const book = asset.bookTypeCode || books[0]?.bookTypeCode || '';
     if (!book) { message.error('No book found for this asset'); return; }
@@ -244,6 +261,8 @@ const AssetTabContent: React.FC<{
     setAcctPreview(null);
     setAcctSlaExists(null);
     setAcctExistingJournal(null);
+    setAcctSteps(ACCT_STEPS_INIT);
+    setAcctStepsVisible(false);
     try {
       // Parallel: preview data + SLA exists check
       const [preview, slaExists] = await Promise.all([
@@ -268,11 +287,14 @@ const AssetTabContent: React.FC<{
     if (!acctPreview) return;
     const book = asset.bookTypeCode || books[0]?.bookTypeCode || '';
     setCreatingAccounting(true);
+    setAcctSteps(ACCT_STEPS_INIT);
+    setAcctStepsVisible(true);
     try {
       const h = acctPreview.header;
       const now = new Date().toISOString().slice(0, 10);
 
-      // Step 1: Create SLA accounting
+      // Step 0: Create SLA accounting
+      updateStep(0, 'process');
       const slaRes = await createSlaAccounting({
         header: {
           moduleName:      h.moduleName,
@@ -308,16 +330,20 @@ const AssetTabContent: React.FC<{
       });
 
       if (!slaRes.headerId) {
-        message.error(slaRes.error || slaRes.message || 'Failed to create SLA accounting');
+        const errMsg = slaRes.error || slaRes.message || 'Failed to create SLA accounting';
+        updateStep(0, 'error', errMsg);
+        message.error(errMsg);
         return;
       }
+      updateStep(0, 'finish', `SLA Header ID: ${slaRes.headerId}`);
 
       const slaHeaderId = slaRes.headerId;
-      const glHeaderId  = slaHeaderId; // use same ID as GL header reference
+      const glHeaderId  = slaHeaderId;
       const batchName   = `FA-ADDITION-${h.sourceNumber}-${now.replace(/-/g, '')}`;
 
-      // Step 2: Create GL journal header
-      await createGlJournalHeader(slaHeaderId, {
+      // Step 1: Create GL journal header
+      updateStep(1, 'process');
+      const glHeaderRes = await createGlJournalHeader(slaHeaderId, {
         JeHeaderId:         glHeaderId,
         JournalName:        `FA Addition — ${h.sourceNumber}`,
         JournalDescription: h.description,
@@ -335,9 +361,16 @@ const AssetTabContent: React.FC<{
         LastUpdateDate:     now + 'T00:00:00.000+00:00',
         LastUpdatedBy:      loggedUser,
       });
+      if (glHeaderRes?.success === false) {
+        updateStep(1, 'error', glHeaderRes.error || 'Failed to create GL header');
+        message.error(glHeaderRes.error || 'Failed to create GL journal header');
+        return;
+      }
+      updateStep(1, 'finish', `GL Header ID: ${glHeaderId}`);
 
-      // Step 3: Create GL journal lines with reference columns
-      await createGlJournalLines(glHeaderId,
+      // Step 2: Create GL journal lines
+      updateStep(2, 'process');
+      const glLinesRes = await createGlJournalLines(glHeaderId,
         acctPreview.lines.map(l => ({
           JeLineNumber:       l.lineNumber,
           EnteredDr:          l.enteredDr,
@@ -352,23 +385,43 @@ const AssetTabContent: React.FC<{
           Reference5:         l.reference5,
         }))
       );
+      if (glLinesRes?.success === false) {
+        updateStep(2, 'error', glLinesRes.error || 'Failed to create GL lines');
+        message.error(glLinesRes.error || 'Failed to create GL journal lines');
+        return;
+      }
+      updateStep(2, 'finish', `${acctPreview.lines.length} lines created`);
 
-      // Step 4: Post SLA to GL
-      await postSlaAccounting({
+      // Step 3: Post SLA to GL
+      updateStep(3, 'process');
+      const postRes = await postSlaAccounting({
         headerId:    slaHeaderId,
         postedBy:    loggedUser,
         glBatchId:   slaHeaderId,
         glBatchName: batchName,
         glHeaderId:  glHeaderId,
       });
+      if (postRes?.success === false) {
+        updateStep(3, 'error', postRes.error || 'Failed to post SLA');
+        message.error(postRes.error || 'Failed to post SLA to GL');
+        return;
+      }
+      updateStep(3, 'finish', 'SLA posted to GL');
 
-      // Step 5: Mark FA addition as ACCOUNTED
-      await markFaAdditionAccounted({
+      // Step 4: Mark FA addition as ACCOUNTED
+      updateStep(4, 'process');
+      const markRes = await markFaAdditionAccounted({
         assetId:      asset.assetId,
         slaHeaderId:  slaHeaderId,
         glHeaderId:   glHeaderId,
         createdBy:    loggedUser,
       });
+      if (markRes?.success === false) {
+        updateStep(4, 'error', markRes.error || 'Failed to mark as accounted');
+        message.error(markRes.error || 'Failed to mark addition as accounted');
+        return;
+      }
+      updateStep(4, 'finish', 'Addition marked as ACCOUNTED');
 
       message.success('Accounting created and posted to GL successfully');
 
@@ -1369,6 +1422,32 @@ const AssetTabContent: React.FC<{
           )}
           {acctPreview && acctPreview.success && acctPreview.header && (
             <>
+              {/* Step-by-step progress during accounting creation */}
+              {acctStepsVisible && (
+                <div style={{ background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, padding: '12px 16px', marginBottom: 14 }}>
+                  <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 10 }}>Accounting Progress</Text>
+                  {acctSteps.map((step, i) => {
+                    const icon = step.status === 'finish'  ? <span style={{ color: REDWOOD.success, fontWeight: 700 }}>✓</span>
+                               : step.status === 'error'   ? <span style={{ color: REDWOOD.primary, fontWeight: 700 }}>✗</span>
+                               : step.status === 'process' ? <Spin size="small" />
+                               : <span style={{ color: REDWOOD.neutral300 }}>○</span>;
+                    return (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, opacity: step.status === 'wait' ? 0.45 : 1 }}>
+                        <span style={{ width: 20, textAlign: 'center' }}>{icon}</span>
+                        <span style={{ flex: 1 }}>
+                          <Text strong style={{ fontSize: 12 }}>{step.label}</Text>
+                          <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>{step.detail}</Text>
+                          {step.result && <Text style={{ fontSize: 11, color: REDWOOD.success, display: 'block' }}>{step.result}</Text>}
+                          {step.error  && <Text type="danger" style={{ fontSize: 11, display: 'block' }}>{step.error}</Text>}
+                        </span>
+                        {step.status === 'finish' && !step.error && <Tag color="success" style={{ fontSize: 10 }}>Done</Tag>}
+                        {step.status === 'error'  && <Tag color="error"   style={{ fontSize: 10 }}>Failed</Tag>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               {/* Status banner if SLA accounting already exists */}
               {acctSlaExists?.exists && (
                 <div style={{ background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6, padding: '10px 14px', marginBottom: 14 }}>
