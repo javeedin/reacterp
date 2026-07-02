@@ -100,7 +100,7 @@ const AssetTabContent: React.FC<{
   const [deprnPeriod, setDeprnPeriod] = useState('');
 
   // Depreciation preview modal state
-  interface DeprnRow { period: string; openingNbv: number; depreciation: number; closingNbv: number; }
+  interface DeprnRow { period: string; days: number; dailyRate: number; openingNbv: number; depreciation: number; closingNbv: number; }
   interface PostResult { period: string; status: 'POSTED' | 'ALREADY_EXISTS' | 'ERROR'; message?: string; }
   const [deprnModal,     setDeprnModal]     = useState(false);
   const [deprnFromDate,  setDeprnFromDate]  = useState<dayjs.Dayjs | null>(null);
@@ -179,7 +179,7 @@ const AssetTabContent: React.FC<{
     while (cur.isBefore(end) || cur.isSame(end, 'month')) {
       const depr = Math.min(dailyRate * cur.daysInMonth(), nbv - salvage);
       if (depr <= 0) { cur = cur.add(1, 'month'); continue; }
-      rows.push({ period: cur.format('MMM-YY'), openingNbv: nbv, depreciation: depr, closingNbv: nbv - depr });
+      rows.push({ period: cur.format('MMM-YY'), days: cur.daysInMonth(), dailyRate, openingNbv: nbv, depreciation: depr, closingNbv: nbv - depr });
       nbv -= depr;
       cur = cur.add(1, 'month');
     }
@@ -984,12 +984,14 @@ const AssetTabContent: React.FC<{
                   <>
                     {/* Table header */}
                     <div style={{ border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, overflow: 'hidden', marginBottom: 8 }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '36px 110px 1fr 1fr 1fr 90px', background: REDWOOD.neutral100, padding: '6px 12px', fontSize: 12, fontWeight: 600, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '36px 90px 50px 110px 1fr 1fr 1fr 90px', background: REDWOOD.neutral100, padding: '6px 12px', fontSize: 12, fontWeight: 600, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
                         <span>
                           <input type="checkbox" checked={allSelected} onChange={toggleAll}
                             title="Select all unposted" style={{ cursor: 'pointer' }} />
                         </span>
                         <span>Period</span>
+                        <span style={{ textAlign: 'right' }}>Days</span>
+                        <span style={{ textAlign: 'right' }}>Daily Rate</span>
                         <span style={{ textAlign: 'right' }}>Opening NBV</span>
                         <span style={{ textAlign: 'right' }}>Depreciation</span>
                         <span style={{ textAlign: 'right' }}>Closing NBV</span>
@@ -1002,7 +1004,7 @@ const AssetTabContent: React.FC<{
                           const postResult = postResults.find(p => p.period === r.period);
                           return (
                             <div key={r.period} style={{
-                              display: 'grid', gridTemplateColumns: '36px 110px 1fr 1fr 1fr 90px',
+                              display: 'grid', gridTemplateColumns: '36px 90px 50px 110px 1fr 1fr 1fr 90px',
                               padding: '5px 12px', fontSize: 12,
                               background: posted ? '#f6ffed' : selected ? '#e6f4ff' : i % 2 === 0 ? '#fff' : REDWOOD.neutral100,
                               borderBottom: `1px solid ${REDWOOD.neutral200}`,
@@ -1015,6 +1017,8 @@ const AssetTabContent: React.FC<{
                                 )}
                               </span>
                               <span style={{ fontFamily: 'monospace', fontWeight: selected ? 600 : 400 }}>{r.period}</span>
+                              <span style={{ textAlign: 'right', fontFamily: 'monospace' }}>{r.days}</span>
+                              <span style={{ textAlign: 'right', fontFamily: 'monospace' }}>{fmt(r.dailyRate)}</span>
                               <span style={{ textAlign: 'right', fontFamily: 'monospace' }}>{fmt(r.openingNbv)}</span>
                               <span style={{ textAlign: 'right', fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(r.depreciation)}</span>
                               <span style={{ textAlign: 'right', fontFamily: 'monospace' }}>{fmt(r.closingNbv)}</span>
