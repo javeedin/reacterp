@@ -707,34 +707,55 @@ export interface AccountingPreviewLine {
   description: string;
   accountedDr: number;
   accountedCr: number;
+  enteredDr: number;
+  enteredCr: number;
   ccid: number | null;
   accountCombination: string | null;
+  reference1: string;
+  reference2: string;
+  reference5: string;
+}
+
+export interface AccountingPreviewHeader {
+  moduleName: string;
+  sourceTable: string;
+  sourceId: number;
+  sourceNumber: string;
+  sourceType: string;
+  eventTypeCode: string;
+  eventDate: string;
+  accountingDate: string;
+  periodName: string;
+  ledgerId: number;
+  ledgerName: string;
+  currencyCode: string;
+  ledgerCurrency: string;
+  description: string;
+  bookTypeCode: string;
+  assetNumber: string;
+  cost: number;
 }
 
 export interface AccountingPreview {
   success: boolean;
-  alreadyAccounted: boolean;
   accountedStatus: string;
   accountedDate: string | null;
-  slaHeaderId: number | null;
-  slaStatus: string | null;
-  glHeaderId: number | null;
-  header: {
-    assetId: string;
-    assetNumber: string;
-    description: string;
-    bookTypeCode: string;
-    periodName: string;
-    accountingDate: string;
-    eventType: string;
-    sourceTable: string;
-    moduleName: string;
-    cost: number;
-  };
+  header: AccountingPreviewHeader;
   lines: AccountingPreviewLine[];
   error?: string;
 }
 
+export interface SlaExistsResult {
+  exists: boolean;
+  headerId?: number;
+  accountingStatus?: string;
+  glHeaderId?: number;
+  glBatchId?: number;
+  glBatchName?: string;
+  error?: string;
+}
+
+// FA-specific: build preview with Dr/Cr accounts from category books
 export const getAdditionsAccountingPreview = async (
   assetId: string,
   bookTypeCode: string,
@@ -746,23 +767,120 @@ export const getAdditionsAccountingPreview = async (
     });
     return await res.json();
   } catch (e: any) {
-    return { success: false, alreadyAccounted: false, accountedStatus: 'UNACCOUNTED', accountedDate: null, slaHeaderId: null, slaStatus: null, glHeaderId: null, header: {} as any, lines: [], error: e.message };
+    return { success: false, accountedStatus: 'UNACCOUNTED', accountedDate: null, header: {} as any, lines: [], error: e.message };
   }
 };
 
-export const createAdditionsAccounting = async (payload: {
-  assetId: string;
-  bookTypeCode: string;
-  createdBy?: string;
-}): Promise<{ success: boolean; status?: string; slaHeaderId?: number; glHeaderId?: number; message?: string; error?: string }> => {
+// Check if SLA accounting already exists for this source record
+export const checkSlaAccountingExists = async (
+  sourceTable: string,
+  sourceId: string,
+  eventType?: string,
+): Promise<SlaExistsResult> => {
   try {
-    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/fa/accounting/create-addition`, {
+    let qs = `sourceTable=${encodeURIComponent(sourceTable)}&sourceId=${encodeURIComponent(sourceId)}`;
+    if (eventType) qs += `&eventType=${encodeURIComponent(eventType)}`;
+    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/exists?${qs}`, {
+      headers: { Accept: 'application/json' },
+    });
+    return await res.json();
+  } catch (e: any) {
+    return { exists: false, error: e.message };
+  }
+};
+
+// Get existing SLA header + lines for a source record
+export const getSlaAccounting = async (sourceTable: string, sourceId: string) => {
+  try {
+    const qs = `sourceTable=${encodeURIComponent(sourceTable)}&sourceId=${encodeURIComponent(sourceId)}`;
+    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting?${qs}`, {
+      headers: { Accept: 'application/json' },
+    });
+    return await res.json();
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
+};
+
+// Create SLA accounting entries (header + lines)
+export const createSlaAccounting = async (body: {
+  header: Record<string, any>;
+  lines: Record<string, any>[];
+}): Promise<{ headerId?: number; lineCount?: number; status?: string; message?: string; error?: string; success?: boolean }> => {
+  try {
+    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return await res.json();
+  } catch (e: any) {
+    return { error: e.message };
+  }
+};
+
+// Create GL journal header entry
+export const createGlJournalHeader = async (batchId: number, header: Record<string, any>) => {
+  try {
+    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/headers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ batchId, items: [header] }),
+    });
+    return await res.json();
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
+};
+
+// Create GL journal lines
+export const createGlJournalLines = async (headerId: number, lines: Record<string, any>[]) => {
+  try {
+    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/lines`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ jeHeaderId: headerId, items: lines }),
+    });
+    return await res.json();
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
+};
+
+// Post SLA accounting to GL
+export const postSlaAccounting = async (payload: {
+  headerId: number;
+  postedBy?: string;
+  glBatchId: number;
+  glBatchName: string;
+  glHeaderId: number;
+}): Promise<{ headerId?: number; glHeaderId?: number; status?: string; message?: string; error?: string }> => {
+  try {
+    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(payload),
     });
-    const data = await res.json();
-    return { ...data, error: data.error };
+    return await res.json();
+  } catch (e: any) {
+    return { error: e.message };
+  }
+};
+
+// Mark the FA Addition as ACCOUNTED in RR_FA_ADDITIONS
+export const markFaAdditionAccounted = async (payload: {
+  assetId: string;
+  slaHeaderId: number;
+  glHeaderId?: number;
+  createdBy?: string;
+}): Promise<{ success: boolean; status?: string; message?: string; error?: string }> => {
+  try {
+    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/fa/accounting/mark-accounted`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return await res.json();
   } catch (e: any) {
     return { success: false, error: e.message };
   }

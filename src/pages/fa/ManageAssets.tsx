@@ -22,13 +22,16 @@ import {
   searchAssets, getAssetDetail, getAssetBooks, getAssetDeprn,
   getAssetDistributions, getAssetInvoices, getAssetTransactions,
   getCategoryDetail, getCategoryBooks, postAssetDeprn, postSingleDeprn, deleteAssetDeprn,
-  getBookControls, getAdditionsAccountingPreview, createAdditionsAccounting,
+  getBookControls,
+  getAdditionsAccountingPreview, checkSlaAccountingExists, getSlaAccounting,
+  createSlaAccounting, createGlJournalHeader, createGlJournalLines,
+  postSlaAccounting, markFaAdditionAccounted,
   formatCurrency, assetTypeLabel, assetStatusLabel,
 } from '../../services/fa.service';
 import type {
   AssetRecord, AssetDetail, AssetBook, DeprnRecord,
   DistributionRecord, InvoiceRecord, TransactionRecord, CategoryBookRecord,
-  BookControlRecord, AccountingPreview,
+  BookControlRecord, AccountingPreview, SlaExistsResult,
 } from '../../services/fa.service';
 
 const { Content } = Layout;
@@ -223,6 +226,8 @@ const AssetTabContent: React.FC<{
   // Create Accounting state
   const [acctPreviewVisible, setAcctPreviewVisible] = useState(false);
   const [acctPreview,        setAcctPreview]        = useState<AccountingPreview | null>(null);
+  const [acctSlaExists,      setAcctSlaExists]      = useState<SlaExistsResult | null>(null);
+  const [acctExistingJournal,setAcctExistingJournal]= useState<any>(null);
   const [acctPreviewLoading, setAcctPreviewLoading] = useState(false);
   const [creatingAccounting, setCreatingAccounting] = useState(false);
 
@@ -232,9 +237,21 @@ const AssetTabContent: React.FC<{
     setAcctPreviewLoading(true);
     setAcctPreviewVisible(true);
     setAcctPreview(null);
+    setAcctSlaExists(null);
+    setAcctExistingJournal(null);
     try {
-      const data = await getAdditionsAccountingPreview(asset.assetId, book);
-      setAcctPreview(data);
+      // Parallel: preview data + SLA exists check
+      const [preview, slaExists] = await Promise.all([
+        getAdditionsAccountingPreview(asset.assetId, book),
+        checkSlaAccountingExists('RR_FA_ADDITIONS', asset.assetId, 'FA_ADDITION'),
+      ]);
+      setAcctPreview(preview);
+      setAcctSlaExists(slaExists);
+      // If accounting already exists, load the actual journal details
+      if (slaExists.exists && slaExists.headerId) {
+        const existing = await getSlaAccounting('RR_FA_ADDITIONS', asset.assetId);
+        setAcctExistingJournal(existing);
+      }
     } catch {
       message.error('Failed to load accounting preview');
     } finally {
@@ -243,22 +260,126 @@ const AssetTabContent: React.FC<{
   };
 
   const handleCreateAccounting = async () => {
+    if (!acctPreview) return;
     const book = asset.bookTypeCode || books[0]?.bookTypeCode || '';
     setCreatingAccounting(true);
     try {
-      const res = await createAdditionsAccounting({
-        assetId: asset.assetId,
-        bookTypeCode: book,
-        createdBy: loggedUser,
+      const h = acctPreview.header;
+      const now = new Date().toISOString().slice(0, 10);
+
+      // Step 1: Create SLA accounting
+      const slaRes = await createSlaAccounting({
+        header: {
+          moduleName:      h.moduleName,
+          sourceTable:     h.sourceTable,
+          sourceId:        h.sourceId,
+          sourceNumber:    h.sourceNumber,
+          sourceType:      h.sourceType,
+          eventTypeCode:   h.eventTypeCode,
+          eventDate:       h.eventDate,
+          accountingDate:  h.accountingDate,
+          periodName:      h.periodName,
+          ledgerId:        h.ledgerId,
+          ledgerName:      h.ledgerName,
+          currencyCode:    h.currencyCode,
+          ledgerCurrency:  h.ledgerCurrency,
+          description:     h.description,
+          createdBy:       loggedUser,
+        },
+        lines: acctPreview.lines.map(l => ({
+          lineNumber:      l.lineNumber,
+          lineType:        l.lineType,
+          accountingClass: l.accountingClass,
+          accountCombo:    l.accountCombination,
+          enteredDr:       l.enteredDr,
+          enteredCr:       l.enteredCr,
+          accountedDr:     l.accountedDr,
+          accountedCr:     l.accountedCr,
+          currencyCode:    h.currencyCode,
+          description:     l.description,
+          sourceLineId:    h.sourceId,
+          sourceLineNum:   l.lineNumber,
+        })),
       });
-      if (res.success || res.status === 'ALREADY_EXISTS') {
-        message.success(res.status === 'ALREADY_EXISTS' ? 'Accounting already exists' : 'Accounting created and posted successfully');
-        // Refresh preview
-        const updated = await getAdditionsAccountingPreview(asset.assetId, book);
-        setAcctPreview(updated);
-      } else {
-        message.error(res.error || 'Failed to create accounting');
+
+      if (!slaRes.headerId) {
+        message.error(slaRes.error || slaRes.message || 'Failed to create SLA accounting');
+        return;
       }
+
+      const slaHeaderId = slaRes.headerId;
+      const glHeaderId  = slaHeaderId; // use same ID as GL header reference
+      const batchName   = `FA-ADDITION-${h.sourceNumber}-${now.replace(/-/g, '')}`;
+
+      // Step 2: Create GL journal header
+      await createGlJournalHeader(slaHeaderId, {
+        JeHeaderId:         glHeaderId,
+        JournalName:        `FA Addition — ${h.sourceNumber}`,
+        JournalDescription: h.description,
+        PeriodName:         h.periodName,
+        DefaultEffectiveDate: h.accountingDate,
+        CurrencyCode:       h.currencyCode,
+        LedgerCurrencyCode: h.ledgerCurrency,
+        RunningTotalDr:     h.cost,
+        RunningTotalCr:     h.cost,
+        RunningTotalAccountedDr: h.cost,
+        RunningTotalAccountedCr: h.cost,
+        UserJeCategoryName: 'Assets',
+        CreatedBy:          loggedUser,
+        CreationDate:       now + 'T00:00:00.000+00:00',
+        LastUpdateDate:     now + 'T00:00:00.000+00:00',
+        LastUpdatedBy:      loggedUser,
+      });
+
+      // Step 3: Create GL journal lines with reference columns
+      await createGlJournalLines(glHeaderId,
+        acctPreview.lines.map(l => ({
+          JeLineNumber:       l.lineNumber,
+          EnteredDr:          l.enteredDr,
+          EnteredCr:          l.enteredCr,
+          AccountedDr:        l.accountedDr,
+          AccountedCr:        l.accountedCr,
+          Description:        l.description,
+          CurrencyCode:       h.currencyCode,
+          AccountCombination: l.accountCombination,
+          Reference1:         l.reference1,
+          Reference2:         l.reference2,
+          Reference5:         l.reference5,
+        }))
+      );
+
+      // Step 4: Post SLA to GL
+      await postSlaAccounting({
+        headerId:    slaHeaderId,
+        postedBy:    loggedUser,
+        glBatchId:   slaHeaderId,
+        glBatchName: batchName,
+        glHeaderId:  glHeaderId,
+      });
+
+      // Step 5: Mark FA addition as ACCOUNTED
+      await markFaAdditionAccounted({
+        assetId:      asset.assetId,
+        slaHeaderId:  slaHeaderId,
+        glHeaderId:   glHeaderId,
+        createdBy:    loggedUser,
+      });
+
+      message.success('Accounting created and posted to GL successfully');
+
+      // Refresh preview to show new status
+      const [updatedPreview, updatedExists] = await Promise.all([
+        getAdditionsAccountingPreview(asset.assetId, book),
+        checkSlaAccountingExists('RR_FA_ADDITIONS', asset.assetId, 'FA_ADDITION'),
+      ]);
+      setAcctPreview(updatedPreview);
+      setAcctSlaExists(updatedExists);
+      if (updatedExists.exists) {
+        const existing = await getSlaAccounting('RR_FA_ADDITIONS', asset.assetId);
+        setAcctExistingJournal(existing);
+      }
+    } catch (err: any) {
+      message.error(err.message || 'Accounting creation failed');
     } finally {
       setCreatingAccounting(false);
     }
@@ -1168,9 +1289,9 @@ const AssetTabContent: React.FC<{
         footer={
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>
-              {acctPreview?.alreadyAccounted && (
+              {acctSlaExists?.exists && (
                 <Tag color="success" style={{ fontSize: 12 }}>
-                  <CheckOutlined /> Accounting created — SLA #{acctPreview.slaHeaderId}
+                  <CheckOutlined /> SLA Header #{acctSlaExists.headerId} — {acctSlaExists.accountingStatus}
                 </Tag>
               )}
             </span>
@@ -1180,11 +1301,11 @@ const AssetTabContent: React.FC<{
                 type="primary"
                 icon={<AccountBookOutlined />}
                 loading={creatingAccounting}
-                disabled={!acctPreview || acctPreview.alreadyAccounted}
-                style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+                disabled={acctSlaExists?.exists || !acctPreview}
+                style={{ background: acctSlaExists?.exists ? undefined : REDWOOD.success, borderColor: acctSlaExists?.exists ? undefined : REDWOOD.success }}
                 onClick={handleCreateAccounting}
               >
-                {acctPreview?.alreadyAccounted ? 'Already Accounted' : 'Create Accounting'}
+                {acctSlaExists?.exists ? 'Already Accounted' : 'Create Accounting'}
               </Button>
             </Space>
           </div>
@@ -1193,14 +1314,14 @@ const AssetTabContent: React.FC<{
         <Spin spinning={acctPreviewLoading}>
           {acctPreview && (
             <>
-              {/* Status banner if already accounted */}
-              {acctPreview.alreadyAccounted && (
+              {/* Status banner if SLA accounting already exists */}
+              {acctSlaExists?.exists && (
                 <div style={{ background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6, padding: '10px 14px', marginBottom: 14 }}>
                   <Space>
                     <CheckOutlined style={{ color: REDWOOD.success }} />
                     <Text style={{ color: REDWOOD.success }}>
                       Accounting already created{acctPreview.accountedDate ? ` on ${acctPreview.accountedDate}` : ''}.
-                      SLA Header #{acctPreview.slaHeaderId} — Status: {acctPreview.slaStatus}
+                      SLA Header #{acctSlaExists.headerId} — Status: {acctSlaExists.accountingStatus}
                     </Text>
                   </Space>
                 </div>
