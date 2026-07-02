@@ -107,8 +107,14 @@ export const syncSuppliers = async (
       const queryParams: Record<string, string> = {
         limit: String(pageSize),
         offset: String(offset),
-        ...parameters,
       };
+
+      // Pass other parameters directly, but convert SupplierNumber to a Fusion q filter
+      const { SupplierNumber, ...rest } = parameters;
+      Object.assign(queryParams, rest);
+      if (SupplierNumber) {
+        queryParams['q'] = `SupplierNumber=${SupplierNumber}`;
+      }
 
       const result = await fetchFromFusion('fscmRestApi/resources/11.13.18.05/suppliers', queryParams, log, true);
 
@@ -181,6 +187,11 @@ export const syncSuppliers = async (
 
       if (testMode) {
         log('info', 'Test mode - stopping after first batch');
+        break;
+      }
+
+      // Single-supplier filter: no need to paginate
+      if (parameters.SupplierNumber) {
         break;
       }
 

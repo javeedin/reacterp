@@ -682,7 +682,15 @@ export const SYNC_OBJECTS: SyncObjectConfig[] = [
     description: 'Sync Suppliers from Oracle Fusion',
     oracleEndpoint: 'suppliers',
     apexEndpoint: 'suppliers',
-    parameters: [],
+    parameters: [
+      {
+        key: 'SupplierNumber',
+        label: 'Supplier Number',
+        type: 'text' as const,
+        required: false,
+        placeholder: 'e.g. 1234 — leave blank to sync all',
+      },
+    ],
   },
   {
     id: 'supplier-addresses',
