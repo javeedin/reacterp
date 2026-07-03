@@ -223,15 +223,26 @@ CREATE OR REPLACE PACKAGE BODY RR_ADMIN_PKG AS
     p_admin_user   IN VARCHAR2,
     p_status      OUT VARCHAR2, p_message OUT VARCHAR2
   ) IS
+    v_acct_count NUMBER;
   BEGIN
+    -- Verify the user account exists
+    SELECT COUNT(*) INTO v_acct_count
+      FROM RR_USER_ACCOUNTS WHERE USERNAME = UPPER(p_username);
+
+    IF v_acct_count = 0 THEN
+      p_status  := 'ERROR';
+      p_message := 'User not found.';
+      RETURN;
+    END IF;
+
+    -- Upsert: update if password row exists, insert if not
     UPDATE RR_USER_PASSWORDS
        SET PASSWORD_HASH = HASH_PASSWORD(p_new_password)
      WHERE USERNAME = UPPER(p_username);
 
     IF SQL%ROWCOUNT = 0 THEN
-      p_status  := 'ERROR';
-      p_message := 'User not found.';
-      RETURN;
+      INSERT INTO RR_USER_PASSWORDS (USERNAME, PASSWORD_HASH, IS_ADMIN)
+      VALUES (UPPER(p_username), HASH_PASSWORD(p_new_password), 'N');
     END IF;
 
     COMMIT;
