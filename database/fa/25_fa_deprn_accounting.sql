@@ -317,9 +317,10 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
          ||   ',"category":"Depreciation"'
          ||   ',"assetCategory":' || jstr(v_asset_category)
          ||   ',"sourceTable":"RR_FA_DEPRN_DETAIL"'
-         ||   ',"sourceId":' || p_asset_id
+         ||   ',"sourceId":' || NVL(p_distribution_id, p_asset_id)
+         ||   ',"assetId":' || p_asset_id
          ||   ',"distributionId":' || NVL(p_distribution_id, 'null')
-         ||   ',"sourceNumber":' || jstr(v_asset_number)
+         ||   ',"sourceNumber":' || NVL(p_distribution_id, jstr(v_asset_number))
          ||   ',"sourceType":"DEPRECIATION"'
          ||   ',"eventTypeCode":"FA_DEPRECIATION"'
          ||   ',"eventDate":' || jstr(v_accounting_date)

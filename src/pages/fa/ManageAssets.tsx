@@ -553,6 +553,7 @@ const AssetTabContent: React.FC<{
   const [deprnAcctCreating,  setDeprnAcctCreating]   = useState(false);
   const [deprnAcctSteps,     setDeprnAcctSteps]      = useState<AcctStep[]>([]);
   const [deprnAcctStepsVis,  setDeprnAcctStepsVis]   = useState(false);
+  const [deprnSlaExists,     setDeprnSlaExists]      = useState<SlaExistsResult | null>(null);
   const [deprnGlLines,       setDeprnGlLines]        = useState<any[]>([]);
   const [deprnGlLoading,     setDeprnGlLoading]      = useState(false);
   const [deprnDebugVisible,  setDeprnDebugVisible]   = useState(false);
@@ -678,11 +679,22 @@ const AssetTabContent: React.FC<{
     setDeprnDbgBatchId(null);
     setDeprnDbgGlId(null);
     setDeprnGlLines([]);
+    setDeprnSlaExists(null);
     try {
       const preview = await getDeprnAccountingPreview(asset.assetId, book, record.periodName, record.distributionId);
       setDeprnAcctPreview(preview);
-      // Load GL lines based on reference2=periodCounter (deprn ID), reference5=FA_DEPRECIATION
-      const deprnRef2 = record.distributionId || preview.header?.periodCounter || record.periodCounter;
+
+      // Check if SLA already exists for this distribution (sourceId = distributionId)
+      const distId = record.distributionId || preview.header?.distributionId;
+      const [slaExists] = await Promise.all([
+        distId
+          ? checkSlaAccountingExists('RR_FA_DEPRN_DETAIL', String(distId), 'FA_DEPRECIATION')
+          : Promise.resolve(null),
+      ]);
+      setDeprnSlaExists(slaExists);
+
+      // Load GL lines based on reference2=distributionId, reference5=FA_DEPRECIATION
+      const deprnRef2 = distId || preview.header?.periodCounter || record.periodCounter;
       if (deprnRef2) {
         setDeprnGlLoading(true);
         fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${encodeURIComponent(String(deprnRef2))}&reference5=FA_DEPRECIATION`, {
@@ -702,6 +714,13 @@ const AssetTabContent: React.FC<{
 
   const handleCreateDeprnAccounting = async () => {
     if (!deprnAcctPreview || !deprnAcctRecord) return;
+
+    // Block if already POSTED — user must reverse first
+    if (deprnSlaExists?.exists && deprnSlaExists.accountingStatus === 'POSTED') {
+      message.warning(`Depreciation ${deprnAcctRecord.periodName} is already accounted (SLA #${deprnSlaExists.headerId}). Reverse the existing entry first.`);
+      return;
+    }
+
     const book = deprnAcctRecord.bookTypeCode || asset.bookTypeCode || books[0]?.bookTypeCode || '';
     setDeprnAcctCreating(true);
     setDeprnAcctSteps(DEPRN_ACCT_STEPS_INIT);
@@ -783,10 +802,15 @@ const AssetTabContent: React.FC<{
       updateDeprnStep(2, 'finish', `${markRes.rowsUpdated || 1} row(s) updated`);
       message.success(`Depreciation ${deprnAcctRecord.periodName} accounted and posted to GL`);
 
-      // Reload GL lines by periodCounter + refresh preview
-      const updatedPreview = await getDeprnAccountingPreview(asset.assetId, book, deprnAcctRecord.periodName, deprnAcctRecord.distributionId);
+      // Reload preview + SLA exists check
+      const distId = deprnAcctRecord.distributionId;
+      const [updatedPreview, updatedSlaExists] = await Promise.all([
+        getDeprnAccountingPreview(asset.assetId, book, deprnAcctRecord.periodName, distId),
+        distId ? checkSlaAccountingExists('RR_FA_DEPRN_DETAIL', String(distId), 'FA_DEPRECIATION') : Promise.resolve(null),
+      ]);
       setDeprnAcctPreview(updatedPreview);
-      const deprnRef2 = deprnAcctRecord.distributionId || updatedPreview.header?.periodCounter || deprnAcctRecord.periodCounter;
+      setDeprnSlaExists(updatedSlaExists);
+      const deprnRef2 = distId || updatedPreview.header?.periodCounter || deprnAcctRecord.periodCounter;
       setDeprnGlLoading(true);
       fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${encodeURIComponent(String(deprnRef2))}&reference5=FA_DEPRECIATION`, {
         headers: { Accept: 'application/json' },
@@ -2143,7 +2167,12 @@ const AssetTabContent: React.FC<{
           <Button key="close" onClick={() => { setDeprnAcctVisible(false); setDeprnAcctStepsVis(false); setDeprnDebugVisible(false); }}>
             Close
           </Button>,
-          deprnGlLines.length === 0 && (
+          deprnSlaExists?.exists
+            ? <Tag key="sla-status" color={deprnSlaExists.accountingStatus === 'POSTED' ? 'success' : 'warning'} style={{ marginLeft: 8, fontSize: 12 }}>
+                <CheckOutlined /> SLA #{deprnSlaExists.headerId} — {deprnSlaExists.accountingStatus}
+              </Tag>
+            : null,
+          !deprnSlaExists?.exists && deprnGlLines.length === 0 && (
             <Button
               key="debug"
               icon={<ApiOutlined />}
@@ -2157,7 +2186,7 @@ const AssetTabContent: React.FC<{
               Debug
             </Button>
           ),
-          deprnGlLines.length === 0 && (
+          !deprnSlaExists?.exists && deprnGlLines.length === 0 && (
             <Button
               key="create"
               type="primary"
