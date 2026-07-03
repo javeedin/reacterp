@@ -234,9 +234,9 @@ BEGIN
 
     -- 5. Insert distribution history (if location provided)
     IF v_location_id IS NOT NULL THEN
-        SELECT NVL(MAX(TO_NUMBER(DISTRIBUTION_ID)),0)+1
+        SELECT RR_FA_DISTRIBUTION_ID_SEQ.NEXTVAL
         INTO   v_distribution_id
-        FROM   RR_FA_DISTRIBUTION_HISTORY;
+        FROM   DUAL;
 
         INSERT INTO RR_FA_DISTRIBUTION_HISTORY (
             DISTRIBUTION_ID, BOOK_TYPE_CODE, ASSET_ID,

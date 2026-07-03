@@ -190,11 +190,11 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
             v_dist_id := NULL;
         END;
 
-        -- Generate a new DISTRIBUTION_ID when none exists for this asset
+        -- Generate a new DISTRIBUTION_ID from sequence when none exists for this asset
         IF v_dist_id IS NULL THEN
-            SELECT NVL(MAX(TO_NUMBER(DISTRIBUTION_ID)), 0) + 1
+            SELECT RR_FA_DISTRIBUTION_ID_SEQ.NEXTVAL
             INTO   v_dist_id
-            FROM   RR_FA_DISTRIBUTION_HISTORY;
+            FROM   DUAL;
 
             INSERT INTO RR_FA_DISTRIBUTION_HISTORY (
                 DISTRIBUTION_ID, BOOK_TYPE_CODE, ASSET_ID,
