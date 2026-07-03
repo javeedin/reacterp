@@ -548,7 +548,7 @@ const ManageReceipts: React.FC = () => {
             }
             return {
               id:                 `sp-saved-${a.adjustment_id ?? a.ADJUSTMENT_ID ?? Math.random()}`,
-              amount:             a.adjustment_amount ?? a.ADJUSTMENT_AMOUNT ?? 0,
+              amount:             Math.abs(a.adjustment_amount ?? a.ADJUSTMENT_AMOUNT ?? 0),
               activityName:       a.receivables_activity ?? a.RECEIVABLES_ACTIVITY ?? '',
               accountCombination: combo,
               accountDescription: desc,
@@ -2154,7 +2154,7 @@ const ManageReceipts: React.FC = () => {
       try {
         const putBody = {
           AmountPaid:                   row.applyAmount,
-          InstallmentAmountAdjusted:    -Math.abs(row.adjustmentAmount ?? 0),
+          InstallmentAmountAdjusted:    Math.abs(row.adjustmentAmount ?? 0),
           LastUpdatedBy:                currentUser,
         };
         const url = `${APEX_AR_INVOICES}/${row.customerTransactionId}/installments/${row.installmentId}`;
