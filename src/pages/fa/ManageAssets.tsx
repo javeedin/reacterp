@@ -622,7 +622,9 @@ const AssetTabContent: React.FC<{
       },
       {
         method: 'POST', url: `${base}/fa/accounting/mark-deprn-accounted`,
-        body: { assetId: h.sourceId, bookTypeCode: h.bookTypeCode, periodName: h.periodName,
+        body: { assetId: h.sourceId, bookTypeCode: h.bookTypeCode,
+          distributionId: (h as any).distributionId || null,
+          periodName: h.periodName,
           slaHeaderId: slaId, glHeaderId: glId, createdBy: loggedUser },
         response: null, loading: false,
       },
@@ -763,12 +765,13 @@ const AssetTabContent: React.FC<{
       // Step 2: Mark deprn period as ACCOUNTED
       updateDeprnStep(2, 'process');
       const markRes = await markFaDeprnAccounted({
-        assetId:      asset.assetId,
-        bookTypeCode: book,
-        periodName:   deprnAcctRecord.periodName,
+        assetId:        asset.assetId,
+        bookTypeCode:   book,
+        distributionId: deprnAcctRecord.distributionId || null,
+        periodName:     deprnAcctRecord.periodName,
         slaHeaderId,
-        glHeaderId:   glRes.headerId ?? slaHeaderId,
-        createdBy:    loggedUser,
+        glHeaderId:     glRes.headerId ?? slaHeaderId,
+        createdBy:      loggedUser,
       });
       if (markRes?.success === false) {
         const err = markRes.error || 'Failed to mark as accounted';

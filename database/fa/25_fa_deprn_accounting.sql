@@ -38,16 +38,17 @@ CREATE OR REPLACE PACKAGE RR_FA_ACCOUNTING_PKG AS
         p_response        OUT CLOB
     );
 
-    -- NEW: mark RR_FA_DEPRN_DETAIL rows as ACCOUNTED for a period
+    -- NEW: mark exact RR_FA_DEPRN_DETAIL row as ACCOUNTED by distribution_id
     PROCEDURE MARK_DEPRN_ACCOUNTED(
-        p_asset_id      IN  VARCHAR2,
-        p_book          IN  VARCHAR2,
-        p_period_name   IN  VARCHAR2,
-        p_sla_header_id IN  NUMBER,
-        p_gl_header_id  IN  NUMBER,
-        p_created_by    IN  VARCHAR2,
-        p_status        OUT NUMBER,
-        p_response      OUT CLOB
+        p_asset_id        IN  VARCHAR2,
+        p_book            IN  VARCHAR2,
+        p_distribution_id IN  VARCHAR2,  -- exact row to mark; falls back to period_name
+        p_period_name     IN  VARCHAR2,
+        p_sla_header_id   IN  NUMBER,
+        p_gl_header_id    IN  NUMBER,
+        p_created_by      IN  VARCHAR2,
+        p_status          OUT NUMBER,
+        p_response        OUT CLOB
     );
 
 END RR_FA_ACCOUNTING_PKG;
@@ -372,40 +373,55 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
 
     -- =========================================================================
     -- MARK_DEPRN_ACCOUNTED
-    -- Updates RR_FA_DEPRN_DETAIL rows for (asset, book, period) to ACCOUNTED
+    -- Marks the exact RR_FA_DEPRN_DETAIL row as ACCOUNTED.
+    -- Uses distribution_id for a precise single-row update when supplied;
+    -- falls back to period_name when distribution_id is null/0.
     -- =========================================================================
     PROCEDURE MARK_DEPRN_ACCOUNTED(
-        p_asset_id      IN  VARCHAR2,
-        p_book          IN  VARCHAR2,
-        p_period_name   IN  VARCHAR2,
-        p_sla_header_id IN  NUMBER,
-        p_gl_header_id  IN  NUMBER,
-        p_created_by    IN  VARCHAR2,
-        p_status        OUT NUMBER,
-        p_response      OUT CLOB
+        p_asset_id        IN  VARCHAR2,
+        p_book            IN  VARCHAR2,
+        p_distribution_id IN  VARCHAR2,
+        p_period_name     IN  VARCHAR2,
+        p_sla_header_id   IN  NUMBER,
+        p_gl_header_id    IN  NUMBER,
+        p_created_by      IN  VARCHAR2,
+        p_status          OUT NUMBER,
+        p_response        OUT CLOB
     ) IS
         v_rows NUMBER;
     BEGIN
-        UPDATE RR_FA_DEPRN_DETAIL dd
-        SET    dd.ACCOUNTED_STATUS = 'ACCOUNTED',
-               dd.ACCOUNTED_DATE   = SYSDATE
-        WHERE  dd.ASSET_ID      = p_asset_id
-        AND    dd.BOOK_TYPE_CODE = p_book
-        AND    dd.PERIOD_COUNTER IN (
-            SELECT dp.PERIOD_COUNTER FROM RR_FA_DEPRN_PERIODS dp
-            WHERE  dp.BOOK_TYPE_CODE = p_book AND dp.PERIOD_NAME = p_period_name
-        );
+        IF p_distribution_id IS NOT NULL AND p_distribution_id != '0' THEN
+            -- Exact row update by distribution_id
+            UPDATE RR_FA_DEPRN_DETAIL
+            SET    ACCOUNTED_STATUS = 'ACCOUNTED',
+                   ACCOUNTED_DATE   = SYSDATE
+            WHERE  ASSET_ID         = p_asset_id
+            AND    BOOK_TYPE_CODE   = p_book
+            AND    DISTRIBUTION_ID  = TO_NUMBER(p_distribution_id);
+        ELSE
+            -- Fallback: update all rows for asset+book+period
+            UPDATE RR_FA_DEPRN_DETAIL
+            SET    ACCOUNTED_STATUS = 'ACCOUNTED',
+                   ACCOUNTED_DATE   = SYSDATE
+            WHERE  ASSET_ID       = p_asset_id
+            AND    BOOK_TYPE_CODE = p_book
+            AND    PERIOD_COUNTER IN (
+                SELECT PERIOD_COUNTER FROM RR_FA_DEPRN_PERIODS
+                WHERE  BOOK_TYPE_CODE = p_book AND PERIOD_NAME = p_period_name
+            );
+        END IF;
 
         v_rows := SQL%ROWCOUNT;
         COMMIT;
 
         p_status   := 200;
         p_response := '{"success":true,"status":"ACCOUNTED"'
-                   || ',"rowsUpdated":' || v_rows
-                   || ',"periodName":' || jstr(p_period_name)
-                   || ',"slaHeaderId":' || NVL(TO_CHAR(p_sla_header_id), 'null')
-                   || ',"glHeaderId":' || NVL(TO_CHAR(p_gl_header_id), 'null')
-                   || ',"message":"Depreciation period marked as accounted"}';
+                   || ',"rowsUpdated":'    || v_rows
+                   || ',"distributionId":' || NVL(p_distribution_id, 'null')
+                   || ',"periodName":'     || jstr(p_period_name)
+                   || ',"slaHeaderId":'    || NVL(TO_CHAR(p_sla_header_id), 'null')
+                   || ',"glHeaderId":'     || NVL(TO_CHAR(p_gl_header_id), 'null')
+                   || ',"message":"Depreciation marked as accounted"}';
 
     EXCEPTION WHEN OTHERS THEN
         ROLLBACK;
@@ -513,14 +529,15 @@ DECLARE
 BEGIN
     APEX_JSON.PARSE(v_json, v_body);
     RR_FA_ACCOUNTING_PKG.MARK_DEPRN_ACCOUNTED(
-        p_asset_id      => APEX_JSON.get_varchar2(p_values=>v_json, p_path=>'assetId'),
-        p_book          => APEX_JSON.get_varchar2(p_values=>v_json, p_path=>'bookTypeCode'),
-        p_period_name   => APEX_JSON.get_varchar2(p_values=>v_json, p_path=>'periodName'),
-        p_sla_header_id => APEX_JSON.get_number(  p_values=>v_json, p_path=>'slaHeaderId'),
-        p_gl_header_id  => APEX_JSON.get_number(  p_values=>v_json, p_path=>'glHeaderId'),
-        p_created_by    => NVL(APEX_JSON.get_varchar2(p_values=>v_json, p_path=>'createdBy'), 'REACTERP'),
-        p_status        => v_status,
-        p_response      => v_response
+        p_asset_id        => APEX_JSON.get_varchar2(p_values=>v_json, p_path=>'assetId'),
+        p_book            => APEX_JSON.get_varchar2(p_values=>v_json, p_path=>'bookTypeCode'),
+        p_distribution_id => APEX_JSON.get_varchar2(p_values=>v_json, p_path=>'distributionId'),
+        p_period_name     => APEX_JSON.get_varchar2(p_values=>v_json, p_path=>'periodName'),
+        p_sla_header_id   => APEX_JSON.get_number(  p_values=>v_json, p_path=>'slaHeaderId'),
+        p_gl_header_id    => APEX_JSON.get_number(  p_values=>v_json, p_path=>'glHeaderId'),
+        p_created_by      => NVL(APEX_JSON.get_varchar2(p_values=>v_json, p_path=>'createdBy'), 'REACTERP'),
+        p_status          => v_status,
+        p_response        => v_response
     );
     :status := NVL(v_status, 200);
     LOOP

@@ -916,6 +916,7 @@ export const getDeprnAccountingPreview = async (
 export const markFaDeprnAccounted = async (payload: {
   assetId: string;
   bookTypeCode: string;
+  distributionId?: string | null;
   periodName: string;
   slaHeaderId: number;
   glHeaderId?: number;
