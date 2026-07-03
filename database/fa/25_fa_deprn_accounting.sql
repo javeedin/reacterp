@@ -265,17 +265,19 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
             p_status   := 404;
             p_response := '{"success":false,"error":"No depreciation found for asset '
                        || p_asset_id || ' distribution ' || NVL(p_distribution_id, 'n/a')
-                       || ' period ' || NVL(p_period_name_out, p_period_name) || '"}';
+                       || ' period ' || NVL(v_period_name_out, p_period_name) || '"}';
             RETURN;
         END;
 
-        -- Get deprn expense and reserve CCIDs + category name from category books
+        -- Get deprn expense and reserve CCIDs + category description from category books
         BEGIN
             SELECT cb.DEPRN_EXPENSE_ACCOUNT_CCID, cb.RESERVE_ACCOUNT_CCID,
-                   NVL(c.CATEGORY_TYPE || ' — ' || c.OWNED_LEASED, 'Depreciation')
+                   NVL(tl.DESCRIPTION, b.SEGMENT1 || ' - ' || b.SEGMENT2)
             INTO   v_expense_ccid, v_reserve_ccid, v_asset_category
             FROM   RR_FA_CATEGORY_BOOKS cb
-            JOIN   RR_FA_ASSET_CATEGORIES c ON c.CATEGORY_ID = cb.CATEGORY_ID
+            JOIN   RR_FA_CATEGORIES_B b  ON b.CATEGORY_ID = cb.CATEGORY_ID
+            LEFT JOIN RR_FA_CATEGORIES_TL tl
+                   ON tl.CATEGORY_ID = b.CATEGORY_ID AND tl.LANGUAGE = 'US'
             WHERE  cb.CATEGORY_ID = v_category_id
             AND    ROWNUM = 1;
         EXCEPTION WHEN NO_DATA_FOUND THEN
