@@ -158,9 +158,12 @@ const AssetTabContent: React.FC<{
     setPostResults(results);
     setSelectedPeriods(new Set());
     setPosting(false);
-    // Refresh deprn tab in background by reloading (handled via message)
     const posted = results.filter(r => r.status === 'POSTED').length;
-    if (posted > 0) message.success(`${posted} period(s) posted successfully`);
+    if (posted > 0) {
+      message.success(`${posted} period(s) posted successfully`);
+      // Refresh the tab so deprn rows get distributionId populated from DB
+      onRefresh();
+    }
   };
 
   const calcDeprn = () => {
@@ -1291,7 +1294,7 @@ const AssetTabContent: React.FC<{
             {/* ── Preview Depreciation Modal ── */}
             <Modal
               open={deprnModal}
-              onCancel={() => { setDeprnModal(false); setPostResults([]); }}
+              onCancel={() => { setDeprnModal(false); setPostResults([]); if (postResults.some(r => r.status === 'POSTED')) onRefresh(); }}
               width={900}
               title={<Space><DollarOutlined style={{ color: FA_COLOR }} /><span>Depreciation Preview — {asset.asset_number || asset.assetNumber}</span></Space>}
               footer={
@@ -1343,7 +1346,7 @@ const AssetTabContent: React.FC<{
                         }}
                       />
                     </Tooltip>
-                    <Button onClick={() => { setDeprnModal(false); setPostResults([]); }}>Close</Button>
+                    <Button onClick={() => { setDeprnModal(false); setPostResults([]); if (postResults.some(r => r.status === 'POSTED')) onRefresh(); }}>Close</Button>
                     <Button
                       type="primary"
                       icon={<SaveOutlined />}

@@ -578,7 +578,7 @@ export const postSingleDeprn = async (payload: {
   periodName: string;
   deprnAmount?: number;
   createdBy?: string;
-}): Promise<{ success: boolean; status?: string; message?: string; error?: string }> => {
+}): Promise<{ success: boolean; status?: string; message?: string; distributionId?: number; error?: string }> => {
   try {
     const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/fa/deprn-post-single`, {
       method: 'POST',
@@ -586,7 +586,7 @@ export const postSingleDeprn = async (payload: {
       body: JSON.stringify(payload),
     });
     const data = await res.json();
-    return { ...data, error: data.message };
+    return { ...data, error: data.success === false ? (data.message || data.error) : undefined };
   } catch (e: any) {
     return { success: false, status: 'ERROR', error: e.message };
   }
