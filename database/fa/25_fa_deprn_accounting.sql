@@ -407,19 +407,42 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
         v_rows NUMBER;
     BEGIN
         IF p_distribution_id IS NOT NULL AND p_distribution_id != '0' THEN
-            -- Exact row update by distribution_id
+            -- DISTRIBUTION_ID is globally unique — no need to also filter by ASSET_ID
             UPDATE RR_FA_DEPRN_DETAIL
             SET    ACCOUNTED_STATUS = 'ACCOUNTED',
                    ACCOUNTED_DATE   = SYSDATE
-            WHERE  ASSET_ID         = p_asset_id
-            AND    BOOK_TYPE_CODE   = p_book
-            AND    DISTRIBUTION_ID  = TO_NUMBER(p_distribution_id);
+            WHERE  DISTRIBUTION_ID  = TO_NUMBER(p_distribution_id);
+
+            v_rows := SQL%ROWCOUNT;
+
+            -- Mirror on summary (keyed by asset+book+period_counter)
+            UPDATE RR_FA_DEPRN_SUMMARY
+            SET    ACCOUNTED_STATUS = 'ACCOUNTED',
+                   ACCOUNTED_DATE   = SYSDATE
+            WHERE  ASSET_ID        = TO_NUMBER(p_asset_id)
+            AND    BOOK_TYPE_CODE  = p_book
+            AND    PERIOD_COUNTER IN (
+                SELECT PERIOD_COUNTER FROM RR_FA_DEPRN_DETAIL
+                WHERE  DISTRIBUTION_ID = TO_NUMBER(p_distribution_id)
+            );
         ELSE
             -- Fallback: update all rows for asset+book+period
             UPDATE RR_FA_DEPRN_DETAIL
             SET    ACCOUNTED_STATUS = 'ACCOUNTED',
                    ACCOUNTED_DATE   = SYSDATE
-            WHERE  ASSET_ID       = p_asset_id
+            WHERE  ASSET_ID       = TO_NUMBER(p_asset_id)
+            AND    BOOK_TYPE_CODE = p_book
+            AND    PERIOD_COUNTER IN (
+                SELECT PERIOD_COUNTER FROM RR_FA_DEPRN_PERIODS
+                WHERE  BOOK_TYPE_CODE = p_book AND PERIOD_NAME = p_period_name
+            );
+
+            v_rows := SQL%ROWCOUNT;
+
+            UPDATE RR_FA_DEPRN_SUMMARY
+            SET    ACCOUNTED_STATUS = 'ACCOUNTED',
+                   ACCOUNTED_DATE   = SYSDATE
+            WHERE  ASSET_ID       = TO_NUMBER(p_asset_id)
             AND    BOOK_TYPE_CODE = p_book
             AND    PERIOD_COUNTER IN (
                 SELECT PERIOD_COUNTER FROM RR_FA_DEPRN_PERIODS
@@ -427,7 +450,6 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
             );
         END IF;
 
-        v_rows := SQL%ROWCOUNT;
         COMMIT;
 
         p_status   := 200;
