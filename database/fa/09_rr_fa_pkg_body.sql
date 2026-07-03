@@ -71,6 +71,8 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                    a.CREATED_BY,
                    a.LAST_UPDATE_DATE,
                    a.LAST_UPDATED_BY,
+                   a.ATTRIBUTE1, a.ATTRIBUTE2, a.ATTRIBUTE3, a.ATTRIBUTE4, a.ATTRIBUTE5,
+                   a.ATTRIBUTE6, a.ATTRIBUTE7, a.ATTRIBUTE8, a.ATTRIBUTE9, a.ATTRIBUTE10,
                    b.BOOK_TYPE_CODE,
                    b.DATE_PLACED_IN_SERVICE,
                    b.COST,
@@ -115,6 +117,16 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                 || ',"createdBy":'          || jstr(r.CREATED_BY)
                 || ',"lastUpdateDate":'     || jstr(r.LAST_UPDATE_DATE)
                 || ',"lastUpdatedBy":'      || jstr(r.LAST_UPDATED_BY)
+                || ',"attribute1":'         || jstr(r.ATTRIBUTE1)
+                || ',"attribute2":'         || jstr(r.ATTRIBUTE2)
+                || ',"attribute3":'         || jstr(r.ATTRIBUTE3)
+                || ',"attribute4":'         || jstr(r.ATTRIBUTE4)
+                || ',"attribute5":'         || jstr(r.ATTRIBUTE5)
+                || ',"attribute6":'         || jstr(r.ATTRIBUTE6)
+                || ',"attribute7":'         || jstr(r.ATTRIBUTE7)
+                || ',"attribute8":'         || jstr(r.ATTRIBUTE8)
+                || ',"attribute9":'         || jstr(r.ATTRIBUTE9)
+                || ',"attribute10":'        || jstr(r.ATTRIBUTE10)
                 || ',"bookTypeCode":'       || jstr(r.BOOK_TYPE_CODE)
                 || ',"datePlacedInService":'|| jstr(r.DATE_PLACED_IN_SERVICE)
                 || ',"cost":'               || jstr(r.COST)
