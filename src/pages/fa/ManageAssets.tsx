@@ -1775,6 +1775,46 @@ const AssetTabContent: React.FC<{
         ? <Spin style={{ display: 'block', margin: '40px auto' }} />
         : (
           <div style={{ padding: '16px 0' }}>
+            {/* API info strip */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <Text type="secondary" style={{ fontSize: 11 }}>GET</Text>
+              <Text copyable style={{ fontFamily: 'monospace', fontSize: 11, color: FA_COLOR, wordBreak: 'break-all' }}>
+                {`${APEX_DB_CONFIG.baseUrl}/fa/assets/${asset.assetId}`}
+              </Text>
+              <Tooltip title="View live API response">
+                <Button
+                  size="small"
+                  icon={<ApiOutlined />}
+                  style={{ color: FA_COLOR, borderColor: FA_COLOR, fontSize: 11 }}
+                  onClick={() => {
+                    const url = `${APEX_DB_CONFIG.baseUrl}/fa/assets/${asset.assetId}`;
+                    fetch(url, { headers: { Accept: 'application/json' } })
+                      .then(r => r.json())
+                      .then(data => Modal.info({
+                        title: `GET fa/assets/${asset.assetId}`,
+                        width: 820,
+                        content: (
+                          <div style={{ marginTop: 8 }}>
+                            <div style={{ fontSize: 11, color: '#888', marginBottom: 6, fontWeight: 600 }}>ENDPOINT</div>
+                            <Text copyable style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>{url}</Text>
+                            <div style={{ fontSize: 11, color: '#888', margin: '12px 0 6px', fontWeight: 600 }}>RESPONSE</div>
+                            <pre style={{
+                              background: '#f5f5f5', border: '1px solid #ddd', borderRadius: 6,
+                              padding: 12, fontSize: 11, maxHeight: 500, overflow: 'auto',
+                              fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                            }}>
+                              {JSON.stringify(data, null, 2)}
+                            </pre>
+                          </div>
+                        ),
+                      }))
+                      .catch(err => message.error(`API call failed: ${err.message}`));
+                  }}
+                >
+                  Test API
+                </Button>
+              </Tooltip>
+            </div>
             <Descriptions
               column={2}
               size="small"
