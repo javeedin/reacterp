@@ -335,12 +335,17 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
             ELSE v_calc_amount
         END, 2);
 
-        -- Cap only when server-calculated (caller-supplied amount is trusted as-is)
-        IF NVL(p_deprn_amount, 0) = 0 THEN
-            v_final_amount := ROUND(LEAST(
-                v_final_amount,
-                GREATEST(0, (v_adj_cost - v_salvage) - v_prior_reserve)
-            ), 2);
+        -- Cap: cannot depreciate beyond remaining NBV (cost - salvage - prior reserve)
+        v_final_amount := ROUND(LEAST(
+            v_final_amount,
+            GREATEST(0, (v_adj_cost - v_salvage) - v_prior_reserve)
+        ), 2);
+
+        -- Block if nothing left to depreciate (asset fully reserved)
+        IF v_final_amount <= 0 THEN
+            p_status  := 'ERROR';
+            p_message := 'Asset ' || p_asset_id || ' is fully depreciated — no remaining NBV to post.';
+            RETURN;
         END IF;
 
         v_new_reserve := ROUND(v_prior_reserve + v_final_amount, 2);
@@ -594,12 +599,17 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
             ELSE v_calc_amount
         END, 2);
 
-        -- Cap only when server-calculated (caller-supplied amount is trusted as-is)
-        IF NVL(p_deprn_amount, 0) = 0 THEN
-            v_final_amount := ROUND(LEAST(
-                v_final_amount,
-                GREATEST(0, (v_adj_cost - v_salvage) - v_prior_reserve)
-            ), 2);
+        -- Cap: cannot depreciate beyond remaining NBV (cost - salvage - prior reserve)
+        v_final_amount := ROUND(LEAST(
+            v_final_amount,
+            GREATEST(0, (v_adj_cost - v_salvage) - v_prior_reserve)
+        ), 2);
+
+        -- Block if nothing left to depreciate (asset fully reserved)
+        IF v_final_amount <= 0 THEN
+            p_status  := 'ERROR';
+            p_message := 'Asset ' || p_asset_id || ' is fully depreciated — no remaining NBV to post.';
+            RETURN;
         END IF;
 
         v_new_reserve := ROUND(v_prior_reserve + v_final_amount, 2);
