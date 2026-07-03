@@ -896,9 +896,13 @@ export const getDeprnAccountingPreview = async (
   assetId: string,
   bookTypeCode: string,
   periodName: string,
+  distributionId?: string | null,
 ): Promise<AccountingPreview> => {
   try {
-    const qs = `assetId=${encodeURIComponent(assetId)}&bookTypeCode=${encodeURIComponent(bookTypeCode)}&periodName=${encodeURIComponent(periodName)}`;
+    const qs = new URLSearchParams({
+      assetId, bookTypeCode, periodName,
+      ...(distributionId ? { distributionId } : {}),
+    });
     const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/fa/accounting/deprn-preview?${qs}`, {
       headers: { Accept: 'application/json' },
     });

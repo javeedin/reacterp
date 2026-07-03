@@ -59,13 +59,14 @@ CREATE OR REPLACE PACKAGE RR_FA_DEPRN_PKG AS
     -- p_message   OUT  human-readable detail
     -- -------------------------------------------------------------------------
     PROCEDURE POST_ASSET_DEPRECIATION (
-        p_asset_id     IN  VARCHAR2,
-        p_book         IN  VARCHAR2,
-        p_period_name  IN  VARCHAR2,
-        p_deprn_amount IN  NUMBER   DEFAULT 0,
-        p_created_by   IN  VARCHAR2 DEFAULT 'REACTERP',
-        p_status       OUT VARCHAR2,
-        p_message      OUT VARCHAR2
+        p_asset_id        IN  VARCHAR2,
+        p_book            IN  VARCHAR2,
+        p_period_name     IN  VARCHAR2,
+        p_deprn_amount    IN  NUMBER   DEFAULT 0,
+        p_created_by      IN  VARCHAR2 DEFAULT 'REACTERP',
+        p_status          OUT VARCHAR2,
+        p_message         OUT VARCHAR2,
+        p_distribution_id OUT NUMBER
     );
 
 END RR_FA_DEPRN_PKG;
@@ -162,31 +163,55 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
 
     -- ── Private: insert one row into DEPRN_SUMMARY + DEPRN_DETAIL ────────────
     -- Called by both CREATE_DEPRECIATION and POST_ASSET_DEPRECIATION.
-    -- DISTRIBUTION_ID defaults to 0 when the asset has no distribution rows.
+    -- Generates a new DISTRIBUTION_ID when the asset has no distribution rows.
     PROCEDURE post_deprn_rows (
-        p_asset_id      IN VARCHAR2,
-        p_book          IN VARCHAR2,
-        p_period_ctr    IN NUMBER,
-        p_deprn_amount  IN NUMBER,
-        p_new_ytd       IN NUMBER,
-        p_new_reserve   IN NUMBER,
-        p_adj_cost      IN NUMBER,
-        p_created_by    IN VARCHAR2
+        p_asset_id         IN  VARCHAR2,
+        p_book             IN  VARCHAR2,
+        p_period_ctr       IN  NUMBER,
+        p_deprn_amount     IN  NUMBER,
+        p_new_ytd          IN  NUMBER,
+        p_new_reserve      IN  NUMBER,
+        p_adj_cost         IN  NUMBER,
+        p_created_by       IN  VARCHAR2,
+        p_distribution_id  OUT NUMBER          -- returns the distribution_id used
     ) IS
-        v_dist_id   VARCHAR2(400) := '0';
-        v_now       VARCHAR2(50)  := TO_CHAR(SYSDATE, 'YYYY-MM-DD"T"HH24:MI:SS".000+00:00"');
+        v_dist_id   NUMBER;
+        v_now       VARCHAR2(50) := TO_CHAR(SYSDATE, 'YYYY-MM-DD"T"HH24:MI:SS".000+00:00"');
     BEGIN
-        -- Get distribution_id for this asset (first active distribution)
+        -- Find existing active distribution for this asset/book
         BEGIN
-            SELECT DISTRIBUTION_ID INTO v_dist_id
+            SELECT TO_NUMBER(DISTRIBUTION_ID) INTO v_dist_id
             FROM   RR_FA_DISTRIBUTION_HISTORY
-            WHERE  ASSET_ID          = p_asset_id
-            AND    BOOK_TYPE_CODE    = p_book
-            AND    DATE_EFFECTIVE   IS NOT NULL
+            WHERE  ASSET_ID       = p_asset_id
+            AND    BOOK_TYPE_CODE = p_book
+            AND    DATE_EFFECTIVE IS NOT NULL
             AND    ROWNUM = 1;
         EXCEPTION WHEN NO_DATA_FOUND THEN
-            v_dist_id := '0';
+            v_dist_id := NULL;
         END;
+
+        -- Generate a new DISTRIBUTION_ID when none exists for this asset
+        IF v_dist_id IS NULL THEN
+            SELECT NVL(MAX(TO_NUMBER(DISTRIBUTION_ID)), 0) + 1
+            INTO   v_dist_id
+            FROM   RR_FA_DISTRIBUTION_HISTORY;
+
+            INSERT INTO RR_FA_DISTRIBUTION_HISTORY (
+                DISTRIBUTION_ID, BOOK_TYPE_CODE, ASSET_ID,
+                UNITS_ASSIGNED, TRANSACTION_UNITS,
+                DATE_EFFECTIVE,
+                OBJECT_VERSION_NUMBER,
+                CREATION_DATE, CREATED_BY, LAST_UPDATE_DATE, LAST_UPDATED_BY
+            ) VALUES (
+                v_dist_id, p_book, p_asset_id,
+                1, 1,
+                SYSTIMESTAMP,
+                1,
+                SYSTIMESTAMP, p_created_by, SYSTIMESTAMP, p_created_by
+            );
+        END IF;
+
+        p_distribution_id := v_dist_id;
 
         -- ── RR_FA_DEPRN_SUMMARY ──────────────────────────────────────────────
         INSERT INTO RR_FA_DEPRN_SUMMARY (
@@ -213,9 +238,9 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
             CREATION_DATE,    CREATED_BY,
             LAST_UPDATE_DATE, LAST_UPDATED_BY
         ) VALUES (
-            p_asset_id,      p_book,            p_period_ctr,
+            p_asset_id,      p_book,          p_period_ctr,
             v_dist_id,       'DEPRECIATION',
-            p_deprn_amount,  p_new_ytd,         p_new_reserve,
+            p_deprn_amount,  p_new_ytd,       p_new_reserve,
             0,
             p_adj_cost,
             v_now,           p_created_by,
@@ -249,6 +274,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
         v_new_reserve   NUMBER;
         v_new_ytd       NUMBER;
         v_exists        NUMBER;
+        v_distribution_id NUMBER;
     BEGIN
         -- Validate required inputs
         IF p_asset_id IS NULL OR p_book IS NULL OR p_period_name IS NULL THEN
@@ -316,31 +342,32 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
         EXCEPTION WHEN NO_DATA_FOUND THEN NULL;
         END;
 
-        -- Prefer client-supplied amount; fall back to server-calculated
-        v_final_amount := CASE
+        -- Prefer client-supplied amount; fall back to server-calculated; round to 2dp
+        v_final_amount := ROUND(CASE
             WHEN NVL(p_deprn_amount, 0) > 0 THEN p_deprn_amount
             ELSE v_calc_amount
-        END;
+        END, 2);
 
         -- Cap: cannot depreciate below salvage
-        v_final_amount := LEAST(
+        v_final_amount := ROUND(LEAST(
             v_final_amount,
             GREATEST(0, (v_adj_cost - v_salvage) - v_prior_reserve)
-        );
+        ), 2);
 
-        v_new_reserve := v_prior_reserve + v_final_amount;
-        v_new_ytd     := v_prior_ytd    + v_final_amount;
+        v_new_reserve := ROUND(v_prior_reserve + v_final_amount, 2);
+        v_new_ytd     := ROUND(v_prior_ytd    + v_final_amount, 2);
 
-        -- Insert into RR_FA_DEPRN_SUMMARY + RR_FA_DEPRN_DETAIL with audit columns
+        -- Insert into RR_FA_DEPRN_SUMMARY + RR_FA_DEPRN_DETAIL
         post_deprn_rows(
-            p_asset_id     => p_asset_id,
-            p_book         => p_book,
-            p_period_ctr   => v_period_ctr,
-            p_deprn_amount => v_final_amount,
-            p_new_ytd      => v_new_ytd,
-            p_new_reserve  => v_new_reserve,
-            p_adj_cost     => v_adj_cost,
-            p_created_by   => p_created_by
+            p_asset_id        => p_asset_id,
+            p_book            => p_book,
+            p_period_ctr      => v_period_ctr,
+            p_deprn_amount    => v_final_amount,
+            p_new_ytd         => v_new_ytd,
+            p_new_reserve     => v_new_reserve,
+            p_adj_cost        => v_adj_cost,
+            p_created_by      => p_created_by,
+            p_distribution_id => v_distribution_id
         );
 
         -- Ensure period exists in RR_FA_DEPRN_PERIODS
@@ -350,13 +377,14 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
 
         p_http_status := 200;
         p_result := '{"success":true,"status":"POSTED"'
-            || ',"assetId":'       || jstr(p_asset_id)
-            || ',"bookTypeCode":'  || jstr(p_book)
-            || ',"periodName":'    || jstr(p_period_name)
-            || ',"periodCounter":' || v_period_ctr
-            || ',"deprnAmount":'   || v_final_amount
-            || ',"newReserve":'    || v_new_reserve
-            || ',"newNbv":'        || (v_adj_cost - v_new_reserve)
+            || ',"assetId":'          || jstr(p_asset_id)
+            || ',"bookTypeCode":'     || jstr(p_book)
+            || ',"periodName":'       || jstr(p_period_name)
+            || ',"periodCounter":'    || v_period_ctr
+            || ',"distributionId":'   || NVL(TO_CHAR(v_distribution_id), 'null')
+            || ',"deprnAmount":'      || v_final_amount
+            || ',"newReserve":'       || v_new_reserve
+            || ',"newNbv":'           || ROUND(v_adj_cost - v_new_reserve, 2)
             || '}';
 
     EXCEPTION
@@ -492,7 +520,8 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
         p_deprn_amount IN  NUMBER   DEFAULT 0,
         p_created_by   IN  VARCHAR2 DEFAULT 'REACTERP',
         p_status       OUT VARCHAR2,
-        p_message      OUT VARCHAR2
+        p_message      OUT VARCHAR2,
+        p_distribution_id OUT NUMBER
     ) IS
         v_period_ctr    NUMBER;
         v_fiscal_year   NUMBER;
@@ -569,31 +598,32 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
         EXCEPTION WHEN NO_DATA_FOUND THEN NULL;
         END;
 
-        -- Prefer caller-supplied amount; fall back to STL
-        v_final_amount := CASE
+        -- Prefer caller-supplied amount; fall back to STL; round to 2dp
+        v_final_amount := ROUND(CASE
             WHEN NVL(p_deprn_amount, 0) > 0 THEN p_deprn_amount
             ELSE v_calc_amount
-        END;
+        END, 2);
 
         -- Cap: cannot depreciate below salvage value
-        v_final_amount := LEAST(
+        v_final_amount := ROUND(LEAST(
             v_final_amount,
             GREATEST(0, (v_adj_cost - v_salvage) - v_prior_reserve)
-        );
+        ), 2);
 
-        v_new_reserve := v_prior_reserve + v_final_amount;
-        v_new_ytd     := v_prior_ytd    + v_final_amount;
+        v_new_reserve := ROUND(v_prior_reserve + v_final_amount, 2);
+        v_new_ytd     := ROUND(v_prior_ytd    + v_final_amount, 2);
 
         -- ── 6. Insert into RR_FA_DEPRN_SUMMARY + RR_FA_DEPRN_DETAIL ────────
         post_deprn_rows(
-            p_asset_id     => p_asset_id,
-            p_book         => p_book,
-            p_period_ctr   => v_period_ctr,
-            p_deprn_amount => v_final_amount,
-            p_new_ytd      => v_new_ytd,
-            p_new_reserve  => v_new_reserve,
-            p_adj_cost     => v_adj_cost,
-            p_created_by   => p_created_by
+            p_asset_id        => p_asset_id,
+            p_book            => p_book,
+            p_period_ctr      => v_period_ctr,
+            p_deprn_amount    => v_final_amount,
+            p_new_ytd         => v_new_ytd,
+            p_new_reserve     => v_new_reserve,
+            p_adj_cost        => v_adj_cost,
+            p_created_by      => p_created_by,
+            p_distribution_id => p_distribution_id
         );
 
         -- ── 7. Ensure period row exists in RR_FA_DEPRN_PERIODS ──────────────
@@ -603,9 +633,10 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
 
         p_status  := 'POSTED';
         p_message := 'Depreciation posted for asset ' || p_asset_id
-                  || ' period '      || p_period_name
-                  || ' amount '      || TO_CHAR(v_final_amount)
-                  || ' new reserve ' || TO_CHAR(v_new_reserve);
+                  || ' period '         || p_period_name
+                  || ' amount '         || TO_CHAR(v_final_amount)
+                  || ' distributionId ' || TO_CHAR(p_distribution_id)
+                  || ' new reserve '    || TO_CHAR(v_new_reserve);
 
     EXCEPTION
         WHEN OTHERS THEN

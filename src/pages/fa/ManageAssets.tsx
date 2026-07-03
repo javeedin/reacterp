@@ -674,13 +674,13 @@ const AssetTabContent: React.FC<{
     setDeprnDbgGlId(null);
     setDeprnGlLines([]);
     try {
-      const preview = await getDeprnAccountingPreview(asset.assetId, book, record.periodName);
+      const preview = await getDeprnAccountingPreview(asset.assetId, book, record.periodName, record.distributionId);
       setDeprnAcctPreview(preview);
       // Load GL lines based on reference2=periodCounter (deprn ID), reference5=FA_DEPRECIATION
-      const periodCtr = preview.header?.periodCounter || record.periodCounter;
-      if (periodCtr) {
+      const deprnRef2 = record.distributionId || preview.header?.periodCounter || record.periodCounter;
+      if (deprnRef2) {
         setDeprnGlLoading(true);
-        fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${encodeURIComponent(String(periodCtr))}&reference5=FA_DEPRECIATION`, {
+        fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${encodeURIComponent(String(deprnRef2))}&reference5=FA_DEPRECIATION`, {
           headers: { Accept: 'application/json' },
         })
           .then(r => r.json())
@@ -778,11 +778,11 @@ const AssetTabContent: React.FC<{
       message.success(`Depreciation ${deprnAcctRecord.periodName} accounted and posted to GL`);
 
       // Reload GL lines by periodCounter + refresh preview
-      const updatedPreview = await getDeprnAccountingPreview(asset.assetId, book, deprnAcctRecord.periodName);
+      const updatedPreview = await getDeprnAccountingPreview(asset.assetId, book, deprnAcctRecord.periodName, deprnAcctRecord.distributionId);
       setDeprnAcctPreview(updatedPreview);
-      const periodCtr = updatedPreview.header?.periodCounter || deprnAcctRecord.periodCounter;
+      const deprnRef2 = deprnAcctRecord.distributionId || updatedPreview.header?.periodCounter || deprnAcctRecord.periodCounter;
       setDeprnGlLoading(true);
-      fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${encodeURIComponent(String(periodCtr))}&reference5=FA_DEPRECIATION`, {
+      fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${encodeURIComponent(String(deprnRef2))}&reference5=FA_DEPRECIATION`, {
         headers: { Accept: 'application/json' },
       })
         .then(r => r.json())
@@ -2275,7 +2275,7 @@ const AssetTabContent: React.FC<{
                   ))}
                   <div style={{ marginTop: 2, width: '100%' }}>
                     <Text type="secondary" style={{ fontSize: 10 }}>
-                      Source: <strong>{APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2={deprnAcctPreview.header.periodCounter}&amp;reference5=FA_DEPRECIATION</strong>
+                      Source: <strong>{APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2={(deprnAcctRecord?.distributionId || deprnAcctPreview.header.periodCounter)}&amp;reference5=FA_DEPRECIATION</strong>
                     </Text>
                   </div>
                 </div>

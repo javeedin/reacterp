@@ -28,13 +28,14 @@ CREATE OR REPLACE PACKAGE RR_FA_ACCOUNTING_PKG AS
         p_response      OUT CLOB
     );
 
-    -- NEW: depreciation accounting preview for a single period
+    -- NEW: depreciation accounting preview — identify row by asset_id + distribution_id
     PROCEDURE GET_DEPRN_PREVIEW(
-        p_asset_id    IN  VARCHAR2,
-        p_book        IN  VARCHAR2,
-        p_period_name IN  VARCHAR2,
-        p_status      OUT NUMBER,
-        p_response    OUT CLOB
+        p_asset_id        IN  VARCHAR2,
+        p_book            IN  VARCHAR2,
+        p_distribution_id IN  VARCHAR2,  -- DISTRIBUTION_ID from RR_FA_DEPRN_DETAIL
+        p_period_name     IN  VARCHAR2,  -- kept for display / fallback when dist_id not supplied
+        p_status          OUT NUMBER,
+        p_response        OUT CLOB
     );
 
     -- NEW: mark RR_FA_DEPRN_DETAIL rows as ACCOUNTED for a period
@@ -186,11 +187,12 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
     --   Cr  Depreciation Reserve  (RESERVE_ACCOUNT_CCID)
     -- =========================================================================
     PROCEDURE GET_DEPRN_PREVIEW(
-        p_asset_id    IN  VARCHAR2,
-        p_book        IN  VARCHAR2,
-        p_period_name IN  VARCHAR2,
-        p_status      OUT NUMBER,
-        p_response    OUT CLOB
+        p_asset_id        IN  VARCHAR2,
+        p_book            IN  VARCHAR2,
+        p_distribution_id IN  VARCHAR2,
+        p_period_name     IN  VARCHAR2,
+        p_status          OUT NUMBER,
+        p_response        OUT CLOB
     ) IS
         v_asset_number      VARCHAR2(100);
         v_asset_category    VARCHAR2(200);
@@ -198,6 +200,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
         v_category_id       NUMBER;
         v_deprn_amount      NUMBER;
         v_period_counter    NUMBER;
+        v_period_name_out   VARCHAR2(30);
         v_acct_status       VARCHAR2(30);
         v_acct_date         VARCHAR2(30);
         v_accounting_date   VARCHAR2(10);  -- LAST_DAY of period close
@@ -212,30 +215,57 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
         v_ledger_id         NUMBER;
         v_currency_code     VARCHAR2(15);
     BEGIN
-        -- Get asset + period deprn data; accounting date = LAST_DAY of period close
+        -- Fetch exact deprn detail row by distribution_id when provided,
+        -- otherwise fall back to period_name lookup
         BEGIN
-            SELECT a.ASSET_NUMBER, a.DESCRIPTION, a.ASSET_CATEGORY_ID,
-                   NVL(dd.DEPRN_AMOUNT, 0),
-                   dd.PERIOD_COUNTER,
-                   NVL(dd.ACCOUNTED_STATUS, 'UNACCOUNTED'),
-                   TO_CHAR(dd.ACCOUNTED_DATE, 'YYYY-MM-DD'),
-                   TO_CHAR(LAST_DAY(NVL(dp.PERIOD_CLOSE_DATE, dd.DEPRN_RUN_DATE)), 'YYYY-MM-DD')
-            INTO   v_asset_number, v_description, v_category_id,
-                   v_deprn_amount, v_period_counter,
-                   v_acct_status, v_acct_date, v_accounting_date
-            FROM   RR_FA_ADDITIONS a
-            JOIN   RR_FA_DEPRN_DETAIL dd
-                   ON  dd.ASSET_ID      = a.ASSET_ID
-                   AND dd.BOOK_TYPE_CODE = p_book
-            JOIN   RR_FA_DEPRN_PERIODS dp
-                   ON  dp.BOOK_TYPE_CODE = dd.BOOK_TYPE_CODE
-                   AND dp.PERIOD_COUNTER = dd.PERIOD_COUNTER
-                   AND dp.PERIOD_NAME    = p_period_name
-            WHERE  a.ASSET_ID = p_asset_id
-            AND    ROWNUM = 1;
+            IF p_distribution_id IS NOT NULL AND p_distribution_id != '0' THEN
+                SELECT a.ASSET_NUMBER, a.DESCRIPTION, a.ASSET_CATEGORY_ID,
+                       ROUND(NVL(dd.DEPRN_AMOUNT, 0), 2),
+                       dd.PERIOD_COUNTER,
+                       dp.PERIOD_NAME,
+                       NVL(dd.ACCOUNTED_STATUS, 'UNACCOUNTED'),
+                       TO_CHAR(dd.ACCOUNTED_DATE, 'YYYY-MM-DD'),
+                       TO_CHAR(LAST_DAY(NVL(dp.PERIOD_CLOSE_DATE, dd.DEPRN_RUN_DATE)), 'YYYY-MM-DD')
+                INTO   v_asset_number, v_description, v_category_id,
+                       v_deprn_amount, v_period_counter, v_period_name_out,
+                       v_acct_status, v_acct_date, v_accounting_date
+                FROM   RR_FA_ADDITIONS a
+                JOIN   RR_FA_DEPRN_DETAIL dd
+                       ON  dd.ASSET_ID       = a.ASSET_ID
+                       AND dd.BOOK_TYPE_CODE  = p_book
+                       AND dd.DISTRIBUTION_ID = TO_NUMBER(p_distribution_id)
+                JOIN   RR_FA_DEPRN_PERIODS dp
+                       ON  dp.BOOK_TYPE_CODE = dd.BOOK_TYPE_CODE
+                       AND dp.PERIOD_COUNTER = dd.PERIOD_COUNTER
+                WHERE  a.ASSET_ID = p_asset_id
+                AND    ROWNUM = 1;
+            ELSE
+                SELECT a.ASSET_NUMBER, a.DESCRIPTION, a.ASSET_CATEGORY_ID,
+                       ROUND(NVL(dd.DEPRN_AMOUNT, 0), 2),
+                       dd.PERIOD_COUNTER,
+                       dp.PERIOD_NAME,
+                       NVL(dd.ACCOUNTED_STATUS, 'UNACCOUNTED'),
+                       TO_CHAR(dd.ACCOUNTED_DATE, 'YYYY-MM-DD'),
+                       TO_CHAR(LAST_DAY(NVL(dp.PERIOD_CLOSE_DATE, dd.DEPRN_RUN_DATE)), 'YYYY-MM-DD')
+                INTO   v_asset_number, v_description, v_category_id,
+                       v_deprn_amount, v_period_counter, v_period_name_out,
+                       v_acct_status, v_acct_date, v_accounting_date
+                FROM   RR_FA_ADDITIONS a
+                JOIN   RR_FA_DEPRN_DETAIL dd
+                       ON  dd.ASSET_ID      = a.ASSET_ID
+                       AND dd.BOOK_TYPE_CODE = p_book
+                JOIN   RR_FA_DEPRN_PERIODS dp
+                       ON  dp.BOOK_TYPE_CODE = dd.BOOK_TYPE_CODE
+                       AND dp.PERIOD_COUNTER = dd.PERIOD_COUNTER
+                       AND dp.PERIOD_NAME    = p_period_name
+                WHERE  a.ASSET_ID = p_asset_id
+                AND    ROWNUM = 1;
+            END IF;
         EXCEPTION WHEN NO_DATA_FOUND THEN
             p_status   := 404;
-            p_response := '{"success":false,"error":"No depreciation found for asset ' || p_asset_id || ' period ' || p_period_name || '"}';
+            p_response := '{"success":false,"error":"No depreciation found for asset '
+                       || p_asset_id || ' distribution ' || NVL(p_distribution_id, 'n/a')
+                       || ' period ' || NVL(p_period_name_out, p_period_name) || '"}';
             RETURN;
         END;
 
@@ -282,18 +312,19 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
          ||   ',"assetCategory":' || jstr(v_asset_category)
          ||   ',"sourceTable":"RR_FA_DEPRN_DETAIL"'
          ||   ',"sourceId":' || p_asset_id
+         ||   ',"distributionId":' || NVL(p_distribution_id, 'null')
          ||   ',"sourceNumber":' || jstr(v_asset_number)
          ||   ',"sourceType":"DEPRECIATION"'
          ||   ',"eventTypeCode":"FA_DEPRECIATION"'
          ||   ',"eventDate":' || jstr(v_accounting_date)
          ||   ',"accountingDate":' || jstr(v_accounting_date)
-         ||   ',"periodName":' || jstr(p_period_name)
+         ||   ',"periodName":' || jstr(v_period_name_out)
          ||   ',"ledgerId":' || NVL(TO_CHAR(v_ledger_id), '1')
          ||   ',"ledgerName":' || jstr(NVL(v_ledger_name, 'Primary Ledger'))
          ||   ',"currencyCode":' || jstr(v_currency_code)
          ||   ',"ledgerCurrency":' || jstr(v_currency_code)
          ||   ',"description":"FA Depreciation — ' || REPLACE(v_asset_number, '"', '\"')
-         ||                                     ' — ' || REPLACE(p_period_name, '"', '\"') || '"'
+         ||                                     ' — ' || REPLACE(v_period_name_out, '"', '\"') || '"'
          ||   ',"bookTypeCode":' || jstr(p_book)
          ||   ',"assetNumber":' || jstr(v_asset_number)
          ||   ',"periodCounter":' || NVL(TO_CHAR(v_period_counter), 'null')
@@ -302,10 +333,10 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
          || '}'
          || ',"lines":['
          -- Line 1: Dr Depreciation Expense
-         -- reference2 = PERIOD_COUNTER (deprn ID), reference5 = FA_DEPRECIATION
+         -- reference2 = DISTRIBUTION_ID, reference5 = FA_DEPRECIATION
          ||   '{"lineNumber":1,"lineType":"DR","accountingClass":"DEPRN_EXPENSE"'
          ||    ',"description":"Depreciation Expense — ' || REPLACE(v_asset_number, '"', '\"')
-         ||                                          ' ' || REPLACE(p_period_name, '"', '\"') || '"'
+         ||                                          ' ' || REPLACE(v_period_name_out, '"', '\"') || '"'
          ||    ',"accountedDr":' || NVL(TO_CHAR(v_deprn_amount), '0')
          ||    ',"accountedCr":0'
          ||    ',"enteredDr":' || NVL(TO_CHAR(v_deprn_amount), '0')
@@ -313,13 +344,13 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
          ||    ',"ccid":' || NVL(TO_CHAR(v_expense_ccid), 'null')
          ||    ',"accountCombination":' || NVL(jstr(v_expense_combo), 'null')
          ||    ',"reference1":' || jstr(v_asset_number)
-         ||    ',"reference2":' || NVL(TO_CHAR(v_period_counter), 'null')
+         ||    ',"reference2":' || NVL(p_distribution_id, TO_CHAR(v_period_counter))
          ||    ',"reference5":"FA_DEPRECIATION"'
          ||   '},'
          -- Line 2: Cr Depreciation Reserve
          ||   '{"lineNumber":2,"lineType":"CR","accountingClass":"DEPRN_RESERVE"'
          ||    ',"description":"Depreciation Reserve — ' || REPLACE(v_asset_number, '"', '\"')
-         ||                                          ' ' || REPLACE(p_period_name, '"', '\"') || '"'
+         ||                                          ' ' || REPLACE(v_period_name_out, '"', '\"') || '"'
          ||    ',"accountedDr":0'
          ||    ',"accountedCr":' || NVL(TO_CHAR(v_deprn_amount), '0')
          ||    ',"enteredDr":0'
@@ -327,7 +358,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
          ||    ',"ccid":' || NVL(TO_CHAR(v_reserve_ccid), 'null')
          ||    ',"accountCombination":' || NVL(jstr(v_reserve_combo), 'null')
          ||    ',"reference1":' || jstr(v_asset_number)
-         ||    ',"reference2":' || NVL(TO_CHAR(v_period_counter), 'null')
+         ||    ',"reference2":' || NVL(p_distribution_id, TO_CHAR(v_period_counter))
          ||    ',"reference5":"FA_DEPRECIATION"'
          ||   '}'
          || ']}';
@@ -408,7 +439,7 @@ BEGIN
 END;
 /
 
--- GET fa/accounting/deprn-preview?assetId=&bookTypeCode=&periodName=
+-- GET fa/accounting/deprn-preview?assetId=&bookTypeCode=&distributionId=&periodName=
 BEGIN
     ORDS.DEFINE_HANDLER(
         p_module_name    => 'reerp',
@@ -424,11 +455,12 @@ DECLARE
     v_buf      VARCHAR2(32767);
 BEGIN
     RR_FA_ACCOUNTING_PKG.GET_DEPRN_PREVIEW(
-        p_asset_id    => :assetId,
-        p_book        => :bookTypeCode,
-        p_period_name => :periodName,
-        p_status      => v_status,
-        p_response    => v_response
+        p_asset_id        => :assetId,
+        p_book            => :bookTypeCode,
+        p_distribution_id => :distributionId,
+        p_period_name     => :periodName,
+        p_status          => v_status,
+        p_response        => v_response
     );
     :status := NVL(v_status, 200);
     LOOP

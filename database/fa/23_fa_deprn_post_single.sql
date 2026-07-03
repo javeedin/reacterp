@@ -54,25 +54,28 @@ BEGIN
         p_items_per_page => 0,
         p_source         => q'[
 DECLARE
-    v_body    CLOB    := :body_text;
-    v_status  VARCHAR2(30);
-    v_message VARCHAR2(500);
+    v_body            CLOB    := :body_text;
+    v_status          VARCHAR2(30);
+    v_message         VARCHAR2(500);
+    v_distribution_id NUMBER;
 BEGIN
     RR_FA_DEPRN_PKG.POST_ASSET_DEPRECIATION(
-        p_asset_id     => JSON_VALUE(v_body, '$.assetId'),
-        p_book         => JSON_VALUE(v_body, '$.bookTypeCode'),
-        p_period_name  => JSON_VALUE(v_body, '$.periodName'),
-        p_deprn_amount => TO_NUMBER(NVL(JSON_VALUE(v_body, '$.deprnAmount'), '0')),
-        p_created_by   => NVL(JSON_VALUE(v_body, '$.createdBy'), 'REACTERP'),
-        p_status       => v_status,
-        p_message      => v_message
+        p_asset_id        => JSON_VALUE(v_body, '$.assetId'),
+        p_book            => JSON_VALUE(v_body, '$.bookTypeCode'),
+        p_period_name     => JSON_VALUE(v_body, '$.periodName'),
+        p_deprn_amount    => ROUND(TO_NUMBER(NVL(JSON_VALUE(v_body, '$.deprnAmount'), '0')), 2),
+        p_created_by      => NVL(JSON_VALUE(v_body, '$.createdBy'), 'REACTERP'),
+        p_status          => v_status,
+        p_message         => v_message,
+        p_distribution_id => v_distribution_id
     );
 
     :status := CASE v_status WHEN 'ERROR' THEN 400 ELSE 200 END;
 
-    HTP.P('{"success":'  || CASE v_status WHEN 'ERROR' THEN 'false' ELSE 'true' END
-       || ',"status":"'  || v_status  || '"'
-       || ',"message":"' || REPLACE(v_message, '"', '\"') || '"'
+    HTP.P('{"success":'       || CASE v_status WHEN 'ERROR' THEN 'false' ELSE 'true' END
+       || ',"status":"'       || v_status  || '"'
+       || ',"message":"'      || REPLACE(v_message, '"', '\"') || '"'
+       || ',"distributionId":' || NVL(TO_CHAR(v_distribution_id), 'null')
        || '}');
 
 EXCEPTION
