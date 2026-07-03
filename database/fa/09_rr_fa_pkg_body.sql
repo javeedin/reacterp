@@ -148,11 +148,36 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         v_asset_id           VARCHAR2(400);
         v_asset_number       VARCHAR2(400);
         v_description        VARCHAR2(400);
+        v_asset_type         VARCHAR2(400);
+        v_tag_number         VARCHAR2(400);
+        v_serial_number      VARCHAR2(400);
+        v_manufacturer       VARCHAR2(400);
+        v_model_number       VARCHAR2(400);
+        v_in_use_flag        VARCHAR2(400);
+        v_owned_leased       VARCHAR2(400);
+        v_new_used           VARCHAR2(400);
+        v_units              VARCHAR2(400);
+        v_property_type      VARCHAR2(400);
+        v_feeder_system      VARCHAR2(400);
         v_asset_category_id  VARCHAR2(400);
         v_creation_date      VARCHAR2(400);
         v_created_by         VARCHAR2(400);
         v_last_update_date   VARCHAR2(400);
         v_last_updated_by    VARCHAR2(400);
+        v_accounted_status   VARCHAR2(400);
+        v_accounted_date     VARCHAR2(400);
+        -- Flexfield attributes
+        v_attribute1         VARCHAR2(400);
+        v_attribute2         VARCHAR2(400);
+        v_attribute3         VARCHAR2(400);
+        v_attribute4         VARCHAR2(400);
+        v_attribute5         VARCHAR2(400);
+        v_attribute6         VARCHAR2(400);
+        v_attribute7         VARCHAR2(400);
+        v_attribute8         VARCHAR2(400);
+        v_attribute9         VARCHAR2(400);
+        v_attribute10        VARCHAR2(400);
+        -- Book fields
         v_book_type_code     VARCHAR2(400);
         v_date_placed        VARCHAR2(400);
         v_date_effective     VARCHAR2(400);
@@ -175,8 +200,16 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         v_convention_type_id VARCHAR2(400);
         v_retirement_id      VARCHAR2(400);
     BEGIN
-        SELECT a.ASSET_ID, a.ASSET_NUMBER, a.DESCRIPTION, a.ASSET_CATEGORY_ID,
+        SELECT a.ASSET_ID, a.ASSET_NUMBER, a.DESCRIPTION, a.ASSET_TYPE,
+               a.TAG_NUMBER, a.SERIAL_NUMBER, a.MANUFACTURER_NAME, a.MODEL_NUMBER,
+               a.IN_USE_FLAG, a.OWNED_LEASED, a.NEW_USED, a.UNITS,
+               a.PROPERTY_TYPE_CODE, a.FEEDER_SYSTEM_NAME,
+               a.ASSET_CATEGORY_ID,
                a.CREATION_DATE, a.CREATED_BY, a.LAST_UPDATE_DATE, a.LAST_UPDATED_BY,
+               NVL(a.ACCOUNTED_STATUS, 'UNACCOUNTED'),
+               TO_CHAR(a.ACCOUNTED_DATE, 'YYYY-MM-DD'),
+               a.ATTRIBUTE1, a.ATTRIBUTE2, a.ATTRIBUTE3, a.ATTRIBUTE4, a.ATTRIBUTE5,
+               a.ATTRIBUTE6, a.ATTRIBUTE7, a.ATTRIBUTE8, a.ATTRIBUTE9, a.ATTRIBUTE10,
                b.BOOK_TYPE_CODE, b.DATE_PLACED_IN_SERVICE, b.DATE_EFFECTIVE,
                b.DEPRN_START_DATE, b.COST, b.ORIGINAL_COST, b.ADJUSTED_COST,
                b.SALVAGE_VALUE, b.RECOVERABLE_COST, b.UNREVALUED_COST,
@@ -184,8 +217,15 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                b.PRORATE_DATE, b.RATE_ADJUSTMENT_FACTOR,
                b.SALVAGE_TYPE, b.DEPRN_LIMIT_TYPE, b.CIP_COST,
                b.METHOD_ID, b.CONVENTION_TYPE_ID, b.RETIREMENT_ID
-        INTO   v_asset_id, v_asset_number, v_description, v_asset_category_id,
+        INTO   v_asset_id, v_asset_number, v_description, v_asset_type,
+               v_tag_number, v_serial_number, v_manufacturer, v_model_number,
+               v_in_use_flag, v_owned_leased, v_new_used, v_units,
+               v_property_type, v_feeder_system,
+               v_asset_category_id,
                v_creation_date, v_created_by, v_last_update_date, v_last_updated_by,
+               v_accounted_status, v_accounted_date,
+               v_attribute1, v_attribute2, v_attribute3, v_attribute4, v_attribute5,
+               v_attribute6, v_attribute7, v_attribute8, v_attribute9, v_attribute10,
                v_book_type_code, v_date_placed, v_date_effective,
                v_deprn_start_date, v_cost, v_original_cost, v_adjusted_cost,
                v_salvage_value, v_recoverable_cost, v_unrevalued_cost,
@@ -200,35 +240,58 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         AND    ROWNUM = 1;
 
         p_result := '{"success":true'
-            || ',"assetId":'             || jstr(v_asset_id)
-            || ',"asset_number":'        || jstr(v_asset_number)
-            || ',"description":'         || jstr(v_description)
-            || ',"assetCategoryId":'     || jstr(v_asset_category_id)
-            || ',"creationDate":'        || jstr(v_creation_date)
-            || ',"createdBy":'           || jstr(v_created_by)
-            || ',"lastUpdateDate":'      || jstr(v_last_update_date)
-            || ',"lastUpdatedBy":'       || jstr(v_last_updated_by)
-            || ',"bookTypeCode":'        || jstr(v_book_type_code)
-            || ',"datePlacedInService":' || jstr(v_date_placed)
-            || ',"dateEffective":'       || jstr(v_date_effective)
-            || ',"deprnStartDate":'      || jstr(v_deprn_start_date)
-            || ',"cost":'                || jstr(v_cost)
-            || ',"originalCost":'        || jstr(v_original_cost)
-            || ',"adjustedCost":'        || jstr(v_adjusted_cost)
-            || ',"salvageValue":'        || jstr(v_salvage_value)
-            || ',"recoverableCost":'     || jstr(v_recoverable_cost)
-            || ',"unrevaluedCost":'      || jstr(v_unrevalued_cost)
-            || ',"capitalizeFlag":'      || jstr(v_capitalize_flag)
-            || ',"depreciateFlag":'      || jstr(v_depreciate_flag)
-            || ',"dateIneffective":'     || jstr(v_date_ineffective)
-            || ',"prorateDate":'         || jstr(v_prorate_date)
-            || ',"rateAdjustmentFactor":'|| jstr(v_rate_adj_factor)
-            || ',"salvageType":'         || jstr(v_salvage_type)
-            || ',"deprnLimitType":'      || jstr(v_deprn_limit_type)
-            || ',"cipCost":'             || jstr(v_cip_cost)
-            || ',"methodId":'            || jstr(v_method_id)
-            || ',"conventionTypeId":'    || jstr(v_convention_type_id)
-            || ',"retirementId":'        || jstr(v_retirement_id)
+            || ',"assetId":'              || jstr(v_asset_id)
+            || ',"asset_number":'         || jstr(v_asset_number)
+            || ',"description":'          || jstr(v_description)
+            || ',"assetType":'            || jstr(v_asset_type)
+            || ',"tagNumber":'            || jstr(v_tag_number)
+            || ',"serialNumber":'         || jstr(v_serial_number)
+            || ',"manufacturerName":'     || jstr(v_manufacturer)
+            || ',"modelNumber":'          || jstr(v_model_number)
+            || ',"inUseFlag":'            || jstr(v_in_use_flag)
+            || ',"ownedLeased":'          || jstr(v_owned_leased)
+            || ',"newUsed":'              || jstr(v_new_used)
+            || ',"units":'                || jstr(v_units)
+            || ',"propertyTypeCode":'     || jstr(v_property_type)
+            || ',"feederSystemName":'     || jstr(v_feeder_system)
+            || ',"assetCategoryId":'      || jstr(v_asset_category_id)
+            || ',"creationDate":'         || jstr(v_creation_date)
+            || ',"createdBy":'            || jstr(v_created_by)
+            || ',"lastUpdateDate":'       || jstr(v_last_update_date)
+            || ',"lastUpdatedBy":'        || jstr(v_last_updated_by)
+            || ',"accountedStatus":'      || jstr(v_accounted_status)
+            || ',"accountedDate":'        || jstr(v_accounted_date)
+            || ',"attribute1":'           || jstr(v_attribute1)
+            || ',"attribute2":'           || jstr(v_attribute2)
+            || ',"attribute3":'           || jstr(v_attribute3)
+            || ',"attribute4":'           || jstr(v_attribute4)
+            || ',"attribute5":'           || jstr(v_attribute5)
+            || ',"attribute6":'           || jstr(v_attribute6)
+            || ',"attribute7":'           || jstr(v_attribute7)
+            || ',"attribute8":'           || jstr(v_attribute8)
+            || ',"attribute9":'           || jstr(v_attribute9)
+            || ',"attribute10":'          || jstr(v_attribute10)
+            || ',"bookTypeCode":'         || jstr(v_book_type_code)
+            || ',"datePlacedInService":'  || jstr(v_date_placed)
+            || ',"dateEffective":'        || jstr(v_date_effective)
+            || ',"deprnStartDate":'       || jstr(v_deprn_start_date)
+            || ',"cost":'                 || jstr(v_cost)
+            || ',"originalCost":'         || jstr(v_original_cost)
+            || ',"adjustedCost":'         || jstr(v_adjusted_cost)
+            || ',"salvageValue":'         || jstr(v_salvage_value)
+            || ',"recoverableCost":'      || jstr(v_recoverable_cost)
+            || ',"unrevaluedCost":'       || jstr(v_unrevalued_cost)
+            || ',"capitalizeFlag":'       || jstr(v_capitalize_flag)
+            || ',"depreciateFlag":'       || jstr(v_depreciate_flag)
+            || ',"dateIneffective":'      || jstr(v_date_ineffective)
+            || ',"prorateDate":'          || jstr(v_prorate_date)
+            || ',"rateAdjustmentFactor":' || jstr(v_rate_adj_factor)
+            || ',"salvageType":'          || jstr(v_salvage_type)
+            || ',"deprnLimitType":'       || jstr(v_deprn_limit_type)
+            || ',"cipCost":'              || jstr(v_cip_cost)
+            || ',"methodId":'             || jstr(v_method_id)
+            || ',"conventionTypeId":'     || jstr(v_convention_type_id)
+            || ',"retirementId":'         || jstr(v_retirement_id)
             || '}';
         p_http_status := 200;
     EXCEPTION
