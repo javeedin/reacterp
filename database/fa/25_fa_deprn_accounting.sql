@@ -354,8 +354,11 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
          -- Line 1: Dr Depreciation Expense
          -- reference2 = DISTRIBUTION_ID, reference5 = FA_DEPRECIATION
          ||   '{"lineNumber":1,"lineType":"DR","accountingClass":"DEPRN_EXPENSE"'
-         ||    ',"description":"Depreciation Expense — ' || REPLACE(v_asset_number, '"', '\"')
-         ||                                          ' ' || REPLACE(v_period_name_out, '"', '\"') || '"'
+         ||    ',"description":"Book : ' || REPLACE(p_book, '"', '\"')
+         ||               ' , Asset Period : ' || REPLACE(v_period_name_out, '"', '\"')
+         ||               ' , Asset Number : ' || REPLACE(v_asset_number, '"', '\"')
+         ||               ' , Depreciation Run Identifier : ' || NVL(p_distribution_id, TO_CHAR(v_period_counter))
+         ||               '\nAsset Name : ' || REPLACE(SUBSTR(v_description, 1, 200), '"', '\"') || '"'
          ||    ',"accountedDr":' || NVL(TO_CHAR(v_deprn_amount), '0')
          ||    ',"accountedCr":0'
          ||    ',"enteredDr":' || NVL(TO_CHAR(v_deprn_amount), '0')
@@ -368,8 +371,11 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
          ||   '},'
          -- Line 2: Cr Depreciation Reserve
          ||   '{"lineNumber":2,"lineType":"CR","accountingClass":"DEPRN_RESERVE"'
-         ||    ',"description":"Depreciation Reserve — ' || REPLACE(v_asset_number, '"', '\"')
-         ||                                          ' ' || REPLACE(v_period_name_out, '"', '\"') || '"'
+         ||    ',"description":"Book : ' || REPLACE(p_book, '"', '\"')
+         ||               ' , Asset Period : ' || REPLACE(v_period_name_out, '"', '\"')
+         ||               ' , Asset Number : ' || REPLACE(v_asset_number, '"', '\"')
+         ||               ' , Depreciation Run Identifier : ' || NVL(p_distribution_id, TO_CHAR(v_period_counter))
+         ||               '\nAsset Name : ' || REPLACE(SUBSTR(v_description, 1, 200), '"', '\"') || '"'
          ||    ',"accountedDr":0'
          ||    ',"accountedCr":' || NVL(TO_CHAR(v_deprn_amount), '0')
          ||    ',"enteredDr":0'
