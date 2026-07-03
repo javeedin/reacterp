@@ -335,11 +335,13 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
             ELSE v_calc_amount
         END, 2);
 
-        -- Cap: cannot depreciate below salvage
-        v_final_amount := ROUND(LEAST(
-            v_final_amount,
-            GREATEST(0, (v_adj_cost - v_salvage) - v_prior_reserve)
-        ), 2);
+        -- Cap only when server-calculated (caller-supplied amount is trusted as-is)
+        IF NVL(p_deprn_amount, 0) = 0 THEN
+            v_final_amount := ROUND(LEAST(
+                v_final_amount,
+                GREATEST(0, (v_adj_cost - v_salvage) - v_prior_reserve)
+            ), 2);
+        END IF;
 
         v_new_reserve := ROUND(v_prior_reserve + v_final_amount, 2);
         v_new_ytd     := ROUND(v_prior_ytd    + v_final_amount, 2);
@@ -592,11 +594,13 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
             ELSE v_calc_amount
         END, 2);
 
-        -- Cap: cannot depreciate below salvage value
-        v_final_amount := ROUND(LEAST(
-            v_final_amount,
-            GREATEST(0, (v_adj_cost - v_salvage) - v_prior_reserve)
-        ), 2);
+        -- Cap only when server-calculated (caller-supplied amount is trusted as-is)
+        IF NVL(p_deprn_amount, 0) = 0 THEN
+            v_final_amount := ROUND(LEAST(
+                v_final_amount,
+                GREATEST(0, (v_adj_cost - v_salvage) - v_prior_reserve)
+            ), 2);
+        END IF;
 
         v_new_reserve := ROUND(v_prior_reserve + v_final_amount, 2);
         v_new_ytd     := ROUND(v_prior_ytd    + v_final_amount, 2);
