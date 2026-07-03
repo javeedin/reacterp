@@ -13,7 +13,7 @@ import {
   EnvironmentOutlined, DatabaseOutlined, InfoCircleOutlined,
   BookOutlined, HistoryOutlined, BarcodeOutlined, ApiOutlined, CheckOutlined,
   FilterOutlined, DownloadOutlined, DollarOutlined, SaveOutlined, DeleteOutlined,
-  AccountBookOutlined, AuditOutlined,
+  AccountBookOutlined, AuditOutlined, TagsOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import { postSlaToGL } from '../../services/glPosting.service';
@@ -27,6 +27,7 @@ import {
   getAdditionsAccountingPreview, getDeprnAccountingPreview,
   checkSlaAccountingExists, getSlaAccounting,
   createSlaAccounting, markFaAdditionAccounted, markFaDeprnAccounted,
+  updateAssetAttributes,
   formatCurrency, assetTypeLabel, assetStatusLabel,
 } from '../../services/fa.service';
 import type { JournalLine } from '../../services/manage-journals.service';
@@ -951,6 +952,62 @@ const AssetTabContent: React.FC<{
     { title: 'Interface', dataIndex: 'callingInterface',    key: 'iface',   ellipsis: true },
   ];
 
+  // ── Attributes tab state ─────────────────────────────────────────────────────
+  const [attrValues, setAttrValues] = useState<Record<string, string>>({});
+  const [attrDirty,  setAttrDirty]  = useState(false);
+  const [attrSaving, setAttrSaving] = useState(false);
+
+  // Seed editable fields whenever detail loads
+  const attrFields: { key: string; label: string }[] = [
+    { key: 'attribute1',  label: 'Sub Account' },
+    { key: 'attribute2',  label: 'Attribute 2' },
+    { key: 'attribute3',  label: 'Attribute 3' },
+    { key: 'attribute4',  label: 'Attribute 4' },
+    { key: 'attribute5',  label: 'Attribute 5' },
+    { key: 'attribute6',  label: 'Attribute 6' },
+    { key: 'attribute7',  label: 'Attribute 7' },
+    { key: 'attribute8',  label: 'Attribute 8' },
+    { key: 'attribute9',  label: 'Attribute 9' },
+    { key: 'attribute10', label: 'Attribute 10' },
+  ];
+
+  // Sync attrValues when detail changes (tab first load / refresh)
+  React.useEffect(() => {
+    if (detail) {
+      const vals: Record<string, string> = {};
+      attrFields.forEach(f => { vals[f.key] = (detail as any)[f.key] ?? ''; });
+      setAttrValues(vals);
+      setAttrDirty(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail]);
+
+  const handleAttrChange = (key: string, val: string) => {
+    setAttrValues(prev => ({ ...prev, [key]: val }));
+    setAttrDirty(true);
+  };
+
+  const handleAttrSave = async () => {
+    setAttrSaving(true);
+    try {
+      const payload: Record<string, string | null> = {};
+      attrFields.forEach(f => { payload[f.key] = attrValues[f.key] || null; });
+      payload.updatedBy = loggedUser;
+      const res = await updateAssetAttributes(asset.assetId, payload);
+      if (res.success) {
+        message.success('Attributes saved successfully');
+        setAttrDirty(false);
+        onRefresh();
+      } else {
+        message.error(res.error || 'Failed to save attributes');
+      }
+    } catch (e: any) {
+      message.error(e.message || 'Failed to save attributes');
+    } finally {
+      setAttrSaving(false);
+    }
+  };
+
   const subTabs = [
     {
       key: 'general',
@@ -1709,6 +1766,60 @@ const AssetTabContent: React.FC<{
               )
             }
           </>
+        ),
+    },
+    {
+      key: 'attributes',
+      label: <span><TagsOutlined style={{ marginRight: 4 }} />Attributes</span>,
+      children: loading
+        ? <Spin style={{ display: 'block', margin: '40px auto' }} />
+        : (
+          <div style={{ padding: '16px 0' }}>
+            <Descriptions
+              column={2}
+              size="small"
+              bordered
+              styles={{ label: { fontWeight: 500, width: 160, background: REDWOOD.neutral100 } }}
+              style={{ marginBottom: 16 }}
+            >
+              {attrFields.map(f => (
+                <Descriptions.Item key={f.key} label={f.label}>
+                  <Input
+                    value={attrValues[f.key] ?? ''}
+                    onChange={e => handleAttrChange(f.key, e.target.value)}
+                    placeholder={`Enter ${f.label}`}
+                    allowClear
+                    style={{ maxWidth: 320 }}
+                  />
+                </Descriptions.Item>
+              ))}
+            </Descriptions>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <Button
+                onClick={() => {
+                  if (detail) {
+                    const vals: Record<string, string> = {};
+                    attrFields.forEach(f => { vals[f.key] = (detail as any)[f.key] ?? ''; });
+                    setAttrValues(vals);
+                    setAttrDirty(false);
+                  }
+                }}
+                disabled={!attrDirty}
+              >
+                Discard Changes
+              </Button>
+              <Button
+                type="primary"
+                icon={<SaveOutlined />}
+                loading={attrSaving}
+                disabled={!attrDirty}
+                onClick={handleAttrSave}
+                style={{ background: attrDirty ? FA_COLOR : undefined, borderColor: attrDirty ? FA_COLOR : undefined }}
+              >
+                Save Attributes
+              </Button>
+            </div>
+          </div>
         ),
     },
   ];

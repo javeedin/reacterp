@@ -68,6 +68,17 @@ export interface AssetDetail extends AssetRecord {
   createdBy: string;
   lastUpdatedBy: string;
   tlDescription: string;
+  // Flexfield attributes
+  attribute1: string | null;
+  attribute2: string | null;
+  attribute3: string | null;
+  attribute4: string | null;
+  attribute5: string | null;
+  attribute6: string | null;
+  attribute7: string | null;
+  attribute8: string | null;
+  attribute9: string | null;
+  attribute10: string | null;
 }
 
 export interface AssetBook {
@@ -925,6 +936,37 @@ export const markFaDeprnAccounted = async (payload: {
   try {
     const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/fa/accounting/mark-deprn-accounted`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return await res.json();
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
+};
+
+// ── Update asset attributes ───────────────────────────────────────────────────
+export interface AssetAttributesPayload {
+  attribute1?: string | null;
+  attribute2?: string | null;
+  attribute3?: string | null;
+  attribute4?: string | null;
+  attribute5?: string | null;
+  attribute6?: string | null;
+  attribute7?: string | null;
+  attribute8?: string | null;
+  attribute9?: string | null;
+  attribute10?: string | null;
+  updatedBy?: string;
+}
+
+export const updateAssetAttributes = async (
+  assetId: string,
+  payload: AssetAttributesPayload,
+): Promise<{ success: boolean; error?: string; rowsUpdated?: number }> => {
+  try {
+    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/fa/assets/${assetId}/attributes`, {
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(payload),
     });
