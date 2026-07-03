@@ -464,6 +464,7 @@ const ManageReceipts: React.FC = () => {
   const [instPickerSel,       setInstPickerSel]       = useState<Record<string, React.Key[]>>({});
   const [instPickerSearch,    setInstPickerSearch]    = useState<Record<string, string>>({});
   const [instPickerApiOpen,   setInstPickerApiOpen]   = useState(false);
+  const [deletingAppId,       setDeletingAppId]       = useState<number | null>(null);
 
   // ── Adj Split dialog ─────────────────────────────────────────────────────
   interface RecvActivity { name: string; type: string; accountCombination: string; }
@@ -564,6 +565,43 @@ const ManageReceipts: React.FC = () => {
       ? existingSplits
       : [{ id: `sp-${Date.now()}`, amount: totalAdj, activityName: '', accountCombination: '', accountDescription: '', reason: '' }];
     setAdjSplitModal({ tabKey, pendingKey, totalAdj, currency, splits, apiUrl: adjApiUrl, applicationId, rowSnap, viewOnly });
+  };
+
+  // Delete a saved receipt application via DELETE /ar/receipt-applications/:id
+  const deleteApplication = async (tabKey: string, applicationId: number, pendingKey?: string) => {
+    if (pendingKey) {
+      // Pending (not yet saved) — just remove from local state
+      setPendingApplications(prev => ({
+        ...prev,
+        [tabKey]: (prev[tabKey] ?? []).filter(p => p.key !== pendingKey),
+      }));
+      return;
+    }
+    Modal.confirm({
+      title: 'Delete Application',
+      content: 'Delete this receipt application? This cannot be undone.',
+      okText: 'Delete',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setDeletingAppId(applicationId);
+        try {
+          const url = `${APEX_RECEIPT_APPS}/${applicationId}`;
+          const res = await fetch(url, { method: 'DELETE', headers: { Accept: 'application/json' } });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || data?.success === false) {
+            message.error(data?.error || data?.message || `Delete failed (HTTP ${res.status})`);
+          } else {
+            message.success('Application deleted');
+            fetchedAppsRef.current.delete(tabKey);
+            fetchApplications(tabKey, tabs.find(t => t.key === tabKey)?.draft.standardReceiptId ?? 0);
+          }
+        } catch (e: any) {
+          message.error(e.message || 'Delete failed');
+        } finally {
+          setDeletingAppId(null);
+        }
+      },
+    });
   };
 
   const fetchOpenInstallments = useCallback(async (tabKey: string, customerAccountNumber: string) => {
@@ -2618,10 +2656,26 @@ const ManageReceipts: React.FC = () => {
     const receiptTotal   = draft.amount ?? 0;
     const totalApplied   = allAppRows.reduce((s, r) => s + (r.applicationAmount || 0), 0);
     const totalAdjAll    = (pendingApplications[tabKey] ?? []).reduce((s, r) => s + (r.adjustmentAmount ?? 0), 0);
-    const unapplied      = Math.max(0, receiptTotal - totalApplied);
-    const isOnAccount    = totalApplied === 0 && receiptTotal > 0;
+    const unapplied        = Math.max(0, receiptTotal - totalApplied);
+    const isOnAccount      = totalApplied === 0 && receiptTotal > 0;
+    const isFullyApplied   = receiptTotal > 0 && Math.abs(receiptTotal - totalApplied) < 0.01;
 
     const appColumns: ColumnsType<ExtAppRow> = [
+      { title: '', key: 'del', width: 32, fixed: 'left',
+        render: (_, r) => {
+          if (isAccounted) return null; // locked — no delete
+          const appId = r._pending ? 0 : (r.applicationId ?? 0);
+          const isDeleting = deletingAppId === appId && appId !== 0;
+          return (
+            <Tooltip title={r._pending ? 'Remove pending application' : 'Delete application'}>
+              <Button size="small" type="text" danger
+                icon={isDeleting ? <Spin size="small" /> : <DeleteOutlined style={{ fontSize: 11 }} />}
+                style={{ padding: '0 2px', height: 20 }}
+                disabled={isDeleting}
+                onClick={() => deleteApplication(tabKey, appId, r._pendingKey)} />
+            </Tooltip>
+          );
+        }},
       { title: '#', key: 'seq', width: 36,
         render: (_,__,i) => <Text type="secondary" style={{ fontSize: 11 }}>{i + 1}</Text> },
       { title: 'Inst #', key: 'instSeq', width: 60, align: 'center',
@@ -3505,11 +3559,13 @@ const ManageReceipts: React.FC = () => {
             extra={
               <Space size="small">
                 {draft.receiptType === 'CASH' && draft.customerAccountNumber && isEditing && (
+                  <Tooltip title={isAccounted ? 'Receipt is accounted — locked' : isFullyApplied ? 'Receipt is fully applied' : undefined}>
                   <Button
                     size="small"
                     type="primary"
                     icon={<FileTextOutlined />}
-                    style={{ background: REDWOOD.success, borderColor: REDWOOD.success, fontSize: 11 }}
+                    disabled={isFullyApplied || isAccounted}
+                    style={{ background: isFullyApplied || isAccounted ? undefined : REDWOOD.success, borderColor: isFullyApplied || isAccounted ? undefined : REDWOOD.success, fontSize: 11 }}
                     onClick={() => {
                       if (!draft.amount || draft.amount <= 0) {
                         message.warning('Enter the receipt amount first before selecting installments');
@@ -3537,6 +3593,7 @@ const ManageReceipts: React.FC = () => {
                   >
                     Select Invoices &amp; Installments
                   </Button>
+                  </Tooltip>
                 )}
                 {/* API debug icon — hover to see the URL being called */}
                 <Tooltip
