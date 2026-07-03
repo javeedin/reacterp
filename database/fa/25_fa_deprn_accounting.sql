@@ -59,7 +59,12 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
     FUNCTION jstr(p IN VARCHAR2) RETURN VARCHAR2 IS
     BEGIN RETURN '"' || REPLACE(REPLACE(p, '\', '\\'), '"', '\"') || '"'; END;
 
-    FUNCTION get_account_combo(p_ccid IN NUMBER, p_company IN VARCHAR2 DEFAULT NULL) RETURN VARCHAR2 IS
+    -- p_sub_account: when not null, overrides segment5 (buimercFinGlbCoaSubAcc); default NULL = use DB value
+    FUNCTION get_account_combo(
+        p_ccid        IN NUMBER,
+        p_company     IN VARCHAR2 DEFAULT NULL,
+        p_sub_account IN VARCHAR2 DEFAULT NULL
+    ) RETURN VARCHAR2 IS
         v_combo VARCHAR2(750);
     BEGIN
         IF p_ccid IS NULL OR p_ccid = 0 THEN RETURN NULL; END IF;
@@ -68,7 +73,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
             NVL("buimercFinGlbCoaLob", '')        || '-' ||
             NVL("buimercFinGlbCoaDepartment", '') || '-' ||
             NVL("buimercFinGlbCoaAccount", '')    || '-' ||
-            NVL("buimercFinGlbCoaSubAcc", '')     || '-' ||
+            NVL(p_sub_account, NVL("buimercFinGlbCoaSubAcc", '')) || '-' ||
             NVL("buimercFinGlbCoaAlys", '')       || '-' ||
             NVL("buimercFinGlbCoaIc", '')         || '-' ||
             NVL("buimercFinGlbCoaFut1", '')       || '-' ||
@@ -210,6 +215,8 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
         v_reserve_ccid      NUMBER;
         v_expense_combo     VARCHAR2(750);
         v_reserve_combo     VARCHAR2(750);
+        -- sub-account from asset attribute1 (segment5 override on expense line only)
+        v_sub_account       VARCHAR2(150);
         -- book controls
         v_company_code      VARCHAR2(30);
         v_ledger_name       VARCHAR2(100);
@@ -225,10 +232,12 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
                        dd.PERIOD_COUNTER,
                        dp.PERIOD_NAME,
                        NVL(dd.ACCOUNTED_STATUS, 'UNACCOUNTED'),
-                       TO_CHAR(dd.ACCOUNTED_DATE, 'YYYY-MM-DD')
+                       TO_CHAR(dd.ACCOUNTED_DATE, 'YYYY-MM-DD'),
+                       a.ATTRIBUTE1
                 INTO   v_asset_number, v_description, v_category_id,
                        v_deprn_amount, v_period_counter, v_period_name_out,
-                       v_acct_status, v_acct_date
+                       v_acct_status, v_acct_date,
+                       v_sub_account
                 FROM   RR_FA_ADDITIONS a
                 JOIN   RR_FA_DEPRN_DETAIL dd
                        ON  dd.ASSET_ID       = a.ASSET_ID
@@ -245,10 +254,12 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
                        dd.PERIOD_COUNTER,
                        dp.PERIOD_NAME,
                        NVL(dd.ACCOUNTED_STATUS, 'UNACCOUNTED'),
-                       TO_CHAR(dd.ACCOUNTED_DATE, 'YYYY-MM-DD')
+                       TO_CHAR(dd.ACCOUNTED_DATE, 'YYYY-MM-DD'),
+                       a.ATTRIBUTE1
                 INTO   v_asset_number, v_description, v_category_id,
                        v_deprn_amount, v_period_counter, v_period_name_out,
-                       v_acct_status, v_acct_date
+                       v_acct_status, v_acct_date,
+                       v_sub_account
                 FROM   RR_FA_ADDITIONS a
                 JOIN   RR_FA_DEPRN_DETAIL dd
                        ON  dd.ASSET_ID      = a.ASSET_ID
@@ -303,7 +314,8 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
             v_company_code := NULL; v_ledger_name := 'Primary Ledger'; v_ledger_id := 1; v_currency_code := 'AED';
         END;
 
-        v_expense_combo := get_account_combo(v_expense_ccid, v_company_code);
+        -- Expense line: replace segment5 with asset attribute1 (Sub Account); default '0000' when blank
+        v_expense_combo := get_account_combo(v_expense_ccid, v_company_code, NVL(NULLIF(TRIM(v_sub_account),''), '0000'));
         v_reserve_combo := get_account_combo(v_reserve_ccid, v_company_code);
 
         p_status := 200;
