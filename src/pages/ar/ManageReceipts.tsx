@@ -399,6 +399,19 @@ const ManageReceipts: React.FC = () => {
     postDetail?: string;
   };
   type AcctStep = { label: string; status: 'pending' | 'running' | 'done' | 'skipped' | 'error'; detail?: string };
+  type DebugStep = {
+    id: string;
+    group: string;         // 'receipt' | 'adj-<id>'
+    label: string;
+    method: 'GET' | 'POST' | 'PUT';
+    url: string;
+    payload?: object;
+    skipReason?: string;   // set when step will be auto-skipped
+    status: 'pending' | 'running' | 'done' | 'skipped' | 'error';
+    responseData?: any;
+    detail?: string;
+    expanded: boolean;
+  };
   const [acctModal, setAcctModal] = useState<{
     visible: boolean; tabKey: string; creating: boolean; posting: boolean;
     // Receipt GL duplicate-check
@@ -406,10 +419,13 @@ const ManageReceipts: React.FC = () => {
     // SLA/batch result for receipt
     slaHeaderId: number | null; slaStatus: string; glBatchId: number | null;
     lines: AcctLine[];
-    adjItems: AdjItem[];   // one entry per saved adjustment (replaces adjLines)
+    adjItems: AdjItem[];
     adjLoading: boolean;
     adjApiUrls: string[];
-    steps: AcctStep[];     // live step progress
+    steps: AcctStep[];
+    // Debug panel
+    debugSteps: DebugStep[] | null;  // null = not built yet
+    showDebug: boolean;
   } | null>(null);
 
   const [viewAcctModal, setViewAcctModal] = useState<{
@@ -1699,7 +1715,8 @@ const ManageReceipts: React.FC = () => {
     setAcctModal({ visible: true, tabKey, creating: false, posting: false,
       rcptGlExists: false, rcptGlPosted: false, rcptGlBatchId: null,
       slaHeaderId, slaStatus: slaPosted ? 'POSTED' : (slaHeaderId ? 'CREATED' : ''),
-      glBatchId: null, lines: [], adjItems: [], adjLoading: true, adjApiUrls: [], steps: [] });
+      glBatchId: null, lines: [], adjItems: [], adjLoading: true, adjApiUrls: [], steps: [],
+      debugSteps: null, showDebug: false });
 
     let lines: AcctLine[] = [];
     if (isMisc) {
@@ -1790,6 +1807,204 @@ const ManageReceipts: React.FC = () => {
     return idx >= 0 ? steps.map((s, i) => i === idx ? next : s) : [...steps, next];
   };
 
+  // Build debug step list with full URLs + payloads — does NOT execute anything
+  const buildDebugSteps = async () => {
+    if (!acctModal) return;
+    const { tabKey, lines, adjItems, rcptGlPosted, rcptGlBatchId } = acctModal;
+    const tab = tabs.find(t => t.key === tabKey);
+    if (!tab) return;
+    const { draft } = tab;
+    const BASE = APEX_DB_CONFIG.baseUrl;
+    const ledger = await fetchLedgerByBusinessUnit(draft.businessUnit);
+    if (!ledger) { message.error('Could not resolve ledger'); return; }
+    const exRate  = draft.conversionRate ?? 1;
+    const period  = derivePeriodName(new Date(draft.receiptDate || today()));
+    const amount  = Math.abs(draft.amount ?? 0);
+    const rcptRef = draft.receiptNumber;
+    const rcptId  = String(draft.standardReceiptId);
+
+    const steps: DebugStep[] = [];
+    let stepIdx = 0;
+    const mkId = (tag: string) => `${tag}-${stepIdx++}`;
+
+    // ── Receipt steps ──
+    const rcptSkip = rcptGlPosted ? `Already posted in GL — Batch #${rcptGlBatchId}` : undefined;
+    const rcptBatchName = `AR-RECEIPT-${rcptRef}-<timestamp>`;
+
+    const rcptSlaPayload: SlaCreatePayload = {
+      header: {
+        moduleName: 'AR', sourceTable: 'AR_RECEIPTS',
+        sourceId: draft.standardReceiptId, sourceNumber: rcptRef, sourceType: 'Receipt',
+        eventTypeCode: draft.receiptType === 'MISC' ? 'AR_MISC_RECEIPT' : 'AR_CASH_RECEIPT',
+        eventDate: draft.receiptDate || today(),
+        accountingDate: draft.accountingDate || draft.receiptDate || today(),
+        periodName: period, ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName,
+        currencyCode: draft.currency || 'AED', ledgerCurrency: 'AED',
+        exchangeRate: exRate, exchangeRateType: draft.conversionRateType || 'Corporate',
+        businessUnit: draft.businessUnit, description: `Receipt ${rcptRef}`, createdBy: currentUser,
+      },
+      lines: lines.map((l, i) => ({
+        lineNumber: i + 1, lineType: l.lineType as 'DR' | 'CR',
+        accountingClass: l.accountingClass, accountCombination: l.accountCombination,
+        enteredDr: l.lineType === 'DR' ? l.enteredDr : 0,
+        enteredCr: l.lineType === 'CR' ? l.enteredCr : 0,
+        accountedDr: l.lineType === 'DR' ? l.enteredDr * exRate : 0,
+        accountedCr: l.lineType === 'CR' ? l.enteredCr * exRate : 0,
+        currencyCode: draft.currency || 'AED', exchangeRate: exRate,
+        description: draft.comments || l.description,
+      })),
+    };
+    steps.push({ id: mkId('rcpt-sla'), group: 'receipt', label: 'Receipt — SLA Accounting',
+      method: 'POST', url: `${BASE}/sla/accounting/create`,
+      payload: rcptSlaPayload, skipReason: rcptSkip,
+      status: 'pending', expanded: false });
+
+    const rcptGlPayload = {
+      batch: {
+        batchName: rcptBatchName, batchDescription: `AR Receipt ${rcptRef}`,
+        ledgerName: ledger.ledgerName, ledgerId: ledger.ledgerId, status: 'NEW',
+        accountingPeriod: period, controlTotal: amount,
+        runningTotalDr: amount, runningTotalCr: amount,
+        batchSource: 'Accounts Receivable', createdBy: currentUser,
+      },
+      header: {
+        ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName,
+        jeCategory: 'Receipts', jeSource: 'Receivables', periodName: period,
+        journalName: `AR-${rcptRef}`, description: `Receipt ${rcptRef} — ${draft.customerName || ''}`,
+        currencyCode: draft.currency || 'AED', currencyConversionType: draft.conversionRateType || 'Corporate',
+        currencyConversionDate: draft.receiptDate || today(), currencyConversionRate: exRate,
+        defaultEffectiveDate: draft.receiptDate || today(),
+        status: 'NEW', runningTotalDr: amount, runningTotalCr: amount, createdBy: currentUser,
+      },
+      lines: lines.map(l => ({
+        enteredDr: l.lineType === 'DR' ? l.enteredDr : null,
+        enteredCr: l.lineType === 'CR' ? l.enteredCr : null,
+        accountedDr: l.lineType === 'DR' ? l.enteredDr * exRate : null,
+        accountedCr: l.lineType === 'CR' ? l.enteredCr * exRate : null,
+        statAmount: null, description: draft.comments || l.description,
+        currencyCode: draft.currency || 'AED',
+        currencyConversionDate: draft.receiptDate || today(), currencyConversionRate: exRate,
+        userCurrencyConversionType: draft.conversionRateType || 'Corporate',
+        accountCombination: l.accountCombination, chartOfAccountsName: 'Chart of Accounts',
+        reference1: rcptRef, reference2: rcptId, reference3: l.accountingClass,
+        reference4: draft.businessUnit, reference5: 'AR_RECEIPTS', createdBy: currentUser,
+      })),
+    };
+    steps.push({ id: mkId('rcpt-gl'), group: 'receipt', label: 'Receipt — GL Journal Create',
+      method: 'POST', url: `${BASE}/journals/create`,
+      payload: rcptGlPayload, skipReason: rcptSkip,
+      status: 'pending', expanded: false });
+
+    steps.push({ id: mkId('rcpt-post'), group: 'receipt', label: 'Receipt — GL Batch Post',
+      method: 'PUT', url: `${BASE}/gl/journals/<batchId>/post`,
+      skipReason: rcptSkip, status: 'pending', expanded: false });
+
+    steps.push({ id: mkId('rcpt-sla-stamp'), group: 'receipt', label: 'Receipt — SLA Stamp',
+      method: 'POST', url: `${BASE}/sla/accounting/post`,
+      payload: { headerId: '<slaHeaderId>', glBatchId: '<glBatchId>', glBatchName: rcptBatchName, glHeaderId: '<glHeaderId>', postedBy: currentUser },
+      skipReason: rcptSkip, status: 'pending', expanded: false });
+
+    steps.push({ id: mkId('rcpt-acct'), group: 'receipt', label: 'Receipt — Mark Accounted',
+      method: 'PUT', url: `${BASE}/ar/receipts/${draft.standardReceiptId}/accounting-status`,
+      payload: {}, skipReason: rcptSkip, status: 'pending', expanded: false });
+
+    // ── Per-adjustment steps ──
+    for (const adj of adjItems) {
+      const adjRef    = String(adj.adjustmentId);
+      const adjSkip   = adj.glPosted ? `Already posted in GL — Batch #${adj.glBatchId}` : undefined;
+      const adjBatch  = `AR-ADJ-${adjRef}-<timestamp>`;
+      const adjLabel  = `Adj #${adj.adjustmentId}`;
+      const unappliedCombo = lines.find(l => l.accountingClass === 'RECEIVABLE' || l.accountingClass === 'UNAPPLIED')?.accountCombination || '';
+
+      const adjSlaPayload: SlaCreatePayload = {
+        header: {
+          moduleName: 'AR', sourceTable: 'AR_ADJUSTMENTS',
+          sourceId: adj.adjustmentId, sourceNumber: adjRef, sourceType: 'Adjustment',
+          eventTypeCode: 'AR_ADJUSTMENT',
+          eventDate: draft.receiptDate || today(),
+          accountingDate: draft.accountingDate || draft.receiptDate || today(),
+          periodName: period, ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName,
+          currencyCode: draft.currency || 'AED', ledgerCurrency: 'AED',
+          exchangeRate: exRate, exchangeRateType: draft.conversionRateType || 'Corporate',
+          businessUnit: draft.businessUnit, description: `Adjustment ${adjRef}`, createdBy: currentUser,
+        },
+        lines: [
+          { lineNumber: 1, lineType: 'DR', accountingClass: 'ADJUSTMENT',
+            accountCombination: adj.accountCombination,
+            enteredDr: adj.amount, enteredCr: 0,
+            accountedDr: adj.amount * exRate, accountedCr: 0,
+            currencyCode: draft.currency || 'AED', exchangeRate: exRate,
+            description: `${adj.transactionNumber} — ${adj.activity}` },
+          { lineNumber: 2, lineType: 'CR', accountingClass: 'RECEIVABLE',
+            accountCombination: unappliedCombo,
+            enteredDr: 0, enteredCr: adj.amount,
+            accountedDr: 0, accountedCr: adj.amount * exRate,
+            currencyCode: draft.currency || 'AED', exchangeRate: exRate,
+            description: `${adj.transactionNumber} — AR Receivable` },
+        ],
+      };
+      steps.push({ id: mkId(`adj-${adjRef}-sla`), group: `adj-${adjRef}`, label: `${adjLabel} — SLA Accounting`,
+        method: 'POST', url: `${BASE}/sla/accounting/create`,
+        payload: adjSlaPayload, skipReason: adjSkip, status: 'pending', expanded: false });
+
+      const adjGlPayload = {
+        batch: {
+          batchName: adjBatch, batchDescription: `AR Adjustment ${adjRef}`,
+          ledgerName: ledger.ledgerName, ledgerId: ledger.ledgerId, status: 'NEW',
+          accountingPeriod: period, controlTotal: adj.amount,
+          runningTotalDr: adj.amount, runningTotalCr: adj.amount,
+          batchSource: 'Accounts Receivable', createdBy: currentUser,
+        },
+        header: {
+          ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName,
+          jeCategory: 'Adjustments', jeSource: 'Receivables', periodName: period,
+          journalName: `AR-ADJ-${adjRef}`, description: `Adjustment ${adjRef} — ${adj.activity}`,
+          currencyCode: draft.currency || 'AED', currencyConversionType: draft.conversionRateType || 'Corporate',
+          currencyConversionDate: draft.receiptDate || today(), currencyConversionRate: exRate,
+          defaultEffectiveDate: draft.receiptDate || today(),
+          status: 'NEW', runningTotalDr: adj.amount, runningTotalCr: adj.amount, createdBy: currentUser,
+        },
+        lines: [
+          { enteredDr: adj.amount, enteredCr: null, accountedDr: adj.amount * exRate, accountedCr: null,
+            statAmount: null, description: `${adj.transactionNumber} — ${adj.activity}`,
+            currencyCode: draft.currency || 'AED',
+            currencyConversionDate: draft.receiptDate || today(), currencyConversionRate: exRate,
+            userCurrencyConversionType: draft.conversionRateType || 'Corporate',
+            accountCombination: adj.accountCombination, chartOfAccountsName: 'Chart of Accounts',
+            reference1: adjRef, reference2: adjRef, reference3: 'ADJUSTMENT',
+            reference4: draft.businessUnit, reference5: 'AR_ADJUSTMENTS', createdBy: currentUser },
+          { enteredDr: null, enteredCr: adj.amount, accountedDr: null, accountedCr: adj.amount * exRate,
+            statAmount: null, description: `${adj.transactionNumber} — AR Receivable`,
+            currencyCode: draft.currency || 'AED',
+            currencyConversionDate: draft.receiptDate || today(), currencyConversionRate: exRate,
+            userCurrencyConversionType: draft.conversionRateType || 'Corporate',
+            accountCombination: unappliedCombo, chartOfAccountsName: 'Chart of Accounts',
+            reference1: adjRef, reference2: adjRef, reference3: 'RECEIVABLE',
+            reference4: draft.businessUnit, reference5: 'AR_ADJUSTMENTS', createdBy: currentUser },
+        ],
+      };
+      steps.push({ id: mkId(`adj-${adjRef}-gl`), group: `adj-${adjRef}`, label: `${adjLabel} — GL Journal Create`,
+        method: 'POST', url: `${BASE}/journals/create`,
+        payload: adjGlPayload, skipReason: adjSkip, status: 'pending', expanded: false });
+
+      steps.push({ id: mkId(`adj-${adjRef}-post`), group: `adj-${adjRef}`, label: `${adjLabel} — GL Batch Post`,
+        method: 'PUT', url: `${BASE}/gl/journals/<batchId>/post`,
+        skipReason: adjSkip, status: 'pending', expanded: false });
+
+      steps.push({ id: mkId(`adj-${adjRef}-sla-stamp`), group: `adj-${adjRef}`, label: `${adjLabel} — SLA Stamp`,
+        method: 'POST', url: `${BASE}/sla/accounting/post`,
+        payload: { headerId: '<slaHeaderId>', glBatchId: '<batchId>', glBatchName: adjBatch, glHeaderId: '<headerId>', postedBy: currentUser },
+        skipReason: adjSkip, status: 'pending', expanded: false });
+
+      steps.push({ id: mkId(`adj-${adjRef}-acct`), group: `adj-${adjRef}`, label: `${adjLabel} — Mark Accounted`,
+        method: 'PUT', url: `${BASE}/ar/adjustments/${adj.adjustmentId}/accounting-status`,
+        payload: { accountingStatus: 'Accounted' },
+        skipReason: adjSkip, status: 'pending', expanded: false });
+    }
+
+    setAcctModal(m => m ? { ...m, debugSteps: steps, showDebug: true } : m);
+  };
+
   const handleCreateAccounting = async () => {
     if (!acctModal) return;
     const { tabKey, lines, adjItems, rcptGlExists, rcptGlPosted, rcptGlBatchId } = acctModal;
@@ -1801,8 +2016,13 @@ const ManageReceipts: React.FC = () => {
       setAcctModal(m => m ? { ...m, ...patch } : m);
     const updStep = (label: string, status: AcctStep['status'], detail?: string) =>
       setAcctModal(m => m ? { ...m, steps: setStep(m.steps, label, status, detail) } : m);
+    // Also update matching debugStep by label
+    const updDebug = (label: string, status: DebugStep['status'], detail?: string, url?: string, responseData?: any) =>
+      setAcctModal(m => !m ? m : { ...m, debugSteps: m.debugSteps
+        ? m.debugSteps.map(s => s.label === label ? { ...s, status, detail, ...(url ? { url } : {}), ...(responseData !== undefined ? { responseData } : {}) } : s)
+        : m.debugSteps });
 
-    upd({ creating: true, steps: [] });
+    upd({ creating: true, steps: [], showDebug: true });
     try {
       const ledger = await fetchLedgerByBusinessUnit(draft.businessUnit);
       if (!ledger) throw new Error('Could not resolve ledger for Business Unit: ' + draft.businessUnit);
@@ -1859,6 +2079,7 @@ const ManageReceipts: React.FC = () => {
         finalSlaHeaderId = slaResult.headerId;
         upd({ slaHeaderId: finalSlaHeaderId, slaStatus: slaResult.status });
         updStep('Receipt — SLA Accounting', 'done', `SLA Header #${finalSlaHeaderId}`);
+        updDebug('Receipt — SLA Accounting', 'done', `SLA Header #${finalSlaHeaderId}`, undefined, slaResult);
 
         // Step 2: Create GL journal
         updStep('Receipt — GL Journal', 'running');
@@ -1913,31 +2134,43 @@ const ManageReceipts: React.FC = () => {
         finalGlBatchId  = glBody?.batchId  ?? glBody?.batch_id  ?? 0;
         const glHeaderId = glBody?.headerId ?? glBody?.header_id ?? 0;
         updStep('Receipt — GL Journal', 'done', `Batch #${finalGlBatchId}`);
+        updDebug('Receipt — GL Journal Create', 'done', `Batch #${finalGlBatchId}`, undefined, glBody);
 
         // Step 3: Post GL batch
         updStep('Receipt — GL Batch Post', 'running');
+        updDebug('Receipt — GL Batch Post', 'running', undefined, `${APEX_DB_CONFIG.baseUrl}/gl/journals/${finalGlBatchId}/post`);
         const postResult = await postJournal(finalGlBatchId);
         if (!postResult.success) {
           updStep('Receipt — GL Batch Post', 'error', postResult.error || postResult.message);
+          updDebug('Receipt — GL Batch Post', 'error', postResult.error || postResult.message, undefined, postResult);
           message.warning(`Receipt journal posting failed: ${postResult.error || postResult.message}`);
         } else {
           updStep('Receipt — GL Batch Post', 'done');
+          updDebug('Receipt — GL Batch Post', 'done', `Batch #${finalGlBatchId} posted`, undefined, postResult);
         }
 
         // Step 4: Stamp SLA
         updStep('Receipt — SLA Stamp', 'running');
-        await postToLedger(finalSlaHeaderId!, finalGlBatchId, batchName, glHeaderId, currentUser);
+        const slaStampPayload = { headerId: finalSlaHeaderId, glBatchId: finalGlBatchId, glBatchName: batchName, glHeaderId, postedBy: currentUser };
+        updDebug('Receipt — SLA Stamp', 'running', undefined, undefined, slaStampPayload);
+        const slaStampRes = await postToLedger(finalSlaHeaderId!, finalGlBatchId, batchName, glHeaderId, currentUser);
         updStep('Receipt — SLA Stamp', 'done');
+        updDebug('Receipt — SLA Stamp', 'done', undefined, undefined, slaStampRes);
 
         // Step 5: Update receipt accounting status
         updStep('Receipt — Mark Accounted', 'running');
         try {
-          await fetch(`${APEX_AR_RECEIPTS}/${draft.standardReceiptId}/accounting-status`, {
+          const acctRes = await fetch(`${APEX_AR_RECEIPTS}/${draft.standardReceiptId}/accounting-status`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             body: JSON.stringify({}),
           });
+          const acctBody = await acctRes.json().catch(() => ({}));
           updStep('Receipt — Mark Accounted', 'done');
-        } catch { updStep('Receipt — Mark Accounted', 'error', 'Non-critical'); }
+          updDebug('Receipt — Mark Accounted', 'done', undefined, undefined, acctBody);
+        } catch (e: any) {
+          updStep('Receipt — Mark Accounted', 'error', 'Non-critical');
+          updDebug('Receipt — Mark Accounted', 'error', e.message);
+        }
 
         upd({ glBatchId: finalGlBatchId, slaStatus: 'POSTED' });
       }
@@ -2001,6 +2234,7 @@ const ManageReceipts: React.FC = () => {
           };
           const adjSlaResult = await createAccounting(adjSlaPayload);
           const adjSlaHeaderId = adjSlaResult.headerId;
+          updDebug(`Adj #${adj.adjustmentId} — SLA Accounting`, 'done', `SLA Header #${adjSlaHeaderId}`, undefined, adjSlaResult);
 
           // Create GL journal
           const adjGlPayload = {
@@ -2052,20 +2286,36 @@ const ManageReceipts: React.FC = () => {
           if (!adjGlRes.ok) throw new Error(adjGlBody?.message || `GL HTTP ${adjGlRes.status}`);
           const adjBatchId  = adjGlBody?.batchId  ?? adjGlBody?.batch_id  ?? 0;
           const adjHeaderId = adjGlBody?.headerId ?? adjGlBody?.header_id ?? 0;
+          updDebug(`Adj #${adj.adjustmentId} — GL Journal Create`, 'done', `Batch #${adjBatchId}`,
+            `${APEX_DB_CONFIG.baseUrl}/journals/create`, adjGlBody);
 
           // Post GL batch
-          await postJournal(adjBatchId);
+          updDebug(`Adj #${adj.adjustmentId} — GL Batch Post`, 'running', undefined,
+            `${APEX_DB_CONFIG.baseUrl}/gl/journals/${adjBatchId}/post`);
+          const adjPostResult = await postJournal(adjBatchId);
+          updDebug(`Adj #${adj.adjustmentId} — GL Batch Post`,
+            adjPostResult.success ? 'done' : 'error',
+            adjPostResult.success ? `Batch #${adjBatchId} posted` : (adjPostResult.error || adjPostResult.message),
+            undefined, adjPostResult);
 
           // Stamp SLA
-          await postToLedger(adjSlaHeaderId, adjBatchId, adjBatch, adjHeaderId, currentUser);
+          updDebug(`Adj #${adj.adjustmentId} — SLA Stamp`, 'running');
+          const adjStampRes = await postToLedger(adjSlaHeaderId, adjBatchId, adjBatch, adjHeaderId, currentUser);
+          updDebug(`Adj #${adj.adjustmentId} — SLA Stamp`, 'done', undefined, undefined, adjStampRes);
 
           // Update adjustment accounting status
+          const adjAcctUrl = `${APEX_DB_CONFIG.baseUrl}/ar/adjustments/${adj.adjustmentId}/accounting-status`;
+          updDebug(`Adj #${adj.adjustmentId} — Mark Accounted`, 'running', undefined, adjAcctUrl);
           try {
-            await fetch(`${APEX_DB_CONFIG.baseUrl}/ar/adjustments/${adj.adjustmentId}/accounting-status`, {
+            const adjAcctRes = await fetch(adjAcctUrl, {
               method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
               body: JSON.stringify({ accountingStatus: 'Accounted' }),
             });
-          } catch { /* non-critical */ }
+            const adjAcctBody = await adjAcctRes.json().catch(() => ({}));
+            updDebug(`Adj #${adj.adjustmentId} — Mark Accounted`, 'done', undefined, undefined, adjAcctBody);
+          } catch (e: any) {
+            updDebug(`Adj #${adj.adjustmentId} — Mark Accounted`, 'error', e.message);
+          }
 
           setAcctModal(m => m ? { ...m,
             adjItems: m.adjItems.map(a => a.adjustmentId === adj.adjustmentId
@@ -2073,6 +2323,7 @@ const ManageReceipts: React.FC = () => {
             steps: setStep(m.steps, adjLabel, 'done', `Batch #${adjBatchId}`),
           } : m);
         } catch (adjErr: any) {
+          updDebug(`Adj #${adj.adjustmentId} — SLA Accounting`, 'error', adjErr.message);
           setAcctModal(m => m ? { ...m,
             adjItems: m.adjItems.map(a => a.adjustmentId === adj.adjustmentId
               ? { ...a, postStatus: 'error', postDetail: adjErr.message } : a),
@@ -5343,18 +5594,39 @@ const ManageReceipts: React.FC = () => {
             width={900}
             styles={{ body: { maxHeight: '75vh', overflowY: 'auto', paddingRight: 4 } }}
             footer={
-              <Space>
-                <Button
-                  type="primary" icon={<BookOutlined />}
-                  loading={acctModal.creating}
-                  disabled={allDone}
-                  style={!allDone ? { background: REDWOOD.success, borderColor: REDWOOD.success } : {}}
-                  onClick={handleCreateAccounting}
-                >
-                  {allDone ? 'All Accounted' : 'Create Accounting'}
-                </Button>
-                <Button onClick={() => setAcctModal(null)}>Close</Button>
-              </Space>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Space>
+                  <Button
+                    icon={<CodeOutlined />}
+                    loading={acctModal.adjLoading}
+                    onClick={buildDebugSteps}
+                    title="Preview all API steps with full URLs and payloads"
+                  >
+                    {acctModal.showDebug ? 'Refresh Debug' : 'Debug'}
+                  </Button>
+                  {acctModal.showDebug && (
+                    <Button
+                      type="text"
+                      size="small"
+                      onClick={() => setAcctModal(m => m ? { ...m, showDebug: false } : m)}
+                    >
+                      Hide
+                    </Button>
+                  )}
+                </Space>
+                <Space>
+                  <Button
+                    type="primary" icon={<BookOutlined />}
+                    loading={acctModal.creating}
+                    disabled={allDone}
+                    style={!allDone ? { background: REDWOOD.success, borderColor: REDWOOD.success } : {}}
+                    onClick={handleCreateAccounting}
+                  >
+                    {allDone ? 'All Accounted' : 'Run / Create Accounting'}
+                  </Button>
+                  <Button onClick={() => setAcctModal(null)}>Close</Button>
+                </Space>
+              </div>
             }
           >
             {/* ── Receipt GL status ── */}
@@ -5389,6 +5661,94 @@ const ManageReceipts: React.FC = () => {
                       {icon}
                       <Text style={{ fontSize: 11 }}>{s.label}</Text>
                       {s.detail && <Text type="secondary" style={{ fontSize: 10, marginLeft: 6 }}>— {s.detail}</Text>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* ── Debug Panel ── */}
+            {acctModal.showDebug && acctModal.debugSteps && (
+              <div style={{ marginBottom: 16, border: `1px solid ${REDWOOD.border}`, borderRadius: 6, overflow: 'hidden' }}>
+                <div style={{ background: '#1f1f1f', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <CodeOutlined style={{ color: '#52c41a', fontSize: 12 }} />
+                  <Text style={{ color: '#e6e6e6', fontSize: 12, fontWeight: 600 }}>API Steps Preview</Text>
+                  <Text style={{ color: '#888', fontSize: 11 }}>— {acctModal.debugSteps.length} steps · click a step to expand payload</Text>
+                </div>
+                {acctModal.debugSteps.map((step, si) => {
+                  const isGroupHeader = si === 0 || acctModal.debugSteps![si - 1].group !== step.group;
+                  const statusColor = step.status === 'done' ? REDWOOD.success
+                    : step.status === 'running' ? '#1677ff'
+                    : step.status === 'error' ? REDWOOD.primary
+                    : step.status === 'skipped' ? '#bfbfbf'
+                    : '#8c8c8c';
+                  const methodColor = step.method === 'POST' ? '#52c41a' : step.method === 'PUT' ? '#faad14' : '#1677ff';
+                  return (
+                    <div key={step.id}>
+                      {isGroupHeader && (
+                        <div style={{ background: '#2a2a2a', padding: '3px 12px', borderTop: '1px solid #333' }}>
+                          <Text style={{ color: '#aaa', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1 }}>
+                            {step.group === 'receipt' ? '▸ Receipt' : `▸ ${step.group.replace('adj-', 'Adjustment #')}`}
+                          </Text>
+                          {step.skipReason && (
+                            <Text style={{ color: '#faad14', fontSize: 10, marginLeft: 8 }}>⚠ All steps skipped: {step.skipReason}</Text>
+                          )}
+                        </div>
+                      )}
+                      <div
+                        style={{ borderTop: '1px solid #2a2a2a', background: step.expanded ? '#141414' : '#1a1a1a', cursor: 'pointer' }}
+                        onClick={() => setAcctModal(m => !m ? m : {
+                          ...m,
+                          debugSteps: m.debugSteps!.map((s, i) => i === si ? { ...s, expanded: !s.expanded } : s),
+                        })}
+                      >
+                        <div style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                          {step.status === 'running' ? <Spin size="small" />
+                            : step.status === 'done' ? <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 12 }} />
+                            : step.status === 'error' ? <CloseCircleOutlined style={{ color: REDWOOD.primary, fontSize: 12 }} />
+                            : step.status === 'skipped' ? <MinusCircleOutlined style={{ color: '#555', fontSize: 12 }} />
+                            : <ClockCircleOutlined style={{ color: '#555', fontSize: 12 }} />}
+                          <Tag style={{ fontSize: 10, fontWeight: 700, padding: '0 4px', margin: 0, background: methodColor, border: 'none', color: '#fff' }}>{step.method}</Tag>
+                          <Text style={{ fontSize: 11, fontFamily: 'monospace', color: step.skipReason ? '#555' : '#d4d4d4', flex: 1 }} ellipsis={{ tooltip: step.url }}>
+                            {step.url}
+                          </Text>
+                          {step.detail && <Text style={{ fontSize: 10, color: statusColor }}>{step.detail}</Text>}
+                          <Text style={{ fontSize: 10, color: '#555' }}>{step.expanded ? '▲' : '▼'}</Text>
+                        </div>
+                        {step.expanded && (
+                          <div style={{ padding: '0 12px 10px 32px', display: 'flex', gap: 12 }}>
+                            {step.payload && (
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <Text style={{ color: '#888', fontSize: 10, display: 'block', marginBottom: 4 }}>Request Payload:</Text>
+                                <pre style={{
+                                  fontSize: 10, lineHeight: 1.5, color: '#a8ff78',
+                                  background: '#0d0d0d', borderRadius: 4, padding: '8px 10px',
+                                  margin: 0, overflowX: 'auto', maxHeight: 300,
+                                  whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                                }}>
+                                  {JSON.stringify(step.payload, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+                            {step.responseData !== undefined && (
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <Text style={{ color: '#888', fontSize: 10, display: 'block', marginBottom: 4 }}>Response:</Text>
+                                <pre style={{
+                                  fontSize: 10, lineHeight: 1.5, color: '#79c0ff',
+                                  background: '#0d0d0d', borderRadius: 4, padding: '8px 10px',
+                                  margin: 0, overflowX: 'auto', maxHeight: 300,
+                                  whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                                }}>
+                                  {JSON.stringify(step.responseData, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+                            {!step.payload && step.responseData === undefined && (
+                              <Text style={{ color: '#555', fontSize: 10 }}>No body (URL only)</Text>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
