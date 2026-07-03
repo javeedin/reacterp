@@ -242,8 +242,7 @@ async function putPostJournal(batchId: number): Promise<{ success: boolean; erro
   try {
     const res  = await fetch(`${BASE}/gl/journals/${batchId}/post`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: '{}',
+      headers: { Accept: 'application/json' },
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data?.success === false) {

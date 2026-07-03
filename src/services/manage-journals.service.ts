@@ -234,8 +234,9 @@ export const postJournal = async (
   jeBatchId: number
 ): Promise<{ success: boolean; message?: string; error?: string; errors?: string[] }> => {
   try {
-    const endpoint = `gl/journals/${jeBatchId}/post`;
-    const data = await putToApex(endpoint);
+    const url = `${APEX_DB_CONFIG.baseUrl}/gl/journals/${jeBatchId}/post`;
+    const res  = await fetch(url, { method: 'PUT', headers: { Accept: 'application/json' } });
+    const data = await res.json().catch(() => ({}));
     return data;
   } catch (error) {
     return {
