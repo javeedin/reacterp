@@ -235,7 +235,7 @@ export const postJournal = async (
 ): Promise<{ success: boolean; message?: string; error?: string; errors?: string[] }> => {
   try {
     const url = `${APEX_DB_CONFIG.baseUrl}/gl/journals/${jeBatchId}/post`;
-    const res  = await fetch(url, { method: 'PUT', headers: { Accept: 'application/json' } });
+    const res  = await fetch(url, { method: 'PUT', headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' } });
     const data = await res.json().catch(() => ({}));
     return data;
   } catch (error) {
