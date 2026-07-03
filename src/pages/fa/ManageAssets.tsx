@@ -102,8 +102,9 @@ const AssetTabContent: React.FC<{
   const loggedUser = user?.username || user?.name || 'REACTERP';
 
   // Depreciation filter state
-  const [deprnFY,     setDeprnFY]     = useState('');
-  const [deprnPeriod, setDeprnPeriod] = useState('');
+  const [deprnFY,       setDeprnFY]       = useState('');
+  const [deprnPeriod,   setDeprnPeriod]   = useState('');
+  const [deprnPageSize, setDeprnPageSize] = useState(15);
 
   // Depreciation preview modal state
   interface DeprnRow { period: string; days: number; dailyRate: number; openingNbv: number; depreciation: number; closingNbv: number; }
@@ -1355,14 +1356,20 @@ const AssetTabContent: React.FC<{
               rowKey={(r) => `${r.periodCounter}-${r.distributionId}`}
               size="small"
               scroll={{ x: 1000 }}
-              pagination={{ pageSize: 15, showSizeChanger: true, pageSizeOptions: ['15','25','50'] }}
+              pagination={{
+                pageSize: deprnPageSize,
+                showSizeChanger: true,
+                pageSizeOptions: ['15', '25', '50'],
+                showTotal: (t) => `${t} records`,
+                onChange: (_page, ps) => setDeprnPageSize(ps),
+              }}
               locale={{ emptyText: 'No depreciation records' }}
-              summary={(rows) => {
-                const total = rows.reduce((s, r) => s + (parseFloat(r.deprnAmount) || 0), 0);
+              summary={() => {
+                const total = filteredDeprn.reduce((s, r) => s + (parseFloat(r.deprnAmount) || 0), 0);
                 return (
                   <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 600 }}>
                     <Table.Summary.Cell index={0} colSpan={4}>
-                      <Text strong style={{ fontSize: 12 }}>Total ({rows.length} periods)</Text>
+                      <Text strong style={{ fontSize: 12 }}>Total ({filteredDeprn.length} periods)</Text>
                     </Table.Summary.Cell>
                     <Table.Summary.Cell index={4} align="right">
                       <Text strong style={{ color: FA_COLOR }}>{formatCurrency(String(total))}</Text>
