@@ -343,8 +343,8 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
 
         -- Block if nothing left to depreciate (asset fully reserved)
         IF v_final_amount <= 0 THEN
-            p_status  := 'ERROR';
-            p_message := 'Asset ' || p_asset_id || ' is fully depreciated — no remaining NBV to post.';
+            p_http_status := 400;
+            p_result      := '{"success":false,"error":"Asset ' || p_asset_id || ' is fully depreciated — no remaining NBV to post."}';
             RETURN;
         END IF;
 
