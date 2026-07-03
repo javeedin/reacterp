@@ -2118,7 +2118,7 @@ const ManageReceipts: React.FC = () => {
           const adjBody = {
             CustomerTransactionId: row.customerTransactionId,
             TransactionNumber:     row.transactionNumber,
-            AdjustmentAmount:      sp.amount,
+            AdjustmentAmount:      -Math.abs(sp.amount),
             AdjustmentDate:        draft.receiptDate || today,
             AccountingDate:        draft.accountingDate || today,
             AdjustmentType:        'LINE',
@@ -2154,7 +2154,7 @@ const ManageReceipts: React.FC = () => {
       try {
         const putBody = {
           AmountPaid:                   row.applyAmount,
-          InstallmentAmountAdjusted:    row.adjustmentAmount ?? 0,
+          InstallmentAmountAdjusted:    -Math.abs(row.adjustmentAmount ?? 0),
           LastUpdatedBy:                currentUser,
         };
         const url = `${APEX_AR_INVOICES}/${row.customerTransactionId}/installments/${row.installmentId}`;
@@ -2213,7 +2213,7 @@ const ManageReceipts: React.FC = () => {
               body: JSON.stringify({
                 CustomerTransactionId: row.customerTransactionId,
                 TransactionNumber:     row.transactionNumber,
-                AdjustmentAmount:      sp.amount,
+                AdjustmentAmount:      -Math.abs(sp.amount),
                 AdjustmentDate:        draft.receiptDate || today,
                 AccountingDate:        draft.accountingDate || today,
                 AdjustmentType:        'LINE',
@@ -2280,7 +2280,7 @@ const ManageReceipts: React.FC = () => {
               body: JSON.stringify({
                 CustomerTransactionId: row.customerTransactionId,
                 TransactionNumber:     row.transactionNumber,
-                AdjustmentAmount:      sp.amount,
+                AdjustmentAmount:      -Math.abs(sp.amount),
                 AdjustmentDate:        draft.receiptDate || today,
                 AccountingDate:        draft.accountingDate || today,
                 AdjustmentType:        'LINE',
@@ -2307,7 +2307,7 @@ const ManageReceipts: React.FC = () => {
             url: `${APEX_AR_INVOICES}/${row.customerTransactionId}/installments/${row.installmentId}`,
             body: JSON.stringify({
               AmountPaid:                row.applyAmount,
-              InstallmentAmountAdjusted: row.adjustmentAmount ?? 0,
+              InstallmentAmountAdjusted: -Math.abs(row.adjustmentAmount ?? 0),
               LastUpdatedBy:             currentUser,
             }, null, 2),
             response: '', running: false, done: false,
