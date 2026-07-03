@@ -977,6 +977,25 @@ const UserManagement: React.FC = () => {
             Set a new password for this user directly. No OTP required.
           </Text>
         </div>
+        {/* API info strip */}
+        <div style={{
+          background: '#f5f5f5', border: '1px solid #e0e0e0', borderRadius: 6,
+          padding: '8px 12px', marginBottom: 16, fontSize: 11, fontFamily: 'monospace',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <ApiOutlined style={{ color: '#1677ff', fontSize: 12 }} />
+            <Text style={{ fontSize: 11, fontWeight: 600, color: '#1677ff' }}>POST</Text>
+            <Text copyable style={{ fontSize: 11, wordBreak: 'break-all' }}>
+              {`${APEX_ADMIN_BASE}/reset-password`}
+            </Text>
+          </div>
+          <div style={{ color: '#666', marginTop: 4 }}>
+            <Text style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>BODY</Text>
+            <pre style={{ margin: '2px 0 0', fontSize: 10, background: 'transparent', whiteSpace: 'pre-wrap' }}>
+              {JSON.stringify({ username: resetTarget, new_password: '••••••••', admin_user: 'ADMIN' }, null, 2)}
+            </pre>
+          </div>
+        </div>
         <Form form={resetForm} layout="vertical">
           <Form.Item
             label="New Password"
