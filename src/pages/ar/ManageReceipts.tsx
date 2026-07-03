@@ -430,32 +430,29 @@ const ManageReceipts: React.FC = () => {
 
   const [viewAcctModal, setViewAcctModal] = useState<{
     receiptNumber: string; loading: boolean; posting: boolean;
-    header: any; lines: any[];
+    header: any; lines: any[];          // receipt journal lines
+    adjGroups: { adjustmentId: number; batchName: string; lines: any[] }[];  // one per adj
   } | null>(null);
 
   const openViewAccounting = async (draft: ReceiptDraft) => {
-    setViewAcctModal({ receiptNumber: draft.receiptNumber, loading: true, posting: false, header: null, lines: [] });
-    try {
-      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/by-txn?txn_id=${encodeURIComponent(String(draft.standardReceiptId))}`,
-        { headers: { Accept: 'application/json' } });
-      const d = await res.json();
-      // Build combo→description map from cached account data
-      const comboDescMap: Record<string, string> = {};
-      allMethodAccounts.forEach(a => {
-        const pairs: [number, string][] = [
-          [a.cashCcid, a.cashCombination], [a.unappliedCcid, a.unappliedCombination],
-          [a.unidentifiedCcid, a.unidentifiedCombination], [a.onAccountCcid, a.onAccountCombination],
-        ];
-        pairs.forEach(([ccid, combo]) => {
-          if (ccid > 0 && combo && acctDescCache[ccid]) {
-            const key = combo.replace(/\./g, '-').toUpperCase();
-            comboDescMap[key] = acctDescCache[ccid].description;
-          }
-        });
+    setViewAcctModal({ receiptNumber: draft.receiptNumber, loading: true, posting: false, header: null, lines: [], adjGroups: [] });
+
+    // Build combo→desc map from cached account data
+    const comboDescMap: Record<string, string> = {};
+    allMethodAccounts.forEach(a => {
+      const pairs: [number, string][] = [
+        [a.cashCcid, a.cashCombination], [a.unappliedCcid, a.unappliedCombination],
+        [a.unidentifiedCcid, a.unidentifiedCombination], [a.onAccountCcid, a.onAccountCombination],
+      ];
+      pairs.forEach(([ccid, combo]) => {
+        if (ccid > 0 && combo && acctDescCache[ccid]) {
+          comboDescMap[combo.replace(/\./g, '-').toUpperCase()] = acctDescCache[ccid].description;
+        }
       });
-      // Enrich lines with accountDesc; fetch missing ones
-      const rawLines: any[] = d.lines || [];
-      const enriched = await Promise.all(rawLines.map(async (l: any) => {
+    });
+
+    const enrichLines = async (rawLines: any[]) =>
+      Promise.all(rawLines.map(async (l: any) => {
         const key = (l.accountCombination || '').toUpperCase();
         if (comboDescMap[key]) return { ...l, accountDesc: comboDescMap[key] };
         try {
@@ -464,9 +461,62 @@ const ManageReceipts: React.FC = () => {
           return { ...l, accountDesc: desc };
         } catch { return l; }
       }));
-      setViewAcctModal({ receiptNumber: draft.receiptNumber, loading: false, posting: false,
-        header: d.found !== false ? d : null,
-        lines: enriched });
+
+    try {
+      const BASE = APEX_DB_CONFIG.baseUrl;
+
+      // 1. Receipt journal — lookup by reference2=standardReceiptId, reference5=AR_RECEIPTS
+      const rcptCheck = await checkGLJournalExists(draft.receiptNumber, String(draft.standardReceiptId), 'AR_RECEIPTS');
+      let header: any = null;
+      let lines: any[] = [];
+      if (rcptCheck.exists && rcptCheck.headerId) {
+        const linesRes = await fetch(`${BASE}/gl/journals/${rcptCheck.headerId}/lines`, { headers: { Accept: 'application/json' } });
+        const linesData = await linesRes.json();
+        const rawLines: any[] = linesData.lines || [];
+        lines = await enrichLines(rawLines);
+        header = {
+          found: true,
+          batchId: rcptCheck.batchId,
+          glHeaderId: rcptCheck.headerId,
+          batchStatus: rcptCheck.status === 'P' ? 'Posted' : 'Unposted',
+          periodName: rcptCheck.period,
+        };
+      }
+
+      // 2. Adjustment journals — one per saved adjustment_id
+      const savedApps = receiptApplications[draft.standardReceiptId ? String(draft.standardReceiptId) : '']?.rows ?? [];
+      // Also check all apps across tabs for this receipt
+      const tabKey = tabs.find(t => t.draft.standardReceiptId === draft.standardReceiptId)?.key ?? '';
+      const appRows = receiptApplications[tabKey]?.rows ?? [];
+      const appIds = appRows.map(a => a.applicationId).filter(Boolean);
+
+      const adjGroups: { adjustmentId: number; batchName: string; lines: any[] }[] = [];
+      if (appIds.length > 0) {
+        // Fetch all adjustments for these applications
+        const adjFetches = appIds.map(appId =>
+          fetch(`${BASE}/ar/adjustments?application_id=${appId}&limit=500`).then(r => r.ok ? r.json() : { items: [] }).catch(() => ({ items: [] }))
+        );
+        const adjResults = await Promise.all(adjFetches);
+        const allAdjs: any[] = adjResults.flatMap(r => r.items ?? []);
+
+        // For each adjustment, check GL and fetch lines
+        for (const adj of allAdjs) {
+          const adjId = adj.adjustment_id ?? adj.ADJUSTMENT_ID;
+          if (!adjId) continue;
+          const adjCheck = await checkGLJournalExists(String(adjId), String(adjId), 'AR_ADJUSTMENTS');
+          if (!adjCheck.exists || !adjCheck.headerId) continue;
+          const adjLinesRes = await fetch(`${BASE}/gl/journals/${adjCheck.headerId}/lines`, { headers: { Accept: 'application/json' } });
+          const adjLinesData = await adjLinesRes.json();
+          const enriched = await enrichLines(adjLinesData.lines || []);
+          adjGroups.push({
+            adjustmentId: adjId,
+            batchName: `Batch #${adjCheck.batchId} · ${adj.receivables_activity ?? adj.RECEIVABLES_ACTIVITY ?? 'Adjustment'} · ${adj.transaction_number ?? adj.TRANSACTION_NUMBER ?? ''}`,
+            lines: enriched,
+          });
+        }
+      }
+
+      setViewAcctModal({ receiptNumber: draft.receiptNumber, loading: false, posting: false, header, lines, adjGroups });
     } catch (e: any) {
       message.error('Failed to load GL journal: ' + e.message);
       setViewAcctModal(null);
@@ -5510,59 +5560,97 @@ const ManageReceipts: React.FC = () => {
           width={900}
         >
           {viewAcctModal.loading
-            ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
-            : vhdr
-              ? <>
-                  <Descriptions size="small" bordered column={3} style={{ marginBottom: 16 }}>
-                    <Descriptions.Item label="Journal Name">{vhdr.description || vhdr.journalName || '—'}</Descriptions.Item>
-                    <Descriptions.Item label="Batch">{vhdr.glBatchName || '—'}</Descriptions.Item>
-                    <Descriptions.Item label="Status">
-                      <Tag color={isPosted ? 'green' : 'orange'}>{batchStatus || 'NEW'}</Tag>
-                    </Descriptions.Item>
-                    <Descriptions.Item label="Period">{vhdr.periodName || '—'}</Descriptions.Item>
-                    <Descriptions.Item label="Acctg Date">{vhdr.accountingDate || '—'}</Descriptions.Item>
-                    <Descriptions.Item label="Created By">{vhdr.createdBy || vhdr.postedBy || '—'}</Descriptions.Item>
-                  </Descriptions>
-                  <Table
-                    dataSource={(viewAcctModal.lines || []).map((l: any, i: number) => ({ ...l, key: i }))}
-                    size="small"
-                    pagination={false}
-                    scroll={{ x: 'max-content' }}
-                    columns={[
-                      { title: 'Line', dataIndex: 'lineNumber', width: 50, render: (_: any, __: any, i: number) => i + 1 },
-                      { title: 'Account', dataIndex: 'accountCombination', width: 180,
-                        render: (v: string, r: any) => {
-                          const segDesc = r.accountDesc
-                            ? r.accountDesc.split(' · ').filter((s: string) => s && s !== 'Default').slice(1).join(' · ')
-                            : '';
-                          return (
-                            <Tooltip title={<><div style={{ fontFamily: 'monospace' }}>{v}</div>{r.accountDesc && <div style={{ fontSize: 11, marginTop: 2 }}>{r.accountDesc}</div>}</>} placement="topLeft">
-                              <div style={{ cursor: 'default' }}>
-                                <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.info, whiteSpace: 'nowrap', display: 'block' }}>{v}</Text>
-                                {segDesc && <div style={{ fontSize: 10, color: '#8c8c8c', marginTop: 1 }}>{segDesc}</div>}
-                              </div>
-                            </Tooltip>
-                          );
-                        } },
-                      { title: 'Description', dataIndex: 'description', width: 260,
-                        render: (v: string) => (
-                          <Tooltip title={v} placement="topLeft">
+            ? <div style={{ textAlign: 'center', padding: 40 }}><Spin tip="Loading journal lines…" /></div>
+            : (() => {
+                const journalColumns: ColumnsType<any> = [
+                  { title: 'Line', dataIndex: 'lineNumber', width: 50, render: (_: any, __: any, i: number) => i + 1 },
+                  { title: 'Account', dataIndex: 'accountCombination', width: 180,
+                    render: (v: string, r: any) => {
+                      const segDesc = r.accountDesc
+                        ? r.accountDesc.split(' · ').filter((s: string) => s && s !== 'Default').slice(1).join(' · ')
+                        : '';
+                      return (
+                        <Tooltip title={<><div style={{ fontFamily: 'monospace' }}>{v}</div>{r.accountDesc && <div style={{ fontSize: 11, marginTop: 2 }}>{r.accountDesc}</div>}</>} placement="topLeft">
+                          <div style={{ cursor: 'default' }}>
+                            <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.info, whiteSpace: 'nowrap', display: 'block' }}>{v}</Text>
+                            {segDesc && <div style={{ fontSize: 10, color: '#8c8c8c', marginTop: 1 }}>{segDesc}</div>}
+                          </div>
+                        </Tooltip>
+                      );
+                    } },
+                  { title: 'Description', dataIndex: 'description', width: 260,
+                    render: (v: string) => (
+                      <Tooltip title={v} placement="topLeft">
+                        <div style={{
+                          fontSize: 11, color: REDWOOD.neutral600, cursor: 'default',
+                          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden', wordBreak: 'break-word',
+                        }}>{v || '—'}</div>
+                      </Tooltip>
+                    ) },
+                  { title: 'Dr', dataIndex: 'enteredDr', width: 130, align: 'right' as const,
+                    render: (v: number) => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> : <Text type="secondary">—</Text> },
+                  { title: 'Cr', dataIndex: 'enteredCr', width: 130, align: 'right' as const,
+                    render: (v: number) => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.primary }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> : <Text type="secondary">—</Text> },
+                  { title: 'Ref2', dataIndex: 'reference2', width: 120, render: (v: string) => <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>{v || '—'}</Text> },
+                ];
+                return (
+                  <>
+                    {/* ── Receipt journal ── */}
+                    <div style={{ marginBottom: 4 }}>
+                      <Tag color="blue" style={{ marginBottom: 8 }}>Receipt Journal</Tag>
+                    </div>
+                    {vhdr ? (
+                      <>
+                        <Descriptions size="small" bordered column={3} style={{ marginBottom: 12 }}>
+                          <Descriptions.Item label="Journal Name">{vhdr.description || vhdr.journalName || '—'}</Descriptions.Item>
+                          <Descriptions.Item label="Batch">{vhdr.glBatchName || '—'}</Descriptions.Item>
+                          <Descriptions.Item label="Status">
+                            <Tag color={isPosted ? 'green' : 'orange'}>{batchStatus || 'NEW'}</Tag>
+                          </Descriptions.Item>
+                          <Descriptions.Item label="Period">{vhdr.periodName || '—'}</Descriptions.Item>
+                          <Descriptions.Item label="Acctg Date">{vhdr.accountingDate || '—'}</Descriptions.Item>
+                          <Descriptions.Item label="Created By">{vhdr.createdBy || vhdr.postedBy || '—'}</Descriptions.Item>
+                        </Descriptions>
+                        <Table
+                          dataSource={(viewAcctModal.lines || []).map((l: any, i: number) => ({ ...l, key: i }))}
+                          size="small" pagination={false} scroll={{ x: 'max-content' }}
+                          columns={journalColumns}
+                        />
+                      </>
+                    ) : (
+                      <Alert type="warning" showIcon style={{ marginBottom: 12 }}
+                        message={`No GL journal found for receipt "${viewAcctModal.receiptNumber}"`} />
+                    )}
+
+                    {/* ── Adjustment journals ── */}
+                    {(viewAcctModal.adjGroups ?? []).length > 0 && (
+                      <>
+                        <Divider style={{ margin: '16px 0 8px' }} />
+                        <Tag color="purple" style={{ marginBottom: 8 }}>Adjustment Journals</Tag>
+                        {viewAcctModal.adjGroups.map((grp, gi) => (
+                          <div key={gi} style={{ marginBottom: 16 }}>
                             <div style={{
-                              fontSize: 11, color: REDWOOD.neutral600, cursor: 'default',
-                              display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-                              overflow: 'hidden', wordBreak: 'break-word',
-                            }}>{v || '—'}</div>
-                          </Tooltip>
-                        ) },
-                      { title: 'Dr', dataIndex: 'enteredDr', width: 130, align: 'right' as const,
-                        render: (v: number) => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> : <Text type="secondary">—</Text> },
-                      { title: 'Cr', dataIndex: 'enteredCr', width: 130, align: 'right' as const,
-                        render: (v: number) => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.primary }}>{Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> : <Text type="secondary">—</Text> },
-                      { title: 'Ref2', dataIndex: 'reference2', width: 120, render: (v: string) => <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>{v || '—'}</Text> },
-                    ]}
-                  />
-                </>
-              : <Alert type="warning" showIcon message={`No GL journal found for receipt number "${viewAcctModal.receiptNumber}"`} />
+                              background: '#f5f0ff', border: '1px solid #d3adf7', borderRadius: 4,
+                              padding: '4px 10px', marginBottom: 6, fontSize: 12,
+                              display: 'flex', alignItems: 'center', gap: 8,
+                            }}>
+                              <ScissorOutlined style={{ color: '#722ed1' }} />
+                              <span style={{ fontWeight: 600, color: '#722ed1' }}>Adj #{grp.adjustmentId}</span>
+                              <span style={{ color: '#595959' }}>{grp.batchName}</span>
+                            </div>
+                            <Table
+                              dataSource={(grp.lines || []).map((l: any, i: number) => ({ ...l, key: i }))}
+                              size="small" pagination={false} scroll={{ x: 'max-content' }}
+                              columns={journalColumns}
+                            />
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </>
+                );
+              })()
           }
         </Modal>
         );
