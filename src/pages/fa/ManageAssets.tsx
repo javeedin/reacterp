@@ -971,16 +971,17 @@ const AssetTabContent: React.FC<{
     { key: 'attribute10', label: 'Attribute 10' },
   ];
 
-  // Sync attrValues when detail changes (tab first load / refresh)
+  // Sync attrValues — prefer detail (if endpoint exists), fall back to asset (search result)
   React.useEffect(() => {
-    if (detail) {
+    const source = detail || asset;
+    if (source) {
       const vals: Record<string, string> = {};
-      attrFields.forEach(f => { vals[f.key] = (detail as any)[f.key] ?? ''; });
+      attrFields.forEach(f => { vals[f.key] = (source as any)[f.key] ?? ''; });
       setAttrValues(vals);
       setAttrDirty(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detail]);
+  }, [detail, asset]);
 
   const handleAttrChange = (key: string, val: string) => {
     setAttrValues(prev => ({ ...prev, [key]: val }));
@@ -1779,7 +1780,7 @@ const AssetTabContent: React.FC<{
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
               <Text type="secondary" style={{ fontSize: 11 }}>GET</Text>
               <Text copyable style={{ fontFamily: 'monospace', fontSize: 11, color: FA_COLOR, wordBreak: 'break-all' }}>
-                {`${APEX_DB_CONFIG.baseUrl}/fa/assets/${asset.assetId}`}
+                {`${APEX_DB_CONFIG.baseUrl}/fa/assets?assetNumber=${asset.assetNumber}&limit=1`}
               </Text>
               <Tooltip title="View live API response">
                 <Button
@@ -1787,11 +1788,11 @@ const AssetTabContent: React.FC<{
                   icon={<ApiOutlined />}
                   style={{ color: FA_COLOR, borderColor: FA_COLOR, fontSize: 11 }}
                   onClick={() => {
-                    const url = `${APEX_DB_CONFIG.baseUrl}/fa/assets/${asset.assetId}`;
+                    const url = `${APEX_DB_CONFIG.baseUrl}/fa/assets?assetNumber=${asset.assetNumber}&limit=1`;
                     fetch(url, { headers: { Accept: 'application/json' } })
                       .then(r => r.json())
                       .then(data => Modal.info({
-                        title: `GET fa/assets/${asset.assetId}`,
+                        title: `GET fa/assets?assetNumber=${asset.assetNumber}`,
                         width: 820,
                         content: (
                           <div style={{ marginTop: 8 }}>
@@ -1837,9 +1838,10 @@ const AssetTabContent: React.FC<{
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <Button
                 onClick={() => {
-                  if (detail) {
+                  const source = detail || asset;
+                  if (source) {
                     const vals: Record<string, string> = {};
-                    attrFields.forEach(f => { vals[f.key] = (detail as any)[f.key] ?? ''; });
+                    attrFields.forEach(f => { vals[f.key] = (source as any)[f.key] ?? ''; });
                     setAttrValues(vals);
                     setAttrDirty(false);
                   }
