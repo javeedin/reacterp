@@ -115,7 +115,7 @@ CREATE OR REPLACE PACKAGE BODY RR_ADMIN_PKG AS
     v_hash       VARCHAR2(100);
   BEGIN
     SELECT COUNT(*) INTO v_acct_count
-      FROM RR_USER_ACCOUNTS WHERE USERNAME = UPPER(p_username);
+      FROM RR_USER_ACCOUNTS WHERE UPPER(USERNAME) = UPPER(p_username);
 
     IF v_acct_count = 0 THEN
       p_status := 'ERROR'; p_message := 'User not found.'; RETURN;
@@ -125,11 +125,11 @@ CREATE OR REPLACE PACKAGE BODY RR_ADMIN_PKG AS
 
     UPDATE RR_USER_PASSWORDS
        SET PASSWORD_HASH = v_hash
-     WHERE USERNAME = UPPER(p_username);
+     WHERE UPPER(USERNAME) = UPPER(p_username);
 
     IF SQL%ROWCOUNT = 0 THEN
       INSERT INTO RR_USER_PASSWORDS (USERNAME, PASSWORD_HASH, IS_ADMIN)
-      VALUES (UPPER(p_username), v_hash, 'N');
+      VALUES (p_username, v_hash, 'N');
     END IF;
 
     COMMIT;
@@ -151,11 +151,11 @@ CREATE OR REPLACE PACKAGE BODY RR_ADMIN_PKG AS
     v_new_hash := HASH_PASSWORD(p_new_password);
     SELECT COUNT(*) INTO v_count
       FROM RR_USER_PASSWORDS
-     WHERE USERNAME = UPPER(p_username) AND PASSWORD_HASH = v_cur_hash;
+     WHERE UPPER(USERNAME) = UPPER(p_username) AND PASSWORD_HASH = v_cur_hash;
     IF v_count = 0 THEN
       p_status := 'ERROR'; p_message := 'Current password is incorrect.'; RETURN;
     END IF;
-    UPDATE RR_USER_PASSWORDS SET PASSWORD_HASH = v_new_hash WHERE USERNAME = UPPER(p_username);
+    UPDATE RR_USER_PASSWORDS SET PASSWORD_HASH = v_new_hash WHERE UPPER(USERNAME) = UPPER(p_username);
     COMMIT;
     p_status := 'SUCCESS'; p_message := 'Password changed successfully.';
   EXCEPTION
