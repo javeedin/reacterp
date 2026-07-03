@@ -225,11 +225,10 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
                        dd.PERIOD_COUNTER,
                        dp.PERIOD_NAME,
                        NVL(dd.ACCOUNTED_STATUS, 'UNACCOUNTED'),
-                       TO_CHAR(dd.ACCOUNTED_DATE, 'YYYY-MM-DD'),
-                       TO_CHAR(LAST_DAY(NVL(dp.PERIOD_CLOSE_DATE, dd.DEPRN_RUN_DATE)), 'YYYY-MM-DD')
+                       TO_CHAR(dd.ACCOUNTED_DATE, 'YYYY-MM-DD')
                 INTO   v_asset_number, v_description, v_category_id,
                        v_deprn_amount, v_period_counter, v_period_name_out,
-                       v_acct_status, v_acct_date, v_accounting_date
+                       v_acct_status, v_acct_date
                 FROM   RR_FA_ADDITIONS a
                 JOIN   RR_FA_DEPRN_DETAIL dd
                        ON  dd.ASSET_ID       = a.ASSET_ID
@@ -246,11 +245,10 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
                        dd.PERIOD_COUNTER,
                        dp.PERIOD_NAME,
                        NVL(dd.ACCOUNTED_STATUS, 'UNACCOUNTED'),
-                       TO_CHAR(dd.ACCOUNTED_DATE, 'YYYY-MM-DD'),
-                       TO_CHAR(LAST_DAY(NVL(dp.PERIOD_CLOSE_DATE, dd.DEPRN_RUN_DATE)), 'YYYY-MM-DD')
+                       TO_CHAR(dd.ACCOUNTED_DATE, 'YYYY-MM-DD')
                 INTO   v_asset_number, v_description, v_category_id,
                        v_deprn_amount, v_period_counter, v_period_name_out,
-                       v_acct_status, v_acct_date, v_accounting_date
+                       v_acct_status, v_acct_date
                 FROM   RR_FA_ADDITIONS a
                 JOIN   RR_FA_DEPRN_DETAIL dd
                        ON  dd.ASSET_ID      = a.ASSET_ID
@@ -268,6 +266,16 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
                        || p_asset_id || ' distribution ' || NVL(p_distribution_id, 'n/a')
                        || ' period ' || NVL(v_period_name_out, p_period_name) || '"}';
             RETURN;
+        END;
+
+        -- Accounting date = last day of the depreciation period (derived from period name e.g. "Apr-25")
+        BEGIN
+            v_accounting_date := TO_CHAR(
+                LAST_DAY(TO_DATE('01-' || v_period_name_out, 'DD-Mon-YY')),
+                'YYYY-MM-DD'
+            );
+        EXCEPTION WHEN OTHERS THEN
+            v_accounting_date := TO_CHAR(LAST_DAY(SYSDATE), 'YYYY-MM-DD');
         END;
 
         -- Get deprn expense and reserve CCIDs + category description from category books
@@ -297,11 +305,6 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_ACCOUNTING_PKG AS
 
         v_expense_combo := get_account_combo(v_expense_ccid, v_company_code);
         v_reserve_combo := get_account_combo(v_reserve_ccid, v_company_code);
-
-        -- Fall back accounting date to last day of current month
-        IF v_accounting_date IS NULL THEN
-            v_accounting_date := TO_CHAR(LAST_DAY(SYSDATE), 'YYYY-MM-DD');
-        END IF;
 
         p_status := 200;
         p_response :=
