@@ -163,11 +163,12 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
 
     -- ── Private: insert one row into DEPRN_SUMMARY + DEPRN_DETAIL ────────────
     -- Called by both CREATE_DEPRECIATION and POST_ASSET_DEPRECIATION.
-    -- Generates a new DISTRIBUTION_ID when the asset has no distribution rows.
+    -- Always generates a NEW DISTRIBUTION_ID per deprn detail row (unique per period).
     PROCEDURE post_deprn_rows (
         p_asset_id         IN  VARCHAR2,
         p_book             IN  VARCHAR2,
         p_period_ctr       IN  NUMBER,
+        p_period_name      IN  VARCHAR2,
         p_deprn_amount     IN  NUMBER,
         p_new_ytd          IN  NUMBER,
         p_new_reserve      IN  NUMBER,
@@ -178,50 +179,36 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
         v_dist_id   NUMBER;
         v_now       VARCHAR2(50) := TO_CHAR(SYSDATE, 'YYYY-MM-DD"T"HH24:MI:SS".000+00:00"');
     BEGIN
-        -- Find existing active distribution for this asset/book
-        BEGIN
-            SELECT TO_NUMBER(DISTRIBUTION_ID) INTO v_dist_id
-            FROM   RR_FA_DISTRIBUTION_HISTORY
-            WHERE  ASSET_ID       = p_asset_id
-            AND    BOOK_TYPE_CODE = p_book
-            AND    DATE_EFFECTIVE IS NOT NULL
-            AND    ROWNUM = 1;
-        EXCEPTION WHEN NO_DATA_FOUND THEN
-            v_dist_id := NULL;
-        END;
+        -- Always generate a unique DISTRIBUTION_ID per deprn detail row
+        SELECT RR_FA_DISTRIBUTION_ID_SEQ.NEXTVAL
+        INTO   v_dist_id
+        FROM   DUAL;
 
-        -- Generate a new DISTRIBUTION_ID from sequence when none exists for this asset
-        IF v_dist_id IS NULL THEN
-            SELECT RR_FA_DISTRIBUTION_ID_SEQ.NEXTVAL
-            INTO   v_dist_id
-            FROM   DUAL;
-
-            INSERT INTO RR_FA_DISTRIBUTION_HISTORY (
-                DISTRIBUTION_ID, BOOK_TYPE_CODE, ASSET_ID,
-                UNITS_ASSIGNED, TRANSACTION_UNITS,
-                DATE_EFFECTIVE,
-                OBJECT_VERSION_NUMBER,
-                CREATION_DATE, CREATED_BY, LAST_UPDATE_DATE, LAST_UPDATED_BY
-            ) VALUES (
-                v_dist_id, p_book, p_asset_id,
-                1, 1,
-                SYSTIMESTAMP,
-                1,
-                SYSTIMESTAMP, p_created_by, SYSTIMESTAMP, p_created_by
-            );
-        END IF;
+        INSERT INTO RR_FA_DISTRIBUTION_HISTORY (
+            DISTRIBUTION_ID, BOOK_TYPE_CODE, ASSET_ID,
+            UNITS_ASSIGNED, TRANSACTION_UNITS,
+            DATE_EFFECTIVE,
+            OBJECT_VERSION_NUMBER,
+            CREATION_DATE, CREATED_BY, LAST_UPDATE_DATE, LAST_UPDATED_BY
+        ) VALUES (
+            v_dist_id, p_book, p_asset_id,
+            1, 1,
+            SYSTIMESTAMP,
+            1,
+            SYSTIMESTAMP, p_created_by, SYSTIMESTAMP, p_created_by
+        );
 
         p_distribution_id := v_dist_id;
 
         -- ── RR_FA_DEPRN_SUMMARY ──────────────────────────────────────────────
         INSERT INTO RR_FA_DEPRN_SUMMARY (
-            ASSET_ID,      BOOK_TYPE_CODE, PERIOD_COUNTER,
+            ASSET_ID,      BOOK_TYPE_CODE, PERIOD_COUNTER, PERIOD_NAME,
             DEPRN_AMOUNT,  YTD_DEPRN,     DEPRN_RESERVE,
             ADJUSTED_COST, DEPRN_RUN_DATE,
             CREATION_DATE,    CREATED_BY,
             LAST_UPDATE_DATE, LAST_UPDATED_BY
         ) VALUES (
-            p_asset_id,     p_book,        p_period_ctr,
+            p_asset_id,     p_book,        p_period_ctr, p_period_name,
             p_deprn_amount, p_new_ytd,     p_new_reserve,
             p_adj_cost,     SYSDATE,
             v_now,          p_created_by,
@@ -230,7 +217,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
 
         -- ── RR_FA_DEPRN_DETAIL ───────────────────────────────────────────────
         INSERT INTO RR_FA_DEPRN_DETAIL (
-            ASSET_ID,        BOOK_TYPE_CODE,   PERIOD_COUNTER,
+            ASSET_ID,        BOOK_TYPE_CODE,   PERIOD_COUNTER, PERIOD_NAME,
             DISTRIBUTION_ID, DEPRN_SOURCE_CODE,
             DEPRN_AMOUNT,    YTD_DEPRN,        DEPRN_RESERVE,
             DEPRN_ADJUSTMENT_AMOUNT,
@@ -238,7 +225,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
             CREATION_DATE,    CREATED_BY,
             LAST_UPDATE_DATE, LAST_UPDATED_BY
         ) VALUES (
-            p_asset_id,      p_book,          p_period_ctr,
+            p_asset_id,      p_book,          p_period_ctr, p_period_name,
             v_dist_id,       'DEPRECIATION',
             p_deprn_amount,  p_new_ytd,       p_new_reserve,
             0,
@@ -362,6 +349,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
             p_asset_id        => p_asset_id,
             p_book            => p_book,
             p_period_ctr      => v_period_ctr,
+            p_period_name     => p_period_name,
             p_deprn_amount    => v_final_amount,
             p_new_ytd         => v_new_ytd,
             p_new_reserve     => v_new_reserve,
@@ -618,6 +606,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_DEPRN_PKG AS
             p_asset_id        => p_asset_id,
             p_book            => p_book,
             p_period_ctr      => v_period_ctr,
+            p_period_name     => p_period_name,
             p_deprn_amount    => v_final_amount,
             p_new_ytd         => v_new_ytd,
             p_new_reserve     => v_new_reserve,
