@@ -178,7 +178,15 @@ const PO_DEFAULTS = {
 };
 
 /* ═══════════════════════════════════════════════════════ */
-const eAPI = (window as any).electronAPI;
+const _rawEAPI = (window as any).electronAPI;
+// Guard: only expose eAPI methods that are actually functions (avoids "not a function" in browser)
+const eAPI = _rawEAPI ? {
+  loadItemmaster:  typeof _rawEAPI.loadItemmaster  === 'function' ? _rawEAPI.loadItemmaster.bind(_rawEAPI)  : null,
+  saveItemmaster:  typeof _rawEAPI.saveItemmaster  === 'function' ? _rawEAPI.saveItemmaster.bind(_rawEAPI)  : null,
+  openItemsFolder: typeof _rawEAPI.openItemsFolder === 'function' ? _rawEAPI.openItemsFolder.bind(_rawEAPI) : null,
+  sendPoApproval:  typeof _rawEAPI.sendPoApproval  === 'function' ? _rawEAPI.sendPoApproval.bind(_rawEAPI)  : null,
+  isElectron:      _rawEAPI.isElectron,
+} : null;
 
 const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
   const navigate = useNavigate();
@@ -598,10 +606,13 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
 
   const buildFusionBody = (): Record<string, any> | null => {
     if (!header) return null;
-    const procBU = busUnits.find(bu => bu.BusinessUnitName === header.procurementBU);
-    const reqBU  = busUnits.find(bu => bu.BusinessUnitName === header.requisitioningBU);
-    if (!procBU?.BusinessUnitId) { message.error('Cannot resolve Procurement BU ID.'); return null; }
-    if (!header.supplierName)    { message.error('Supplier is required.'); return null; }
+    // ORDS returns snake_case: bu_name, bu_id
+    const procBU = busUnits.find(bu => (bu.bu_name ?? bu.BusinessUnitName) === header.procurementBU);
+    const reqBU  = busUnits.find(bu => (bu.bu_name ?? bu.BusinessUnitName) === header.requisitioningBU);
+    const procBUId = procBU?.bu_id ?? procBU?.BusinessUnitId;
+    const reqBUId  = reqBU?.bu_id  ?? reqBU?.BusinessUnitId;
+    if (!procBUId) { message.error('Cannot resolve Procurement BU ID. Check that Business Units loaded correctly.'); return null; }
+    if (!header.supplierName) { message.error('Supplier is required.'); return null; }
 
     const currencyObj = currencies.find(c => c.code === header.currency);
 
@@ -609,7 +620,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
     const orgObj = inventoryOrgs.find(o => o.OrganizationCode === header.shipToOrg);
 
     return {
-      ProcurementBUId:           procBU.BusinessUnitId,
+      ProcurementBUId:           procBUId,
       OrderNumber:               header.poNumber,
       RequiredAcknowledgment:    'None',
       CurrencyCode:              header.currency,
@@ -620,7 +631,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
       ConversionRate:            null,
       Buyer:                     header.buyer || null,
       PayOnReceiptFlag:          header.payOnReceipt ? 'Y' : 'N',
-      RequisitioningBUId:        reqBU?.BusinessUnitId ?? null,
+      RequisitioningBUId:        reqBUId ?? null,
       Supplier:                  header.supplierName,
       SupplierSite:              header.supplierSite       || null,
       BillToLocation:            header.billToLocation     || null,
@@ -1333,7 +1344,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
 
       const subject = `[Approval Required] Purchase Order ${header.poNumber} — ${header.supplierName} — ${fmt(grandTotal)} ${header.currency}`;
 
-      const result = await eAPI?.sendPoApproval({
+      const result = await eAPI?.sendPoApproval?.({
         toEmails: toList,
         ccEmails: ccList,
         subject,
@@ -1365,7 +1376,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
 
     // Try reading from cached Excel file first — no network call needed
     try {
-      const cached = await eAPI?.loadItemmaster(header.shipToOrg);
+      const cached = await eAPI?.loadItemmaster?.(header.shipToOrg);
       if (cached && cached.items?.length > 0) {
         setItems(cached.items);
         setItemCacheTs(cached.ts ?? '');
@@ -1381,7 +1392,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
       if (all.length === 0) {
         message.warning(`Item master returned 0 records for org "${header.shipToOrg}". Check that the org code is correct.`);
       }
-      const saved = await eAPI?.saveItemmaster(header.shipToOrg, all);
+      const saved = await eAPI?.saveItemmaster?.(header.shipToOrg, all);
       if (saved?.ts) setItemCacheTs(saved.ts);
     } catch (e: any) {
       setItems([]);
@@ -1396,7 +1407,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
     try {
       const all = await fetchLOV(url, false);
       setItems(all);
-      const saved = await eAPI?.saveItemmaster(header.shipToOrg, all);
+      const saved = await eAPI?.saveItemmaster?.(header.shipToOrg, all);
       if (saved?.ts) setItemCacheTs(saved.ts);
       message.success(`Item master refreshed — ${all.length} items saved to file`);
     } catch (e: any) {
@@ -1465,12 +1476,12 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
     let masterItems = items;
     if (masterItems.length === 0 && header) {
       try {
-        const cached = await eAPI?.loadItemmaster(header.shipToOrg);
+        const cached = await eAPI?.loadItemmaster?.(header.shipToOrg);
         if (cached?.items?.length > 0) {
           masterItems = cached.items;
         } else {
           masterItems = await fetchLOV(`${ORDS_BASE}/inventory/itemmaster?org=${header.shipToOrg}`, false);
-          const saved = await eAPI?.saveItemmaster(header.shipToOrg, masterItems);
+          const saved = await eAPI?.saveItemmaster?.(header.shipToOrg, masterItems);
           if (saved?.ts) setItemCacheTs(saved.ts);
         }
         setItems(masterItems);
@@ -2006,21 +2017,21 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
                       <Select size="small" variant="borderless" showSearch optionFilterProp="children"
                         value={header.procurementBU} style={{ width: '100%', marginLeft: -7, color: C.text }}
                         onChange={v => patch({ procurementBU: v, requisitioningBU: v })}>
-                        {busUnits.map(bu => <Option key={bu.BusinessUnitId ?? bu.BusinessUnitName} value={bu.BusinessUnitName}>{bu.BusinessUnitName}</Option>)}
+                        {busUnits.map(bu => <Option key={bu.bu_id ?? bu.BusinessUnitId ?? bu.bu_name} value={bu.bu_name ?? bu.BusinessUnitName}>{bu.bu_name ?? bu.BusinessUnitName}</Option>)}
                       </Select>
                     } />
                     <FieldPair label="Requisitioning BU" value={
                       <Select size="small" variant="borderless" showSearch optionFilterProp="children"
                         value={header.requisitioningBU} style={{ width: '100%', marginLeft: -7, color: C.text }}
                         onChange={v => patch({ requisitioningBU: v })}>
-                        {busUnits.map(bu => <Option key={`rq-${bu.BusinessUnitId ?? bu.BusinessUnitName}`} value={bu.BusinessUnitName}>{bu.BusinessUnitName}</Option>)}
+                        {busUnits.map(bu => <Option key={`rq-${bu.bu_id ?? bu.BusinessUnitId ?? bu.bu_name}`} value={bu.bu_name ?? bu.BusinessUnitName}>{bu.bu_name ?? bu.BusinessUnitName}</Option>)}
                       </Select>
                     } />
                     <FieldPair label="Bill-to BU" value={
                       <Select size="small" variant="borderless" showSearch optionFilterProp="children"
                         value={header.billToBU} style={{ width: '100%', marginLeft: -7, color: C.text }}
                         onChange={v => patch({ billToBU: v })}>
-                        {busUnits.map(bu => <Option key={`bt-${bu.BusinessUnitId ?? bu.BusinessUnitName}`} value={bu.BusinessUnitName}>{bu.BusinessUnitName}</Option>)}
+                        {busUnits.map(bu => <Option key={`bt-${bu.bu_id ?? bu.BusinessUnitId ?? bu.bu_name}`} value={bu.bu_name ?? bu.BusinessUnitName}>{bu.bu_name ?? bu.BusinessUnitName}</Option>)}
                       </Select>
                     } />
                     <FieldPair label="Ship-to Org" value={
@@ -2947,7 +2958,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
                   <Button
                     size="small"
                     icon={<BuildOutlined />}
-                    onClick={() => eAPI?.openItemsFolder()}
+                    onClick={() => eAPI?.openItemsFolder?.()}
                     style={{ fontSize: 12 }}
                   >
                     Open Folder
