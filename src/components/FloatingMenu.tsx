@@ -39,6 +39,7 @@ import {
   EyeInvisibleOutlined,
   RightOutlined,
   CloudDownloadOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -148,7 +149,15 @@ const administrationItems: MenuItemType[] = [
   { key: 'attachments', icon: <CloudDownloadOutlined />, label: 'Attachments', description: 'Download invoice attachments from Oracle Fusion in bulk', color: '#722ed1', path: '/ap/attachments' },
 ];
 
+const arTaskItems: MenuItemType[] = [
+  { key: 'ar-manage-customers',    icon: <UserOutlined />,     label: 'Manage Customers',        description: 'Search customers and view activity', color: REDWOOD.info,     path: '/ar/manage-customers' },
+  { key: 'ar-manage-receipts',     icon: <DollarOutlined />,   label: 'Manage Receipts',          description: 'Search and manage AR receipts',      color: REDWOOD.success,  path: '/ar/manage-receipts' },
+  { key: 'ar-manage-receivables',  icon: <FileTextOutlined />, label: 'Manage Receivables',       description: 'View AR invoices and balances',       color: REDWOOD.primary,  path: '/ar/manage-receivables' },
+  { key: 'ar-customer-activities', icon: <BankOutlined />,     label: 'Customer Site Activities', description: 'Customer site-level AR summary',      color: '#722ed1',         path: '/ar/customer-site-activities' },
+];
+
 const taskSections = [
+  { key: 'ar', label: 'Accounts Receivable', items: arTaskItems },
   { key: 'invoices', label: 'Invoices', items: invoiceTaskItems },
   { key: 'accounting', label: 'Accounting', items: accountingTaskItems },
   { key: 'petty-cash', label: 'Petty Cash', items: pettyCashItems },

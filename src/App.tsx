@@ -53,6 +53,7 @@ const ARManageAdjustments     = lazy(() => import('./pages/ar/ManageAdjustments'
 const ARManageCreditMemos     = lazy(() => import('./pages/ar/ManageCreditMemos'));
 const ARSyncCMApplications    = lazy(() => import('./pages/ar/SyncCMApplications'));
 const ARCustomerSiteActivities = lazy(() => import('./pages/ar/CustomerSiteActivities'));
+const ARManageCustomers        = lazy(() => import('./pages/ar/ManageCustomers'));
 const ManageInvoices          = lazy(() => import('./pages/ap/ManageInvoices'));
 const ManageDistCombinations  = lazy(() => import('./pages/ap/ManageDistCombinations'));
 const APReports               = lazy(() => import('./pages/ap/APReports'));
@@ -245,6 +246,7 @@ function App() {
               <Route path="ar/manage-credit-memos" element={<ARManageCreditMemos />} />
               <Route path="ar/sync-cm-applications" element={<ARSyncCMApplications />} />
               <Route path="ar/customer-site-activities" element={<ARCustomerSiteActivities />} />
+              <Route path="ar/manage-customers" element={<ARManageCustomers />} />
               <Route path="ar/*" element={<ARModule />} />
               <Route path="inventory/onhand" element={<ManageOnhandInventory />} />
               <Route path="inventory/subinventories" element={<Subinventories />} />
