@@ -25,7 +25,10 @@ const { Text, Title } = Typography;
 const { Option } = Select;
 
 const FUSION_BASE = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05';
-const ORDS_BASE   = 'https://g827cd88c3cfc03-mitsumioracledb.adb.me-dubai-1.oraclecloudapps.com/ords/test/FUSIONCLIENTERP';
+// In dev (localhost) use Vite proxy to avoid CORS; in Electron/production use direct URL.
+const ORDS_BASE   = window.location.hostname === 'localhost'
+  ? '/ords-mitsu'
+  : 'https://g827cd88c3cfc03-mitsumioracledb.adb.me-dubai-1.oraclecloudapps.com/ords/test/FUSIONCLIENTERP';
 const GL_ORDS_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp';
 const AUTH_HEADER = 'Basic ' + btoa('emparun:Fusion@1234');
 const FUSION_HDRS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
@@ -46,10 +49,16 @@ const fetchLOV = async (url: string, auth = true): Promise<any[]> => {
   while (true) {
     const sep = url.includes('?') ? '&' : '?';
     const r = await fetch(`${url}${sep}limit=500&offset=${offset}`, auth ? { headers: FUSION_HDRS } : {});
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (!r.ok) {
+      const body = await r.text().catch(() => '');
+      throw new Error(`HTTP ${r.status}${body ? ` — ${body.slice(0, 200)}` : ''}`);
+    }
     const d = await r.json();
-    const items = d.items ?? (Array.isArray(d) ? d : []);
+    // ORDS collection feeds return { items: [...], hasMore: bool }
+    // Some ORDS handlers return { rows: [...] } or plain arrays
+    const items: any[] = d.items ?? d.rows ?? (Array.isArray(d) ? d : []);
     all.push(...items);
+    // hasMore can be boolean or string; stop if false/missing or fewer than 500 returned
     if (!d.hasMore || items.length < 500) break;
     offset += 500;
   }
@@ -1369,9 +1378,15 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
     try {
       const all = await fetchLOV(url, false);
       setItems(all);
+      if (all.length === 0) {
+        message.warning(`Item master returned 0 records for org "${header.shipToOrg}". Check that the org code is correct.`);
+      }
       const saved = await eAPI?.saveItemmaster(header.shipToOrg, all);
       if (saved?.ts) setItemCacheTs(saved.ts);
-    } catch { setItems([]); } finally { setItemsLoading(false); }
+    } catch (e: any) {
+      setItems([]);
+      message.error(`Failed to load item master: ${e?.message ?? 'Network or CORS error — check browser console'}`);
+    } finally { setItemsLoading(false); }
   };
 
   const refreshItems = async () => {
@@ -1384,7 +1399,9 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
       const saved = await eAPI?.saveItemmaster(header.shipToOrg, all);
       if (saved?.ts) setItemCacheTs(saved.ts);
       message.success(`Item master refreshed — ${all.length} items saved to file`);
-    } catch { message.error('Failed to refresh item master'); } finally { setItemsLoading(false); }
+    } catch (e: any) {
+      message.error(`Failed to refresh item master: ${e?.message ?? 'Network or CORS error'}`);
+    } finally { setItemsLoading(false); }
   };
 
   const exportItemsExcel = () => {

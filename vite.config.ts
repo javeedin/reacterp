@@ -18,6 +18,17 @@ export default defineConfig(() => {
   return {
     plugins: [react()],
     base: process.env.GITHUB_ACTIONS ? '/reacterp/' : './',
+    server: {
+      proxy: {
+        // Proxy Mitsumi ORDS calls to avoid CORS in dev
+        '/ords-mitsu': {
+          target: 'https://g827cd88c3cfc03-mitsumioracledb.adb.me-dubai-1.oraclecloudapps.com',
+          changeOrigin: true,
+          rewrite: (path: string) => path.replace(/^\/ords-mitsu/, '/ords/test/FUSIONCLIENTERP'),
+          secure: true,
+        },
+      },
+    },
     define: {
       __BREVO_API_KEY__: JSON.stringify(emailCfg.pass ?? ''),
       __BREVO_SENDER__:  JSON.stringify(emailCfg.user ?? ''),
