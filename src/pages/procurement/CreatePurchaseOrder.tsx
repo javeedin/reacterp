@@ -25,10 +25,9 @@ const { Text, Title } = Typography;
 const { Option } = Select;
 
 const FUSION_BASE = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05';
+const ORDS_DIRECT = 'https://g827cd88c3cfc03-mitsumioracledb.adb.me-dubai-1.oraclecloudapps.com/ords/test/FUSIONCLIENTERP';
 // In dev (localhost) use Vite proxy to avoid CORS; in Electron/production use direct URL.
-const ORDS_BASE   = window.location.hostname === 'localhost'
-  ? '/ords-mitsu'
-  : 'https://g827cd88c3cfc03-mitsumioracledb.adb.me-dubai-1.oraclecloudapps.com/ords/test/FUSIONCLIENTERP';
+const ORDS_BASE   = window.location.hostname === 'localhost' ? '/ords-mitsu' : ORDS_DIRECT;
 const GL_ORDS_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp';
 const AUTH_HEADER = 'Basic ' + btoa('emparun:Fusion@1234');
 const FUSION_HDRS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
@@ -179,14 +178,27 @@ const PO_DEFAULTS = {
 
 /* ═══════════════════════════════════════════════════════ */
 const _rawEAPI = (window as any).electronAPI;
-// Guard: only expose eAPI methods that are actually functions (avoids "not a function" in browser)
 const eAPI = _rawEAPI ? {
-  loadItemmaster:  typeof _rawEAPI.loadItemmaster  === 'function' ? _rawEAPI.loadItemmaster.bind(_rawEAPI)  : null,
-  saveItemmaster:  typeof _rawEAPI.saveItemmaster  === 'function' ? _rawEAPI.saveItemmaster.bind(_rawEAPI)  : null,
   openItemsFolder: typeof _rawEAPI.openItemsFolder === 'function' ? _rawEAPI.openItemsFolder.bind(_rawEAPI) : null,
   sendPoApproval:  typeof _rawEAPI.sendPoApproval  === 'function' ? _rawEAPI.sendPoApproval.bind(_rawEAPI)  : null,
   isElectron:      _rawEAPI.isElectron,
 } : null;
+
+// Item master cache via localStorage (works in both browser and Electron)
+const ITEM_CACHE_KEY = (org: string) => `po_itemmaster_${org}`;
+const saveItemmasterCache = (org: string, items: any[]) => {
+  try {
+    localStorage.setItem(ITEM_CACHE_KEY(org), JSON.stringify({ items, ts: new Date().toISOString() }));
+  } catch { /* quota exceeded — ignore */ }
+};
+const loadItemmasterCache = (org: string): { items: any[]; ts: string } | null => {
+  try {
+    const raw = localStorage.getItem(ITEM_CACHE_KEY(org));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed?.items?.length > 0 ? parsed : null;
+  } catch { return null; }
+};
 
 const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
   const navigate = useNavigate();
@@ -606,11 +618,11 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
 
   const buildFusionBody = (): Record<string, any> | null => {
     if (!header) return null;
-    // ORDS returns snake_case: bu_name, bu_id
+    // ORDS returns snake_case: bu_name, business_unit_id
     const procBU = busUnits.find(bu => (bu.bu_name ?? bu.BusinessUnitName) === header.procurementBU);
     const reqBU  = busUnits.find(bu => (bu.bu_name ?? bu.BusinessUnitName) === header.requisitioningBU);
-    const procBUId = procBU?.bu_id ?? procBU?.BusinessUnitId;
-    const reqBUId  = reqBU?.bu_id  ?? reqBU?.BusinessUnitId;
+    const procBUId = procBU?.business_unit_id ?? procBU?.bu_id ?? procBU?.BusinessUnitId;
+    const reqBUId  = reqBU?.business_unit_id  ?? reqBU?.bu_id  ?? reqBU?.BusinessUnitId;
     if (!procBUId) { message.error('Cannot resolve Procurement BU ID. Check that Business Units loaded correctly.'); return null; }
     if (!header.supplierName) { message.error('Supplier is required.'); return null; }
 
@@ -1370,30 +1382,29 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
   const openAddItem = async () => {
     if (!header) return;
     const url = `${ORDS_BASE}/inventory/itemmaster?org=${header.shipToOrg}`;
-    setAddItemApiUrl(url);
+    setAddItemApiUrl(`${ORDS_DIRECT}/inventory/itemmaster?org=${header.shipToOrg}`);
     setAddItemOpen(true); setSearchTerm(''); setSelectedItemKeys([]);
     setAddItemTab('browse'); setPastedRows([]); setPasteText('');
 
-    // Try reading from cached Excel file first — no network call needed
-    try {
-      const cached = await eAPI?.loadItemmaster?.(header.shipToOrg);
-      if (cached && cached.items?.length > 0) {
-        setItems(cached.items);
-        setItemCacheTs(cached.ts ?? '');
-        return;
-      }
-    } catch { /* fall through to API */ }
+    // Load from localStorage cache first — no network call needed
+    const cached = loadItemmasterCache(header.shipToOrg);
+    if (cached) {
+      setItems(cached.items);
+      setItemCacheTs(cached.ts);
+      return;
+    }
 
-    // First time or cache missing: fetch from API and write Excel file
+    // Cache miss — fetch from API and save to localStorage
     setItemsLoading(true);
     try {
       const all = await fetchLOV(url, false);
       setItems(all);
       if (all.length === 0) {
         message.warning(`Item master returned 0 records for org "${header.shipToOrg}". Check that the org code is correct.`);
+      } else {
+        saveItemmasterCache(header.shipToOrg, all);
+        setItemCacheTs(new Date().toISOString());
       }
-      const saved = await eAPI?.saveItemmaster?.(header.shipToOrg, all);
-      if (saved?.ts) setItemCacheTs(saved.ts);
     } catch (e: any) {
       setItems([]);
       message.error(`Failed to load item master: ${e?.message ?? 'Network or CORS error — check browser console'}`);
@@ -1407,9 +1418,10 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
     try {
       const all = await fetchLOV(url, false);
       setItems(all);
-      const saved = await eAPI?.saveItemmaster?.(header.shipToOrg, all);
-      if (saved?.ts) setItemCacheTs(saved.ts);
-      message.success(`Item master refreshed — ${all.length} items saved to file`);
+      saveItemmasterCache(header.shipToOrg, all);
+      const ts = new Date().toISOString();
+      setItemCacheTs(ts);
+      message.success(`Item master refreshed — ${all.length} items cached`);
     } catch (e: any) {
       message.error(`Failed to refresh item master: ${e?.message ?? 'Network or CORS error'}`);
     } finally { setItemsLoading(false); }
@@ -1476,13 +1488,15 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
     let masterItems = items;
     if (masterItems.length === 0 && header) {
       try {
-        const cached = await eAPI?.loadItemmaster?.(header.shipToOrg);
-        if (cached?.items?.length > 0) {
+        const cached = loadItemmasterCache(header.shipToOrg);
+        if (cached) {
           masterItems = cached.items;
         } else {
           masterItems = await fetchLOV(`${ORDS_BASE}/inventory/itemmaster?org=${header.shipToOrg}`, false);
-          const saved = await eAPI?.saveItemmaster?.(header.shipToOrg, masterItems);
-          if (saved?.ts) setItemCacheTs(saved.ts);
+          if (masterItems.length > 0) {
+            saveItemmasterCache(header.shipToOrg, masterItems);
+            setItemCacheTs(new Date().toISOString());
+          }
         }
         setItems(masterItems);
       } catch { /* use empty */ }
@@ -1825,7 +1839,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
               {
                 label: 'Business Units (Procurement BU / Bill To BU)',
                 method: 'GET', tag: 'blue',
-                url: `${ORDS_BASE}/BUSINESS_UNITS`,
+                url: `${ORDS_DIRECT}/BUSINESS_UNITS`,
                 note: 'ORDS: list of business units with Company Code and default Currency — used to populate BU dropdowns and auto-fill currency on selection',
                 source: 'ORDS / Fusion Client ERP',
               },
@@ -1846,7 +1860,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
               {
                 label: 'Subinventories',
                 method: 'GET', tag: 'blue',
-                url: `${ORDS_BASE}/inventory/inventorywarehousesubinventory?limit=500&offset=0`,
+                url: `${ORDS_DIRECT}/inventory/inventorywarehousesubinventory?limit=500&offset=0`,
                 note: 'ORDS: warehouse sub-inventory codes, filtered client-side by selected ship-to org',
                 source: 'ORDS / Fusion Client ERP',
               },
@@ -2017,21 +2031,21 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
                       <Select size="small" variant="borderless" showSearch optionFilterProp="children"
                         value={header.procurementBU} style={{ width: '100%', marginLeft: -7, color: C.text }}
                         onChange={v => patch({ procurementBU: v, requisitioningBU: v })}>
-                        {busUnits.map(bu => <Option key={bu.bu_id ?? bu.BusinessUnitId ?? bu.bu_name} value={bu.bu_name ?? bu.BusinessUnitName}>{bu.bu_name ?? bu.BusinessUnitName}</Option>)}
+                        {busUnits.map(bu => <Option key={bu.business_unit_id ?? bu.bu_id ?? bu.bu_name} value={bu.bu_name ?? bu.BusinessUnitName}>{bu.bu_name ?? bu.BusinessUnitName}</Option>)}
                       </Select>
                     } />
                     <FieldPair label="Requisitioning BU" value={
                       <Select size="small" variant="borderless" showSearch optionFilterProp="children"
                         value={header.requisitioningBU} style={{ width: '100%', marginLeft: -7, color: C.text }}
                         onChange={v => patch({ requisitioningBU: v })}>
-                        {busUnits.map(bu => <Option key={`rq-${bu.bu_id ?? bu.BusinessUnitId ?? bu.bu_name}`} value={bu.bu_name ?? bu.BusinessUnitName}>{bu.bu_name ?? bu.BusinessUnitName}</Option>)}
+                        {busUnits.map(bu => <Option key={`rq-${bu.business_unit_id ?? bu.bu_id ?? bu.bu_name}`} value={bu.bu_name ?? bu.BusinessUnitName}>{bu.bu_name ?? bu.BusinessUnitName}</Option>)}
                       </Select>
                     } />
                     <FieldPair label="Bill-to BU" value={
                       <Select size="small" variant="borderless" showSearch optionFilterProp="children"
                         value={header.billToBU} style={{ width: '100%', marginLeft: -7, color: C.text }}
                         onChange={v => patch({ billToBU: v })}>
-                        {busUnits.map(bu => <Option key={`bt-${bu.bu_id ?? bu.BusinessUnitId ?? bu.bu_name}`} value={bu.bu_name ?? bu.BusinessUnitName}>{bu.bu_name ?? bu.BusinessUnitName}</Option>)}
+                        {busUnits.map(bu => <Option key={`bt-${bu.business_unit_id ?? bu.bu_id ?? bu.bu_name}`} value={bu.bu_name ?? bu.BusinessUnitName}>{bu.bu_name ?? bu.BusinessUnitName}</Option>)}
                       </Select>
                     } />
                     <FieldPair label="Ship-to Org" value={
