@@ -118,8 +118,19 @@ const AssetTabContent: React.FC<{
   const [posting,        setPosting]        = useState(false);
 
   const openDeprnPreview = () => {
+    const b0 = books[0];
+    // Depreciation begins on the book's depreciation start date, which Oracle derives from
+    // the date placed in service + the prorate convention — NOT on the DPIS itself. For the
+    // common "following month" convention an asset placed 30-Sep-2023 starts depreciating
+    // 01-Oct-2023, so the placed-in-service month must not be depreciated. Prefer the
+    // backend-provided start date; fall back to the prorate date; finally derive the first
+    // day of the month following the DPIS.
     const dpis = asset.datePlacedInService;
-    setDeprnFromDate(dpis ? dayjs(dpis) : null);
+    const startSource =
+      b0?.deprnStartDate ||
+      b0?.prorateDate ||
+      (dpis ? dayjs(dpis).add(1, 'month').startOf('month').format('YYYY-MM-DD') : '');
+    setDeprnFromDate(startSource ? dayjs(startSource) : null);
     setDeprnToDate(dayjs());
     setDeprnRows([]);
     setSelectedPeriods(new Set());
@@ -1465,7 +1476,7 @@ const AssetTabContent: React.FC<{
 
               <Row gutter={[12, 0]} style={{ marginBottom: 12 }}>
                 <Col xs={24} sm={8}>
-                  <div style={{ marginBottom: 4 }}><Text type="secondary" style={{ fontSize: 11 }}>From Date (Date in Service)</Text></div>
+                  <div style={{ marginBottom: 4 }}><Text type="secondary" style={{ fontSize: 11 }}>From Date (Deprn Start)</Text></div>
                   <DatePicker style={{ width: '100%' }} value={deprnFromDate} format="DD-MMM-YYYY" onChange={v => { setDeprnFromDate(v); setDeprnRows([]); setSelectedPeriods(new Set()); }} />
                 </Col>
                 <Col xs={24} sm={8}>
