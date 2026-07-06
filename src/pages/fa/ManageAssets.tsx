@@ -119,17 +119,15 @@ const AssetTabContent: React.FC<{
 
   const openDeprnPreview = () => {
     const b0 = books[0];
-    // Depreciation begins on the book's depreciation start date, which Oracle derives from
-    // the date placed in service + the prorate convention — NOT on the DPIS itself. For the
-    // common "following month" convention an asset placed 30-Sep-2023 starts depreciating
-    // 01-Oct-2023, so the placed-in-service month must not be depreciated. Prefer the
-    // backend-provided start date; fall back to the prorate date; finally derive the first
-    // day of the month following the DPIS.
+    // Depreciation starts the month AFTER the date placed in service (following-month
+    // prorate convention): an asset placed 30-Sep-2022 first depreciates in Oct-2022, so the
+    // placed-in-service month must never be depreciated. We derive this from the DPIS rather
+    // than the backend deprnStartDate/prorateDate because those fields come back equal to the
+    // DPIS for these assets. Fall back to the backend start dates only when DPIS is missing.
     const dpis = asset.datePlacedInService;
-    const startSource =
-      b0?.deprnStartDate ||
-      b0?.prorateDate ||
-      (dpis ? dayjs(dpis).add(1, 'month').startOf('month').format('YYYY-MM-DD') : '');
+    const startSource = dpis
+      ? dayjs(dpis).add(1, 'month').startOf('month').format('YYYY-MM-DD')
+      : (b0?.deprnStartDate || b0?.prorateDate || '');
     setDeprnFromDate(startSource ? dayjs(startSource) : null);
     setDeprnToDate(dayjs());
     setDeprnRows([]);
