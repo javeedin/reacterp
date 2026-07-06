@@ -205,6 +205,33 @@ const AssetTabContent: React.FC<{
     setDeprnRows(rows);
   };
 
+  const exportPreviewToExcel = () => {
+    if (!deprnRows.length) return;
+    const num = (n: number) => Number(n.toFixed(2));
+    const data: Record<string, string | number>[] = deprnRows.map(r => ({
+      'Period':       r.period,
+      'Days':         r.days,
+      'Daily Rate':   num(r.dailyRate),
+      'Opening NBV':  num(r.openingNbv),
+      'Depreciation': num(r.depreciation),
+      'Closing NBV':  num(r.closingNbv),
+      'Status':       isPosted(r.period) ? 'Posted' : '',
+    }));
+    data.push({
+      'Period':       `Total (${deprnRows.length} months)`,
+      'Days':         deprnRows.reduce((s, r) => s + r.days, 0),
+      'Daily Rate':   '',
+      'Opening NBV':  '',
+      'Depreciation': num(deprnRows.reduce((s, r) => s + r.depreciation, 0)),
+      'Closing NBV':  num(deprnRows[deprnRows.length - 1].closingNbv),
+      'Status':       '',
+    });
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Deprn Preview');
+    XLSX.writeFile(wb, `deprn_preview_asset${asset.assetId}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
   // Derived unique option lists for filter dropdowns
   const fyOptions     = Array.from(new Set(deprn.map(r => r.fiscalYear).filter(Boolean))).sort((a, b) => b.localeCompare(a));
   const periodOptions = Array.from(new Set(deprn.map(r => r.periodName).filter(Boolean))).sort((a, b) => b.localeCompare(a));
@@ -1510,6 +1537,7 @@ const AssetTabContent: React.FC<{
 
               {deprnRows.length > 0 && (() => {
                 const totalDeprn = deprnRows.reduce((s, r) => s + r.depreciation, 0);
+                const totalDays  = deprnRows.reduce((s, r) => s + r.days, 0);
                 const finalNbv   = deprnRows[deprnRows.length - 1].closingNbv;
                 const fmt = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 const selectableCount = deprnRows.filter(r => !isPosted(r.period)).length;
@@ -1589,19 +1617,24 @@ const AssetTabContent: React.FC<{
                         })}
                       </div>
                       {/* Totals */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '36px 110px 1fr 1fr 1fr 90px', padding: '6px 12px', fontSize: 12, fontWeight: 700, background: '#fff3cd', borderTop: `2px solid ${REDWOOD.warning}` }}>
-                        <span /><span>Total ({deprnRows.length} months)</span>
+                      <div style={{ display: 'grid', gridTemplateColumns: '36px 90px 50px 110px 1fr 1fr 1fr 90px', padding: '6px 12px', fontSize: 12, fontWeight: 700, background: '#fff3cd', borderTop: `2px solid ${REDWOOD.warning}` }}>
+                        <span />
+                        <span>Total ({deprnRows.length} mo)</span>
+                        <span style={{ textAlign: 'right', fontFamily: 'monospace' }}>{totalDays}</span>
+                        <span />
                         <span />
                         <span style={{ textAlign: 'right', fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(totalDeprn)}</span>
                         <span style={{ textAlign: 'right', fontFamily: 'monospace' }}>{fmt(finalNbv)}</span>
                         <span />
                       </div>
                     </div>
-                    <Space>
+                    <Space wrap>
                       <Tag color="orange">Total Depreciation: {fmt(totalDeprn)}</Tag>
                       <Tag color="blue">Final NBV: {fmt(finalNbv)}</Tag>
                       <Tag color="green">{deprnRows.length} months</Tag>
+                      <Tag color="geekblue">Total Days: {totalDays}</Tag>
                       {postedPeriods.size > 0 && <Tag color="success">{deprnRows.filter(r => isPosted(r.period)).length} already posted</Tag>}
+                      <Button size="small" icon={<DownloadOutlined />} onClick={exportPreviewToExcel}>Excel</Button>
                     </Space>
                   </>
                 );
