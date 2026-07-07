@@ -788,6 +788,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [mpaTabGenerating,setMpaTabGenerating]= useState(false);
   const [mpaTabApiUrl,    setMpaTabApiUrl]    = useState('');
   const [mpaError,        setMpaError]        = useState<string | null>(null);
+  const [mpaGenerating,   setMpaGenerating]   = useState(false);
   const [unapplyLoading, setUnapplyLoading] = useState(false);
 
   // Prepayment invoice view: balance + applied invoices
@@ -4877,6 +4878,30 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       setApiExecInstall({ loading: false, httpStatus: res.status, body: pretty });
     } catch (e: any) {
       setApiExecInstall({ loading: false, httpStatus: 0, body: e?.message ?? 'Network error' });
+    }
+  };
+
+  // Generate (or regenerate) the multiperiod schedule from the schedule modal, then reload it.
+  const handleGenerateMpaFromModal = async () => {
+    const invId = savedInvoiceId ?? initialData?.invoiceId ?? null;
+    if (!invId) { message.warning('Save the invoice first to generate its multiperiod schedule.'); return; }
+    setMpaGenerating(true);
+    setMpaError(null);
+    try {
+      await generateMpaSchedule(invId);
+      const detail = await getMpaSchedule(invId);
+      const rows = detail.lines || [];
+      setMpaSchedule(rows);
+      if (rows.length === 0) {
+        message.warning('No schedule rows generated. Ensure each line has start & end dates in different months plus an accrual account, then save the invoice and try again.');
+      } else {
+        message.success(`Multiperiod schedule generated — ${rows.length} row(s)`);
+      }
+    } catch (e: any) {
+      setMpaError(e?.message ?? 'Failed to generate schedule');
+      message.error(e?.message || 'Failed to generate schedule');
+    } finally {
+      setMpaGenerating(false);
     }
   };
 
@@ -12753,9 +12778,21 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
             <CalendarOutlined style={{ color: REDWOOD.primary }} />
             <span>Multiperiod Accounting Schedule</span>
             {mpaSchedule.length > 0 && (
-              <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
-                ({mpaSchedule.length} row{mpaSchedule.length !== 1 ? 's' : ''})
-              </Text>
+              <>
+                <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
+                  ({mpaSchedule.length} row{mpaSchedule.length !== 1 ? 's' : ''})
+                </Text>
+                <Tooltip title="Rebuild the schedule from the current saved lines">
+                  <Button
+                    size="small"
+                    icon={<PlayCircleOutlined />}
+                    loading={mpaGenerating}
+                    onClick={handleGenerateMpaFromModal}
+                  >
+                    Regenerate
+                  </Button>
+                </Tooltip>
+              </>
             )}
           </Space>
         }
@@ -12772,13 +12809,25 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
           <Alert type="warning" showIcon message="Could not load multiperiod schedule" description={mpaError} />
         )}
         {!mpaLoading && !mpaError && mpaSchedule.length === 0 && (
-          <Alert
-            type="info"
-            showIcon
-            message="No multiperiod schedule found for this invoice"
-            description="Multiperiod schedule is generated when the invoice has lines with start/end dates and an accrual account set. Save the invoice to generate the schedule."
-            style={{ margin: '16px 0' }}
-          />
+          <div style={{ margin: '16px 0' }}>
+            <Alert
+              type="info"
+              showIcon
+              message="No multiperiod schedule found for this invoice"
+              description="Multiperiod schedule is generated from lines that have start/end dates spanning different months and an accrual account set. Click Generate to build it now."
+            />
+            <div style={{ textAlign: 'center', marginTop: 16 }}>
+              <Button
+                type="primary"
+                icon={<PlayCircleOutlined />}
+                loading={mpaGenerating}
+                onClick={handleGenerateMpaFromModal}
+                style={{ background: '#722ed1', borderColor: '#722ed1' }}
+              >
+                Generate Multiperiod Schedule
+              </Button>
+            </div>
+          </div>
         )}
         {!mpaLoading && mpaSchedule.length > 0 && (() => {
           const totalAmt = mpaSchedule.reduce((s, l) => s + (l.periodAmount || 0), 0);
