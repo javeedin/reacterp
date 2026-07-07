@@ -193,14 +193,31 @@ const formatCurrency = (amount: number, currency: string = 'AED'): string => {
 };
 
 // Format date
+// Parse a date that may arrive as ISO (YYYY-MM-DD[THH:mm:ssZ]), Oracle DD-MON-YYYY
+// (e.g. 31-JUL-2026), DD-MMM-YYYY, or space-separated "DD MMM YYYY". Returns a dayjs
+// object or null. Centralises parsing so load (formatDateStr) and save (toISODate) agree.
+const parseFlexDate = (input: string | null | undefined): dayjs.Dayjs | null => {
+  if (!input) return null;
+  const s = String(input).trim();
+  if (!s) return null;
+  // Normalise a "DD-MON-YYYY" / "DD MON YYYY" style token so the month is Title-case
+  // (dayjs's MMM token is case-sensitive, so "31-JUL-2026" would otherwise fail).
+  const m = s.match(/^(\d{1,2})[-\s]([A-Za-z]{3,})[-\s](\d{4})$/);
+  const normalised = m
+    ? `${m[1].padStart(2, '0')}-${m[2][0].toUpperCase()}${m[2].slice(1, 3).toLowerCase()}-${m[3]}`
+    : s;
+  const d = dayjs(normalised, [
+    'DD-MMM-YYYY', 'YYYY-MM-DD', 'YYYY-MM-DDTHH:mm:ss',
+    'YYYY-MM-DDTHH:mm:ssZ', 'YYYY-MM-DDTHH:mm:ss.SSSZ', 'DD-MMMM-YYYY',
+  ], false);
+  if (d.isValid()) return d;
+  const native = dayjs(new Date(s));
+  return native.isValid() ? native : null;
+};
+
 const formatDateStr = (dateStr: string | null): string => {
-  if (!dateStr) return '';
-  try {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-  } catch {
-    return dateStr;
-  }
+  const d = parseFlexDate(dateStr);
+  return d ? d.format('DD-MMM-YYYY') : '';
 };
 
 // Aging color helper
@@ -4370,21 +4387,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const buildInvoicePayload = (values: any) => {
     const invoiceDate = values.invoiceDate?.format('YYYY-MM-DD') || '';
 
-    // Convert DD-MMM-YYYY (display format) to YYYY-MM-DD (API format)
+    // Convert any supported date form (DD-MMM-YYYY, Oracle DD-MON-YYYY, "DD MMM YYYY",
+    // ISO) to YYYY-MM-DD for the API. Uses the shared flexible parser so dates loaded
+    // from the server round-trip correctly even if the user never re-picks them.
     const toISODate = (dateStr: string): string | null => {
-      if (!dateStr) return null;
-      // Already in YYYY-MM-DD format
-      if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
-      // Convert DD-MMM-YYYY → YYYY-MM-DD
-      const months: Record<string, string> = {
-        Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06',
-        Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12',
-      };
-      const parts = dateStr.split('-');
-      if (parts.length === 3 && months[parts[1]]) {
-        return `${parts[2]}-${months[parts[1]]}-${parts[0].padStart(2, '0')}`;
-      }
-      return dateStr;
+      const d = parseFlexDate(dateStr);
+      return d ? d.format('YYYY-MM-DD') : null;
     };
 
     // Keep every line the user has in the grid (only drop truly blank rows)
@@ -4466,8 +4474,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       // Only send multiperiod fields when start and end span different months —
       // same-month lines must not generate schedule rows in the multiperiod table.
       ...(line.startDate && line.endDate && line.accrualAccount &&
-          dayjs(line.startDate, ['DD-MMM-YYYY', 'YYYY-MM-DD']).format('YYYY-MM') !==
-          dayjs(line.endDate,   ['DD-MMM-YYYY', 'YYYY-MM-DD']).format('YYYY-MM')
+          parseFlexDate(line.startDate)?.format('YYYY-MM') !==
+          parseFlexDate(line.endDate)?.format('YYYY-MM')
         ? {
             MultiperiodStartDate:    toISODate(line.startDate),
             MultiperiodEndDate:      toISODate(line.endDate),
@@ -5711,6 +5719,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               >
                 Clear Data
               </Button>
+              <Tooltip title={`Preview the full ${savedInvoiceId ? 'PUT' : 'POST'} request — URL and JSON payload (incl. multiperiod start/end dates)`}>
+                <Button
+                  icon={<ApiOutlined />}
+                  onClick={() => handleApiPreview()}
+                  data-sat-id="invoice-api-preview-button"
+                >
+                  API
+                </Button>
+              </Tooltip>
               <Tooltip title={buSelected && !derivedCompany ? 'No company code for this Business Unit — cannot save invoice' : undefined}>
                 <Button
                   type="primary"
