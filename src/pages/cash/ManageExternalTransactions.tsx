@@ -3161,6 +3161,10 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           legalEntity:             txn.legalEntityName  || undefined,
           ledgerId:                ledger.ledgerId,
           ledgerName:              ledger.ledgerName,
+          // Apply the bank conversion rate so accounted (ledger currency) amounts are
+          // entered × rate — otherwise accountedDr/Cr defaulted to the entered amount.
+          exchangeRate:            txn.bankConversionRate ?? 1,
+          ledgerCurrency:          'AED',
           createdBy:               currentUser,
         });
 
@@ -3376,6 +3380,10 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           legalEntity:             txn.legalEntityName  || undefined,
           ledgerId:                ledger.ledgerId,
           ledgerName:              ledger.ledgerName,
+          // Apply the bank conversion rate so accounted (ledger currency) amounts are
+          // entered × rate — otherwise accountedDr/Cr defaulted to the entered amount.
+          exchangeRate:            txn.bankConversionRate ?? 1,
+          ledgerCurrency:          'AED',
           createdBy:               currentUser,
         });
         const slaResult = await createAccounting(slaPayload);
