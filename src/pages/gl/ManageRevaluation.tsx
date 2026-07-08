@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layout, Card, Table, Button, Space, Typography, Breadcrumb,
   Input, Row, Col, Spin, Tag, Modal, message, Select, Popconfirm,
-  Descriptions, Divider, Alert, Steps,
+  Descriptions, Divider, Alert, Steps, Tooltip,
 } from 'antd';
 import {
   HomeOutlined,
@@ -19,6 +19,7 @@ import {
   BugOutlined,
   PlayCircleOutlined,
   AccountBookOutlined,
+  ApiOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -29,7 +30,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 const { Content } = Layout;
-const { Title, Text } = Typography;
+const { Title, Text, Paragraph } = Typography;
 
 const ORDS_BASE = APEX_DB_CONFIG.baseUrl;
 
@@ -243,6 +244,12 @@ const ManageRevaluation: React.FC = () => {
     httpStatus: number | null; rawResponse: string;
   } | null>(null);
   const [acctFlowRetrying, setAcctFlowRetrying] = useState(false);
+
+  // Delete API log (URL/method/response shown via the API icon)
+  const [deleteApiVisible, setDeleteApiVisible] = useState(false);
+  const [deleteApiLog, setDeleteApiLog] = useState<{
+    url: string; method: string; httpStatus: number | null; rawResponse: string;
+  } | null>(null);
 
   // Debug / dry-run preview modal
   const [debugVisible,  setDebugVisible]  = useState(false);
@@ -943,22 +950,33 @@ const ManageRevaluation: React.FC = () => {
   };
 
   const handleDelete = async (id: number) => {
+    const url = `${ORDS_BASE}/${APEX_DB_CONFIG.endpoints.revaluation}/${id}`;
+    const method = 'DELETE';
     try {
-      const res = await fetch(
-        `${ORDS_BASE}/${APEX_DB_CONFIG.endpoints.revaluation}/${id}`,
-        { method: 'DELETE' }
-      );
+      const res = await fetch(url, { method });
       const text = await res.text();
+      setDeleteApiLog({ url, method, httpStatus: res.status, rawResponse: text });
+
+      // ORDS returns an HTML error page (starts with "<!DOCTYPE") when no handler
+      // matches the route/method (404/405) — surface that clearly instead of a
+      // cryptic "Unexpected token '<'" JSON parse error.
+      const looksHtml = /^\s*</.test(text);
+      if (looksHtml || !res.headers.get('content-type')?.includes('json')) {
+        if (looksHtml) {
+          throw new Error(`Endpoint returned HTML (HTTP ${res.status}) — the DELETE ${url} handler is likely missing on the server. Click the API icon for details.`);
+        }
+      }
       const json = JSON.parse(text);
-      if (json.status === 'SUCCESS') {
+      if (res.ok && json.status === 'SUCCESS') {
         message.success(`Revaluation #${id} deleted`);
         load();
         if (detail?.revalueId === id) setDetailVisible(false);
       } else {
-        throw new Error(json.error || 'Delete failed');
+        throw new Error(json.error || `Delete failed (HTTP ${res.status})`);
       }
     } catch (e) {
       message.error('Failed to delete: ' + (e instanceof Error ? e.message : String(e)));
+      setDeleteApiVisible(true);
     }
   };
 
@@ -1105,6 +1123,19 @@ const ManageRevaluation: React.FC = () => {
               </Button>
             </>
           )}
+          <Tooltip title="Show delete API (URL + last response)">
+            <Button
+              size="small"
+              icon={<ApiOutlined />}
+              onClick={() => {
+                setDeleteApiLog(prev => prev ?? {
+                  url: `${ORDS_BASE}/${APEX_DB_CONFIG.endpoints.revaluation}/${rec.revalueId}`,
+                  method: 'DELETE', httpStatus: null, rawResponse: '(not called yet — click Delete to run)',
+                });
+                setDeleteApiVisible(true);
+              }}
+            />
+          </Tooltip>
           <Popconfirm
             title="Delete this revaluation?"
             description="This will also delete all CCY rows and journal lines."
@@ -1242,6 +1273,43 @@ const ManageRevaluation: React.FC = () => {
           </Card>
         </div>
       </Content>
+
+      {/* Delete API Log Modal */}
+      <Modal
+        title={<Space><ApiOutlined style={{ color: '#1677ff' }} />Delete API</Space>}
+        open={deleteApiVisible}
+        onCancel={() => setDeleteApiVisible(false)}
+        footer={<Button onClick={() => setDeleteApiVisible(false)}>Close</Button>}
+        width={720}
+      >
+        {deleteApiLog && (
+          <div style={{ fontSize: 13 }}>
+            <div style={{ marginBottom: 8 }}>
+              <Tag color="red">{deleteApiLog.method}</Tag>
+              {deleteApiLog.httpStatus != null && (
+                <Tag color={deleteApiLog.httpStatus >= 200 && deleteApiLog.httpStatus < 300 ? 'green' : 'red'}>
+                  HTTP {deleteApiLog.httpStatus}
+                </Tag>
+              )}
+            </div>
+            <Text type="secondary" style={{ fontSize: 12 }}>URL</Text>
+            <Paragraph copyable style={{ fontFamily: 'monospace', fontSize: 12, background: '#f5f5f5', padding: '6px 10px', borderRadius: 4, wordBreak: 'break-all' }}>
+              {deleteApiLog.url}
+            </Paragraph>
+            {/^\s*</.test(deleteApiLog.rawResponse) && (
+              <Alert
+                type="error" showIcon style={{ marginBottom: 8 }}
+                message="Server returned an HTML page, not JSON"
+                description="ORDS returns an HTML error page when no handler matches the route/method (usually 404/405). The DELETE handler for gl/revaluation/:id is likely not deployed on this database."
+              />
+            )}
+            <Text type="secondary" style={{ fontSize: 12 }}>Response</Text>
+            <pre style={{ fontFamily: 'monospace', fontSize: 11, background: '#f5f5f5', padding: '8px 10px', borderRadius: 4, maxHeight: 260, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+              {(() => { try { return JSON.stringify(JSON.parse(deleteApiLog.rawResponse), null, 2); } catch { return deleteApiLog.rawResponse || '(empty)'; } })()}
+            </pre>
+          </div>
+        )}
+      </Modal>
 
       {/* Detail Modal */}
       <Modal
