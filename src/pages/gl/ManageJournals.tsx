@@ -470,20 +470,31 @@ const ManageJournals: React.FC = () => {
   useEffect(() => {
     const fetchLedgers = async () => {
       setLoadingLedgers(true);
+      // Use the same endpoint TrialBalance uses successfully; the old hardcoded
+      // `/ledgers` path was returning an error, surfacing as "Failed to fetch ledgers".
+      const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.getLedgerName}`;
       try {
-        const response = await fetch('https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp/ledgers');
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
-        if (data.items && data.items.length > 0) {
-          setLedgers(data.items);
-          // Auto-select first ledger
-          const firstLedger = data.items[0];
+        // De-duplicate by ledger_name (the endpoint can return one row per company/COA)
+        const seen = new Set<string>();
+        const items: Ledger[] = (data.items || []).filter((it: Ledger) => {
+          if (!it.ledger_name || seen.has(it.ledger_name)) return false;
+          seen.add(it.ledger_name);
+          return true;
+        });
+        if (items.length > 0) {
+          setLedgers(items);
+          const firstLedger = items[0];
           setSelectedLedger(firstLedger);
-          // Set form field value
           form.setFieldsValue({ ledger: firstLedger.ledger_name });
+        } else {
+          message.warning('No ledgers returned by the server.');
         }
       } catch (error) {
-        console.error('Error fetching ledgers:', error);
-        message.error('Failed to fetch ledgers');
+        console.error('Error fetching ledgers:', error, 'url:', url);
+        message.error(`Failed to fetch ledgers: ${error instanceof Error ? error.message : 'unknown error'}`);
       } finally {
         setLoadingLedgers(false);
       }
@@ -3679,7 +3690,27 @@ const ManageJournals: React.FC = () => {
                   </Col>
 
                   <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Period</Text></Col>
-                  <Col span={16}><Text style={{ fontSize: 11 }}>{journal.periodName}</Text></Col>
+                  <Col span={16}>
+                    {isEditable ? (
+                      <Select
+                        size="small"
+                        style={{ width: '100%', fontSize: 11 }}
+                        showSearch
+                        optionFilterProp="children"
+                        value={headerFields.periodName || undefined}
+                        placeholder="Select period"
+                        onChange={v => handlePeriodChange(v)}
+                      >
+                        {periods.map(p => (
+                          <Option key={p.period_name_id} value={p.period_name_id}>
+                            {p.period_name_id} ({p.status})
+                          </Option>
+                        ))}
+                      </Select>
+                    ) : (
+                      <Text style={{ fontSize: 11 }}>{journal.periodName}</Text>
+                    )}
+                  </Col>
 
                   <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Source</Text></Col>
                   <Col span={16}><Text style={{ fontSize: 11 }}>{journal.source}</Text></Col>
