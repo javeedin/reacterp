@@ -950,6 +950,12 @@ const ManageRevaluation: React.FC = () => {
   };
 
   const handleDelete = async (id: number) => {
+    // Guard: never delete an already-accounted revaluation.
+    const target = data.find(r => r.revalueId === id);
+    if (target?.status === 'ACCOUNTED') {
+      message.error('Cannot delete an accounted revaluation. Reverse/unaccount it first.');
+      return;
+    }
     const url = `${ORDS_BASE}/${APEX_DB_CONFIG.endpoints.revaluation}/${id}`;
     const method = 'DELETE';
     try {
@@ -1136,15 +1142,21 @@ const ManageRevaluation: React.FC = () => {
               }}
             />
           </Tooltip>
-          <Popconfirm
-            title="Delete this revaluation?"
-            description="This will also delete all CCY rows and journal lines."
-            onConfirm={() => handleDelete(rec.revalueId)}
-            okText="Delete"
-            okButtonProps={{ danger: true }}
-          >
-            <Button size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
+          {rec.status === 'ACCOUNTED' ? (
+            <Tooltip title="Cannot delete — this revaluation is already accounted. Reverse/unaccount it first.">
+              <Button size="small" danger icon={<DeleteOutlined />} disabled />
+            </Tooltip>
+          ) : (
+            <Popconfirm
+              title="Delete this revaluation?"
+              description="This will also delete all CCY rows and journal lines."
+              onConfirm={() => handleDelete(rec.revalueId)}
+              okText="Delete"
+              okButtonProps={{ danger: true }}
+            >
+              <Button size="small" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
