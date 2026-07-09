@@ -187,8 +187,9 @@ const ManageMultiperiod: React.FC = () => {
     fusionRows.forEach((r: any) => { if (r.chargeAccount) s.add(r.chargeAccount); if (r.multiperiodAccrualAccount) s.add(r.multiperiodAccrualAccount); });
     accrualLines.forEach((inv: any) => (inv.periodAllLines || []).forEach((l: any) => { if (l.chargeAccount) s.add(l.chargeAccount); if (l.accrualAccount) s.add(l.accrualAccount); }));
     (drawerData?.lines || []).forEach((ln: any) => (ln.periods || []).forEach((p: any) => { if (p.chargeAccount) s.add(p.chargeAccount); if (p.accrualAccount) s.add(p.accrualAccount); }));
+    detailTabs.forEach((t: any) => (t.detail?.lines || []).forEach((l: any) => { if (l.chargeAccount) s.add(l.chargeAccount); if (l.accrualAccount) s.add(l.accrualAccount); }));
     return Array.from(s);
-  }, [fusionRows, accrualLines, drawerData]);
+  }, [fusionRows, accrualLines, drawerData, detailTabs]);
   const accountDescs = useAccountDescriptions(allAccountCodes);
   // Render an account combination with its description underneath.
   const renderAcctWithDesc = (code?: string | null, codeFontSize = 11) => (
@@ -1172,12 +1173,12 @@ const ManageMultiperiod: React.FC = () => {
       render: v => <Text strong style={{ fontSize: 12 }}>{fmtAmt(v)}</Text>,
     },
     {
-      title: 'Charge A/C (Dr)', dataIndex: 'chargeAccount', width: 200, ellipsis: true,
-      render: v => <Text code style={{ fontSize: 11 }}>{v || '—'}</Text>,
+      title: 'Charge A/C (Dr)', dataIndex: 'chargeAccount', width: 210,
+      render: v => renderAcctWithDesc(v, 11),
     },
     {
-      title: 'Accrual A/C (Cr)', dataIndex: 'accrualAccount', width: 200, ellipsis: true,
-      render: v => <Text code style={{ fontSize: 11 }}>{v || '—'}</Text>,
+      title: 'Accrual A/C (Cr)', dataIndex: 'accrualAccount', width: 210,
+      render: v => renderAcctWithDesc(v, 11),
     },
     {
       title: 'Status', dataIndex: 'postingStatus', width: 120,
