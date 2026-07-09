@@ -201,11 +201,12 @@ export async function markPeriodPosted(
   periodName: string,
   slaHeaderId: number,
   postedBy: string,
+  scheduleId?: number,   // when provided, only this one schedule row is updated
 ): Promise<void> {
   const res = await fetch(`${BASE}/mark-posted`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ invoiceId, periodName, slaHeaderId, postedBy }),
+    body: JSON.stringify({ scheduleId, invoiceId, periodName, slaHeaderId, postedBy }),
   });
   const data = await res.json();
   if (!res.ok || !data.success) throw new Error(data?.error || `HTTP ${res.status}`);

@@ -518,7 +518,7 @@ const ManageMultiperiod: React.FC = () => {
       { step: '5 — Stamp SLA header POSTED', method: 'POST', url: `${base}/sla/accounting/post`,
         payload: { headerId: '{slaHeaderId}', glBatchId: '{batchId}', glBatchName: '{batchName}', glHeaderId: '{glHeaderId}', postedBy } },
       { step: '6 — Mark MPA schedule posted', method: 'POST', url: `${base}/ap/multiperiod/mark-posted`,
-        payload: { invoiceId: g.invoiceId, periodName: g.periodName, slaHeaderId: '{slaHeaderId}', postedBy } },
+        payload: { scheduleId: g.scheduleId, invoiceId: g.invoiceId, periodName: g.periodName, slaHeaderId: '{slaHeaderId}', postedBy } },
     ]);
     setAccrualStepTest({});
     // Seed the resolver with the (deterministic) batch name; slaHeaderId / batchId /
@@ -545,7 +545,7 @@ const ManageMultiperiod: React.FC = () => {
         if (exists.exists && exists.status === 'P') {
           // Journal already posted — still sync the MPA schedule status in case a
           // previous run posted the journal but failed at mark-posted.
-          try { await markPeriodPosted(g.invoiceId, g.periodName, exists.headerId ?? 0, postedBy); } catch { /* status sync best-effort */ }
+          try { await markPeriodPosted(g.invoiceId, g.periodName, exists.headerId ?? 0, postedBy, g.scheduleId); } catch { /* status sync best-effort */ }
           results.push({ scheduleId: g.scheduleId, invoiceNumber: g.invoiceNumber, status: 'skipped', message: `Already accounted — GL batch ${exists.batchId} (status synced)` });
           setAccrualAcctResults([...results]); continue;
         }
@@ -562,7 +562,7 @@ const ManageMultiperiod: React.FC = () => {
         if (!glRes.success) { results.push({ scheduleId: g.scheduleId, invoiceNumber: g.invoiceNumber, status: 'error', message: glRes.error || 'GL posting failed' }); setAccrualAcctResults([...results]); continue; }
 
         // 6. Mark the MPA schedule/period posted
-        await markPeriodPosted(g.invoiceId, g.periodName, slaHeaderId, postedBy);
+        await markPeriodPosted(g.invoiceId, g.periodName, slaHeaderId, postedBy, g.scheduleId);
         const slaTag = (slaExists.exists && slaExists.headerId) ? ' (SLA reused)' : '';
         results.push({ scheduleId: g.scheduleId, invoiceNumber: g.invoiceNumber, status: 'success', message: `SLA #${slaHeaderId}${slaTag} — GL ${glRes.batchName}${glRes.skipped ? ' (reused)' : ''}` });
       } catch (e: any) {
