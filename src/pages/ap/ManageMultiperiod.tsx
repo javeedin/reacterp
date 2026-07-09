@@ -9,8 +9,9 @@ import {
   HomeOutlined, SearchOutlined, ReloadOutlined, CalendarOutlined,
   CheckCircleOutlined, CloseOutlined, SyncOutlined, BookOutlined,
   FileTextOutlined, WarningOutlined, ApiOutlined, CopyOutlined,
-  EyeOutlined, DeleteOutlined,
+  EyeOutlined, DeleteOutlined, FileExcelOutlined,
 } from '@ant-design/icons';
+import * as XLSX from 'xlsx';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import { APEX_DB_CONFIG } from '../../config/api.config';
@@ -239,6 +240,31 @@ const ManageMultiperiod: React.FC = () => {
   }, [form]);
 
   const handleReset = () => { form.resetFields(); setSearchResult([]); setSearchErr(null); };
+
+  // Export the Manage-Multiperiod search results to Excel.
+  const exportSearchToExcel = (rows: MpaInvoiceSummary[]) => {
+    if (!rows.length) { message.warning('Nothing to export.'); return; }
+    const data = rows.map(r => ({
+      'Invoice Number':  r.invoiceNumber,
+      'Supplier':        r.supplier,
+      'Supplier No.':    r.supplierNumber,
+      'Business Unit':   r.businessUnit,
+      'Invoice Date':    r.invoiceDate,
+      'Currency':        r.currencyCode,
+      'Invoice Amount':  r.totalAmount,
+      'Posted':          r.postedAmount,
+      'Not Posted':      r.notPostedAmount,
+      'Total Lines':     r.totalLines,
+      'Open Lines':      r.openLines,
+      'Closed Lines':    r.closedLines,
+      'First Period':    r.minPeriodDate,
+      'Last Period':     r.maxPeriodDate,
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Multiperiod Accounting');
+    XLSX.writeFile(wb, `Multiperiod_Accounting_${dayjs().format('YYYY-MM-DD')}.xlsx`);
+  };
 
   // ── open detail tab ───────────────────────────────────────────────────────
 
@@ -1066,6 +1092,10 @@ const ManageMultiperiod: React.FC = () => {
       ),
     },
     {
+      title: 'Invoice Amount', dataIndex: 'totalAmount', width: 130, align: 'right' as const,
+      render: (v, rec) => <Text strong style={{ fontSize: 12 }}>{fmtAmt(v, rec.currencyCode)}</Text>,
+    },
+    {
       title: 'Not Posted', dataIndex: 'notPostedAmount', width: 130, align: 'right' as const,
       render: (v, rec) => v > 0
         ? <Text type="warning" style={{ fontSize: 12 }}>{fmtAmt(v, rec.currencyCode)}</Text>
@@ -1341,9 +1371,30 @@ const ManageMultiperiod: React.FC = () => {
               if (mpaStatusFilter === 'closed') return (r.closedLines ?? 0) > 0 && (r.openLines ?? 0) === 0;
               return true;
             });
+            const totInvoice   = filteredSearchResult.reduce((s, r) => s + (r.totalAmount     || 0), 0);
+            const totPosted    = filteredSearchResult.reduce((s, r) => s + (r.postedAmount    || 0), 0);
+            const totNotPosted = filteredSearchResult.reduce((s, r) => s + (r.notPostedAmount || 0), 0);
+            const curr         = filteredSearchResult[0]?.currencyCode || '';
             return (
               <>
-                <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'flex-end' }}>
+                {filteredSearchResult.length > 0 && (
+                  <Row gutter={8} style={{ marginBottom: 12 }}>
+                    <Col span={6}><Card size="small" bodyStyle={{ padding: '6px 12px' }}><Statistic title="Invoices" value={filteredSearchResult.length} valueStyle={{ fontSize: 16 }} /></Card></Col>
+                    <Col span={6}><Card size="small" bodyStyle={{ padding: '6px 12px' }}><Statistic title="Total Invoice Amount" value={totInvoice} precision={2} prefix={curr} valueStyle={{ fontSize: 15 }} /></Card></Col>
+                    <Col span={6}><Card size="small" bodyStyle={{ padding: '6px 12px' }}><Statistic title="Posted" value={totPosted} precision={2} prefix={curr} valueStyle={{ fontSize: 15, color: REDWOOD.success }} /></Card></Col>
+                    <Col span={6}><Card size="small" bodyStyle={{ padding: '6px 12px' }}><Statistic title="Not Posted" value={totNotPosted} precision={2} prefix={curr} valueStyle={{ fontSize: 15, color: REDWOOD.warning }} /></Card></Col>
+                  </Row>
+                )}
+                <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                  <Button
+                    size="small"
+                    icon={<FileExcelOutlined />}
+                    style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
+                    disabled={filteredSearchResult.length === 0}
+                    onClick={() => exportSearchToExcel(filteredSearchResult)}
+                  >
+                    Excel
+                  </Button>
                   <Radio.Group
                     value={mpaStatusFilter}
                     onChange={e => setMpaStatusFilter(e.target.value)}
@@ -1362,9 +1413,26 @@ const ManageMultiperiod: React.FC = () => {
                   rowKey="invoiceId"
                   size="small"
                   loading={searching}
-                  pagination={{ pageSize: 20, showSizeChanger: true }}
-                  scroll={{ x: 1000 }}
+                  pagination={{ defaultPageSize: 20, showSizeChanger: true, pageSizeOptions: ['20', '50', '100', '200'] }}
+                  scroll={{ x: 1150 }}
                   locale={{ emptyText: 'Run a search to see multiperiod invoices' }}
+                  summary={(rows) => {
+                    if (!rows.length) return null;
+                    const t  = rows.reduce((s, r: any) => s + (r.totalAmount     || 0), 0);
+                    const p  = rows.reduce((s, r: any) => s + (r.postedAmount    || 0), 0);
+                    const np = rows.reduce((s, r: any) => s + (r.notPostedAmount || 0), 0);
+                    return (
+                      <Table.Summary fixed>
+                        <Table.Summary.Row style={{ background: '#f0f5ff', fontWeight: 700 }}>
+                          <Table.Summary.Cell index={0} colSpan={6}><strong>Total ({rows.length})</strong></Table.Summary.Cell>
+                          <Table.Summary.Cell index={6} align="right"><Text strong>{fmtAmt(t, curr)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={7} align="right"><Text strong style={{ color: REDWOOD.warning }}>{fmtAmt(np, curr)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={8} align="right"><Text strong style={{ color: REDWOOD.success }}>{fmtAmt(p, curr)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={9} />
+                        </Table.Summary.Row>
+                      </Table.Summary>
+                    );
+                  }}
                 />
               </>
             );
