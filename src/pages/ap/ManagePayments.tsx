@@ -713,6 +713,7 @@ const ManagePayments: React.FC = () => {
   const [availableInvoicesLoading, setAvailableInvoicesLoading] = useState(false);
   const [selectedInvoiceKeys, setSelectedInvoiceKeys] = useState<React.Key[]>([]);
   const [addInvoicesApiUrl, setAddInvoicesApiUrl] = useState('');
+  const [supplierBalanceApiUrl, setSupplierBalanceApiUrl] = useState('');
   const [invoicesToPay, setInvoicesToPay] = useState<PaymentInvoice[]>([]);
   const [supplierTotalBalance, setSupplierTotalBalance] = useState<number | null>(null);
   const [supplierBalanceLoading, setSupplierBalanceLoading] = useState(false);
@@ -1317,6 +1318,7 @@ const ManagePayments: React.FC = () => {
     setSupplierTotalBalance(null);
     try {
       const url = `${APEX_INVOICE_URL}?supplier_number=${encodeURIComponent(supplierNumber)}`;
+      setSupplierBalanceApiUrl(url);
       const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
@@ -3928,7 +3930,25 @@ const ManagePayments: React.FC = () => {
                         <Row gutter={0} style={{ borderTop: `1px solid ${REDWOOD.neutral200}`, marginTop: 8, paddingTop: 8, background: '#fafafa', borderRadius: '0 0 6px 6px' }}>
                           {/* Supplier Due Balance */}
                           <Col span={6} style={{ textAlign: 'center', padding: '6px 8px', borderRight: `1px solid ${REDWOOD.neutral200}` }}>
-                            <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>Supplier Due Balance</div>
+                            <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>
+                              Supplier Due Balance
+                              <Popover
+                                trigger="click"
+                                title="Supplier Due Balance — API"
+                                content={
+                                  <div style={{ maxWidth: 460 }}>
+                                    <Typography.Paragraph copyable={{ text: supplierBalanceApiUrl }} style={{ fontFamily: 'monospace', fontSize: 11, margin: 0, wordBreak: 'break-all' }}>
+                                      {supplierBalanceApiUrl || '(select a supplier first)'}
+                                    </Typography.Paragraph>
+                                    <Text type="secondary" style={{ fontSize: 11 }}>
+                                      GET /ap/createinvoice?supplier_number=… — balance = Σ(invoice_amount − amount_paid) for rows where due &gt; 0.
+                                    </Text>
+                                  </div>
+                                }
+                              >
+                                <ApiOutlined style={{ marginLeft: 6, color: REDWOOD.info, cursor: 'pointer', fontSize: 12 }} />
+                              </Popover>
+                            </div>
                             <div style={{ fontSize: 14, fontWeight: 600, color: REDWOOD.neutral900 }}>
                               {supplierBalanceLoading
                                 ? <span style={{ fontSize: 12, color: '#aaa' }}>Loading…</span>
