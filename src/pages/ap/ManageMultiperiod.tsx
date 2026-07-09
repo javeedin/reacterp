@@ -249,20 +249,21 @@ const ManageMultiperiod: React.FC = () => {
   const exportSearchToExcel = (rows: MpaInvoiceSummary[]) => {
     if (!rows.length) { message.warning('Nothing to export.'); return; }
     const data = rows.map(r => ({
-      'Invoice Number':  r.invoiceNumber,
-      'Supplier':        r.supplier,
-      'Supplier No.':    r.supplierNumber,
-      'Business Unit':   r.businessUnit,
-      'Invoice Date':    r.invoiceDate,
-      'Currency':        r.currencyCode,
-      'Invoice Amount':  r.totalAmount,
-      'Posted':          r.postedAmount,
-      'Not Posted':      r.notPostedAmount,
-      'Total Lines':     r.totalLines,
-      'Open Lines':      r.openLines,
-      'Closed Lines':    r.closedLines,
-      'First Period':    r.minPeriodDate,
-      'Last Period':     r.maxPeriodDate,
+      'Invoice Number':             r.invoiceNumber,
+      'Supplier':                   r.supplier,
+      'Supplier No.':               r.supplierNumber,
+      'Business Unit':              r.businessUnit,
+      'Invoice Date':               r.invoiceDate,
+      'MPA Start':                  r.mpaStartDate ?? r.minPeriodDate,
+      'MPA End':                    r.mpaEndDate ?? r.maxPeriodDate,
+      'Currency':                   r.currencyCode,
+      'Total Invoice':              r.invoiceAmount ?? '',
+      'Total MPA':                  r.totalAmount,
+      'Allocated (Posted)':         r.postedAmount,
+      'Not Allocated (Not Posted)': r.notPostedAmount,
+      'Total Lines':                r.totalLines,
+      'Open Lines':                 r.openLines,
+      'Closed Lines':               r.closedLines,
     }));
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
@@ -1078,10 +1079,10 @@ const ManageMultiperiod: React.FC = () => {
       render: v => <Text style={{ fontSize: 12 }}>{fmtDate(v)}</Text>,
     },
     {
-      title: 'Period Range', width: 160,
+      title: 'MPA Start – End', width: 175,
       render: (_, rec) => (
         <Text style={{ fontSize: 12 }}>
-          {fmtDate(rec.minPeriodDate)} – {fmtDate(rec.maxPeriodDate)}
+          {fmtDate(rec.mpaStartDate ?? rec.minPeriodDate)} – {fmtDate(rec.mpaEndDate ?? rec.maxPeriodDate)}
         </Text>
       ),
     },
@@ -1100,19 +1101,25 @@ const ManageMultiperiod: React.FC = () => {
       render: (v: string) => <Tag style={{ fontSize: 11 }}>{v || '—'}</Tag>,
     },
     {
-      title: 'Invoice Amount', dataIndex: 'totalAmount', width: 130, align: 'right' as const,
-      render: (v) => <Text strong style={{ fontSize: 12 }}>{fmtNum(v)}</Text>,
-    },
-    {
-      title: 'Not Posted', dataIndex: 'notPostedAmount', width: 130, align: 'right' as const,
-      render: (v) => v > 0
-        ? <Text type="warning" style={{ fontSize: 12 }}>{fmtNum(v)}</Text>
+      title: 'Total Invoice', dataIndex: 'invoiceAmount', width: 130, align: 'right' as const,
+      render: (v) => v != null
+        ? <Text strong style={{ fontSize: 12 }}>{fmtNum(v)}</Text>
         : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>,
     },
     {
-      title: 'Posted', dataIndex: 'postedAmount', width: 130, align: 'right' as const,
+      title: 'Total MPA', dataIndex: 'totalAmount', width: 130, align: 'right' as const,
+      render: (v) => <Text style={{ fontSize: 12 }}>{fmtNum(v)}</Text>,
+    },
+    {
+      title: 'Allocated (Posted)', dataIndex: 'postedAmount', width: 140, align: 'right' as const,
       render: (v) => v > 0
         ? <Text style={{ color: REDWOOD.success, fontSize: 12 }}>{fmtNum(v)}</Text>
+        : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>,
+    },
+    {
+      title: 'Not Allocated (Not Posted)', dataIndex: 'notPostedAmount', width: 160, align: 'right' as const,
+      render: (v) => v > 0
+        ? <Text type="warning" style={{ fontSize: 12 }}>{fmtNum(v)}</Text>
         : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>,
     },
     {
@@ -1379,7 +1386,8 @@ const ManageMultiperiod: React.FC = () => {
               if (mpaStatusFilter === 'closed') return (r.closedLines ?? 0) > 0 && (r.openLines ?? 0) === 0;
               return true;
             });
-            const totInvoice   = filteredSearchResult.reduce((s, r) => s + (r.totalAmount     || 0), 0);
+            const totInvoice   = filteredSearchResult.reduce((s, r) => s + (r.invoiceAmount   || 0), 0);
+            const totMpa       = filteredSearchResult.reduce((s, r) => s + (r.totalAmount     || 0), 0);
             const totPosted    = filteredSearchResult.reduce((s, r) => s + (r.postedAmount    || 0), 0);
             const totNotPosted = filteredSearchResult.reduce((s, r) => s + (r.notPostedAmount || 0), 0);
             const curr         = filteredSearchResult[0]?.currencyCode || '';
@@ -1387,10 +1395,11 @@ const ManageMultiperiod: React.FC = () => {
               <>
                 {filteredSearchResult.length > 0 && (
                   <Row gutter={8} style={{ marginBottom: 12 }}>
-                    <Col span={6}><Card size="small" bodyStyle={{ padding: '6px 12px' }}><Statistic title="Invoices" value={filteredSearchResult.length} valueStyle={{ fontSize: 16 }} /></Card></Col>
-                    <Col span={6}><Card size="small" bodyStyle={{ padding: '6px 12px' }}><Statistic title="Total Invoice Amount" value={totInvoice} precision={2} prefix={curr} valueStyle={{ fontSize: 15 }} /></Card></Col>
-                    <Col span={6}><Card size="small" bodyStyle={{ padding: '6px 12px' }}><Statistic title="Posted" value={totPosted} precision={2} prefix={curr} valueStyle={{ fontSize: 15, color: REDWOOD.success }} /></Card></Col>
-                    <Col span={6}><Card size="small" bodyStyle={{ padding: '6px 12px' }}><Statistic title="Not Posted" value={totNotPosted} precision={2} prefix={curr} valueStyle={{ fontSize: 15, color: REDWOOD.warning }} /></Card></Col>
+                    <Col span={4}><Card size="small" bodyStyle={{ padding: '6px 12px' }}><Statistic title="Invoices" value={filteredSearchResult.length} valueStyle={{ fontSize: 16 }} /></Card></Col>
+                    <Col span={5}><Card size="small" bodyStyle={{ padding: '6px 12px' }}><Statistic title="Total Invoice" value={totInvoice} precision={2} prefix={curr} valueStyle={{ fontSize: 14 }} /></Card></Col>
+                    <Col span={5}><Card size="small" bodyStyle={{ padding: '6px 12px' }}><Statistic title="Total MPA" value={totMpa} precision={2} prefix={curr} valueStyle={{ fontSize: 14 }} /></Card></Col>
+                    <Col span={5}><Card size="small" bodyStyle={{ padding: '6px 12px' }}><Statistic title="Allocated (Posted)" value={totPosted} precision={2} prefix={curr} valueStyle={{ fontSize: 14, color: REDWOOD.success }} /></Card></Col>
+                    <Col span={5}><Card size="small" bodyStyle={{ padding: '6px 12px' }}><Statistic title="Not Allocated" value={totNotPosted} precision={2} prefix={curr} valueStyle={{ fontSize: 14, color: REDWOOD.warning }} /></Card></Col>
                   </Row>
                 )}
                 <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
@@ -1422,22 +1431,24 @@ const ManageMultiperiod: React.FC = () => {
                   size="small"
                   loading={searching}
                   pagination={{ defaultPageSize: 20, showSizeChanger: true, pageSizeOptions: ['20', '50', '100', '200'] }}
-                  scroll={{ x: 1240 }}
+                  scroll={{ x: 1420 }}
                   locale={{ emptyText: 'Run a search to see multiperiod invoices' }}
                   summary={(rows) => {
                     if (!rows.length) return null;
-                    const t  = rows.reduce((s, r: any) => s + (r.totalAmount     || 0), 0);
-                    const p  = rows.reduce((s, r: any) => s + (r.postedAmount    || 0), 0);
-                    const np = rows.reduce((s, r: any) => s + (r.notPostedAmount || 0), 0);
+                    const inv = rows.reduce((s, r: any) => s + (r.invoiceAmount   || 0), 0);
+                    const t   = rows.reduce((s, r: any) => s + (r.totalAmount     || 0), 0);
+                    const p   = rows.reduce((s, r: any) => s + (r.postedAmount    || 0), 0);
+                    const np  = rows.reduce((s, r: any) => s + (r.notPostedAmount || 0), 0);
                     return (
                       <Table.Summary fixed>
                         <Table.Summary.Row style={{ background: '#f0f5ff', fontWeight: 700 }}>
                           <Table.Summary.Cell index={0} colSpan={6}><strong>Total ({rows.length})</strong></Table.Summary.Cell>
                           <Table.Summary.Cell index={6} align="center"><Text strong>{curr}</Text></Table.Summary.Cell>
-                          <Table.Summary.Cell index={7} align="right"><Text strong>{fmtNum(t)}</Text></Table.Summary.Cell>
-                          <Table.Summary.Cell index={8} align="right"><Text strong style={{ color: REDWOOD.warning }}>{fmtNum(np)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={7} align="right"><Text strong>{fmtNum(inv)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={8} align="right"><Text strong>{fmtNum(t)}</Text></Table.Summary.Cell>
                           <Table.Summary.Cell index={9} align="right"><Text strong style={{ color: REDWOOD.success }}>{fmtNum(p)}</Text></Table.Summary.Cell>
-                          <Table.Summary.Cell index={10} />
+                          <Table.Summary.Cell index={10} align="right"><Text strong style={{ color: REDWOOD.warning }}>{fmtNum(np)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={11} />
                         </Table.Summary.Row>
                       </Table.Summary>
                     );

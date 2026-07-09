@@ -13,11 +13,14 @@ export interface MpaInvoiceSummary {
   totalLines: number;
   openLines: number;
   closedLines: number;
-  totalAmount: number;
+  totalAmount: number;        // sum of MPA schedule period amounts
+  invoiceAmount?: number;     // full invoice header amount (RR_AP_INVOICES_ALL)
   postedAmount: number;
   notPostedAmount: number;
   minPeriodDate: string;
   maxPeriodDate: string;
+  mpaStartDate?: string;      // invoice MPA accrual window start
+  mpaEndDate?: string;        // invoice MPA accrual window end
 }
 
 export interface MpaScheduleLine {
