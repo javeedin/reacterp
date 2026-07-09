@@ -17,6 +17,7 @@ import {
   Row,
   Col,
   Statistic,
+  Segmented,
   Breadcrumb,
   Tooltip,
   Dropdown,
@@ -444,6 +445,21 @@ const ManagePayments: React.FC = () => {
   const { checkPdcMaturity } = useNotifications();
   const [loading, setLoading] = useState(false);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  const [acctStatusFilter, setAcctStatusFilter] = useState<'all' | 'DRAFT' | 'POSTED'>('all');
+  const [gridSearch, setGridSearch] = useState('');
+  const displayPayments = useMemo(() => {
+    const q = gridSearch.trim().toLowerCase();
+    return payments.filter(p => {
+      if (acctStatusFilter !== 'all' && (p.accountingStatus || '').toUpperCase() !== acctStatusFilter) return false;
+      if (q && ![
+        p.paymentNumber, p.payee, p.supplierNumber, p.businessUnit, p.payeeSite,
+        p.paymentMethod, p.paymentType, p.paymentStatus, p.accountingStatus,
+        p.accountingDate, p.legalEntity, p.disbursementBankAccount, p.paymentCurrency,
+        p.paymentDescription,
+      ].some(v => v != null && String(v).toLowerCase().includes(q))) return false;
+      return true;
+    });
+  }, [payments, acctStatusFilter, gridSearch]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [searchCollapsed, setSearchCollapsed] = useState(false);
 
@@ -3524,6 +3540,28 @@ const ManagePayments: React.FC = () => {
                     </Tooltip>
                   );
                 })()}
+                <Segmented
+                  size="small"
+                  value={acctStatusFilter}
+                  onChange={(v) => setAcctStatusFilter(v as 'all' | 'DRAFT' | 'POSTED')}
+                  options={[
+                    { label: 'All', value: 'all' },
+                    { label: 'Draft', value: 'DRAFT' },
+                    { label: 'Posted', value: 'POSTED' },
+                  ]}
+                />
+                <Input
+                  size="small"
+                  allowClear
+                  placeholder="Filter payments…"
+                  prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
+                  value={gridSearch}
+                  onChange={e => setGridSearch(e.target.value)}
+                  style={{ width: 210 }}
+                />
+                {(gridSearch || acctStatusFilter !== 'all') && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>{displayPayments.length} shown</Text>
+                )}
                 {(() => {
                   if (selectedRowKeys.length !== 1) return null;
                   const sel = payments.find(p => p.key === selectedRowKeys[0]);
@@ -3555,7 +3593,7 @@ const ManagePayments: React.FC = () => {
             {/* Data Table */}
             <Table
               columns={columns}
-              dataSource={payments}
+              dataSource={displayPayments}
               rowSelection={rowSelection}
               loading={loading}
               pagination={{
