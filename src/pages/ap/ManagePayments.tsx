@@ -1293,7 +1293,9 @@ const ManagePayments: React.FC = () => {
           };
         })
         .filter((inv: PaymentInvoice) => {
-          if (inv.amountDue <= 0 || already.has(inv.key)) return false;
+          // Exclude only fully-settled installments. Keep negative balances so
+          // credit memos (which reduce the payment) appear in the selection list.
+          if (Math.abs(inv.amountDue) < 0.005 || already.has(inv.key)) return false;
           // Client-side BU filter
           if (buName && inv.businessUnit && inv.businessUnit.trim().toLowerCase() !== buName.trim().toLowerCase()) return false;
           // Client-side currency filter — only show invoices matching the payment currency
