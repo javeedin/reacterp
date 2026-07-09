@@ -128,6 +128,7 @@ const ManageMultiperiod: React.FC = () => {
   const [acctData,           setAcctData]           = useState<SlaGetResult | null>(null);
   const [acctAllLines,       setAcctAllLines]       = useState<any[] | null>(null);
   const [acctLoading,        setAcctLoading]        = useState(false);
+  const [acctApiOpen,        setAcctApiOpen]        = useState(false);   // show the API URL used to fetch the journal
 
   // ── Post Accrual tab ──────────────────────────────────────────────────────
   const [accrualPeriods,    setAccrualPeriods]    = useState<string[]>([]);
@@ -2226,17 +2227,43 @@ const ManageMultiperiod: React.FC = () => {
           footer={<Button onClick={() => setAcctModalOpen(false)}>Close</Button>}
           width={980}
         >
-          <Radio.Group
-            size="small"
-            value={acctMode}
-            onChange={e => switchAcctMode(e.target.value)}
-            style={{ marginBottom: 12 }}
-          >
-            <Tooltip title={acctCtx?.scheduleId == null ? 'Open from a specific period to see a single journal' : ''}>
-              <Radio.Button value="period" disabled={acctCtx?.scheduleId == null}>This Period</Radio.Button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <Radio.Group
+              size="small"
+              value={acctMode}
+              onChange={e => switchAcctMode(e.target.value)}
+            >
+              <Tooltip title={acctCtx?.scheduleId == null ? 'Open from a specific period to see a single journal' : ''}>
+                <Radio.Button value="period" disabled={acctCtx?.scheduleId == null}>This Period</Radio.Button>
+              </Tooltip>
+              <Radio.Button value="all">All Periods</Radio.Button>
+            </Radio.Group>
+            <Tooltip title="Show the API used to fetch this journal">
+              <Button size="small" icon={<ApiOutlined />} type={acctApiOpen ? 'primary' : 'default'}
+                onClick={() => setAcctApiOpen(o => !o)}>API</Button>
             </Tooltip>
-            <Radio.Button value="all">All Periods</Radio.Button>
-          </Radio.Group>
+          </div>
+          {acctApiOpen && acctCtx && (() => {
+            const base = APEX_DB_CONFIG.baseUrl;
+            const api = acctMode === 'period'
+              ? { method: 'GET',
+                  url: `${base}/sla/accounting?sourceTable=RR_AP_INVOICE_MULTIPERIOD_SCHEDULE&sourceId=${acctCtx.scheduleId ?? ''}`,
+                  note: 'RR_SLA_PKG.get_accounting — newest SLA header + its GL lines for this schedule (reference2 = scheduleId).' }
+              : { method: 'GET',
+                  url: `${base}/sla/journals/lines?sourceNumber=${encodeURIComponent(acctCtx.invoiceNumber)}&limit=500&moduleName=AP`,
+                  note: 'RR_SLA_JOURNALS_PKG.get_lines — all AP SLA lines for reference1 = invoice number; filtered in the UI to reference5 (eventTypeCode) = MPA_ACCRUAL.' };
+            return (
+              <Alert type="info" showIcon style={{ marginBottom: 12 }}
+                message={<Space size={6}><Tag color="blue" style={{ fontSize: 10 }}>{api.method}</Tag><Text style={{ fontSize: 11 }}>{acctMode === 'period' ? 'Per-period journal' : 'All-periods journals'}</Text></Space>}
+                description={
+                  <div>
+                    <Paragraph copyable={{ text: api.url }} style={{ fontFamily: 'monospace', fontSize: 11, margin: '4px 0', wordBreak: 'break-all' }}>{api.url}</Paragraph>
+                    <Text type="secondary" style={{ fontSize: 11 }}>{api.note}</Text>
+                  </div>
+                }
+              />
+            );
+          })()}
 
           {acctLoading ? (
             <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>
