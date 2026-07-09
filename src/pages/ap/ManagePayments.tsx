@@ -16,6 +16,7 @@ import {
   Tag,
   Row,
   Col,
+  Statistic,
   Breadcrumb,
   Tooltip,
   Dropdown,
@@ -65,6 +66,7 @@ import {
   PlayCircleOutlined,
   LoadingOutlined,
   CheckCircleOutlined,
+  SyncOutlined,
   AccountBookOutlined,
   FormOutlined,
   SendOutlined,
@@ -642,6 +644,12 @@ const ManagePayments: React.FC = () => {
   const [acctLoading, setAcctLoading] = useState(false);
   const [acctResults, setAcctResults] = useState<{ invoiceNumber: string; status: string; headerId?: number; error?: string }[]>([]);
   const [acctModalOpen, setAcctModalOpen] = useState(false);
+
+  // Bulk Create Accounting (post Draft payments to GL)
+  const [bulkAcctOpen, setBulkAcctOpen] = useState(false);
+  const [bulkAcctRows, setBulkAcctRows] = useState<PaymentRecord[]>([]);
+  const [bulkAcctRunning, setBulkAcctRunning] = useState(false);
+  const [bulkAcctStatus, setBulkAcctStatus] = useState<Record<string, { status: string; message: string }>>({});
 
   // View / Post Accounting modal state
   const [viewAcctRecord, setViewAcctRecord] = useState<PaymentRecord | null>(null);
@@ -2030,6 +2038,7 @@ const ManagePayments: React.FC = () => {
       dataIndex: 'accountingStatus',
       key: 'accountingStatus',
       width: 140,
+      sorter: (a, b) => (a.accountingStatus || '').localeCompare(b.accountingStatus || ''),
       render: (status: string) => {
         if (!status) return null;
         const color = status === 'Accounted' ? REDWOOD.success : status === 'Not Accounted' ? REDWOOD.warning : REDWOOD.neutral600;
@@ -3061,6 +3070,137 @@ const ManagePayments: React.FC = () => {
   };
   // ────────────────────────────────────────────────────────────────────────
 
+  // ── Bulk: post a single Draft payment's existing SLA accounting to GL ──────
+  // Mirrors the payment-detail "Post to Ledger → Post to GL" flow: read the SLA
+  // header + lines, build the GL journal, dup-check, create + post, stamp SLA.
+  const postDraftPaymentToGl = async (record: PaymentRecord): Promise<{ status: 'success'|'skipped'|'error'; message: string }> => {
+    const acctData: any = await fetch(
+      `${APEX_DB_CONFIG.baseUrl}/sla/accounting?sourceTable=AP_PAYMENTS&sourceId=${record.checkId}`,
+      { headers: { Accept: 'application/json' } },
+    ).then(r => r.json()).catch(() => ({}));
+    if (!acctData?.found || !acctData.headerId) {
+      return { status: 'error', message: 'No accounting found — open the payment and Create Accounting first.' };
+    }
+    if (String(acctData.accountingStatus || '').toUpperCase() === 'POSTED') {
+      return { status: 'skipped', message: 'Already posted' };
+    }
+    const lines: any[] = acctData.lines || [];
+    if (!lines.length) return { status: 'error', message: 'SLA header has no lines' };
+
+    const ledgerInfo = await fetchLedgerByBusinessUnit(record.businessUnit || '');
+    const ledgerName = ledgerInfo?.ledgerName ?? 'BCL DIFC';
+    const ledgerId   = ledgerInfo?.ledgerId   ?? 0;
+    const rate = (record.conversionRate && record.conversionRate > 0) ? record.conversionRate : 1;
+    const ccy  = record.currency || record.paymentCurrency || 'AED';
+    const totalDr  = lines.reduce((s, l) => s + Math.max(Number(l.enteredDr)   || 0, 0), 0);
+    const totalCr  = lines.reduce((s, l) => s + Math.max(Number(l.enteredCr)   || 0, 0), 0);
+    const totalADr = lines.reduce((s, l) => s + Math.max(Number(l.accountedDr) || 0, 0), 0);
+    const totalACr = lines.reduce((s, l) => s + Math.max(Number(l.accountedCr) || 0, 0), 0);
+    const eventTypeCode = acctData.eventTypeCode || 'PAYMENT_CREATED';
+    const ref5 = eventTypeToRef5(eventTypeCode);
+    const batchName = `SLA-AP_PAYMENTS-${acctData.periodName}-${acctData.headerId}`;
+
+    const payload = {
+      batch: {
+        batchName, batchDescription: acctData.description || '',
+        ledgerName, ledgerId, status: 'NEW',
+        accountingPeriod: acctData.periodName,
+        controlTotal: totalDr, runningTotalDr: totalDr, runningTotalCr: totalCr,
+        accountedTotalDr: totalADr, accountedTotalCr: totalACr,
+        batchSource: 'Payables', createdBy: 'SYSTEM',
+      },
+      header: {
+        ledgerId, ledgerName,
+        jeCategory: eventTypeCode, jeSource: 'Payables',
+        periodName: acctData.periodName,
+        journalName: `SLA-${record.paymentNumber}-${eventTypeCode}`,
+        description: acctData.description || '',
+        currencyCode: ccy, currencyConversionType: 'User',
+        currencyConversionDate: acctData.accountingDate, currencyConversionRate: rate,
+        defaultEffectiveDate: acctData.accountingDate,
+        status: 'NEW', runningTotalDr: totalDr, runningTotalCr: totalCr, createdBy: 'SYSTEM',
+      },
+      lines: lines.map((l: any) => {
+        const rawEDr = l.enteredDr != null ? Number(l.enteredDr) : (l.lineType === 'DR' ? (l.amount || 0) : 0);
+        const rawECr = l.enteredCr != null ? Number(l.enteredCr) : (l.lineType === 'CR' ? (l.amount || 0) : 0);
+        const eDr = rawEDr > 0 ? rawEDr : null;
+        const eCr = rawECr > 0 ? rawECr : null;
+        const aDr = l.accountedDr != null ? Number(l.accountedDr) : (eDr != null ? Math.round(eDr * rate * 100) / 100 : null);
+        const aCr = l.accountedCr != null ? Number(l.accountedCr) : (eCr != null ? Math.round(eCr * rate * 100) / 100 : null);
+        return {
+          enteredDr: eDr, enteredCr: eCr, accountedDr: aDr, accountedCr: aCr, statAmount: null,
+          description: l.description || acctData.description || '',
+          currencyCode: ccy, currencyConversionDate: acctData.accountingDate,
+          currencyConversionRate: rate, userCurrencyConversionType: 'User',
+          accountCombination: l.accountCombination || '', chartOfAccountsName: 'Chart of Accounts',
+          reference1: String(record.paymentNumber || ''), reference2: String(record.checkId || ''),
+          reference3: l.accountingClass || null, reference4: record.businessUnit || null,
+          reference5: ref5, createdBy: 'SYSTEM',
+        };
+      }),
+    };
+
+    const glExists = await checkGLJournalExists(String(record.paymentNumber || ''), String(record.checkId || ''), ref5);
+    let retBatchId  = glExists.batchId;
+    let retHeaderId = glExists.headerId;
+    let retBatchName = batchName;
+    const putPost = async (batchId: number) => {
+      const putRes  = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/${batchId}/post`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: '{}',
+      });
+      const putData = await putRes.json().catch(() => ({}));
+      if (!putRes.ok || putData?.success === false) {
+        throw new Error(Array.isArray(putData?.errors) ? putData.errors[0] : putData?.error || `HTTP ${putRes.status}`);
+      }
+    };
+    if (glExists.exists && glExists.status === 'P') {
+      // already posted — just (re)stamp SLA below
+    } else if (glExists.exists && glExists.batchId) {
+      await putPost(glExists.batchId);
+    } else {
+      const glRes  = await fetch(`${APEX_DB_CONFIG.baseUrl}/journals/create`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(payload),
+      });
+      const glData = await glRes.json().catch(() => ({}));
+      if (!glRes.ok) throw new Error(glData?.message || `HTTP ${glRes.status}`);
+      retBatchId   = glData.jeBatchId  ?? glData.batchId  ?? null;
+      retHeaderId  = glData.jeHeaderId ?? glData.headerId ?? null;
+      retBatchName = glData.batchName  ?? retBatchName;
+      if (retBatchId) await putPost(retBatchId);
+    }
+
+    await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ headerId: acctData.headerId, glBatchId: retBatchId, glBatchName: retBatchName, glHeaderId: retHeaderId, postedBy: 'SYSTEM' }),
+    });
+    return { status: 'success', message: `Posted — GL batch ${retBatchName}` };
+  };
+
+  const openBulkAccounting = (rows: PaymentRecord[]) => {
+    if (!rows.length) { message.warning('No Draft payments selected.'); return; }
+    setBulkAcctRows(rows);
+    const init: Record<string, { status: string; message: string }> = {};
+    rows.forEach(r => { init[r.key] = { status: 'pending', message: '' }; });
+    setBulkAcctStatus(init);
+    setBulkAcctRunning(false);
+    setBulkAcctOpen(true);
+  };
+
+  const runBulkAccounting = async () => {
+    setBulkAcctRunning(true);
+    for (const r of bulkAcctRows) {
+      setBulkAcctStatus(prev => ({ ...prev, [r.key]: { status: 'posting', message: 'Posting…' } }));
+      try {
+        const res = await postDraftPaymentToGl(r);
+        setBulkAcctStatus(prev => ({ ...prev, [r.key]: res }));
+      } catch (e: any) {
+        setBulkAcctStatus(prev => ({ ...prev, [r.key]: { status: 'error', message: e?.message || 'Unexpected error' } }));
+      }
+    }
+    setBulkAcctRunning(false);
+    try { await handleSearch(form.getFieldsValue()); } catch { /* refresh best-effort */ }
+  };
+
   // Row selection config
   const rowSelection = {
     selectedRowKeys,
@@ -3368,6 +3508,22 @@ const ManagePayments: React.FC = () => {
                 <Button size="small" icon={<ScissorOutlined />}>
                   Detach
                 </Button>
+                {(() => {
+                  const selectedDraft = payments.filter(p => selectedRowKeys.includes(p.key) && (p.accountingStatus || '').toUpperCase() === 'DRAFT');
+                  return (
+                    <Tooltip title={selectedDraft.length === 0 ? 'Select one or more Draft payments' : `Create accounting for ${selectedDraft.length} Draft payment(s)`}>
+                      <Button
+                        size="small"
+                        type="primary"
+                        icon={<AccountBookOutlined />}
+                        disabled={selectedDraft.length === 0}
+                        onClick={() => openBulkAccounting(selectedDraft)}
+                      >
+                        Create Accounting{selectedDraft.length > 0 ? ` (${selectedDraft.length})` : ''}
+                      </Button>
+                    </Tooltip>
+                  );
+                })()}
                 {(() => {
                   if (selectedRowKeys.length !== 1) return null;
                   const sel = payments.find(p => p.key === selectedRowKeys[0]);
@@ -6086,6 +6242,74 @@ const ManagePayments: React.FC = () => {
         })() : (
           <Alert message="No accounting entries found for this payment." type="info" />
         )}
+      </Modal>
+
+      {/* Bulk Create Accounting Modal */}
+      <Modal
+        open={bulkAcctOpen}
+        title={<Space><AccountBookOutlined style={{ color: REDWOOD.info }} /><span>Create Accounting — Draft Payments</span></Space>}
+        onCancel={() => { if (!bulkAcctRunning) setBulkAcctOpen(false); }}
+        maskClosable={!bulkAcctRunning}
+        width={720}
+        footer={
+          <Space>
+            <Button disabled={bulkAcctRunning} onClick={() => setBulkAcctOpen(false)}>Close</Button>
+            <Button
+              type="primary"
+              icon={<AccountBookOutlined />}
+              loading={bulkAcctRunning}
+              disabled={bulkAcctRows.length === 0 || Object.values(bulkAcctStatus).every(s => s.status === 'success' || s.status === 'skipped')}
+              onClick={runBulkAccounting}
+            >
+              Create Accounting ({bulkAcctRows.length})
+            </Button>
+          </Space>
+        }
+        destroyOnClose
+      >
+        {(() => {
+          const vals = Object.values(bulkAcctStatus);
+          const ok   = vals.filter(s => s.status === 'success').length;
+          const err  = vals.filter(s => s.status === 'error').length;
+          const skip = vals.filter(s => s.status === 'skipped').length;
+          const statusTag = (s?: { status: string; message: string }) => {
+            switch (s?.status) {
+              case 'posting': return <Tag color="processing" icon={<SyncOutlined spin />}>Posting…</Tag>;
+              case 'success': return <Tag color="success" icon={<CheckCircleOutlined />}>Accounted</Tag>;
+              case 'skipped': return <Tag color="gold">Skipped</Tag>;
+              case 'error':   return <Tooltip title={s.message}><Tag color="error">Error</Tag></Tooltip>;
+              default:        return <Tag>Pending</Tag>;
+            }
+          };
+          return (
+            <>
+              <Row gutter={8} style={{ marginBottom: 12 }}>
+                <Col span={8}><Card size="small" bodyStyle={{ padding: '6px 12px' }}><Statistic title="Selected (Draft)" value={bulkAcctRows.length} valueStyle={{ fontSize: 16 }} /></Card></Col>
+                <Col span={8}><Card size="small" bodyStyle={{ padding: '6px 12px' }}><Statistic title="Accounted" value={ok} valueStyle={{ fontSize: 16, color: REDWOOD.success }} /></Card></Col>
+                <Col span={8}><Card size="small" bodyStyle={{ padding: '6px 12px' }}><Statistic title="Failed" value={err} valueStyle={{ fontSize: 16, color: err ? REDWOOD.error : undefined }} /></Card></Col>
+              </Row>
+              {(bulkAcctRunning || ok + err + skip > 0) && (
+                <Alert type={err ? 'warning' : 'info'} showIcon style={{ marginBottom: 12, fontSize: 12 }}
+                  message={`${ok} accounted · ${err} failed · ${skip} skipped`} />
+              )}
+              <Text type="secondary" style={{ fontSize: 12 }}>Each payment's draft SLA is posted to GL (create journal → post → stamp SLA).</Text>
+              <Table
+                style={{ marginTop: 8 }}
+                dataSource={bulkAcctRows}
+                rowKey="key"
+                size="small"
+                pagination={bulkAcctRows.length > 50 ? { defaultPageSize: 50 } : false}
+                scroll={{ y: 320 }}
+                columns={[
+                  { title: 'Payment #', dataIndex: 'paymentNumber', width: 110, render: (v: any) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+                  { title: 'Business Unit', dataIndex: 'businessUnit', ellipsis: true, render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+                  { title: 'Amount', dataIndex: 'paymentAmount', width: 130, align: 'right' as const, render: (v: number, r: any) => <Text style={{ fontSize: 12 }}>{Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {r.paymentCurrency || r.currency || ''}</Text> },
+                  { title: 'Status', width: 130, align: 'center' as const, render: (_: any, r: any) => statusTag(bulkAcctStatus[r.key]) },
+                ]}
+              />
+            </>
+          );
+        })()}
       </Modal>
 
       {/* Post to Ledger Modal */}
