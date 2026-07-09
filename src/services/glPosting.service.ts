@@ -90,43 +90,27 @@ export interface GlPostingResult {
   postPayload?: { url: string; body: object };  // captured for debug display
 }
 
-export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResult> {
+/**
+ * Build the exact POST /journals/create body (batch + header + lines) from the
+ * posting options. This is the single source of truth for the journal payload —
+ * used by postSlaToGL() and surfaced in the step-by-step debug modals so what is
+ * shown matches what is actually sent (including reference1/2/5).
+ */
+export function buildGlJournalPayload(opts: GlPostingOptions, batchName: string) {
   const {
-    slaHeaderId, sourceNumber, sourceId, eventTypeCode,
+    sourceNumber, sourceId, eventTypeCode,
     periodName, ledgerName, ledgerId, currency, accountingDate,
-    legalEntity, businessUnit, lines, createdBy = 'user',
+    businessUnit, lines, createdBy = 'user',
     conversionRate = 1, jeCategory = 'Purchase Invoices',
     jeSource = 'Payables', batchSource = 'Payables',
     batchDescription: batchDescOverride,
     journalDescription: journalDescOverride,
     journalName: journalNameOverride,
-    forceCreate = false,
   } = opts;
 
   const rate = (conversionRate && conversionRate > 0) ? conversionRate : 1;
   const ref5 = eventTypeToRef5(eventTypeCode);
-  const batchName = `${ref5}-${sourceNumber}-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Date.now().toString().slice(-6)}`;
 
-  // ── 0. Duplicate check ────────────────────────────────────────────────────
-  // forceCreate=true bypasses this check (used for revaluation to avoid reusing
-  // an old journal created with the wrong currency before a code fix).
-  if (!forceCreate) {
-    const exists = await checkGLJournalExists(sourceNumber, String(sourceId), ref5);
-    if (exists.exists) {
-      if (exists.status === 'P') {
-        // Already posted — just stamp SLA and return
-        await stampSla(slaHeaderId, exists.batchId, batchName, exists.headerId, createdBy);
-        return { success: true, skipped: true, batchId: exists.batchId, headerId: exists.headerId, batchName };
-      }
-      // Exists but unposted — post the existing batch
-      const putOk = await putPostJournal(exists.batchId!);
-      if (!putOk.success) return { success: false, skipped: false, batchId: exists.batchId, headerId: exists.headerId, batchName, error: putOk.error };
-      await stampSla(slaHeaderId, exists.batchId, batchName, exists.headerId, createdBy);
-      return { success: true, skipped: true, batchId: exists.batchId, headerId: exists.headerId, batchName };
-    }
-  }
-
-  // ── 1. Create journal ─────────────────────────────────────────────────────
   // runningTotalDr/Cr = entered (foreign currency) amounts for the journal header.
   // For revaluation journals enteredDr/Cr are 0, so fall back to accountedDr/Cr.
   const entTotalDr = lines.reduce((s, l) => s + (l.enteredDr ?? 0), 0);
@@ -134,7 +118,7 @@ export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResu
   const totalDr = entTotalDr > 0 ? entTotalDr : lines.reduce((s, l) => s + (l.accountedDr ?? 0), 0);
   const totalCr = entTotalCr > 0 ? entTotalCr : lines.reduce((s, l) => s + (l.accountedCr ?? 0), 0);
 
-  const payload = {
+  return {
     batch: {
       batchName,
       batchDescription:  batchDescOverride || `${ref5} – ${sourceNumber}`,
@@ -206,6 +190,49 @@ export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResu
     };
     }),
   };
+}
+
+/**
+ * Compute the deterministic-shaped batch name for a posting.
+ * (Contains a timestamp, so two calls differ — pass an explicit name to reuse.)
+ */
+export function makeBatchName(eventTypeCode: string, sourceNumber: string): string {
+  const ref5 = eventTypeToRef5(eventTypeCode);
+  return `${ref5}-${sourceNumber}-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Date.now().toString().slice(-6)}`;
+}
+
+export async function postSlaToGL(opts: GlPostingOptions): Promise<GlPostingResult> {
+  const {
+    slaHeaderId, sourceNumber, sourceId, eventTypeCode,
+    createdBy = 'user', forceCreate = false,
+  } = opts;
+
+  const ref5 = eventTypeToRef5(eventTypeCode);
+  const batchName = makeBatchName(eventTypeCode, sourceNumber);
+
+  // ── 0. Duplicate check ────────────────────────────────────────────────────
+  // forceCreate=true bypasses this check (used for revaluation to avoid reusing
+  // an old journal created with the wrong currency before a code fix).
+  if (!forceCreate) {
+    const exists = await checkGLJournalExists(sourceNumber, String(sourceId), ref5);
+    if (exists.exists) {
+      if (exists.status === 'P') {
+        // Already posted — just stamp SLA and return
+        await stampSla(slaHeaderId, exists.batchId, batchName, exists.headerId, createdBy);
+        return { success: true, skipped: true, batchId: exists.batchId, headerId: exists.headerId, batchName };
+      }
+      // Exists but unposted — post the existing batch
+      const putOk = await putPostJournal(exists.batchId!);
+      if (!putOk.success) return { success: false, skipped: false, batchId: exists.batchId, headerId: exists.headerId, batchName, error: putOk.error };
+      await stampSla(slaHeaderId, exists.batchId, batchName, exists.headerId, createdBy);
+      return { success: true, skipped: true, batchId: exists.batchId, headerId: exists.headerId, batchName };
+    }
+  }
+
+  // ── 1. Create journal ─────────────────────────────────────────────────────
+  // Build the batch + header + lines body via the shared builder so the payload
+  // is identical to what the step-by-step debug modal shows (references included).
+  const payload = buildGlJournalPayload(opts, batchName);
 
   const createUrl  = `${BASE}/journals/create`;
   const postPayload = { url: createUrl, body: payload };

@@ -24,7 +24,8 @@ import {
   createAccounting, fetchLedgerByBusinessUnit, getAccounting, checkGLJournalExists,
   type SlaCreatePayload, type SlaGetResult,
 } from '../../services/sla.service';
-import { postSlaToGL } from '../../services/glPosting.service';
+import { postSlaToGL, buildGlJournalPayload, makeBatchName } from '../../services/glPosting.service';
+import type { GlPostingOptions } from '../../services/glPosting.service';
 import { useAuth } from '../../context/AuthContext';
 
 const { Content } = Layout;
@@ -439,6 +440,17 @@ const ManageMultiperiod: React.FC = () => {
       accountCombination: g.crAcct || '', accountingClass: 'ACCRUAL', legalEntity: null },
   ]);
 
+  // Shared GL posting options for an accrual schedule — used by both the live run
+  // (postSlaToGL) and the step-by-step debug modal (buildGlJournalPayload) so the
+  // journal body shown in step 3 matches exactly what is posted.
+  const buildAccrualGlOpts = (g: any, ledger: any, postedBy: string, today: string, slaHeaderId = 0): GlPostingOptions => ({
+    slaHeaderId, sourceNumber: g.invoiceNumber, sourceId: g.scheduleId,
+    eventTypeCode: 'MPA_ACCRUAL', periodName: g.periodName, ledgerName: ledger.ledgerName,
+    ledgerId: ledger.ledgerId, currency: 'AED', accountingDate: today, legalEntity: '',
+    businessUnit: g.businessUnit, jeCategory: 'Accrual', jeSource: 'Payables', batchSource: 'Payables',
+    createdBy: postedBy, lines: buildGlLines(g, today),
+  });
+
   const openAccrualDebug = async () => {
     const groups = groupAccrualSchedules();
     if (!groups.length) { message.warning('No schedules to account.'); return; }
@@ -448,12 +460,16 @@ const ManageMultiperiod: React.FC = () => {
     const g = groups[0];  // representative schedule
     const ledger = await fetchLedgerByBusinessUnit(g.businessUnit).catch(() => null);
     const slaPayload = ledger ? buildAccrualSlaPayload(g, ledger, postedBy, today) : { error: `No ledger for BU '${g.businessUnit}'` };
+    // Build the exact POST /journals/create body (batch + header + lines with
+    // reference1/2/5) via the shared builder — same call runAccrualAccounting makes.
+    const glPayload = ledger
+      ? buildGlJournalPayload(buildAccrualGlOpts(g, ledger, postedBy, today), makeBatchName('MPA_ACCRUAL', g.invoiceNumber))
+      : { error: `No ledger for BU '${g.businessUnit}'` };
     setAccrualDebugSteps([
       { step: `1 — Duplicate check (Ref2=${g.scheduleId}, Ref5=MPA_ACCRUAL)`, method: 'GET',
         url: `${base}/gl/journals/check?reference1=${encodeURIComponent(g.invoiceNumber)}&reference2=${g.scheduleId}&reference5=MPA_ACCRUAL`, payload: null },
       { step: '2 — Create SLA accounting', method: 'POST', url: `${base}/sla/accounting/create`, payload: slaPayload },
-      { step: '3 — Create GL journal', method: 'POST', url: `${base}/journals/create`,
-        payload: { note: 'Built by postSlaToGL from the SLA header + these lines', lines: ledger ? buildGlLines(g, today) : [] } },
+      { step: '3 — Create GL journal', method: 'POST', url: `${base}/journals/create`, payload: glPayload },
       { step: '4 — Post journal to GL', method: 'PUT', url: `${base}/gl/journals/{batchId}/post`, payload: {} },
       { step: '5 — Stamp SLA header POSTED', method: 'POST', url: `${base}/sla/accounting/post`,
         payload: { headerId: '{slaHeaderId}', glBatchId: '{batchId}', glBatchName: '{batchName}', glHeaderId: '{glHeaderId}', postedBy } },
@@ -490,13 +506,7 @@ const ManageMultiperiod: React.FC = () => {
         const sla = await createAccounting(buildAccrualSlaPayload(g, ledger, postedBy, today));
 
         // 3-5. Create + post GL journal, stamp SLA (postSlaToGL also re-checks the duplicate)
-        const glRes = await postSlaToGL({
-          slaHeaderId: sla.headerId, sourceNumber: g.invoiceNumber, sourceId: g.scheduleId,
-          eventTypeCode: 'MPA_ACCRUAL', periodName: g.periodName, ledgerName: ledger.ledgerName,
-          ledgerId: ledger.ledgerId, currency: 'AED', accountingDate: today, legalEntity: '',
-          businessUnit: g.businessUnit, jeCategory: 'Accrual', jeSource: 'Payables', batchSource: 'Payables',
-          createdBy: postedBy, lines: buildGlLines(g, today),
-        });
+        const glRes = await postSlaToGL(buildAccrualGlOpts(g, ledger, postedBy, today, sla.headerId));
         if (!glRes.success) { results.push({ scheduleId: g.scheduleId, invoiceNumber: g.invoiceNumber, status: 'error', message: glRes.error || 'GL posting failed' }); setAccrualAcctResults([...results]); continue; }
 
         // 6. Mark the MPA schedule/period posted
@@ -525,7 +535,7 @@ const ManageMultiperiod: React.FC = () => {
       const res = await fetch(s.url.replace(/\{[^}]+\}/g, '0'), {
         method: s.method,
         headers: hasBody ? { 'Content-Type': 'application/json', Accept: 'application/json' } : { Accept: 'application/json' },
-        body: hasBody && s.payload && !s.payload.error && !s.payload.note ? JSON.stringify(s.payload) : undefined,
+        body: hasBody && s.payload && !s.payload.error ? JSON.stringify(s.payload) : undefined,
       });
       const text = await res.text();
       let pretty = text; try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* not json */ }
