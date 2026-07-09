@@ -5491,7 +5491,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         }}
       >
         {/* Row 1: Title + Balance + Action Buttons */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <Space size={12}>
           <Title level={5} style={{ margin: 0, whiteSpace: 'nowrap' }}>
             <FileTextOutlined style={{ marginRight: 8, color: REDWOOD.primary }} />
@@ -5502,7 +5502,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               const balUrl = `${APEX_DB_CONFIG.baseUrl}/ap/applied-prepayments/balances?prepayment_invoice_id=${initialData?.invoiceId || ''}`;
               return prepaymentBalance ? (
                 <Space size={4}>
-                  <Text strong style={{ fontSize: 15, color: REDWOOD.primary }}>
+                  <Text strong style={{ fontSize: 15, color: REDWOOD.primary, whiteSpace: 'nowrap' }}>
                     Available: {formatAmount(prepaymentBalance.availableBalance)} {initialData?.invoiceCurrency || headerValues.invoiceCurrency || 'AED'}
                   </Text>
                   <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>{balUrl}</span>} placement="bottom">
@@ -5519,7 +5519,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
               : invoiceBalance !== null
                 ? (
                   <Space size={4}>
-                    <Text strong style={{ fontSize: 15, color: invoiceBalance === 0 ? REDWOOD.success : REDWOOD.primary }}>
+                    <Text strong style={{ fontSize: 15, color: invoiceBalance === 0 ? REDWOOD.success : REDWOOD.primary, whiteSpace: 'nowrap' }}>
                       {`Balance: ${formatAmount(invoiceBalance)} ${initialData?.invoiceCurrency || headerValues.invoiceCurrency || 'AED'}`}
                     </Text>
                     <Tooltip
@@ -5539,7 +5539,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                       const isCredit = (initialData.invoiceAmount ?? 0) < 0;
                       const label    = isCredit ? 'Open Credit' : 'Unpaid';
                       const color    = isCredit ? REDWOOD.warning : REDWOOD.primary;
-                      return <Text strong style={{ fontSize: 15, color }}>{`${label}: ${formatAmount(Math.abs(initialData.unpaidAmount))} ${initialData.invoiceCurrency || 'AED'}`}</Text>;
+                      return <Text strong style={{ fontSize: 15, color, whiteSpace: 'nowrap' }}>{`${label}: ${formatAmount(Math.abs(initialData.unpaidAmount))} ${initialData.invoiceCurrency || 'AED'}`}</Text>;
                     })()
                   : null
           ) : null}
