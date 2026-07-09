@@ -22,7 +22,7 @@ import {
 } from '../../services/multiperiod.service';
 import {
   createAccounting, fetchLedgerByBusinessUnit, getAccounting, checkGLJournalExists,
-  checkAccountingExists,
+  checkAccountingExists, getAccountingLinesBySourceNumber,
   type SlaCreatePayload, type SlaGetResult,
 } from '../../services/sla.service';
 import { postSlaToGL, buildGlJournalPayload, makeBatchName } from '../../services/glPosting.service';
@@ -121,8 +121,12 @@ const ManageMultiperiod: React.FC = () => {
   const [lastApiNote,        setLastApiNote]        = useState<string | null>(null);
   const [copiedUrl,          setCopiedUrl]          = useState(false);
   const [acctModalOpen,      setAcctModalOpen]      = useState(false);
-  const [acctModalInvoiceId, setAcctModalInvoiceId] = useState<number | null>(null);
+  // View-Accounting modal context. Per-period view is keyed by scheduleId (reference2);
+  // the "all periods" view queries by invoiceNumber (reference1) + MPA_ACCRUAL (reference5).
+  const [acctCtx,            setAcctCtx]            = useState<{ scheduleId?: number; invoiceNumber: string; periodName?: string } | null>(null);
+  const [acctMode,           setAcctMode]           = useState<'period' | 'all'>('period');
   const [acctData,           setAcctData]           = useState<SlaGetResult | null>(null);
+  const [acctAllLines,       setAcctAllLines]       = useState<any[] | null>(null);
   const [acctLoading,        setAcctLoading]        = useState(false);
 
   // ── Post Accrual tab ──────────────────────────────────────────────────────
@@ -646,20 +650,45 @@ const ManageMultiperiod: React.FC = () => {
 
   // ── view accounting ───────────────────────────────────────────────────────
 
-  const openAccountingModal = useCallback(async (invoiceId: number) => {
-    setAcctModalInvoiceId(invoiceId);
-    setAcctModalOpen(true);
+  // Load the View-Accounting data for a given context + mode.
+  //  • 'period' → the single schedule's journal (reference2 = scheduleId)
+  //  • 'all'    → every period's journal for the invoice (reference1 = invoiceNumber
+  //               + reference5 = MPA_ACCRUAL), one GET returning all MPA lines.
+  const loadAcctData = useCallback(async (ctx: { scheduleId?: number; invoiceNumber: string }, mode: 'period' | 'all') => {
     setAcctLoading(true);
     setAcctData(null);
+    setAcctAllLines(null);
     try {
-      const result = await getAccounting('RR_AP_INVOICE_MULTIPERIOD_SCHEDULE', invoiceId);
-      setAcctData(result);
+      if (mode === 'period' && ctx.scheduleId != null) {
+        setAcctData(await getAccounting('RR_AP_INVOICE_MULTIPERIOD_SCHEDULE', ctx.scheduleId));
+      } else {
+        const res = await getAccountingLinesBySourceNumber(ctx.invoiceNumber, 'AP');
+        setAcctAllLines((res.items || []).filter((it: any) => (it.eventTypeCode ?? '') === 'MPA_ACCRUAL'));
+      }
     } catch (e: any) {
       message.error(`Failed to load accounting: ${e?.message}`);
-      setAcctModalOpen(false);
     }
     setAcctLoading(false);
   }, []);
+
+  const openAccountingPeriod = useCallback((scheduleId: number, invoiceNumber: string, periodName?: string) => {
+    const ctx = { scheduleId, invoiceNumber, periodName };
+    setAcctCtx(ctx); setAcctMode('period'); setAcctModalOpen(true);
+    loadAcctData(ctx, 'period');
+  }, [loadAcctData]);
+
+  const openAccountingAll = useCallback((invoiceNumber: string) => {
+    const ctx = { invoiceNumber };
+    setAcctCtx(ctx); setAcctMode('all'); setAcctModalOpen(true);
+    loadAcctData(ctx, 'all');
+  }, [loadAcctData]);
+
+  // Toggle inside the modal between the single period and all periods.
+  const switchAcctMode = useCallback((mode: 'period' | 'all') => {
+    if (!acctCtx) return;
+    setAcctMode(mode);
+    loadAcctData(acctCtx, mode);
+  }, [acctCtx, loadAcctData]);
 
   // ── fusion data search ────────────────────────────────────────────────────
 
@@ -879,7 +908,17 @@ const ManageMultiperiod: React.FC = () => {
         : <Tag color="default">Pending</Tag>,
     },
     {
-      title: 'Action', width: 160, fixed: 'right' as const,
+      title: 'Accounting', width: 140, align: 'center' as const,
+      render: (_, rec) => {
+        const posted = rec.postedAmount || 0;
+        if (posted <= 0) return <Tag color="default">Not Accounted</Tag>;
+        if ((rec.pendingAmount || 0) > 0)
+          return <Tooltip title={`${fmtAmt(posted, rec.invoiceCurrency)} of ${fmtAmt(rec.totalScheduled, rec.invoiceCurrency)} accounted`}><Tag color="gold">Partially Accounted</Tag></Tooltip>;
+        return <Tag color="success" icon={<CheckCircleOutlined />}>Accounted</Tag>;
+      },
+    },
+    {
+      title: 'Action', width: 230, fixed: 'right' as const,
       render: (_, rec) => {
         const openAsOf = fusionForm.getFieldValue('openAsOf')?.format?.('YYYY-MM-DD');
         return (
@@ -891,6 +930,17 @@ const ManageMultiperiod: React.FC = () => {
             >
               Detail
             </Button>
+            {(rec.postedAmount || 0) > 0 && (
+              <Tooltip title="View all periods' accounting journals">
+                <Button
+                  size="small"
+                  icon={<BookOutlined />}
+                  onClick={() => openAccountingAll(rec.invoiceNumber)}
+                >
+                  Accounting
+                </Button>
+              </Tooltip>
+            )}
             {!rec.scheduleGenerated && (
               <Button
                 size="small"
@@ -1105,7 +1155,7 @@ const ManageMultiperiod: React.FC = () => {
             <Button
               icon={<EyeOutlined />}
               size="small"
-              onClick={() => openAccountingModal(tab.invoiceId)}
+              onClick={() => openAccountingAll(d.invoiceNumber)}
             >
               View Accounting
             </Button>
@@ -1964,6 +2014,18 @@ const ManageMultiperiod: React.FC = () => {
                 title: 'Accrual A/C', dataIndex: 'accrualAccount', ellipsis: true,
                 render: v => <Text code style={{ fontSize: 10 }}>{v || '—'}</Text>,
               },
+              {
+                title: 'Journal', width: 90, align: 'center' as const, fixed: 'right' as const,
+                render: (_, rec) => (
+                  <Tooltip title={rec.postingStatus === 'Posted' ? 'View this period\'s journal' : 'Not accounted yet'}>
+                    <Button size="small" type="link" icon={<EyeOutlined />} disabled={rec.postingStatus !== 'Posted'}
+                      style={{ padding: 0 }}
+                      onClick={() => openAccountingPeriod(rec.scheduleId, d.invoiceNumber, rec.periodName)}>
+                      View
+                    </Button>
+                  </Tooltip>
+                ),
+              },
             ];
 
             const collapseItems = (d.lines || []).map(ln => ({
@@ -2137,84 +2199,163 @@ const ManageMultiperiod: React.FC = () => {
         {/* ── View Accounting Modal ────────────────────────────────────── */}
         <Modal
           open={acctModalOpen}
-          title={<Space><EyeOutlined style={{ color: REDWOOD.info }} />Multiperiod Accounting Journal</Space>}
+          title={
+            <Space>
+              <EyeOutlined style={{ color: REDWOOD.info }} />
+              <span>Multiperiod Accounting Journal</span>
+              {acctCtx?.invoiceNumber && <Tag color="blue">{acctCtx.invoiceNumber}</Tag>}
+              {acctMode === 'period' && acctCtx?.periodName && <Tag color="purple">{acctCtx.periodName}</Tag>}
+            </Space>
+          }
           onCancel={() => setAcctModalOpen(false)}
           footer={<Button onClick={() => setAcctModalOpen(false)}>Close</Button>}
-          width={900}
+          width={980}
         >
+          <Radio.Group
+            size="small"
+            value={acctMode}
+            onChange={e => switchAcctMode(e.target.value)}
+            style={{ marginBottom: 12 }}
+          >
+            <Tooltip title={acctCtx?.scheduleId == null ? 'Open from a specific period to see a single journal' : ''}>
+              <Radio.Button value="period" disabled={acctCtx?.scheduleId == null}>This Period</Radio.Button>
+            </Tooltip>
+            <Radio.Button value="all">All Periods</Radio.Button>
+          </Radio.Group>
+
           {acctLoading ? (
             <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>
-          ) : !acctData?.found ? (
-            <Alert
-              type="warning"
-              showIcon
-              message="No accounting entries found"
-              description="No journal entries have been posted yet for this invoice's multiperiod schedule."
-            />
+          ) : acctMode === 'period' ? (
+            !acctData?.found ? (
+              <Alert type="warning" showIcon message="No accounting entries found"
+                description="No journal has been posted yet for this period's schedule." />
+            ) : (
+              <>
+                <Descriptions size="small" column={3} style={{ marginBottom: 12 }}>
+                  <Descriptions.Item label="Journal #">{acctData.headerId}</Descriptions.Item>
+                  <Descriptions.Item label="Period">{acctData.periodName}</Descriptions.Item>
+                  <Descriptions.Item label="Accounting Date">{acctData.accountingDate ? dayjs(acctData.accountingDate).format('DD MMM YYYY') : '—'}</Descriptions.Item>
+                  <Descriptions.Item label="Status">
+                    {acctData.accountingStatus === 'POSTED'
+                      ? <Tag color="success">Posted</Tag>
+                      : <Tag color="processing">{acctData.accountingStatus}</Tag>}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Posted By">{acctData.postedBy || '—'}</Descriptions.Item>
+                  <Descriptions.Item label="GL Batch">{acctData.glBatchName || '—'}</Descriptions.Item>
+                </Descriptions>
+                <Table
+                  dataSource={acctData.lines}
+                  rowKey="lineId"
+                  size="small"
+                  pagination={false}
+                  scroll={{ x: 800 }}
+                  columns={[
+                    { title: '#', dataIndex: 'lineNumber', width: 45, align: 'center' as const },
+                    {
+                      title: 'Type', dataIndex: 'lineType', width: 55, align: 'center' as const,
+                      render: (v: string) => (
+                        <Tag color={v === 'DR' ? 'blue' : 'orange'} style={{ fontWeight: 600 }}>{v}</Tag>
+                      ),
+                    },
+                    { title: 'Class', dataIndex: 'accountingClass', width: 100 },
+                    {
+                      title: 'Account', dataIndex: 'accountCombination', ellipsis: true,
+                      render: (v: string) => <Text code style={{ fontSize: 11 }}>{v}</Text>,
+                    },
+                    { title: 'Description', dataIndex: 'description', ellipsis: true },
+                    {
+                      title: 'Dr Amount', dataIndex: 'enteredDr', width: 120, align: 'right' as const,
+                      render: (v: number) => v ? <Text style={{ color: REDWOOD.info }}>{fmtAmt(v)}</Text> : <Text type="secondary">—</Text>,
+                    },
+                    {
+                      title: 'Cr Amount', dataIndex: 'enteredCr', width: 120, align: 'right' as const,
+                      render: (v: number) => v ? <Text style={{ color: REDWOOD.success }}>{fmtAmt(v)}</Text> : <Text type="secondary">—</Text>,
+                    },
+                  ]}
+                  summary={() => {
+                    const totalDr = acctData.lines.reduce((s, l) => s + (l.enteredDr || 0), 0);
+                    const totalCr = acctData.lines.reduce((s, l) => s + (l.enteredCr || 0), 0);
+                    return (
+                      <Table.Summary fixed>
+                        <Table.Summary.Row>
+                          <Table.Summary.Cell index={0} colSpan={5} align="right">
+                            <Text strong>Total</Text>
+                          </Table.Summary.Cell>
+                          <Table.Summary.Cell index={5} align="right">
+                            <Text strong style={{ color: REDWOOD.info }}>{fmtAmt(totalDr)}</Text>
+                          </Table.Summary.Cell>
+                          <Table.Summary.Cell index={6} align="right">
+                            <Text strong style={{ color: REDWOOD.success }}>{fmtAmt(totalCr)}</Text>
+                          </Table.Summary.Cell>
+                        </Table.Summary.Row>
+                      </Table.Summary>
+                    );
+                  }}
+                />
+              </>
+            )
           ) : (
-            <>
-              <Descriptions size="small" column={3} style={{ marginBottom: 12 }}>
-                <Descriptions.Item label="Journal #">{acctData.headerId}</Descriptions.Item>
-                <Descriptions.Item label="Period">{acctData.periodName}</Descriptions.Item>
-                <Descriptions.Item label="Accounting Date">{acctData.accountingDate ? dayjs(acctData.accountingDate).format('DD MMM YYYY') : '—'}</Descriptions.Item>
-                <Descriptions.Item label="Status">
-                  {acctData.accountingStatus === 'POSTED'
-                    ? <Tag color="success">Posted</Tag>
-                    : <Tag color="processing">{acctData.accountingStatus}</Tag>}
-                </Descriptions.Item>
-                <Descriptions.Item label="Posted By">{acctData.postedBy || '—'}</Descriptions.Item>
-                <Descriptions.Item label="GL Batch">{acctData.glBatchName || '—'}</Descriptions.Item>
-              </Descriptions>
-              <Table
-                dataSource={acctData.lines}
-                rowKey="lineId"
-                size="small"
-                pagination={false}
-                scroll={{ x: 800 }}
-                columns={[
-                  { title: '#', dataIndex: 'lineNumber', width: 45, align: 'center' as const },
-                  {
-                    title: 'Type', dataIndex: 'lineType', width: 55, align: 'center' as const,
-                    render: (v: string) => (
-                      <Tag color={v === 'DR' ? 'blue' : 'orange'} style={{ fontWeight: 600 }}>{v}</Tag>
-                    ),
-                  },
-                  { title: 'Class', dataIndex: 'accountingClass', width: 100 },
-                  {
-                    title: 'Account', dataIndex: 'accountCombination', ellipsis: true,
-                    render: (v: string) => <Text code style={{ fontSize: 11 }}>{v}</Text>,
-                  },
-                  { title: 'Description', dataIndex: 'description', ellipsis: true },
-                  {
-                    title: 'Dr Amount', dataIndex: 'enteredDr', width: 120, align: 'right' as const,
-                    render: (v: number) => v ? <Text style={{ color: REDWOOD.info }}>{fmtAmt(v)}</Text> : <Text type="secondary">—</Text>,
-                  },
-                  {
-                    title: 'Cr Amount', dataIndex: 'enteredCr', width: 120, align: 'right' as const,
-                    render: (v: number) => v ? <Text style={{ color: REDWOOD.success }}>{fmtAmt(v)}</Text> : <Text type="secondary">—</Text>,
-                  },
-                ]}
-                summary={() => {
-                  const totalDr = acctData.lines.reduce((s, l) => s + (l.enteredDr || 0), 0);
-                  const totalCr = acctData.lines.reduce((s, l) => s + (l.enteredCr || 0), 0);
-                  return (
-                    <Table.Summary fixed>
-                      <Table.Summary.Row>
-                        <Table.Summary.Cell index={0} colSpan={5} align="right">
-                          <Text strong>Total</Text>
-                        </Table.Summary.Cell>
-                        <Table.Summary.Cell index={5} align="right">
-                          <Text strong style={{ color: REDWOOD.info }}>{fmtAmt(totalDr)}</Text>
-                        </Table.Summary.Cell>
-                        <Table.Summary.Cell index={6} align="right">
-                          <Text strong style={{ color: REDWOOD.success }}>{fmtAmt(totalCr)}</Text>
-                        </Table.Summary.Cell>
-                      </Table.Summary.Row>
-                    </Table.Summary>
-                  );
-                }}
-              />
-            </>
+            /* ── All periods ── */
+            !acctAllLines || acctAllLines.length === 0 ? (
+              <Alert type="warning" showIcon message="No accounting entries found"
+                description={`No MPA accrual journals posted yet for invoice ${acctCtx?.invoiceNumber ?? ''}.`} />
+            ) : (
+              <>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {new Set(acctAllLines.map(l => l.periodName)).size} period(s) · {new Set(acctAllLines.map(l => l.headerId)).size} journal(s)
+                </Text>
+                <Table
+                  style={{ marginTop: 8 }}
+                  dataSource={acctAllLines}
+                  rowKey={(r: any) => `${r.headerId}-${r.lineId}`}
+                  size="small"
+                  pagination={false}
+                  scroll={{ x: 900 }}
+                  columns={[
+                    {
+                      title: 'Period', dataIndex: 'periodName', width: 80,
+                      render: (v: string) => <Tag color="purple" style={{ fontSize: 10 }}>{v}</Tag>,
+                    },
+                    { title: 'Jrnl #', dataIndex: 'headerId', width: 70, align: 'center' as const },
+                    {
+                      title: 'Type', dataIndex: 'lineType', width: 55, align: 'center' as const,
+                      render: (v: string) => <Tag color={v === 'DR' ? 'blue' : 'orange'} style={{ fontWeight: 600 }}>{v}</Tag>,
+                    },
+                    { title: 'Class', dataIndex: 'accountingClass', width: 95 },
+                    {
+                      title: 'Account', dataIndex: 'accountCombination', ellipsis: true,
+                      render: (v: string) => <Text code style={{ fontSize: 11 }}>{v}</Text>,
+                    },
+                    { title: 'Description', dataIndex: 'description', ellipsis: true },
+                    {
+                      title: 'Status', dataIndex: 'accountingStatus', width: 90, align: 'center' as const,
+                      render: (v: string) => v === 'POSTED' ? <Tag color="success">Posted</Tag> : <Tag color="processing">{v}</Tag>,
+                    },
+                    {
+                      title: 'Dr Amount', dataIndex: 'enteredDr', width: 115, align: 'right' as const,
+                      render: (v: number) => v ? <Text style={{ color: REDWOOD.info }}>{fmtAmt(v)}</Text> : <Text type="secondary">—</Text>,
+                    },
+                    {
+                      title: 'Cr Amount', dataIndex: 'enteredCr', width: 115, align: 'right' as const,
+                      render: (v: number) => v ? <Text style={{ color: REDWOOD.success }}>{fmtAmt(v)}</Text> : <Text type="secondary">—</Text>,
+                    },
+                  ]}
+                  summary={() => {
+                    const totalDr = acctAllLines.reduce((s, l) => s + (l.enteredDr || 0), 0);
+                    const totalCr = acctAllLines.reduce((s, l) => s + (l.enteredCr || 0), 0);
+                    return (
+                      <Table.Summary fixed>
+                        <Table.Summary.Row>
+                          <Table.Summary.Cell index={0} colSpan={7} align="right"><Text strong>Total (all periods)</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={7} align="right"><Text strong style={{ color: REDWOOD.info }}>{fmtAmt(totalDr)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={8} align="right"><Text strong style={{ color: REDWOOD.success }}>{fmtAmt(totalCr)}</Text></Table.Summary.Cell>
+                        </Table.Summary.Row>
+                      </Table.Summary>
+                    );
+                  }}
+                />
+              </>
+            )
           )}
         </Modal>
 
