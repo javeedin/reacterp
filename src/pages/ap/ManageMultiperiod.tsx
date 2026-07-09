@@ -774,9 +774,10 @@ const ManageMultiperiod: React.FC = () => {
               hasPeriodLines: periodLines.length > 0,
               hasPeriodOpen: periodOpen > 0,
               periodNotPostedLines,
+              periodAllLines: periodLines,   // both posted + not-posted, for the Accounted column
             };
           } catch {
-            return { ...inv, periodAmt: 0, periodPosted: 0, periodOpen: 0, postedToDate: 0, totalScheduled: inv.totalAmount, hasPeriodLines: false, hasPeriodOpen: false, periodNotPostedLines: [] };
+            return { ...inv, periodAmt: 0, periodPosted: 0, periodOpen: 0, postedToDate: 0, totalScheduled: inv.totalAmount, hasPeriodLines: false, hasPeriodOpen: false, periodNotPostedLines: [], periodAllLines: [] };
           }
         })
       );
@@ -1449,7 +1450,7 @@ const ManageMultiperiod: React.FC = () => {
           {(() => {
             // Flatten: one row per schedule line for the selected period
             const allFlatRows = accrualLines.flatMap((inv: any) =>
-              (inv.periodNotPostedLines || []).map((sl: any) => ({
+              (inv.periodAllLines || []).map((sl: any) => ({
                 rowKey: `${inv.invoiceId}-${sl.scheduleId}`,
                 scheduleId: sl.scheduleId,
                 invoiceId: inv.invoiceId,
@@ -1468,6 +1469,10 @@ const ManageMultiperiod: React.FC = () => {
                 description: sl.description,
                 periodName: sl.periodName,
                 lineNumber: sl.lineNumber,
+                postingStatus: sl.postingStatus,
+                postedBy: sl.postedBy,
+                postedDate: sl.postedDate,
+                slaHeaderId: sl.slaHeaderId,
               }))
             );
 
@@ -1565,6 +1570,8 @@ const ManageMultiperiod: React.FC = () => {
                   rowSelection={{
                     selectedRowKeys: accrualSelected,
                     onChange: (keys) => setAccrualSelected(keys as number[]),
+                    // Already-accounted schedules can't be posted again.
+                    getCheckboxProps: (rec: any) => ({ disabled: rec.postingStatus === 'Posted' }),
                   }}
                   locale={{ emptyText: accrualPeriod ? `No accrual lines for ${accrualPeriod}` : 'Select a period to see accrual lines' }}
                   summary={(rows) => {
@@ -1627,10 +1634,18 @@ const ManageMultiperiod: React.FC = () => {
                       render: (v: number, rec: any) => <Text style={{ color: REDWOOD.success, fontSize: 11 }}>{fmtAmt(v, rec.currencyCode)}</Text>,
                     },
                     {
-                      title: 'Action', width: 100, fixed: 'right' as const,
-                      render: (_: any, rec: any) => (
-                        <Button size="small" onClick={() => openDetail(rec)}>View & Post</Button>
-                      ),
+                      title: 'Accounted', dataIndex: 'postingStatus', width: 120, align: 'center' as const,
+                      filters: [{ text: 'Accounted', value: 'Posted' }, { text: 'Not Accounted', value: 'Not Posted' }],
+                      onFilter: (value: any, rec: any) => rec.postingStatus === value,
+                      render: (v: string, rec: any) => v === 'Posted'
+                        ? <Tooltip title={`${rec.postedBy || ''}${rec.postedDate ? ' · ' + fmtDate(rec.postedDate) : ''}`}><Tag color="success" icon={<CheckCircleOutlined />}>Accounted</Tag></Tooltip>
+                        : <Tag color="warning" icon={<WarningOutlined />}>Not Accounted</Tag>,
+                    },
+                    {
+                      title: 'Action', width: 120, fixed: 'right' as const,
+                      render: (_: any, rec: any) => rec.postingStatus === 'Posted'
+                        ? <Button size="small" icon={<EyeOutlined />} onClick={() => openAccountingPeriod(rec.scheduleId, rec.invoiceNumber, rec.periodName)}>View</Button>
+                        : <Button size="small" onClick={() => openDetail(rec)}>View &amp; Post</Button>,
                     },
                   ]}
                 />
