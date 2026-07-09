@@ -134,9 +134,12 @@ const ManageMultiperiod: React.FC = () => {
   const [accrualPeriod,     setAccrualPeriod]     = useState<string>('');
   const [accrualLines,      setAccrualLines]      = useState<any[]>([]);
   const [accrualLoading,    setAccrualLoading]    = useState(false);
-  const [accrualPosting,    setAccrualPosting]    = useState(false);
-  const [accrualPosted,     setAccrualPosted]     = useState<{invoiceId:number;invoiceNumber:string;period:string;status:'ok'|'error';note:string}[]>([]);
   const [accrualSelected,    setAccrualSelected]    = useState<number[]>([]);   // selected invoiceIds
+  // Post-Accrual modal (select lines / entire month → KPI + per-line status)
+  const [postModalOpen,     setPostModalOpen]     = useState(false);
+  const [postRows,          setPostRows]          = useState<any[]>([]);
+  const [postRunning,       setPostRunning]       = useState(false);
+  const [postStatus,        setPostStatus]        = useState<Record<number, { status: string; message: string }>>({});
   const [accrualSearch,      setAccrualSearch]      = useState('');
   const [detailSearch,       setDetailSearch]       = useState<Record<string, string>>({});
   const [accrualPreviewOpen, setAccrualPreviewOpen] = useState(false);
@@ -528,6 +531,46 @@ const ManageMultiperiod: React.FC = () => {
     setAccrualDebugOpen(true);
   };
 
+  // Post a single accrual schedule end-to-end: ledger → dup check → SLA (reuse or
+  // create) → create+post GL journal → mark the schedule posted. Shared by the
+  // preview "Create Accounting" run and the Post-Accrual modal.
+  const postAccrualSchedule = async (g: any, postedBy: string, today: string): Promise<{ status: 'success'|'skipped'|'error'; message: string }> => {
+    const ledger = await fetchLedgerByBusinessUnit(g.businessUnit);
+    if (!ledger) return { status: 'error', message: `No ledger for BU '${g.businessUnit}'` };
+
+    // 1. Duplicate check by reference2 (schedule id) + reference5 (MPA_ACCRUAL)
+    const exists = await checkGLJournalExists(g.invoiceNumber, g.scheduleId, 'MPA_ACCRUAL');
+    if (exists.exists && exists.status === 'P') {
+      // Already posted — sync the schedule status in case an earlier run stopped before mark-posted.
+      try { await markPeriodPosted(g.invoiceId, g.periodName, exists.headerId ?? 0, postedBy, g.scheduleId); } catch { /* best-effort */ }
+      return { status: 'skipped', message: `Already accounted — GL batch ${exists.batchId}` };
+    }
+
+    // 2. Reuse an existing SLA header for this schedule, else create one.
+    const slaExists = await checkAccountingExists('RR_AP_INVOICE_MULTIPERIOD_SCHEDULE', g.scheduleId, 'MPA_ACCRUAL');
+    const slaHeaderId = (slaExists.exists && slaExists.headerId)
+      ? slaExists.headerId
+      : (await createAccounting(buildAccrualSlaPayload(g, ledger, postedBy, today))).headerId;
+
+    // 3-5. Create + post GL journal, stamp SLA.
+    const glRes = await postSlaToGL(buildAccrualGlOpts(g, ledger, postedBy, slaHeaderId));
+    if (!glRes.success) return { status: 'error', message: glRes.error || 'GL posting failed' };
+
+    // 6. Mark the schedule posted.
+    await markPeriodPosted(g.invoiceId, g.periodName, slaHeaderId, postedBy, g.scheduleId);
+    const slaTag = (slaExists.exists && slaExists.headerId) ? ' (SLA reused)' : '';
+    return { status: 'success', message: `SLA #${slaHeaderId}${slaTag} — GL ${glRes.batchName}${glRes.skipped ? ' (reused)' : ''}` };
+  };
+
+  // Map a flattened Post-Accrual row into the group shape postAccrualSchedule expects.
+  const accrualRowToGroup = (r: any) => ({
+    scheduleId: r.scheduleId, invoiceId: r.invoiceId, invoiceNumber: r.invoiceNumber,
+    businessUnit: r.businessUnit, periodName: r.periodName,
+    drAcct: r.chargeAccount, crAcct: r.accrualAccount,
+    drDesc: r.description, crDesc: `MPA Accrual — ${r.periodName} (${r.invoiceNumber})`,
+    amount: r.periodAmt,
+  });
+
   const runAccrualAccounting = async () => {
     const groups = groupAccrualSchedules();
     if (!groups.length) { message.warning('No schedules to account.'); return; }
@@ -537,34 +580,8 @@ const ManageMultiperiod: React.FC = () => {
     const results: { scheduleId: number; invoiceNumber: string; status: 'success'|'skipped'|'error'; message: string }[] = [];
     for (const g of groups) {
       try {
-        const ledger = await fetchLedgerByBusinessUnit(g.businessUnit);
-        if (!ledger) { results.push({ scheduleId: g.scheduleId, invoiceNumber: g.invoiceNumber, status: 'error', message: `No ledger for BU '${g.businessUnit}'` }); setAccrualAcctResults([...results]); continue; }
-
-        // 1. Duplicate check by reference2 (schedule id) + reference5 (MPA_ACCRUAL)
-        const exists = await checkGLJournalExists(g.invoiceNumber, g.scheduleId, 'MPA_ACCRUAL');
-        if (exists.exists && exists.status === 'P') {
-          // Journal already posted — still sync the MPA schedule status in case a
-          // previous run posted the journal but failed at mark-posted.
-          try { await markPeriodPosted(g.invoiceId, g.periodName, exists.headerId ?? 0, postedBy, g.scheduleId); } catch { /* status sync best-effort */ }
-          results.push({ scheduleId: g.scheduleId, invoiceNumber: g.invoiceNumber, status: 'skipped', message: `Already accounted — GL batch ${exists.batchId} (status synced)` });
-          setAccrualAcctResults([...results]); continue;
-        }
-
-        // 2. Create SLA — but reuse an existing header for this schedule instead of
-        //    creating a duplicate every run.
-        const slaExists = await checkAccountingExists('RR_AP_INVOICE_MULTIPERIOD_SCHEDULE', g.scheduleId, 'MPA_ACCRUAL');
-        const slaHeaderId = (slaExists.exists && slaExists.headerId)
-          ? slaExists.headerId
-          : (await createAccounting(buildAccrualSlaPayload(g, ledger, postedBy, today))).headerId;
-
-        // 3-5. Create + post GL journal, stamp SLA (postSlaToGL also re-checks the duplicate)
-        const glRes = await postSlaToGL(buildAccrualGlOpts(g, ledger, postedBy, slaHeaderId));
-        if (!glRes.success) { results.push({ scheduleId: g.scheduleId, invoiceNumber: g.invoiceNumber, status: 'error', message: glRes.error || 'GL posting failed' }); setAccrualAcctResults([...results]); continue; }
-
-        // 6. Mark the MPA schedule/period posted
-        await markPeriodPosted(g.invoiceId, g.periodName, slaHeaderId, postedBy, g.scheduleId);
-        const slaTag = (slaExists.exists && slaExists.headerId) ? ' (SLA reused)' : '';
-        results.push({ scheduleId: g.scheduleId, invoiceNumber: g.invoiceNumber, status: 'success', message: `SLA #${slaHeaderId}${slaTag} — GL ${glRes.batchName}${glRes.skipped ? ' (reused)' : ''}` });
+        const res = await postAccrualSchedule(g, postedBy, today);
+        results.push({ scheduleId: g.scheduleId, invoiceNumber: g.invoiceNumber, ...res });
       } catch (e: any) {
         results.push({ scheduleId: g.scheduleId, invoiceNumber: g.invoiceNumber, status: 'error', message: e?.message || 'Unexpected error' });
       }
@@ -576,6 +593,40 @@ const ManageMultiperiod: React.FC = () => {
     const err = results.filter(r => r.status === 'error').length;
     (err ? message.warning : message.success)(`Accrual accounting — ${ok} created, ${skip} skipped, ${err} failed`);
     if (ok > 0 && accrualPeriod) loadAccrualLines(accrualPeriod);
+  };
+
+  // ── Post-Accrual modal (select lines / entire month → KPI + per-line status) ──
+  const openPostModal = (rows: any[]) => {
+    if (!rows.length) { message.warning('No lines to post.'); return; }
+    setPostRows(rows);
+    const init: Record<number, { status: string; message: string }> = {};
+    rows.forEach(r => {
+      init[r.scheduleId] = r.postingStatus === 'Posted'
+        ? { status: 'accounted', message: 'Already accounted' }
+        : { status: 'pending', message: '' };
+    });
+    setPostStatus(init);
+    setPostRunning(false);
+    setPostModalOpen(true);
+  };
+
+  const runPostAll = async () => {
+    const postedBy = user?.name || user?.username || 'System';
+    const today = dayjs().format('YYYY-MM-DD');
+    const toPost = postRows.filter(r => r.postingStatus !== 'Posted');
+    if (!toPost.length) { message.info('All selected lines are already accounted.'); return; }
+    setPostRunning(true);
+    for (const r of toPost) {
+      setPostStatus(prev => ({ ...prev, [r.scheduleId]: { status: 'posting', message: 'Posting…' } }));
+      try {
+        const res = await postAccrualSchedule(accrualRowToGroup(r), postedBy, today);
+        setPostStatus(prev => ({ ...prev, [r.scheduleId]: res }));
+      } catch (e: any) {
+        setPostStatus(prev => ({ ...prev, [r.scheduleId]: { status: 'error', message: e?.message || 'Unexpected error' } }));
+      }
+    }
+    setPostRunning(false);
+    if (accrualPeriod) loadAccrualLines(accrualPeriod);
   };
 
   // Run a single debug step live from the debug modal. Placeholders like
@@ -1507,15 +1558,15 @@ const ManageMultiperiod: React.FC = () => {
                 </div>
                 <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <Text type="secondary" style={{ fontSize: 11 }}>
-                    {accrualSelected.length > 0 ? `${accrualSelected.length} schedule(s) selected` : 'Select schedules to create accrual accounting entries'}
+                    {accrualSelected.length > 0 ? `${accrualSelected.length} schedule(s) selected` : 'Select schedules, or post the whole month at once'}
                   </Text>
                   <Space>
                     {accrualSelected.length > 0 && (
                       <Button size="small" onClick={() => setAccrualSelected([])}>Clear Selection</Button>
                     )}
                     <Button
-                      type="primary"
-                      icon={<BookOutlined />}
+                      size="small"
+                      icon={<ApiOutlined />}
                       disabled={accrualSelected.length === 0}
                       onClick={() => {
                         const selectedSet = new Set(accrualSelected);
@@ -1532,11 +1583,8 @@ const ManageMultiperiod: React.FC = () => {
                               account: r.chargeAccount, accountType: 'Expense (DR)',
                               description: r.description,
                               dr: r.periodAmt, cr: 0,
-                              reference1: r.invoiceNumber,
-                              reference2: String(r.scheduleId),
-                              reference3: r.periodName,
-                              reference4: r.invoiceNumber,
-                              reference5: 'MPA_ACCRUAL',
+                              reference1: r.invoiceNumber, reference2: String(r.scheduleId),
+                              reference3: r.periodName, reference4: r.invoiceNumber, reference5: 'MPA_ACCRUAL',
                             });
                             lines.push({
                               lineNum: lineNum++, scheduleId: r.scheduleId,
@@ -1546,18 +1594,32 @@ const ManageMultiperiod: React.FC = () => {
                               account: r.accrualAccount, accountType: 'Accrual (CR)',
                               description: `MPA Accrual — ${r.periodName} (${r.invoiceNumber})`,
                               dr: 0, cr: r.periodAmt,
-                              reference1: r.invoiceNumber,
-                              reference2: String(r.scheduleId),
-                              reference3: r.periodName,
-                              reference4: r.invoiceNumber,
-                              reference5: 'MPA_ACCRUAL',
+                              reference1: r.invoiceNumber, reference2: String(r.scheduleId),
+                              reference3: r.periodName, reference4: r.invoiceNumber, reference5: 'MPA_ACCRUAL',
                             });
                           });
                         setAccrualPreviewLines(lines);
                         setAccrualPreviewOpen(true);
                       }}
                     >
-                      Create Accrual Accounting
+                      Preview / Debug
+                    </Button>
+                    <Button
+                      icon={<CalendarOutlined />}
+                      onClick={() => openPostModal(flatRows)}
+                    >
+                      Post Entire Month
+                    </Button>
+                    <Button
+                      type="primary"
+                      icon={<BookOutlined />}
+                      disabled={accrualSelected.length === 0}
+                      onClick={() => {
+                        const selectedSet = new Set(accrualSelected);
+                        openPostModal(flatRows.filter((r: any) => selectedSet.has(r.scheduleId)));
+                      }}
+                    >
+                      Post Selected ({accrualSelected.length})
                     </Button>
                   </Space>
                 </div>
@@ -1566,7 +1628,7 @@ const ManageMultiperiod: React.FC = () => {
                   rowKey="scheduleId"
                   size="small"
                   loading={accrualLoading}
-                  pagination={{ pageSize: 25, showSizeChanger: true }}
+                  pagination={{ defaultPageSize: 25, showSizeChanger: true, pageSizeOptions: ['10', '25', '50', '100', '200'] }}
                   scroll={{ x: 1300 }}
                   rowSelection={{
                     selectedRowKeys: accrualSelected,
@@ -2210,6 +2272,76 @@ const ManageMultiperiod: React.FC = () => {
                 render: v => <Text strong>{fmtAmt(v)}</Text> },
             ]}
           />
+        </Modal>
+
+        {/* ── Post Accrual Modal (KPIs + per-line status) ──────────────── */}
+        <Modal
+          open={postModalOpen}
+          title={<Space><BookOutlined style={{ color: REDWOOD.info }} /><span>Post Accrual</span>{postRows[0]?.periodName && <Tag color="purple">{postRows[0].periodName}</Tag>}</Space>}
+          onCancel={() => { if (!postRunning) setPostModalOpen(false); }}
+          maskClosable={!postRunning}
+          width={880}
+          footer={
+            <Space>
+              <Button disabled={postRunning} onClick={() => setPostModalOpen(false)}>Close</Button>
+              <Button type="primary" icon={<BookOutlined />} loading={postRunning}
+                disabled={postRows.every(r => r.postingStatus === 'Posted')}
+                onClick={runPostAll}>
+                Post {postRows.filter(r => r.postingStatus !== 'Posted').length} line(s)
+              </Button>
+            </Space>
+          }
+          destroyOnClose
+        >
+          {(() => {
+            const currency  = postRows[0]?.currencyCode || 'AED';
+            const accounted = postRows.filter(r => r.postingStatus === 'Posted').length;
+            const toPost    = postRows.length - accounted;
+            const toPostAmt = postRows.filter(r => r.postingStatus !== 'Posted').reduce((s, r) => s + (r.periodAmt || 0), 0);
+            const vals      = Object.values(postStatus);
+            const okCount   = vals.filter(s => s.status === 'success').length;
+            const errCount  = vals.filter(s => s.status === 'error').length;
+            const statusTagFor = (s?: { status: string; message: string }) => {
+              switch (s?.status) {
+                case 'accounted': return <Tag color="blue" icon={<CheckCircleOutlined />}>Accounted</Tag>;
+                case 'posting':   return <Tag color="processing" icon={<SyncOutlined spin />}>Posting…</Tag>;
+                case 'success':   return <Tag color="success" icon={<CheckCircleOutlined />}>Posted</Tag>;
+                case 'skipped':   return <Tag color="gold">Skipped</Tag>;
+                case 'error':     return <Tooltip title={s.message}><Tag color="error" icon={<WarningOutlined />}>Error</Tag></Tooltip>;
+                default:          return <Tag>Pending</Tag>;
+              }
+            };
+            return (
+              <>
+                <Row gutter={8} style={{ marginBottom: 12 }}>
+                  <Col span={6}><Card size="small" bodyStyle={{ padding: '6px 10px' }}><Statistic title="Lines selected" value={postRows.length} valueStyle={{ fontSize: 16 }} /></Card></Col>
+                  <Col span={6}><Card size="small" bodyStyle={{ padding: '6px 10px' }}><Statistic title="Already accounted" value={accounted} valueStyle={{ fontSize: 16, color: REDWOOD.info }} /></Card></Col>
+                  <Col span={6}><Card size="small" bodyStyle={{ padding: '6px 10px' }}><Statistic title="To post" value={toPost} valueStyle={{ fontSize: 16, color: REDWOOD.warning }} /></Card></Col>
+                  <Col span={6}><Card size="small" bodyStyle={{ padding: '6px 10px' }}><Statistic title="Amount to post" value={toPostAmt} precision={2} prefix={currency} valueStyle={{ fontSize: 14 }} /></Card></Col>
+                </Row>
+                {(postRunning || okCount + errCount > 0) && (
+                  <Alert type={errCount ? 'warning' : 'info'} showIcon style={{ marginBottom: 12, fontSize: 12 }}
+                    message={`${okCount} posted · ${errCount} failed · ${vals.filter(s => s.status === 'accounted' || s.status === 'skipped').length} skipped`} />
+                )}
+                <Text type="secondary" style={{ fontSize: 11 }}>Already-accounted lines are shown for reference and are not posted again.</Text>
+                <Table
+                  style={{ marginTop: 8 }}
+                  dataSource={postRows}
+                  rowKey="scheduleId"
+                  size="small"
+                  pagination={postRows.length > 50 ? { defaultPageSize: 50, showSizeChanger: true, pageSizeOptions: ['50', '100', '200'] } : false}
+                  scroll={{ x: 640, y: 340 }}
+                  columns={[
+                    { title: 'Sched', dataIndex: 'scheduleId', width: 75, render: (v: number) => <Tag style={{ fontSize: 10, fontFamily: 'monospace' }}>{v}</Tag> },
+                    { title: 'Invoice', dataIndex: 'invoiceNumber', width: 130, ellipsis: true, render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+                    { title: 'Description', dataIndex: 'description', ellipsis: true, render: (v: string) => <Text style={{ fontSize: 11 }} title={v}>{v}</Text> },
+                    { title: 'Amount', dataIndex: 'periodAmt', width: 120, align: 'right' as const, render: (v: number, rec: any) => <Text strong style={{ fontSize: 11 }}>{fmtAmt(v, rec.currencyCode)}</Text> },
+                    { title: 'Status', width: 120, align: 'center' as const, render: (_: any, rec: any) => statusTagFor(postStatus[rec.scheduleId]) },
+                  ]}
+                />
+              </>
+            );
+          })()}
         </Modal>
 
         {/* ── View Accounting Modal ────────────────────────────────────── */}
