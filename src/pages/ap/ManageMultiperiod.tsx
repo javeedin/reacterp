@@ -21,11 +21,11 @@ import {
   type FusionMpaLine, type FusionMpaDetail, type FusionMpaSchedulePeriod,
 } from '../../services/multiperiod.service';
 import {
-  createAccounting, fetchLedgerByBusinessUnit, getAccounting, checkGLJournalExists,
-  checkAccountingExists, getAccountingLinesBySourceNumber,
-  type SlaCreatePayload, type SlaGetResult,
+  createAccounting, fetchLedgerByBusinessUnit, checkGLJournalExists,
+  checkAccountingExists,
+  type SlaCreatePayload,
 } from '../../services/sla.service';
-import { postSlaToGL, buildGlJournalPayload, makeBatchName } from '../../services/glPosting.service';
+import { postSlaToGL, buildGlJournalPayload, makeBatchName, getGlJournalLines } from '../../services/glPosting.service';
 import type { GlPostingOptions } from '../../services/glPosting.service';
 import { useAuth } from '../../context/AuthContext';
 
@@ -125,8 +125,7 @@ const ManageMultiperiod: React.FC = () => {
   // the "all periods" view queries by invoiceNumber (reference1) + MPA_ACCRUAL (reference5).
   const [acctCtx,            setAcctCtx]            = useState<{ scheduleId?: number; invoiceNumber: string; periodName?: string } | null>(null);
   const [acctMode,           setAcctMode]           = useState<'period' | 'all'>('period');
-  const [acctData,           setAcctData]           = useState<SlaGetResult | null>(null);
-  const [acctAllLines,       setAcctAllLines]       = useState<any[] | null>(null);
+  const [acctGlLines,        setAcctGlLines]        = useState<any[] | null>(null);   // actual GL journal lines
   const [acctLoading,        setAcctLoading]        = useState(false);
   const [acctApiOpen,        setAcctApiOpen]        = useState(false);   // show the API URL used to fetch the journal
 
@@ -651,23 +650,24 @@ const ManageMultiperiod: React.FC = () => {
 
   // ── view accounting ───────────────────────────────────────────────────────
 
-  // Load the View-Accounting data for a given context + mode.
-  //  • 'period' → the single schedule's journal (reference2 = scheduleId)
-  //  • 'all'    → every period's journal for the invoice (reference1 = invoiceNumber
-  //               + reference5 = MPA_ACCRUAL), one GET returning all MPA lines.
+  // Load the actual GL journal lines for a given context + mode — read straight
+  // from the posted journal (GET /gl/journals/lines), not the SLA staging tables.
+  //  • 'period' → the single period's journal (reference2 = scheduleId)
+  //  • 'all'    → every period's journal for the invoice (reference1 = invoiceNumber)
+  // Both scoped to reference5 = MPA_ACCRUAL.
   const loadAcctData = useCallback(async (ctx: { scheduleId?: number; invoiceNumber: string }, mode: 'period' | 'all') => {
     setAcctLoading(true);
-    setAcctData(null);
-    setAcctAllLines(null);
+    setAcctGlLines(null);
     try {
-      if (mode === 'period' && ctx.scheduleId != null) {
-        setAcctData(await getAccounting('RR_AP_INVOICE_MULTIPERIOD_SCHEDULE', ctx.scheduleId));
-      } else {
-        const res = await getAccountingLinesBySourceNumber(ctx.invoiceNumber, 'AP');
-        setAcctAllLines((res.items || []).filter((it: any) => (it.eventTypeCode ?? '') === 'MPA_ACCRUAL'));
-      }
+      const res = await getGlJournalLines(
+        mode === 'period' && ctx.scheduleId != null
+          ? { reference2: ctx.scheduleId, reference5: 'MPA_ACCRUAL' }
+          : { reference1: ctx.invoiceNumber, reference5: 'MPA_ACCRUAL' }
+      );
+      setAcctGlLines(res.items);
     } catch (e: any) {
-      message.error(`Failed to load accounting: ${e?.message}`);
+      message.error(`Failed to load journal: ${e?.message}`);
+      setAcctGlLines([]);
     }
     setAcctLoading(false);
   }, []);
@@ -2247,11 +2247,11 @@ const ManageMultiperiod: React.FC = () => {
             const base = APEX_DB_CONFIG.baseUrl;
             const api = acctMode === 'period'
               ? { method: 'GET',
-                  url: `${base}/sla/accounting?sourceTable=RR_AP_INVOICE_MULTIPERIOD_SCHEDULE&sourceId=${acctCtx.scheduleId ?? ''}`,
-                  note: 'RR_SLA_PKG.get_accounting — newest SLA header + its GL lines for this schedule (reference2 = scheduleId).' }
+                  url: `${base}/gl/journals/lines?reference2=${acctCtx.scheduleId ?? ''}&reference5=MPA_ACCRUAL`,
+                  note: 'Actual GL journal lines (RR_GL_JE_LINES_ALL ⨝ headers) for this period — reference2 = scheduleId, reference5 = MPA_ACCRUAL.' }
               : { method: 'GET',
-                  url: `${base}/sla/journals/lines?sourceNumber=${encodeURIComponent(acctCtx.invoiceNumber)}&limit=500&moduleName=AP`,
-                  note: 'RR_SLA_JOURNALS_PKG.get_lines — all AP SLA lines for reference1 = invoice number; filtered in the UI to reference5 (eventTypeCode) = MPA_ACCRUAL.' };
+                  url: `${base}/gl/journals/lines?reference1=${encodeURIComponent(acctCtx.invoiceNumber)}&reference5=MPA_ACCRUAL`,
+                  note: 'Actual GL journal lines across all periods for reference1 = invoice number, reference5 = MPA_ACCRUAL.' };
             return (
               <Alert type="info" showIcon style={{ marginBottom: 12 }}
                 message={<Space size={6}><Tag color="blue" style={{ fontSize: 10 }}>{api.method}</Tag><Text style={{ fontSize: 11 }}>{acctMode === 'period' ? 'Per-period journal' : 'All-periods journals'}</Text></Space>}
@@ -2267,138 +2267,75 @@ const ManageMultiperiod: React.FC = () => {
 
           {acctLoading ? (
             <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>
-          ) : acctMode === 'period' ? (
-            !acctData?.found ? (
-              <Alert type="warning" showIcon message="No accounting entries found"
-                description="No journal has been posted yet for this period's schedule." />
-            ) : (
-              <>
-                <Descriptions size="small" column={3} style={{ marginBottom: 12 }}>
-                  <Descriptions.Item label="Journal #">{acctData.headerId}</Descriptions.Item>
-                  <Descriptions.Item label="Period">{acctData.periodName}</Descriptions.Item>
-                  <Descriptions.Item label="Accounting Date">{acctData.accountingDate ? dayjs(acctData.accountingDate).format('DD MMM YYYY') : '—'}</Descriptions.Item>
-                  <Descriptions.Item label="Status">
-                    {acctData.accountingStatus === 'POSTED'
-                      ? <Tag color="success">Posted</Tag>
-                      : <Tag color="processing">{acctData.accountingStatus}</Tag>}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="Posted By">{acctData.postedBy || '—'}</Descriptions.Item>
-                  <Descriptions.Item label="GL Batch">{acctData.glBatchName || '—'}</Descriptions.Item>
-                </Descriptions>
-                <Table
-                  dataSource={acctData.lines}
-                  rowKey="lineId"
-                  size="small"
-                  pagination={false}
-                  scroll={{ x: 800 }}
-                  columns={[
-                    { title: '#', dataIndex: 'lineNumber', width: 45, align: 'center' as const },
-                    {
-                      title: 'Type', dataIndex: 'lineType', width: 55, align: 'center' as const,
-                      render: (v: string) => (
-                        <Tag color={v === 'DR' ? 'blue' : 'orange'} style={{ fontWeight: 600 }}>{v}</Tag>
-                      ),
-                    },
-                    { title: 'Class', dataIndex: 'accountingClass', width: 100 },
-                    {
-                      title: 'Account', dataIndex: 'accountCombination', ellipsis: true,
-                      render: (v: string) => <Text code style={{ fontSize: 11 }}>{v}</Text>,
-                    },
-                    { title: 'Description', dataIndex: 'description', ellipsis: true },
-                    {
-                      title: 'Dr Amount', dataIndex: 'enteredDr', width: 120, align: 'right' as const,
-                      render: (v: number) => v ? <Text style={{ color: REDWOOD.info }}>{fmtAmt(v)}</Text> : <Text type="secondary">—</Text>,
-                    },
-                    {
-                      title: 'Cr Amount', dataIndex: 'enteredCr', width: 120, align: 'right' as const,
-                      render: (v: number) => v ? <Text style={{ color: REDWOOD.success }}>{fmtAmt(v)}</Text> : <Text type="secondary">—</Text>,
-                    },
-                  ]}
-                  summary={() => {
-                    const totalDr = acctData.lines.reduce((s, l) => s + (l.enteredDr || 0), 0);
-                    const totalCr = acctData.lines.reduce((s, l) => s + (l.enteredCr || 0), 0);
-                    return (
-                      <Table.Summary fixed>
-                        <Table.Summary.Row>
-                          <Table.Summary.Cell index={0} colSpan={5} align="right">
-                            <Text strong>Total</Text>
-                          </Table.Summary.Cell>
-                          <Table.Summary.Cell index={5} align="right">
-                            <Text strong style={{ color: REDWOOD.info }}>{fmtAmt(totalDr)}</Text>
-                          </Table.Summary.Cell>
-                          <Table.Summary.Cell index={6} align="right">
-                            <Text strong style={{ color: REDWOOD.success }}>{fmtAmt(totalCr)}</Text>
-                          </Table.Summary.Cell>
-                        </Table.Summary.Row>
-                      </Table.Summary>
-                    );
-                  }}
-                />
-              </>
-            )
-          ) : (
-            /* ── All periods ── */
-            !acctAllLines || acctAllLines.length === 0 ? (
-              <Alert type="warning" showIcon message="No accounting entries found"
-                description={`No MPA accrual journals posted yet for invoice ${acctCtx?.invoiceNumber ?? ''}.`} />
-            ) : (
+          ) : !acctGlLines || acctGlLines.length === 0 ? (
+            <Alert type="warning" showIcon message="No GL journal lines found"
+              description={acctMode === 'period'
+                ? `No posted journal for this period (reference2 = ${acctCtx?.scheduleId ?? '—'}, reference5 = MPA_ACCRUAL).`
+                : `No MPA accrual journals for invoice ${acctCtx?.invoiceNumber ?? ''} (reference1, reference5 = MPA_ACCRUAL).`} />
+          ) : (() => {
+            const rows = acctGlLines;
+            const totalDr = rows.reduce((s: number, l: any) => s + (Number(l.accounted_dr) || 0), 0);
+            const totalCr = rows.reduce((s: number, l: any) => s + (Number(l.accounted_cr) || 0), 0);
+            const periods  = new Set(rows.map((l: any) => l.period_name));
+            const journals = new Set(rows.map((l: any) => l.je_header_id));
+            return (
               <>
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  {new Set(acctAllLines.map(l => l.periodName)).size} period(s) · {new Set(acctAllLines.map(l => l.headerId)).size} journal(s)
+                  {periods.size} period(s) · {journals.size} journal(s) · {rows.length} line(s)
                 </Text>
                 <Table
                   style={{ marginTop: 8 }}
-                  dataSource={acctAllLines}
-                  rowKey={(r: any) => `${r.headerId}-${r.lineId}`}
+                  dataSource={rows}
+                  rowKey={(r: any) => `${r.je_header_id}-${r.line_id}`}
                   size="small"
                   pagination={false}
-                  scroll={{ x: 900 }}
+                  scroll={{ x: 940 }}
                   columns={[
                     {
-                      title: 'Period', dataIndex: 'periodName', width: 80,
-                      render: (v: string) => <Tag color="purple" style={{ fontSize: 10 }}>{v}</Tag>,
+                      title: 'Period', dataIndex: 'period_name', width: 80,
+                      render: (v: string) => <Tag color="purple" style={{ fontSize: 10 }}>{v || '—'}</Tag>,
                     },
-                    { title: 'Jrnl #', dataIndex: 'headerId', width: 70, align: 'center' as const },
                     {
-                      title: 'Type', dataIndex: 'lineType', width: 55, align: 'center' as const,
-                      render: (v: string) => <Tag color={v === 'DR' ? 'blue' : 'orange'} style={{ fontWeight: 600 }}>{v}</Tag>,
+                      title: 'Journal', dataIndex: 'je_header_id', width: 90, align: 'center' as const,
+                      render: (v: number, rec: any) => <Tooltip title={rec.journal_name}><Text style={{ fontSize: 11 }}>{v}</Text></Tooltip>,
                     },
-                    { title: 'Class', dataIndex: 'accountingClass', width: 95 },
+                    { title: '#', dataIndex: 'line_num', width: 40, align: 'center' as const },
                     {
-                      title: 'Account', dataIndex: 'accountCombination', ellipsis: true,
+                      title: 'Account', dataIndex: 'account', ellipsis: true,
                       render: (v: string) => <Text code style={{ fontSize: 11 }}>{v}</Text>,
                     },
                     { title: 'Description', dataIndex: 'description', ellipsis: true },
                     {
-                      title: 'Status', dataIndex: 'accountingStatus', width: 90, align: 'center' as const,
-                      render: (v: string) => v === 'POSTED' ? <Tag color="success">Posted</Tag> : <Tag color="processing">{v}</Tag>,
+                      title: 'Status', dataIndex: 'posting_status', width: 90, align: 'center' as const,
+                      render: (v: string) => <Tag color={v === 'POSTED' ? 'success' : 'default'} style={{ fontSize: 10 }}>{v || '—'}</Tag>,
                     },
                     {
-                      title: 'Dr Amount', dataIndex: 'enteredDr', width: 115, align: 'right' as const,
-                      render: (v: number) => v ? <Text style={{ color: REDWOOD.info }}>{fmtAmt(v)}</Text> : <Text type="secondary">—</Text>,
+                      title: 'Dr Amount', dataIndex: 'accounted_dr', width: 120, align: 'right' as const,
+                      render: (v: any) => Number(v) ? <Text style={{ color: REDWOOD.info }}>{fmtAmt(Number(v))}</Text> : <Text type="secondary">—</Text>,
                     },
                     {
-                      title: 'Cr Amount', dataIndex: 'enteredCr', width: 115, align: 'right' as const,
-                      render: (v: number) => v ? <Text style={{ color: REDWOOD.success }}>{fmtAmt(v)}</Text> : <Text type="secondary">—</Text>,
+                      title: 'Cr Amount', dataIndex: 'accounted_cr', width: 120, align: 'right' as const,
+                      render: (v: any) => Number(v) ? <Text style={{ color: REDWOOD.success }}>{fmtAmt(Number(v))}</Text> : <Text type="secondary">—</Text>,
                     },
                   ]}
-                  summary={() => {
-                    const totalDr = acctAllLines.reduce((s, l) => s + (l.enteredDr || 0), 0);
-                    const totalCr = acctAllLines.reduce((s, l) => s + (l.enteredCr || 0), 0);
-                    return (
-                      <Table.Summary fixed>
-                        <Table.Summary.Row>
-                          <Table.Summary.Cell index={0} colSpan={7} align="right"><Text strong>Total (all periods)</Text></Table.Summary.Cell>
-                          <Table.Summary.Cell index={7} align="right"><Text strong style={{ color: REDWOOD.info }}>{fmtAmt(totalDr)}</Text></Table.Summary.Cell>
-                          <Table.Summary.Cell index={8} align="right"><Text strong style={{ color: REDWOOD.success }}>{fmtAmt(totalCr)}</Text></Table.Summary.Cell>
-                        </Table.Summary.Row>
-                      </Table.Summary>
-                    );
-                  }}
+                  summary={() => (
+                    <Table.Summary fixed>
+                      <Table.Summary.Row>
+                        <Table.Summary.Cell index={0} colSpan={6} align="right"><Text strong>{acctMode === 'all' ? 'Total (all periods)' : 'Total'}</Text></Table.Summary.Cell>
+                        <Table.Summary.Cell index={6} align="right"><Text strong style={{ color: REDWOOD.info }}>{fmtAmt(totalDr)}</Text></Table.Summary.Cell>
+                        <Table.Summary.Cell index={7} align="right"><Text strong style={{ color: REDWOOD.success }}>{fmtAmt(totalCr)}</Text></Table.Summary.Cell>
+                      </Table.Summary.Row>
+                    </Table.Summary>
+                  )}
                 />
+                <div style={{ marginTop: 6 }}>
+                  <Text type="secondary" style={{ fontSize: 10 }}>
+                    Source: reerp/gl/journals/lines?{acctMode === 'period' ? `reference2=${acctCtx?.scheduleId}` : `reference1=${acctCtx?.invoiceNumber}`}&reference5=MPA_ACCRUAL
+                  </Text>
+                </div>
               </>
-            )
-          )}
+            );
+          })()}
         </Modal>
 
         {/* ── API Debug Modal ──────────────────────────────────────────── */}

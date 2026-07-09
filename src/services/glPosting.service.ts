@@ -11,6 +11,32 @@ import { checkGLJournalExists } from './sla.service';
 
 const BASE = APEX_DB_CONFIG.baseUrl;
 
+/**
+ * Fetch actual GL journal lines (RR_GL_JE_LINES_ALL joined to headers) filtered
+ * by GL reference columns. This reads the posted journal directly — not the SLA
+ * staging tables. Columns returned (snake_case): line_num, je_header_id,
+ * journal_name, period_name, accounting_date, je_batch_id, posting_status,
+ * reference1..6, account, description, entered_dr/cr, accounted_dr/cr, currency_code.
+ */
+export async function getGlJournalLines(params: {
+  reference1?: string | number;
+  reference2?: string | number;
+  reference5?: string;
+  periodName?: string;
+  limit?: number;
+}): Promise<{ items: any[] }> {
+  const qs = new URLSearchParams();
+  if (params.reference1 != null) qs.set('reference1', String(params.reference1));
+  if (params.reference2 != null) qs.set('reference2', String(params.reference2));
+  if (params.reference5 != null) qs.set('reference5', String(params.reference5));
+  if (params.periodName)         qs.set('period_name', params.periodName);
+  qs.set('limit', String(params.limit ?? 500));
+  const res  = await fetch(`${BASE}/gl/journals/lines?${qs.toString()}`, { headers: { Accept: 'application/json' } });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.message || `HTTP ${res.status}`);
+  return { items: Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []) };
+}
+
 // Maps SLA event type codes → reference5 label stored on GL lines
 const EVENT_TYPE_TO_REF5: Record<string, string> = {
   AP_INVOICE_CREATION:     'AP-INVOICE-CREATION',
