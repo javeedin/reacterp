@@ -22,6 +22,7 @@ import {
 } from '../../services/multiperiod.service';
 import {
   createAccounting, fetchLedgerByBusinessUnit, getAccounting, checkGLJournalExists,
+  checkAccountingExists,
   type SlaCreatePayload, type SlaGetResult,
 } from '../../services/sla.service';
 import { postSlaToGL, buildGlJournalPayload, makeBatchName } from '../../services/glPosting.service';
@@ -545,16 +546,21 @@ const ManageMultiperiod: React.FC = () => {
           setAccrualAcctResults([...results]); continue;
         }
 
-        // 2. Create SLA
-        const sla = await createAccounting(buildAccrualSlaPayload(g, ledger, postedBy, today));
+        // 2. Create SLA — but reuse an existing header for this schedule instead of
+        //    creating a duplicate every run.
+        const slaExists = await checkAccountingExists('RR_AP_INVOICE_MULTIPERIOD_SCHEDULE', g.scheduleId, 'MPA_ACCRUAL');
+        const slaHeaderId = (slaExists.exists && slaExists.headerId)
+          ? slaExists.headerId
+          : (await createAccounting(buildAccrualSlaPayload(g, ledger, postedBy, today))).headerId;
 
         // 3-5. Create + post GL journal, stamp SLA (postSlaToGL also re-checks the duplicate)
-        const glRes = await postSlaToGL(buildAccrualGlOpts(g, ledger, postedBy, sla.headerId));
+        const glRes = await postSlaToGL(buildAccrualGlOpts(g, ledger, postedBy, slaHeaderId));
         if (!glRes.success) { results.push({ scheduleId: g.scheduleId, invoiceNumber: g.invoiceNumber, status: 'error', message: glRes.error || 'GL posting failed' }); setAccrualAcctResults([...results]); continue; }
 
         // 6. Mark the MPA schedule/period posted
-        await markPeriodPosted(g.invoiceId, g.periodName, sla.headerId, postedBy);
-        results.push({ scheduleId: g.scheduleId, invoiceNumber: g.invoiceNumber, status: 'success', message: `SLA #${sla.headerId} — GL ${glRes.batchName}${glRes.skipped ? ' (reused)' : ''}` });
+        await markPeriodPosted(g.invoiceId, g.periodName, slaHeaderId, postedBy);
+        const slaTag = (slaExists.exists && slaExists.headerId) ? ' (SLA reused)' : '';
+        results.push({ scheduleId: g.scheduleId, invoiceNumber: g.invoiceNumber, status: 'success', message: `SLA #${slaHeaderId}${slaTag} — GL ${glRes.batchName}${glRes.skipped ? ' (reused)' : ''}` });
       } catch (e: any) {
         results.push({ scheduleId: g.scheduleId, invoiceNumber: g.invoiceNumber, status: 'error', message: e?.message || 'Unexpected error' });
       }
@@ -585,6 +591,21 @@ const ManageMultiperiod: React.FC = () => {
     try {
       const url     = resolveAccrualTokens(s.url, accrualDebugCtx);
       const payload = s.payload ? resolveAccrualTokens(s.payload, accrualDebugCtx) : null;
+
+      // Step 2 (Create SLA): don't create a duplicate — if an SLA header already
+      // exists for this schedule, reuse it and skip the POST.
+      if (s.url.includes('/sla/accounting/create') && payload?.header?.sourceId != null) {
+        const h = payload.header;
+        const chk = await checkAccountingExists(h.sourceTable, h.sourceId, h.eventTypeCode);
+        if (chk.exists && chk.headerId) {
+          setAccrualDebugCtx(prev => ({ ...prev, slaHeaderId: chk.headerId }));
+          setAccrualStepTest(prev => ({ ...prev, [idx]: { loading: false, status: 200,
+            body: `SLA already exists for schedule ${h.sourceId} — reusing headerId ${chk.headerId} (accounting ${chk.accountingStatus ?? '—'}, posting ${chk.postingStatus ?? '—'}). No duplicate created.\n\n${JSON.stringify(chk, null, 2)}` } }));
+          message.info(`SLA already exists — reusing header #${chk.headerId} (no duplicate created).`);
+          return;
+        }
+      }
+
       const hasBody = s.method === 'POST' || s.method === 'PUT';
       const res = await fetch(url, {
         method: s.method,
