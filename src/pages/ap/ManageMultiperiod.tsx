@@ -52,6 +52,32 @@ const fmtDate = (s: string | null | undefined) =>
 
 const currentPeriod = () => dayjs().format('MMM-YY');   // e.g. "Apr-26"
 
+// Accrual period is stored as "MMM-YYYY" (e.g. "May-2026"). GL periods use the
+// short "MMM-YY" form ("May-26") and the accounting/effective date must fall in
+// that period → use the last day of the month (e.g. "2026-05-31").
+const accrualPeriodInfo = (periodName: string): { label: string; endDate: string } => {
+  const d = dayjs(periodName, 'MMM-YYYY');
+  return d.isValid()
+    ? { label: d.format('MMM-YY'), endDate: d.endOf('month').format('YYYY-MM-DD') }
+    : { label: periodName, endDate: dayjs().format('YYYY-MM-DD') };
+};
+
+// Resolve {token} placeholders in a URL string or payload object from a running
+// context map (values captured from earlier debug steps). Missing tokens fall
+// back to '0' so a single step can still be exercised in isolation.
+function resolveAccrualTokens<T>(value: T, ctx: Record<string, any>): T {
+  if (typeof value === 'string') {
+    return value.replace(/\{(\w+)\}/g, (_, k) => (ctx[k] != null ? String(ctx[k]) : '0')) as unknown as T;
+  }
+  if (Array.isArray(value)) return value.map(v => resolveAccrualTokens(v, ctx)) as unknown as T;
+  if (value && typeof value === 'object') {
+    const out: Record<string, any> = {};
+    for (const k of Object.keys(value as Record<string, any>)) out[k] = resolveAccrualTokens((value as any)[k], ctx);
+    return out as unknown as T;
+  }
+  return value;
+}
+
 const statusTag = (status: string) => {
   if (status === 'Posted')     return <Tag color="success" icon={<CheckCircleOutlined />}>Posted</Tag>;
   if (status === 'Not Posted') return <Tag color="warning" icon={<WarningOutlined />}>Not Posted</Tag>;
@@ -116,6 +142,10 @@ const ManageMultiperiod: React.FC = () => {
   const [accrualDebugOpen,   setAccrualDebugOpen]   = useState(false);
   const [accrualDebugSteps,  setAccrualDebugSteps]  = useState<{ step: string; method: string; url: string; payload: any }[]>([]);
   const [accrualStepTest,    setAccrualStepTest]    = useState<Record<number, { loading: boolean; status: number; body: string }>>({});
+  // IDs captured from earlier debug steps ({slaHeaderId} / {batchId} / {batchName} / {glHeaderId})
+  const [accrualDebugCtx,    setAccrualDebugCtx]    = useState<Record<string, any>>({});
+  // Once the step-1 duplicate check reports the journal already exists, later steps are halted.
+  const [accrualDebugHalted, setAccrualDebugHalted] = useState(false);
 
   // ── Fusion data tab ───────────────────────────────────────────────────────
   const [fusionForm]        = Form.useForm();
@@ -411,45 +441,54 @@ const ManageMultiperiod: React.FC = () => {
     return Array.from(map.values());
   };
 
-  const buildAccrualSlaPayload = (g: any, ledger: any, postedBy: string, today: string): SlaCreatePayload => ({
+  const buildAccrualSlaPayload = (g: any, ledger: any, postedBy: string, today: string): SlaCreatePayload => {
+    const { label: periodLabel, endDate: acctDate } = accrualPeriodInfo(g.periodName);
+    return {
     header: {
       moduleName: 'AP', sourceTable: 'RR_AP_INVOICE_MULTIPERIOD_SCHEDULE',
       sourceId: g.scheduleId, sourceNumber: g.invoiceNumber, sourceType: 'Multiperiod',
-      eventTypeCode: 'MPA_ACCRUAL', eventDate: today, accountingDate: today,
-      periodName: g.periodName, ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName,
+      // eventDate = when the accrual was run (today); accountingDate = the GL date,
+      // which must fall inside the accrual period → period-end date.
+      eventTypeCode: 'MPA_ACCRUAL', eventDate: today, accountingDate: acctDate,
+      periodName: periodLabel, ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName,
       currencyCode: 'AED', ledgerCurrency: ledger.ledgerName, exchangeRate: 1,
-      businessUnit: g.businessUnit, description: `MPA Accrual — ${g.invoiceNumber} — ${g.periodName}`,
+      businessUnit: g.businessUnit, description: `MPA Accrual — ${g.invoiceNumber} — ${periodLabel}`,
       createdBy: postedBy,
     },
     lines: [
       { lineNumber: 1, lineType: 'DR', accountingClass: 'EXPENSE', accountCombination: g.drAcct || '',
         enteredDr: g.amount, enteredCr: 0, accountedDr: g.amount, accountedCr: 0, currencyCode: 'AED',
-        exchangeRate: 1, description: g.drDesc || `Expense — ${g.periodName}`, sourceLineId: g.scheduleId, sourceLineNumber: 1 },
+        exchangeRate: 1, description: g.drDesc || `Expense — ${periodLabel}`, sourceLineId: g.scheduleId, sourceLineNumber: 1 },
       { lineNumber: 2, lineType: 'CR', accountingClass: 'ACCRUAL', accountCombination: g.crAcct || '',
         enteredDr: 0, enteredCr: g.amount, accountedDr: 0, accountedCr: g.amount, currencyCode: 'AED',
-        exchangeRate: 1, description: g.crDesc || `Accrual — ${g.periodName}`, sourceLineId: g.scheduleId, sourceLineNumber: 2 },
+        exchangeRate: 1, description: g.crDesc || `Accrual — ${periodLabel}`, sourceLineId: g.scheduleId, sourceLineNumber: 2 },
     ],
-  });
+    };
+  };
 
-  const buildGlLines = (g: any, today: string) => ([
+  const buildGlLines = (g: any, acctDate: string) => ([
     { lineType: 'DR' as const, enteredDr: g.amount, enteredCr: 0, accountedDr: g.amount, accountedCr: 0,
-      description: g.drDesc || `Expense — ${g.periodName}`, currencyCode: 'AED', accountingDate: today,
+      description: g.drDesc || `Expense — ${g.periodName}`, currencyCode: 'AED', accountingDate: acctDate,
       accountCombination: g.drAcct || '', accountingClass: 'EXPENSE', legalEntity: null },
     { lineType: 'CR' as const, enteredDr: 0, enteredCr: g.amount, accountedDr: 0, accountedCr: g.amount,
-      description: g.crDesc || `Accrual — ${g.periodName}`, currencyCode: 'AED', accountingDate: today,
+      description: g.crDesc || `Accrual — ${g.periodName}`, currencyCode: 'AED', accountingDate: acctDate,
       accountCombination: g.crAcct || '', accountingClass: 'ACCRUAL', legalEntity: null },
   ]);
 
   // Shared GL posting options for an accrual schedule — used by both the live run
   // (postSlaToGL) and the step-by-step debug modal (buildGlJournalPayload) so the
-  // journal body shown in step 3 matches exactly what is posted.
-  const buildAccrualGlOpts = (g: any, ledger: any, postedBy: string, today: string, slaHeaderId = 0): GlPostingOptions => ({
-    slaHeaderId, sourceNumber: g.invoiceNumber, sourceId: g.scheduleId,
-    eventTypeCode: 'MPA_ACCRUAL', periodName: g.periodName, ledgerName: ledger.ledgerName,
-    ledgerId: ledger.ledgerId, currency: 'AED', accountingDate: today, legalEntity: '',
-    businessUnit: g.businessUnit, jeCategory: 'Accrual', jeSource: 'Payables', batchSource: 'Payables',
-    createdBy: postedBy, lines: buildGlLines(g, today),
-  });
+  // journal body shown in step 3 matches exactly what is posted. periodName is the
+  // GL "MMM-YY" form and the accounting/effective date is the period-end date.
+  const buildAccrualGlOpts = (g: any, ledger: any, postedBy: string, slaHeaderId = 0): GlPostingOptions => {
+    const { label: periodLabel, endDate: acctDate } = accrualPeriodInfo(g.periodName);
+    return {
+      slaHeaderId, sourceNumber: g.invoiceNumber, sourceId: g.scheduleId,
+      eventTypeCode: 'MPA_ACCRUAL', periodName: periodLabel, ledgerName: ledger.ledgerName,
+      ledgerId: ledger.ledgerId, currency: 'AED', accountingDate: acctDate, legalEntity: '',
+      businessUnit: g.businessUnit, jeCategory: 'Accrual', jeSource: 'Payables', batchSource: 'Payables',
+      createdBy: postedBy, lines: buildGlLines(g, acctDate),
+    };
+  };
 
   const openAccrualDebug = async () => {
     const groups = groupAccrualSchedules();
@@ -463,7 +502,7 @@ const ManageMultiperiod: React.FC = () => {
     // Build the exact POST /journals/create body (batch + header + lines with
     // reference1/2/5) via the shared builder — same call runAccrualAccounting makes.
     const glPayload = ledger
-      ? buildGlJournalPayload(buildAccrualGlOpts(g, ledger, postedBy, today), makeBatchName('MPA_ACCRUAL', g.invoiceNumber))
+      ? buildGlJournalPayload(buildAccrualGlOpts(g, ledger, postedBy), makeBatchName('MPA_ACCRUAL', g.invoiceNumber))
       : { error: `No ledger for BU '${g.businessUnit}'` };
     setAccrualDebugSteps([
       { step: `1 — Duplicate check (Ref2=${g.scheduleId}, Ref5=MPA_ACCRUAL)`, method: 'GET',
@@ -477,6 +516,10 @@ const ManageMultiperiod: React.FC = () => {
         payload: { invoiceId: g.invoiceId, periodName: g.periodName, slaHeaderId: '{slaHeaderId}', postedBy } },
     ]);
     setAccrualStepTest({});
+    // Seed the resolver with the (deterministic) batch name; slaHeaderId / batchId /
+    // glHeaderId fill in as steps 2 and 3 run. Reset the halt flag for a fresh run.
+    setAccrualDebugCtx({ batchName: (glPayload as any)?.batch?.batchName ?? null });
+    setAccrualDebugHalted(false);
     setAccrualDebugOpen(true);
   };
 
@@ -506,7 +549,7 @@ const ManageMultiperiod: React.FC = () => {
         const sla = await createAccounting(buildAccrualSlaPayload(g, ledger, postedBy, today));
 
         // 3-5. Create + post GL journal, stamp SLA (postSlaToGL also re-checks the duplicate)
-        const glRes = await postSlaToGL(buildAccrualGlOpts(g, ledger, postedBy, today, sla.headerId));
+        const glRes = await postSlaToGL(buildAccrualGlOpts(g, ledger, postedBy, sla.headerId));
         if (!glRes.success) { results.push({ scheduleId: g.scheduleId, invoiceNumber: g.invoiceNumber, status: 'error', message: glRes.error || 'GL posting failed' }); setAccrualAcctResults([...results]); continue; }
 
         // 6. Mark the MPA schedule/period posted
@@ -525,21 +568,56 @@ const ManageMultiperiod: React.FC = () => {
     if (ok > 0 && accrualPeriod) loadAccrualLines(accrualPeriod);
   };
 
-  // Run a single debug step live from the debug modal.
+  // Run a single debug step live from the debug modal. Placeholders like
+  // {slaHeaderId} / {batchId} / {batchName} / {glHeaderId} are resolved from IDs
+  // captured by earlier steps, and each step feeds its own IDs back into the
+  // context. Once the step-1 duplicate check reports the journal already exists,
+  // the remaining steps are halted.
   const runAccrualDebugStep = async (idx: number) => {
     const s = accrualDebugSteps[idx];
     if (!s) return;
+    const isDupCheck = s.url.includes('/gl/journals/check');
+    if (accrualDebugHalted && !isDupCheck) {
+      message.warning('Journal already exists — remaining steps are halted. Re-open the debug modal to reset.');
+      return;
+    }
     setAccrualStepTest(prev => ({ ...prev, [idx]: { loading: true, status: 0, body: '' } }));
     try {
+      const url     = resolveAccrualTokens(s.url, accrualDebugCtx);
+      const payload = s.payload ? resolveAccrualTokens(s.payload, accrualDebugCtx) : null;
       const hasBody = s.method === 'POST' || s.method === 'PUT';
-      const res = await fetch(s.url.replace(/\{[^}]+\}/g, '0'), {
+      const res = await fetch(url, {
         method: s.method,
         headers: hasBody ? { 'Content-Type': 'application/json', Accept: 'application/json' } : { Accept: 'application/json' },
-        body: hasBody && s.payload && !s.payload.error ? JSON.stringify(s.payload) : undefined,
+        body: hasBody && payload && !payload.error ? JSON.stringify(payload) : undefined,
       });
       const text = await res.text();
-      let pretty = text; try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* not json */ }
+      let data: any = null, pretty = text;
+      try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* not json */ }
       setAccrualStepTest(prev => ({ ...prev, [idx]: { loading: false, status: res.status, body: pretty } }));
+
+      // Capture IDs from each step so later steps resolve to real numbers.
+      if (data && res.ok) {
+        if (isDupCheck) {
+          if (data.exists) {
+            setAccrualDebugCtx(prev => ({ ...prev,
+              batchId:    data.batchId  ?? prev.batchId,
+              glHeaderId: data.headerId ?? prev.glHeaderId }));
+            setAccrualDebugHalted(true);
+            message.warning(`Journal already exists (GL batch ${data.batchId ?? '—'}, status ${data.status ?? '—'}) — remaining steps halted.`);
+          }
+        } else if (s.url.includes('/sla/accounting/create')) {
+          if (data.headerId != null) setAccrualDebugCtx(prev => ({ ...prev, slaHeaderId: data.headerId }));
+        } else if (s.url.includes('/journals/create')) {
+          const batchId    = data.jeBatchId  ?? data.je_batch_id  ?? data.batchId  ?? null;
+          const glHeaderId = data.jeHeaderId ?? data.je_header_id ?? data.headerId ?? null;
+          const batchName  = (payload as any)?.batch?.batchName ?? null;
+          setAccrualDebugCtx(prev => ({ ...prev,
+            batchId:    batchId    ?? prev.batchId,
+            glHeaderId: glHeaderId ?? prev.glHeaderId,
+            batchName:  batchName  ?? prev.batchName }));
+        }
+      }
     } catch (e: any) {
       setAccrualStepTest(prev => ({ ...prev, [idx]: { loading: false, status: 0, body: e?.message ?? 'Network error' } }));
     }
@@ -1652,24 +1730,34 @@ const ManageMultiperiod: React.FC = () => {
             destroyOnClose
           >
             <Alert type="info" showIcon style={{ marginBottom: 12, fontSize: 11 }}
-              message="Payloads shown for the first selected schedule. Placeholders like {slaHeaderId} / {batchId} are resolved at run time from earlier steps. Use Test to call a single step live." />
+              message="Payloads shown for the first selected schedule. Placeholders like {slaHeaderId} / {batchId} resolve from earlier steps as you run them. Use Test to call a single step live." />
+            {accrualDebugHalted && (
+              <Alert type="warning" showIcon style={{ marginBottom: 12, fontSize: 11 }}
+                message="Duplicate check reported the journal already exists — steps 2–6 are halted. Re-open this modal to reset." />
+            )}
             {accrualDebugSteps.map((s, idx) => {
               const t = accrualStepTest[idx];
+              const isDupCheck = s.url.includes('/gl/journals/check');
+              const stepHalted = accrualDebugHalted && !isDupCheck;
+              // Show URL + payload with placeholders resolved from IDs captured so far.
+              const dispUrl     = resolveAccrualTokens(s.url, accrualDebugCtx);
+              const dispPayload = s.payload != null ? resolveAccrualTokens(s.payload, accrualDebugCtx) : null;
               return (
-                <div key={idx} style={{ border: `1px solid ${REDWOOD.neutral}`, borderRadius: 6, marginBottom: 10, overflow: 'hidden' }}>
+                <div key={idx} style={{ border: `1px solid ${REDWOOD.neutral}`, borderRadius: 6, marginBottom: 10, overflow: 'hidden', opacity: stepHalted ? 0.55 : 1 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fafafa', padding: '6px 10px', borderBottom: '1px solid #eee' }}>
                     <Tag color={s.method === 'GET' ? 'blue' : s.method === 'PUT' ? 'orange' : 'green'} style={{ fontSize: 10 }}>{s.method}</Tag>
                     <Text strong style={{ fontSize: 12 }}>{s.step}</Text>
-                    <Button size="small" style={{ marginLeft: 'auto' }} loading={t?.loading} onClick={() => runAccrualDebugStep(idx)}>Test</Button>
+                    {stepHalted && <Tag color="warning" style={{ fontSize: 10 }}>halted</Tag>}
+                    <Button size="small" style={{ marginLeft: 'auto' }} loading={t?.loading} disabled={stepHalted} onClick={() => runAccrualDebugStep(idx)}>Test</Button>
                   </div>
                   <div style={{ padding: '6px 10px' }}>
                     <Text type="secondary" style={{ fontSize: 10 }}>URL</Text>
-                    <Paragraph copyable style={{ fontFamily: 'monospace', fontSize: 11, margin: '2px 0 6px', wordBreak: 'break-all' }}>{s.url}</Paragraph>
-                    {s.payload != null && (
+                    <Paragraph copyable style={{ fontFamily: 'monospace', fontSize: 11, margin: '2px 0 6px', wordBreak: 'break-all' }}>{dispUrl}</Paragraph>
+                    {dispPayload != null && (
                       <>
                         <Text type="secondary" style={{ fontSize: 10 }}>Payload</Text>
                         <pre style={{ fontFamily: 'monospace', fontSize: 10, background: '#f5f5f5', padding: '6px 8px', borderRadius: 4, maxHeight: 180, overflow: 'auto', margin: '2px 0 0' }}>
-                          {JSON.stringify(s.payload, null, 2)}
+                          {JSON.stringify(dispPayload, null, 2)}
                         </pre>
                       </>
                     )}
