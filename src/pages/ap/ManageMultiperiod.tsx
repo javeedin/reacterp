@@ -50,6 +50,10 @@ const APEX_BU_URL = `${APEX_DB_CONFIG.baseUrl}/gl/businessunits`;
 const fmtAmt = (v: number | null | undefined, currency = 'AED') =>
   v == null ? '—' : `${currency} ${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+// Number-only (no currency prefix) — used where currency has its own column.
+const fmtNum = (v: number | null | undefined) =>
+  v == null ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 const fmtDate = (s: string | null | undefined) =>
   s ? dayjs(s).format('DD MMM YYYY') : '—';
 
@@ -1092,19 +1096,23 @@ const ManageMultiperiod: React.FC = () => {
       ),
     },
     {
+      title: 'Currency', dataIndex: 'currencyCode', width: 90, align: 'center' as const,
+      render: (v: string) => <Tag style={{ fontSize: 11 }}>{v || '—'}</Tag>,
+    },
+    {
       title: 'Invoice Amount', dataIndex: 'totalAmount', width: 130, align: 'right' as const,
-      render: (v, rec) => <Text strong style={{ fontSize: 12 }}>{fmtAmt(v, rec.currencyCode)}</Text>,
+      render: (v) => <Text strong style={{ fontSize: 12 }}>{fmtNum(v)}</Text>,
     },
     {
       title: 'Not Posted', dataIndex: 'notPostedAmount', width: 130, align: 'right' as const,
-      render: (v, rec) => v > 0
-        ? <Text type="warning" style={{ fontSize: 12 }}>{fmtAmt(v, rec.currencyCode)}</Text>
+      render: (v) => v > 0
+        ? <Text type="warning" style={{ fontSize: 12 }}>{fmtNum(v)}</Text>
         : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>,
     },
     {
       title: 'Posted', dataIndex: 'postedAmount', width: 130, align: 'right' as const,
-      render: (v, rec) => v > 0
-        ? <Text style={{ color: REDWOOD.success, fontSize: 12 }}>{fmtAmt(v, rec.currencyCode)}</Text>
+      render: (v) => v > 0
+        ? <Text style={{ color: REDWOOD.success, fontSize: 12 }}>{fmtNum(v)}</Text>
         : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>,
     },
     {
@@ -1414,7 +1422,7 @@ const ManageMultiperiod: React.FC = () => {
                   size="small"
                   loading={searching}
                   pagination={{ defaultPageSize: 20, showSizeChanger: true, pageSizeOptions: ['20', '50', '100', '200'] }}
-                  scroll={{ x: 1150 }}
+                  scroll={{ x: 1240 }}
                   locale={{ emptyText: 'Run a search to see multiperiod invoices' }}
                   summary={(rows) => {
                     if (!rows.length) return null;
@@ -1425,10 +1433,11 @@ const ManageMultiperiod: React.FC = () => {
                       <Table.Summary fixed>
                         <Table.Summary.Row style={{ background: '#f0f5ff', fontWeight: 700 }}>
                           <Table.Summary.Cell index={0} colSpan={6}><strong>Total ({rows.length})</strong></Table.Summary.Cell>
-                          <Table.Summary.Cell index={6} align="right"><Text strong>{fmtAmt(t, curr)}</Text></Table.Summary.Cell>
-                          <Table.Summary.Cell index={7} align="right"><Text strong style={{ color: REDWOOD.warning }}>{fmtAmt(np, curr)}</Text></Table.Summary.Cell>
-                          <Table.Summary.Cell index={8} align="right"><Text strong style={{ color: REDWOOD.success }}>{fmtAmt(p, curr)}</Text></Table.Summary.Cell>
-                          <Table.Summary.Cell index={9} />
+                          <Table.Summary.Cell index={6} align="center"><Text strong>{curr}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={7} align="right"><Text strong>{fmtNum(t)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={8} align="right"><Text strong style={{ color: REDWOOD.warning }}>{fmtNum(np)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={9} align="right"><Text strong style={{ color: REDWOOD.success }}>{fmtNum(p)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={10} />
                         </Table.Summary.Row>
                       </Table.Summary>
                     );
