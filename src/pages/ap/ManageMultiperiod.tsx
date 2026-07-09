@@ -21,13 +21,14 @@ import {
   type FusionMpaLine, type FusionMpaDetail, type FusionMpaSchedulePeriod,
 } from '../../services/multiperiod.service';
 import {
-  createAccounting, fetchLedgerByBusinessUnit, getAccounting,
+  createAccounting, fetchLedgerByBusinessUnit, getAccounting, checkGLJournalExists,
   type SlaCreatePayload, type SlaGetResult,
 } from '../../services/sla.service';
+import { postSlaToGL } from '../../services/glPosting.service';
 import { useAuth } from '../../context/AuthContext';
 
 const { Content } = Layout;
-const { Text, Title } = Typography;
+const { Text, Title, Paragraph } = Typography;
 const { Option } = Select;
 
 const REDWOOD = {
@@ -108,6 +109,12 @@ const ManageMultiperiod: React.FC = () => {
   const [detailSearch,       setDetailSearch]       = useState<Record<string, string>>({});
   const [accrualPreviewOpen, setAccrualPreviewOpen] = useState(false);
   const [accrualPreviewLines, setAccrualPreviewLines] = useState<any[]>([]);
+  // Accrual Create-Accounting run + debug
+  const [accrualAcctRunning, setAccrualAcctRunning] = useState(false);
+  const [accrualAcctResults, setAccrualAcctResults] = useState<{ scheduleId: number; invoiceNumber: string; status: 'success'|'skipped'|'error'; message: string }[]>([]);
+  const [accrualDebugOpen,   setAccrualDebugOpen]   = useState(false);
+  const [accrualDebugSteps,  setAccrualDebugSteps]  = useState<{ step: string; method: string; url: string; payload: any }[]>([]);
+  const [accrualStepTest,    setAccrualStepTest]    = useState<Record<number, { loading: boolean; status: number; body: string }>>({});
 
   // ── Fusion data tab ───────────────────────────────────────────────────────
   const [fusionForm]        = Form.useForm();
@@ -383,6 +390,146 @@ const ManageMultiperiod: React.FC = () => {
 
     setConfirmTab(tabKey);
     setConfirmOpen(true);
+  };
+
+  // ── Accrual Create Accounting (from preview) ───────────────────────────────
+  // Group the 2-line-per-schedule preview into one object per schedule.
+  const groupAccrualSchedules = () => {
+    const map = new Map<number, any>();
+    accrualPreviewLines.forEach((l: any) => {
+      let g = map.get(l.scheduleId);
+      if (!g) {
+        g = { scheduleId: l.scheduleId, invoiceId: l.invoiceId, invoiceNumber: l.invoiceNumber,
+              businessUnit: l.businessUnit, periodName: l.periodName, drAcct: '', crAcct: '',
+              drDesc: '', crDesc: '', amount: 0 };
+        map.set(l.scheduleId, g);
+      }
+      if (l.dr > 0) { g.drAcct = l.account; g.drDesc = l.description; g.amount = l.dr; }
+      else          { g.crAcct = l.account; g.crDesc = l.description; }
+    });
+    return Array.from(map.values());
+  };
+
+  const buildAccrualSlaPayload = (g: any, ledger: any, postedBy: string, today: string): SlaCreatePayload => ({
+    header: {
+      moduleName: 'AP', sourceTable: 'RR_AP_INVOICE_MULTIPERIOD_SCHEDULE',
+      sourceId: g.scheduleId, sourceNumber: g.invoiceNumber, sourceType: 'Multiperiod',
+      eventTypeCode: 'MPA_ACCRUAL', eventDate: today, accountingDate: today,
+      periodName: g.periodName, ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName,
+      currencyCode: 'AED', ledgerCurrency: ledger.ledgerName, exchangeRate: 1,
+      businessUnit: g.businessUnit, description: `MPA Accrual — ${g.invoiceNumber} — ${g.periodName}`,
+      createdBy: postedBy,
+    },
+    lines: [
+      { lineNumber: 1, lineType: 'DR', accountingClass: 'EXPENSE', accountCombination: g.drAcct || '',
+        enteredDr: g.amount, enteredCr: 0, accountedDr: g.amount, accountedCr: 0, currencyCode: 'AED',
+        exchangeRate: 1, description: g.drDesc || `Expense — ${g.periodName}`, sourceLineId: g.scheduleId, sourceLineNumber: 1 },
+      { lineNumber: 2, lineType: 'CR', accountingClass: 'ACCRUAL', accountCombination: g.crAcct || '',
+        enteredDr: 0, enteredCr: g.amount, accountedDr: 0, accountedCr: g.amount, currencyCode: 'AED',
+        exchangeRate: 1, description: g.crDesc || `Accrual — ${g.periodName}`, sourceLineId: g.scheduleId, sourceLineNumber: 2 },
+    ],
+  });
+
+  const buildGlLines = (g: any, today: string) => ([
+    { lineType: 'DR' as const, enteredDr: g.amount, enteredCr: 0, accountedDr: g.amount, accountedCr: 0,
+      description: g.drDesc || `Expense — ${g.periodName}`, currencyCode: 'AED', accountingDate: today,
+      accountCombination: g.drAcct || '', accountingClass: 'EXPENSE', legalEntity: null },
+    { lineType: 'CR' as const, enteredDr: 0, enteredCr: g.amount, accountedDr: 0, accountedCr: g.amount,
+      description: g.crDesc || `Accrual — ${g.periodName}`, currencyCode: 'AED', accountingDate: today,
+      accountCombination: g.crAcct || '', accountingClass: 'ACCRUAL', legalEntity: null },
+  ]);
+
+  const openAccrualDebug = async () => {
+    const groups = groupAccrualSchedules();
+    if (!groups.length) { message.warning('No schedules to account.'); return; }
+    const postedBy = user?.name || user?.username || 'System';
+    const today = dayjs().format('YYYY-MM-DD');
+    const base = APEX_DB_CONFIG.baseUrl;
+    const g = groups[0];  // representative schedule
+    const ledger = await fetchLedgerByBusinessUnit(g.businessUnit).catch(() => null);
+    const slaPayload = ledger ? buildAccrualSlaPayload(g, ledger, postedBy, today) : { error: `No ledger for BU '${g.businessUnit}'` };
+    setAccrualDebugSteps([
+      { step: `1 — Duplicate check (Ref2=${g.scheduleId}, Ref5=MPA_ACCRUAL)`, method: 'GET',
+        url: `${base}/gl/journals/check?reference1=${encodeURIComponent(g.invoiceNumber)}&reference2=${g.scheduleId}&reference5=MPA_ACCRUAL`, payload: null },
+      { step: '2 — Create SLA accounting', method: 'POST', url: `${base}/sla/accounting/create`, payload: slaPayload },
+      { step: '3 — Create GL journal', method: 'POST', url: `${base}/journals/create`,
+        payload: { note: 'Built by postSlaToGL from the SLA header + these lines', lines: ledger ? buildGlLines(g, today) : [] } },
+      { step: '4 — Post journal to GL', method: 'PUT', url: `${base}/gl/journals/{batchId}/post`, payload: {} },
+      { step: '5 — Stamp SLA header POSTED', method: 'POST', url: `${base}/sla/accounting/post`,
+        payload: { headerId: '{slaHeaderId}', glBatchId: '{batchId}', glBatchName: '{batchName}', glHeaderId: '{glHeaderId}', postedBy } },
+      { step: '6 — Mark MPA schedule posted', method: 'POST', url: `${base}/ap/multiperiod/mark-posted`,
+        payload: { invoiceId: g.invoiceId, periodName: g.periodName, slaHeaderId: '{slaHeaderId}', postedBy } },
+    ]);
+    setAccrualStepTest({});
+    setAccrualDebugOpen(true);
+  };
+
+  const runAccrualAccounting = async () => {
+    const groups = groupAccrualSchedules();
+    if (!groups.length) { message.warning('No schedules to account.'); return; }
+    const postedBy = user?.name || user?.username || 'System';
+    const today = dayjs().format('YYYY-MM-DD');
+    setAccrualAcctRunning(true);
+    const results: { scheduleId: number; invoiceNumber: string; status: 'success'|'skipped'|'error'; message: string }[] = [];
+    for (const g of groups) {
+      try {
+        const ledger = await fetchLedgerByBusinessUnit(g.businessUnit);
+        if (!ledger) { results.push({ scheduleId: g.scheduleId, invoiceNumber: g.invoiceNumber, status: 'error', message: `No ledger for BU '${g.businessUnit}'` }); setAccrualAcctResults([...results]); continue; }
+
+        // 1. Duplicate check by reference2 (schedule id) + reference5 (MPA_ACCRUAL)
+        const exists = await checkGLJournalExists(g.invoiceNumber, g.scheduleId, 'MPA_ACCRUAL');
+        if (exists.exists && exists.status === 'P') {
+          results.push({ scheduleId: g.scheduleId, invoiceNumber: g.invoiceNumber, status: 'skipped', message: `Already accounted — GL batch ${exists.batchId}` });
+          setAccrualAcctResults([...results]); continue;
+        }
+
+        // 2. Create SLA
+        const sla = await createAccounting(buildAccrualSlaPayload(g, ledger, postedBy, today));
+
+        // 3-5. Create + post GL journal, stamp SLA (postSlaToGL also re-checks the duplicate)
+        const glRes = await postSlaToGL({
+          slaHeaderId: sla.headerId, sourceNumber: g.invoiceNumber, sourceId: g.scheduleId,
+          eventTypeCode: 'MPA_ACCRUAL', periodName: g.periodName, ledgerName: ledger.ledgerName,
+          ledgerId: ledger.ledgerId, currency: 'AED', accountingDate: today, legalEntity: '',
+          businessUnit: g.businessUnit, jeCategory: 'Accrual', jeSource: 'Payables', batchSource: 'Payables',
+          createdBy: postedBy, lines: buildGlLines(g, today),
+        });
+        if (!glRes.success) { results.push({ scheduleId: g.scheduleId, invoiceNumber: g.invoiceNumber, status: 'error', message: glRes.error || 'GL posting failed' }); setAccrualAcctResults([...results]); continue; }
+
+        // 6. Mark the MPA schedule/period posted
+        await markPeriodPosted(g.invoiceId, g.periodName, sla.headerId, postedBy);
+        results.push({ scheduleId: g.scheduleId, invoiceNumber: g.invoiceNumber, status: 'success', message: `SLA #${sla.headerId} — GL ${glRes.batchName}${glRes.skipped ? ' (reused)' : ''}` });
+      } catch (e: any) {
+        results.push({ scheduleId: g.scheduleId, invoiceNumber: g.invoiceNumber, status: 'error', message: e?.message || 'Unexpected error' });
+      }
+      setAccrualAcctResults([...results]);
+    }
+    setAccrualAcctRunning(false);
+    const ok = results.filter(r => r.status === 'success').length;
+    const skip = results.filter(r => r.status === 'skipped').length;
+    const err = results.filter(r => r.status === 'error').length;
+    (err ? message.warning : message.success)(`Accrual accounting — ${ok} created, ${skip} skipped, ${err} failed`);
+    if (ok > 0 && accrualPeriod) loadAccrualLines(accrualPeriod);
+  };
+
+  // Run a single debug step live from the debug modal.
+  const runAccrualDebugStep = async (idx: number) => {
+    const s = accrualDebugSteps[idx];
+    if (!s) return;
+    setAccrualStepTest(prev => ({ ...prev, [idx]: { loading: true, status: 0, body: '' } }));
+    try {
+      const hasBody = s.method === 'POST' || s.method === 'PUT';
+      const res = await fetch(s.url.replace(/\{[^}]+\}/g, '0'), {
+        method: s.method,
+        headers: hasBody ? { 'Content-Type': 'application/json', Accept: 'application/json' } : { Accept: 'application/json' },
+        body: hasBody && s.payload && !s.payload.error && !s.payload.note ? JSON.stringify(s.payload) : undefined,
+      });
+      const text = await res.text();
+      let pretty = text; try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* not json */ }
+      setAccrualStepTest(prev => ({ ...prev, [idx]: { loading: false, status: res.status, body: pretty } }));
+    } catch (e: any) {
+      setAccrualStepTest(prev => ({ ...prev, [idx]: { loading: false, status: 0, body: e?.message ?? 'Network error' } }));
+    }
   };
 
   // ── view accounting ───────────────────────────────────────────────────────
@@ -1343,6 +1490,17 @@ const ManageMultiperiod: React.FC = () => {
             footer={
               <Space>
                 <Button onClick={() => setAccrualPreviewOpen(false)}>Close</Button>
+                <Button icon={<ApiOutlined />} onClick={openAccrualDebug}>
+                  Create Account &amp; Debug
+                </Button>
+                <Button
+                  type="primary"
+                  icon={<BookOutlined />}
+                  loading={accrualAcctRunning}
+                  onClick={runAccrualAccounting}
+                >
+                  Create Accounting
+                </Button>
               </Space>
             }
             destroyOnClose
@@ -1353,6 +1511,25 @@ const ManageMultiperiod: React.FC = () => {
               style={{ marginBottom: 12, fontSize: 11 }}
               message="DR Expense Account (Charge A/C) / CR Accrual Account — one journal pair per schedule line. Ref 5 class = MPA_ACCRUAL"
             />
+            {accrualAcctResults.length > 0 && (
+              <div style={{ marginBottom: 12 }}>
+                {accrualAcctResults.map(r => (
+                  <div key={r.scheduleId} style={{
+                    display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px', marginBottom: 3,
+                    borderRadius: 4, fontSize: 11,
+                    background: r.status === 'success' ? '#f6ffed' : r.status === 'skipped' ? '#fffbe6' : '#fff2f0',
+                    border: `1px solid ${r.status === 'success' ? '#b7eb8f' : r.status === 'skipped' ? '#ffe58f' : '#ffccc7'}`,
+                  }}>
+                    <Tag color={r.status === 'success' ? 'success' : r.status === 'skipped' ? 'warning' : 'error'} style={{ fontSize: 10 }}>
+                      {r.status === 'success' ? 'Accounted' : r.status === 'skipped' ? 'Skipped' : 'Error'}
+                    </Tag>
+                    <Text strong style={{ fontSize: 11 }}>Sched {r.scheduleId}</Text>
+                    <Text style={{ fontSize: 11 }}>{r.invoiceNumber}</Text>
+                    <Text type="secondary" style={{ fontSize: 11 }}>— {r.message}</Text>
+                  </div>
+                ))}
+              </div>
+            )}
             <Table
               dataSource={accrualPreviewLines}
               rowKey={(r: any) => `${r.scheduleId}-${r.accountType}`}
@@ -1442,6 +1619,57 @@ const ManageMultiperiod: React.FC = () => {
                 },
               ]}
             />
+          </Modal>
+
+          {/* Accrual Create-Accounting Debug Modal */}
+          <Modal
+            open={accrualDebugOpen}
+            onCancel={() => setAccrualDebugOpen(false)}
+            title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>Create Accounting — Step-by-step (Debug)</span></Space>}
+            width={860}
+            footer={
+              <Space>
+                <Button onClick={() => setAccrualDebugOpen(false)}>Close</Button>
+                <Button type="primary" icon={<BookOutlined />} loading={accrualAcctRunning}
+                  onClick={() => { setAccrualDebugOpen(false); runAccrualAccounting(); }}>
+                  Run Full Flow
+                </Button>
+              </Space>
+            }
+            destroyOnClose
+          >
+            <Alert type="info" showIcon style={{ marginBottom: 12, fontSize: 11 }}
+              message="Payloads shown for the first selected schedule. Placeholders like {slaHeaderId} / {batchId} are resolved at run time from earlier steps. Use Test to call a single step live." />
+            {accrualDebugSteps.map((s, idx) => {
+              const t = accrualStepTest[idx];
+              return (
+                <div key={idx} style={{ border: `1px solid ${REDWOOD.neutral}`, borderRadius: 6, marginBottom: 10, overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fafafa', padding: '6px 10px', borderBottom: '1px solid #eee' }}>
+                    <Tag color={s.method === 'GET' ? 'blue' : s.method === 'PUT' ? 'orange' : 'green'} style={{ fontSize: 10 }}>{s.method}</Tag>
+                    <Text strong style={{ fontSize: 12 }}>{s.step}</Text>
+                    <Button size="small" style={{ marginLeft: 'auto' }} loading={t?.loading} onClick={() => runAccrualDebugStep(idx)}>Test</Button>
+                  </div>
+                  <div style={{ padding: '6px 10px' }}>
+                    <Text type="secondary" style={{ fontSize: 10 }}>URL</Text>
+                    <Paragraph copyable style={{ fontFamily: 'monospace', fontSize: 11, margin: '2px 0 6px', wordBreak: 'break-all' }}>{s.url}</Paragraph>
+                    {s.payload != null && (
+                      <>
+                        <Text type="secondary" style={{ fontSize: 10 }}>Payload</Text>
+                        <pre style={{ fontFamily: 'monospace', fontSize: 10, background: '#f5f5f5', padding: '6px 8px', borderRadius: 4, maxHeight: 180, overflow: 'auto', margin: '2px 0 0' }}>
+                          {JSON.stringify(s.payload, null, 2)}
+                        </pre>
+                      </>
+                    )}
+                    {t && (
+                      <div style={{ marginTop: 6 }}>
+                        <Tag color={t.status >= 200 && t.status < 300 ? 'green' : 'red'} style={{ fontSize: 10 }}>HTTP {t.status}</Tag>
+                        <pre style={{ fontFamily: 'monospace', fontSize: 10, background: '#f0f5ff', padding: '6px 8px', borderRadius: 4, maxHeight: 160, overflow: 'auto', margin: '4px 0 0' }}>{t.body || '(empty)'}</pre>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </Modal>
         </div>
       ),
