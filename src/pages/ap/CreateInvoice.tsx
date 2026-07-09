@@ -90,6 +90,7 @@ import { postSlaToGL, eventTypeToRef5 } from '../../services/glPosting.service';
 import type { GlPostingLine } from '../../services/glPosting.service';
 import { searchCombinations, type DistCombination } from '../../services/distCombinations.service';
 import AccountSelector, { validateAccountCode } from '../../components/AccountSelector';
+import { useAccountDescriptions } from '../../hooks/useAccountDescriptions';
 import { useAuth } from '../../context/AuthContext';
 import InvoiceAttachments from '../../components/InvoiceAttachments';
 import { listAttachments } from '../../services/invoiceAttachment.service';
@@ -609,6 +610,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
   const [attachmentModalOpen, setAttachmentModalOpen] = useState(false);
   const [validationResults, setValidationResults] = useState<{ label: string; passed: boolean; detail?: string; action?: { label: string; onClick: () => void }; subItems?: { label: string; detail?: string; action?: { label: string; onClick: () => void } }[] }[]>([]);
   const [validationModalVisible, setValidationModalVisible] = useState(false);
+
+  // Resolve account-combination descriptions for the distribution + accrual accounts on the lines.
+  const lineAccountCodes = useMemo(() => {
+    const s = new Set<string>();
+    lines.forEach(l => { if (l.distributionCombination) s.add(l.distributionCombination); if (l.accrualAccount) s.add(l.accrualAccount); });
+    return Array.from(s);
+  }, [lines]);
+  const lineAccountDescs = useAccountDescriptions(lineAccountCodes);
 
   // View Accounting modal
   const [accountingModalVisible, setAccountingModalVisible] = useState(false);
@@ -5087,9 +5096,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                 </Tooltip>
               )}
             </div>
-            {record.accountDescription && (
-              <div style={{ fontSize: 11, color: REDWOOD.neutral300, marginTop: 2, paddingLeft: 4 }}>
-                {record.accountDescription}
+            {(record.accountDescription || lineAccountDescs[val]) && (
+              <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 2, paddingLeft: 4 }}>
+                {record.accountDescription || lineAccountDescs[val]}
               </div>
             )}
           </div>
@@ -5451,20 +5460,27 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
       key: 'accrualAccount',
       width: 250,
       render: (val: string, record: InvoiceLine) => (
-        <Input
-          size="small"
-          value={val}
-          onChange={(e) => updateLine(record.key, 'accrualAccount', e.target.value)}
-          variant="borderless"
-          placeholder="e.g. 01-000-2200-0000-000"
-          readOnly={isReadOnly}
-          suffix={
-            <SearchOutlined
-              style={{ color: isReadOnly ? REDWOOD.neutral300 : REDWOOD.info, fontSize: 12, cursor: isReadOnly ? 'default' : 'pointer' }}
-              onClick={() => !isReadOnly && openAccountSelector(record.key, val, 'accrualAccount')}
-            />
-          }
-        />
+        <div>
+          <Input
+            size="small"
+            value={val}
+            onChange={(e) => updateLine(record.key, 'accrualAccount', e.target.value)}
+            variant="borderless"
+            placeholder="e.g. 01-000-2200-0000-000"
+            readOnly={isReadOnly}
+            suffix={
+              <SearchOutlined
+                style={{ color: isReadOnly ? REDWOOD.neutral300 : REDWOOD.info, fontSize: 12, cursor: isReadOnly ? 'default' : 'pointer' }}
+                onClick={() => !isReadOnly && openAccountSelector(record.key, val, 'accrualAccount')}
+              />
+            }
+          />
+          {val && lineAccountDescs[val] && (
+            <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 2, paddingLeft: 4 }}>
+              {lineAccountDescs[val]}
+            </div>
+          )}
+        </div>
       ),
     },
   ];

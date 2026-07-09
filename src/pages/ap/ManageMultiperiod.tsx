@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import dayjs from 'dayjs';
 import {
   Layout, Card, Form, Select, Input, Button, Space, Typography,
@@ -28,6 +28,7 @@ import {
 import { postSlaToGL, buildGlJournalPayload, makeBatchName, getGlJournalLines } from '../../services/glPosting.service';
 import type { GlPostingOptions } from '../../services/glPosting.service';
 import { useAuth } from '../../context/AuthContext';
+import { useAccountDescriptions } from '../../hooks/useAccountDescriptions';
 
 const { Content } = Layout;
 const { Text, Title, Paragraph } = Typography;
@@ -174,6 +175,25 @@ const ManageMultiperiod: React.FC = () => {
   const [bulkSelected,      setBulkSelected]      = useState<Set<number>>(new Set());
   const [bulkRunning,       setBulkRunning]        = useState(false);
   const [bulkProgress,      setBulkProgress]      = useState<{ done: number; total: number; current: string; results: { invoiceId: number; invoiceNumber: string; status: 'ok' | 'skip' | 'error'; note: string }[] }>({ done: 0, total: 0, current: '', results: [] });
+
+  // Resolve account-combination descriptions for every account shown on this page.
+  const allAccountCodes = useMemo(() => {
+    const s = new Set<string>();
+    fusionRows.forEach((r: any) => { if (r.chargeAccount) s.add(r.chargeAccount); if (r.multiperiodAccrualAccount) s.add(r.multiperiodAccrualAccount); });
+    accrualLines.forEach((inv: any) => (inv.periodAllLines || []).forEach((l: any) => { if (l.chargeAccount) s.add(l.chargeAccount); if (l.accrualAccount) s.add(l.accrualAccount); }));
+    (drawerData?.lines || []).forEach((ln: any) => (ln.periods || []).forEach((p: any) => { if (p.chargeAccount) s.add(p.chargeAccount); if (p.accrualAccount) s.add(p.accrualAccount); }));
+    return Array.from(s);
+  }, [fusionRows, accrualLines, drawerData]);
+  const accountDescs = useAccountDescriptions(allAccountCodes);
+  // Render an account combination with its description underneath.
+  const renderAcctWithDesc = (code?: string | null, codeFontSize = 11) => (
+    <div style={{ lineHeight: 1.3 }}>
+      <Text code style={{ fontSize: codeFontSize }}>{code || '—'}</Text>
+      {code && accountDescs[code] && (
+        <div><Text type="secondary" style={{ fontSize: 10 }} title={accountDescs[code]}>{accountDescs[code]}</Text></div>
+      )}
+    </div>
+  );
 
   // Load business units
   useEffect(() => {
@@ -947,12 +967,12 @@ const ManageMultiperiod: React.FC = () => {
       render: v => <Text style={{ fontSize: 12, color: REDWOOD.info }}>{fmtDate(v)}</Text>,
     },
     {
-      title: 'Charge A/C', dataIndex: 'chargeAccount', width: 190, ellipsis: true,
-      render: v => <Text code style={{ fontSize: 11 }}>{v || '—'}</Text>,
+      title: 'Charge A/C', dataIndex: 'chargeAccount', width: 210,
+      render: v => renderAcctWithDesc(v),
     },
     {
-      title: 'Accrual A/C', dataIndex: 'multiperiodAccrualAccount', width: 190, ellipsis: true,
-      render: v => <Text code style={{ fontSize: 11 }}>{v || '—'}</Text>,
+      title: 'Accrual A/C', dataIndex: 'multiperiodAccrualAccount', width: 210,
+      render: v => renderAcctWithDesc(v),
     },
     {
       title: 'Schedule', dataIndex: 'scheduleGenerated', width: 100, align: 'center' as const,
@@ -1681,12 +1701,12 @@ const ManageMultiperiod: React.FC = () => {
                       render: (v: number, rec: any) => <Text strong style={{ color: '#1677ff', fontSize: 11 }}>{fmtAmt(v, rec.currencyCode)}</Text>,
                     },
                     {
-                      title: 'Charge A/C (Expense DR)', dataIndex: 'chargeAccount', ellipsis: true, width: 200,
-                      render: (v: string) => <Text code style={{ fontSize: 10 }}>{v || '—'}</Text>,
+                      title: 'Charge A/C (Expense DR)', dataIndex: 'chargeAccount', width: 210,
+                      render: (v: string) => renderAcctWithDesc(v, 10),
                     },
                     {
-                      title: 'Accrual A/C (CR)', dataIndex: 'accrualAccount', ellipsis: true, width: 200,
-                      render: (v: string) => <Text code style={{ fontSize: 10 }}>{v || '—'}</Text>,
+                      title: 'Accrual A/C (CR)', dataIndex: 'accrualAccount', width: 210,
+                      render: (v: string) => renderAcctWithDesc(v, 10),
                     },
                     {
                       title: 'Invoice Total', dataIndex: 'totalAmount', width: 130, align: 'right' as const,
@@ -2089,8 +2109,8 @@ const ManageMultiperiod: React.FC = () => {
                 render: v => <Text type="secondary" style={{ fontSize: 11 }}>{fmtDate(v)}</Text>,
               },
               {
-                title: 'Accrual A/C', dataIndex: 'accrualAccount', ellipsis: true,
-                render: v => <Text code style={{ fontSize: 10 }}>{v || '—'}</Text>,
+                title: 'Accrual A/C', dataIndex: 'accrualAccount', width: 210,
+                render: v => renderAcctWithDesc(v, 10),
               },
               {
                 title: 'Journal', width: 90, align: 'center' as const, fixed: 'right' as const,
