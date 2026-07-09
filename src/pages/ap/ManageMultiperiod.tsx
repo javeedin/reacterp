@@ -479,7 +479,10 @@ const ManageMultiperiod: React.FC = () => {
         // 1. Duplicate check by reference2 (schedule id) + reference5 (MPA_ACCRUAL)
         const exists = await checkGLJournalExists(g.invoiceNumber, g.scheduleId, 'MPA_ACCRUAL');
         if (exists.exists && exists.status === 'P') {
-          results.push({ scheduleId: g.scheduleId, invoiceNumber: g.invoiceNumber, status: 'skipped', message: `Already accounted — GL batch ${exists.batchId}` });
+          // Journal already posted — still sync the MPA schedule status in case a
+          // previous run posted the journal but failed at mark-posted.
+          try { await markPeriodPosted(g.invoiceId, g.periodName, exists.headerId ?? 0, postedBy); } catch { /* status sync best-effort */ }
+          results.push({ scheduleId: g.scheduleId, invoiceNumber: g.invoiceNumber, status: 'skipped', message: `Already accounted — GL batch ${exists.batchId} (status synced)` });
           setAccrualAcctResults([...results]); continue;
         }
 
