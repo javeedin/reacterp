@@ -680,9 +680,9 @@ const ManageReceipts: React.FC = () => {
               <code style={{ fontSize: 11, wordBreak: 'break-all' }}>{`${APEX_RECEIPT_APPS}/${applicationId}`}</code>
             </div>
           </div>
-          <p style={{ marginTop: 8, marginBottom: 0, color: REDWOOD.warning, fontSize: 11 }}>
-            After deleting, verify the invoice installment balance (AMOUNT_PAID / status) —
-            a plain row delete may not reverse it.
+          <p style={{ marginTop: 8, marginBottom: 0, color: REDWOOD.neutral600, fontSize: 11 }}>
+            Restores the invoice installment (adds the allocated amount back to the balance due,
+            reduces Amount Paid, reopens it) and deletes this application's adjustments.
           </p>
         </div>
       ),
@@ -697,7 +697,8 @@ const ManageReceipts: React.FC = () => {
           if (!res.ok || data?.success === false) {
             message.error(data?.error || data?.message || `Delete failed (HTTP ${res.status})`);
           } else {
-            message.success('Application deleted');
+            const restored = data?.amountRestored != null ? ` — ${Number(data.amountRestored).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} restored to installment` : '';
+            message.success(`Application deleted${restored}`);
             fetchedAppsRef.current.delete(tabKey);
             fetchApplications(tabKey, tabs.find(t => t.key === tabKey)?.draft.standardReceiptId ?? 0);
           }
