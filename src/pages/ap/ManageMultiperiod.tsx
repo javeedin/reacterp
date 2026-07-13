@@ -272,6 +272,35 @@ const ManageMultiperiod: React.FC = () => {
     XLSX.writeFile(wb, `Multiperiod_Accounting_${dayjs().format('YYYY-MM-DD')}.xlsx`);
   };
 
+  // Export the Post-Accrual schedule lines (current period) to Excel.
+  const exportAccrualToExcel = (rows: any[], period: string) => {
+    if (!rows.length) { message.warning('No accrual lines to export.'); return; }
+    const data = rows.map(r => ({
+      'Sched ID':      r.scheduleId,
+      'Line':          r.lineNumber,
+      'Period':        r.periodName,
+      'Invoice Number': r.invoiceNumber,
+      'Supplier':      r.supplier,
+      'Business Unit': r.businessUnit,
+      'Description':   r.description,
+      'Currency':     r.currencyCode,
+      'Period Amount': r.periodAmt,
+      'Charge A/C (Expense DR)': r.chargeAccount,
+      'Charge A/C Desc':  accountDescs[r.chargeAccount] || '',
+      'Accrual A/C (CR)': r.accrualAccount,
+      'Accrual A/C Desc': accountDescs[r.accrualAccount] || '',
+      'Invoice Total': r.totalAmount,
+      'Posted to Date': r.postedToDate,
+      'Accounted':     r.postingStatus === 'Posted' ? 'Accounted' : 'Not Accounted',
+      'Posted By':     r.postedBy || '',
+      'Posted Date':   r.postedDate || '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Post Accrual');
+    XLSX.writeFile(wb, `Post_Accrual_${period || dayjs().format('YYYY-MM-DD')}.xlsx`);
+  };
+
   // ── open detail tab ───────────────────────────────────────────────────────
 
   const openDetail = useCallback(async (row: MpaInvoiceSummary) => {
@@ -1673,6 +1702,15 @@ const ManageMultiperiod: React.FC = () => {
                     {accrualSelected.length > 0 && (
                       <Button size="small" onClick={() => setAccrualSelected([])}>Clear Selection</Button>
                     )}
+                    <Button
+                      size="small"
+                      icon={<FileExcelOutlined />}
+                      style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
+                      disabled={flatRows.length === 0}
+                      onClick={() => exportAccrualToExcel(flatRows, accrualPeriod)}
+                    >
+                      Excel
+                    </Button>
                     <Button
                       size="small"
                       icon={<ApiOutlined />}
