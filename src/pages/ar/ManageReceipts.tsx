@@ -669,7 +669,23 @@ const ManageReceipts: React.FC = () => {
     }
     Modal.confirm({
       title: 'Delete Application',
-      content: 'Delete this receipt application? This cannot be undone.',
+      width: 500,
+      content: (
+        <div style={{ fontSize: 13 }}>
+          <p style={{ margin: '8px 0' }}>Delete this receipt application? This cannot be undone.</p>
+          <div style={{ padding: '6px 10px', background: '#fafafa', border: '1px solid #eee', borderRadius: 6 }}>
+            <Text type="secondary" style={{ fontSize: 10 }}>API — no request body</Text>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+              <Tag color="red" style={{ fontSize: 10, margin: 0 }}>DELETE</Tag>
+              <code style={{ fontSize: 11, wordBreak: 'break-all' }}>{`${APEX_RECEIPT_APPS}/${applicationId}`}</code>
+            </div>
+          </div>
+          <p style={{ marginTop: 8, marginBottom: 0, color: REDWOOD.warning, fontSize: 11 }}>
+            After deleting, verify the invoice installment balance (AMOUNT_PAID / status) —
+            a plain row delete may not reverse it.
+          </p>
+        </div>
+      ),
       okText: 'Delete',
       okButtonProps: { danger: true },
       onOk: async () => {
