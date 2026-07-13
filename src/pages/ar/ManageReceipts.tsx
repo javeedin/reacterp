@@ -2667,6 +2667,50 @@ const ManageReceipts: React.FC = () => {
     return true;
   };
 
+  // ── Delete an unaccounted receipt (reverses applications/installments/adjustments) ──
+  const handleDeleteReceipt = (tabKey: string, draft: ReceiptDraft) => {
+    if (!draft.standardReceiptId) { message.warning('Receipt is not saved yet.'); return; }
+    if ((draft.accountingStatus || '').toLowerCase() === 'accounted') {
+      message.warning('Accounted receipts cannot be deleted.'); return;
+    }
+    Modal.confirm({
+      title: 'Delete Receipt',
+      icon: <ExclamationCircleOutlined style={{ color: REDWOOD.primary }} />,
+      width: 480,
+      okText: 'Delete', okType: 'danger', cancelText: 'Cancel',
+      content: (
+        <div style={{ fontSize: 13 }}>
+          <p style={{ margin: '8px 0' }}>Delete receipt <strong>{draft.receiptNumber}</strong> (ID {draft.standardReceiptId})?</p>
+          <p style={{ color: REDWOOD.warning, fontSize: 12, margin: 0 }}>
+            This reverses its receipt applications (restores each installment) and deletes its
+            adjustments. This cannot be undone.
+          </p>
+          <div style={{ marginTop: 8, padding: '6px 10px', background: '#fafafa', border: '1px solid #eee', borderRadius: 6 }}>
+            <Text type="secondary" style={{ fontSize: 10 }}>API — no request body</Text>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+              <Tag color="green" style={{ fontSize: 10, margin: 0 }}>POST</Tag>
+              <code style={{ fontSize: 11, wordBreak: 'break-all' }}>{`${APEX_AR_RECEIPTS}/${draft.standardReceiptId}/delete`}</code>
+            </div>
+          </div>
+        </div>
+      ),
+      onOk: async () => {
+        try {
+          const res  = await fetch(`${APEX_AR_RECEIPTS}/${draft.standardReceiptId}/delete`, { method: 'POST', headers: { Accept: 'application/json' } });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || data.success === false) {
+            message.error(`Delete failed: ${data.error || `HTTP ${res.status}`}`);
+            return;
+          }
+          message.success(`Receipt ${draft.receiptNumber} deleted — ${data.applicationsDeleted ?? 0} application(s), ${data.adjustmentsDeleted ?? 0} adjustment(s), ${data.installmentsRestored ?? 0} installment(s) restored`);
+          closeTab(tabKey);
+        } catch (e: any) {
+          message.error(`Delete failed: ${e.message}`);
+        }
+      },
+    });
+  };
+
   // ── Debug Modal ────────────────────────────────────────────────────────────
   const openDebugModal = (tabKey: string, draft: ReceiptDraft) => {
     const pending = pendingApplications[tabKey] ?? [];
@@ -3408,6 +3452,14 @@ const ManageReceipts: React.FC = () => {
                   </Button>
                 )}
               </>}
+              {/* Delete — only for saved, unaccounted receipts */}
+              {hasSavedId && (draft.accountingStatus || '').toLowerCase() !== 'accounted' && (
+                <Tooltip title="Delete this receipt (only allowed while not accounted)">
+                  <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDeleteReceipt(tabKey, draft)}>
+                    Delete
+                  </Button>
+                </Tooltip>
+              )}
               {/* Actions dropdown — only for saved receipts */}
               {hasSavedId && (
                 <Dropdown
