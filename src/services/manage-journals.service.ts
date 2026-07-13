@@ -235,8 +235,15 @@ export const postJournal = async (
 ): Promise<{ success: boolean; message?: string; error?: string; errors?: string[] }> => {
   try {
     const url = `${APEX_DB_CONFIG.baseUrl}/gl/journals/${jeBatchId}/post`;
-    const res  = await fetch(url, { method: 'PUT', headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' } });
+    // No request body — send only Accept. Sending Content-Type: application/json
+    // with an empty body makes the ORDS handler try to parse an empty JSON body
+    // and fail ("An unexpected error occurred"). This mirrors the working
+    // putPostJournal in glPosting.service used by payments/MPA posting.
+    const res  = await fetch(url, { method: 'PUT', headers: { Accept: 'application/json' } });
     const data = await res.json().catch(() => ({}));
+    if (!res.ok && data && data.success === undefined) {
+      return { success: false, error: `HTTP ${res.status}`, errors: Array.isArray(data.errors) ? data.errors : undefined };
+    }
     return data;
   } catch (error) {
     return {

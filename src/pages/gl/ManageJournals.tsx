@@ -2826,6 +2826,14 @@ const ManageJournals: React.FC = () => {
                 ))}
               </tbody>
             </table>
+            <div style={{ marginTop: 12, padding: '6px 10px', background: '#fafafa', border: '1px solid #eee', borderRadius: 6 }}>
+              <Text type="secondary" style={{ fontSize: 10 }}>API — no request body</Text>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                <Tag color="orange" style={{ fontSize: 10, margin: 0 }}>PUT</Tag>
+                <code style={{ fontSize: 11, wordBreak: 'break-all', flex: 1 }}>{`${APEX_DB_CONFIG.baseUrl}/gl/journals/${journal.jeBatchId}/post`}</code>
+                <Button size="small" icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(`${APEX_DB_CONFIG.baseUrl}/gl/journals/${journal.jeBatchId}/post`); message.success('URL copied'); }} />
+              </div>
+            </div>
             <p style={{ marginTop: 12, color: REDWOOD.warning, fontSize: 12 }}>
               ⚠ Posted journals cannot be modified.
             </p>
