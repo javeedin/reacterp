@@ -2616,8 +2616,11 @@ const ManageReceipts: React.FC = () => {
             CreatedBy:             currentUser,
             LastUpdatedBy:         currentUser,
           };
-          const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/ar/adjustments`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(adjBody) });
-          if (!res.ok) adjErrors.push(`${row.transactionNumber}/#${row.sequenceNumber} (${sp.activityName}): HTTP ${res.status}`);
+          const res  = await fetch(`${APEX_DB_CONFIG.baseUrl}/ar/adjustments`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(adjBody) });
+          const text = await res.text();
+          let ok = res.ok;
+          try { const j = JSON.parse(text); if (j && (j.success === false || j.error || (Array.isArray(j.errors) && j.errors.length))) ok = false; } catch { /* non-json ok */ }
+          if (!ok) adjErrors.push(`${row.transactionNumber}/#${row.sequenceNumber} (${sp.activityName}): HTTP ${res.status} — ${text.slice(0, 200)}`);
         } catch (e: any) { adjErrors.push(`${row.transactionNumber}: ${e.message}`); }
       }
     }
@@ -2634,7 +2637,8 @@ const ManageReceipts: React.FC = () => {
       try {
         const putBody = {
           AmountPaid:                   row.applyAmount,
-          InstallmentAmountAdjusted:    Math.abs(row.adjustmentAmount ?? 0),
+          // Match the Save & Debug flow — the adjusted amount is written as negative.
+          InstallmentAmountAdjusted:    -Math.abs(row.adjustmentAmount ?? 0),
           LastUpdatedBy:                currentUser,
         };
         const url = `${APEX_AR_INVOICES}/${row.customerTransactionId}/installments/${row.installmentId}`;
