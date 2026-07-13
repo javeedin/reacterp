@@ -389,6 +389,7 @@ const ManageReceipts: React.FC = () => {
     accountCombination: string;
     accountDesc: string;
     activity: string;
+    lines: AcctLine[];   // Dr/Cr preview journal lines for this adjustment
     // GL duplicate-check result
     glExists: boolean;
     glPosted: boolean;
@@ -1758,6 +1759,10 @@ const ManageReceipts: React.FC = () => {
     const unappliedCombo = acct?.unappliedCombination?.replace(/\./g, '-') || '';
     const cashDesc       = acct?.cashCcid      ? (acctDescCache[acct.cashCcid]?.description      ?? '') : '';
     const unappliedDesc  = acct?.unappliedCcid ? (acctDescCache[acct.unappliedCcid]?.description ?? '') : '';
+    // Credit account comes from the receipt's "Cr Account" (falls back to the
+    // method's unapplied combination when the receipt has none).
+    const crCombo        = draft.crAccount ? draft.crAccount.replace(/\./g, '-') : unappliedCombo;
+    const crDesc         = draft.crAccountDesc || unappliedDesc;
     const drDesc         = `${draft.comments || ''} ${draft.receiptNumber}`.trim();
     const savedApps      = receiptApplications[tabKey]?.rows ?? [];
 
@@ -1780,27 +1785,27 @@ const ManageReceipts: React.FC = () => {
       // DR: Bank — full receipt amount
       lines.push({ lineType: 'DR', accountingClass: 'CASH', accountCombination: cashCombo,
         accountDesc: cashDesc || draft.drAccountDesc, enteredDr: amount, enteredCr: 0, description: drDesc });
-      // CR: one line per application
+      // CR: one line per application — booked to the receipt's Cr Account
       for (const app of savedApps) {
         const appAmount = Math.abs(app.applicationAmount);
         if (appAmount === 0) continue;
         const crLineDesc = `${app.referenceTransactionNumber} — App Ref ${app.applicationId}`;
-        lines.push({ lineType: 'CR', accountingClass: 'RECEIVABLE', accountCombination: unappliedCombo,
-          accountDesc: unappliedDesc, enteredDr: 0, enteredCr: appAmount,
+        lines.push({ lineType: 'CR', accountingClass: 'RECEIVABLE', accountCombination: crCombo,
+          accountDesc: crDesc, enteredDr: 0, enteredCr: appAmount,
           description: crLineDesc, ref: String(app.applicationId) });
       }
       // If total CR < DR (unapplied remainder), add unapplied line
       const crTotal = lines.filter(l => l.lineType === 'CR').reduce((s, l) => s + l.enteredCr, 0);
       const remainder = Math.round((amount - crTotal) * 100) / 100;
       if (remainder > 0.001) {
-        lines.push({ lineType: 'CR', accountingClass: 'UNAPPLIED', accountCombination: unappliedCombo,
-          accountDesc: unappliedDesc, enteredDr: 0, enteredCr: remainder,
+        lines.push({ lineType: 'CR', accountingClass: 'UNAPPLIED', accountCombination: crCombo,
+          accountDesc: crDesc, enteredDr: 0, enteredCr: remainder,
           description: `${draft.receiptNumber} — Unapplied` });
       }
     } else {
       lines = [
-        { lineType: 'DR', accountingClass: 'CASH',      accountCombination: cashCombo,      accountDesc: cashDesc || draft.drAccountDesc, enteredDr: amount, enteredCr: 0,      description: drDesc },
-        { lineType: 'CR', accountingClass: 'UNAPPLIED', accountCombination: unappliedCombo, accountDesc: unappliedDesc,                   enteredDr: 0,      enteredCr: amount, description: `${draft.receiptNumber} — Unapplied` },
+        { lineType: 'DR', accountingClass: 'CASH',      accountCombination: cashCombo, accountDesc: cashDesc || draft.drAccountDesc, enteredDr: amount, enteredCr: 0,      description: drDesc },
+        { lineType: 'CR', accountingClass: 'UNAPPLIED', accountCombination: crCombo,   accountDesc: crDesc,                          enteredDr: 0,      enteredCr: amount, description: `${draft.receiptNumber} — Unapplied` },
       ];
     }
 
@@ -1836,6 +1841,15 @@ const ManageReceipts: React.FC = () => {
           adjustmentId: adjId, applicationId: appId,
           transactionNumber: txnNum, amount: adjAmt,
           accountCombination: adjCombo, accountDesc: activity, activity,
+          // Dr = adjustment/activity account; Cr = receipt Cr Account (same as the receipt).
+          lines: [
+            { lineType: 'DR', accountingClass: 'ADJUSTMENT', accountCombination: adjCombo,
+              accountDesc: activity, enteredDr: adjAmt, enteredCr: 0,
+              description: `${txnNum} — ${activity}` },
+            { lineType: 'CR', accountingClass: 'RECEIVABLE', accountCombination: crCombo,
+              accountDesc: crDesc, enteredDr: 0, enteredCr: adjAmt,
+              description: `${txnNum} — Receipt Cr` },
+          ],
           glExists: adjGlCheck.exists, glPosted: adjGlCheck.status === 'P',
           glBatchId: adjGlCheck.batchId, glStatus: adjGlCheck.status,
           postStatus: 'pending',
@@ -5971,39 +5985,52 @@ const ManageReceipts: React.FC = () => {
               </div>
               {acctModal.adjLoading
                 ? <div style={{ padding: 16, textAlign: 'center' }}><Spin size="small" /></div>
-                : acctModal.adjItems.length > 0 && (
-                <Table size="small" pagination={false}
-                  dataSource={acctModal.adjItems.map((a, i) => ({ ...a, key: i }))}
-                  scroll={{ x: 800 }}
-                  columns={[
-                    { title: 'Adj ID', dataIndex: 'adjustmentId', width: 90,
-                      render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v}</Text> },
-                    { title: 'Txn', dataIndex: 'transactionNumber', width: 130,
-                      render: v => <Text style={{ fontSize: 11 }}>{v || '—'}</Text> },
-                    { title: 'Activity', dataIndex: 'activity', width: 140,
-                      render: v => <Text style={{ fontSize: 11 }}>{v}</Text> },
-                    { title: 'Account', dataIndex: 'accountCombination', width: 180,
-                      render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: v ? REDWOOD.info : '#bfbfbf' }}>{v || '— not set —'}</Text> },
-                    { title: 'Amount', dataIndex: 'amount', width: 110, align: 'right' as const,
-                      render: v => <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{fmt(v)}</Text> },
-                    { title: 'GL Status', key: 'glStatus', width: 130,
-                      render: (_, r: any) => {
-                        if (r.postStatus === 'running') return <Spin size="small" />;
-                        if (r.postStatus === 'done') return <Tag color="green" style={{ fontSize: 10 }}>Posted — {r.postDetail}</Tag>;
-                        if (r.postStatus === 'error') return <Tag color="red" style={{ fontSize: 10 }}>{r.postDetail}</Tag>;
-                        if (r.glPosted) return <Tag color="green" style={{ fontSize: 10 }}>Already Posted</Tag>;
-                        if (r.glExists) return <Tag color="orange" style={{ fontSize: 10 }}>Exists (Unposted)</Tag>;
-                        return <Tag color="blue" style={{ fontSize: 10 }}>Pending</Tag>;
-                      }},
-                    { title: 'ref1/ref2/ref5', key: 'refs', width: 200,
-                      render: (_, r: any) => (
+                : acctModal.adjItems.length > 0 && acctModal.adjItems.map((adj, ai) => {
+                  const glStatus = adj.postStatus === 'running' ? <Spin size="small" />
+                    : adj.postStatus === 'done'  ? <Tag color="green"  style={{ fontSize: 10 }}>Posted — {adj.postDetail}</Tag>
+                    : adj.postStatus === 'error' ? <Tag color="red"    style={{ fontSize: 10 }}>{adj.postDetail}</Tag>
+                    : adj.glPosted               ? <Tag color="green"  style={{ fontSize: 10 }}>Already Posted — Batch #{adj.glBatchId}</Tag>
+                    : adj.glExists               ? <Tag color="orange" style={{ fontSize: 10 }}>Exists (Unposted)</Tag>
+                    : <Tag color="blue" style={{ fontSize: 10 }}>Pending</Tag>;
+                  return (
+                    <div key={ai} style={{ marginBottom: 12, border: `1px solid ${REDWOOD.border}`, borderRadius: 6, overflow: 'hidden' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', background: '#fafafa', padding: '5px 10px', borderBottom: '1px solid #f0f0f0' }}>
+                        <Text strong style={{ fontSize: 11 }}>Adj #{adj.adjustmentId}</Text>
+                        {adj.transactionNumber && <Text style={{ fontSize: 11 }}>· {adj.transactionNumber}</Text>}
+                        <Tag color="purple" style={{ fontSize: 10 }}>{adj.activity}</Tag>
+                        <Text style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 600 }}>{fmt(adj.amount)}</Text>
+                        <span style={{ marginLeft: 'auto' }}>{glStatus}</span>
                         <Text style={{ fontSize: 10, fontFamily: 'monospace', color: REDWOOD.neutral600 }}>
-                          {r.adjustmentId} / {r.adjustmentId} / AR_ADJUSTMENTS
+                          ref {adj.adjustmentId} / {adj.adjustmentId} / AR_ADJUSTMENTS
                         </Text>
-                      )},
-                  ]}
-                />
-              )}
+                      </div>
+                      <Table
+                        size="small" pagination={false}
+                        dataSource={adj.lines.map((l, i) => ({ ...l, key: i }))}
+                        scroll={{ x: 720 }}
+                        columns={[
+                          { title: 'Type', dataIndex: 'lineType', width: 55,
+                            render: v => <Tag color={v === 'DR' ? 'blue' : 'green'} style={{ fontSize: 11, fontWeight: 700 }}>{v}</Tag> },
+                          { title: 'Class', dataIndex: 'accountingClass', width: 100,
+                            render: v => <Text style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{v}</Text> },
+                          { title: 'Account', dataIndex: 'accountCombination',
+                            render: (v, r: any) => (
+                              <div style={{ minWidth: 130 }}>
+                                <Text style={{ fontSize: 11, fontFamily: 'monospace', color: v ? REDWOOD.info : '#bfbfbf', whiteSpace: 'nowrap', display: 'block' }}>{v || '— not set —'}</Text>
+                                {r.accountDesc && <div style={{ fontSize: 10, color: '#8c8c8c', marginTop: 2 }}>{r.accountDesc}</div>}
+                              </div>
+                            ) },
+                          { title: 'Line Description', dataIndex: 'description',
+                            render: (v: any) => <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{v || '—'}</Text> },
+                          { title: 'Debit', dataIndex: 'enteredDr', width: 110, align: 'right' as const,
+                            render: v => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.success }}>{fmt(v)}</Text> : <Text type="secondary">—</Text> },
+                          { title: 'Credit', dataIndex: 'enteredCr', width: 110, align: 'right' as const,
+                            render: v => v ? <Text style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: REDWOOD.primary }}>{fmt(v)}</Text> : <Text type="secondary">—</Text> },
+                        ]}
+                      />
+                    </div>
+                  );
+                })}
             </div>
 
             <div style={{ marginTop: 10, padding: '8px 12px', background: '#f5f5f5', borderRadius: 6, fontSize: 11 }}>
