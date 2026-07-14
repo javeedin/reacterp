@@ -4,8 +4,10 @@
 -- Delete an UNACCOUNTED AR receipt and reverse everything it touched:
 --   • Guard: refuse if RR_AR_RECEIPTS.ACCOUNTING_STATUS = 'Accounted'.
 --   • For every application of the receipt:
---       - restore its installment (status Open, subtract application_amount from
---         AMOUNT_PAID, reset INSTALLMENT_AMOUNT_ADJUSTED to 0)
+--       - restore its installment: back out AMOUNT_PAID and the adjustment, then
+--         recompute the balance from the original line amount and set all three
+--         balance columns (INSTALLMENT_BALANCE_DUE / ACCOUNTED_BALANCE_DUE /
+--         INSTALLMENT_LINE_AMOUNT_DUE) plus status/close dates
 --       - delete its adjustments (RR_AR_ADJUSTMENTS by APPLICATION_ID)
 --   • delete the applications (RR_AR_RECEIPT_APPLICATIONS)
 --   • delete the receipt (RR_AR_RECEIPTS)
@@ -70,17 +72,44 @@ BEGIN
 
   -- Reverse each application: restore installment + delete its adjustments
   FOR app IN (
-    SELECT APPLICATION_ID, APPLICATION_AMOUNT, REFERENCE_INSTALLMENT_ID
+    SELECT APPLICATION_ID, NVL(APPLICATION_AMOUNT, 0) AS APP_AMT,
+           NVL(ADJUSTMENT_AMOUNT, 0) AS ADJ_AMT, REFERENCE_INSTALLMENT_ID
     FROM   RR_AR_RECEIPT_APPLICATIONS
     WHERE  STANDARD_RECEIPT_ID = v_id
   ) LOOP
     IF app.REFERENCE_INSTALLMENT_ID IS NOT NULL THEN
-      UPDATE RR_AR_INVOICE_INSTALLMENTS
-         SET INSTALLMENT_STATUS          = 'Open',
-             AMOUNT_PAID                 = NVL(AMOUNT_PAID, 0) - NVL(app.APPLICATION_AMOUNT, 0),
-             INSTALLMENT_AMOUNT_ADJUSTED = 0
-       WHERE INSTALLMENT_ID = app.REFERENCE_INSTALLMENT_ID;
-      v_insts := v_insts + SQL%ROWCOUNT;
+      DECLARE
+        l_orig     NUMBER; l_paid NUMBER; l_adj NUMBER;
+        l_new_paid NUMBER; l_new_adj NUMBER; l_bal NUMBER;
+        l_status   VARCHAR2(30); l_closed DATE;
+      BEGIN
+        SELECT NVL(INSTALLMENT_LINE_AMOUNT_ORIGINAL, 0), NVL(AMOUNT_PAID, 0), NVL(INSTALLMENT_AMOUNT_ADJUSTED, 0)
+          INTO l_orig, l_paid, l_adj
+          FROM RR_AR_INVOICE_INSTALLMENTS WHERE INSTALLMENT_ID = app.REFERENCE_INSTALLMENT_ID;
+
+        -- Back out this application's contribution, then recompute the balance
+        l_new_paid := GREATEST(l_paid - app.APP_AMT, 0);
+        l_new_adj  := l_adj + ABS(app.ADJ_AMT);            -- undo the negative adjustment
+        l_bal      := l_orig - l_new_paid - ABS(l_new_adj);
+        IF l_bal <= 0 THEN l_status := 'Closed'; l_closed := SYSDATE; l_bal := 0;
+        ELSE               l_status := 'Open';   l_closed := NULL; END IF;
+
+        UPDATE RR_AR_INVOICE_INSTALLMENTS
+           SET AMOUNT_PAID                    = l_new_paid,
+               INSTALLMENT_AMOUNT_ADJUSTED    = l_new_adj,
+               INSTALLMENT_BALANCE_DUE        = l_bal,
+               ACCOUNTED_BALANCE_DUE          = l_bal,
+               INSTALLMENT_LINE_AMOUNT_DUE    = l_bal,
+               INSTALLMENT_FREIGHT_AMOUNT_DUE = CASE WHEN l_status = 'Closed' THEN 0 ELSE INSTALLMENT_FREIGHT_AMOUNT_DUE END,
+               INSTALLMENT_TAX_AMOUNT_DUE     = CASE WHEN l_status = 'Closed' THEN 0 ELSE INSTALLMENT_TAX_AMOUNT_DUE END,
+               INSTALLMENT_STATUS             = l_status,
+               INSTALLMENT_CLOSED_DATE        = l_closed,
+               INSTALLMENT_GL_CLOSED_DATE     = l_closed,
+               LAST_UPDATED_BY                = USER,
+               LAST_UPDATE_DATE               = SYSTIMESTAMP
+         WHERE INSTALLMENT_ID = app.REFERENCE_INSTALLMENT_ID;
+        v_insts := v_insts + SQL%ROWCOUNT;
+      END;
     END IF;
 
     DELETE FROM RR_AR_ADJUSTMENTS WHERE APPLICATION_ID = app.APPLICATION_ID;

@@ -2,13 +2,17 @@
 -- ORDS REST Handler: DELETE /ar/receipt-applications/:appId
 --
 -- Delete a single receipt application AND reverse the installment it paid, so the
--- open balance reflects that the allocated amount is no longer applied:
+-- open balance reflects that the allocated amount is no longer applied. The
+-- balance is RECOMPUTED from the original line amount (same as the accumulate PUT
+-- and the receipt-delete handler), and all three balance columns are set:
 --   • RR_AR_INVOICE_INSTALLMENTS (the app's REFERENCE_INSTALLMENT_ID):
---       INSTALLMENT_BALANCE_DUE     += APPLICATION_AMOUNT + ABS(ADJUSTMENT_AMOUNT)  (restore amount due)
---       AMOUNT_PAID                 -= APPLICATION_AMOUNT   (floor 0)
---       INSTALLMENT_AMOUNT_ADJUSTED  = 0
---       INSTALLMENT_STATUS           = 'Open'
---       INSTALLMENT_CLOSED_DATE      = NULL
+--       AMOUNT_PAID                 -= APPLICATION_AMOUNT           (floor 0)
+--       INSTALLMENT_AMOUNT_ADJUSTED += ABS(ADJUSTMENT_AMOUNT)       (undo the adjustment)
+--       balance = ORIGINAL - new_paid - ABS(new_adj)   [floor 0 -> Closed]
+--       INSTALLMENT_BALANCE_DUE     = balance
+--       ACCOUNTED_BALANCE_DUE       = balance
+--       INSTALLMENT_LINE_AMOUNT_DUE = balance
+--       INSTALLMENT_STATUS          = Open/Closed, close dates accordingly
 --   • RR_AR_ADJUSTMENTS: delete rows for this APPLICATION_ID
 --   • RR_AR_RECEIPT_APPLICATIONS: delete the application row
 --
@@ -47,6 +51,10 @@ DECLARE
   v_adj_amt    NUMBER;
   v_inst_id    NUMBER;
   v_adjs       NUMBER := 0;
+  l_orig       NUMBER; l_paid NUMBER; l_adj NUMBER;
+  l_new_paid   NUMBER; l_new_adj NUMBER; l_bal NUMBER;
+  l_status     VARCHAR2(30); l_closed DATE;
+  l_restored   NUMBER := 0;
 BEGIN
   -- 1. Load the application (404 if missing)
   BEGIN
@@ -61,16 +69,34 @@ BEGIN
     RETURN;
   END;
 
-  -- 2. Reverse the installment — allocated amount goes back to the open balance
+  -- 2. Reverse the installment — back out this application, then recompute the
+  --    balance from the original line amount and set all three balance columns.
   IF v_inst_id IS NOT NULL THEN
+    SELECT NVL(INSTALLMENT_LINE_AMOUNT_ORIGINAL, 0), NVL(AMOUNT_PAID, 0), NVL(INSTALLMENT_AMOUNT_ADJUSTED, 0)
+      INTO l_orig, l_paid, l_adj
+      FROM RR_AR_INVOICE_INSTALLMENTS WHERE INSTALLMENT_ID = v_inst_id;
+
+    l_new_paid := GREATEST(l_paid - v_app_amt, 0);
+    l_new_adj  := l_adj + ABS(v_adj_amt);              -- undo the negative adjustment
+    l_bal      := l_orig - l_new_paid - ABS(l_new_adj);
+    IF l_bal <= 0 THEN l_status := 'Closed'; l_closed := SYSDATE; l_bal := 0;
+    ELSE               l_status := 'Open';   l_closed := NULL; END IF;
+
+    l_restored := GREATEST(l_bal - NVL((SELECT INSTALLMENT_BALANCE_DUE FROM RR_AR_INVOICE_INSTALLMENTS WHERE INSTALLMENT_ID = v_inst_id), 0), 0);
+
     UPDATE RR_AR_INVOICE_INSTALLMENTS
-       SET INSTALLMENT_BALANCE_DUE     = NVL(INSTALLMENT_BALANCE_DUE, 0) + v_app_amt + ABS(v_adj_amt),
-           AMOUNT_PAID                 = GREATEST(NVL(AMOUNT_PAID, 0) - v_app_amt, 0),
-           INSTALLMENT_AMOUNT_ADJUSTED = 0,
-           INSTALLMENT_STATUS          = 'Open',
-           INSTALLMENT_CLOSED_DATE     = NULL,
-           LAST_UPDATED_BY             = USER,
-           LAST_UPDATE_DATE            = SYSTIMESTAMP
+       SET AMOUNT_PAID                    = l_new_paid,
+           INSTALLMENT_AMOUNT_ADJUSTED    = l_new_adj,
+           INSTALLMENT_BALANCE_DUE        = l_bal,
+           ACCOUNTED_BALANCE_DUE          = l_bal,
+           INSTALLMENT_LINE_AMOUNT_DUE    = l_bal,
+           INSTALLMENT_FREIGHT_AMOUNT_DUE = CASE WHEN l_status = 'Closed' THEN 0 ELSE INSTALLMENT_FREIGHT_AMOUNT_DUE END,
+           INSTALLMENT_TAX_AMOUNT_DUE     = CASE WHEN l_status = 'Closed' THEN 0 ELSE INSTALLMENT_TAX_AMOUNT_DUE END,
+           INSTALLMENT_STATUS             = l_status,
+           INSTALLMENT_CLOSED_DATE        = l_closed,
+           INSTALLMENT_GL_CLOSED_DATE     = l_closed,
+           LAST_UPDATED_BY                = USER,
+           LAST_UPDATE_DATE               = SYSTIMESTAMP
      WHERE INSTALLMENT_ID = v_inst_id;
   END IF;
 
@@ -86,7 +112,8 @@ BEGIN
   OWA_UTIL.MIME_HEADER('application/json', TRUE);
   HTP.PRN('{"success":true,"applicationId":' || v_app_id ||
           ',"installmentId":' || NVL(TO_CHAR(v_inst_id), 'null') ||
-          ',"amountRestored":' || (v_app_amt + ABS(v_adj_amt)) ||
+          ',"amountRestored":' || l_restored ||
+          ',"installmentStatus":"' || NVL(l_status, 'n/a') || '"' ||
           ',"adjustmentsDeleted":' || v_adjs || '}');
 EXCEPTION
   WHEN OTHERS THEN
@@ -103,6 +130,8 @@ END;
 -- =====================================================
 -- ENDPOINT SUMMARY
 -- DELETE {base}/ar/receipt-applications/{applicationId}   (no request body)
---   Deletes the application, restores its installment (balance/paid/status),
---   resets INSTALLMENT_AMOUNT_ADJUSTED, and deletes its adjustments.
+--   Deletes the application, recomputes the installment balance from the original
+--   line amount (setting INSTALLMENT_BALANCE_DUE / ACCOUNTED_BALANCE_DUE /
+--   INSTALLMENT_LINE_AMOUNT_DUE), reverses AMOUNT_PAID / INSTALLMENT_AMOUNT_ADJUSTED
+--   and status, and deletes its adjustments.
 -- =====================================================
