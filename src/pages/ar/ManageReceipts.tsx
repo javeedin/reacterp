@@ -432,7 +432,7 @@ const ManageReceipts: React.FC = () => {
   const [viewAcctModal, setViewAcctModal] = useState<{
     receiptNumber: string; loading: boolean; posting: boolean;
     header: any; lines: any[];          // receipt journal lines
-    adjGroups: { adjustmentId: number; batchName: string; lines: any[] }[];  // one per adj
+    adjGroups: { adjustmentId: number; batchName: string; lines: any[]; found: boolean }[];  // one per adj
     apiUrls?: string[];                 // GET endpoints used to retrieve the journal
     tabKey?: string;                    // owning receipt tab (to jump to Create Accounting)
   } | null>(null);
@@ -520,7 +520,7 @@ const ManageReceipts: React.FC = () => {
       const appRows = receiptApplications[tabKey]?.rows ?? [];
       const appIds = appRows.map(a => a.applicationId).filter(Boolean);
 
-      const adjGroups: { adjustmentId: number; batchName: string; lines: any[] }[] = [];
+      const adjGroups: { adjustmentId: number; batchName: string; lines: any[]; found: boolean }[] = [];
       if (appIds.length > 0) {
         // Fetch all adjustments for these applications
         const adjFetches = appIds.map(appId =>
@@ -529,21 +529,27 @@ const ManageReceipts: React.FC = () => {
         const adjResults = await Promise.all(adjFetches);
         const allAdjs: any[] = adjResults.flatMap(r => r.items ?? []);
 
-        // For each adjustment, retrieve its lines by reference2 + reference5
+        // For each adjustment, retrieve its lines by reference2 + reference5.
+        // Keep ALL adjustments (found or not) so each can show a found/missing tick.
         for (const adj of allAdjs) {
           const adjId = adj.adjustment_id ?? adj.ADJUSTMENT_ID;
           if (!adjId) continue;
+          const activity = adj.receivables_activity ?? adj.RECEIVABLES_ACTIVITY ?? 'Adjustment';
+          const txnNum   = adj.transaction_number ?? adj.TRANSACTION_NUMBER ?? '';
           const adjLinesUrl = `${BASE}/gl/journals/lines?reference2=${encodeURIComponent(String(adjId))}&reference5=AR_ADJUSTMENTS`;
           apiUrls.push(`GET ${adjLinesUrl}`);
           const adjRes  = await fetch(adjLinesUrl, { headers: { Accept: 'application/json' } });
           const adjData = await adjRes.json().catch(() => ({}));
           const adjRows: any[] = (Array.isArray(adjData?.items) ? adjData.items : Array.isArray(adjData) ? adjData : []).map(mapFlatLine);
-          if (adjRows.length === 0) continue;
-          const enriched = await enrichLines(adjRows);
+          const found = adjRows.length > 0;
+          const enriched = found ? await enrichLines(adjRows) : [];
           adjGroups.push({
             adjustmentId: adjId,
-            batchName: `Batch #${adjRows[0]?.batchId ?? '—'} · ${adj.receivables_activity ?? adj.RECEIVABLES_ACTIVITY ?? 'Adjustment'} · ${adj.transaction_number ?? adj.TRANSACTION_NUMBER ?? ''}`,
+            batchName: found
+              ? `Batch #${adjRows[0]?.batchId ?? '—'} · ${activity} · ${txnNum}`
+              : `${activity} · ${txnNum} — no GL journal`,
             lines: enriched,
+            found,
           });
         }
       }
@@ -5737,6 +5743,8 @@ const ManageReceipts: React.FC = () => {
         const isPosted = batchStatus.toUpperCase() === 'POSTED' || batchStatus === 'Posted';
         const batchId: number = vhdr?.batchId ?? 0;
         const postUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/${batchId}/post`;
+        // A journal is missing if the receipt has none, or any adjustment has none.
+        const anyMissing = !vhdr || (viewAcctModal.adjGroups ?? []).some(g => !g.found);
         const handleViewPost = async () => {
           if (!batchId) return;
           setViewAcctModal(m => m ? { ...m, posting: true } : m);
@@ -5785,9 +5793,9 @@ const ManageReceipts: React.FC = () => {
                     </Button>
                   </>
                 )}
-                {/* No receipt journal found in GL → offer Create Accounting with debug */}
-                {!vhdr && viewAcctModal.tabKey && (
-                  <Tooltip title="No GL journal found for this receipt. Open Create Accounting and show the API Steps Preview so you can create/debug the journal.">
+                {/* Any journal (receipt or adjustment) missing → offer Create Accounting with debug */}
+                {anyMissing && viewAcctModal.tabKey && (
+                  <Tooltip title="A GL journal is missing (receipt or adjustment). Open Create Accounting and show the API Steps Preview so you can create/debug the journal.">
                     <Button danger type="primary" size="small" icon={<BookOutlined />}
                       onClick={() => {
                         const tk = viewAcctModal.tabKey!;
@@ -5800,9 +5808,9 @@ const ManageReceipts: React.FC = () => {
                 )}
               </Space>
               <Space>
-                {/* Always allow jumping to Create Accounting + debug (creates any
-                    missing receipt/adjustment journals; skips already-posted ones). */}
-                {vhdr && viewAcctModal.tabKey && (
+                {/* When everything is found, still allow jumping to Create Accounting
+                    + debug (skips already-posted ones). */}
+                {!anyMissing && viewAcctModal.tabKey && (
                   <Button size="small" icon={<CodeOutlined />}
                     onClick={() => {
                       const tk = viewAcctModal.tabKey!;
@@ -5856,8 +5864,11 @@ const ManageReceipts: React.FC = () => {
                 return (
                   <>
                     {/* ── Receipt journal ── */}
-                    <div style={{ marginBottom: 4 }}>
-                      <Tag color="blue" style={{ marginBottom: 8 }}>Receipt Journal</Tag>
+                    <div style={{ marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Tag color="blue" style={{ margin: 0 }}>Receipt Journal</Tag>
+                      {vhdr
+                        ? <Tag icon={<CheckCircleOutlined />} color="success" style={{ margin: 0 }}>Found in GL</Tag>
+                        : <Tag icon={<CloseCircleOutlined />} color="error" style={{ margin: 0 }}>Not in GL</Tag>}
                     </div>
                     {vhdr ? (
                       <>
@@ -5890,19 +5901,28 @@ const ManageReceipts: React.FC = () => {
                         {viewAcctModal.adjGroups.map((grp, gi) => (
                           <div key={gi} style={{ marginBottom: 16 }}>
                             <div style={{
-                              background: '#f5f0ff', border: '1px solid #d3adf7', borderRadius: 4,
+                              background: grp.found ? '#f5f0ff' : '#fff1f0',
+                              border: `1px solid ${grp.found ? '#d3adf7' : '#ffccc7'}`, borderRadius: 4,
                               padding: '4px 10px', marginBottom: 6, fontSize: 12,
                               display: 'flex', alignItems: 'center', gap: 8,
                             }}>
                               <ScissorOutlined style={{ color: '#722ed1' }} />
                               <span style={{ fontWeight: 600, color: '#722ed1' }}>Adj #{grp.adjustmentId}</span>
                               <span style={{ color: '#595959' }}>{grp.batchName}</span>
+                              {grp.found
+                                ? <Tag icon={<CheckCircleOutlined />} color="success" style={{ margin: '0 0 0 auto' }}>Found in GL</Tag>
+                                : <Tag icon={<CloseCircleOutlined />} color="error" style={{ margin: '0 0 0 auto' }}>Not in GL</Tag>}
                             </div>
-                            <Table
-                              dataSource={(grp.lines || []).map((l: any, i: number) => ({ ...l, key: i }))}
-                              size="small" pagination={false} scroll={{ x: 'max-content' }}
-                              columns={journalColumns}
-                            />
+                            {grp.found ? (
+                              <Table
+                                dataSource={(grp.lines || []).map((l: any, i: number) => ({ ...l, key: i }))}
+                                size="small" pagination={false} scroll={{ x: 'max-content' }}
+                                columns={journalColumns}
+                              />
+                            ) : (
+                              <Alert type="warning" showIcon style={{ marginBottom: 4 }}
+                                message={`No GL journal found for adjustment #${grp.adjustmentId}`} />
+                            )}
                           </div>
                         ))}
                       </>
