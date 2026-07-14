@@ -14,7 +14,7 @@ import {
   ApiOutlined, DeleteOutlined, CloseCircleOutlined, ExclamationCircleOutlined, SendOutlined, CodeOutlined,
   BookOutlined, CheckCircleOutlined, PaperClipOutlined, UploadOutlined, PrinterOutlined, EditOutlined,
   CopyOutlined, RollbackOutlined, DownOutlined, ScissorOutlined, PlusCircleOutlined, LinkOutlined,
-  MinusCircleOutlined, ClockCircleOutlined,
+  MinusCircleOutlined, ClockCircleOutlined, PlayCircleOutlined,
 } from '@ant-design/icons';
 import { Upload } from 'antd';
 import { Link } from 'react-router-dom';
@@ -2115,6 +2115,78 @@ const ManageReceipts: React.FC = () => {
     }
 
     setAcctModal(m => m ? { ...m, debugSteps: steps, showDebug: true } : m);
+  };
+
+  // Run a single debug step on demand (the "Run" button in API Steps Preview).
+  // Resolves <timestamp>/<slaHeaderId>/<batchId>/<glHeaderId> placeholders from
+  // the responses of already-run steps in the SAME group, then fires the call.
+  const [runningStepIdx, setRunningStepIdx] = useState<number | null>(null);
+  const runDebugStep = async (si: number) => {
+    const stepsSnap = acctModal?.debugSteps;
+    if (!stepsSnap) return;
+    const step = stepsSnap[si];
+    if (!step) return;
+
+    // Gather ids produced by earlier steps in this group
+    const ts = Date.now().toString().slice(-6);
+    let slaHeaderId: any, glBatchId: any, glHeaderId: any;
+    for (let i = 0; i < si; i++) {
+      const s = stepsSnap[i];
+      if (s.group !== step.group || s.responseData == null) continue;
+      const rd: any = s.responseData;
+      if (s.label.includes('SLA Accounting'))
+        slaHeaderId = rd.headerId ?? rd.header_id ?? rd.slaHeaderId ?? rd.sla_header_id ?? slaHeaderId;
+      if (s.label.includes('GL Journal Create')) {
+        glBatchId  = rd.jeBatchId  ?? rd.je_batch_id  ?? rd.batchId  ?? rd.batch_id  ?? glBatchId;
+        glHeaderId = rd.jeHeaderId ?? rd.je_header_id ?? rd.headerId ?? rd.header_id ?? glHeaderId;
+      }
+    }
+    const tok: Record<string, any> = {
+      '<timestamp>':   ts,
+      '<batchId>':     glBatchId,
+      '<glBatchId>':   glBatchId,
+      '<glHeaderId>':  glHeaderId,
+      '<headerId>':    glHeaderId,
+      '<slaHeaderId>': slaHeaderId,
+    };
+    // URL substitution (leave token in place if unresolved)
+    let url = step.url;
+    for (const [k, v] of Object.entries(tok)) if (v != null) url = url.split(k).join(String(v));
+
+    // Body substitution: replace "<token>" with a number when numeric, else string
+    let bodyStr: string | undefined;
+    if (step.payload !== undefined) {
+      let ps = JSON.stringify(step.payload);
+      for (const [k, v] of Object.entries(tok)) {
+        if (v == null) continue;
+        const val = String(v);
+        ps = ps.split(`"${k}"`).join(/^\d+$/.test(val) ? val : `"${val}"`);
+        ps = ps.split(k).join(val);
+      }
+      bodyStr = ps;
+    }
+
+    setRunningStepIdx(si);
+    setAcctModal(m => !m ? m : { ...m, debugSteps: m.debugSteps!.map((s, i) =>
+      i === si ? { ...s, status: 'running', expanded: true, url } : s) });
+    try {
+      const headers: Record<string, string> = { Accept: 'application/json' };
+      // GL Batch Post (and any step without a payload) must NOT send a body —
+      // an empty JSON body makes the ORDS post handler fail.
+      if (bodyStr !== undefined) headers['Content-Type'] = 'application/json';
+      const res  = await fetch(url, { method: step.method, headers, ...(bodyStr !== undefined ? { body: bodyStr } : {}) });
+      const data = await res.json().catch(() => ({}));
+      setAcctModal(m => !m ? m : { ...m, debugSteps: m.debugSteps!.map((s, i) =>
+        i === si ? { ...s, status: res.ok ? 'done' : 'error', detail: `HTTP ${res.status}`, responseData: data, url } : s) });
+      if (res.ok) message.success(`${step.label}: HTTP ${res.status}`);
+      else message.error(`${step.label}: HTTP ${res.status}`);
+    } catch (e: any) {
+      setAcctModal(m => !m ? m : { ...m, debugSteps: m.debugSteps!.map((s, i) =>
+        i === si ? { ...s, status: 'error', detail: e.message, responseData: { error: e.message }, url } : s) });
+      message.error(`${step.label}: ${e.message}`);
+    } finally {
+      setRunningStepIdx(null);
+    }
   };
 
   const handleCreateAccounting = async () => {
@@ -5906,7 +5978,7 @@ const ManageReceipts: React.FC = () => {
                 <div style={{ background: '#1f1f1f', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
                   <CodeOutlined style={{ color: '#52c41a', fontSize: 12 }} />
                   <Text style={{ color: '#e6e6e6', fontSize: 12, fontWeight: 600 }}>API Steps Preview</Text>
-                  <Text style={{ color: '#888', fontSize: 11 }}>— {acctModal.debugSteps.length} steps · click a step to expand payload</Text>
+                  <Text style={{ color: '#888', fontSize: 11 }}>— {acctModal.debugSteps.length} steps · click a step to expand payload · Run fires that call individually (ids resolve from earlier runs in the same group)</Text>
                 </div>
                 {acctModal.debugSteps.map((step, si) => {
                   const isGroupHeader = si === 0 || acctModal.debugSteps![si - 1].group !== step.group;
@@ -5946,6 +6018,19 @@ const ManageReceipts: React.FC = () => {
                             {step.url}
                           </Text>
                           {step.detail && <Text style={{ fontSize: 10, color: statusColor }}>{step.detail}</Text>}
+                          <Tooltip title={`Run this ${step.method} now`}>
+                            <Button
+                              size="small"
+                              type="primary"
+                              ghost
+                              icon={<PlayCircleOutlined />}
+                              loading={runningStepIdx === si}
+                              onClick={(e) => { e.stopPropagation(); runDebugStep(si); }}
+                              style={{ height: 22, fontSize: 10, padding: '0 8px', lineHeight: '20px' }}
+                            >
+                              Run
+                            </Button>
+                          </Tooltip>
                           <Text style={{ fontSize: 10, color: '#555' }}>{step.expanded ? '▲' : '▼'}</Text>
                         </div>
                         {step.expanded && (
