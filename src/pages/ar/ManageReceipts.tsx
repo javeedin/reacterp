@@ -433,6 +433,7 @@ const ManageReceipts: React.FC = () => {
     receiptNumber: string; loading: boolean; posting: boolean;
     header: any; lines: any[];          // receipt journal lines
     adjGroups: { adjustmentId: number; batchName: string; lines: any[] }[];  // one per adj
+    apiUrls?: string[];                 // GET endpoints used to retrieve the journal
   } | null>(null);
 
   const openViewAccounting = async (draft: ReceiptDraft) => {
@@ -465,13 +466,21 @@ const ManageReceipts: React.FC = () => {
 
     try {
       const BASE = APEX_DB_CONFIG.baseUrl;
+      const apiUrls: string[] = [];
 
-      // 1. Receipt journal — lookup by reference2=standardReceiptId, reference5=AR_RECEIPTS
-      const rcptCheck = await checkGLJournalExists(draft.receiptNumber, String(draft.standardReceiptId), 'AR_RECEIPTS');
+      // 1. Receipt journal — lookup by reference2=standardReceiptId + reference5=AR_RECEIPTS.
+      //    reference1 (the receipt number) is intentionally left blank: it is a long,
+      //    free-text value and reference2+reference5 uniquely identify the journal.
+      const rcptId = String(draft.standardReceiptId);
+      const checkUrl = `${BASE}/gl/journals/check?reference2=${encodeURIComponent(rcptId)}&reference5=AR_RECEIPTS`;
+      apiUrls.push(`GET ${checkUrl}`);
+      const rcptCheck = await checkGLJournalExists('', rcptId, 'AR_RECEIPTS');
       let header: any = null;
       let lines: any[] = [];
       if (rcptCheck.exists && rcptCheck.headerId) {
-        const linesRes = await fetch(`${BASE}/gl/journals/${rcptCheck.headerId}/lines`, { headers: { Accept: 'application/json' } });
+        const linesUrl = `${BASE}/gl/journals/${rcptCheck.headerId}/lines`;
+        apiUrls.push(`GET ${linesUrl}`);
+        const linesRes = await fetch(linesUrl, { headers: { Accept: 'application/json' } });
         const linesData = await linesRes.json();
         const rawLines: any[] = linesData.lines || [];
         lines = await enrichLines(rawLines);
@@ -517,7 +526,7 @@ const ManageReceipts: React.FC = () => {
         }
       }
 
-      setViewAcctModal({ receiptNumber: draft.receiptNumber, loading: false, posting: false, header, lines, adjGroups });
+      setViewAcctModal({ receiptNumber: draft.receiptNumber, loading: false, posting: false, header, lines, adjGroups, apiUrls });
     } catch (e: any) {
       message.error('Failed to load GL journal: ' + e.message);
       setViewAcctModal(null);
@@ -1837,7 +1846,7 @@ const ManageReceipts: React.FC = () => {
 
     // Run in parallel: receipt GL check + all adjustment fetches
     const [rcptGlCheck, ...adjResults] = await Promise.all([
-      checkGLJournalExists(draft.receiptNumber, String(draft.standardReceiptId), 'AR_RECEIPTS'),
+      checkGLJournalExists('', String(draft.standardReceiptId), 'AR_RECEIPTS'),
       ...adjApiUrls.map(url =>
         fetch(url).then(r => r.ok ? r.json() : { items: [] }).catch(() => ({ items: [] }))
       ),
@@ -2215,8 +2224,8 @@ const ManageReceipts: React.FC = () => {
         });
         const glBody = await glRes.json();
         if (!glRes.ok) throw new Error(glBody?.message || `GL HTTP ${glRes.status}`);
-        finalGlBatchId  = glBody?.batchId  ?? glBody?.batch_id  ?? 0;
-        const glHeaderId = glBody?.headerId ?? glBody?.header_id ?? 0;
+        finalGlBatchId  = glBody?.jeBatchId  ?? glBody?.je_batch_id  ?? glBody?.batchId  ?? glBody?.batch_id  ?? 0;
+        const glHeaderId = glBody?.jeHeaderId ?? glBody?.je_header_id ?? glBody?.headerId ?? glBody?.header_id ?? 0;
         updStep('Receipt — GL Journal', 'done', `Batch #${finalGlBatchId}`);
         updDebug('Receipt — GL Journal Create', 'done', `Batch #${finalGlBatchId}`, undefined, glBody);
 
@@ -2368,8 +2377,8 @@ const ManageReceipts: React.FC = () => {
           });
           const adjGlBody = await adjGlRes.json();
           if (!adjGlRes.ok) throw new Error(adjGlBody?.message || `GL HTTP ${adjGlRes.status}`);
-          const adjBatchId  = adjGlBody?.batchId  ?? adjGlBody?.batch_id  ?? 0;
-          const adjHeaderId = adjGlBody?.headerId ?? adjGlBody?.header_id ?? 0;
+          const adjBatchId  = adjGlBody?.jeBatchId  ?? adjGlBody?.je_batch_id  ?? adjGlBody?.batchId  ?? adjGlBody?.batch_id  ?? 0;
+          const adjHeaderId = adjGlBody?.jeHeaderId ?? adjGlBody?.je_header_id ?? adjGlBody?.headerId ?? adjGlBody?.header_id ?? 0;
           updDebug(`Adj #${adj.adjustmentId} — GL Journal Create`, 'done', `Batch #${adjBatchId}`,
             `${APEX_DB_CONFIG.baseUrl}/journals/create`, adjGlBody);
 
@@ -5637,7 +5646,23 @@ const ManageReceipts: React.FC = () => {
         return (
         <Modal
           open
-          title={<Space><EyeOutlined style={{ color: '#722ed1' }} /><span>GL Journal — Receipt {viewAcctModal.receiptNumber}</span></Space>}
+          title={<Space>
+            <EyeOutlined style={{ color: '#722ed1' }} />
+            <span>GL Journal — Receipt {viewAcctModal.receiptNumber}</span>
+            {(viewAcctModal.apiUrls?.length ?? 0) > 0 && (
+              <Tooltip
+                title={
+                  <div style={{ maxWidth: 520 }}>
+                    <div style={{ fontSize: 11, marginBottom: 4, opacity: 0.85 }}>Retrieval endpoints (matched by reference2 + reference5):</div>
+                    {viewAcctModal.apiUrls!.map((u, i) => (
+                      <div key={i} style={{ fontFamily: 'monospace', fontSize: 11, color: '#fff', wordBreak: 'break-all', marginBottom: 2 }}>{u}</div>
+                    ))}
+                  </div>
+                }>
+                <ApiOutlined style={{ color: REDWOOD.info, cursor: 'help', fontSize: 14 }} />
+              </Tooltip>
+            )}
+          </Space>}
           onCancel={() => setViewAcctModal(null)}
           footer={
             <Space style={{ width: '100%', justifyContent: 'space-between' }}>
