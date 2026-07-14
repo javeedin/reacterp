@@ -464,38 +464,55 @@ const ManageReceipts: React.FC = () => {
         } catch { return l; }
       }));
 
+    // Map a flat gl/journals/lines row (FA-style endpoint) to the modal's line shape.
+    const mapFlatLine = (l: any) => ({
+      accountCombination: l.account ?? l.ACCOUNT ?? l.account_combination ?? '',
+      description:        l.description ?? l.DESCRIPTION ?? '',
+      enteredDr:          l.entered_dr ?? l.ENTERED_DR ?? 0,
+      enteredCr:          l.entered_cr ?? l.ENTERED_CR ?? 0,
+      reference2:         l.reference2 ?? l.REFERENCE2 ?? '',
+      journalName:        l.journal_name ?? l.JOURNAL_NAME ?? '',
+      periodName:         l.period_name ?? l.PERIOD_NAME ?? '',
+      postingStatus:      l.posting_status ?? l.POSTING_STATUS ?? '',
+      batchId:            l.je_batch_id ?? l.JE_BATCH_ID ?? null,
+    });
+    // Header derived from the first line of a flat result set.
+    const headerFromLines = (rows: any[]) => {
+      const f = rows[0] ?? {};
+      return {
+        found: true,
+        batchId: f.batchId,
+        batchStatus: (f.postingStatus || '').toUpperCase() === 'POSTED' ? 'Posted' : 'Unposted',
+        periodName: f.periodName,
+        journalName: f.journalName,
+        glBatchName: f.journalName,
+      };
+    };
+
     try {
       const BASE = APEX_DB_CONFIG.baseUrl;
       const apiUrls: string[] = [];
 
-      // 1. Receipt journal — lookup by reference2=standardReceiptId + reference5=AR_RECEIPTS.
-      //    reference1 (the receipt number) is intentionally left blank: it is a long,
-      //    free-text value and reference2+reference5 uniquely identify the journal.
+      // 1. Receipt journal — retrieve lines by reference2=standardReceiptId + reference5=AR_RECEIPTS,
+      //    using the SAME flat endpoint the Fixed Assets / Depreciation module uses:
+      //      GET /gl/journals/lines?reference2={id}&reference5={type}
+      //    reference1 (the receipt number) is intentionally NOT used — it is a long,
+      //    free-text value; reference2 + reference5 uniquely identify the journal.
       const rcptId = String(draft.standardReceiptId);
-      const checkUrl = `${BASE}/gl/journals/check?reference2=${encodeURIComponent(rcptId)}&reference5=AR_RECEIPTS`;
-      apiUrls.push(`GET ${checkUrl}`);
-      const rcptCheck = await checkGLJournalExists('', rcptId, 'AR_RECEIPTS');
+      const rcptLinesUrl = `${BASE}/gl/journals/lines?reference2=${encodeURIComponent(rcptId)}&reference5=AR_RECEIPTS`;
+      apiUrls.push(`GET ${rcptLinesUrl}`);
       let header: any = null;
       let lines: any[] = [];
-      if (rcptCheck.exists && rcptCheck.headerId) {
-        const linesUrl = `${BASE}/gl/journals/${rcptCheck.headerId}/lines`;
-        apiUrls.push(`GET ${linesUrl}`);
-        const linesRes = await fetch(linesUrl, { headers: { Accept: 'application/json' } });
-        const linesData = await linesRes.json();
-        const rawLines: any[] = linesData.lines || [];
-        lines = await enrichLines(rawLines);
-        header = {
-          found: true,
-          batchId: rcptCheck.batchId,
-          glHeaderId: rcptCheck.headerId,
-          batchStatus: rcptCheck.status === 'P' ? 'Posted' : 'Unposted',
-          periodName: rcptCheck.period,
-        };
+      const rcptRes  = await fetch(rcptLinesUrl, { headers: { Accept: 'application/json' } });
+      const rcptData = await rcptRes.json().catch(() => ({}));
+      const rcptRows: any[] = (Array.isArray(rcptData?.items) ? rcptData.items : Array.isArray(rcptData) ? rcptData : []).map(mapFlatLine);
+      if (rcptRows.length > 0) {
+        lines = await enrichLines(rcptRows);
+        header = headerFromLines(rcptRows);
       }
 
-      // 2. Adjustment journals — one per saved adjustment_id
-      const savedApps = receiptApplications[draft.standardReceiptId ? String(draft.standardReceiptId) : '']?.rows ?? [];
-      // Also check all apps across tabs for this receipt
+      // 2. Adjustment journals — one per saved adjustment_id, same flat endpoint
+      //    (reference2 = adjustment id, reference5 = AR_ADJUSTMENTS).
       const tabKey = tabs.find(t => t.draft.standardReceiptId === draft.standardReceiptId)?.key ?? '';
       const appRows = receiptApplications[tabKey]?.rows ?? [];
       const appIds = appRows.map(a => a.applicationId).filter(Boolean);
@@ -509,18 +526,20 @@ const ManageReceipts: React.FC = () => {
         const adjResults = await Promise.all(adjFetches);
         const allAdjs: any[] = adjResults.flatMap(r => r.items ?? []);
 
-        // For each adjustment, check GL and fetch lines
+        // For each adjustment, retrieve its lines by reference2 + reference5
         for (const adj of allAdjs) {
           const adjId = adj.adjustment_id ?? adj.ADJUSTMENT_ID;
           if (!adjId) continue;
-          const adjCheck = await checkGLJournalExists(String(adjId), String(adjId), 'AR_ADJUSTMENTS');
-          if (!adjCheck.exists || !adjCheck.headerId) continue;
-          const adjLinesRes = await fetch(`${BASE}/gl/journals/${adjCheck.headerId}/lines`, { headers: { Accept: 'application/json' } });
-          const adjLinesData = await adjLinesRes.json();
-          const enriched = await enrichLines(adjLinesData.lines || []);
+          const adjLinesUrl = `${BASE}/gl/journals/lines?reference2=${encodeURIComponent(String(adjId))}&reference5=AR_ADJUSTMENTS`;
+          apiUrls.push(`GET ${adjLinesUrl}`);
+          const adjRes  = await fetch(adjLinesUrl, { headers: { Accept: 'application/json' } });
+          const adjData = await adjRes.json().catch(() => ({}));
+          const adjRows: any[] = (Array.isArray(adjData?.items) ? adjData.items : Array.isArray(adjData) ? adjData : []).map(mapFlatLine);
+          if (adjRows.length === 0) continue;
+          const enriched = await enrichLines(adjRows);
           adjGroups.push({
             adjustmentId: adjId,
-            batchName: `Batch #${adjCheck.batchId} · ${adj.receivables_activity ?? adj.RECEIVABLES_ACTIVITY ?? 'Adjustment'} · ${adj.transaction_number ?? adj.TRANSACTION_NUMBER ?? ''}`,
+            batchName: `Batch #${adjRows[0]?.batchId ?? '—'} · ${adj.receivables_activity ?? adj.RECEIVABLES_ACTIVITY ?? 'Adjustment'} · ${adj.transaction_number ?? adj.TRANSACTION_NUMBER ?? ''}`,
             lines: enriched,
           });
         }
