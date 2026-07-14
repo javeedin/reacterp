@@ -385,7 +385,7 @@ BEGIN
         p_method         => 'GET',
         p_source_type    => 'plsql/block',
         p_comments       => 'Get installments for an AR invoice with calculated balance and status',
-        p_source         => '
+        p_source         => q'[
 DECLARE
     l_txn_id        NUMBER := :id;
     l_orig          NUMBER;
@@ -400,7 +400,7 @@ DECLARE
     l_count         NUMBER := 0;
 BEGIN
     APEX_JSON.open_object;
-    APEX_JSON.open_array(''items'');
+    APEX_JSON.open_array('items');
 
     FOR r IN (
         SELECT ii.INSTALLMENT_ID,
@@ -441,44 +441,44 @@ BEGIN
         IF l_calc_balance < 0 THEN l_calc_balance := 0; END IF;
 
         IF (l_paid + ABS(l_adj)) >= l_orig AND l_orig > 0 THEN
-            l_status      := ''Closed'';
+            l_status      := 'Closed';
             l_closed_date := NVL(r.INSTALLMENT_CLOSED_DATE, SYSDATE);
             l_balance     := 0;
         ELSE
-            l_status      := ''Open'';
+            l_status      := 'Open';
             l_closed_date := NULL;
         END IF;
 
         APEX_JSON.open_object;
-        APEX_JSON.write(''installment_id'',                r.INSTALLMENT_ID);
-        APEX_JSON.write(''customer_trx_id'',               r.CUSTOMER_TRANSACTION_ID);
-        APEX_JSON.write(''installment_sequence_number'',   r.INSTALLMENT_SEQUENCE_NUMBER);
-        APEX_JSON.write(''installment_due_date'',          r.INSTALLMENT_DUE_DATE);
-        APEX_JSON.write(''original_amount'',               l_orig);
-        APEX_JSON.write(''amount_paid'',                   l_paid);
-        APEX_JSON.write(''installment_amount_adjusted'',   l_adj);
-        APEX_JSON.write(''installment_balance_due'',       l_balance);
-        APEX_JSON.write(''accounted_balance_due'',         l_balance);
-        APEX_JSON.write(''installment_line_amount_due'',   l_balance);
-        APEX_JSON.write(''applied_amount'',                l_calc_applied);
-        APEX_JSON.write(''applied_adjustment'',            l_calc_adj);
-        APEX_JSON.write(''calculated_balance'',            l_calc_balance);
-        APEX_JSON.write(''installment_freight_amount_due'', CASE WHEN l_status = ''Closed'' THEN 0 ELSE NVL(r.INSTALLMENT_FREIGHT_AMOUNT_DUE, 0) END);
-        APEX_JSON.write(''installment_tax_amount_due'',    CASE WHEN l_status = ''Closed'' THEN 0 ELSE NVL(r.INSTALLMENT_TAX_AMOUNT_DUE, 0) END);
-        APEX_JSON.write(''installment_status'',            l_status);
-        APEX_JSON.write(''installment_closed_date'',       l_closed_date);
-        APEX_JSON.write(''installment_gl_closed_date'',    r.INSTALLMENT_GL_CLOSED_DATE);
-        APEX_JSON.write(''last_update_date'',              r.LAST_UPDATE_DATE);
-        APEX_JSON.write(''last_updated_by'',               r.LAST_UPDATED_BY);
+        APEX_JSON.write('installment_id',                r.INSTALLMENT_ID);
+        APEX_JSON.write('customer_trx_id',               r.CUSTOMER_TRANSACTION_ID);
+        APEX_JSON.write('installment_sequence_number',   r.INSTALLMENT_SEQUENCE_NUMBER);
+        APEX_JSON.write('installment_due_date',          r.INSTALLMENT_DUE_DATE);
+        APEX_JSON.write('original_amount',               l_orig);
+        APEX_JSON.write('amount_paid',                   l_paid);
+        APEX_JSON.write('installment_amount_adjusted',   l_adj);
+        APEX_JSON.write('installment_balance_due',       l_balance);
+        APEX_JSON.write('accounted_balance_due',         l_balance);
+        APEX_JSON.write('installment_line_amount_due',   l_balance);
+        APEX_JSON.write('applied_amount',                l_calc_applied);
+        APEX_JSON.write('applied_adjustment',            l_calc_adj);
+        APEX_JSON.write('calculated_balance',            l_calc_balance);
+        APEX_JSON.write('installment_freight_amount_due', CASE WHEN l_status = 'Closed' THEN 0 ELSE NVL(r.INSTALLMENT_FREIGHT_AMOUNT_DUE, 0) END);
+        APEX_JSON.write('installment_tax_amount_due',    CASE WHEN l_status = 'Closed' THEN 0 ELSE NVL(r.INSTALLMENT_TAX_AMOUNT_DUE, 0) END);
+        APEX_JSON.write('installment_status',            l_status);
+        APEX_JSON.write('installment_closed_date',       l_closed_date);
+        APEX_JSON.write('installment_gl_closed_date',    r.INSTALLMENT_GL_CLOSED_DATE);
+        APEX_JSON.write('last_update_date',              r.LAST_UPDATE_DATE);
+        APEX_JSON.write('last_updated_by',               r.LAST_UPDATED_BY);
         APEX_JSON.close_object;
 
         l_count := l_count + 1;
     END LOOP;
 
     APEX_JSON.close_array;
-    APEX_JSON.write(''count'', l_count);
+    APEX_JSON.write('count', l_count);
     APEX_JSON.close_object;
-END;'
+END;]'
     );
     COMMIT;
 END;
