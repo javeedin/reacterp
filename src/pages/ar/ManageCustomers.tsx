@@ -2,13 +2,13 @@ import React, { useState, useCallback, useRef } from 'react';
 import {
   Layout, Card, Form, Input, Button, Space, Typography, Table, Tabs,
   Row, Col, Breadcrumb, Tooltip, message, Tag, Spin, Descriptions,
-  Badge, Divider, Statistic, Empty,
+  Badge, Divider, Statistic, Empty, Alert,
 } from 'antd';
 import {
   HomeOutlined, SearchOutlined, ReloadOutlined,
   UserOutlined, PhoneOutlined, MailOutlined, BankOutlined,
   FileTextOutlined, DollarOutlined, CloseOutlined, InfoCircleOutlined,
-  EnvironmentOutlined, IdcardOutlined, DownloadOutlined,
+  EnvironmentOutlined, IdcardOutlined, DownloadOutlined, ApiOutlined, CopyOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -115,6 +115,8 @@ const ManageCustomers: React.FC = () => {
   const [searching, setSearching]     = useState(false);
   const [customers, setCustomers]     = useState<CustomerRow[]>([]);
   const [searched, setSearched]       = useState(false);
+  const [lastUrl, setLastUrl]         = useState('');   // last search endpoint (for API icon)
+  const [searchError, setSearchError] = useState('');   // last search error (shown as alert)
 
   // Tabs state
   const [tabs, setTabs]               = useState<CustomerTab[]>([]);
@@ -127,14 +129,21 @@ const ManageCustomers: React.FC = () => {
   const handleSearch = useCallback(async (values: any) => {
     setSearching(true);
     setSearched(false);
+    setSearchError('');
+    const p = new URLSearchParams();
+    if (values.customerName) p.append('customer_name', values.customerName);
+    if (values.accountNumber) p.append('account_number', values.accountNumber);
+    if (values.taxNumber) p.append('tax_number', values.taxNumber);
+    const url = `${BASE}/ar/customer-site-activities?${p}`;
+    setLastUrl(url);
     try {
-      const p = new URLSearchParams();
-      if (values.customerName) p.append('customer_name', values.customerName);
-      if (values.accountNumber) p.append('account_number', values.accountNumber);
-      if (values.taxNumber) p.append('tax_number', values.taxNumber);
-
-      const res  = await fetch(`${BASE}/ar/customer-site-activities?${p}`);
-      const data = await res.json();
+      const res  = await fetch(url, { headers: { Accept: 'application/json' } });
+      const raw  = await res.text();
+      let data: any = {};
+      try { data = raw ? JSON.parse(raw) : {}; } catch { /* non-JSON error body */ }
+      if (!res.ok) {
+        throw new Error(data?.message || data?.error || `HTTP ${res.status} — ${raw.slice(0, 300) || res.statusText}`);
+      }
       const items: any[] = data.items ?? data.rows ?? (Array.isArray(data) ? data : []);
       setCustomers(items.map((r: any, i: number) => ({
         key: String(r.bill_to_site_use_id ?? r.BILL_TO_SITE_USE_ID ?? i),
@@ -150,6 +159,8 @@ const ManageCustomers: React.FC = () => {
       })));
       setSearched(true);
     } catch (e: any) {
+      setSearchError(e.message || String(e));
+      setSearched(true);
       message.error('Search failed: ' + e.message);
     } finally {
       setSearching(false);
@@ -572,9 +583,49 @@ const ManageCustomers: React.FC = () => {
                       Export
                     </Button>
                   )}
+                  <Tooltip
+                    title={
+                      <div style={{ maxWidth: 460 }}>
+                        <div style={{ fontSize: 11, marginBottom: 4, opacity: 0.85 }}>Customer search endpoint:</div>
+                        <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#fff', wordBreak: 'break-all' }}>
+                          GET {lastUrl || `${BASE}/ar/customer-site-activities?customer_name=&account_number=&tax_number=`}
+                        </div>
+                        <div style={{ fontSize: 10, marginTop: 6, opacity: 0.75 }}>Click to copy</div>
+                      </div>
+                    }>
+                    <Button
+                      type="text"
+                      icon={<ApiOutlined style={{ color: REDWOOD.info }} />}
+                      onClick={() => {
+                        const u = lastUrl || `${BASE}/ar/customer-site-activities`;
+                        navigator.clipboard.writeText(u);
+                        message.success('Endpoint URL copied');
+                      }}
+                    />
+                  </Tooltip>
                 </Space>
               </Form.Item>
             </Form>
+            {searchError && (
+              <Alert
+                type="error"
+                showIcon
+                style={{ marginTop: 4 }}
+                message="Customer search failed"
+                description={
+                  <div>
+                    <div style={{ marginBottom: 6 }}>{searchError}</div>
+                    <div style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.neutral600 }}>
+                      GET {lastUrl}
+                    </div>
+                    <Button size="small" type="link" icon={<CopyOutlined />} style={{ paddingLeft: 0 }}
+                      onClick={() => { navigator.clipboard.writeText(lastUrl); message.success('URL copied'); }}>
+                      Copy URL
+                    </Button>
+                  </div>
+                }
+              />
+            )}
           </Card>
 
           {/* Results */}
