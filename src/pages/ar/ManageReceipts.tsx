@@ -540,6 +540,7 @@ const ManageReceipts: React.FC = () => {
     installmentId: number;
     originalAmount: number;
     balanceDue: number;
+    calculatedBalance: number;
     currency: string;
     applyAmount: number | null;
     adjustmentAmount: number | null;
@@ -737,6 +738,7 @@ const ManageReceipts: React.FC = () => {
         (instData.items ?? []).forEach((x: any) => {
           const bal = x.installment_balance_due ?? x.INSTALLMENT_BALANCE_DUE ?? 0;
           if (bal <= 0) return;
+          const calcBal = x.calculated_balance ?? x.CALCULATED_BALANCE ?? bal;
           allRows.push({
             key: `${txnId}-${x.installment_id ?? x.INSTALLMENT_ID}`,
             customerTransactionId: txnId,
@@ -747,6 +749,7 @@ const ManageReceipts: React.FC = () => {
             dueDate:         (x.installment_due_date ?? x.INSTALLMENT_DUE_DATE ?? '').slice(0, 10),
             originalAmount:  x.original_amount ?? x.ORIGINAL_AMOUNT ?? 0,
             balanceDue: bal,
+            calculatedBalance: calcBal,
             currency: ccy,
             applyAmount: null,
             adjustmentAmount: null,
@@ -4238,6 +4241,17 @@ const ManageReceipts: React.FC = () => {
                 render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text> },
               { title: 'Balance Due', dataIndex: 'balanceDue', width: 110, align: 'right',
                 render: v => <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.primary }}>{Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text> },
+              { title: 'Calculated Balance', dataIndex: 'calculatedBalance', width: 130, align: 'right',
+                render: (v, rec) => {
+                  const mismatch = Math.abs((v ?? 0) - (rec.balanceDue ?? 0)) > 0.001;
+                  return (
+                    <Tooltip title={mismatch ? 'Differs from stored Balance Due — computed from actual receipt applications & adjustments' : 'Computed from actual receipt applications & adjustments'}>
+                      <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: mismatch ? REDWOOD.warning : REDWOOD.success }}>
+                        {Number(v ?? 0).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </Text>
+                    </Tooltip>
+                  );
+                }},
               { title: 'Apply Amount', dataIndex: 'applyAmount', width: 120, align: 'right',
                 render: (v, rec) => (
                   <InputNumber size="small" style={{ width: '100%' }} precision={2} min={0} max={rec.balanceDue}

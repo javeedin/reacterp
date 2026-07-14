@@ -392,6 +392,9 @@ DECLARE
     l_paid          NUMBER;
     l_adj           NUMBER;
     l_balance       NUMBER;
+    l_calc_applied  NUMBER;
+    l_calc_adj      NUMBER;
+    l_calc_balance  NUMBER;
     l_status        VARCHAR2(30);
     l_closed_date   DATE;
     l_count         NUMBER := 0;
@@ -400,29 +403,42 @@ BEGIN
     APEX_JSON.open_array(''items'');
 
     FOR r IN (
-        SELECT INSTALLMENT_ID,
-               CUSTOMER_TRANSACTION_ID,
-               INSTALLMENT_SEQUENCE_NUMBER,
-               INSTALLMENT_DUE_DATE,
-               INSTALLMENT_LINE_AMOUNT_ORIGINAL,
-               ORIGINAL_AMOUNT,
-               AMOUNT_PAID,
-               INSTALLMENT_AMOUNT_ADJUSTED,
-               INSTALLMENT_FREIGHT_AMOUNT_DUE,
-               INSTALLMENT_TAX_AMOUNT_DUE,
-               INSTALLMENT_STATUS,
-               INSTALLMENT_CLOSED_DATE,
-               INSTALLMENT_GL_CLOSED_DATE,
-               LAST_UPDATE_DATE,
-               LAST_UPDATED_BY
-        FROM   RR_AR_INVOICE_INSTALLMENTS
-        WHERE  CUSTOMER_TRANSACTION_ID = l_txn_id
-        ORDER  BY INSTALLMENT_SEQUENCE_NUMBER
+        SELECT ii.INSTALLMENT_ID,
+               ii.CUSTOMER_TRANSACTION_ID,
+               ii.INSTALLMENT_SEQUENCE_NUMBER,
+               ii.INSTALLMENT_DUE_DATE,
+               ii.INSTALLMENT_LINE_AMOUNT_ORIGINAL,
+               ii.ORIGINAL_AMOUNT,
+               ii.AMOUNT_PAID,
+               ii.INSTALLMENT_AMOUNT_ADJUSTED,
+               ii.INSTALLMENT_FREIGHT_AMOUNT_DUE,
+               ii.INSTALLMENT_TAX_AMOUNT_DUE,
+               ii.INSTALLMENT_STATUS,
+               ii.INSTALLMENT_CLOSED_DATE,
+               ii.INSTALLMENT_GL_CLOSED_DATE,
+               ii.LAST_UPDATE_DATE,
+               ii.LAST_UPDATED_BY,
+               (SELECT NVL(SUM(NVL(ra.APPLICATION_AMOUNT, 0)), 0)
+                  FROM RR_AR_RECEIPT_APPLICATIONS ra
+                 WHERE ra.REFERENCE_INSTALLMENT_ID = ii.INSTALLMENT_ID) AS APPLIED_AMT,
+               (SELECT NVL(SUM(ABS(NVL(ra.ADJUSTMENT_AMOUNT, 0))), 0)
+                  FROM RR_AR_RECEIPT_APPLICATIONS ra
+                 WHERE ra.REFERENCE_INSTALLMENT_ID = ii.INSTALLMENT_ID) AS APPLIED_ADJ
+        FROM   RR_AR_INVOICE_INSTALLMENTS ii
+        WHERE  ii.CUSTOMER_TRANSACTION_ID = l_txn_id
+        ORDER  BY ii.INSTALLMENT_SEQUENCE_NUMBER
     ) LOOP
         l_orig    := NVL(r.INSTALLMENT_LINE_AMOUNT_ORIGINAL, NVL(r.ORIGINAL_AMOUNT, 0));
         l_paid    := NVL(r.AMOUNT_PAID, 0);
         l_adj     := NVL(r.INSTALLMENT_AMOUNT_ADJUSTED, 0);
         l_balance := l_orig - l_paid - ABS(l_adj);
+
+        -- Calculated balance from ACTUAL receipt applications/adjustments against
+        -- this installment (independent of the stored balance-due columns).
+        l_calc_applied := NVL(r.APPLIED_AMT, 0);
+        l_calc_adj     := NVL(r.APPLIED_ADJ, 0);
+        l_calc_balance := l_orig - l_calc_applied - l_calc_adj;
+        IF l_calc_balance < 0 THEN l_calc_balance := 0; END IF;
 
         IF (l_paid + ABS(l_adj)) >= l_orig AND l_orig > 0 THEN
             l_status      := ''Closed'';
@@ -444,6 +460,9 @@ BEGIN
         APEX_JSON.write(''installment_balance_due'',       l_balance);
         APEX_JSON.write(''accounted_balance_due'',         l_balance);
         APEX_JSON.write(''installment_line_amount_due'',   l_balance);
+        APEX_JSON.write(''applied_amount'',                l_calc_applied);
+        APEX_JSON.write(''applied_adjustment'',            l_calc_adj);
+        APEX_JSON.write(''calculated_balance'',            l_calc_balance);
         APEX_JSON.write(''installment_freight_amount_due'', CASE WHEN l_status = ''Closed'' THEN 0 ELSE NVL(r.INSTALLMENT_FREIGHT_AMOUNT_DUE, 0) END);
         APEX_JSON.write(''installment_tax_amount_due'',    CASE WHEN l_status = ''Closed'' THEN 0 ELSE NVL(r.INSTALLMENT_TAX_AMOUNT_DUE, 0) END);
         APEX_JSON.write(''installment_status'',            l_status);
@@ -542,6 +561,9 @@ END;
 -- GET    {base}/ar/invoices/:id                  Get single header
 -- GET    {base}/ar/invoices/:id/lines            Get lines for a header
 -- GET    {base}/ar/invoices/:id/installments     Get installments for a header
+--          (adds applied_amount, applied_adjustment and calculated_balance —
+--           balance derived from actual RR_AR_RECEIPT_APPLICATIONS, not the
+--           stored balance-due columns)
 -- GET    {base}/ar/invoices/:id/distributions    Get distributions for a header
 -- GET    {base}/ar/invoices/stats                Dashboard summary stats
 -- =====================================================
