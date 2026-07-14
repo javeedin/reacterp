@@ -434,7 +434,10 @@ const ManageReceipts: React.FC = () => {
     header: any; lines: any[];          // receipt journal lines
     adjGroups: { adjustmentId: number; batchName: string; lines: any[] }[];  // one per adj
     apiUrls?: string[];                 // GET endpoints used to retrieve the journal
+    tabKey?: string;                    // owning receipt tab (to jump to Create Accounting)
   } | null>(null);
+  // When set, openAcctModal auto-opens the debug 'API Steps Preview' once loaded.
+  const [autoDebugPending, setAutoDebugPending] = useState(false);
 
   const openViewAccounting = async (draft: ReceiptDraft) => {
     setViewAcctModal({ receiptNumber: draft.receiptNumber, loading: true, posting: false, header: null, lines: [], adjGroups: [] });
@@ -545,7 +548,7 @@ const ManageReceipts: React.FC = () => {
         }
       }
 
-      setViewAcctModal({ receiptNumber: draft.receiptNumber, loading: false, posting: false, header, lines, adjGroups, apiUrls });
+      setViewAcctModal({ receiptNumber: draft.receiptNumber, loading: false, posting: false, header, lines, adjGroups, apiUrls, tabKey });
     } catch (e: any) {
       message.error('Failed to load GL journal: ' + e.message);
       setViewAcctModal(null);
@@ -1796,9 +1799,10 @@ const ManageReceipts: React.FC = () => {
   };
 
   // ── Open Accounting Modal ────────────────────────────────────────────────
-  const openAcctModal = async (tabKey: string) => {
+  const openAcctModal = async (tabKey: string, autoDebug = false) => {
     const tab = tabs.find(t => t.key === tabKey);
     if (!tab) return;
+    if (autoDebug) setAutoDebugPending(true);
     const { draft, slaHeaderId, slaPosted } = tab;
     const acct           = allMethodAccounts.find(a => a.id === draft.selectedBankAccountId);
     const amount         = Math.abs(draft.amount ?? 0);
@@ -2116,6 +2120,17 @@ const ManageReceipts: React.FC = () => {
 
     setAcctModal(m => m ? { ...m, debugSteps: steps, showDebug: true } : m);
   };
+
+  // Auto-open the debug 'API Steps Preview' when requested (e.g. jumping here
+  // from View Accounting because a GL journal was missing). Waits until the
+  // modal has finished loading adjustments so the steps are complete.
+  useEffect(() => {
+    if (autoDebugPending && acctModal && !acctModal.adjLoading && !acctModal.debugSteps) {
+      setAutoDebugPending(false);
+      buildDebugSteps();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoDebugPending, acctModal?.adjLoading, acctModal?.debugSteps]);
 
   // Run a single debug step on demand (the "Run" button in API Steps Preview).
   // Resolves <timestamp>/<slaHeaderId>/<batchId>/<glHeaderId> placeholders from
@@ -5770,8 +5785,35 @@ const ManageReceipts: React.FC = () => {
                     </Button>
                   </>
                 )}
+                {/* No receipt journal found in GL → offer Create Accounting with debug */}
+                {!vhdr && viewAcctModal.tabKey && (
+                  <Tooltip title="No GL journal found for this receipt. Open Create Accounting and show the API Steps Preview so you can create/debug the journal.">
+                    <Button danger type="primary" size="small" icon={<BookOutlined />}
+                      onClick={() => {
+                        const tk = viewAcctModal.tabKey!;
+                        setViewAcctModal(null);
+                        openAcctModal(tk, true);   // true → auto-open the debug panel
+                      }}>
+                      Create Accounting
+                    </Button>
+                  </Tooltip>
+                )}
               </Space>
-              <Button onClick={() => setViewAcctModal(null)}>Close</Button>
+              <Space>
+                {/* Always allow jumping to Create Accounting + debug (creates any
+                    missing receipt/adjustment journals; skips already-posted ones). */}
+                {vhdr && viewAcctModal.tabKey && (
+                  <Button size="small" icon={<CodeOutlined />}
+                    onClick={() => {
+                      const tk = viewAcctModal.tabKey!;
+                      setViewAcctModal(null);
+                      openAcctModal(tk, true);
+                    }}>
+                    Create Accounting (Debug)
+                  </Button>
+                )}
+                <Button onClick={() => setViewAcctModal(null)}>Close</Button>
+              </Space>
             </Space>
           }
           width={900}
