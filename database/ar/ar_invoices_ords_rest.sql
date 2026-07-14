@@ -421,9 +421,16 @@ BEGIN
                (SELECT NVL(SUM(NVL(ra.APPLICATION_AMOUNT, 0)), 0)
                   FROM RR_AR_RECEIPT_APPLICATIONS ra
                  WHERE ra.REFERENCE_INSTALLMENT_ID = ii.INSTALLMENT_ID) AS APPLIED_AMT,
-               (SELECT NVL(SUM(ABS(NVL(ra.ADJUSTMENT_AMOUNT, 0))), 0)
-                  FROM RR_AR_RECEIPT_APPLICATIONS ra
-                 WHERE ra.REFERENCE_INSTALLMENT_ID = ii.INSTALLMENT_ID) AS APPLIED_ADJ
+               -- Adjustment is sourced from RR_AR_ADJUSTMENTS (NOT the receipt
+               -- application row). Match on INSTALLMENT_ID; fall back to
+               -- CUSTOMER_TRANSACTION_ID + INSTALLMENT_NUMBER for rows where
+               -- INSTALLMENT_ID was not populated.
+               (SELECT NVL(SUM(ABS(NVL(adj.ADJUSTMENT_AMOUNT, 0))), 0)
+                  FROM RR_AR_ADJUSTMENTS adj
+                 WHERE adj.INSTALLMENT_ID = ii.INSTALLMENT_ID
+                    OR (adj.INSTALLMENT_ID IS NULL
+                        AND adj.CUSTOMER_TRANSACTION_ID = ii.CUSTOMER_TRANSACTION_ID
+                        AND adj.INSTALLMENT_NUMBER      = ii.INSTALLMENT_SEQUENCE_NUMBER)) AS APPLIED_ADJ
         FROM   RR_AR_INVOICE_INSTALLMENTS ii
         WHERE  ii.CUSTOMER_TRANSACTION_ID = l_txn_id
         ORDER  BY ii.INSTALLMENT_SEQUENCE_NUMBER
@@ -433,8 +440,9 @@ BEGIN
         l_adj     := NVL(r.INSTALLMENT_AMOUNT_ADJUSTED, 0);
         l_balance := l_orig - l_paid - ABS(l_adj);
 
-        -- Calculated balance from ACTUAL receipt applications/adjustments against
-        -- this installment (independent of the stored balance-due columns).
+        -- Calculated balance = ORIGINAL - applied (from RR_AR_RECEIPT_APPLICATIONS)
+        -- - adjustments (from RR_AR_ADJUSTMENTS). Independent of the stored
+        -- balance-due columns.
         l_calc_applied := NVL(r.APPLIED_AMT, 0);
         l_calc_adj     := NVL(r.APPLIED_ADJ, 0);
         l_calc_balance := l_orig - l_calc_applied - l_calc_adj;
@@ -562,8 +570,9 @@ END;
 -- GET    {base}/ar/invoices/:id/lines            Get lines for a header
 -- GET    {base}/ar/invoices/:id/installments     Get installments for a header
 --          (adds applied_amount, applied_adjustment and calculated_balance —
---           balance derived from actual RR_AR_RECEIPT_APPLICATIONS, not the
---           stored balance-due columns)
+--           applied_amount from RR_AR_RECEIPT_APPLICATIONS, applied_adjustment
+--           from RR_AR_ADJUSTMENTS; balance = ORIGINAL - applied - adjustment,
+--           independent of the stored balance-due columns)
 -- GET    {base}/ar/invoices/:id/distributions    Get distributions for a header
 -- GET    {base}/ar/invoices/stats                Dashboard summary stats
 -- =====================================================
