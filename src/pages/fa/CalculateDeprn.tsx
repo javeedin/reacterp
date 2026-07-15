@@ -69,6 +69,8 @@ const CalculateDeprn: React.FC = () => {
   const [statusMeta,    setStatusMeta]    = useState<{ periodName?: string; postedCount?: number; notPostedCount?: number; totalCount?: number } | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
   const [statusFilter,  setStatusFilter]  = useState<'all' | 'posted' | 'notposted'>('all');
+  const [statusError,   setStatusError]   = useState('');
+  const [statusUrl,     setStatusUrl]     = useState('');
 
   useEffect(() => {
     getBookControls().then((bc) => {
@@ -141,10 +143,18 @@ const CalculateDeprn: React.FC = () => {
   const handleShowStatus = useCallback(async (periodName: string) => {
     if (!selectedBook || !periodName) return;
     setStatusLoading(true);
+    setStatusError('');
     setViewMode('status');
+    const url = `${APEX_DB_CONFIG.baseUrl}/fa/deprn-by-period?bookTypeCode=${encodeURIComponent(selectedBook)}&periodName=${encodeURIComponent(periodName)}`;
+    setStatusUrl(url);
     try {
       const res = await getDeprnStatus({ bookTypeCode: selectedBook, periodName });
-      if (res.success === false) { message.error(res.error || 'Failed to load status'); return; }
+      if (res.success === false) {
+        setStatusError(res.error || 'Failed to load status');
+        setStatusItems([]); setStatusSummary(null); setStatusMeta(null);
+        message.error(res.error || 'Failed to load status');
+        return;
+      }
       setStatusItems(res.items || []);
       setStatusSummary(res.summary || null);
       setStatusMeta({
@@ -617,9 +627,37 @@ const CalculateDeprn: React.FC = () => {
                       </Select>
                       <Button size="small" icon={<ReloadOutlined />} loading={statusLoading}
                         onClick={() => handleShowStatus(statusPeriodName)}>Show</Button>
+                      <Tooltip title={
+                        <div style={{ maxWidth: 520 }}>
+                          <div style={{ fontSize: 11, marginBottom: 4 }}>GET (no body — query params):</div>
+                          <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#fff', wordBreak: 'break-all' }}>
+                            {statusUrl || `${APEX_DB_CONFIG.baseUrl}/fa/deprn-by-period?bookTypeCode=${encodeURIComponent(selectedBook)}&periodName=${encodeURIComponent(statusPeriodName || '...')}`}
+                          </div>
+                          <div style={{ fontSize: 10, marginTop: 6, opacity: 0.75 }}>Click to copy</div>
+                        </div>
+                      }>
+                        <Button type="text" size="small" icon={<ApiOutlined style={{ color: '#1677ff' }} />}
+                          onClick={() => {
+                            const u = statusUrl || `${APEX_DB_CONFIG.baseUrl}/fa/deprn-by-period?bookTypeCode=${encodeURIComponent(selectedBook)}&periodName=${encodeURIComponent(statusPeriodName || '')}`;
+                            navigator.clipboard.writeText(u); message.success('URL copied');
+                          }} />
+                      </Tooltip>
                     </Space>
                   }
                 >
+                  {statusError && (
+                    <Alert type="error" showIcon style={{ marginBottom: 12 }}
+                      message="Failed to load depreciation status"
+                      description={
+                        <div>
+                          <div style={{ marginBottom: 6 }}>{statusError}</div>
+                          <div style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.neutral500 }}>GET {statusUrl}</div>
+                          <div style={{ fontSize: 11, marginTop: 6 }}>
+                            A 404 means the webservice isn't deployed. Run <b>08_rr_fa_pkg_spec.sql → 09_rr_fa_pkg_body.sql → 18_fa_deprn_by_period_get.sql</b>.
+                          </div>
+                        </div>
+                      } />
+                  )}
                   {statusLoading ? (
                     <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
                   ) : statusMeta ? (
