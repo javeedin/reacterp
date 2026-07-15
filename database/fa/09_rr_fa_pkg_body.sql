@@ -778,11 +778,11 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                    NVL(dsum.COST, b.COST) - NVL(dsum.DEPRN_RESERVE, 0)  AS NBV,
                    dsum.DEPRN_RUN_DATE                                  AS DEPRN_RUN_DATE,
                    dsum.ACCOUNTED_STATUS                                AS ACCOUNTED_STATUS,
-                   NVL(b.SALVAGE_VALUE, 0)                              AS SALVAGE_VALUE,
+                   b.SALVAGE_VALUE                                      AS SALVAGE_VALUE,
                    m.METHOD_CODE                                        AS METHOD_CODE,
                    m.LIFE_IN_MONTHS                                     AS LIFE_IN_MONTHS,
-                   TO_CHAR(b.DATE_PLACED_IN_SERVICE, 'YYYY-MM-DD')      AS DATE_PLACED_IN_SERVICE,
-                   TO_CHAR(b.DEPRN_START_DATE, 'YYYY-MM-DD')            AS DEPRN_START_DATE,
+                   b.DATE_PLACED_IN_SERVICE                             AS DATE_PLACED_IN_SERVICE,
+                   b.DEPRN_START_DATE                                   AS DEPRN_START_DATE,
                    CASE WHEN dsum.ASSET_ID IS NOT NULL THEN 'Posted' ELSE 'Not Posted' END AS STATUS
               FROM RR_FA_BOOKS b
               JOIN RR_FA_ADDITIONS a ON a.ASSET_ID = b.ASSET_ID
