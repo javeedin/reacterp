@@ -1704,7 +1704,9 @@ const ManageMultiperiod: React.FC = () => {
           {(() => {
             // Flatten: one row per schedule line for the selected period
             const allFlatRows = accrualLines.flatMap((inv: any) =>
-              (inv.periodAllLines || []).map((sl: any) => ({
+              (inv.periodAllLines || [])
+                .filter((sl: any) => sl.postingStatus !== 'Suspended')   // suspended lines are excluded from accruals
+                .map((sl: any) => ({
                 rowKey: `${inv.invoiceId}-${sl.scheduleId}`,
                 scheduleId: sl.scheduleId,
                 invoiceId: inv.invoiceId,
@@ -1748,15 +1750,34 @@ const ManageMultiperiod: React.FC = () => {
             return (
               <>
                 <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Input.Search
-                    placeholder="Search any column…"
-                    allowClear
-                    size="small"
-                    style={{ width: 280 }}
-                    value={accrualSearch}
-                    onChange={e => setAccrualSearch(e.target.value)}
-                    onSearch={v => setAccrualSearch(v)}
-                  />
+                  <Space>
+                    <Input.Search
+                      placeholder="Search any column…"
+                      allowClear
+                      size="small"
+                      style={{ width: 280 }}
+                      value={accrualSearch}
+                      onChange={e => setAccrualSearch(e.target.value)}
+                      onSearch={v => setAccrualSearch(v)}
+                    />
+                    <Tooltip title={
+                      <div style={{ maxWidth: 500 }}>
+                        <div style={{ fontSize: 11, marginBottom: 4 }}>Post-Accrual loads schedules via:</div>
+                        <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#fff', wordBreak: 'break-all' }}>
+                          GET {APEX_DB_CONFIG.baseUrl}/ap/multiperiod
+                        </div>
+                        <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#fff', wordBreak: 'break-all', marginTop: 2 }}>
+                          GET {APEX_DB_CONFIG.baseUrl}/ap/multiperiod/&#123;invoiceId&#125;
+                        </div>
+                        <div style={{ fontSize: 10, marginTop: 6, opacity: 0.75 }}>
+                          Rows are filtered to the selected period; <b>Suspended</b> and non-period lines are excluded. Click to copy the list URL.
+                        </div>
+                      </div>
+                    }>
+                      <Button type="text" size="small" icon={<ApiOutlined style={{ color: REDWOOD.info }} />}
+                        onClick={() => { navigator.clipboard.writeText(`${APEX_DB_CONFIG.baseUrl}/ap/multiperiod`); message.success('Endpoint URL copied'); }} />
+                    </Tooltip>
+                  </Space>
                 </div>
                 <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <Text type="secondary" style={{ fontSize: 11 }}>
