@@ -695,11 +695,64 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         p_result      OUT CLOB
     ) IS BEGIN write_error(p_http_status, p_result, 501, 'Not implemented in this body'); END;
 
+    -- Straight-line schedule for ONE month (daily-rate, following-month
+    -- convention) — mirrors the Manage Assets "Depreciation Preview" dialog.
+    -- Returns days / daily-rate / opening NBV / depreciation / closing NBV for
+    -- p_target_month (first day of the month). Amounts are null when the month
+    -- is outside the depreciation window.
+    PROCEDURE calc_period_sched (
+        p_cost         IN  NUMBER,
+        p_salvage      IN  NUMBER,
+        p_life         IN  NUMBER,
+        p_dpis         IN  DATE,
+        p_target_month IN  DATE,
+        p_days         OUT NUMBER,
+        p_daily        OUT NUMBER,
+        p_open_nbv     OUT NUMBER,
+        p_deprn        OUT NUMBER,
+        p_close_nbv    OUT NUMBER
+    ) IS
+        v_start   DATE;
+        v_total   NUMBER := 0;
+        v_nbv     NUMBER;
+        v_cur     DATE;
+        v_dim     NUMBER;
+        v_depr    NUMBER;
+    BEGIN
+        p_days := NULL; p_daily := NULL; p_open_nbv := NULL; p_deprn := NULL; p_close_nbv := NULL;
+        IF p_cost IS NULL OR p_cost <= 0 OR p_life IS NULL OR p_life <= 0
+           OR p_dpis IS NULL OR p_target_month IS NULL THEN
+            RETURN;
+        END IF;
+        v_start := ADD_MONTHS(TRUNC(p_dpis, 'MM'), 1);   -- month AFTER DPIS
+        FOR i IN 0 .. p_life - 1 LOOP
+            v_total := v_total + (LAST_DAY(ADD_MONTHS(v_start, i)) - TRUNC(ADD_MONTHS(v_start, i), 'MM') + 1);
+        END LOOP;
+        IF v_total <= 0 THEN RETURN; END IF;
+        p_daily := ROUND((p_cost - NVL(p_salvage, 0)) / v_total, 2);
+        v_nbv   := p_cost;
+        FOR i IN 0 .. p_life + 2 LOOP
+            v_cur := ADD_MONTHS(v_start, i);
+            v_dim := LAST_DAY(v_cur) - TRUNC(v_cur, 'MM') + 1;
+            v_depr := LEAST(((p_cost - NVL(p_salvage, 0)) / v_total) * v_dim, v_nbv - NVL(p_salvage, 0));
+            IF v_depr <= 0 THEN CONTINUE; END IF;
+            IF TRUNC(v_cur, 'MM') = TRUNC(p_target_month, 'MM') THEN
+                p_days      := v_dim;
+                p_open_nbv  := ROUND(v_nbv, 2);
+                p_deprn     := ROUND(v_depr, 2);
+                p_close_nbv := ROUND(v_nbv - v_depr, 2);
+                RETURN;
+            END IF;
+            v_nbv := v_nbv - v_depr;
+        END LOOP;
+    END calc_period_sched;
+
     -- ── GET_DEPRN_BY_PERIOD ───────────────────────────────────────────────────
     -- All ACTIVE assets of a book for ONE period. Depreciation comes from
-    -- RR_FA_DEPRN_DETAIL (same table as GET_ASSET_DEPRN), aggregated per asset.
-    -- Assets with no depreciation for the period are still returned with
-    -- status 'Not Posted' (LEFT JOIN). Accepts period name OR counter.
+    -- RR_FA_DEPRN_DETAIL (same table as GET_ASSET_DEPRN) when posted; otherwise
+    -- it is CALCULATED (straight-line) so every line carries an amount. Assets
+    -- with no depreciation for the period are still returned with status
+    -- 'Not Posted' (LEFT JOIN). Accepts period name OR counter.
     PROCEDURE GET_DEPRN_BY_PERIOD (
         p_book_type      IN  VARCHAR2,
         p_period_name    IN  VARCHAR2,
@@ -712,6 +765,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
     ) IS
         v_pc        NUMBER;
         v_pname     VARCHAR2(100);
+        v_tgt_month DATE;
         v_offset    NUMBER := NVL(p_offset, 0);
         v_limit     NUMBER := NVL(p_limit, 2000);
         v_total     NUMBER := 0;
@@ -719,6 +773,9 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         v_tot_cost  NUMBER := 0;
         v_tot_deprn NUMBER := 0;
         v_tot_nbv   NUMBER := 0;
+        -- per-line schedule outputs
+        v_life_n    NUMBER; v_salv_n NUMBER;
+        v_days      NUMBER; v_daily NUMBER; v_open NUMBER; v_deprn NUMBER; v_close NUMBER;
     BEGIN
         IF p_book_type IS NULL THEN
             write_error(p_http_status, p_result, 400, 'bookTypeCode is required');
@@ -740,8 +797,15 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
             RETURN;
         END IF;
 
-        SELECT MAX(PERIOD_NAME) INTO v_pname
+        SELECT MAX(PERIOD_NAME),
+               TRUNC(MAX(NVL(CALENDAR_PERIOD_OPEN_DATE, PERIOD_OPEN_DATE)), 'MM')
+          INTO v_pname, v_tgt_month
           FROM RR_FA_DEPRN_PERIODS WHERE BOOK_TYPE_CODE = p_book_type AND PERIOD_COUNTER = v_pc;
+
+        -- Fallback: derive the target month from the period name (e.g. 'Apr-26').
+        IF v_tgt_month IS NULL AND v_pname IS NOT NULL THEN
+            v_tgt_month := TRUNC(TO_DATE(v_pname, 'Mon-RR' DEFAULT NULL ON CONVERSION ERROR), 'MM');
+        END IF;
 
         SELECT COUNT(*),
                SUM(CASE WHEN dsum.ASSET_ID IS NOT NULL THEN 1 ELSE 0 END)
@@ -805,26 +869,42 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
              ORDER BY a.ASSET_NUMBER
              OFFSET v_offset ROWS FETCH NEXT v_limit ROWS ONLY
         ) LOOP
+            -- Straight-line schedule for THIS asset in the target period (same
+            -- daily-rate math as the Depreciation Preview dialog).
+            v_life_n := TO_NUMBER(r.LIFE_IN_MONTHS  DEFAULT NULL ON CONVERSION ERROR);
+            v_salv_n := NVL(TO_NUMBER(r.SALVAGE_VALUE DEFAULT NULL ON CONVERSION ERROR), 0);
+            calc_period_sched(
+                p_cost => r.COST, p_salvage => v_salv_n, p_life => v_life_n,
+                p_dpis => r.DATE_PLACED_IN_SERVICE, p_target_month => v_tgt_month,
+                p_days => v_days, p_daily => v_daily, p_open_nbv => v_open,
+                p_deprn => v_deprn, p_close_nbv => v_close);
+
             v_tot_cost  := v_tot_cost  + NVL(r.COST, 0);
-            v_tot_deprn := v_tot_deprn + NVL(r.DEPRN_AMOUNT, 0);
-            v_tot_nbv   := v_tot_nbv   + NVL(r.NBV, 0);
+            v_tot_deprn := v_tot_deprn + NVL(v_deprn, 0);
+            v_tot_nbv   := v_tot_nbv   + NVL(v_close, NVL(r.NBV, 0));
 
             APEX_JSON.OPEN_OBJECT;
             APEX_JSON.WRITE('assetId',              r.ASSET_ID);
             APEX_JSON.WRITE('assetNumber',          r.ASSET_NUMBER);
             APEX_JSON.WRITE('description',          r.DESCRIPTION);
+            APEX_JSON.WRITE('periodName',           v_pname);
             APEX_JSON.WRITE('cost',                 r.COST);
-            APEX_JSON.WRITE('deprnAmount',          r.DEPRN_AMOUNT);
-            APEX_JSON.WRITE('ytdDeprn',             r.YTD_DEPRN);
-            APEX_JSON.WRITE('deprnReserve',         r.DEPRN_RESERVE);
-            APEX_JSON.WRITE('nbv',                  r.NBV);
-            APEX_JSON.WRITE('deprnRunDate',         r.DEPRN_RUN_DATE);
-            APEX_JSON.WRITE('accountedStatus',      r.ACCOUNTED_STATUS);
             APEX_JSON.WRITE('salvageValue',         r.SALVAGE_VALUE);
             APEX_JSON.WRITE('methodCode',           r.METHOD_CODE);
             APEX_JSON.WRITE('lifeInMonths',         r.LIFE_IN_MONTHS);
             APEX_JSON.WRITE('datePlacedInService',  r.DATE_PLACED_IN_SERVICE);
             APEX_JSON.WRITE('deprnStartDate',       r.DEPRN_START_DATE);
+            -- dialog-style schedule for the period
+            APEX_JSON.WRITE('days',                 v_days);
+            APEX_JSON.WRITE('dailyRate',            v_daily);
+            APEX_JSON.WRITE('openingNbv',           v_open);
+            APEX_JSON.WRITE('deprnAmount',          NVL(r.DEPRN_AMOUNT, v_deprn));
+            APEX_JSON.WRITE('closingNbv',           v_close);
+            -- current actuals (for reference)
+            APEX_JSON.WRITE('nbv',                  r.NBV);
+            APEX_JSON.WRITE('deprnReserve',         r.DEPRN_RESERVE);
+            APEX_JSON.WRITE('deprnRunDate',         r.DEPRN_RUN_DATE);
+            APEX_JSON.WRITE('accountedStatus',      r.ACCOUNTED_STATUS);
             APEX_JSON.WRITE('status',               r.STATUS);
             APEX_JSON.CLOSE_OBJECT;
         END LOOP;

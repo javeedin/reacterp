@@ -372,23 +372,27 @@ const CalculateDeprn: React.FC = () => {
       render: (v: number) => <Text style={{ fontSize: 12, color: REDWOOD.success }}>{fmt(v)}</Text> },
   ];
 
+  const monoRed = { fontSize: 12, fontFamily: 'monospace', color: REDWOOD.primary, fontWeight: 600 } as const;
+  const mono   = { fontSize: 12, fontFamily: 'monospace' } as const;
   const statusColumns = [
-    { title: 'Asset #',     dataIndex: 'assetNumber', key: 'assetNumber', width: 110, fixed: 'left' as const,
+    { title: 'Asset #',     dataIndex: 'assetNumber', key: 'assetNumber', width: 100, fixed: 'left' as const,
       render: (v: string) => <Text style={{ fontSize: 12, fontWeight: 600 }}>{v}</Text> },
-    { title: 'Description', dataIndex: 'description', key: 'description', width: 240,
-      render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
-    { title: 'Cost',        dataIndex: 'cost', key: 'cost', width: 130, align: 'right' as const,
-      render: (v: number) => <Text style={{ fontSize: 12 }}>{fmt(v)}</Text> },
+    { title: 'Description', dataIndex: 'description', key: 'description', width: 200, ellipsis: true,
+      render: (v: string) => <Tooltip title={v}><Text style={{ fontSize: 12 }}>{v || '—'}</Text></Tooltip> },
+    { title: 'Period',      dataIndex: 'periodName', key: 'periodName', width: 90,
+      render: (v: string) => <Text style={{ fontSize: 12, fontWeight: 600 }}>{v || statusMeta?.periodName || '—'}</Text> },
+    { title: 'Days',        dataIndex: 'days', key: 'days', width: 70, align: 'right' as const,
+      render: (v: number) => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Daily Rate',  dataIndex: 'dailyRate', key: 'dailyRate', width: 110, align: 'right' as const,
+      render: (v: number) => <Text style={mono}>{v == null ? '—' : fmt(v)}</Text> },
+    { title: 'Opening NBV', dataIndex: 'openingNbv', key: 'openingNbv', width: 140, align: 'right' as const,
+      render: (v: number) => <Text style={mono}>{v == null ? '—' : fmt(v)}</Text> },
     { title: 'Depreciation', dataIndex: 'periodDeprn', key: 'periodDeprn', width: 130, align: 'right' as const,
       render: (v: number | null, r: any) => v == null
         ? <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
-        : <Text style={{ fontSize: 12, color: REDWOOD.primary, fontWeight: 600 }} title={r.status === 'Posted' ? 'Posted amount' : 'Calculated (not yet posted)'}>{fmt(v)}</Text> },
-    { title: 'Reserve',     dataIndex: 'deprnReserve', key: 'deprnReserve', width: 120, align: 'right' as const,
-      render: (v: number) => <Text style={{ fontSize: 12 }}>{fmt(v)}</Text> },
-    { title: 'NBV',         dataIndex: 'nbv', key: 'nbv', width: 120, align: 'right' as const,
-      render: (v: number) => <Text style={{ fontSize: 12, color: REDWOOD.success, fontWeight: 600 }}>{fmt(v)}</Text> },
-    { title: 'Run Date',    dataIndex: 'deprnRunDate', key: 'deprnRunDate', width: 120,
-      render: (v: string) => <Text style={{ fontSize: 12 }}>{fmtDate(v)}</Text> },
+        : <Text style={monoRed} title={r.status === 'Posted' ? 'Posted amount' : 'Calculated (not yet posted)'}>{fmt(v)}</Text> },
+    { title: 'Closing NBV', dataIndex: 'closingNbv', key: 'closingNbv', width: 140, align: 'right' as const,
+      render: (v: number) => <Text style={{ ...mono, color: REDWOOD.success, fontWeight: 600 }}>{v == null ? '—' : fmt(v)}</Text> },
     { title: 'Status',      dataIndex: 'status', key: 'status', width: 120, fixed: 'right' as const,
       filters: [{ text: 'Posted', value: 'Posted' }, { text: 'Not Posted', value: 'Not Posted' }],
       onFilter: (value: any, r: any) => r.status === value,
@@ -397,21 +401,20 @@ const CalculateDeprn: React.FC = () => {
         : <Tag color="default" icon={<ClockCircleOutlined />} style={{ fontSize: 11, color: REDWOOD.neutral500 }}>Not Posted</Tag> },
   ];
 
-  // Enrich each asset with the period's depreciation amount: use the actual
-  // posted amount when present, otherwise compute it (same math as the dialog).
-  // Exclude assets with 0 cost.
+  // Enrich each asset with the period's depreciation amount + schedule. Prefer
+  // the server's values (days/dailyRate/opening/closing/deprnAmount); fall back
+  // to the client calc if a field is missing. Exclude assets with 0 cost.
   const enrichedStatusItems = React.useMemo(() => {
     const target = statusMeta?.periodName || statusPeriodName;
     return statusItems
       .filter(r => Number(r.cost) > 0)
       .map(r => {
-        const posted = r.status === 'Posted';
-        const actual = r.deprnAmount != null ? Number(r.deprnAmount) : null;
-        const calc = computePeriodDeprn(
+        const server = r.deprnAmount != null ? Number(r.deprnAmount) : null;
+        const calc = server == null ? computePeriodDeprn(
           Number(r.cost), Number(r.salvageValue ?? 0), Number(r.lifeInMonths ?? 0),
           r.datePlacedInService, r.deprnStartDate, target,
-        );
-        return { ...r, periodDeprn: posted && actual != null ? actual : calc };
+        ) : null;
+        return { ...r, periodDeprn: server ?? calc };
       });
   }, [statusItems, statusMeta, statusPeriodName]);
 
@@ -799,7 +802,7 @@ const CalculateDeprn: React.FC = () => {
                         columns={statusColumns}
                         rowKey="assetId"
                         size="small"
-                        scroll={{ x: 1100, y: 440 }}
+                        scroll={{ x: 1180, y: 440 }}
                         pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `${t} assets` }}
                         locale={{ emptyText: 'No assets found for this book/period' }}
                         rowSelection={{
