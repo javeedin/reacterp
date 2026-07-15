@@ -7,7 +7,7 @@ import {
   HomeOutlined, LineChartOutlined, ReloadOutlined,
   CheckCircleOutlined, ClockCircleOutlined, ApiOutlined,
   PlayCircleOutlined, SyncOutlined, CloudUploadOutlined, EyeOutlined,
-  SwapOutlined,
+  SwapOutlined, AuditOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -148,6 +148,19 @@ const CalculateDeprn: React.FC = () => {
   const [deprnRunning,   setDeprnRunning]   = useState(false);
   // View Journal modal
   const [journalModal, setJournalModal] = useState<{ assetNumber: string; url: string; loading: boolean; lines: any[]; error?: string } | null>(null);
+  // Create Accounting modal (for a Posted deprn row) — reuses the SAME flow as
+  // the Manage Assets Depreciation tab: getDeprnAccountingPreview -> createSlaAccounting
+  // -> postSlaToGL -> markFaDeprnAccounted, showing Dr/Cr and per-step URL/payload.
+  interface AcctStepUI {
+    label: string; method: string; url: string; payload?: any; response?: any;
+    status: 'pending' | 'posting' | 'done' | 'error'; detail?: string; expanded?: boolean;
+  }
+  interface AcctModalState {
+    assetId: string; assetNumber: string; periodName: string; distributionId?: number | null;
+    loading: boolean; error?: string; preview?: any; acctLines?: AcctLine[];
+    posting: boolean; posted: boolean; steps: AcctStepUI[];
+  }
+  const [acctModal, setAcctModal] = useState<AcctModalState | null>(null);
   const { user } = useAuth();
   const loggedUser = user?.username || user?.name || 'REACTERP';
 
@@ -458,10 +471,26 @@ const CalculateDeprn: React.FC = () => {
       render: (v: string) => v === 'Posted'
         ? <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: 11 }}>Posted</Tag>
         : <Tag color="default" icon={<ClockCircleOutlined />} style={{ fontSize: 11, color: REDWOOD.neutral500 }}>Not Posted</Tag> },
-    { title: '', key: 'journal', width: 110, fixed: 'right' as const,
-      render: (_: any, r: any) => r.status === 'Posted'
-        ? <Button size="small" icon={<EyeOutlined />} onClick={() => openViewJournal(r)} style={{ fontSize: 11 }}>Journal</Button>
-        : null },
+    { title: 'Accounting', key: 'actions', width: 150, fixed: 'right' as const,
+      render: (_: any, r: any) => {
+        if (r.status !== 'Posted') return <Text type="secondary" style={{ fontSize: 11 }}>—</Text>;
+        const accounted = String(r.accountedStatus || '').toUpperCase() === 'ACCOUNTED';
+        return accounted ? (
+          <Space size={4}>
+            <Tag color="success" style={{ fontSize: 10, margin: 0 }}>Accounted</Tag>
+            <Tooltip title="View GL journal">
+              <Button size="small" icon={<EyeOutlined />} onClick={() => openViewJournal(r)} style={{ fontSize: 11 }} />
+            </Tooltip>
+          </Space>
+        ) : (
+          <Tooltip title="Create accounting (SLA → GL journal) — same flow as the asset Depreciation tab">
+            <Button size="small" type="primary" ghost icon={<AuditOutlined />} onClick={() => openAccounting(r)}
+              style={{ fontSize: 11 }}>
+              Create Accounting
+            </Button>
+          </Tooltip>
+        );
+      } },
   ];
 
   // Enrich each asset with the period's depreciation amount + schedule. Prefer
@@ -504,44 +533,17 @@ const CalculateDeprn: React.FC = () => {
     const rows = enrichedStatusItems.filter(r =>
       statusSelected.includes(String(r.assetId)) && r.status !== 'Posted' && (r.periodDeprn ?? 0) > 0);
     if (rows.length === 0) { message.warning('No postable lines selected (need Not-Posted with an amount).'); return; }
-    const steps: DeprnStep[] = [];
-    rows.forEach(r => {
+    const steps: DeprnStep[] = rows.map(r => {
       const aid = String(r.assetId);
-      steps.push({
-        assetId: aid, assetNumber: r.assetNumber, kind: 'deprn', method: 'POST',
+      return {
+        assetId: aid, assetNumber: r.assetNumber, kind: 'deprn' as const, method: 'POST',
         url: `${APEX_DB_CONFIG.baseUrl}/fa/deprn-post-single`,
         payload: { assetId: aid, bookTypeCode: selectedBook, periodName: target, deprnAmount: Number(r.periodDeprn), createdBy: loggedUser },
-        status: 'pending', expanded: rows.length <= 2,
-      });
-      const amt = Number(r.periodDeprn);
-      const expAcct = r.deprnExpenseAccount || '—';
-      const resAcct = r.deprnReserveAccount || '—';
-      steps.push({
-        assetId: aid, assetNumber: r.assetNumber, kind: 'acct', method: 'POST',
-        url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create → journals/create → gl/journals/{id}/post → fa/deprn-post-asset (mark)`,
-        payload: { note: 'Built after depreciation is created (needs the distribution id + accounting preview).' },
-        status: 'pending', expanded: rows.length <= 2, amount: amt,
-        acctLines: [
-          { label: 'Depreciation Expense (Dr)',     account: expAcct, dr: amt, cr: 0 },
-          { label: 'Accumulated Depreciation (Cr)', account: resAcct, dr: 0,   cr: amt },
-        ],
-      });
+        status: 'pending' as const, expanded: rows.length <= 3,
+      };
     });
     setDeprnSteps(steps);
     setDeprnModalOpen(true);
-
-    // Resolve the account segment descriptions for each Dr/Cr combination.
-    const combos = Array.from(new Set(steps.flatMap(s => (s.acctLines || []).map(l => l.account)).filter(a => a && a !== '—')));
-    combos.forEach(async (combo) => {
-      try {
-        const res = await validateAccountCode(combo);
-        const desc = Object.values(res.segmentDetails ?? {}).map((v: any) => v.description).filter(Boolean).join(' · ');
-        if (!desc) return;
-        setDeprnSteps(prev => prev.map(s => s.kind !== 'acct' ? s : {
-          ...s, acctLines: (s.acctLines || []).map(l => l.account === combo ? { ...l, desc } : l),
-        }));
-      } catch { /* no description */ }
-    });
   };
 
   const setStep = (i: number, patch: Partial<DeprnStep>) =>
@@ -563,79 +565,137 @@ const CalculateDeprn: React.FC = () => {
     return good;
   };
 
-  // ── Run ONE 'acct' step (create accounting) ──
-  const runOneAcct = async (i: number): Promise<boolean> => {
-    const aStep = deprnSteps[i];
-    if (!aStep || aStep.kind !== 'acct') return false;
-    const target = statusMeta?.periodName || statusPeriodName;
-    const distId = distIdRef.current[aStep.assetId] ?? null;
-    setDeprnStepRunning(i);
-    setStep(i, { status: 'posting' });
+  // ── Create Accounting (standalone, for a Posted row) ────────────────────────
+  // Resolve a code-combination's segment descriptions for display under the combo.
+  const describeCombo = async (combo?: string): Promise<string> => {
+    if (!combo) return '';
     try {
-      const preview = await getDeprnAccountingPreview(aStep.assetId, selectedBook, target, distId ?? undefined);
+      const v = await validateAccountCode(combo);
+      return Object.values(v.segmentDetails || {}).map(s => s.description).filter(Boolean).join(' · ');
+    } catch { return ''; }
+  };
+
+  const setAcctStep = (i: number, patch: Partial<AcctStepUI>) =>
+    setAcctModal(m => m && ({ ...m, steps: m.steps.map((s, idx) => idx === i ? { ...s, ...patch } : s) }));
+
+  // Open the Create Accounting dialog for a Posted deprn row. Depreciation is
+  // already posted, so getDeprnAccountingPreview returns the real Dr/Cr lines.
+  const openAccounting = async (r: any) => {
+    const periodName = statusMeta?.periodName || statusPeriodName;
+    const distId = r.distributionId ?? null;
+    setAcctModal({
+      assetId: String(r.assetId), assetNumber: r.assetNumber, periodName, distributionId: distId,
+      loading: true, posting: false, posted: false, steps: [],
+    });
+    try {
+      const preview = await getDeprnAccountingPreview(String(r.assetId), selectedBook, periodName, distId ?? undefined);
       if (!preview?.header || !(preview.lines?.length)) {
-        setStep(i, { status: 'error', detail: 'No accounting preview (create depreciation first, or already accounted)', response: preview });
-        setDeprnStepRunning(null); return false;
+        setAcctModal(m => m && ({ ...m, loading: false, preview,
+          error: (preview as any)?.error || 'No accounting preview returned — depreciation may not be posted for this period, or it is already accounted.' }));
+        return;
       }
-      const h = preview.header;
-      const slaBody = {
-        header: { moduleName: h.moduleName, sourceTable: h.sourceTable, sourceId: h.sourceId, sourceNumber: h.sourceNumber,
-          sourceType: h.sourceType, eventTypeCode: h.eventTypeCode, eventDate: h.eventDate, accountingDate: h.accountingDate,
-          periodName: h.periodName, ledgerId: h.ledgerId, ledgerName: h.ledgerName, currencyCode: h.currencyCode,
-          ledgerCurrency: h.ledgerCurrency, description: h.description, createdBy: loggedUser },
-        lines: preview.lines.map((l: any) => ({ lineNumber: l.lineNumber, lineType: l.lineType, accountingClass: l.accountingClass,
-          accountCombo: l.accountCombination, enteredDr: l.enteredDr, enteredCr: l.enteredCr, accountedDr: l.accountedDr,
-          accountedCr: l.accountedCr, currencyCode: h.currencyCode, description: l.description, sourceLineId: h.sourceId, sourceLineNum: l.lineNumber })),
-      };
-      setStep(i, { payload: slaBody });
+      const acctLines: AcctLine[] = await Promise.all((preview.lines as any[]).map(async (l) => ({
+        label: l.accountingClass || l.lineType || `Line ${l.lineNumber}`,
+        account: l.accountCombination,
+        desc: await describeCombo(l.accountCombination),
+        dr: Number(l.enteredDr || 0), cr: Number(l.enteredCr || 0),
+      })));
+      setAcctModal(m => m && ({ ...m, loading: false, preview, acctLines }));
+    } catch (e: any) {
+      setAcctModal(m => m && ({ ...m, loading: false, error: e?.message || 'Failed to load accounting preview' }));
+    }
+  };
 
+  // Run the accounting flow: SLA create -> GL journal post -> mark accounted.
+  const postAccounting = async () => {
+    const m0 = acctModal;
+    if (!m0?.preview?.header) return;
+    const h = m0.preview.header;
+    const lines: any[] = m0.preview.lines;
+    const distId = m0.distributionId ?? null;
+
+    const slaBody = {
+      header: { moduleName: h.moduleName, sourceTable: h.sourceTable, sourceId: h.sourceId, sourceNumber: h.sourceNumber,
+        sourceType: h.sourceType, eventTypeCode: h.eventTypeCode, eventDate: h.eventDate, accountingDate: h.accountingDate,
+        periodName: h.periodName, ledgerId: h.ledgerId, ledgerName: h.ledgerName, currencyCode: h.currencyCode,
+        ledgerCurrency: h.ledgerCurrency, description: h.description, createdBy: loggedUser },
+      lines: lines.map((l) => ({ lineNumber: l.lineNumber, lineType: l.lineType, accountingClass: l.accountingClass,
+        accountCombo: l.accountCombination, enteredDr: l.enteredDr, enteredCr: l.enteredCr, accountedDr: l.accountedDr,
+        accountedCr: l.accountedCr, currencyCode: h.currencyCode, description: l.description, sourceLineId: h.sourceId, sourceLineNum: l.lineNumber })),
+    };
+    const markBody = {
+      assetId: m0.assetId, bookTypeCode: selectedBook, distributionId: distId,
+      periodName: m0.periodName, slaHeaderId: 0, glHeaderId: 0, createdBy: loggedUser,
+    };
+    const steps: AcctStepUI[] = [
+      { label: '1 · Create SLA Accounting', method: 'POST', url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`, payload: slaBody, status: 'pending', expanded: true },
+      { label: '2 · Create + Post GL Journal', method: 'POST', url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/create`, payload: { note: 'built by postSlaToGL from the SLA header' }, status: 'pending', expanded: false },
+      { label: '3 · Mark Depreciation Accounted', method: 'POST', url: `${APEX_DB_CONFIG.baseUrl}/fa/accounting/mark-deprn-accounted`, payload: markBody, status: 'pending', expanded: false },
+    ];
+    setAcctModal(m => m && ({ ...m, posting: true, error: undefined, steps }));
+
+    try {
+      // Step 1 — SLA
+      setAcctStep(0, { status: 'posting' });
       const slaRes = await createSlaAccounting(slaBody as any);
-      if (!slaRes.headerId) { setStep(i, { status: 'error', detail: slaRes.error || slaRes.message || 'SLA failed', response: slaRes }); setDeprnStepRunning(null); return false; }
+      if (!slaRes.headerId) {
+        setAcctStep(0, { status: 'error', detail: slaRes.error || slaRes.message || 'SLA failed', response: slaRes });
+        setAcctModal(m => m && ({ ...m, posting: false })); message.error(slaRes.error || slaRes.message || 'SLA accounting failed'); return;
+      }
+      setAcctStep(0, { status: 'done', detail: `SLA Header #${slaRes.headerId}`, response: slaRes });
 
+      // Step 2 — GL
+      setAcctStep(1, { status: 'posting' });
       const glRes = await postSlaToGL({
-        slaHeaderId: slaRes.headerId, sourceNumber: String(h.sourceNumber || aStep.assetNumber), sourceId: h.sourceId,
+        slaHeaderId: slaRes.headerId, sourceNumber: String(h.sourceNumber || m0.assetNumber), sourceId: h.sourceId,
         eventTypeCode: h.eventTypeCode, periodName: h.periodName, ledgerName: h.ledgerName, ledgerId: h.ledgerId,
         currency: h.currencyCode, accountingDate: h.accountingDate, legalEntity: '', businessUnit: '',
         jeCategory: 'Depreciation', jeSource: 'Fixed Assets', batchSource: 'Fixed Assets',
-        journalName: `FA Depreciation — ${h.sourceNumber || aStep.assetNumber} — ${h.periodName}`,
+        journalName: `FA Depreciation — ${h.sourceNumber || m0.assetNumber} — ${h.periodName}`,
         journalDescription: h.description, createdBy: loggedUser,
-        lines: preview.lines.map((l: any) => ({ lineType: l.lineType, enteredDr: l.enteredDr || null, enteredCr: l.enteredCr || null,
+        lines: lines.map((l) => ({ lineType: l.lineType, enteredDr: l.enteredDr || null, enteredCr: l.enteredCr || null,
           accountedDr: l.accountedDr || null, accountedCr: l.accountedCr || null, description: l.description, currencyCode: h.currencyCode,
           accountingDate: h.accountingDate, accountCombination: l.accountCombination, accountingClass: l.accountingClass, legalEntity: null })),
       } as any);
-      if (!glRes.success) { setStep(i, { status: 'error', detail: glRes.error || 'GL post failed', response: { slaRes, glRes } }); setDeprnStepRunning(null); return false; }
+      if (!glRes.success) {
+        setAcctStep(1, { status: 'error', detail: glRes.error || 'GL post failed', response: glRes });
+        setAcctModal(m => m && ({ ...m, posting: false })); message.error(glRes.error || 'GL journal post failed'); return;
+      }
+      setAcctStep(1, { status: 'done', detail: `GL Batch ${glRes.batchId} · Header ${glRes.headerId}`, response: glRes });
 
-      const markRes = await markFaDeprnAccounted({
-        assetId: aStep.assetId, bookTypeCode: selectedBook, distributionId: distId,
-        periodName: target, slaHeaderId: slaRes.headerId, glHeaderId: glRes.headerId ?? slaRes.headerId, createdBy: loggedUser,
-      } as any);
-      setStep(i, { status: 'done', detail: `SLA #${slaRes.headerId} · GL Batch ${glRes.batchId}`, response: { slaRes, glRes, markRes } });
-      setDeprnStepRunning(null);
-      return true;
+      // Step 3 — mark accounted
+      const markPayload = { ...markBody, slaHeaderId: slaRes.headerId, glHeaderId: glRes.headerId ?? slaRes.headerId };
+      setAcctStep(2, { status: 'posting', payload: markPayload });
+      const markRes = await markFaDeprnAccounted(markPayload as any);
+      if (markRes?.success === false) {
+        setAcctStep(2, { status: 'error', detail: markRes.error || 'Mark failed', response: markRes });
+        setAcctModal(m => m && ({ ...m, posting: false })); message.error(markRes.error || 'Failed to mark as accounted'); return;
+      }
+      setAcctStep(2, { status: 'done', detail: `${markRes.rowsUpdated || 1} row(s) updated`, response: markRes });
+
+      setAcctModal(m => m && ({ ...m, posting: false, posted: true }));
+      message.success(`Depreciation ${m0.periodName} accounted and posted to GL (Asset ${m0.assetNumber})`);
+      // Refresh the status grid so the row flips to accounted (View Journal).
+      handleShowStatus(statusPeriodName);
     } catch (e: any) {
-      setStep(i, { status: 'error', detail: e?.message, response: { error: e?.message } });
-      setDeprnStepRunning(null);
-      return false;
+      setAcctModal(m => m && ({ ...m, posting: false }));
+      message.error(e?.message || 'Accounting failed');
     }
   };
 
-  // Run a single step (per-step Run button)
+  // Run a single depreciation step (per-step Run button)
   const runOneStep = async (i: number) => {
     setDeprnRunning(true);
-    if (deprnSteps[i].kind === 'deprn') await runOneDeprn(i); else await runOneAcct(i);
+    await runOneDeprn(i);
     setDeprnRunning(false);
   };
 
-  // Run all steps in order (pairs: deprn then acct)
+  // Run all depreciation steps
   const runDeprnSteps = async () => {
     setDeprnRunning(true);
-    for (let i = 0; i < deprnSteps.length; i += 2) {
-      const good = await runOneDeprn(i);
-      if (good) await runOneAcct(i + 1);
-      else setStep(i + 1, { status: 'skipped', detail: 'depreciation failed' });
-    }
+    for (let i = 0; i < deprnSteps.length; i++) await runOneDeprn(i);
     setDeprnRunning(false);
-    message.success('Run complete — see per-step status');
+    message.success('Depreciation posted — use the Create Accounting icon on each posted line to account it.');
     setStatusSelected([]);
     handleShowStatus(statusPeriodName);
   };
@@ -1125,7 +1185,7 @@ const CalculateDeprn: React.FC = () => {
           destroyOnClose
         >
           <Alert type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }}
-            message={<span>Two steps per asset: <b>1) Create Depreciation</b> (<code>POST fa/deprn-post-single</code>) then <b>2) Create Accounting</b> (SLA → GL journal → mark). Expand a step to see its full URL and JSON payload/response.</span>} />
+            message={<span><b>Step 1 — Post Depreciation</b> (<code>POST fa/deprn-post-single</code>). Once a line is posted, use the <b>Create Accounting</b> icon on that row to account it (SLA → GL journal → mark). Expand a step to see its full URL and JSON payload/response.</span>} />
           <div style={{ maxHeight: 460, overflowY: 'auto', border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6 }}>
             {deprnSteps.map((s, i) => {
               const color = s.status === 'done' ? REDWOOD.success : s.status === 'error' ? REDWOOD.primary : s.status === 'posting' ? '#1677ff' : REDWOOD.neutral500;
@@ -1236,6 +1296,108 @@ const CalculateDeprn: React.FC = () => {
                         { title: 'Status', dataIndex: 'posting_status', width: 90, render: (v: string) => <Tag color={v === 'POSTED' ? 'green' : 'orange'} style={{ fontSize: 10 }}>{v}</Tag> },
                       ]}
                     />}
+          </Modal>
+        )}
+
+        {/* ── Create Accounting (for a Posted deprn row) ── */}
+        {acctModal && (
+          <Modal
+            open
+            title={<Space><AuditOutlined style={{ color: '#722ed1' }} /><span>Create Accounting — Asset {acctModal.assetNumber} · {acctModal.periodName}</span></Space>}
+            onCancel={() => { if (!acctModal.posting) setAcctModal(null); }}
+            maskClosable={!acctModal.posting}
+            width={860}
+            footer={
+              <Space>
+                <Button disabled={acctModal.posting} onClick={() => setAcctModal(null)}>Close</Button>
+                <Button type="primary" icon={<AuditOutlined />} loading={acctModal.posting}
+                  disabled={acctModal.loading || !!acctModal.error || acctModal.posted || !acctModal.preview}
+                  style={{ background: acctModal.posted ? undefined : FA_COLOR, borderColor: acctModal.posted ? undefined : FA_COLOR }}
+                  onClick={postAccounting}>
+                  {acctModal.posted ? 'Accounted' : 'Create Accounting'}
+                </Button>
+              </Space>
+            }
+            destroyOnClose
+          >
+            {acctModal.loading ? (
+              <div style={{ textAlign: 'center', padding: 40 }}><Spin tip="Loading accounting preview…" /></div>
+            ) : acctModal.error ? (
+              <Alert type="warning" showIcon message="Cannot create accounting" description={acctModal.error} />
+            ) : (
+              <>
+                <Alert type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }}
+                  message={<span>Depreciation is posted — this accounts it: <b>SLA</b> (<code>sla/accounting/create</code>) → <b>GL journal</b> (<code>gl/journals/create</code> + post) → <b>mark accounted</b> (<code>fa/accounting/mark-deprn-accounted</code>).</span>} />
+
+                {/* Dr/Cr accounting entry */}
+                {acctModal.acctLines && acctModal.acctLines.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <Text style={{ fontSize: 11, color: '#888' }}>Accounting entry (Dr Depreciation Expense / Cr Accumulated Depreciation)</Text>
+                    <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', marginTop: 4 }}>
+                      <thead>
+                        <tr style={{ background: '#fafafa', color: '#888' }}>
+                          <th style={{ textAlign: 'left', padding: '4px 8px' }}>Line</th>
+                          <th style={{ textAlign: 'left', padding: '4px 8px' }}>Account</th>
+                          <th style={{ textAlign: 'right', padding: '4px 8px' }}>Dr</th>
+                          <th style={{ textAlign: 'right', padding: '4px 8px' }}>Cr</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {acctModal.acctLines.map((l, li) => (
+                          <tr key={li} style={{ borderTop: '1px solid #eee', verticalAlign: 'top' }}>
+                            <td style={{ padding: '4px 8px' }}>{l.label}</td>
+                            <td style={{ padding: '4px 8px' }}>
+                              <div style={{ fontFamily: 'monospace', color: '#1677ff' }}>{l.account}</div>
+                              {l.desc && <div style={{ fontSize: 10, color: '#8c8c8c', marginTop: 1 }}>{l.desc}</div>}
+                            </td>
+                            <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'monospace', color: l.dr ? REDWOOD.success : '#bbb' }}>{l.dr ? fmt(l.dr) : '—'}</td>
+                            <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'monospace', color: l.cr ? REDWOOD.primary : '#bbb' }}>{l.cr ? fmt(l.cr) : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Per-step URL / payload / response */}
+                {acctModal.steps.length > 0 && (
+                  <div style={{ border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6 }}>
+                    {acctModal.steps.map((s, i) => {
+                      const color = s.status === 'done' ? REDWOOD.success : s.status === 'error' ? REDWOOD.primary : s.status === 'posting' ? '#1677ff' : REDWOOD.neutral500;
+                      return (
+                        <div key={i} style={{ borderTop: i === 0 ? 'none' : `1px solid ${REDWOOD.neutral200}` }}>
+                          <div style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', background: s.expanded ? '#fafafa' : '#fff' }}
+                            onClick={() => setAcctModal(m => m && ({ ...m, steps: m.steps.map((x, idx) => idx === i ? { ...x, expanded: !x.expanded } : x) }))}>
+                            {s.status === 'posting' ? <SyncOutlined spin style={{ color: '#1677ff' }} />
+                              : s.status === 'done' ? <CheckCircleOutlined style={{ color: REDWOOD.success }} />
+                              : s.status === 'error' ? <Tag color="error" style={{ margin: 0 }}>ERR</Tag>
+                              : <ClockCircleOutlined style={{ color: REDWOOD.neutral500 }} />}
+                            <Text strong style={{ fontSize: 12 }}>{s.label}</Text>
+                            <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.neutral500, flex: 1 }} ellipsis>{s.method} {s.url}</Text>
+                            <Text style={{ fontSize: 11, color, fontWeight: 600 }}>{s.detail}</Text>
+                            <Text style={{ fontSize: 10, color: '#999' }}>{s.expanded ? '▲' : '▼'}</Text>
+                          </div>
+                          {s.expanded && (
+                            <div style={{ padding: '0 12px 10px 32px', display: 'flex', gap: 12 }}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <Text style={{ fontSize: 10, color: '#888' }}>Request Payload</Text>
+                                <pre style={{ fontSize: 11, background: '#0d0d0d', color: '#a8ff78', borderRadius: 4, padding: 8, margin: '4px 0 0', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{JSON.stringify(s.payload, null, 2)}</pre>
+                              </div>
+                              {s.response !== undefined && (
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <Text style={{ fontSize: 10, color: '#888' }}>Response</Text>
+                                  <pre style={{ fontSize: 11, background: '#0d0d0d', color: '#79c0ff', borderRadius: 4, padding: 8, margin: '4px 0 0', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{JSON.stringify(s.response, null, 2)}</pre>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
           </Modal>
         )}
       </Content>
