@@ -25,6 +25,13 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         RETURN '"' || REPLACE(REPLACE(p_val, '\', '\\'), '"', '\"') || '"';
     END jstr;
 
+    -- Safe VARCHAR->NUMBER (null on non-numeric) — portable, no ON CONVERSION ERROR.
+    FUNCTION to_num(p_val IN VARCHAR2) RETURN NUMBER IS
+    BEGIN
+        RETURN TO_NUMBER(p_val);
+    EXCEPTION WHEN OTHERS THEN RETURN NULL;
+    END to_num;
+
     -- ── GET_ASSETS ────────────────────────────────────────────────────────────
     -- Sources: RR_FA_ADDITIONS_TL + RR_FA_BOOKS.
     -- Supported filters: p_description, p_book_type.
@@ -804,7 +811,14 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
 
         -- Fallback: derive the target month from the period name (e.g. 'Apr-26').
         IF v_tgt_month IS NULL AND v_pname IS NOT NULL THEN
-            v_tgt_month := TRUNC(TO_DATE(v_pname, 'Mon-RR' DEFAULT NULL ON CONVERSION ERROR), 'MM');
+            BEGIN
+                v_tgt_month := TRUNC(TO_DATE(v_pname, 'Mon-RR'), 'MM');
+            EXCEPTION WHEN OTHERS THEN
+                BEGIN
+                    v_tgt_month := TRUNC(TO_DATE(v_pname, 'Mon-YYYY'), 'MM');
+                EXCEPTION WHEN OTHERS THEN v_tgt_month := NULL;
+                END;
+            END;
         END IF;
 
         SELECT COUNT(*),
@@ -871,8 +885,8 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         ) LOOP
             -- Straight-line schedule for THIS asset in the target period (same
             -- daily-rate math as the Depreciation Preview dialog).
-            v_life_n := TO_NUMBER(r.LIFE_IN_MONTHS  DEFAULT NULL ON CONVERSION ERROR);
-            v_salv_n := NVL(TO_NUMBER(r.SALVAGE_VALUE DEFAULT NULL ON CONVERSION ERROR), 0);
+            v_life_n := to_num(r.LIFE_IN_MONTHS);
+            v_salv_n := NVL(to_num(r.SALVAGE_VALUE), 0);
             calc_period_sched(
                 p_cost => r.COST, p_salvage => v_salv_n, p_life => v_life_n,
                 p_dpis => r.DATE_PLACED_IN_SERVICE, p_target_month => v_tgt_month,
