@@ -9,14 +9,14 @@ import {
   HomeOutlined, SearchOutlined, ReloadOutlined, CalendarOutlined,
   CheckCircleOutlined, CloseOutlined, SyncOutlined, BookOutlined,
   FileTextOutlined, WarningOutlined, ApiOutlined, CopyOutlined,
-  EyeOutlined, DeleteOutlined, FileExcelOutlined,
+  EyeOutlined, DeleteOutlined, FileExcelOutlined, PauseCircleOutlined,
 } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import {
-  listMpaInvoices, getMpaSchedule, generateMpaSchedule, markPeriodPosted,
+  listMpaInvoices, getMpaSchedule, generateMpaSchedule, markPeriodPosted, suspendMpaSchedules,
   listFusionMpaLines, getFusionMpaDetail, deleteMpaSchedule,
   type MpaInvoiceSummary, type MpaScheduleLine, type MpaInvoiceDetail,
   type FusionMpaLine, type FusionMpaDetail, type FusionMpaSchedulePeriod,
@@ -88,6 +88,7 @@ function resolveAccrualTokens<T>(value: T, ctx: Record<string, any>): T {
 const statusTag = (status: string) => {
   if (status === 'Posted')     return <Tag color="success" icon={<CheckCircleOutlined />}>Posted</Tag>;
   if (status === 'Not Posted') return <Tag color="warning" icon={<WarningOutlined />}>Not Posted</Tag>;
+  if (status === 'Suspended')  return <Tag color="default" icon={<PauseCircleOutlined />} style={{ color: '#8c8c8c', borderColor: '#d9d9d9' }}>Suspended</Tag>;
   if (status === 'Error')      return <Tag color="error">Error</Tag>;
   return <Tag>{status}</Tag>;
 };
@@ -148,6 +149,8 @@ const ManageMultiperiod: React.FC = () => {
   const [postStatus,        setPostStatus]        = useState<Record<number, { status: string; message: string }>>({});
   const [accrualSearch,      setAccrualSearch]      = useState('');
   const [detailSearch,       setDetailSearch]       = useState<Record<string, string>>({});
+  const [mpaSelected,        setMpaSelected]        = useState<Record<string, number[]>>({});  // per-tab selected scheduleIds
+  const [suspendingTab,      setSuspendingTab]      = useState<string | null>(null);
   const [accrualPreviewOpen, setAccrualPreviewOpen] = useState(false);
   const [accrualPreviewLines, setAccrualPreviewLines] = useState<any[]>([]);
   // Accrual Create-Accounting run + debug
@@ -339,6 +342,29 @@ const ManageMultiperiod: React.FC = () => {
       setDetailTabs(prev => prev.map(t => t.key === tabKey ? { ...t, loading: false, error: e?.message ?? 'Failed' } : t));
     }
   }, []);
+
+  // ── suspend selected schedule lines ───────────────────────────────────────
+
+  const handleSuspend = useCallback(async (tabKey: string, invoiceId: number) => {
+    const ids = mpaSelected[tabKey] ?? [];
+    if (ids.length === 0) return;
+    const updatedBy = user?.name || user?.username || 'System';
+    setSuspendingTab(tabKey);
+    try {
+      const r = await suspendMpaSchedules(ids, updatedBy, 'Suspended');
+      if (r.rowsUpdated > 0) {
+        message.success(`${r.rowsUpdated} line(s) suspended${r.skipped ? ` — ${r.skipped} skipped (already accounted)` : ''}`);
+      } else {
+        message.warning('Nothing suspended — selected lines are already accounted');
+      }
+      setMpaSelected(prev => ({ ...prev, [tabKey]: [] }));
+      await refreshDetail(tabKey, invoiceId);
+    } catch (e: any) {
+      message.error(`Suspend failed: ${e?.message}`);
+    } finally {
+      setSuspendingTab(null);
+    }
+  }, [mpaSelected, user, refreshDetail]);
 
   // ── generate schedule ─────────────────────────────────────────────────────
 
@@ -1307,6 +1333,20 @@ const ManageMultiperiod: React.FC = () => {
             >
               View Accounting
             </Button>
+            <Tooltip title={(mpaSelected[tab.key]?.length ?? 0) === 0
+              ? 'Select one or more not-accounted lines to suspend'
+              : `Suspend ${mpaSelected[tab.key]!.length} selected line(s)`}>
+              <Button
+                icon={<PauseCircleOutlined />}
+                size="small"
+                danger
+                disabled={(mpaSelected[tab.key]?.length ?? 0) === 0}
+                loading={suspendingTab === tab.key}
+                onClick={() => handleSuspend(tab.key, tab.invoiceId)}
+              >
+                Suspend{(mpaSelected[tab.key]?.length ?? 0) > 0 ? ` (${mpaSelected[tab.key]!.length})` : ''}
+              </Button>
+            </Tooltip>
           </Space>
 
           <Tooltip title={postDisabledReason ?? `Create Dr Expense / Cr Accrual entries for ${period}`}>
@@ -1353,6 +1393,12 @@ const ManageMultiperiod: React.FC = () => {
                 size="small"
                 pagination={false}
                 scroll={{ x: 1050 }}
+                rowSelection={{
+                  selectedRowKeys: mpaSelected[tab.key] ?? [],
+                  onChange: (keys) => setMpaSelected(prev => ({ ...prev, [tab.key]: keys as number[] })),
+                  // Only NOT-accounted lines can be suspended.
+                  getCheckboxProps: (rec) => ({ disabled: rec.postingStatus === 'Posted' }),
+                }}
                 rowClassName={(rec) => rec.periodName === period && rec.postingStatus === 'Not Posted' ? 'ant-table-row-selected' : ''}
               />
             </>

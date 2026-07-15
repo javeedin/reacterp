@@ -199,6 +199,26 @@ export async function deleteMpaSchedule(invoiceId: number): Promise<{ deleted: n
   return { deleted: data.deleted, postedKept: data.postedKept };
 }
 
+/**
+ * Suspend (or resume) multiperiod schedule lines. Only NOT-accounted lines
+ * ('Not Posted' / 'Suspended') are affected — 'Posted' rows are skipped.
+ * Pass status='Not Posted' to resume a suspended line.
+ */
+export async function suspendMpaSchedules(
+  scheduleIds: number[],
+  updatedBy?: string,
+  status: 'Suspended' | 'Not Posted' = 'Suspended',
+): Promise<{ rowsUpdated: number; skipped: number; status: string }> {
+  const res = await fetch(`${BASE}/suspend`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ scheduleIds, status, updatedBy }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data?.error || `HTTP ${res.status}`);
+  return { rowsUpdated: data.rowsUpdated, skipped: data.skipped, status: data.status };
+}
+
 export async function markPeriodPosted(
   invoiceId: number,
   periodName: string,
