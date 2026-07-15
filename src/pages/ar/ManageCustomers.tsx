@@ -247,11 +247,43 @@ const ManageCustomers: React.FC = () => {
     XLSX.writeFile(wb, 'parties.xlsx');
   };
 
+  // ── Per-column search filter (funnel on each column header) ────────────────
+
+  const colSearch = (dataIndex: keyof PartyRow) => ({
+    filterDropdown: ({ setSelectedKeys, selectedKeys, confirm, clearFilters }: any) => (
+      <div style={{ padding: 8 }} onKeyDown={(e) => e.stopPropagation()}>
+        <Input
+          autoFocus
+          placeholder="Filter…"
+          value={selectedKeys[0]}
+          onChange={(e) => setSelectedKeys(e.target.value ? [e.target.value] : [])}
+          onPressEnter={() => confirm()}
+          style={{ width: 200, marginBottom: 8, display: 'block' }}
+        />
+        <Space>
+          <Button type="primary" size="small" icon={<SearchOutlined />} onClick={() => confirm()} style={{ width: 90 }}>
+            Filter
+          </Button>
+          <Button size="small" onClick={() => { clearFilters?.(); confirm(); }} style={{ width: 90 }}>
+            Reset
+          </Button>
+        </Space>
+      </div>
+    ),
+    filterIcon: (filtered: boolean) => (
+      <SearchOutlined style={{ color: filtered ? REDWOOD.primary : undefined }} />
+    ),
+    onFilter: (value: any, record: PartyRow) =>
+      (record[dataIndex] ?? '').toString().toLowerCase().includes(String(value).toLowerCase()),
+  });
+
   // ── Search columns ────────────────────────────────────────────────────────
 
   const searchColumns: ColumnsType<PartyRow> = [
     {
       title: 'Party Name', dataIndex: 'partyName', key: 'partyName', fixed: 'left', width: 260,
+      ...colSearch('partyName'),
+      sorter: (a, b) => (a.partyName || '').localeCompare(b.partyName || ''),
       render: (v: string, r: PartyRow) => (
         <Button type="link" style={{ padding: 0, textAlign: 'left', height: 'auto', fontSize: 13, fontWeight: 600, color: REDWOOD.info }}
           onClick={() => openPartyTab(r)}>
@@ -259,20 +291,21 @@ const ManageCustomers: React.FC = () => {
         </Button>
       ),
     },
-    { title: 'Party #', dataIndex: 'partyNumber', width: 130,
+    { title: 'Party #', dataIndex: 'partyNumber', width: 130, ...colSearch('partyNumber'),
+      sorter: (a, b) => (a.partyNumber || '').localeCompare(b.partyNumber || ''),
       render: (v: string) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{v || '—'}</Text> },
-    { title: 'Type', dataIndex: 'partyType', width: 130,
+    { title: 'Type', dataIndex: 'partyType', width: 130, ...colSearch('partyType'),
       render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
-    { title: 'Country', dataIndex: 'country', width: 100,
+    { title: 'Country', dataIndex: 'country', width: 100, ...colSearch('country'),
       render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
-    { title: 'City', dataIndex: 'city', width: 120,
+    { title: 'City', dataIndex: 'city', width: 120, ...colSearch('city'),
       render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
-    { title: 'Address', dataIndex: 'address1', width: 240, ellipsis: true,
+    { title: 'Address', dataIndex: 'address1', width: 240, ellipsis: true, ...colSearch('address1'),
       render: (_: any, r: PartyRow) => {
         const a = [r.address1, r.address2].filter(Boolean).join(', ');
         return <Tooltip title={a}><Text style={{ fontSize: 12 }}>{a || '—'}</Text></Tooltip>;
       } },
-    { title: 'Status', dataIndex: 'status', width: 100,
+    { title: 'Status', dataIndex: 'status', width: 100, ...colSearch('status'),
       render: (v: string) => <Tag color={statusColor(v)} style={{ fontSize: 11 }}>{v || '—'}</Tag> },
     {
       title: '', key: 'open', width: 90, fixed: 'right',
