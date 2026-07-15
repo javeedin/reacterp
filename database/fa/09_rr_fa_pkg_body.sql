@@ -42,6 +42,28 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         RETURN NULL;
     END to_dt;
 
+    -- CCID -> concatenated account combination string (from REERP_GL_CODE_COMBINATIONS).
+    FUNCTION acct_str(p_ccid VARCHAR2) RETURN VARCHAR2 IS
+        v_str VARCHAR2(200);
+    BEGIN
+        IF p_ccid IS NULL THEN RETURN NULL; END IF;
+        BEGIN
+            SELECT NVL("buimercFinGlbCoaCo",'')        || '-' ||
+                   NVL("buimercFinGlbCoaLob",'')        || '-' ||
+                   NVL("buimercFinGlbCoaDepartment",'') || '-' ||
+                   NVL("buimercFinGlbCoaAccount",'')    || '-' ||
+                   NVL("buimercFinGlbCoaSubAcc",'')     || '-' ||
+                   NVL("buimercFinGlbCoaAlys",'')       || '-' ||
+                   NVL("buimercFinGlbCoaIc",'')         || '-' ||
+                   NVL("buimercFinGlbCoaFut1",'')       || '-' ||
+                   NVL("buimercFinGlbCoaFut2",'')
+            INTO   v_str
+            FROM   REERP_GL_CODE_COMBINATIONS
+            WHERE  "_CODE_COMBINATION_ID" = TO_NUMBER(p_ccid);
+        EXCEPTION WHEN OTHERS THEN v_str := p_ccid; END;
+        RETURN v_str;
+    END acct_str;
+
     -- ── GET_ASSETS ────────────────────────────────────────────────────────────
     -- Sources: RR_FA_ADDITIONS_TL + RR_FA_BOOKS.
     -- Supported filters: p_description, p_book_type.
@@ -871,6 +893,10 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                    m.LIFE_IN_MONTHS                                     AS LIFE_IN_MONTHS,
                    b.DATE_PLACED_IN_SERVICE                             AS DATE_PLACED_IN_SERVICE,
                    b.DEPRN_START_DATE                                   AS DEPRN_START_DATE,
+                   (SELECT MAX(cb.DEPRN_EXPENSE_ACCOUNT_CCID) FROM RR_FA_CATEGORY_BOOKS cb
+                     WHERE cb.CATEGORY_ID = a.ASSET_CATEGORY_ID)        AS EXP_CCID,
+                   (SELECT MAX(cb.RESERVE_ACCOUNT_CCID) FROM RR_FA_CATEGORY_BOOKS cb
+                     WHERE cb.CATEGORY_ID = a.ASSET_CATEGORY_ID)        AS RES_CCID,
                    CASE WHEN dsum.ASSET_ID IS NOT NULL THEN 'Posted' ELSE 'Not Posted' END AS STATUS
               FROM RR_FA_BOOKS b
               JOIN RR_FA_ADDITIONS a ON a.ASSET_ID = b.ASSET_ID
@@ -931,6 +957,9 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
             APEX_JSON.WRITE('deprnRunDate',         r.DEPRN_RUN_DATE);
             APEX_JSON.WRITE('distributionId',       r.DISTRIBUTION_ID);
             APEX_JSON.WRITE('accountedStatus',      r.ACCOUNTED_STATUS);
+            -- Dr Depreciation Expense / Cr Accumulated Depreciation account combinations
+            APEX_JSON.WRITE('deprnExpenseAccount',  acct_str(r.EXP_CCID));
+            APEX_JSON.WRITE('deprnReserveAccount',  acct_str(r.RES_CCID));
             APEX_JSON.WRITE('status',               r.STATUS);
             APEX_JSON.CLOSE_OBJECT;
         END LOOP;

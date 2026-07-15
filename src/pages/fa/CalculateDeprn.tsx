@@ -20,6 +20,7 @@ import { postSlaToGL } from '../../services/glPosting.service';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import type { BookControlRecord } from '../../services/fa.service';
 import { useAuth } from '../../context/AuthContext';
+import { validateAccountCode } from '../../components/AccountSelector';
 
 const { Content } = Layout;
 const { Text, Title } = Typography;
@@ -134,7 +135,7 @@ const CalculateDeprn: React.FC = () => {
   // Create Depreciation debug dialog — two phases per asset:
   //   1) create depreciation  (POST fa/deprn-post-single)
   //   2) create accounting     (SLA create -> GL post -> mark accounted)
-  interface AcctLine { label: string; account: string; dr: number; cr: number; }
+  interface AcctLine { label: string; account: string; desc?: string; dr: number; cr: number; }
   interface DeprnStep {
     assetId: string; assetNumber: string; kind: 'deprn' | 'acct';
     method: string; url: string; payload: any;
@@ -513,40 +514,33 @@ const CalculateDeprn: React.FC = () => {
         status: 'pending', expanded: rows.length <= 2,
       });
       const amt = Number(r.periodDeprn);
+      const expAcct = r.deprnExpenseAccount || '—';
+      const resAcct = r.deprnReserveAccount || '—';
       steps.push({
         assetId: aid, assetNumber: r.assetNumber, kind: 'acct', method: 'POST',
         url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create → journals/create → gl/journals/{id}/post → fa/deprn-post-asset (mark)`,
         payload: { note: 'Built after depreciation is created (needs the distribution id + accounting preview).' },
         status: 'pending', expanded: rows.length <= 2, amount: amt,
         acctLines: [
-          { label: 'Depreciation Expense (Dr)',     account: '—', dr: amt, cr: 0 },
-          { label: 'Accumulated Depreciation (Cr)', account: '—', dr: 0,   cr: amt },
+          { label: 'Depreciation Expense (Dr)',     account: expAcct, dr: amt, cr: 0 },
+          { label: 'Accumulated Depreciation (Cr)', account: resAcct, dr: 0,   cr: amt },
         ],
       });
     });
     setDeprnSteps(steps);
     setDeprnModalOpen(true);
 
-    // Best-effort: fetch each asset's accounting preview to fill the real
-    // Dr/Cr account combinations (from the category books).
-    const target2 = statusMeta?.periodName || statusPeriodName;
-    rows.forEach(async (r) => {
-      const aid = String(r.assetId);
+    // Resolve the account segment descriptions for each Dr/Cr combination.
+    const combos = Array.from(new Set(steps.flatMap(s => (s.acctLines || []).map(l => l.account)).filter(a => a && a !== '—')));
+    combos.forEach(async (combo) => {
       try {
-        const preview = await getDeprnAccountingPreview(aid, selectedBook, target2, undefined);
-        const lines = preview?.lines || [];
-        const dr = lines.find((l: any) => l.lineType === 'DR');
-        const cr = lines.find((l: any) => l.lineType === 'CR');
-        if (dr || cr) {
-          const amt = Number(r.periodDeprn);
-          setDeprnSteps(prev => prev.map(s => (s.assetId === aid && s.kind === 'acct')
-            ? { ...s, acctLines: [
-                { label: 'Depreciation Expense (Dr)',     account: dr?.accountCombination || '—', dr: amt, cr: 0 },
-                { label: 'Accumulated Depreciation (Cr)', account: cr?.accountCombination || '—', dr: 0,   cr: amt },
-              ] }
-            : s));
-        }
-      } catch { /* accounts stay '—' */ }
+        const res = await validateAccountCode(combo);
+        const desc = Object.values(res.segmentDetails ?? {}).map((v: any) => v.description).filter(Boolean).join(' · ');
+        if (!desc) return;
+        setDeprnSteps(prev => prev.map(s => s.kind !== 'acct' ? s : {
+          ...s, acctLines: (s.acctLines || []).map(l => l.account === combo ? { ...l, desc } : l),
+        }));
+      } catch { /* no description */ }
     });
   };
 
@@ -1177,9 +1171,12 @@ const CalculateDeprn: React.FC = () => {
                             </thead>
                             <tbody>
                               {s.acctLines.map((l, li) => (
-                                <tr key={li} style={{ borderTop: '1px solid #eee' }}>
+                                <tr key={li} style={{ borderTop: '1px solid #eee', verticalAlign: 'top' }}>
                                   <td style={{ padding: '3px 6px' }}>{l.label}</td>
-                                  <td style={{ padding: '3px 6px', fontFamily: 'monospace', color: '#1677ff' }}>{l.account}</td>
+                                  <td style={{ padding: '3px 6px' }}>
+                                    <div style={{ fontFamily: 'monospace', color: '#1677ff' }}>{l.account}</div>
+                                    {l.desc && <div style={{ fontSize: 10, color: '#8c8c8c', marginTop: 1 }}>{l.desc}</div>}
+                                  </td>
                                   <td style={{ padding: '3px 6px', textAlign: 'right', fontFamily: 'monospace', color: l.dr ? REDWOOD.success : '#bbb' }}>{l.dr ? fmt(l.dr) : '—'}</td>
                                   <td style={{ padding: '3px 6px', textAlign: 'right', fontFamily: 'monospace', color: l.cr ? REDWOOD.primary : '#bbb' }}>{l.cr ? fmt(l.cr) : '—'}</td>
                                 </tr>
