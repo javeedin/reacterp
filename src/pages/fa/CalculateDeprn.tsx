@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layout, Card, Row, Col, Breadcrumb, Typography, Select, Space,
-  Button, Spin, Tag, Tooltip, message, Popover, Table, Alert, Divider, Input,
+  Button, Spin, Tag, Tooltip, message, Popover, Table, Alert, Divider, Input, Modal,
 } from 'antd';
 import {
   HomeOutlined, LineChartOutlined, ReloadOutlined,
@@ -129,6 +129,13 @@ const CalculateDeprn: React.FC = () => {
   const [statusPrev,     setStatusPrev]     = useState<Record<string, number>>({});  // prev-period deprn by assetId
   const [statusPrevName, setStatusPrevName] = useState('');
   const [statusSearch,   setStatusSearch]   = useState('');   // quick filter across all columns
+  // Create Depreciation debug dialog
+  interface DeprnStep { assetId: string; assetNumber: string; url: string; payload: any; status: 'pending'|'posting'|'done'|'error'; response?: any; expanded?: boolean; }
+  const [deprnModalOpen, setDeprnModalOpen] = useState(false);
+  const [deprnSteps,     setDeprnSteps]     = useState<DeprnStep[]>([]);
+  const [deprnRunning,   setDeprnRunning]   = useState(false);
+  // View Journal modal
+  const [journalModal, setJournalModal] = useState<{ assetNumber: string; url: string; loading: boolean; lines: any[]; error?: string } | null>(null);
   const { user } = useAuth();
   const loggedUser = user?.username || user?.name || 'REACTERP';
 
@@ -433,12 +440,16 @@ const CalculateDeprn: React.FC = () => {
         : <Text style={monoRed} title={r.status === 'Posted' ? 'Posted amount' : 'Calculated (not yet posted)'}>{fmt(v)}</Text> },
     { title: 'Closing NBV', dataIndex: 'closingNbv', key: 'closingNbv', width: 140, align: 'right' as const,
       render: (v: number) => <Text style={{ ...mono, color: REDWOOD.success, fontWeight: 600 }}>{v == null ? '—' : fmt(v)}</Text> },
-    { title: 'Status',      dataIndex: 'status', key: 'status', width: 120, fixed: 'right' as const,
+    { title: 'Status',      dataIndex: 'status', key: 'status', width: 110, fixed: 'right' as const,
       filters: [{ text: 'Posted', value: 'Posted' }, { text: 'Not Posted', value: 'Not Posted' }],
       onFilter: (value: any, r: any) => r.status === value,
       render: (v: string) => v === 'Posted'
         ? <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: 11 }}>Posted</Tag>
         : <Tag color="default" icon={<ClockCircleOutlined />} style={{ fontSize: 11, color: REDWOOD.neutral500 }}>Not Posted</Tag> },
+    { title: '', key: 'journal', width: 110, fixed: 'right' as const,
+      render: (_: any, r: any) => r.status === 'Posted'
+        ? <Button size="small" icon={<EyeOutlined />} onClick={() => openViewJournal(r)} style={{ fontSize: 11 }}>Journal</Button>
+        : null },
   ];
 
   // Enrich each asset with the period's depreciation amount + schedule. Prefer
@@ -475,28 +486,61 @@ const CalculateDeprn: React.FC = () => {
         .some(v => v != null && String(v).toLowerCase().includes(q)));
   })();
 
-  const handlePostSelected = async () => {
+  // Build the debug steps for the selected lines and open the dialog.
+  const openCreateDeprnDialog = () => {
     const target = statusMeta?.periodName || statusPeriodName;
     const rows = enrichedStatusItems.filter(r =>
       statusSelected.includes(String(r.assetId)) && r.status !== 'Posted' && (r.periodDeprn ?? 0) > 0);
     if (rows.length === 0) { message.warning('No postable lines selected (need Not-Posted with an amount).'); return; }
-    setStatusPosting(true);
-    let ok = 0, fail = 0;
-    for (const r of rows) {
-      const res = await postSingleDeprn({
+    const steps: DeprnStep[] = rows.map(r => ({
+      assetId: String(r.assetId),
+      assetNumber: r.assetNumber,
+      url: `${APEX_DB_CONFIG.baseUrl}/fa/deprn-post-single`,
+      payload: {
         assetId: String(r.assetId),
         bookTypeCode: selectedBook,
         periodName: target,
         deprnAmount: Number(r.periodDeprn),
         createdBy: loggedUser,
-      });
-      if (res.success || res.status === 'POSTED' || res.status === 'ALREADY_EXISTS') ok++; else fail++;
+      },
+      status: 'pending',
+      expanded: rows.length <= 3,
+    }));
+    setDeprnSteps(steps);
+    setDeprnModalOpen(true);
+  };
+
+  const runDeprnSteps = async () => {
+    setDeprnRunning(true);
+    let ok = 0, fail = 0;
+    for (let i = 0; i < deprnSteps.length; i++) {
+      setDeprnSteps(prev => prev.map((s, idx) => idx === i ? { ...s, status: 'posting' } : s));
+      const step = deprnSteps[i];
+      const res = await postSingleDeprn(step.payload);
+      const good = res.success || res.status === 'POSTED' || res.status === 'ALREADY_EXISTS';
+      if (good) ok++; else fail++;
+      setDeprnSteps(prev => prev.map((s, idx) => idx === i ? { ...s, status: good ? 'done' : 'error', response: res } : s));
     }
-    setStatusPosting(false);
-    if (ok > 0) message.success(`${ok} line(s) depreciation posted${fail ? `, ${fail} failed` : ''}`);
+    setDeprnRunning(false);
+    if (ok > 0) message.success(`${ok} line(s) posted${fail ? `, ${fail} failed` : ''}`);
     else message.error(`Post failed for ${fail} line(s)`);
     setStatusSelected([]);
-    handleShowStatus(statusPeriodName);   // refresh
+    handleShowStatus(statusPeriodName);   // refresh underlying data
+  };
+
+  // View the FA depreciation GL journal for a posted asset/period.
+  const openViewJournal = async (r: any) => {
+    const ref2 = r.distributionId ?? r.assetId;
+    const url = `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${encodeURIComponent(String(ref2))}&reference5=FA_DEPRECIATION`;
+    setJournalModal({ assetNumber: r.assetNumber, url, loading: true, lines: [] });
+    try {
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const data = await res.json().catch(() => ({}));
+      const items: any[] = data.items ?? (Array.isArray(data) ? data : []);
+      setJournalModal({ assetNumber: r.assetNumber, url, loading: false, lines: items });
+    } catch (e: any) {
+      setJournalModal({ assetNumber: r.assetNumber, url, loading: false, lines: [], error: e?.message });
+    }
   };
 
   const isPreview = viewMode === 'preview';
@@ -851,7 +895,7 @@ const CalculateDeprn: React.FC = () => {
                             icon={<CloudUploadOutlined />}
                             loading={statusPosting}
                             disabled={statusSelected.length === 0}
-                            onClick={handlePostSelected}
+                            onClick={openCreateDeprnDialog}
                             style={statusSelected.length > 0 ? { background: FA_COLOR, borderColor: FA_COLOR } : {}}
                           >
                             Create Depreciation ({statusSelected.length})
@@ -863,7 +907,7 @@ const CalculateDeprn: React.FC = () => {
                         columns={statusColumns}
                         rowKey="assetId"
                         size="small"
-                        scroll={{ x: 1330, y: 440 }}
+                        scroll={{ x: 1440, y: 440 }}
                         pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `${t} assets` }}
                         locale={{ emptyText: 'No assets found for this book/period' }}
                         rowSelection={{
@@ -947,6 +991,99 @@ const CalculateDeprn: React.FC = () => {
             </>
           )}
         </div>
+
+        {/* ── Create Depreciation — API Steps ── */}
+        <Modal
+          open={deprnModalOpen}
+          title={<Space><CloudUploadOutlined style={{ color: FA_COLOR }} /><span>Create Depreciation — {deprnSteps.length} line(s) · {statusMeta?.periodName}</span></Space>}
+          onCancel={() => { if (!deprnRunning) setDeprnModalOpen(false); }}
+          maskClosable={!deprnRunning}
+          width={860}
+          footer={
+            <Space>
+              <Button disabled={deprnRunning} onClick={() => setDeprnModalOpen(false)}>Close</Button>
+              <Button type="primary" icon={<CloudUploadOutlined />} loading={deprnRunning}
+                disabled={deprnSteps.every(s => s.status === 'done')}
+                style={{ background: FA_COLOR, borderColor: FA_COLOR }}
+                onClick={runDeprnSteps}>
+                Post {deprnSteps.filter(s => s.status !== 'done').length} line(s)
+              </Button>
+            </Space>
+          }
+          destroyOnClose
+        >
+          <Alert type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }}
+            message={<span>Each line runs <code>POST {`${APEX_DB_CONFIG.baseUrl}/fa/deprn-post-single`}</code> with the payload below.</span>} />
+          <div style={{ maxHeight: 460, overflowY: 'auto', border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6 }}>
+            {deprnSteps.map((s, i) => {
+              const color = s.status === 'done' ? REDWOOD.success : s.status === 'error' ? REDWOOD.primary : s.status === 'posting' ? '#1677ff' : REDWOOD.neutral500;
+              return (
+                <div key={s.assetId} style={{ borderTop: i === 0 ? 'none' : `1px solid ${REDWOOD.neutral200}` }}>
+                  <div style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', background: s.expanded ? '#fafafa' : '#fff' }}
+                    onClick={() => setDeprnSteps(prev => prev.map((x, idx) => idx === i ? { ...x, expanded: !x.expanded } : x))}>
+                    {s.status === 'posting' ? <SyncOutlined spin style={{ color: '#1677ff' }} />
+                      : s.status === 'done' ? <CheckCircleOutlined style={{ color: REDWOOD.success }} />
+                      : s.status === 'error' ? <Tag color="error" style={{ margin: 0 }}>ERR</Tag>
+                      : <ClockCircleOutlined style={{ color: REDWOOD.neutral500 }} />}
+                    <Tag color="green" style={{ margin: 0, fontSize: 10 }}>POST</Tag>
+                    <Text strong style={{ fontSize: 12 }}>Asset {s.assetNumber}</Text>
+                    <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.neutral500, flex: 1 }} ellipsis>{s.url}</Text>
+                    <Text style={{ fontSize: 11, color, fontWeight: 600 }}>{s.payload.deprnAmount != null ? fmt(s.payload.deprnAmount) : ''}</Text>
+                    <Text style={{ fontSize: 10, color: '#999' }}>{s.expanded ? '▲' : '▼'}</Text>
+                  </div>
+                  {s.expanded && (
+                    <div style={{ padding: '0 12px 10px 32px', display: 'flex', gap: 12 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={{ fontSize: 10, color: '#888' }}>Request Payload</Text>
+                        <pre style={{ fontSize: 11, background: '#0d0d0d', color: '#a8ff78', borderRadius: 4, padding: 8, margin: '4px 0 0', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{JSON.stringify(s.payload, null, 2)}</pre>
+                      </div>
+                      {s.response !== undefined && (
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={{ fontSize: 10, color: '#888' }}>Response</Text>
+                          <pre style={{ fontSize: 11, background: '#0d0d0d', color: '#79c0ff', borderRadius: 4, padding: 8, margin: '4px 0 0', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{JSON.stringify(s.response, null, 2)}</pre>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Modal>
+
+        {/* ── View Journal ── */}
+        {journalModal && (
+          <Modal
+            open
+            title={<Space><EyeOutlined style={{ color: '#722ed1' }} /><span>Depreciation Journal — Asset {journalModal.assetNumber}</span>
+              <Tooltip title={<Text style={{ fontSize: 11, fontFamily: 'monospace', color: '#fff', wordBreak: 'break-all' }}>{`GET ${journalModal.url}`}</Text>}>
+                <ApiOutlined style={{ color: '#1677ff', cursor: 'help' }} onClick={() => { navigator.clipboard.writeText(journalModal.url); message.success('URL copied'); }} />
+              </Tooltip>
+            </Space>}
+            onCancel={() => setJournalModal(null)}
+            footer={<Button onClick={() => setJournalModal(null)}>Close</Button>}
+            width={860}
+          >
+            {journalModal.loading
+              ? <div style={{ textAlign: 'center', padding: 40 }}><Spin tip="Loading journal…" /></div>
+              : journalModal.error
+                ? <Alert type="error" showIcon message="Failed to load journal" description={journalModal.error} />
+                : journalModal.lines.length === 0
+                  ? <Alert type="warning" showIcon message="No GL journal found for this asset's depreciation (may not be accounted yet)." />
+                  : <Table
+                      dataSource={journalModal.lines.map((l: any, i: number) => ({ ...l, _k: i }))}
+                      rowKey="_k" size="small" pagination={false} scroll={{ x: 'max-content' }}
+                      columns={[
+                        { title: 'Account', dataIndex: 'account', width: 200, render: (v: string) => <Text style={{ fontSize: 11, fontFamily: 'monospace', color: '#1677ff' }}>{v}</Text> },
+                        { title: 'Description', dataIndex: 'description', ellipsis: true, render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+                        { title: 'Dr', dataIndex: 'entered_dr', width: 120, align: 'right' as const, render: (v: number) => v ? <Text style={{ fontSize: 11, color: REDWOOD.success }}>{fmt(v)}</Text> : '—' },
+                        { title: 'Cr', dataIndex: 'entered_cr', width: 120, align: 'right' as const, render: (v: number) => v ? <Text style={{ fontSize: 11, color: REDWOOD.primary }}>{fmt(v)}</Text> : '—' },
+                        { title: 'Period', dataIndex: 'period_name', width: 90, render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+                        { title: 'Status', dataIndex: 'posting_status', width: 90, render: (v: string) => <Tag color={v === 'POSTED' ? 'green' : 'orange'} style={{ fontSize: 10 }}>{v}</Tag> },
+                      ]}
+                    />}
+          </Modal>
+        )}
       </Content>
     </Layout>
   );

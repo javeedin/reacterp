@@ -864,6 +864,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                    dsum.DEPRN_RESERVE                                   AS DEPRN_RESERVE,
                    NVL(dsum.COST, b.COST) - NVL(dsum.DEPRN_RESERVE, 0)  AS NBV,
                    dsum.DEPRN_RUN_DATE                                  AS DEPRN_RUN_DATE,
+                   dsum.DISTRIBUTION_ID                                 AS DISTRIBUTION_ID,
                    dsum.ACCOUNTED_STATUS                                AS ACCOUNTED_STATUS,
                    b.SALVAGE_VALUE                                      AS SALVAGE_VALUE,
                    m.METHOD_CODE                                        AS METHOD_CODE,
@@ -881,6 +882,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                            SUM(NVL(dd.DEPRN_RESERVE, 0)) AS DEPRN_RESERVE,
                            SUM(NVL(dd.COST, 0))          AS COST,
                            MAX(dd.DEPRN_RUN_DATE)        AS DEPRN_RUN_DATE,
+                           MAX(dd.DISTRIBUTION_ID)       AS DISTRIBUTION_ID,
                            MAX(NVL(dd.ACCOUNTED_STATUS, 'UNACCOUNTED')) AS ACCOUNTED_STATUS
                       FROM RR_FA_DEPRN_DETAIL dd
                      WHERE dd.PERIOD_COUNTER = v_pc
@@ -927,6 +929,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
             APEX_JSON.WRITE('nbv',                  r.NBV);
             APEX_JSON.WRITE('deprnReserve',         r.DEPRN_RESERVE);
             APEX_JSON.WRITE('deprnRunDate',         r.DEPRN_RUN_DATE);
+            APEX_JSON.WRITE('distributionId',       r.DISTRIBUTION_ID);
             APEX_JSON.WRITE('accountedStatus',      r.ACCOUNTED_STATUS);
             APEX_JSON.WRITE('status',               r.STATUS);
             APEX_JSON.CLOSE_OBJECT;
