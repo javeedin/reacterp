@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layout, Card, Row, Col, Breadcrumb, Typography, Select, Space,
-  Button, Spin, Tag, Tooltip, message, Popover, Table, Alert, Divider,
+  Button, Spin, Tag, Tooltip, message, Popover, Table, Alert, Divider, Input,
 } from 'antd';
 import {
   HomeOutlined, LineChartOutlined, ReloadOutlined,
@@ -127,6 +127,7 @@ const CalculateDeprn: React.FC = () => {
   const [statusPosting,  setStatusPosting]  = useState(false);
   const [statusPrev,     setStatusPrev]     = useState<Record<string, number>>({});  // prev-period deprn by assetId
   const [statusPrevName, setStatusPrevName] = useState('');
+  const [statusSearch,   setStatusSearch]   = useState('');   // quick filter across all columns
   const { user } = useAuth();
   const loggedUser = user?.username || user?.name || 'REACTERP';
 
@@ -203,6 +204,7 @@ const CalculateDeprn: React.FC = () => {
     setStatusLoading(true);
     setStatusError('');
     setStatusSelected([]);
+    setStatusSearch('');
     setViewMode('status');
     const url = `${APEX_DB_CONFIG.baseUrl}/fa/deprn-by-period?bookTypeCode=${encodeURIComponent(selectedBook)}&periodName=${encodeURIComponent(periodName)}`;
     setStatusUrl(url);
@@ -453,9 +455,17 @@ const CalculateDeprn: React.FC = () => {
       });
   }, [statusItems, statusMeta, statusPeriodName, statusPrev, statusPrevName]);
 
-  const filteredStatusItems = statusFilter === 'all'
-    ? enrichedStatusItems
-    : enrichedStatusItems.filter(r => statusFilter === 'posted' ? r.status === 'Posted' : r.status === 'Not Posted');
+  const filteredStatusItems = (() => {
+    const byStatus = statusFilter === 'all'
+      ? enrichedStatusItems
+      : enrichedStatusItems.filter(r => statusFilter === 'posted' ? r.status === 'Posted' : r.status === 'Not Posted');
+    const q = statusSearch.trim().toLowerCase();
+    if (!q) return byStatus;
+    return byStatus.filter(r =>
+      [r.assetNumber, r.description, r.periodName ?? statusMeta?.periodName, r.methodCode,
+       r.days, r.dailyRate, r.openingNbv, r.prevDeprn, r.periodDeprn, r.closingNbv, r.cost, r.status]
+        .some(v => v != null && String(v).toLowerCase().includes(q)));
+  })();
 
   const handlePostSelected = async () => {
     const target = statusMeta?.periodName || statusPeriodName;
@@ -807,8 +817,16 @@ const CalculateDeprn: React.FC = () => {
                           </Col>
                         ))}
                       </Row>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                        <Space>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
+                        <Space wrap>
+                          <Input.Search
+                            allowClear
+                            size="small"
+                            placeholder="Filter any column…"
+                            style={{ width: 240 }}
+                            value={statusSearch}
+                            onChange={e => setStatusSearch(e.target.value)}
+                          />
                           <Button size="small" type={statusFilter === 'all' ? 'primary' : 'default'} onClick={() => setStatusFilter('all')}>All ({enrichedStatusItems.length})</Button>
                           <Button size="small" type={statusFilter === 'posted' ? 'primary' : 'default'}
                             style={statusFilter === 'posted' ? { background: REDWOOD.success, borderColor: REDWOOD.success } : {}}
