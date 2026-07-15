@@ -62,8 +62,8 @@ const CalculateDeprn: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('last');
 
   // Status-by-period (all assets)
-  const [periodsList,   setPeriodsList]   = useState<any[]>([]);
-  const [statusPeriod,  setStatusPeriod]  = useState<number | null>(null);   // periodCounter
+  const [periodsList,     setPeriodsList]     = useState<any[]>([]);
+  const [statusPeriodName, setStatusPeriodName] = useState<string>('');   // period name (resolved server-side)
   const [statusItems,   setStatusItems]   = useState<any[]>([]);
   const [statusSummary, setStatusSummary] = useState<any>(null);
   const [statusMeta,    setStatusMeta]    = useState<{ periodName?: string; postedCount?: number; notPostedCount?: number; totalCount?: number } | null>(null);
@@ -114,18 +114,36 @@ const CalculateDeprn: React.FC = () => {
   // Load the full period list for the status-by-period selector
   useEffect(() => {
     if (!selectedBook) { setPeriodsList([]); return; }
-    getDeprnPeriods(selectedBook).then((ps) => {
-      setPeriodsList(ps);
-      setStatusPeriod(prev => prev ?? (ps[0]?.periodCounter != null ? Number(ps[0].periodCounter) : null));
-    });
+    getDeprnPeriods(selectedBook).then((ps) => setPeriodsList(ps || []));
   }, [selectedBook]);
 
-  const handleShowStatus = useCallback(async (periodCounter: number | null) => {
-    if (!selectedBook || periodCounter == null) return;
+  // Period options — merge the list endpoint with the known last/next periods so
+  // the dropdown is never empty even if fa/deprn-periods (list) isn't deployed.
+  const periodOptions = React.useMemo(() => {
+    const seen = new Set<string>();
+    const out: { name: string; fy?: string }[] = [];
+    const add = (name?: string, fy?: string) => {
+      if (name && !seen.has(name.toUpperCase())) { seen.add(name.toUpperCase()); out.push({ name, fy }); }
+    };
+    (periodsList || []).forEach((p: any) => add(p.periodName, p.fiscalYear));
+    add(lastPeriod?.lastPeriodName, lastPeriod?.fiscalYear);
+    add(lastPeriod?.nextPeriodName);
+    return out;
+  }, [periodsList, lastPeriod]);
+
+  // Default the selection to the last run period once options are known
+  useEffect(() => {
+    if (!statusPeriodName && periodOptions.length > 0) {
+      setStatusPeriodName(lastPeriod?.lastPeriodName || periodOptions[0].name);
+    }
+  }, [periodOptions, lastPeriod, statusPeriodName]);
+
+  const handleShowStatus = useCallback(async (periodName: string) => {
+    if (!selectedBook || !periodName) return;
     setStatusLoading(true);
     setViewMode('status');
     try {
-      const res = await getDeprnStatus({ bookTypeCode: selectedBook, periodCounter });
+      const res = await getDeprnStatus({ bookTypeCode: selectedBook, periodName });
       if (res.success === false) { message.error(res.error || 'Failed to load status'); return; }
       setStatusItems(res.items || []);
       setStatusSummary(res.summary || null);
@@ -209,7 +227,7 @@ const CalculateDeprn: React.FC = () => {
       <div style={{ marginBottom: 10 }}>
         <Text strong>Status by period (all assets)</Text>
         <Typography.Text copyable code style={{ display: 'block', fontSize: 11, marginTop: 4, wordBreak: 'break-all' }}>
-          {`${APEX_DB_CONFIG.baseUrl}/fa/deprn-by-period?bookTypeCode=${encodeURIComponent(selectedBook)}&periodCounter=${statusPeriod ?? '...'}`}
+          {`${APEX_DB_CONFIG.baseUrl}/fa/deprn-by-period?bookTypeCode=${encodeURIComponent(selectedBook)}&periodName=${encodeURIComponent(statusPeriodName || '...')}`}
         </Typography.Text>
       </div>
       <div>
@@ -530,7 +548,7 @@ const CalculateDeprn: React.FC = () => {
                     type={isStatus ? 'primary' : 'default'}
                     size="small"
                     icon={<CheckCircleOutlined />}
-                    onClick={() => { setViewMode('status'); if (statusItems.length === 0 && statusPeriod != null) handleShowStatus(statusPeriod); }}
+                    onClick={() => { setViewMode('status'); if (statusItems.length === 0 && statusPeriodName) handleShowStatus(statusPeriodName); }}
                     style={isStatus ? { background: '#1677ff', borderColor: '#1677ff' } : { color: '#1677ff', borderColor: '#1677ff' }}
                   >
                     Status by Period
@@ -584,21 +602,21 @@ const CalculateDeprn: React.FC = () => {
                       <Text type="secondary" style={{ fontSize: 12 }}>Period:</Text>
                       <Select
                         size="small"
-                        style={{ width: 190 }}
+                        style={{ width: 200 }}
                         placeholder="Select period"
-                        value={statusPeriod ?? undefined}
-                        onChange={(v) => { setStatusPeriod(v); handleShowStatus(v); }}
+                        value={statusPeriodName || undefined}
+                        onChange={(v) => { setStatusPeriodName(v); handleShowStatus(v); }}
                         showSearch
                         optionFilterProp="children"
                       >
-                        {periodsList.map((p: any) => (
-                          <Option key={p.periodCounter} value={Number(p.periodCounter)}>
-                            {p.periodName} (FY {p.fiscalYear})
+                        {periodOptions.map((p) => (
+                          <Option key={p.name} value={p.name}>
+                            {p.name}{p.fy ? ` (FY ${p.fy})` : ''}
                           </Option>
                         ))}
                       </Select>
                       <Button size="small" icon={<ReloadOutlined />} loading={statusLoading}
-                        onClick={() => handleShowStatus(statusPeriod)}>Show</Button>
+                        onClick={() => handleShowStatus(statusPeriodName)}>Show</Button>
                     </Space>
                   }
                 >
