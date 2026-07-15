@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import dayjs from 'dayjs';
 import {
@@ -13,7 +13,7 @@ import {
   EnvironmentOutlined, DatabaseOutlined, InfoCircleOutlined,
   BookOutlined, HistoryOutlined, BarcodeOutlined, ApiOutlined, CheckOutlined,
   FilterOutlined, DownloadOutlined, DollarOutlined, SaveOutlined, DeleteOutlined,
-  AccountBookOutlined, AuditOutlined, TagsOutlined,
+  AccountBookOutlined, AuditOutlined, TagsOutlined, ArrowLeftOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { postSlaToGL } from '../../services/glPosting.service';
@@ -2734,9 +2734,12 @@ const ManageAssets: React.FC = () => {
   // Deep-link: /fa/assets?assetNumber=100009 → auto-open that asset's tab
   // (e.g. clicking an asset from Calculate Depreciation → Status by Period).
   const [urlParams] = useSearchParams();
+  const cameFromDeprn = urlParams.get('from') === 'deprn';
+  const deepLinkHandled = useRef<string | null>(null);
   useEffect(() => {
     const an = urlParams.get('assetNumber');
-    if (!an) return;
+    if (!an || deepLinkHandled.current === an) return;   // handle each assetNumber once
+    deepLinkHandled.current = an;
     (async () => {
       form.setFieldsValue({ assetNumber: an });
       const res = await searchAssets({ assetNumber: an, limit: 1 });
@@ -3183,13 +3186,20 @@ const ManageAssets: React.FC = () => {
                 <Text type="secondary" style={{ fontSize: 11 }}>Search and manage fixed asset records</Text>
               </div>
             </Space>
-            <Button
-              type="primary" icon={<PlusOutlined />}
-              style={{ background: FA_COLOR, borderColor: FA_COLOR }}
-              onClick={() => navigate('/fa/create-asset')}
-            >
-              New Asset
-            </Button>
+            <Space>
+              {cameFromDeprn && (
+                <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/fa/calculate-deprn')}>
+                  Back to Depreciation
+                </Button>
+              )}
+              <Button
+                type="primary" icon={<PlusOutlined />}
+                style={{ background: FA_COLOR, borderColor: FA_COLOR }}
+                onClick={() => navigate('/fa/create-asset')}
+              >
+                New Asset
+              </Button>
+            </Space>
           </div>
         </div>
 

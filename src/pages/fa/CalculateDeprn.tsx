@@ -408,7 +408,7 @@ const CalculateDeprn: React.FC = () => {
       render: (v: string) => (
         <Tooltip title="Open asset details">
           <Button type="link" size="small" style={{ padding: 0, height: 'auto', fontSize: 12, fontWeight: 600 }}
-            onClick={() => navigate(`/fa/assets?assetNumber=${encodeURIComponent(v)}`)}>
+            onClick={() => navigate(`/fa/assets?assetNumber=${encodeURIComponent(v)}&from=deprn`)}>
             {v}
           </Button>
         </Tooltip>
