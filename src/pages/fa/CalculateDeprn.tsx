@@ -134,11 +134,13 @@ const CalculateDeprn: React.FC = () => {
   // Create Depreciation debug dialog — two phases per asset:
   //   1) create depreciation  (POST fa/deprn-post-single)
   //   2) create accounting     (SLA create -> GL post -> mark accounted)
+  interface AcctLine { label: string; account: string; dr: number; cr: number; }
   interface DeprnStep {
     assetId: string; assetNumber: string; kind: 'deprn' | 'acct';
     method: string; url: string; payload: any;
     status: 'pending' | 'posting' | 'done' | 'error' | 'skipped';
     detail?: string; response?: any; expanded?: boolean;
+    amount?: number; acctLines?: AcctLine[];   // Dr/Cr preview on the accounting step
   }
   const [deprnModalOpen, setDeprnModalOpen] = useState(false);
   const [deprnSteps,     setDeprnSteps]     = useState<DeprnStep[]>([]);
@@ -510,15 +512,42 @@ const CalculateDeprn: React.FC = () => {
         payload: { assetId: aid, bookTypeCode: selectedBook, periodName: target, deprnAmount: Number(r.periodDeprn), createdBy: loggedUser },
         status: 'pending', expanded: rows.length <= 2,
       });
+      const amt = Number(r.periodDeprn);
       steps.push({
         assetId: aid, assetNumber: r.assetNumber, kind: 'acct', method: 'POST',
         url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create → journals/create → gl/journals/{id}/post → fa/deprn-post-asset (mark)`,
         payload: { note: 'Built after depreciation is created (needs the distribution id + accounting preview).' },
-        status: 'pending', expanded: false,
+        status: 'pending', expanded: rows.length <= 2, amount: amt,
+        acctLines: [
+          { label: 'Depreciation Expense (Dr)',     account: '—', dr: amt, cr: 0 },
+          { label: 'Accumulated Depreciation (Cr)', account: '—', dr: 0,   cr: amt },
+        ],
       });
     });
     setDeprnSteps(steps);
     setDeprnModalOpen(true);
+
+    // Best-effort: fetch each asset's accounting preview to fill the real
+    // Dr/Cr account combinations (from the category books).
+    const target2 = statusMeta?.periodName || statusPeriodName;
+    rows.forEach(async (r) => {
+      const aid = String(r.assetId);
+      try {
+        const preview = await getDeprnAccountingPreview(aid, selectedBook, target2, undefined);
+        const lines = preview?.lines || [];
+        const dr = lines.find((l: any) => l.lineType === 'DR');
+        const cr = lines.find((l: any) => l.lineType === 'CR');
+        if (dr || cr) {
+          const amt = Number(r.periodDeprn);
+          setDeprnSteps(prev => prev.map(s => (s.assetId === aid && s.kind === 'acct')
+            ? { ...s, acctLines: [
+                { label: 'Depreciation Expense (Dr)',     account: dr?.accountCombination || '—', dr: amt, cr: 0 },
+                { label: 'Accumulated Depreciation (Cr)', account: cr?.accountCombination || '—', dr: 0,   cr: amt },
+              ] }
+            : s));
+        }
+      } catch { /* accounts stay '—' */ }
+    });
   };
 
   const setStep = (i: number, patch: Partial<DeprnStep>) =>
@@ -1132,17 +1161,45 @@ const CalculateDeprn: React.FC = () => {
                     <Text style={{ fontSize: 10, color: '#999' }}>{s.expanded ? '▲' : '▼'}</Text>
                   </div>
                   {s.expanded && (
-                    <div style={{ padding: '0 12px 10px 32px', display: 'flex', gap: 12 }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <Text style={{ fontSize: 10, color: '#888' }}>Request Payload</Text>
-                        <pre style={{ fontSize: 11, background: '#0d0d0d', color: '#a8ff78', borderRadius: 4, padding: 8, margin: '4px 0 0', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{JSON.stringify(s.payload, null, 2)}</pre>
-                      </div>
-                      {s.response !== undefined && (
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <Text style={{ fontSize: 10, color: '#888' }}>Response</Text>
-                          <pre style={{ fontSize: 11, background: '#0d0d0d', color: '#79c0ff', borderRadius: 4, padding: 8, margin: '4px 0 0', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{JSON.stringify(s.response, null, 2)}</pre>
+                    <div style={{ padding: '0 12px 10px 32px' }}>
+                      {/* Dr/Cr accounting lines for the accounting step */}
+                      {isAcct && s.acctLines && (
+                        <div style={{ marginBottom: 8 }}>
+                          <Text style={{ fontSize: 10, color: '#888' }}>Accounting entry (Dr Depreciation Expense / Cr Accumulated Depreciation)</Text>
+                          <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse', marginTop: 4 }}>
+                            <thead>
+                              <tr style={{ background: '#fafafa', color: '#888' }}>
+                                <th style={{ textAlign: 'left', padding: '3px 6px' }}>Line</th>
+                                <th style={{ textAlign: 'left', padding: '3px 6px' }}>Account</th>
+                                <th style={{ textAlign: 'right', padding: '3px 6px' }}>Dr</th>
+                                <th style={{ textAlign: 'right', padding: '3px 6px' }}>Cr</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {s.acctLines.map((l, li) => (
+                                <tr key={li} style={{ borderTop: '1px solid #eee' }}>
+                                  <td style={{ padding: '3px 6px' }}>{l.label}</td>
+                                  <td style={{ padding: '3px 6px', fontFamily: 'monospace', color: '#1677ff' }}>{l.account}</td>
+                                  <td style={{ padding: '3px 6px', textAlign: 'right', fontFamily: 'monospace', color: l.dr ? REDWOOD.success : '#bbb' }}>{l.dr ? fmt(l.dr) : '—'}</td>
+                                  <td style={{ padding: '3px 6px', textAlign: 'right', fontFamily: 'monospace', color: l.cr ? REDWOOD.primary : '#bbb' }}>{l.cr ? fmt(l.cr) : '—'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
                         </div>
                       )}
+                      <div style={{ display: 'flex', gap: 12 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={{ fontSize: 10, color: '#888' }}>Request Payload</Text>
+                          <pre style={{ fontSize: 11, background: '#0d0d0d', color: '#a8ff78', borderRadius: 4, padding: 8, margin: '4px 0 0', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{JSON.stringify(s.payload, null, 2)}</pre>
+                        </div>
+                        {s.response !== undefined && (
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <Text style={{ fontSize: 10, color: '#888' }}>Response</Text>
+                            <pre style={{ fontSize: 11, background: '#0d0d0d', color: '#79c0ff', borderRadius: 4, padding: 8, margin: '4px 0 0', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{JSON.stringify(s.response, null, 2)}</pre>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
