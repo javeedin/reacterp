@@ -113,6 +113,7 @@ const ManageCustomers: React.FC = () => {
   const [searched, setSearched]       = useState(false);
   const [lastUrl, setLastUrl]         = useState('');   // last search endpoint (API icon)
   const [searchError, setSearchError] = useState('');   // last search error
+  const [gridFilter, setGridFilter]   = useState('');   // client-side quick filter on results
 
   // Tabs state
   const [tabs, setTabs]               = useState<PartyTab[]>([]);
@@ -126,6 +127,7 @@ const ManageCustomers: React.FC = () => {
     setSearching(true);
     setSearched(false);
     setSearchError('');
+    setGridFilter('');
     const p = new URLSearchParams();
     if (values.q) p.append('q', values.q);
     if (values.status) p.append('status', values.status);
@@ -428,7 +430,7 @@ const ManageCustomers: React.FC = () => {
                     Search
                   </Button>
                   <Button icon={<ReloadOutlined />}
-                    onClick={() => { form.resetFields(); setParties([]); setSearched(false); setSearchError(''); }}>
+                    onClick={() => { form.resetFields(); setParties([]); setSearched(false); setSearchError(''); setGridFilter(''); }}>
                     Reset
                   </Button>
                   {parties.length > 0 && (
@@ -482,7 +484,14 @@ const ManageCustomers: React.FC = () => {
             </div>
           )}
 
-          {searched && (
+          {searched && (() => {
+            const q = gridFilter.trim().toLowerCase();
+            const filtered = q
+              ? parties.filter(r =>
+                  [r.partyName, r.partyNumber, r.partyType, r.country, r.city, r.address1, r.address2, r.status]
+                    .some(v => (v || '').toString().toLowerCase().includes(q)))
+              : parties;
+            return (
             <Card
               size="small"
               style={{ borderRadius: 8, border: `1px solid ${REDWOOD.border}` }}
@@ -490,12 +499,25 @@ const ManageCustomers: React.FC = () => {
               title={
                 <Space>
                   <UserOutlined style={{ color: REDWOOD.primary }} />
-                  <span style={{ fontWeight: 600 }}>{parties.length} part{parties.length !== 1 ? 'ies' : 'y'} found</span>
+                  <span style={{ fontWeight: 600 }}>
+                    {q ? `${filtered.length} of ${parties.length}` : parties.length} part{(q ? filtered.length : parties.length) !== 1 ? 'ies' : 'y'} found
+                  </span>
                 </Space>
+              }
+              extra={
+                <Input
+                  allowClear
+                  size="small"
+                  prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
+                  placeholder="Filter results…"
+                  value={gridFilter}
+                  onChange={e => setGridFilter(e.target.value)}
+                  style={{ width: 240 }}
+                />
               }
             >
               <Table
-                dataSource={parties}
+                dataSource={filtered}
                 columns={searchColumns}
                 size="small"
                 loading={searching}
@@ -507,7 +529,8 @@ const ManageCustomers: React.FC = () => {
                 onRow={(r) => ({ onDoubleClick: () => openPartyTab(r), style: { cursor: 'pointer' } })}
               />
             </Card>
-          )}
+            );
+          })()}
         </div>
       ),
     },
