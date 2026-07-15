@@ -44,6 +44,16 @@ const fmt = (v: number | null | undefined) =>
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const daysInMonth = (y: number, m: number) => new Date(y, m + 1, 0).getDate();
 const periodLabel = (y: number, m: number) => `${MON[m]}-${String(y).slice(-2)}`;
+// Previous period name from a 'MMM-YY' label (e.g. 'Apr-26' -> 'Mar-26').
+const prevPeriodName = (name?: string): string => {
+  if (!name) return '';
+  const m = MON.indexOf(name.slice(0, 3));
+  const yy = parseInt(name.slice(4), 10);
+  if (m < 0 || isNaN(yy)) return '';
+  const d = new Date(2000 + yy, m, 1);
+  d.setMonth(d.getMonth() - 1);
+  return `${MON[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
+};
 const computePeriodDeprn = (
   cost: number, salvage: number, life: number, dpis?: string, deprnStart?: string, target?: string,
 ): number | null => {
@@ -115,6 +125,8 @@ const CalculateDeprn: React.FC = () => {
   const [statusUrl,     setStatusUrl]     = useState('');
   const [statusSelected, setStatusSelected] = useState<string[]>([]);   // selected assetIds
   const [statusPosting,  setStatusPosting]  = useState(false);
+  const [statusPrev,     setStatusPrev]     = useState<Record<string, number>>({});  // prev-period deprn by assetId
+  const [statusPrevName, setStatusPrevName] = useState('');
   const { user } = useAuth();
   const loggedUser = user?.username || user?.name || 'REACTERP';
 
@@ -210,6 +222,20 @@ const CalculateDeprn: React.FC = () => {
         notPostedCount: res.notPostedCount,
         totalCount: res.totalCount,
       });
+
+      // Also fetch the PREVIOUS period so we can show it alongside the current.
+      const prevName = prevPeriodName(res.periodName || periodName);
+      setStatusPrevName(prevName);
+      if (prevName) {
+        const pres = await getDeprnStatus({ bookTypeCode: selectedBook, periodName: prevName });
+        const map: Record<string, number> = {};
+        (pres.items || []).forEach((it: any) => {
+          if (it.deprnAmount != null) map[String(it.assetId)] = Number(it.deprnAmount);
+        });
+        setStatusPrev(map);
+      } else {
+        setStatusPrev({});
+      }
     } finally {
       setStatusLoading(false);
     }
@@ -387,7 +413,11 @@ const CalculateDeprn: React.FC = () => {
       render: (v: number) => <Text style={mono}>{v == null ? '—' : fmt(v)}</Text> },
     { title: 'Opening NBV', dataIndex: 'openingNbv', key: 'openingNbv', width: 140, align: 'right' as const,
       render: (v: number) => <Text style={mono}>{v == null ? '—' : fmt(v)}</Text> },
-    { title: 'Depreciation', dataIndex: 'periodDeprn', key: 'periodDeprn', width: 130, align: 'right' as const,
+    { title: `Depreciation${statusPrevName ? ` (${statusPrevName})` : ' (Prev)'}`, dataIndex: 'prevDeprn', key: 'prevDeprn', width: 140, align: 'right' as const,
+      render: (v: number | null) => v == null
+        ? <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
+        : <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.neutral500 }}>{fmt(v)}</Text> },
+    { title: `Depreciation${statusMeta?.periodName ? ` (${statusMeta.periodName})` : ''}`, dataIndex: 'periodDeprn', key: 'periodDeprn', width: 150, align: 'right' as const,
       render: (v: number | null, r: any) => v == null
         ? <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
         : <Text style={monoRed} title={r.status === 'Posted' ? 'Posted amount' : 'Calculated (not yet posted)'}>{fmt(v)}</Text> },
@@ -414,9 +444,14 @@ const CalculateDeprn: React.FC = () => {
           Number(r.cost), Number(r.salvageValue ?? 0), Number(r.lifeInMonths ?? 0),
           r.datePlacedInService, r.deprnStartDate, target,
         ) : null;
-        return { ...r, periodDeprn: server ?? calc };
+        // previous period: from the prev-period fetch, else client calc
+        const prev = statusPrev[String(r.assetId)] ?? (statusPrevName ? computePeriodDeprn(
+          Number(r.cost), Number(r.salvageValue ?? 0), Number(r.lifeInMonths ?? 0),
+          r.datePlacedInService, r.deprnStartDate, statusPrevName,
+        ) : null);
+        return { ...r, periodDeprn: server ?? calc, prevDeprn: prev };
       });
-  }, [statusItems, statusMeta, statusPeriodName]);
+  }, [statusItems, statusMeta, statusPeriodName, statusPrev, statusPrevName]);
 
   const filteredStatusItems = statusFilter === 'all'
     ? enrichedStatusItems
@@ -802,7 +837,7 @@ const CalculateDeprn: React.FC = () => {
                         columns={statusColumns}
                         rowKey="assetId"
                         size="small"
-                        scroll={{ x: 1180, y: 440 }}
+                        scroll={{ x: 1330, y: 440 }}
                         pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `${t} assets` }}
                         locale={{ emptyText: 'No assets found for this book/period' }}
                         rowSelection={{
