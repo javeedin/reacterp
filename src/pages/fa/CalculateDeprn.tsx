@@ -9,7 +9,7 @@ import {
   PlayCircleOutlined, SyncOutlined, CloudUploadOutlined, EyeOutlined,
   SwapOutlined,
 } from '@ant-design/icons';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   getBookControls, getDeprnLastPeriod,
   getDeprnPreview, postDeprnCalculate,
@@ -91,6 +91,7 @@ const computePeriodDeprn = (
 type ViewMode = 'last' | 'preview' | 'compare' | 'status';
 
 const CalculateDeprn: React.FC = () => {
+  const navigate = useNavigate();
   const [bookControls, setBookControls] = useState<BookControlRecord[]>([]);
   const [selectedBook, setSelectedBook] = useState<string>('');
   const [lastPeriod,   setLastPeriod]   = useState<any | null>(null);
@@ -404,7 +405,14 @@ const CalculateDeprn: React.FC = () => {
   const mono   = { fontSize: 12, fontFamily: 'monospace' } as const;
   const statusColumns = [
     { title: 'Asset #',     dataIndex: 'assetNumber', key: 'assetNumber', width: 100, fixed: 'left' as const,
-      render: (v: string) => <Text style={{ fontSize: 12, fontWeight: 600 }}>{v}</Text> },
+      render: (v: string) => (
+        <Tooltip title="Open asset details">
+          <Button type="link" size="small" style={{ padding: 0, height: 'auto', fontSize: 12, fontWeight: 600 }}
+            onClick={() => navigate(`/fa/assets?assetNumber=${encodeURIComponent(v)}`)}>
+            {v}
+          </Button>
+        </Tooltip>
+      ) },
     { title: 'Description', dataIndex: 'description', key: 'description', width: 200, ellipsis: true,
       render: (v: string) => <Tooltip title={v}><Text style={{ fontSize: 12 }}>{v || '—'}</Text></Tooltip> },
     { title: 'Period',      dataIndex: 'periodName', key: 'periodName', width: 90,

@@ -15,7 +15,7 @@ import {
   FilterOutlined, DownloadOutlined, DollarOutlined, SaveOutlined, DeleteOutlined,
   AccountBookOutlined, AuditOutlined, TagsOutlined,
 } from '@ant-design/icons';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { postSlaToGL } from '../../services/glPosting.service';
 import { useAuth } from '../../context/AuthContext';
 import { APEX_DB_CONFIG } from '../../config/api.config';
@@ -2730,6 +2730,22 @@ const ManageAssets: React.FC = () => {
   }, [form, pageSize]);
 
   useEffect(() => { runSearch(1, pageSize); }, []);
+
+  // Deep-link: /fa/assets?assetNumber=100009 → auto-open that asset's tab
+  // (e.g. clicking an asset from Calculate Depreciation → Status by Period).
+  const [urlParams] = useSearchParams();
+  useEffect(() => {
+    const an = urlParams.get('assetNumber');
+    if (!an) return;
+    (async () => {
+      form.setFieldsValue({ assetNumber: an });
+      const res = await searchAssets({ assetNumber: an, limit: 1 });
+      const item = (res.items || [])[0];
+      if (item) openAssetTab(item);
+      else message.warning(`Asset ${an} not found`);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlParams]);
 
   // Open asset in new tab
   const openAssetTab = async (asset: AssetRecord) => {
