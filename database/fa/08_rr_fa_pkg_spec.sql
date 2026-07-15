@@ -103,6 +103,21 @@ CREATE OR REPLACE PACKAGE RR_FA_PKG AS
         p_result         OUT CLOB
     );
 
+    -- ── Depreciation by period (all assets, one period) ───────────────────────
+    -- Pass a period (name or counter). Returns every ACTIVE asset for the book
+    -- with its depreciation for that period from RR_FA_DEPRN_DETAIL, and a
+    -- status of 'Posted' (depreciated) or 'Not Posted'.
+    PROCEDURE GET_DEPRN_BY_PERIOD (
+        p_book_type      IN  VARCHAR2,
+        p_period_name    IN  VARCHAR2,
+        p_period_counter IN  VARCHAR2,
+        p_asset_number   IN  VARCHAR2,
+        p_offset         IN  NUMBER,
+        p_limit          IN  NUMBER,
+        p_http_status    OUT NUMBER,
+        p_result         OUT CLOB
+    );
+
     -- ── Write Operations ──────────────────────────────────────────────────────
     PROCEDURE CREATE_ASSET (
         p_body        IN  CLOB,
