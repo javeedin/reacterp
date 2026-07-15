@@ -1350,6 +1350,21 @@ const ManageMultiperiod: React.FC = () => {
                 Suspend{(mpaSelected[tab.key]?.length ?? 0) > 0 ? ` (${mpaSelected[tab.key]!.length})` : ''}
               </Button>
             </Tooltip>
+            <Tooltip title={
+              <div style={{ maxWidth: 460 }}>
+                <div style={{ fontSize: 11, marginBottom: 4 }}>Suspend endpoint:</div>
+                <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#fff', wordBreak: 'break-all' }}>
+                  POST {APEX_DB_CONFIG.baseUrl}/ap/multiperiod/suspend
+                </div>
+                <div style={{ fontFamily: 'monospace', fontSize: 10, marginTop: 4, color: '#bbb', wordBreak: 'break-all' }}>
+                  {`{ "scheduleIds": [${(mpaSelected[tab.key] ?? []).join(', ')}], "status": "Suspended", "updatedBy": "…" }`}
+                </div>
+                <div style={{ fontSize: 10, marginTop: 6, opacity: 0.75 }}>Click to copy URL</div>
+              </div>
+            }>
+              <Button type="text" size="small" icon={<ApiOutlined style={{ color: REDWOOD.info }} />}
+                onClick={() => { navigator.clipboard.writeText(`${APEX_DB_CONFIG.baseUrl}/ap/multiperiod/suspend`); message.success('Suspend URL copied'); }} />
+            </Tooltip>
           </Space>
 
           <Tooltip title={postDisabledReason ?? `Create Dr Expense / Cr Accrual entries for ${period}`}>
