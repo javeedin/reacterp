@@ -804,13 +804,12 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
             RETURN;
         END IF;
 
-        SELECT MAX(PERIOD_NAME),
-               TRUNC(MAX(NVL(CALENDAR_PERIOD_OPEN_DATE, PERIOD_OPEN_DATE)), 'MM')
-          INTO v_pname, v_tgt_month
+        SELECT MAX(PERIOD_NAME) INTO v_pname
           FROM RR_FA_DEPRN_PERIODS WHERE BOOK_TYPE_CODE = p_book_type AND PERIOD_COUNTER = v_pc;
 
-        -- Fallback: derive the target month from the period name (e.g. 'Apr-26').
-        IF v_tgt_month IS NULL AND v_pname IS NOT NULL THEN
+        -- Derive the target month from the period name (e.g. 'Apr-26').
+        -- (The period date columns are stored as NUMBER, so we parse the name.)
+        IF v_pname IS NOT NULL THEN
             BEGIN
                 v_tgt_month := TRUNC(TO_DATE(v_pname, 'Mon-RR'), 'MM');
             EXCEPTION WHEN OTHERS THEN
