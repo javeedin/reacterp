@@ -778,9 +778,15 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                    NVL(dsum.COST, b.COST) - NVL(dsum.DEPRN_RESERVE, 0)  AS NBV,
                    dsum.DEPRN_RUN_DATE                                  AS DEPRN_RUN_DATE,
                    dsum.ACCOUNTED_STATUS                                AS ACCOUNTED_STATUS,
+                   NVL(b.SALVAGE_VALUE, 0)                              AS SALVAGE_VALUE,
+                   m.METHOD_CODE                                        AS METHOD_CODE,
+                   m.LIFE_IN_MONTHS                                     AS LIFE_IN_MONTHS,
+                   TO_CHAR(b.DATE_PLACED_IN_SERVICE, 'YYYY-MM-DD')      AS DATE_PLACED_IN_SERVICE,
+                   TO_CHAR(b.DEPRN_START_DATE, 'YYYY-MM-DD')            AS DEPRN_START_DATE,
                    CASE WHEN dsum.ASSET_ID IS NOT NULL THEN 'Posted' ELSE 'Not Posted' END AS STATUS
               FROM RR_FA_BOOKS b
               JOIN RR_FA_ADDITIONS a ON a.ASSET_ID = b.ASSET_ID
+              LEFT JOIN RR_FA_METHODS m ON m.METHOD_ID = b.METHOD_ID
               LEFT JOIN (
                     SELECT dd.ASSET_ID, dd.BOOK_TYPE_CODE,
                            SUM(NVL(dd.DEPRN_AMOUNT, 0))  AS DEPRN_AMOUNT,
@@ -804,17 +810,22 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
             v_tot_nbv   := v_tot_nbv   + NVL(r.NBV, 0);
 
             APEX_JSON.OPEN_OBJECT;
-            APEX_JSON.WRITE('assetId',         r.ASSET_ID);
-            APEX_JSON.WRITE('assetNumber',     r.ASSET_NUMBER);
-            APEX_JSON.WRITE('description',     r.DESCRIPTION);
-            APEX_JSON.WRITE('cost',            r.COST);
-            APEX_JSON.WRITE('deprnAmount',     r.DEPRN_AMOUNT);
-            APEX_JSON.WRITE('ytdDeprn',        r.YTD_DEPRN);
-            APEX_JSON.WRITE('deprnReserve',    r.DEPRN_RESERVE);
-            APEX_JSON.WRITE('nbv',             r.NBV);
-            APEX_JSON.WRITE('deprnRunDate',    r.DEPRN_RUN_DATE);
-            APEX_JSON.WRITE('accountedStatus', r.ACCOUNTED_STATUS);
-            APEX_JSON.WRITE('status',          r.STATUS);
+            APEX_JSON.WRITE('assetId',              r.ASSET_ID);
+            APEX_JSON.WRITE('assetNumber',          r.ASSET_NUMBER);
+            APEX_JSON.WRITE('description',          r.DESCRIPTION);
+            APEX_JSON.WRITE('cost',                 r.COST);
+            APEX_JSON.WRITE('deprnAmount',          r.DEPRN_AMOUNT);
+            APEX_JSON.WRITE('ytdDeprn',             r.YTD_DEPRN);
+            APEX_JSON.WRITE('deprnReserve',         r.DEPRN_RESERVE);
+            APEX_JSON.WRITE('nbv',                  r.NBV);
+            APEX_JSON.WRITE('deprnRunDate',         r.DEPRN_RUN_DATE);
+            APEX_JSON.WRITE('accountedStatus',      r.ACCOUNTED_STATUS);
+            APEX_JSON.WRITE('salvageValue',         r.SALVAGE_VALUE);
+            APEX_JSON.WRITE('methodCode',           r.METHOD_CODE);
+            APEX_JSON.WRITE('lifeInMonths',         r.LIFE_IN_MONTHS);
+            APEX_JSON.WRITE('datePlacedInService',  r.DATE_PLACED_IN_SERVICE);
+            APEX_JSON.WRITE('deprnStartDate',       r.DEPRN_START_DATE);
+            APEX_JSON.WRITE('status',               r.STATUS);
             APEX_JSON.CLOSE_OBJECT;
         END LOOP;
 

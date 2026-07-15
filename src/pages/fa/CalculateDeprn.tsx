@@ -13,10 +13,11 @@ import { Link } from 'react-router-dom';
 import {
   getBookControls, getDeprnLastPeriod,
   getDeprnPreview, postDeprnCalculate,
-  getDeprnWorkbench, getDeprnPeriods, getDeprnStatus,
+  getDeprnWorkbench, getDeprnPeriods, getDeprnStatus, postSingleDeprn,
 } from '../../services/fa.service';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import type { BookControlRecord } from '../../services/fa.service';
+import { useAuth } from '../../context/AuthContext';
 
 const { Content } = Layout;
 const { Text, Title } = Typography;
@@ -35,6 +36,47 @@ const FA_COLOR = '#CA7700';
 
 const fmt = (v: number | null | undefined) =>
   v == null ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// ── Period straight-line depreciation (same daily-rate math as the Manage
+// Assets "Depreciation Preview" dialog) — returns the depreciation for one
+// target period ("MMM-YY", e.g. "Apr-26"). Used to show/post the amount for
+// assets that are not yet depreciated in that period.
+const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const daysInMonth = (y: number, m: number) => new Date(y, m + 1, 0).getDate();
+const periodLabel = (y: number, m: number) => `${MON[m]}-${String(y).slice(-2)}`;
+const computePeriodDeprn = (
+  cost: number, salvage: number, life: number, dpis?: string, deprnStart?: string, target?: string,
+): number | null => {
+  if (!cost || cost <= 0 || !life || life <= 0 || !target) return null;
+  let startY: number, startM: number;
+  if (dpis) {
+    const d = new Date(dpis); if (isNaN(d.getTime())) return null;
+    // depreciation starts the month AFTER date-placed-in-service
+    startY = d.getFullYear() + Math.floor((d.getMonth() + 1) / 12);
+    startM = (d.getMonth() + 1) % 12;
+  } else if (deprnStart) {
+    const d = new Date(deprnStart); if (isNaN(d.getTime())) return null;
+    startY = d.getFullYear(); startM = d.getMonth();
+  } else return null;
+
+  let totalDays = 0;
+  for (let i = 0; i < life; i++) {
+    totalDays += daysInMonth(startY + Math.floor((startM + i) / 12), (startM + i) % 12);
+  }
+  if (totalDays <= 0) return null;
+  const dailyRate = (cost - salvage) / totalDays;
+
+  let nbv = cost;
+  for (let i = 0; i < life + 3; i++) {
+    const yy = startY + Math.floor((startM + i) / 12);
+    const mm = (startM + i) % 12;
+    const depr = Math.min(dailyRate * daysInMonth(yy, mm), nbv - salvage);
+    if (depr <= 0) continue;
+    if (periodLabel(yy, mm).toUpperCase() === target.toUpperCase()) return Math.round(depr * 100) / 100;
+    nbv -= depr;
+  }
+  return null;
+};
 
 type ViewMode = 'last' | 'preview' | 'compare' | 'status';
 
@@ -71,6 +113,10 @@ const CalculateDeprn: React.FC = () => {
   const [statusFilter,  setStatusFilter]  = useState<'all' | 'posted' | 'notposted'>('all');
   const [statusError,   setStatusError]   = useState('');
   const [statusUrl,     setStatusUrl]     = useState('');
+  const [statusSelected, setStatusSelected] = useState<string[]>([]);   // selected assetIds
+  const [statusPosting,  setStatusPosting]  = useState(false);
+  const { user } = useAuth();
+  const loggedUser = user?.username || user?.name || 'REACTERP';
 
   useEffect(() => {
     getBookControls().then((bc) => {
@@ -144,6 +190,7 @@ const CalculateDeprn: React.FC = () => {
     if (!selectedBook || !periodName) return;
     setStatusLoading(true);
     setStatusError('');
+    setStatusSelected([]);
     setViewMode('status');
     const url = `${APEX_DB_CONFIG.baseUrl}/fa/deprn-by-period?bookTypeCode=${encodeURIComponent(selectedBook)}&periodName=${encodeURIComponent(periodName)}`;
     setStatusUrl(url);
@@ -332,10 +379,10 @@ const CalculateDeprn: React.FC = () => {
       render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Cost',        dataIndex: 'cost', key: 'cost', width: 130, align: 'right' as const,
       render: (v: number) => <Text style={{ fontSize: 12 }}>{fmt(v)}</Text> },
-    { title: 'Deprn Amount', dataIndex: 'deprnAmount', key: 'deprnAmount', width: 130, align: 'right' as const,
-      render: (v: number, r: any) => r.status === 'Posted'
-        ? <Text style={{ fontSize: 12, color: REDWOOD.primary, fontWeight: 600 }}>{fmt(v)}</Text>
-        : <Text type="secondary" style={{ fontSize: 12 }}>—</Text> },
+    { title: 'Depreciation', dataIndex: 'periodDeprn', key: 'periodDeprn', width: 130, align: 'right' as const,
+      render: (v: number | null, r: any) => v == null
+        ? <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
+        : <Text style={{ fontSize: 12, color: REDWOOD.primary, fontWeight: 600 }} title={r.status === 'Posted' ? 'Posted amount' : 'Calculated (not yet posted)'}>{fmt(v)}</Text> },
     { title: 'Reserve',     dataIndex: 'deprnReserve', key: 'deprnReserve', width: 120, align: 'right' as const,
       render: (v: number) => <Text style={{ fontSize: 12 }}>{fmt(v)}</Text> },
     { title: 'NBV',         dataIndex: 'nbv', key: 'nbv', width: 120, align: 'right' as const,
@@ -350,9 +397,51 @@ const CalculateDeprn: React.FC = () => {
         : <Tag color="default" icon={<ClockCircleOutlined />} style={{ fontSize: 11, color: REDWOOD.neutral500 }}>Not Posted</Tag> },
   ];
 
+  // Enrich each asset with the period's depreciation amount: use the actual
+  // posted amount when present, otherwise compute it (same math as the dialog).
+  // Exclude assets with 0 cost.
+  const enrichedStatusItems = React.useMemo(() => {
+    const target = statusMeta?.periodName || statusPeriodName;
+    return statusItems
+      .filter(r => Number(r.cost) > 0)
+      .map(r => {
+        const posted = r.status === 'Posted';
+        const actual = r.deprnAmount != null ? Number(r.deprnAmount) : null;
+        const calc = computePeriodDeprn(
+          Number(r.cost), Number(r.salvageValue ?? 0), Number(r.lifeInMonths ?? 0),
+          r.datePlacedInService, r.deprnStartDate, target,
+        );
+        return { ...r, periodDeprn: posted && actual != null ? actual : calc };
+      });
+  }, [statusItems, statusMeta, statusPeriodName]);
+
   const filteredStatusItems = statusFilter === 'all'
-    ? statusItems
-    : statusItems.filter(r => statusFilter === 'posted' ? r.status === 'Posted' : r.status === 'Not Posted');
+    ? enrichedStatusItems
+    : enrichedStatusItems.filter(r => statusFilter === 'posted' ? r.status === 'Posted' : r.status === 'Not Posted');
+
+  const handlePostSelected = async () => {
+    const target = statusMeta?.periodName || statusPeriodName;
+    const rows = enrichedStatusItems.filter(r =>
+      statusSelected.includes(String(r.assetId)) && r.status !== 'Posted' && (r.periodDeprn ?? 0) > 0);
+    if (rows.length === 0) { message.warning('No postable lines selected (need Not-Posted with an amount).'); return; }
+    setStatusPosting(true);
+    let ok = 0, fail = 0;
+    for (const r of rows) {
+      const res = await postSingleDeprn({
+        assetId: String(r.assetId),
+        bookTypeCode: selectedBook,
+        periodName: target,
+        deprnAmount: Number(r.periodDeprn),
+        createdBy: loggedUser,
+      });
+      if (res.success || res.status === 'POSTED' || res.status === 'ALREADY_EXISTS') ok++; else fail++;
+    }
+    setStatusPosting(false);
+    if (ok > 0) message.success(`${ok} line(s) depreciation posted${fail ? `, ${fail} failed` : ''}`);
+    else message.error(`Post failed for ${fail} line(s)`);
+    setStatusSelected([]);
+    handleShowStatus(statusPeriodName);   // refresh
+  };
 
   const isPreview = viewMode === 'preview';
   const isCompare = viewMode === 'compare';
@@ -680,23 +769,45 @@ const CalculateDeprn: React.FC = () => {
                           </Col>
                         ))}
                       </Row>
-                      <Space style={{ marginBottom: 10 }}>
-                        <Button size="small" type={statusFilter === 'all' ? 'primary' : 'default'} onClick={() => setStatusFilter('all')}>All ({statusItems.length})</Button>
-                        <Button size="small" type={statusFilter === 'posted' ? 'primary' : 'default'}
-                          style={statusFilter === 'posted' ? { background: REDWOOD.success, borderColor: REDWOOD.success } : {}}
-                          onClick={() => setStatusFilter('posted')}>Posted ({statusMeta.postedCount ?? 0})</Button>
-                        <Button size="small" type={statusFilter === 'notposted' ? 'primary' : 'default'}
-                          style={statusFilter === 'notposted' ? { background: REDWOOD.warning, borderColor: REDWOOD.warning } : {}}
-                          onClick={() => setStatusFilter('notposted')}>Not Posted ({statusMeta.notPostedCount ?? 0})</Button>
-                      </Space>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                        <Space>
+                          <Button size="small" type={statusFilter === 'all' ? 'primary' : 'default'} onClick={() => setStatusFilter('all')}>All ({enrichedStatusItems.length})</Button>
+                          <Button size="small" type={statusFilter === 'posted' ? 'primary' : 'default'}
+                            style={statusFilter === 'posted' ? { background: REDWOOD.success, borderColor: REDWOOD.success } : {}}
+                            onClick={() => setStatusFilter('posted')}>Posted ({statusMeta.postedCount ?? 0})</Button>
+                          <Button size="small" type={statusFilter === 'notposted' ? 'primary' : 'default'}
+                            style={statusFilter === 'notposted' ? { background: REDWOOD.warning, borderColor: REDWOOD.warning } : {}}
+                            onClick={() => setStatusFilter('notposted')}>Not Posted ({statusMeta.notPostedCount ?? 0})</Button>
+                        </Space>
+                        <Tooltip title={statusSelected.length === 0
+                          ? 'Select one or more Not-Posted assets to post their depreciation'
+                          : `Post depreciation (fa/deprn-post-single) for ${statusSelected.length} asset(s), period ${statusMeta.periodName}`}>
+                          <Button
+                            type="primary"
+                            icon={<CloudUploadOutlined />}
+                            loading={statusPosting}
+                            disabled={statusSelected.length === 0}
+                            onClick={handlePostSelected}
+                            style={statusSelected.length > 0 ? { background: FA_COLOR, borderColor: FA_COLOR } : {}}
+                          >
+                            Create Depreciation ({statusSelected.length})
+                          </Button>
+                        </Tooltip>
+                      </div>
                       <Table
                         dataSource={filteredStatusItems}
                         columns={statusColumns}
                         rowKey="assetId"
                         size="small"
-                        scroll={{ x: 1050, y: 440 }}
+                        scroll={{ x: 1100, y: 440 }}
                         pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `${t} assets` }}
                         locale={{ emptyText: 'No assets found for this book/period' }}
+                        rowSelection={{
+                          selectedRowKeys: statusSelected,
+                          onChange: (keys) => setStatusSelected(keys as string[]),
+                          // Only Not-Posted assets with a computable amount can be posted.
+                          getCheckboxProps: (r: any) => ({ disabled: r.status === 'Posted' || !(r.periodDeprn > 0) }),
+                        }}
                       />
                     </>
                   ) : (
