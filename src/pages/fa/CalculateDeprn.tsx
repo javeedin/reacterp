@@ -13,7 +13,7 @@ import { Link } from 'react-router-dom';
 import {
   getBookControls, getDeprnLastPeriod,
   getDeprnPreview, postDeprnCalculate,
-  getDeprnWorkbench,
+  getDeprnWorkbench, getDeprnPeriods, getDeprnStatus,
 } from '../../services/fa.service';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import type { BookControlRecord } from '../../services/fa.service';
@@ -36,7 +36,7 @@ const FA_COLOR = '#CA7700';
 const fmt = (v: number | null | undefined) =>
   v == null ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-type ViewMode = 'last' | 'preview' | 'compare';
+type ViewMode = 'last' | 'preview' | 'compare' | 'status';
 
 const CalculateDeprn: React.FC = () => {
   const [bookControls, setBookControls] = useState<BookControlRecord[]>([]);
@@ -60,6 +60,15 @@ const CalculateDeprn: React.FC = () => {
 
   // Which table to show
   const [viewMode, setViewMode] = useState<ViewMode>('last');
+
+  // Status-by-period (all assets)
+  const [periodsList,   setPeriodsList]   = useState<any[]>([]);
+  const [statusPeriod,  setStatusPeriod]  = useState<number | null>(null);   // periodCounter
+  const [statusItems,   setStatusItems]   = useState<any[]>([]);
+  const [statusSummary, setStatusSummary] = useState<any>(null);
+  const [statusMeta,    setStatusMeta]    = useState<{ periodName?: string; postedCount?: number; notPostedCount?: number; totalCount?: number } | null>(null);
+  const [statusLoading, setStatusLoading] = useState(false);
+  const [statusFilter,  setStatusFilter]  = useState<'all' | 'posted' | 'notposted'>('all');
 
   useEffect(() => {
     getBookControls().then((bc) => {
@@ -101,6 +110,35 @@ const CalculateDeprn: React.FC = () => {
   useEffect(() => {
     if (selectedBook) loadAll(selectedBook);
   }, [selectedBook, loadAll]);
+
+  // Load the full period list for the status-by-period selector
+  useEffect(() => {
+    if (!selectedBook) { setPeriodsList([]); return; }
+    getDeprnPeriods(selectedBook).then((ps) => {
+      setPeriodsList(ps);
+      setStatusPeriod(prev => prev ?? (ps[0]?.periodCounter != null ? Number(ps[0].periodCounter) : null));
+    });
+  }, [selectedBook]);
+
+  const handleShowStatus = useCallback(async (periodCounter: number | null) => {
+    if (!selectedBook || periodCounter == null) return;
+    setStatusLoading(true);
+    setViewMode('status');
+    try {
+      const res = await getDeprnStatus({ bookTypeCode: selectedBook, periodCounter });
+      if (res.success === false) { message.error(res.error || 'Failed to load status'); return; }
+      setStatusItems(res.items || []);
+      setStatusSummary(res.summary || null);
+      setStatusMeta({
+        periodName: res.periodName,
+        postedCount: res.postedCount,
+        notPostedCount: res.notPostedCount,
+        totalCount: res.totalCount,
+      });
+    } finally {
+      setStatusLoading(false);
+    }
+  }, [selectedBook]);
 
   const handlePreview = async () => {
     if (!lastPeriod?.nextPeriodName) return;
@@ -166,6 +204,12 @@ const CalculateDeprn: React.FC = () => {
         <Text strong>3. Preview next period depreciation</Text>
         <Typography.Text copyable code style={{ display: 'block', fontSize: 11, marginTop: 4, wordBreak: 'break-all' }}>
           {`${APEX_DB_CONFIG.baseUrl}/fa/deprn-calculate/preview?bookTypeCode=${encodeURIComponent(selectedBook)}&periodName=${encodeURIComponent(lastPeriod?.nextPeriodName || '')}`}
+        </Typography.Text>
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <Text strong>Status by period (all assets)</Text>
+        <Typography.Text copyable code style={{ display: 'block', fontSize: 11, marginTop: 4, wordBreak: 'break-all' }}>
+          {`${APEX_DB_CONFIG.baseUrl}/fa/deprn-status?bookTypeCode=${encodeURIComponent(selectedBook)}&periodCounter=${statusPeriod ?? '...'}`}
         </Typography.Text>
       </div>
       <div>
@@ -253,8 +297,38 @@ const CalculateDeprn: React.FC = () => {
       render: (v: number) => <Text style={{ fontSize: 12, color: REDWOOD.success }}>{fmt(v)}</Text> },
   ];
 
+  const statusColumns = [
+    { title: 'Asset #',     dataIndex: 'assetNumber', key: 'assetNumber', width: 110, fixed: 'left' as const,
+      render: (v: string) => <Text style={{ fontSize: 12, fontWeight: 600 }}>{v}</Text> },
+    { title: 'Description', dataIndex: 'description', key: 'description', width: 240,
+      render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+    { title: 'Cost',        dataIndex: 'cost', key: 'cost', width: 130, align: 'right' as const,
+      render: (v: number) => <Text style={{ fontSize: 12 }}>{fmt(v)}</Text> },
+    { title: 'Deprn Amount', dataIndex: 'deprnAmount', key: 'deprnAmount', width: 130, align: 'right' as const,
+      render: (v: number, r: any) => r.status === 'Posted'
+        ? <Text style={{ fontSize: 12, color: REDWOOD.primary, fontWeight: 600 }}>{fmt(v)}</Text>
+        : <Text type="secondary" style={{ fontSize: 12 }}>—</Text> },
+    { title: 'Reserve',     dataIndex: 'deprnReserve', key: 'deprnReserve', width: 120, align: 'right' as const,
+      render: (v: number) => <Text style={{ fontSize: 12 }}>{fmt(v)}</Text> },
+    { title: 'NBV',         dataIndex: 'nbv', key: 'nbv', width: 120, align: 'right' as const,
+      render: (v: number) => <Text style={{ fontSize: 12, color: REDWOOD.success, fontWeight: 600 }}>{fmt(v)}</Text> },
+    { title: 'Run Date',    dataIndex: 'deprnRunDate', key: 'deprnRunDate', width: 120,
+      render: (v: string) => <Text style={{ fontSize: 12 }}>{fmtDate(v)}</Text> },
+    { title: 'Status',      dataIndex: 'status', key: 'status', width: 120, fixed: 'right' as const,
+      filters: [{ text: 'Posted', value: 'Posted' }, { text: 'Not Posted', value: 'Not Posted' }],
+      onFilter: (value: any, r: any) => r.status === value,
+      render: (v: string) => v === 'Posted'
+        ? <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: 11 }}>Posted</Tag>
+        : <Tag color="default" icon={<ClockCircleOutlined />} style={{ fontSize: 11, color: REDWOOD.neutral500 }}>Not Posted</Tag> },
+  ];
+
+  const filteredStatusItems = statusFilter === 'all'
+    ? statusItems
+    : statusItems.filter(r => statusFilter === 'posted' ? r.status === 'Posted' : r.status === 'Not Posted');
+
   const isPreview = viewMode === 'preview';
   const isCompare = viewMode === 'compare';
+  const isStatus  = viewMode === 'status';
 
   // Build compare rows — join last actuals + preview by assetId
   const compareRows = React.useMemo(() => {
@@ -452,6 +526,15 @@ const CalculateDeprn: React.FC = () => {
                       Compare
                     </Button>
                   )}
+                  <Button
+                    type={isStatus ? 'primary' : 'default'}
+                    size="small"
+                    icon={<CheckCircleOutlined />}
+                    onClick={() => { setViewMode('status'); if (statusItems.length === 0 && statusPeriod != null) handleShowStatus(statusPeriod); }}
+                    style={isStatus ? { background: '#1677ff', borderColor: '#1677ff' } : { color: '#1677ff', borderColor: '#1677ff' }}
+                  >
+                    Status by Period
+                  </Button>
                 </Space>
               </div>
 
@@ -489,7 +572,85 @@ const CalculateDeprn: React.FC = () => {
                 );
               })()}
 
+              {/* ── Status by Period (all assets) ── */}
+              {isStatus && (
+                <Card
+                  style={{ borderRadius: 12, border: 'none', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
+                  styles={{ body: { padding: '16px 20px' } }}
+                  title={
+                    <Space wrap>
+                      <CheckCircleOutlined style={{ color: '#1677ff' }} />
+                      <Text strong>Depreciation Status — all assets</Text>
+                      <Text type="secondary" style={{ fontSize: 12 }}>Period:</Text>
+                      <Select
+                        size="small"
+                        style={{ width: 190 }}
+                        placeholder="Select period"
+                        value={statusPeriod ?? undefined}
+                        onChange={(v) => { setStatusPeriod(v); handleShowStatus(v); }}
+                        showSearch
+                        optionFilterProp="children"
+                      >
+                        {periodsList.map((p: any) => (
+                          <Option key={p.periodCounter} value={Number(p.periodCounter)}>
+                            {p.periodName} (FY {p.fiscalYear})
+                          </Option>
+                        ))}
+                      </Select>
+                      <Button size="small" icon={<ReloadOutlined />} loading={statusLoading}
+                        onClick={() => handleShowStatus(statusPeriod)}>Show</Button>
+                    </Space>
+                  }
+                >
+                  {statusLoading ? (
+                    <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+                  ) : statusMeta ? (
+                    <>
+                      <Row gutter={[10, 10]} style={{ marginBottom: 12 }}>
+                        {[
+                          { label: 'Total Assets',  value: statusMeta.totalCount ?? 0,      color: '#1677ff', isCount: true },
+                          { label: 'Posted',         value: statusMeta.postedCount ?? 0,     color: REDWOOD.success, isCount: true },
+                          { label: 'Not Posted',     value: statusMeta.notPostedCount ?? 0,  color: REDWOOD.warning, isCount: true },
+                          { label: 'Deprn Amount',   value: statusSummary?.totalDeprnAmount, color: REDWOOD.primary },
+                        ].map(s => (
+                          <Col xs={12} md={6} key={s.label}>
+                            <Card size="small" styles={{ body: { padding: '10px 14px' } }}
+                              style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, background: REDWOOD.neutral100 }}>
+                              <Text style={{ fontSize: 11, color: REDWOOD.neutral500, display: 'block' }}>{s.label}</Text>
+                              <Text style={{ fontSize: 15, fontWeight: 700, color: s.color }}>
+                                {s.isCount ? s.value : fmt(s.value as number)}
+                              </Text>
+                            </Card>
+                          </Col>
+                        ))}
+                      </Row>
+                      <Space style={{ marginBottom: 10 }}>
+                        <Button size="small" type={statusFilter === 'all' ? 'primary' : 'default'} onClick={() => setStatusFilter('all')}>All ({statusItems.length})</Button>
+                        <Button size="small" type={statusFilter === 'posted' ? 'primary' : 'default'}
+                          style={statusFilter === 'posted' ? { background: REDWOOD.success, borderColor: REDWOOD.success } : {}}
+                          onClick={() => setStatusFilter('posted')}>Posted ({statusMeta.postedCount ?? 0})</Button>
+                        <Button size="small" type={statusFilter === 'notposted' ? 'primary' : 'default'}
+                          style={statusFilter === 'notposted' ? { background: REDWOOD.warning, borderColor: REDWOOD.warning } : {}}
+                          onClick={() => setStatusFilter('notposted')}>Not Posted ({statusMeta.notPostedCount ?? 0})</Button>
+                      </Space>
+                      <Table
+                        dataSource={filteredStatusItems}
+                        columns={statusColumns}
+                        rowKey="assetId"
+                        size="small"
+                        scroll={{ x: 1050, y: 440 }}
+                        pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `${t} assets` }}
+                        locale={{ emptyText: 'No assets found for this book/period' }}
+                      />
+                    </>
+                  ) : (
+                    <Alert type="info" showIcon message="Select a period and click Show to see the depreciation status for all assets." />
+                  )}
+                </Card>
+              )}
+
               {/* Details card */}
+              {!isStatus && (
               <Card
                 style={{ borderRadius: 12, border: 'none', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
                 styles={{ body: { padding: '16px 20px' } }}
@@ -551,6 +712,7 @@ const CalculateDeprn: React.FC = () => {
                   </>
                 )}
               </Card>
+              )}
             </>
           )}
         </div>
