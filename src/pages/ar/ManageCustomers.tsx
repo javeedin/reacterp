@@ -1,14 +1,13 @@
 import React, { useState, useCallback, useRef } from 'react';
 import {
   Layout, Card, Form, Input, Button, Space, Typography, Table, Tabs,
-  Row, Col, Breadcrumb, Tooltip, message, Tag, Spin, Descriptions,
-  Badge, Divider, Statistic, Empty, Alert,
+  Breadcrumb, Tooltip, message, Tag, Spin, Descriptions, Badge, Empty, Alert,
 } from 'antd';
 import {
   HomeOutlined, SearchOutlined, ReloadOutlined,
-  UserOutlined, PhoneOutlined, MailOutlined, BankOutlined,
-  FileTextOutlined, DollarOutlined, CloseOutlined, InfoCircleOutlined,
-  EnvironmentOutlined, IdcardOutlined, DownloadOutlined, ApiOutlined, CopyOutlined,
+  UserOutlined, BankOutlined, IdcardOutlined, DownloadOutlined,
+  ApiOutlined, CopyOutlined, CloseOutlined, EnvironmentOutlined,
+  ApartmentOutlined, InfoCircleOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
@@ -35,75 +34,72 @@ const BASE = APEX_DB_CONFIG.baseUrl;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-interface CustomerRow {
+interface PartyRow {
   key: string;
-  billToSiteUseId: number;
-  billToSiteNumber: string;
-  billToSiteAddress: string;
-  accountNumber: string;
-  customerName: string;
-  taxRegistrationNumber: string;
-  totalOpenReceivables: number;
-  totalTransactionsDue: number;
-  syncDate: string;
-}
-
-interface ReceiptRow {
-  key: string;
-  standardReceiptId: number;
-  receiptNumber: string;
-  receiptDate: string;
-  amount: number;
-  unappliedAmount: number;
-  currency: string;
-  state: string;
-  accountingStatus: string;
-  receiptMethod: string;
-  businessUnit: string;
-}
-
-interface InvoiceRow {
-  key: string;
-  customerTransactionId: number;
-  transactionNumber: string;
-  transactionDate: string;
-  dueDate: string;
-  amount: number;
-  balanceDue: number;
-  currency: string;
+  partyId: number;
+  partyNumber: string;
+  partyName: string;
+  partyType: string;
+  country: string;
+  address1: string;
+  address2: string;
+  city: string;
   status: string;
-  businessUnit: string;
 }
 
-interface CustomerTab {
+interface PartyTab {
   key: string;
-  customer: CustomerRow;
-  receiptsLoading: boolean;
-  receipts: ReceiptRow[];
-  invoicesLoading: boolean;
-  invoices: InvoiceRow[];
-  receiptsLoaded: boolean;
-  invoicesLoaded: boolean;
+  party: PartyRow;
+  detail: Record<string, any> | null;   // raw /ar/parties/:id row
+  detailLoading: boolean;
+  detailUrl: string;
+  accounts: Record<string, any>[];       // raw /ar/parties/:id/accounts rows
+  accountsLoading: boolean;
+  accountsLoaded: boolean;
+  accountsUrl: string;
+  accountsError: string;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-const fmt = (n: number, currency = 'AED') =>
-  new Intl.NumberFormat('en-AE', { style: 'currency', currency, minimumFractionDigits: 2 }).format(n ?? 0);
+const prettyKey = (k: string) =>
+  k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
-const fmtDate = (s: string) => {
-  if (!s) return '—';
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? s : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+const fmtVal = (v: any): string => {
+  if (v === null || v === undefined || v === '') return '—';
+  return String(v);
 };
 
-const stateColor = (s: string) => {
-  const m: Record<string, string> = {
-    APPROVED: 'green', POSTED: 'green', APPLIED: 'green',
-    UNIDENTIFIED: 'orange', UNAPPLIED: 'orange',
-    REVERSED: 'red', NSF: 'red', STOP_PAYMENT: 'red',
-  };
-  return m[s?.toUpperCase()] ?? 'default';
+// Build table columns dynamically from the returned rows (schema-agnostic),
+// putting a few well-known columns first.
+const buildDynamicColumns = (rows: Record<string, any>[], preferred: string[]): ColumnsType<any> => {
+  if (!rows.length) return [];
+  const keys = Object.keys(rows[0]);
+  const ordered = [
+    ...preferred.filter(k => keys.includes(k)),
+    ...keys.filter(k => !preferred.includes(k)),
+  ];
+  return ordered.map(k => ({
+    title: prettyKey(k),
+    dataIndex: k,
+    key: k,
+    width: 170,
+    ellipsis: true,
+    render: (v: any) => (
+      <Tooltip title={fmtVal(v)}>
+        <Text style={{ fontSize: 12, fontFamily: /id|number|amount|date/i.test(k) ? 'monospace' : undefined }}>
+          {fmtVal(v)}
+        </Text>
+      </Tooltip>
+    ),
+  }));
+};
+
+const statusColor = (s: string) => {
+  const u = (s || '').toUpperCase();
+  if (u === 'A' || u === 'ACTIVE') return 'green';
+  if (u === 'I' || u === 'INACTIVE') return 'red';
+  return 'default';
 };
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -113,136 +109,110 @@ const ManageCustomers: React.FC = () => {
 
   // Search state
   const [searching, setSearching]     = useState(false);
-  const [customers, setCustomers]     = useState<CustomerRow[]>([]);
+  const [parties, setParties]         = useState<PartyRow[]>([]);
   const [searched, setSearched]       = useState(false);
-  const [lastUrl, setLastUrl]         = useState('');   // last search endpoint (for API icon)
-  const [searchError, setSearchError] = useState('');   // last search error (shown as alert)
+  const [lastUrl, setLastUrl]         = useState('');   // last search endpoint (API icon)
+  const [searchError, setSearchError] = useState('');   // last search error
 
   // Tabs state
-  const [tabs, setTabs]               = useState<CustomerTab[]>([]);
+  const [tabs, setTabs]               = useState<PartyTab[]>([]);
   const [activeKey, setActiveKey]     = useState<string>('search');
 
   const loadedRef = useRef<Set<string>>(new Set());
 
-  // ── Search ────────────────────────────────────────────────────────────────
+  // ── Search parties ──────────────────────────────────────────────────────────
 
   const handleSearch = useCallback(async (values: any) => {
     setSearching(true);
     setSearched(false);
     setSearchError('');
     const p = new URLSearchParams();
-    if (values.customerName) p.append('customer_name', values.customerName);
-    if (values.accountNumber) p.append('account_number', values.accountNumber);
-    if (values.taxNumber) p.append('tax_number', values.taxNumber);
-    const url = `${BASE}/ar/customer-site-activities?${p}`;
+    if (values.q) p.append('q', values.q);
+    if (values.status) p.append('status', values.status);
+    const url = `${BASE}/ar/parties?${p}`;
     setLastUrl(url);
     try {
-      const res  = await fetch(url, { headers: { Accept: 'application/json' } });
-      const raw  = await res.text();
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const raw = await res.text();
       let data: any = {};
-      try { data = raw ? JSON.parse(raw) : {}; } catch { /* non-JSON error body */ }
+      try { data = raw ? JSON.parse(raw) : {}; } catch { /* non-JSON body */ }
       if (!res.ok) {
         throw new Error(data?.message || data?.error || `HTTP ${res.status} — ${raw.slice(0, 300) || res.statusText}`);
       }
       const items: any[] = data.items ?? data.rows ?? (Array.isArray(data) ? data : []);
-      setCustomers(items.map((r: any, i: number) => ({
-        key: String(r.bill_to_site_use_id ?? r.BILL_TO_SITE_USE_ID ?? i),
-        billToSiteUseId:       r.bill_to_site_use_id       ?? r.BILL_TO_SITE_USE_ID       ?? 0,
-        billToSiteNumber:      r.bill_to_site_number       ?? r.BILL_TO_SITE_NUMBER        ?? '',
-        billToSiteAddress:     r.bill_to_site_address      ?? r.BILL_TO_SITE_ADDRESS       ?? '',
-        accountNumber:         r.account_number            ?? r.ACCOUNT_NUMBER             ?? '',
-        customerName:          r.customer_name             ?? r.CUSTOMER_NAME              ?? '',
-        taxRegistrationNumber: r.tax_registration_number   ?? r.TAX_REGISTRATION_NUMBER    ?? '',
-        totalOpenReceivables:  Number(r.total_open_receivables_for_site ?? r.TOTAL_OPEN_RECEIVABLES_FOR_SITE ?? 0),
-        totalTransactionsDue:  Number(r.total_transactions_due_for_site ?? r.TOTAL_TRANSACTIONS_DUE_FOR_SITE ?? 0),
-        syncDate:              r.sync_date                 ?? r.SYNC_DATE                  ?? '',
+      setParties(items.map((r: any, i: number) => ({
+        key:         String(r.party_id ?? r.PARTY_ID ?? i),
+        partyId:     r.party_id      ?? r.PARTY_ID      ?? 0,
+        partyNumber: r.party_number  ?? r.PARTY_NUMBER  ?? '',
+        partyName:   r.party_name    ?? r.PARTY_NAME    ?? '',
+        partyType:   r.party_type    ?? r.PARTY_TYPE    ?? '',
+        country:     r.country       ?? r.COUNTRY       ?? '',
+        address1:    r.address1      ?? r.ADDRESS1      ?? '',
+        address2:    r.address2      ?? r.ADDRESS2      ?? '',
+        city:        r.city          ?? r.CITY          ?? '',
+        status:      r.status        ?? r.STATUS        ?? '',
       })));
       setSearched(true);
     } catch (e: any) {
       setSearchError(e.message || String(e));
       setSearched(true);
-      message.error('Search failed: ' + e.message);
+      message.error('Party search failed: ' + e.message);
     } finally {
       setSearching(false);
     }
   }, []);
 
-  // ── Open customer tab ─────────────────────────────────────────────────────
+  // ── Open party tab ────────────────────────────────────────────────────────
 
-  const openCustomerTab = useCallback((customer: CustomerRow) => {
-    const key = `cust-${customer.billToSiteUseId}`;
-    const existing = tabs.find(t => t.key === key);
-    if (existing) { setActiveKey(key); return; }
-
-    const newTab: CustomerTab = {
-      key, customer,
-      receiptsLoading: false, receipts: [], receiptsLoaded: false,
-      invoicesLoading: false,  invoices: [], invoicesLoaded:  false,
-    };
-    setTabs(prev => [...prev, newTab]);
+  const openPartyTab = useCallback((party: PartyRow) => {
+    const key = `party-${party.partyId}`;
+    if (tabs.find(t => t.key === key)) { setActiveKey(key); return; }
+    const detailUrl   = `${BASE}/ar/parties/${party.partyId}`;
+    const accountsUrl = `${BASE}/ar/parties/${party.partyId}/accounts`;
+    setTabs(prev => [...prev, {
+      key, party,
+      detail: null, detailLoading: false, detailUrl,
+      accounts: [], accountsLoading: false, accountsLoaded: false, accountsUrl, accountsError: '',
+    }]);
     setActiveKey(key);
+    loadDetail(key, party.partyId);
+    loadAccounts(key, party.partyId);
   }, [tabs]);
 
-  // ── Load receipts for a tab ───────────────────────────────────────────────
+  // ── Load party detail ─────────────────────────────────────────────────────
 
-  const loadReceipts = useCallback(async (tabKey: string, customer: CustomerRow) => {
-    if (loadedRef.current.has(`rcpt-${tabKey}`)) return;
-    loadedRef.current.add(`rcpt-${tabKey}`);
-
-    setTabs(prev => prev.map(t => t.key === tabKey ? { ...t, receiptsLoading: true } : t));
+  const loadDetail = useCallback(async (tabKey: string, partyId: number) => {
+    if (loadedRef.current.has(`detail-${tabKey}`)) return;
+    loadedRef.current.add(`detail-${tabKey}`);
+    setTabs(prev => prev.map(t => t.key === tabKey ? { ...t, detailLoading: true } : t));
     try {
-      const p = new URLSearchParams({ customer: customer.accountNumber, limit: '200' });
-      const res  = await fetch(`${BASE}/ar/receipts?${p}`);
+      const res  = await fetch(`${BASE}/ar/parties/${partyId}`, { headers: { Accept: 'application/json' } });
       const data = await res.json();
-      const items: any[] = data.items ?? data.rows ?? (Array.isArray(data) ? data : []);
-      const rows: ReceiptRow[] = items.map((r: any, i: number) => ({
-        key: String(r.standard_receipt_id ?? i),
-        standardReceiptId: r.standard_receipt_id ?? 0,
-        receiptNumber:     r.receipt_number     ?? '',
-        receiptDate:       r.receipt_date        ?? '',
-        amount:            Number(r.amount        ?? 0),
-        unappliedAmount:   Number(r.unapplied_amount ?? 0),
-        currency:          r.currency            ?? '',
-        state:             r.state               ?? '',
-        accountingStatus:  r.accounting_status   ?? '',
-        receiptMethod:     r.receipt_method       ?? '',
-        businessUnit:      r.business_unit        ?? '',
-      }));
-      setTabs(prev => prev.map(t => t.key === tabKey ? { ...t, receiptsLoading: false, receipts: rows, receiptsLoaded: true } : t));
+      const item = (data.items ?? data.rows ?? (Array.isArray(data) ? data : []))[0] ?? null;
+      setTabs(prev => prev.map(t => t.key === tabKey ? { ...t, detailLoading: false, detail: item } : t));
     } catch {
-      loadedRef.current.delete(`rcpt-${tabKey}`);
-      setTabs(prev => prev.map(t => t.key === tabKey ? { ...t, receiptsLoading: false } : t));
+      loadedRef.current.delete(`detail-${tabKey}`);
+      setTabs(prev => prev.map(t => t.key === tabKey ? { ...t, detailLoading: false } : t));
     }
   }, []);
 
-  // ── Load invoices for a tab ───────────────────────────────────────────────
+  // ── Load party accounts ───────────────────────────────────────────────────
 
-  const loadInvoices = useCallback(async (tabKey: string, customer: CustomerRow) => {
-    if (loadedRef.current.has(`inv-${tabKey}`)) return;
-    loadedRef.current.add(`inv-${tabKey}`);
-
-    setTabs(prev => prev.map(t => t.key === tabKey ? { ...t, invoicesLoading: true } : t));
+  const loadAccounts = useCallback(async (tabKey: string, partyId: number) => {
+    if (loadedRef.current.has(`acct-${tabKey}`)) return;
+    loadedRef.current.add(`acct-${tabKey}`);
+    setTabs(prev => prev.map(t => t.key === tabKey ? { ...t, accountsLoading: true, accountsError: '' } : t));
     try {
-      const p = new URLSearchParams({ bill_to_customer: customer.accountNumber, limit: '200' });
-      const res  = await fetch(`${BASE}/ar/invoices?${p}`);
-      const data = await res.json();
+      const res = await fetch(`${BASE}/ar/parties/${partyId}/accounts`, { headers: { Accept: 'application/json' } });
+      const raw = await res.text();
+      let data: any = {};
+      try { data = raw ? JSON.parse(raw) : {}; } catch { /* non-JSON */ }
+      if (!res.ok) throw new Error(data?.message || data?.error || `HTTP ${res.status} — ${raw.slice(0, 200)}`);
       const items: any[] = data.items ?? data.rows ?? (Array.isArray(data) ? data : []);
-      const rows: InvoiceRow[] = items.map((r: any, i: number) => ({
-        key: String(r.customer_transaction_id ?? i),
-        customerTransactionId: r.customer_transaction_id ?? 0,
-        transactionNumber:     r.transaction_number      ?? '',
-        transactionDate:       r.transaction_date        ?? '',
-        dueDate:               r.due_date                ?? '',
-        amount:                Number(r.amount           ?? 0),
-        balanceDue:            Number(r.balance_due      ?? 0),
-        currency:              r.currency                ?? '',
-        status:                r.status                  ?? '',
-        businessUnit:          r.business_unit           ?? '',
-      }));
-      setTabs(prev => prev.map(t => t.key === tabKey ? { ...t, invoicesLoading: false, invoices: rows, invoicesLoaded: true } : t));
-    } catch {
-      loadedRef.current.delete(`inv-${tabKey}`);
-      setTabs(prev => prev.map(t => t.key === tabKey ? { ...t, invoicesLoading: false } : t));
+      setTabs(prev => prev.map(t => t.key === tabKey ? { ...t, accountsLoading: false, accounts: items, accountsLoaded: true } : t));
+    } catch (e: any) {
+      loadedRef.current.delete(`acct-${tabKey}`);
+      setTabs(prev => prev.map(t => t.key === tabKey ? { ...t, accountsLoading: false, accountsLoaded: true, accountsError: e.message || String(e) } : t));
     }
   }, []);
 
@@ -252,271 +222,170 @@ const ManageCustomers: React.FC = () => {
     const idx = tabs.findIndex(t => t.key === key);
     const nextKey = idx > 0 ? tabs[idx - 1].key : 'search';
     setTabs(prev => prev.filter(t => t.key !== key));
-    loadedRef.current.delete(`rcpt-${key}`);
-    loadedRef.current.delete(`inv-${key}`);
+    loadedRef.current.delete(`detail-${key}`);
+    loadedRef.current.delete(`acct-${key}`);
     if (activeKey === key) setActiveKey(nextKey);
   };
 
-  // ── Export ────────────────────────────────────────────────────────────────
+  // ── Export parties ──────────────────────────────────────────────────────────
 
   const exportXlsx = () => {
-    const ws = XLSX.utils.json_to_sheet(customers.map(r => ({
-      'Customer Name':         r.customerName,
-      'Account Number':        r.accountNumber,
-      'Site Number':           r.billToSiteNumber,
-      'Address':               r.billToSiteAddress,
-      'Tax Reg No':            r.taxRegistrationNumber,
-      'Open Receivables':      r.totalOpenReceivables,
-      'Transactions Due':      r.totalTransactionsDue,
-      'Sync Date':             r.syncDate,
+    const ws = XLSX.utils.json_to_sheet(parties.map(r => ({
+      'Party Number': r.partyNumber,
+      'Party Name':   r.partyName,
+      'Party Type':   r.partyType,
+      'Country':      r.country,
+      'Address 1':    r.address1,
+      'Address 2':    r.address2,
+      'City':         r.city,
+      'Status':       r.status,
     })));
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Customers');
-    XLSX.writeFile(wb, 'customers.xlsx');
+    XLSX.utils.book_append_sheet(wb, ws, 'Parties');
+    XLSX.writeFile(wb, 'parties.xlsx');
   };
 
   // ── Search columns ────────────────────────────────────────────────────────
 
-  const searchColumns: ColumnsType<CustomerRow> = [
+  const searchColumns: ColumnsType<PartyRow> = [
     {
-      title: 'Customer Name',
-      dataIndex: 'customerName',
-      key: 'customerName',
-      fixed: 'left',
-      width: 240,
-      render: (v: string, r: CustomerRow) => (
+      title: 'Party Name', dataIndex: 'partyName', key: 'partyName', fixed: 'left', width: 260,
+      render: (v: string, r: PartyRow) => (
         <Button type="link" style={{ padding: 0, textAlign: 'left', height: 'auto', fontSize: 13, fontWeight: 600, color: REDWOOD.info }}
-          onClick={() => openCustomerTab(r)}>
+          onClick={() => openPartyTab(r)}>
           {v || '—'}
         </Button>
       ),
     },
-    { title: 'Account #', dataIndex: 'accountNumber', width: 130,
+    { title: 'Party #', dataIndex: 'partyNumber', width: 130,
       render: (v: string) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{v || '—'}</Text> },
-    { title: 'Site #', dataIndex: 'billToSiteNumber', width: 100,
+    { title: 'Type', dataIndex: 'partyType', width: 130,
       render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
-    { title: 'Address', dataIndex: 'billToSiteAddress', width: 260, ellipsis: true,
-      render: (v: string) => <Tooltip title={v}><Text style={{ fontSize: 12 }}>{v || '—'}</Text></Tooltip> },
-    { title: 'Tax Reg #', dataIndex: 'taxRegistrationNumber', width: 140,
-      render: (v: string) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{v || '—'}</Text> },
-    { title: 'Open Receivables', dataIndex: 'totalOpenReceivables', width: 150, align: 'right' as const,
-      sorter: (a, b) => a.totalOpenReceivables - b.totalOpenReceivables,
-      render: (v: number) => (
-        <Text style={{ fontFamily: 'monospace', fontSize: 12, color: v > 0 ? REDWOOD.primary : REDWOOD.success, fontWeight: 600 }}>
-          {fmt(v)}
-        </Text>
-      ) },
-    { title: 'Transactions Due', dataIndex: 'totalTransactionsDue', width: 150, align: 'right' as const,
-      sorter: (a, b) => a.totalTransactionsDue - b.totalTransactionsDue,
-      render: (v: number) => (
-        <Text style={{ fontFamily: 'monospace', fontSize: 12, color: v > 0 ? REDWOOD.warning : REDWOOD.neutral600 }}>
-          {fmt(v)}
-        </Text>
-      ) },
-    { title: 'Sync Date', dataIndex: 'syncDate', width: 140,
-      render: (v: string) => <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>{v || '—'}</Text> },
+    { title: 'Country', dataIndex: 'country', width: 100,
+      render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+    { title: 'City', dataIndex: 'city', width: 120,
+      render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+    { title: 'Address', dataIndex: 'address1', width: 240, ellipsis: true,
+      render: (_: any, r: PartyRow) => {
+        const a = [r.address1, r.address2].filter(Boolean).join(', ');
+        return <Tooltip title={a}><Text style={{ fontSize: 12 }}>{a || '—'}</Text></Tooltip>;
+      } },
+    { title: 'Status', dataIndex: 'status', width: 100,
+      render: (v: string) => <Tag color={statusColor(v)} style={{ fontSize: 11 }}>{v || '—'}</Tag> },
     {
-      title: '',
-      key: 'open',
-      width: 70,
-      fixed: 'right',
-      render: (_: any, r: CustomerRow) => (
-        <Button size="small" icon={<FileTextOutlined />} onClick={() => openCustomerTab(r)}
-          style={{ fontSize: 11 }}>
-          Open
+      title: '', key: 'open', width: 90, fixed: 'right',
+      render: (_: any, r: PartyRow) => (
+        <Button size="small" icon={<ApartmentOutlined />} onClick={() => openPartyTab(r)} style={{ fontSize: 11 }}>
+          Accounts
         </Button>
       ),
     },
   ];
 
-  // ── Receipt columns ───────────────────────────────────────────────────────
+  // ── Party detail + accounts panel ─────────────────────────────────────────
 
-  const receiptColumns: ColumnsType<ReceiptRow> = [
-    { title: 'Receipt #', dataIndex: 'receiptNumber', width: 160,
-      render: (v: string) => <Text style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 600, color: REDWOOD.info }}>{v}</Text> },
-    { title: 'Date', dataIndex: 'receiptDate', width: 110, render: fmtDate },
-    { title: 'Amount', dataIndex: 'amount', width: 140, align: 'right' as const,
-      render: (v: number, r: ReceiptRow) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{fmt(v, r.currency)}</Text> },
-    { title: 'Unapplied', dataIndex: 'unappliedAmount', width: 140, align: 'right' as const,
-      render: (v: number, r: ReceiptRow) => (
-        <Text style={{ fontFamily: 'monospace', fontSize: 12, color: v > 0 ? REDWOOD.warning : REDWOOD.neutral600 }}>
-          {fmt(v, r.currency)}
-        </Text>
-      ) },
-    { title: 'Method', dataIndex: 'receiptMethod', width: 130,
-      render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
-    { title: 'State', dataIndex: 'state', width: 110,
-      render: (v: string) => <Tag color={stateColor(v)} style={{ fontSize: 11 }}>{v || '—'}</Tag> },
-    { title: 'Accounting', dataIndex: 'accountingStatus', width: 110,
-      render: (v: string) => <Tag color={v === 'Accounted' ? 'green' : 'orange'} style={{ fontSize: 11 }}>{v || 'Unaccounted'}</Tag> },
-    { title: 'Business Unit', dataIndex: 'businessUnit', width: 160,
-      render: (v: string) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text> },
-  ];
+  const renderPartyDetail = (tab: PartyTab) => {
+    const p = tab.party;
+    const detail = tab.detail;
+    const accountsCols = buildDynamicColumns(tab.accounts,
+      ['ACCOUNT_NUMBER', 'ACCOUNT_NAME', 'STATUS', 'CUST_ACCOUNT_ID', 'PARTY_ID']);
 
-  // ── Invoice columns ───────────────────────────────────────────────────────
-
-  const invoiceColumns: ColumnsType<InvoiceRow> = [
-    { title: 'Transaction #', dataIndex: 'transactionNumber', width: 160,
-      render: (v: string) => <Text style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 600, color: REDWOOD.info }}>{v}</Text> },
-    { title: 'Txn Date', dataIndex: 'transactionDate', width: 110, render: fmtDate },
-    { title: 'Due Date', dataIndex: 'dueDate', width: 110, render: fmtDate },
-    { title: 'Amount', dataIndex: 'amount', width: 140, align: 'right' as const,
-      render: (v: number, r: InvoiceRow) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{fmt(v, r.currency)}</Text> },
-    { title: 'Balance Due', dataIndex: 'balanceDue', width: 140, align: 'right' as const,
-      render: (v: number, r: InvoiceRow) => (
-        <Text style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 600,
-          color: v > 0 ? REDWOOD.primary : REDWOOD.success }}>
-          {fmt(v, r.currency)}
-        </Text>
-      ) },
-    { title: 'Status', dataIndex: 'status', width: 110,
-      render: (v: string) => <Tag color={v === 'OPEN' ? 'orange' : v === 'CLOSED' ? 'green' : 'default'} style={{ fontSize: 11 }}>{v || '—'}</Tag> },
-    { title: 'Business Unit', dataIndex: 'businessUnit', width: 160,
-      render: (v: string) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text> },
-  ];
-
-  // ── Customer detail panel ─────────────────────────────────────────────────
-
-  const renderCustomerDetail = (tab: CustomerTab) => {
-    const c = tab.customer;
     return (
       <div style={{ padding: '0 4px' }}>
-        {/* Summary cards */}
-        <Row gutter={16} style={{ marginBottom: 20 }}>
-          <Col span={8}>
-            <Card size="small" style={{ borderRadius: 8, background: '#f6ffed', border: '1px solid #b7eb8f' }}>
-              <Statistic
-                title={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Open Receivables</Text>}
-                value={c.totalOpenReceivables}
-                precision={2}
-                prefix="AED"
-                valueStyle={{ fontSize: 18, fontWeight: 700, color: REDWOOD.primary }}
-              />
-            </Card>
-          </Col>
-          <Col span={8}>
-            <Card size="small" style={{ borderRadius: 8, background: '#fffbe6', border: '1px solid #ffe58f' }}>
-              <Statistic
-                title={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Transactions Due</Text>}
-                value={c.totalTransactionsDue}
-                precision={2}
-                prefix="AED"
-                valueStyle={{ fontSize: 18, fontWeight: 700, color: REDWOOD.warning }}
-              />
-            </Card>
-          </Col>
-          <Col span={8}>
-            <Card size="small" style={{ borderRadius: 8, background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.border}` }}>
-              <Statistic
-                title={<Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Receipts Loaded</Text>}
-                value={tab.receipts.length}
-                valueStyle={{ fontSize: 18, fontWeight: 700, color: REDWOOD.info }}
-              />
-            </Card>
-          </Col>
-        </Row>
-
-        {/* Customer info */}
-        <Descriptions
+        {/* ── Party detail ── */}
+        <Card
           size="small"
-          bordered
-          column={2}
-          style={{ marginBottom: 20, borderRadius: 6, overflow: 'hidden' }}
-          labelStyle={{ background: REDWOOD.neutral100, fontWeight: 600, fontSize: 12, width: 160 }}
-          contentStyle={{ fontSize: 12 }}
+          style={{ borderRadius: 8, border: `1px solid ${REDWOOD.border}`, marginBottom: 16 }}
+          title={
+            <Space>
+              <UserOutlined style={{ color: REDWOOD.primary }} />
+              <span style={{ fontWeight: 600 }}>Party — {p.partyName}</span>
+              <Tag color={statusColor(p.status)} style={{ fontSize: 11 }}>{p.status || '—'}</Tag>
+            </Space>
+          }
+          extra={
+            <Tooltip title={<Text style={{ fontSize: 11, fontFamily: 'monospace', color: '#fff', wordBreak: 'break-all' }}>{`GET ${tab.detailUrl}`}</Text>}>
+              <Button type="text" size="small" icon={<ApiOutlined style={{ color: REDWOOD.info }} />}
+                onClick={() => { navigator.clipboard.writeText(tab.detailUrl); message.success('URL copied'); }} />
+            </Tooltip>
+          }
         >
-          <Descriptions.Item label={<Space size={4}><UserOutlined />Customer Name</Space>} span={2}>
-            <Text strong style={{ fontSize: 13 }}>{c.customerName}</Text>
-          </Descriptions.Item>
-          <Descriptions.Item label={<Space size={4}><IdcardOutlined />Account Number</Space>}>
-            <Text style={{ fontFamily: 'monospace' }}>{c.accountNumber || '—'}</Text>
-          </Descriptions.Item>
-          <Descriptions.Item label={<Space size={4}><BankOutlined />Tax Reg #</Space>}>
-            <Text style={{ fontFamily: 'monospace' }}>{c.taxRegistrationNumber || '—'}</Text>
-          </Descriptions.Item>
-          <Descriptions.Item label={<Space size={4}><InfoCircleOutlined />Site Number</Space>}>
-            {c.billToSiteNumber || '—'}
-          </Descriptions.Item>
-          <Descriptions.Item label={<Space size={4}><EnvironmentOutlined />Site Address</Space>}>
-            {c.billToSiteAddress || '—'}
-          </Descriptions.Item>
-          <Descriptions.Item label="Sync Date" span={2}>
-            <Text style={{ color: REDWOOD.neutral600, fontSize: 11 }}>{c.syncDate || '—'}</Text>
-          </Descriptions.Item>
-        </Descriptions>
+          {tab.detailLoading
+            ? <div style={{ textAlign: 'center', padding: 24 }}><Spin /></div>
+            : (
+              <Descriptions size="small" bordered column={3}
+                labelStyle={{ background: REDWOOD.neutral100, fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' }}
+                contentStyle={{ fontSize: 12 }}>
+                <Descriptions.Item label={<Space size={4}><IdcardOutlined />Party #</Space>}>
+                  <Text style={{ fontFamily: 'monospace' }}>{p.partyNumber || '—'}</Text>
+                </Descriptions.Item>
+                <Descriptions.Item label="Party ID">
+                  <Text style={{ fontFamily: 'monospace' }}>{p.partyId || '—'}</Text>
+                </Descriptions.Item>
+                <Descriptions.Item label={<Space size={4}><InfoCircleOutlined />Type</Space>}>{p.partyType || '—'}</Descriptions.Item>
+                <Descriptions.Item label={<Space size={4}><EnvironmentOutlined />Address</Space>} span={2}>
+                  {[p.address1, p.address2].filter(Boolean).join(', ') || '—'}
+                </Descriptions.Item>
+                <Descriptions.Item label="City">{p.city || '—'}</Descriptions.Item>
+                <Descriptions.Item label="Country">{p.country || '—'}</Descriptions.Item>
+                <Descriptions.Item label="Status">
+                  <Tag color={statusColor(p.status)}>{p.status || '—'}</Tag>
+                </Descriptions.Item>
+                {/* Any extra fields returned by /ar/parties/:id that aren't in the row above */}
+                {detail && Object.entries(detail)
+                  .filter(([k]) => !/^(party_id|party_number|party_name|party_type|country|address1|address2|city|status)$/i.test(k))
+                  .slice(0, 12)
+                  .map(([k, v]) => (
+                    <Descriptions.Item key={k} label={prettyKey(k)}>{fmtVal(v)}</Descriptions.Item>
+                  ))}
+              </Descriptions>
+            )}
+        </Card>
 
-        {/* Sub-tabs: Receipts / Invoices */}
-        <Tabs
+        {/* ── Accounts ── */}
+        <Card
           size="small"
-          onChange={subKey => {
-            if (subKey === 'receipts' && !tab.receiptsLoaded) loadReceipts(tab.key, c);
-            if (subKey === 'invoices' && !tab.invoicesLoaded)  loadInvoices(tab.key, c);
-          }}
-          items={[
-            {
-              key: 'receipts',
-              label: (
-                <Space size={4}>
-                  <DollarOutlined />
-                  Receipts
-                  {tab.receiptsLoaded && <Badge count={tab.receipts.length} style={{ backgroundColor: REDWOOD.info }} />}
-                </Space>
-              ),
-              children: (
-                tab.receiptsLoading
-                  ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
-                  : tab.receiptsLoaded
-                    ? tab.receipts.length === 0
-                      ? <Empty description="No receipts found for this customer" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                      : <Table
-                          dataSource={tab.receipts}
-                          columns={receiptColumns}
-                          size="small"
-                          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `${t} receipts` }}
-                          scroll={{ x: 'max-content' }}
-                        />
-                    : (
-                      <div style={{ textAlign: 'center', padding: 40 }}>
-                        <Button icon={<DollarOutlined />} onClick={() => loadReceipts(tab.key, c)}>
-                          Load Receipts
-                        </Button>
-                      </div>
-                    )
-              ),
-            },
-            {
-              key: 'invoices',
-              label: (
-                <Space size={4}>
-                  <FileTextOutlined />
-                  Invoices
-                  {tab.invoicesLoaded && <Badge count={tab.invoices.length} style={{ backgroundColor: REDWOOD.success }} />}
-                </Space>
-              ),
-              children: (
-                tab.invoicesLoading
-                  ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
-                  : tab.invoicesLoaded
-                    ? tab.invoices.length === 0
-                      ? <Empty description="No invoices found for this customer" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                      : <Table
-                          dataSource={tab.invoices}
-                          columns={invoiceColumns}
-                          size="small"
-                          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `${t} invoices` }}
-                          scroll={{ x: 'max-content' }}
-                        />
-                    : (
-                      <div style={{ textAlign: 'center', padding: 40 }}>
-                        <Button icon={<FileTextOutlined />} onClick={() => loadInvoices(tab.key, c)}>
-                          Load Invoices
-                        </Button>
-                      </div>
-                    )
-              ),
-            },
-          ]}
-        />
+          style={{ borderRadius: 8, border: `1px solid ${REDWOOD.border}` }}
+          bodyStyle={{ padding: 0 }}
+          title={
+            <Space>
+              <ApartmentOutlined style={{ color: REDWOOD.info }} />
+              <span style={{ fontWeight: 600 }}>Customer Accounts</span>
+              {tab.accountsLoaded && <Badge count={tab.accounts.length} style={{ backgroundColor: REDWOOD.info }} showZero />}
+            </Space>
+          }
+          extra={
+            <Space>
+              <Tooltip title={<Text style={{ fontSize: 11, fontFamily: 'monospace', color: '#fff', wordBreak: 'break-all' }}>{`GET ${tab.accountsUrl}`}</Text>}>
+                <Button type="text" size="small" icon={<ApiOutlined style={{ color: REDWOOD.info }} />}
+                  onClick={() => { navigator.clipboard.writeText(tab.accountsUrl); message.success('URL copied'); }} />
+              </Tooltip>
+              <Button size="small" icon={<ReloadOutlined />}
+                onClick={() => { loadedRef.current.delete(`acct-${tab.key}`); loadAccounts(tab.key, p.partyId); }}>
+                Reload
+              </Button>
+            </Space>
+          }
+        >
+          {tab.accountsLoading
+            ? <div style={{ textAlign: 'center', padding: 40 }}><Spin tip="Loading accounts…" /></div>
+            : tab.accountsError
+              ? <Alert type="error" showIcon style={{ margin: 12 }}
+                  message="Failed to load accounts"
+                  description={<div><div>{tab.accountsError}</div>
+                    <div style={{ fontFamily: 'monospace', fontSize: 11, marginTop: 4, wordBreak: 'break-all' }}>GET {tab.accountsUrl}</div></div>} />
+              : tab.accounts.length === 0
+                ? <Empty description="No customer accounts for this party" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ padding: 24 }} />
+                : <Table
+                    dataSource={tab.accounts.map((a, i) => ({ ...a, _k: i }))}
+                    rowKey="_k"
+                    columns={accountsCols}
+                    size="small"
+                    pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `${t} accounts` }}
+                    scroll={{ x: 'max-content' }}
+                  />
+          }
+        </Card>
       </div>
     );
   };
@@ -526,7 +395,7 @@ const ManageCustomers: React.FC = () => {
   const tabItems = [
     {
       key: 'search',
-      label: <Space size={4}><SearchOutlined />Customers</Space>,
+      label: <Space size={4}><SearchOutlined />Parties</Space>,
       children: (
         <div style={{ padding: '0 4px' }}>
           {/* Search form */}
@@ -535,83 +404,60 @@ const ManageCustomers: React.FC = () => {
             style={{ marginBottom: 16, borderRadius: 8, border: `1px solid ${REDWOOD.border}` }}
             bodyStyle={{ padding: '16px 20px 8px' }}
           >
-            <Form form={form} layout="inline" onFinish={handleSearch}
-              initialValues={{ customerName: '', accountNumber: '', taxNumber: '' }}>
-              <Form.Item name="customerName" style={{ marginBottom: 8 }}>
+            <Form form={form} layout="inline" onFinish={handleSearch} initialValues={{ q: '', status: '' }}>
+              <Form.Item name="q" style={{ marginBottom: 8 }}>
                 <Input
                   prefix={<UserOutlined style={{ color: REDWOOD.neutral600 }} />}
-                  placeholder="Customer name"
-                  style={{ width: 260 }}
+                  placeholder="Party name or number"
+                  style={{ width: 300 }}
                   allowClear
                 />
               </Form.Item>
-              <Form.Item name="accountNumber" style={{ marginBottom: 8 }}>
+              <Form.Item name="status" style={{ marginBottom: 8 }}>
                 <Input
-                  prefix={<IdcardOutlined style={{ color: REDWOOD.neutral600 }} />}
-                  placeholder="Account number"
-                  style={{ width: 200 }}
-                  allowClear
-                />
-              </Form.Item>
-              <Form.Item name="taxNumber" style={{ marginBottom: 8 }}>
-                <Input
-                  prefix={<BankOutlined style={{ color: REDWOOD.neutral600 }} />}
-                  placeholder="Tax reg number"
-                  style={{ width: 200 }}
+                  prefix={<InfoCircleOutlined style={{ color: REDWOOD.neutral600 }} />}
+                  placeholder="Status (optional)"
+                  style={{ width: 180 }}
                   allowClear
                 />
               </Form.Item>
               <Form.Item style={{ marginBottom: 8 }}>
                 <Space>
-                  <Button
-                    type="primary"
-                    htmlType="submit"
-                    icon={<SearchOutlined />}
-                    loading={searching}
-                    style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-                  >
+                  <Button type="primary" htmlType="submit" icon={<SearchOutlined />} loading={searching}
+                    style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
                     Search
                   </Button>
-                  <Button
-                    icon={<ReloadOutlined />}
-                    onClick={() => { form.resetFields(); setCustomers([]); setSearched(false); }}
-                  >
+                  <Button icon={<ReloadOutlined />}
+                    onClick={() => { form.resetFields(); setParties([]); setSearched(false); setSearchError(''); }}>
                     Reset
                   </Button>
-                  {customers.length > 0 && (
-                    <Button icon={<DownloadOutlined />} onClick={exportXlsx}>
-                      Export
-                    </Button>
+                  {parties.length > 0 && (
+                    <Button icon={<DownloadOutlined />} onClick={exportXlsx}>Export</Button>
                   )}
                   <Tooltip
                     title={
                       <div style={{ maxWidth: 460 }}>
-                        <div style={{ fontSize: 11, marginBottom: 4, opacity: 0.85 }}>Customer search endpoint:</div>
+                        <div style={{ fontSize: 11, marginBottom: 4, opacity: 0.85 }}>Party search endpoint:</div>
                         <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#fff', wordBreak: 'break-all' }}>
-                          GET {lastUrl || `${BASE}/ar/customer-site-activities?customer_name=&account_number=&tax_number=`}
+                          GET {lastUrl || `${BASE}/ar/parties?q=&status=`}
                         </div>
                         <div style={{ fontSize: 10, marginTop: 6, opacity: 0.75 }}>Click to copy</div>
                       </div>
                     }>
-                    <Button
-                      type="text"
-                      icon={<ApiOutlined style={{ color: REDWOOD.info }} />}
+                    <Button type="text" icon={<ApiOutlined style={{ color: REDWOOD.info }} />}
                       onClick={() => {
-                        const u = lastUrl || `${BASE}/ar/customer-site-activities`;
+                        const u = lastUrl || `${BASE}/ar/parties`;
                         navigator.clipboard.writeText(u);
                         message.success('Endpoint URL copied');
-                      }}
-                    />
+                      }} />
                   </Tooltip>
                 </Space>
               </Form.Item>
             </Form>
             {searchError && (
               <Alert
-                type="error"
-                showIcon
-                style={{ marginTop: 4 }}
-                message="Customer search failed"
+                type="error" showIcon style={{ marginTop: 4 }}
+                message="Party search failed"
                 description={
                   <div>
                     <div style={{ marginBottom: 6 }}>{searchError}</div>
@@ -632,7 +478,7 @@ const ManageCustomers: React.FC = () => {
           {!searched && !searching && (
             <div style={{ textAlign: 'center', padding: '60px 0', color: REDWOOD.neutral600 }}>
               <UserOutlined style={{ fontSize: 48, color: REDWOOD.neutral200, display: 'block', marginBottom: 12 }} />
-              <Text type="secondary">Enter search criteria and click Search to find customers</Text>
+              <Text type="secondary">Enter a party name or number and click Search</Text>
             </div>
           )}
 
@@ -644,28 +490,21 @@ const ManageCustomers: React.FC = () => {
               title={
                 <Space>
                   <UserOutlined style={{ color: REDWOOD.primary }} />
-                  <span style={{ fontWeight: 600 }}>
-                    {customers.length} customer{customers.length !== 1 ? 's' : ''} found
-                  </span>
+                  <span style={{ fontWeight: 600 }}>{parties.length} part{parties.length !== 1 ? 'ies' : 'y'} found</span>
                 </Space>
               }
             >
               <Table
-                dataSource={customers}
+                dataSource={parties}
                 columns={searchColumns}
                 size="small"
                 loading={searching}
                 scroll={{ x: 'max-content' }}
                 pagination={{
-                  pageSize: 25,
-                  showSizeChanger: true,
-                  pageSizeOptions: ['10', '25', '50', '100'],
+                  pageSize: 25, showSizeChanger: true, pageSizeOptions: ['10', '25', '50', '100'],
                   showTotal: (total, [start, end]) => `${start}–${end} of ${total}`,
                 }}
-                onRow={(r) => ({
-                  onDoubleClick: () => openCustomerTab(r),
-                  style: { cursor: 'pointer' },
-                })}
+                onRow={(r) => ({ onDoubleClick: () => openPartyTab(r), style: { cursor: 'pointer' } })}
               />
             </Card>
           )}
@@ -675,18 +514,16 @@ const ManageCustomers: React.FC = () => {
     ...tabs.map((tab) => ({
       key: tab.key,
       label: (
-        <Space size={4} style={{ maxWidth: 200, overflow: 'hidden' }}>
+        <Space size={4} style={{ maxWidth: 220, overflow: 'hidden' }}>
           <UserOutlined />
-          <span style={{ fontSize: 13, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block' }}>
-            {tab.customer.customerName}
+          <span style={{ fontSize: 13, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block' }}>
+            {tab.party.partyName}
           </span>
-          <CloseOutlined
-            style={{ fontSize: 10, color: REDWOOD.neutral600, marginLeft: 2 }}
-            onClick={(e) => { e.stopPropagation(); closeTab(tab.key); }}
-          />
+          <CloseOutlined style={{ fontSize: 10, color: REDWOOD.neutral600, marginLeft: 2 }}
+            onClick={(e) => { e.stopPropagation(); closeTab(tab.key); }} />
         </Space>
       ),
-      children: renderCustomerDetail(tab),
+      children: renderPartyDetail(tab),
     })),
   ];
 
@@ -705,30 +542,18 @@ const ManageCustomers: React.FC = () => {
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16, gap: 12 }}>
           <UserOutlined style={{ fontSize: 22, color: REDWOOD.primary }} />
-          <Title level={4} style={{ margin: 0, color: REDWOOD.primary }}>
-            Manage Customers
-          </Title>
+          <Title level={4} style={{ margin: 0, color: REDWOOD.primary }}>Manage Customers</Title>
           {tabs.length > 0 && (
             <Badge count={tabs.length} style={{ backgroundColor: REDWOOD.info }}
-              title={`${tabs.length} customer tab${tabs.length > 1 ? 's' : ''} open`} />
+              title={`${tabs.length} party tab${tabs.length > 1 ? 's' : ''} open`} />
           )}
         </div>
 
         {/* Main tabs */}
-        <Card
-          bodyStyle={{ padding: '0 0 16px' }}
-          style={{ borderRadius: 8, border: `1px solid ${REDWOOD.border}` }}
-        >
+        <Card bodyStyle={{ padding: '0 0 16px' }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.border}` }}>
           <Tabs
             activeKey={activeKey}
-            onChange={key => {
-              setActiveKey(key);
-              // Auto-load receipts when switching to a customer tab for the first time
-              const tab = tabs.find(t => t.key === key);
-              if (tab && !tab.receiptsLoaded && !tab.receiptsLoading) {
-                loadReceipts(tab.key, tab.customer);
-              }
-            }}
+            onChange={setActiveKey}
             type="card"
             size="small"
             style={{ padding: '8px 16px 0' }}
