@@ -710,6 +710,8 @@ const ManageMultiperiod: React.FC = () => {
     rows.forEach(r => {
       init[r.scheduleId] = r.postingStatus === 'Posted'
         ? { status: 'accounted', message: 'Already accounted' }
+        : r.postingStatus === 'Suspended'
+        ? { status: 'skipped', message: 'Suspended — not posted' }
         : { status: 'pending', message: '' };
     });
     setPostStatus(init);
@@ -720,8 +722,9 @@ const ManageMultiperiod: React.FC = () => {
   const runPostAll = async () => {
     const postedBy = user?.name || user?.username || 'System';
     const today = dayjs().format('YYYY-MM-DD');
-    const toPost = postRows.filter(r => r.postingStatus !== 'Posted');
-    if (!toPost.length) { message.info('All selected lines are already accounted.'); return; }
+    // Only 'Not Posted' lines are eligible — accounted and Suspended are excluded.
+    const toPost = postRows.filter(r => r.postingStatus === 'Not Posted');
+    if (!toPost.length) { message.info('No postable lines (already accounted or suspended).'); return; }
     setPostRunning(true);
     for (const r of toPost) {
       setPostStatus(prev => ({ ...prev, [r.scheduleId]: { status: 'posting', message: 'Posting…' } }));
@@ -1396,8 +1399,8 @@ const ManageMultiperiod: React.FC = () => {
                 rowSelection={{
                   selectedRowKeys: mpaSelected[tab.key] ?? [],
                   onChange: (keys) => setMpaSelected(prev => ({ ...prev, [tab.key]: keys as number[] })),
-                  // Only NOT-accounted lines can be suspended.
-                  getCheckboxProps: (rec) => ({ disabled: rec.postingStatus === 'Posted' }),
+                  // Only 'Not Posted' lines can be suspended (accounted & already-suspended are locked).
+                  getCheckboxProps: (rec) => ({ disabled: rec.postingStatus !== 'Not Posted' }),
                 }}
                 rowClassName={(rec) => rec.periodName === period && rec.postingStatus === 'Not Posted' ? 'ant-table-row-selected' : ''}
               />
@@ -1826,8 +1829,8 @@ const ManageMultiperiod: React.FC = () => {
                   rowSelection={{
                     selectedRowKeys: accrualSelected,
                     onChange: (keys) => setAccrualSelected(keys as number[]),
-                    // Already-accounted schedules can't be posted again.
-                    getCheckboxProps: (rec: any) => ({ disabled: rec.postingStatus === 'Posted' }),
+                    // Already-accounted OR suspended schedules can't be posted.
+                    getCheckboxProps: (rec: any) => ({ disabled: rec.postingStatus === 'Posted' || rec.postingStatus === 'Suspended' }),
                   }}
                   locale={{ emptyText: accrualPeriod ? `No accrual lines for ${accrualPeriod}` : 'Select a period to see accrual lines' }}
                   summary={(rows) => {
@@ -2478,9 +2481,9 @@ const ManageMultiperiod: React.FC = () => {
             <Space>
               <Button disabled={postRunning} onClick={() => setPostModalOpen(false)}>Close</Button>
               <Button type="primary" icon={<BookOutlined />} loading={postRunning}
-                disabled={postRows.every(r => r.postingStatus === 'Posted')}
+                disabled={!postRows.some(r => r.postingStatus === 'Not Posted')}
                 onClick={runPostAll}>
-                Post {postRows.filter(r => r.postingStatus !== 'Posted').length} line(s)
+                Post {postRows.filter(r => r.postingStatus === 'Not Posted').length} line(s)
               </Button>
             </Space>
           }
@@ -2489,8 +2492,9 @@ const ManageMultiperiod: React.FC = () => {
           {(() => {
             const currency  = postRows[0]?.currencyCode || 'AED';
             const accounted = postRows.filter(r => r.postingStatus === 'Posted').length;
-            const toPost    = postRows.length - accounted;
-            const toPostAmt = postRows.filter(r => r.postingStatus !== 'Posted').reduce((s, r) => s + (r.periodAmt || 0), 0);
+            const suspended = postRows.filter(r => r.postingStatus === 'Suspended').length;
+            const toPost    = postRows.filter(r => r.postingStatus === 'Not Posted').length;
+            const toPostAmt = postRows.filter(r => r.postingStatus === 'Not Posted').reduce((s, r) => s + (r.periodAmt || 0), 0);
             const vals      = Object.values(postStatus);
             const okCount   = vals.filter(s => s.status === 'success').length;
             const errCount  = vals.filter(s => s.status === 'error').length;
@@ -2507,10 +2511,13 @@ const ManageMultiperiod: React.FC = () => {
             return (
               <>
                 <Row gutter={8} style={{ marginBottom: 12 }}>
-                  <Col span={6}><Card size="small" bodyStyle={{ padding: '6px 10px' }}><Statistic title="Lines selected" value={postRows.length} valueStyle={{ fontSize: 16 }} /></Card></Col>
-                  <Col span={6}><Card size="small" bodyStyle={{ padding: '6px 10px' }}><Statistic title="Already accounted" value={accounted} valueStyle={{ fontSize: 16, color: REDWOOD.info }} /></Card></Col>
-                  <Col span={6}><Card size="small" bodyStyle={{ padding: '6px 10px' }}><Statistic title="To post" value={toPost} valueStyle={{ fontSize: 16, color: REDWOOD.warning }} /></Card></Col>
-                  <Col span={6}><Card size="small" bodyStyle={{ padding: '6px 10px' }}><Statistic title="Amount to post" value={toPostAmt} precision={2} prefix={currency} valueStyle={{ fontSize: 14 }} /></Card></Col>
+                  <Col span={suspended > 0 ? 5 : 6}><Card size="small" bodyStyle={{ padding: '6px 10px' }}><Statistic title="Lines selected" value={postRows.length} valueStyle={{ fontSize: 16 }} /></Card></Col>
+                  <Col span={suspended > 0 ? 5 : 6}><Card size="small" bodyStyle={{ padding: '6px 10px' }}><Statistic title="Already accounted" value={accounted} valueStyle={{ fontSize: 16, color: REDWOOD.info }} /></Card></Col>
+                  {suspended > 0 && (
+                    <Col span={4}><Card size="small" bodyStyle={{ padding: '6px 10px' }}><Statistic title="Suspended" value={suspended} valueStyle={{ fontSize: 16, color: '#8c8c8c' }} /></Card></Col>
+                  )}
+                  <Col span={suspended > 0 ? 5 : 6}><Card size="small" bodyStyle={{ padding: '6px 10px' }}><Statistic title="To post" value={toPost} valueStyle={{ fontSize: 16, color: REDWOOD.warning }} /></Card></Col>
+                  <Col span={suspended > 0 ? 5 : 6}><Card size="small" bodyStyle={{ padding: '6px 10px' }}><Statistic title="Amount to post" value={toPostAmt} precision={2} prefix={currency} valueStyle={{ fontSize: 14 }} /></Card></Col>
                 </Row>
                 {(postRunning || okCount + errCount > 0) && (
                   <Alert type={errCount ? 'warning' : 'info'} showIcon style={{ marginBottom: 12, fontSize: 12 }}
