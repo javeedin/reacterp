@@ -455,11 +455,11 @@ const CalculateDeprn: React.FC = () => {
       render: (v: number) => <Text style={mono}>{v == null ? '—' : fmt(v)}</Text> },
     { title: 'Opening NBV', dataIndex: 'openingNbv', key: 'openingNbv', width: 140, align: 'right' as const,
       render: (v: number) => <Text style={mono}>{v == null ? '—' : fmt(v)}</Text> },
-    { title: `Depreciation${statusPrevName ? ` (${statusPrevName})` : ' (Prev)'}`, dataIndex: 'prevDeprn', key: 'prevDeprn', width: 140, align: 'right' as const,
+    { title: `Deprn${statusPrevName ? ` (${statusPrevName})` : ' (Prev)'}`, dataIndex: 'prevDeprn', key: 'prevDeprn', width: 120, align: 'right' as const,
       render: (v: number | null) => v == null
         ? <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
         : <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.neutral500 }}>{fmt(v)}</Text> },
-    { title: `Depreciation${statusMeta?.periodName ? ` (${statusMeta.periodName})` : ''}`, dataIndex: 'periodDeprn', key: 'periodDeprn', width: 150, align: 'right' as const,
+    { title: `Deprn${statusMeta?.periodName ? ` (${statusMeta.periodName})` : ''}`, dataIndex: 'periodDeprn', key: 'periodDeprn', width: 130, align: 'right' as const,
       render: (v: number | null, r: any) => v == null
         ? <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
         : <Text style={monoRed} title={r.status === 'Posted' ? 'Posted amount' : 'Calculated (not yet posted)'}>{fmt(v)}</Text> },
