@@ -646,22 +646,26 @@ export const getDeprnLastPeriod = async (bookTypeCode?: string): Promise<any | n
 };
 
 /**
- * Depreciation status for ALL active assets in a book for a given period.
- * Each asset shows status 'Posted' (deprn row exists) or 'Not Posted'.
+ * Per-asset depreciation for a period — sourced from RR_FA_DEPRN_DETAIL (same
+ * table as GET /fa/assets/:assetId/deprn). Returns ALL active assets for the
+ * book: those with depreciation for the period show status 'Posted' + the
+ * amount; the rest show 'Not Posted'.
  */
 export const getDeprnStatus = async (params: {
   bookTypeCode: string;
-  periodCounter: number | string;
+  periodCounter?: number | string;
+  periodName?: string;
   assetNumber?: string;
   limit?: number;
 }): Promise<any> => {
   try {
     const q = new URLSearchParams();
     q.append('bookTypeCode', params.bookTypeCode);
-    q.append('periodCounter', String(params.periodCounter));
+    if (params.periodCounter != null) q.append('periodCounter', String(params.periodCounter));
+    if (params.periodName) q.append('periodName', params.periodName);
     if (params.assetNumber) q.append('assetNumber', params.assetNumber);
     q.append('limit', String(params.limit ?? 2000));
-    return await fetchFromApex(`fa/deprn-status?${q.toString()}`);
+    return await fetchFromApex(`fa/deprn-by-period?${q.toString()}`);
   } catch (e: any) {
     return { success: false, items: [], summary: null, error: e?.message };
   }

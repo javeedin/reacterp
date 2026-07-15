@@ -209,7 +209,7 @@ const CalculateDeprn: React.FC = () => {
       <div style={{ marginBottom: 10 }}>
         <Text strong>Status by period (all assets)</Text>
         <Typography.Text copyable code style={{ display: 'block', fontSize: 11, marginTop: 4, wordBreak: 'break-all' }}>
-          {`${APEX_DB_CONFIG.baseUrl}/fa/deprn-status?bookTypeCode=${encodeURIComponent(selectedBook)}&periodCounter=${statusPeriod ?? '...'}`}
+          {`${APEX_DB_CONFIG.baseUrl}/fa/deprn-by-period?bookTypeCode=${encodeURIComponent(selectedBook)}&periodCounter=${statusPeriod ?? '...'}`}
         </Typography.Text>
       </div>
       <div>
