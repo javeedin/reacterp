@@ -32,6 +32,16 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
     EXCEPTION WHEN OTHERS THEN RETURN NULL;
     END to_num;
 
+    -- Safe date parser — handles ISO strings ('YYYY-MM-DD...'), 'DD-MON-RR',
+    -- and real DATE/TIMESTAMP values passed as text. Null when unparseable.
+    FUNCTION to_dt(p_val IN VARCHAR2) RETURN DATE IS
+    BEGIN
+        IF p_val IS NULL OR TRIM(p_val) IS NULL THEN RETURN NULL; END IF;
+        BEGIN RETURN TO_DATE(SUBSTR(p_val, 1, 10), 'YYYY-MM-DD'); EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN RETURN TO_DATE(SUBSTR(p_val, 1, 9),  'DD-MON-RR');  EXCEPTION WHEN OTHERS THEN NULL; END;
+        RETURN NULL;
+    END to_dt;
+
     -- ── GET_ASSETS ────────────────────────────────────────────────────────────
     -- Sources: RR_FA_ADDITIONS_TL + RR_FA_BOOKS.
     -- Supported filters: p_description, p_book_type.
@@ -888,7 +898,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
             v_salv_n := NVL(to_num(r.SALVAGE_VALUE), 0);
             calc_period_sched(
                 p_cost => r.COST, p_salvage => v_salv_n, p_life => v_life_n,
-                p_dpis => r.DATE_PLACED_IN_SERVICE, p_target_month => v_tgt_month,
+                p_dpis => to_dt(r.DATE_PLACED_IN_SERVICE), p_target_month => v_tgt_month,
                 p_days => v_days, p_daily => v_daily, p_open_nbv => v_open,
                 p_deprn => v_deprn, p_close_nbv => v_close);
 
