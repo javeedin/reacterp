@@ -118,6 +118,22 @@ CREATE OR REPLACE PACKAGE RR_FA_PKG AS
         p_result         OUT CLOB
     );
 
+    -- ── Depreciation VIEW (read straight from RR_FA_DEPRN_DETAIL) ──────────────
+    -- For the "View Depreciation" report. Takes a period name AND/OR a fiscal
+    -- year (both optional) and returns every ACTUAL depreciation row from
+    -- RR_FA_DEPRN_DETAIL for the book — no open/last/max period gating, no
+    -- calculation. One row per asset per period (summed across distributions).
+    PROCEDURE GET_DEPRN_VIEW (
+        p_book_type      IN  VARCHAR2,
+        p_period_name    IN  VARCHAR2,
+        p_fiscal_year    IN  VARCHAR2,
+        p_asset_number   IN  VARCHAR2,
+        p_offset         IN  NUMBER,
+        p_limit          IN  NUMBER,
+        p_http_status    OUT NUMBER,
+        p_result         OUT CLOB
+    );
+
     -- ── Write Operations ──────────────────────────────────────────────────────
     PROCEDURE CREATE_ASSET (
         p_body        IN  CLOB,

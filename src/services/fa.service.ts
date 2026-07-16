@@ -671,6 +671,28 @@ export const getDeprnStatus = async (params: {
   }
 };
 
+// View Depreciation — read straight from RR_FA_DEPRN_DETAIL (no open/max-period
+// gating, no calculation). Filter by a single period name and/or a fiscal year.
+export const getDeprnView = async (params: {
+  bookTypeCode: string;
+  periodName?: string;
+  fiscalYear?: string;
+  assetNumber?: string;
+  limit?: number;
+}): Promise<any> => {
+  try {
+    const q = new URLSearchParams();
+    q.append('bookTypeCode', params.bookTypeCode);
+    if (params.periodName) q.append('periodName', params.periodName);
+    if (params.fiscalYear) q.append('fiscalYear', params.fiscalYear);
+    if (params.assetNumber) q.append('assetNumber', params.assetNumber);
+    q.append('limit', String(params.limit ?? 5000));
+    return await fetchFromApex(`fa/deprn-view?${q.toString()}`);
+  } catch (e: any) {
+    return { success: false, items: [], summary: null, error: e?.message };
+  }
+};
+
 export const getDeprnPreview = async (bookTypeCode: string, periodName: string): Promise<any> => {
   try {
     const qs = `?bookTypeCode=${encodeURIComponent(bookTypeCode)}&periodName=${encodeURIComponent(periodName)}`;

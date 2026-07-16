@@ -980,5 +980,120 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
             write_error(p_http_status, p_result, 500, SQLERRM);
     END GET_DEPRN_BY_PERIOD;
 
+    -- ── Depreciation VIEW — read straight from RR_FA_DEPRN_DETAIL ──────────────
+    -- No open/last/max period gating and no straight-line calculation: whatever
+    -- actual depreciation exists in RR_FA_DEPRN_DETAIL for the book (optionally
+    -- filtered to one period name and/or one fiscal year) is returned, one row
+    -- per asset per period (summed across distributions). The period name/year
+    -- come from RR_FA_DEPRN_PERIODS purely as labels.
+    PROCEDURE GET_DEPRN_VIEW (
+        p_book_type      IN  VARCHAR2,
+        p_period_name    IN  VARCHAR2,
+        p_fiscal_year    IN  VARCHAR2,
+        p_asset_number   IN  VARCHAR2,
+        p_offset         IN  NUMBER,
+        p_limit          IN  NUMBER,
+        p_http_status    OUT NUMBER,
+        p_result         OUT CLOB
+    ) IS
+        v_offset    NUMBER := NVL(p_offset, 0);
+        v_limit     NUMBER := NVL(p_limit, 5000);
+        v_total     NUMBER := 0;
+        v_tot_cost  NUMBER := 0;
+        v_tot_deprn NUMBER := 0;
+    BEGIN
+        IF p_book_type IS NULL THEN
+            write_error(p_http_status, p_result, 400, 'bookTypeCode is required');
+            RETURN;
+        END IF;
+
+        APEX_JSON.INITIALIZE_CLOB_OUTPUT;
+        APEX_JSON.OPEN_OBJECT;
+        APEX_JSON.WRITE('success',      TRUE);
+        APEX_JSON.WRITE('bookTypeCode', p_book_type);
+        APEX_JSON.WRITE('periodName',   p_period_name);
+        APEX_JSON.WRITE('fiscalYear',   p_fiscal_year);
+        APEX_JSON.OPEN_ARRAY('items');
+
+        FOR r IN (
+            SELECT a.ASSET_ID, a.ASSET_NUMBER, a.DESCRIPTION,
+                   p.PERIOD_NAME, p.PERIOD_COUNTER, p.FISCAL_YEAR,
+                   b.COST                                          AS COST,
+                   b.SALVAGE_VALUE                                 AS SALVAGE_VALUE,
+                   b.DATE_PLACED_IN_SERVICE                        AS DATE_PLACED_IN_SERVICE,
+                   b.DEPRN_START_DATE                              AS DEPRN_START_DATE,
+                   m.LIFE_IN_MONTHS                                AS LIFE_IN_MONTHS,
+                   m.METHOD_CODE                                   AS METHOD_CODE,
+                   SUM(NVL(dd.DEPRN_AMOUNT, 0))                    AS DEPRN_AMOUNT,
+                   SUM(NVL(dd.YTD_DEPRN, 0))                       AS YTD_DEPRN,
+                   SUM(NVL(dd.DEPRN_RESERVE, 0))                   AS DEPRN_RESERVE,
+                   MAX(dd.DEPRN_RUN_DATE)                          AS DEPRN_RUN_DATE,
+                   MAX(dd.DISTRIBUTION_ID)                         AS DISTRIBUTION_ID,
+                   MAX(NVL(dd.ACCOUNTED_STATUS, 'UNACCOUNTED'))    AS ACCOUNTED_STATUS
+              FROM RR_FA_DEPRN_DETAIL dd
+              JOIN RR_FA_DEPRN_PERIODS p
+                    ON p.BOOK_TYPE_CODE = dd.BOOK_TYPE_CODE
+                   AND p.PERIOD_COUNTER = dd.PERIOD_COUNTER
+              JOIN RR_FA_ADDITIONS a ON a.ASSET_ID = dd.ASSET_ID
+              JOIN RR_FA_BOOKS b
+                    ON b.ASSET_ID = dd.ASSET_ID
+                   AND b.BOOK_TYPE_CODE = dd.BOOK_TYPE_CODE
+                   AND b.DATE_INEFFECTIVE IS NULL
+              LEFT JOIN RR_FA_METHODS m ON m.METHOD_ID = b.METHOD_ID
+             WHERE dd.BOOK_TYPE_CODE = p_book_type
+               AND (p_period_name IS NULL OR UPPER(TRIM(p.PERIOD_NAME)) = UPPER(TRIM(p_period_name)))
+               AND (p_fiscal_year IS NULL OR TO_CHAR(p.FISCAL_YEAR) = TO_CHAR(p_fiscal_year))
+               AND (p_asset_number IS NULL OR UPPER(a.ASSET_NUMBER) LIKE UPPER('%' || p_asset_number || '%'))
+             GROUP BY a.ASSET_ID, a.ASSET_NUMBER, a.DESCRIPTION,
+                      p.PERIOD_NAME, p.PERIOD_COUNTER, p.FISCAL_YEAR,
+                      b.COST, b.SALVAGE_VALUE, b.DATE_PLACED_IN_SERVICE, b.DEPRN_START_DATE,
+                      m.LIFE_IN_MONTHS, m.METHOD_CODE
+             ORDER BY a.ASSET_NUMBER, p.PERIOD_COUNTER
+             OFFSET v_offset ROWS FETCH NEXT v_limit ROWS ONLY
+        ) LOOP
+            v_total     := v_total + 1;
+            v_tot_cost  := v_tot_cost  + NVL(r.COST, 0);
+            v_tot_deprn := v_tot_deprn + NVL(r.DEPRN_AMOUNT, 0);
+
+            APEX_JSON.OPEN_OBJECT;
+            APEX_JSON.WRITE('assetId',              r.ASSET_ID);
+            APEX_JSON.WRITE('assetNumber',          r.ASSET_NUMBER);
+            APEX_JSON.WRITE('description',          r.DESCRIPTION);
+            APEX_JSON.WRITE('periodName',           r.PERIOD_NAME);
+            APEX_JSON.WRITE('periodCounter',        r.PERIOD_COUNTER);
+            APEX_JSON.WRITE('fiscalYear',           r.FISCAL_YEAR);
+            APEX_JSON.WRITE('cost',                 r.COST);
+            APEX_JSON.WRITE('salvageValue',         r.SALVAGE_VALUE);
+            APEX_JSON.WRITE('lifeInMonths',         r.LIFE_IN_MONTHS);
+            APEX_JSON.WRITE('methodCode',           r.METHOD_CODE);
+            APEX_JSON.WRITE('datePlacedInService',  r.DATE_PLACED_IN_SERVICE);
+            APEX_JSON.WRITE('deprnStartDate',       r.DEPRN_START_DATE);
+            APEX_JSON.WRITE('deprnAmount',          r.DEPRN_AMOUNT);
+            APEX_JSON.WRITE('ytdDeprn',             r.YTD_DEPRN);
+            APEX_JSON.WRITE('deprnReserve',         r.DEPRN_RESERVE);
+            APEX_JSON.WRITE('nbv',                  NVL(r.COST, 0) - NVL(r.DEPRN_RESERVE, 0));
+            APEX_JSON.WRITE('deprnRunDate',         r.DEPRN_RUN_DATE);
+            APEX_JSON.WRITE('distributionId',       r.DISTRIBUTION_ID);
+            APEX_JSON.WRITE('accountedStatus',      r.ACCOUNTED_STATUS);
+            APEX_JSON.WRITE('status',               'Posted');
+            APEX_JSON.CLOSE_OBJECT;
+        END LOOP;
+
+        APEX_JSON.CLOSE_ARRAY;
+        APEX_JSON.WRITE('totalCount', v_total);
+        APEX_JSON.OPEN_OBJECT('summary');
+        APEX_JSON.WRITE('totalCost',        v_tot_cost);
+        APEX_JSON.WRITE('totalDeprnAmount', v_tot_deprn);
+        APEX_JSON.CLOSE_OBJECT;
+        APEX_JSON.CLOSE_OBJECT;
+
+        p_http_status := 200;
+        p_result      := APEX_JSON.GET_CLOB_OUTPUT;
+        APEX_JSON.FREE_OUTPUT;
+    EXCEPTION
+        WHEN OTHERS THEN
+            write_error(p_http_status, p_result, 500, SQLERRM);
+    END GET_DEPRN_VIEW;
+
 END RR_FA_PKG;
 /

@@ -16,6 +16,7 @@ import {
   getDeprnPreview, postDeprnCalculate,
   getDeprnWorkbench, getDeprnPeriods, getDeprnStatus, postSingleDeprn,
   getDeprnAccountingPreview, createSlaAccounting, markFaDeprnAccounted,
+  getDeprnView,
 } from '../../services/fa.service';
 import { postSlaToGL } from '../../services/glPosting.service';
 import { APEX_DB_CONFIG } from '../../config/api.config';
@@ -794,63 +795,41 @@ const CalculateDeprn: React.FC = () => {
       const periods = [...viewPeriodNames].sort((a, b) => periodKey(a) - periodKey(b));
       const asOf = periods[periods.length - 1];   // latest period → remaining-life reference
 
-      // Roster of assets + static attributes (DPIS, life, cost). Sourced from a
-      // period the backend accepts (last run period, else a selected one).
-      const roster: Record<string, any> = {};
-      const seedFrom = (items: any[]) => {
-        (items || []).forEach((it: any) => {
-          if (Number(it.cost) <= 0) return;
+      // Read straight from RR_FA_DEPRN_DETAIL (fa/deprn-view) — one call per
+      // selected period. Only assets that actually have depreciation in the
+      // detail table come back, so rows/cells are pure actuals (blank = no data).
+      const byAsset: Record<string, any> = {};
+      let anySucceeded = false;
+      for (const pn of periods) {
+        const res = await getDeprnView({ bookTypeCode: selectedBook, periodName: pn, assetNumber: viewAssetFilter || undefined });
+        if (res.success === false || !Array.isArray(res.items)) continue;   // no data → nothing
+        anySucceeded = true;
+        (res.items as any[]).forEach((it) => {
           const aid = String(it.assetId);
-          if (!roster[aid]) roster[aid] = {
+          if (!byAsset[aid]) byAsset[aid] = {
             assetId: aid, assetNumber: it.assetNumber, description: it.description,
             cost: Number(it.cost), lifeInMonths: it.lifeInMonths != null ? Number(it.lifeInMonths) : null,
             datePlacedInService: it.datePlacedInService, deprnStartDate: it.deprnStartDate,
           };
-        });
-      };
-
-      // Fetch every selected period; keep ONLY actual posted rows (data in table).
-      const rosterSeed = lastPeriod?.lastPeriodName;
-      if (rosterSeed && !periods.includes(rosterSeed)) {
-        const rres = await getDeprnStatus({ bookTypeCode: selectedBook, periodName: rosterSeed, assetNumber: viewAssetFilter || undefined });
-        if (rres.success !== false) seedFrom(rres.items || []);
-      }
-      const postedByPeriod: Record<string, Record<string, number>> = {};
-      for (const pn of periods) {
-        postedByPeriod[pn] = {};
-        const res = await getDeprnStatus({ bookTypeCode: selectedBook, periodName: pn, assetNumber: viewAssetFilter || undefined });
-        if (res.success === false || !Array.isArray(res.items)) continue;   // no data in table → nothing
-        seedFrom(res.items);
-        (res.items as any[]).forEach((it) => {
-          // Only actual posted rows have real data in RR_FA_DEPRN_DETAIL.
-          if (it.status === 'Posted' && it.deprnAmount != null) {
-            postedByPeriod[pn][String(it.assetId)] = Number(it.deprnAmount);
-          }
+          if (it.deprnAmount != null) byAsset[aid][pn] = Number(it.deprnAmount);
         });
       }
 
-      if (Object.keys(roster).length === 0) {
-        setViewError('No asset data available for this book / selection.');
+      if (!anySucceeded) {
+        setViewError('The depreciation endpoint (fa/deprn-view) returned no data — check it is deployed and the selected period(s) exist in RR_FA_DEPRN_PERIODS.');
         setViewRows([]); setViewCols([]); return;
       }
+      if (Object.keys(byAsset).length === 0) {
+        setViewRows([]); setViewCols(periods); return;   // deployed but no posted rows for the selection
+      }
 
-      // Pivot: one row per asset, actual posted amount per period (blank otherwise).
-      const rows = Object.values(roster).map((m: any) => {
-        const row: Record<string, any> = {
-          assetId: m.assetId, assetNumber: m.assetNumber, description: m.description,
-          cost: m.cost, lifeInMonths: m.lifeInMonths, datePlacedInService: m.datePlacedInService,
-        };
+      const rows = Object.values(byAsset).map((m: any) => {
         const used = m.lifeInMonths != null ? monthsDepreciated(m.datePlacedInService, m.deprnStartDate, asOf) : null;
-        row.remainingLife = (m.lifeInMonths != null && used != null)
+        const remainingLife = (m.lifeInMonths != null && used != null)
           ? Math.max(0, Math.min(m.lifeInMonths, m.lifeInMonths - Math.max(0, used)))
           : null;
-        let total = 0;
-        periods.forEach(pn => {
-          const v = postedByPeriod[pn][m.assetId];
-          if (v != null) { row[pn] = v; total += v; }
-        });
-        row.__total = total;
-        return row;
+        const total = periods.reduce((s, pn) => s + (Number(m[pn]) || 0), 0);
+        return { ...m, remainingLife, __total: total };
       });
       rows.sort((a: any, b: any) => String(a.assetNumber).localeCompare(String(b.assetNumber)));
       setViewCols(periods);
@@ -1083,26 +1062,18 @@ const CalculateDeprn: React.FC = () => {
             trigger="click"
             placement="bottomRight"
             content={(() => {
-              const seed = lastPeriod?.lastPeriodName;
-              const seedUrl = seed && !viewPeriodNames.includes(seed)
-                ? `${APEX_DB_CONFIG.baseUrl}/fa/deprn-by-period?bookTypeCode=${encodeURIComponent(selectedBook)}&periodName=${encodeURIComponent(seed)}`
-                : null;
               const rows = [...viewPeriodNames].sort((a, b) => periodKey(a) - periodKey(b)).map(pn => ({
                 pn,
-                url: `${APEX_DB_CONFIG.baseUrl}/fa/deprn-by-period?bookTypeCode=${encodeURIComponent(selectedBook)}&periodName=${encodeURIComponent(pn)}${viewAssetFilter ? `&assetNumber=${encodeURIComponent(viewAssetFilter)}` : ''}`,
+                url: `${APEX_DB_CONFIG.baseUrl}/fa/deprn-view?bookTypeCode=${encodeURIComponent(selectedBook)}&periodName=${encodeURIComponent(pn)}${viewAssetFilter ? `&assetNumber=${encodeURIComponent(viewAssetFilter)}` : ''}`,
               }));
+              const seedUrl: string | null = null;
               return (
                 <div style={{ maxWidth: 620, fontSize: 12 }}>
                   <div style={{ marginBottom: 8, color: REDWOOD.neutral500 }}>
-                    Method <b>GET</b> · no body. The report fires one call per selected period; a period
-                    not loaded in RR_FA_DEPRN_PERIODS returns <code>success:false</code> (so its column is blank).
+                    Method <b>GET</b> · no body. Reads straight from <code>RR_FA_DEPRN_DETAIL</code> (joined to
+                    <code>RR_FA_DEPRN_PERIODS</code> for the period label). One call per selected period — you can
+                    also pass <code>&amp;fiscalYear=26</code> instead of a period to pull a whole year.
                   </div>
-                  {seedUrl && (
-                    <div style={{ marginBottom: 10 }}>
-                      <Text strong>Roster seed — {seed}</Text>
-                      <Typography.Text copyable code style={{ display: 'block', fontSize: 11, marginTop: 2, wordBreak: 'break-all' }}>{seedUrl}</Typography.Text>
-                    </div>
-                  )}
                   {rows.length === 0
                     ? <Alert type="info" showIcon message="Select one or more periods first." />
                     : rows.map(r => (
