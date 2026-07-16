@@ -4,7 +4,7 @@ import dayjs from 'dayjs';
 import {
   Layout, Card, Form, Input, Button, Space, Typography, Table, Tag,
   Row, Col, Breadcrumb, Tooltip, Select, Tabs, Descriptions,
-  Spin, Empty, Badge, message, Modal, Switch, Statistic, DatePicker, Popconfirm, Divider, Alert,
+  Spin, Empty, Badge, message, Modal, Switch, Statistic, DatePicker, Popconfirm, Divider, Alert, Popover,
 } from 'antd';
 import type { ColumnsType, TableProps } from 'antd/es/table';
 import {
@@ -2055,6 +2055,50 @@ const AssetTabContent: React.FC<{
     },
   ];
 
+  // ── Dynamic NBV / Deprn Reserve ────────────────────────────────────────────
+  // tab.asset is the (static) search record. Compute the live values from the
+  // reloaded depreciation lines instead: Deprn Reserve = accumulated reserve of
+  // the LATEST posted period; NBV = Cost − Deprn Reserve. Falls back to the
+  // freshly-fetched book, then the search record. Recomputes on every refresh
+  // (and right after an adjustment, since the deprn grid reloads).
+  const dynMaxPc = deprn.length ? Math.max(...deprn.map(d => Number(d.periodCounter) || 0)) : null;
+  const dynReserve = dynMaxPc != null
+    ? deprn.filter(d => (Number(d.periodCounter) || 0) === dynMaxPc)
+           .reduce((s, d) => s + (parseFloat(d.deprnReserve) || 0), 0)
+    : (books[0]?.deprnReserve != null ? parseFloat(String(books[0].deprnReserve)) : (parseFloat(asset.deprnReserve) || 0));
+  const dynCost = books[0]?.cost != null ? parseFloat(String(books[0].cost)) : (parseFloat(asset.cost) || 0);
+  const dynNbv  = dynCost - dynReserve;
+  const dynReservePeriod = dynMaxPc != null
+    ? (deprn.find(d => (Number(d.periodCounter) || 0) === dynMaxPc)?.periodName || '')
+    : '';
+
+  const valuesApiContent = (
+    <div style={{ maxWidth: 560, fontSize: 12 }}>
+      <div style={{ color: '#888', marginBottom: 8 }}>
+        <b>NBV</b> = Cost − Deprn Reserve (calculated). <b>Deprn Reserve</b> is the accumulated
+        depreciation of the latest posted period{dynReservePeriod ? ` (${dynReservePeriod})` : ''}, read from these calls:
+      </div>
+      <div style={{ marginBottom: 8 }}>
+        <Text strong>Depreciation lines — reserve source</Text>
+        <Typography.Text copyable code style={{ display: 'block', fontSize: 11, marginTop: 2, wordBreak: 'break-all' }}>
+          {`${APEX_DB_CONFIG.baseUrl}/fa/assets/${asset.assetId}/deprn`}
+        </Typography.Text>
+      </div>
+      <div style={{ marginBottom: 8 }}>
+        <Text strong>Asset books (COST / reserve / NBV per book)</Text>
+        <Typography.Text copyable code style={{ display: 'block', fontSize: 11, marginTop: 2, wordBreak: 'break-all' }}>
+          {`${APEX_DB_CONFIG.baseUrl}/fa/assets/${asset.assetId}/books`}
+        </Typography.Text>
+      </div>
+      <div>
+        <Text strong>Asset detail</Text>
+        <Typography.Text copyable code style={{ display: 'block', fontSize: 11, marginTop: 2, wordBreak: 'break-all' }}>
+          {`${APEX_DB_CONFIG.baseUrl}/fa/assets/${asset.assetId}`}
+        </Typography.Text>
+      </div>
+    </div>
+  );
+
   return (
     <div style={{ padding: '16px 20px' }}>
       {/* Header summary strip */}
@@ -2084,6 +2128,11 @@ const AssetTabContent: React.FC<{
           )}
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
             {statusTag(asset.retiredFlag)}
+            <Popover title="API — how NBV & Deprn Reserve are fetched" content={valuesApiContent} trigger="click" placement="bottomRight">
+              <Tooltip title="Show the API URLs behind these values">
+                <Button size="small" icon={<ApiOutlined />} style={{ color: '#0572CE', borderColor: '#0572CE' }} />
+              </Tooltip>
+            </Popover>
             <Tooltip title="Refresh asset data">
               <Button
                 size="small"
@@ -2101,9 +2150,9 @@ const AssetTabContent: React.FC<{
             { label: 'Book',            value: asset.bookTypeCode || '—',              color: REDWOOD.neutral600, bg: REDWOOD.neutral100, border: REDWOOD.neutral200 },
             { label: 'Date in Service', value: fmtDate(asset.datePlacedInService),     color: REDWOOD.neutral600, bg: REDWOOD.neutral100, border: REDWOOD.neutral200 },
             { label: 'Company',         value: books[0]?.companyCode || '—',           color: REDWOOD.info,       bg: '#f0f7ff',          border: '#bdd7f5' },
-            { label: 'Cost',            value: formatCurrency(asset.cost),             color: FA_COLOR,           bg: `${FA_COLOR}10`,    border: `${FA_COLOR}30` },
-            { label: 'NBV',             value: formatCurrency(asset.nbv),              color: REDWOOD.info,       bg: `${REDWOOD.info}10`,border: `${REDWOOD.info}30` },
-            { label: 'Deprn Reserve',   value: formatCurrency(asset.deprnReserve),     color: REDWOOD.warning,    bg: `${REDWOOD.warning}10`, border: `${REDWOOD.warning}30` },
+            { label: 'Cost',            value: formatCurrency(String(dynCost)),        color: FA_COLOR,           bg: `${FA_COLOR}10`,    border: `${FA_COLOR}30` },
+            { label: 'NBV',             value: formatCurrency(String(dynNbv)),         color: REDWOOD.info,       bg: `${REDWOOD.info}10`,border: `${REDWOOD.info}30` },
+            { label: 'Deprn Reserve',   value: formatCurrency(String(dynReserve)),     color: REDWOOD.warning,    bg: `${REDWOOD.warning}10`, border: `${REDWOOD.warning}30` },
           ].map(({ label, value, color, bg, border }) => (
             <div key={label} style={{ padding: '6px 14px', borderRadius: 6, background: bg, border: `1px solid ${border}`, minWidth: 110 }}>
               <Text type="secondary" style={{ fontSize: 10, display: 'block', whiteSpace: 'nowrap' }}>{label}</Text>
