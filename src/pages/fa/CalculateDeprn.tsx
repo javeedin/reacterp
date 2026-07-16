@@ -1078,13 +1078,53 @@ const CalculateDeprn: React.FC = () => {
             style={{ background: FA_COLOR, borderColor: FA_COLOR }} onClick={handleViewFetch}>
             Fetch
           </Button>
-          <Tooltip title="One GET per period: fa/deprn-by-period?bookTypeCode=…&periodName=…">
-            <ApiOutlined style={{ color: '#1677ff', cursor: 'help' }}
-              onClick={() => {
-                const urls = viewPeriodNames.map(pn => `${APEX_DB_CONFIG.baseUrl}/fa/deprn-by-period?bookTypeCode=${encodeURIComponent(selectedBook)}&periodName=${encodeURIComponent(pn)}`).join('\n');
-                navigator.clipboard.writeText(urls); message.success('URL(s) copied');
-              }} />
-          </Tooltip>
+          <Popover
+            title="API Requests — GET (one per period)"
+            trigger="click"
+            placement="bottomRight"
+            content={(() => {
+              const seed = lastPeriod?.lastPeriodName;
+              const seedUrl = seed && !viewPeriodNames.includes(seed)
+                ? `${APEX_DB_CONFIG.baseUrl}/fa/deprn-by-period?bookTypeCode=${encodeURIComponent(selectedBook)}&periodName=${encodeURIComponent(seed)}`
+                : null;
+              const rows = [...viewPeriodNames].sort((a, b) => periodKey(a) - periodKey(b)).map(pn => ({
+                pn,
+                url: `${APEX_DB_CONFIG.baseUrl}/fa/deprn-by-period?bookTypeCode=${encodeURIComponent(selectedBook)}&periodName=${encodeURIComponent(pn)}${viewAssetFilter ? `&assetNumber=${encodeURIComponent(viewAssetFilter)}` : ''}`,
+              }));
+              return (
+                <div style={{ maxWidth: 620, fontSize: 12 }}>
+                  <div style={{ marginBottom: 8, color: REDWOOD.neutral500 }}>
+                    Method <b>GET</b> · no body. The report fires one call per selected period; a period
+                    not loaded in RR_FA_DEPRN_PERIODS returns <code>success:false</code> (so its column is blank).
+                  </div>
+                  {seedUrl && (
+                    <div style={{ marginBottom: 10 }}>
+                      <Text strong>Roster seed — {seed}</Text>
+                      <Typography.Text copyable code style={{ display: 'block', fontSize: 11, marginTop: 2, wordBreak: 'break-all' }}>{seedUrl}</Typography.Text>
+                    </div>
+                  )}
+                  {rows.length === 0
+                    ? <Alert type="info" showIcon message="Select one or more periods first." />
+                    : rows.map(r => (
+                        <div key={r.pn} style={{ marginBottom: 8 }}>
+                          <Text strong>{r.pn}</Text>
+                          <Typography.Text copyable code style={{ display: 'block', fontSize: 11, marginTop: 2, wordBreak: 'break-all' }}>{r.url}</Typography.Text>
+                        </div>
+                      ))}
+                  {rows.length > 0 && (
+                    <Button size="small" style={{ marginTop: 4 }} icon={<ApiOutlined />}
+                      onClick={() => { navigator.clipboard.writeText([seedUrl, ...rows.map(r => r.url)].filter(Boolean).join('\n')); message.success('All URLs copied'); }}>
+                      Copy all
+                    </Button>
+                  )}
+                </div>
+              );
+            })()}
+          >
+            <Tooltip title="Show all API URLs (for Postman)">
+              <ApiOutlined style={{ color: '#1677ff', cursor: 'pointer' }} />
+            </Tooltip>
+          </Popover>
         </Space>
       }
     >
