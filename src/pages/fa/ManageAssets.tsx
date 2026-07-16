@@ -3095,6 +3095,7 @@ const ManageAssets: React.FC = () => {
       'Original Cost':     parseFloat(r.originalCost) || 0,
       'Adjusted Cost':     parseFloat(r.adjustedCost) || 0,
       'Salvage Value':     parseFloat(r.salvageValue) || 0,
+      'YTD Deprn':         parseFloat(r.ytdDeprn) || 0,
       'Deprn Reserve':     parseFloat(r.deprnReserve) || 0,
       'NBV':               parseFloat(r.nbv) || 0,
       'Depreciate':        r.depreciateFlag,
@@ -3139,6 +3140,16 @@ const ManageAssets: React.FC = () => {
     {
       title: 'Cost', dataIndex: 'cost', key: 'cost', width: 130, align: 'right' as const,
       sorter: (a, b) => (parseFloat(a.cost) || 0) - (parseFloat(b.cost) || 0),
+      render: (v) => formatCurrency(v),
+    },
+    {
+      title: 'YTD Deprn', dataIndex: 'ytdDeprn', key: 'ytdDeprn', width: 130, align: 'right' as const,
+      sorter: (a, b) => (parseFloat(a.ytdDeprn) || 0) - (parseFloat(b.ytdDeprn) || 0),
+      render: (v) => formatCurrency(v),
+    },
+    {
+      title: 'Deprn Reserve', dataIndex: 'deprnReserve', key: 'deprnReserve', width: 140, align: 'right' as const,
+      sorter: (a, b) => (parseFloat(a.deprnReserve) || 0) - (parseFloat(b.deprnReserve) || 0),
       render: (v) => formatCurrency(v),
     },
     {

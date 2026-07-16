@@ -37,6 +37,7 @@ export interface AssetRecord {
   depreciateFlag: string;
   dateIneffective: string;
   deprnReserve: string;
+  ytdDeprn: string;
   nbv: string;
   retiredFlag: string;   // 'YES' if no active book entry, else 'NO'
   accountedStatus?: string;   // 'ACCOUNTED' | 'UNACCOUNTED'

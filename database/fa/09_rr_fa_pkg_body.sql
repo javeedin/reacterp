@@ -122,6 +122,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                    b.DEPRECIATE_FLAG,
                    b.DATE_INEFFECTIVE,
                    NVL(ds.DEPRN_RESERVE, 0)                    AS DEPRN_RESERVE,
+                   NVL(ds.YTD_DEPRN, 0)                        AS YTD_DEPRN,
                    NVL(b.COST, 0) - NVL(ds.DEPRN_RESERVE, 0)  AS NBV,
                    CASE WHEN b.ASSET_ID IS NULL THEN 'YES' ELSE 'NO' END AS RETIRED_FLAG,
                    NVL(a.ACCOUNTED_STATUS, 'UNACCOUNTED')       AS ACCOUNTED_STATUS,
@@ -130,7 +131,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
             LEFT JOIN (SELECT * FROM RR_FA_BOOKS WHERE DATE_INEFFECTIVE IS NULL) b
                    ON b.ASSET_ID = a.ASSET_ID
             LEFT JOIN (
-                SELECT ds1.ASSET_ID, ds1.BOOK_TYPE_CODE, ds1.DEPRN_RESERVE
+                SELECT ds1.ASSET_ID, ds1.BOOK_TYPE_CODE, ds1.DEPRN_RESERVE, ds1.YTD_DEPRN
                 FROM   RR_FA_DEPRN_SUMMARY ds1
                 WHERE  ds1.PERIOD_COUNTER = (
                     SELECT MAX(ds2.PERIOD_COUNTER) FROM RR_FA_DEPRN_SUMMARY ds2
@@ -176,6 +177,7 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                 || ',"depreciateFlag":'     || jstr(r.DEPRECIATE_FLAG)
                 || ',"dateIneffective":'    || jstr(r.DATE_INEFFECTIVE)
                 || ',"deprnReserve":'       || TO_CHAR(r.DEPRN_RESERVE)
+                || ',"ytdDeprn":'           || TO_CHAR(r.YTD_DEPRN)
                 || ',"nbv":'               || TO_CHAR(r.NBV)
                 || ',"retiredFlag":'        || jstr(r.RETIRED_FLAG)
                 || ',"accountedStatus":'   || jstr(r.ACCOUNTED_STATUS)
@@ -1130,32 +1132,25 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         v_pc := TO_NUMBER(p_period_counter);
 
         -- ── RR_FA_DEPRN_DETAIL ────────────────────────────────────────────────
-        IF p_distribution_id IS NOT NULL AND p_distribution_id != '0' THEN
-            -- DISTRIBUTION_ID is globally unique.
-            UPDATE RR_FA_DEPRN_DETAIL
-            SET    DEPRN_ADJUSTMENT_AMOUNT = NVL(DEPRN_ADJUSTMENT_AMOUNT, 0) + v_adj,
-                   YTD_DEPRN               = NVL(YTD_DEPRN, 0)               + v_adj,
-                   DEPRN_RESERVE           = NVL(DEPRN_RESERVE, 0)           + v_adj,
-                   ACCOUNTED_STATUS        = 'ACCOUNTED',
-                   ACCOUNTED_DATE          = SYSDATE,
-                   LAST_UPDATE_DATE        = SYSDATE,
-                   LAST_UPDATED_BY         = v_by
-            WHERE  DISTRIBUTION_ID = TO_NUMBER(p_distribution_id);
-            v_rows_d := SQL%ROWCOUNT;
-        ELSE
-            UPDATE RR_FA_DEPRN_DETAIL
-            SET    DEPRN_ADJUSTMENT_AMOUNT = NVL(DEPRN_ADJUSTMENT_AMOUNT, 0) + v_adj,
-                   YTD_DEPRN               = NVL(YTD_DEPRN, 0)               + v_adj,
-                   DEPRN_RESERVE           = NVL(DEPRN_RESERVE, 0)           + v_adj,
-                   ACCOUNTED_STATUS        = 'ACCOUNTED',
-                   ACCOUNTED_DATE          = SYSDATE,
-                   LAST_UPDATE_DATE        = SYSDATE,
-                   LAST_UPDATED_BY         = v_by
-            WHERE  ASSET_ID       = TO_NUMBER(p_asset_id)
-            AND    BOOK_TYPE_CODE = p_book
-            AND    PERIOD_COUNTER = v_pc;
-            v_rows_d := SQL%ROWCOUNT;
-        END IF;
+        -- ALWAYS scope by asset + book + period counter so only the selected
+        -- period is touched. DISTRIBUTION_ID is NOT unique across periods in
+        -- bulk-loaded data, so it can only be used to *narrow* within a period,
+        -- never on its own.
+        UPDATE RR_FA_DEPRN_DETAIL
+        SET    DEPRN_ADJUSTMENT_AMOUNT = NVL(DEPRN_ADJUSTMENT_AMOUNT, 0) + v_adj,
+               YTD_DEPRN               = NVL(YTD_DEPRN, 0)               + v_adj,
+               DEPRN_RESERVE           = NVL(DEPRN_RESERVE, 0)           + v_adj,
+               ACCOUNTED_STATUS        = 'ACCOUNTED',
+               ACCOUNTED_DATE          = SYSDATE,
+               LAST_UPDATE_DATE        = SYSDATE,
+               LAST_UPDATED_BY         = v_by
+        WHERE  ASSET_ID       = TO_NUMBER(p_asset_id)
+        AND    BOOK_TYPE_CODE = p_book
+        AND    PERIOD_COUNTER = v_pc
+        AND    (p_distribution_id IS NULL
+                OR p_distribution_id = '0'
+                OR DISTRIBUTION_ID = TO_NUMBER(p_distribution_id));
+        v_rows_d := SQL%ROWCOUNT;
 
         -- ── RR_FA_DEPRN_SUMMARY (one row per asset+book+period) ───────────────
         UPDATE RR_FA_DEPRN_SUMMARY
