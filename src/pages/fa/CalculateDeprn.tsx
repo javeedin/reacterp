@@ -472,10 +472,16 @@ const CalculateDeprn: React.FC = () => {
       render: (v: number | null) => v == null
         ? <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
         : <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.neutral500 }}>{fmt(v)}</Text> },
-    { title: `Deprn${statusMeta?.periodName ? ` (${statusMeta.periodName})` : ''}`, dataIndex: 'periodDeprn', key: 'periodDeprn', width: 130, align: 'right' as const,
-      render: (v: number | null, r: any) => v == null
+    { title: `Calculated${statusMeta?.periodName ? ` (${statusMeta.periodName})` : ''}`, dataIndex: 'periodDeprn', key: 'periodDeprn', width: 140, align: 'right' as const,
+      render: (v: number | null) => v == null
         ? <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
-        : <Text style={monoRed} title={r.status === 'Posted' ? 'Posted amount' : 'Calculated (not yet posted)'}>{fmt(v)}</Text> },
+        : <Text style={monoRed} title="Calculated (straight-line)">{fmt(v)}</Text> },
+    { title: `Posted${statusMeta?.periodName ? ` (${statusMeta.periodName})` : ''}`, dataIndex: 'periodActual', key: 'periodActual', width: 140, align: 'right' as const,
+      render: (v: number | null, r: any) => r.status !== 'Posted'
+        ? <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
+        : v == null
+          ? <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
+          : <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success, fontWeight: 600 }} title="Actual posted amount">{fmt(v)}</Text> },
     { title: 'Closing NBV', dataIndex: 'closingNbv', key: 'closingNbv', width: 140, align: 'right' as const,
       render: (v: number) => <Text style={{ ...mono, color: REDWOOD.success, fontWeight: 600 }}>{v == null ? '—' : fmt(v)}</Text> },
     { title: 'Status',      dataIndex: 'status', key: 'status', width: 110, fixed: 'right' as const,
@@ -515,16 +521,20 @@ const CalculateDeprn: React.FC = () => {
       .filter(r => Number(r.cost) > 0)
       .map(r => {
         const server = r.deprnAmount != null ? Number(r.deprnAmount) : null;
-        const calc = server == null ? computePeriodDeprn(
+        const posted = r.status === 'Posted';
+        // Always compute the client-side straight-line amount (the "calculated").
+        const calc = computePeriodDeprn(
           Number(r.cost), Number(r.salvageValue ?? 0), Number(r.lifeInMonths ?? 0),
           r.datePlacedInService, r.deprnStartDate, target,
-        ) : null;
+        );
         // previous period: from the prev-period fetch, else client calc
         const prev = statusPrev[String(r.assetId)] ?? (statusPrevName ? computePeriodDeprn(
           Number(r.cost), Number(r.salvageValue ?? 0), Number(r.lifeInMonths ?? 0),
           r.datePlacedInService, r.deprnStartDate, statusPrevName,
         ) : null);
-        return { ...r, periodDeprn: server ?? calc, prevDeprn: prev };
+        // periodDeprn = calculated (shown + used for posting); periodActual =
+        // the actual posted amount from the server, only when the row is Posted.
+        return { ...r, periodDeprn: calc ?? server, periodActual: posted ? server : null, prevDeprn: prev };
       });
   }, [statusItems, statusMeta, statusPeriodName, statusPrev, statusPrevName]);
 
@@ -780,6 +790,23 @@ const CalculateDeprn: React.FC = () => {
     }
   };
 
+  // Distinct years available across the period options (from the "MMM-YY" suffix).
+  const yearOptions = React.useMemo(() => {
+    const seen = new Map<string, string>();  // yy -> label
+    periodOptions.forEach(p => {
+      const yy = (p.name || '').slice(4);
+      if (yy && !seen.has(yy)) seen.set(yy, `FY ${p.fy || yy} (20${yy})`);
+    });
+    return Array.from(seen.entries()).map(([key, label]) => ({ key, label })).sort((a, b) => a.key.localeCompare(b.key));
+  }, [periodOptions]);
+
+  // Add every period of a given year to the selection (dedup, keep existing).
+  const addYear = (yy: string) => {
+    const names = periodOptions.filter(p => (p.name || '').slice(4) === yy).map(p => p.name);
+    if (names.length === 0) { message.info('No periods found for that year.'); return; }
+    setViewPeriodNames(prev => Array.from(new Set([...prev, ...names])).sort((a, b) => periodKey(a) - periodKey(b)));
+  };
+
   const filteredViewRows = React.useMemo(() => {
     const q = viewSearch.trim().toLowerCase();
     if (!q) return viewRows;
@@ -821,7 +848,8 @@ const CalculateDeprn: React.FC = () => {
         'Daily Rate': r.dailyRate != null ? Number(r.dailyRate) : null,
         'Opening NBV': r.openingNbv != null ? Number(r.openingNbv) : null,
         [`Deprn (${statusPrevName || 'Prev'})`]: r.prevDeprn != null ? Number(r.prevDeprn) : null,
-        [`Deprn (${statusMeta?.periodName || ''})`]: r.periodDeprn != null ? Number(r.periodDeprn) : null,
+        [`Calculated (${statusMeta?.periodName || ''})`]: r.periodDeprn != null ? Number(r.periodDeprn) : null,
+        [`Posted (${statusMeta?.periodName || ''})`]: r.periodActual != null ? Number(r.periodActual) : null,
         'Closing NBV': r.closingNbv != null ? Number(r.closingNbv) : null,
         'Cost': Number(r.cost), 'Status': r.status, 'Accounted': r.accountedStatus || '',
       }));
@@ -925,7 +953,7 @@ const CalculateDeprn: React.FC = () => {
           <Select
             mode="multiple"
             size="small"
-            style={{ minWidth: 320 }}
+            style={{ minWidth: 300 }}
             allowClear
             placeholder="Select one or more periods"
             value={viewPeriodNames}
@@ -936,6 +964,19 @@ const CalculateDeprn: React.FC = () => {
           >
             {periodOptions.map(p => (
               <Option key={p.name} value={p.name}>{p.name}{p.fy ? ` (FY ${p.fy})` : ''}</Option>
+            ))}
+          </Select>
+          <Select
+            size="small"
+            style={{ width: 170 }}
+            placeholder="+ Add full year"
+            value={null}
+            onChange={(yy) => yy && addYear(yy)}
+            showSearch
+            optionFilterProp="children"
+          >
+            {yearOptions.map(y => (
+              <Option key={y.key} value={y.key}>{y.label}</Option>
             ))}
           </Select>
           <Input
@@ -1357,7 +1398,7 @@ const CalculateDeprn: React.FC = () => {
                         columns={statusColumns}
                         rowKey="assetId"
                         size="small"
-                        scroll={{ x: 1440, y: 440 }}
+                        scroll={{ x: 1600, y: 440 }}
                         pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `${t} assets` }}
                         locale={{ emptyText: 'No assets found for this book/period' }}
                         rowSelection={{
