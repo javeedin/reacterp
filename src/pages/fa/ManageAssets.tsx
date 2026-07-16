@@ -4,7 +4,7 @@ import dayjs from 'dayjs';
 import {
   Layout, Card, Form, Input, Button, Space, Typography, Table, Tag,
   Row, Col, Breadcrumb, Tooltip, Select, Tabs, Descriptions,
-  Spin, Empty, Badge, message, Modal, Switch, Statistic, DatePicker, Popconfirm, Divider,
+  Spin, Empty, Badge, message, Modal, Switch, Statistic, DatePicker, Popconfirm, Divider, Alert,
 } from 'antd';
 import type { ColumnsType, TableProps } from 'antd/es/table';
 import {
@@ -13,7 +13,7 @@ import {
   EnvironmentOutlined, DatabaseOutlined, InfoCircleOutlined,
   BookOutlined, HistoryOutlined, BarcodeOutlined, ApiOutlined, CheckOutlined,
   FilterOutlined, DownloadOutlined, DollarOutlined, SaveOutlined, DeleteOutlined,
-  AccountBookOutlined, AuditOutlined, TagsOutlined, ArrowLeftOutlined,
+  AccountBookOutlined, AuditOutlined, TagsOutlined, ArrowLeftOutlined, EditOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { postSlaToGL } from '../../services/glPosting.service';
@@ -27,7 +27,7 @@ import {
   getAdditionsAccountingPreview, getDeprnAccountingPreview,
   checkSlaAccountingExists, getSlaAccounting,
   createSlaAccounting, markFaAdditionAccounted, markFaDeprnAccounted,
-  updateAssetAttributes,
+  updateAssetAttributes, adjustDeprn,
   formatCurrency, assetTypeLabel, assetStatusLabel,
 } from '../../services/fa.service';
 import type { JournalLine } from '../../services/manage-journals.service';
@@ -894,6 +894,48 @@ const AssetTabContent: React.FC<{
     }
   };
 
+  // ── Depreciation Adjustment ────────────────────────────────────────────────
+  // Select a posted deprn line and add an adjustment. The amount is added to
+  // YTD Deprn + Deprn Reserve, stored in Deprn Adjustment, and the period is
+  // marked ACCOUNTED (updates RR_FA_DEPRN_DETAIL + RR_FA_DEPRN_SUMMARY).
+  const [adjustRecord, setAdjustRecord] = useState<DeprnRecord | null>(null);
+  const [adjustValue,  setAdjustValue]  = useState<string>('');
+  const [adjustSaving, setAdjustSaving] = useState(false);
+
+  const openAdjustDeprn = (record: DeprnRecord) => { setAdjustValue(''); setAdjustRecord(record); };
+
+  const handleSaveAdjust = async () => {
+    if (!adjustRecord) return;
+    const book = books[0]?.bookTypeCode || asset.bookTypeCode || '';
+    const adj  = Number(adjustValue);
+    if (!book) { message.error('No book found for this asset'); return; }
+    if (!adj || isNaN(adj)) { message.warning('Enter a non-zero adjustment amount'); return; }
+    setAdjustSaving(true);
+    try {
+      const res = await adjustDeprn({
+        assetId:       asset.assetId,
+        bookTypeCode:  book,
+        periodCounter: adjustRecord.periodCounter,
+        distributionId: adjustRecord.distributionId || null,
+        deprnAdjustmentAmount: adj,
+        updatedBy:     loggedUser,
+      });
+      if (res.success) {
+        message.success(`Adjustment of ${formatCurrency(adj)} applied to ${adjustRecord.periodName}`);
+        const fresh = await getAssetDeprn(asset.assetId);
+        if (fresh.success) {
+          setOpenAssetTabs((prev: OpenAssetTab[]) => prev.map((t: OpenAssetTab) =>
+            t.key === `asset-${asset.assetId}` ? { ...t, deprn: fresh.items } : t));
+        }
+        setAdjustRecord(null);
+      } else {
+        message.error(res.error || 'Adjustment failed');
+      }
+    } finally {
+      setAdjustSaving(false);
+    }
+  };
+
   const deprnColumns: ColumnsType<DeprnRecord> = [
     { title: 'FY',          dataIndex: 'fiscalYear',               key: 'fiscalYear',  width: 60  },
     { title: 'Period Num',  dataIndex: 'periodNum',                key: 'periodNum',   width: 80  },
@@ -924,10 +966,18 @@ const AssetTabContent: React.FC<{
     {
       title: '',
       key: 'action',
-      width: 120,
+      width: 150,
       fixed: 'right' as const,
       render: (_: any, record: DeprnRecord) => (
         <Space size={4}>
+          <Tooltip title="Edit / add depreciation adjustment">
+            <Button
+              size="small"
+              icon={<EditOutlined />}
+              style={{ color: '#CA7700', borderColor: '#CA7700' }}
+              onClick={() => openAdjustDeprn(record)}
+            />
+          </Tooltip>
           <Tooltip title={record.accountedStatus === 'ACCOUNTED' ? 'View Accounting' : 'Create Accounting'}>
             <Button
               size="small"
@@ -1415,6 +1465,96 @@ const AssetTabContent: React.FC<{
                 );
               }}
             />
+
+            {/* ── Depreciation Adjustment Modal ── */}
+            {adjustRecord && (() => {
+              const book  = books[0]?.bookTypeCode || asset.bookTypeCode || '';
+              const adj   = Number(adjustValue) || 0;
+              const curYtd = parseFloat(adjustRecord.ytdDeprn) || 0;
+              const curRes = parseFloat(adjustRecord.deprnReserve) || 0;
+              const curAdj = parseFloat(adjustRecord.deprnAdjustmentAmount) || 0;
+              const payload = {
+                assetId: asset.assetId, bookTypeCode: book,
+                periodCounter: adjustRecord.periodCounter,
+                distributionId: adjustRecord.distributionId || null,
+                deprnAdjustmentAmount: adj, updatedBy: loggedUser,
+              };
+              return (
+                <Modal
+                  open
+                  onCancel={() => { if (!adjustSaving) setAdjustRecord(null); }}
+                  width={620}
+                  maskClosable={!adjustSaving}
+                  title={<Space><EditOutlined style={{ color: '#CA7700' }} /><span>Depreciation Adjustment — {adjustRecord.periodName}</span></Space>}
+                  footer={
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Tooltip title={<div style={{ maxWidth: 460 }}>
+                        <div style={{ fontSize: 11, marginBottom: 4 }}>POST {APEX_DB_CONFIG.baseUrl}/fa/deprn-adjust</div>
+                        <pre style={{ fontSize: 10, color: '#fff', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{JSON.stringify(payload, null, 2)}</pre>
+                      </div>}>
+                        <Button size="small" icon={<ApiOutlined />} style={{ color: '#0572CE', borderColor: '#0572CE' }}
+                          onClick={() => { navigator.clipboard.writeText(`${APEX_DB_CONFIG.baseUrl}/fa/deprn-adjust\n${JSON.stringify(payload, null, 2)}`); message.success('Request copied'); }} />
+                      </Tooltip>
+                      <Space>
+                        <Button disabled={adjustSaving} onClick={() => setAdjustRecord(null)}>Cancel</Button>
+                        <Button type="primary" loading={adjustSaving} disabled={!adj}
+                          style={{ background: '#CA7700', borderColor: '#CA7700' }}
+                          onClick={handleSaveAdjust}>
+                          Apply Adjustment
+                        </Button>
+                      </Space>
+                    </div>
+                  }
+                >
+                  <Alert type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }}
+                    message="The adjustment is added to YTD Deprn and Deprn Reserve, stored in Deprn Adjustment, and the period is marked ACCOUNTED — on both the depreciation detail and summary tables." />
+                  <Descriptions size="small" column={2} bordered
+                    styles={{ label: { width: 140, fontSize: 12 }, content: { fontSize: 12 } }}>
+                    <Descriptions.Item label="Period">{adjustRecord.periodName} (ctr {adjustRecord.periodCounter})</Descriptions.Item>
+                    <Descriptions.Item label="Distribution">{adjustRecord.distributionId || '—'}</Descriptions.Item>
+                    <Descriptions.Item label="Deprn Amount">{formatCurrency(adjustRecord.deprnAmount)}</Descriptions.Item>
+                    <Descriptions.Item label="Acctd Status">{adjustRecord.accountedStatus || 'UNACCOUNTED'}</Descriptions.Item>
+                  </Descriptions>
+                  <div style={{ margin: '14px 0 6px' }}>
+                    <Text strong style={{ fontSize: 12 }}>Deprn Adjustment amount (added; may be negative)</Text>
+                  </div>
+                  <Input
+                    type="number"
+                    size="large"
+                    autoFocus
+                    placeholder="e.g. 500 or -250"
+                    value={adjustValue}
+                    onChange={(e) => setAdjustValue(e.target.value)}
+                    onPressEnter={() => { if (adj) handleSaveAdjust(); }}
+                    prefix={<DollarOutlined style={{ color: '#CA7700' }} />}
+                  />
+                  <table style={{ width: '100%', marginTop: 16, fontSize: 12, borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: '#fafafa', color: '#888' }}>
+                        <th style={{ textAlign: 'left', padding: '4px 8px' }}>Field</th>
+                        <th style={{ textAlign: 'right', padding: '4px 8px' }}>Current</th>
+                        <th style={{ textAlign: 'right', padding: '4px 8px' }}>+ Adjustment</th>
+                        <th style={{ textAlign: 'right', padding: '4px 8px' }}>New</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        { label: 'Deprn Adjustment', cur: curAdj },
+                        { label: 'YTD Deprn',        cur: curYtd },
+                        { label: 'Deprn Reserve',    cur: curRes },
+                      ].map(row => (
+                        <tr key={row.label} style={{ borderTop: '1px solid #eee' }}>
+                          <td style={{ padding: '4px 8px' }}>{row.label}</td>
+                          <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(String(row.cur))}</td>
+                          <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'monospace', color: adj >= 0 ? '#1D7B4D' : '#C74634' }}>{adj >= 0 ? '+' : ''}{formatCurrency(String(adj))}</td>
+                          <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#CA7700' }}>{formatCurrency(String(row.cur + adj))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </Modal>
+              );
+            })()}
 
             {/* ── Preview Depreciation Modal ── */}
             <Modal

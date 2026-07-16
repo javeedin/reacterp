@@ -134,6 +134,23 @@ CREATE OR REPLACE PACKAGE RR_FA_PKG AS
         p_result         OUT CLOB
     );
 
+    -- ── Depreciation Adjustment ───────────────────────────────────────────────
+    -- Apply a manual depreciation adjustment to ONE posted period (keyed by
+    -- asset + book + period counter, optionally a specific distribution). The
+    -- adjustment amount is ADDED to YTD_DEPRN and DEPRN_RESERVE, stored in
+    -- DEPRN_ADJUSTMENT_AMOUNT, and the period is marked ACCOUNTED. Updates both
+    -- RR_FA_DEPRN_DETAIL and RR_FA_DEPRN_SUMMARY.
+    PROCEDURE ADJUST_DEPRN (
+        p_asset_id        IN  VARCHAR2,
+        p_book            IN  VARCHAR2,
+        p_period_counter  IN  VARCHAR2,
+        p_distribution_id IN  VARCHAR2,
+        p_adjustment      IN  NUMBER,
+        p_updated_by      IN  VARCHAR2,
+        p_http_status     OUT NUMBER,
+        p_result          OUT CLOB
+    );
+
     -- ── Write Operations ──────────────────────────────────────────────────────
     PROCEDURE CREATE_ASSET (
         p_body        IN  CLOB,

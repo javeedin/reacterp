@@ -620,6 +620,33 @@ export const deleteAssetDeprn = async (payload: {
   }
 };
 
+// Apply a depreciation adjustment to one posted period. Adds the amount to
+// YTD Deprn + Deprn Reserve, stores it in Deprn Adjustment, marks ACCOUNTED —
+// on RR_FA_DEPRN_DETAIL and RR_FA_DEPRN_SUMMARY (keyed by asset+book+period).
+export const adjustDeprn = async (payload: {
+  assetId: string;
+  bookTypeCode: string;
+  periodCounter: number | string;
+  distributionId?: number | string | null;
+  deprnAdjustmentAmount: number;
+  updatedBy?: string;
+}): Promise<{
+  success: boolean; detailRowsUpdated?: number; summaryRowsUpdated?: number;
+  deprnAdjustmentAmount?: number; ytdDeprn?: number; deprnReserve?: number;
+  accountedStatus?: string; error?: string;
+}> => {
+  try {
+    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/fa/deprn-adjust`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return await res.json();
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
+};
+
 export const getDeprnPeriods = async (bookTypeCode?: string): Promise<any[]> => {
   try {
     const qs = bookTypeCode ? `?bookTypeCode=${encodeURIComponent(bookTypeCode)}` : '';

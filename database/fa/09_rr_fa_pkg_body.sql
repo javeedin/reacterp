@@ -1095,5 +1095,133 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
             write_error(p_http_status, p_result, 500, SQLERRM);
     END GET_DEPRN_VIEW;
 
+    -- ── Depreciation Adjustment ───────────────────────────────────────────────
+    -- Adds p_adjustment to YTD_DEPRN and DEPRN_RESERVE for the target period,
+    -- stores it in DEPRN_ADJUSTMENT_AMOUNT, and marks the period ACCOUNTED — on
+    -- BOTH RR_FA_DEPRN_DETAIL and RR_FA_DEPRN_SUMMARY. Keyed by asset + book +
+    -- period counter (and the specific distribution when supplied).
+    PROCEDURE ADJUST_DEPRN (
+        p_asset_id        IN  VARCHAR2,
+        p_book            IN  VARCHAR2,
+        p_period_counter  IN  VARCHAR2,
+        p_distribution_id IN  VARCHAR2,
+        p_adjustment      IN  NUMBER,
+        p_updated_by      IN  VARCHAR2,
+        p_http_status     OUT NUMBER,
+        p_result          OUT CLOB
+    ) IS
+        v_adj      NUMBER := NVL(p_adjustment, 0);
+        v_pc       NUMBER;
+        v_rows_d   NUMBER := 0;
+        v_rows_s   NUMBER := 0;
+        v_new_ytd  NUMBER;
+        v_new_res  NUMBER;
+        v_new_adj  NUMBER;
+        v_by       VARCHAR2(100) := NVL(p_updated_by, 'REACTERP');
+    BEGIN
+        IF p_asset_id IS NULL OR p_book IS NULL OR p_period_counter IS NULL THEN
+            write_error(p_http_status, p_result, 400, 'assetId, bookTypeCode and periodCounter are required');
+            RETURN;
+        END IF;
+        IF v_adj = 0 THEN
+            write_error(p_http_status, p_result, 400, 'deprnAdjustmentAmount must be a non-zero number');
+            RETURN;
+        END IF;
+        v_pc := TO_NUMBER(p_period_counter);
+
+        -- ── RR_FA_DEPRN_DETAIL ────────────────────────────────────────────────
+        IF p_distribution_id IS NOT NULL AND p_distribution_id != '0' THEN
+            -- DISTRIBUTION_ID is globally unique.
+            UPDATE RR_FA_DEPRN_DETAIL
+            SET    DEPRN_ADJUSTMENT_AMOUNT = NVL(DEPRN_ADJUSTMENT_AMOUNT, 0) + v_adj,
+                   YTD_DEPRN               = NVL(YTD_DEPRN, 0)               + v_adj,
+                   DEPRN_RESERVE           = NVL(DEPRN_RESERVE, 0)           + v_adj,
+                   ACCOUNTED_STATUS        = 'ACCOUNTED',
+                   ACCOUNTED_DATE          = SYSDATE,
+                   LAST_UPDATE_DATE        = SYSDATE,
+                   LAST_UPDATED_BY         = v_by
+            WHERE  DISTRIBUTION_ID = TO_NUMBER(p_distribution_id);
+            v_rows_d := SQL%ROWCOUNT;
+        ELSE
+            UPDATE RR_FA_DEPRN_DETAIL
+            SET    DEPRN_ADJUSTMENT_AMOUNT = NVL(DEPRN_ADJUSTMENT_AMOUNT, 0) + v_adj,
+                   YTD_DEPRN               = NVL(YTD_DEPRN, 0)               + v_adj,
+                   DEPRN_RESERVE           = NVL(DEPRN_RESERVE, 0)           + v_adj,
+                   ACCOUNTED_STATUS        = 'ACCOUNTED',
+                   ACCOUNTED_DATE          = SYSDATE,
+                   LAST_UPDATE_DATE        = SYSDATE,
+                   LAST_UPDATED_BY         = v_by
+            WHERE  ASSET_ID       = TO_NUMBER(p_asset_id)
+            AND    BOOK_TYPE_CODE = p_book
+            AND    PERIOD_COUNTER = v_pc;
+            v_rows_d := SQL%ROWCOUNT;
+        END IF;
+
+        -- ── RR_FA_DEPRN_SUMMARY (one row per asset+book+period) ───────────────
+        UPDATE RR_FA_DEPRN_SUMMARY
+        SET    YTD_DEPRN        = NVL(YTD_DEPRN, 0)     + v_adj,
+               DEPRN_RESERVE    = NVL(DEPRN_RESERVE, 0) + v_adj,
+               ACCOUNTED_STATUS = 'ACCOUNTED',
+               ACCOUNTED_DATE   = SYSDATE,
+               LAST_UPDATE_DATE = SYSDATE,
+               LAST_UPDATED_BY  = v_by
+        WHERE  ASSET_ID       = TO_NUMBER(p_asset_id)
+        AND    BOOK_TYPE_CODE = p_book
+        AND    PERIOD_COUNTER = v_pc;
+        v_rows_s := SQL%ROWCOUNT;
+
+        IF v_rows_d = 0 AND v_rows_s = 0 THEN
+            ROLLBACK;
+            write_error(p_http_status, p_result, 404, 'No depreciation row found for asset/book/period');
+            RETURN;
+        END IF;
+
+        COMMIT;
+
+        -- Read back the resulting values (prefer summary; fall back to detail).
+        BEGIN
+            SELECT YTD_DEPRN, DEPRN_RESERVE
+              INTO v_new_ytd, v_new_res
+              FROM RR_FA_DEPRN_SUMMARY
+             WHERE ASSET_ID = TO_NUMBER(p_asset_id)
+               AND BOOK_TYPE_CODE = p_book
+               AND PERIOD_COUNTER = v_pc
+               AND ROWNUM = 1;
+        EXCEPTION WHEN NO_DATA_FOUND THEN
+            v_new_ytd := NULL; v_new_res := NULL;
+        END;
+        BEGIN
+            SELECT SUM(NVL(DEPRN_ADJUSTMENT_AMOUNT, 0))
+              INTO v_new_adj
+              FROM RR_FA_DEPRN_DETAIL
+             WHERE ASSET_ID = TO_NUMBER(p_asset_id)
+               AND BOOK_TYPE_CODE = p_book
+               AND PERIOD_COUNTER = v_pc;
+        EXCEPTION WHEN OTHERS THEN v_new_adj := NULL; END;
+
+        APEX_JSON.INITIALIZE_CLOB_OUTPUT;
+        APEX_JSON.OPEN_OBJECT;
+        APEX_JSON.WRITE('success',              TRUE);
+        APEX_JSON.WRITE('assetId',              p_asset_id);
+        APEX_JSON.WRITE('bookTypeCode',         p_book);
+        APEX_JSON.WRITE('periodCounter',        v_pc);
+        APEX_JSON.WRITE('adjustment',           v_adj);
+        APEX_JSON.WRITE('detailRowsUpdated',    v_rows_d);
+        APEX_JSON.WRITE('summaryRowsUpdated',   v_rows_s);
+        APEX_JSON.WRITE('deprnAdjustmentAmount', v_new_adj);
+        APEX_JSON.WRITE('ytdDeprn',             v_new_ytd);
+        APEX_JSON.WRITE('deprnReserve',         v_new_res);
+        APEX_JSON.WRITE('accountedStatus',      'ACCOUNTED');
+        APEX_JSON.CLOSE_OBJECT;
+
+        p_http_status := 200;
+        p_result      := APEX_JSON.GET_CLOB_OUTPUT;
+        APEX_JSON.FREE_OUTPUT;
+    EXCEPTION
+        WHEN OTHERS THEN
+            ROLLBACK;
+            write_error(p_http_status, p_result, 500, SQLERRM);
+    END ADJUST_DEPRN;
+
 END RR_FA_PKG;
 /
