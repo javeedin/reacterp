@@ -224,17 +224,40 @@ const CalculateDeprn: React.FC = () => {
     getDeprnPeriods(selectedBook).then((ps) => setPeriodsList(ps || []));
   }, [selectedBook]);
 
-  // Period options — merge the list endpoint with the known last/next periods so
-  // the dropdown is never empty even if fa/deprn-periods (list) isn't deployed.
+  // Period options. The server list (fa/deprn-periods) only returns whatever is
+  // loaded in RR_FA_DEPRN_PERIODS — often just the current/next period — so the
+  // picker would be limited to those. Depreciation for any month is computed by
+  // name (client + server), so we additionally generate a rolling window of
+  // periods around the last run so the user can pick any month / full year.
   const periodOptions = React.useMemo(() => {
+    const pk = (name: string) => {
+      const m = MON.indexOf(name.slice(0, 3));
+      const yy = parseInt(name.slice(4), 10);
+      return (isNaN(yy) ? 0 : yy) * 12 + (m < 0 ? 0 : m);
+    };
     const seen = new Set<string>();
     const out: { name: string; fy?: string }[] = [];
     const add = (name?: string, fy?: string) => {
       if (name && !seen.has(name.toUpperCase())) { seen.add(name.toUpperCase()); out.push({ name, fy }); }
     };
+    // 1) server-provided periods carry the real fiscal year — add them first.
     (periodsList || []).forEach((p: any) => add(p.periodName, p.fiscalYear));
     add(lastPeriod?.lastPeriodName, lastPeriod?.fiscalYear);
     add(lastPeriod?.nextPeriodName);
+    // 2) generate a window: 6 months forward .. 30 back from the last-run month
+    //    (or today if unknown). fy is left blank for generated ones.
+    const baseName: string | undefined = lastPeriod?.lastPeriodName;
+    const bidx = baseName ? MON.indexOf(baseName.slice(0, 3)) : -1;
+    let by: number, bm: number;
+    if (baseName && bidx >= 0) { by = 2000 + parseInt(baseName.slice(4), 10); bm = bidx; }
+    else { const d = new Date(); by = d.getFullYear(); bm = d.getMonth(); }
+    for (let off = 6; off >= -30; off--) {
+      const total = by * 12 + bm + off;
+      const y = Math.floor(total / 12);
+      const m = ((total % 12) + 12) % 12;
+      add(periodLabel(y, m));
+    }
+    out.sort((a, b) => pk(b.name) - pk(a.name));  // newest first
     return out;
   }, [periodsList, lastPeriod]);
 
