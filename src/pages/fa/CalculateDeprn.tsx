@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layout, Card, Row, Col, Breadcrumb, Typography, Select, Space,
-  Button, Spin, Tag, Tooltip, message, Popover, Table, Alert, Divider, Input, Modal,
+  Button, Spin, Tag, Tooltip, message, Popover, Table, Alert, Divider, Input, Modal, Tabs,
 } from 'antd';
 import {
   HomeOutlined, LineChartOutlined, ReloadOutlined,
   CheckCircleOutlined, ClockCircleOutlined, ApiOutlined,
   PlayCircleOutlined, SyncOutlined, CloudUploadOutlined, EyeOutlined,
-  SwapOutlined, AuditOutlined,
+  SwapOutlined, AuditOutlined, TableOutlined, FileExcelOutlined,
 } from '@ant-design/icons';
+import * as XLSX from 'xlsx';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   getBookControls, getDeprnLastPeriod,
@@ -116,6 +117,18 @@ const CalculateDeprn: React.FC = () => {
 
   // Which table to show
   const [viewMode, setViewMode] = useState<ViewMode>('last');
+
+  // Outer page tabs: Calculate Depreciation | View Depreciation
+  const [pageTab, setPageTab] = useState<'calculate' | 'view'>('calculate');
+
+  // ── View Depreciation (pivot: assets × selected periods) ──
+  const [viewPeriodNames, setViewPeriodNames] = useState<string[]>([]);  // selected period names
+  const [viewAssetFilter, setViewAssetFilter] = useState('');            // optional asset# filter
+  const [viewCols,    setViewCols]    = useState<string[]>([]);          // resolved period columns (chronological)
+  const [viewRows,    setViewRows]    = useState<any[]>([]);             // pivoted rows
+  const [viewLoading, setViewLoading] = useState(false);
+  const [viewSearch,  setViewSearch]  = useState('');
+  const [viewError,   setViewError]   = useState('');
 
   // Status-by-period (all assets)
   const [periodsList,     setPeriodsList]     = useState<any[]>([]);
@@ -715,6 +728,133 @@ const CalculateDeprn: React.FC = () => {
     }
   };
 
+  // ── View Depreciation: fetch each selected period and pivot into columns ──
+  const periodKey = (name?: string): number => {
+    if (!name) return 0;
+    const m = MON.indexOf(name.slice(0, 3));
+    const yy = parseInt(name.slice(4), 10);
+    return (isNaN(yy) ? 0 : yy) * 12 + (m < 0 ? 0 : m);
+  };
+
+  const handleViewFetch = async () => {
+    if (!selectedBook || viewPeriodNames.length === 0) {
+      message.warning('Select a book and at least one period.');
+      return;
+    }
+    setViewLoading(true);
+    setViewError('');
+    setViewSearch('');
+    try {
+      const periods = [...viewPeriodNames].sort((a, b) => periodKey(a) - periodKey(b));
+      const byAsset: Record<string, any> = {};
+      for (const pn of periods) {
+        const res = await getDeprnStatus({ bookTypeCode: selectedBook, periodName: pn, assetNumber: viewAssetFilter || undefined });
+        if (res.success === false) { setViewError(res.error || `Failed to load ${pn}`); continue; }
+        const resolved = res.periodName || pn;
+        (res.items || []).forEach((it: any) => {
+          if (Number(it.cost) <= 0) return;
+          const aid = String(it.assetId);
+          if (!byAsset[aid]) {
+            byAsset[aid] = { assetId: aid, assetNumber: it.assetNumber, description: it.description, cost: Number(it.cost) };
+          }
+          const server = it.deprnAmount != null ? Number(it.deprnAmount) : null;
+          const calc = server == null ? computePeriodDeprn(
+            Number(it.cost), Number(it.salvageValue ?? 0), Number(it.lifeInMonths ?? 0),
+            it.datePlacedInService, it.deprnStartDate, resolved,
+          ) : null;
+          byAsset[aid][pn] = server ?? calc;
+          byAsset[aid][`${pn}__posted`] = it.status === 'Posted';
+        });
+      }
+      const rows = Object.values(byAsset).map((r: any) => ({
+        ...r,
+        __total: periods.reduce((s, pn) => s + (Number(r[pn]) || 0), 0),
+      }));
+      rows.sort((a: any, b: any) => String(a.assetNumber).localeCompare(String(b.assetNumber)));
+      setViewCols(periods);
+      setViewRows(rows);
+    } catch (e: any) {
+      setViewError(e?.message || 'Failed to fetch depreciation');
+    } finally {
+      setViewLoading(false);
+    }
+  };
+
+  const filteredViewRows = React.useMemo(() => {
+    const q = viewSearch.trim().toLowerCase();
+    if (!q) return viewRows;
+    return viewRows.filter(r =>
+      [r.assetNumber, r.description, r.cost, ...viewCols.map(pn => r[pn])]
+        .some(v => v != null && String(v).toLowerCase().includes(q)));
+  }, [viewRows, viewCols, viewSearch]);
+
+  // Export the pivoted View Depreciation grid (ALL rows, not just current page).
+  const exportViewExcel = () => {
+    if (filteredViewRows.length === 0) { message.warning('Nothing to export.'); return; }
+    const data = filteredViewRows.map(r => {
+      const row: Record<string, any> = { 'Asset #': r.assetNumber, 'Description': r.description, 'Cost': r.cost };
+      viewCols.forEach(pn => { row[pn] = r[pn] != null ? Number(r[pn]) : null; });
+      row['Total'] = r.__total;
+      return row;
+    });
+    // grand total row
+    const totalsRow: Record<string, any> = { 'Asset #': '', 'Description': 'TOTAL', 'Cost': filteredViewRows.reduce((s, r) => s + (Number(r.cost) || 0), 0) };
+    viewCols.forEach(pn => { totalsRow[pn] = filteredViewRows.reduce((s, r) => s + (Number(r[pn]) || 0), 0); });
+    totalsRow['Total'] = filteredViewRows.reduce((s, r) => s + (Number(r.__total) || 0), 0);
+    data.push(totalsRow);
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Depreciation');
+    XLSX.writeFile(wb, `depreciation_${selectedBook}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  // Export the active table on the Calculate Depreciation tab (ALL rows).
+  const exportCalcExcel = () => {
+    let data: any[] = [];
+    let sheet = 'Depreciation';
+    let fname = 'depreciation';
+    if (isStatus) {
+      sheet = 'Deprn Status'; fname = `deprn_status_${statusMeta?.periodName || ''}`;
+      data = filteredStatusItems.map(r => ({
+        'Asset #': r.assetNumber, 'Description': r.description,
+        'Period': r.periodName ?? statusMeta?.periodName, 'Days': r.days,
+        'Daily Rate': r.dailyRate != null ? Number(r.dailyRate) : null,
+        'Opening NBV': r.openingNbv != null ? Number(r.openingNbv) : null,
+        [`Deprn (${statusPrevName || 'Prev'})`]: r.prevDeprn != null ? Number(r.prevDeprn) : null,
+        [`Deprn (${statusMeta?.periodName || ''})`]: r.periodDeprn != null ? Number(r.periodDeprn) : null,
+        'Closing NBV': r.closingNbv != null ? Number(r.closingNbv) : null,
+        'Cost': Number(r.cost), 'Status': r.status, 'Accounted': r.accountedStatus || '',
+      }));
+    } else if (isCompare) {
+      sheet = 'Compare'; fname = `deprn_compare_${lastPeriod?.lastPeriodName || ''}_vs_${lastPeriod?.nextPeriodName || ''}`;
+      data = compareRows.map(r => ({
+        'Asset #': r.assetNumber, 'Description': r.description, 'Method': r.methodCode,
+        [`${r.lastPeriod} Deprn`]: r.lastDeprn, [`${r.nextPeriod} Deprn`]: r.nextDeprn,
+        'Difference': r.difference, [`${r.lastPeriod} NBV`]: r.lastNbv, [`${r.nextPeriod} NBV`]: r.nextNbv,
+      }));
+    } else if (isPreview) {
+      sheet = 'Preview'; fname = `deprn_preview_${lastPeriod?.nextPeriodName || ''}`;
+      data = previewItems.map(r => ({
+        'Asset #': r.assetNumber, 'Description': r.description, 'Method': r.methodCode,
+        'Life (Months)': r.lifeInMonths, 'Cost': Number(r.adjustedCost), 'Salvage': Number(r.salvageValue),
+        'Deprn Amount': Number(r.deprnAmount), 'Prior Reserve': Number(r.priorReserve),
+        'New Reserve': Number(r.newReserve), 'NBV': Number(r.nbv),
+      }));
+    } else {
+      sheet = 'Last Period'; fname = `deprn_${lastPeriod?.lastPeriodName || ''}`;
+      data = wbItems.map(r => ({
+        'Asset #': r.assetNumber, 'Description': r.description, 'FY': r.fiscalYear,
+        'Cost': Number(r.adjustedCost), 'Deprn Amount': Number(r.deprnAmount), 'YTD Deprn': Number(r.ytdDeprn),
+        'Reserve': Number(r.deprnReserve), 'NBV': Number(r.nbv), 'Run Date': r.deprnRunDate,
+      }));
+    }
+    if (data.length === 0) { message.warning('Nothing to export.'); return; }
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, sheet);
+    XLSX.writeFile(wb, `${fname}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
   const isPreview = viewMode === 'preview';
   const isCompare = viewMode === 'compare';
   const isStatus  = viewMode === 'status';
@@ -748,6 +888,129 @@ const CalculateDeprn: React.FC = () => {
   const activeSummary = isCompare ? null          : isPreview ? previewSummary : wbSummary;
   const activeLoading = isCompare ? false         : isPreview ? previewLoading : wbLoading;
   const activeRowKey  = 'assetId';
+
+  // Columns for the View Depreciation pivot: fixed cols + one per selected period.
+  const viewColumns = [
+    { title: 'Asset #', dataIndex: 'assetNumber', key: 'assetNumber', width: 100, fixed: 'left' as const,
+      render: (v: string) => (
+        <Tooltip title="Open asset details">
+          <Button type="link" size="small" style={{ padding: 0, height: 'auto', fontSize: 12, fontWeight: 600 }}
+            onClick={() => navigate(`/fa/assets?assetNumber=${encodeURIComponent(v)}&from=deprn`)}>{v}</Button>
+        </Tooltip>
+      ) },
+    { title: 'Description', dataIndex: 'description', key: 'description', width: 220, ellipsis: true, fixed: 'left' as const,
+      render: (v: string) => <Tooltip title={v}><Text style={{ fontSize: 12 }}>{v || '—'}</Text></Tooltip> },
+    { title: 'Cost', dataIndex: 'cost', key: 'cost', width: 130, align: 'right' as const,
+      render: (v: number) => <Text style={{ fontSize: 12 }}>{fmt(v)}</Text> },
+    ...viewCols.map(pn => ({
+      title: pn, dataIndex: pn, key: pn, width: 120, align: 'right' as const,
+      render: (v: number | null, r: any) => v == null
+        ? <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
+        : <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.primary, fontWeight: 600 }}
+            title={r[`${pn}__posted`] ? 'Posted' : 'Calculated (not posted)'}>{fmt(v)}</Text>,
+    })),
+    { title: 'Total', dataIndex: '__total', key: '__total', width: 140, align: 'right' as const, fixed: 'right' as const,
+      render: (v: number) => <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success, fontWeight: 700 }}>{fmt(v)}</Text> },
+  ];
+
+  const renderViewDeprn = () => (
+    <Card
+      style={{ borderRadius: 12, border: 'none', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
+      styles={{ body: { padding: '16px 20px' } }}
+      title={
+        <Space wrap>
+          <TableOutlined style={{ color: FA_COLOR }} />
+          <Text strong>View Depreciation by Period</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>Periods:</Text>
+          <Select
+            mode="multiple"
+            size="small"
+            style={{ minWidth: 320 }}
+            allowClear
+            placeholder="Select one or more periods"
+            value={viewPeriodNames}
+            onChange={(v) => setViewPeriodNames(v)}
+            showSearch
+            optionFilterProp="children"
+            maxTagCount="responsive"
+          >
+            {periodOptions.map(p => (
+              <Option key={p.name} value={p.name}>{p.name}{p.fy ? ` (FY ${p.fy})` : ''}</Option>
+            ))}
+          </Select>
+          <Input
+            size="small"
+            allowClear
+            placeholder="Asset # (optional)"
+            style={{ width: 150 }}
+            value={viewAssetFilter}
+            onChange={e => setViewAssetFilter(e.target.value)}
+            onPressEnter={handleViewFetch}
+          />
+          <Button size="small" type="primary" icon={<LineChartOutlined />} loading={viewLoading}
+            style={{ background: FA_COLOR, borderColor: FA_COLOR }} onClick={handleViewFetch}>
+            Fetch
+          </Button>
+          <Tooltip title="One GET per period: fa/deprn-by-period?bookTypeCode=…&periodName=…">
+            <ApiOutlined style={{ color: '#1677ff', cursor: 'help' }}
+              onClick={() => {
+                const urls = viewPeriodNames.map(pn => `${APEX_DB_CONFIG.baseUrl}/fa/deprn-by-period?bookTypeCode=${encodeURIComponent(selectedBook)}&periodName=${encodeURIComponent(pn)}`).join('\n');
+                navigator.clipboard.writeText(urls); message.success('URL(s) copied');
+              }} />
+          </Tooltip>
+        </Space>
+      }
+    >
+      {viewError && <Alert type="error" showIcon style={{ marginBottom: 12 }} message={viewError} />}
+      {viewLoading ? (
+        <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+      ) : viewRows.length === 0 ? (
+        <Alert type="info" showIcon message="Select a book (top-right) and one or more periods, then click Fetch. Each period becomes its own column." />
+      ) : (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
+            <Space wrap>
+              <Input.Search allowClear size="small" placeholder="Filter any column…" style={{ width: 240 }}
+                value={viewSearch} onChange={e => setViewSearch(e.target.value)} />
+              <Text type="secondary" style={{ fontSize: 12 }}>{filteredViewRows.length} asset(s) · {viewCols.length} period(s)</Text>
+            </Space>
+            <Button size="small" icon={<FileExcelOutlined />} onClick={exportViewExcel}
+              style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}>
+              Export to Excel
+            </Button>
+          </div>
+          <Table
+            dataSource={filteredViewRows}
+            columns={viewColumns}
+            rowKey="assetId"
+            size="small"
+            scroll={{ x: 550 + viewCols.length * 120, y: 460 }}
+            pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `${t} assets` }}
+            summary={(pageData) => {
+              const tot = (key: string) => pageData.reduce((s: number, r: any) => s + (Number(r[key]) || 0), 0);
+              return (
+                <Table.Summary fixed>
+                  <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 700 }}>
+                    <Table.Summary.Cell index={0}><Text strong style={{ fontSize: 12 }}>Total (page)</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={1} />
+                    <Table.Summary.Cell index={2} align="right"><Text strong style={{ fontSize: 12 }}>{fmt(tot('cost'))}</Text></Table.Summary.Cell>
+                    {viewCols.map((pn, i) => (
+                      <Table.Summary.Cell key={pn} index={3 + i} align="right">
+                        <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(tot(pn))}</Text>
+                      </Table.Summary.Cell>
+                    ))}
+                    <Table.Summary.Cell index={3 + viewCols.length} align="right">
+                      <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(tot('__total'))}</Text>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              );
+            }}
+          />
+        </>
+      )}
+    </Card>
+  );
 
   return (
     <Layout style={{ minHeight: 'calc(100vh - 64px)', background: REDWOOD.neutral100 }}>
@@ -799,7 +1062,16 @@ const CalculateDeprn: React.FC = () => {
         </div>
 
         <div style={{ padding: 24 }}>
-          {loading ? (
+          <Tabs
+            activeKey={pageTab}
+            onChange={(k) => setPageTab(k as 'calculate' | 'view')}
+            style={{ marginBottom: 8 }}
+            items={[
+              { key: 'calculate', label: <span><LineChartOutlined /> Calculate Depreciation</span> },
+              { key: 'view', label: <span><TableOutlined /> View Depreciation</span> },
+            ]}
+          />
+          {pageTab === 'view' ? renderViewDeprn() : loading ? (
             <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>
           ) : (
             <>
@@ -924,6 +1196,12 @@ const CalculateDeprn: React.FC = () => {
                   >
                     Status by Period
                   </Button>
+                  <Tooltip title="Export the current table (all rows) to Excel">
+                    <Button size="small" icon={<FileExcelOutlined />} onClick={exportCalcExcel}
+                      style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}>
+                      Export to Excel
+                    </Button>
+                  </Tooltip>
                 </Space>
               </div>
 
