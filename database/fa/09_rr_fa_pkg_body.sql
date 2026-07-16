@@ -1132,10 +1132,10 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
         v_pc := TO_NUMBER(p_period_counter);
 
         -- ── RR_FA_DEPRN_DETAIL ────────────────────────────────────────────────
-        -- ALWAYS scope by asset + book + period counter so only the selected
-        -- period is touched. DISTRIBUTION_ID is NOT unique across periods in
-        -- bulk-loaded data, so it can only be used to *narrow* within a period,
-        -- never on its own.
+        -- Identify the target line by DISTRIBUTION_ID + PERIOD_COUNTER +
+        -- ASSET_ID (+ book). DISTRIBUTION_ID is NOT unique across periods in
+        -- bulk-loaded data, so the period counter + asset are what make the
+        -- match exact — the distribution only narrows within the period.
         UPDATE RR_FA_DEPRN_DETAIL
         SET    DEPRN_ADJUSTMENT_AMOUNT = NVL(DEPRN_ADJUSTMENT_AMOUNT, 0) + v_adj,
                YTD_DEPRN               = NVL(YTD_DEPRN, 0)               + v_adj,
