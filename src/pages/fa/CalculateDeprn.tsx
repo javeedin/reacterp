@@ -779,26 +779,78 @@ const CalculateDeprn: React.FC = () => {
     setViewSearch('');
     try {
       const periods = [...viewPeriodNames].sort((a, b) => periodKey(a) - periodKey(b));
-      const byAsset: Record<string, any> = {};
-      for (const pn of periods) {
-        const res = await getDeprnStatus({ bookTypeCode: selectedBook, periodName: pn, assetNumber: viewAssetFilter || undefined });
-        if (res.success === false) { setViewError(res.error || `Failed to load ${pn}`); continue; }
-        const resolved = res.periodName || pn;
-        (res.items || []).forEach((it: any) => {
+
+      // Build a roster of assets + attributes from a period the backend accepts
+      // (the last run period, else the first selected period that succeeds).
+      // We need cost/salvage/life/DPIS to CALCULATE any month the deprn-by-period
+      // endpoint rejects (it only accepts periods loaded in RR_FA_DEPRN_PERIODS).
+      const roster: Record<string, any> = {};
+      const seedFrom = (items: any[]) => {
+        (items || []).forEach((it: any) => {
           if (Number(it.cost) <= 0) return;
           const aid = String(it.assetId);
-          if (!byAsset[aid]) {
-            byAsset[aid] = { assetId: aid, assetNumber: it.assetNumber, description: it.description, cost: Number(it.cost) };
-          }
-          const server = it.deprnAmount != null ? Number(it.deprnAmount) : null;
-          const calc = server == null ? computePeriodDeprn(
-            Number(it.cost), Number(it.salvageValue ?? 0), Number(it.lifeInMonths ?? 0),
-            it.datePlacedInService, it.deprnStartDate, resolved,
-          ) : null;
-          byAsset[aid][pn] = server ?? calc;
-          byAsset[aid][`${pn}__posted`] = it.status === 'Posted';
+          if (!roster[aid]) roster[aid] = {
+            assetId: aid, assetNumber: it.assetNumber, description: it.description,
+            cost: Number(it.cost), salvageValue: Number(it.salvageValue ?? 0),
+            lifeInMonths: Number(it.lifeInMonths ?? 0),
+            datePlacedInService: it.datePlacedInService, deprnStartDate: it.deprnStartDate,
+          };
         });
+      };
+
+      // Fetch every selected period once; remember which succeeded (server data)
+      // and which failed (will be calculated from the roster).
+      const serverByPeriod: Record<string, any[] | null> = {};
+      let calculatedAny = false;
+      const rosterSeed = lastPeriod?.lastPeriodName;
+      if (rosterSeed && !periods.includes(rosterSeed)) {
+        const rres = await getDeprnStatus({ bookTypeCode: selectedBook, periodName: rosterSeed, assetNumber: viewAssetFilter || undefined });
+        if (rres.success !== false) seedFrom(rres.items || []);
       }
+      for (const pn of periods) {
+        const res = await getDeprnStatus({ bookTypeCode: selectedBook, periodName: pn, assetNumber: viewAssetFilter || undefined });
+        if (res.success === false || !Array.isArray(res.items)) {
+          serverByPeriod[pn] = null;         // backend rejected — calculate later
+          calculatedAny = true;
+        } else {
+          serverByPeriod[pn] = res.items;
+          seedFrom(res.items);
+        }
+      }
+
+      if (Object.keys(roster).length === 0) {
+        setViewError('No asset data available for this book — none of the selected periods (or the last run period) returned assets.');
+        setViewRows([]); setViewCols([]); return;
+      }
+
+      // Pivot: one row per roster asset, one value per selected period.
+      const byAsset: Record<string, any> = {};
+      Object.values(roster).forEach((m: any) => {
+        byAsset[m.assetId] = { assetId: m.assetId, assetNumber: m.assetNumber, description: m.description, cost: m.cost };
+      });
+      for (const pn of periods) {
+        const items = serverByPeriod[pn];
+        if (items) {
+          // server accepted this period — use posted actual / server amount, else calc
+          const posix: Record<string, any> = {};
+          items.forEach((it: any) => { posix[String(it.assetId)] = it; });
+          Object.keys(byAsset).forEach(aid => {
+            const it = posix[aid]; const m = roster[aid];
+            const server = it && it.deprnAmount != null ? Number(it.deprnAmount) : null;
+            const calc = computePeriodDeprn(m.cost, m.salvageValue, m.lifeInMonths, m.datePlacedInService, m.deprnStartDate, pn);
+            byAsset[aid][pn] = server ?? calc;
+            byAsset[aid][`${pn}__posted`] = it ? it.status === 'Posted' : false;
+          });
+        } else {
+          // backend rejected — CALCULATE for every asset from roster attributes
+          Object.keys(byAsset).forEach(aid => {
+            const m = roster[aid];
+            byAsset[aid][pn] = computePeriodDeprn(m.cost, m.salvageValue, m.lifeInMonths, m.datePlacedInService, m.deprnStartDate, pn);
+            byAsset[aid][`${pn}__posted`] = false;
+          });
+        }
+      }
+
       const rows = Object.values(byAsset).map((r: any) => ({
         ...r,
         __total: periods.reduce((s, pn) => s + (Number(r[pn]) || 0), 0),
@@ -806,6 +858,10 @@ const CalculateDeprn: React.FC = () => {
       rows.sort((a: any, b: any) => String(a.assetNumber).localeCompare(String(b.assetNumber)));
       setViewCols(periods);
       setViewRows(rows);
+      if (calculatedAny) {
+        setViewError('');
+        message.info('Periods not yet loaded in the calendar are shown as calculated (straight-line) amounts.');
+      }
     } catch (e: any) {
       setViewError(e?.message || 'Failed to fetch depreciation');
     } finally {
