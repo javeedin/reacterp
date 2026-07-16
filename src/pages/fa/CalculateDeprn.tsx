@@ -769,6 +769,19 @@ const CalculateDeprn: React.FC = () => {
     return (isNaN(yy) ? 0 : yy) * 12 + (m < 0 ? 0 : m);
   };
 
+  // Months depreciated from the depreciation start up to (and including) a target
+  // period. Start = month after DPIS (following-month convention) or deprnStart.
+  const monthsDepreciated = (dpis?: string, deprnStart?: string, asOf?: string): number | null => {
+    let sy: number, sm: number;
+    if (dpis) { const d = new Date(dpis); if (isNaN(d.getTime())) return null; sy = d.getFullYear() + Math.floor((d.getMonth() + 1) / 12); sm = (d.getMonth() + 1) % 12; }
+    else if (deprnStart) { const d = new Date(deprnStart); if (isNaN(d.getTime())) return null; sy = d.getFullYear(); sm = d.getMonth(); }
+    else return null;
+    if (!asOf) return null;
+    const ai = MON.indexOf(asOf.slice(0, 3)); const ayy = parseInt(asOf.slice(4), 10);
+    if (ai < 0 || isNaN(ayy)) return null;
+    return (2000 + ayy) * 12 + ai - (sy * 12 + sm) + 1;   // inclusive
+  };
+
   const handleViewFetch = async () => {
     if (!selectedBook || viewPeriodNames.length === 0) {
       message.warning('Select a book and at least one period.');
@@ -779,11 +792,10 @@ const CalculateDeprn: React.FC = () => {
     setViewSearch('');
     try {
       const periods = [...viewPeriodNames].sort((a, b) => periodKey(a) - periodKey(b));
+      const asOf = periods[periods.length - 1];   // latest period → remaining-life reference
 
-      // Build a roster of assets + attributes from a period the backend accepts
-      // (the last run period, else the first selected period that succeeds).
-      // We need cost/salvage/life/DPIS to CALCULATE any month the deprn-by-period
-      // endpoint rejects (it only accepts periods loaded in RR_FA_DEPRN_PERIODS).
+      // Roster of assets + static attributes (DPIS, life, cost). Sourced from a
+      // period the backend accepts (last run period, else a selected one).
       const roster: Record<string, any> = {};
       const seedFrom = (items: any[]) => {
         (items || []).forEach((it: any) => {
@@ -791,77 +803,58 @@ const CalculateDeprn: React.FC = () => {
           const aid = String(it.assetId);
           if (!roster[aid]) roster[aid] = {
             assetId: aid, assetNumber: it.assetNumber, description: it.description,
-            cost: Number(it.cost), salvageValue: Number(it.salvageValue ?? 0),
-            lifeInMonths: Number(it.lifeInMonths ?? 0),
+            cost: Number(it.cost), lifeInMonths: it.lifeInMonths != null ? Number(it.lifeInMonths) : null,
             datePlacedInService: it.datePlacedInService, deprnStartDate: it.deprnStartDate,
           };
         });
       };
 
-      // Fetch every selected period once; remember which succeeded (server data)
-      // and which failed (will be calculated from the roster).
-      const serverByPeriod: Record<string, any[] | null> = {};
-      let calculatedAny = false;
+      // Fetch every selected period; keep ONLY actual posted rows (data in table).
       const rosterSeed = lastPeriod?.lastPeriodName;
       if (rosterSeed && !periods.includes(rosterSeed)) {
         const rres = await getDeprnStatus({ bookTypeCode: selectedBook, periodName: rosterSeed, assetNumber: viewAssetFilter || undefined });
         if (rres.success !== false) seedFrom(rres.items || []);
       }
+      const postedByPeriod: Record<string, Record<string, number>> = {};
       for (const pn of periods) {
+        postedByPeriod[pn] = {};
         const res = await getDeprnStatus({ bookTypeCode: selectedBook, periodName: pn, assetNumber: viewAssetFilter || undefined });
-        if (res.success === false || !Array.isArray(res.items)) {
-          serverByPeriod[pn] = null;         // backend rejected — calculate later
-          calculatedAny = true;
-        } else {
-          serverByPeriod[pn] = res.items;
-          seedFrom(res.items);
-        }
+        if (res.success === false || !Array.isArray(res.items)) continue;   // no data in table → nothing
+        seedFrom(res.items);
+        (res.items as any[]).forEach((it) => {
+          // Only actual posted rows have real data in RR_FA_DEPRN_DETAIL.
+          if (it.status === 'Posted' && it.deprnAmount != null) {
+            postedByPeriod[pn][String(it.assetId)] = Number(it.deprnAmount);
+          }
+        });
       }
 
       if (Object.keys(roster).length === 0) {
-        setViewError('No asset data available for this book — none of the selected periods (or the last run period) returned assets.');
+        setViewError('No asset data available for this book / selection.');
         setViewRows([]); setViewCols([]); return;
       }
 
-      // Pivot: one row per roster asset, one value per selected period.
-      const byAsset: Record<string, any> = {};
-      Object.values(roster).forEach((m: any) => {
-        byAsset[m.assetId] = { assetId: m.assetId, assetNumber: m.assetNumber, description: m.description, cost: m.cost };
+      // Pivot: one row per asset, actual posted amount per period (blank otherwise).
+      const rows = Object.values(roster).map((m: any) => {
+        const row: Record<string, any> = {
+          assetId: m.assetId, assetNumber: m.assetNumber, description: m.description,
+          cost: m.cost, lifeInMonths: m.lifeInMonths, datePlacedInService: m.datePlacedInService,
+        };
+        const used = m.lifeInMonths != null ? monthsDepreciated(m.datePlacedInService, m.deprnStartDate, asOf) : null;
+        row.remainingLife = (m.lifeInMonths != null && used != null)
+          ? Math.max(0, Math.min(m.lifeInMonths, m.lifeInMonths - Math.max(0, used)))
+          : null;
+        let total = 0;
+        periods.forEach(pn => {
+          const v = postedByPeriod[pn][m.assetId];
+          if (v != null) { row[pn] = v; total += v; }
+        });
+        row.__total = total;
+        return row;
       });
-      for (const pn of periods) {
-        const items = serverByPeriod[pn];
-        if (items) {
-          // server accepted this period — use posted actual / server amount, else calc
-          const posix: Record<string, any> = {};
-          items.forEach((it: any) => { posix[String(it.assetId)] = it; });
-          Object.keys(byAsset).forEach(aid => {
-            const it = posix[aid]; const m = roster[aid];
-            const server = it && it.deprnAmount != null ? Number(it.deprnAmount) : null;
-            const calc = computePeriodDeprn(m.cost, m.salvageValue, m.lifeInMonths, m.datePlacedInService, m.deprnStartDate, pn);
-            byAsset[aid][pn] = server ?? calc;
-            byAsset[aid][`${pn}__posted`] = it ? it.status === 'Posted' : false;
-          });
-        } else {
-          // backend rejected — CALCULATE for every asset from roster attributes
-          Object.keys(byAsset).forEach(aid => {
-            const m = roster[aid];
-            byAsset[aid][pn] = computePeriodDeprn(m.cost, m.salvageValue, m.lifeInMonths, m.datePlacedInService, m.deprnStartDate, pn);
-            byAsset[aid][`${pn}__posted`] = false;
-          });
-        }
-      }
-
-      const rows = Object.values(byAsset).map((r: any) => ({
-        ...r,
-        __total: periods.reduce((s, pn) => s + (Number(r[pn]) || 0), 0),
-      }));
       rows.sort((a: any, b: any) => String(a.assetNumber).localeCompare(String(b.assetNumber)));
       setViewCols(periods);
       setViewRows(rows);
-      if (calculatedAny) {
-        setViewError('');
-        message.info('Periods not yet loaded in the calendar are shown as calculated (straight-line) amounts.');
-      }
     } catch (e: any) {
       setViewError(e?.message || 'Failed to fetch depreciation');
     } finally {
@@ -890,7 +883,7 @@ const CalculateDeprn: React.FC = () => {
     const q = viewSearch.trim().toLowerCase();
     if (!q) return viewRows;
     return viewRows.filter(r =>
-      [r.assetNumber, r.description, r.cost, ...viewCols.map(pn => r[pn])]
+      [r.assetNumber, r.description, r.datePlacedInService, r.lifeInMonths, r.remainingLife, r.cost, ...viewCols.map(pn => r[pn])]
         .some(v => v != null && String(v).toLowerCase().includes(q)));
   }, [viewRows, viewCols, viewSearch]);
 
@@ -898,13 +891,20 @@ const CalculateDeprn: React.FC = () => {
   const exportViewExcel = () => {
     if (filteredViewRows.length === 0) { message.warning('Nothing to export.'); return; }
     const data = filteredViewRows.map(r => {
-      const row: Record<string, any> = { 'Asset #': r.assetNumber, 'Description': r.description, 'Cost': r.cost };
+      const row: Record<string, any> = {
+        'Asset #': r.assetNumber, 'Description': r.description,
+        'Date In Service': fmtDate(r.datePlacedInService), 'Life (Months)': r.lifeInMonths ?? '',
+        'Remaining Life': r.remainingLife ?? '', 'Cost': r.cost,
+      };
       viewCols.forEach(pn => { row[pn] = r[pn] != null ? Number(r[pn]) : null; });
       row['Total'] = r.__total;
       return row;
     });
     // grand total row
-    const totalsRow: Record<string, any> = { 'Asset #': '', 'Description': 'TOTAL', 'Cost': filteredViewRows.reduce((s, r) => s + (Number(r.cost) || 0), 0) };
+    const totalsRow: Record<string, any> = {
+      'Asset #': '', 'Description': 'TOTAL', 'Date In Service': '', 'Life (Months)': '', 'Remaining Life': '',
+      'Cost': filteredViewRows.reduce((s, r) => s + (Number(r.cost) || 0), 0),
+    };
     viewCols.forEach(pn => { totalsRow[pn] = filteredViewRows.reduce((s, r) => s + (Number(r[pn]) || 0), 0); });
     totalsRow['Total'] = filteredViewRows.reduce((s, r) => s + (Number(r.__total) || 0), 0);
     data.push(totalsRow);
@@ -1005,24 +1005,23 @@ const CalculateDeprn: React.FC = () => {
             onClick={() => navigate(`/fa/assets?assetNumber=${encodeURIComponent(v)}&from=deprn`)}>{v}</Button>
         </Tooltip>
       ) },
-    { title: 'Description', dataIndex: 'description', key: 'description', width: 220, ellipsis: true, fixed: 'left' as const,
+    { title: 'Description', dataIndex: 'description', key: 'description', width: 200, ellipsis: true, fixed: 'left' as const,
       render: (v: string) => <Tooltip title={v}><Text style={{ fontSize: 12 }}>{v || '—'}</Text></Tooltip> },
+    { title: 'Date In Service', dataIndex: 'datePlacedInService', key: 'datePlacedInService', width: 120,
+      render: (v: string) => <Text style={{ fontSize: 12 }}>{fmtDate(v)}</Text> },
+    { title: 'Life (Months)', dataIndex: 'lifeInMonths', key: 'lifeInMonths', width: 100, align: 'right' as const,
+      render: (v: number | null) => <Text style={{ fontSize: 12 }}>{v == null ? '—' : v}</Text> },
+    { title: 'Remaining Life', dataIndex: 'remainingLife', key: 'remainingLife', width: 110, align: 'right' as const,
+      render: (v: number | null) => v == null
+        ? <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
+        : <Text style={{ fontSize: 12, color: v === 0 ? REDWOOD.neutral500 : REDWOOD.warning, fontWeight: 600 }}>{v}</Text> },
     { title: 'Cost', dataIndex: 'cost', key: 'cost', width: 130, align: 'right' as const,
       render: (v: number) => <Text style={{ fontSize: 12 }}>{fmt(v)}</Text> },
     ...viewCols.map(pn => ({
       title: pn, dataIndex: pn, key: pn, width: 120, align: 'right' as const,
-      render: (v: number | null, r: any) => {
-        if (v == null) return <Text type="secondary" style={{ fontSize: 12 }}>—</Text>;
-        const posted = !!r[`${pn}__posted`];
-        return (
-          <Text
-            style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: posted ? REDWOOD.success : REDWOOD.neutral500 }}
-            title={posted ? 'Posted (actual)' : 'Calculated (not posted)'}
-          >
-            {fmt(v)}{posted && <CheckCircleOutlined style={{ fontSize: 10, marginLeft: 4, color: REDWOOD.success }} />}
-          </Text>
-        );
-      },
+      render: (v: number | null) => v == null
+        ? <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
+        : <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success, fontWeight: 600 }} title="Posted (actual)">{fmt(v)}</Text>,
     })),
     { title: 'Total', dataIndex: '__total', key: '__total', width: 140, align: 'right' as const, fixed: 'right' as const,
       render: (v: number) => <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success, fontWeight: 700 }}>{fmt(v)}</Text> },
@@ -1101,8 +1100,7 @@ const CalculateDeprn: React.FC = () => {
               <Input.Search allowClear size="small" placeholder="Filter any column…" style={{ width: 240 }}
                 value={viewSearch} onChange={e => setViewSearch(e.target.value)} />
               <Text type="secondary" style={{ fontSize: 12 }}>{filteredViewRows.length} asset(s) · {viewCols.length} period(s)</Text>
-              <Text style={{ fontSize: 11, color: REDWOOD.success }}><CheckCircleOutlined /> Posted (actual)</Text>
-              <Text style={{ fontSize: 11, color: REDWOOD.neutral500 }}>■ Calculated</Text>
+              <Text style={{ fontSize: 11, color: REDWOOD.success }}><CheckCircleOutlined /> Posted (actual) — blank where nothing is posted</Text>
             </Space>
             <Button size="small" icon={<FileExcelOutlined />} onClick={exportViewExcel}
               style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}>
@@ -1114,22 +1112,26 @@ const CalculateDeprn: React.FC = () => {
             columns={viewColumns}
             rowKey="assetId"
             size="small"
-            scroll={{ x: 550 + viewCols.length * 120, y: 460 }}
+            scroll={{ x: 900 + viewCols.length * 120, y: 460 }}
             pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `${t} assets` }}
             summary={(pageData) => {
               const tot = (key: string) => pageData.reduce((s: number, r: any) => s + (Number(r[key]) || 0), 0);
+              // Column order: 0 Asset# · 1 Desc · 2 DateInService · 3 Life · 4 Remaining · 5 Cost · 6.. periods · Total
               return (
                 <Table.Summary fixed>
                   <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 700 }}>
                     <Table.Summary.Cell index={0}><Text strong style={{ fontSize: 12 }}>Total (page)</Text></Table.Summary.Cell>
                     <Table.Summary.Cell index={1} />
-                    <Table.Summary.Cell index={2} align="right"><Text strong style={{ fontSize: 12 }}>{fmt(tot('cost'))}</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={2} />
+                    <Table.Summary.Cell index={3} />
+                    <Table.Summary.Cell index={4} />
+                    <Table.Summary.Cell index={5} align="right"><Text strong style={{ fontSize: 12 }}>{fmt(tot('cost'))}</Text></Table.Summary.Cell>
                     {viewCols.map((pn, i) => (
-                      <Table.Summary.Cell key={pn} index={3 + i} align="right">
+                      <Table.Summary.Cell key={pn} index={6 + i} align="right">
                         <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(tot(pn))}</Text>
                       </Table.Summary.Cell>
                     ))}
-                    <Table.Summary.Cell index={3 + viewCols.length} align="right">
+                    <Table.Summary.Cell index={6 + viewCols.length} align="right">
                       <Text strong style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(tot('__total'))}</Text>
                     </Table.Summary.Cell>
                   </Table.Summary.Row>
