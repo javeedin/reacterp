@@ -1011,10 +1011,18 @@ const CalculateDeprn: React.FC = () => {
       render: (v: number) => <Text style={{ fontSize: 12 }}>{fmt(v)}</Text> },
     ...viewCols.map(pn => ({
       title: pn, dataIndex: pn, key: pn, width: 120, align: 'right' as const,
-      render: (v: number | null, r: any) => v == null
-        ? <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
-        : <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.primary, fontWeight: 600 }}
-            title={r[`${pn}__posted`] ? 'Posted' : 'Calculated (not posted)'}>{fmt(v)}</Text>,
+      render: (v: number | null, r: any) => {
+        if (v == null) return <Text type="secondary" style={{ fontSize: 12 }}>—</Text>;
+        const posted = !!r[`${pn}__posted`];
+        return (
+          <Text
+            style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: posted ? REDWOOD.success : REDWOOD.neutral500 }}
+            title={posted ? 'Posted (actual)' : 'Calculated (not posted)'}
+          >
+            {fmt(v)}{posted && <CheckCircleOutlined style={{ fontSize: 10, marginLeft: 4, color: REDWOOD.success }} />}
+          </Text>
+        );
+      },
     })),
     { title: 'Total', dataIndex: '__total', key: '__total', width: 140, align: 'right' as const, fixed: 'right' as const,
       render: (v: number) => <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success, fontWeight: 700 }}>{fmt(v)}</Text> },
@@ -1093,6 +1101,8 @@ const CalculateDeprn: React.FC = () => {
               <Input.Search allowClear size="small" placeholder="Filter any column…" style={{ width: 240 }}
                 value={viewSearch} onChange={e => setViewSearch(e.target.value)} />
               <Text type="secondary" style={{ fontSize: 12 }}>{filteredViewRows.length} asset(s) · {viewCols.length} period(s)</Text>
+              <Text style={{ fontSize: 11, color: REDWOOD.success }}><CheckCircleOutlined /> Posted (actual)</Text>
+              <Text style={{ fontSize: 11, color: REDWOOD.neutral500 }}>■ Calculated</Text>
             </Space>
             <Button size="small" icon={<FileExcelOutlined />} onClick={exportViewExcel}
               style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}>
