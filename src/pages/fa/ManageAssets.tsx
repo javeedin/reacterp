@@ -989,20 +989,26 @@ const AssetTabContent: React.FC<{
               onClick={() => openDeprnAccounting(record)}
             />
           </Tooltip>
-          <Popconfirm
-            title={`Delete depreciation for ${record.periodName}?`}
-            description="This cannot be undone if the period has been transferred to GL."
-            onConfirm={() => handleDeleteDeprn(record)}
-            okText="Delete"
-            okButtonProps={{ danger: true }}
-          >
-            <Button
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
-              loading={deletingPeriod === record.periodName}
-            />
-          </Popconfirm>
+          {record.accountedStatus === 'ACCOUNTED' ? (
+            <Tooltip title="Accounted depreciation cannot be deleted">
+              <Button size="small" danger icon={<DeleteOutlined />} disabled />
+            </Tooltip>
+          ) : (
+            <Popconfirm
+              title={`Delete depreciation for ${record.periodName}?`}
+              description="This cannot be undone if the period has been transferred to GL."
+              onConfirm={() => handleDeleteDeprn(record)}
+              okText="Delete"
+              okButtonProps={{ danger: true }}
+            >
+              <Button
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+                loading={deletingPeriod === record.periodName}
+              />
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
