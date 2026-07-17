@@ -93,6 +93,19 @@ const computePeriodDeprn = (
   return null;
 };
 
+// Months of depreciation elapsed from the depreciation start (month AFTER
+// date-placed-in-service, or deprnStart) up to and INCLUDING the target period.
+const monthsElapsedTo = (dpis?: string, deprnStart?: string, target?: string): number | null => {
+  let sy: number, sm: number;
+  if (dpis) { const d = new Date(dpis); if (isNaN(d.getTime())) return null; sy = d.getFullYear() + Math.floor((d.getMonth() + 1) / 12); sm = (d.getMonth() + 1) % 12; }
+  else if (deprnStart) { const d = new Date(deprnStart); if (isNaN(d.getTime())) return null; sy = d.getFullYear(); sm = d.getMonth(); }
+  else return null;
+  if (!target) return null;
+  const ti = MON.indexOf(target.slice(0, 3)); const tyy = parseInt(target.slice(4), 10);
+  if (ti < 0 || isNaN(tyy)) return null;
+  return (2000 + tyy) * 12 + ti - (sy * 12 + sm) + 1;
+};
+
 type ViewMode = 'last' | 'preview' | 'compare' | 'status';
 
 const CalculateDeprn: React.FC = () => {
@@ -482,16 +495,24 @@ const CalculateDeprn: React.FC = () => {
           </Button>
         </Tooltip>
       ) },
-    { title: 'Description', dataIndex: 'description', key: 'description', width: 200, ellipsis: true,
+    { title: 'Description', dataIndex: 'description', key: 'description', width: 190, ellipsis: true,
       render: (v: string) => <Tooltip title={v}><Text style={{ fontSize: 12 }}>{v || '—'}</Text></Tooltip> },
+    { title: 'Cost',        dataIndex: 'cost', key: 'cost', width: 130, align: 'right' as const,
+      render: (v: any) => <Text style={mono}>{v == null ? '—' : fmt(Number(v))}</Text> },
+    { title: 'Total Life',  dataIndex: 'lifeInMonths', key: 'lifeInMonths', width: 90, align: 'right' as const,
+      render: (v: any) => <Text style={{ fontSize: 12 }}>{v == null || v === '' ? '—' : Number(v)}</Text> },
+    { title: 'Remaining Life', dataIndex: 'remainingLife', key: 'remainingLife', width: 110, align: 'right' as const,
+      render: (v: number | null) => v == null
+        ? <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
+        : <Text style={{ fontSize: 12, color: v === 0 ? REDWOOD.neutral500 : REDWOOD.warning, fontWeight: 600 }}>{v}</Text> },
     { title: 'Period',      dataIndex: 'periodName', key: 'periodName', width: 90,
       render: (v: string) => <Text style={{ fontSize: 12, fontWeight: 600 }}>{v || statusMeta?.periodName || '—'}</Text> },
     { title: 'Days',        dataIndex: 'days', key: 'days', width: 70, align: 'right' as const,
       render: (v: number) => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
     { title: 'Daily Rate',  dataIndex: 'dailyRate', key: 'dailyRate', width: 110, align: 'right' as const,
       render: (v: number) => <Text style={mono}>{v == null ? '—' : fmt(v)}</Text> },
-    { title: 'Opening NBV', dataIndex: 'openingNbv', key: 'openingNbv', width: 140, align: 'right' as const,
-      render: (v: number) => <Text style={mono}>{v == null ? '—' : fmt(v)}</Text> },
+    { title: `Opening NBV${statusPrevName ? ` (as of ${statusPrevName})` : ''}`, dataIndex: 'openingNbv', key: 'openingNbv', width: 160, align: 'right' as const,
+      render: (v: number) => <Text style={mono} title="Net book value at the start of the period (= closing NBV of the prior period)">{v == null ? '—' : fmt(v)}</Text> },
     { title: `Deprn${statusPrevName ? ` (${statusPrevName})` : ' (Prev)'}`, dataIndex: 'prevDeprn', key: 'prevDeprn', width: 120, align: 'right' as const,
       render: (v: number | null) => v == null
         ? <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
@@ -556,9 +577,15 @@ const CalculateDeprn: React.FC = () => {
           Number(r.cost), Number(r.salvageValue ?? 0), Number(r.lifeInMonths ?? 0),
           r.datePlacedInService, r.deprnStartDate, statusPrevName,
         ) : null);
+        // Remaining life = total life − months depreciated up to this period.
+        const life = Number(r.lifeInMonths ?? 0);
+        const elapsed = life > 0 ? monthsElapsedTo(r.datePlacedInService, r.deprnStartDate, target) : null;
+        const remainingLife = (life > 0 && elapsed != null)
+          ? Math.max(0, Math.min(life, life - Math.max(0, elapsed)))
+          : null;
         // periodDeprn = calculated (shown + used for posting); periodActual =
         // the actual posted amount from the server, only when the row is Posted.
-        return { ...r, periodDeprn: calc ?? server, periodActual: posted ? server : null, prevDeprn: prev };
+        return { ...r, periodDeprn: calc ?? server, periodActual: posted ? server : null, prevDeprn: prev, remainingLife };
       });
   }, [statusItems, statusMeta, statusPeriodName, statusPrev, statusPrevName]);
 
@@ -570,7 +597,8 @@ const CalculateDeprn: React.FC = () => {
     if (!q) return byStatus;
     return byStatus.filter(r =>
       [r.assetNumber, r.description, r.periodName ?? statusMeta?.periodName, r.methodCode,
-       r.days, r.dailyRate, r.openingNbv, r.prevDeprn, r.periodDeprn, r.closingNbv, r.cost, r.status]
+       r.cost, r.lifeInMonths, r.remainingLife, r.days, r.dailyRate, r.openingNbv,
+       r.prevDeprn, r.periodDeprn, r.periodActual, r.closingNbv, r.status]
         .some(v => v != null && String(v).toLowerCase().includes(q)));
   })();
 
@@ -902,6 +930,9 @@ const CalculateDeprn: React.FC = () => {
       sheet = 'Deprn Status'; fname = `deprn_status_${statusMeta?.periodName || ''}`;
       data = filteredStatusItems.map(r => ({
         'Asset #': r.assetNumber, 'Description': r.description,
+        'Cost': r.cost != null ? Number(r.cost) : null,
+        'Total Life': r.lifeInMonths != null && r.lifeInMonths !== '' ? Number(r.lifeInMonths) : null,
+        'Remaining Life': r.remainingLife ?? null,
         'Period': r.periodName ?? statusMeta?.periodName, 'Days': r.days,
         'Daily Rate': r.dailyRate != null ? Number(r.dailyRate) : null,
         'Opening NBV': r.openingNbv != null ? Number(r.openingNbv) : null,
@@ -1500,7 +1531,7 @@ const CalculateDeprn: React.FC = () => {
                         columns={statusColumns}
                         rowKey="assetId"
                         size="small"
-                        scroll={{ x: 1600, y: 480 }}
+                        scroll={{ x: 1950, y: 480 }}
                         pagination={{ pageSize: 100, showSizeChanger: true, pageSizeOptions: ['50', '100', '200', '500'], showTotal: (t) => `${t} assets` }}
                         locale={{ emptyText: 'No assets found for this book/period' }}
                         rowSelection={{
@@ -1513,24 +1544,28 @@ const CalculateDeprn: React.FC = () => {
                           // Totals across ALL filtered rows (not just the page).
                           const sum = (k: string) => filteredStatusItems.reduce((s, r) => s + (Number(r[k]) || 0), 0);
                           // Column order (a selection checkbox occupies index 0):
-                          // 1 Asset# · 2 Desc · 3 Period · 4 Days · 5 Daily Rate · 6 Opening NBV ·
-                          // 7 Deprn(prev) · 8 Calculated · 9 Posted · 10 Closing NBV · 11 Status · 12 Acctg
+                          // 1 Asset# · 2 Desc · 3 Cost · 4 Total Life · 5 Remaining Life · 6 Period ·
+                          // 7 Days · 8 Daily Rate · 9 Opening NBV · 10 Deprn(prev) · 11 Calculated ·
+                          // 12 Posted · 13 Closing NBV · 14 Status · 15 Acctg
                           return (
                             <Table.Summary fixed>
                               <Table.Summary.Row style={{ background: '#fafafa' }}>
                                 <Table.Summary.Cell index={0} />
                                 <Table.Summary.Cell index={1}><Text strong style={{ fontSize: 12 }}>Total ({filteredStatusItems.length})</Text></Table.Summary.Cell>
                                 <Table.Summary.Cell index={2} />
-                                <Table.Summary.Cell index={3} />
+                                <Table.Summary.Cell index={3} align="right"><Text strong style={mono}>{fmt(sum('cost'))}</Text></Table.Summary.Cell>
                                 <Table.Summary.Cell index={4} />
                                 <Table.Summary.Cell index={5} />
-                                <Table.Summary.Cell index={6} align="right"><Text strong style={mono}>{fmt(sum('openingNbv'))}</Text></Table.Summary.Cell>
-                                <Table.Summary.Cell index={7} align="right"><Text strong style={{ ...mono, color: REDWOOD.neutral500 }}>{fmt(sum('prevDeprn'))}</Text></Table.Summary.Cell>
-                                <Table.Summary.Cell index={8} align="right"><Text strong style={monoRed}>{fmt(sum('periodDeprn'))}</Text></Table.Summary.Cell>
-                                <Table.Summary.Cell index={9} align="right"><Text strong style={{ ...mono, color: REDWOOD.success }}>{fmt(sum('periodActual'))}</Text></Table.Summary.Cell>
-                                <Table.Summary.Cell index={10} align="right"><Text strong style={{ ...mono, color: REDWOOD.success }}>{fmt(sum('closingNbv'))}</Text></Table.Summary.Cell>
-                                <Table.Summary.Cell index={11} />
-                                <Table.Summary.Cell index={12} />
+                                <Table.Summary.Cell index={6} />
+                                <Table.Summary.Cell index={7} />
+                                <Table.Summary.Cell index={8} />
+                                <Table.Summary.Cell index={9} align="right"><Text strong style={mono}>{fmt(sum('openingNbv'))}</Text></Table.Summary.Cell>
+                                <Table.Summary.Cell index={10} align="right"><Text strong style={{ ...mono, color: REDWOOD.neutral500 }}>{fmt(sum('prevDeprn'))}</Text></Table.Summary.Cell>
+                                <Table.Summary.Cell index={11} align="right"><Text strong style={monoRed}>{fmt(sum('periodDeprn'))}</Text></Table.Summary.Cell>
+                                <Table.Summary.Cell index={12} align="right"><Text strong style={{ ...mono, color: REDWOOD.success }}>{fmt(sum('periodActual'))}</Text></Table.Summary.Cell>
+                                <Table.Summary.Cell index={13} align="right"><Text strong style={{ ...mono, color: REDWOOD.success }}>{fmt(sum('closingNbv'))}</Text></Table.Summary.Cell>
+                                <Table.Summary.Cell index={14} />
+                                <Table.Summary.Cell index={15} />
                               </Table.Summary.Row>
                             </Table.Summary>
                           );
