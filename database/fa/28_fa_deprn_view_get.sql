@@ -69,6 +69,9 @@ BEGIN
 DECLARE
     v_status NUMBER;
     v_result CLOB;
+    v_len    NUMBER;
+    v_pos    NUMBER := 1;
+    v_amt    NUMBER := 8000;
 BEGIN
     RR_FA_VIEW_PKG.GET_DEPRN_VIEW(
         p_book_type     => :bookTypeCode,
@@ -81,7 +84,12 @@ BEGIN
         p_result        => v_result
     );
     :status := v_status;
-    HTP.P(v_result);
+    -- Stream the CLOB in <32K chunks (HTP.P errors ORA-06502 on a CLOB > 32767).
+    v_len := DBMS_LOB.GETLENGTH(v_result);
+    WHILE v_pos <= v_len LOOP
+        HTP.PRN(DBMS_LOB.SUBSTR(v_result, v_amt, v_pos));
+        v_pos := v_pos + v_amt;
+    END LOOP;
 END;
 ]'
     );

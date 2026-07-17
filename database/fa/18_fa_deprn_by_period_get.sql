@@ -68,6 +68,9 @@ BEGIN
 DECLARE
     v_status NUMBER;
     v_result CLOB;
+    v_len    NUMBER;
+    v_pos    NUMBER := 1;
+    v_amt    NUMBER := 8000;
 BEGIN
     RR_FA_PKG.GET_DEPRN_BY_PERIOD(
         p_book_type      => :bookTypeCode,
@@ -80,7 +83,13 @@ BEGIN
         p_result         => v_result
     );
     :status := v_status;
-    HTP.P(v_result);
+    -- Stream the CLOB in <32K chunks: HTP.P cannot emit a CLOB larger than
+    -- 32767 chars (ORA-06502), and this response can exceed that for many assets.
+    v_len := DBMS_LOB.GETLENGTH(v_result);
+    WHILE v_pos <= v_len LOOP
+        HTP.PRN(DBMS_LOB.SUBSTR(v_result, v_amt, v_pos));
+        v_pos := v_pos + v_amt;
+    END LOOP;
 END;
 ]'
     );
