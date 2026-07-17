@@ -1500,14 +1500,40 @@ const CalculateDeprn: React.FC = () => {
                         columns={statusColumns}
                         rowKey="assetId"
                         size="small"
-                        scroll={{ x: 1600, y: 440 }}
-                        pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `${t} assets` }}
+                        scroll={{ x: 1600, y: 480 }}
+                        pagination={{ pageSize: 100, showSizeChanger: true, pageSizeOptions: ['50', '100', '200', '500'], showTotal: (t) => `${t} assets` }}
                         locale={{ emptyText: 'No assets found for this book/period' }}
                         rowSelection={{
                           selectedRowKeys: statusSelected,
                           onChange: (keys) => setStatusSelected(keys as string[]),
                           // Only Not-Posted assets with a computable amount can be posted.
                           getCheckboxProps: (r: any) => ({ disabled: r.status === 'Posted' || !(r.periodDeprn > 0) }),
+                        }}
+                        summary={() => {
+                          // Totals across ALL filtered rows (not just the page).
+                          const sum = (k: string) => filteredStatusItems.reduce((s, r) => s + (Number(r[k]) || 0), 0);
+                          // Column order (a selection checkbox occupies index 0):
+                          // 1 Asset# · 2 Desc · 3 Period · 4 Days · 5 Daily Rate · 6 Opening NBV ·
+                          // 7 Deprn(prev) · 8 Calculated · 9 Posted · 10 Closing NBV · 11 Status · 12 Acctg
+                          return (
+                            <Table.Summary fixed>
+                              <Table.Summary.Row style={{ background: '#fafafa' }}>
+                                <Table.Summary.Cell index={0} />
+                                <Table.Summary.Cell index={1}><Text strong style={{ fontSize: 12 }}>Total ({filteredStatusItems.length})</Text></Table.Summary.Cell>
+                                <Table.Summary.Cell index={2} />
+                                <Table.Summary.Cell index={3} />
+                                <Table.Summary.Cell index={4} />
+                                <Table.Summary.Cell index={5} />
+                                <Table.Summary.Cell index={6} align="right"><Text strong style={mono}>{fmt(sum('openingNbv'))}</Text></Table.Summary.Cell>
+                                <Table.Summary.Cell index={7} align="right"><Text strong style={{ ...mono, color: REDWOOD.neutral500 }}>{fmt(sum('prevDeprn'))}</Text></Table.Summary.Cell>
+                                <Table.Summary.Cell index={8} align="right"><Text strong style={monoRed}>{fmt(sum('periodDeprn'))}</Text></Table.Summary.Cell>
+                                <Table.Summary.Cell index={9} align="right"><Text strong style={{ ...mono, color: REDWOOD.success }}>{fmt(sum('periodActual'))}</Text></Table.Summary.Cell>
+                                <Table.Summary.Cell index={10} align="right"><Text strong style={{ ...mono, color: REDWOOD.success }}>{fmt(sum('closingNbv'))}</Text></Table.Summary.Cell>
+                                <Table.Summary.Cell index={11} />
+                                <Table.Summary.Cell index={12} />
+                              </Table.Summary.Row>
+                            </Table.Summary>
+                          );
                         }}
                       />
                     </>
