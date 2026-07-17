@@ -2,8 +2,8 @@
 -- 29_FA_DEPRN_ADJUST_POST.SQL
 --
 -- New webservice: POST reerp/fa/deprn-adjust
---   Delegates to RR_FA_PKG.ADJUST_DEPRN.
---   ** Deploy 08_rr_fa_pkg_spec.sql and 09_rr_fa_pkg_body.sql FIRST. **
+--   Delegates to RR_FA_VIEW_PKG.ADJUST_DEPRN.
+--   ** Deploy 31_rr_fa_view_pkg.sql FIRST. **
 --
 --   Applies a manual depreciation adjustment to ONE posted period. The
 --   adjustment amount is ADDED to YTD_DEPRN and DEPRN_RESERVE, stored in
@@ -67,7 +67,7 @@ DECLARE
     v_status NUMBER;
     v_result CLOB;
 BEGIN
-    RR_FA_PKG.ADJUST_DEPRN(
+    RR_FA_VIEW_PKG.ADJUST_DEPRN(
         p_asset_id        => JSON_VALUE(v_body, '$.assetId'),
         p_book            => JSON_VALUE(v_body, '$.bookTypeCode'),
         p_period_counter  => JSON_VALUE(v_body, '$.periodCounter'),

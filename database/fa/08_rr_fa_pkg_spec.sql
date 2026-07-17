@@ -118,38 +118,9 @@ CREATE OR REPLACE PACKAGE RR_FA_PKG AS
         p_result         OUT CLOB
     );
 
-    -- ── Depreciation VIEW (read straight from RR_FA_DEPRN_DETAIL) ──────────────
-    -- For the "View Depreciation" report. Takes a period name AND/OR a fiscal
-    -- year (both optional) and returns every ACTUAL depreciation row from
-    -- RR_FA_DEPRN_DETAIL for the book — no open/last/max period gating, no
-    -- calculation. One row per asset per period (summed across distributions).
-    PROCEDURE GET_DEPRN_VIEW (
-        p_book_type      IN  VARCHAR2,
-        p_period_name    IN  VARCHAR2,
-        p_fiscal_year    IN  VARCHAR2,
-        p_asset_number   IN  VARCHAR2,
-        p_offset         IN  NUMBER,
-        p_limit          IN  NUMBER,
-        p_http_status    OUT NUMBER,
-        p_result         OUT CLOB
-    );
-
-    -- ── Depreciation Adjustment ───────────────────────────────────────────────
-    -- Apply a manual depreciation adjustment to ONE posted period (keyed by
-    -- asset + book + period counter, optionally a specific distribution). The
-    -- adjustment amount is ADDED to YTD_DEPRN and DEPRN_RESERVE, stored in
-    -- DEPRN_ADJUSTMENT_AMOUNT, and the period is marked ACCOUNTED. Updates both
-    -- RR_FA_DEPRN_DETAIL and RR_FA_DEPRN_SUMMARY.
-    PROCEDURE ADJUST_DEPRN (
-        p_asset_id        IN  VARCHAR2,
-        p_book            IN  VARCHAR2,
-        p_period_counter  IN  VARCHAR2,
-        p_distribution_id IN  VARCHAR2,
-        p_adjustment      IN  NUMBER,
-        p_updated_by      IN  VARCHAR2,
-        p_http_status     OUT NUMBER,
-        p_result          OUT CLOB
-    );
+    -- NOTE: GET_DEPRN_VIEW and ADJUST_DEPRN now live in their OWN package
+    -- (RR_FA_VIEW_PKG, file 31_rr_fa_view_pkg.sql) so the "View Depreciation"
+    -- and adjustment features can never invalidate this core read package.
 
     -- ── Write Operations ──────────────────────────────────────────────────────
     PROCEDURE CREATE_ASSET (

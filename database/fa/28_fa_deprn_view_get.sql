@@ -2,8 +2,8 @@
 -- 27_FA_DEPRN_VIEW_GET.SQL
 --
 -- New webservice: GET reerp/fa/deprn-view
---   Delegates to RR_FA_PKG.GET_DEPRN_VIEW.
---   ** Deploy 08_rr_fa_pkg_spec.sql and 09_rr_fa_pkg_body.sql FIRST. **
+--   Delegates to RR_FA_VIEW_PKG.GET_DEPRN_VIEW.
+--   ** Deploy 31_rr_fa_view_pkg.sql FIRST. **
 --
 --   Reads depreciation STRAIGHT from RR_FA_DEPRN_DETAIL (joined to
 --   RR_FA_DEPRN_PERIODS only for the period name / fiscal year label).
@@ -70,7 +70,7 @@ DECLARE
     v_status NUMBER;
     v_result CLOB;
 BEGIN
-    RR_FA_PKG.GET_DEPRN_VIEW(
+    RR_FA_VIEW_PKG.GET_DEPRN_VIEW(
         p_book_type     => :bookTypeCode,
         p_period_name   => :periodName,
         p_fiscal_year   => :fiscalYear,
