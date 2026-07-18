@@ -31,6 +31,7 @@ import {
   Alert,
   Space as AntSpace,
   Descriptions,
+  Radio,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -462,6 +463,7 @@ const ManageInvoices: React.FC = () => {
   // Filtered invoices based on fully paid toggle
   const [tableSearch,     setTableSearch]     = useState('');
   const [payMethodFilter, setPayMethodFilter] = useState<'all'|'payment'|'prepayment'|'mixed'>('all');
+  const [acctFilter,      setAcctFilter]      = useState<'all'|'posted'|'unposted'>('all');
   const [createdByFilter, setCreatedByFilter] = useState<string>('');
   const [knownUsers,      setKnownUsers]      = useState<string[]>([]);
 
@@ -690,11 +692,17 @@ const ManageInvoices: React.FC = () => {
     if (payMethodFilter !== 'all') {
       list = list.filter(inv => getPayMethod(inv) === payMethodFilter);
     }
+    if (acctFilter !== 'all') {
+      // Posted = accounting complete ('Accounted'); Unposted = everything else.
+      list = list.filter(inv => acctFilter === 'posted'
+        ? inv.accountingStatus === 'Accounted'
+        : inv.accountingStatus !== 'Accounted');
+    }
     if (createdByFilter) {
       list = list.filter(inv => inv.createdBy === createdByFilter);
     }
     return list;
-  }, [invoices, showFullyPaid, tableSearch, payMethodFilter, createdByFilter]);
+  }, [invoices, showFullyPaid, tableSearch, payMethodFilter, acctFilter, createdByFilter]);
 
   // Compute totals for amount columns (based on displayed invoices)
   const totals = useMemo(() => {
@@ -1950,6 +1958,20 @@ const ManageInvoices: React.FC = () => {
       sorter: (a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber),
     },
     {
+      title: 'Accounting Status',
+      dataIndex: 'accountingStatus',
+      key: 'accountingStatus',
+      width: 150,
+      render: (status: string) => getAccountingStatusTag(status),
+      filters: [
+        { text: 'Accounted',       value: 'Accounted' },
+        { text: 'Draft Accounted', value: 'Draft Accounted' },
+        { text: 'Not Accounted',   value: 'Not Accounted' },
+        { text: 'Error',           value: 'Error' },
+      ],
+      onFilter: (value, record) => record.accountingStatus === value,
+    },
+    {
       title: 'Invoice Date',
       dataIndex: 'invoiceDate',
       key: 'invoiceDate',
@@ -2127,20 +2149,6 @@ const ManageInvoices: React.FC = () => {
       key: 'approvalStatus',
       width: 140,
       render: (status: string) => getApprovalStatusTag(status),
-    },
-    {
-      title: 'Accounting Status',
-      dataIndex: 'accountingStatus',
-      key: 'accountingStatus',
-      width: 150,
-      render: (status: string) => getAccountingStatusTag(status),
-      filters: [
-        { text: 'Accounted',       value: 'Accounted' },
-        { text: 'Draft Accounted', value: 'Draft Accounted' },
-        { text: 'Not Accounted',   value: 'Not Accounted' },
-        { text: 'Error',           value: 'Error' },
-      ],
-      onFilter: (value, record) => record.accountingStatus === value,
     },
     {
       title: 'Paid Status',
@@ -2526,6 +2534,17 @@ const ManageInvoices: React.FC = () => {
                   value={tableSearch}
                   onChange={e => setTableSearch(e.target.value)}
                 />
+                <Radio.Group
+                  size="small"
+                  value={acctFilter}
+                  onChange={e => setAcctFilter(e.target.value)}
+                  optionType="button"
+                  buttonStyle="solid"
+                >
+                  <Radio.Button value="all">All</Radio.Button>
+                  <Radio.Button value="posted">Posted</Radio.Button>
+                  <Radio.Button value="unposted">Unposted</Radio.Button>
+                </Radio.Group>
                 <Select
                   size="small"
                   value={payMethodFilter}
