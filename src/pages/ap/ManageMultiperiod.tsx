@@ -132,6 +132,7 @@ const ManageMultiperiod: React.FC = () => {
   const [activeTab,    setActiveTab]    = useState('search');
   const [detailTabs,   setDetailTabs]   = useState<DetailTab[]>([]);
   const [searchResult, setSearchResult] = useState<MpaInvoiceSummary[]>([]);
+  const [gridSearch,   setGridSearch]   = useState('');   // quick filter across all result columns
   const [mpaStatusFilter, setMpaStatusFilter] = useState<'all'|'open'|'closed'>('open');
   const [searching,    setSearching]    = useState(false);
   const [searchErr,    setSearchErr]    = useState<string | null>(null);
@@ -1202,6 +1203,7 @@ const ManageMultiperiod: React.FC = () => {
       title: 'Invoice Number',
       dataIndex: 'invoiceNumber',
       width: 160,
+      sorter: (a, b) => String(a.invoiceNumber || '').localeCompare(String(b.invoiceNumber || ''), undefined, { numeric: true }),
       render: (v, rec) => (
         <Button type="link" size="small" style={{ padding: 0 }} onClick={() => openDetail(rec)}>{v}</Button>
       ),
@@ -1210,6 +1212,8 @@ const ManageMultiperiod: React.FC = () => {
     { title: 'Business Unit',  dataIndex: 'businessUnit',  width: 180, ellipsis: true },
     {
       title: 'Invoice Date', dataIndex: 'invoiceDate', width: 110,
+      sorter: (a, b) => dayjs(a.invoiceDate).valueOf() - dayjs(b.invoiceDate).valueOf(),
+      defaultSortOrder: 'descend' as const,
       render: v => <Text style={{ fontSize: 12 }}>{fmtDate(v)}</Text>,
     },
     {
@@ -1652,10 +1656,17 @@ const ManageMultiperiod: React.FC = () => {
           {searchErr && <Alert type="error" showIcon message={searchErr} style={{ marginBottom: 12 }} />}
 
           {(() => {
+            const gq = gridSearch.trim().toLowerCase();
             const filteredSearchResult = searchResult.filter(r => {
-              if (mpaStatusFilter === 'open')   return (r.openLines   ?? 0) > 0;
-              if (mpaStatusFilter === 'closed') return (r.closedLines ?? 0) > 0 && (r.openLines ?? 0) === 0;
-              return true;
+              if (mpaStatusFilter === 'open'   && !((r.openLines   ?? 0) > 0)) return false;
+              if (mpaStatusFilter === 'closed' && !((r.closedLines ?? 0) > 0 && (r.openLines ?? 0) === 0)) return false;
+              if (!gq) return true;
+              return [
+                r.invoiceNumber, r.supplier, r.supplierNumber, r.businessUnit,
+                fmtDate(r.invoiceDate), r.invoiceCurrency, r.currencyCode,
+                r.invoiceAmount, r.totalAmount, r.postedAmount, r.notPostedAmount,
+                r.totalLines, r.openLines, r.closedLines,
+              ].some(v => v != null && String(v).toLowerCase().includes(gq));
             });
             // All list totals are in AED (each foreign invoice converted at its
             // invoice-date rate; amounts with no rate yet count as 0 until it loads).
@@ -1675,7 +1686,16 @@ const ManageMultiperiod: React.FC = () => {
                     <Col span={5}><Card size="small" bodyStyle={{ padding: '6px 12px' }}><Statistic title="Not Allocated" value={totNotPosted} precision={2} prefix={curr} valueStyle={{ fontSize: 14, color: REDWOOD.warning }} /></Card></Col>
                   </Row>
                 )}
-                <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <Input.Search
+                    allowClear
+                    size="small"
+                    placeholder="Filter results (any column)…"
+                    style={{ width: 280 }}
+                    value={gridSearch}
+                    onChange={e => setGridSearch(e.target.value)}
+                  />
+                  <div style={{ display: 'flex', gap: 8 }}>
                   <Button
                     size="small"
                     icon={<FileExcelOutlined />}
@@ -1696,6 +1716,7 @@ const ManageMultiperiod: React.FC = () => {
                     <Radio.Button value="open">Open</Radio.Button>
                     <Radio.Button value="closed">Closed</Radio.Button>
                   </Radio.Group>
+                  </div>
                 </div>
                 <Table
                   dataSource={filteredSearchResult}
