@@ -946,22 +946,12 @@ const AssetTabContent: React.FC<{
   const [costAdjDate,   setCostAdjDate]   = useState<dayjs.Dayjs>(dayjs());
   const [costAdjSaving, setCostAdjSaving] = useState(false);
 
-  // Effective period counter for the adjustment date = latest deprn period whose
-  // month is on/before the date (else the earliest period).
-  const MON_FA = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
-  const periodMonthKey = (name: string): number => {
-    const [mon, yr] = String(name || '').split('-');
-    const mi = MON_FA.indexOf(String(mon).slice(0, 3).toLowerCase());
-    const y = yr && yr.length === 2 ? 2000 + parseInt(yr, 10) : parseInt(yr, 10);
-    return (mi < 0 || isNaN(y)) ? -1 : y * 12 + mi;
-  };
-  const resolveCostPeriodCounter = (date: dayjs.Dayjs): number => {
-    const dKey = date.year() * 12 + date.month();
-    const lines = (deprn || []).map(l => ({ pc: Number(l.periodCounter), k: periodMonthKey(l.periodName) }))
-      .filter(x => !isNaN(x.pc));
-    if (!lines.length) return 0;
-    const eligible = lines.filter(x => x.k >= 0 && x.k <= dKey);
-    return eligible.length ? Math.max(...eligible.map(x => x.pc)) : Math.min(...lines.map(x => x.pc));
+  // Cost adjustment is always booked on the LAST depreciation record (the
+  // period with the greatest period counter) — that is where the reserve/cost
+  // change lands.
+  const lastDeprnRecord = (): DeprnRecord | null => {
+    if (!deprn || deprn.length === 0) return null;
+    return [...deprn].sort((a, b) => (Number(b.periodCounter) || 0) - (Number(a.periodCounter) || 0))[0];
   };
 
   const handleSaveCostAdj = async () => {
@@ -969,8 +959,10 @@ const AssetTabContent: React.FC<{
     const raw = Number(costAdjAmount);
     if (!book) { message.error('No book found for this asset'); return; }
     if (!raw || isNaN(raw)) { message.warning('Enter a non-zero amount'); return; }
+    const last = lastDeprnRecord();
+    if (!last) { message.error('No depreciation records to adjust.'); return; }
     const signed = costAdjDir === 'decrease' ? -Math.abs(raw) : Math.abs(raw);
-    const pc = resolveCostPeriodCounter(costAdjDate);
+    const pc = Number(last.periodCounter);
     setCostAdjSaving(true);
     try {
       const res = await adjustCost({
@@ -1633,8 +1625,13 @@ const AssetTabContent: React.FC<{
               const book = books[0]?.bookTypeCode || asset.bookTypeCode || '';
               const raw = Math.abs(Number(costAdjAmount) || 0);
               const signed = costAdjDir === 'decrease' ? -raw : raw;
-              const pc = resolveCostPeriodCounter(costAdjDate);
-              const effPeriod = (deprn || []).find(l => Number(l.periodCounter) === pc)?.periodName || `#${pc}`;
+              const last = lastDeprnRecord();
+              const pc = last ? Number(last.periodCounter) : 0;
+              const effPeriod = last?.periodName || `#${pc}`;
+              // Current values from the book + last depreciation record (NBV = cost − reserve).
+              const curCost    = books[0]?.cost != null ? parseFloat(String(books[0].cost)) : (parseFloat(asset.cost) || 0);
+              const curReserve = last ? (parseFloat(last.deprnReserve) || 0) : (parseFloat(asset.deprnReserve) || 0);
+              const curNbv     = curCost - curReserve;
               const payload = {
                 assetId: asset.assetId, bookTypeCode: book, periodCounter: pc,
                 adjustmentAmount: signed, adjustDate: costAdjDate.format('YYYY-MM-DD'), updatedBy: loggedUser,
@@ -1667,7 +1664,7 @@ const AssetTabContent: React.FC<{
                   }
                 >
                   <Alert type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }}
-                    message={`The amount is applied to the asset cost and the depreciation reserve (both ± the same amount) from the selected date's period (${effPeriod}) forward, so NBV stays the same. Updates the book, and the depreciation detail + summary.`} />
+                    message={`The amount is applied to the asset cost and to the depreciation reserve of the LAST depreciation period (${effPeriod}) — both ± the same amount, so NBV stays the same. Updates RR_FA_BOOKS and the depreciation detail + summary.`} />
                   <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
                     <div>
                       <div style={{ fontSize: 12, marginBottom: 4 }}><Text strong>Direction</Text></div>
@@ -1697,9 +1694,9 @@ const AssetTabContent: React.FC<{
                     </thead>
                     <tbody>
                       {[
-                        { label: 'Cost',          cur: dynCost,    delta: signed },
-                        { label: 'Deprn Reserve', cur: dynReserve, delta: signed },
-                        { label: 'NBV',           cur: dynNbv,     delta: 0 },
+                        { label: 'Cost',          cur: curCost,    delta: signed },
+                        { label: `Deprn Reserve (${effPeriod})`, cur: curReserve, delta: signed },
+                        { label: 'NBV',           cur: curNbv,     delta: 0 },
                       ].map(row => (
                         <tr key={row.label} style={{ borderTop: '1px solid #eee' }}>
                           <td style={{ padding: '4px 8px' }}>{row.label}</td>
