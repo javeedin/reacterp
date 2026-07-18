@@ -132,7 +132,7 @@ const ManageMultiperiod: React.FC = () => {
   const [activeTab,    setActiveTab]    = useState('search');
   const [detailTabs,   setDetailTabs]   = useState<DetailTab[]>([]);
   const [searchResult, setSearchResult] = useState<MpaInvoiceSummary[]>([]);
-  const [mpaStatusFilter, setMpaStatusFilter] = useState<'all'|'open'|'closed'>('all');
+  const [mpaStatusFilter, setMpaStatusFilter] = useState<'all'|'open'|'closed'>('open');
   const [searching,    setSearching]    = useState(false);
   const [searchErr,    setSearchErr]    = useState<string | null>(null);
   const [businessUnits, setBusinessUnits] = useState<string[]>([]);
@@ -1645,7 +1645,7 @@ const ManageMultiperiod: React.FC = () => {
                   rowKey="invoiceId"
                   size="small"
                   loading={searching}
-                  pagination={{ defaultPageSize: 20, showSizeChanger: true, pageSizeOptions: ['20', '50', '100', '200'] }}
+                  pagination={{ defaultPageSize: 100, showSizeChanger: true, pageSizeOptions: ['50', '100', '200', '500'] }}
                   scroll={{ x: 1420 }}
                   locale={{ emptyText: 'Run a search to see multiperiod invoices' }}
                   summary={(rows) => {
