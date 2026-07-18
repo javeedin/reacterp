@@ -4,7 +4,7 @@ import dayjs from 'dayjs';
 import {
   Layout, Card, Form, Input, Button, Space, Typography, Table, Tag,
   Row, Col, Breadcrumb, Tooltip, Select, Tabs, Descriptions,
-  Spin, Empty, Badge, message, Modal, Switch, Statistic, DatePicker, Popconfirm, Divider, Alert, Popover,
+  Spin, Empty, Badge, message, Modal, Switch, Statistic, DatePicker, Popconfirm, Divider, Alert, Popover, Radio,
 } from 'antd';
 import type { ColumnsType, TableProps } from 'antd/es/table';
 import {
@@ -27,7 +27,7 @@ import {
   getAdditionsAccountingPreview, getDeprnAccountingPreview,
   checkSlaAccountingExists, getSlaAccounting,
   createSlaAccounting, markFaAdditionAccounted, markFaDeprnAccounted,
-  updateAssetAttributes, adjustDeprn,
+  updateAssetAttributes, adjustDeprn, adjustCost,
   formatCurrency, assetTypeLabel, assetStatusLabel,
 } from '../../services/fa.service';
 import type { JournalLine } from '../../services/manage-journals.service';
@@ -936,10 +936,68 @@ const AssetTabContent: React.FC<{
     }
   };
 
+  // ── Cost Adjustment ────────────────────────────────────────────────────────
+  // Increase/decrease the asset cost from a date forward; adds the same amount
+  // to the depreciation reserve (NBV unchanged). Updates RR_FA_BOOKS +
+  // RR_FA_DEPRN_DETAIL/_SUMMARY (COST + DEPRN_RESERVE) from the date's period on.
+  const [costAdjOpen,   setCostAdjOpen]   = useState(false);
+  const [costAdjAmount, setCostAdjAmount] = useState<string>('');
+  const [costAdjDir,    setCostAdjDir]    = useState<'increase' | 'decrease'>('increase');
+  const [costAdjDate,   setCostAdjDate]   = useState<dayjs.Dayjs>(dayjs());
+  const [costAdjSaving, setCostAdjSaving] = useState(false);
+
+  // Effective period counter for the adjustment date = latest deprn period whose
+  // month is on/before the date (else the earliest period).
+  const MON_FA = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+  const periodMonthKey = (name: string): number => {
+    const [mon, yr] = String(name || '').split('-');
+    const mi = MON_FA.indexOf(String(mon).slice(0, 3).toLowerCase());
+    const y = yr && yr.length === 2 ? 2000 + parseInt(yr, 10) : parseInt(yr, 10);
+    return (mi < 0 || isNaN(y)) ? -1 : y * 12 + mi;
+  };
+  const resolveCostPeriodCounter = (date: dayjs.Dayjs): number => {
+    const dKey = date.year() * 12 + date.month();
+    const lines = (deprn || []).map(l => ({ pc: Number(l.periodCounter), k: periodMonthKey(l.periodName) }))
+      .filter(x => !isNaN(x.pc));
+    if (!lines.length) return 0;
+    const eligible = lines.filter(x => x.k >= 0 && x.k <= dKey);
+    return eligible.length ? Math.max(...eligible.map(x => x.pc)) : Math.min(...lines.map(x => x.pc));
+  };
+
+  const handleSaveCostAdj = async () => {
+    const book = books[0]?.bookTypeCode || asset.bookTypeCode || '';
+    const raw = Number(costAdjAmount);
+    if (!book) { message.error('No book found for this asset'); return; }
+    if (!raw || isNaN(raw)) { message.warning('Enter a non-zero amount'); return; }
+    const signed = costAdjDir === 'decrease' ? -Math.abs(raw) : Math.abs(raw);
+    const pc = resolveCostPeriodCounter(costAdjDate);
+    setCostAdjSaving(true);
+    try {
+      const res = await adjustCost({
+        assetId:      asset.assetId,
+        bookTypeCode: book,
+        periodCounter: pc,
+        adjustmentAmount: signed,
+        adjustDate:   costAdjDate.format('YYYY-MM-DD'),
+        updatedBy:    loggedUser,
+      });
+      if (res.success) {
+        message.success(`Cost ${signed >= 0 ? 'increased' : 'decreased'} by ${formatCurrency(String(Math.abs(signed)))} — new cost ${formatCurrency(String(res.newCost))}`);
+        setCostAdjOpen(false); setCostAdjAmount('');
+        onRefresh();   // reload books/detail/deprn so header + grid reflect the change
+      } else {
+        message.error(res.error || 'Cost adjustment failed');
+      }
+    } finally {
+      setCostAdjSaving(false);
+    }
+  };
+
   const deprnColumns: ColumnsType<DeprnRecord> = [
     { title: 'FY',          dataIndex: 'fiscalYear',               key: 'fiscalYear',  width: 60  },
     { title: 'Period Num',  dataIndex: 'periodNum',                key: 'periodNum',   width: 80  },
     { title: 'Period',      dataIndex: 'periodName',               key: 'periodName',  width: 110 },
+    { title: 'Cost',                    dataIndex: 'cost',                       key: 'cost',      align: 'right' as const, render: (v) => formatCurrency(v) },
     { title: 'Total Amount',            dataIndex: 'totalDeprnAmount',           key: 'totalAmt',  align: 'right' as const, render: (v) => formatCurrency(v) },
     { title: 'Depreciation Amount',     dataIndex: 'deprnAmount',                key: 'deprnAmt',  align: 'right' as const, render: (v) => formatCurrency(v) },
     { title: 'Deprn Adjustment',        dataIndex: 'deprnAdjustmentAmount',      key: 'deprnAdj',  align: 'right' as const, render: (v) => formatCurrency(v) },
@@ -1434,6 +1492,14 @@ const AssetTabContent: React.FC<{
                 </Tooltip>
                 <Button
                   size="small"
+                  icon={<EditOutlined />}
+                  style={{ borderColor: '#722ed1', color: '#722ed1' }}
+                  onClick={() => { setCostAdjAmount(''); setCostAdjDir('increase'); setCostAdjDate(dayjs()); setCostAdjOpen(true); }}
+                >
+                  Adjust Cost
+                </Button>
+                <Button
+                  size="small"
                   icon={<DollarOutlined />}
                   style={{ borderColor: FA_COLOR, color: FA_COLOR }}
                   onClick={openDeprnPreview}
@@ -1447,7 +1513,7 @@ const AssetTabContent: React.FC<{
               dataSource={filteredDeprn} columns={deprnColumns}
               rowKey={(r) => `${r.periodCounter}-${r.distributionId}`}
               size="small"
-              scroll={{ x: 1000 }}
+              scroll={{ x: 1120 }}
               pagination={{
                 pageSize: deprnPageSize,
                 showSizeChanger: true,
@@ -1554,6 +1620,94 @@ const AssetTabContent: React.FC<{
                           <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(String(row.cur))}</td>
                           <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'monospace', color: adj >= 0 ? '#1D7B4D' : '#C74634' }}>{adj >= 0 ? '+' : ''}{formatCurrency(String(adj))}</td>
                           <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#CA7700' }}>{formatCurrency(String(row.cur + adj))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </Modal>
+              );
+            })()}
+
+            {/* ── Cost Adjustment Modal ── */}
+            {costAdjOpen && (() => {
+              const book = books[0]?.bookTypeCode || asset.bookTypeCode || '';
+              const raw = Math.abs(Number(costAdjAmount) || 0);
+              const signed = costAdjDir === 'decrease' ? -raw : raw;
+              const pc = resolveCostPeriodCounter(costAdjDate);
+              const effPeriod = (deprn || []).find(l => Number(l.periodCounter) === pc)?.periodName || `#${pc}`;
+              const payload = {
+                assetId: asset.assetId, bookTypeCode: book, periodCounter: pc,
+                adjustmentAmount: signed, adjustDate: costAdjDate.format('YYYY-MM-DD'), updatedBy: loggedUser,
+              };
+              return (
+                <Modal
+                  open
+                  onCancel={() => { if (!costAdjSaving) setCostAdjOpen(false); }}
+                  width={620}
+                  maskClosable={!costAdjSaving}
+                  title={<Space><EditOutlined style={{ color: '#722ed1' }} /><span>Adjust Asset Cost — {asset.asset_number || asset.assetNumber}</span></Space>}
+                  footer={
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Tooltip title={<div style={{ maxWidth: 460 }}>
+                        <div style={{ fontSize: 11, marginBottom: 4 }}>POST {APEX_DB_CONFIG.baseUrl}/fa/cost-adjust</div>
+                        <pre style={{ fontSize: 10, color: '#fff', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{JSON.stringify(payload, null, 2)}</pre>
+                      </div>}>
+                        <Button size="small" icon={<ApiOutlined />} style={{ color: '#0572CE', borderColor: '#0572CE' }}
+                          onClick={() => { navigator.clipboard.writeText(`${APEX_DB_CONFIG.baseUrl}/fa/cost-adjust\n${JSON.stringify(payload, null, 2)}`); message.success('Request copied'); }} />
+                      </Tooltip>
+                      <Space>
+                        <Button disabled={costAdjSaving} onClick={() => setCostAdjOpen(false)}>Cancel</Button>
+                        <Button type="primary" loading={costAdjSaving} disabled={!raw}
+                          style={{ background: '#722ed1', borderColor: '#722ed1' }}
+                          onClick={handleSaveCostAdj}>
+                          Apply Cost Adjustment
+                        </Button>
+                      </Space>
+                    </div>
+                  }
+                >
+                  <Alert type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }}
+                    message={`The amount is applied to the asset cost and the depreciation reserve (both ± the same amount) from the selected date's period (${effPeriod}) forward, so NBV stays the same. Updates the book, and the depreciation detail + summary.`} />
+                  <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+                    <div>
+                      <div style={{ fontSize: 12, marginBottom: 4 }}><Text strong>Direction</Text></div>
+                      <Radio.Group value={costAdjDir} onChange={e => setCostAdjDir(e.target.value)} optionType="button" buttonStyle="solid" size="small">
+                        <Radio.Button value="increase">Increase (+)</Radio.Button>
+                        <Radio.Button value="decrease">Decrease (−)</Radio.Button>
+                      </Radio.Group>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 160 }}>
+                      <div style={{ fontSize: 12, marginBottom: 4 }}><Text strong>Amount</Text></div>
+                      <Input type="number" size="middle" placeholder="e.g. 50000" value={costAdjAmount}
+                        onChange={e => setCostAdjAmount(e.target.value)} prefix={<DollarOutlined style={{ color: '#722ed1' }} />} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 12, marginBottom: 4 }}><Text strong>Date</Text></div>
+                      <DatePicker value={costAdjDate} onChange={d => d && setCostAdjDate(d)} allowClear={false} format="DD MMM YYYY" />
+                    </div>
+                  </div>
+                  <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: '#fafafa', color: '#888' }}>
+                        <th style={{ textAlign: 'left', padding: '4px 8px' }}>Field</th>
+                        <th style={{ textAlign: 'right', padding: '4px 8px' }}>Current</th>
+                        <th style={{ textAlign: 'right', padding: '4px 8px' }}>± Adjustment</th>
+                        <th style={{ textAlign: 'right', padding: '4px 8px' }}>New</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        { label: 'Cost',          cur: dynCost,    delta: signed },
+                        { label: 'Deprn Reserve', cur: dynReserve, delta: signed },
+                        { label: 'NBV',           cur: dynNbv,     delta: 0 },
+                      ].map(row => (
+                        <tr key={row.label} style={{ borderTop: '1px solid #eee' }}>
+                          <td style={{ padding: '4px 8px' }}>{row.label}</td>
+                          <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(String(row.cur))}</td>
+                          <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'monospace', color: row.delta === 0 ? '#bbb' : row.delta > 0 ? '#1D7B4D' : '#C74634' }}>
+                            {row.delta === 0 ? '—' : `${row.delta > 0 ? '+' : ''}${formatCurrency(String(row.delta))}`}
+                          </td>
+                          <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#722ed1' }}>{formatCurrency(String(row.cur + row.delta))}</td>
                         </tr>
                       ))}
                     </tbody>

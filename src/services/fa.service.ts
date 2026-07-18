@@ -648,6 +648,33 @@ export const adjustDeprn = async (payload: {
   }
 };
 
+// Adjust the asset cost (+ increase / - decrease), effective from a period
+// forward. Bumps RR_FA_BOOKS.COST + ADJUSTED_COST and, for period_counter >=
+// periodCounter, COST and DEPRN_RESERVE on the depreciation detail/summary.
+export const adjustCost = async (payload: {
+  assetId: string;
+  bookTypeCode: string;
+  periodCounter: number | string;
+  adjustmentAmount: number;
+  adjustDate?: string;
+  updatedBy?: string;
+}): Promise<{
+  success: boolean; booksRowsUpdated?: number; detailRowsUpdated?: number;
+  summaryRowsUpdated?: number; newCost?: number; newDeprnReserve?: number;
+  newNbv?: number; error?: string;
+}> => {
+  try {
+    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/fa/cost-adjust`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return await res.json();
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
+};
+
 export const getDeprnPeriods = async (bookTypeCode?: string): Promise<any[]> => {
   try {
     const qs = bookTypeCode ? `?bookTypeCode=${encodeURIComponent(bookTypeCode)}` : '';

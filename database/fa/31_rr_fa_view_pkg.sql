@@ -37,6 +37,21 @@ CREATE OR REPLACE PACKAGE RR_FA_VIEW_PKG AS
         p_result          OUT CLOB
     );
 
+    -- Adjust the asset COST by p_adjustment (may be negative), effective from
+    -- period p_period_counter forward. Bumps RR_FA_BOOKS.COST/ADJUSTED_COST and,
+    -- for period_counter >= p_period_counter, COST and DEPRN_RESERVE on both
+    -- RR_FA_DEPRN_DETAIL and RR_FA_DEPRN_SUMMARY (NBV stays unchanged).
+    PROCEDURE ADJUST_COST (
+        p_asset_id        IN  VARCHAR2,
+        p_book            IN  VARCHAR2,
+        p_period_counter  IN  VARCHAR2,
+        p_adjustment      IN  NUMBER,
+        p_adjust_date     IN  VARCHAR2,
+        p_updated_by      IN  VARCHAR2,
+        p_http_status     OUT NUMBER,
+        p_result          OUT CLOB
+    );
+
 END RR_FA_VIEW_PKG;
 /
 
@@ -276,6 +291,118 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_VIEW_PKG AS
             ROLLBACK;
             write_error(p_http_status, p_result, 500, SQLERRM);
     END ADJUST_DEPRN;
+
+    -- ── Cost Adjustment ───────────────────────────────────────────────────────
+    -- Increase/decrease the asset cost by p_adjustment, effective from
+    -- p_period_counter forward. Bumps RR_FA_BOOKS.COST + ADJUSTED_COST, and for
+    -- period_counter >= p_period_counter bumps COST (detail) / ADJUSTED_COST
+    -- (summary) and DEPRN_RESERVE by the same amount (so NBV is unchanged).
+    PROCEDURE ADJUST_COST (
+        p_asset_id        IN  VARCHAR2,
+        p_book            IN  VARCHAR2,
+        p_period_counter  IN  VARCHAR2,
+        p_adjustment      IN  NUMBER,
+        p_adjust_date     IN  VARCHAR2,
+        p_updated_by      IN  VARCHAR2,
+        p_http_status     OUT NUMBER,
+        p_result          OUT CLOB
+    ) IS
+        v_adj      NUMBER := NVL(p_adjustment, 0);
+        v_pc       NUMBER := NVL(TO_NUMBER(p_period_counter), 0);
+        v_by       VARCHAR2(100) := NVL(p_updated_by, 'REACTERP');
+        v_rows_b   NUMBER := 0;
+        v_rows_d   NUMBER := 0;
+        v_rows_s   NUMBER := 0;
+        v_new_cost NUMBER;
+        v_new_res  NUMBER;
+    BEGIN
+        IF p_asset_id IS NULL OR p_book IS NULL THEN
+            write_error(p_http_status, p_result, 400, 'assetId and bookTypeCode are required');
+            RETURN;
+        END IF;
+        IF v_adj = 0 THEN
+            write_error(p_http_status, p_result, 400, 'adjustmentAmount must be a non-zero number');
+            RETURN;
+        END IF;
+
+        -- 1) Asset book cost
+        UPDATE RR_FA_BOOKS
+        SET    COST          = NVL(COST, 0)          + v_adj,
+               ADJUSTED_COST = NVL(ADJUSTED_COST, 0) + v_adj
+        WHERE  ASSET_ID       = TO_NUMBER(p_asset_id)
+        AND    BOOK_TYPE_CODE = p_book
+        AND    DATE_INEFFECTIVE IS NULL;
+        v_rows_b := SQL%ROWCOUNT;
+
+        -- 2) Depreciation detail — from the effective period forward
+        UPDATE RR_FA_DEPRN_DETAIL
+        SET    COST             = NVL(COST, 0)          + v_adj,
+               DEPRN_RESERVE    = NVL(DEPRN_RESERVE, 0) + v_adj,
+               LAST_UPDATE_DATE = SYSDATE,
+               LAST_UPDATED_BY  = v_by
+        WHERE  ASSET_ID       = TO_NUMBER(p_asset_id)
+        AND    BOOK_TYPE_CODE = p_book
+        AND    PERIOD_COUNTER >= v_pc;
+        v_rows_d := SQL%ROWCOUNT;
+
+        -- 3) Depreciation summary — from the effective period forward
+        UPDATE RR_FA_DEPRN_SUMMARY
+        SET    ADJUSTED_COST    = NVL(ADJUSTED_COST, 0) + v_adj,
+               DEPRN_RESERVE    = NVL(DEPRN_RESERVE, 0) + v_adj,
+               LAST_UPDATE_DATE = SYSDATE,
+               LAST_UPDATED_BY  = v_by
+        WHERE  ASSET_ID       = TO_NUMBER(p_asset_id)
+        AND    BOOK_TYPE_CODE = p_book
+        AND    PERIOD_COUNTER >= v_pc;
+        v_rows_s := SQL%ROWCOUNT;
+
+        IF v_rows_b = 0 AND v_rows_d = 0 AND v_rows_s = 0 THEN
+            ROLLBACK;
+            write_error(p_http_status, p_result, 404, 'No asset / book / period rows found to adjust');
+            RETURN;
+        END IF;
+
+        COMMIT;
+
+        BEGIN
+            SELECT COST INTO v_new_cost
+              FROM RR_FA_BOOKS
+             WHERE ASSET_ID = TO_NUMBER(p_asset_id) AND BOOK_TYPE_CODE = p_book
+               AND DATE_INEFFECTIVE IS NULL AND ROWNUM = 1;
+        EXCEPTION WHEN NO_DATA_FOUND THEN v_new_cost := NULL; END;
+        BEGIN
+            SELECT DEPRN_RESERVE INTO v_new_res
+              FROM RR_FA_DEPRN_SUMMARY
+             WHERE ASSET_ID = TO_NUMBER(p_asset_id) AND BOOK_TYPE_CODE = p_book
+               AND PERIOD_COUNTER = (SELECT MAX(PERIOD_COUNTER) FROM RR_FA_DEPRN_SUMMARY
+                                      WHERE ASSET_ID = TO_NUMBER(p_asset_id) AND BOOK_TYPE_CODE = p_book)
+               AND ROWNUM = 1;
+        EXCEPTION WHEN NO_DATA_FOUND THEN v_new_res := NULL; END;
+
+        APEX_JSON.INITIALIZE_CLOB_OUTPUT;
+        APEX_JSON.OPEN_OBJECT;
+        APEX_JSON.WRITE('success',                 TRUE);
+        APEX_JSON.WRITE('assetId',                 p_asset_id);
+        APEX_JSON.WRITE('bookTypeCode',            p_book);
+        APEX_JSON.WRITE('adjustment',              v_adj);
+        APEX_JSON.WRITE('adjustDate',              p_adjust_date);
+        APEX_JSON.WRITE('effectiveFromPeriod',     v_pc);
+        APEX_JSON.WRITE('booksRowsUpdated',        v_rows_b);
+        APEX_JSON.WRITE('detailRowsUpdated',       v_rows_d);
+        APEX_JSON.WRITE('summaryRowsUpdated',      v_rows_s);
+        APEX_JSON.WRITE('newCost',                 v_new_cost);
+        APEX_JSON.WRITE('newDeprnReserve',         v_new_res);
+        APEX_JSON.WRITE('newNbv',                  NVL(v_new_cost, 0) - NVL(v_new_res, 0));
+        APEX_JSON.CLOSE_OBJECT;
+
+        p_http_status := 200;
+        p_result      := APEX_JSON.GET_CLOB_OUTPUT;
+        APEX_JSON.FREE_OUTPUT;
+    EXCEPTION
+        WHEN OTHERS THEN
+            ROLLBACK;
+            write_error(p_http_status, p_result, 500, SQLERRM);
+    END ADJUST_COST;
 
 END RR_FA_VIEW_PKG;
 /
