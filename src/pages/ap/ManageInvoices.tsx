@@ -693,10 +693,13 @@ const ManageInvoices: React.FC = () => {
       list = list.filter(inv => getPayMethod(inv) === payMethodFilter);
     }
     if (acctFilter !== 'all') {
-      // Posted = accounting complete ('Accounted'); Unposted = everything else.
-      list = list.filter(inv => acctFilter === 'posted'
-        ? inv.accountingStatus === 'Accounted'
-        : inv.accountingStatus !== 'Accounted');
+      // Posted = accounting complete ("POSTED"/"Accounted", any case);
+      // Unposted = everything else (Not Accounted, Draft, Unposted, Error, …).
+      const isPosted = (s?: string) => {
+        const v = String(s || '').trim().toLowerCase();
+        return v === 'posted' || v === 'accounted' || v === 'final accounted';
+      };
+      list = list.filter(inv => acctFilter === 'posted' ? isPosted(inv.accountingStatus) : !isPosted(inv.accountingStatus));
     }
     if (createdByFilter) {
       list = list.filter(inv => inv.createdBy === createdByFilter);
