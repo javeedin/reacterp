@@ -281,7 +281,7 @@ const ManageMultiperiod: React.FC = () => {
       'Invoice Date':               r.invoiceDate,
       'MPA Start':                  r.mpaStartDate ?? r.minPeriodDate,
       'MPA End':                    r.mpaEndDate ?? r.maxPeriodDate,
-      'Currency':                   r.currencyCode,
+      'Currency':                   r.invoiceCurrency || r.currencyCode,
       'Total Invoice':              r.invoiceAmount ?? '',
       'Total MPA':                  r.totalAmount,
       'Allocated (Posted)':         r.postedAmount,
@@ -1193,8 +1193,12 @@ const ManageMultiperiod: React.FC = () => {
       ),
     },
     {
-      title: 'Currency', dataIndex: 'currencyCode', width: 90, align: 'center' as const,
-      render: (v: string) => <Tag style={{ fontSize: 11 }}>{v || '—'}</Tag>,
+      title: 'Currency', key: 'currency', width: 90, align: 'center' as const,
+      render: (_: any, rec) => {
+        const ccy = rec.invoiceCurrency || rec.currencyCode || '';
+        const foreign = ccy && ccy.toUpperCase() !== FUNCTIONAL_CCY;
+        return <Tag color={foreign ? 'blue' : 'default'} style={{ fontSize: 11, fontWeight: foreign ? 600 : 400 }}>{ccy || '—'}</Tag>;
+      },
     },
     {
       title: 'Total Invoice', dataIndex: 'invoiceAmount', width: 130, align: 'right' as const,

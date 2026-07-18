@@ -175,6 +175,8 @@ create or replace PACKAGE BODY RR_AP_MPA_PKG AS
         MAX(s.PERIOD_DATE)                                                              AS MAX_PERIOD_DATE,
         MAX((SELECT i.INVOICE_AMOUNT FROM RR_AP_INVOICES_ALL i
               WHERE i.INVOICE_ID = s.INVOICE_ID))                                       AS INVOICE_AMOUNT,
+        MAX((SELECT i.INVOICE_CURRENCY FROM RR_AP_INVOICES_ALL i
+              WHERE i.INVOICE_ID = s.INVOICE_ID))                                       AS INVOICE_CURRENCY,
         MAX((SELECT MIN(l.MULTIPERIOD_START_DATE) FROM RR_AP_INVOICE_LINES_ALL l
               WHERE l.INVOICE_ID = s.INVOICE_ID AND l.MULTIPERIOD_START_DATE IS NOT NULL)) AS MPA_START_DATE,
         MAX((SELECT MAX(l.MULTIPERIOD_END_DATE)   FROM RR_AP_INVOICE_LINES_ALL l
@@ -201,6 +203,7 @@ create or replace PACKAGE BODY RR_AP_MPA_PKG AS
           || '"businessUnit":'     || jstr(r.BUSINESS_UNIT)     || ','
           || '"invoiceDate":'      || jdate(r.INVOICE_DATE)     || ','
           || '"currencyCode":'     || jstr(r.CURRENCY_CODE)     || ','
+          || '"invoiceCurrency":'  || jstr(r.INVOICE_CURRENCY)  || ','
           || '"totalLines":'       || jnum(r.TOTAL_LINES)       || ','
           || '"closedLines":'      || jnum(r.CLOSED_LINES)      || ','
           || '"openLines":'        || jnum(r.OPEN_LINES)        || ','

@@ -9,7 +9,8 @@ export interface MpaInvoiceSummary {
   supplierNumber: string;
   businessUnit: string;
   invoiceDate: string;
-  currencyCode: string;
+  currencyCode: string;         // schedule currency (may default to AED)
+  invoiceCurrency?: string;     // actual invoice header currency (RR_AP_INVOICES_ALL)
   totalLines: number;
   openLines: number;
   closedLines: number;
