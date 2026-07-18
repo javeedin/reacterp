@@ -171,6 +171,9 @@ const ManageMultiperiod: React.FC = () => {
   const [mpaSelected,        setMpaSelected]        = useState<Record<string, number[]>>({});  // per-tab selected scheduleIds
   // Per-line conversion rate (invoice ccy -> AED), keyed by scheduleId.
   const [lineRates,          setLineRates]          = useState<Record<number, FxRateResult & { loading?: boolean }>>({});
+  // Per-invoice conversion rate (invoice ccy -> AED at invoice date) for the
+  // Manage list AED-converted amount columns, keyed by invoiceId.
+  const [invRate,            setInvRate]            = useState<Record<number, { rate: number; found: boolean }>>({});
   const [suspendingTab,      setSuspendingTab]      = useState<string | null>(null);
   const [accrualPreviewOpen, setAccrualPreviewOpen] = useState(false);
   const [accrualPreviewLines, setAccrualPreviewLines] = useState<any[]>([]);
@@ -235,6 +238,38 @@ const ManageMultiperiod: React.FC = () => {
 
   // ── search ────────────────────────────────────────────────────────────────
 
+  // Invoice-date Corporate rate (invoice ccy -> AED) for every foreign-currency
+  // row, deduped by currency+date. Populates invRate so the amount columns and
+  // summary tiles can show AED.
+  const invCcy = (r: MpaInvoiceSummary) => (r.invoiceCurrency || r.currencyCode || '').toUpperCase();
+  const fetchInvoiceRates = async (rows: MpaInvoiceSummary[]) => {
+    const foreign = rows.filter(r => invCcy(r) && invCcy(r) !== FUNCTIONAL_CCY);
+    if (!foreign.length) return;
+    const keyOf = (r: MpaInvoiceSummary) => `${invCcy(r)}|${dayjs(r.invoiceDate).format('YYYY-MM-DD')}`;
+    const uniq = new Map<string, { ccy: string; date: string }>();
+    foreign.forEach(r => { if (!uniq.has(keyOf(r))) uniq.set(keyOf(r), { ccy: invCcy(r), date: dayjs(r.invoiceDate).format('YYYY-MM-DD') }); });
+    const rateByKey: Record<string, { rate: number; found: boolean }> = {};
+    await Promise.all([...uniq.entries()].map(async ([k, v]) => {
+      const rr = await getConversionRate(v.ccy, FUNCTIONAL_CCY, v.date, 'Corporate');
+      rateByKey[k] = { rate: rr.found ? rr.rate : 0, found: rr.found };
+    }));
+    setInvRate(prev => {
+      const nx = { ...prev };
+      foreign.forEach(r => { nx[r.invoiceId] = rateByKey[keyOf(r)]; });
+      return nx;
+    });
+  };
+  // AED equivalent of an amount for a row (rate 1 for AED; null if rate unknown).
+  const invAedRate = (r: MpaInvoiceSummary): number | null => {
+    if (!invCcy(r) || invCcy(r) === FUNCTIONAL_CCY) return 1;
+    const st = invRate[r.invoiceId];
+    return st?.found ? st.rate : null;
+  };
+  const toAed = (r: MpaInvoiceSummary, amt: number | null | undefined): number | null => {
+    const rt = invAedRate(r);
+    return rt == null ? null : (amt || 0) * rt;
+  };
+
   const handleSearch = useCallback(async () => {
     const vals = form.getFieldsValue();
     setSearching(true);
@@ -258,6 +293,7 @@ const ManageMultiperiod: React.FC = () => {
         postingStatus: vals.postingStatus || undefined,
       });
       setSearchResult(rows);
+      fetchInvoiceRates(rows);   // convert foreign-currency list totals to AED
       setLastApiStatus('success');
       setLastApiNote(`${rows.length} invoice(s) returned`);
     } catch (e: any) {
@@ -282,10 +318,12 @@ const ManageMultiperiod: React.FC = () => {
       'MPA Start':                  r.mpaStartDate ?? r.minPeriodDate,
       'MPA End':                    r.mpaEndDate ?? r.maxPeriodDate,
       'Currency':                   r.invoiceCurrency || r.currencyCode,
-      'Total Invoice':              r.invoiceAmount ?? '',
-      'Total MPA':                  r.totalAmount,
-      'Allocated (Posted)':         r.postedAmount,
-      'Not Allocated (Not Posted)': r.notPostedAmount,
+      'FrC (Foreign Invoice Amt)':  invCcy(r) && invCcy(r) !== FUNCTIONAL_CCY ? (r.invoiceAmount ?? '') : '',
+      'Conv. Rate':                 invAedRate(r) ?? '',
+      'Total Invoice (AED)':        toAed(r, r.invoiceAmount)   ?? '',
+      'Total MPA (AED)':            toAed(r, r.totalAmount)     ?? '',
+      'Allocated (Posted, AED)':    toAed(r, r.postedAmount)    ?? '',
+      'Not Allocated (Not Posted, AED)': toAed(r, r.notPostedAmount) ?? '',
       'Total Lines':                r.totalLines,
       'Open Lines':                 r.openLines,
       'Closed Lines':               r.closedLines,
@@ -1193,7 +1231,7 @@ const ManageMultiperiod: React.FC = () => {
       ),
     },
     {
-      title: 'Currency', key: 'currency', width: 90, align: 'center' as const,
+      title: 'Currency', key: 'currency', width: 80, align: 'center' as const,
       render: (_: any, rec) => {
         const ccy = rec.invoiceCurrency || rec.currencyCode || '';
         const foreign = ccy && ccy.toUpperCase() !== FUNCTIONAL_CCY;
@@ -1201,26 +1239,44 @@ const ManageMultiperiod: React.FC = () => {
       },
     },
     {
-      title: 'Total Invoice', dataIndex: 'invoiceAmount', width: 130, align: 'right' as const,
-      render: (v) => v != null
-        ? <Text strong style={{ fontSize: 12 }}>{fmtNum(v)}</Text>
-        : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>,
+      title: <Tooltip title="Foreign-currency invoice amount (invoice currency)">FrC</Tooltip>,
+      key: 'frc', width: 140, align: 'right' as const,
+      render: (_: any, rec) => {
+        const ccy = rec.invoiceCurrency || rec.currencyCode || '';
+        if (!ccy || ccy.toUpperCase() === FUNCTIONAL_CCY) return <Text type="secondary" style={{ fontSize: 11 }}>—</Text>;
+        return <Text style={{ fontSize: 12, color: REDWOOD.info }}>{fmtAmt(rec.invoiceAmount, ccy)}</Text>;
+      },
     },
     {
-      title: 'Total MPA', dataIndex: 'totalAmount', width: 130, align: 'right' as const,
-      render: (v) => <Text style={{ fontSize: 12 }}>{fmtNum(v)}</Text>,
+      title: 'Total Invoice (AED)', dataIndex: 'invoiceAmount', width: 140, align: 'right' as const,
+      render: (v, rec) => {
+        const a = toAed(rec, v);
+        if (a == null) return <Tooltip title="Fetching invoice-date rate…"><Text type="secondary" style={{ fontSize: 12 }}>…</Text></Tooltip>;
+        return <Text strong style={{ fontSize: 12 }}>{fmtNum(a)}</Text>;
+      },
     },
     {
-      title: 'Allocated (Posted)', dataIndex: 'postedAmount', width: 140, align: 'right' as const,
-      render: (v) => v > 0
-        ? <Text style={{ color: REDWOOD.success, fontSize: 12 }}>{fmtNum(v)}</Text>
-        : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>,
+      title: 'Total MPA (AED)', dataIndex: 'totalAmount', width: 130, align: 'right' as const,
+      render: (v, rec) => {
+        const a = toAed(rec, v);
+        return a == null ? <Text type="secondary" style={{ fontSize: 12 }}>…</Text> : <Text style={{ fontSize: 12 }}>{fmtNum(a)}</Text>;
+      },
     },
     {
-      title: 'Not Allocated (Not Posted)', dataIndex: 'notPostedAmount', width: 160, align: 'right' as const,
-      render: (v) => v > 0
-        ? <Text type="warning" style={{ fontSize: 12 }}>{fmtNum(v)}</Text>
-        : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>,
+      title: 'Allocated (Posted, AED)', dataIndex: 'postedAmount', width: 150, align: 'right' as const,
+      render: (v, rec) => {
+        const a = toAed(rec, v);
+        if (a == null) return <Text type="secondary" style={{ fontSize: 12 }}>…</Text>;
+        return a > 0 ? <Text style={{ color: REDWOOD.success, fontSize: 12 }}>{fmtNum(a)}</Text> : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>;
+      },
+    },
+    {
+      title: 'Not Allocated (Not Posted, AED)', dataIndex: 'notPostedAmount', width: 170, align: 'right' as const,
+      render: (v, rec) => {
+        const a = toAed(rec, v);
+        if (a == null) return <Text type="secondary" style={{ fontSize: 12 }}>…</Text>;
+        return a > 0 ? <Text type="warning" style={{ fontSize: 12 }}>{fmtNum(a)}</Text> : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>;
+      },
     },
     {
       title: 'Actions', width: 140,
@@ -1601,11 +1657,13 @@ const ManageMultiperiod: React.FC = () => {
               if (mpaStatusFilter === 'closed') return (r.closedLines ?? 0) > 0 && (r.openLines ?? 0) === 0;
               return true;
             });
-            const totInvoice   = filteredSearchResult.reduce((s, r) => s + (r.invoiceAmount   || 0), 0);
-            const totMpa       = filteredSearchResult.reduce((s, r) => s + (r.totalAmount     || 0), 0);
-            const totPosted    = filteredSearchResult.reduce((s, r) => s + (r.postedAmount    || 0), 0);
-            const totNotPosted = filteredSearchResult.reduce((s, r) => s + (r.notPostedAmount || 0), 0);
-            const curr         = filteredSearchResult[0]?.currencyCode || '';
+            // All list totals are in AED (each foreign invoice converted at its
+            // invoice-date rate; amounts with no rate yet count as 0 until it loads).
+            const totInvoice   = filteredSearchResult.reduce((s, r) => s + (toAed(r, r.invoiceAmount)   ?? 0), 0);
+            const totMpa       = filteredSearchResult.reduce((s, r) => s + (toAed(r, r.totalAmount)     ?? 0), 0);
+            const totPosted    = filteredSearchResult.reduce((s, r) => s + (toAed(r, r.postedAmount)    ?? 0), 0);
+            const totNotPosted = filteredSearchResult.reduce((s, r) => s + (toAed(r, r.notPostedAmount) ?? 0), 0);
+            const curr         = FUNCTIONAL_CCY;
             return (
               <>
                 {filteredSearchResult.length > 0 && (
@@ -1646,24 +1704,26 @@ const ManageMultiperiod: React.FC = () => {
                   size="small"
                   loading={searching}
                   pagination={{ defaultPageSize: 100, showSizeChanger: true, pageSizeOptions: ['50', '100', '200', '500'] }}
-                  scroll={{ x: 1420 }}
+                  scroll={{ x: 1620 }}
                   locale={{ emptyText: 'Run a search to see multiperiod invoices' }}
                   summary={(rows) => {
                     if (!rows.length) return null;
-                    const inv = rows.reduce((s, r: any) => s + (r.invoiceAmount   || 0), 0);
-                    const t   = rows.reduce((s, r: any) => s + (r.totalAmount     || 0), 0);
-                    const p   = rows.reduce((s, r: any) => s + (r.postedAmount    || 0), 0);
-                    const np  = rows.reduce((s, r: any) => s + (r.notPostedAmount || 0), 0);
+                    // AED-converted totals (invoice-date rate per row).
+                    const inv = rows.reduce((s, r: any) => s + (toAed(r, r.invoiceAmount)   ?? 0), 0);
+                    const t   = rows.reduce((s, r: any) => s + (toAed(r, r.totalAmount)     ?? 0), 0);
+                    const p   = rows.reduce((s, r: any) => s + (toAed(r, r.postedAmount)    ?? 0), 0);
+                    const np  = rows.reduce((s, r: any) => s + (toAed(r, r.notPostedAmount) ?? 0), 0);
                     return (
                       <Table.Summary fixed>
                         <Table.Summary.Row style={{ background: '#f0f5ff', fontWeight: 700 }}>
                           <Table.Summary.Cell index={0} colSpan={6}><strong>Total ({rows.length})</strong></Table.Summary.Cell>
-                          <Table.Summary.Cell index={6} align="center"><Text strong>{curr}</Text></Table.Summary.Cell>
-                          <Table.Summary.Cell index={7} align="right"><Text strong>{fmtNum(inv)}</Text></Table.Summary.Cell>
-                          <Table.Summary.Cell index={8} align="right"><Text strong>{fmtNum(t)}</Text></Table.Summary.Cell>
-                          <Table.Summary.Cell index={9} align="right"><Text strong style={{ color: REDWOOD.success }}>{fmtNum(p)}</Text></Table.Summary.Cell>
-                          <Table.Summary.Cell index={10} align="right"><Text strong style={{ color: REDWOOD.warning }}>{fmtNum(np)}</Text></Table.Summary.Cell>
-                          <Table.Summary.Cell index={11} />
+                          <Table.Summary.Cell index={6} align="center"><Text strong>{FUNCTIONAL_CCY}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={7} />
+                          <Table.Summary.Cell index={8} align="right"><Text strong>{fmtNum(inv)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={9} align="right"><Text strong>{fmtNum(t)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={10} align="right"><Text strong style={{ color: REDWOOD.success }}>{fmtNum(p)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={11} align="right"><Text strong style={{ color: REDWOOD.warning }}>{fmtNum(np)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={12} />
                         </Table.Summary.Row>
                       </Table.Summary>
                     );
