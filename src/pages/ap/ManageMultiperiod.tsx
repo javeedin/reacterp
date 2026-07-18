@@ -28,6 +28,7 @@ import {
 } from '../../services/sla.service';
 import { postSlaToGL, buildGlJournalPayload, makeBatchName, getGlJournalLines } from '../../services/glPosting.service';
 import type { GlPostingOptions } from '../../services/glPosting.service';
+import { getConversionRate, type FxRateResult } from '../../services/fx.service';
 import { useAuth } from '../../context/AuthContext';
 import { useAccountDescriptions } from '../../hooks/useAccountDescriptions';
 
@@ -58,6 +59,24 @@ const fmtDate = (s: string | null | undefined) =>
   s ? dayjs(s).format('DD MMM YYYY') : '—';
 
 const currentPeriod = () => dayjs().format('MMM-YY');   // e.g. "Apr-26"
+
+// Functional / ledger currency. AED amounts = entered amount × conversion rate.
+const FUNCTIONAL_CCY = 'AED';
+
+// Rate date for a schedule line = LAST DAY of the line's period month.
+const MON3 = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const lineRateDate = (line: { periodDate?: string; periodName?: string }): string => {
+  const d = line.periodDate ? dayjs(line.periodDate) : null;
+  if (d && d.isValid()) return d.endOf('month').format('YYYY-MM-DD');
+  // fall back to parsing "MMM-YYYY" / "MMM-YY" without a dayjs parse plugin
+  const parts = (line.periodName || '').split('-');
+  if (parts.length === 2) {
+    const mi = MON3.indexOf(parts[0].slice(0, 3).toLowerCase());
+    const yy = parts[1].length === 2 ? 2000 + parseInt(parts[1], 10) : parseInt(parts[1], 10);
+    if (mi >= 0 && !isNaN(yy)) return dayjs(new Date(yy, mi + 1, 0)).format('YYYY-MM-DD'); // day 0 of next month
+  }
+  return dayjs().endOf('month').format('YYYY-MM-DD');
+};
 
 // Accrual period is stored as "MMM-YYYY" (e.g. "May-2026"). GL periods use the
 // short "MMM-YY" form ("May-26") and the accounting/effective date must fall in
@@ -150,6 +169,8 @@ const ManageMultiperiod: React.FC = () => {
   const [accrualSearch,      setAccrualSearch]      = useState('');
   const [detailSearch,       setDetailSearch]       = useState<Record<string, string>>({});
   const [mpaSelected,        setMpaSelected]        = useState<Record<string, number[]>>({});  // per-tab selected scheduleIds
+  // Per-line conversion rate (invoice ccy -> AED), keyed by scheduleId.
+  const [lineRates,          setLineRates]          = useState<Record<number, FxRateResult & { loading?: boolean }>>({});
   const [suspendingTab,      setSuspendingTab]      = useState<string | null>(null);
   const [accrualPreviewOpen, setAccrualPreviewOpen] = useState(false);
   const [accrualPreviewLines, setAccrualPreviewLines] = useState<any[]>([]);
@@ -427,7 +448,22 @@ const ManageMultiperiod: React.FC = () => {
       const ledger = await fetchLedgerByBusinessUnit(tab.detail.businessUnit);
       if (!ledger) throw new Error('Could not find ledger for Business Unit: ' + tab.detail.businessUnit);
 
-      const currency = tab.detail.currencyCode || 'AED';
+      const currency = tab.detail.currencyCode || FUNCTIONAL_CCY;
+      // Conversion rate: 1 when the invoice is already in the functional currency;
+      // else the Corporate rate at the posting period's month-end.
+      let exRate = 1;
+      let rateDate = dayjs().format('YYYY-MM-DD');
+      if (currency.toUpperCase() !== FUNCTIONAL_CCY) {
+        rateDate = lineRateDate(linesToPost[0]);
+        const rr = await getConversionRate(currency, FUNCTIONAL_CCY, rateDate, 'Corporate');
+        if (!rr.found || !rr.rate) {
+          throw new Error(`No Corporate conversion rate ${currency}→${FUNCTIONAL_CCY} as of ${rateDate}. Add the rate first (Manage Currency Rates), then retry.`);
+        }
+        exRate = rr.rate;
+      }
+      // Accounted (functional) amount = entered amount × rate.
+      const acc = (amt: number) => Math.round((amt || 0) * exRate * 100) / 100;
+
       const payload: SlaCreatePayload = {
         header: {
           moduleName:     'AP',
@@ -441,11 +477,12 @@ const ManageMultiperiod: React.FC = () => {
           periodName:     period,
           ledgerId:       ledger.ledgerId,
           ledgerName:     ledger.ledgerName,
-          currencyCode:   currency,
-          ledgerCurrency: ledger.ledgerName,
-          exchangeRate:   1,
+          currencyCode:   currency,               // entered (invoice) currency
+          ledgerCurrency: FUNCTIONAL_CCY,          // accounted (functional) currency
+          exchangeRate:   exRate,
+          exchangeRateType: 'Corporate',
           businessUnit:   tab.detail.businessUnit,
-          description:    `Multiperiod Accrual – ${tab.detail.invoiceNumber} – ${period}`,
+          description:    `Multiperiod Accrual – ${tab.detail.invoiceNumber} – ${period}` + (exRate !== 1 ? ` (rate ${exRate} @ ${rateDate})` : ''),
           createdBy:      postedBy,
         },
         lines: linesToPost.flatMap((l, idx) => [
@@ -456,10 +493,10 @@ const ManageMultiperiod: React.FC = () => {
             accountCombination: l.chargeAccount || '',
             enteredDr:         l.periodAmount,
             enteredCr:         0,
-            accountedDr:       l.periodAmount,
+            accountedDr:       acc(l.periodAmount),
             accountedCr:       0,
             currencyCode:      currency,
-            exchangeRate:      1,
+            exchangeRate:      exRate,
             description:       `${l.description || 'Expense'} – ${period}`,
             sourceLineId:      l.scheduleId,
             sourceLineNumber:  l.lineNumber,
@@ -472,9 +509,9 @@ const ManageMultiperiod: React.FC = () => {
             enteredDr:         0,
             enteredCr:         l.periodAmount,
             accountedDr:       0,
-            accountedCr:       l.periodAmount,
+            accountedCr:       acc(l.periodAmount),
             currencyCode:      currency,
-            exchangeRate:      1,
+            exchangeRate:      exRate,
             description:       `${l.description || 'Accrual'} – ${period}`,
             sourceLineId:      l.scheduleId,
             sourceLineNumber:  l.lineNumber,
@@ -1208,9 +1245,45 @@ const ManageMultiperiod: React.FC = () => {
     },
   ];
 
+  // ── conversion rates ──────────────────────────────────────────────────────
+
+  // Fetch the conversion rate for ONE line (invoice ccy -> AED, Corporate, at
+  // the line's period month-end).
+  const fetchLineRate = async (line: MpaScheduleLine, invoiceCcy: string) => {
+    const sid = line.scheduleId;
+    if (!invoiceCcy || invoiceCcy.toUpperCase() === FUNCTIONAL_CCY) {
+      setLineRates(prev => ({ ...prev, [sid]: { rate: 1, found: true, rateDate: lineRateDate(line), rateType: 'Corporate' } }));
+      return;
+    }
+    setLineRates(prev => ({ ...prev, [sid]: { ...(prev[sid] || { rate: 0, found: false }), loading: true } }));
+    const r = await getConversionRate(invoiceCcy, FUNCTIONAL_CCY, lineRateDate(line), 'Corporate');
+    setLineRates(prev => ({ ...prev, [sid]: { ...r, loading: false } }));
+    if (!r.found) message.warning(r.error || `No Corporate rate for ${invoiceCcy}→${FUNCTIONAL_CCY}`);
+  };
+
+  // Fetch rates for ALL lines of a tab (one call per distinct period month-end).
+  const fetchAllLineRates = async (lines: MpaScheduleLine[], invoiceCcy: string) => {
+    const functional = !invoiceCcy || invoiceCcy.toUpperCase() === FUNCTIONAL_CCY;
+    const dates = [...new Set(lines.map(l => lineRateDate(l)))];
+    const rateByDate: Record<string, FxRateResult> = {};
+    await Promise.all(dates.map(async (dt) => {
+      rateByDate[dt] = functional
+        ? { rate: 1, found: true, rateDate: dt, rateType: 'Corporate' }
+        : await getConversionRate(invoiceCcy, FUNCTIONAL_CCY, dt, 'Corporate');
+    }));
+    setLineRates(prev => {
+      const nx = { ...prev };
+      lines.forEach(l => { nx[l.scheduleId] = { ...rateByDate[lineRateDate(l)], loading: false }; });
+      return nx;
+    });
+    const missing = lines.filter(l => !rateByDate[lineRateDate(l)]?.found).length;
+    if (missing) message.warning(`${missing} line(s) have no ${invoiceCcy}→${FUNCTIONAL_CCY} rate for their period month-end.`);
+  };
+
   // ── detail schedule columns ───────────────────────────────────────────────
 
-  const buildScheduleColumns = (lines: MpaScheduleLine[]): ColumnsType<MpaScheduleLine> => {
+  const buildScheduleColumns = (lines: MpaScheduleLine[], currencyCode: string): ColumnsType<MpaScheduleLine> => {
+    const isFunctional = !currencyCode || currencyCode.toUpperCase() === FUNCTIONAL_CCY;
     const periodOptions = [...new Set(lines.map(l => l.periodName))].sort().map(v => ({ text: v, value: v }));
     return [
     {
@@ -1223,12 +1296,40 @@ const ManageMultiperiod: React.FC = () => {
     { title: 'Description', dataIndex: 'description', ellipsis: true,
       render: (v: string) => <Tooltip title={v}><Text style={{ fontSize: 12 }}>{v}</Text></Tooltip> },
     {
-      title: 'Original Amt', dataIndex: 'originalAmount', width: 130, align: 'right' as const,
-      render: v => <Text style={{ fontSize: 12 }}>{fmtAmt(v)}</Text>,
+      title: 'Original Amt', dataIndex: 'originalAmount', width: 140, align: 'right' as const,
+      render: v => <Text style={{ fontSize: 12 }}>{fmtAmt(v, currencyCode)}</Text>,
     },
     {
-      title: 'Period Amt', dataIndex: 'periodAmount', width: 130, align: 'right' as const,
-      render: v => <Text strong style={{ fontSize: 12 }}>{fmtAmt(v)}</Text>,
+      title: 'Period Amt', dataIndex: 'periodAmount', width: 140, align: 'right' as const,
+      render: v => <Text strong style={{ fontSize: 12 }}>{fmtAmt(v, currencyCode)}</Text>,
+    },
+    {
+      title: 'Conv. Rate', width: 120, align: 'right' as const,
+      render: (_, rec) => {
+        if (isFunctional) return <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>1.000000</Text>;
+        const r = lineRates[rec.scheduleId];
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+            {r?.found
+              ? <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.info }}>{r.rate.toFixed(6)}</Text>
+              : <Text type="secondary" style={{ fontSize: 11 }}>—</Text>}
+            <Button size="small" type="link" loading={r?.loading} icon={<SyncOutlined />}
+              onClick={() => fetchLineRate(rec, currencyCode)}
+              style={{ fontSize: 10, height: 18, padding: 0 }}>
+              {r?.found ? 'Refresh' : 'Fetch'}
+            </Button>
+            {r?.rateDate && <Text type="secondary" style={{ fontSize: 9 }}>{r.rateDate}</Text>}
+          </div>
+        );
+      },
+    },
+    {
+      title: `${FUNCTIONAL_CCY} Amount`, width: 140, align: 'right' as const,
+      render: (_, rec) => {
+        const rate = isFunctional ? 1 : (lineRates[rec.scheduleId]?.found ? lineRates[rec.scheduleId].rate : null);
+        if (rate == null) return <Text type="secondary" style={{ fontSize: 11 }}>fetch rate</Text>;
+        return <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>{fmtAmt((rec.periodAmount || 0) * rate, FUNCTIONAL_CCY)}</Text>;
+      },
     },
     {
       title: 'Charge A/C (Dr)', dataIndex: 'chargeAccount', width: 210,
@@ -1279,11 +1380,16 @@ const ManageMultiperiod: React.FC = () => {
       <div style={{ padding: '0 8px' }}>
         {/* Invoice header */}
         <Card size="small" style={{ marginBottom: 12 }}>
-          <Descriptions size="small" column={5}>
+          <Descriptions size="small" column={6}>
             <Descriptions.Item label="Invoice Number">
               <Text strong>{d.invoiceNumber}</Text>
             </Descriptions.Item>
             <Descriptions.Item label="Invoice Date">{fmtDate(d.invoiceDate)}</Descriptions.Item>
+            <Descriptions.Item label="Currency">
+              <Tag color={d.currencyCode && d.currencyCode.toUpperCase() !== FUNCTIONAL_CCY ? 'blue' : 'default'} style={{ fontWeight: 600 }}>
+                {d.currencyCode || FUNCTIONAL_CCY}
+              </Tag>
+            </Descriptions.Item>
             <Descriptions.Item label="Supplier">{d.supplier}</Descriptions.Item>
             <Descriptions.Item label="Business Unit">{d.businessUnit}</Descriptions.Item>
             <Descriptions.Item label="Invoice Accounting">
@@ -1336,6 +1442,17 @@ const ManageMultiperiod: React.FC = () => {
             >
               View Accounting
             </Button>
+            {d.currencyCode && d.currencyCode.toUpperCase() !== FUNCTIONAL_CCY && (
+              <Tooltip title={`Fetch ${d.currencyCode}→${FUNCTIONAL_CCY} Corporate rates (period month-end) for all lines`}>
+                <Button
+                  icon={<SyncOutlined />}
+                  size="small"
+                  onClick={() => fetchAllLineRates(d.lines, d.currencyCode)}
+                >
+                  Fetch Rates
+                </Button>
+              </Tooltip>
+            )}
             <Tooltip title={(mpaSelected[tab.key]?.length ?? 0) === 0
               ? 'Select one or more not-accounted lines to suspend'
               : `Suspend ${mpaSelected[tab.key]!.length} selected line(s)`}>
@@ -1406,11 +1523,11 @@ const ManageMultiperiod: React.FC = () => {
               </div>
               <Table
                 dataSource={filteredLines}
-                columns={buildScheduleColumns(d.lines)}
+                columns={buildScheduleColumns(d.lines, d.currencyCode)}
                 rowKey="scheduleId"
                 size="small"
                 pagination={false}
-                scroll={{ x: 1050 }}
+                scroll={{ x: 1320 }}
                 rowSelection={{
                   selectedRowKeys: mpaSelected[tab.key] ?? [],
                   onChange: (keys) => setMpaSelected(prev => ({ ...prev, [tab.key]: keys as number[] })),
