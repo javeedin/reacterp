@@ -3016,7 +3016,7 @@ const ManageAssets: React.FC = () => {
   const [loading,    setLoading]    = useState(false);
   const [totalCount, setTotalCount] = useState(0);
   const [page,       setPage]       = useState(1);
-  const [pageSize,   setPageSize]   = useState(25);
+  const [pageSize,   setPageSize]   = useState(200);
   const [searched,   setSearched]   = useState(false);
   const [bookList,   setBookList]   = useState<BookControlRecord[]>([]);
 
@@ -3271,7 +3271,9 @@ const ManageAssets: React.FC = () => {
   const columns: ColumnsType<AssetRecord> = [
     {
       title: 'Asset Number', key: 'assetNumber', width: 130,
-      sorter: (a, b) => (a.asset_number || a.assetNumber || a.assetId).localeCompare(b.asset_number || b.assetNumber || b.assetId),
+      defaultSortOrder: 'ascend' as const,
+      sorter: (a, b) => (a.asset_number || a.assetNumber || a.assetId).localeCompare(
+        b.asset_number || b.assetNumber || b.assetId, undefined, { numeric: true }),
       render: (_v, record) => (
         <Button type="link" style={{ padding: 0, fontWeight: 600 }} onClick={(e) => { e.stopPropagation(); openAssetTab(record); }}>
           {record.asset_number || record.assetNumber || record.assetId}
@@ -3279,8 +3281,9 @@ const ManageAssets: React.FC = () => {
       ),
     },
     {
-      title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true,
+      title: 'Description', dataIndex: 'description', key: 'description', width: 220, ellipsis: true,
       sorter: (a, b) => (a.description || '').localeCompare(b.description || ''),
+      render: (v: string) => <Tooltip title={v}>{v || <Text type="secondary">—</Text>}</Tooltip>,
     },
     {
       title: 'Category', dataIndex: 'assetCategory', key: 'assetCategory', width: 180, ellipsis: true,
@@ -3484,14 +3487,14 @@ const ManageAssets: React.FC = () => {
           rowKey="assetId"
           loading={loading}
           size="small"
-          scroll={{ x: 1100 }}
+          scroll={{ x: 1700 }}
           locale={{ emptyText: searched ? 'No assets found' : 'Enter search criteria above' }}
           onRow={(record) => ({ onClick: () => openAssetTab(record), style: { cursor: 'pointer' } })}
           pagination={{
             current: page, pageSize, total: totalCount,
             showSizeChanger: true,
             showTotal: (t) => `${t} total${gridSearch ? ` (${displayedRows.length} shown)` : ''}`,
-            pageSizeOptions: ['25', '50', '100'],
+            pageSizeOptions: ['25', '50', '100', '200', '500'],
             onChange: (p, ps) => { setPageSize(ps); runSearch(p, ps); },
           }}
         />
