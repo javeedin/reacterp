@@ -48,6 +48,9 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPLIER_CREATE_PKG AS
     v_addr_id   NUMBER;
     v_site_id   NUMBER;
     v_site_base NUMBER;
+    v_asgn_id   NUMBER;
+    v_asgn_base NUMBER;
+    v_bu_id     NUMBER;
     v_sites     NUMBER := 0;
   BEGIN
     v_name := JSON_VALUE(p_json, '$.supplier');
@@ -94,6 +97,7 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPLIER_CREATE_PKG AS
 
     -- 3) Sites (0..n) — increment a local counter (uncommitted rows aren't seen by MAX)
     SELECT NVL(MAX(SUPPLIER_SITE_ID), 900000000000) INTO v_site_base FROM RR_SUPPLIER_SITES;
+    SELECT NVL(MAX(ASSIGNMENT_ID), 900000000000) INTO v_asgn_base FROM RR_SUPPLIER_SITE_ASSIGNMENTS;
     FOR s IN (
       SELECT * FROM JSON_TABLE(p_json, '$.sites[*]' COLUMNS (
         site_code  VARCHAR2(60)  PATH '$.siteCode',
@@ -121,6 +125,29 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPLIER_CREATE_PKG AS
         CASE WHEN LOWER(NVL(s.pay_flag,'false')) IN ('y','true','1','yes') THEN 'Y' ELSE 'N' END,
         s.pay_terms, s.inv_ccy, NVL(s.st, 'Active'), SYSTIMESTAMP, v_by, SYSTIMESTAMP, v_by
       );
+
+      -- 3a) Site assignment — one row per site tying it to its Procurement/Client BU
+      IF s.proc_bu IS NOT NULL THEN
+        BEGIN
+          SELECT BUSINESS_UNIT_ID INTO v_bu_id
+          FROM   RR_GL_BUSINESS_UNITS
+          WHERE  UPPER(BUSINESS_UNIT_NAME) = UPPER(s.proc_bu)
+          AND    ROWNUM = 1;
+        EXCEPTION WHEN NO_DATA_FOUND THEN v_bu_id := NULL;
+        END;
+        v_asgn_base := v_asgn_base + 1;
+        v_asgn_id   := v_asgn_base;
+        INSERT INTO RR_SUPPLIER_SITE_ASSIGNMENTS (
+          ASSIGNMENT_ID, SUPPLIER_ID, SUPPLIER_SITE_ID,
+          CLIENT_BU_ID, CLIENT_BU, BILL_TO_BU_ID, BILL_TO_BU,
+          STATUS, CREATION_DATE, CREATED_BY, LAST_UPDATE_DATE, LAST_UPDATED_BY
+        ) VALUES (
+          v_asgn_id, v_sid, v_site_id,
+          v_bu_id, s.proc_bu, v_bu_id, s.proc_bu,
+          NVL(s.st, 'Active'), SYSTIMESTAMP, v_by, SYSTIMESTAMP, v_by
+        );
+      END IF;
+
       v_sites := v_sites + 1;
     END LOOP;
 
