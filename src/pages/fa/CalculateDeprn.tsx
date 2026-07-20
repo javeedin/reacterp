@@ -665,12 +665,18 @@ const CalculateDeprn: React.FC = () => {
   };
 
   // ── Create Accounting (standalone, for a Posted row) ────────────────────────
-  // Resolve a code-combination's segment descriptions for display under the combo.
+  // Resolve a code-combination's NATURAL ACCOUNT segment description only
+  // (skip Company/Cost-Center/Default segments) for display under the combo.
   const describeCombo = async (combo?: string): Promise<string> => {
     if (!combo) return '';
     try {
       const v = await validateAccountCode(combo);
-      return Object.values(v.segmentDetails || {}).map(s => s.description).filter(Boolean).join(' · ');
+      const segs = Object.values(v.segmentDetails || {});
+      const acct = segs.find(s => {
+        const p = (s.name || '').toLowerCase();
+        return p === 'account' || (p.includes('account') && !p.includes('sub') && !p.includes('chart') && !p.includes('offset'));
+      });
+      return acct?.description || '';
     } catch { return ''; }
   };
 
