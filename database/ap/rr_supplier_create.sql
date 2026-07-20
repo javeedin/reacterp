@@ -39,11 +39,6 @@ END RR_SUPPLIER_CREATE_PKG;
 
 CREATE OR REPLACE PACKAGE BODY RR_SUPPLIER_CREATE_PKG AS
 
-  FUNCTION yn(p IN VARCHAR2) RETURN VARCHAR2 IS
-  BEGIN
-    RETURN CASE WHEN LOWER(NVL(p, 'false')) IN ('y', 'true', '1', 'yes') THEN 'Y' ELSE 'N' END;
-  END yn;
-
   PROCEDURE CREATE_SUPPLIER(p_json IN CLOB, p_status OUT NUMBER, p_result OUT CLOB) IS
     v_sid       NUMBER;
     v_num       VARCHAR2(30);
@@ -90,8 +85,10 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPLIER_CREATE_PKG AS
         JSON_VALUE(p_json, '$.address.addressLine1'), JSON_VALUE(p_json, '$.address.addressLine2'),
         JSON_VALUE(p_json, '$.address.city'), JSON_VALUE(p_json, '$.address.state'),
         JSON_VALUE(p_json, '$.address.postalCode'), JSON_VALUE(p_json, '$.address.phoneNumber'),
-        JSON_VALUE(p_json, '$.address.email'), yn(JSON_VALUE(p_json, '$.address.purposeOrdering')),
-        yn(JSON_VALUE(p_json, '$.address.purposeRemitTo')), 'Active', SYSTIMESTAMP, v_by, SYSTIMESTAMP, v_by
+        JSON_VALUE(p_json, '$.address.email'),
+        CASE WHEN LOWER(NVL(JSON_VALUE(p_json, '$.address.purposeOrdering'),'false')) IN ('y','true','1','yes') THEN 'Y' ELSE 'N' END,
+        CASE WHEN LOWER(NVL(JSON_VALUE(p_json, '$.address.purposeRemitTo'),'false')) IN ('y','true','1','yes') THEN 'Y' ELSE 'N' END,
+        'Active', SYSTIMESTAMP, v_by, SYSTIMESTAMP, v_by
       );
     END IF;
 
@@ -118,7 +115,10 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPLIER_CREATE_PKG AS
         STATUS, CREATION_DATE, CREATED_BY, LAST_UPDATE_DATE, LAST_UPDATED_BY
       ) VALUES (
         v_site_id, v_sid, s.proc_bu, NVL(s.site_name, s.site_code), s.site_code,
-        NVL(s.addr_name, v_addr_name), yn(s.purch_flag), yn(s.pay_flag), yn(s.pay_flag),
+        NVL(s.addr_name, v_addr_name),
+        CASE WHEN LOWER(NVL(s.purch_flag,'false')) IN ('y','true','1','yes') THEN 'Y' ELSE 'N' END,
+        CASE WHEN LOWER(NVL(s.pay_flag,'false')) IN ('y','true','1','yes') THEN 'Y' ELSE 'N' END,
+        CASE WHEN LOWER(NVL(s.pay_flag,'false')) IN ('y','true','1','yes') THEN 'Y' ELSE 'N' END,
         s.pay_terms, s.inv_ccy, NVL(s.st, 'Active'), SYSTIMESTAMP, v_by, SYSTIMESTAMP, v_by
       );
       v_sites := v_sites + 1;
