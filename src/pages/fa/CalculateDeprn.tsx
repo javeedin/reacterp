@@ -188,6 +188,15 @@ const CalculateDeprn: React.FC = () => {
     posting: boolean; posted: boolean; steps: AcctStepUI[];
   }
   const [acctModal, setAcctModal] = useState<AcctModalState | null>(null);
+
+  // Bulk "Create Accounting for All" modal — accounts every Posted-but-unaccounted
+  // line, reusing the exact same per-row flow, and shows each line's status.
+  interface BulkAcctRow {
+    assetId: string; assetNumber: string; periodName: string; distributionId?: number | null;
+    status: 'pending' | 'running' | 'done' | 'error' | 'skipped'; detail?: string;
+  }
+  const [bulkAcct, setBulkAcct] = useState<{ open: boolean; running: boolean; done: boolean; rows: BulkAcctRow[] } | null>(null);
+
   const { user } = useAuth();
   const loggedUser = user?.username || user?.name || 'REACTERP';
 
@@ -511,8 +520,6 @@ const CalculateDeprn: React.FC = () => {
       render: (v: number) => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
     { title: 'Daily Rate',  dataIndex: 'dailyRate', key: 'dailyRate', width: 110, align: 'right' as const,
       render: (v: number) => <Text style={mono}>{v == null ? '—' : fmt(v)}</Text> },
-    { title: `Opening NBV${statusPrevName ? ` (as of ${statusPrevName})` : ''}`, dataIndex: 'openingNbv', key: 'openingNbv', width: 160, align: 'right' as const,
-      render: (v: number) => <Text style={mono} title="Net book value at the start of the period (= closing NBV of the prior period)">{v == null ? '—' : fmt(v)}</Text> },
     { title: `Deprn${statusPrevName ? ` (${statusPrevName})` : ' (Prev)'}`, dataIndex: 'prevDeprn', key: 'prevDeprn', width: 120, align: 'right' as const,
       render: (v: number | null) => v == null
         ? <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
@@ -527,8 +534,14 @@ const CalculateDeprn: React.FC = () => {
         : v == null
           ? <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
           : <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success, fontWeight: 600 }} title="Actual posted amount">{fmt(v)}</Text> },
-    { title: 'Closing NBV', dataIndex: 'closingNbv', key: 'closingNbv', width: 140, align: 'right' as const,
-      render: (v: number) => <Text style={{ ...mono, color: REDWOOD.success, fontWeight: 600 }}>{v == null ? '—' : fmt(v)}</Text> },
+    { title: 'Debit Account', dataIndex: 'deprnExpenseAccount', key: 'deprnExpenseAccount', width: 200,
+      render: (v: string) => v
+        ? <Tooltip title="Dr — Depreciation Expense"><Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.primary }}>{v}</Text></Tooltip>
+        : <Text type="secondary" style={{ fontSize: 12 }}>—</Text> },
+    { title: 'Credit Account', dataIndex: 'deprnReserveAccount', key: 'deprnReserveAccount', width: 200,
+      render: (v: string) => v
+        ? <Tooltip title="Cr — Accumulated Depreciation"><Text style={{ fontSize: 11, fontFamily: 'monospace', color: '#1677ff' }}>{v}</Text></Tooltip>
+        : <Text type="secondary" style={{ fontSize: 12 }}>—</Text> },
     { title: 'Status',      dataIndex: 'status', key: 'status', width: 110, fixed: 'right' as const,
       filters: [{ text: 'Posted', value: 'Posted' }, { text: 'Not Posted', value: 'Not Posted' }],
       onFilter: (value: any, r: any) => r.status === value,
@@ -597,8 +610,8 @@ const CalculateDeprn: React.FC = () => {
     if (!q) return byStatus;
     return byStatus.filter(r =>
       [r.assetNumber, r.description, r.periodName ?? statusMeta?.periodName, r.methodCode,
-       r.cost, r.lifeInMonths, r.remainingLife, r.days, r.dailyRate, r.openingNbv,
-       r.prevDeprn, r.periodDeprn, r.periodActual, r.closingNbv, r.status]
+       r.cost, r.lifeInMonths, r.remainingLife, r.days, r.dailyRate,
+       r.prevDeprn, r.periodDeprn, r.periodActual, r.deprnExpenseAccount, r.deprnReserveAccount, r.status]
         .some(v => v != null && String(v).toLowerCase().includes(q)));
   })();
 
@@ -756,6 +769,84 @@ const CalculateDeprn: React.FC = () => {
       setAcctModal(m => m && ({ ...m, posting: false }));
       message.error(e?.message || 'Accounting failed');
     }
+  };
+
+  // Account ONE posted row end-to-end (preview -> SLA -> GL -> mark), no UI steps.
+  // Returns { success, detail } for the bulk runner. Same logic as postAccounting.
+  const accountOneRow = async (r: any): Promise<{ success: boolean; detail: string }> => {
+    const periodName = statusMeta?.periodName || statusPeriodName;
+    const distId = r.distributionId ?? null;
+    try {
+      const preview = await getDeprnAccountingPreview(String(r.assetId), selectedBook, periodName, distId ?? undefined);
+      if (!preview?.header || !(preview.lines?.length)) {
+        return { success: false, detail: (preview as any)?.error || 'No accounting preview (not posted / already accounted)' };
+      }
+      const h = preview.header;
+      const lines: any[] = preview.lines;
+      const slaBody = {
+        header: { moduleName: h.moduleName, sourceTable: h.sourceTable, sourceId: h.sourceId, sourceNumber: h.sourceNumber,
+          sourceType: h.sourceType, eventTypeCode: h.eventTypeCode, eventDate: h.eventDate, accountingDate: h.accountingDate,
+          periodName: h.periodName, ledgerId: h.ledgerId, ledgerName: h.ledgerName, currencyCode: h.currencyCode,
+          ledgerCurrency: h.ledgerCurrency, description: h.description, createdBy: loggedUser },
+        lines: lines.map((l) => ({ lineNumber: l.lineNumber, lineType: l.lineType, accountingClass: l.accountingClass,
+          accountCombo: l.accountCombination, enteredDr: l.enteredDr, enteredCr: l.enteredCr, accountedDr: l.accountedDr,
+          accountedCr: l.accountedCr, currencyCode: h.currencyCode, description: l.description, sourceLineId: h.sourceId, sourceLineNum: l.lineNumber })),
+      };
+      const slaRes = await createSlaAccounting(slaBody as any);
+      if (!slaRes.headerId) return { success: false, detail: slaRes.error || slaRes.message || 'SLA accounting failed' };
+
+      const glRes = await postSlaToGL({
+        slaHeaderId: slaRes.headerId, sourceNumber: String(h.sourceNumber || r.assetNumber), sourceId: h.sourceId,
+        eventTypeCode: h.eventTypeCode, periodName: h.periodName, ledgerName: h.ledgerName, ledgerId: h.ledgerId,
+        currency: h.currencyCode, accountingDate: h.accountingDate, legalEntity: '', businessUnit: '',
+        jeCategory: 'Depreciation', jeSource: 'Fixed Assets', batchSource: 'Fixed Assets',
+        journalName: `FA Depreciation — ${h.sourceNumber || r.assetNumber} — ${h.periodName}`,
+        journalDescription: h.description, createdBy: loggedUser,
+        lines: lines.map((l) => ({ lineType: l.lineType, enteredDr: l.enteredDr || null, enteredCr: l.enteredCr || null,
+          accountedDr: l.accountedDr || null, accountedCr: l.accountedCr || null, description: l.description, currencyCode: h.currencyCode,
+          accountingDate: h.accountingDate, accountCombination: l.accountCombination, accountingClass: l.accountingClass, legalEntity: null })),
+      } as any);
+      if (!glRes.success) return { success: false, detail: glRes.error || 'GL journal post failed' };
+
+      const markRes = await markFaDeprnAccounted({
+        assetId: String(r.assetId), bookTypeCode: selectedBook, distributionId: distId,
+        periodName, slaHeaderId: slaRes.headerId, glHeaderId: glRes.headerId ?? slaRes.headerId, createdBy: loggedUser,
+      } as any);
+      if (markRes?.success === false) return { success: false, detail: markRes.error || 'Failed to mark accounted' };
+
+      return { success: true, detail: `GL ${glRes.headerId ?? slaRes.headerId} · accounted` };
+    } catch (e: any) {
+      return { success: false, detail: e?.message || 'Accounting failed' };
+    }
+  };
+
+  // Open the bulk-accounting dialog: gather all Posted-but-unaccounted lines.
+  const openBulkAccounting = () => {
+    const rows: BulkAcctRow[] = enrichedStatusItems
+      .filter(r => r.status === 'Posted' && String(r.accountedStatus || '').toUpperCase() !== 'ACCOUNTED')
+      .map(r => ({
+        assetId: String(r.assetId), assetNumber: r.assetNumber,
+        periodName: r.periodName ?? statusMeta?.periodName ?? statusPeriodName,
+        distributionId: r.distributionId ?? null, status: 'pending' as const,
+      }));
+    if (rows.length === 0) { message.info('No posted, unaccounted lines to account.'); return; }
+    setBulkAcct({ open: true, running: false, done: false, rows });
+  };
+
+  // Run accounting for every row in the bulk dialog, sequentially.
+  const runBulkAccounting = async () => {
+    if (!bulkAcct) return;
+    setBulkAcct(m => m && ({ ...m, running: true, done: false }));
+    const rows = bulkAcct.rows;
+    for (let i = 0; i < rows.length; i++) {
+      setBulkAcct(m => m && ({ ...m, rows: m.rows.map((x, idx) => idx === i ? { ...x, status: 'running' } : x) }));
+      const res = await accountOneRow(rows[i]);
+      setBulkAcct(m => m && ({ ...m, rows: m.rows.map((x, idx) => idx === i
+        ? { ...x, status: res.success ? 'done' : 'error', detail: res.detail } : x) }));
+    }
+    setBulkAcct(m => m && ({ ...m, running: false, done: true }));
+    message.success('Bulk accounting complete');
+    handleShowStatus(statusPeriodName);
   };
 
   // Run a single depreciation step (per-step Run button)
@@ -935,12 +1026,12 @@ const CalculateDeprn: React.FC = () => {
         'Remaining Life': r.remainingLife ?? null,
         'Period': r.periodName ?? statusMeta?.periodName, 'Days': r.days,
         'Daily Rate': r.dailyRate != null ? Number(r.dailyRate) : null,
-        'Opening NBV': r.openingNbv != null ? Number(r.openingNbv) : null,
         [`Deprn (${statusPrevName || 'Prev'})`]: r.prevDeprn != null ? Number(r.prevDeprn) : null,
         [`Calculated (${statusMeta?.periodName || ''})`]: r.periodDeprn != null ? Number(r.periodDeprn) : null,
         [`Posted (${statusMeta?.periodName || ''})`]: r.periodActual != null ? Number(r.periodActual) : null,
-        'Closing NBV': r.closingNbv != null ? Number(r.closingNbv) : null,
-        'Cost': Number(r.cost), 'Status': r.status, 'Accounted': r.accountedStatus || '',
+        'Debit Account': r.deprnExpenseAccount || '',
+        'Credit Account': r.deprnReserveAccount || '',
+        'Status': r.status, 'Accounted': r.accountedStatus || '',
       }));
     } else if (isCompare) {
       sheet = 'Compare'; fname = `deprn_compare_${lastPeriod?.lastPeriodName || ''}_vs_${lastPeriod?.nextPeriodName || ''}`;
@@ -1511,20 +1602,39 @@ const CalculateDeprn: React.FC = () => {
                             style={statusFilter === 'notposted' ? { background: REDWOOD.warning, borderColor: REDWOOD.warning } : {}}
                             onClick={() => setStatusFilter('notposted')}>Not Posted ({statusMeta.notPostedCount ?? 0})</Button>
                         </Space>
-                        <Tooltip title={statusSelected.length === 0
-                          ? 'Select one or more Not-Posted assets to post their depreciation'
-                          : `Post depreciation (fa/deprn-post-single) for ${statusSelected.length} asset(s), period ${statusMeta.periodName}`}>
-                          <Button
-                            type="primary"
-                            icon={<CloudUploadOutlined />}
-                            loading={statusPosting}
-                            disabled={statusSelected.length === 0}
-                            onClick={openCreateDeprnDialog}
-                            style={statusSelected.length > 0 ? { background: FA_COLOR, borderColor: FA_COLOR } : {}}
-                          >
-                            Create Depreciation ({statusSelected.length})
-                          </Button>
-                        </Tooltip>
+                        <Space>
+                          {(() => {
+                            const unaccounted = enrichedStatusItems.filter(r => r.status === 'Posted' && String(r.accountedStatus || '').toUpperCase() !== 'ACCOUNTED').length;
+                            return (
+                              <Tooltip title={unaccounted === 0
+                                ? 'No posted, unaccounted lines'
+                                : `Create accounting for all ${unaccounted} posted, unaccounted line(s)`}>
+                                <Button
+                                  icon={<AuditOutlined />}
+                                  disabled={unaccounted === 0}
+                                  onClick={openBulkAccounting}
+                                  style={unaccounted > 0 ? { color: '#722ed1', borderColor: '#722ed1' } : {}}
+                                >
+                                  Create Accounting for All ({unaccounted})
+                                </Button>
+                              </Tooltip>
+                            );
+                          })()}
+                          <Tooltip title={statusSelected.length === 0
+                            ? 'Select one or more Not-Posted assets to post their depreciation'
+                            : `Post depreciation (fa/deprn-post-single) for ${statusSelected.length} asset(s), period ${statusMeta.periodName}`}>
+                            <Button
+                              type="primary"
+                              icon={<CloudUploadOutlined />}
+                              loading={statusPosting}
+                              disabled={statusSelected.length === 0}
+                              onClick={openCreateDeprnDialog}
+                              style={statusSelected.length > 0 ? { background: FA_COLOR, borderColor: FA_COLOR } : {}}
+                            >
+                              Create Depreciation ({statusSelected.length})
+                            </Button>
+                          </Tooltip>
+                        </Space>
                       </div>
                       <Table
                         dataSource={filteredStatusItems}
@@ -1545,8 +1655,8 @@ const CalculateDeprn: React.FC = () => {
                           const sum = (k: string) => filteredStatusItems.reduce((s, r) => s + (Number(r[k]) || 0), 0);
                           // Column order (a selection checkbox occupies index 0):
                           // 1 Asset# · 2 Desc · 3 Cost · 4 Total Life · 5 Remaining Life · 6 Period ·
-                          // 7 Days · 8 Daily Rate · 9 Opening NBV · 10 Deprn(prev) · 11 Calculated ·
-                          // 12 Posted · 13 Closing NBV · 14 Status · 15 Acctg
+                          // 7 Days · 8 Daily Rate · 9 Deprn(prev) · 10 Calculated · 11 Posted ·
+                          // 12 Debit Account · 13 Credit Account · 14 Status · 15 Acctg
                           return (
                             <Table.Summary fixed>
                               <Table.Summary.Row style={{ background: '#fafafa' }}>
@@ -1559,11 +1669,11 @@ const CalculateDeprn: React.FC = () => {
                                 <Table.Summary.Cell index={6} />
                                 <Table.Summary.Cell index={7} />
                                 <Table.Summary.Cell index={8} />
-                                <Table.Summary.Cell index={9} align="right"><Text strong style={mono}>{fmt(sum('openingNbv'))}</Text></Table.Summary.Cell>
-                                <Table.Summary.Cell index={10} align="right"><Text strong style={{ ...mono, color: REDWOOD.neutral500 }}>{fmt(sum('prevDeprn'))}</Text></Table.Summary.Cell>
-                                <Table.Summary.Cell index={11} align="right"><Text strong style={monoRed}>{fmt(sum('periodDeprn'))}</Text></Table.Summary.Cell>
-                                <Table.Summary.Cell index={12} align="right"><Text strong style={{ ...mono, color: REDWOOD.success }}>{fmt(sum('periodActual'))}</Text></Table.Summary.Cell>
-                                <Table.Summary.Cell index={13} align="right"><Text strong style={{ ...mono, color: REDWOOD.success }}>{fmt(sum('closingNbv'))}</Text></Table.Summary.Cell>
+                                <Table.Summary.Cell index={9} align="right"><Text strong style={{ ...mono, color: REDWOOD.neutral500 }}>{fmt(sum('prevDeprn'))}</Text></Table.Summary.Cell>
+                                <Table.Summary.Cell index={10} align="right"><Text strong style={monoRed}>{fmt(sum('periodDeprn'))}</Text></Table.Summary.Cell>
+                                <Table.Summary.Cell index={11} align="right"><Text strong style={{ ...mono, color: REDWOOD.success }}>{fmt(sum('periodActual'))}</Text></Table.Summary.Cell>
+                                <Table.Summary.Cell index={12} />
+                                <Table.Summary.Cell index={13} />
                                 <Table.Summary.Cell index={14} />
                                 <Table.Summary.Cell index={15} />
                               </Table.Summary.Row>
@@ -1882,6 +1992,67 @@ const CalculateDeprn: React.FC = () => {
             )}
           </Modal>
         )}
+
+        {/* ── Create Accounting for All (bulk) ── */}
+        {bulkAcct?.open && (() => {
+          const rows = bulkAcct.rows;
+          const doneCount = rows.filter(r => r.status === 'done').length;
+          const errCount  = rows.filter(r => r.status === 'error').length;
+          const statusTag = (s: BulkAcctRow['status']) => {
+            switch (s) {
+              case 'running': return <Tag icon={<Spin size="small" />} color="processing">Accounting…</Tag>;
+              case 'done':    return <Tag color="success" icon={<CheckCircleOutlined />}>Accounted</Tag>;
+              case 'error':   return <Tag color="error">Failed</Tag>;
+              case 'skipped': return <Tag>Skipped</Tag>;
+              default:        return <Tag color="default" icon={<ClockCircleOutlined />}>Pending</Tag>;
+            }
+          };
+          return (
+            <Modal
+              open
+              title={<Space><AuditOutlined style={{ color: '#722ed1' }} /><span>Create Accounting for All — {statusMeta?.periodName || statusPeriodName}</span></Space>}
+              onCancel={() => { if (!bulkAcct.running) setBulkAcct(null); }}
+              maskClosable={!bulkAcct.running}
+              width={760}
+              footer={
+                <Space>
+                  <Button disabled={bulkAcct.running} onClick={() => setBulkAcct(null)}>Close</Button>
+                  <Button type="primary" icon={<AuditOutlined />} loading={bulkAcct.running}
+                    disabled={bulkAcct.done}
+                    style={{ background: bulkAcct.done ? undefined : FA_COLOR, borderColor: bulkAcct.done ? undefined : FA_COLOR }}
+                    onClick={runBulkAccounting}>
+                    {bulkAcct.done ? 'Done' : `Create Accounting (${rows.length})`}
+                  </Button>
+                </Space>
+              }
+              destroyOnClose
+            >
+              <Alert type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }}
+                message={<span>Accounts all <b>{rows.length}</b> posted, unaccounted line(s). Each runs the same flow: <b>SLA</b> → <b>GL journal</b> → <b>mark accounted</b>.</span>} />
+              {(doneCount > 0 || errCount > 0) && (
+                <div style={{ marginBottom: 10 }}>
+                  <Tag color="success">Accounted: {doneCount}</Tag>
+                  {errCount > 0 && <Tag color="error">Failed: {errCount}</Tag>}
+                  <Tag>Pending: {rows.length - doneCount - errCount}</Tag>
+                </div>
+              )}
+              <Table
+                dataSource={rows}
+                rowKey="assetId"
+                size="small"
+                pagination={false}
+                scroll={{ y: 380 }}
+                columns={[
+                  { title: 'Asset #', dataIndex: 'assetNumber', key: 'assetNumber', width: 110 },
+                  { title: 'Period', dataIndex: 'periodName', key: 'periodName', width: 100 },
+                  { title: 'Status', key: 'status', width: 130, render: (_: any, r: BulkAcctRow) => statusTag(r.status) },
+                  { title: 'Detail', dataIndex: 'detail', key: 'detail', ellipsis: true,
+                    render: (v: string, r: BulkAcctRow) => <Text type={r.status === 'error' ? 'danger' : 'secondary'} style={{ fontSize: 11 }}>{v || '—'}</Text> },
+                ]}
+              />
+            </Modal>
+          );
+        })()}
       </Content>
     </Layout>
   );
