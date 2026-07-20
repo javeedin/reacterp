@@ -160,7 +160,11 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                 || ',"categorySegment1":'   || jstr(r.CATEGORY_SEGMENT1)
                 || ',"categorySegment2":'   || jstr(r.CATEGORY_SEGMENT2)
                 || ',"assetCategory":'      || jstr(
-                       TRIM(BOTH ' -' FROM NVL(r.CATEGORY_SEGMENT1,'') || ' - ' || NVL(r.CATEGORY_SEGMENT2,'')))
+                       CASE
+                         WHEN r.CATEGORY_SEGMENT1 IS NOT NULL AND r.CATEGORY_SEGMENT2 IS NOT NULL
+                              THEN r.CATEGORY_SEGMENT1 || ' - ' || r.CATEGORY_SEGMENT2
+                         ELSE NVL(r.CATEGORY_SEGMENT1, r.CATEGORY_SEGMENT2)
+                       END)
                 || ',"creationDate":'       || jstr(r.CREATION_DATE)
                 || ',"createdBy":'          || jstr(r.CREATED_BY)
                 || ',"lastUpdateDate":'     || jstr(r.LAST_UPDATE_DATE)
