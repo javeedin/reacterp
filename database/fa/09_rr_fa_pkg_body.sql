@@ -845,15 +845,15 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                AND UPPER(PERIOD_NAME) = UPPER(p_period_name);
         END IF;
 
-        IF v_pc IS NULL THEN
-            write_error(p_http_status, p_result, 400, 'provide periodCounter or a valid periodName for the book');
-            RETURN;
+        -- Display name: from the periods table if the counter is known, else the
+        -- name the caller passed (future/pending period not yet loaded).
+        IF v_pc IS NOT NULL THEN
+            SELECT MAX(PERIOD_NAME) INTO v_pname
+              FROM RR_FA_DEPRN_PERIODS WHERE BOOK_TYPE_CODE = p_book_type AND PERIOD_COUNTER = v_pc;
         END IF;
+        v_pname := NVL(v_pname, p_period_name);
 
-        SELECT MAX(PERIOD_NAME) INTO v_pname
-          FROM RR_FA_DEPRN_PERIODS WHERE BOOK_TYPE_CODE = p_book_type AND PERIOD_COUNTER = v_pc;
-
-        -- Derive the target month from the period name (e.g. 'Apr-26').
+        -- Derive the target month from the period name (e.g. 'Apr-26' / 'May-26').
         -- (The period date columns are stored as NUMBER, so we parse the name.)
         IF v_pname IS NOT NULL THEN
             BEGIN
@@ -864,6 +864,19 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                 EXCEPTION WHEN OTHERS THEN v_tgt_month := NULL;
                 END;
             END;
+        END IF;
+
+        -- If the period name is valid (parses to a month) but the period isn't
+        -- loaded yet in RR_FA_DEPRN_PERIODS, treat it as a future/pending period:
+        -- use a non-matching counter so every asset shows as "Not Posted" and the
+        -- per-asset straight-line schedule is still computed for that month.
+        IF v_pc IS NULL AND v_tgt_month IS NOT NULL THEN
+            v_pc := -1;
+        END IF;
+
+        IF v_pc IS NULL THEN
+            write_error(p_http_status, p_result, 400, 'provide periodCounter or a valid periodName for the book');
+            RETURN;
         END IF;
 
         SELECT COUNT(*),
