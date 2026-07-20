@@ -691,6 +691,11 @@ const ManageSuppliers: React.FC = () => {
   const [activeTab, setActiveTab] = useState('search');
   const [openTabs, setOpenTabs] = useState<SupplierTab[]>([]);
 
+  // Edit-supplier detail (Addresses / Sites) — stored per tab key
+  const [addressesMap, setAddressesMap] = useState<Record<string, any[]>>({});
+  const [sitesDetailMap, setSitesDetailMap] = useState<Record<string, any[]>>({});
+  const [detailLoadingMap, setDetailLoadingMap] = useState<Record<string, boolean>>({});
+
   // Balance tab state - stored per tab key
   const [balanceDataMap, setBalanceDataMap] = useState<Record<string, BalanceData | null>>({});
   const [invoicesMap, setInvoicesMap] = useState<Record<string, InvoiceRecord[]>>({});
@@ -1181,6 +1186,28 @@ const ManageSuppliers: React.FC = () => {
     setPdfPreviewVisible(true);
   };
 
+  // Fetch a supplier's addresses + sites for the Edit screen
+  const fetchSupplierDetailData = async (supplierId: number, tabKey: string) => {
+    setDetailLoadingMap(prev => ({ ...prev, [tabKey]: true }));
+    try {
+      const [addrRes, siteRes] = await Promise.all([
+        fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers/addresses/${supplierId}`),
+        fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers/sitelist/${supplierId}`),
+      ]);
+      const addrData = addrRes.ok ? await addrRes.json() : {};
+      const siteData = siteRes.ok ? await siteRes.json() : {};
+      const addrItems: any[] = Array.isArray(addrData) ? addrData : (addrData.items || []);
+      const siteItems: any[] = Array.isArray(siteData) ? siteData : (siteData.items || []);
+      setAddressesMap(prev => ({ ...prev, [tabKey]: addrItems }));
+      setSitesDetailMap(prev => ({ ...prev, [tabKey]: siteItems }));
+    } catch (e) {
+      console.error('Error fetching supplier detail data:', e);
+      message.error('Failed to load addresses / sites');
+    } finally {
+      setDetailLoadingMap(prev => ({ ...prev, [tabKey]: false }));
+    }
+  };
+
   // Open supplier detail in new tab
   const openSupplierTab = async (record: SupplierRecord) => {
     const tabKey = `supplier-${record.supplierId}`;
@@ -1202,6 +1229,8 @@ const ManageSuppliers: React.FC = () => {
     };
     setOpenTabs([...openTabs, newTab]);
     setActiveTab(tabKey);
+    // Load addresses + sites for the Addresses / Sites sub-tabs
+    fetchSupplierDetailData(record.supplierId, tabKey);
   };
 
   // Open supplier balance in new tab
@@ -1752,6 +1781,57 @@ const ManageSuppliers: React.FC = () => {
   );
 
   // Render supplier detail tab content
+  // Render Addresses sub-tab (Edit Supplier)
+  const renderAddressesTab = (tabKey: string) => {
+    const rows = (addressesMap[tabKey] || []).map((r, i) => ({ ...r, key: r.supplierAddressId ?? i }));
+    const yn = (v: any) => (String(v).toUpperCase() === 'Y' ? <CheckOutlined style={{ color: REDWOOD.success }} /> : null);
+    const cols: ColumnsType<any> = [
+      { title: 'Address Name', dataIndex: 'addressName', key: 'addressName', width: 140 },
+      { title: 'Address', key: 'addr', render: (_: any, r: any) =>
+          [r.addressLine1, r.addressLine2, r.city, r.state, r.postalCode, r.country].filter(Boolean).join(', ') },
+      { title: 'Phone', dataIndex: 'phoneNumber', key: 'phoneNumber', width: 120 },
+      { title: 'Email', dataIndex: 'email', key: 'email', width: 160 },
+      { title: 'Ordering', dataIndex: 'purposeOrdering', key: 'purposeOrdering', width: 80, align: 'center' as const, render: yn },
+      { title: 'Remit To', dataIndex: 'purposeRemitTo', key: 'purposeRemitTo', width: 80, align: 'center' as const, render: yn },
+      { title: 'Status', dataIndex: 'status', key: 'status', width: 90,
+        render: (v: string) => <Tag color={String(v).toUpperCase() === 'ACTIVE' ? 'green' : 'default'}>{v || '-'}</Tag> },
+    ];
+    return (
+      <div style={{ padding: 12 }}>
+        <Table columns={cols} dataSource={rows} loading={detailLoadingMap[tabKey]} size="small"
+          rowKey="key" pagination={false} scroll={{ x: 800 }}
+          locale={{ emptyText: detailLoadingMap[tabKey] ? 'Loading…' : 'No addresses' }} />
+      </div>
+    );
+  };
+
+  // Render Sites sub-tab (Edit Supplier)
+  const renderSitesTab = (tabKey: string) => {
+    const rows = (sitesDetailMap[tabKey] || []).map((r, i) => ({ ...r, key: r.supplierSiteId ?? i }));
+    const yn = (v: any) => (String(v).toUpperCase() === 'Y' ? <CheckOutlined style={{ color: REDWOOD.success }} /> : null);
+    const cols: ColumnsType<any> = [
+      { title: 'Site Code', dataIndex: 'siteCode', key: 'siteCode', width: 120 },
+      { title: 'Site Name', dataIndex: 'supplierSite', key: 'supplierSite', width: 160 },
+      { title: 'Procurement BU', dataIndex: 'procurementBu', key: 'procurementBu', width: 160 },
+      { title: 'Assigned BU', dataIndex: 'assignedBu', key: 'assignedBu', width: 160,
+        render: (v: string) => v || <Text type="secondary">-</Text> },
+      { title: 'Address', dataIndex: 'addressName', key: 'addressName', width: 130 },
+      { title: 'Purchasing', dataIndex: 'purchasingFlag', key: 'purchasingFlag', width: 90, align: 'center' as const, render: yn },
+      { title: 'Pay', dataIndex: 'payFlag', key: 'payFlag', width: 60, align: 'center' as const, render: yn },
+      { title: 'Payment Terms', dataIndex: 'paymentTerms', key: 'paymentTerms', width: 130 },
+      { title: 'Currency', dataIndex: 'invoiceCurrency', key: 'invoiceCurrency', width: 90 },
+      { title: 'Status', dataIndex: 'status', key: 'status', width: 90,
+        render: (v: string) => <Tag color={String(v).toUpperCase() === 'ACTIVE' ? 'green' : 'default'}>{v || '-'}</Tag> },
+    ];
+    return (
+      <div style={{ padding: 12 }}>
+        <Table columns={cols} dataSource={rows} loading={detailLoadingMap[tabKey]} size="small"
+          rowKey="key" pagination={false} scroll={{ x: 1100 }}
+          locale={{ emptyText: detailLoadingMap[tabKey] ? 'Loading…' : 'No sites' }} />
+      </div>
+    );
+  };
+
   const renderSupplierDetailTab = (tab: SupplierTab) => {
     if (tab.loading) {
       return (
@@ -1821,20 +1901,20 @@ const ManageSuppliers: React.FC = () => {
                 label: (
                   <Space>
                     <EnvironmentOutlined />
-                    Addresses
+                    Addresses ({(addressesMap[tab.key] || []).length})
                   </Space>
                 ),
-                children: <div style={{ padding: 24 }}><Text type="secondary">Addresses tab content</Text></div>,
+                children: renderAddressesTab(tab.key),
               },
               {
                 key: 'sites',
                 label: (
                   <Space>
                     <BankOutlined />
-                    Sites
+                    Sites ({(sitesDetailMap[tab.key] || []).length})
                   </Space>
                 ),
-                children: <div style={{ padding: 24 }}><Text type="secondary">Sites tab content</Text></div>,
+                children: renderSitesTab(tab.key),
               },
               {
                 key: 'contacts',
