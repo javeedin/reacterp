@@ -582,51 +582,75 @@ const ManageSuppliers: React.FC = () => {
   const [createSaving, setCreateSaving] = useState(false);
   const [createForm]   = Form.useForm();
 
+  const CREATE_SUPPLIER_URL = `${APEX_DB_CONFIG.baseUrl}/suppliers/create`;
+
+  const buildSupplierPayload = (vals: any): any => {
+    const addr = vals.address || {};
+    return {
+      supplier:              vals.supplier,
+      supplierNumber:        vals.supplierNumber || undefined,
+      alternateName:         vals.alternateName,
+      supplierType:          vals.supplierType,
+      taxOrganizationType:   vals.taxOrganizationType,
+      businessRelationship:  vals.businessRelationship,
+      taxRegistrationNumber: vals.taxRegistrationNumber,
+      taxpayerId:            vals.taxpayerId,
+      dunsNumber:            vals.dunsNumber,
+      status:                vals.status || 'Active',
+      createdBy:             'REACTERP',
+      address: addr.addressName ? {
+        addressName:   addr.addressName,
+        country:       addr.country,
+        addressLine1:  addr.addressLine1,
+        addressLine2:  addr.addressLine2,
+        city:          addr.city,
+        state:         addr.state,
+        postalCode:    addr.postalCode,
+        phoneNumber:   addr.phoneNumber,
+        email:         addr.email,
+        purposeOrdering: !!addr.purposeOrdering,
+        purposeRemitTo:  !!addr.purposeRemitTo,
+      } : undefined,
+      sites: (vals.sites || []).filter((s: any) => s && s.siteCode).map((s: any) => ({
+        siteCode:       s.siteCode,
+        siteName:       s.siteName,
+        procurementBu:  s.procurementBu,
+        addressName:    s.addressName || addr.addressName,
+        payFlag:        !!s.payFlag,
+        purchasingFlag: !!s.purchasingFlag,
+        paymentTerms:   s.paymentTerms,
+        invoiceCurrency: s.invoiceCurrency,
+        status:         'Active',
+      })),
+    };
+  };
+
+  const showCreateSupplierApi = () => {
+    const payload = buildSupplierPayload(createForm.getFieldsValue());
+    Modal.info({
+      title: 'Create Supplier — API Request',
+      width: 660,
+      content: (
+        <div>
+          <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Method / URL</div>
+          <Typography.Text copyable code style={{ fontSize: 12, wordBreak: 'break-all' }}>{`POST ${CREATE_SUPPLIER_URL}`}</Typography.Text>
+          <div style={{ fontSize: 12, color: '#888', margin: '10px 0 4px' }}>JSON Body</div>
+          <pre style={{ fontSize: 11, background: '#0d0d0d', color: '#a8ff78', borderRadius: 4, padding: 10, maxHeight: 360, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+            {JSON.stringify(payload, null, 2)}
+          </pre>
+        </div>
+      ),
+    });
+  };
+
   const handleCreateSupplier = async () => {
     let vals: any;
     try { vals = await createForm.validateFields(); }
     catch { return; }   // validation errors are shown inline
     setCreateSaving(true);
     try {
-      const addr = vals.address || {};
-      const payload: any = {
-        supplier:              vals.supplier,
-        supplierNumber:        vals.supplierNumber || undefined,
-        alternateName:         vals.alternateName,
-        supplierType:          vals.supplierType,
-        taxOrganizationType:   vals.taxOrganizationType,
-        businessRelationship:  vals.businessRelationship,
-        taxRegistrationNumber: vals.taxRegistrationNumber,
-        taxpayerId:            vals.taxpayerId,
-        dunsNumber:            vals.dunsNumber,
-        status:                vals.status || 'Active',
-        createdBy:             'REACTERP',
-        address: addr.addressName ? {
-          addressName:   addr.addressName,
-          country:       addr.country,
-          addressLine1:  addr.addressLine1,
-          addressLine2:  addr.addressLine2,
-          city:          addr.city,
-          state:         addr.state,
-          postalCode:    addr.postalCode,
-          phoneNumber:   addr.phoneNumber,
-          email:         addr.email,
-          purposeOrdering: !!addr.purposeOrdering,
-          purposeRemitTo:  !!addr.purposeRemitTo,
-        } : undefined,
-        sites: (vals.sites || []).filter((s: any) => s && s.siteCode).map((s: any) => ({
-          siteCode:       s.siteCode,
-          siteName:       s.siteName,
-          procurementBu:  s.procurementBu,
-          addressName:    s.addressName || addr.addressName,
-          payFlag:        !!s.payFlag,
-          purchasingFlag: !!s.purchasingFlag,
-          paymentTerms:   s.paymentTerms,
-          invoiceCurrency: s.invoiceCurrency,
-          status:         'Active',
-        })),
-      };
-      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/suppliers/create`, {
+      const payload = buildSupplierPayload(vals);
+      const res = await fetch(CREATE_SUPPLIER_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -1645,7 +1669,9 @@ const ManageSuppliers: React.FC = () => {
       {/* ── Register Supplier dialog ── */}
       <Modal
         open={createOpen}
-        title={<Space><PlusOutlined style={{ color: REDWOOD.primary }} /><span>Register New Supplier</span></Space>}
+        title={<Space><PlusOutlined style={{ color: REDWOOD.primary }} /><span>Register New Supplier</span>
+          <Tooltip title="Show the API URL & JSON payload"><Button size="small" icon={<ApiOutlined />} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }} onClick={showCreateSupplierApi} /></Tooltip>
+        </Space>}
         onCancel={() => { if (!createSaving) setCreateOpen(false); }}
         maskClosable={!createSaving}
         width={880}
@@ -1703,7 +1729,10 @@ const ManageSuppliers: React.FC = () => {
                   <Row gutter={8} key={key} align="middle" style={{ marginBottom: 4 }}>
                     <Col span={4}><Form.Item {...rest} name={[name, 'siteCode']} rules={[{ required: true, message: 'Code' }]} style={{ marginBottom: 8 }}><Input placeholder="Site Code *" /></Form.Item></Col>
                     <Col span={4}><Form.Item {...rest} name={[name, 'siteName']} style={{ marginBottom: 8 }}><Input placeholder="Site Name" /></Form.Item></Col>
-                    <Col span={4}><Form.Item {...rest} name={[name, 'procurementBu']} style={{ marginBottom: 8 }}><Input placeholder="Procurement BU" /></Form.Item></Col>
+                    <Col span={4}><Form.Item {...rest} name={[name, 'procurementBu']} style={{ marginBottom: 8 }}>
+                      <Select showSearch allowClear placeholder="Procurement BU" optionFilterProp="children"
+                        options={businessUnits.map(bu => ({ value: bu, label: bu }))} />
+                    </Form.Item></Col>
                     <Col span={4}><Form.Item {...rest} name={[name, 'paymentTerms']} style={{ marginBottom: 8 }}><Input placeholder="Payment Terms" /></Form.Item></Col>
                     <Col span={3}><Form.Item {...rest} name={[name, 'invoiceCurrency']} style={{ marginBottom: 8 }}><Input placeholder="Ccy" /></Form.Item></Col>
                     <Col span={2}><Form.Item {...rest} name={[name, 'payFlag']} valuePropName="checked" style={{ marginBottom: 8 }}><Checkbox>Pay</Checkbox></Form.Item></Col>

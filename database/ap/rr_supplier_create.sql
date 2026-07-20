@@ -28,24 +28,10 @@
 -- HOW TO RUN: APEX SQL Workshop -> SQL Commands -> run the whole block.
 -- =============================================================================
 
--- ── Sequences (created high to avoid colliding with synced Fusion IDs) ────────
-DECLARE v NUMBER; BEGIN
-  SELECT COUNT(*) INTO v FROM USER_SEQUENCES WHERE SEQUENCE_NAME = 'RR_SUPPLIER_ID_SEQ';
-  IF v = 0 THEN EXECUTE IMMEDIATE 'CREATE SEQUENCE RR_SUPPLIER_ID_SEQ START WITH 900000000001 INCREMENT BY 1 NOCACHE'; END IF;
-END;
-/
-DECLARE v NUMBER; BEGIN
-  SELECT COUNT(*) INTO v FROM USER_SEQUENCES WHERE SEQUENCE_NAME = 'RR_SUPPLIER_ADDRESS_ID_SEQ';
-  IF v = 0 THEN EXECUTE IMMEDIATE 'CREATE SEQUENCE RR_SUPPLIER_ADDRESS_ID_SEQ START WITH 900000000001 INCREMENT BY 1 NOCACHE'; END IF;
-END;
-/
-DECLARE v NUMBER; BEGIN
-  SELECT COUNT(*) INTO v FROM USER_SEQUENCES WHERE SEQUENCE_NAME = 'RR_SUPPLIER_SITES_ID_SEQ';
-  IF v = 0 THEN EXECUTE IMMEDIATE 'CREATE SEQUENCE RR_SUPPLIER_SITES_ID_SEQ START WITH 900000000001 INCREMENT BY 1 NOCACHE'; END IF;
-END;
-/
-
 -- ── Package ───────────────────────────────────────────────────────────────────
+-- NOTE: IDs are generated with MAX(id)+1 from a high floor (900000000000) so
+-- there is no dependency on sequences / CREATE SEQUENCE privilege, and no
+-- collision with synced Fusion IDs.
 CREATE OR REPLACE PACKAGE RR_SUPPLIER_CREATE_PKG AS
   PROCEDURE CREATE_SUPPLIER(p_json IN CLOB, p_status OUT NUMBER, p_result OUT CLOB);
 END RR_SUPPLIER_CREATE_PKG;
@@ -66,6 +52,7 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPLIER_CREATE_PKG AS
     v_addr_name VARCHAR2(240);
     v_addr_id   NUMBER;
     v_site_id   NUMBER;
+    v_site_base NUMBER;
     v_sites     NUMBER := 0;
   BEGIN
     v_name := JSON_VALUE(p_json, '$.supplier');
@@ -73,7 +60,7 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPLIER_CREATE_PKG AS
       p_status := 400; p_result := '{"success":false,"error":"supplier (name) is required"}'; RETURN;
     END IF;
     v_by  := NVL(JSON_VALUE(p_json, '$.createdBy'), 'REACTERP');
-    v_sid := RR_SUPPLIER_ID_SEQ.NEXTVAL;
+    SELECT NVL(MAX(SUPPLIER_ID), 900000000000) + 1 INTO v_sid FROM RR_SUPPLIER_MASTER;
     v_num := NVL(JSON_VALUE(p_json, '$.supplierNumber'), 'SUP-' || v_sid);
 
     -- 1) Supplier header
@@ -93,7 +80,7 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPLIER_CREATE_PKG AS
     -- 2) Address (optional)
     v_addr_name := JSON_VALUE(p_json, '$.address.addressName');
     IF v_addr_name IS NOT NULL THEN
-      v_addr_id := RR_SUPPLIER_ADDRESS_ID_SEQ.NEXTVAL;
+      SELECT NVL(MAX(SUPPLIER_ADDRESS_ID), 900000000000) + 1 INTO v_addr_id FROM RR_SUPPLIER_ADDRESS;
       INSERT INTO RR_SUPPLIER_ADDRESS (
         SUPPLIER_ADDRESS_ID, SUPPLIER_ID, ADDRESS_NAME, COUNTRY, ADDRESS_LINE1, ADDRESS_LINE2,
         CITY, STATE, POSTAL_CODE, PHONE_NUMBER, EMAIL, ADDR_PURPOSE_ORDERING, ADDR_PURPOSE_REMIT_TO,
@@ -108,7 +95,8 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPLIER_CREATE_PKG AS
       );
     END IF;
 
-    -- 3) Sites (0..n)
+    -- 3) Sites (0..n) — increment a local counter (uncommitted rows aren't seen by MAX)
+    SELECT NVL(MAX(SUPPLIER_SITE_ID), 900000000000) INTO v_site_base FROM RR_SUPPLIER_SITES;
     FOR s IN (
       SELECT * FROM JSON_TABLE(p_json, '$.sites[*]' COLUMNS (
         site_code  VARCHAR2(60)  PATH '$.siteCode',
@@ -122,7 +110,8 @@ CREATE OR REPLACE PACKAGE BODY RR_SUPPLIER_CREATE_PKG AS
         st         VARCHAR2(30)  PATH '$.status'
       ))
     ) LOOP
-      v_site_id := RR_SUPPLIER_SITES_ID_SEQ.NEXTVAL;
+      v_site_base := v_site_base + 1;
+      v_site_id   := v_site_base;
       INSERT INTO RR_SUPPLIER_SITES (
         SUPPLIER_SITE_ID, SUPPLIER_ID, PROCUREMENT_BU, SUPPLIER_SITE, SUPPLIER_SITE_CODE,
         ADDRESS_NAME, PURCHASING_FLAG, PAY_FLAG, PAY_SITE_FLAG, PAYMENT_TERMS, INVOICE_CURRENCY_CODE,
@@ -198,3 +187,12 @@ END;
   DBMS_OUTPUT.PUT_LINE('POST suppliers/create registered OK');
 END;
 /
+
+-- ── Verify the package compiled (this is what ORA-06508 is about) ─────────────
+-- Recompile and list any errors. After a clean run this returns NO rows.
+ALTER PACKAGE RR_SUPPLIER_CREATE_PKG COMPILE BODY;
+
+SELECT name, type, line, position, text
+FROM   USER_ERRORS
+WHERE  name = 'RR_SUPPLIER_CREATE_PKG'
+ORDER  BY sequence;
