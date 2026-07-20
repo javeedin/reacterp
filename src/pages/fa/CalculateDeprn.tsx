@@ -159,6 +159,7 @@ const CalculateDeprn: React.FC = () => {
   const [statusPrev,     setStatusPrev]     = useState<Record<string, number>>({});  // prev-period deprn by assetId
   const [statusPrevName, setStatusPrevName] = useState('');
   const [statusSearch,   setStatusSearch]   = useState('');   // quick filter across all columns
+  const [comboDesc,      setComboDesc]      = useState<Record<string, string>>({});  // account combo -> segment descriptions
   // Create Depreciation debug dialog — two phases per asset:
   //   1) create depreciation  (POST fa/deprn-post-single)
   //   2) create accounting     (SLA create -> GL post -> mark accounted)
@@ -534,13 +535,23 @@ const CalculateDeprn: React.FC = () => {
         : v == null
           ? <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
           : <Text style={{ fontSize: 12, fontFamily: 'monospace', color: REDWOOD.success, fontWeight: 600 }} title="Actual posted amount">{fmt(v)}</Text> },
-    { title: 'Debit Account', dataIndex: 'deprnExpenseAccount', key: 'deprnExpenseAccount', width: 200,
+    { title: 'Debit Account', dataIndex: 'deprnExpenseAccount', key: 'deprnExpenseAccount', width: 240,
       render: (v: string) => v
-        ? <Tooltip title="Dr — Depreciation Expense"><Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.primary }}>{v}</Text></Tooltip>
+        ? <Tooltip title="Dr — Depreciation Expense">
+            <div>
+              <Text style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.primary }}>{v}</Text>
+              {comboDesc[v] ? <div style={{ fontSize: 10, color: REDWOOD.neutral500, lineHeight: 1.3, marginTop: 1 }}>{comboDesc[v]}</div> : null}
+            </div>
+          </Tooltip>
         : <Text type="secondary" style={{ fontSize: 12 }}>—</Text> },
-    { title: 'Credit Account', dataIndex: 'deprnReserveAccount', key: 'deprnReserveAccount', width: 200,
+    { title: 'Credit Account', dataIndex: 'deprnReserveAccount', key: 'deprnReserveAccount', width: 240,
       render: (v: string) => v
-        ? <Tooltip title="Cr — Accumulated Depreciation"><Text style={{ fontSize: 11, fontFamily: 'monospace', color: '#1677ff' }}>{v}</Text></Tooltip>
+        ? <Tooltip title="Cr — Accumulated Depreciation">
+            <div>
+              <Text style={{ fontSize: 11, fontFamily: 'monospace', color: '#1677ff' }}>{v}</Text>
+              {comboDesc[v] ? <div style={{ fontSize: 10, color: REDWOOD.neutral500, lineHeight: 1.3, marginTop: 1 }}>{comboDesc[v]}</div> : null}
+            </div>
+          </Tooltip>
         : <Text type="secondary" style={{ fontSize: 12 }}>—</Text> },
     { title: 'Status',      dataIndex: 'status', key: 'status', width: 110, fixed: 'right' as const,
       filters: [{ text: 'Posted', value: 'Posted' }, { text: 'Not Posted', value: 'Not Posted' }],
@@ -662,6 +673,30 @@ const CalculateDeprn: React.FC = () => {
       return Object.values(v.segmentDetails || {}).map(s => s.description).filter(Boolean).join(' · ');
     } catch { return ''; }
   };
+
+  // Resolve segment descriptions for every distinct Dr/Cr account combo in the
+  // status grid, once each, and cache them for the "under the code" display.
+  useEffect(() => {
+    const combos = new Set<string>();
+    enrichedStatusItems.forEach(r => {
+      if (r.deprnExpenseAccount) combos.add(r.deprnExpenseAccount);
+      if (r.deprnReserveAccount) combos.add(r.deprnReserveAccount);
+    });
+    const missing = [...combos].filter(c => comboDesc[c] === undefined);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(missing.map(async c => [c, await describeCombo(c)] as const));
+      if (cancelled) return;
+      setComboDesc(prev => {
+        const next = { ...prev };
+        entries.forEach(([c, d]) => { next[c] = d; });
+        return next;
+      });
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enrichedStatusItems]);
 
   const setAcctStep = (i: number, patch: Partial<AcctStepUI>) =>
     setAcctModal(m => m && ({ ...m, steps: m.steps.map((s, idx) => idx === i ? { ...s, ...patch } : s) }));
