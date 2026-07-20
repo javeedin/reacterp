@@ -39,6 +39,10 @@ export interface AssetRecord {
   deprnReserve: string;
   ytdDeprn: string;
   nbv: string;
+  assetCategoryId?: string;
+  assetCategory?: string;       // "SEGMENT1 - SEGMENT2"
+  categorySegment1?: string;
+  categorySegment2?: string;
   retiredFlag: string;   // 'YES' if no active book entry, else 'NO'
   accountedStatus?: string;   // 'ACCOUNTED' | 'UNACCOUNTED'
   accountedDate?: string | null;

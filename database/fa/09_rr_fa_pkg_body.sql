@@ -106,6 +106,8 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                    a.ASSET_NUMBER,
                    a.DESCRIPTION,
                    a.ASSET_CATEGORY_ID,
+                   cat.SEGMENT1                               AS CATEGORY_SEGMENT1,
+                   cat.SEGMENT2                               AS CATEGORY_SEGMENT2,
                    a.CREATION_DATE,
                    a.CREATED_BY,
                    a.LAST_UPDATE_DATE,
@@ -128,6 +130,8 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                    NVL(a.ACCOUNTED_STATUS, 'UNACCOUNTED')       AS ACCOUNTED_STATUS,
                    TO_CHAR(a.ACCOUNTED_DATE, 'YYYY-MM-DD')      AS ACCOUNTED_DATE
             FROM   RR_FA_ADDITIONS a
+            LEFT JOIN RR_FA_CATEGORIES_B cat
+                   ON cat.CATEGORY_ID = a.ASSET_CATEGORY_ID
             LEFT JOIN (SELECT * FROM RR_FA_BOOKS WHERE DATE_INEFFECTIVE IS NULL) b
                    ON b.ASSET_ID = a.ASSET_ID
             LEFT JOIN (
@@ -153,6 +157,10 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
                 || ',"asset_number":'       || jstr(r.ASSET_NUMBER)
                 || ',"description":'        || jstr(r.DESCRIPTION)
                 || ',"assetCategoryId":'    || jstr(r.ASSET_CATEGORY_ID)
+                || ',"categorySegment1":'   || jstr(r.CATEGORY_SEGMENT1)
+                || ',"categorySegment2":'   || jstr(r.CATEGORY_SEGMENT2)
+                || ',"assetCategory":'      || jstr(
+                       TRIM(BOTH ' -' FROM NVL(r.CATEGORY_SEGMENT1,'') || ' - ' || NVL(r.CATEGORY_SEGMENT2,'')))
                 || ',"creationDate":'       || jstr(r.CREATION_DATE)
                 || ',"createdBy":'          || jstr(r.CREATED_BY)
                 || ',"lastUpdateDate":'     || jstr(r.LAST_UPDATE_DATE)

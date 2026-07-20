@@ -3231,7 +3231,8 @@ const ManageAssets: React.FC = () => {
         (r.asset_number || r.assetNumber || '').toLowerCase().includes(q) ||
         (r.assetId      || '').toLowerCase().includes(q) ||
         (r.bookTypeCode || '').toLowerCase().includes(q) ||
-        (r.assetType    || '').toLowerCase().includes(q)
+        (r.assetType    || '').toLowerCase().includes(q) ||
+        (r.assetCategory || '').toLowerCase().includes(q)
       );
     }
     return true;
@@ -3245,6 +3246,7 @@ const ManageAssets: React.FC = () => {
     const data = displayedRows.map(r => ({
       'Asset Number':      r.asset_number || r.assetNumber || r.assetId,
       'Description':       r.description,
+      'Category':          r.assetCategory || '',
       'Asset Type':        assetTypeLabel(r.assetType || ''),
       'Book':              r.bookTypeCode,
       'Date in Service':   fmtDate(r.datePlacedInService),
@@ -3279,6 +3281,11 @@ const ManageAssets: React.FC = () => {
     {
       title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true,
       sorter: (a, b) => (a.description || '').localeCompare(b.description || ''),
+    },
+    {
+      title: 'Category', dataIndex: 'assetCategory', key: 'assetCategory', width: 180, ellipsis: true,
+      sorter: (a, b) => (a.assetCategory || '').localeCompare(b.assetCategory || ''),
+      render: (v: string) => v ? <Tag color="geekblue" style={{ borderRadius: 4, fontSize: 11 }}>{v}</Tag> : <Text type="secondary">—</Text>,
     },
     {
       title: 'Type', dataIndex: 'assetType', key: 'assetType', width: 110,
