@@ -907,11 +907,15 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_PKG AS
 
         FOR r IN (
             SELECT a.ASSET_ID, a.ASSET_NUMBER, a.DESCRIPTION,
-                   NVL(dsum.COST, b.COST)                              AS COST,
+                   -- Cost is the authoritative book cost (same value the asset-edit
+                   -- screen shows). Do NOT use the summed deprn-detail cost: an asset
+                   -- with several distributions carries the full cost on each detail
+                   -- row, so SUM(dd.COST) would multiply it.
+                   b.COST                                              AS COST,
                    dsum.DEPRN_AMOUNT                                    AS DEPRN_AMOUNT,
                    dsum.YTD_DEPRN                                       AS YTD_DEPRN,
                    dsum.DEPRN_RESERVE                                   AS DEPRN_RESERVE,
-                   NVL(dsum.COST, b.COST) - NVL(dsum.DEPRN_RESERVE, 0)  AS NBV,
+                   b.COST - NVL(dsum.DEPRN_RESERVE, 0)                  AS NBV,
                    dsum.DEPRN_RUN_DATE                                  AS DEPRN_RUN_DATE,
                    dsum.DISTRIBUTION_ID                                 AS DISTRIBUTION_ID,
                    dsum.ACCOUNTED_STATUS                                AS ACCOUNTED_STATUS,
