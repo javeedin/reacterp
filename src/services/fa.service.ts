@@ -43,6 +43,7 @@ export interface AssetRecord {
   assetCategory?: string;       // "SEGMENT1 - SEGMENT2"
   categorySegment1?: string;
   categorySegment2?: string;
+  attribute3?: string;          // shown as "Type" in the search grid
   retiredFlag: string;   // 'YES' if no active book entry, else 'NO'
   accountedStatus?: string;   // 'ACCOUNTED' | 'UNACCOUNTED'
   accountedDate?: string | null;
