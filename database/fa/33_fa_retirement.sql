@@ -8,36 +8,33 @@
 --        body: { bookTypeCode, dateRetired, proceedsOfSale, costOfRemoval,
 --                soldTo, retirementTypeCode, lines:[{lineType,accountCombination,
 --                enteredDr,enteredCr}] }
---        -> retires the asset + records the Dr/Cr lines in RR_FA_RETIREMENT_ACCOUNTS
+--        -> retires the asset + records the Dr/Cr account combinations on
+--           RR_FA_RETIREMENTS (new account columns added below)
 --
--- Dr/Cr account combinations are stored in a NEW child table so the synced
--- Fusion table RR_FA_RETIREMENTS is left untouched.
+-- The Dr/Cr account combinations are stored on RR_FA_RETIREMENTS in six new
+-- columns (one per accounting line type).
 --
 -- HOW TO RUN: APEX SQL Workshop -> SQL Commands -> run the whole block.
 -- =============================================================================
 
--- ── Child table for the retirement Dr/Cr account lines ───────────────────────
+-- ── Add the Dr/Cr account columns to RR_FA_RETIREMENTS (idempotent) ──────────
 DECLARE
-  v_exists NUMBER;
+  PROCEDURE add_col(p_col VARCHAR2) IS
+    v_n NUMBER;
+  BEGIN
+    SELECT COUNT(*) INTO v_n FROM USER_TAB_COLUMNS
+     WHERE TABLE_NAME = 'RR_FA_RETIREMENTS' AND COLUMN_NAME = p_col;
+    IF v_n = 0 THEN
+      EXECUTE IMMEDIATE 'ALTER TABLE RR_FA_RETIREMENTS ADD ("' || p_col || '" VARCHAR2(200))';
+    END IF;
+  END;
 BEGIN
-  SELECT COUNT(*) INTO v_exists FROM USER_TABLES WHERE TABLE_NAME = 'RR_FA_RETIREMENT_ACCOUNTS';
-  IF v_exists = 0 THEN
-    EXECUTE IMMEDIATE q'[
-      CREATE TABLE RR_FA_RETIREMENT_ACCOUNTS (
-        RETIREMENT_ACCT_ID   NUMBER PRIMARY KEY,
-        RETIREMENT_ID        NUMBER,
-        ASSET_ID             NUMBER,
-        BOOK_TYPE_CODE       VARCHAR2(100),
-        LINE_NO              NUMBER,
-        LINE_TYPE            VARCHAR2(60),
-        ACCOUNT_COMBINATION  VARCHAR2(200),
-        ENTERED_DR           NUMBER,
-        ENTERED_CR           NUMBER,
-        CREATION_DATE        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        CREATED_BY           VARCHAR2(240)
-      )
-    ]';
-  END IF;
+  add_col('ASSET_COST_ACCOUNT');        -- Cr  asset cost
+  add_col('DEPRN_RESERVE_ACCOUNT');     -- Dr  accumulated depreciation
+  add_col('PROCEEDS_ACCOUNT');          -- Dr  proceeds of sale
+  add_col('COST_OF_REMOVAL_ACCOUNT');   -- Cr  cost of removal
+  add_col('GAIN_ACCOUNT');              -- Cr  gain on retirement
+  add_col('LOSS_ACCOUNT');              -- Dr  loss on retirement
 END;
 /
 
@@ -155,8 +152,16 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_RETIRE_PKG AS
     v_gain_loss  NUMBER;
     v_ret_id     NUMBER;
     v_txn_id     NUMBER;
-    v_acct_base  NUMBER;
     v_cnt        NUMBER;
+    -- per-line-type account combinations
+    v_acc_cost   VARCHAR2(200);
+    v_acc_deprn  VARCHAR2(200);
+    v_acc_proc   VARCHAR2(200);
+    v_acc_remv   VARCHAR2(200);
+    v_acc_gain   VARCHAR2(200);
+    v_acc_loss   VARCHAR2(200);
+    v_lt         VARCHAR2(80);
+    v_acc        VARCHAR2(200);
   BEGIN
     -- Validate asset / not already retired
     BEGIN
@@ -178,6 +183,20 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_RETIRE_PKG AS
     v_type     := NVL(APEX_JSON.GET_VARCHAR2(p_path => 'retirementTypeCode'), 'ORDINARY');
     v_by       := NVL(APEX_JSON.GET_VARCHAR2(p_path => 'createdBy'), 'REACTERP');
 
+    -- Map each accounting line to its account column by line type.
+    v_cnt := NVL(APEX_JSON.GET_COUNT(p_path => 'lines'), 0);
+    FOR i IN 1 .. v_cnt LOOP
+      v_lt  := UPPER(APEX_JSON.GET_VARCHAR2(p_path => 'lines[%d].lineType', p0 => i));
+      v_acc := APEX_JSON.GET_VARCHAR2(p_path => 'lines[%d].accountCombination', p0 => i);
+      IF    v_lt LIKE '%ACCUMULATED%' OR v_lt LIKE '%RESERVE%' THEN v_acc_deprn := v_acc;
+      ELSIF v_lt LIKE '%ASSET COST%'  OR v_lt = 'COST'         THEN v_acc_cost  := v_acc;
+      ELSIF v_lt LIKE '%PROCEEDS%'                             THEN v_acc_proc  := v_acc;
+      ELSIF v_lt LIKE '%REMOVAL%'                              THEN v_acc_remv  := v_acc;
+      ELSIF v_lt LIKE '%GAIN%'                                 THEN v_acc_gain  := v_acc;
+      ELSIF v_lt LIKE '%LOSS%'                                 THEN v_acc_loss  := v_acc;
+      END IF;
+    END LOOP;
+
     get_cost_reserve(p_asset_id, v_book, v_cost, v_reserve);
     v_nbv       := v_cost - v_reserve;
     v_gain_loss := v_proceeds - v_removal - v_nbv;
@@ -190,12 +209,16 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_RETIRE_PKG AS
       DATE_RETIRED, DATE_EFFECTIVE, COST_RETIRED, STATUS, UNITS,
       NBV_RETIRED, GAIN_LOSS_AMOUNT, PROCEEDS_OF_SALE, COST_OF_REMOVAL,
       RETIREMENT_TYPE_CODE, UNREVALUED_COST_RETIRED, SOLD_TO, OBJECT_VERSION_NUMBER,
+      ASSET_COST_ACCOUNT, DEPRN_RESERVE_ACCOUNT, PROCEEDS_ACCOUNT,
+      COST_OF_REMOVAL_ACCOUNT, GAIN_ACCOUNT, LOSS_ACCOUNT,
       CREATION_DATE, CREATED_BY, LAST_UPDATE_DATE, LAST_UPDATED_BY
     ) VALUES (
       v_ret_id, v_book, p_asset_id, v_txn_id,
       v_date, SYSDATE, v_cost, 'PROCESSED', NULL,
       v_nbv, v_gain_loss, v_proceeds, v_removal,
       v_type, v_cost, v_soldto, 1,
+      v_acc_cost, v_acc_deprn, v_acc_proc,
+      v_acc_remv, v_acc_gain, v_acc_loss,
       SYSTIMESTAMP, v_by, SYSTIMESTAMP, v_by
     );
 
@@ -221,26 +244,6 @@ CREATE OR REPLACE PACKAGE BODY RR_FA_RETIRE_PKG AS
      WHERE ASSET_ID = p_asset_id
        AND BOOK_TYPE_CODE = NVL(v_book, BOOK_TYPE_CODE)
        AND DATE_INEFFECTIVE IS NULL;
-
-    -- Store the Dr/Cr account lines (lines[*] from the dialog).
-    SELECT NVL(MAX(RETIREMENT_ACCT_ID),0) INTO v_acct_base FROM RR_FA_RETIREMENT_ACCOUNTS;
-    v_cnt := NVL(APEX_JSON.GET_COUNT(p_path => 'lines'), 0);
-    FOR i IN 1 .. v_cnt LOOP
-      v_acct_base := v_acct_base + 1;
-      INSERT INTO RR_FA_RETIREMENT_ACCOUNTS (
-        RETIREMENT_ACCT_ID, RETIREMENT_ID, ASSET_ID, BOOK_TYPE_CODE,
-        LINE_NO, LINE_TYPE, ACCOUNT_COMBINATION, ENTERED_DR, ENTERED_CR,
-        CREATION_DATE, CREATED_BY
-      ) VALUES (
-        v_acct_base, v_ret_id, p_asset_id, v_book,
-        i,
-        APEX_JSON.GET_VARCHAR2(p_path => 'lines[%d].lineType', p0 => i),
-        APEX_JSON.GET_VARCHAR2(p_path => 'lines[%d].accountCombination', p0 => i),
-        NVL(APEX_JSON.GET_NUMBER(p_path => 'lines[%d].enteredDr', p0 => i), 0),
-        NVL(APEX_JSON.GET_NUMBER(p_path => 'lines[%d].enteredCr', p0 => i), 0),
-        SYSTIMESTAMP, v_by
-      );
-    END LOOP;
 
     COMMIT;
     p_status := 200;
