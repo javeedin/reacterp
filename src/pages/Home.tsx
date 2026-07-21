@@ -173,7 +173,7 @@ const Home: React.FC = () => {
           {periodName !== '—' && <Tag icon={<CalendarOutlined />} style={{ padding: '4px 10px', borderRadius: 6 }}>Period: <strong>{periodName}</strong></Tag>}
           {periodStatus !== '—' && <Tag color={isOpen ? 'success' : 'error'} style={{ padding: '4px 10px', borderRadius: 6 }}>GL: {periodStatus}</Tag>}
           <Tag icon={<CheckCircleOutlined />} color="success" style={{ padding: '4px 10px', borderRadius: 6 }}>System Online</Tag>
-          <Tag color="processing" style={{ padding: '4px 10px', borderRadius: 6 }}>v2.0.0 · Jul 9th</Tag>
+          <Tag color="processing" style={{ padding: '4px 10px', borderRadius: 6 }}>v2.1.0 · Jul 21st</Tag>
         </div>
       </div>
 
