@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import dayjs from 'dayjs';
 import {
-  Layout, Card, Form, Input, Button, Space, Typography, Table, Tag,
+  Layout, Card, Form, Input, InputNumber, Button, Space, Typography, Table, Tag,
   Row, Col, Breadcrumb, Tooltip, Select, Tabs, Descriptions,
   Spin, Empty, Badge, message, Modal, Switch, Statistic, DatePicker, Popconfirm, Divider, Alert, Popover, Radio,
 } from 'antd';
@@ -14,6 +14,7 @@ import {
   BookOutlined, HistoryOutlined, BarcodeOutlined, ApiOutlined, CheckOutlined,
   FilterOutlined, DownloadOutlined, DollarOutlined, SaveOutlined, DeleteOutlined,
   AccountBookOutlined, AuditOutlined, TagsOutlined, ArrowLeftOutlined, EditOutlined,
+  LogoutOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { postSlaToGL } from '../../services/glPosting.service';
@@ -28,6 +29,7 @@ import {
   checkSlaAccountingExists, getSlaAccounting,
   createSlaAccounting, markFaAdditionAccounted, markFaDeprnAccounted,
   updateAssetAttributes, adjustDeprn, adjustCost,
+  getRetirementPreview, retireAssetWithAccounting,
   formatCurrency, assetTypeLabel, assetStatusLabel,
 } from '../../services/fa.service';
 import type { JournalLine } from '../../services/manage-journals.service';
@@ -35,6 +37,7 @@ import type {
   AssetRecord, AssetDetail, AssetBook, DeprnRecord,
   DistributionRecord, InvoiceRecord, TransactionRecord, CategoryBookRecord,
   BookControlRecord, AccountingPreview, SlaExistsResult,
+  RetirementPreview, RetireLine,
 } from '../../services/fa.service';
 
 const { Content } = Layout;
@@ -985,6 +988,97 @@ const AssetTabContent: React.FC<{
     }
   };
 
+  // ── Retirement ─────────────────────────────────────────────────────────────
+  const [retireOpen,     setRetireOpen]     = useState(false);
+  const [retireLoading,  setRetireLoading]  = useState(false);
+  const [retireSaving,   setRetireSaving]   = useState(false);
+  const [retirePreview,  setRetirePreview]  = useState<RetirementPreview | null>(null);
+  const [retireDate,     setRetireDate]     = useState<dayjs.Dayjs>(dayjs());
+  const [retireSold,     setRetireSold]     = useState(false);
+  const [retireProceeds, setRetireProceeds] = useState<number | null>(null);
+  const [retireRemoval,  setRetireRemoval]  = useState<number | null>(null);
+  const [retireSoldTo,   setRetireSoldTo]   = useState('');
+  const [retireLines,    setRetireLines]    = useState<RetireLine[]>([]);
+  const [retireShowAcct, setRetireShowAcct] = useState(false);
+
+  const retireBook = () => books[0]?.bookTypeCode || asset.bookTypeCode || '';
+
+  const openRetire = async () => {
+    const book = retireBook();
+    if (!book) { message.error('No active book found for this asset'); return; }
+    setRetireOpen(true);
+    setRetireLoading(true);
+    setRetireShowAcct(false); setRetireLines([]);
+    setRetireSold(false); setRetireProceeds(null); setRetireRemoval(null); setRetireSoldTo('');
+    setRetireDate(dayjs());
+    const pv = await getRetirementPreview(asset.assetId, book);
+    setRetirePreview(pv.success ? pv : null);
+    if (!pv.success) message.error(pv.error || 'Failed to load retirement preview');
+    setRetireLoading(false);
+  };
+
+  // Standard retirement accounting lines. Balances by construction:
+  //   Dr Accum Deprn (reserve) + Dr Proceeds  = Cr Asset Cost + Cr Cost-of-Removal + gain/loss line
+  const buildRetireLines = (): RetireLine[] => {
+    if (!retirePreview) return [];
+    const cost    = Number(retirePreview.cost || 0);
+    const reserve = Number(retirePreview.deprnReserve || 0);
+    const nbv     = Number(retirePreview.nbv ?? (cost - reserve));
+    const proceeds = retireSold ? Number(retireProceeds || 0) : 0;
+    const removal  = Number(retireRemoval || 0);
+    const gainLoss = proceeds - removal - nbv;   // >0 gain, <0 loss
+    const lines: RetireLine[] = [
+      { lineType: 'Accumulated Depreciation', accountCombination: retirePreview.accumDeprnAccount || '', enteredDr: reserve, enteredCr: 0 },
+      { lineType: 'Asset Cost',               accountCombination: retirePreview.assetCostAccount  || '', enteredDr: 0, enteredCr: cost },
+    ];
+    if (proceeds > 0) lines.push({ lineType: 'Proceeds of Sale', accountCombination: '', enteredDr: proceeds, enteredCr: 0 });
+    if (removal  > 0) lines.push({ lineType: 'Cost of Removal',  accountCombination: '', enteredDr: 0, enteredCr: removal });
+    if (gainLoss > 0)      lines.push({ lineType: 'Gain on Retirement', accountCombination: '', enteredDr: 0, enteredCr: gainLoss });
+    else if (gainLoss < 0) lines.push({ lineType: 'Loss on Retirement', accountCombination: '', enteredDr: -gainLoss, enteredCr: 0 });
+    return lines;
+  };
+
+  const previewRetireAccounting = () => {
+    if (!retirePreview) return;
+    setRetireLines(buildRetireLines());
+    setRetireShowAcct(true);
+  };
+
+  const setRetireLineAccount = (idx: number, combo: string) =>
+    setRetireLines(prev => prev.map((l, i) => i === idx ? { ...l, accountCombination: combo } : l));
+
+  const handleRetire = async () => {
+    const book = retireBook();
+    if (!retirePreview) { message.error('No retirement preview'); return; }
+    const lines = retireShowAcct && retireLines.length ? retireLines : buildRetireLines();
+    if (lines.some(l => !l.accountCombination)) {
+      message.warning('Every accounting line needs an account combination.'); return;
+    }
+    setRetireSaving(true);
+    try {
+      const res = await retireAssetWithAccounting({
+        assetId: asset.assetId,
+        bookTypeCode: book,
+        dateRetired: retireDate.format('YYYY-MM-DD'),
+        proceedsOfSale: retireSold ? Number(retireProceeds || 0) : 0,
+        costOfRemoval: Number(retireRemoval || 0),
+        soldTo: retireSold ? retireSoldTo : undefined,
+        retirementTypeCode: 'ORDINARY',
+        createdBy: loggedUser,
+        lines,
+      });
+      if (res.success) {
+        message.success(`Asset ${asset.asset_number || asset.assetId} retired (retirement #${res.retirementId}). Gain/Loss ${formatCurrency(String(res.gainLoss ?? 0))}`);
+        setRetireOpen(false);
+        onRefresh();
+      } else {
+        message.error(res.error || 'Retirement failed');
+      }
+    } finally {
+      setRetireSaving(false);
+    }
+  };
+
   const deprnColumns: ColumnsType<DeprnRecord> = [
     { title: 'FY',          dataIndex: 'fiscalYear',               key: 'fiscalYear',  width: 60  },
     { title: 'Period Num',  dataIndex: 'periodNum',                key: 'periodNum',   width: 80  },
@@ -1492,6 +1586,15 @@ const AssetTabContent: React.FC<{
                 </Button>
                 <Button
                   size="small"
+                  icon={<LogoutOutlined />}
+                  danger
+                  disabled={asset.retiredFlag === 'YES'}
+                  onClick={openRetire}
+                >
+                  {asset.retiredFlag === 'YES' ? 'Retired' : 'Retire'}
+                </Button>
+                <Button
+                  size="small"
                   icon={<DollarOutlined />}
                   style={{ borderColor: FA_COLOR, color: FA_COLOR }}
                   onClick={openDeprnPreview}
@@ -1709,6 +1812,133 @@ const AssetTabContent: React.FC<{
                       ))}
                     </tbody>
                   </table>
+                </Modal>
+              );
+            })()}
+
+            {/* ── Retire Asset Modal ── */}
+            {retireOpen && (() => {
+              const cost    = Number(retirePreview?.cost || 0);
+              const reserve = Number(retirePreview?.deprnReserve || 0);
+              const nbv     = Number(retirePreview?.nbv ?? (cost - reserve));
+              const proceeds = retireSold ? Number(retireProceeds || 0) : 0;
+              const removal  = Number(retireRemoval || 0);
+              const gainLoss = proceeds - removal - nbv;
+              const totDr = retireLines.reduce((s, l) => s + (l.enteredDr || 0), 0);
+              const totCr = retireLines.reduce((s, l) => s + (l.enteredCr || 0), 0);
+              const balanced = Math.abs(totDr - totCr) < 0.005;
+              return (
+                <Modal
+                  open
+                  onCancel={() => { if (!retireSaving) setRetireOpen(false); }}
+                  width={860}
+                  maskClosable={!retireSaving}
+                  title={<Space><LogoutOutlined style={{ color: '#C74634' }} /><span>Retire Asset — {asset.asset_number || asset.assetNumber}</span></Space>}
+                  footer={
+                    <Space>
+                      <Button disabled={retireSaving} onClick={() => setRetireOpen(false)}>Cancel</Button>
+                      <Button icon={<AuditOutlined />} onClick={previewRetireAccounting} disabled={retireLoading || !retirePreview}>
+                        Preview Accounting
+                      </Button>
+                      <Button type="primary" danger loading={retireSaving} disabled={retireLoading || !retirePreview}
+                        onClick={handleRetire}>
+                        Retire Asset
+                      </Button>
+                    </Space>
+                  }
+                >
+                  {retireLoading ? (
+                    <div style={{ textAlign: 'center', padding: 40 }}><Spin tip="Loading retirement details…" /></div>
+                  ) : !retirePreview ? (
+                    <Alert type="error" showIcon message="Could not load retirement preview for this asset." />
+                  ) : (
+                    <>
+                      <Alert type="warning" showIcon style={{ marginBottom: 12, fontSize: 12 }}
+                        message="Retiring writes off the remaining NBV. If sold, enter the proceeds; the gain/loss is the balancing entry. Accounts default from the category — edit any before retiring." />
+                      {/* Summary */}
+                      <Row gutter={12} style={{ marginBottom: 12 }}>
+                        {[
+                          { label: 'Cost', value: cost, color: '#1A1A1A' },
+                          { label: 'Deprn Reserve', value: reserve, color: '#0572CE' },
+                          { label: 'NBV to Retire', value: nbv, color: '#C74634' },
+                          { label: gainLoss >= 0 ? 'Gain' : 'Loss', value: Math.abs(gainLoss), color: gainLoss >= 0 ? '#1D7B4D' : '#C74634' },
+                        ].map(s => (
+                          <Col span={6} key={s.label}>
+                            <Card size="small" styles={{ body: { padding: '8px 12px' } }}>
+                              <Text style={{ fontSize: 11, color: '#888', display: 'block' }}>{s.label}</Text>
+                              <Text style={{ fontSize: 14, fontWeight: 700, color: s.color, fontFamily: 'monospace' }}>{formatCurrency(String(s.value))}</Text>
+                            </Card>
+                          </Col>
+                        ))}
+                      </Row>
+                      {/* Inputs */}
+                      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 12 }}>
+                        <div>
+                          <div style={{ fontSize: 12, marginBottom: 4 }}><Text strong>Date Retired</Text></div>
+                          <DatePicker value={retireDate} onChange={d => d && setRetireDate(d)} allowClear={false} format="DD MMM YYYY" />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 12, marginBottom: 4 }}><Text strong>Sale?</Text></div>
+                          <Switch checked={retireSold} onChange={setRetireSold} checkedChildren="Sold" unCheckedChildren="Scrap" />
+                        </div>
+                        {retireSold && (
+                          <>
+                            <div>
+                              <div style={{ fontSize: 12, marginBottom: 4 }}><Text strong>Proceeds of Sale</Text></div>
+                              <InputNumber value={retireProceeds} onChange={v => setRetireProceeds(v as number)} min={0} style={{ width: 150 }} prefix="AED" />
+                            </div>
+                            <div style={{ minWidth: 160 }}>
+                              <div style={{ fontSize: 12, marginBottom: 4 }}><Text strong>Sold To</Text></div>
+                              <Input value={retireSoldTo} onChange={e => setRetireSoldTo(e.target.value)} placeholder="Buyer name" />
+                            </div>
+                          </>
+                        )}
+                        <div>
+                          <div style={{ fontSize: 12, marginBottom: 4 }}><Text strong>Cost of Removal</Text></div>
+                          <InputNumber value={retireRemoval} onChange={v => setRetireRemoval(v as number)} min={0} style={{ width: 150 }} prefix="AED" />
+                        </div>
+                      </div>
+                      {/* Accounting preview */}
+                      {retireShowAcct && (
+                        <>
+                          <Divider orientation="left" style={{ fontSize: 13, margin: '10px 0' }}>
+                            Retirement Accounting {balanced ? <Tag color="success" style={{ marginLeft: 8 }}>Balanced</Tag> : <Tag color="error" style={{ marginLeft: 8 }}>Out of balance</Tag>}
+                          </Divider>
+                          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr style={{ background: '#fafafa', color: '#888' }}>
+                                <th style={{ textAlign: 'left', padding: '4px 8px', width: 190 }}>Line</th>
+                                <th style={{ textAlign: 'left', padding: '4px 8px' }}>Account Combination</th>
+                                <th style={{ textAlign: 'right', padding: '4px 8px', width: 110 }}>Debit</th>
+                                <th style={{ textAlign: 'right', padding: '4px 8px', width: 110 }}>Credit</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {retireLines.map((l, idx) => (
+                                <tr key={idx} style={{ borderTop: '1px solid #eee' }}>
+                                  <td style={{ padding: '4px 8px' }}>{l.lineType}</td>
+                                  <td style={{ padding: '4px 8px' }}>
+                                    <Input size="small" value={l.accountCombination}
+                                      placeholder="01-00-00-…"
+                                      status={!l.accountCombination ? 'error' : ''}
+                                      onChange={e => setRetireLineAccount(idx, e.target.value)}
+                                      style={{ fontFamily: 'monospace', fontSize: 11 }} />
+                                  </td>
+                                  <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'monospace', color: '#1D7B4D' }}>{l.enteredDr ? formatCurrency(String(l.enteredDr)) : '—'}</td>
+                                  <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'monospace', color: '#C74634' }}>{l.enteredCr ? formatCurrency(String(l.enteredCr)) : '—'}</td>
+                                </tr>
+                              ))}
+                              <tr style={{ borderTop: '2px solid #ddd', background: '#fafafa', fontWeight: 700 }}>
+                                <td style={{ padding: '4px 8px' }} colSpan={2}>Total</td>
+                                <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(String(totDr))}</td>
+                                <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'monospace' }}>{formatCurrency(String(totCr))}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </>
+                      )}
+                    </>
+                  )}
                 </Modal>
               );
             })()}

@@ -680,6 +680,59 @@ export const adjustCost = async (payload: {
   }
 };
 
+// ── Asset retirement ─────────────────────────────────────────────────────────
+export interface RetirementPreview {
+  success: boolean;
+  assetId?: number; assetNumber?: string; bookTypeCode?: string;
+  cost?: number; deprnReserve?: number; nbv?: number;
+  assetCostAccount?: string; accumDeprnAccount?: string;
+  error?: string;
+}
+
+export const getRetirementPreview = async (
+  assetId: string | number, bookTypeCode: string,
+): Promise<RetirementPreview> => {
+  try {
+    const res = await fetch(
+      `${APEX_DB_CONFIG.baseUrl}/fa/assets/${assetId}/retirement-preview?bookTypeCode=${encodeURIComponent(bookTypeCode)}`,
+    );
+    return await res.json();
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
+};
+
+export interface RetireLine {
+  lineType: string;
+  accountCombination: string;
+  enteredDr: number;
+  enteredCr: number;
+}
+
+export const retireAssetWithAccounting = async (payload: {
+  assetId: string | number;
+  bookTypeCode: string;
+  dateRetired?: string;
+  proceedsOfSale?: number;
+  costOfRemoval?: number;
+  soldTo?: string;
+  retirementTypeCode?: string;
+  createdBy?: string;
+  lines: RetireLine[];
+}): Promise<{ success: boolean; retirementId?: number; nbvRetired?: number; gainLoss?: number; error?: string }> => {
+  try {
+    const { assetId, ...body } = payload;
+    const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/fa/assets/${assetId}/retire-post`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return await res.json();
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
+};
+
 export const getDeprnPeriods = async (bookTypeCode?: string): Promise<any[]> => {
   try {
     const qs = bookTypeCode ? `?bookTypeCode=${encodeURIComponent(bookTypeCode)}` : '';
