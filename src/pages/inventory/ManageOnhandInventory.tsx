@@ -9,6 +9,7 @@ import {
   HomeOutlined, DatabaseOutlined, SearchOutlined, ReloadOutlined,
   InfoCircleOutlined, CloseOutlined, AppstoreOutlined, BarcodeOutlined,
   TagsOutlined, ApartmentOutlined, FilterOutlined, InboxOutlined,
+  ApiOutlined, DollarOutlined, ReconciliationOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 
@@ -26,6 +27,7 @@ const REDWOOD = {
 
 // ── API ───────────────────────────────────────────────────────────────────────
 const BASE_URL = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05';
+const LATEST_URL = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/latest';
 const AUTH_HEADER = 'Basic ' + btoa('emparun:Fusion@1234');
 const HEADERS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
 const PAGE_SIZE = 50;
@@ -328,6 +330,74 @@ const AllLotsTab: React.FC<{ allLots: any[]; loading: boolean }> = ({ allLots, l
   );
 };
 
+// ── Cost tab (Receipt Costs / Item Costs) ─────────────────────────────────────
+// Fetches a Fusion cost REST resource for the item and renders every returned
+// field in a table. The API icon (hover) shows the exact webservice URL.
+const CostTab: React.FC<{ url: string; emptyText: string }> = ({ url, emptyText }) => {
+  const [rows, setRows]       = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr]         = useState('');
+  const [filter, setFilter]   = useState('');
+
+  const load = useCallback(() => {
+    setLoading(true); setErr('');
+    fetch(url, { headers: HEADERS })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}: ${r.statusText}`)))
+      .then(d => setRows(Array.isArray(d) ? d : (d.items ?? [])))
+      .catch(e => { setErr(e.message); setRows([]); })
+      .finally(() => setLoading(false));
+  }, [url]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const cols: ColumnsType<any> = React.useMemo(() => {
+    const keys: string[] = [];
+    rows.forEach(r => Object.keys(r).forEach(k => { if (k !== 'links' && !keys.includes(k)) keys.push(k); }));
+    return keys.map(k => ({
+      title: k, dataIndex: k, key: k, ellipsis: true, width: 150,
+      render: (v: any) => {
+        if (v == null || v === '') return <span style={{ color: REDWOOD.neutral300 }}>—</span>;
+        if (typeof v === 'object') return <Text style={{ fontSize: 11 }}>{JSON.stringify(v)}</Text>;
+        if (/date/i.test(k) && typeof v === 'string' && v.length >= 10) return <Text style={{ fontSize: 12 }}>{fmtDate(v)}</Text>;
+        if (/cost|amount|price|qty|quantity/i.test(k) && !isNaN(Number(v)))
+          return <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</Text>;
+        return <Text style={{ fontSize: 12 }}>{String(v)}</Text>;
+      },
+    }));
+  }, [rows]);
+
+  const filtered = filter ? rows.filter(r => matchesFilter(r, filter)) : rows;
+
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
+        <Space>
+          <Input size="small" allowClear prefix={<FilterOutlined />} placeholder="Filter results…"
+            value={filter} onChange={e => setFilter(e.target.value)} style={{ width: 240 }} />
+          <Text type="secondary" style={{ fontSize: 12 }}>{filtered.length} row(s)</Text>
+        </Space>
+        <Space>
+          <Button size="small" icon={<ReloadOutlined />} onClick={load} loading={loading}>Refresh</Button>
+          <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>GET {url}</span>} placement="bottomRight">
+            <ApiOutlined style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 15 }} />
+          </Tooltip>
+        </Space>
+      </div>
+      {err && <div style={{ color: REDWOOD.error, fontSize: 12, marginBottom: 8 }}>Failed to load: {err}</div>}
+      <Table
+        dataSource={filtered}
+        columns={cols}
+        rowKey={(_, i) => String(i)}
+        loading={loading}
+        size="small"
+        scroll={{ x: 'max-content' }}
+        pagination={{ pageSize: 25, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'], showTotal: (t) => `${t} rows` }}
+        locale={{ emptyText: loading ? 'Loading…' : (err ? 'Error' : emptyText) }}
+      />
+    </div>
+  );
+};
+
 // ── Item Detail Page ──────────────────────────────────────────────────────────
 const OnhandDetailPage: React.FC<{ items: RawOnhand[]; onClose?: () => void }> = ({ items, onClose }) => {
   const [activeTab, setActiveTab] = useState('summary');
@@ -469,6 +539,22 @@ const OnhandDetailPage: React.FC<{ items: RawOnhand[]; onClose?: () => void }> =
       ),
     });
   }
+
+  // Receipt Costs — GET receiptCosts?q=Item=<itemNumber>
+  const receiptCostsUrl = `${BASE_URL}/receiptCosts?q=${encodeURIComponent('Item=' + first.ItemNumber)}&limit=${CHILD_LIMIT}`;
+  tabItems.push({
+    key: 'receiptCosts',
+    label: <Space size={4}><ReconciliationOutlined />Receipt Costs</Space>,
+    children: <CostTab url={receiptCostsUrl} emptyText={`No receipt costs for ${first.ItemNumber}`} />,
+  });
+
+  // Item Costs — GET (latest) itemCosts?q=ItemNumber=<itemNumber>
+  const itemCostsUrl = `${LATEST_URL}/itemCosts?q=${encodeURIComponent('ItemNumber=' + first.ItemNumber)}&limit=${CHILD_LIMIT}`;
+  tabItems.push({
+    key: 'itemCosts',
+    label: <Space size={4}><DollarOutlined />Item Costs</Space>,
+    children: <CostTab url={itemCostsUrl} emptyText={`No item costs for ${first.ItemNumber}`} />,
+  });
 
   return (
     <div style={{ background: REDWOOD.neutral100, minHeight: '100%' }}>
