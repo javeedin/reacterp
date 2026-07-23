@@ -70,6 +70,8 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_REVENUE_PKG AS
     v_cnt        NUMBER;
     v_by         VARCHAR2(240);
     v_id         NUMBER;
+    v_sdt        VARCHAR2(50);
+    v_edt        VARCHAR2(50);
     v_start      DATE;
     v_end        DATE;
     v_months     NUMBER;
@@ -92,14 +94,18 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_REVENUE_PKG AS
       v_id := APEX_JSON.GET_NUMBER(p_path => 'contractIds[%d]', p0 => i);
 
       BEGIN
-        SELECT to_dt(CONTRACT_START_DATE), to_dt(CONTRACT_END_DATE), NVL(RENT_TOTAL,0)
-          INTO v_start, v_end, v_total
+        -- Select raw VARCHAR dates, then convert in PL/SQL (to_dt is a private
+        -- package function and cannot be used inside a SQL statement).
+        SELECT CONTRACT_START_DATE, CONTRACT_END_DATE, NVL(RENT_TOTAL,0)
+          INTO v_sdt, v_edt, v_total
           FROM RR_AR_REVENUE_CONTRACT
          WHERE ID = v_id;
       EXCEPTION WHEN NO_DATA_FOUND THEN
         CONTINUE;
       END;
 
+      v_start := to_dt(v_sdt);
+      v_end   := to_dt(v_edt);
       IF v_start IS NULL OR v_end IS NULL THEN CONTINUE; END IF;
 
       -- Inclusive month count (Jan 1 – Dec 31 = 12).
