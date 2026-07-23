@@ -9,7 +9,7 @@ import {
   HomeOutlined, DatabaseOutlined, SearchOutlined, ReloadOutlined,
   InfoCircleOutlined, CloseOutlined, AppstoreOutlined, BarcodeOutlined,
   TagsOutlined, ApartmentOutlined, FilterOutlined, InboxOutlined,
-  ApiOutlined, DollarOutlined, ReconciliationOutlined,
+  ApiOutlined, DollarOutlined, ReconciliationOutlined, BranchesOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 
@@ -376,13 +376,19 @@ const CostTab: React.FC<{ url: string; emptyText: string }> = ({ url, emptyText 
     rows.forEach(r => {
       const vu = String(r.ValuationUnit ?? '');
       let g = map.get(vu);
-      if (!g) { g = { vu, ...parseValuationUnit(vu), totalUnitCost: null, receiptQty: 0, onhandQty: 0, count: 0 }; map.set(vu, g); }
+      if (!g) { g = { vu, ...parseValuationUnit(vu), totalUnitCost: null, receiptQty: 0, onhandQty: 0, count: 0, _recpt: new Set<string>(), _ref: new Set<string>() }; map.set(vu, g); }
       g.receiptQty += Number(r.ReceiptQuantity) || 0;
       g.onhandQty  += Number(r.QuantityOnhand)  || 0;
       g.count      += 1;
       if (r.TotalUnitCost != null && r.TotalUnitCost !== '') g.totalUnitCost = r.TotalUnitCost;
+      if (r.ReceiptNumber)   g._recpt.add(String(r.ReceiptNumber));
+      if (r.ReferenceNumber) g._ref.add(String(r.ReferenceNumber));
     });
-    return Array.from(map.values());
+    return Array.from(map.values()).map(g => ({
+      ...g,
+      receiptNumber: Array.from(g._recpt).join(', '),
+      referenceNumber: Array.from(g._ref).join(', '),
+    }));
   }, [rows]);
 
   const groupedCols: ColumnsType<any> = [
@@ -390,6 +396,8 @@ const CostTab: React.FC<{ url: string; emptyText: string }> = ({ url, emptyText 
     { title: 'Inventory Org', dataIndex: 'invOrg',  key: 'invOrg',  width: 150, ellipsis: true, render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
     { title: 'Subinventory',  dataIndex: 'subinv',  key: 'subinv',  width: 130, render: (v: string) => v ? <Tag color="cyan">{v}</Tag> : '—' },
     { title: 'Lot',           dataIndex: 'lot',     key: 'lot',     width: 170, ellipsis: true, render: (v: string) => v ? <Tag color="geekblue">{v}</Tag> : '—' },
+    { title: 'Receipt #',     dataIndex: 'receiptNumber',   key: 'receiptNumber',   width: 130, ellipsis: true, render: (v: string) => v || <span style={{ color: REDWOOD.neutral300 }}>—</span> },
+    { title: 'Reference #',   dataIndex: 'referenceNumber', key: 'referenceNumber', width: 130, ellipsis: true, render: (v: string) => v || <span style={{ color: REDWOOD.neutral300 }}>—</span> },
     { title: 'Total Unit Cost', dataIndex: 'totalUnitCost', key: 'totalUnitCost', width: 140, align: 'right' as const, render: (v: any) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{numFmt(v)}</Text> },
     { title: 'Receipt Qty',   dataIndex: 'receiptQty', key: 'receiptQty', width: 120, align: 'right' as const, render: (v: any) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{numFmt(v)}</Text> },
     { title: 'On-hand Qty',   dataIndex: 'onhandQty',  key: 'onhandQty',  width: 120, align: 'right' as const, render: (v: any) => <Text strong style={{ fontFamily: 'monospace', fontSize: 12, color: Number(v) > 0 ? REDWOOD.success : undefined }}>{numFmt(v)}</Text> },
@@ -449,13 +457,140 @@ const CostTab: React.FC<{ url: string; emptyText: string }> = ({ url, emptyText 
         summary={() => (hasVU && filtered.length > 0) ? (
           <Table.Summary fixed>
             <Table.Summary.Row style={{ background: REDWOOD.neutral100, fontWeight: 700 }}>
-              <Table.Summary.Cell index={0} colSpan={5}><Text strong>Total ({filtered.length})</Text></Table.Summary.Cell>
-              <Table.Summary.Cell index={5} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{numFmt(filtered.reduce((s: number, g: any) => s + g.receiptQty, 0))}</Text></Table.Summary.Cell>
-              <Table.Summary.Cell index={6} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.success }}>{numFmt(filtered.reduce((s: number, g: any) => s + g.onhandQty, 0))}</Text></Table.Summary.Cell>
-              <Table.Summary.Cell index={7} />
+              <Table.Summary.Cell index={0} colSpan={7}><Text strong>Total ({filtered.length})</Text></Table.Summary.Cell>
+              <Table.Summary.Cell index={7} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{numFmt(filtered.reduce((s: number, g: any) => s + g.receiptQty, 0))}</Text></Table.Summary.Cell>
+              <Table.Summary.Cell index={8} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.success }}>{numFmt(filtered.reduce((s: number, g: any) => s + g.onhandQty, 0))}</Text></Table.Summary.Cell>
+              <Table.Summary.Cell index={9} />
             </Table.Summary.Row>
           </Table.Summary>
         ) : null}
+      />
+    </div>
+  );
+};
+
+// ── Cost Distributions tab ────────────────────────────────────────────────────
+// TransactionIds come from receiptCosts for the item; the Retrieve button then
+// pulls costDistributions?q=TransactionId=<id> for the selected (or all) txns.
+const CostDistributionsTab: React.FC<{ itemNumber: string }> = ({ itemNumber }) => {
+  const [txns, setTxns]         = useState<{ id: string; receipt: string; reference: string }[]>([]);
+  const [txnLoading, setTxnLoading] = useState(false);
+  const [selectedTxn, setSelectedTxn] = useState<string>('all');
+  const [rows, setRows]         = useState<any[]>([]);
+  const [loading, setLoading]   = useState(false);
+  const [err, setErr]           = useState('');
+  const [filter, setFilter]     = useState('');
+  const [ran, setRan]           = useState(false);
+
+  const receiptUrl = `${BASE_URL}/receiptCosts?q=${encodeURIComponent('Item=' + itemNumber)}&limit=${CHILD_LIMIT}`;
+
+  // Load the transaction ids (from receiptCosts) for the dropdown.
+  useEffect(() => {
+    setTxnLoading(true);
+    fetch(receiptUrl, { headers: HEADERS })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(d => {
+        const items: any[] = Array.isArray(d) ? d : (d.items ?? []);
+        const seen = new Set<string>();
+        const list: { id: string; receipt: string; reference: string }[] = [];
+        items.forEach(r => {
+          const id = r.TransactionId != null ? String(r.TransactionId) : '';
+          if (id && !seen.has(id)) { seen.add(id); list.push({ id, receipt: String(r.ReceiptNumber ?? ''), reference: String(r.ReferenceNumber ?? '') }); }
+        });
+        setTxns(list);
+      })
+      .catch(() => setTxns([]))
+      .finally(() => setTxnLoading(false));
+  }, [itemNumber]);
+
+  const distUrl = (id: string) => `${BASE_URL}/costDistributions?q=${encodeURIComponent('TransactionId=' + id)}&limit=${CHILD_LIMIT}`;
+
+  const retrieve = async () => {
+    const ids = selectedTxn === 'all' ? txns.map(t => t.id) : [selectedTxn];
+    if (ids.length === 0) { message.warning('No transaction ids found from receiptCosts for this item'); return; }
+    setLoading(true); setErr(''); setRan(true);
+    try {
+      const results = await Promise.all(ids.map(async id => {
+        const r = await fetch(distUrl(id), { headers: HEADERS });
+        if (!r.ok) return [];
+        const d = await r.json();
+        return (d.items ?? []).map((x: any) => ({ ...x, _TransactionId: id }));
+      }));
+      setRows(results.flat());
+    } catch (e: any) {
+      setErr(e.message); setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Clean columns: keep TransactionId, drop other *Id + object/links.
+  const cols: ColumnsType<any> = React.useMemo(() => {
+    const keys: string[] = [];
+    rows.forEach(r => Object.keys(r).forEach(k => {
+      if (k === 'links' || k === '_TransactionId') return;
+      if (/id$/i.test(k) && !/transactionid$/i.test(k)) return;
+      if (typeof (r as any)[k] === 'object' && (r as any)[k] !== null) return;
+      if (!keys.includes(k)) keys.push(k);
+    }));
+    return keys.map(k => ({
+      title: k, dataIndex: k, key: k, ellipsis: true, width: 150,
+      render: (v: any) => {
+        if (v == null || v === '') return <span style={{ color: REDWOOD.neutral300 }}>—</span>;
+        if (/date/i.test(k) && typeof v === 'string' && v.length >= 10) return <Text style={{ fontSize: 12 }}>{fmtDate(v)}</Text>;
+        if (/cost|amount|price|qty|quantity|dr$|cr$/i.test(k) && !isNaN(Number(v)))
+          return <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{numFmt(v)}</Text>;
+        return <Text style={{ fontSize: 12 }}>{String(v)}</Text>;
+      },
+    }));
+  }, [rows]);
+
+  const filtered = filter ? rows.filter(r => matchesFilter(r, filter)) : rows;
+  const activeUrl = selectedTxn === 'all'
+    ? distUrl('<each TransactionId>')
+    : distUrl(selectedTxn);
+
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
+        <Space wrap>
+          <Text style={{ fontSize: 12 }}>Transaction:</Text>
+          <Select
+            size="small"
+            style={{ width: 320 }}
+            loading={txnLoading}
+            value={selectedTxn}
+            onChange={setSelectedTxn}
+            showSearch
+            optionFilterProp="label"
+            options={[
+              { value: 'all', label: `All transactions (${txns.length})` },
+              ...txns.map(t => ({ value: t.id, label: `${t.id}${t.receipt ? ` · Rcpt ${t.receipt}` : ''}${t.reference ? ` · Ref ${t.reference}` : ''}` })),
+            ]}
+          />
+          <Button type="primary" size="small" icon={<BranchesOutlined />} loading={loading}
+            style={{ background: REDWOOD.teal, borderColor: REDWOOD.teal }} onClick={retrieve}>
+            Retrieve Distributions
+          </Button>
+        </Space>
+        <Space>
+          <Input size="small" allowClear prefix={<FilterOutlined />} placeholder="Filter…"
+            value={filter} onChange={e => setFilter(e.target.value)} style={{ width: 200 }} />
+          <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>GET {activeUrl}</span>} placement="bottomRight">
+            <ApiOutlined style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 15 }} />
+          </Tooltip>
+        </Space>
+      </div>
+      {err && <div style={{ color: REDWOOD.error, fontSize: 12, marginBottom: 8 }}>Failed to load: {err}</div>}
+      <Table
+        dataSource={filtered}
+        columns={cols}
+        rowKey={(_, i) => String(i)}
+        loading={loading}
+        size="small"
+        scroll={{ x: 'max-content' }}
+        pagination={{ pageSize: 25, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'], showTotal: (t) => `${t} rows` }}
+        locale={{ emptyText: ran ? (loading ? 'Loading…' : 'No cost distributions') : 'Pick a transaction and click Retrieve Distributions' }}
       />
     </div>
   );
@@ -617,6 +752,13 @@ const OnhandDetailPage: React.FC<{ items: RawOnhand[]; onClose?: () => void }> =
     key: 'itemCosts',
     label: <Space size={4}><DollarOutlined />Item Costs</Space>,
     children: <CostTab url={itemCostsUrl} emptyText={`No item costs for ${first.ItemNumber}`} />,
+  });
+
+  // Cost Distributions — GET costDistributions?q=TransactionId=<id from receiptCosts>
+  tabItems.push({
+    key: 'costDistributions',
+    label: <Space size={4}><BranchesOutlined />Cost Distributions</Space>,
+    children: <CostDistributionsTab itemNumber={first.ItemNumber} />,
   });
 
   return (
