@@ -482,12 +482,12 @@ const CostDistributionsTab: React.FC<{ itemNumber: string }> = ({ itemNumber }) 
   const [filter, setFilter]     = useState('');
   const [ran, setRan]           = useState(false);
 
-  const receiptUrl = `${BASE_URL}/receiptCosts?q=${encodeURIComponent('Item=' + itemNumber)}&limit=${CHILD_LIMIT}`;
+  const txnSourceUrl = `${LATEST_URL}/itemCosts?q=${encodeURIComponent('ItemNumber=' + itemNumber)}&limit=${CHILD_LIMIT}`;
 
-  // Load the transaction ids (from receiptCosts) for the dropdown.
+  // Load the transaction ids (from itemCosts) for the dropdown.
   useEffect(() => {
     setTxnLoading(true);
-    fetch(receiptUrl, { headers: HEADERS })
+    fetch(txnSourceUrl, { headers: HEADERS })
       .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(d => {
         const items: any[] = Array.isArray(d) ? d : (d.items ?? []);
