@@ -30,6 +30,30 @@ const REDWOOD = {
 const fmt = (v: number | null | undefined) =>
   v == null ? '—' : new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v));
 
+// Parse the contract date strings (MM/DD/YYYY, YYYY-MM-DD, DD-MON-YYYY seen).
+const parseFlexDate = (s: string): Date | null => {
+  if (!s) return null;
+  const t = s.trim();
+  let m = t.match(/^(\d{4})-(\d{2})-(\d{2})/);                 // YYYY-MM-DD
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+  m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);                // MM/DD/YYYY
+  if (m) return new Date(+m[3], +m[1] - 1, +m[2]);
+  const d = new Date(t);                                        // DD-MON-YYYY etc.
+  return isNaN(d.getTime()) ? null : d;
+};
+
+// Inclusive month count, matching CEIL(MONTHS_BETWEEN(end+1, start)) in the DB.
+const contractMonths = (startStr: string, endStr: string): number | null => {
+  const start = parseFlexDate(startStr);
+  const end = parseFlexDate(endStr);
+  if (!start || !end) return null;
+  const endPlus = new Date(end.getFullYear(), end.getMonth(), end.getDate() + 1);
+  const diff = (endPlus.getFullYear() - start.getFullYear()) * 12
+             + (endPlus.getMonth() - start.getMonth())
+             + (endPlus.getDate() - start.getDate()) / 31;
+  return Math.max(1, Math.ceil(diff));
+};
+
 const RevenueRecognition: React.FC = () => {
   const { user } = useAuth();
   const loggedUser = user?.username || user?.name || 'REACTERP';
@@ -116,6 +140,11 @@ const RevenueRecognition: React.FC = () => {
     { title: 'Tenant', dataIndex: 'tenant', key: 'tenant', width: 180, ellipsis: true },
     { title: 'Start', dataIndex: 'contractStartDate', key: 'contractStartDate', width: 110 },
     { title: 'End', dataIndex: 'contractEndDate', key: 'contractEndDate', width: 110 },
+    { title: 'Total Periods', key: 'periods', width: 110, align: 'center' as const,
+      render: (_: any, r: RevenueContract) => {
+        const n = contractMonths(r.contractStartDate, r.contractEndDate);
+        return n == null ? <Text type="secondary">—</Text> : <Tag color="purple">{n} mo</Tag>;
+      } },
     { title: 'Rent Total', dataIndex: 'rentTotal', key: 'rentTotal', width: 130, align: 'right' as const,
       sorter: (a, b) => (a.rentTotal || 0) - (b.rentTotal || 0),
       render: (v) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
