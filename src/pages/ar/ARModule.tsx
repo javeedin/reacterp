@@ -7,6 +7,7 @@ import {
   DollarOutlined,
   BankOutlined,
   EyeOutlined,
+  CalendarOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import FloatingMenu from '../../components/FloatingMenu';
@@ -76,6 +77,13 @@ const tasks = [
     label: 'Customer Site Activities',
     description: 'View receivables activity by customer account site',
     path: '/ar/customer-site-activities',
+  },
+  {
+    key: 'revenue-recognition',
+    icon: <CalendarOutlined style={{ fontSize: 28, color: REDWOOD.success }} />,
+    label: 'Revenue Recognition',
+    description: 'Generate monthly revenue schedules from rental contracts',
+    path: '/ar/revenue-recognition',
   },
 ];
 
