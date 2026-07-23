@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input,
   Row, Col, Space, Tag, Tabs, message, Empty, Modal, Tooltip, Badge,
-  Divider, Drawer, Spin,
+  Divider, Drawer, Spin, Select,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -620,6 +620,27 @@ const SearchTab: React.FC<{ onOpen: (items: RawOnhand[]) => void }> = ({ onOpen 
   const [filter, setFilter]     = useState('');
   const [searched, setSearched] = useState(false);
 
+  // Organization Code options — from inventoryOrganizations
+  const [orgs, setOrgs]         = useState<{ code: string; name: string; id?: number }[]>([]);
+  const [orgsLoading, setOrgsLoading] = useState(false);
+
+  useEffect(() => {
+    setOrgsLoading(true);
+    fetch(`${BASE_URL}/inventoryOrganizations?limit=500&onlyData=true&fields=OrganizationCode,OrganizationName,OrganizationId`, { headers: HEADERS })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(d => {
+        const items: any[] = Array.isArray(d) ? d : (d.items ?? []);
+        const seen = new Set<string>();
+        const list = items
+          .map(o => ({ code: o.OrganizationCode, name: o.OrganizationName, id: o.OrganizationId }))
+          .filter(o => o.code && !seen.has(o.code) && seen.add(o.code))
+          .sort((a, b) => String(a.code).localeCompare(String(b.code)));
+        setOrgs(list);
+      })
+      .catch(() => { /* fall back to free typing */ })
+      .finally(() => setOrgsLoading(false));
+  }, []);
+
   const buildUrl = (p: SearchParams, pg: number) => {
     const parts = [`OrganizationCode=${p.orgCode.trim()}`];
     if (p.itemNumber?.trim()) parts.push(`ItemNumber like "${p.itemNumber.trim()}*"`);
@@ -716,7 +737,16 @@ const SearchTab: React.FC<{ onOpen: (items: RawOnhand[]) => void }> = ({ onOpen 
         <Form form={form} layout="inline" onFinish={handleSearch} style={{ gap: 8, flexWrap: 'wrap' }}>
           <Form.Item name="orgCode" label={<Text strong style={{ fontSize: 12 }}>Organization Code</Text>}
             rules={[{ required: true, message: 'Required' }]} style={{ marginBottom: 8 }}>
-            <Input placeholder="e.g. MLC" style={{ width: 160 }} allowClear />
+            <Select
+              showSearch
+              allowClear
+              loading={orgsLoading}
+              placeholder="Select organization"
+              style={{ width: 260 }}
+              optionFilterProp="label"
+              options={orgs.map(o => ({ value: o.code, label: `${o.code} — ${o.name}` }))}
+              notFoundContent={orgsLoading ? <Spin size="small" /> : 'No organizations'}
+            />
           </Form.Item>
           <Form.Item name="itemNumber" label={<Text style={{ fontSize: 12 }}>Item Number</Text>} style={{ marginBottom: 8 }}>
             <Input placeholder="e.g. 6UW42AA  (prefix search)" style={{ width: 220 }} allowClear />
