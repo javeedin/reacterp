@@ -1,11 +1,9 @@
 -- =============================================================================
 -- RR_AR_REVENUE.SQL   — Revenue Recognition (Receivables)
 --
--- Contract source table (already exists):  RR_AR_REVENUE_SCHDULE
+-- Contract source table (already exists):  RR_AR_REVENUE_CONTRACT
 --   (ID, TRX_NUMBER, UNIT, LOCATION, TENANT, CONTRACT_START_DATE,
 --    CONTRACT_END_DATE, STATUS, RENT_TOTAL)
---   NOTE: if your contract table is actually named RR_AR_REVENUE_CONTRACT,
---   change the two references in this file (GET handler + package).
 --
 -- New schedules table (created below): RR_AR_REVENUE_SCHDULES
 --
@@ -96,7 +94,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_REVENUE_PKG AS
       BEGIN
         SELECT to_dt(CONTRACT_START_DATE), to_dt(CONTRACT_END_DATE), NVL(RENT_TOTAL,0)
           INTO v_start, v_end, v_total
-          FROM RR_AR_REVENUE_SCHDULE
+          FROM RR_AR_REVENUE_CONTRACT
          WHERE ID = v_id;
       EXCEPTION WHEN NO_DATA_FOUND THEN
         CONTINUE;
@@ -127,7 +125,7 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_REVENUE_PKG AS
         SELECT c.ID, c.TRX_NUMBER, c.UNIT, c.LOCATION, c.TENANT,
                m, TO_CHAR(v_pdate, 'Mon-RR'), v_pdate, v_amt,
                NULL, 'PENDING', 'UNACCOUNTED', SYSTIMESTAMP, v_by
-          FROM RR_AR_REVENUE_SCHDULE c
+          FROM RR_AR_REVENUE_CONTRACT c
          WHERE c.ID = v_id;
         v_rows := v_rows + 1;
       END LOOP;
@@ -175,7 +173,7 @@ SELECT ID              AS "id",
        STATUS          AS "status",
        RENT_TOTAL      AS "rentTotal",
        (SELECT COUNT(*) FROM RR_AR_REVENUE_SCHDULES s WHERE s.CONTRACT_ID = c.ID) AS "scheduleCount"
-FROM RR_AR_REVENUE_SCHDULE c
+FROM RR_AR_REVENUE_CONTRACT c
 ORDER BY TRX_NUMBER, ID
 ]'
   );
