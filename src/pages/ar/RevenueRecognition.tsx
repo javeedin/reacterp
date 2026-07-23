@@ -279,6 +279,42 @@ const RevenueRecognition: React.FC = () => {
       render: (v: string) => <Tag color={String(v).toUpperCase() === 'ACCOUNTED' ? 'green' : 'default'}>{v || '—'}</Tag> },
   ];
 
+  const saveWb = (wb: XLSX.WorkBook, name: string) => {
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    saveAs(new Blob([buf], { type: 'application/octet-stream' }), `${name}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  const exportContracts = () => {
+    if (filteredContracts.length === 0) { message.warning('No contracts to export'); return; }
+    const data = filteredContracts.map(c => ({
+      'Trx #': c.trxNumber, 'Unit': c.unit, 'Location': c.location, 'Tenant': c.tenant,
+      'Start': c.contractStartDate, 'End': c.contractEndDate,
+      'Total Periods': contractMonths(c.contractStartDate, c.contractEndDate) ?? '',
+      'Rent Total': Number(c.rentTotal) || 0, 'Status': c.status, 'Schedules': c.scheduleCount,
+    }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Revenue Contracts');
+    saveWb(wb, 'revenue_contracts');
+  };
+
+  const exportMatrix = () => {
+    if (matrix.rows.length === 0) { message.warning('No schedules to export'); return; }
+    const data = matrix.rows.map((r: any) => {
+      const row: Record<string, any> = { 'Trx #': r.trxNumber, 'Unit': r.unit, 'Tenant': r.tenant };
+      matrix.months.forEach(m => { row[m.name] = Number(r.cells[m.name]?.amount) || 0; });
+      row['Total Amount'] = r.total;
+      row['Billed'] = r.billedAmount;
+      row['Balance'] = r.balance;
+      row['Billed Periods'] = r.billedPeriods;
+      row['Remaining Periods'] = r.remainingPeriods;
+      row['Total Periods'] = r.totalPeriods;
+      return row;
+    });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Schedule Matrix');
+    saveWb(wb, 'revenue_matrix');
+  };
+
   const exportSchedules = () => {
     if (filteredSchedules.length === 0) { message.warning('No schedules to export'); return; }
     const data = filteredSchedules.map(s => ({
@@ -328,6 +364,7 @@ const RevenueRecognition: React.FC = () => {
                         <Input allowClear prefix={<SearchOutlined />} placeholder="Filter contracts…"
                           value={contractSearch} onChange={e => setContractSearch(e.target.value)} style={{ width: 260 }} />
                         <Space>
+                          <Button icon={<FileExcelOutlined />} style={{ color: REDWOOD.success, borderColor: REDWOOD.success }} onClick={exportContracts}>Excel</Button>
                           <Button icon={<ReloadOutlined />} onClick={loadContracts} loading={contractsLoading}>Refresh</Button>
                           <Button type="primary" icon={<ThunderboltOutlined />}
                             disabled={selectedKeys.length === 0}
@@ -417,7 +454,10 @@ const RevenueRecognition: React.FC = () => {
                             <CheckCircleTwoTone twoToneColor="#1D7B4D" /> billed &nbsp; <CloseCircleTwoTone twoToneColor="#C74634" /> not billed &nbsp; <Tag color="green" style={{ fontSize: 9 }}>Acct</Tag> accounted
                           </Text>
                         </Space>
-                        <Button icon={<ReloadOutlined />} onClick={loadSchedules} loading={schedulesLoading}>Refresh</Button>
+                        <Space>
+                          <Button icon={<FileExcelOutlined />} style={{ color: REDWOOD.success, borderColor: REDWOOD.success }} onClick={exportMatrix}>Excel</Button>
+                          <Button icon={<ReloadOutlined />} onClick={loadSchedules} loading={schedulesLoading}>Refresh</Button>
+                        </Space>
                       </div>
                       <Table
                         rowKey="key"
