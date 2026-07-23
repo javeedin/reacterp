@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Layout, Card, Typography, Table, Button, Space, Tag, Breadcrumb, Tabs,
-  message, Input, Tooltip, Row, Col, Statistic,
+  message, Input, Tooltip, Row, Col, Statistic, Modal, Alert,
 } from 'antd';
 import {
   HomeOutlined, ReloadOutlined, ThunderboltOutlined, SearchOutlined,
@@ -15,7 +15,7 @@ import FloatingMenu from '../../components/FloatingMenu';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import { useAuth } from '../../context/AuthContext';
 import {
-  getRevenueContracts, getRevenueSchedules, generateRevenueSchedules,
+  getRevenueContracts, getRevenueSchedules,
 } from '../../services/revenue.service';
 import type { RevenueContract, RevenueSchedule } from '../../services/revenue.service';
 
@@ -67,6 +67,14 @@ const RevenueRecognition: React.FC = () => {
   const [generating, setGenerating] = useState(false);
   const [contractSearch, setContractSearch] = useState('');
 
+  // Generate-schedule debug modal
+  const [genOpen, setGenOpen] = useState(false);
+  const [genStatus, setGenStatus] = useState<number | null>(null);
+  const [genResponse, setGenResponse] = useState<string>('');
+
+  const GEN_URL = `${APEX_DB_CONFIG.baseUrl}/ar/revenue-schedules/generate`;
+  const genPayload = { contractIds: selectedKeys.map(Number), createdBy: loggedUser };
+
   // Schedules
   const [schedules, setSchedules] = useState<RevenueSchedule[]>([]);
   const [schedulesLoading, setSchedulesLoading] = useState(false);
@@ -88,19 +96,42 @@ const RevenueRecognition: React.FC = () => {
 
   useEffect(() => { loadContracts(); loadSchedules(); }, []);
 
-  const handleGenerate = async () => {
+  const openGenerate = () => {
     if (selectedKeys.length === 0) { message.warning('Select one or more contracts'); return; }
+    setGenStatus(null);
+    setGenResponse('');
+    setGenOpen(true);
+  };
+
+  // Runs the POST directly (not via the service) so we can show the exact URL,
+  // payload, HTTP status and raw response body for debugging.
+  const runGenerate = async () => {
     setGenerating(true);
+    setGenStatus(null);
+    setGenResponse('');
     try {
-      const res = await generateRevenueSchedules(selectedKeys.map(Number), loggedUser);
-      if (res.success) {
-        message.success(`Generated ${res.schedules} schedule line(s) for ${res.contracts} contract(s)`);
+      const res = await fetch(GEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(genPayload),
+      });
+      setGenStatus(res.status);
+      const text = await res.text();
+      setGenResponse(text);
+      let data: any = {};
+      try { data = JSON.parse(text); } catch { /* non-JSON response */ }
+      if (res.ok && data.success) {
+        message.success(`Generated ${data.schedules} schedule line(s) for ${data.contracts} contract(s)`);
         setSelectedKeys([]);
         await Promise.all([loadContracts(), loadSchedules()]);
+        setGenOpen(false);
         setTab('schedules');
       } else {
-        message.error(res.error || 'Generation failed');
+        message.error(data.error || `Generation failed (HTTP ${res.status})`);
       }
+    } catch (e: any) {
+      setGenResponse(e?.message || 'Network error');
+      message.error(e?.message || 'Generation failed');
     } finally {
       setGenerating(false);
     }
@@ -224,10 +255,10 @@ const RevenueRecognition: React.FC = () => {
                           value={contractSearch} onChange={e => setContractSearch(e.target.value)} style={{ width: 260 }} />
                         <Space>
                           <Button icon={<ReloadOutlined />} onClick={loadContracts} loading={contractsLoading}>Refresh</Button>
-                          <Button type="primary" icon={<ThunderboltOutlined />} loading={generating}
+                          <Button type="primary" icon={<ThunderboltOutlined />}
                             disabled={selectedKeys.length === 0}
                             style={selectedKeys.length > 0 ? { background: REDWOOD.primary, borderColor: REDWOOD.primary } : {}}
-                            onClick={handleGenerate}>
+                            onClick={openGenerate}>
                             Generate Schedule ({selectedKeys.length})
                           </Button>
                         </Space>
@@ -291,6 +322,49 @@ const RevenueRecognition: React.FC = () => {
             />
           </Card>
         </div>
+
+        {/* ── Generate Schedule — debug/confirm modal ── */}
+        <Modal
+          open={genOpen}
+          onCancel={() => { if (!generating) setGenOpen(false); }}
+          maskClosable={!generating}
+          width={720}
+          title={<Space><ThunderboltOutlined style={{ color: REDWOOD.primary }} /><span>Generate Revenue Schedule</span></Space>}
+          footer={
+            <Space>
+              <Button disabled={generating} onClick={() => setGenOpen(false)}>Close</Button>
+              <Button type="primary" loading={generating}
+                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+                onClick={runGenerate}>
+                Run Generate ({selectedKeys.length})
+              </Button>
+            </Space>
+          }
+        >
+          <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Method / URL</div>
+          <Typography.Text copyable code style={{ fontSize: 12, wordBreak: 'break-all' }}>{`POST ${GEN_URL}`}</Typography.Text>
+
+          <div style={{ fontSize: 12, color: '#888', margin: '12px 0 4px' }}>Request Body (JSON)</div>
+          <pre style={{ fontSize: 11, background: '#0d0d0d', color: '#a8ff78', borderRadius: 4, padding: 10, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+            {JSON.stringify(genPayload, null, 2)}
+          </pre>
+
+          {genStatus != null && (
+            <>
+              <div style={{ fontSize: 12, color: '#888', margin: '12px 0 4px' }}>
+                Response — HTTP <b style={{ color: genStatus >= 200 && genStatus < 300 ? REDWOOD.success : REDWOOD.primary }}>{genStatus}</b>
+              </div>
+              <pre style={{ fontSize: 11, background: '#0d0d0d', color: '#79c0ff', borderRadius: 4, padding: 10, maxHeight: 240, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                {genResponse || '(empty)'}
+              </pre>
+              {genStatus === 404 && (
+                <Alert type="warning" showIcon style={{ marginTop: 8, fontSize: 12 }}
+                  message="404 — the webservice isn't deployed. Run database/ar/rr_ar_revenue.sql in APEX SQL Workshop (it registers POST ar/revenue-schedules/generate)." />
+              )}
+            </>
+          )}
+        </Modal>
+
         <FloatingMenu />
       </Content>
     </Layout>
