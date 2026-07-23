@@ -524,15 +524,22 @@ const CostDistributionsTab: React.FC<{ itemNumber: string }> = ({ itemNumber }) 
     }
   };
 
-  // Clean columns: keep TransactionId, drop other *Id + object/links.
+  // Clean columns: drop all *Id + object/links.
   const cols: ColumnsType<any> = React.useMemo(() => {
     const keys: string[] = [];
     rows.forEach(r => Object.keys(r).forEach(k => {
       if (k === 'links' || k === '_TransactionId') return;
-      if (/id$/i.test(k) && !/transactionid$/i.test(k)) return;
+      if (/id$/i.test(k)) return;                                 // drop all *Id columns
       if (typeof (r as any)[k] === 'object' && (r as any)[k] !== null) return;
       if (!keys.includes(k)) keys.push(k);
     }));
+    // Move CostElementCode to right after the Accounted Dr column.
+    const ceIdx = keys.findIndex(k => /costelementcode/i.test(k));
+    if (ceIdx >= 0) {
+      const [ce] = keys.splice(ceIdx, 1);
+      const drIdx = keys.findIndex(k => /accounteddr/i.test(k));
+      if (drIdx >= 0) keys.splice(drIdx + 1, 0, ce); else keys.push(ce);
+    }
     return keys.map(k => ({
       title: k, dataIndex: k, key: k, ellipsis: true, width: 150,
       render: (v: any) => {
