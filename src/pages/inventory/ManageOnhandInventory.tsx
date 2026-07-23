@@ -330,9 +330,27 @@ const AllLotsTab: React.FC<{ allLots: any[]; loading: boolean }> = ({ allLots, l
   );
 };
 
+// Split a ValuationUnit like "COSTORG-INVORG-SUBINV-LOT\-2026020223" into parts.
+// Hyphens escaped as "\-" (inside the lot) are NOT split points.
+const parseValuationUnit = (vu?: string) => {
+  if (!vu) return { costOrg: '', invOrg: '', subinv: '', lot: '' };
+  const parts = String(vu).split(/(?<!\\)-/);   // split on unescaped hyphens
+  const costOrg = parts[0] || '';
+  const invOrg  = parts[1] || '';
+  const subinv  = parts[2] || '';
+  const lot     = parts.slice(3).join('-').replace(/\\-/g, '-');
+  return { costOrg, invOrg, subinv, lot };
+};
+
+const numFmt = (v: any) =>
+  v == null || v === '' || isNaN(Number(v)) ? '—'
+    : new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 }).format(Number(v));
+
 // ── Cost tab (Receipt Costs / Item Costs) ─────────────────────────────────────
-// Fetches a Fusion cost REST resource for the item and renders every returned
-// field in a table. The API icon (hover) shows the exact webservice URL.
+// If the resource returns ValuationUnit rows, group by ValuationUnit — split it
+// into Cost Org / Inventory Org / Subinventory / Lot, show TotalUnitCost, and
+// sum ReceiptQuantity + QuantityOnhand. Otherwise show a clean table (id/links
+// columns removed). The API icon (hover) shows the exact webservice URL.
 const CostTab: React.FC<{ url: string; emptyText: string }> = ({ url, emptyText }) => {
   const [rows, setRows]       = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -350,23 +368,58 @@ const CostTab: React.FC<{ url: string; emptyText: string }> = ({ url, emptyText 
 
   useEffect(() => { load(); }, [load]);
 
-  const cols: ColumnsType<any> = React.useMemo(() => {
+  const hasVU = rows.some(r => r.ValuationUnit != null);
+
+  // Grouped-by-ValuationUnit rows
+  const grouped = React.useMemo(() => {
+    const map = new Map<string, any>();
+    rows.forEach(r => {
+      const vu = String(r.ValuationUnit ?? '');
+      let g = map.get(vu);
+      if (!g) { g = { vu, ...parseValuationUnit(vu), totalUnitCost: null, receiptQty: 0, onhandQty: 0, count: 0 }; map.set(vu, g); }
+      g.receiptQty += Number(r.ReceiptQuantity) || 0;
+      g.onhandQty  += Number(r.QuantityOnhand)  || 0;
+      g.count      += 1;
+      if (r.TotalUnitCost != null && r.TotalUnitCost !== '') g.totalUnitCost = r.TotalUnitCost;
+    });
+    return Array.from(map.values());
+  }, [rows]);
+
+  const groupedCols: ColumnsType<any> = [
+    { title: 'Cost Org',      dataIndex: 'costOrg', key: 'costOrg', width: 150, ellipsis: true, render: (v: string) => <Text strong style={{ fontSize: 12 }}>{v || '—'}</Text> },
+    { title: 'Inventory Org', dataIndex: 'invOrg',  key: 'invOrg',  width: 150, ellipsis: true, render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+    { title: 'Subinventory',  dataIndex: 'subinv',  key: 'subinv',  width: 130, render: (v: string) => v ? <Tag color="cyan">{v}</Tag> : '—' },
+    { title: 'Lot',           dataIndex: 'lot',     key: 'lot',     width: 170, ellipsis: true, render: (v: string) => v ? <Tag color="geekblue">{v}</Tag> : '—' },
+    { title: 'Total Unit Cost', dataIndex: 'totalUnitCost', key: 'totalUnitCost', width: 140, align: 'right' as const, render: (v: any) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{numFmt(v)}</Text> },
+    { title: 'Receipt Qty',   dataIndex: 'receiptQty', key: 'receiptQty', width: 120, align: 'right' as const, render: (v: any) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{numFmt(v)}</Text> },
+    { title: 'On-hand Qty',   dataIndex: 'onhandQty',  key: 'onhandQty',  width: 120, align: 'right' as const, render: (v: any) => <Text strong style={{ fontFamily: 'monospace', fontSize: 12, color: Number(v) > 0 ? REDWOOD.success : undefined }}>{numFmt(v)}</Text> },
+    { title: '# Receipts',    dataIndex: 'count',      key: 'count',      width: 90, align: 'right' as const, render: (v: number) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+  ];
+
+  // Clean flat columns (fallback): drop id + links + object columns.
+  const flatCols: ColumnsType<any> = React.useMemo(() => {
     const keys: string[] = [];
-    rows.forEach(r => Object.keys(r).forEach(k => { if (k !== 'links' && !keys.includes(k)) keys.push(k); }));
+    rows.forEach(r => Object.keys(r).forEach(k => {
+      if (k === 'links') return;
+      if (/id$/i.test(k)) return;                 // drop all *Id columns
+      if (typeof (r as any)[k] === 'object' && (r as any)[k] !== null) return;
+      if (!keys.includes(k)) keys.push(k);
+    }));
     return keys.map(k => ({
       title: k, dataIndex: k, key: k, ellipsis: true, width: 150,
       render: (v: any) => {
         if (v == null || v === '') return <span style={{ color: REDWOOD.neutral300 }}>—</span>;
-        if (typeof v === 'object') return <Text style={{ fontSize: 11 }}>{JSON.stringify(v)}</Text>;
         if (/date/i.test(k) && typeof v === 'string' && v.length >= 10) return <Text style={{ fontSize: 12 }}>{fmtDate(v)}</Text>;
         if (/cost|amount|price|qty|quantity/i.test(k) && !isNaN(Number(v)))
-          return <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</Text>;
+          return <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{numFmt(v)}</Text>;
         return <Text style={{ fontSize: 12 }}>{String(v)}</Text>;
       },
     }));
   }, [rows]);
 
-  const filtered = filter ? rows.filter(r => matchesFilter(r, filter)) : rows;
+  const dataSource = hasVU ? grouped : rows;
+  const columns = hasVU ? groupedCols : flatCols;
+  const filtered = filter ? dataSource.filter((r: any) => matchesFilter(r, filter)) : dataSource;
 
   return (
     <div style={{ padding: 16 }}>
@@ -374,7 +427,7 @@ const CostTab: React.FC<{ url: string; emptyText: string }> = ({ url, emptyText 
         <Space>
           <Input size="small" allowClear prefix={<FilterOutlined />} placeholder="Filter results…"
             value={filter} onChange={e => setFilter(e.target.value)} style={{ width: 240 }} />
-          <Text type="secondary" style={{ fontSize: 12 }}>{filtered.length} row(s)</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>{filtered.length} {hasVU ? 'valuation unit(s)' : 'row(s)'}</Text>
         </Space>
         <Space>
           <Button size="small" icon={<ReloadOutlined />} onClick={load} loading={loading}>Refresh</Button>
@@ -386,13 +439,23 @@ const CostTab: React.FC<{ url: string; emptyText: string }> = ({ url, emptyText 
       {err && <div style={{ color: REDWOOD.error, fontSize: 12, marginBottom: 8 }}>Failed to load: {err}</div>}
       <Table
         dataSource={filtered}
-        columns={cols}
+        columns={columns}
         rowKey={(_, i) => String(i)}
         loading={loading}
         size="small"
         scroll={{ x: 'max-content' }}
         pagination={{ pageSize: 25, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'], showTotal: (t) => `${t} rows` }}
         locale={{ emptyText: loading ? 'Loading…' : (err ? 'Error' : emptyText) }}
+        summary={() => (hasVU && filtered.length > 0) ? (
+          <Table.Summary fixed>
+            <Table.Summary.Row style={{ background: REDWOOD.neutral100, fontWeight: 700 }}>
+              <Table.Summary.Cell index={0} colSpan={5}><Text strong>Total ({filtered.length})</Text></Table.Summary.Cell>
+              <Table.Summary.Cell index={5} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{numFmt(filtered.reduce((s: number, g: any) => s + g.receiptQty, 0))}</Text></Table.Summary.Cell>
+              <Table.Summary.Cell index={6} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.success }}>{numFmt(filtered.reduce((s: number, g: any) => s + g.onhandQty, 0))}</Text></Table.Summary.Cell>
+              <Table.Summary.Cell index={7} />
+            </Table.Summary.Row>
+          </Table.Summary>
+        ) : null}
       />
     </div>
   );
