@@ -5,7 +5,8 @@ import {
 } from 'antd';
 import {
   HomeOutlined, ReloadOutlined, ThunderboltOutlined, SearchOutlined,
-  FileExcelOutlined, ApiOutlined, DollarOutlined,
+  FileExcelOutlined, ApiOutlined, DollarOutlined, CheckCircleTwoTone, CloseCircleTwoTone,
+  TableOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -162,6 +163,52 @@ const RevenueRecognition: React.FC = () => {
 
   const scheduleTotal = useMemo(() => filteredSchedules.reduce((s, r) => s + (Number(r.amount) || 0), 0), [filteredSchedules]);
 
+  const isBilled = (s: RevenueSchedule) => String(s.status || '').toUpperCase() !== 'PENDING' || !!s.invoiceNumber;
+  const isAccounted = (s: RevenueSchedule) => String(s.accountStatus || '').toUpperCase() === 'ACCOUNTED';
+
+  // Pivot: one row per contract, one column per month (chronological).
+  const matrix = useMemo(() => {
+    const months: { name: string; date: string }[] = [];
+    const seen = new Set<string>();
+    const byContract = new Map<number, any>();
+    filteredSchedules.forEach(s => {
+      if (!seen.has(s.periodName)) { seen.add(s.periodName); months.push({ name: s.periodName, date: s.periodDate }); }
+      let row = byContract.get(s.contractId);
+      if (!row) { row = { key: s.contractId, contractId: s.contractId, trxNumber: s.trxNumber, unit: s.unit, tenant: s.tenant, total: 0, cells: {} as Record<string, RevenueSchedule> }; byContract.set(s.contractId, row); }
+      row.cells[s.periodName] = s;
+      row.total += Number(s.amount) || 0;
+    });
+    months.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    return { months, rows: Array.from(byContract.values()) };
+  }, [filteredSchedules]);
+
+  const matrixColumns: ColumnsType<any> = useMemo(() => [
+    { title: 'Trx #', dataIndex: 'trxNumber', key: 'trxNumber', width: 90, fixed: 'left' as const, render: (v: any) => <Text strong>{v ?? '—'}</Text> },
+    { title: 'Unit', dataIndex: 'unit', key: 'unit', width: 110, fixed: 'left' as const },
+    { title: 'Tenant', dataIndex: 'tenant', key: 'tenant', width: 150, fixed: 'left' as const, ellipsis: true },
+    ...matrix.months.map(m => ({
+      title: m.name, key: m.name, width: 110, align: 'center' as const,
+      render: (_: any, row: any) => {
+        const s: RevenueSchedule | undefined = row.cells[m.name];
+        if (!s) return <Text type="secondary">—</Text>;
+        const billed = isBilled(s);
+        return (
+          <Tooltip title={`Billed: ${billed ? 'Yes' : 'No'} · Accounted: ${isAccounted(s) ? 'Yes' : 'No'}${s.invoiceNumber ? ` · Inv ${s.invoiceNumber}` : ''}`}>
+            <div style={{ lineHeight: 1.3 }}>
+              <div style={{ fontFamily: 'monospace', fontSize: 12 }}>{fmt(s.amount)}</div>
+              <div>
+                {billed ? <CheckCircleTwoTone twoToneColor="#1D7B4D" /> : <CloseCircleTwoTone twoToneColor="#C74634" />}
+                {isAccounted(s) && <Tag color="green" style={{ marginLeft: 4, fontSize: 9, padding: '0 4px', lineHeight: '14px' }}>Acct</Tag>}
+              </div>
+            </div>
+          </Tooltip>
+        );
+      },
+    })),
+    { title: 'Total', dataIndex: 'total', key: 'total', width: 120, align: 'right' as const, fixed: 'right' as const,
+      render: (v: number) => <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(v)}</Text> },
+  ], [matrix.months]);
+
   // ── Columns ────────────────────────────────────────────────────────────────
   const contractCols: ColumnsType<RevenueContract> = [
     { title: 'Trx #', dataIndex: 'trxNumber', key: 'trxNumber', width: 100, sorter: (a, b) => (a.trxNumber || 0) - (b.trxNumber || 0),
@@ -314,6 +361,35 @@ const RevenueRecognition: React.FC = () => {
                             </Table.Summary.Row>
                           </Table.Summary>
                         )}
+                      />
+                    </>
+                  ),
+                },
+                {
+                  key: 'matrix',
+                  label: <Space size={4}><TableOutlined />Schedule Matrix</Space>,
+                  children: (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
+                        <Space wrap>
+                          <Input allowClear prefix={<SearchOutlined />} placeholder="Filter…"
+                            value={scheduleSearch} onChange={e => setScheduleSearch(e.target.value)} style={{ width: 240 }} />
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            <CheckCircleTwoTone twoToneColor="#1D7B4D" /> billed &nbsp; <CloseCircleTwoTone twoToneColor="#C74634" /> not billed &nbsp; <Tag color="green" style={{ fontSize: 9 }}>Acct</Tag> accounted
+                          </Text>
+                        </Space>
+                        <Button icon={<ReloadOutlined />} onClick={loadSchedules} loading={schedulesLoading}>Refresh</Button>
+                      </div>
+                      <Table
+                        rowKey="key"
+                        columns={matrixColumns}
+                        dataSource={matrix.rows}
+                        loading={schedulesLoading}
+                        size="small"
+                        bordered
+                        scroll={{ x: 300 + matrix.months.length * 110 }}
+                        pagination={{ pageSize: 50, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'], showTotal: (t) => `${t} contracts` }}
+                        locale={{ emptyText: 'No schedules — generate them from the Contracts tab' }}
                       />
                     </>
                   ),
