@@ -15,7 +15,7 @@ import {
   DollarOutlined, FileTextOutlined, DownOutlined, FilePdfOutlined,
   HistoryOutlined,
 } from '@ant-design/icons';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import CreatePurchaseOrder from './CreatePurchaseOrder';
 
 const { Content } = Layout;
@@ -958,6 +958,19 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
   };
 
   const handleReset = () => { form.resetFields(); setSearchParams({}); setPage(1); setData([]); setTotal(0); setHasSearched(false); setLineCountMap(new Map()); };
+
+  // Deep-link: ?orderNumber=<PO> (e.g. drill-down from cost-distribution reference)
+  // prefills the form and runs the search automatically.
+  const [urlParams] = useSearchParams();
+  useEffect(() => {
+    const on = urlParams.get('orderNumber');
+    if (!on) return;
+    form.setFieldsValue({ orderNumber: on });
+    const params: SearchParams = { orderNumber: on };
+    setSearchParams(params); setPage(1); setHasSearched(true);
+    fetchPOs(params, 1).then(items => fetchLineCounts(items));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleApiTest = async () => {
     const url = buildUrl(form.getFieldsValue(), page);

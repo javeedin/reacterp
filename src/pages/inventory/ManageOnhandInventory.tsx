@@ -11,7 +11,7 @@ import {
   TagsOutlined, ApartmentOutlined, FilterOutlined, InboxOutlined,
   ApiOutlined, DollarOutlined, ReconciliationOutlined, BranchesOutlined,
 } from '@ant-design/icons';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -352,6 +352,7 @@ const numFmt = (v: any) =>
 // sum ReceiptQuantity + QuantityOnhand. Otherwise show a clean table (id/links
 // columns removed). The API icon (hover) shows the exact webservice URL.
 const CostTab: React.FC<{ url: string; emptyText: string }> = ({ url, emptyText }) => {
+  const navigate = useNavigate();
   const [rows, setRows]       = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr]         = useState('');
@@ -388,6 +389,7 @@ const CostTab: React.FC<{ url: string; emptyText: string }> = ({ url, emptyText 
       ...g,
       receiptNumber: Array.from(g._recpt).join(', '),
       referenceNumber: Array.from(g._ref).join(', '),
+      referenceList: Array.from(g._ref) as string[],
     }));
   }, [rows]);
 
@@ -397,7 +399,21 @@ const CostTab: React.FC<{ url: string; emptyText: string }> = ({ url, emptyText 
     { title: 'Subinventory',  dataIndex: 'subinv',  key: 'subinv',  width: 130, render: (v: string) => v ? <Tag color="cyan">{v}</Tag> : '—' },
     { title: 'Lot',           dataIndex: 'lot',     key: 'lot',     width: 170, ellipsis: true, render: (v: string) => v ? <Tag color="geekblue">{v}</Tag> : '—' },
     { title: 'Receipt #',     dataIndex: 'receiptNumber',   key: 'receiptNumber',   width: 130, ellipsis: true, render: (v: string) => v || <span style={{ color: REDWOOD.neutral300 }}>—</span> },
-    { title: 'Reference #',   dataIndex: 'referenceNumber', key: 'referenceNumber', width: 130, ellipsis: true, render: (v: string) => v || <span style={{ color: REDWOOD.neutral300 }}>—</span> },
+    { title: 'Reference # (PO)', dataIndex: 'referenceNumber', key: 'referenceNumber', width: 150, ellipsis: true,
+      render: (_: any, r: any) => {
+        const refs: string[] = r.referenceList || [];
+        if (refs.length === 0) return <span style={{ color: REDWOOD.neutral300 }}>—</span>;
+        return (
+          <Space size={4} wrap>
+            {refs.map((ref, i) => (
+              <Tooltip key={i} title={`Drill down to Purchase Order ${ref}`}>
+                <a onClick={() => navigate(`/procurement/purchase-orders?orderNumber=${encodeURIComponent(ref)}`)}
+                  style={{ fontSize: 12, fontWeight: 600 }}>{ref}</a>
+              </Tooltip>
+            ))}
+          </Space>
+        );
+      } },
     { title: 'Total Unit Cost', dataIndex: 'totalUnitCost', key: 'totalUnitCost', width: 140, align: 'right' as const, render: (v: any) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{numFmt(v)}</Text> },
     { title: 'Receipt Qty',   dataIndex: 'receiptQty', key: 'receiptQty', width: 120, align: 'right' as const, render: (v: any) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{numFmt(v)}</Text> },
     { title: 'On-hand Qty',   dataIndex: 'onhandQty',  key: 'onhandQty',  width: 120, align: 'right' as const, render: (v: any) => <Text strong style={{ fontFamily: 'monospace', fontSize: 12, color: Number(v) > 0 ? REDWOOD.success : undefined }}>{numFmt(v)}</Text> },
