@@ -802,12 +802,21 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
     // Match the exact structure required by Oracle Fusion draftPurchaseOrders
     const orgObj = inventoryOrgs.find(o => o.OrganizationCode === header.shipToOrg);
 
+    // Conversion rate — only for a foreign currency (AED is functional).
+    // Pulled from the fxRate already shown on the page (rate/type/date).
+    const isForeignCcy = !!header.currency && header.currency !== 'AED';
+    const useFx = isForeignCcy && fxRate && fxRate.rate > 0;
+
     return {
       ProcurementBUId:           procBUId,
       OrderNumber:               header.poNumber,
       RequiredAcknowledgment:    'None',
       CurrencyCode:              header.currency,
       Currency:                  currencyObj?.name ?? null,
+      ConversionRateTypeCode:    useFx ? (fxRate!.rateType || 'Corporate') : null,
+      ConversionRateType:        useFx ? (fxRate!.rateType || 'Corporate') : null,
+      ConversionRateDate:        useFx && fxRate!.rateDate ? dayjs(fxRate!.rateDate).format('YYYY-MM-DD') : null,
+      ConversionRate:            useFx ? fxRate!.rate : null,
       Buyer:                     header.buyer || null,
       PayOnReceiptFlag:          header.payOnReceipt ? 'Y' : 'N',
       RequisitioningBUId:        reqBUId ?? null,
