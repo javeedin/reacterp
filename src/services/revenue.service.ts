@@ -84,6 +84,32 @@ export const getRevenueSchedules = async (params?: { contractId?: number; trxNum
   return items.map(mapSchedule);
 };
 
+// Update a revenue schedule by schedule id — used after accounting is posted to
+// stamp accountStatus = ACCOUNTED (+ the SLA header id). Mirrors ap/multiperiod
+// mark-posted. POST ar/revenue-schedules/mark-accounted.
+export const REVENUE_MARK_ACCOUNTED_URL = `${BASE}/ar/revenue-schedules/mark-accounted`;
+
+export interface MarkAccountedResult { success: boolean; scheduleId: number; rowsUpdated?: number; error?: string }
+
+export const markRevenueScheduleAccounted = async (
+  scheduleId: number,
+  opts?: { slaHeaderId?: number; accountStatus?: string; updatedBy?: string },
+): Promise<MarkAccountedResult> => {
+  const res = await fetch(REVENUE_MARK_ACCOUNTED_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      scheduleId,
+      slaHeaderId:   opts?.slaHeaderId ?? null,
+      accountStatus: opts?.accountStatus ?? 'ACCOUNTED',
+      updatedBy:     opts?.updatedBy ?? 'SYSTEM',
+    }),
+  });
+  const data = await res.json().catch(() => ({} as any));
+  if (!res.ok || data?.success === false) throw new Error(data?.error || `HTTP ${res.status}`);
+  return { success: true, scheduleId, rowsUpdated: data?.rowsUpdated };
+};
+
 export const generateRevenueSchedules = async (
   contractIds: number[], createdBy?: string,
 ): Promise<{ success: boolean; contracts?: number; schedules?: number; error?: string }> => {

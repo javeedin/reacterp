@@ -16,7 +16,7 @@ import FloatingMenu from '../../components/FloatingMenu';
 import { APEX_DB_CONFIG } from '../../config/api.config';
 import { useAuth } from '../../context/AuthContext';
 import {
-  getRevenueContracts, getRevenueSchedules,
+  getRevenueContracts, getRevenueSchedules, markRevenueScheduleAccounted,
 } from '../../services/revenue.service';
 import type { RevenueContract, RevenueSchedule } from '../../services/revenue.service';
 import {
@@ -24,8 +24,20 @@ import {
   fetchLedgerByBusinessUnit, derivePeriodName,
 } from '../../services/sla.service';
 import type { SlaCreatePayload } from '../../services/sla.service';
-import { postSlaToGL } from '../../services/glPosting.service';
+import { postSlaToGL, buildGlJournalPayload, makeBatchName } from '../../services/glPosting.service';
 import type { GlPostingOptions } from '../../services/glPosting.service';
+
+// Resolve {slaHeaderId}/{batchId}/{batchName}/{glHeaderId} tokens in debug steps.
+function resolveTokens<T>(value: T, ctx: Record<string, any>): T {
+  if (typeof value === 'string') return value.replace(/\{(\w+)\}/g, (_, k) => (ctx[k] != null ? String(ctx[k]) : '0')) as unknown as T;
+  if (Array.isArray(value)) return value.map(v => resolveTokens(v, ctx)) as unknown as T;
+  if (value && typeof value === 'object') {
+    const out: Record<string, any> = {};
+    for (const k of Object.keys(value as Record<string, any>)) out[k] = resolveTokens((value as any)[k], ctx);
+    return out as unknown as T;
+  }
+  return value;
+}
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -148,6 +160,13 @@ const RevenueRecognition: React.FC = () => {
   const [acctLines, setAcctLines]             = useState<AcctLine[]>([]);
   const [posting, setPosting]                 = useState(false);
   const [postResults, setPostResults]         = useState<{ schedule: number; trx: number | null; status: string; message: string }[]>([]);
+
+  // Create-accounting debug modal (per-step URL + payload + Run)
+  const [acctDebugOpen,   setAcctDebugOpen]   = useState(false);
+  const [acctDebugSteps,  setAcctDebugSteps]  = useState<{ step: string; method: string; url: string; payload: any }[]>([]);
+  const [acctStepTest,    setAcctStepTest]    = useState<Record<number, { loading: boolean; status: number; body: string }>>({});
+  const [acctDebugCtx,    setAcctDebugCtx]    = useState<Record<string, any>>({});
+  const [acctDebugHalted, setAcctDebugHalted] = useState(false);
 
   const loadContracts = async () => {
     setContractsLoading(true);
@@ -333,7 +352,12 @@ const RevenueRecognition: React.FC = () => {
 
     const glRes = await postSlaToGL(buildRevenueGlOpts(s, ledger, postedBy, slaHeaderId));
     if (!glRes.success) return { status: 'error', message: glRes.error || 'GL posting failed' };
-    return { status: 'success', message: `SLA #${slaHeaderId} — GL ${glRes.batchName}${glRes.skipped ? ' (reused)' : ''}` };
+
+    // Stamp the revenue schedule accounted (best-effort — don't fail the post).
+    let markNote = '';
+    try { await markRevenueScheduleAccounted(s.id, { slaHeaderId, updatedBy: postedBy }); }
+    catch (e: any) { markNote = ` · schedule not stamped (${e.message})`; }
+    return { status: 'success', message: `SLA #${slaHeaderId} — GL ${glRes.batchName}${glRes.skipped ? ' (reused)' : ''}${markNote}` };
   };
 
   const runCreateAccounting = async () => {
@@ -358,6 +382,93 @@ const RevenueRecognition: React.FC = () => {
     if (err === 0) message.success(`Accounting created: ${ok} posted${skip ? `, ${skip} already accounted` : ''}`);
     else message.warning(`Posted ${ok}, skipped ${skip}, failed ${err}`);
     await loadSchedules();
+  };
+
+  // ── Create-accounting debug: build all steps for the first selected schedule ──
+  const openAcctDebug = async () => {
+    const chosen = postSchedules.filter(s => postSelectedKeys.includes(s.id));
+    const s = chosen[0];
+    if (!s) { message.warning('Select a schedule to debug'); return; }
+    const postedBy = loggedUser;
+    const today = new Date().toISOString().split('T')[0];
+    const base = APEX_DB_CONFIG.baseUrl;
+    const ledger = await fetchLedgerByBusinessUnit(s.businessUnit).catch(() => null);
+    const slaPayload = ledger ? buildRevenueSlaPayload(s, ledger, postedBy, today) : { error: `No ledger for BU '${s.businessUnit || '—'}'` };
+    const batchName = makeBatchName(RR_SOURCE, String(s.trxNumber ?? s.id));
+    const glPayload = ledger ? buildGlJournalPayload(buildRevenueGlOpts(s, ledger, postedBy, 0), batchName) : { error: `No ledger for BU '${s.businessUnit || '—'}'` };
+    setAcctDebugSteps([
+      { step: `1 — Ledger by BU (${s.businessUnit || '—'})`, method: 'GET',
+        url: `${base}/gl/getledgername?P_BUSINESS_UNIT_NAME=${encodeURIComponent(s.businessUnit || '')}`, payload: null },
+      { step: `2 — Duplicate check (Ref2=${s.id}, Ref5=${RR_SOURCE})`, method: 'GET',
+        url: `${base}/gl/journals/check?reference1=${encodeURIComponent(String(s.trxNumber ?? ''))}&reference2=${s.id}&reference5=${RR_SOURCE}`, payload: null },
+      { step: '3 — Create SLA accounting', method: 'POST', url: `${base}/sla/accounting/create`, payload: slaPayload },
+      { step: '4 — Create GL journal', method: 'POST', url: `${base}/journals/create`, payload: glPayload },
+      { step: '5 — Post journal to GL', method: 'PUT', url: `${base}/gl/journals/{batchId}/post`, payload: {} },
+      { step: '6 — Stamp SLA header POSTED', method: 'POST', url: `${base}/sla/accounting/post`,
+        payload: { headerId: '{slaHeaderId}', glBatchId: '{batchId}', glBatchName: batchName, glHeaderId: '{glHeaderId}', postedBy } },
+      { step: `7 — Update revenue schedule (schedule ${s.id})`, method: 'POST', url: `${base}/ar/revenue-schedules/mark-accounted`,
+        payload: { scheduleId: s.id, slaHeaderId: '{slaHeaderId}', accountStatus: 'ACCOUNTED', updatedBy: postedBy } },
+    ]);
+    setAcctStepTest({});
+    setAcctDebugCtx({ batchName });
+    setAcctDebugHalted(false);
+    setAcctDebugOpen(true);
+  };
+
+  const runAcctDebugStep = async (idx: number) => {
+    const s = acctDebugSteps[idx];
+    if (!s) return;
+    const isDupCheck = s.url.includes('/gl/journals/check');
+    if (acctDebugHalted && !isDupCheck) { message.warning('Journal already exists — remaining steps are halted. Re-open the debug modal to reset.'); return; }
+    setAcctStepTest(prev => ({ ...prev, [idx]: { loading: true, status: 0, body: '' } }));
+    try {
+      const url = resolveTokens(s.url, acctDebugCtx);
+      const payload = s.payload ? resolveTokens(s.payload, acctDebugCtx) : null;
+
+      // SLA create — reuse an existing header instead of creating a duplicate.
+      if (s.url.includes('/sla/accounting/create') && payload?.header?.sourceId != null) {
+        const h = payload.header;
+        const chk = await checkAccountingExists(h.sourceTable, h.sourceId, h.eventTypeCode);
+        if (chk.exists && chk.headerId) {
+          setAcctDebugCtx(prev => ({ ...prev, slaHeaderId: chk.headerId }));
+          setAcctStepTest(prev => ({ ...prev, [idx]: { loading: false, status: 200, body: `SLA already exists for schedule ${h.sourceId} — reusing headerId ${chk.headerId}. No duplicate created.\n\n${JSON.stringify(chk, null, 2)}` } }));
+          message.info(`SLA already exists — reusing header #${chk.headerId}`);
+          return;
+        }
+      }
+
+      const hasBody = s.method === 'POST' || s.method === 'PUT';
+      const res = await fetch(url, {
+        method: s.method,
+        headers: hasBody ? { 'Content-Type': 'application/json', Accept: 'application/json' } : { Accept: 'application/json' },
+        body: hasBody && payload && !payload.error ? JSON.stringify(payload) : undefined,
+      });
+      const text = await res.text();
+      let data: any = null, pretty = text;
+      try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* not json */ }
+      setAcctStepTest(prev => ({ ...prev, [idx]: { loading: false, status: res.status, body: pretty } }));
+
+      if (data && res.ok) {
+        if (isDupCheck) {
+          if (data.exists) {
+            setAcctDebugCtx(prev => ({ ...prev, batchId: data.batchId ?? prev.batchId, glHeaderId: data.headerId ?? prev.glHeaderId }));
+            setAcctDebugHalted(true);
+            message.warning(`Journal already exists (GL batch ${data.batchId ?? '—'}) — remaining steps halted.`);
+          }
+        } else if (s.url.includes('/gl/getledgername')) {
+          const item = data.items?.[0];
+          if (item) setAcctDebugCtx(prev => ({ ...prev, ledgerId: item.ledger_id, ledgerName: item.ledger_name }));
+        } else if (s.url.includes('/sla/accounting/create')) {
+          if (data.headerId != null) setAcctDebugCtx(prev => ({ ...prev, slaHeaderId: data.headerId }));
+        } else if (s.url.includes('/journals/create')) {
+          const batchId    = data.jeBatchId  ?? data.je_batch_id  ?? data.batchId  ?? null;
+          const glHeaderId = data.jeHeaderId ?? data.je_header_id ?? data.headerId ?? null;
+          setAcctDebugCtx(prev => ({ ...prev, batchId: batchId ?? prev.batchId, glHeaderId: glHeaderId ?? prev.glHeaderId }));
+        }
+      }
+    } catch (e: any) {
+      setAcctStepTest(prev => ({ ...prev, [idx]: { loading: false, status: 0, body: e?.message ?? 'Network error' } }));
+    }
   };
 
   // Pivot: one row per contract, one column per month (chronological).
@@ -709,6 +820,7 @@ const RevenueRecognition: React.FC = () => {
                             onClick={openAcctPreview}>
                             Create Accounting ({postSelectedKeys.length})
                           </Button>
+                          <Button icon={<ApiOutlined />} disabled={postSelectedKeys.length === 0} onClick={openAcctDebug}>Debug</Button>
                           <Button icon={<ReloadOutlined />} onClick={loadSchedules} loading={schedulesLoading}>Refresh</Button>
                         </Space>
                       </div>
@@ -873,6 +985,65 @@ const RevenueRecognition: React.FC = () => {
               ]}
             />
           )}
+        </Modal>
+
+        {/* ── Create Accounting — step-by-step debug ── */}
+        <Modal
+          open={acctDebugOpen}
+          onCancel={() => setAcctDebugOpen(false)}
+          width={860}
+          title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>Create Accounting — Service Debug</span></Space>}
+          footer={
+            <Space>
+              <Button onClick={() => setAcctDebugOpen(false)}>Close</Button>
+              <Button type="primary" style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+                onClick={() => { setAcctDebugOpen(false); openAcctPreview(); }}>
+                Go to Create Accounting
+              </Button>
+            </Space>
+          }
+        >
+          {acctDebugHalted && (
+            <Alert type="warning" showIcon style={{ marginBottom: 10, fontSize: 12 }}
+              message="Journal already exists — remaining steps are halted. Re-open Debug to reset." />
+          )}
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            Runs the standard SLA + GL journal services for the first selected schedule. Test each step in order — ids ({'{slaHeaderId}'}, {'{batchId}'}, {'{glHeaderId}'}) captured by earlier steps fill in automatically.
+          </Text>
+          <div style={{ marginTop: 10 }}>
+            {acctDebugSteps.map((s, idx) => {
+              const t = acctStepTest[idx];
+              const isDupCheck = s.url.includes('/gl/journals/check');
+              const stepHalted = acctDebugHalted && !isDupCheck;
+              const dispUrl     = resolveTokens(s.url, acctDebugCtx);
+              const dispPayload = s.payload != null ? resolveTokens(s.payload, acctDebugCtx) : null;
+              return (
+                <div key={idx} style={{ border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, padding: 10, marginBottom: 8, opacity: stepHalted ? 0.55 : 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Tag color={s.method === 'GET' ? 'blue' : s.method === 'PUT' ? 'purple' : 'green'} style={{ fontSize: 11 }}>{s.method}</Tag>
+                    <Text strong style={{ fontSize: 12 }}>{s.step}</Text>
+                    <Button size="small" style={{ marginLeft: 'auto' }} loading={t?.loading} disabled={stepHalted} onClick={() => runAcctDebugStep(idx)}>Run</Button>
+                  </div>
+                  <div style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info, wordBreak: 'break-all', marginTop: 6 }}>{dispUrl}</div>
+                  {dispPayload != null && (
+                    <pre style={{ fontSize: 10.5, background: '#0d0d0d', color: '#a8ff78', borderRadius: 4, padding: 8, margin: '6px 0 0', maxHeight: 150, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                      {JSON.stringify(dispPayload, null, 2)}
+                    </pre>
+                  )}
+                  {t && t.status !== 0 && (
+                    <>
+                      <div style={{ fontSize: 11, color: '#888', margin: '6px 0 2px' }}>
+                        HTTP <b style={{ color: t.status >= 200 && t.status < 300 ? REDWOOD.success : REDWOOD.primary }}>{t.status}</b>
+                      </div>
+                      <pre style={{ fontSize: 10.5, background: '#0d0d0d', color: '#79c0ff', borderRadius: 4, padding: 8, margin: 0, maxHeight: 150, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                        {t.body || '(empty)'}
+                      </pre>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </Modal>
 
         <FloatingMenu />
