@@ -668,6 +668,10 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
     const h = obj.header;
     setHeader({ ...h, orderDate: h.orderDate ? dayjs(h.orderDate) : dayjs() });
     headerForm.setFieldsValue({ poNumber: h.poNumber, docType: h.docType });
+    // Foreign currency (≠ functional AED) → auto-fetch the conversion rate so the
+    // rate box populates and the order can be validated for a valid rate on save.
+    if (h.currency && h.currency !== 'AED') fetchFxRate(h.currency);
+    else setFxRate(null);
     const restored = (obj.lines ?? []).map((l: any, i: number) => computeLine({
       ...l,
       lineNum:      l.lineNum ?? i + 1,
@@ -928,6 +932,12 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
     // by the separate assign-item-to-org / itemsV2 flow, which guards on it), so
     // it must not block PO generation — e.g. after loading a JSON without one.
     if (!header.buyer)          errors.push('Buyer is required');
+    // Foreign currency must have a conversion rate to AED before interfacing to
+    // Fusion — if none was found (or still loading), don't allow the save.
+    if (header.currency && header.currency !== 'AED') {
+      if (fxRateLoading) errors.push(`Conversion rate for ${header.currency} → AED is still loading — try again in a moment`);
+      else if (!fxRate || !(fxRate.rate > 0)) errors.push(`Conversion rate for ${header.currency} → AED is required — none found`);
+    }
     if (lines.length === 0)     errors.push('At least one line item is required');
     const linesWithoutNeedBy = lines.filter(l => !l.needBy);
     if (linesWithoutNeedBy.length > 0)
