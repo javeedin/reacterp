@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type * as XLSX from 'xlsx';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
   DatePicker, Row, Col, Space, Modal, InputNumber, Tabs, Checkbox,
-  Spin, Tooltip, Tag, Divider, Badge, Progress, Alert, Upload,
+  Spin, Tooltip, Tag, Divider, Badge, Progress, Alert, Upload, Dropdown,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { TableRowSelection } from 'antd/es/table/interface';
@@ -15,7 +15,8 @@ import {
   UserOutlined, CalendarOutlined, DollarOutlined, ShopOutlined,
   BuildOutlined, FileTextOutlined, CheckCircleOutlined,
   CloseCircleOutlined, UploadOutlined, MailOutlined, SyncOutlined,
-  CodeOutlined,
+  CodeOutlined, DownOutlined, DownloadOutlined, FolderOpenOutlined,
+  CheckOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import { message } from 'antd';
@@ -589,6 +590,86 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
     message.info(`Assigned ${ok}/${lines.length} item(s) to ${bulkAssignOrg}`);
   };
 
+  /* ─── PO number inline edit ─────────────────────────── */
+  const [editingPoNum, setEditingPoNum] = useState(false);
+  const [poNumDraft, setPoNumDraft]     = useState('');
+
+  const startEditPoNum = () => { setPoNumDraft(header?.poNumber ?? ''); setEditingPoNum(true); };
+  const commitPoNum = () => {
+    const v = poNumDraft.trim();
+    if (!v) { message.warning('Order number cannot be empty'); return; }
+    patch({ poNumber: v });
+    headerForm.setFieldValue('poNumber', v);
+    setEditingPoNum(false);
+    message.success(`Order number set to ${v}`);
+  };
+
+  /* ─── Save / Load the PO as JSON (header + lines + charges) ───────────
+     Same data we push to Fusion, in a re-loadable container. Used both for
+     the manual "JSON Actions" menu and the auto-backup on a failed save. */
+  const jsonInputRef = useRef<HTMLInputElement>(null);
+
+  const buildPoSnapshot = () => ({
+    _reactErp: 'purchase-order',
+    version: 1,
+    savedAt: new Date().toISOString(),
+    header: header ? { ...header, orderDate: header.orderDate ? dayjs(header.orderDate).toISOString() : null } : null,
+    lines: lines.map(l => ({
+      ...l,
+      needBy:       l.needBy ? dayjs(l.needBy).toISOString() : null,
+      promisedDate: l.promisedDate ? dayjs(l.promisedDate).toISOString() : null,
+    })),
+    acqCharges,
+  });
+
+  const downloadJson = (obj: any, filename: string) => {
+    const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const savePoJson = (reason?: string): string | undefined => {
+    if (!header) { message.warning('Nothing to save yet'); return; }
+    const stamp = dayjs().format('YYYYMMDD_HHmmss');
+    const safe = (header.poNumber || 'PO').replace(/[^\w.-]+/g, '_');
+    const name = `PO_${safe}${reason ? '_' + reason : ''}_${stamp}.json`;
+    downloadJson(buildPoSnapshot(), name);
+    return name;
+  };
+
+  const loadPoFromObject = (obj: any) => {
+    if (!obj || obj._reactErp !== 'purchase-order' || !obj.header) {
+      message.error('Not a valid ReactERP purchase-order JSON file'); return;
+    }
+    const h = obj.header;
+    setHeader({ ...h, orderDate: h.orderDate ? dayjs(h.orderDate) : dayjs() });
+    headerForm.setFieldsValue({ poNumber: h.poNumber, docType: h.docType });
+    const restored = (obj.lines ?? []).map((l: any, i: number) => computeLine({
+      ...l,
+      lineNum:      l.lineNum ?? i + 1,
+      needBy:       l.needBy ? dayjs(l.needBy) : null,
+      promisedDate: l.promisedDate ? dayjs(l.promisedDate) : null,
+    }));
+    setLines(restored);
+    setAcqCharges(Array.isArray(obj.acqCharges) ? obj.acqCharges : []);
+    message.success(`Loaded PO ${h.poNumber ?? ''} — ${restored.length} line(s)`);
+  };
+
+  const handleLoadJsonFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try { loadPoFromObject(JSON.parse(String(reader.result))); }
+      catch { message.error('Could not parse the selected JSON file'); }
+    };
+    reader.readAsText(file);
+    e.target.value = '';   // allow re-picking the same file
+  };
+
   const subtotal   = lines.reduce((s, l) => s + l.lineTotal, 0);
   const totalTax   = lines.reduce((s, l) => s + l.taxAmount, 0);
   const grandTotal = lines.reduce((s, l) => s + l.netTotal,  0);
@@ -863,21 +944,32 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
         setGeneratePoSuccess({ orderNumber: data.OrderNumber, status: data.Status ?? 'Draft' });
         setGeneratePoModalOpen(true);
       } else {
-        const errMsg = data?.title ?? data?.detail ?? data?.message ?? `HTTP ${r.status}`;
+        const backup = savePoJson('FAILED');
         Modal.error({
           title: `Failed to Generate PO (HTTP ${r.status})`,
           content: (
-            <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 260, overflow: 'auto' }}>
-              {rawText || '(empty response)'}
-            </pre>
+            <>
+              <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 260, overflow: 'auto' }}>
+                {rawText || '(empty response)'}
+              </pre>
+              {backup && <Alert type="info" showIcon style={{ marginTop: 10 }}
+                message="Backup saved" description={<span>The order (header + lines) was saved to <Text code>{backup}</Text>. Use <Text strong>JSON Actions → Load</Text> to restore it.</span>} />}
+            </>
           ),
           width: 600,
         });
       }
     } catch (err: any) {
+      const backup = savePoJson('FAILED');
       Modal.error({
         title: 'Network Error',
-        content: err.message,
+        content: (
+          <>
+            <div>{err.message}</div>
+            {backup && <Alert type="info" showIcon style={{ marginTop: 10 }}
+              message="Backup saved" description={<span>The order was saved to <Text code>{backup}</Text>. Use <Text strong>JSON Actions → Load</Text> to restore it.</span>} />}
+          </>
+        ),
       });
     } finally {
       setGeneratePoLoading(false);
@@ -1993,6 +2085,14 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
                   <Tag color="geekblue" style={{ fontSize: 11 }}>{header.docType}</Tag>
                 </Space>
                 <Space>
+                  <input ref={jsonInputRef} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={handleLoadJsonFile} />
+                  <Dropdown
+                    menu={{ items: [
+                      { key: 'save', icon: <DownloadOutlined />, label: 'Save to JSON', onClick: () => { const n = savePoJson(); if (n) message.success(`Saved ${n}`); } },
+                      { key: 'load', icon: <FolderOpenOutlined />, label: 'Load from JSON…', onClick: () => jsonInputRef.current?.click() },
+                    ] }}>
+                    <Button icon={<CodeOutlined />}>JSON Actions <DownOutlined /></Button>
+                  </Dropdown>
                   <Button danger onClick={() => setDiscardConfirmOpen(true)}>Discard</Button>
                   <Tooltip title="Show JSON (Oracle Fusion request body)">
                     <Button
@@ -2044,17 +2144,44 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
                     <div>
                       <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Purchase Order</div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: 18, fontWeight: 700, color: '#fff', letterSpacing: '0.02em', fontFamily: 'monospace' }}>{header.poNumber}</span>
-                        <Tooltip title="Get next number from Oracle Fusion">
-                          <Button
-                            type="text"
-                            size="small"
-                            icon={<SyncOutlined spin={nextPoLoading} />}
-                            loading={nextPoLoading}
-                            onClick={() => fetchNextPoNumber(true)}
-                            style={{ color: 'rgba(255,255,255,0.65)', padding: '0 4px', height: 22, minWidth: 22 }}
-                          />
-                        </Tooltip>
+                        {editingPoNum ? (
+                          <Space.Compact>
+                            <Input
+                              autoFocus
+                              size="small"
+                              value={poNumDraft}
+                              onChange={e => setPoNumDraft(e.target.value)}
+                              onPressEnter={commitPoNum}
+                              placeholder="Paste / type order number"
+                              style={{ width: 240, fontFamily: 'monospace' }}
+                            />
+                            <Tooltip title="Apply"><Button size="small" type="primary" icon={<CheckOutlined />} onClick={commitPoNum} /></Tooltip>
+                            <Tooltip title="Cancel"><Button size="small" icon={<CloseOutlined />} onClick={() => setEditingPoNum(false)} /></Tooltip>
+                          </Space.Compact>
+                        ) : (
+                          <>
+                            <span style={{ fontSize: 18, fontWeight: 700, color: '#fff', letterSpacing: '0.02em', fontFamily: 'monospace' }}>{header.poNumber}</span>
+                            <Tooltip title="Edit / paste order number">
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<EditOutlined />}
+                                onClick={startEditPoNum}
+                                style={{ color: 'rgba(255,255,255,0.65)', padding: '0 4px', height: 22, minWidth: 22 }}
+                              />
+                            </Tooltip>
+                            <Tooltip title="Get next number from Oracle Fusion">
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<SyncOutlined spin={nextPoLoading} />}
+                                loading={nextPoLoading}
+                                onClick={() => fetchNextPoNumber(true)}
+                                style={{ color: 'rgba(255,255,255,0.65)', padding: '0 4px', height: 22, minWidth: 22 }}
+                              />
+                            </Tooltip>
+                          </>
+                        )}
                       </div>
                     </div>
                     <div style={{ width: 1, height: 32, background: 'rgba(255,255,255,0.15)' }} />
