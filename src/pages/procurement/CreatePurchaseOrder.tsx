@@ -95,6 +95,10 @@ interface POLine {
   needBy: Dayjs | null; promisedDate: Dayjs | null;
   lineTotal: number; taxAmount: number; netTotal: number;
   chargeAccount: string; destinationType: string;
+  // Inventory-org assignment (itemsV2)
+  assignOrg?: string;
+  assignStatus?: 'idle' | 'pending' | 'success' | 'error';
+  assignMsg?: string;
 }
 
 const computeLine = (line: Omit<POLine, 'lineTotal' | 'taxAmount' | 'netTotal'>): POLine => {
@@ -526,6 +530,64 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
 
   const handleDeleteLine = (key: string) =>
     setLines(prev => prev.filter(l => l.key !== key).map((l, i) => ({ ...l, lineNum: i + 1 })));
+
+  /* ─── Assign PO line items to an inventory org (itemsV2) ─────────────
+     POSTs the item into the target org, which is how Fusion records an
+     item ↔ inventory-org assignment. Status is tracked per line. */
+  const [bulkAssignOrg, setBulkAssignOrg] = useState<string | undefined>();
+  const [bulkAssigning, setBulkAssigning] = useState(false);
+
+  const patchLine = (key: string, patch: Partial<POLine>) =>
+    setLines(prev => prev.map(l => l.key === key ? { ...l, ...patch } : l));
+
+  const assignItemToOrg = async (line: POLine): Promise<boolean> => {
+    const org = line.assignOrg;
+    if (!org) { message.warning(`Pick an inventory org for ${line.itemNumber} first`); return false; }
+    if (!line.itemNumber) { message.warning('Line has no item number'); return false; }
+    patchLine(line.key, { assignStatus: 'pending', assignMsg: '' });
+    // itemsV2 create-in-org payload. ItemClass may need to match your setup.
+    const body: Record<string, any> = {
+      OrganizationCode: org,
+      ItemNumber: line.itemNumber,
+      ItemDescription: line.description || line.itemNumber,
+      ItemClass: 'Root Item Class',
+    };
+    try {
+      const r = await fetch(`${FUSION_BASE}/itemsV2`, {
+        method: 'POST',
+        headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await r.json().catch(() => ({} as any));
+      if (!r.ok) {
+        const msg = data?.detail || data?.message || (Array.isArray(data?.['o:errorDetails']) ? data['o:errorDetails'][0]?.detail : '') || `HTTP ${r.status}`;
+        patchLine(line.key, { assignStatus: 'error', assignMsg: String(msg) });
+        message.error(`Assign ${line.itemNumber} → ${org} failed: ${msg}`, 6);
+        return false;
+      }
+      patchLine(line.key, { assignStatus: 'success', assignMsg: `Assigned to ${org}` });
+      message.success(`Item ${line.itemNumber} assigned to ${org}`);
+      return true;
+    } catch (e: any) {
+      patchLine(line.key, { assignStatus: 'error', assignMsg: e.message });
+      message.error(`Assign ${line.itemNumber} failed: ${e.message}`, 6);
+      return false;
+    }
+  };
+
+  const assignAllToOrg = async () => {
+    if (!bulkAssignOrg) { message.warning('Pick an inventory org to assign all lines to'); return; }
+    if (lines.length === 0) return;
+    setBulkAssigning(true);
+    setLines(prev => prev.map(l => ({ ...l, assignOrg: bulkAssignOrg })));
+    let ok = 0;
+    for (const l of lines) {
+      const success = await assignItemToOrg({ ...l, assignOrg: bulkAssignOrg });
+      if (success) ok += 1;
+    }
+    setBulkAssigning(false);
+    message.info(`Assigned ${ok}/${lines.length} item(s) to ${bulkAssignOrg}`);
+  };
 
   const subtotal   = lines.reduce((s, l) => s + l.lineTotal, 0);
   const totalTax   = lines.reduce((s, l) => s + l.taxAmount, 0);
@@ -1582,6 +1644,18 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
     { title: 'Tax Amt', dataIndex: 'taxAmount', width: 100, align: 'right' as const, render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{fmt(v)}</Text> },
     { title: 'Net Total', dataIndex: 'netTotal', width: 120, align: 'right' as const, render: v => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: C.red }}>{fmt(v)}</Text> },
     { title: 'Need By', dataIndex: 'needBy', width: 135, render: (v, r) => <DatePicker size="small" value={v} onChange={d => handleLineChange(r.key, 'needBy', d)} style={{ width: 125 }} format="D-MMM-YYYY" /> },
+    { title: 'Assign to Inventory Org', key: 'assignOrg', width: 250, render: (_: any, r: POLine) => (
+      <Space size={4}>
+        <Select size="small" style={{ width: 130 }} value={r.assignOrg} placeholder="Org" allowClear
+          showSearch optionFilterProp="label"
+          options={inventoryOrgs.map(o => ({ label: `${o.OrganizationCode}${o.OrganizationName ? ' — ' + o.OrganizationName : ''}`, value: o.OrganizationCode }))}
+          onChange={val => patchLine(r.key, { assignOrg: val, assignStatus: 'idle', assignMsg: '' })} />
+        <Button size="small" type="primary" ghost loading={r.assignStatus === 'pending'} disabled={!r.assignOrg}
+          onClick={() => assignItemToOrg(r)}>Assign</Button>
+        {r.assignStatus === 'success' && <Tooltip title={r.assignMsg}><CheckCircleOutlined style={{ color: C.green }} /></Tooltip>}
+        {r.assignStatus === 'error'   && <Tooltip title={r.assignMsg}><CloseCircleOutlined style={{ color: C.red }} /></Tooltip>}
+      </Space>
+    ) },
     { title: '', key: 'del', width: 46, align: 'center' as const, render: (_: any, r: POLine) => <Tooltip title="Remove"><Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={() => handleDeleteLine(r.key)} /></Tooltip> },
   ];
 
@@ -2259,6 +2333,13 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
                     <DatePicker size="small" value={needByAll} onChange={handleNeedByAllChange} format="D-MMM-YYYY" placeholder="Pick date" style={{ width: 130 }} />
                     <Text style={{ fontSize: 12, color: C.textMid }}>Default Tax %:</Text>
                     <InputNumber size="small" value={defaultTaxPct} min={0} max={100} precision={2} style={{ width: 72 }} onChange={val => setDefaultTaxPct(val ?? 0)} />
+                    <Divider type="vertical" />
+                    <Text style={{ fontSize: 12, color: C.textMid }}>Assign all to Inventory Org:</Text>
+                    <Select size="small" value={bulkAssignOrg} onChange={setBulkAssignOrg} placeholder="Select org"
+                      allowClear showSearch optionFilterProp="label" style={{ width: 190 }}
+                      options={inventoryOrgs.map(o => ({ label: `${o.OrganizationCode}${o.OrganizationName ? ' — ' + o.OrganizationName : ''}`, value: o.OrganizationCode }))} />
+                    <Button size="small" type="primary" ghost icon={<ApiOutlined />} loading={bulkAssigning}
+                      disabled={!bulkAssignOrg || lines.length === 0} onClick={assignAllToOrg}>Assign All</Button>
                   </Space>
                 }
               >
@@ -2269,7 +2350,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
                       label: <Badge count={lines.length} size="small" offset={[6, 0]} color={C.blue}><span style={{ paddingRight: 8 }}>Lines</span></Badge>,
                       children: (
                         <Table columns={lineCols} dataSource={lines} rowKey="key" size="small" bordered
-                          pagination={false} scroll={{ x: 1100 }}
+                          pagination={false} scroll={{ x: 1350 }}
                           rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''}
                           locale={{ emptyText: <div style={{ padding: 28, color: C.textLight, textAlign: 'center' }}>No lines yet. Click "Add Item" to begin.</div> }}
                           summary={() => lines.length > 0 ? (
@@ -2279,7 +2360,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
                               <Table.Summary.Cell index={7} />
                               <Table.Summary.Cell index={8} align="right"><Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(totalTax)}</Text></Table.Summary.Cell>
                               <Table.Summary.Cell index={9} align="right"><Text strong style={{ fontVariantNumeric: 'tabular-nums', color: C.red }}>{fmt(grandTotal)}</Text></Table.Summary.Cell>
-                              <Table.Summary.Cell index={10} colSpan={2} />
+                              <Table.Summary.Cell index={10} colSpan={3} />
                             </Table.Summary.Row>
                           ) : null}
                         />
