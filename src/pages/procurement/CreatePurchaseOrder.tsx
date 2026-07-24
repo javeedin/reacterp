@@ -16,7 +16,7 @@ import {
   BuildOutlined, FileTextOutlined, CheckCircleOutlined,
   CloseCircleOutlined, UploadOutlined, MailOutlined, SyncOutlined,
   CodeOutlined, DownOutlined, DownloadOutlined, FolderOpenOutlined,
-  CheckOutlined,
+  CheckOutlined, ThunderboltOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import { message } from 'antd';
@@ -304,6 +304,10 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
   const [generatePoModalOpen, setGeneratePoModalOpen] = useState(false);
   const [poHeaderId, setPoHeaderId]                   = useState<number | null>(null);
   const [approvingFusion, setApprovingFusion]         = useState(false);
+  const [poActionLoading, setPoActionLoading]         = useState<string | null>(null);
+  const [customActionOpen, setCustomActionOpen]       = useState(false);
+  const [customActionName, setCustomActionName]       = useState('');
+  const [customActionResource, setCustomActionResource] = useState('purchaseOrders');
   const [confettiPieces, setConfettiPieces]           = useState<{ id: number; x: number; color: string; delay: number; size: number }[]>([]);
 
   // Init modal API inspector
@@ -1071,6 +1075,63 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
     } finally {
       setApprovingFusion(false);
     }
+  };
+
+  // ── Fusion PO lifecycle actions (cancel / close / hold / reopen …) ──────────
+  // Each is a custom action POSTed to the resource row with the adf.action
+  // content type. Lifecycle actions live on `purchaseOrders`; `submit` is on
+  // `draftPurchaseOrders`. Needs the PO to exist in Fusion (poHeaderId).
+  const runPoAction = async (label: string, actionName: string, resource = 'purchaseOrders', params: any[] = []) => {
+    if (!poHeaderId) { message.warning('Save the purchase order first — the action needs the Fusion PO id.'); return; }
+    setPoActionLoading(actionName);
+    try {
+      const url = `${FUSION_BASE}/${resource}/${poHeaderId}`;
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { ...FUSION_HDRS, 'Content-Type': 'application/vnd.oracle.adf.action+json' },
+        body: JSON.stringify({ name: actionName, parameters: params }),
+      });
+      const rawText = await r.text();
+      let data: any = null; try { data = JSON.parse(rawText); } catch { /* non-json */ }
+      if (!r.ok) {
+        const msg = data?.title ?? data?.detail ?? data?.message ?? `HTTP ${r.status}`;
+        Modal.error({ title: `${label} failed (HTTP ${r.status})`, width: 620,
+          content: <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 300, overflow: 'auto' }}>{rawText || String(msg)}</pre> });
+        return;
+      }
+      const newStatus = data?.result ?? data?.Status ?? data?.DocumentStatus;
+      if (typeof newStatus === 'string') patch({ status: newStatus });
+      Modal.success({ title: `${label} — done`, width: 620,
+        content: <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 300, overflow: 'auto' }}>{rawText || '(no content)'}</pre> });
+    } catch (err: any) {
+      Modal.error({ title: `${label} — network error`, content: err.message });
+    } finally {
+      setPoActionLoading(null);
+    }
+  };
+
+  // Confirm first — shows the exact URL + adf.action body before running.
+  const confirmPoAction = (label: string, actionName: string, resource = 'purchaseOrders') => {
+    if (!poHeaderId) { message.warning('Save the purchase order first — the action needs the Fusion PO id.'); return; }
+    Modal.confirm({
+      title: `${label}?`,
+      width: 600,
+      icon: null,
+      content: (
+        <div style={{ fontSize: 12 }}>
+          <p style={{ margin: '0 0 8px' }}>POST the Fusion custom action <b>{actionName}</b> to this purchase order.</p>
+          <pre style={{ fontSize: 11, background: '#f5f5f5', padding: 10, borderRadius: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+{`POST ${FUSION_BASE}/${resource}/${poHeaderId}
+Content-Type: application/vnd.oracle.adf.action+json
+
+${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
+          </pre>
+        </div>
+      ),
+      okText: `Run ${label}`,
+      okButtonProps: { danger: /cancel|finallyClose/i.test(actionName) },
+      onOk: () => runPoAction(label, actionName, resource),
+    });
   };
 
   const handleGeneratePDF = () => {
@@ -2226,6 +2287,28 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
                     ] }}>
                     <Button icon={<CodeOutlined />}>JSON Actions <DownOutlined /></Button>
                   </Dropdown>
+                  <Tooltip title={poHeaderId ? 'Oracle Fusion lifecycle actions on this PO' : 'Save the PO to Fusion first to enable these actions'}>
+                    <Dropdown
+                      disabled={!poHeaderId}
+                      menu={{ items: [
+                        { key: 'submit',  label: 'Submit for Approval', onClick: () => submitForApproval() },
+                        { type: 'divider' },
+                        { key: 'cancel',  danger: true, label: 'Cancel Document', onClick: () => confirmPoAction('Cancel Document', 'cancelDocument') },
+                        { key: 'hold',    label: 'Hold', onClick: () => confirmPoAction('Hold', 'holdDocument') },
+                        { key: 'release', label: 'Release Hold', onClick: () => confirmPoAction('Release Hold', 'releaseHoldDocument') },
+                        { key: 'ack',     label: 'Acknowledge', onClick: () => confirmPoAction('Acknowledge', 'acknowledgeDocument') },
+                        { type: 'divider' },
+                        { key: 'close',      label: 'Close', onClick: () => confirmPoAction('Close', 'closeDocument') },
+                        { key: 'closeInv',   label: 'Close for Invoicing', onClick: () => confirmPoAction('Close for Invoicing', 'closeForInvoicing') },
+                        { key: 'closeRcv',   label: 'Close for Receiving', onClick: () => confirmPoAction('Close for Receiving', 'closeForReceiving') },
+                        { key: 'finalClose', danger: true, label: 'Finally Close', onClick: () => confirmPoAction('Finally Close', 'finallyCloseDocument') },
+                        { key: 'reopen',     label: 'Reopen', onClick: () => confirmPoAction('Reopen', 'reopenDocument') },
+                        { type: 'divider' },
+                        { key: 'custom', icon: <ApiOutlined />, label: 'Custom action…', onClick: () => { setCustomActionName(''); setCustomActionResource('purchaseOrders'); setCustomActionOpen(true); } },
+                      ] }}>
+                      <Button icon={<ThunderboltOutlined />} loading={!!poActionLoading}>PO Actions <DownOutlined /></Button>
+                    </Dropdown>
+                  </Tooltip>
                   <Button danger onClick={() => setDiscardConfirmOpen(true)}>Discard</Button>
                   <Tooltip title="Show JSON (Oracle Fusion request body)">
                     <Button
@@ -3752,6 +3835,46 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
             <Button danger type="primary" onClick={() => { setDiscardConfirmOpen(false); exit(); }}>Discard</Button>
           </Space>}>
           <Text>All unsaved changes will be lost. Are you sure?</Text>
+        </Modal>
+
+        {/* ── Custom Fusion PO action ─────────────────── */}
+        <Modal
+          open={customActionOpen}
+          title={<Space><ThunderboltOutlined style={{ color: C.blue }} />Run Custom Fusion Action</Space>}
+          onCancel={() => setCustomActionOpen(false)}
+          footer={<Space>
+            <Button onClick={() => setCustomActionOpen(false)}>Close</Button>
+            <Button type="primary" disabled={!customActionName.trim()} loading={!!poActionLoading}
+              style={{ background: C.blue, borderColor: C.blue }}
+              onClick={() => { setCustomActionOpen(false); runPoAction(customActionName.trim(), customActionName.trim(), (customActionResource || 'purchaseOrders').trim()); }}>
+              Run action
+            </Button>
+          </Space>}>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            Runs any Fusion custom action on this PO (POHeaderId {poHeaderId ?? '—'}). Use the
+            Search Orders → Submit-for-Approval “Discover actions” tool to find valid names for
+            <Text code>purchaseOrders</Text> (cancel/change/close…).
+          </Text>
+          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div>
+              <Text strong style={{ fontSize: 12 }}>Resource</Text>
+              <Input value={customActionResource} onChange={e => setCustomActionResource(e.target.value)}
+                placeholder="purchaseOrders" style={{ fontFamily: 'monospace', marginTop: 4 }} />
+            </div>
+            <div>
+              <Text strong style={{ fontSize: 12 }}>Action name</Text>
+              <Input value={customActionName} onChange={e => setCustomActionName(e.target.value)}
+                placeholder="e.g. cancelDocument" style={{ fontFamily: 'monospace', marginTop: 4 }} />
+            </div>
+            {customActionName.trim() && poHeaderId && (
+              <pre style={{ fontSize: 11, background: '#f5f5f5', padding: 10, borderRadius: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>
+{`POST ${FUSION_BASE}/${(customActionResource || 'purchaseOrders').trim()}/${poHeaderId}
+Content-Type: application/vnd.oracle.adf.action+json
+
+${JSON.stringify({ name: customActionName.trim(), parameters: [] }, null, 2)}`}
+              </pre>
+            )}
+          </div>
         </Modal>
 
         {/* ── Fusion PO Modal (preview + run) ─────────── */}
