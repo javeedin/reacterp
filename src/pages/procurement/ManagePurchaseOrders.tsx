@@ -899,6 +899,9 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
   const [lineCountsLoading, setLineCountsLoading] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const [approving, setApproving]       = useState(false);
+  const [approveApiOpen, setApproveApiOpen] = useState(false);
+
+  const APPROVE_BODY = { name: 'submitDraft', parameters: [] as any[] };
 
   // Bulk-submit the selected purchase orders for approval (Fusion submitDraft).
   const submitSelectedForApproval = async () => {
@@ -1164,6 +1167,10 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
                 style={{ background: '#1D7B4D', borderColor: '#1D7B4D', fontWeight: 600 }}>
                 Submit for Approval
               </Button>
+              <Tooltip title="View approval API URL & JSON body">
+                <Button size="small" icon={<ApiOutlined />} onClick={() => setApproveApiOpen(true)}
+                  style={{ borderColor: REDWOOD.info, color: REDWOOD.info }} />
+              </Tooltip>
             </Space>
           )}
         </div>
@@ -1186,6 +1193,39 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
           onRow={rec => ({ style: { cursor: 'pointer' }, onDoubleClick: () => onOpen(rec) })}
         />
       </Card>
+
+      {/* Submit-for-Approval API Modal */}
+      <Modal
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /> Submit for Approval — Fusion API</Space>}
+        open={approveApiOpen} onCancel={() => setApproveApiOpen(false)} footer={null} width={760}
+      >
+        <div style={{ fontSize: 12, marginBottom: 10 }}>
+          <Space size={6}><Tag color="green">POST</Tag><Text>Oracle Fusion custom action on the draft PO ({selectedKeys.length} selected)</Text></Space>
+        </div>
+        <Text strong style={{ fontSize: 12 }}>Headers</Text>
+        <pre style={{ fontSize: 11, background: REDWOOD.neutral100, padding: 10, borderRadius: 6, marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+{`Authorization: Basic ***
+Accept: application/json
+Content-Type: application/vnd.oracle.adf.action+json`}
+        </pre>
+        <Text strong style={{ fontSize: 12 }}>Body</Text>
+        <pre style={{ fontSize: 11, background: REDWOOD.neutral100, padding: 10, borderRadius: 6, marginTop: 4, whiteSpace: 'pre-wrap' }}>
+{JSON.stringify(APPROVE_BODY, null, 2)}
+        </pre>
+        <Text strong style={{ fontSize: 12 }}>URL{selectedKeys.length !== 1 ? 's' : ''} (one call per selected PO)</Text>
+        <div style={{ maxHeight: 220, overflow: 'auto', marginTop: 4, border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6 }}>
+          {selectedKeys.length === 0
+            ? <div style={{ padding: 12, color: REDWOOD.neutral600, fontSize: 12 }}>Select one or more purchase orders to see their exact URLs.</div>
+            : data.filter(po => selectedKeys.includes(po.POHeaderId)).map(po => (
+              <div key={po.POHeaderId} style={{ padding: '6px 10px', borderBottom: `1px solid ${REDWOOD.neutral100}` }}>
+                <Tag color="blue" style={{ fontSize: 10 }}>{po.OrderNumber}</Tag>
+                <Text copyable style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
+                  {`${BASE_URL}/draftPurchaseOrders/${po.POHeaderId}`}
+                </Text>
+              </div>
+            ))}
+        </div>
+      </Modal>
 
       {/* API Inspector Modal */}
       <Modal
