@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input,
   Row, Col, Space, Tag, Tabs, message, Empty, Modal, Tooltip, Badge,
-  Divider, Drawer, Spin, Select,
+  Divider, Drawer, Spin, Select, Descriptions,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -11,7 +11,7 @@ import {
   TagsOutlined, ApartmentOutlined, FilterOutlined, InboxOutlined,
   ApiOutlined, DollarOutlined, ReconciliationOutlined, BranchesOutlined,
 } from '@ant-design/icons';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -346,13 +346,110 @@ const numFmt = (v: any) =>
   v == null || v === '' || isNaN(Number(v)) ? '—'
     : new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 }).format(Number(v));
 
+// ── Purchase Order drill-down dialog ──────────────────────────────────────────
+// Opened from the Reference # (PO) column on a Cost tab. Fetches the PO header +
+// lines from Fusion and shows them in a modal — the user stays on the on-hand
+// screen. Query mirrors: /purchaseOrders?q=OrderNumber=<ref>&expand=lines
+const PurchaseOrderDialog: React.FC<{ orderNumber: string | null; onClose: () => void }> = ({ orderNumber, onClose }) => {
+  const [loading, setLoading] = useState(false);
+  const [err, setErr]         = useState('');
+  const [po, setPo]           = useState<any>(null);
+  const [lines, setLines]     = useState<any[]>([]);
+
+  const url = orderNumber
+    ? `${BASE_URL}/purchaseOrders?q=OrderNumber=${encodeURIComponent(orderNumber)}&expand=lines`
+    : '';
+
+  useEffect(() => {
+    if (!orderNumber) return;
+    let cancelled = false;
+    setLoading(true); setErr(''); setPo(null); setLines([]);
+    fetch(url, { headers: HEADERS })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}: ${r.statusText}`)))
+      .then(d => {
+        if (cancelled) return;
+        const header = (d.items ?? [])[0];
+        if (!header) { setErr(`No purchase order found for Order Number ${orderNumber}.`); return; }
+        setPo(header);
+        setLines(header.lines?.items ?? header.lines ?? []);
+      })
+      .catch(e => { if (!cancelled) setErr(e.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [orderNumber, url]);
+
+  const money = (v: any, ccy?: string) =>
+    v == null || v === '' || isNaN(Number(v)) ? '—'
+      : `${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v))}${ccy ? ' ' + ccy : ''}`;
+
+  const lineCols: ColumnsType<any> = [
+    { title: 'Line', dataIndex: 'LineNumber', key: 'LineNumber', width: 60, align: 'right' as const, render: (v: any) => <Text strong style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Type', dataIndex: 'LineType', key: 'LineType', width: 90, ellipsis: true, render: (v: string) => v ? <Text style={{ fontSize: 12 }}>{v}</Text> : '—' },
+    { title: 'Item', dataIndex: 'Item', key: 'Item', width: 130, ellipsis: true, render: (v: string) => v ? <Text style={{ fontSize: 12 }}>{v}</Text> : <span style={{ color: REDWOOD.neutral300 }}>—</span> },
+    { title: 'Description', dataIndex: 'Description', key: 'Description', ellipsis: true, render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+    { title: 'UOM', dataIndex: 'UOM', key: 'UOM', width: 80, ellipsis: true, render: (v: string) => v || '—' },
+    { title: 'Qty', dataIndex: 'Quantity', key: 'Quantity', width: 90, align: 'right' as const, render: (v: any) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{numFmt(v)}</Text> },
+    { title: 'Price', dataIndex: 'Price', key: 'Price', width: 110, align: 'right' as const, render: (v: any) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{money(v)}</Text> },
+    { title: 'Ordered', dataIndex: 'Ordered', key: 'Ordered', width: 120, align: 'right' as const, render: (v: any) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{money(v)}</Text> },
+    { title: 'Need-By', dataIndex: 'NeedByDate', key: 'NeedByDate', width: 110, render: (v: string) => v ? fmtDate(v) : '—' },
+    { title: 'Status', dataIndex: 'Status', key: 'Status', width: 110, ellipsis: true, render: (v: string) => v ? <Tag color="blue">{v}</Tag> : '—' },
+  ];
+
+  return (
+    <Modal
+      open={!!orderNumber}
+      onCancel={onClose}
+      footer={<Button onClick={onClose}>Close</Button>}
+      width={1000}
+      title={
+        <Space>
+          <ReconciliationOutlined style={{ color: REDWOOD.primary }} />
+          <span>Purchase Order {orderNumber}</span>
+        </Space>
+      }
+      styles={{ body: { maxHeight: '70vh', overflowY: 'auto' } }}
+    >
+      {loading && <div style={{ textAlign: 'center', padding: 48 }}><Spin tip="Loading purchase order…" /></div>}
+      {!loading && err && <Empty description={err} />}
+      {!loading && !err && po && (
+        <>
+          <Descriptions size="small" bordered column={2} style={{ marginBottom: 16 }}
+            labelStyle={{ fontSize: 12, fontWeight: 600, width: 150 }} contentStyle={{ fontSize: 12 }}>
+            <Descriptions.Item label="Order Number">{po.OrderNumber ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Status">{po.Status ? <Tag color="green">{po.Status}</Tag> : '—'}</Descriptions.Item>
+            <Descriptions.Item label="Supplier">{po.Supplier ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Supplier Site">{po.SupplierSite ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Buyer">{po.BuyerDisplayName ?? po.Buyer ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Procurement BU">{po.ProcurementBU ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Order Date">{po.OrderDate ? fmtDate(po.OrderDate) : '—'}</Descriptions.Item>
+            <Descriptions.Item label="Currency">{po.CurrencyCode ?? po.Currency ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Ordered">{money(po.Ordered, po.CurrencyCode)}</Descriptions.Item>
+            <Descriptions.Item label="Total">{money(po.Total, po.CurrencyCode)}</Descriptions.Item>
+            {po.Description && <Descriptions.Item label="Description" span={2}>{po.Description}</Descriptions.Item>}
+          </Descriptions>
+          <Divider orientation="left" style={{ fontSize: 13 }}>Lines ({lines.length})</Divider>
+          <Table
+            size="small"
+            rowKey={(r: any) => String(r.POLineId ?? r.LineNumber)}
+            columns={lineCols}
+            dataSource={lines}
+            pagination={false}
+            scroll={{ x: 'max-content' }}
+            locale={{ emptyText: 'No lines on this purchase order.' }}
+          />
+        </>
+      )}
+    </Modal>
+  );
+};
+
 // ── Cost tab (Receipt Costs / Item Costs) ─────────────────────────────────────
 // If the resource returns ValuationUnit rows, group by ValuationUnit — split it
 // into Cost Org / Inventory Org / Subinventory / Lot, show TotalUnitCost, and
 // sum ReceiptQuantity + QuantityOnhand. Otherwise show a clean table (id/links
 // columns removed). The API icon (hover) shows the exact webservice URL.
 const CostTab: React.FC<{ url: string; emptyText: string }> = ({ url, emptyText }) => {
-  const navigate = useNavigate();
+  const [poDialog, setPoDialog] = useState<string | null>(null);
   const [rows, setRows]       = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr]         = useState('');
@@ -407,7 +504,7 @@ const CostTab: React.FC<{ url: string; emptyText: string }> = ({ url, emptyText 
           <Space size={4} wrap>
             {refs.map((ref, i) => (
               <Tooltip key={i} title={`Drill down to Purchase Order ${ref}`}>
-                <a onClick={() => navigate(`/procurement/purchase-orders?orderNumber=${encodeURIComponent(ref)}`)}
+                <a onClick={() => setPoDialog(ref)}
                   style={{ fontSize: 12, fontWeight: 600 }}>{ref}</a>
               </Tooltip>
             ))}
@@ -481,6 +578,7 @@ const CostTab: React.FC<{ url: string; emptyText: string }> = ({ url, emptyText 
           </Table.Summary>
         ) : null}
       />
+      <PurchaseOrderDialog orderNumber={poDialog} onClose={() => setPoDialog(null)} />
     </div>
   );
 };
