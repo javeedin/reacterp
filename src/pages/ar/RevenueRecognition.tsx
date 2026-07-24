@@ -19,6 +19,13 @@ import {
   getRevenueContracts, getRevenueSchedules,
 } from '../../services/revenue.service';
 import type { RevenueContract, RevenueSchedule } from '../../services/revenue.service';
+import {
+  createAccounting, checkAccountingExists, checkGLJournalExists,
+  fetchLedgerByBusinessUnit, derivePeriodName,
+} from '../../services/sla.service';
+import type { SlaCreatePayload } from '../../services/sla.service';
+import { postSlaToGL } from '../../services/glPosting.service';
+import type { GlPostingOptions } from '../../services/glPosting.service';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -133,16 +140,14 @@ const RevenueRecognition: React.FC = () => {
   const [schedulesLoading, setSchedulesLoading] = useState(false);
   const [scheduleSearch, setScheduleSearch] = useState('');
 
-  // Post Revenue — accounting
+  // Post Revenue — accounting (standard SLA + GL journal flow, like Multiperiod)
   const [postPeriod, setPostPeriod]           = useState<string>();
   const [postSelectedKeys, setPostSelectedKeys] = useState<React.Key[]>([]);
   const [acctPreviewOpen, setAcctPreviewOpen] = useState(false);
+  const [acctSchedules, setAcctSchedules]     = useState<RevenueSchedule[]>([]);
   const [acctLines, setAcctLines]             = useState<AcctLine[]>([]);
   const [posting, setPosting]                 = useState(false);
-  const [postStatus, setPostStatus]           = useState<number | null>(null);
-  const [postResponse, setPostResponse]       = useState<string>('');
-
-  const POST_ACCT_URL = `${APEX_DB_CONFIG.baseUrl}/ar/revenue-accounting/create`;
+  const [postResults, setPostResults]         = useState<{ schedule: number; trx: number | null; status: string; message: string }[]>([]);
 
   const loadContracts = async () => {
     setContractsLoading(true);
@@ -245,8 +250,9 @@ const RevenueRecognition: React.FC = () => {
   const openAcctPreview = () => {
     const chosen = postSchedules.filter(s => postSelectedKeys.includes(s.id));
     if (chosen.length === 0) { message.warning('Select one or more schedules'); return; }
+    setAcctSchedules(chosen);
     setAcctLines(buildAcctLines(chosen));
-    setPostStatus(null); setPostResponse('');
+    setPostResults([]);
     setAcctPreviewOpen(true);
   };
 
@@ -255,34 +261,103 @@ const RevenueRecognition: React.FC = () => {
     credit: acctLines.reduce((s, l) => s + l.credit, 0),
   }), [acctLines]);
 
-  const postAcctPayload = useMemo(() => ({
-    source: RR_SOURCE,
-    period: postPeriod,
-    createdBy: loggedUser,
-    lines: acctLines.map(l => ({
-      scheduleId: l.scheduleId, trxNumber: l.trxNumber, accountCombination: l.accountCombination,
-      debit: l.debit, credit: l.credit,
-      reference1: l.reference1, reference2: l.reference2, reference5: l.reference5,
-    })),
-  }), [acctLines, postPeriod, loggedUser]);
+  // ── Standard SLA create-accounting + GL journal (mirrors ManageMultiperiod) ──
+  const RR_SOURCE_TABLE = 'RR_AR_REVENUE_SCHEDULE';
+
+  const scheduleAcctDate = (s: RevenueSchedule): string => {
+    const d = parseFlexDate(s.periodDate) || new Date();
+    return d.toISOString().split('T')[0];
+  };
+  const schedulePeriodLabel = (s: RevenueSchedule): string =>
+    derivePeriodName(parseFlexDate(s.periodDate) || new Date());
+
+  const buildRevenueSlaPayload = (s: RevenueSchedule, ledger: { ledgerId: number; ledgerName: string }, postedBy: string, today: string): SlaCreatePayload => {
+    const acctDate = scheduleAcctDate(s);
+    const company = companyFromBU(s.businessUnit);
+    const amount = Number(s.amount) || 0;
+    return {
+      header: {
+        moduleName: 'AR', sourceTable: RR_SOURCE_TABLE, sourceId: s.id,
+        sourceNumber: String(s.trxNumber ?? s.id), sourceType: 'Revenue Recognition',
+        eventTypeCode: RR_SOURCE, eventDate: today, accountingDate: acctDate,
+        periodName: schedulePeriodLabel(s), ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName,
+        currencyCode: 'AED', ledgerCurrency: ledger.ledgerName, exchangeRate: 1,
+        businessUnit: s.businessUnit, description: `Revenue Recognition — Trx ${s.trxNumber ?? s.id} — ${s.periodName}`,
+        createdBy: postedBy,
+      },
+      lines: [
+        { lineNumber: 1, lineType: 'DR', accountingClass: 'RECEIVABLE', accountCombination: buildCombination(company, RR_DEBIT_ACCOUNT),
+          enteredDr: amount, enteredCr: 0, accountedDr: amount, accountedCr: 0, currencyCode: 'AED', exchangeRate: 1,
+          description: `Dr ${RR_DEBIT_ACCOUNT} — ${s.periodName}`, sourceLineId: s.id, sourceLineNumber: 1 },
+        { lineNumber: 2, lineType: 'CR', accountingClass: 'REVENUE', accountCombination: buildCombination(company, RR_CREDIT_ACCOUNT),
+          enteredDr: 0, enteredCr: amount, accountedDr: 0, accountedCr: amount, currencyCode: 'AED', exchangeRate: 1,
+          description: `Cr ${RR_CREDIT_ACCOUNT} — ${s.periodName}`, sourceLineId: s.id, sourceLineNumber: 2 },
+      ],
+    };
+  };
+
+  const buildRevenueGlOpts = (s: RevenueSchedule, ledger: { ledgerId: number; ledgerName: string }, postedBy: string, slaHeaderId: number): GlPostingOptions => {
+    const acctDate = scheduleAcctDate(s);
+    const company = companyFromBU(s.businessUnit);
+    const amount = Number(s.amount) || 0;
+    return {
+      slaHeaderId, sourceNumber: String(s.trxNumber ?? s.id), sourceId: s.id,
+      eventTypeCode: RR_SOURCE, periodName: schedulePeriodLabel(s), ledgerName: ledger.ledgerName,
+      ledgerId: ledger.ledgerId, currency: 'AED', accountingDate: acctDate, legalEntity: '',
+      businessUnit: s.businessUnit, jeCategory: 'Revenue', jeSource: 'Receivables', batchSource: 'Receivables',
+      createdBy: postedBy,
+      lines: [
+        { lineType: 'DR', enteredDr: amount, enteredCr: 0, accountedDr: amount, accountedCr: 0,
+          description: `Dr ${RR_DEBIT_ACCOUNT} — ${s.periodName}`, currencyCode: 'AED', accountingDate: acctDate,
+          accountCombination: buildCombination(company, RR_DEBIT_ACCOUNT), accountingClass: 'RECEIVABLE', legalEntity: null },
+        { lineType: 'CR', enteredDr: 0, enteredCr: amount, accountedDr: 0, accountedCr: amount,
+          description: `Cr ${RR_CREDIT_ACCOUNT} — ${s.periodName}`, currencyCode: 'AED', accountingDate: acctDate,
+          accountCombination: buildCombination(company, RR_CREDIT_ACCOUNT), accountingClass: 'REVENUE', legalEntity: null },
+      ],
+    };
+  };
+
+  // Post one schedule end-to-end: ledger → dup check → SLA (reuse/create) →
+  // create+post GL journal (reference1=trx, reference2=schedule, reference5=source).
+  const postRevenueSchedule = async (s: RevenueSchedule, postedBy: string, today: string): Promise<{ status: 'success' | 'skipped' | 'error'; message: string }> => {
+    const ledger = await fetchLedgerByBusinessUnit(s.businessUnit);
+    if (!ledger) return { status: 'error', message: `No ledger for BU '${s.businessUnit || '—'}'` };
+
+    const dup = await checkGLJournalExists(String(s.trxNumber ?? ''), s.id, RR_SOURCE);
+    if (dup.exists && dup.status === 'P') return { status: 'skipped', message: `Already accounted — GL batch ${dup.batchId}` };
+
+    const slaExists = await checkAccountingExists(RR_SOURCE_TABLE, s.id, RR_SOURCE);
+    const slaHeaderId = (slaExists.exists && slaExists.headerId)
+      ? slaExists.headerId
+      : (await createAccounting(buildRevenueSlaPayload(s, ledger, postedBy, today))).headerId;
+
+    const glRes = await postSlaToGL(buildRevenueGlOpts(s, ledger, postedBy, slaHeaderId));
+    if (!glRes.success) return { status: 'error', message: glRes.error || 'GL posting failed' };
+    return { status: 'success', message: `SLA #${slaHeaderId} — GL ${glRes.batchName}${glRes.skipped ? ' (reused)' : ''}` };
+  };
 
   const runCreateAccounting = async () => {
-    setPosting(true); setPostStatus(null); setPostResponse('');
-    try {
-      const res = await fetch(POST_ACCT_URL, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(postAcctPayload),
-      });
-      const text = await res.text();
-      setPostStatus(res.status); setPostResponse(text);
-      if (res.ok) {
-        message.success(`Accounting created for ${acctLines.length / 2} schedule(s)`);
-        await loadSchedules();
+    if (acctSchedules.length === 0) return;
+    setPosting(true); setPostResults([]);
+    const postedBy = loggedUser;
+    const today = new Date().toISOString().split('T')[0];
+    const results: { schedule: number; trx: number | null; status: string; message: string }[] = [];
+    for (const s of acctSchedules) {
+      try {
+        const r = await postRevenueSchedule(s, postedBy, today);
+        results.push({ schedule: s.id, trx: s.trxNumber, status: r.status, message: r.message });
+      } catch (e: any) {
+        results.push({ schedule: s.id, trx: s.trxNumber, status: 'error', message: String(e.message) });
       }
-    } catch (e: any) {
-      setPostStatus(0); setPostResponse(String(e.message));
-      message.error(`Create accounting failed: ${e.message}`);
-    } finally { setPosting(false); }
+      setPostResults([...results]);
+    }
+    setPosting(false);
+    const ok = results.filter(r => r.status === 'success').length;
+    const skip = results.filter(r => r.status === 'skipped').length;
+    const err = results.filter(r => r.status === 'error').length;
+    if (err === 0) message.success(`Accounting created: ${ok} posted${skip ? `, ${skip} already accounted` : ''}`);
+    else message.warning(`Posted ${ok}, skipped ${skip}, failed ${err}`);
+    await loadSchedules();
   };
 
   // Pivot: one row per contract, one column per month (chronological).
@@ -778,23 +853,25 @@ const RevenueRecognition: React.FC = () => {
           />
 
           <Divider style={{ margin: '12px 0' }} />
-          <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>POST {POST_ACCT_URL}</div>
-          <pre style={{ fontSize: 11, background: '#0d0d0d', color: '#a8ff78', borderRadius: 4, padding: 10, maxHeight: 160, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-            {JSON.stringify(postAcctPayload, null, 2)}
-          </pre>
-          {postStatus != null && (
-            <>
-              <div style={{ fontSize: 12, color: '#888', margin: '10px 0 4px' }}>
-                Response — HTTP <b style={{ color: postStatus >= 200 && postStatus < 300 ? REDWOOD.success : REDWOOD.primary }}>{postStatus}</b>
-              </div>
-              <pre style={{ fontSize: 11, background: '#0d0d0d', color: '#79c0ff', borderRadius: 4, padding: 10, maxHeight: 180, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                {postResponse || '(empty)'}
-              </pre>
-              {postStatus === 404 && (
-                <Alert type="warning" showIcon style={{ marginTop: 8, fontSize: 12 }}
-                  message="404 — the create-accounting webservice isn't deployed yet. Register POST ar/revenue-accounting/create in APEX to persist the journal lines." />
-              )}
-            </>
+          <Alert type="info" showIcon style={{ fontSize: 12, marginBottom: postResults.length ? 10 : 0 }}
+            message="Standard Subledger Accounting"
+            description={<span>Each schedule runs the standard flow: resolve ledger by business unit → duplicate check → create SLA accounting → create &amp; post the GL journal (reference1 = trx #, reference2 = schedule id, reference5 = {RR_SOURCE}) → stamp SLA. Same path as Multiperiod Accounting.</span>} />
+          {postResults.length > 0 && (
+            <Table
+              rowKey="schedule"
+              size="small"
+              style={{ marginTop: 10 }}
+              dataSource={postResults}
+              pagination={false}
+              scroll={{ y: 180 }}
+              columns={[
+                { title: 'Trx #', dataIndex: 'trx', width: 90, render: (v: any) => v ?? '—' },
+                { title: 'Schedule', dataIndex: 'schedule', width: 90 },
+                { title: 'Status', dataIndex: 'status', width: 100, render: (v: string) =>
+                  <Tag color={v === 'success' ? 'green' : v === 'skipped' ? 'gold' : 'red'}>{v}</Tag> },
+                { title: 'Result', dataIndex: 'message', ellipsis: true, render: (v: string) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+              ]}
+            />
           )}
         </Modal>
 
