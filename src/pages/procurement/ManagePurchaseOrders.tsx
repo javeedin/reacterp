@@ -13,7 +13,7 @@ import {
   InfoCircleOutlined, UnorderedListOutlined, ApiOutlined, CopyOutlined,
   PlusOutlined, BankOutlined, UserOutlined, CalendarOutlined,
   DollarOutlined, FileTextOutlined, DownOutlined, FilePdfOutlined,
-  HistoryOutlined,
+  HistoryOutlined, FolderOpenOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import CreatePurchaseOrder from './CreatePurchaseOrder';
@@ -1872,7 +1872,11 @@ const AnalyticsTab: React.FC = () => {
 const ManagePurchaseOrders: React.FC = () => {
   const [openPOs, setOpenPOs]         = useState<RawPO[]>([]);
   const [activeTab, setActiveTab]     = useState('search');
-  const [createPoOpen, setCreatePoOpen] = useState(false);
+  // Each "Create PO" click opens its own independent draft tab.
+  const [createTabs, setCreateTabs] = useState<string[]>([]);
+  const [createTabData, setCreateTabData] = useState<Record<string, any>>({});   // tab id → loaded PO snapshot
+  const createSeqRef = useRef(0);
+  const loadPoInputRef = useRef<HTMLInputElement>(null);
 
   const handleOpen = (po: RawPO) => {
     const key = String(po.POHeaderId);
@@ -1883,7 +1887,13 @@ const ManagePurchaseOrders: React.FC = () => {
   };
 
   const handleCloseTab = (key: string) => {
-    if (key === 'create') { setCreatePoOpen(false); setActiveTab('search'); return; }
+    if (key.startsWith('create-')) {
+      const remaining = createTabs.filter(k => k !== key);
+      setCreateTabs(remaining);
+      setCreateTabData(prev => { const n = { ...prev }; delete n[key]; return n; });
+      if (activeTab === key) setActiveTab(remaining.length > 0 ? remaining[remaining.length - 1] : 'search');
+      return;
+    }
     const remaining = openPOs.filter(p => String(p.POHeaderId) !== key);
     setOpenPOs(remaining);
     if (activeTab === key) {
@@ -1891,8 +1901,31 @@ const ManagePurchaseOrders: React.FC = () => {
     }
   };
 
-  const openCreatePO = () => { setCreatePoOpen(true); setActiveTab('create'); };
-  const closeCreatePO = () => { setCreatePoOpen(false); setActiveTab('search'); };
+  const openCreatePO = (snapshot?: any) => {
+    createSeqRef.current += 1;
+    const id = `create-${createSeqRef.current}`;
+    if (snapshot) setCreateTabData(prev => ({ ...prev, [id]: snapshot }));
+    setCreateTabs(prev => [...prev, id]);
+    setActiveTab(id);
+  };
+
+  const handleLoadPoJson = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const obj = JSON.parse(String(reader.result));
+        if (!obj || obj._reactErp !== 'purchase-order' || !obj.header) {
+          message.error('Not a valid ReactERP purchase-order JSON file'); return;
+        }
+        openCreatePO(obj);
+        message.success(`Loaded PO ${obj.header.poNumber ?? ''}`);
+      } catch { message.error('Could not parse the selected JSON file'); }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
 
   const tabItems = [
     {
@@ -1925,17 +1958,25 @@ const ManagePurchaseOrders: React.FC = () => {
       children: <AnalyticsTab />,
       closable: false,
     },
-    ...(createPoOpen ? [{
-      key: 'create',
-      label: (
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <PlusOutlined style={{ fontSize: 12, color: REDWOOD.success }} />
-          <span style={{ fontWeight: 600, color: REDWOOD.success }}>Create PO</span>
-        </span>
-      ),
-      children: <CreatePurchaseOrder onExit={closeCreatePO} />,
-      closable: true,
-    }] : []),
+    ...createTabs.map((id, idx) => {
+      const loaded = createTabData[id];
+      const loadedNum = loaded?.header?.poNumber;
+      return {
+        key: id,
+        label: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {loaded
+              ? <FolderOpenOutlined style={{ fontSize: 12, color: REDWOOD.primary }} />
+              : <PlusOutlined style={{ fontSize: 12, color: REDWOOD.success }} />}
+            <span style={{ fontWeight: 600, color: loaded ? REDWOOD.primary : REDWOOD.success, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {loaded ? (loadedNum || 'Loaded PO') : `Create PO${createTabs.filter(k => !createTabData[k]).length > 1 ? ` ${idx + 1}` : ''}`}
+            </span>
+          </span>
+        ),
+        children: <CreatePurchaseOrder onExit={() => handleCloseTab(id)} initialPo={loaded} />,
+        closable: true,
+      };
+    }),
     ...openPOs.map(po => ({
       key: String(po.POHeaderId),
       label: (
@@ -1981,11 +2022,19 @@ const ManagePurchaseOrders: React.FC = () => {
           tabBarGutter={4}
           tabBarExtraContent={{
             right: (
-              <div style={{ paddingRight: 16 }}>
+              <div style={{ paddingRight: 16, display: 'flex', gap: 8 }}>
+                <input ref={loadPoInputRef} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={handleLoadPoJson} />
+                <Button
+                  icon={<FolderOpenOutlined />}
+                  onClick={() => loadPoInputRef.current?.click()}
+                  style={{ fontWeight: 600 }}
+                >
+                  Load PO from JSON
+                </Button>
                 <Button
                   type="primary"
                   icon={<PlusOutlined />}
-                  onClick={openCreatePO}
+                  onClick={() => openCreatePO()}
                   style={{ background: REDWOOD.success, borderColor: REDWOOD.success, fontWeight: 600 }}
                 >
                   + Create PO

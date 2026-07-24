@@ -221,12 +221,13 @@ const loadItemmasterCache = (org: string): { items: any[]; ts: string } | null =
   } catch { return null; }
 };
 
-const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
+const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = ({ onExit, initialPo }) => {
   const navigate = useNavigate();
   const exit = () => onExit ? onExit() : navigate('/procurement/purchase-orders');
   const [headerForm] = Form.useForm();
 
-  const [showInitModal, setShowInitModal] = useState(true);
+  // When opened with a loaded PO snapshot, skip the "New Purchase Order" dialog.
+  const [showInitModal, setShowInitModal] = useState(!initialPo);
   const [header, setHeader] = useState<POHeader | null>(null);
   const [lines, setLines] = useState<POLine[]>([]);
   const [defaultTaxPct, setDefaultTaxPct] = useState(0);
@@ -685,6 +686,12 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
     reader.readAsText(file);
     e.target.value = '';   // allow re-picking the same file
   };
+
+  // Opened from "Load PO from JSON" — hydrate the order and skip the setup dialog.
+  useEffect(() => {
+    if (initialPo) { loadPoFromObject(initialPo); setShowInitModal(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const subtotal   = lines.reduce((s, l) => s + l.lineTotal, 0);
   const totalTax   = lines.reduce((s, l) => s + l.taxAmount, 0);
