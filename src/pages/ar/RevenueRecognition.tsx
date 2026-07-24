@@ -47,6 +47,10 @@ const REDWOOD = {
   neutral100: '#F7F7F7', neutral200: '#E5E5E5', neutral500: '#8C8C8C',
 };
 
+// Oracle Fusion — business-unit LOV (same source as procurement/BusinessUnits).
+const FUSION_BASE = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05';
+const FUSION_HEADERS = { Authorization: 'Basic ' + btoa('emparun:Fusion@1234'), Accept: 'application/json' };
+
 const fmt = (v: number | null | undefined) =>
   v == null ? '—' : new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v));
 
@@ -58,15 +62,17 @@ const RR_CREDIT_ACCOUNT = '4111101';   // Cr — revenue
 const RR_REMAINING_SEGMENTS = ['0000', '000', '00', '000', '000']; // CC + seg4..7 (default)
 const RR_SOURCE = 'AR_REVENUE_RECOGNIZATION';   // reference5
 
-// Company segment derived from the business unit. Extend this map as needed;
-// falls back to '00' when the BU is unknown.
+// Company segment derived from the business unit. Populated at runtime from the
+// finBusinessUnitsLOV Company field (keyed by upper-cased BU name); falls back
+// to '01' when the BU is unknown.
 const BU_TO_COMPANY: Record<string, string> = {
   // 'AMS B2B GHANA': '01',
 };
+const DEFAULT_COMPANY = '01';
 const companyFromBU = (bu?: string): string => {
-  if (!bu) return '00';
+  if (!bu) return DEFAULT_COMPANY;
   const hit = BU_TO_COMPANY[bu.trim()] ?? BU_TO_COMPANY[bu.trim().toUpperCase()];
-  return hit ?? '00';
+  return hit ?? DEFAULT_COMPANY;
 };
 const buildCombination = (company: string, account: string): string =>
   [company, account, ...RR_REMAINING_SEGMENTS].join('-');
@@ -154,9 +160,11 @@ const RevenueRecognition: React.FC = () => {
 
   // Post Revenue — accounting (standard SLA + GL journal flow, like Multiperiod)
   const [postPeriod, setPostPeriod]           = useState<string>();
-  // Schedules carry no business unit, so allow the user to supply the Fusion BU
-  // name that drives ledger + company resolution for accounting.
+  // Schedules carry no business unit, so allow the user to pick the Fusion BU
+  // that drives ledger + company resolution for accounting.
   const [postBusinessUnit, setPostBusinessUnit] = useState<string>('');
+  const [buOptions, setBuOptions] = useState<{ name: string; company: string }[]>([]);
+  const [buLoading, setBuLoading] = useState(false);
   const [postSelectedKeys, setPostSelectedKeys] = useState<React.Key[]>([]);
   const [acctPreviewOpen, setAcctPreviewOpen] = useState(false);
   const [acctSchedules, setAcctSchedules]     = useState<RevenueSchedule[]>([]);
@@ -187,7 +195,29 @@ const RevenueRecognition: React.FC = () => {
     finally { setSchedulesLoading(false); }
   };
 
-  useEffect(() => { loadContracts(); loadSchedules(); }, []);
+  // Load Fusion business units for the Post Revenue BU picker. The LOV Company
+  // field feeds the runtime BU→company map so the account combination uses the
+  // right first segment (falls back to DEFAULT_COMPANY '01').
+  const loadBusinessUnits = async () => {
+    setBuLoading(true);
+    try {
+      const res = await fetch(`${FUSION_BASE}/finBusinessUnitsLOV?limit=500&onlyData=true`, { headers: FUSION_HEADERS });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const items: any[] = Array.isArray(data) ? data : (data.items ?? []);
+      const opts = items
+        .map(it => ({ name: String(it.BusinessUnitName ?? '').trim(), company: String(it.Company ?? '').trim() }))
+        .filter(o => o.name)
+        .sort((a, b) => a.name.localeCompare(b.name));
+      // Feed the runtime company map (upper-cased keys) so companyFromBU resolves.
+      opts.forEach(o => { if (o.company) BU_TO_COMPANY[o.name.toUpperCase()] = o.company; });
+      setBuOptions(opts);
+    } catch (e: any) {
+      message.error(`Failed to load business units: ${e.message}`);
+    } finally { setBuLoading(false); }
+  };
+
+  useEffect(() => { loadContracts(); loadSchedules(); loadBusinessUnits(); }, []);
 
   const openGenerate = () => {
     if (selectedKeys.length === 0) { message.warning('Select one or more contracts'); return; }
@@ -830,9 +860,14 @@ const RevenueRecognition: React.FC = () => {
                             style={{ width: 220 }} options={periodOptions.map(p => ({ label: p, value: p }))}
                             notFoundContent={schedules.length === 0 ? 'Load schedules first' : 'No periods'} />
                           <Text style={{ fontSize: 12, color: REDWOOD.neutral500 }}>Business Unit</Text>
-                          <Input allowClear placeholder="Fusion BU name (for ledger)"
-                            value={postBusinessUnit} onChange={(e) => setPostBusinessUnit(e.target.value)}
-                            style={{ width: 220 }} />
+                          <Select showSearch allowClear placeholder="Select business unit"
+                            loading={buLoading} value={postBusinessUnit || undefined}
+                            onChange={(v) => setPostBusinessUnit(v || '')}
+                            style={{ width: 240 }}
+                            optionFilterProp="label"
+                            options={buOptions.map(o => ({
+                              label: o.company ? `${o.name} (Co ${o.company})` : o.name, value: o.name }))}
+                            notFoundContent={buLoading ? 'Loading…' : 'No business units'} />
                           {postPeriod && <Text type="secondary" style={{ fontSize: 12 }}>
                             {postSchedules.length} schedule(s) · {postSelectedKeys.length} selected
                           </Text>}
@@ -857,12 +892,15 @@ const RevenueRecognition: React.FC = () => {
                           getCheckboxProps: (r) => ({ disabled: isAccounted(r) }) }}
                         locale={{ emptyText: postPeriod ? 'No schedules for this period' : 'Select a period to list schedules' }}
                         columns={[
+                          { title: 'Business Unit', key: 'businessUnit', width: 200, ellipsis: true, render: (_: any, r: RevenueSchedule) => {
+                            const bu = buForSchedule(r);
+                            return bu ? bu : <span style={{ color: REDWOOD.neutral500 }}>— select BU —</span>;
+                          } },
                           { title: 'Trx #', dataIndex: 'trxNumber', width: 90, render: (v: any) => <Text strong>{v ?? '—'}</Text> },
                           { title: 'Invoice #', dataIndex: 'invoiceNumber', width: 120, render: (v: any) => v || <span style={{ color: REDWOOD.neutral500 }}>—</span> },
                           { title: 'Unit', dataIndex: 'unit', width: 110 },
                           { title: 'Tenant', dataIndex: 'tenant', width: 170, ellipsis: true },
-                          { title: 'Business Unit', dataIndex: 'businessUnit', width: 150, ellipsis: true, render: (v: string) => v || <span style={{ color: REDWOOD.neutral500 }}>—</span> },
-                          { title: 'Company', key: 'company', width: 90, render: (_: any, r: RevenueSchedule) => <Tag color="blue">{companyFromBU(r.businessUnit)}</Tag> },
+                          { title: 'Company', key: 'company', width: 90, render: (_: any, r: RevenueSchedule) => <Tag color="blue">{companyFromBU(buForSchedule(r))}</Tag> },
                           { title: '#', dataIndex: 'scheduleNum', width: 55, align: 'right' as const },
                           { title: 'Amount', dataIndex: 'amount', width: 120, align: 'right' as const, render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
                           { title: 'Billed', key: 'billed', width: 70, align: 'center' as const, render: (_: any, r: RevenueSchedule) => isBilled(r) ? <CheckCircleTwoTone twoToneColor="#1D7B4D" /> : <CloseCircleTwoTone twoToneColor="#C74634" /> },
