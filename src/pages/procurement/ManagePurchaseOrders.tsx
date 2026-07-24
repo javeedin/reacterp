@@ -1029,9 +1029,17 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
   const [urlParams] = useSearchParams();
   useEffect(() => {
     const on = urlParams.get('orderNumber');
-    if (!on) return;
-    form.setFieldsValue({ orderNumber: on });
-    const params: SearchParams = { orderNumber: on };
+    if (on) {
+      form.setFieldsValue({ orderNumber: on });
+      const params: SearchParams = { orderNumber: on };
+      setSearchParams(params); setPage(1); setHasSearched(true);
+      fetchPOs(params, 1).then(items => fetchLineCounts(items));
+      return;
+    }
+    // Default: recent orders — CreationDate > (sysdate - 2). Prefill + auto-run.
+    const defaultDate = dayjs().subtract(2, 'day');
+    form.setFieldsValue({ dateOp: '>', creationDate: defaultDate });
+    const params: SearchParams = { dateOp: '>', creationDate: defaultDate };
     setSearchParams(params); setPage(1); setHasSearched(true);
     fetchPOs(params, 1).then(items => fetchLineCounts(items));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1152,7 +1160,7 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
                     <Select style={{ width: 76 }}
                       options={(['=', '>', '>=', '<', '<='] as DateOp[]).map(o => ({ label: o, value: o }))} />
                   </Form.Item>
-                  <Form.Item name="creationDate" noStyle>
+                  <Form.Item name="creationDate" noStyle initialValue={dayjs().subtract(2, 'day')}>
                     <DatePicker allowClear format="YYYY-MM-DD" style={{ width: '100%' }} placeholder="Select date" />
                   </Form.Item>
                 </Space.Compact>
