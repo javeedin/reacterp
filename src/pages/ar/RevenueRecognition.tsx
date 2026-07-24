@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Layout, Card, Typography, Table, Button, Space, Tag, Breadcrumb, Tabs,
-  message, Input, Tooltip, Row, Col, Statistic, Modal, Alert,
+  message, Input, Tooltip, Row, Col, Statistic, Modal, Alert, Select, Divider,
 } from 'antd';
 import {
   HomeOutlined, ReloadOutlined, ThunderboltOutlined, SearchOutlined,
   FileExcelOutlined, ApiOutlined, DollarOutlined, CheckCircleTwoTone, CloseCircleTwoTone,
-  TableOutlined,
+  TableOutlined, AuditOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -30,6 +30,58 @@ const REDWOOD = {
 
 const fmt = (v: number | null | undefined) =>
   v == null ? '—' : new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v));
+
+// ── Revenue-recognition accounting ────────────────────────────────────────────
+// COA structure (7 segments): Company-Account-CostCenter-Seg4-Seg5-Seg6-Seg7
+// e.g. 00-1240100-0000-000-00-000-000
+const RR_DEBIT_ACCOUNT  = '2313111';   // Dr — unbilled/deferred revenue control
+const RR_CREDIT_ACCOUNT = '4111101';   // Cr — revenue
+const RR_REMAINING_SEGMENTS = ['0000', '000', '00', '000', '000']; // CC + seg4..7 (default)
+const RR_SOURCE = 'AR_REVENUE_RECOGNIZATION';   // reference5
+
+// Company segment derived from the business unit. Extend this map as needed;
+// falls back to '00' when the BU is unknown.
+const BU_TO_COMPANY: Record<string, string> = {
+  // 'AMS B2B GHANA': '01',
+};
+const companyFromBU = (bu?: string): string => {
+  if (!bu) return '00';
+  const hit = BU_TO_COMPANY[bu.trim()] ?? BU_TO_COMPANY[bu.trim().toUpperCase()];
+  return hit ?? '00';
+};
+const buildCombination = (company: string, account: string): string =>
+  [company, account, ...RR_REMAINING_SEGMENTS].join('-');
+
+interface AcctLine {
+  key: string;
+  scheduleId: number;
+  trxNumber: number | null;
+  periodName: string;
+  unit: string;
+  tenant: string;
+  lineType: 'DR' | 'CR';
+  accountCombination: string;
+  debit: number;
+  credit: number;
+  reference1: string;   // trx_number
+  reference2: string;   // schedule_id
+  reference5: string;   // AR_REVENUE_RECOGNIZATION
+}
+
+const buildAcctLines = (rows: RevenueSchedule[]): AcctLine[] => {
+  const lines: AcctLine[] = [];
+  rows.forEach(s => {
+    const company = companyFromBU(s.businessUnit);
+    const amount = Number(s.amount) || 0;
+    const base = {
+      scheduleId: s.id, trxNumber: s.trxNumber, periodName: s.periodName, unit: s.unit, tenant: s.tenant,
+      reference1: String(s.trxNumber ?? ''), reference2: String(s.id), reference5: RR_SOURCE,
+    };
+    lines.push({ ...base, key: `${s.id}-DR`, lineType: 'DR', accountCombination: buildCombination(company, RR_DEBIT_ACCOUNT),  debit: amount, credit: 0 });
+    lines.push({ ...base, key: `${s.id}-CR`, lineType: 'CR', accountCombination: buildCombination(company, RR_CREDIT_ACCOUNT), debit: 0, credit: amount });
+  });
+  return lines;
+};
 
 // Parse the contract date strings (MM/DD/YYYY, YYYY-MM-DD, DD-MON-YYYY seen).
 const parseFlexDate = (s: string): Date | null => {
@@ -80,6 +132,17 @@ const RevenueRecognition: React.FC = () => {
   const [schedules, setSchedules] = useState<RevenueSchedule[]>([]);
   const [schedulesLoading, setSchedulesLoading] = useState(false);
   const [scheduleSearch, setScheduleSearch] = useState('');
+
+  // Post Revenue — accounting
+  const [postPeriod, setPostPeriod]           = useState<string>();
+  const [postSelectedKeys, setPostSelectedKeys] = useState<React.Key[]>([]);
+  const [acctPreviewOpen, setAcctPreviewOpen] = useState(false);
+  const [acctLines, setAcctLines]             = useState<AcctLine[]>([]);
+  const [posting, setPosting]                 = useState(false);
+  const [postStatus, setPostStatus]           = useState<number | null>(null);
+  const [postResponse, setPostResponse]       = useState<string>('');
+
+  const POST_ACCT_URL = `${APEX_DB_CONFIG.baseUrl}/ar/revenue-accounting/create`;
 
   const loadContracts = async () => {
     setContractsLoading(true);
@@ -165,6 +228,62 @@ const RevenueRecognition: React.FC = () => {
 
   const isBilled = (s: RevenueSchedule) => String(s.status || '').toUpperCase() !== 'PENDING' || !!s.invoiceNumber;
   const isAccounted = (s: RevenueSchedule) => String(s.accountStatus || '').toUpperCase() === 'ACCOUNTED';
+
+  // ── Post Revenue: period list, schedules in the period, and selection ──
+  const periodOptions = useMemo(() => {
+    const seen = new Map<string, string>();   // name → date (for sort)
+    schedules.forEach(s => { if (s.periodName && !seen.has(s.periodName)) seen.set(s.periodName, s.periodDate); });
+    return Array.from(seen.entries())
+      .sort((a, b) => (a[1] || a[0]).localeCompare(b[1] || b[0]))
+      .map(([name]) => name);
+  }, [schedules]);
+
+  const postSchedules = useMemo(
+    () => (postPeriod ? schedules.filter(s => s.periodName === postPeriod) : []),
+    [schedules, postPeriod]);
+
+  const openAcctPreview = () => {
+    const chosen = postSchedules.filter(s => postSelectedKeys.includes(s.id));
+    if (chosen.length === 0) { message.warning('Select one or more schedules'); return; }
+    setAcctLines(buildAcctLines(chosen));
+    setPostStatus(null); setPostResponse('');
+    setAcctPreviewOpen(true);
+  };
+
+  const acctTotals = useMemo(() => ({
+    debit:  acctLines.reduce((s, l) => s + l.debit, 0),
+    credit: acctLines.reduce((s, l) => s + l.credit, 0),
+  }), [acctLines]);
+
+  const postAcctPayload = useMemo(() => ({
+    source: RR_SOURCE,
+    period: postPeriod,
+    createdBy: loggedUser,
+    lines: acctLines.map(l => ({
+      scheduleId: l.scheduleId, trxNumber: l.trxNumber, accountCombination: l.accountCombination,
+      debit: l.debit, credit: l.credit,
+      reference1: l.reference1, reference2: l.reference2, reference5: l.reference5,
+    })),
+  }), [acctLines, postPeriod, loggedUser]);
+
+  const runCreateAccounting = async () => {
+    setPosting(true); setPostStatus(null); setPostResponse('');
+    try {
+      const res = await fetch(POST_ACCT_URL, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(postAcctPayload),
+      });
+      const text = await res.text();
+      setPostStatus(res.status); setPostResponse(text);
+      if (res.ok) {
+        message.success(`Accounting created for ${acctLines.length / 2} schedule(s)`);
+        await loadSchedules();
+      }
+    } catch (e: any) {
+      setPostStatus(0); setPostResponse(String(e.message));
+      message.error(`Create accounting failed: ${e.message}`);
+    } finally { setPosting(false); }
+  };
 
   // Pivot: one row per contract, one column per month (chronological).
   const matrix = useMemo(() => {
@@ -493,6 +612,65 @@ const RevenueRecognition: React.FC = () => {
                     </>
                   ),
                 },
+                {
+                  key: 'post-revenue',
+                  label: <Space size={4}><AuditOutlined />Post Revenue</Space>,
+                  children: (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
+                        <Space wrap>
+                          <Text style={{ fontSize: 12, color: REDWOOD.neutral500 }}>Period</Text>
+                          <Select showSearch allowClear placeholder="Select accounting period"
+                            value={postPeriod} onChange={(v) => { setPostPeriod(v); setPostSelectedKeys([]); }}
+                            style={{ width: 220 }} options={periodOptions.map(p => ({ label: p, value: p }))}
+                            notFoundContent={schedules.length === 0 ? 'Load schedules first' : 'No periods'} />
+                          {postPeriod && <Text type="secondary" style={{ fontSize: 12 }}>
+                            {postSchedules.length} schedule(s) · {postSelectedKeys.length} selected
+                          </Text>}
+                        </Space>
+                        <Space>
+                          <Button type="primary" icon={<AuditOutlined />} disabled={postSelectedKeys.length === 0}
+                            style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+                            onClick={openAcctPreview}>
+                            Create Accounting ({postSelectedKeys.length})
+                          </Button>
+                          <Button icon={<ReloadOutlined />} onClick={loadSchedules} loading={schedulesLoading}>Refresh</Button>
+                        </Space>
+                      </div>
+                      <Table
+                        rowKey="id"
+                        size="small"
+                        loading={schedulesLoading}
+                        dataSource={postSchedules}
+                        pagination={{ pageSize: 25, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'], showTotal: (t) => `${t} schedules` }}
+                        rowSelection={{ selectedRowKeys: postSelectedKeys, onChange: setPostSelectedKeys,
+                          getCheckboxProps: (r) => ({ disabled: isAccounted(r) }) }}
+                        locale={{ emptyText: postPeriod ? 'No schedules for this period' : 'Select a period to list schedules' }}
+                        columns={[
+                          { title: 'Trx #', dataIndex: 'trxNumber', width: 90, render: (v: any) => <Text strong>{v ?? '—'}</Text> },
+                          { title: 'Invoice #', dataIndex: 'invoiceNumber', width: 120, render: (v: any) => v || <span style={{ color: REDWOOD.neutral500 }}>—</span> },
+                          { title: 'Unit', dataIndex: 'unit', width: 110 },
+                          { title: 'Tenant', dataIndex: 'tenant', width: 170, ellipsis: true },
+                          { title: 'Business Unit', dataIndex: 'businessUnit', width: 150, ellipsis: true, render: (v: string) => v || <span style={{ color: REDWOOD.neutral500 }}>—</span> },
+                          { title: 'Company', key: 'company', width: 90, render: (_: any, r: RevenueSchedule) => <Tag color="blue">{companyFromBU(r.businessUnit)}</Tag> },
+                          { title: '#', dataIndex: 'scheduleNum', width: 55, align: 'right' as const },
+                          { title: 'Amount', dataIndex: 'amount', width: 120, align: 'right' as const, render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
+                          { title: 'Billed', key: 'billed', width: 70, align: 'center' as const, render: (_: any, r: RevenueSchedule) => isBilled(r) ? <CheckCircleTwoTone twoToneColor="#1D7B4D" /> : <CloseCircleTwoTone twoToneColor="#C74634" /> },
+                          { title: 'Accounted', key: 'acct', width: 90, align: 'center' as const, render: (_: any, r: RevenueSchedule) => isAccounted(r) ? <Tag color="green">Accounted</Tag> : <Tag>Pending</Tag> },
+                        ]}
+                        summary={() => postSchedules.length === 0 ? null : (
+                          <Table.Summary fixed>
+                            <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 700 }}>
+                              <Table.Summary.Cell index={0} colSpan={7}><Text strong>Total ({postSchedules.length})</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={7} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{fmt(postSchedules.reduce((s, r) => s + (Number(r.amount) || 0), 0))}</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={8} colSpan={2} />
+                            </Table.Summary.Row>
+                          </Table.Summary>
+                        )}
+                      />
+                    </>
+                  ),
+                },
               ]}
             />
           </Card>
@@ -535,6 +713,86 @@ const RevenueRecognition: React.FC = () => {
               {genStatus === 404 && (
                 <Alert type="warning" showIcon style={{ marginTop: 8, fontSize: 12 }}
                   message="404 — the webservice isn't deployed. Run database/ar/rr_ar_revenue.sql in APEX SQL Workshop (it registers POST ar/revenue-schedules/generate)." />
+              )}
+            </>
+          )}
+        </Modal>
+
+        {/* ── Create Accounting — preview + post ── */}
+        <Modal
+          open={acctPreviewOpen}
+          onCancel={() => { if (!posting) setAcctPreviewOpen(false); }}
+          maskClosable={!posting}
+          width={980}
+          title={<Space><AuditOutlined style={{ color: REDWOOD.primary }} /><span>Create Accounting — Preview</span></Space>}
+          footer={
+            <Space>
+              <Button disabled={posting} onClick={() => setAcctPreviewOpen(false)}>Close</Button>
+              <Button type="primary" loading={posting} icon={<AuditOutlined />}
+                disabled={Math.abs(acctTotals.debit - acctTotals.credit) > 0.005}
+                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+                onClick={runCreateAccounting}>
+                Post Accounting ({acctLines.length / 2})
+              </Button>
+            </Space>
+          }
+        >
+          <Space size={16} wrap style={{ marginBottom: 8 }}>
+            <Text style={{ fontSize: 12 }}>Period: <Tag color="blue">{postPeriod}</Tag></Text>
+            <Text style={{ fontSize: 12 }}>Dr: <Tag>{RR_DEBIT_ACCOUNT}</Tag></Text>
+            <Text style={{ fontSize: 12 }}>Cr: <Tag>{RR_CREDIT_ACCOUNT}</Tag></Text>
+            <Text style={{ fontSize: 12 }}>Source (ref5): <Tag color="purple">{RR_SOURCE}</Tag></Text>
+          </Space>
+          <Table
+            rowKey="key"
+            size="small"
+            bordered
+            dataSource={acctLines}
+            pagination={false}
+            scroll={{ y: 320, x: 900 }}
+            columns={[
+              { title: 'Trx #', dataIndex: 'trxNumber', width: 80, render: (v: any) => v ?? '—' },
+              { title: 'Sched', dataIndex: 'scheduleId', width: 70 },
+              { title: 'Dr/Cr', dataIndex: 'lineType', width: 60, render: (v: string) => <Tag color={v === 'DR' ? 'geekblue' : 'gold'}>{v}</Tag> },
+              { title: 'Account Combination', dataIndex: 'accountCombination', width: 220, render: (v: string) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</Text> },
+              { title: 'Debit', dataIndex: 'debit', width: 110, align: 'right' as const, render: (v: number) => v ? <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> : '—' },
+              { title: 'Credit', dataIndex: 'credit', width: 110, align: 'right' as const, render: (v: number) => v ? <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> : '—' },
+              { title: 'Ref1', dataIndex: 'reference1', width: 90, render: (v: string) => <Tooltip title="trx_number">{v || '—'}</Tooltip> },
+              { title: 'Ref2', dataIndex: 'reference2', width: 90, render: (v: string) => <Tooltip title="schedule_id">{v}</Tooltip> },
+              { title: 'Ref5', dataIndex: 'reference5', width: 170, ellipsis: true, render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+            ]}
+            summary={() => (
+              <Table.Summary fixed>
+                <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 700 }}>
+                  <Table.Summary.Cell index={0} colSpan={4}><Text strong>Totals</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={4} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{fmt(acctTotals.debit)}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={5} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{fmt(acctTotals.credit)}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={6} colSpan={3} align="right">
+                    {Math.abs(acctTotals.debit - acctTotals.credit) < 0.005
+                      ? <Tag color="green">Balanced</Tag>
+                      : <Tag color="red">Out of balance</Tag>}
+                  </Table.Summary.Cell>
+                </Table.Summary.Row>
+              </Table.Summary>
+            )}
+          />
+
+          <Divider style={{ margin: '12px 0' }} />
+          <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>POST {POST_ACCT_URL}</div>
+          <pre style={{ fontSize: 11, background: '#0d0d0d', color: '#a8ff78', borderRadius: 4, padding: 10, maxHeight: 160, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+            {JSON.stringify(postAcctPayload, null, 2)}
+          </pre>
+          {postStatus != null && (
+            <>
+              <div style={{ fontSize: 12, color: '#888', margin: '10px 0 4px' }}>
+                Response — HTTP <b style={{ color: postStatus >= 200 && postStatus < 300 ? REDWOOD.success : REDWOOD.primary }}>{postStatus}</b>
+              </div>
+              <pre style={{ fontSize: 11, background: '#0d0d0d', color: '#79c0ff', borderRadius: 4, padding: 10, maxHeight: 180, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                {postResponse || '(empty)'}
+              </pre>
+              {postStatus === 404 && (
+                <Alert type="warning" showIcon style={{ marginTop: 8, fontSize: 12 }}
+                  message="404 — the create-accounting webservice isn't deployed yet. Register POST ar/revenue-accounting/create in APEX to persist the journal lines." />
               )}
             </>
           )}

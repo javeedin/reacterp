@@ -29,6 +29,7 @@ export interface RevenueSchedule {
   invoiceNumber: string | null;
   status: string;
   accountStatus: string;
+  businessUnit: string;
 }
 
 // ORDS json/collection folds quoted camelCase aliases to lowercase, so read
@@ -60,6 +61,7 @@ const mapSchedule = (r: any): RevenueSchedule => ({
   invoiceNumber: r.invoiceNumber ?? r.invoicenumber ?? null,
   status: r.status ?? '',
   accountStatus: r.accountStatus ?? r.accountstatus ?? '',
+  businessUnit: r.businessUnit ?? r.business_unit ?? r.businessunit ?? r.bu ?? '',
 });
 
 export const getRevenueContracts = async (): Promise<RevenueContract[]> => {
