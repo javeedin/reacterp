@@ -314,7 +314,9 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
   const [approvalNote, setApprovalNote]     = useState('');
   const [approvalSending, setApprovalSending] = useState(false);
 
-  useEffect(() => { if (showInitModal) loadInitLOVs(); }, [showInitModal]);
+  // Load LOVs when the init modal opens, or when opened via a loaded JSON PO
+  // (which skips the init modal) — the detail page still needs the org list etc.
+  useEffect(() => { if (showInitModal || initialPo) loadInitLOVs(); }, [showInitModal]);
 
   const loadInitLOVs = async () => {
     setLovLoading(true);
@@ -1686,19 +1688,55 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
     setImportValidating(false);
   };
 
-  const handleAddPastedItems = () => {
-    const toAdd = pastedRows.filter(r => r.status === 'valid' && !existingItemNumbers.has(r.itemNumber));
-    const base = lines.length;
-    setLines(prev => [...prev, ...toAdd.map((r, i) => computeLine({
-      key: `${r.itemNumber}-${Date.now()}-${i}`,
-      lineNum: base + i + 1,
-      itemNumber: r.itemNumber,
-      description: String(r.matchedItem?.description ?? ''),
-      uom: String(r.matchedItem?.primary_uom_code ?? r.matchedItem?.uom ?? ''),
-      qty: r.qty > 0 ? r.qty : 1, price: r.price, taxPct: defaultTaxPct,
-      needBy: needByAll, promisedDate: null, chargeAccount: '', destinationType: 'Inventory',
-    }))]);
+  // Apply the pasted rows. overwrite=true updates qty/price on lines already on
+  // the PO; either way, items not yet on the PO are appended.
+  const applyPastedItems = (overwrite: boolean) => {
+    const valid = pastedRows.filter(r => r.status === 'valid');
+    if (valid.length === 0) return;
+    const byNum = new Map(valid.map(r => [r.itemNumber, r]));
+    const existing = new Set(lines.map(l => l.itemNumber));
+    const added = valid.filter(r => !existing.has(r.itemNumber)).length;
+    const updated = overwrite ? valid.length - added : 0;
+
+    setLines(prev => {
+      const patched = prev.map(l => {
+        const r = byNum.get(l.itemNumber);
+        if (!r || !overwrite) return l;
+        return computeLine({ ...l, qty: r.qty > 0 ? r.qty : l.qty, price: r.price });
+      });
+      const onPo = new Set(prev.map(l => l.itemNumber));
+      const appended = valid.filter(r => !onPo.has(r.itemNumber)).map((r, i) => computeLine({
+        key: `${r.itemNumber}-${Date.now()}-${i}`,
+        lineNum: 0,
+        itemNumber: r.itemNumber,
+        description: String(r.matchedItem?.description ?? ''),
+        uom: String(r.matchedItem?.primary_uom_code ?? r.matchedItem?.uom ?? ''),
+        qty: r.qty > 0 ? r.qty : 1, price: r.price, taxPct: defaultTaxPct,
+        needBy: needByAll, promisedDate: null, chargeAccount: '', destinationType: 'Inventory',
+      }));
+      return [...patched, ...appended].map((l, i) => ({ ...l, lineNum: i + 1 }));
+    });
     setAddItemOpen(false);
+    message.success(`${added} item(s) added${updated ? `, ${updated} updated` : ''}`);
+  };
+
+  const handleAddPastedItems = () => {
+    const valid = pastedRows.filter(r => r.status === 'valid');
+    if (valid.length === 0) return;
+    const dup = valid.filter(r => existingItemNumbers.has(r.itemNumber)).length;
+    if (dup > 0) {
+      Modal.confirm({
+        title: 'Some items are already on this PO',
+        content: `${dup} of the ${valid.length} pasted item(s) already exist on this purchase order. Overwrite their quantity & price with the pasted values, or add only the new items?`,
+        okText: 'Overwrite existing',
+        cancelText: 'Add new only',
+        width: 460,
+        onOk:     () => applyPastedItems(true),
+        onCancel: () => applyPastedItems(false),
+      });
+    } else {
+      applyPastedItems(true);
+    }
   };
 
   const existingItemNumbers = new Set(lines.map(l => l.itemNumber));
@@ -3236,11 +3274,16 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
                   </Button>
                   <Button type="primary"
                     onClick={handleAddPastedItems}
-                    disabled={pastedRows.filter(r => r.status === 'valid' && !existingItemNumbers.has(r.itemNumber)).length === 0}
+                    disabled={pastedRows.filter(r => r.status === 'valid').length === 0}
                     style={{ background: C.green, borderColor: C.green }}>
                     {(() => {
-                      const n = pastedRows.filter(r => r.status === 'valid' && !existingItemNumbers.has(r.itemNumber)).length;
-                      return n > 0 ? `Add ${n} Valid Item(s)` : 'Add Valid Items';
+                      const valid = pastedRows.filter(r => r.status === 'valid');
+                      const add = valid.filter(r => !existingItemNumbers.has(r.itemNumber)).length;
+                      const upd = valid.length - add;
+                      if (valid.length === 0) return 'Add Valid Items';
+                      if (upd > 0 && add > 0) return `Add ${add} · Update ${upd}`;
+                      if (upd > 0) return `Update ${upd} Item(s)`;
+                      return `Add ${add} Valid Item(s)`;
                     })()}
                   </Button>
                 </Space>
