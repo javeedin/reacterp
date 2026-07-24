@@ -904,20 +904,24 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
   const [describeActions, setDescribeActions] = useState<any[] | null>(null);
   const [describeLoading, setDescribeLoading] = useState(false);
   const [describeErr, setDescribeErr]         = useState('');
+  // Which Fusion resource to describe. draftPurchaseOrders exposes `submit`;
+  // purchaseOrders exposes the lifecycle actions (cancel/change/close/hold…).
+  const [describeResource, setDescribeResource] = useState('draftPurchaseOrders');
 
   const approveBody = { name: approveAction, parameters: [] as any[] };
 
   // Fetch the resource's describe and list its custom action names + params.
   const discoverActions = async () => {
+    const resource = (describeResource || 'draftPurchaseOrders').trim();
     setDescribeLoading(true); setDescribeErr(''); setDescribeActions(null);
     try {
-      const r = await fetch(`${BASE_URL}/draftPurchaseOrders/describe`, { headers: { Authorization: AUTH_HEADER, Accept: 'application/json' } });
+      const r = await fetch(`${BASE_URL}/${resource}/describe`, { headers: { Authorization: AUTH_HEADER, Accept: 'application/json' } });
       if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
       const d = await r.json();
-      let actions: any = d?.Resources?.draftPurchaseOrders?.actions ?? d?.actions ?? [];
+      let actions: any = d?.Resources?.[resource]?.actions ?? d?.actions ?? [];
       if (actions && !Array.isArray(actions)) actions = Object.entries(actions).map(([name, v]) => ({ name, ...(v as any) }));
       setDescribeActions(actions);
-      if (Array.isArray(actions) && actions.length === 0) setDescribeErr('No custom actions listed on this resource.');
+      if (Array.isArray(actions) && actions.length === 0) setDescribeErr(`No custom actions listed on ${resource}.`);
     } catch (e: any) { setDescribeErr(e.message); }
     finally { setDescribeLoading(false); }
   };
@@ -1226,6 +1230,13 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
           <Text strong style={{ fontSize: 12 }}>Action name</Text>
           <Input size="small" value={approveAction} onChange={e => setApproveAction(e.target.value)} style={{ width: 200, fontFamily: 'monospace' }} placeholder="e.g. submit" />
           <Button size="small" icon={<ApiOutlined />} loading={describeLoading} onClick={discoverActions}>Discover actions</Button>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+          <Text strong style={{ fontSize: 12 }}>Describe resource</Text>
+          <Input size="small" value={describeResource} onChange={e => setDescribeResource(e.target.value)} style={{ width: 220, fontFamily: 'monospace' }} placeholder="e.g. purchaseOrders" />
+          <Button size="small" onClick={() => setDescribeResource('draftPurchaseOrders')}>draftPurchaseOrders</Button>
+          <Button size="small" onClick={() => setDescribeResource('purchaseOrders')}>purchaseOrders</Button>
+          <Text type="secondary" style={{ fontSize: 11 }}>submit lives on draft; cancel/change/close live on purchaseOrders</Text>
         </div>
 
         {describeErr && <div style={{ color: REDWOOD.error, fontSize: 12, marginBottom: 8 }}>{describeErr}</div>}
