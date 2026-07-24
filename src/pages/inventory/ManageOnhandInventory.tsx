@@ -792,17 +792,17 @@ const InventoryTransactionsTab: React.FC<{ organizationCode: string; itemNumber:
   const [err, setErr]         = useState('');
   const [filter, setFilter]   = useState('');
 
+  const [ran, setRan] = useState(false);
+
   const url = `${BASE_URL}/inventoryCompletedTransactions?q=${encodeURIComponent(`Organization=${organizationCode};Item=${itemNumber}`)}&limit=${CHILD_LIMIT}`;
 
   const load = useCallback(() => {
-    setLoading(true); setErr('');
+    setLoading(true); setErr(''); setRan(true);
     fetchAllPages(url)
       .then(d => setRows(d))
       .catch(e => { setErr(e.message); setRows([]); })
       .finally(() => setLoading(false));
   }, [url]);
-
-  useEffect(() => { load(); }, [load]);
 
   const columns = React.useMemo(() => buildDynamicCols(rows), [rows]);
   const filtered = filter ? rows.filter(r => matchesFilter(r, filter)) : rows;
@@ -816,7 +816,8 @@ const InventoryTransactionsTab: React.FC<{ organizationCode: string; itemNumber:
           <Text type="secondary" style={{ fontSize: 12 }}>{filtered.length} transaction(s)</Text>
         </Space>
         <Space>
-          <Button size="small" icon={<ReloadOutlined />} onClick={load} loading={loading}>Refresh</Button>
+          <Button type="primary" size="small" icon={<ReloadOutlined />} onClick={load} loading={loading}
+            style={{ background: REDWOOD.teal, borderColor: REDWOOD.teal }}>Refresh</Button>
           <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>GET {url}</span>} placement="bottomRight">
             <ApiOutlined style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 15 }} />
           </Tooltip>
@@ -831,7 +832,7 @@ const InventoryTransactionsTab: React.FC<{ organizationCode: string; itemNumber:
         size="small"
         scroll={{ x: 'max-content' }}
         pagination={{ pageSize: 25, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'], showTotal: (t) => `${t} rows` }}
-        locale={{ emptyText: loading ? 'Loading…' : (err ? 'Error' : `No transactions for ${itemNumber}`) }}
+        locale={{ emptyText: loading ? 'Loading…' : (ran ? (err ? 'Error' : `No transactions for ${itemNumber}`) : 'Click Refresh to load transactions') }}
         expandable={{
           expandedRowRender: (r: any) => {
             const lotsHref = r.links?.find((l: any) => l.name === 'lots')?.href
