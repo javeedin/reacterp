@@ -157,11 +157,51 @@ const buildQueryUrl = (vals: SearchVals): string => {
 // ═══════════════════════════════════════════════════════════════════════════════
 //  Search results table
 // ═══════════════════════════════════════════════════════════════════════════════
+// Grouped-by-ValuationUnit columns — mirrors the on-hand Receipt Costs tab:
+// split the VU, show Total Unit Cost, and sum Receipt + On-hand quantities.
+const groupedCols: ColumnsType<any> = [
+  { title: 'Cost Org',      dataIndex: 'costOrg', key: 'costOrg', width: 150, ellipsis: true, render: (v: string) => <Text strong style={{ fontSize: 12 }}>{v || '—'}</Text> },
+  { title: 'Inventory Org', dataIndex: 'invOrg',  key: 'invOrg',  width: 150, ellipsis: true, render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+  { title: 'Subinventory',  dataIndex: 'subinv',  key: 'subinv',  width: 130, render: (v: string) => v ? <Tag color="cyan">{v}</Tag> : '—' },
+  { title: 'Lot',           dataIndex: 'lot',     key: 'lot',     width: 180, ellipsis: true, render: (v: string) => v ? <Tag color="geekblue">{v}</Tag> : '—' },
+  { title: 'Receipt #',     dataIndex: 'receiptNumber',   key: 'receiptNumber',   width: 130, ellipsis: true, render: (v: string) => v || <span style={{ color: REDWOOD.neutral300 }}>—</span> },
+  { title: 'Reference # (PO)', dataIndex: 'referenceNumber', key: 'referenceNumber', width: 150, ellipsis: true, render: (v: string) => v || <span style={{ color: REDWOOD.neutral300 }}>—</span> },
+  { title: 'Total Unit Cost', dataIndex: 'totalUnitCost', key: 'totalUnitCost', width: 140, align: 'right' as const, render: (v: any) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{numFmt(v)}</Text> },
+  { title: 'Receipt Qty',   dataIndex: 'receiptQty', key: 'receiptQty', width: 120, align: 'right' as const, render: (v: any) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{numFmt(v)}</Text> },
+  { title: 'On-hand Qty',   dataIndex: 'onhandQty',  key: 'onhandQty',  width: 120, align: 'right' as const, render: (v: any) => <Text strong style={{ fontFamily: 'monospace', fontSize: 12, color: Number(v) > 0 ? REDWOOD.success : undefined }}>{numFmt(v)}</Text> },
+  { title: '# Receipts',    dataIndex: 'count',      key: 'count',      width: 90, align: 'right' as const, render: (v: number) => <Text style={{ fontSize: 12 }}>{v}</Text> },
+];
+
 const SearchTable: React.FC<{ rows: any[]; loading: boolean; err: string; ran: boolean; url: string; onRefresh: () => void }> =
 ({ rows, loading, err, ran, url, onRefresh }) => {
   const [filter, setFilter] = useState('');
-  const columns = React.useMemo(() => buildCols(rows), [rows]);
-  const filtered = filter ? rows.filter(r => matchesFilter(r, filter)) : rows;
+
+  const hasVU = rows.some(r => r.ValuationUnit != null);
+
+  // Group by ValuationUnit → split parts, keep unit cost, sum quantities.
+  const grouped = React.useMemo(() => {
+    const map = new Map<string, any>();
+    rows.forEach(r => {
+      const vu = String(r.ValuationUnit ?? '');
+      let g = map.get(vu);
+      if (!g) { g = { vu, ...parseValuationUnit(vu), totalUnitCost: null, receiptQty: 0, onhandQty: 0, count: 0, _recpt: new Set<string>(), _ref: new Set<string>() }; map.set(vu, g); }
+      g.receiptQty += Number(r.ReceiptQuantity) || 0;
+      g.onhandQty  += Number(r.QuantityOnhand)  || 0;
+      g.count      += 1;
+      if (r.TotalUnitCost != null && r.TotalUnitCost !== '') g.totalUnitCost = r.TotalUnitCost;
+      if (r.ReceiptNumber)   g._recpt.add(String(r.ReceiptNumber));
+      if (r.ReferenceNumber) g._ref.add(String(r.ReferenceNumber));
+    });
+    return Array.from(map.values()).map(g => ({
+      ...g,
+      receiptNumber: Array.from(g._recpt).join(', '),
+      referenceNumber: Array.from(g._ref).join(', '),
+    }));
+  }, [rows]);
+
+  const dataSource = hasVU ? grouped : rows;
+  const columns = hasVU ? groupedCols : buildCols(rows);
+  const filtered = filter ? dataSource.filter((r: any) => matchesFilter(r, filter)) : dataSource;
 
   return (
     <div style={{ padding: 16 }}>
@@ -169,7 +209,7 @@ const SearchTable: React.FC<{ rows: any[]; loading: boolean; err: string; ran: b
         <Space>
           <Input size="small" allowClear prefix={<FilterOutlined />} placeholder="Filter results…"
             value={filter} onChange={e => setFilter(e.target.value)} style={{ width: 240 }} />
-          <Text type="secondary" style={{ fontSize: 12 }}>{filtered.length} row(s)</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>{filtered.length} {hasVU ? 'valuation unit(s)' : 'row(s)'}</Text>
         </Space>
         <Space>
           <Button size="small" icon={<ReloadOutlined />} onClick={onRefresh} loading={loading} disabled={!ran}>Refresh</Button>
@@ -186,8 +226,18 @@ const SearchTable: React.FC<{ rows: any[]; loading: boolean; err: string; ran: b
         loading={loading}
         size="small"
         scroll={{ x: 'max-content' }}
-        pagination={{ pageSize: 25, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'], showTotal: (t) => `${t} rows` }}
+        pagination={{ pageSize: 25, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'], showTotal: (t) => `${t} ${hasVU ? 'valuation units' : 'rows'}` }}
         locale={{ emptyText: loading ? 'Loading…' : (ran ? (err ? 'Error' : 'No receipt costs found') : 'Set your criteria above and click Search') }}
+        summary={() => (hasVU && filtered.length > 0) ? (
+          <Table.Summary fixed>
+            <Table.Summary.Row style={{ background: REDWOOD.neutral100, fontWeight: 700 }}>
+              <Table.Summary.Cell index={0} colSpan={7}><Text strong>Total ({filtered.length})</Text></Table.Summary.Cell>
+              <Table.Summary.Cell index={7} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{numFmt(filtered.reduce((s: number, g: any) => s + g.receiptQty, 0))}</Text></Table.Summary.Cell>
+              <Table.Summary.Cell index={8} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.success }}>{numFmt(filtered.reduce((s: number, g: any) => s + g.onhandQty, 0))}</Text></Table.Summary.Cell>
+              <Table.Summary.Cell index={9} />
+            </Table.Summary.Row>
+          </Table.Summary>
+        ) : null}
       />
     </div>
   );
