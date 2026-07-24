@@ -717,6 +717,132 @@ const CostDistributionsTab: React.FC<{ itemNumber: string }> = ({ itemNumber }) 
   );
 };
 
+// ── Inventory Transactions tab ────────────────────────────────────────────────
+// GET inventoryCompletedTransactions?q=Organization=<org>;Item=<item>
+// Columns are built dynamically, dropping any column that is null/empty across
+// every row (plus links + object columns). Each transaction row expands to show
+// its lots, fetched on demand from the row's `lots` child href.
+const buildDynamicCols = (rows: any[]): ColumnsType<any> => {
+  const keys: string[] = [];
+  rows.forEach(r => Object.keys(r).forEach(k => {
+    if (k === 'links' || k.startsWith('_')) return;
+    if (keys.includes(k)) return;
+    // keep a column only if at least one row has a non-null, non-empty, non-object value
+    const hasValue = rows.some(row => {
+      const v = row[k];
+      return v != null && v !== '' && !(typeof v === 'object');
+    });
+    if (hasValue) keys.push(k);
+  }));
+  return keys.map(k => ({
+    title: k, dataIndex: k, key: k, ellipsis: true,
+    width: /description|address|explanation/i.test(k) ? 220 : 150,
+    render: (v: any) => {
+      if (v == null || v === '') return <span style={{ color: REDWOOD.neutral300 }}>—</span>;
+      if (/date/i.test(k) && typeof v === 'string' && v.length >= 10) return <Text style={{ fontSize: 12 }}>{fmtDate(v)}</Text>;
+      if (/quantity|qty|amount|cost|value|price/i.test(k) && !isNaN(Number(v)))
+        return <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{numFmt(v)}</Text>;
+      return <Text style={{ fontSize: 12 }}>{String(v)}</Text>;
+    },
+  }));
+};
+
+// Lots for a single transaction — lazy-fetched from the child href.
+const TxnLots: React.FC<{ href: string }> = ({ href }) => {
+  const [rows, setRows]       = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr]         = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true); setErr('');
+    fetchAllPages(href)
+      .then(d => { if (!cancelled) setRows(d); })
+      .catch(e => { if (!cancelled) setErr(e.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [href]);
+
+  if (loading) return <div style={{ padding: 12 }}><Spin size="small" /> <Text type="secondary" style={{ fontSize: 12 }}>Loading lots…</Text></div>;
+  if (err)     return <div style={{ padding: 12, color: REDWOOD.error, fontSize: 12 }}>Failed to load lots: {err}</div>;
+  if (rows.length === 0) return <div style={{ padding: 12 }}><Text type="secondary" style={{ fontSize: 12 }}>No lots for this transaction.</Text></div>;
+
+  return (
+    <div style={{ padding: '4px 8px 8px 8px' }}>
+      <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
+        <TagsOutlined style={{ color: REDWOOD.teal, marginRight: 6 }} />Lots ({rows.length})
+      </Text>
+      <Table
+        size="small"
+        rowKey={(_, i) => String(i)}
+        columns={buildDynamicCols(rows)}
+        dataSource={rows}
+        pagination={false}
+        scroll={{ x: 'max-content' }}
+      />
+    </div>
+  );
+};
+
+const InventoryTransactionsTab: React.FC<{ organizationCode: string; itemNumber: string }> = ({ organizationCode, itemNumber }) => {
+  const [rows, setRows]       = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr]         = useState('');
+  const [filter, setFilter]   = useState('');
+
+  const url = `${BASE_URL}/inventoryCompletedTransactions?q=${encodeURIComponent(`Organization=${organizationCode};Item=${itemNumber}`)}&limit=${CHILD_LIMIT}`;
+
+  const load = useCallback(() => {
+    setLoading(true); setErr('');
+    fetchAllPages(url)
+      .then(d => setRows(d))
+      .catch(e => { setErr(e.message); setRows([]); })
+      .finally(() => setLoading(false));
+  }, [url]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const columns = React.useMemo(() => buildDynamicCols(rows), [rows]);
+  const filtered = filter ? rows.filter(r => matchesFilter(r, filter)) : rows;
+
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
+        <Space>
+          <Input size="small" allowClear prefix={<FilterOutlined />} placeholder="Filter results…"
+            value={filter} onChange={e => setFilter(e.target.value)} style={{ width: 240 }} />
+          <Text type="secondary" style={{ fontSize: 12 }}>{filtered.length} transaction(s)</Text>
+        </Space>
+        <Space>
+          <Button size="small" icon={<ReloadOutlined />} onClick={load} loading={loading}>Refresh</Button>
+          <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>GET {url}</span>} placement="bottomRight">
+            <ApiOutlined style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 15 }} />
+          </Tooltip>
+        </Space>
+      </div>
+      {err && <div style={{ color: REDWOOD.error, fontSize: 12, marginBottom: 8 }}>Failed to load: {err}</div>}
+      <Table
+        dataSource={filtered}
+        columns={columns}
+        rowKey={(r: any, i) => String(r.TransactionId ?? i)}
+        loading={loading}
+        size="small"
+        scroll={{ x: 'max-content' }}
+        pagination={{ pageSize: 25, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'], showTotal: (t) => `${t} rows` }}
+        locale={{ emptyText: loading ? 'Loading…' : (err ? 'Error' : `No transactions for ${itemNumber}`) }}
+        expandable={{
+          expandedRowRender: (r: any) => {
+            const lotsHref = r.links?.find((l: any) => l.name === 'lots')?.href
+              ?? `${BASE_URL}/inventoryCompletedTransactions/${r.TransactionId}/child/lots`;
+            return <TxnLots href={lotsHref} />;
+          },
+          rowExpandable: (r: any) => r.TransactionId != null || (r.links?.some((l: any) => l.name === 'lots') ?? false),
+        }}
+      />
+    </div>
+  );
+};
+
 // ── Item Detail Page ──────────────────────────────────────────────────────────
 const OnhandDetailPage: React.FC<{ items: RawOnhand[]; onClose?: () => void }> = ({ items, onClose }) => {
   const [activeTab, setActiveTab] = useState('summary');
@@ -880,6 +1006,13 @@ const OnhandDetailPage: React.FC<{ items: RawOnhand[]; onClose?: () => void }> =
     key: 'costDistributions',
     label: <Space size={4}><BranchesOutlined />Cost Distributions</Space>,
     children: <CostDistributionsTab itemNumber={first.ItemNumber} />,
+  });
+
+  // Inventory Transactions — GET inventoryCompletedTransactions?q=Organization=<org>;Item=<item>
+  tabItems.push({
+    key: 'inventoryTransactions',
+    label: <Space size={4}><InboxOutlined />Inventory Transactions</Space>,
+    children: <InventoryTransactionsTab organizationCode={first.OrganizationCode} itemNumber={first.ItemNumber} />,
   });
 
   return (
