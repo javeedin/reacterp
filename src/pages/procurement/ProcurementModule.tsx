@@ -4,6 +4,7 @@ import {
   HomeOutlined, ShoppingCartOutlined, TeamOutlined, AppstoreOutlined,
   DatabaseOutlined, CheckCircleOutlined, LockOutlined, BugOutlined,
   ApartmentOutlined, BankOutlined, SafetyCertificateOutlined, InboxOutlined,
+  DollarOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -102,6 +103,14 @@ const procurementItems: MenuItemType[] = [
     description: 'View and manage purchase order lines pending receipt in Oracle Fusion',
     color: REDWOOD.teal,
     path: '/procurement/expected-receipts',
+  },
+  {
+    key: 'item-costs',
+    icon: <DollarOutlined />,
+    label: 'Manage Item Cost',
+    description: 'Search item costs from Oracle Fusion (itemCosts)',
+    color: REDWOOD.primary,
+    path: '/procurement/item-costs',
   },
   {
     key: 'uat',
