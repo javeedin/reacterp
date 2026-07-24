@@ -75,6 +75,12 @@ const companyFromBU = (bu?: string): string => {
 const buildCombination = (company: string, account: string): string =>
   [company, ...RR_SEGMENTS_BEFORE_ACCOUNT, account, ...RR_REMAINING_SEGMENTS].join('-');
 
+// Journal line description: period + period number + unit + tenant + trx.
+const revLineDesc = (s: RevenueSchedule): string =>
+  [s.periodName, s.scheduleNum, s.unit, s.tenant, s.trxNumber]
+    .filter(v => v != null && String(v).trim() !== '')
+    .join(' · ');
+
 interface AcctLine {
   key: string;
   scheduleId: number;
@@ -84,6 +90,7 @@ interface AcctLine {
   tenant: string;
   lineType: 'DR' | 'CR';
   accountCombination: string;
+  description: string;  // period · sched # · unit · tenant · trx
   debit: number;
   credit: number;
   reference1: string;   // trx_number
@@ -98,6 +105,7 @@ const buildAcctLines = (rows: RevenueSchedule[]): AcctLine[] => {
     const amount = Number(s.amount) || 0;
     const base = {
       scheduleId: s.id, trxNumber: s.trxNumber, periodName: s.periodName, unit: s.unit, tenant: s.tenant,
+      description: revLineDesc(s),
       reference1: String(s.trxNumber ?? ''), reference2: String(s.id), reference5: RR_SOURCE,
     };
     lines.push({ ...base, key: `${s.id}-DR`, lineType: 'DR', accountCombination: buildCombination(company, RR_DEBIT_ACCOUNT),  debit: amount, credit: 0 });
@@ -366,10 +374,10 @@ const RevenueRecognition: React.FC = () => {
       lines: [
         { lineNumber: 1, lineType: 'DR', accountingClass: 'RECEIVABLE', accountCombination: buildCombination(company, RR_DEBIT_ACCOUNT),
           enteredDr: amount, enteredCr: 0, accountedDr: amount, accountedCr: 0, currencyCode: 'AED', exchangeRate: 1,
-          description: `Dr ${RR_DEBIT_ACCOUNT} — ${s.periodName}`, sourceLineId: s.id, sourceLineNumber: 1 },
+          description: revLineDesc(s), sourceLineId: s.id, sourceLineNumber: 1 },
         { lineNumber: 2, lineType: 'CR', accountingClass: 'REVENUE', accountCombination: buildCombination(company, RR_CREDIT_ACCOUNT),
           enteredDr: 0, enteredCr: amount, accountedDr: 0, accountedCr: amount, currencyCode: 'AED', exchangeRate: 1,
-          description: `Cr ${RR_CREDIT_ACCOUNT} — ${s.periodName}`, sourceLineId: s.id, sourceLineNumber: 2 },
+          description: revLineDesc(s), sourceLineId: s.id, sourceLineNumber: 2 },
       ],
     };
   };
@@ -387,10 +395,10 @@ const RevenueRecognition: React.FC = () => {
       createdBy: postedBy,
       lines: [
         { lineType: 'DR', enteredDr: amount, enteredCr: 0, accountedDr: amount, accountedCr: 0,
-          description: `Dr ${RR_DEBIT_ACCOUNT} — ${s.periodName}`, currencyCode: 'AED', accountingDate: acctDate,
+          description: revLineDesc(s), currencyCode: 'AED', accountingDate: acctDate,
           accountCombination: buildCombination(company, RR_DEBIT_ACCOUNT), accountingClass: 'RECEIVABLE', legalEntity: null },
         { lineType: 'CR', enteredDr: 0, enteredCr: amount, accountedDr: 0, accountedCr: amount,
-          description: `Cr ${RR_CREDIT_ACCOUNT} — ${s.periodName}`, currencyCode: 'AED', accountingDate: acctDate,
+          description: revLineDesc(s), currencyCode: 'AED', accountingDate: acctDate,
           accountCombination: buildCombination(company, RR_CREDIT_ACCOUNT), accountingClass: 'REVENUE', legalEntity: null },
       ],
     };
@@ -1049,7 +1057,7 @@ const RevenueRecognition: React.FC = () => {
             bordered
             dataSource={acctLines}
             pagination={false}
-            scroll={{ y: 320, x: 900 }}
+            scroll={{ y: 320, x: 1140 }}
             columns={[
               { title: 'Trx #', dataIndex: 'trxNumber', width: 80, render: (v: any) => v ?? '—' },
               { title: 'Sched', dataIndex: 'scheduleId', width: 70 },
@@ -1063,6 +1071,7 @@ const RevenueRecognition: React.FC = () => {
                   </div>
                 );
               } },
+              { title: 'Description', dataIndex: 'description', width: 240, ellipsis: true, render: (v: string) => <Text style={{ fontSize: 11 }}>{v || '—'}</Text> },
               { title: 'Debit', dataIndex: 'debit', width: 110, align: 'right' as const, render: (v: number) => v ? <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> : '—' },
               { title: 'Credit', dataIndex: 'credit', width: 110, align: 'right' as const, render: (v: number) => v ? <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> : '—' },
               { title: 'Ref1', dataIndex: 'reference1', width: 90, render: (v: string) => <Tooltip title="trx_number">{v || '—'}</Tooltip> },
@@ -1072,10 +1081,10 @@ const RevenueRecognition: React.FC = () => {
             summary={() => (
               <Table.Summary fixed>
                 <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 700 }}>
-                  <Table.Summary.Cell index={0} colSpan={4}><Text strong>Totals</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell index={4} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{fmt(acctTotals.debit)}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell index={5} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{fmt(acctTotals.credit)}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell index={6} colSpan={3} align="right">
+                  <Table.Summary.Cell index={0} colSpan={5}><Text strong>Totals</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={5} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{fmt(acctTotals.debit)}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={6} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{fmt(acctTotals.credit)}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={7} colSpan={3} align="right">
                     {Math.abs(acctTotals.debit - acctTotals.credit) < 0.005
                       ? <Tag color="green">Balanced</Tag>
                       : <Tag color="red">Out of balance</Tag>}
