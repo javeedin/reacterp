@@ -47,10 +47,6 @@ const REDWOOD = {
   neutral100: '#F7F7F7', neutral200: '#E5E5E5', neutral500: '#8C8C8C',
 };
 
-// Oracle Fusion — business-unit LOV (same source as procurement/BusinessUnits).
-const FUSION_BASE = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05';
-const FUSION_HEADERS = { Authorization: 'Basic ' + btoa('emparun:Fusion@1234'), Accept: 'application/json' };
-
 const fmt = (v: number | null | undefined) =>
   v == null ? '—' : new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v));
 
@@ -195,18 +191,22 @@ const RevenueRecognition: React.FC = () => {
     finally { setSchedulesLoading(false); }
   };
 
-  // Load Fusion business units for the Post Revenue BU picker. The LOV Company
-  // field feeds the runtime BU→company map so the account combination uses the
-  // right first segment (falls back to DEFAULT_COMPANY '01').
+  // Load business units for the Post Revenue BU picker from the APEX (emparun)
+  // backend — GET gl/businessunits — same source the rest of the AR module uses.
+  // The company field feeds the runtime BU→company map so the account
+  // combination uses the right first segment (falls back to DEFAULT_COMPANY '01').
   const loadBusinessUnits = async () => {
     setBuLoading(true);
     try {
-      const res = await fetch(`${FUSION_BASE}/finBusinessUnitsLOV?limit=500&onlyData=true`, { headers: FUSION_HEADERS });
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/businessunits`, { headers: { Accept: 'application/json' } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const items: any[] = Array.isArray(data) ? data : (data.items ?? []);
       const opts = items
-        .map(it => ({ name: String(it.BusinessUnitName ?? '').trim(), company: String(it.Company ?? '').trim() }))
+        .map(it => ({
+          name: String(it.business_unit_name ?? it.businessUnitName ?? it.BusinessUnitName ?? '').trim(),
+          company: String(it.company ?? it.company_code ?? it.companyCode ?? it.Company ?? '').trim(),
+        }))
         .filter(o => o.name)
         .sort((a, b) => a.name.localeCompare(b.name));
       // Feed the runtime company map (upper-cased keys) so companyFromBU resolves.
@@ -689,7 +689,7 @@ const RevenueRecognition: React.FC = () => {
         <div style={{ padding: '16px 24px 0' }}>
           <Breadcrumb items={[
             { title: <Link to="/"><HomeOutlined /> Home</Link> },
-            { title: 'Receivables' },
+            { title: <Link to="/ar">Receivables</Link> },
             { title: 'Revenue Recognition' },
           ]} />
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '12px 0' }}>
