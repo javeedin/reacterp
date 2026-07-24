@@ -885,7 +885,6 @@ ${po.NoteToSupplier ? `<div class="sec">Notes</div><div class="fv">${po.NoteToSu
 
 // ── Search Tab ───────────────────────────────────────────────────────────────
 const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
-  const navigate = useNavigate();
   const [form] = Form.useForm();
   const [data, setData]             = useState<RawPO[]>([]);
   const [loading, setLoading]       = useState(false);
@@ -898,6 +897,45 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
   const [apiResult, setApiResult]   = useState<{ status: number; body: string } | null>(null);
   const [lineCountMap, setLineCountMap] = useState<Map<number, number>>(new Map());
   const [lineCountsLoading, setLineCountsLoading] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
+  const [approving, setApproving]       = useState(false);
+
+  // Bulk-submit the selected purchase orders for approval (Fusion submitDraft).
+  const submitSelectedForApproval = async () => {
+    const chosen = data.filter(po => selectedKeys.includes(po.POHeaderId));
+    if (chosen.length === 0) return;
+    setApproving(true);
+    let ok = 0; const failures: string[] = [];
+    for (const po of chosen) {
+      try {
+        const r = await fetch(`${BASE_URL}/draftPurchaseOrders/${po.POHeaderId}`, {
+          method: 'POST',
+          headers: { Authorization: AUTH_HEADER, Accept: 'application/json', 'Content-Type': 'application/vnd.oracle.adf.action+json' },
+          body: JSON.stringify({ name: 'submitDraft', parameters: [] }),
+        });
+        const raw = await r.text();
+        let d: any = null; try { d = JSON.parse(raw); } catch { /* non-json */ }
+        if (r.ok) ok += 1;
+        else failures.push(`${po.OrderNumber}: ${d?.title ?? d?.detail ?? d?.message ?? `HTTP ${r.status}`}`);
+      } catch (e: any) {
+        failures.push(`${po.OrderNumber}: ${e.message}`);
+      }
+    }
+    setApproving(false);
+    setSelectedKeys([]);
+    if (failures.length === 0) {
+      message.success(`Submitted ${ok} purchase order(s) for approval`);
+    } else {
+      Modal.warning({
+        title: `Submitted ${ok}/${chosen.length} — ${failures.length} failed`,
+        width: 620,
+        content: <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 300, overflow: 'auto' }}>{failures.join('\n')}</pre>,
+      });
+    }
+    // refresh so statuses reflect the change
+    const items = await fetchPOs(searchParams, page);
+    fetchLineCounts(items);
+  };
 
   const buildUrl = (params: SearchParams, pageNum: number) => {
     const q = buildQParam(params);
@@ -1101,14 +1139,6 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
               Search
             </Button>
             <Button icon={<ReloadOutlined />} onClick={handleReset}>Reset</Button>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => navigate('/procurement/create-po')}
-              style={{ background: '#1D7B4D', borderColor: '#1D7B4D', borderRadius: 6, fontWeight: 600 }}
-            >
-              + Create PO
-            </Button>
             <Tooltip title="API Inspector — view web service URL and test it">
               <Button icon={<ApiOutlined />} onClick={() => { setApiResult(null); setApiOpen(true); }}
                 style={{ marginLeft: 'auto', borderColor: REDWOOD.info, color: REDWOOD.info }}>
@@ -1121,14 +1151,25 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
 
       {/* Results */}
       <Card styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
-        <div style={{ padding: '10px 16px', borderBottom: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center' }}>
+        <div style={{ padding: '10px 16px', borderBottom: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', gap: 12 }}>
           <Text strong style={{ fontSize: 13 }}>
             Purchase Orders
             {hasSearched && total > 0 && <Text type="secondary" style={{ fontWeight: 400, marginLeft: 8 }}>({total} result{total !== 1 ? 's' : ''})</Text>}
           </Text>
+          {selectedKeys.length > 0 && (
+            <Space style={{ marginLeft: 'auto' }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>{selectedKeys.length} selected</Text>
+              <Button size="small" type="primary" icon={<CheckCircleOutlined />} loading={approving}
+                onClick={submitSelectedForApproval}
+                style={{ background: '#1D7B4D', borderColor: '#1D7B4D', fontWeight: 600 }}>
+                Submit for Approval
+              </Button>
+            </Space>
+          )}
         </div>
         <Table
           columns={columns} dataSource={data} rowKey="POHeaderId"
+          rowSelection={{ selectedRowKeys: selectedKeys, onChange: setSelectedKeys, preserveSelectedRowKeys: true }}
           loading={loading} size="small" scroll={{ x: 1400 }}
           pagination={hasSearched && total > PAGE_SIZE ? {
             current: page, pageSize: PAGE_SIZE, total, showSizeChanger: false,
