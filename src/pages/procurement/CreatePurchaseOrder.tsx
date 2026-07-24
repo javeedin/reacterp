@@ -924,7 +924,9 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
     if (!header.procurementBU)  errors.push('Procurement Organization (BU) is required');
     if (!header.supplierName)   errors.push('Supplier is required');
     if (!header.shipToOrg)      errors.push('Ship-to Organization is required');
-    if (!header.subinventory)   errors.push('Subinventory is required');
+    // Subinventory is NOT part of the draftPurchaseOrders payload (it's only used
+    // by the separate assign-item-to-org / itemsV2 flow, which guards on it), so
+    // it must not block PO generation — e.g. after loading a JSON without one.
     if (!header.buyer)          errors.push('Buyer is required');
     if (lines.length === 0)     errors.push('At least one line item is required');
     const linesWithoutNeedBy = lines.filter(l => !l.needBy);
