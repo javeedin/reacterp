@@ -52,11 +52,12 @@ const fmt = (v: number | null | undefined) =>
   v == null ? '—' : new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v));
 
 // ── Revenue-recognition accounting ────────────────────────────────────────────
-// COA structure (7 segments): Company-Account-CostCenter-Seg4-Seg5-Seg6-Seg7
-// e.g. 00-1240100-0000-000-00-000-000
+// COA structure (9 segments): Company-Seg2-Seg3-Account-Seg5-Seg6-Seg7-Seg8-Seg9
+// e.g. 01-00-00-2313111-0000-000-00-000-000  (natural account is the 4th segment)
 const RR_DEBIT_ACCOUNT  = '2313111';   // Dr — unbilled/deferred revenue control
 const RR_CREDIT_ACCOUNT = '4111101';   // Cr — revenue
-const RR_REMAINING_SEGMENTS = ['0000', '000', '00', '000', '000']; // CC + seg4..7 (default)
+const RR_SEGMENTS_BEFORE_ACCOUNT = ['00', '00'];                    // seg2, seg3 (between company & account)
+const RR_REMAINING_SEGMENTS = ['0000', '000', '00', '000', '000']; // seg5..seg9 (after the account)
 const RR_SOURCE = 'AR_REVENUE_RECOGNIZATION';   // reference5
 
 // Company segment derived from the business unit. Populated at runtime from the
@@ -72,7 +73,7 @@ const companyFromBU = (bu?: string): string => {
   return hit ?? DEFAULT_COMPANY;
 };
 const buildCombination = (company: string, account: string): string =>
-  [company, account, ...RR_REMAINING_SEGMENTS].join('-');
+  [company, ...RR_SEGMENTS_BEFORE_ACCOUNT, account, ...RR_REMAINING_SEGMENTS].join('-');
 
 interface AcctLine {
   key: string;
