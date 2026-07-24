@@ -302,6 +302,8 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
   const [generatePoLoading, setGeneratePoLoading]     = useState(false);
   const [generatePoSuccess, setGeneratePoSuccess]     = useState<{ orderNumber: string; status: string } | null>(null);
   const [generatePoModalOpen, setGeneratePoModalOpen] = useState(false);
+  const [poHeaderId, setPoHeaderId]                   = useState<number | null>(null);
+  const [approvingFusion, setApprovingFusion]         = useState(false);
   const [confettiPieces, setConfettiPieces]           = useState<{ id: number; x: number; color: string; delay: number; size: number }[]>([]);
 
   // Init modal API inspector
@@ -674,6 +676,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
     }));
     setLines(restored);
     setAcqCharges(Array.isArray(obj.acqCharges) ? obj.acqCharges : []);
+    setPoHeaderId(null);   // not yet created in Fusion — Save first, then approve
     message.success(`Loaded PO ${h.poNumber ?? ''} — ${restored.length} line(s)`);
   };
 
@@ -967,6 +970,8 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
         }));
         setConfettiPieces(pieces);
         setGeneratePoSuccess({ orderNumber: data.OrderNumber, status: data.Status ?? 'Draft' });
+        setPoHeaderId(data.POHeaderId ?? null);
+        if (data.OrderNumber) { patch({ poNumber: data.OrderNumber, status: data.Status ?? header.status }); }
         setGeneratePoModalOpen(true);
       } else {
         const backup = savePoJson('FAILED');
@@ -998,6 +1003,45 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
       });
     } finally {
       setGeneratePoLoading(false);
+    }
+  };
+
+  /* ─── Submit the draft PO for approval (Fusion custom action) ─────────
+     Invokes the `submitDraft` action on draftPurchaseOrders/{POHeaderId}
+     using the Oracle ADF action content type. Needs the PO to be saved
+     first (that create call returns the POHeaderId we submit against). */
+  const submitForApproval = async (idArg?: number | null) => {
+    const id = idArg ?? poHeaderId;
+    if (!id) {
+      message.warning('Save the purchase order first — that creates the draft in Fusion and returns its ID to approve.');
+      return;
+    }
+    setApprovingFusion(true);
+    try {
+      const r = await fetch(`${FUSION_BASE}/draftPurchaseOrders/${id}`, {
+        method: 'POST',
+        headers: { ...FUSION_HDRS, 'Content-Type': 'application/vnd.oracle.adf.action+json' },
+        body: JSON.stringify({ name: 'submitDraft', parameters: [] }),
+      });
+      const rawText = await r.text();
+      let data: any = null; try { data = JSON.parse(rawText); } catch { /* non-json */ }
+      if (!r.ok) {
+        const msg = data?.title ?? data?.detail ?? data?.message ?? `HTTP ${r.status}`;
+        Modal.error({
+          title: `Approval failed (HTTP ${r.status})`,
+          width: 600,
+          content: <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 260, overflow: 'auto' }}>{rawText || String(msg)}</pre>,
+        });
+        return;
+      }
+      const newStatus = data?.result ?? data?.Status ?? data?.DocumentStatus ?? 'Pending approval';
+      patch({ status: typeof newStatus === 'string' ? newStatus : 'Pending approval' });
+      setGeneratePoSuccess(prev => prev ? { ...prev, status: typeof newStatus === 'string' ? newStatus : 'Pending approval' } : prev);
+      message.success(`Purchase order submitted for approval${typeof newStatus === 'string' ? ` — ${newStatus}` : ''}`);
+    } catch (err: any) {
+      Modal.error({ title: 'Approval network error', content: err.message });
+    } finally {
+      setApprovingFusion(false);
     }
   };
 
@@ -3579,12 +3623,22 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
           centered
           width={480}
           footer={
-            <Space style={{ justifyContent: 'center', width: '100%' }}>
+            <Space style={{ justifyContent: 'center', width: '100%' }} wrap>
               <Button
                 size="large"
                 onClick={() => { setGeneratePoModalOpen(false); setConfettiPieces([]); }}
               >
                 Stay Here
+              </Button>
+              <Button
+                size="large"
+                icon={<MailOutlined />}
+                loading={approvingFusion}
+                disabled={!poHeaderId}
+                style={{ background: C.orange, borderColor: C.orange, color: '#fff', fontWeight: 700 }}
+                onClick={() => submitForApproval()}
+              >
+                Submit for Approval
               </Button>
               <Button
                 type="primary"
