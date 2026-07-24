@@ -133,10 +133,26 @@ interface AcqCharge {
 interface PastedItem {
   key: string;
   itemNumber: string;
+  qty: number;
   price: number;
   status: 'pending' | 'valid' | 'invalid';
   matchedItem?: any;
 }
+
+// Parse Qty + Price from the cells after the item number.
+// 3+ cells → [item, qty, price]; exactly 2 → [item, price] (qty defaults to 1).
+const parseQtyPrice = (rest: any[]): { qty: number; price: number } => {
+  const cells = rest.map(v => String(v ?? '').trim());
+  let qty = 1, price = 0;
+  if (cells.length >= 2 && cells[1] !== '') {
+    qty   = parseFloat(cells[0]) || 1;
+    price = parseFloat(cells[1]) || 0;
+  } else {
+    price = parseFloat(cells[0] ?? '') || 0;   // legacy 2-column: item, price
+  }
+  if (!(qty > 0)) qty = 1;
+  return { qty, price };
+};
 
 /* ─── Compact field pair (label : value on one row) ─── */
 const FieldPair: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
@@ -1605,8 +1621,8 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
       .map((line, i) => {
         const parts = line.split(/\t|,/);
         const itemNumber = (parts[0] ?? '').trim().toUpperCase();
-        const price = parseFloat((parts[1] ?? '').trim()) || 0;
-        return { key: `paste-${i}-${itemNumber}`, itemNumber, price, status: 'pending' as const };
+        const { qty, price } = parseQtyPrice(parts.slice(1));
+        return { key: `paste-${i}-${itemNumber}`, itemNumber, qty, price, status: 'pending' as const };
       })
       .filter(r => r.itemNumber);
   };
@@ -1624,8 +1640,8 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
           .filter((r: any[]) => r[0])
           .map((r: any[], i: number) => {
             const itemNumber = String(r[0] ?? '').trim().toUpperCase();
-            const price = parseFloat(String(r[1] ?? '').trim()) || 0;
-            return { key: `xl-${i}-${itemNumber}`, itemNumber, price, status: 'pending' as const };
+            const { qty, price } = parseQtyPrice(r.slice(1));
+            return { key: `xl-${i}-${itemNumber}`, itemNumber, qty, price, status: 'pending' as const };
           })
           .filter(r => r.itemNumber);
         setPastedRows(parsed);
@@ -1672,7 +1688,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
       itemNumber: r.itemNumber,
       description: String(r.matchedItem?.description ?? ''),
       uom: String(r.matchedItem?.primary_uom_code ?? r.matchedItem?.uom ?? ''),
-      qty: 1, price: r.price, taxPct: defaultTaxPct,
+      qty: r.qty > 0 ? r.qty : 1, price: r.price, taxPct: defaultTaxPct,
       needBy: needByAll, promisedDate: null, chargeAccount: '', destinationType: 'Inventory',
     }))]);
     setAddItemOpen(false);
@@ -3286,18 +3302,18 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                     <Alert
                       type="info" showIcon
-                      message="Paste item data or upload an Excel file. Columns: Item Number (A), Price (B). After pasting/uploading, click Validate to check items against the item master."
+                      message="Paste item data or upload an Excel file. Columns: Item Number (A), Qty (B), Price (C). (Two columns — Item Number, Price — still works; Qty defaults to 1.) After pasting/uploading, click Validate to check items against the item master."
                     />
 
                     <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
                       {/* Paste textarea */}
                       <div style={{ flex: 1, minWidth: 280 }}>
                         <Text style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>
-                          Paste Data (tab- or comma-separated: ItemNumber, Price)
+                          Paste Data (tab- or comma-separated: ItemNumber, Qty, Price)
                         </Text>
                         <Input.TextArea
                           rows={6}
-                          placeholder={'ITEM-001\t150.00\nITEM-002\t89.50\nITEM-003\t200.00'}
+                          placeholder={'ITEM-001\t10\t150.00\nITEM-002\t5\t89.50\nITEM-003\t20\t200.00'}
                           value={pasteText}
                           onChange={e => setPasteText(e.target.value)}
                           style={{ fontFamily: 'monospace', fontSize: 12 }}
@@ -3321,7 +3337,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
                           Upload Excel File
                         </Text>
                         <Text style={{ fontSize: 11, color: C.textLight, display: 'block', marginBottom: 8 }}>
-                          Column A: Item Number · Column B: Price · Row 1: header (skipped)
+                          Column A: Item Number · Column B: Qty · Column C: Price · Row 1: header (skipped)
                         </Text>
                         <Upload
                           accept=".xlsx,.xls,.csv"
@@ -3371,6 +3387,10 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
                             {
                               title: 'Item Number', dataIndex: 'itemNumber', width: 180,
                               render: (v: string) => <Text style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 12, color: C.blue }}>{v}</Text>,
+                            },
+                            {
+                              title: 'Qty', dataIndex: 'qty', width: 80, align: 'right' as const,
+                              render: (v: number) => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{fmt(v)}</Text>,
                             },
                             {
                               title: 'Price', dataIndex: 'price', width: 110, align: 'right' as const,
