@@ -26,6 +26,7 @@ import {
 import type { SlaCreatePayload } from '../../services/sla.service';
 import { postSlaToGL, buildGlJournalPayload, makeBatchName, getGlJournalLines } from '../../services/glPosting.service';
 import type { GlPostingOptions } from '../../services/glPosting.service';
+import { useAccountDescriptions } from '../../hooks/useAccountDescriptions';
 
 // Resolve {slaHeaderId}/{batchId}/{batchName}/{glHeaderId} tokens in debug steps.
 function resolveTokens<T>(value: T, ctx: Record<string, any>): T {
@@ -182,6 +183,11 @@ const RevenueRecognition: React.FC = () => {
   const [viewAcctLoading, setViewAcctLoading] = useState(false);
   const [viewAcctLines,   setViewAcctLines]   = useState<any[] | null>(null);
   const [viewAcctSchedule, setViewAcctSchedule] = useState<RevenueSchedule | null>(null);
+  // Natural-account description per code combination shown in the modal.
+  const viewAcctCodes = useMemo(
+    () => (viewAcctLines ?? []).map((l: any) => l.account ?? l.account_combination).filter(Boolean) as string[],
+    [viewAcctLines]);
+  const acctDescMap = useAccountDescriptions(viewAcctCodes);
 
   const loadContracts = async () => {
     setContractsLoading(true);
@@ -1193,7 +1199,16 @@ const RevenueRecognition: React.FC = () => {
                     { title: 'Period', dataIndex: 'period_name', width: 80, render: (v: string) => <Tag color="purple" style={{ fontSize: 10 }}>{v || '—'}</Tag> },
                     { title: 'Journal', dataIndex: 'je_header_id', width: 90, align: 'center' as const, render: (v: number, rec: any) => <Tooltip title={rec.journal_name}><Text style={{ fontSize: 11 }}>{v ?? rec.je_batch_id ?? '—'}</Text></Tooltip> },
                     { title: '#', dataIndex: 'line_num', width: 40, align: 'center' as const },
-                    { title: 'Account', dataIndex: 'account', ellipsis: true, render: (v: string, rec: any) => <Text code style={{ fontSize: 11 }}>{v ?? rec.account_combination ?? '—'}</Text> },
+                    { title: 'Account', dataIndex: 'account', width: 250, render: (v: string, rec: any) => {
+                      const code = v ?? rec.account_combination ?? '';
+                      const desc = acctDescMap[code];
+                      return (
+                        <div>
+                          <Text code style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{code || '—'}</Text>
+                          {desc && <div style={{ fontSize: 10.5, color: REDWOOD.neutral500, marginTop: 2 }}>{desc}</div>}
+                        </div>
+                      );
+                    } },
                     { title: 'Description', dataIndex: 'description', ellipsis: true },
                     { title: 'Class', dataIndex: 'reference3', width: 100, render: (v: string) => v ? <Tag style={{ fontSize: 10 }}>{v}</Tag> : <Text type="secondary">—</Text> },
                     { title: 'Dr Amount', dataIndex: 'accounted_dr', width: 120, align: 'right' as const, render: (v: any) => Number(v) ? <Text style={{ color: REDWOOD.info, fontFamily: 'monospace' }}>{fmt(Number(v))}</Text> : <Text type="secondary">—</Text> },
