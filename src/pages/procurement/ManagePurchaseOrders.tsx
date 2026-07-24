@@ -160,11 +160,13 @@ interface POSchedule {
   [key: string]: any;
 }
 
+type DateOp = '=' | '>' | '>=' | '<' | '<=';
 interface SearchParams {
   orderNumber?: string;
   supplier?: string;
   statusCode?: string;
-  dateRange?: [Dayjs, Dayjs] | null;
+  dateOp?: DateOp;
+  creationDate?: Dayjs | null;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -199,8 +201,7 @@ const buildQParam = (p: SearchParams): string => {
   if (p.orderNumber) parts.push(`OrderNumber like "${p.orderNumber}*"`);
   if (p.supplier)    parts.push(`Supplier like "${p.supplier}*"`);
   if (p.statusCode)  parts.push(`StatusCode="${p.statusCode}"`);
-  if (p.dateRange?.[0]) parts.push(`OrderDate>="${p.dateRange[0].format('YYYY-MM-DD')}"`);
-  if (p.dateRange?.[1]) parts.push(`OrderDate<="${p.dateRange[1].format('YYYY-MM-DD')}"`);
+  if (p.creationDate) parts.push(`CreationDate${p.dateOp || '>'}${dayjs(p.creationDate).format('YYYY-MM-DD')}`);
   return parts.join(';');
 };
 
@@ -951,7 +952,7 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
 
   const handleSearch = async () => {
     const vals = form.getFieldsValue();
-    const params: SearchParams = { orderNumber: vals.orderNumber, supplier: vals.supplier, statusCode: vals.statusCode, dateRange: vals.dateRange ?? null };
+    const params: SearchParams = { orderNumber: vals.orderNumber, supplier: vals.supplier, statusCode: vals.statusCode, dateOp: vals.dateOp, creationDate: vals.creationDate ?? null };
     setSearchParams(params); setPage(1); setHasSearched(true);
     const items = await fetchPOs(params, 1);
     fetchLineCounts(items);
@@ -1060,12 +1061,12 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
           <Row gutter={[10, 0]}>
             <Col xs={24} sm={12} md={5}>
               <Form.Item name="orderNumber" label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Order Number</Text>} style={{ marginBottom: 8 }}>
-                <Input placeholder="e.g. PO-0001" allowClear />
+                <Input placeholder="e.g. 2026020223" allowClear onPressEnter={handleSearch} />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12} md={5}>
               <Form.Item name="supplier" label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Supplier</Text>} style={{ marginBottom: 8 }}>
-                <Input placeholder="Supplier name" allowClear />
+                <Input placeholder="Supplier name" allowClear onPressEnter={handleSearch} />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12} md={5}>
@@ -1081,8 +1082,16 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
               </Form.Item>
             </Col>
             <Col xs={24} sm={12} md={7}>
-              <Form.Item name="dateRange" label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Order Date</Text>} style={{ marginBottom: 8 }}>
-                <RangePicker style={{ width: '100%' }} />
+              <Form.Item label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Creation Date</Text>} style={{ marginBottom: 8 }}>
+                <Space.Compact block>
+                  <Form.Item name="dateOp" noStyle initialValue=">">
+                    <Select style={{ width: 76 }}
+                      options={(['=', '>', '>=', '<', '<='] as DateOp[]).map(o => ({ label: o, value: o }))} />
+                  </Form.Item>
+                  <Form.Item name="creationDate" noStyle>
+                    <DatePicker allowClear format="YYYY-MM-DD" style={{ width: '100%' }} placeholder="Select date" />
+                  </Form.Item>
+                </Space.Compact>
               </Form.Item>
             </Col>
           </Row>
