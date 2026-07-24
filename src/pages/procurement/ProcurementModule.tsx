@@ -4,7 +4,7 @@ import {
   HomeOutlined, ShoppingCartOutlined, TeamOutlined, AppstoreOutlined,
   DatabaseOutlined, CheckCircleOutlined, LockOutlined, BugOutlined,
   ApartmentOutlined, BankOutlined, SafetyCertificateOutlined, InboxOutlined,
-  DollarOutlined,
+  DollarOutlined, ReconciliationOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -111,6 +111,14 @@ const procurementItems: MenuItemType[] = [
     description: 'Search item costs from Oracle Fusion (itemCosts)',
     color: REDWOOD.primary,
     path: '/procurement/item-costs',
+  },
+  {
+    key: 'receipt-costs',
+    icon: <ReconciliationOutlined />,
+    label: 'Manage Receipt Cost',
+    description: 'Search receipt costs from Oracle Fusion (receiptCosts)',
+    color: REDWOOD.teal,
+    path: '/procurement/receipt-costs',
   },
   {
     key: 'uat',

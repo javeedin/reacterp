@@ -130,6 +130,7 @@ const ManagePurchaseOrders    = lazy(() => import('./pages/procurement').then(m 
 const CreatePurchaseOrder     = lazy(() => import('./pages/procurement').then(m => ({ default: m.CreatePurchaseOrder })));
 const ManageExpectedReceipts  = lazy(() => import('./pages/procurement').then(m => ({ default: m.ManageExpectedReceipts })));
 const ManageItemCost          = lazy(() => import('./pages/procurement').then(m => ({ default: m.ManageItemCost })));
+const ManageReceiptCost       = lazy(() => import('./pages/procurement').then(m => ({ default: m.ManageReceiptCost })));
 const UATDiagnostics          = lazy(() => import('./pages/procurement').then(m => ({ default: m.UATDiagnostics })));
 const TrialBalanceLoading     = lazy(() => import('./pages/procurement').then(m => ({ default: m.TrialBalanceLoading })));
 
@@ -266,6 +267,7 @@ function App() {
               <Route path="procurement/legal-entities" element={<LegalEntities />} />
               <Route path="procurement/expected-receipts" element={<ManageExpectedReceipts />} />
               <Route path="procurement/item-costs" element={<ManageItemCost />} />
+              <Route path="procurement/receipt-costs" element={<ManageReceiptCost />} />
               <Route path="procurement/uat" element={<UATDiagnostics />} />
               <Route path="procurement/tb-loading" element={<TrialBalanceLoading />} />
               <Route path="ap/suppliers" element={<APManageSuppliers />} />
