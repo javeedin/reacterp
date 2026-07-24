@@ -858,16 +858,10 @@ const RevenueRecognition: React.FC = () => {
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
                         <Space wrap>
                           <Text style={{ fontSize: 12, color: REDWOOD.neutral500 }}>
-                            <span style={{ color: REDWOOD.primary, marginRight: 2 }}>*</span>Period
+                            <span style={{ color: REDWOOD.primary, marginRight: 2 }}>*</span>Business Unit
                           </Text>
-                          <Select showSearch placeholder="Select accounting period"
-                            status={postPeriod ? undefined : 'error'}
-                            value={postPeriod} onChange={(v) => { setPostPeriod(v); setPostSelectedKeys([]); }}
-                            style={{ width: 220 }} options={periodOptions.map(p => ({ label: p, value: p }))}
-                            notFoundContent={schedules.length === 0 ? 'Load schedules first' : 'No periods'} />
-                          <Text style={{ fontSize: 12, color: REDWOOD.neutral500 }}>Business Unit</Text>
-                          <Select showSearch allowClear placeholder={postPeriod ? 'Select business unit' : 'Select period first'}
-                            disabled={!postPeriod}
+                          <Select showSearch allowClear placeholder="Select business unit"
+                            status={postBusinessUnit ? undefined : 'error'}
                             loading={buLoading} value={postBusinessUnit || undefined}
                             onChange={(v) => setPostBusinessUnit(v || '')}
                             style={{ width: 240 }}
@@ -875,6 +869,14 @@ const RevenueRecognition: React.FC = () => {
                             options={buOptions.map(o => ({
                               label: o.company ? `${o.name} (Co ${o.company})` : o.name, value: o.name }))}
                             notFoundContent={buLoading ? 'Loading…' : 'No business units'} />
+                          <Text style={{ fontSize: 12, color: REDWOOD.neutral500 }}>
+                            <span style={{ color: REDWOOD.primary, marginRight: 2 }}>*</span>Period
+                          </Text>
+                          <Select showSearch placeholder="Select accounting period"
+                            status={postPeriod ? undefined : 'error'}
+                            value={postPeriod} onChange={(v) => { setPostPeriod(v); setPostSelectedKeys([]); }}
+                            style={{ width: 220 }} options={periodOptions.map(p => ({ label: p, value: p }))}
+                            notFoundContent={schedules.length === 0 ? 'Load schedules first' : 'No periods'} />
                           {postPeriod
                             ? <Text type="secondary" style={{ fontSize: 12 }}>
                                 {postSchedules.length} schedule(s) · {postSelectedKeys.length} selected
