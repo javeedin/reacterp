@@ -154,6 +154,9 @@ const RevenueRecognition: React.FC = () => {
 
   // Post Revenue — accounting (standard SLA + GL journal flow, like Multiperiod)
   const [postPeriod, setPostPeriod]           = useState<string>();
+  // Schedules carry no business unit, so allow the user to supply the Fusion BU
+  // name that drives ledger + company resolution for accounting.
+  const [postBusinessUnit, setPostBusinessUnit] = useState<string>('');
   const [postSelectedKeys, setPostSelectedKeys] = useState<React.Key[]>([]);
   const [acctPreviewOpen, setAcctPreviewOpen] = useState(false);
   const [acctSchedules, setAcctSchedules]     = useState<RevenueSchedule[]>([]);
@@ -167,6 +170,8 @@ const RevenueRecognition: React.FC = () => {
   const [acctStepTest,    setAcctStepTest]    = useState<Record<number, { loading: boolean; status: number; body: string }>>({});
   const [acctDebugCtx,    setAcctDebugCtx]    = useState<Record<string, any>>({});
   const [acctDebugHalted, setAcctDebugHalted] = useState(false);
+  const [acctDebugLedgerOk, setAcctDebugLedgerOk] = useState(true);
+  const [acctDebugBU,     setAcctDebugBU]     = useState('');
 
   const loadContracts = async () => {
     setContractsLoading(true);
@@ -290,9 +295,14 @@ const RevenueRecognition: React.FC = () => {
   const schedulePeriodLabel = (s: RevenueSchedule): string =>
     derivePeriodName(parseFlexDate(s.periodDate) || new Date());
 
+  // Effective business unit for a schedule: use the row's BU if present, else
+  // fall back to the BU the user typed in the Post Revenue toolbar.
+  const buForSchedule = (s: RevenueSchedule): string => (s.businessUnit || postBusinessUnit || '').trim();
+
   const buildRevenueSlaPayload = (s: RevenueSchedule, ledger: { ledgerId: number; ledgerName: string }, postedBy: string, today: string): SlaCreatePayload => {
     const acctDate = scheduleAcctDate(s);
-    const company = companyFromBU(s.businessUnit);
+    const bu = buForSchedule(s);
+    const company = companyFromBU(bu);
     const amount = Number(s.amount) || 0;
     return {
       header: {
@@ -301,7 +311,7 @@ const RevenueRecognition: React.FC = () => {
         eventTypeCode: RR_SOURCE, eventDate: today, accountingDate: acctDate,
         periodName: schedulePeriodLabel(s), ledgerId: ledger.ledgerId, ledgerName: ledger.ledgerName,
         currencyCode: 'AED', ledgerCurrency: ledger.ledgerName, exchangeRate: 1,
-        businessUnit: s.businessUnit, description: `Revenue Recognition — Trx ${s.trxNumber ?? s.id} — ${s.periodName}`,
+        businessUnit: bu, description: `Revenue Recognition — Trx ${s.trxNumber ?? s.id} — ${s.periodName}`,
         createdBy: postedBy,
       },
       lines: [
@@ -317,13 +327,14 @@ const RevenueRecognition: React.FC = () => {
 
   const buildRevenueGlOpts = (s: RevenueSchedule, ledger: { ledgerId: number; ledgerName: string }, postedBy: string, slaHeaderId: number): GlPostingOptions => {
     const acctDate = scheduleAcctDate(s);
-    const company = companyFromBU(s.businessUnit);
+    const bu = buForSchedule(s);
+    const company = companyFromBU(bu);
     const amount = Number(s.amount) || 0;
     return {
       slaHeaderId, sourceNumber: String(s.trxNumber ?? s.id), sourceId: s.id,
       eventTypeCode: RR_SOURCE, periodName: schedulePeriodLabel(s), ledgerName: ledger.ledgerName,
       ledgerId: ledger.ledgerId, currency: 'AED', accountingDate: acctDate, legalEntity: '',
-      businessUnit: s.businessUnit, jeCategory: 'Revenue', jeSource: 'Receivables', batchSource: 'Receivables',
+      businessUnit: bu, jeCategory: 'Revenue', jeSource: 'Receivables', batchSource: 'Receivables',
       createdBy: postedBy,
       lines: [
         { lineType: 'DR', enteredDr: amount, enteredCr: 0, accountedDr: amount, accountedCr: 0,
@@ -339,8 +350,9 @@ const RevenueRecognition: React.FC = () => {
   // Post one schedule end-to-end: ledger → dup check → SLA (reuse/create) →
   // create+post GL journal (reference1=trx, reference2=schedule, reference5=source).
   const postRevenueSchedule = async (s: RevenueSchedule, postedBy: string, today: string): Promise<{ status: 'success' | 'skipped' | 'error'; message: string }> => {
-    const ledger = await fetchLedgerByBusinessUnit(s.businessUnit);
-    if (!ledger) return { status: 'error', message: `No ledger for BU '${s.businessUnit || '—'}'` };
+    const bu = buForSchedule(s);
+    const ledger = await fetchLedgerByBusinessUnit(bu);
+    if (!ledger) return { status: 'error', message: `No ledger for BU '${bu || '—'}' — set the Business Unit field` };
 
     const dup = await checkGLJournalExists(String(s.trxNumber ?? ''), s.id, RR_SOURCE);
     if (dup.exists && dup.status === 'P') return { status: 'skipped', message: `Already accounted — GL batch ${dup.batchId}` };
@@ -392,13 +404,20 @@ const RevenueRecognition: React.FC = () => {
     const postedBy = loggedUser;
     const today = new Date().toISOString().split('T')[0];
     const base = APEX_DB_CONFIG.baseUrl;
-    const ledger = await fetchLedgerByBusinessUnit(s.businessUnit).catch(() => null);
-    const slaPayload = ledger ? buildRevenueSlaPayload(s, ledger, postedBy, today) : { error: `No ledger for BU '${s.businessUnit || '—'}'` };
+    const bu = buForSchedule(s);
+    const ledger = await fetchLedgerByBusinessUnit(bu).catch(() => null);
+    // Always build the real SLA/GL request bodies so the JSON is visible in the
+    // debug modal even when the ledger can't be resolved — use a placeholder
+    // ledger and surface the resolution problem as a warning instead.
+    const effLedger = ledger ?? { ledgerId: 0, ledgerName: '(unresolved)' };
+    const slaPayload = buildRevenueSlaPayload(s, effLedger, postedBy, today);
     const batchName = makeBatchName(RR_SOURCE, String(s.trxNumber ?? s.id));
-    const glPayload = ledger ? buildGlJournalPayload(buildRevenueGlOpts(s, ledger, postedBy, 0), batchName) : { error: `No ledger for BU '${s.businessUnit || '—'}'` };
+    const glPayload = buildGlJournalPayload(buildRevenueGlOpts(s, effLedger, postedBy, 0), batchName);
+    setAcctDebugLedgerOk(!!ledger);
+    setAcctDebugBU(bu);
     setAcctDebugSteps([
-      { step: `1 — Ledger by BU (${s.businessUnit || '—'})`, method: 'GET',
-        url: `${base}/gl/getledgername?P_BUSINESS_UNIT_NAME=${encodeURIComponent(s.businessUnit || '')}`, payload: null },
+      { step: `1 — Ledger by BU (${bu || '—'})`, method: 'GET',
+        url: `${base}/gl/getledgername?P_BUSINESS_UNIT_NAME=${encodeURIComponent(bu)}`, payload: null },
       { step: `2 — Duplicate check (Ref2=${s.id}, Ref5=${RR_SOURCE})`, method: 'GET',
         url: `${base}/gl/journals/check?reference1=${encodeURIComponent(String(s.trxNumber ?? ''))}&reference2=${s.id}&reference5=${RR_SOURCE}`, payload: null },
       { step: '3 — Create SLA accounting', method: 'POST', url: `${base}/sla/accounting/create`, payload: slaPayload },
@@ -810,6 +829,10 @@ const RevenueRecognition: React.FC = () => {
                             value={postPeriod} onChange={(v) => { setPostPeriod(v); setPostSelectedKeys([]); }}
                             style={{ width: 220 }} options={periodOptions.map(p => ({ label: p, value: p }))}
                             notFoundContent={schedules.length === 0 ? 'Load schedules first' : 'No periods'} />
+                          <Text style={{ fontSize: 12, color: REDWOOD.neutral500 }}>Business Unit</Text>
+                          <Input allowClear placeholder="Fusion BU name (for ledger)"
+                            value={postBusinessUnit} onChange={(e) => setPostBusinessUnit(e.target.value)}
+                            style={{ width: 220 }} />
                           {postPeriod && <Text type="secondary" style={{ fontSize: 12 }}>
                             {postSchedules.length} schedule(s) · {postSelectedKeys.length} selected
                           </Text>}
@@ -1003,6 +1026,11 @@ const RevenueRecognition: React.FC = () => {
             </Space>
           }
         >
+          {!acctDebugLedgerOk && (
+            <Alert type="error" showIcon style={{ marginBottom: 10, fontSize: 12 }}
+              message={`No ledger resolved for Business Unit '${acctDebugBU || '—'}'`}
+              description="The JSON bodies below are built with a placeholder ledger (id 0) so you can review them, but steps 3–6 will fail until a valid Business Unit is set in the Post Revenue toolbar." />
+          )}
           {acctDebugHalted && (
             <Alert type="warning" showIcon style={{ marginBottom: 10, fontSize: 12 }}
               message="Journal already exists — remaining steps are halted. Re-open Debug to reset." />
