@@ -900,8 +900,27 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const [approving, setApproving]       = useState(false);
   const [approveApiOpen, setApproveApiOpen] = useState(false);
+  const [approveAction, setApproveAction]   = useState('submitDraft');   // editable — set from Discover actions
+  const [describeActions, setDescribeActions] = useState<any[] | null>(null);
+  const [describeLoading, setDescribeLoading] = useState(false);
+  const [describeErr, setDescribeErr]         = useState('');
 
-  const APPROVE_BODY = { name: 'submitDraft', parameters: [] as any[] };
+  const approveBody = { name: approveAction, parameters: [] as any[] };
+
+  // Fetch the resource's describe and list its custom action names + params.
+  const discoverActions = async () => {
+    setDescribeLoading(true); setDescribeErr(''); setDescribeActions(null);
+    try {
+      const r = await fetch(`${BASE_URL}/draftPurchaseOrders/describe`, { headers: { Authorization: AUTH_HEADER, Accept: 'application/json' } });
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+      const d = await r.json();
+      let actions: any = d?.Resources?.draftPurchaseOrders?.actions ?? d?.actions ?? [];
+      if (actions && !Array.isArray(actions)) actions = Object.entries(actions).map(([name, v]) => ({ name, ...(v as any) }));
+      setDescribeActions(actions);
+      if (Array.isArray(actions) && actions.length === 0) setDescribeErr('No custom actions listed on this resource.');
+    } catch (e: any) { setDescribeErr(e.message); }
+    finally { setDescribeLoading(false); }
+  };
 
   // Bulk-submit the selected purchase orders for approval (Fusion submitDraft).
   const submitSelectedForApproval = async () => {
@@ -914,7 +933,7 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
         const r = await fetch(`${BASE_URL}/draftPurchaseOrders/${po.POHeaderId}`, {
           method: 'POST',
           headers: { Authorization: AUTH_HEADER, Accept: 'application/json', 'Content-Type': 'application/vnd.oracle.adf.action+json' },
-          body: JSON.stringify({ name: 'submitDraft', parameters: [] }),
+          body: JSON.stringify({ name: approveAction, parameters: [] }),
         });
         const raw = await r.text();
         let d: any = null; try { d = JSON.parse(raw); } catch { /* non-json */ }
@@ -1202,6 +1221,27 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
         <div style={{ fontSize: 12, marginBottom: 10 }}>
           <Space size={6}><Tag color="green">POST</Tag><Text>Oracle Fusion custom action on the draft PO ({selectedKeys.length} selected)</Text></Space>
         </div>
+
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+          <Text strong style={{ fontSize: 12 }}>Action name</Text>
+          <Input size="small" value={approveAction} onChange={e => setApproveAction(e.target.value)} style={{ width: 200, fontFamily: 'monospace' }} placeholder="e.g. submitDraft" />
+          <Button size="small" icon={<ApiOutlined />} loading={describeLoading} onClick={discoverActions}>Discover actions</Button>
+        </div>
+
+        {describeErr && <div style={{ color: REDWOOD.error, fontSize: 12, marginBottom: 8 }}>{describeErr}</div>}
+        {describeActions && describeActions.length > 0 && (
+          <div style={{ maxHeight: 160, overflow: 'auto', border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, marginBottom: 10 }}>
+            {describeActions.map((a: any, i: number) => (
+              <div key={i} style={{ padding: '5px 10px', borderBottom: `1px solid ${REDWOOD.neutral100}`, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <a onClick={() => setApproveAction(a.name)} style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 600 }}>{a.name}</a>
+                {a.method && <Tag style={{ fontSize: 10 }}>{a.method}</Tag>}
+                {Array.isArray(a.parameters) && a.parameters.length > 0 &&
+                  <Text type="secondary" style={{ fontSize: 11 }}>params: {a.parameters.map((p: any) => p.name ?? p).join(', ')}</Text>}
+              </div>
+            ))}
+          </div>
+        )}
+
         <Text strong style={{ fontSize: 12 }}>Headers</Text>
         <pre style={{ fontSize: 11, background: REDWOOD.neutral100, padding: 10, borderRadius: 6, marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
 {`Authorization: Basic ***
@@ -1210,7 +1250,7 @@ Content-Type: application/vnd.oracle.adf.action+json`}
         </pre>
         <Text strong style={{ fontSize: 12 }}>Body</Text>
         <pre style={{ fontSize: 11, background: REDWOOD.neutral100, padding: 10, borderRadius: 6, marginTop: 4, whiteSpace: 'pre-wrap' }}>
-{JSON.stringify(APPROVE_BODY, null, 2)}
+{JSON.stringify(approveBody, null, 2)}
         </pre>
         <Text strong style={{ fontSize: 12 }}>URL{selectedKeys.length !== 1 ? 's' : ''} (one call per selected PO)</Text>
         <div style={{ maxHeight: 220, overflow: 'auto', marginTop: 4, border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6 }}>
