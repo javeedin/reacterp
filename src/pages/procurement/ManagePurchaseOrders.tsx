@@ -900,7 +900,7 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const [approving, setApproving]       = useState(false);
   const [approveApiOpen, setApproveApiOpen] = useState(false);
-  const [approveAction, setApproveAction]   = useState('submitDraft');   // editable — set from Discover actions
+  const [approveAction, setApproveAction]   = useState('submit');   // editable — set from Discover actions
   const [describeActions, setDescribeActions] = useState<any[] | null>(null);
   const [describeLoading, setDescribeLoading] = useState(false);
   const [describeErr, setDescribeErr]         = useState('');
@@ -922,7 +922,7 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
     finally { setDescribeLoading(false); }
   };
 
-  // Bulk-submit the selected purchase orders for approval (Fusion submitDraft).
+  // Bulk-submit the selected purchase orders for approval (Fusion submit action).
   const submitSelectedForApproval = async () => {
     const chosen = data.filter(po => selectedKeys.includes(po.POHeaderId));
     if (chosen.length === 0) return;
@@ -1224,7 +1224,7 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
           <Text strong style={{ fontSize: 12 }}>Action name</Text>
-          <Input size="small" value={approveAction} onChange={e => setApproveAction(e.target.value)} style={{ width: 200, fontFamily: 'monospace' }} placeholder="e.g. submitDraft" />
+          <Input size="small" value={approveAction} onChange={e => setApproveAction(e.target.value)} style={{ width: 200, fontFamily: 'monospace' }} placeholder="e.g. submit" />
           <Button size="small" icon={<ApiOutlined />} loading={describeLoading} onClick={discoverActions}>Discover actions</Button>
         </div>
 

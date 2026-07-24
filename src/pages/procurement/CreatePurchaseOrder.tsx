@@ -1007,7 +1007,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
   };
 
   /* ─── Submit the draft PO for approval (Fusion custom action) ─────────
-     Invokes the `submitDraft` action on draftPurchaseOrders/{POHeaderId}
+     Invokes the `submit` action on draftPurchaseOrders/{POHeaderId}
      using the Oracle ADF action content type. Needs the PO to be saved
      first (that create call returns the POHeaderId we submit against). */
   const submitForApproval = async (idArg?: number | null) => {
@@ -1021,7 +1021,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
       const r = await fetch(`${FUSION_BASE}/draftPurchaseOrders/${id}`, {
         method: 'POST',
         headers: { ...FUSION_HDRS, 'Content-Type': 'application/vnd.oracle.adf.action+json' },
-        body: JSON.stringify({ name: 'submitDraft', parameters: [] }),
+        body: JSON.stringify({ name: 'submit', parameters: [] }),
       });
       const rawText = await r.text();
       let data: any = null; try { data = JSON.parse(rawText); } catch { /* non-json */ }
