@@ -49,6 +49,7 @@ const buildCols = (rows: any[]): ColumnsType<any> => {
   const keys: string[] = [];
   rows.forEach(r => Object.keys(r).forEach(k => {
     if (k === 'links') return;
+    if (/id$/i.test(k)) return;                 // hide all *Id columns
     if (keys.includes(k)) return;
     const hasValue = rows.some(row => {
       const v = row[k];
