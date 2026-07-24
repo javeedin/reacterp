@@ -1,9 +1,10 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Layout, Typography, Card, Table, Button, Form, Input, Space, Tabs,
-  Tooltip, Row, Col, Tag, Select, Segmented, Empty, Spin,
+  Tooltip, Row, Col, Tag, Select, Segmented, Empty, Spin, DatePicker,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import dayjs from 'dayjs';
 import {
   HomeOutlined, ReconciliationOutlined, SearchOutlined, ReloadOutlined,
   FilterOutlined, ApiOutlined, ClearOutlined, BarChartOutlined,
@@ -130,10 +131,13 @@ const fetchAllReceiptCosts = async (baseUrl: string, cap = 5000): Promise<any[]>
 };
 
 // ── Shared search params ──────────────────────────────────────────────────────
+type DateOp = '=' | '>' | '>=' | '<' | '<=';
 interface SearchVals {
   inventoryOrg?: string;   // InventoryOrganizationName (exact, from dropdown)
   reference?: string;      // ReferenceNumber (exact)
   item?: string;           // Item (like)
+  costDateOp?: DateOp;     // comparison operator for CostDate
+  costDate?: any;          // Dayjs from the DatePicker (or ISO string)
 }
 
 const buildQueryUrl = (vals: SearchVals): string => {
@@ -141,6 +145,11 @@ const buildQueryUrl = (vals: SearchVals): string => {
   if (vals.inventoryOrg) clauses.push(`InventoryOrganizationName=${vals.inventoryOrg}`);
   if (vals.reference)    clauses.push(`ReferenceNumber=${vals.reference}`);
   if (vals.item)         clauses.push(`Item like "${vals.item}*"`);
+  if (vals.costDate) {
+    const op = vals.costDateOp || '=';
+    const d = typeof vals.costDate === 'string' ? vals.costDate : dayjs(vals.costDate).format('YYYY-MM-DD');
+    clauses.push(`CostDate${op}${d}`);
+  }
   const qs = clauses.length ? `?q=${encodeURIComponent(clauses.join(';'))}` : '';
   return `${BASE_URL}/receiptCosts${qs}`;
 };
@@ -488,7 +497,7 @@ const ManageReceiptCost: React.FC = () => {
 
           {/* Shared search form — drives both tabs */}
           <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 14 }} styles={{ body: { padding: '14px 16px 2px' } }}>
-            <Form form={form} layout="vertical" onFinish={search}>
+            <Form form={form} layout="vertical" onFinish={search} initialValues={{ costDateOp: '=' }}>
               <Row gutter={12}>
                 <Col xs={24} sm={12} md={7}>
                   <Form.Item name="inventoryOrg" label="Inventory Organization" style={{ marginBottom: 12 }}>
@@ -498,24 +507,37 @@ const ManageReceiptCost: React.FC = () => {
                       notFoundContent={orgs.length === 0 ? 'Loading…' : 'No match'} />
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12} md={5}>
+                <Col xs={24} sm={12} md={4}>
                   <Form.Item name="reference" label="Reference # (PO)" style={{ marginBottom: 12 }}>
                     <Input allowClear placeholder="e.g. 2026020095" onPressEnter={search} />
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12} md={5}>
+                <Col xs={24} sm={12} md={4}>
                   <Form.Item name="item" label="Item" style={{ marginBottom: 12 }}>
                     <Input allowClear placeholder="e.g. TECNO-AE10-BU" onPressEnter={search} />
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12} md={7}>
+                <Col xs={24} sm={12} md={6}>
+                  <Form.Item label="Cost Date" style={{ marginBottom: 12 }}>
+                    <Space.Compact block>
+                      <Form.Item name="costDateOp" noStyle>
+                        <Select style={{ width: 76 }}
+                          options={(['=', '>', '>=', '<', '<='] as DateOp[]).map(o => ({ label: o, value: o }))} />
+                      </Form.Item>
+                      <Form.Item name="costDate" noStyle>
+                        <DatePicker allowClear format="YYYY-MM-DD" style={{ width: '100%' }} placeholder="Select date" />
+                      </Form.Item>
+                    </Space.Compact>
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={12} md={3}>
                   <Form.Item label=" " style={{ marginBottom: 12 }}>
-                    <Space>
+                    <Space size={4}>
                       <Button type="primary" htmlType="submit" icon={<SearchOutlined />} loading={loading}
                         style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>
                         Search
                       </Button>
-                      <Button icon={<ClearOutlined />} onClick={reset}>Reset</Button>
+                      <Button icon={<ClearOutlined />} onClick={reset} />
                       <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>GET {previewUrl}</span>} placement="bottomRight">
                         <ApiOutlined style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 16 }} />
                       </Tooltip>
