@@ -2226,6 +2226,13 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
                     style={{ background: C.red, borderColor: C.red, fontWeight: 600 }}>
                     Save Purchase Order
                   </Button>
+                  <Tooltip title={poHeaderId ? 'Submit this draft for approval in Oracle Fusion' : 'Save the purchase order first — that creates the draft in Fusion and returns its ID to approve'}>
+                    <Button icon={<CheckCircleOutlined />} loading={approvingFusion} disabled={!poHeaderId}
+                      onClick={() => submitForApproval()}
+                      style={{ background: poHeaderId ? C.green : undefined, borderColor: poHeaderId ? C.green : undefined, color: poHeaderId ? '#fff' : undefined, fontWeight: 600 }}>
+                      Submit for Approval
+                    </Button>
+                  </Tooltip>
                 </Space>
               </div>
             </div>
