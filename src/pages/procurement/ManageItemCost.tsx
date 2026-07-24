@@ -1,13 +1,19 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Layout, Typography, Card, Table, Button, Form, Input, Space, Tabs,
-  Tooltip, Row, Col, Tag,
+  Tooltip, Row, Col, Tag, Select, Segmented, Empty, Spin,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, DollarOutlined, SearchOutlined, ReloadOutlined,
-  FilterOutlined, ApiOutlined, ClearOutlined,
+  FilterOutlined, ApiOutlined, ClearOutlined, BarChartOutlined,
+  DashboardOutlined, AppstoreOutlined, ApartmentOutlined, TagsOutlined,
+  DatabaseOutlined, CloseCircleOutlined,
 } from '@ant-design/icons';
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  Tooltip as RTooltip, Cell, LabelList, PieChart, Pie, Legend,
+} from 'recharts';
 import { Link } from 'react-router-dom';
 
 const { Content } = Layout;
@@ -202,6 +208,298 @@ const SearchTab: React.FC = () => {
   );
 };
 
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+// Validated categorical palette (dataviz skill) + single-hue blue for the main
+// bar. Contrast WARN on the light surface → we ship direct labels + legend as
+// the required relief, so identity is never colour-alone.
+const VIZ = {
+  blue: '#2a78d6',
+  cat: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300'],
+  other: '#898781',
+  grid: '#e1e0d9', axis: '#898781', ink: REDWOOD.neutral900, sub: '#52514e',
+};
+
+// Pull all itemCosts (paged) — capped so a bad filter can't run away.
+const fetchAllItemCosts = async (baseUrl: string, cap = 5000): Promise<any[]> => {
+  const stripped = baseUrl.replace(/[?&]limit=\d+/gi, '').replace(/[?&]offset=\d+/gi, '').replace(/\?&/, '?').replace(/&&/g, '&');
+  const all: any[] = [];
+  let offset = 0;
+  const step = 500;
+  while (all.length < cap) {
+    const sep = stripped.includes('?') ? '&' : '?';
+    const r = await fetch(`${stripped}${sep}limit=${step}&offset=${offset}`, { headers: HEADERS });
+    if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+    const d = await r.json();
+    const items: any[] = Array.isArray(d) ? d : (d.items ?? []);
+    all.push(...items);
+    if (!d.hasMore || items.length < step) break;
+    offset += step;
+  }
+  return all;
+};
+
+// Pick the first present value across a list of candidate field names.
+const pick = (row: any, names: string[]) => {
+  for (const n of names) if (row[n] != null && row[n] !== '') return row[n];
+  return undefined;
+};
+const COST_FIELDS = ['TotalUnitCost', 'UnitCost', 'ItemCost', 'UnitAverageCost', 'AverageUnitCost'];
+const CAT_FIELDS  = ['ItemCategory', 'CategoryName', 'Category', 'ItemCategoryCode', 'CategoryCode'];
+
+const money = (v: number, ccy?: string) =>
+  (v == null || isNaN(v)) ? '—'
+    : `${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v)}${ccy ? ' ' + ccy : ''}`;
+const compact = (v: number) => {
+  if (v == null || isNaN(v)) return '0';
+  const a = Math.abs(v);
+  if (a >= 1e9) return (v / 1e9).toFixed(1) + 'B';
+  if (a >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+  if (a >= 1e3) return (v / 1e3).toFixed(1) + 'k';
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(v);
+};
+
+type DimKey = 'invOrg' | 'subinv' | 'item' | 'category';
+type MeasureKey = 'avg' | 'total' | 'max' | 'count';
+
+const DIMS: { key: DimKey; label: string; icon: React.ReactNode }[] = [
+  { key: 'invOrg',   label: 'Inventory Org', icon: <ApartmentOutlined /> },
+  { key: 'subinv',   label: 'Subinventory',  icon: <DatabaseOutlined /> },
+  { key: 'item',     label: 'Item',          icon: <AppstoreOutlined /> },
+  { key: 'category', label: 'Item Category', icon: <TagsOutlined /> },
+];
+const MEASURES: { key: MeasureKey; label: string; money: boolean }[] = [
+  { key: 'avg',   label: 'Avg Unit Cost',   money: true },
+  { key: 'total', label: 'Total Unit Cost', money: true },
+  { key: 'max',   label: 'Max Unit Cost',   money: true },
+  { key: 'count', label: 'Record Count',    money: false },
+];
+
+// StatTile — a hero number, no chart (dataviz: not everything is a chart).
+const StatTile: React.FC<{ label: string; value: React.ReactNode; accent?: string }> = ({ label, value, accent }) => (
+  <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, borderLeft: `3px solid ${accent ?? REDWOOD.teal}` }} styles={{ body: { padding: '10px 14px' } }}>
+    <Text style={{ fontSize: 10, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block' }}>{label}</Text>
+    <div style={{ fontSize: 20, fontWeight: 700, color: REDWOOD.neutral900, lineHeight: 1.25, marginTop: 2 }}>{value}</div>
+  </Card>
+);
+
+const DashboardTab: React.FC = () => {
+  const [raw, setRaw]         = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr]         = useState('');
+  const [dim, setDim]         = useState<DimKey>('invOrg');
+  const [measure, setMeasure] = useState<MeasureKey>('avg');
+  const [topN, setTopN]       = useState(12);
+  const [drill, setDrill]     = useState<{ dim: DimKey; value: string } | null>(null);
+
+  const url = `${LATEST_URL}/itemCosts`;
+
+  const load = useCallback(() => {
+    setLoading(true); setErr(''); setDrill(null);
+    fetchAllItemCosts(url)
+      .then(d => setRaw(d))
+      .catch(e => { setErr(e.message); setRaw([]); })
+      .finally(() => setLoading(false));
+  }, [url]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Normalise every row into the dimensions + cost we care about.
+  const recs = useMemo(() => raw.map(r => {
+    const p = parseValuationUnit(r.ValuationUnit);
+    const cost = Number(pick(r, COST_FIELDS));
+    return {
+      item:     r.ItemNumber ?? r.Item ?? '—',
+      invOrg:   p.invOrg || r.OrganizationCode || r.OrganizationName || '—',
+      subinv:   p.subinv || r.Subinventory || '—',
+      category: String(pick(r, CAT_FIELDS) ?? 'Uncategorized'),
+      cost:     isNaN(cost) ? null : cost,
+      ccy:      r.CurrencyCode ?? r.Currency ?? '',
+    };
+  }), [raw]);
+
+  const ccy = useMemo(() => {
+    const set = new Set(recs.map(r => r.ccy).filter(Boolean));
+    return set.size === 1 ? Array.from(set)[0] as string : '';
+  }, [recs]);
+
+  // Apply drill (click-to-filter) for the KPIs, donut and detail table.
+  const scoped = useMemo(() => drill ? recs.filter(r => (r as any)[drill.dim] === drill.value) : recs, [recs, drill]);
+
+  // Aggregate helper.
+  const aggregate = (rows: typeof recs, key: DimKey) => {
+    const m = new Map<string, { key: string; count: number; sum: number; max: number; n: number }>();
+    rows.forEach(r => {
+      const k = String((r as any)[key] ?? '—');
+      let g = m.get(k);
+      if (!g) { g = { key: k, count: 0, sum: 0, max: 0, n: 0 }; m.set(k, g); }
+      g.count += 1;
+      if (r.cost != null) { g.sum += r.cost; g.max = Math.max(g.max, r.cost); g.n += 1; }
+    });
+    return Array.from(m.values()).map(g => ({
+      key: g.key, count: g.count, total: g.sum, max: g.max,
+      avg: g.n ? g.sum / g.n : 0,
+    }));
+  };
+
+  const measureVal = (row: any) => row[measure] as number;
+  const activeMeasure = MEASURES.find(x => x.key === measure)!;
+
+  // Main bar data — group by dim, sort by measure desc, take top N.
+  const barData = useMemo(() => {
+    const agg = aggregate(recs, dim).sort((a, b) => measureVal(b) - measureVal(a));
+    return agg.slice(0, topN);
+  }, [recs, dim, measure, topN]);
+
+  // Donut — cost share by Inventory Org (scoped), top 5 + Other.
+  const donutData = useMemo(() => {
+    const agg = aggregate(scoped, 'invOrg').sort((a, b) => b.total - a.total);
+    const top = agg.slice(0, 5);
+    const rest = agg.slice(5).reduce((s, g) => s + g.total, 0);
+    const out = top.map(g => ({ name: g.key, value: g.total }));
+    if (rest > 0) out.push({ name: 'Other', value: rest });
+    return out;
+  }, [scoped]);
+
+  // KPIs (scoped).
+  const kpi = useMemo(() => {
+    const costs = scoped.map(r => r.cost).filter((v): v is number => v != null);
+    const avg = costs.length ? costs.reduce((s, v) => s + v, 0) / costs.length : 0;
+    return {
+      records: scoped.length,
+      items:   new Set(scoped.map(r => r.item)).size,
+      orgs:    new Set(scoped.map(r => r.invOrg)).size,
+      subs:    new Set(scoped.map(r => r.subinv)).size,
+      cats:    new Set(scoped.map(r => r.category)).size,
+      avg, max: costs.length ? Math.max(...costs) : 0,
+      total: costs.reduce((s, v) => s + v, 0),
+    };
+  }, [scoped]);
+
+  const dimLabel = DIMS.find(d => d.key === dim)!.label;
+  const fmtMeasure = (v: number) => activeMeasure.money ? money(v, ccy) : new Intl.NumberFormat('en-US').format(v);
+
+  if (loading) return <div style={{ padding: 60, textAlign: 'center' }}><Spin tip="Loading item costs…" size="large"><div style={{ height: 40 }} /></Spin></div>;
+  if (err)     return <div style={{ padding: 24 }}><Empty description={`Failed to load: ${err}`} /><div style={{ textAlign: 'center', marginTop: 12 }}><Button icon={<ReloadOutlined />} onClick={load}>Retry</Button></div></div>;
+
+  return (
+    <div style={{ padding: 16 }}>
+      {/* KPI row */}
+      <Row gutter={[10, 10]} style={{ marginBottom: 14 }}>
+        <Col xs={12} sm={8} md={6} lg={4}><StatTile label="Cost Records" value={kpi.records} accent={REDWOOD.teal} /></Col>
+        <Col xs={12} sm={8} md={6} lg={4}><StatTile label="Items" value={kpi.items} accent={REDWOOD.info} /></Col>
+        <Col xs={12} sm={8} md={6} lg={4}><StatTile label="Inventory Orgs" value={kpi.orgs} accent={VIZ.cat[2]} /></Col>
+        <Col xs={12} sm={8} md={6} lg={4}><StatTile label="Subinventories" value={kpi.subs} accent={VIZ.cat[3]} /></Col>
+        <Col xs={12} sm={8} md={6} lg={4}><StatTile label="Avg Unit Cost" value={money(kpi.avg, ccy)} accent={REDWOOD.primary} /></Col>
+        <Col xs={12} sm={8} md={6} lg={4}><StatTile label="Max Unit Cost" value={money(kpi.max, ccy)} accent={VIZ.cat[1]} /></Col>
+      </Row>
+
+      {/* Prompts / controls */}
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+        <Space size={6}>
+          <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Group by</Text>
+          <Segmented size="small" value={dim} onChange={(v) => { setDim(v as DimKey); setDrill(null); }}
+            options={DIMS.map(d => ({ label: <Space size={4}>{d.icon}{d.label}</Space>, value: d.key }))} />
+        </Space>
+        <Space size={6}>
+          <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Measure</Text>
+          <Select size="small" value={measure} onChange={setMeasure} style={{ width: 160 }}
+            options={MEASURES.map(m => ({ label: m.label, value: m.key }))} />
+        </Space>
+        <Space size={6}>
+          <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Top</Text>
+          <Select size="small" value={topN} onChange={setTopN} style={{ width: 90 }}
+            options={[8, 12, 15, 20, 30].map(n => ({ label: `Top ${n}`, value: n }))} />
+        </Space>
+        {drill && (
+          <Tag color="volcano" closable onClose={() => setDrill(null)} icon={<CloseCircleOutlined />} style={{ fontSize: 12 }}>
+            {DIMS.find(d => d.key === drill.dim)!.label}: {drill.value}
+          </Tag>
+        )}
+        <div style={{ marginLeft: 'auto' }}>
+          <Button size="small" icon={<ReloadOutlined />} onClick={load}>Refresh</Button>
+        </div>
+      </div>
+
+      <Row gutter={[14, 14]}>
+        {/* Main bar chart */}
+        <Col xs={24} lg={15}>
+          <Card size="small" title={<Space><BarChartOutlined style={{ color: VIZ.blue }} /><span style={{ fontSize: 13 }}>{activeMeasure.label} by {dimLabel} — Top {topN}</span></Space>}
+            style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }} styles={{ body: { padding: '8px 8px 4px' } }}>
+            {barData.length === 0 ? <Empty description="No data" style={{ padding: 24 }} /> : (
+              <ResponsiveContainer width="100%" height={Math.max(240, barData.length * 30 + 40)}>
+                <BarChart data={barData} layout="vertical" margin={{ top: 4, right: 56, bottom: 4, left: 8 }} barCategoryGap={6}>
+                  <CartesianGrid horizontal={false} stroke={VIZ.grid} />
+                  <XAxis type="number" tickFormatter={(v) => activeMeasure.money ? compact(v) : String(v)}
+                    tick={{ fontSize: 11, fill: VIZ.axis }} axisLine={{ stroke: VIZ.grid }} tickLine={false} />
+                  <YAxis type="category" dataKey="key" width={150} tick={{ fontSize: 11, fill: VIZ.sub }}
+                    axisLine={false} tickLine={false}
+                    tickFormatter={(v: string) => v.length > 20 ? v.slice(0, 19) + '…' : v} />
+                  <RTooltip cursor={{ fill: 'rgba(42,120,214,0.06)' }}
+                    formatter={(v: any) => [fmtMeasure(Number(v)), activeMeasure.label]}
+                    contentStyle={{ fontSize: 12, borderRadius: 6, border: `1px solid ${REDWOOD.neutral200}` }} />
+                  <Bar dataKey={measure} radius={[0, 4, 4, 0]} maxBarSize={22} cursor="pointer"
+                    onClick={(d: any) => setDrill(prev => prev && prev.value === d.key && prev.dim === dim ? null : { dim, value: d.key })}>
+                    {barData.map((d) => (
+                      <Cell key={d.key}
+                        fill={drill && drill.dim === dim && drill.value === d.key ? REDWOOD.primary : VIZ.blue}
+                        fillOpacity={drill && drill.dim === dim && drill.value !== d.key ? 0.35 : 1} />
+                    ))}
+                    <LabelList dataKey={measure} position="right"
+                      formatter={(v: any) => activeMeasure.money ? compact(Number(v)) : String(v)}
+                      style={{ fontSize: 10, fill: VIZ.sub, fontWeight: 600 }} />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+            <Text type="secondary" style={{ fontSize: 11, paddingLeft: 8 }}>Tip: click a bar to filter the whole dashboard by that {dimLabel.toLowerCase()}.</Text>
+          </Card>
+        </Col>
+
+        {/* Donut: cost share by inventory org */}
+        <Col xs={24} lg={9}>
+          <Card size="small" title={<Space><DashboardOutlined style={{ color: VIZ.cat[2] }} /><span style={{ fontSize: 13 }}>Total Cost Share by Inventory Org</span></Space>}
+            style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }} styles={{ body: { padding: 8 } }}>
+            {donutData.length === 0 ? <Empty description="No data" style={{ padding: 24 }} /> : (
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie data={donutData} dataKey="value" nameKey="name" cx="50%" cy="45%" innerRadius={55} outerRadius={90}
+                    paddingAngle={2} stroke="#fff" strokeWidth={2}
+                    label={(e: any) => `${(e.percent * 100).toFixed(0)}%`} labelLine={false}
+                    style={{ fontSize: 11 }}>
+                    {donutData.map((d, i) => <Cell key={d.name} fill={d.name === 'Other' ? VIZ.other : VIZ.cat[i % VIZ.cat.length]} />)}
+                  </Pie>
+                  <RTooltip formatter={(v: any, n: any) => [money(Number(v), ccy), n]}
+                    contentStyle={{ fontSize: 12, borderRadius: 6, border: `1px solid ${REDWOOD.neutral200}` }} />
+                  <Legend verticalAlign="bottom" height={64} iconType="circle" wrapperStyle={{ fontSize: 11 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
+          </Card>
+        </Col>
+      </Row>
+
+      {/* Ranked detail table (also the accessible table view of the bar chart) */}
+      <Card size="small" title={<Space><BarChartOutlined /><span style={{ fontSize: 13 }}>Breakdown by {dimLabel}</span></Space>}
+        style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginTop: 14 }} styles={{ body: { padding: 0 } }}>
+        <Table
+          size="small"
+          rowKey="key"
+          dataSource={aggregate(recs, dim).sort((a, b) => measureVal(b) - measureVal(a))}
+          pagination={{ pageSize: 10, showSizeChanger: true, pageSizeOptions: ['10', '25', '50'], showTotal: (t) => `${t} ${dimLabel.toLowerCase()}(s)` }}
+          onRow={(r) => ({ onClick: () => setDrill(prev => prev && prev.value === r.key && prev.dim === dim ? null : { dim, value: r.key }), style: { cursor: 'pointer' } })}
+          columns={[
+            { title: dimLabel, dataIndex: 'key', ellipsis: true, render: (v: string) => <Text strong style={{ fontSize: 12 }}>{v}</Text> },
+            { title: 'Records', dataIndex: 'count', width: 100, align: 'right', render: (v: number) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</Text> },
+            { title: 'Avg Unit Cost', dataIndex: 'avg', width: 140, align: 'right', render: (v: number) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{money(v, ccy)}</Text> },
+            { title: 'Max Unit Cost', dataIndex: 'max', width: 140, align: 'right', render: (v: number) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{money(v, ccy)}</Text> },
+            { title: 'Total Unit Cost', dataIndex: 'total', width: 150, align: 'right', render: (v: number) => <Text strong style={{ fontFamily: 'monospace', fontSize: 12 }}>{money(v, ccy)}</Text> },
+          ]}
+        />
+      </Card>
+    </div>
+  );
+};
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 const ManageItemCost: React.FC = () => {
   return (
@@ -245,6 +543,10 @@ const ManageItemCost: React.FC = () => {
                 key: 'search',
                 label: <Space size={4}><SearchOutlined />Search</Space>,
                 children: <SearchTab />,
+              }, {
+                key: 'dashboard',
+                label: <Space size={4}><DashboardOutlined />Dashboard</Space>,
+                children: <DashboardTab />,
               }]}
             />
           </Card>
