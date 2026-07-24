@@ -327,6 +327,9 @@ const RevenueRecognition: React.FC = () => {
     debit:  acctLines.reduce((s, l) => s + l.debit, 0),
     credit: acctLines.reduce((s, l) => s + l.credit, 0),
   }), [acctLines]);
+  // Natural-account description per combination for the preview lines.
+  const acctPreviewCodes = useMemo(() => acctLines.map(l => l.accountCombination).filter(Boolean), [acctLines]);
+  const acctPreviewDescMap = useAccountDescriptions(acctPreviewCodes);
 
   // ── Standard SLA create-accounting + GL journal (mirrors ManageMultiperiod) ──
   const RR_SOURCE_TABLE = 'RR_AR_REVENUE_SCHEDULE';
@@ -1051,7 +1054,15 @@ const RevenueRecognition: React.FC = () => {
               { title: 'Trx #', dataIndex: 'trxNumber', width: 80, render: (v: any) => v ?? '—' },
               { title: 'Sched', dataIndex: 'scheduleId', width: 70 },
               { title: 'Dr/Cr', dataIndex: 'lineType', width: 60, render: (v: string) => <Tag color={v === 'DR' ? 'geekblue' : 'gold'}>{v}</Tag> },
-              { title: 'Account Combination', dataIndex: 'accountCombination', width: 220, render: (v: string) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</Text> },
+              { title: 'Account Combination', dataIndex: 'accountCombination', width: 250, render: (v: string) => {
+                const desc = acctPreviewDescMap[v];
+                return (
+                  <div>
+                    <Text style={{ fontFamily: 'monospace', fontSize: 12, whiteSpace: 'nowrap' }}>{v}</Text>
+                    {desc && <div style={{ fontSize: 10.5, color: REDWOOD.neutral500, marginTop: 2 }}>{desc}</div>}
+                  </div>
+                );
+              } },
               { title: 'Debit', dataIndex: 'debit', width: 110, align: 'right' as const, render: (v: number) => v ? <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> : '—' },
               { title: 'Credit', dataIndex: 'credit', width: 110, align: 'right' as const, render: (v: number) => v ? <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> : '—' },
               { title: 'Ref1', dataIndex: 'reference1', width: 90, render: (v: string) => <Tooltip title="trx_number">{v || '—'}</Tooltip> },
