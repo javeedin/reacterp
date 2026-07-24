@@ -318,9 +318,12 @@ const RevenueRecognition: React.FC = () => {
   // ── Standard SLA create-accounting + GL journal (mirrors ManageMultiperiod) ──
   const RR_SOURCE_TABLE = 'RR_AR_REVENUE_SCHEDULE';
 
+  // Accounting date = last day of the period month (end of period). Formats
+  // with local Y/M/D parts so it isn't shifted back a day by UTC conversion.
   const scheduleAcctDate = (s: RevenueSchedule): string => {
     const d = parseFlexDate(s.periodDate) || new Date();
-    return d.toISOString().split('T')[0];
+    const eom = new Date(d.getFullYear(), d.getMonth() + 1, 0); // day 0 of next month
+    return `${eom.getFullYear()}-${String(eom.getMonth() + 1).padStart(2, '0')}-${String(eom.getDate()).padStart(2, '0')}`;
   };
   const schedulePeriodLabel = (s: RevenueSchedule): string =>
     derivePeriodName(parseFlexDate(s.periodDate) || new Date());
