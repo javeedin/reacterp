@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import {
   Layout, Typography, Card, Table, Button, Form, Input, Space, Tabs,
-  Tooltip, Row, Col,
+  Tooltip, Row, Col, Tag,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -44,7 +44,29 @@ const matchesFilter = (row: any, q: string) => {
   return Object.values(row).some(v => v != null && String(v).toLowerCase().includes(needle));
 };
 
-// Build clean columns: drop links, object-valued and all-null columns.
+// Split a ValuationUnit like "COSTORG-INVORG-SUBINV-LOT\-2026020223" into parts.
+// Hyphens escaped as "\-" (inside the lot) are NOT split points.
+const parseValuationUnit = (vu?: string) => {
+  if (!vu) return { costOrg: '', invOrg: '', subinv: '', lot: '' };
+  const parts = String(vu).split(/(?<!\\)-/);   // split on unescaped hyphens
+  return {
+    costOrg: parts[0] || '',
+    invOrg:  parts[1] || '',
+    subinv:  parts[2] || '',
+    lot:     parts.slice(3).join('-').replace(/\\-/g, '-'),
+  };
+};
+
+// The four columns a ValuationUnit is broken into (like the on-hand cost tabs).
+const vuCols: ColumnsType<any> = [
+  { title: 'Cost Org',      key: '_vu_costOrg', width: 150, ellipsis: true, render: (_: any, r: any) => { const p = parseValuationUnit(r.ValuationUnit); return <Text strong style={{ fontSize: 12 }}>{p.costOrg || '—'}</Text>; } },
+  { title: 'Inventory Org', key: '_vu_invOrg',  width: 150, ellipsis: true, render: (_: any, r: any) => { const p = parseValuationUnit(r.ValuationUnit); return <Text style={{ fontSize: 12 }}>{p.invOrg || '—'}</Text>; } },
+  { title: 'Subinventory',  key: '_vu_subinv',  width: 130,                 render: (_: any, r: any) => { const p = parseValuationUnit(r.ValuationUnit); return p.subinv ? <Tag color="cyan">{p.subinv}</Tag> : '—'; } },
+  { title: 'Lot',           key: '_vu_lot',     width: 180, ellipsis: true, render: (_: any, r: any) => { const p = parseValuationUnit(r.ValuationUnit); return p.lot ? <Tag color="geekblue">{p.lot}</Tag> : '—'; } },
+];
+
+// Build clean columns: drop links, object-valued and all-null columns, hide *Id.
+// A ValuationUnit column is broken into Cost Org / Inventory Org / Subinventory / Lot.
 const buildCols = (rows: any[]): ColumnsType<any> => {
   const keys: string[] = [];
   rows.forEach(r => Object.keys(r).forEach(k => {
@@ -57,17 +79,22 @@ const buildCols = (rows: any[]): ColumnsType<any> => {
     });
     if (hasValue) keys.push(k);
   }));
-  return keys.map(k => ({
-    title: k, dataIndex: k, key: k, ellipsis: true,
-    width: /description|name|valuationunit/i.test(k) ? 220 : 150,
-    render: (v: any) => {
-      if (v == null || v === '') return <span style={{ color: REDWOOD.neutral300 }}>—</span>;
-      if (/date/i.test(k) && typeof v === 'string' && v.length >= 10) return <Text style={{ fontSize: 12 }}>{fmtDate(v)}</Text>;
-      if (/cost|amount|price|qty|quantity|value/i.test(k) && !isNaN(Number(v)))
-        return <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{numFmt(v)}</Text>;
-      return <Text style={{ fontSize: 12 }}>{String(v)}</Text>;
-    },
-  }));
+  const cols: ColumnsType<any> = [];
+  keys.forEach(k => {
+    if (/^valuationunit$/i.test(k)) { cols.push(...vuCols); return; }   // break it out
+    cols.push({
+      title: k, dataIndex: k, key: k, ellipsis: true,
+      width: /description|name/i.test(k) ? 220 : 150,
+      render: (v: any) => {
+        if (v == null || v === '') return <span style={{ color: REDWOOD.neutral300 }}>—</span>;
+        if (/date/i.test(k) && typeof v === 'string' && v.length >= 10) return <Text style={{ fontSize: 12 }}>{fmtDate(v)}</Text>;
+        if (/cost|amount|price|qty|quantity|value/i.test(k) && !isNaN(Number(v)))
+          return <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{numFmt(v)}</Text>;
+        return <Text style={{ fontSize: 12 }}>{String(v)}</Text>;
+      },
+    });
+  });
+  return cols;
 };
 
 interface SearchVals {
