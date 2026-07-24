@@ -10,6 +10,7 @@ import {
   InfoCircleOutlined, CloseOutlined, AppstoreOutlined, BarcodeOutlined,
   TagsOutlined, ApartmentOutlined, FilterOutlined, InboxOutlined,
   ApiOutlined, DollarOutlined, ReconciliationOutlined, BranchesOutlined,
+  ShoppingOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 
@@ -722,10 +723,11 @@ const CostDistributionsTab: React.FC<{ itemNumber: string }> = ({ itemNumber }) 
 // Columns are built dynamically, dropping any column that is null/empty across
 // every row (plus links + object columns). Each transaction row expands to show
 // its lots, fetched on demand from the row's `lots` child href.
-const buildDynamicCols = (rows: any[]): ColumnsType<any> => {
+const buildDynamicCols = (rows: any[], opts?: { dropIds?: boolean }): ColumnsType<any> => {
   const keys: string[] = [];
   rows.forEach(r => Object.keys(r).forEach(k => {
     if (k === 'links' || k.startsWith('_')) return;
+    if (opts?.dropIds && /id$/i.test(k)) return;   // drop *Id columns when requested
     if (keys.includes(k)) return;
     // keep a column only if at least one row has a non-null, non-empty, non-object value
     const hasValue = rows.some(row => {
@@ -838,6 +840,97 @@ const InventoryTransactionsTab: React.FC<{ organizationCode: string; itemNumber:
           },
           rowExpandable: (r: any) => r.TransactionId != null || (r.links?.some((l: any) => l.name === 'lots') ?? false),
         }}
+      />
+    </div>
+  );
+};
+
+// ── Purchase Order tab ────────────────────────────────────────────────────────
+// On Refresh: read receiptCosts for the item → collect distinct Reference # (PO)
+// → for each PO run purchaseOrders?q=OrderNumber=<ref> → follow the header's
+// `lines` child href → fetch and show all PO lines. Null + *Id columns dropped.
+const PurchaseOrderTab: React.FC<{ itemNumber: string }> = ({ itemNumber }) => {
+  const [lines, setLines]     = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr]         = useState('');
+  const [filter, setFilter]   = useState('');
+  const [ran, setRan]         = useState(false);
+  const [poCount, setPoCount] = useState(0);
+
+  const receiptCostsUrl = `${BASE_URL}/receiptCosts?q=${encodeURIComponent('Item=' + itemNumber)}&limit=${CHILD_LIMIT}`;
+
+  const load = useCallback(async () => {
+    setLoading(true); setErr(''); setRan(true); setLines([]); setPoCount(0);
+    try {
+      // 1) receipt costs → distinct reference (PO) numbers
+      const receipts = await fetchAllPages(receiptCostsUrl);
+      const refs = Array.from(new Set(
+        receipts.map(r => r.ReferenceNumber).filter(v => v != null && v !== '').map(String)
+      ));
+      if (refs.length === 0) { setErr('No Reference # (PO) found on receipt costs for this item.'); return; }
+      setPoCount(refs.length);
+
+      // 2+3) per PO: header → lines child href → lines
+      const perPo = await Promise.all(refs.map(async (ref) => {
+        const headerUrl = `${BASE_URL}/purchaseOrders?q=${encodeURIComponent('OrderNumber=' + ref)}`;
+        const hr = await fetch(headerUrl, { headers: HEADERS });
+        if (!hr.ok) return [];
+        const hd = await hr.json();
+        const header = (hd.items ?? [])[0];
+        if (!header) return [];
+        const linesHref = header.links?.find((l: any) => l.name === 'lines')?.href
+          ?? `${BASE_URL}/purchaseOrders/${header.POHeaderId}/child/lines`;
+        const poLines = await fetchAllPages(linesHref);
+        return poLines.map((ln: any) => ({ ...ln, _orderNumber: ref }));
+      }));
+      setLines(perPo.flat());
+    } catch (e: any) {
+      setErr(e.message); setLines([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [receiptCostsUrl]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const columns: ColumnsType<any> = React.useMemo(() => {
+    const orderCol: ColumnsType<any>[number] = {
+      title: 'Order Number', dataIndex: '_orderNumber', key: '_orderNumber', width: 140, fixed: 'left' as const,
+      render: (v: string) => <Text strong style={{ fontSize: 12 }}>{v || '—'}</Text>,
+    };
+    return [orderCol, ...buildDynamicCols(lines, { dropIds: true })];
+  }, [lines]);
+
+  const filtered = filter ? lines.filter(r => matchesFilter(r, filter)) : lines;
+
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
+        <Space>
+          <Button type="primary" size="small" icon={<ReloadOutlined />} loading={loading}
+            style={{ background: REDWOOD.teal, borderColor: REDWOOD.teal }} onClick={load}>
+            Refresh
+          </Button>
+          <Input size="small" allowClear prefix={<FilterOutlined />} placeholder="Filter results…"
+            value={filter} onChange={e => setFilter(e.target.value)} style={{ width: 220 }} />
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {filtered.length} line(s){poCount > 0 ? ` · ${poCount} PO(s)` : ''}
+          </Text>
+        </Space>
+        <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>Step 1 · GET {receiptCostsUrl}</span>} placement="bottomRight">
+          <ApiOutlined style={{ color: REDWOOD.info, cursor: 'pointer', fontSize: 15 }} />
+        </Tooltip>
+      </div>
+      {err && <div style={{ color: REDWOOD.error, fontSize: 12, marginBottom: 8 }}>{err}</div>}
+      <Table
+        dataSource={filtered}
+        columns={columns}
+        rowKey={(r: any, i) => `${r._orderNumber}-${r.POLineId ?? r.LineNumber ?? i}`}
+        loading={loading}
+        size="small"
+        scroll={{ x: 'max-content' }}
+        pagination={{ pageSize: 25, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'], showTotal: (t) => `${t} rows` }}
+        locale={{ emptyText: loading ? 'Loading…' : (ran ? (err ? 'Error' : `No purchase order lines for ${itemNumber}`) : 'Click Refresh to load') }}
       />
     </div>
   );
@@ -1013,6 +1106,13 @@ const OnhandDetailPage: React.FC<{ items: RawOnhand[]; onClose?: () => void }> =
     key: 'inventoryTransactions',
     label: <Space size={4}><InboxOutlined />Inventory Transactions</Space>,
     children: <InventoryTransactionsTab organizationCode={first.OrganizationCode} itemNumber={first.ItemNumber} />,
+  });
+
+  // Purchase Order — receiptCosts reference #(s) → purchaseOrders → lines
+  tabItems.push({
+    key: 'purchaseOrder',
+    label: <Space size={4}><ShoppingOutlined />Purchase Order</Space>,
+    children: <PurchaseOrderTab itemNumber={first.ItemNumber} />,
   });
 
   return (
