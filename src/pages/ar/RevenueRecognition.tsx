@@ -6,7 +6,7 @@ import {
 import {
   HomeOutlined, ReloadOutlined, ThunderboltOutlined, SearchOutlined,
   FileExcelOutlined, ApiOutlined, DollarOutlined, CheckCircleTwoTone, CloseCircleTwoTone,
-  TableOutlined, AuditOutlined,
+  TableOutlined, AuditOutlined, FileSearchOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -24,7 +24,7 @@ import {
   fetchLedgerByBusinessUnit, derivePeriodName,
 } from '../../services/sla.service';
 import type { SlaCreatePayload } from '../../services/sla.service';
-import { postSlaToGL, buildGlJournalPayload, makeBatchName } from '../../services/glPosting.service';
+import { postSlaToGL, buildGlJournalPayload, makeBatchName, getGlJournalLines } from '../../services/glPosting.service';
 import type { GlPostingOptions } from '../../services/glPosting.service';
 
 // Resolve {slaHeaderId}/{batchId}/{batchName}/{glHeaderId} tokens in debug steps.
@@ -176,6 +176,12 @@ const RevenueRecognition: React.FC = () => {
   const [acctDebugHalted, setAcctDebugHalted] = useState(false);
   const [acctDebugLedgerOk, setAcctDebugLedgerOk] = useState(true);
   const [acctDebugBU,     setAcctDebugBU]     = useState('');
+
+  // View-accounting modal (read the posted GL journal for an accounted schedule)
+  const [viewAcctOpen,    setViewAcctOpen]    = useState(false);
+  const [viewAcctLoading, setViewAcctLoading] = useState(false);
+  const [viewAcctLines,   setViewAcctLines]   = useState<any[] | null>(null);
+  const [viewAcctSchedule, setViewAcctSchedule] = useState<RevenueSchedule | null>(null);
 
   const loadContracts = async () => {
     setContractsLoading(true);
@@ -521,6 +527,23 @@ const RevenueRecognition: React.FC = () => {
     } catch (e: any) {
       setAcctStepTest(prev => ({ ...prev, [idx]: { loading: false, status: 0, body: e?.message ?? 'Network error' } }));
     }
+  };
+
+  // View the posted GL journal for an accounted schedule — read straight from
+  // GET /gl/journals/lines by reference2 = schedule id, reference5 = RR source.
+  const openViewAccounting = async (s: RevenueSchedule) => {
+    setViewAcctSchedule(s);
+    setViewAcctOpen(true);
+    setViewAcctLoading(true);
+    setViewAcctLines(null);
+    try {
+      const res = await getGlJournalLines({ reference2: s.id, reference5: RR_SOURCE });
+      setViewAcctLines(res.items);
+    } catch (e: any) {
+      message.error(`Failed to load journal: ${e?.message}`);
+      setViewAcctLines([]);
+    }
+    setViewAcctLoading(false);
   };
 
   // Pivot: one row per contract, one column per month (chronological).
@@ -916,7 +939,14 @@ const RevenueRecognition: React.FC = () => {
                           { title: '#', dataIndex: 'scheduleNum', width: 55, align: 'right' as const },
                           { title: 'Amount', dataIndex: 'amount', width: 120, align: 'right' as const, render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
                           { title: 'Billed', key: 'billed', width: 70, align: 'center' as const, render: (_: any, r: RevenueSchedule) => isBilled(r) ? <CheckCircleTwoTone twoToneColor="#1D7B4D" /> : <CloseCircleTwoTone twoToneColor="#C74634" /> },
-                          { title: 'Accounted', key: 'acct', width: 90, align: 'center' as const, render: (_: any, r: RevenueSchedule) => isAccounted(r) ? <Tag color="green">Accounted</Tag> : <Tag>Pending</Tag> },
+                          { title: 'Accounted', key: 'acct', width: 130, align: 'center' as const, render: (_: any, r: RevenueSchedule) => isAccounted(r)
+                            ? <Space size={4}>
+                                <Tag color="green" style={{ marginInlineEnd: 0 }}>Accounted</Tag>
+                                <Tooltip title="View accounting / journal details">
+                                  <Button type="text" size="small" icon={<FileSearchOutlined style={{ color: REDWOOD.info }} />} onClick={() => openViewAccounting(r)} />
+                                </Tooltip>
+                              </Space>
+                            : <Tag>Pending</Tag> },
                         ]}
                         summary={() => postSchedules.length === 0 ? null : (
                           <Table.Summary fixed>
@@ -1122,6 +1152,71 @@ const RevenueRecognition: React.FC = () => {
               );
             })}
           </div>
+        </Modal>
+
+        {/* ── View Accounting — posted GL journal for an accounted schedule ── */}
+        <Modal
+          open={viewAcctOpen}
+          onCancel={() => setViewAcctOpen(false)}
+          width={900}
+          title={<Space><FileSearchOutlined style={{ color: REDWOOD.info }} /><span>
+            Accounting — Trx {viewAcctSchedule?.trxNumber ?? '—'} · Schedule {viewAcctSchedule?.id ?? '—'} · {viewAcctSchedule?.periodName ?? ''}
+          </span></Space>}
+          footer={<Button onClick={() => setViewAcctOpen(false)}>Close</Button>}
+        >
+          {viewAcctLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}><Text type="secondary">Loading journal…</Text></div>
+          ) : !viewAcctLines || viewAcctLines.length === 0 ? (
+            <Alert type="info" showIcon message="No posted GL journal found for this schedule."
+              description={`Looked up gl/journals/lines?reference2=${viewAcctSchedule?.id}&reference5=${RR_SOURCE}`} />
+          ) : (() => {
+            const rows = viewAcctLines;
+            const totalDr = rows.reduce((s: number, l: any) => s + (Number(l.accounted_dr) || 0), 0);
+            const totalCr = rows.reduce((s: number, l: any) => s + (Number(l.accounted_cr) || 0), 0);
+            const journals = new Set(rows.map((l: any) => l.je_header_id ?? l.je_batch_id));
+            const batchId  = rows[0]?.je_batch_id ?? rows[0]?.je_header_id ?? '—';
+            const status   = rows[0]?.posting_status ?? '—';
+            return (
+              <>
+                <Space wrap style={{ marginBottom: 8 }}>
+                  <Tag color="blue">Batch {batchId}</Tag>
+                  <Tag color={status === 'POSTED' ? 'success' : 'default'}>{status}</Tag>
+                  <Text type="secondary" style={{ fontSize: 12 }}>{journals.size} journal(s) · {rows.length} line(s)</Text>
+                </Space>
+                <Table
+                  dataSource={rows}
+                  rowKey={(r: any, i) => `${r.je_header_id ?? r.je_batch_id}-${r.line_num ?? r.line_id ?? i}`}
+                  size="small"
+                  pagination={false}
+                  scroll={{ x: 820 }}
+                  columns={[
+                    { title: 'Period', dataIndex: 'period_name', width: 80, render: (v: string) => <Tag color="purple" style={{ fontSize: 10 }}>{v || '—'}</Tag> },
+                    { title: 'Journal', dataIndex: 'je_header_id', width: 90, align: 'center' as const, render: (v: number, rec: any) => <Tooltip title={rec.journal_name}><Text style={{ fontSize: 11 }}>{v ?? rec.je_batch_id ?? '—'}</Text></Tooltip> },
+                    { title: '#', dataIndex: 'line_num', width: 40, align: 'center' as const },
+                    { title: 'Account', dataIndex: 'account', ellipsis: true, render: (v: string, rec: any) => <Text code style={{ fontSize: 11 }}>{v ?? rec.account_combination ?? '—'}</Text> },
+                    { title: 'Description', dataIndex: 'description', ellipsis: true },
+                    { title: 'Class', dataIndex: 'reference3', width: 100, render: (v: string) => v ? <Tag style={{ fontSize: 10 }}>{v}</Tag> : <Text type="secondary">—</Text> },
+                    { title: 'Dr Amount', dataIndex: 'accounted_dr', width: 120, align: 'right' as const, render: (v: any) => Number(v) ? <Text style={{ color: REDWOOD.info, fontFamily: 'monospace' }}>{fmt(Number(v))}</Text> : <Text type="secondary">—</Text> },
+                    { title: 'Cr Amount', dataIndex: 'accounted_cr', width: 120, align: 'right' as const, render: (v: any) => Number(v) ? <Text style={{ color: REDWOOD.success, fontFamily: 'monospace' }}>{fmt(Number(v))}</Text> : <Text type="secondary">—</Text> },
+                  ]}
+                  summary={() => (
+                    <Table.Summary fixed>
+                      <Table.Summary.Row style={{ background: '#fafafa' }}>
+                        <Table.Summary.Cell index={0} colSpan={6} align="right"><Text strong>Total</Text></Table.Summary.Cell>
+                        <Table.Summary.Cell index={6} align="right"><Text strong style={{ color: REDWOOD.info, fontFamily: 'monospace' }}>{fmt(totalDr)}</Text></Table.Summary.Cell>
+                        <Table.Summary.Cell index={7} align="right"><Text strong style={{ color: REDWOOD.success, fontFamily: 'monospace' }}>{fmt(totalCr)}</Text></Table.Summary.Cell>
+                      </Table.Summary.Row>
+                    </Table.Summary>
+                  )}
+                />
+                <div style={{ marginTop: 6 }}>
+                  <Text type="secondary" style={{ fontSize: 10 }}>
+                    Source: reerp/gl/journals/lines?reference2={viewAcctSchedule?.id}&reference5={RR_SOURCE}
+                  </Text>
+                </div>
+              </>
+            );
+          })()}
         </Modal>
 
         <FloatingMenu />
