@@ -857,13 +857,17 @@ const RevenueRecognition: React.FC = () => {
                     <>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
                         <Space wrap>
-                          <Text style={{ fontSize: 12, color: REDWOOD.neutral500 }}>Period</Text>
-                          <Select showSearch allowClear placeholder="Select accounting period"
+                          <Text style={{ fontSize: 12, color: REDWOOD.neutral500 }}>
+                            <span style={{ color: REDWOOD.primary, marginRight: 2 }}>*</span>Period
+                          </Text>
+                          <Select showSearch placeholder="Select accounting period"
+                            status={postPeriod ? undefined : 'error'}
                             value={postPeriod} onChange={(v) => { setPostPeriod(v); setPostSelectedKeys([]); }}
                             style={{ width: 220 }} options={periodOptions.map(p => ({ label: p, value: p }))}
                             notFoundContent={schedules.length === 0 ? 'Load schedules first' : 'No periods'} />
                           <Text style={{ fontSize: 12, color: REDWOOD.neutral500 }}>Business Unit</Text>
-                          <Select showSearch allowClear placeholder="Select business unit"
+                          <Select showSearch allowClear placeholder={postPeriod ? 'Select business unit' : 'Select period first'}
+                            disabled={!postPeriod}
                             loading={buLoading} value={postBusinessUnit || undefined}
                             onChange={(v) => setPostBusinessUnit(v || '')}
                             style={{ width: 240 }}
@@ -871,9 +875,11 @@ const RevenueRecognition: React.FC = () => {
                             options={buOptions.map(o => ({
                               label: o.company ? `${o.name} (Co ${o.company})` : o.name, value: o.name }))}
                             notFoundContent={buLoading ? 'Loading…' : 'No business units'} />
-                          {postPeriod && <Text type="secondary" style={{ fontSize: 12 }}>
-                            {postSchedules.length} schedule(s) · {postSelectedKeys.length} selected
-                          </Text>}
+                          {postPeriod
+                            ? <Text type="secondary" style={{ fontSize: 12 }}>
+                                {postSchedules.length} schedule(s) · {postSelectedKeys.length} selected
+                              </Text>
+                            : <Text style={{ fontSize: 12, color: REDWOOD.primary }}>Select a period to list schedules</Text>}
                         </Space>
                         <Space>
                           <Button type="primary" icon={<AuditOutlined />} disabled={postSelectedKeys.length === 0}
@@ -899,6 +905,7 @@ const RevenueRecognition: React.FC = () => {
                             const bu = buForSchedule(r);
                             return bu ? bu : <span style={{ color: REDWOOD.neutral500 }}>— select BU —</span>;
                           } },
+                          { title: 'Schedule ID', dataIndex: 'id', width: 100, render: (v: number) => <Text code>{v}</Text> },
                           { title: 'Trx #', dataIndex: 'trxNumber', width: 90, render: (v: any) => <Text strong>{v ?? '—'}</Text> },
                           { title: 'Invoice #', dataIndex: 'invoiceNumber', width: 120, render: (v: any) => v || <span style={{ color: REDWOOD.neutral500 }}>—</span> },
                           { title: 'Unit', dataIndex: 'unit', width: 110 },
@@ -912,9 +919,9 @@ const RevenueRecognition: React.FC = () => {
                         summary={() => postSchedules.length === 0 ? null : (
                           <Table.Summary fixed>
                             <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 700 }}>
-                              <Table.Summary.Cell index={0} colSpan={7}><Text strong>Total ({postSchedules.length})</Text></Table.Summary.Cell>
-                              <Table.Summary.Cell index={7} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{fmt(postSchedules.reduce((s, r) => s + (Number(r.amount) || 0), 0))}</Text></Table.Summary.Cell>
-                              <Table.Summary.Cell index={8} colSpan={2} />
+                              <Table.Summary.Cell index={0} colSpan={8}><Text strong>Total ({postSchedules.length})</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={8} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{fmt(postSchedules.reduce((s, r) => s + (Number(r.amount) || 0), 0))}</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={9} colSpan={2} />
                             </Table.Summary.Row>
                           </Table.Summary>
                         )}
