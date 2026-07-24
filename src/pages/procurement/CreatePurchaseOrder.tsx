@@ -422,6 +422,17 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
     setSubinventories(allSubinventories.filter((s: any) => s.warehouse_code === orgCode));
   };
 
+  // Keep the subinventory dropdown populated for the current ship-to org — needed
+  // after loading a PO from JSON (header is set before/without the org's subinv
+  // list being filtered, and the load may run before the LOVs finish fetching),
+  // so the restored header.subinventory renders and saves back correctly.
+  useEffect(() => {
+    if (header?.shipToOrg && allSubinventories.length) {
+      setSubinventories(allSubinventories.filter((s: any) => s.warehouse_code === header.shipToOrg));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allSubinventories, header?.shipToOrg]);
+
   const handleInitSubmit = async () => {
     if (!selectedSupplier) { message.error('Please select a supplier'); return; }
     setInitConfirmLoading(true);
