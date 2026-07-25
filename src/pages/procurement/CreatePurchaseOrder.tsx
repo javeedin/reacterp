@@ -806,7 +806,9 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
       }
       const restored = rawLines.map((l, i) => {
         const sch = l.schedules?.items?.[0] ?? (Array.isArray(l.schedules) ? l.schedules[0] : null);
-        const needByRaw = sch?.RequestedDeliveryDate ?? l.RequestedDeliveryDate ?? null;
+        const needByRaw =
+          sch?.RequestedDeliveryDate ?? sch?.RequestedShipDate ?? sch?.PromisedDeliveryDate ?? sch?.NeedByDate ??
+          l.RequestedDeliveryDate ?? l.RequestedShipDate ?? l.PromisedDeliveryDate ?? null;
         return computeLine({
           key: `F${l.POLineId ?? i}`,
           poLineId: l.POLineId,
