@@ -935,10 +935,10 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
   // Build one Fusion PO line body (with its schedule + distribution). Used for
   // the whole-PO create and for adding a single line to an existing draft.
   // includeLineNumber=false lets Fusion auto-number when appending to a draft.
-  const buildLineBody = (l: POLine, includeLineNumber = true): Record<string, any> => {
+  const buildLineBody = (l: POLine, lineNumber?: number): Record<string, any> => {
     const orgObj = inventoryOrgs.find(o => o.OrganizationCode === header?.shipToOrg);
     return {
-      ...(includeLineNumber ? { LineNumber: l.lineNum } : {}),
+      LineNumber:  lineNumber ?? l.lineNum,
       LineType:    'Goods',
       Item:        l.itemNumber,
       Description: l.description,
@@ -1013,9 +1013,13 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
       ModeOfTransportCode:       header.shippingMethod     || null,
       BuyerManagedTransportFlag: false,
       SupplierEmailAddress:      header.communicationEmail || null,
-      lines: lines.map(l => buildLineBody(l, true)),
+      lines: lines.map(l => buildLineBody(l)),
     };
   };
+
+  // Next free LineNumber for lines appended to an existing draft (max + 1…).
+  const nextLineNumberBase = () =>
+    lines.reduce((m, l) => Math.max(m, l.lineNum || 0), 0);
 
   const handleCreateInFusion = () => {
     const body = buildFusionBody();
@@ -1217,8 +1221,10 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
     const errors: string[] = [];
     let added = 0, updated = 0;
     try {
+      let nextNum = nextLineNumberBase();
       for (const l of lines.filter(x => x.poLineId == null)) {
-        const body = buildLineBody(l, false);   // full schedule incl. ShipToOrganization
+        nextNum += 1;
+        const body = buildLineBody(l, nextNum);   // full schedule + LineNumber
         const r = await fetch(`${FUSION_BASE}/draftPurchaseOrders/${poHeaderId}/child/lines`, {
           method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
         });
@@ -1255,16 +1261,41 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
 
   // The actual Fusion operations "Save Changes" will run, for the Show JSON dialog
   // in edit mode (POST for new lines, PATCH for existing ones).
-  const buildEditOps = (): { method: string; url: string; body: any }[] => {
-    const ops: { method: string; url: string; body: any }[] = [];
-    lines.filter(l => l.poLineId == null).forEach(l => ops.push({
-      method: 'POST', url: `${FUSION_BASE}/draftPurchaseOrders/${poHeaderId}/child/lines`, body: buildLineBody(l, false),
-    }));
+  const buildEditOps = (): { method: string; url: string; body: any; lineKey: string }[] => {
+    const ops: { method: string; url: string; body: any; lineKey: string }[] = [];
+    let nextNum = nextLineNumberBase();
+    lines.filter(l => l.poLineId == null).forEach(l => {
+      nextNum += 1;
+      ops.push({ method: 'POST', url: `${FUSION_BASE}/draftPurchaseOrders/${poHeaderId}/child/lines`, body: buildLineBody(l, nextNum), lineKey: l.key });
+    });
     lines.filter(l => l.poLineId != null).forEach(l => ops.push({
       method: 'PATCH', url: `${FUSION_BASE}/draftPurchaseOrders/${poHeaderId}/child/lines/${l.poLineId}`,
-      body: { Quantity: l.qty, Price: l.price, Description: l.description },
+      body: { Quantity: l.qty, Price: l.price, Description: l.description }, lineKey: l.key,
     }));
     return ops;
+  };
+
+  // Test-run of a single edit op from the Show JSON dialog. On a successful POST
+  // the new POLineId is stamped onto the line so Save Changes won't re-create it.
+  const [editOps, setEditOps] = useState<{ method: string; url: string; body: any; lineKey: string }[]>([]);
+  const [editOpResults, setEditOpResults] = useState<Record<number, { loading: boolean; status: number; body: string }>>({});
+  const runEditOp = async (idx: number) => {
+    const op = editOps[idx];
+    if (!op) return;
+    setEditOpResults(prev => ({ ...prev, [idx]: { loading: true, status: 0, body: '' } }));
+    try {
+      const r = await fetch(op.url, { method: op.method, headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(op.body) });
+      const text = await r.text();
+      let data: any = null, pretty = text;
+      try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* not json */ }
+      if (op.method === 'POST' && r.ok) {
+        const newId = data?.POLineId ?? data?.LineId;
+        if (newId != null) patchLine(op.lineKey, { poLineId: Number(newId) });
+      }
+      setEditOpResults(prev => ({ ...prev, [idx]: { loading: false, status: r.status, body: pretty } }));
+    } catch (e: any) {
+      setEditOpResults(prev => ({ ...prev, [idx]: { loading: false, status: 0, body: e?.message ?? 'Network error' } }));
+    }
   };
 
   // ── Delete the whole PO from Fusion (draft/Incomplete) ──────────────────────
@@ -2623,7 +2654,7 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                   <Tooltip title={editMode ? 'Show the Save Changes operations (POST/PATCH per line)' : 'Show JSON (Oracle Fusion create request body)'}>
                     <Button
                       icon={<CodeOutlined />}
-                      onClick={editMode ? () => setEditJsonOpen(true) : handleCreateInFusion}
+                      onClick={editMode ? () => { setEditOps(buildEditOps()); setEditOpResults({}); setEditJsonOpen(true); } : handleCreateInFusion}
                       style={{ background: C.blue, borderColor: C.blue, color: '#fff', fontWeight: 600 }}
                     />
                   </Tooltip>
@@ -4162,32 +4193,42 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
           width={820}
           footer={<Button onClick={() => setEditJsonOpen(false)}>Close</Button>}
         >
-          {(() => {
-            const ops = buildEditOps();
-            const adds = ops.filter(o => o.method === 'POST').length;
-            const patches = ops.filter(o => o.method === 'PATCH').length;
-            if (ops.length === 0) return <Alert type="info" showIcon message="No line changes to save." />;
-            return (
-              <>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  On Save Changes these run in order — {adds} new line(s) POSTed, {patches} existing line(s) PATCHed. Deletes happen immediately when you remove a line.
-                </Text>
-                <div style={{ marginTop: 10, maxHeight: 460, overflow: 'auto' }}>
-                  {ops.map((o, i) => (
+          {editOps.length === 0 ? (
+            <Alert type="info" showIcon message="No line changes to save." />
+          ) : (
+            <>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                On Save Changes these run in order — {editOps.filter(o => o.method === 'POST').length} new line(s) POSTed, {editOps.filter(o => o.method === 'PATCH').length} existing line(s) PATCHed. Deletes happen immediately when you remove a line. Use Test to run a single operation now.
+              </Text>
+              <div style={{ marginTop: 10, maxHeight: 460, overflow: 'auto' }}>
+                {editOps.map((o, i) => {
+                  const t = editOpResults[i];
+                  return (
                     <div key={i} style={{ border: `1px solid ${C.border}`, borderRadius: 6, padding: 10, marginBottom: 8 }}>
-                      <Space size={8}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <Tag color={o.method === 'POST' ? 'green' : 'gold'} style={{ fontSize: 11 }}>{o.method}</Tag>
-                        <Text style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>{o.url}</Text>
-                      </Space>
-                      <pre style={{ fontSize: 10.5, background: '#0d0d0d', color: '#a8ff78', borderRadius: 4, padding: 8, margin: '6px 0 0', maxHeight: 220, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                        <Text style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', flex: 1 }}>{o.url}</Text>
+                        <Button size="small" loading={t?.loading} onClick={() => runEditOp(i)}>Test</Button>
+                      </div>
+                      <pre style={{ fontSize: 10.5, background: '#0d0d0d', color: '#a8ff78', borderRadius: 4, padding: 8, margin: '6px 0 0', maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
                         {JSON.stringify(o.body, null, 2)}
                       </pre>
+                      {t && t.status !== 0 && (
+                        <>
+                          <div style={{ fontSize: 11, color: '#888', margin: '6px 0 2px' }}>
+                            HTTP <b style={{ color: t.status >= 200 && t.status < 300 ? C.green : C.red }}>{t.status}</b>
+                          </div>
+                          <pre style={{ fontSize: 10.5, background: '#0d0d0d', color: '#79c0ff', borderRadius: 4, padding: 8, margin: 0, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                            {t.body || '(empty)'}
+                          </pre>
+                        </>
+                      )}
                     </div>
-                  ))}
-                </div>
-              </>
-            );
-          })()}
+                  );
+                })}
+              </div>
+            </>
+          )}
         </Modal>
 
         {/* ── Custom Fusion PO action ─────────────────── */}
