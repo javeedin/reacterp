@@ -257,7 +257,7 @@ const AllFieldsModal: React.FC<{
 };
 
 // ── PO Detail Tab ───────────────────────────────────────────────────────────────
-interface RcvData { lotNumber: string; locator: string; fromSerial: string; toSerial: string; qty: number; }
+interface RcvData { lotNumber: string; locator: string; subinventory: string; fromSerial: string; toSerial: string; qty: number; }
 
 const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> = ({
   poNumber, initialLines,
@@ -306,6 +306,7 @@ const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> =
       result[k] = {
         lotNumber:  lotPrefix,
         locator:    '',
+        subinventory: String(r.Subinventory ?? (r as Record<string, unknown>).Subinventory ?? ''),
         fromSerial: `${lotPrefix}_${pad3(counter)}`,
         toSerial:   `${lotPrefix}_${pad3(counter + qty - 1)}`,
         qty,
@@ -339,35 +340,79 @@ const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> =
         const k = String(line.DocumentLineId ?? '');
         const d: RcvData = rcvLineData[k];
         if (!d) return null;
-        return {
-          POHeaderId:       String((line as Record<string, unknown>).DocumentHeaderId ?? ''),
-          POLineLocationId: String(line.DocumentLineId ?? ''),
-          SourceDocumentCode: 'PO',
-          ReceiptSourceCode:  'VENDOR',
+        const lr = line as Record<string, unknown>;
+        const base: Record<string, unknown> = {
+          POHeaderId:       String(lr.POHeaderId ?? ''),
+          POLineLocationId: String(lr.POLineLocationId ?? ''),
+          SourceDocumentCode: String(line.SourceDocumentCode ?? 'PO'),
+          ReceiptSourceCode:  String(lr.ReceiptSourceCode ?? 'VENDOR'),
           TransactionType:    'RECEIVE',
           AutoTransactCode:   'DELIVER',
           DocumentNumber:      line.DocumentNumber ?? poNumber,
           DocumentLineNumber:  String(line.DocumentLineNumber ?? ''),
           ItemNumber:         line.ItemNumber ?? '',
           OrganizationCode:   line.ToOrganizationCode ?? '',
-          Subinventory:       '',
+          Subinventory:       (d.subinventory ?? '') as string,
           Quantity:           d.qty,
           FromOrganizationCode: null,
-          UnitOfMeasure:      line.UOMCode ?? '',
-          lotSerialItemLots: [{
+          UnitOfMeasure:      String(line.UnitOfMeasure ?? line.UOMCode ?? ''),
+        };
+        if (d.locator) base.Locator = d.locator;
+        // Only include lot/serial when a lot number is set (item is lot/serial-controlled).
+        if (d.lotNumber) {
+          base.lotSerialItemLots = [{
             LotNumber:           d.lotNumber,
             TransactionQuantity: d.qty,
-            lotSerialItemSerials: [{
-              FromSerialNumber: d.fromSerial,
-              ToSerialNumber:   d.toSerial,
-            }],
-          }],
-        };
+            ...(d.fromSerial ? { lotSerialItemSerials: [{ FromSerialNumber: d.fromSerial, ToSerialNumber: d.toSerial }] } : {}),
+          }];
+        }
+        return base;
       }).filter(Boolean),
     };
   }, [lines, rcvSelectedKeys, rcvLineData, rcvShipmentNum, poNumber]);
 
   const firstLine = lines[0];
+
+  // ── Receive PO — POST receivingReceiptRequests (mirrors the WMS PL/SQL) ──────
+  const RECEIVE_URL = `${FUSION_BASE}/receivingReceiptRequests`;
+  const [receiveOpen, setReceiveOpen]       = useState(false);
+  const [receiveLoading, setReceiveLoading] = useState(false);
+  const [receiveBody, setReceiveBody]       = useState<any>(null);
+  const [receiveResult, setReceiveResult]   = useState<{ status: number; ok: boolean; body: string; summary?: string } | null>(null);
+
+  const openReceive = () => {
+    setReceiveBody(buildReceivingJson());
+    setReceiveResult(null);
+    setReceiveOpen(true);
+  };
+
+  const runReceive = async () => {
+    const body = receiveBody ?? buildReceivingJson();
+    setReceiveLoading(true); setReceiveResult(null);
+    try {
+      const res = await fetch(RECEIVE_URL, {
+        method: 'POST',
+        headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const text = await res.text();
+      let data: any = null, pretty = text;
+      try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* not json */ }
+      const status = data?.ProcessingStatusCode ?? data?.processingStatusCode;
+      const hdrId  = data?.HeaderInterfaceId ?? data?.headerInterfaceId;
+      const retMsg = data?.ReturnMessage ?? data?.returnMessage;
+      const summary = res.ok
+        ? `ProcessingStatusCode: ${status ?? '—'}${hdrId ? ` · HeaderInterfaceId: ${hdrId}` : ''}${retMsg ? ` · ${retMsg}` : ''}`
+        : `HTTP ${res.status} — ${data?.detail ?? data?.title ?? retMsg ?? res.statusText}`;
+      setReceiveResult({ status: res.status, ok: res.ok && (status ? ['SUCCESS', 'PENDING'].includes(String(status).toUpperCase()) : true), body: pretty, summary });
+      if (res.ok) message.success(`Receipt submitted — ${status ?? 'sent'}`);
+      else message.error(`Receive failed — HTTP ${res.status}`);
+    } catch (e: any) {
+      setReceiveResult({ status: 0, ok: false, body: e?.message ?? 'Network error', summary: e?.message });
+    } finally {
+      setReceiveLoading(false);
+    }
+  };
 
   // ── Lines tab columns ──────────────────────────────────────────────────────
   const lineColumns = [
@@ -537,7 +582,7 @@ const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> =
                       icon={<InboxOutlined />}
                       disabled={rcvSelectedKeys.length === 0}
                       style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
-                      onClick={() => message.info('Receive PO — wire to the Fusion receiving endpoint')}
+                      onClick={openReceive}
                     >
                       Receive PO
                     </Button>
@@ -633,6 +678,46 @@ const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> =
         }}>
           {JSON.stringify(buildReceivingJson(), null, 2)}
         </pre>
+      </Modal>
+
+      {/* Receive PO — receivingReceiptRequests preview + run */}
+      <Modal
+        open={receiveOpen}
+        onCancel={() => setReceiveOpen(false)}
+        width={780}
+        title={<Space><InboxOutlined style={{ color: REDWOOD.success }} />Receive PO — Fusion receivingReceiptRequests</Space>}
+        footer={
+          <Space>
+            <Button onClick={() => setReceiveOpen(false)}>Close</Button>
+            <Button type="primary" loading={receiveLoading} icon={<InboxOutlined />}
+              style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+              onClick={runReceive}>
+              Receive ({receiveBody?.lines?.length ?? 0})
+            </Button>
+          </Space>
+        }
+      >
+        <div style={{ fontSize: 12, marginBottom: 6 }}>
+          <Space size={6}><Tag color="green">POST</Tag><Text type="secondary">Oracle Fusion — create receipt</Text></Space>
+        </div>
+        <Text copyable style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>{RECEIVE_URL}</Text>
+
+        <div style={{ fontSize: 12, fontWeight: 600, margin: '12px 0 4px' }}>Request Body (JSON)</div>
+        <pre style={{ fontSize: 11, background: '#0d0d0d', color: '#a8ff78', borderRadius: 4, padding: 10, maxHeight: 300, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+          {receiveBody ? JSON.stringify(receiveBody, null, 2) : '(no lines selected)'}
+        </pre>
+
+        {receiveResult && (
+          <>
+            <div style={{ fontSize: 12, margin: '10px 0 2px' }}>
+              Result — <b style={{ color: receiveResult.ok ? REDWOOD.success : REDWOOD.primary }}>HTTP {receiveResult.status}</b>
+              {receiveResult.summary && <span style={{ marginLeft: 8, color: REDWOOD.neutral600 }}>{receiveResult.summary}</span>}
+            </div>
+            <pre style={{ fontSize: 11, background: '#0d0d0d', color: '#79c0ff', borderRadius: 4, padding: 10, maxHeight: 260, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+              {receiveResult.body || '(empty)'}
+            </pre>
+          </>
+        )}
       </Modal>
 
       {/* Change Lot Number Modal */}
