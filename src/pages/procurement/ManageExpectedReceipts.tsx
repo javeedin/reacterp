@@ -521,18 +521,30 @@ const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> =
       } },
     { title: 'UOM', dataIndex: 'UOMCode', key: 'UOMCode', width: 60, align: 'center' as const,
       render: (v: string) => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
-    { title: <span><span style={{ color: REDWOOD.primary, marginRight: 2 }}>*</span>Subinventory</span>, key: 'subinventory', width: 170,
+    { title: <span><span style={{ color: REDWOOD.primary, marginRight: 2 }}>*</span>Subinventory</span>, key: 'subinventory', width: 200,
       render: (_: unknown, r: ReceiptLine) => {
         const k = String(r.DocumentLineId ?? '');
         const disabled = !rcvSelectedKeys.includes(k);
         const val = rcvLineData[k]?.subinventory || undefined;
-        return <Select size="small" showSearch allowClear style={{ width: 158 }} disabled={disabled}
-          placeholder="Select subinventory"
-          status={!disabled && !val ? 'error' : undefined}
-          value={val}
-          onChange={v => rcvUpdateField(k, 'subinventory', v || '')}
-          options={subinvs.map(s => ({ label: s, value: s }))}
-          notFoundContent={subinvs.length === 0 ? 'No subinventories' : undefined} />;
+        return (
+          <Space size={2}>
+            <Select size="small" showSearch allowClear style={{ width: 150 }} disabled={disabled}
+              placeholder="Select subinventory"
+              status={!disabled && !val ? 'error' : undefined}
+              value={val}
+              onChange={v => rcvUpdateField(k, 'subinventory', v || '')}
+              options={subinvs.map(s => ({ label: s, value: s }))}
+              notFoundContent={subinvs.length === 0 ? 'No subinventories' : undefined} />
+            <Tooltip title="Copy this subinventory to all lines">
+              <Button size="small" type="text" icon={<CopyOutlined />} disabled={!val}
+                onClick={() => setRcvLineData(prev => {
+                  const next = { ...prev };
+                  Object.keys(next).forEach(kk => { next[kk] = { ...next[kk], subinventory: val as string }; });
+                  return next;
+                })} />
+            </Tooltip>
+          </Space>
+        );
       } },
     { title: 'Lot Number', key: 'lotNumber', width: 200,
       render: (_: unknown, r: ReceiptLine) => {
