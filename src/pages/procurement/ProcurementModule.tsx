@@ -203,7 +203,10 @@ const PasswordGate: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
       const res = await api.fusionLogin();
       if (res?.success) {
         sessionStorage.setItem(SESSION_KEY, 'true');
-        if (res.username) sessionStorage.setItem('fusion_user', res.username);
+        if (res.username) {
+          sessionStorage.setItem('fusion_user', res.username);
+          window.dispatchEvent(new CustomEvent('fusion-user-changed', { detail: res.username }));
+        }
         message.success(`Signed in to Oracle Fusion${res.username ? ` as ${res.username}` : ''}`);
         onSuccess();
       } else if (res?.cancelled) {

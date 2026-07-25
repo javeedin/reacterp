@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Layout, Dropdown, Avatar, Space, Typography, Tooltip, Badge, Button, Modal } from 'antd';
+import { Layout, Dropdown, Avatar, Space, Typography, Tooltip, Badge, Button, Modal, Tag } from 'antd';
 import {
   UserOutlined,
   LogoutOutlined,
   SettingOutlined,
   HomeOutlined,
   CloudServerOutlined,
+  CloudOutlined,
   StarOutlined,
   FlagOutlined,
   EyeOutlined,
@@ -67,6 +68,19 @@ const MainLayout: React.FC = () => {
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [showIOSModal, setShowIOSModal] = useState(false);
+
+  // Signed-in Oracle Fusion user (captured by the Fusion Client login). Reads
+  // sessionStorage and stays in sync via the 'fusion-user-changed' event.
+  const [fusionUser, setFusionUser] = useState<string | null>(() => sessionStorage.getItem('fusion_user'));
+  useEffect(() => {
+    const sync = () => setFusionUser(sessionStorage.getItem('fusion_user'));
+    window.addEventListener('fusion-user-changed', sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener('fusion-user-changed', sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
   const [showInstallButton, setShowInstallButton] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showAndTellOpen, setShowAndTellOpen] = useState(false);
@@ -323,6 +337,13 @@ const MainLayout: React.FC = () => {
               }}
             />
           </Tooltip>
+          {fusionUser && (
+            <Tooltip title={`Signed in to Oracle Fusion as ${fusionUser}`}>
+              <Tag icon={<CloudOutlined />} color="green" style={{ marginLeft: 6, marginRight: 0, fontWeight: 600 }}>
+                {fusionUser}
+              </Tag>
+            </Tooltip>
+          )}
           <Tooltip title={user?.name || 'User Profile'}>
             <Dropdown menu={{ items: userMenuItems }} placement="bottomRight" trigger={['click']}>
               <Avatar
