@@ -446,11 +446,15 @@ const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> =
         let data: any = null, pretty = text;
         try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* not json */ }
         const pStatus = data?.ProcessingStatusCode ?? data?.processingStatusCode;
+        const retStatus = data?.ReturnStatus ?? data?.returnStatus;
         const retMsg  = data?.ReturnMessage ?? data?.returnMessage;
-        const ok = res.ok && (pStatus ? ['SUCCESS', 'PENDING'].includes(String(pStatus).toUpperCase()) : true);
+        // Fusion can return HTTP 200 with ReturnStatus=ERROR — treat that as a failure.
+        const statusOk = pStatus ? ['SUCCESS', 'PENDING'].includes(String(pStatus).toUpperCase()) : true;
+        const returnOk = !retStatus || String(retStatus).toUpperCase() !== 'ERROR';
+        const ok = res.ok && statusOk && returnOk;
         const msg = ok
           ? `${pStatus ?? 'sent'}${data?.HeaderInterfaceId ? ` · Hdr ${data.HeaderInterfaceId}` : ''}`
-          : (retMsg || data?.detail || data?.title || `HTTP ${res.status}`);
+          : (retMsg || (retStatus ? `ReturnStatus: ${retStatus}` : '') || data?.detail || data?.title || `HTTP ${res.status}`);
         setReceiveRows(prev => prev.map(r => r.key === row.key ? { ...r, status: ok ? 'success' : 'error', http: res.status, message: String(msg), response: pretty } : r));
         if (ok) succeeded.push(row.key);
       } catch (e: any) {
