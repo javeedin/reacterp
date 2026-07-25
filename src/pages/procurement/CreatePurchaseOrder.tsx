@@ -91,6 +91,7 @@ interface POHeader {
 
 interface POLine {
   key: string; lineNum: number;
+  poLineId?: number;   // Fusion POLineId — present only for lines loaded from Fusion (edit mode)
   itemNumber: string; description: string; uom: string;
   qty: number; price: number; taxPct: number;
   needBy: Dayjs | null; promisedDate: Dayjs | null;
@@ -221,13 +222,19 @@ const loadItemmasterCache = (org: string): { items: any[]; ts: string } | null =
   } catch { return null; }
 };
 
-const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = ({ onExit, initialPo }) => {
+const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; editPoHeaderId?: number }> = ({ onExit, initialPo, editPoHeaderId }) => {
   const navigate = useNavigate();
   const exit = () => onExit ? onExit() : navigate('/procurement/purchase-orders');
   const [headerForm] = Form.useForm();
 
-  // When opened with a loaded PO snapshot, skip the "New Purchase Order" dialog.
-  const [showInitModal, setShowInitModal] = useState(!initialPo);
+  // Edit mode: the PO already exists in Fusion (opened from Search Orders for an
+  // Incomplete PO). Header + lines (with POLineId) are loaded from Fusion.
+  const [editMode, setEditMode]       = useState(!!editPoHeaderId);
+  const [editLoading, setEditLoading] = useState(false);
+  const [savingEdit, setSavingEdit]   = useState(false);
+
+  // When opened with a loaded PO snapshot or in edit mode, skip the "New Purchase Order" dialog.
+  const [showInitModal, setShowInitModal] = useState(!initialPo && !editPoHeaderId);
   const [header, setHeader] = useState<POHeader | null>(null);
   const [lines, setLines] = useState<POLine[]>([]);
   const [defaultTaxPct, setDefaultTaxPct] = useState(0);
@@ -322,7 +329,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
 
   // Load LOVs when the init modal opens, or when opened via a loaded JSON PO
   // (which skips the init modal) — the detail page still needs the org list etc.
-  useEffect(() => { if (showInitModal || initialPo) loadInitLOVs(); }, [showInitModal]);
+  useEffect(() => { if (showInitModal || initialPo || editPoHeaderId) loadInitLOVs(); }, [showInitModal]);
 
   const loadInitLOVs = async () => {
     setLovLoading(true);
@@ -565,8 +572,44 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
   const handleLineChange = (key: string, field: keyof POLine, value: any) =>
     setLines(prev => prev.map(l => l.key !== key ? l : computeLine({ ...l, [field]: value })));
 
-  const handleDeleteLine = (key: string) =>
+  const removeLineLocal = (key: string) =>
     setLines(prev => prev.filter(l => l.key !== key).map((l, i) => ({ ...l, lineNum: i + 1 })));
+
+  const handleDeleteLine = (key: string) => {
+    const line = lines.find(l => l.key === key);
+    // Edit mode + the line exists in Fusion → DELETE it from Fusion (confirm first).
+    if (editMode && line?.poLineId != null && poHeaderId) {
+      Modal.confirm({
+        title: `Delete line ${line.lineNum} from Fusion?`,
+        width: 560,
+        okText: 'Delete from Fusion', okButtonProps: { danger: true },
+        content: (
+          <div style={{ fontSize: 12 }}>
+            <p>This permanently removes item <b>{line.itemNumber}</b> (POLineId {line.poLineId}) from PO {header?.poNumber} in Oracle Fusion.</p>
+            <pre style={{ fontSize: 11, background: '#f5f5f5', padding: 8, borderRadius: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+{`DELETE ${FUSION_BASE}/draftPurchaseOrders/${poHeaderId}/child/lines/${line.poLineId}`}
+            </pre>
+          </div>
+        ),
+        onOk: async () => {
+          try {
+            const r = await fetch(`${FUSION_BASE}/draftPurchaseOrders/${poHeaderId}/child/lines/${line.poLineId}`, { method: 'DELETE', headers: FUSION_HDRS });
+            if (!r.ok && r.status !== 204) {
+              const t = await r.text();
+              Modal.error({ title: 'Delete line failed', width: 620, content: <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 260, overflow: 'auto' }}>{t}</pre> });
+              return;
+            }
+            removeLineLocal(key);
+            message.success(`Line ${line.lineNum} deleted from Fusion`);
+          } catch (e: any) {
+            Modal.error({ title: 'Delete line — network error', content: e.message });
+          }
+        },
+      });
+      return;
+    }
+    removeLineLocal(key);
+  };
 
   /* ─── Assign PO line items to an inventory org (itemsV2) ─────────────
      POSTs the item into the target org, which is how Fusion records an
@@ -699,6 +742,59 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
     message.success(`Loaded PO ${h.poNumber ?? ''} — ${restored.length} line(s)`);
   };
 
+  // ── Edit mode: load an existing (Incomplete) PO straight from Fusion ────────
+  // GET draftPurchaseOrders/{id}?expand=lines — hydrates header + lines with
+  // their POLineId so lines can be PATCHed/DELETEd back in Fusion.
+  const loadDraftFromFusion = async (id: number) => {
+    setEditMode(true);
+    setEditLoading(true);
+    try {
+      const url = `${FUSION_BASE}/draftPurchaseOrders/${id}?expand=lines`;
+      const r = await fetch(url, { headers: FUSION_HDRS });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.title ?? d?.detail ?? `HTTP ${r.status}`);
+
+      const orderNum = d.OrderNumber ?? '';
+      setHeader({
+        poNumber: orderNum,
+        docType: String(orderNum).replace(/\d.*$/, '') || 'STD',
+        orderDate: d.CreationDate ? dayjs(d.CreationDate) : dayjs(),
+        status: d.DocumentStatus ?? d.StatusCode ?? 'Incomplete',
+        buyer: d.Buyer ?? '',
+        procurementBU: d.ProcurementBU ?? '', requisitioningBU: d.RequisitioningBU ?? d.ProcurementBU ?? '', billToBU: d.SoldToLegalEntity ?? '',
+        currency: d.CurrencyCode ?? 'AED', description: d.Description ?? '',
+        supplierId: String(d.SupplierId ?? ''), supplierName: d.Supplier ?? '', supplierSite: d.SupplierSite ?? '',
+        supplierContact: '', communicationMethod: 'E-Mail', communicationEmail: d.SupplierEmailAddress ?? '',
+        billToLocation: d.BillToLocation ?? '', shipToLocation: d.DefaultShipToLocation ?? '',
+        shipToOrg: d.DefaultShipToLocation ?? '', subinventory: '',
+        paymentTerms: d.PaymentTerms ?? '', shippingMethod: d.ModeOfTransportCode ?? '', freightTerms: d.FreightTerms ?? '', fob: d.FOB ?? '',
+        payOnReceipt: d.PayOnReceiptFlag === 'Y', confirmingOrder: false,
+        noteToSupplier: d.NoteToSupplier ?? '', noteToReceiver: '',
+      });
+      headerForm.setFieldsValue({ poNumber: orderNum, docType: String(orderNum).replace(/\d.*$/, '') || 'STD' });
+      setPoHeaderId(Number(d.POHeaderId ?? id));
+
+      const rawLines: any[] = d.lines?.items ?? (Array.isArray(d.lines) ? d.lines : []);
+      const restored = rawLines.map((l, i) => computeLine({
+        key: `F${l.POLineId ?? i}`,
+        poLineId: l.POLineId,
+        lineNum: l.LineNumber ?? i + 1,
+        itemNumber: l.Item ?? l.ItemNumber ?? '', description: l.Description ?? '', uom: l.UOM ?? '',
+        qty: Number(l.Quantity ?? 0), price: Number(l.Price ?? l.UnitPrice ?? 0), taxPct: 0,
+        needBy: null, promisedDate: null,
+        chargeAccount: '', destinationType: 'Inventory',
+      }));
+      setLines(restored);
+      setAcqCharges([]);
+      if (d.CurrencyCode && d.CurrencyCode !== 'AED') fetchFxRate(d.CurrencyCode); else setFxRate(null);
+      message.success(`Loaded PO ${orderNum} from Fusion — ${restored.length} line(s)`);
+    } catch (e: any) {
+      Modal.error({ title: 'Failed to load PO from Fusion', content: e.message });
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
   const handleLoadJsonFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -711,9 +807,11 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
     e.target.value = '';   // allow re-picking the same file
   };
 
-  // Opened from "Load PO from JSON" — hydrate the order and skip the setup dialog.
+  // Opened from "Load PO from JSON" (hydrate from snapshot) or from Search Orders
+  // Edit (hydrate the Incomplete PO straight from Fusion) — skip the setup dialog.
   useEffect(() => {
     if (initialPo) { loadPoFromObject(initialPo); setShowInitModal(false); }
+    else if (editPoHeaderId) { loadDraftFromFusion(editPoHeaderId); setShowInitModal(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1075,6 +1173,81 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any }> = 
     } finally {
       setApprovingFusion(false);
     }
+  };
+
+  // ── Edit mode: save changes back to the existing Fusion draft PO ────────────
+  // New lines (no POLineId) → POST child/lines; existing lines → PATCH qty/price/
+  // description. Deletes are handled immediately in handleDeleteLine. After the
+  // sync the PO is reloaded from Fusion so every line carries its POLineId.
+  const saveEditChanges = async () => {
+    if (!poHeaderId) { message.warning('No Fusion PO loaded.'); return; }
+    setSavingEdit(true);
+    const errors: string[] = [];
+    let added = 0, updated = 0;
+    try {
+      for (const l of lines.filter(x => x.poLineId == null)) {
+        const body: Record<string, any> = {
+          LineType: 'Goods', Item: l.itemNumber, Description: l.description,
+          Quantity: l.qty, Price: l.price, UOM: l.uom,
+          schedules: [{ ShipToLocation: header?.shipToOrg, Quantity: l.qty,
+            distributions: [{ DistributionNumber: 1, Quantity: l.qty }] }],
+        };
+        const r = await fetch(`${FUSION_BASE}/draftPurchaseOrders/${poHeaderId}/child/lines`, {
+          method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+        if (r.ok) added++; else { const t = await r.text(); errors.push(`Add ${l.itemNumber}: ${t.slice(0, 300)}`); }
+      }
+      for (const l of lines.filter(x => x.poLineId != null)) {
+        const body = { Quantity: l.qty, Price: l.price, Description: l.description };
+        const r = await fetch(`${FUSION_BASE}/draftPurchaseOrders/${poHeaderId}/child/lines/${l.poLineId}`, {
+          method: 'PATCH', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+        if (r.ok) updated++; else { const t = await r.text(); errors.push(`Update line ${l.lineNum}: ${t.slice(0, 300)}`); }
+      }
+      if (errors.length) {
+        Modal.error({ title: `Saved with ${errors.length} error(s) — ${added} added, ${updated} updated`, width: 640,
+          content: <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 300, overflow: 'auto' }}>{errors.join('\n\n')}</pre> });
+      } else {
+        message.success(`Saved to Fusion — ${added} line(s) added, ${updated} updated`);
+      }
+      await loadDraftFromFusion(poHeaderId);   // refresh ids/state from Fusion
+    } catch (e: any) {
+      Modal.error({ title: 'Save changes — network error', content: e.message });
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  // ── Delete the whole PO from Fusion (draft/Incomplete) ──────────────────────
+  const deletePoFromFusion = () => {
+    if (!poHeaderId) { message.warning('No Fusion PO loaded.'); return; }
+    Modal.confirm({
+      title: `Delete PO ${header?.poNumber} from Fusion?`,
+      width: 560,
+      okText: 'Delete Purchase Order', okButtonProps: { danger: true },
+      content: (
+        <div style={{ fontSize: 12 }}>
+          <p>This permanently removes the entire purchase order (POHeaderId {poHeaderId}) from Oracle Fusion.</p>
+          <pre style={{ fontSize: 11, background: '#f5f5f5', padding: 8, borderRadius: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+{`DELETE ${FUSION_BASE}/draftPurchaseOrders/${poHeaderId}`}
+          </pre>
+        </div>
+      ),
+      onOk: async () => {
+        try {
+          const r = await fetch(`${FUSION_BASE}/draftPurchaseOrders/${poHeaderId}`, { method: 'DELETE', headers: FUSION_HDRS });
+          if (!r.ok && r.status !== 204) {
+            const t = await r.text();
+            Modal.error({ title: 'Delete PO failed', width: 620, content: <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 260, overflow: 'auto' }}>{t}</pre> });
+            return;
+          }
+          message.success(`PO ${header?.poNumber} deleted from Fusion`);
+          exit();
+        } catch (e: any) {
+          Modal.error({ title: 'Delete PO — network error', content: e.message });
+        }
+      },
+    });
   };
 
   // ── Fusion PO lifecycle actions (cancel / close / hold / reopen …) ──────────
@@ -2277,6 +2450,9 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                   <Title level={5} style={{ margin: 0, color: C.text }}>{header.poNumber}</Title>
                   <Tag color="orange" style={{ fontSize: 11, fontWeight: 600 }}>{header.status}</Tag>
                   <Tag color="geekblue" style={{ fontSize: 11 }}>{header.docType}</Tag>
+                  {editMode && <Tag color="purple" style={{ fontSize: 11, fontWeight: 600 }} icon={<EditOutlined />}>
+                    Editing from Fusion{editLoading ? ' — loading…' : ''}
+                  </Tag>}
                 </Space>
                 <Space>
                   <input ref={jsonInputRef} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={handleLoadJsonFile} />
@@ -2304,6 +2480,7 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                         { key: 'finalClose', danger: true, label: 'Finally Close', onClick: () => confirmPoAction('Finally Close', 'finallyCloseDocument') },
                         { key: 'reopen',     label: 'Reopen', onClick: () => confirmPoAction('Reopen', 'reopenDocument') },
                         { type: 'divider' },
+                        { key: 'deletePo', danger: true, icon: <DeleteOutlined />, label: 'Delete Purchase Order', onClick: () => deletePoFromFusion() },
                         { key: 'custom', icon: <ApiOutlined />, label: 'Custom action…', onClick: () => { setCustomActionName(''); setCustomActionResource('purchaseOrders'); setCustomActionOpen(true); } },
                       ] }}>
                       <Button icon={<ThunderboltOutlined />} loading={!!poActionLoading}>PO Actions <DownOutlined /></Button>
@@ -2333,10 +2510,17 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                   >
                     Generate PDF
                   </Button>
-                  <Button type="primary" icon={<SaveOutlined />} loading={generatePoLoading} onClick={handleGeneratePO}
-                    style={{ background: C.red, borderColor: C.red, fontWeight: 600 }}>
-                    Save Purchase Order
-                  </Button>
+                  {editMode ? (
+                    <Button type="primary" icon={<SaveOutlined />} loading={savingEdit} onClick={saveEditChanges}
+                      style={{ background: C.red, borderColor: C.red, fontWeight: 600 }}>
+                      Save Changes
+                    </Button>
+                  ) : (
+                    <Button type="primary" icon={<SaveOutlined />} loading={generatePoLoading} onClick={handleGeneratePO}
+                      style={{ background: C.red, borderColor: C.red, fontWeight: 600 }}>
+                      Save Purchase Order
+                    </Button>
+                  )}
                   <Tooltip title={poHeaderId ? 'Submit this draft for approval in Oracle Fusion' : 'Save the purchase order first — that creates the draft in Fusion and returns its ID to approve'}>
                     <Button icon={<CheckCircleOutlined />} loading={approvingFusion} disabled={!poHeaderId}
                       onClick={() => submitForApproval()}

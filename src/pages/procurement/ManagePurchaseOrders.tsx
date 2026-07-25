@@ -13,7 +13,7 @@ import {
   InfoCircleOutlined, UnorderedListOutlined, ApiOutlined, CopyOutlined,
   PlusOutlined, BankOutlined, UserOutlined, CalendarOutlined,
   DollarOutlined, FileTextOutlined, DownOutlined, FilePdfOutlined,
-  HistoryOutlined, FolderOpenOutlined,
+  HistoryOutlined, FolderOpenOutlined, EditOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import CreatePurchaseOrder from './CreatePurchaseOrder';
@@ -884,7 +884,7 @@ ${po.NoteToSupplier ? `<div class="sec">Notes</div><div class="fv">${po.NoteToSu
 };
 
 // ── Search Tab ───────────────────────────────────────────────────────────────
-const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
+const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => void }> = ({ onOpen, onEdit }) => {
   const [form] = Form.useForm();
   const [data, setData]             = useState<RawPO[]>([]);
   const [loading, setLoading]       = useState(false);
@@ -1114,12 +1114,20 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void }> = ({ onOpen }) => {
       defaultSortOrder: 'descend' as const,
     },
     {
-      title: '', key: 'actions', width: 80, fixed: 'right', align: 'center',
+      title: '', key: 'actions', width: 128, fixed: 'right', align: 'center',
       render: (_: unknown, rec: RawPO) => (
-        <Button size="small" type="primary" icon={<EyeOutlined />} onClick={() => onOpen(rec)}
-          style={{ background: REDWOOD.info, borderColor: REDWOOD.info, borderRadius: 4, fontSize: 11 }}>
-          Open
-        </Button>
+        <Space size={4}>
+          {String(rec.StatusCode ?? '').toUpperCase().includes('INCOMPLETE') && (
+            <Tooltip title="Edit this incomplete PO (loads header + lines from Fusion)">
+              <Button size="small" icon={<EditOutlined />} onClick={() => onEdit(rec)}
+                style={{ borderColor: REDWOOD.primary, color: REDWOOD.primary, borderRadius: 4, fontSize: 11 }} />
+            </Tooltip>
+          )}
+          <Button size="small" type="primary" icon={<EyeOutlined />} onClick={() => onOpen(rec)}
+            style={{ background: REDWOOD.info, borderColor: REDWOOD.info, borderRadius: 4, fontSize: 11 }}>
+            Open
+          </Button>
+        </Space>
       ),
     },
   ];
@@ -2058,6 +2066,16 @@ const ManagePurchaseOrders: React.FC = () => {
     setActiveTab(id);
   };
 
+  // Edit an existing (Incomplete) PO — opens a tab that loads the draft from
+  // Fusion (header + lines with POLineId) for add/delete/save.
+  const openEditPO = (po: RawPO) => {
+    createSeqRef.current += 1;
+    const id = `create-${createSeqRef.current}`;
+    setCreateTabData(prev => ({ ...prev, [id]: { _editHeaderId: Number(po.POHeaderId), header: { poNumber: po.OrderNumber } } }));
+    setCreateTabs(prev => [...prev, id]);
+    setActiveTab(id);
+  };
+
   const handleLoadPoJson = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -2084,7 +2102,7 @@ const ManagePurchaseOrders: React.FC = () => {
           <SearchOutlined style={{ fontSize: 13 }} /> Search Orders
         </span>
       ),
-      children: <SearchTab onOpen={handleOpen} />,
+      children: <SearchTab onOpen={handleOpen} onEdit={openEditPO} />,
       closable: false,
     },
     {
@@ -2109,20 +2127,23 @@ const ManagePurchaseOrders: React.FC = () => {
     },
     ...createTabs.map((id, idx) => {
       const loaded = createTabData[id];
+      const editId = loaded?._editHeaderId as number | undefined;
       const loadedNum = loaded?.header?.poNumber;
       return {
         key: id,
         label: (
           <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            {loaded
-              ? <FolderOpenOutlined style={{ fontSize: 12, color: REDWOOD.primary }} />
-              : <PlusOutlined style={{ fontSize: 12, color: REDWOOD.success }} />}
-            <span style={{ fontWeight: 600, color: loaded ? REDWOOD.primary : REDWOOD.success, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {loaded ? (loadedNum || 'Loaded PO') : `Create PO${createTabs.filter(k => !createTabData[k]).length > 1 ? ` ${idx + 1}` : ''}`}
+            {editId
+              ? <EditOutlined style={{ fontSize: 12, color: REDWOOD.primary }} />
+              : loaded
+                ? <FolderOpenOutlined style={{ fontSize: 12, color: REDWOOD.primary }} />
+                : <PlusOutlined style={{ fontSize: 12, color: REDWOOD.success }} />}
+            <span style={{ fontWeight: 600, color: (loaded || editId) ? REDWOOD.primary : REDWOOD.success, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {editId ? `Edit ${loadedNum || 'PO'}` : loaded ? (loadedNum || 'Loaded PO') : `Create PO${createTabs.filter(k => !createTabData[k]).length > 1 ? ` ${idx + 1}` : ''}`}
             </span>
           </span>
         ),
-        children: <CreatePurchaseOrder onExit={() => handleCloseTab(id)} initialPo={loaded} />,
+        children: <CreatePurchaseOrder onExit={() => handleCloseTab(id)} initialPo={editId ? undefined : loaded} editPoHeaderId={editId} />,
         closable: true,
       };
     }),
