@@ -340,6 +340,53 @@ const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> =
     setRcvLineData(prev => ({ ...prev, [lineKey]: { ...prev[lineKey], [field]: value } as RcvData }));
   }, []);
 
+  // Map one PO line + its receiving data into a receivingReceiptRequests line.
+  const mapReceiveLine = useCallback((line: ReceiptLine, d: RcvData): Record<string, unknown> => {
+    const lr = line as Record<string, unknown>;
+    const base: Record<string, unknown> = {
+      POHeaderId:       String(lr.POHeaderId ?? ''),
+      POLineLocationId: String(lr.POLineLocationId ?? ''),
+      SourceDocumentCode: String(line.SourceDocumentCode ?? 'PO'),
+      ReceiptSourceCode:  String(lr.ReceiptSourceCode ?? 'VENDOR'),
+      TransactionType:    'RECEIVE',
+      AutoTransactCode:   'DELIVER',
+      DocumentNumber:      line.DocumentNumber ?? poNumber,
+      DocumentLineNumber:  String(line.DocumentLineNumber ?? ''),
+      ItemNumber:         line.ItemNumber ?? '',
+      OrganizationCode:   line.ToOrganizationCode ?? '',
+      Subinventory:       (d?.subinventory ?? '') as string,
+      Quantity:           d?.qty,
+      FromOrganizationCode: null,
+      UnitOfMeasure:      String(line.UnitOfMeasure ?? line.UOMCode ?? ''),
+    };
+    if (d?.locator) base.Locator = d.locator;
+    if (d?.lotNumber) {
+      base.lotSerialItemLots = [{
+        LotNumber:           d.lotNumber,
+        TransactionQuantity: d.qty,
+        ...(d.fromSerial ? { lotSerialItemSerials: [{ FromSerialNumber: d.fromSerial, ToSerialNumber: d.toSerial }] } : {}),
+      }];
+    }
+    return base;
+  }, [poNumber]);
+
+  // One receivingReceiptRequests body per line (mirrors the WMS PL/SQL, which
+  // posts each line separately with a per-line ShipmentNumber).
+  const buildBodyForLine = useCallback((line: ReceiptLine): Record<string, unknown> => {
+    const k = String(line.DocumentLineId ?? '');
+    const d = rcvLineData[k];
+    const shipBase = rcvShipmentNum.trim() || String(Date.now()).slice(-6);
+    return {
+      FromOrganizationCode: null,
+      OrganizationCode:  line.ToOrganizationCode ?? '',
+      ReceiptSourceCode: 'VENDOR',
+      EmployeeId:        '',
+      VendorName:        line.VendorName ?? '',
+      ShipmentNumber:    `${shipBase}${line.DocumentLineNumber ?? ''}`,
+      lines: [mapReceiveLine(line, d)],
+    };
+  }, [rcvLineData, rcvShipmentNum, mapReceiveLine]);
+
   const buildReceivingJson = useCallback(() => {
     const firstL = lines[0];
     const shipNum = rcvShipmentNum.trim() || String(Date.now()).slice(-6);
@@ -351,49 +398,22 @@ const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> =
       EmployeeId:        '',
       VendorName:        firstL?.VendorName ?? '',
       ShipmentNumber:    shipNum,
-      lines: selectedLines.map(line => {
-        const k = String(line.DocumentLineId ?? '');
-        const d: RcvData = rcvLineData[k];
-        if (!d) return null;
-        const lr = line as Record<string, unknown>;
-        const base: Record<string, unknown> = {
-          POHeaderId:       String(lr.POHeaderId ?? ''),
-          POLineLocationId: String(lr.POLineLocationId ?? ''),
-          SourceDocumentCode: String(line.SourceDocumentCode ?? 'PO'),
-          ReceiptSourceCode:  String(lr.ReceiptSourceCode ?? 'VENDOR'),
-          TransactionType:    'RECEIVE',
-          AutoTransactCode:   'DELIVER',
-          DocumentNumber:      line.DocumentNumber ?? poNumber,
-          DocumentLineNumber:  String(line.DocumentLineNumber ?? ''),
-          ItemNumber:         line.ItemNumber ?? '',
-          OrganizationCode:   line.ToOrganizationCode ?? '',
-          Subinventory:       (d.subinventory ?? '') as string,
-          Quantity:           d.qty,
-          FromOrganizationCode: null,
-          UnitOfMeasure:      String(line.UnitOfMeasure ?? line.UOMCode ?? ''),
-        };
-        if (d.locator) base.Locator = d.locator;
-        // Only include lot/serial when a lot number is set (item is lot/serial-controlled).
-        if (d.lotNumber) {
-          base.lotSerialItemLots = [{
-            LotNumber:           d.lotNumber,
-            TransactionQuantity: d.qty,
-            ...(d.fromSerial ? { lotSerialItemSerials: [{ FromSerialNumber: d.fromSerial, ToSerialNumber: d.toSerial }] } : {}),
-          }];
-        }
-        return base;
-      }).filter(Boolean),
+      lines: selectedLines.map(line => mapReceiveLine(line, rcvLineData[String(line.DocumentLineId ?? '')])),
     };
-  }, [lines, rcvSelectedKeys, rcvLineData, rcvShipmentNum, poNumber]);
+  }, [lines, rcvSelectedKeys, rcvLineData, rcvShipmentNum, mapReceiveLine]);
 
   const firstLine = lines[0];
 
-  // ── Receive PO — POST receivingReceiptRequests (mirrors the WMS PL/SQL) ──────
+  // ── Receive PO — one receivingReceiptRequests POST per selected line ─────────
   const RECEIVE_URL = `${FUSION_BASE}/receivingReceiptRequests`;
+  type RcvRow = {
+    key: string; item: string; qty: number; subinv: string; body: any;
+    status: 'pending' | 'processing' | 'success' | 'error'; http: number; message: string; response: string;
+  };
   const [receiveOpen, setReceiveOpen]       = useState(false);
   const [receiveLoading, setReceiveLoading] = useState(false);
-  const [receiveBody, setReceiveBody]       = useState<any>(null);
-  const [receiveResult, setReceiveResult]   = useState<{ status: number; ok: boolean; body: string; summary?: string } | null>(null);
+  const [receiveRows, setReceiveRows]       = useState<RcvRow[]>([]);
+  const [receivedKeys, setReceivedKeys]     = useState<Set<string>>(new Set());
 
   const openReceive = () => {
     const missing = rcvSelectedKeys.filter(k => !rcvLineData[k]?.subinventory);
@@ -401,37 +421,49 @@ const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> =
       message.error(`Select a Subinventory on ${missing.length} selected line(s) before receiving.`);
       return;
     }
-    setReceiveBody(buildReceivingJson());
-    setReceiveResult(null);
+    const selected = lines.filter(l => rcvSelectedKeys.includes(String(l.DocumentLineId ?? '')));
+    setReceiveRows(selected.map(l => {
+      const k = String(l.DocumentLineId ?? '');
+      const d = rcvLineData[k];
+      return { key: k, item: l.ItemNumber ?? '', qty: d?.qty ?? 0, subinv: d?.subinventory ?? '',
+        body: buildBodyForLine(l), status: 'pending' as const, http: 0, message: '', response: '' };
+    }));
     setReceiveOpen(true);
   };
 
   const runReceive = async () => {
-    const body = receiveBody ?? buildReceivingJson();
-    setReceiveLoading(true); setReceiveResult(null);
-    try {
-      const res = await fetch(RECEIVE_URL, {
-        method: 'POST',
-        headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const text = await res.text();
-      let data: any = null, pretty = text;
-      try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* not json */ }
-      const status = data?.ProcessingStatusCode ?? data?.processingStatusCode;
-      const hdrId  = data?.HeaderInterfaceId ?? data?.headerInterfaceId;
-      const retMsg = data?.ReturnMessage ?? data?.returnMessage;
-      const summary = res.ok
-        ? `ProcessingStatusCode: ${status ?? '—'}${hdrId ? ` · HeaderInterfaceId: ${hdrId}` : ''}${retMsg ? ` · ${retMsg}` : ''}`
-        : `HTTP ${res.status} — ${data?.detail ?? data?.title ?? retMsg ?? res.statusText}`;
-      setReceiveResult({ status: res.status, ok: res.ok && (status ? ['SUCCESS', 'PENDING'].includes(String(status).toUpperCase()) : true), body: pretty, summary });
-      if (res.ok) message.success(`Receipt submitted — ${status ?? 'sent'}`);
-      else message.error(`Receive failed — HTTP ${res.status}`);
-    } catch (e: any) {
-      setReceiveResult({ status: 0, ok: false, body: e?.message ?? 'Network error', summary: e?.message });
-    } finally {
-      setReceiveLoading(false);
+    setReceiveLoading(true);
+    const succeeded: string[] = [];
+    // Process each line sequentially so per-line status updates live.
+    for (const row of receiveRows) {
+      if (row.status === 'success') continue;
+      setReceiveRows(prev => prev.map(r => r.key === row.key ? { ...r, status: 'processing', message: '' } : r));
+      try {
+        const res = await fetch(RECEIVE_URL, {
+          method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(row.body),
+        });
+        const text = await res.text();
+        let data: any = null, pretty = text;
+        try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* not json */ }
+        const pStatus = data?.ProcessingStatusCode ?? data?.processingStatusCode;
+        const retMsg  = data?.ReturnMessage ?? data?.returnMessage;
+        const ok = res.ok && (pStatus ? ['SUCCESS', 'PENDING'].includes(String(pStatus).toUpperCase()) : true);
+        const msg = ok
+          ? `${pStatus ?? 'sent'}${data?.HeaderInterfaceId ? ` · Hdr ${data.HeaderInterfaceId}` : ''}`
+          : (retMsg || data?.detail || data?.title || `HTTP ${res.status}`);
+        setReceiveRows(prev => prev.map(r => r.key === row.key ? { ...r, status: ok ? 'success' : 'error', http: res.status, message: String(msg), response: pretty } : r));
+        if (ok) succeeded.push(row.key);
+      } catch (e: any) {
+        setReceiveRows(prev => prev.map(r => r.key === row.key ? { ...r, status: 'error', http: 0, message: e?.message ?? 'Network error', response: e?.message ?? '' } : r));
+      }
     }
+    // Mark successful lines received + deselect them.
+    if (succeeded.length) {
+      setReceivedKeys(prev => { const n = new Set(prev); succeeded.forEach(k => n.add(k)); return n; });
+      setRcvSelectedKeys(prev => prev.filter(k => !succeeded.includes(k)));
+      message.success(`${succeeded.length} line(s) received`);
+    }
+    setReceiveLoading(false);
   };
 
   // ── Lines tab columns ──────────────────────────────────────────────────────
@@ -469,6 +501,10 @@ const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> =
 
   // ── Receiving tab columns ──────────────────────────────────────────────────
   const rcvColumns = [
+    { title: '', key: 'recvStatus', width: 44, align: 'center' as const,
+      render: (_: unknown, r: ReceiptLine) => receivedKeys.has(String(r.DocumentLineId ?? ''))
+        ? <Tooltip title="Received"><Tag color="success" style={{ margin: 0, fontSize: 10 }}>✓</Tag></Tooltip>
+        : null },
     { title: 'Line / Sch', key: 'linesch', width: 80,
       render: (_: unknown, r: ReceiptLine) => `${r.DocumentLineNumber ?? '—'}.${r.DocumentScheduleNumber ?? '—'}` },
     { title: 'Item', dataIndex: 'ItemNumber', key: 'ItemNumber', width: 130,
@@ -676,10 +712,11 @@ const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> =
                     scroll={{ x: 'max-content' }}
                     loading={loading}
                     pagination={false}
-                    rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''}
+                    rowClassName={(r) => receivedKeys.has(String(r.DocumentLineId ?? '')) ? 'qoh-ok' : ''}
                     rowSelection={{
                       selectedRowKeys: rcvSelectedKeys,
                       onChange: keys => setRcvSelectedKeys(keys as (string | number)[]),
+                      getCheckboxProps: (r) => ({ disabled: receivedKeys.has(String(r.DocumentLineId ?? '')) }),
                     }}
                   />
                 </div>
@@ -725,44 +762,71 @@ const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> =
         </pre>
       </Modal>
 
-      {/* Receive PO — receivingReceiptRequests preview + run */}
+      {/* Receive PO — per-line receivingReceiptRequests with live status */}
       <Modal
         open={receiveOpen}
         onCancel={() => setReceiveOpen(false)}
-        width={780}
-        title={<Space><InboxOutlined style={{ color: REDWOOD.success }} />Receive PO — Fusion receivingReceiptRequests</Space>}
+        width={900}
+        title={<Space><InboxOutlined style={{ color: REDWOOD.success }} />Receive PO — {receiveRows.length} line(s)</Space>}
         footer={
           <Space>
             <Button onClick={() => setReceiveOpen(false)}>Close</Button>
             <Button type="primary" loading={receiveLoading} icon={<InboxOutlined />}
+              disabled={receiveRows.every(r => r.status === 'success')}
               style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
               onClick={runReceive}>
-              Receive ({receiveBody?.lines?.length ?? 0})
+              Confirm &amp; Receive ({receiveRows.filter(r => r.status !== 'success').length})
             </Button>
           </Space>
         }
       >
-        <div style={{ fontSize: 12, marginBottom: 6 }}>
-          <Space size={6}><Tag color="green">POST</Tag><Text type="secondary">Oracle Fusion — create receipt</Text></Space>
+        <div style={{ fontSize: 12, marginBottom: 8 }}>
+          <Space size={6}><Tag color="green">POST</Tag>
+            <Text copyable style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>{RECEIVE_URL}</Text>
+          </Space>
         </div>
-        <Text copyable style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>{RECEIVE_URL}</Text>
-
-        <div style={{ fontSize: 12, fontWeight: 600, margin: '12px 0 4px' }}>Request Body (JSON)</div>
-        <pre style={{ fontSize: 11, background: '#0d0d0d', color: '#a8ff78', borderRadius: 4, padding: 10, maxHeight: 300, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-          {receiveBody ? JSON.stringify(receiveBody, null, 2) : '(no lines selected)'}
-        </pre>
-
-        {receiveResult && (
-          <>
-            <div style={{ fontSize: 12, margin: '10px 0 2px' }}>
-              Result — <b style={{ color: receiveResult.ok ? REDWOOD.success : REDWOOD.primary }}>HTTP {receiveResult.status}</b>
-              {receiveResult.summary && <span style={{ marginLeft: 8, color: REDWOOD.neutral600 }}>{receiveResult.summary}</span>}
-            </div>
-            <pre style={{ fontSize: 11, background: '#0d0d0d', color: '#79c0ff', borderRadius: 4, padding: 10, maxHeight: 260, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-              {receiveResult.body || '(empty)'}
-            </pre>
-          </>
-        )}
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          Each line is posted separately. Successful lines are marked and deselected. Expand a row to see its URL, JSON payload and response.
+        </Text>
+        <Table<RcvRow>
+          style={{ marginTop: 10 }}
+          size="small"
+          rowKey="key"
+          dataSource={receiveRows}
+          pagination={false}
+          scroll={{ y: 320 }}
+          expandable={{
+            expandedRowRender: (r) => (
+              <div>
+                <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>Request Body</div>
+                <pre style={{ fontSize: 10.5, background: '#0d0d0d', color: '#a8ff78', borderRadius: 4, padding: 8, margin: 0, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                  {JSON.stringify(r.body, null, 2)}
+                </pre>
+                {r.response && (
+                  <>
+                    <div style={{ fontSize: 11, color: REDWOOD.neutral600, margin: '6px 0 4px' }}>Response {r.http ? `(HTTP ${r.http})` : ''}</div>
+                    <pre style={{ fontSize: 10.5, background: '#0d0d0d', color: '#79c0ff', borderRadius: 4, padding: 8, margin: 0, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                      {r.response}
+                    </pre>
+                  </>
+                )}
+              </div>
+            ),
+          }}
+          columns={[
+            { title: 'Item', dataIndex: 'item', width: 150, render: (v: string) => <span style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 12 }}>{v}</span> },
+            { title: 'Qty', dataIndex: 'qty', width: 70, align: 'right' as const },
+            { title: 'Subinv', dataIndex: 'subinv', width: 110, render: (v: string) => <Tag style={{ fontSize: 11 }}>{v || '—'}</Tag> },
+            { title: 'Status', dataIndex: 'status', width: 110, render: (s: RcvRow['status']) => {
+              const map: Record<RcvRow['status'], { c: string; t: string }> = {
+                pending: { c: 'default', t: 'Pending' }, processing: { c: 'processing', t: 'Processing…' },
+                success: { c: 'success', t: 'Success' }, error: { c: 'error', t: 'Error' },
+              };
+              return <Tag color={map[s].c as any}>{map[s].t}</Tag>;
+            } },
+            { title: 'Message', dataIndex: 'message', ellipsis: true, render: (v: string) => <Tooltip title={v}><span style={{ fontSize: 11 }}>{v || '—'}</span></Tooltip> },
+          ]}
+        />
       </Modal>
 
       {/* Change Lot Number Modal */}
