@@ -689,6 +689,7 @@ const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> =
 const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ onOpenPO }) => {
   const [org, setOrg] = useState('');
   const [poNum, setPoNum] = useState('');
+  const [sourceDoc, setSourceDoc] = useState<string>('');
   const [dateMode, setDateMode] = useState<DateMode>('none');
   const [exactDate, setExactDate] = useState<Dayjs | null>(null);
   const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
@@ -702,7 +703,8 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
     setSearched(true);
     setFilterText('');
     try {
-      const q = buildQuery(org, poNum, dateMode, exactDate, dateRange);
+      let q = buildQuery(org, poNum, dateMode, exactDate, dateRange);
+      if (sourceDoc.trim()) q = (q ? q + ';' : '') + `SourceDocumentCode='${sourceDoc.trim()}'`;
       const rows = await fetchLinesToReceive(q);
       const grouped = groupRows(rows);
       setGroups(grouped);
@@ -712,10 +714,10 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
     } finally {
       setLoading(false);
     }
-  }, [org, poNum, dateMode, exactDate, dateRange]);
+  }, [org, poNum, sourceDoc, dateMode, exactDate, dateRange]);
 
   const handleClear = () => {
-    setOrg(''); setPoNum(''); setDateMode('none');
+    setOrg(''); setPoNum(''); setSourceDoc(''); setDateMode('none');
     setExactDate(null); setDateRange(null);
     setGroups([]); setSearched(false); setFilterText('');
   };
@@ -884,6 +886,24 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
                   onPressEnter={handleSearch}
                   allowClear
                   size="small"
+                />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={6}>
+              <Form.Item label="Source Document" style={{ marginBottom: 0 }}>
+                <Select
+                  value={sourceDoc || undefined}
+                  onChange={v => setSourceDoc(v || '')}
+                  size="small"
+                  allowClear
+                  placeholder="All"
+                  style={{ width: '100%' }}
+                  options={[
+                    { label: 'Purchase Order (PO)', value: 'PO' },
+                    { label: 'Transfer Order (TO)', value: 'TRANSFER ORDER' },
+                    { label: 'ASN', value: 'ASN' },
+                    { label: 'RMA', value: 'RMA' },
+                  ]}
                 />
               </Form.Item>
             </Col>
