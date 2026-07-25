@@ -749,7 +749,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
     setEditMode(true);
     setEditLoading(true);
     try {
-      const url = `${FUSION_BASE}/draftPurchaseOrders/${id}?expand=lines`;
+      const url = `${FUSION_BASE}/draftPurchaseOrders/${id}`;
       const r = await fetch(url, { headers: FUSION_HDRS });
       const d = await r.json();
       if (!r.ok) throw new Error(d?.title ?? d?.detail ?? `HTTP ${r.status}`);
@@ -774,7 +774,20 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
       headerForm.setFieldsValue({ poNumber: orderNum, docType: String(orderNum).replace(/\d.*$/, '') || 'STD' });
       setPoHeaderId(Number(d.POHeaderId ?? id));
 
-      const rawLines: any[] = d.lines?.items ?? (Array.isArray(d.lines) ? d.lines : []);
+      // Lines come from the child collection which pages at 25 by default —
+      // page through at 500/page until hasMore is false so ALL lines are loaded.
+      const rawLines: any[] = [];
+      let offset = 0;
+      const PAGE = 500;
+      for (let guard = 0; guard < 200; guard++) {
+        const lr = await fetch(`${FUSION_BASE}/draftPurchaseOrders/${id}/child/lines?limit=${PAGE}&offset=${offset}`, { headers: FUSION_HDRS });
+        const ld = await lr.json();
+        if (!lr.ok) throw new Error(ld?.title ?? ld?.detail ?? `HTTP ${lr.status}`);
+        const items: any[] = ld?.items ?? [];
+        rawLines.push(...items);
+        if (!ld?.hasMore || items.length === 0) break;
+        offset += items.length;
+      }
       const restored = rawLines.map((l, i) => computeLine({
         key: `F${l.POLineId ?? i}`,
         poLineId: l.POLineId,
