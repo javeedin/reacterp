@@ -144,6 +144,14 @@ const procurementItems: MenuItemType[] = [
     color: REDWOOD.info,
     path: '/procurement/login-history',
   },
+  {
+    key: 'cost-management',
+    icon: <DollarOutlined />,
+    label: 'Cost Management',
+    description: 'Cost received items — Receipt & Cost Accounting ESS jobs (run & monitor)',
+    color: REDWOOD.primary,
+    path: '/procurement/cost-management',
+  },
 ];
 
 const TaskCard: React.FC<{ item: MenuItemType; onClick: () => void }> = ({ item, onClick }) => (
