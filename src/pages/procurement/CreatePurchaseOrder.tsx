@@ -576,6 +576,19 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
   const removeLineLocal = (key: string) =>
     setLines(prev => prev.filter(l => l.key !== key).map((l, i) => ({ ...l, lineNum: i + 1 })));
 
+  // Clear lines that were added locally but not yet saved to Fusion (no POLineId).
+  // Saved/Fusion lines are left in place.
+  const clearUnsavedLines = () => {
+    const unsaved = lines.filter(l => l.poLineId == null);
+    if (unsaved.length === 0) { message.info('No unsaved lines to clear.'); return; }
+    Modal.confirm({
+      title: `Clear ${unsaved.length} unsaved line(s)?`,
+      okText: 'Clear unsaved', okButtonProps: { danger: true },
+      content: 'Removes lines that were added but not yet saved to Fusion. Lines already saved in Fusion are kept.',
+      onOk: () => setLines(prev => prev.filter(l => l.poLineId != null).map((l, i) => ({ ...l, lineNum: i + 1 }))),
+    });
+  };
+
   const handleDeleteLine = (key: string) => {
     const line = lines.find(l => l.key === key);
     // Edit mode + the line exists in Fusion → DELETE it from Fusion (confirm first).
@@ -2955,6 +2968,13 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                   <Space wrap>
                     <Button type="primary" size="small" icon={<PlusOutlined />} onClick={openAddItem}
                       style={{ background: C.green, borderColor: C.green }}>Add Item</Button>
+                    {(() => { const n = lines.filter(l => l.poLineId == null).length; return (
+                      <Tooltip title="Remove lines added but not yet saved to Fusion (saved lines are untouched)">
+                        <Button size="small" danger icon={<DeleteOutlined />} disabled={n === 0} onClick={clearUnsavedLines}>
+                          Clear Unsaved{n ? ` (${n})` : ''}
+                        </Button>
+                      </Tooltip>
+                    ); })()}
                     <Divider type="vertical" />
                     <Text style={{ fontSize: 12, color: C.textMid }}>Need By for All:</Text>
                     <DatePicker size="small" value={needByAll} onChange={handleNeedByAllChange} format="D-MMM-YYYY" placeholder="Pick date" style={{ width: 130 }} />
