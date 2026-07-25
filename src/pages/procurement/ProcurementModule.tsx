@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { Layout, Breadcrumb, Typography, Card, Row, Col, Input, Button, Form, Alert, Divider, message } from 'antd';
+import { Layout, Breadcrumb, Typography, Card, Row, Col, Input, Button, Form, Alert, Divider, message, Tag } from 'antd';
 import {
   HomeOutlined, ShoppingCartOutlined, TeamOutlined, AppstoreOutlined,
   DatabaseOutlined, CheckCircleOutlined, LockOutlined, BugOutlined,
   ApartmentOutlined, BankOutlined, SafetyCertificateOutlined, InboxOutlined,
-  DollarOutlined, ReconciliationOutlined, CloudOutlined,
+  DollarOutlined, ReconciliationOutlined, CloudOutlined, HistoryOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -135,6 +135,14 @@ const procurementItems: MenuItemType[] = [
     description: 'Load trial balance from Excel, filter and review the data',
     color: '#0572CE',
     path: '/procurement/tb-loading',
+  },
+  {
+    key: 'login-history',
+    icon: <HistoryOutlined />,
+    label: 'Login History',
+    description: 'Oracle Fusion (IDCS) sign-in history via Audit Events',
+    color: REDWOOD.info,
+    path: '/procurement/login-history',
   },
 ];
 
@@ -328,6 +336,7 @@ const PasswordGate: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
 // ── Module Home ───────────────────────────────────────────────────────────────
 const ProcurementHome: React.FC = () => {
   const navigate = useNavigate();
+  const fusionUser = sessionStorage.getItem('fusion_user');
 
   return (
     <Layout style={{ minHeight: 'calc(100vh - 64px)', background: REDWOOD.neutral100 }}>
@@ -351,7 +360,14 @@ const ProcurementHome: React.FC = () => {
               <ShoppingCartOutlined style={{ fontSize: 26, color: '#fff' }} />
             </div>
             <div>
-              <Title level={2} style={{ margin: 0, color: REDWOOD.neutral900 }}>Fusion Client</Title>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <Title level={2} style={{ margin: 0, color: REDWOOD.neutral900 }}>Fusion Client</Title>
+                {fusionUser && (
+                  <Tag icon={<CloudOutlined />} color="green" style={{ fontWeight: 600, fontSize: 12 }}>
+                    {fusionUser}
+                  </Tag>
+                )}
+              </div>
               <Text type="secondary">Interface to query and perform transactions in Oracle Fusion</Text>
             </div>
           </div>

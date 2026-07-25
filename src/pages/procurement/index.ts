@@ -8,3 +8,4 @@ export { default as ManageItemCost } from './ManageItemCost';
 export { default as ManageReceiptCost } from './ManageReceiptCost';
 export { default as UATDiagnostics } from './UATDiagnostics';
 export { default as TrialBalanceLoading } from './TrialBalanceLoading';
+export { default as LoginHistory } from './LoginHistory';
