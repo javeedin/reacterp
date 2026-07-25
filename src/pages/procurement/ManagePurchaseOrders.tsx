@@ -206,7 +206,7 @@ const buildQParam = (p: SearchParams): string => {
 };
 
 // ── PO Detail Page (shown as a tab) ─────────────────────────────────────────
-const PODetailPage: React.FC<{ po: RawPO; onClose?: () => void }> = ({ po, onClose }) => {
+const PODetailPage: React.FC<{ po: RawPO; onClose?: () => void; onEdit?: (po: RawPO) => void }> = ({ po, onClose, onEdit }) => {
   const [lines, setLines]           = useState<POLine[]>([]);
   const [linesLoading, setLL]       = useState(false);
   const [linesError, setLE]         = useState<string | null>(null);
@@ -528,6 +528,15 @@ ${po.NoteToSupplier ? `<div class="sec">Notes</div><div class="fv">${po.NoteToSu
         borderBottom: `1px solid ${REDWOOD.neutral200}`,
         display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8,
       }}>
+        {onEdit && String(po.StatusCode ?? '').toUpperCase().includes('INCOMPLETE') && (
+          <Button
+            icon={<EditOutlined />}
+            onClick={() => onEdit(po)}
+            style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary, color: '#fff', fontWeight: 600, borderRadius: 4 }}
+          >
+            Edit
+          </Button>
+        )}
         <Button
           icon={<FilePdfOutlined />}
           onClick={handleViewPDF}
@@ -2157,7 +2166,7 @@ const ManagePurchaseOrders: React.FC = () => {
           </span>
         </span>
       ),
-      children: <PODetailPage po={po} onClose={() => handleCloseTab(String(po.POHeaderId))} />,
+      children: <PODetailPage po={po} onClose={() => handleCloseTab(String(po.POHeaderId))} onEdit={openEditPO} />,
       closable: true,
     })),
   ];
