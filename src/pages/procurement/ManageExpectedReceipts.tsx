@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   Layout, Card, Table, Form, Input, Select, DatePicker, Button,
   Tabs, Tag, Typography, Space, Badge, Tooltip, Spin, Row, Col, message, Modal, InputNumber,
@@ -8,7 +8,7 @@ import {
   SearchOutlined, EyeOutlined, ClearOutlined, InboxOutlined,
   ReloadOutlined, HomeOutlined, FileExcelOutlined, FilterOutlined,
   CodeOutlined, EnvironmentOutlined, CopyOutlined,
-  EditOutlined, NumberOutlined,
+  EditOutlined, NumberOutlined, ApiOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -690,13 +690,42 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
   const [org, setOrg] = useState('');
   const [poNum, setPoNum] = useState('');
   const [sourceDoc, setSourceDoc] = useState<string>('');
+  const [orgs, setOrgs] = useState<{ code: string; name: string }[]>([]);
+  const [orgsLoading, setOrgsLoading] = useState(false);
   const [dateMode, setDateMode] = useState<DateMode>('none');
+
+  // Inventory organizations for the Organization dropdown — same source as the
+  // On-Hand Inventory page (inventoryOrganizations web service).
+  useEffect(() => {
+    setOrgsLoading(true);
+    fetch(`${FUSION_BASE}/inventoryOrganizations?limit=500&onlyData=true&fields=OrganizationCode,OrganizationName`, { headers: FUSION_HDRS })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(d => {
+        const items: any[] = Array.isArray(d) ? d : (d.items ?? []);
+        const seen = new Set<string>();
+        setOrgs(items
+          .map(o => ({ code: o.OrganizationCode, name: o.OrganizationName }))
+          .filter(o => o.code && !seen.has(o.code) && seen.add(o.code))
+          .sort((a, b) => String(a.code).localeCompare(String(b.code))));
+      })
+      .catch(() => { /* fall back to free typing */ })
+      .finally(() => setOrgsLoading(false));
+  }, []);
   const [exactDate, setExactDate] = useState<Dayjs | null>(null);
   const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
   const [groups, setGroups] = useState<POGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [filterText, setFilterText] = useState('');
+  const [apiOpen, setApiOpen] = useState(false);
+
+  // The exact linesToReceive request the current filters will run.
+  const currentUrl = useMemo(() => {
+    let q = buildQuery(org, poNum, dateMode, exactDate, dateRange);
+    if (sourceDoc.trim()) q = (q ? q + ';' : '') + `SourceDocumentCode='${sourceDoc.trim()}'`;
+    const qParam = q ? `q=${encodeURIComponent(q)}&` : '';
+    return `${FUSION_BASE}/linesToReceive?${qParam}limit=200&offset=0`;
+  }, [org, poNum, sourceDoc, dateMode, exactDate, dateRange]);
 
   const handleSearch = useCallback(async () => {
     setLoading(true);
@@ -867,13 +896,18 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
           <Row gutter={[12, 0]} align="bottom">
             <Col xs={24} sm={6}>
               <Form.Item label="Organization" style={{ marginBottom: 0 }}>
-                <Input
-                  placeholder="e.g. AMS"
-                  value={org}
-                  onChange={e => setOrg(e.target.value)}
-                  onPressEnter={handleSearch}
+                <Select
+                  showSearch
                   allowClear
                   size="small"
+                  loading={orgsLoading}
+                  placeholder="Select inventory org"
+                  value={org || undefined}
+                  onChange={v => setOrg(v || '')}
+                  optionFilterProp="label"
+                  style={{ width: '100%' }}
+                  options={orgs.map(o => ({ label: o.name ? `${o.code} — ${o.name}` : o.code, value: o.code }))}
+                  notFoundContent={orgsLoading ? 'Loading…' : 'No organizations'}
                 />
               </Form.Item>
             </Col>
@@ -939,6 +973,9 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
                   <Button icon={<ClearOutlined />} onClick={handleClear} size="small">
                     Clear
                   </Button>
+                  <Tooltip title="Show the Fusion web service URL">
+                    <Button icon={<ApiOutlined />} size="small" onClick={() => setApiOpen(true)} />
+                  </Tooltip>
                 </Space>
               </Form.Item>
             </Col>
@@ -974,6 +1011,23 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
           )}
         </Form>
       </Card>
+
+      <Modal
+        open={apiOpen}
+        onCancel={() => setApiOpen(false)}
+        footer={<Button onClick={() => setApiOpen(false)}>Close</Button>}
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} />Fusion Web Service</Space>}
+        width={720}
+      >
+        <div style={{ fontSize: 12, marginBottom: 8 }}>
+          <Space size={6}><Tag color="blue">GET</Tag><Text type="secondary">Oracle Fusion — linesToReceive (Expected PO Receipts)</Text></Space>
+        </div>
+        <Text copyable style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>{currentUrl}</Text>
+        <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 12 }}>
+          Query params: ToOrganizationCode, DocumentNumber, SourceDocumentCode, DueDate (from the filters above).
+          The Organization dropdown is loaded from <Text code style={{ fontSize: 11 }}>inventoryOrganizations</Text>.
+        </div>
+      </Modal>
 
       {/* Grouped results */}
       {(searched || groups.length > 0) && (
