@@ -286,7 +286,7 @@ const ProcurementHome: React.FC = () => {
         <div style={{ padding: '14px 24px', background: REDWOOD.surface, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
           <Breadcrumb items={[
             { title: <Link to="/home"><HomeOutlined /> Home</Link> },
-            { title: 'Procurement' },
+            { title: 'Fusion Client' },
           ]} />
         </div>
 
@@ -302,14 +302,14 @@ const ProcurementHome: React.FC = () => {
               <ShoppingCartOutlined style={{ fontSize: 26, color: '#fff' }} />
             </div>
             <div>
-              <Title level={2} style={{ margin: 0, color: REDWOOD.neutral900 }}>Procurement</Title>
-              <Text type="secondary">Purchase orders, suppliers, items and inventory management</Text>
+              <Title level={2} style={{ margin: 0, color: REDWOOD.neutral900 }}>Fusion Client</Title>
+              <Text type="secondary">Interface to query and perform transactions in Oracle Fusion</Text>
             </div>
           </div>
 
           <div style={{ marginBottom: 24 }}>
             <Text strong style={{ fontSize: 13, color: REDWOOD.neutral900, textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 10 }}>
-              PURCHASING
+              FUSION CLIENT
             </Text>
             <Row gutter={[12, 12]}>
               {procurementItems.map(item => (
