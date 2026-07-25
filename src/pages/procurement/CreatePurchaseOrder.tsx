@@ -92,6 +92,7 @@ interface POHeader {
 interface POLine {
   key: string; lineNum: number;
   poLineId?: number;   // Fusion POLineId — present only for lines loaded from Fusion (edit mode)
+  scheduleId?: number; // Fusion schedule id (LineLocationId) — for PATCHing need-by
   itemNumber: string; description: string; uom: string;
   qty: number; price: number; taxPct: number;
   needBy: Dayjs | null; promisedDate: Dayjs | null;
@@ -795,7 +796,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
       let offset = 0;
       const PAGE = 500;
       for (let guard = 0; guard < 200; guard++) {
-        const lr = await fetch(`${FUSION_BASE}/draftPurchaseOrders/${id}/child/lines?limit=${PAGE}&offset=${offset}`, { headers: FUSION_HDRS });
+        const lr = await fetch(`${FUSION_BASE}/draftPurchaseOrders/${id}/child/lines?expand=schedules&limit=${PAGE}&offset=${offset}`, { headers: FUSION_HDRS });
         const ld = await lr.json();
         if (!lr.ok) throw new Error(ld?.title ?? ld?.detail ?? `HTTP ${lr.status}`);
         const items: any[] = ld?.items ?? [];
@@ -803,15 +804,20 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
         if (!ld?.hasMore || items.length === 0) break;
         offset += items.length;
       }
-      const restored = rawLines.map((l, i) => computeLine({
-        key: `F${l.POLineId ?? i}`,
-        poLineId: l.POLineId,
-        lineNum: l.LineNumber ?? i + 1,
-        itemNumber: l.Item ?? l.ItemNumber ?? '', description: l.Description ?? '', uom: l.UOM ?? '',
-        qty: Number(l.Quantity ?? 0), price: Number(l.Price ?? l.UnitPrice ?? 0), taxPct: 0,
-        needBy: null, promisedDate: null,
-        chargeAccount: '', destinationType: 'Inventory',
-      }));
+      const restored = rawLines.map((l, i) => {
+        const sch = l.schedules?.items?.[0] ?? (Array.isArray(l.schedules) ? l.schedules[0] : null);
+        const needByRaw = sch?.RequestedDeliveryDate ?? l.RequestedDeliveryDate ?? null;
+        return computeLine({
+          key: `F${l.POLineId ?? i}`,
+          poLineId: l.POLineId,
+          scheduleId: sch?.LineLocationId ?? sch?.ScheduleId ?? undefined,
+          lineNum: l.LineNumber ?? i + 1,
+          itemNumber: l.Item ?? l.ItemNumber ?? '', description: l.Description ?? '', uom: l.UOM ?? '',
+          qty: Number(l.Quantity ?? 0), price: Number(l.Price ?? l.UnitPrice ?? 0), taxPct: 0,
+          needBy: needByRaw ? dayjs(needByRaw) : null, promisedDate: null,
+          chargeAccount: '', destinationType: 'Inventory',
+        });
+      });
       setLines(restored);
       setAcqCharges([]);
       if (d.CurrencyCode && d.CurrencyCode !== 'AED') fetchFxRate(d.CurrencyCode); else setFxRate(null);
@@ -1217,6 +1223,13 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
   // sync the PO is reloaded from Fusion so every line carries its POLineId.
   const saveEditChanges = async () => {
     if (!poHeaderId) { message.warning('No Fusion PO loaded.'); return; }
+    // Need-by date is mandatory on every line.
+    const missingNeedBy = lines.filter(l => !l.needBy);
+    if (missingNeedBy.length > 0) {
+      Modal.error({ title: 'Need-by date is required',
+        content: `Set a Need-by date on line${missingNeedBy.length > 1 ? 's' : ''}: ${missingNeedBy.map(l => l.lineNum).join(', ')}` });
+      return;
+    }
     setSavingEdit(true);
     const errors: string[] = [];
     let added = 0, updated = 0;
@@ -1242,6 +1255,14 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
           method: 'PATCH', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
         });
         if (r.ok) updated++; else { const t = await r.text(); errors.push(`Update line ${l.lineNum}: ${t.slice(0, 300)}`); }
+        // Need-by lives on the schedule — PATCH it (and the schedule qty) so it saves.
+        if (l.scheduleId != null && l.needBy) {
+          const schBody = { RequestedDeliveryDate: l.needBy.format('YYYY-MM-DD'), Quantity: l.qty };
+          const sr = await fetch(`${FUSION_BASE}/draftPurchaseOrders/${poHeaderId}/child/lines/${l.poLineId}/child/schedules/${l.scheduleId}`, {
+            method: 'PATCH', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(schBody),
+          });
+          if (!sr.ok) { const t = await sr.text(); errors.push(`Need-by line ${l.lineNum}: ${t.slice(0, 200)}`); }
+        }
       }
       if (errors.length) {
         // Keep the current lines on screen — successful adds now carry a POLineId,
@@ -1268,10 +1289,16 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
       nextNum += 1;
       ops.push({ method: 'POST', url: `${FUSION_BASE}/draftPurchaseOrders/${poHeaderId}/child/lines`, body: buildLineBody(l, nextNum), lineKey: l.key });
     });
-    lines.filter(l => l.poLineId != null).forEach(l => ops.push({
-      method: 'PATCH', url: `${FUSION_BASE}/draftPurchaseOrders/${poHeaderId}/child/lines/${l.poLineId}`,
-      body: { Quantity: l.qty, Price: l.price, Description: l.description }, lineKey: l.key,
-    }));
+    lines.filter(l => l.poLineId != null).forEach(l => {
+      ops.push({
+        method: 'PATCH', url: `${FUSION_BASE}/draftPurchaseOrders/${poHeaderId}/child/lines/${l.poLineId}`,
+        body: { Quantity: l.qty, Price: l.price, Description: l.description }, lineKey: l.key,
+      });
+      if (l.scheduleId != null && l.needBy) ops.push({
+        method: 'PATCH', url: `${FUSION_BASE}/draftPurchaseOrders/${poHeaderId}/child/lines/${l.poLineId}/child/schedules/${l.scheduleId}`,
+        body: { RequestedDeliveryDate: l.needBy.format('YYYY-MM-DD'), Quantity: l.qty }, lineKey: l.key,
+      });
+    });
     return ops;
   };
 
@@ -2265,7 +2292,7 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
     { title: 'Tax %', dataIndex: 'taxPct', width: 80, align: 'right' as const, render: (v, r) => <InputNumber size="small" value={v} min={0} max={100} precision={2} style={{ width: 70 }} onChange={val => handleLineChange(r.key, 'taxPct', val ?? 0)} /> },
     { title: 'Tax Amt', dataIndex: 'taxAmount', width: 100, align: 'right' as const, render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{fmt(v)}</Text> },
     { title: 'Net Total', dataIndex: 'netTotal', width: 120, align: 'right' as const, render: v => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: C.red }}>{fmt(v)}</Text> },
-    { title: 'Need By', dataIndex: 'needBy', width: 135, render: (v, r) => <DatePicker size="small" value={v} onChange={d => handleLineChange(r.key, 'needBy', d)} style={{ width: 125 }} format="D-MMM-YYYY" /> },
+    { title: <span><span style={{ color: C.red, marginRight: 2 }}>*</span>Need By</span>, dataIndex: 'needBy', width: 135, render: (v, r) => <DatePicker size="small" value={v} status={v ? undefined : 'error'} onChange={d => handleLineChange(r.key, 'needBy', d)} style={{ width: 125 }} format="D-MMM-YYYY" /> },
     { title: 'Assign to Inventory Org', key: 'assignOrg', width: 250, render: (_: any, r: POLine) => (
       <Space size={4}>
         <Select size="small" style={{ width: 130 }} value={r.assignOrg} placeholder="Org" allowClear
@@ -2300,8 +2327,8 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
         const org = inventoryOrgs.find(o => o.OrganizationCode === header?.shipToOrg);
         return <Text style={{ fontSize: 11, color: C.textMid }}>{org?.OrganizationName ?? '—'}</Text>;
       } },
-    { title: 'Requested Delivery', dataIndex: 'needBy', width: 155,
-      render: (v, r) => <DatePicker size="small" value={v} onChange={d => handleLineChange(r.key, 'needBy', d)} style={{ width: 145 }} format="D-MMM-YYYY" /> },
+    { title: <span><span style={{ color: C.red, marginRight: 2 }}>*</span>Requested Delivery</span>, dataIndex: 'needBy', width: 155,
+      render: (v, r) => <DatePicker size="small" value={v} status={v ? undefined : 'error'} onChange={d => handleLineChange(r.key, 'needBy', d)} style={{ width: 145 }} format="D-MMM-YYYY" /> },
     { title: 'Dest Type', dataIndex: 'destinationType', width: 100,
       render: v => <Tag color={v === 'Expense' ? 'orange' : 'green'} style={{ fontSize: 10 }}>
         {v === 'Expense' ? 'EXPENSE' : 'INVENTORY'}
