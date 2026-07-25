@@ -3880,7 +3880,8 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                           bordered
                           rowKey="key"
                           dataSource={pastedRows}
-                          pagination={{ pageSize: 10, showSizeChanger: false }}
+                          pagination={false}
+                          scroll={{ y: 360 }}
                           rowClassName={r => r.status === 'invalid' ? 'qoh-low' : ''}
                           columns={[
                             {
