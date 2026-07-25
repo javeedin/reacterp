@@ -228,7 +228,7 @@ const PasswordGate: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
           }}>
             <LockOutlined style={{ fontSize: 28, color: '#fff' }} />
           </div>
-          <Title level={3} style={{ margin: 0, color: REDWOOD.neutral900 }}>Procurement</Title>
+          <Title level={3} style={{ margin: 0, color: REDWOOD.neutral900 }}>Fusion Client</Title>
           <Text type="secondary" style={{ fontSize: 13 }}>Enter your access password to continue</Text>
         </div>
 
@@ -268,7 +268,7 @@ const PasswordGate: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
               height: 44,
             }}
           >
-            Access Procurement
+            Access Fusion Client
           </Button>
         </Form>
       </Card>
