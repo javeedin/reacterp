@@ -1263,6 +1263,53 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
     });
   };
 
+  // ── Delete ALL lines (and their schedules/distributions) from Fusion ────────
+  // Deleting a draft PO line cascades to its schedules + distributions, so
+  // looping DELETE over every POLineId clears the whole set.
+  const deleteAllLines = () => {
+    if (!poHeaderId) { message.warning('No Fusion PO loaded.'); return; }
+    const fusionLines = lines.filter(l => l.poLineId != null);
+    if (fusionLines.length === 0) {
+      setLines([]);
+      message.info('No Fusion lines to delete — cleared local lines.');
+      return;
+    }
+    Modal.confirm({
+      title: `Delete ALL ${fusionLines.length} line(s) from Fusion?`,
+      width: 580,
+      okText: `Delete all ${fusionLines.length} lines`, okButtonProps: { danger: true },
+      content: (
+        <div style={{ fontSize: 12 }}>
+          <p>This permanently removes <b>every line</b> — and each line's schedules and distributions — from PO {header?.poNumber} in Oracle Fusion. The PO header stays.</p>
+          <pre style={{ fontSize: 11, background: '#f5f5f5', padding: 8, borderRadius: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+{`DELETE ${FUSION_BASE}/draftPurchaseOrders/${poHeaderId}/child/lines/{POLineId}   ×${fusionLines.length}`}
+          </pre>
+        </div>
+      ),
+      onOk: async () => {
+        setSavingEdit(true);
+        const errors: string[] = [];
+        let deleted = 0;
+        // Delete highest line number first so re-sequencing never clashes.
+        for (const l of [...fusionLines].sort((a, b) => (b.lineNum ?? 0) - (a.lineNum ?? 0))) {
+          try {
+            const r = await fetch(`${FUSION_BASE}/draftPurchaseOrders/${poHeaderId}/child/lines/${l.poLineId}`, { method: 'DELETE', headers: FUSION_HDRS });
+            if (r.ok || r.status === 204) deleted++;
+            else { const t = await r.text(); errors.push(`Line ${l.lineNum} (${l.itemNumber}): ${t.slice(0, 200)}`); }
+          } catch (e: any) { errors.push(`Line ${l.lineNum} (${l.itemNumber}): ${e.message}`); }
+        }
+        setSavingEdit(false);
+        if (errors.length) {
+          Modal.error({ title: `Deleted ${deleted}, ${errors.length} failed`, width: 640,
+            content: <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 300, overflow: 'auto' }}>{errors.join('\n\n')}</pre> });
+        } else {
+          message.success(`All ${deleted} line(s) deleted from Fusion`);
+        }
+        await loadDraftFromFusion(poHeaderId);   // refresh from Fusion
+      },
+    });
+  };
+
   // ── Fusion PO lifecycle actions (cancel / close / hold / reopen …) ──────────
   // Each is a custom action POSTed to the resource row with the adf.action
   // content type. Lifecycle actions live on `purchaseOrders`; `submit` is on
@@ -2493,6 +2540,7 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                         { key: 'finalClose', danger: true, label: 'Finally Close', onClick: () => confirmPoAction('Finally Close', 'finallyCloseDocument') },
                         { key: 'reopen',     label: 'Reopen', onClick: () => confirmPoAction('Reopen', 'reopenDocument') },
                         { type: 'divider' },
+                        ...(editMode ? [{ key: 'deleteLines', danger: true, icon: <DeleteOutlined />, label: `Delete All Lines${lines.length ? ` (${lines.length})` : ''}`, onClick: () => deleteAllLines() }] : []),
                         { key: 'deletePo', danger: true, icon: <DeleteOutlined />, label: 'Delete Purchase Order', onClick: () => deletePoFromFusion() },
                         { key: 'custom', icon: <ApiOutlined />, label: 'Custom action…', onClick: () => { setCustomActionName(''); setCustomActionResource('purchaseOrders'); setCustomActionOpen(true); } },
                       ] }}>
