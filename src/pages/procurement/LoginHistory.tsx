@@ -19,8 +19,10 @@ const REDWOOD = {
 // Default IDCS identity-domain base (the tenant that fronts this Fusion pod).
 // Override in the field if your tenant differs.
 const DEFAULT_IDCS_BASE = 'https://idcs-08ec9f6c9fe6485ca2a776ed49559d01.identity.oraclecloud.com';
-const TOKEN_KEY = 'idcs_audit_token';
 const BASE_KEY  = 'idcs_audit_base';
+
+// Same Basic-auth credentials the rest of the Fusion Client uses.
+const AUTH_HEADER = 'Basic ' + btoa('emparun:Fusion@1234');
 
 // Common IDCS audit event ids for sign-in activity.
 const EVENT_OPTIONS = [
@@ -42,7 +44,6 @@ const pick = (r: any, keys: string[]): string => {
 const LoginHistory: React.FC = () => {
   const fusionUser = sessionStorage.getItem('fusion_user') || '';
   const [idcsBase, setIdcsBase] = useState(localStorage.getItem(BASE_KEY) || DEFAULT_IDCS_BASE);
-  const [token, setToken]       = useState(localStorage.getItem(TOKEN_KEY) || '');
   const [actor, setActor]       = useState(fusionUser);
   const [eventId, setEventId]   = useState('sso.session.create.success');
   const [fromDate, setFromDate] = useState<Dayjs | null>(dayjs().subtract(7, 'day'));
@@ -66,13 +67,11 @@ const LoginHistory: React.FC = () => {
   }, [idcsBase, eventId, actor, fromDate]);
 
   const run = async () => {
-    if (!token.trim()) { setError('An IDCS OAuth bearer token is required (Audit Administrator scope).'); return; }
     setError(''); setLoading(true); setRows([]);
-    localStorage.setItem(TOKEN_KEY, token.trim());
     localStorage.setItem(BASE_KEY, idcsBase.trim());
     try {
       const res = await fetch(requestUrl, {
-        headers: { Authorization: `Bearer ${token.trim()}`, Accept: 'application/json' },
+        headers: { Authorization: AUTH_HEADER, Accept: 'application/json' },
       });
       const text = await res.text();
       setRaw(text);
@@ -133,18 +132,14 @@ const LoginHistory: React.FC = () => {
           </div>
 
           <Alert type="info" showIcon style={{ marginBottom: 14, fontSize: 12 }}
-            message="Requires an IDCS OAuth bearer token"
-            description="IDCS Audit Events use OAuth (Audit Administrator scope), not the Fusion REST Basic auth. Paste a bearer token below. Note: IDCS AuditEvents may be retired for pods migrated to OCI IAM — then use the OCI Audit service instead." />
+            message="Uses the standard Fusion credentials (Basic auth)"
+            description="This calls the Audit Events endpoint with the same emparun Basic-auth used across the Fusion Client — no separate token needed. Adjust the Service Base URL if your audit endpoint differs. If the endpoint rejects Basic auth or returns nothing, use the API icon to inspect the raw response." />
 
           <Card size="small" style={{ borderRadius: 8, marginBottom: 16 }}>
             <Row gutter={[12, 12]}>
-              <Col xs={24} md={12}>
-                <Text style={{ fontSize: 12, fontWeight: 600 }}>IDCS Base URL</Text>
+              <Col xs={24}>
+                <Text style={{ fontSize: 12, fontWeight: 600 }}>Service Base URL</Text>
                 <Input value={idcsBase} onChange={e => setIdcsBase(e.target.value)} placeholder="https://idcs-xxxx.identity.oraclecloud.com" style={{ marginTop: 4, fontFamily: 'monospace', fontSize: 12 }} />
-              </Col>
-              <Col xs={24} md={12}>
-                <Text style={{ fontSize: 12, fontWeight: 600 }}>Bearer Token</Text>
-                <Input.Password value={token} onChange={e => setToken(e.target.value)} placeholder="IDCS OAuth access token" style={{ marginTop: 4 }} />
               </Col>
               <Col xs={24} sm={8} md={7}>
                 <Text style={{ fontSize: 12, fontWeight: 600 }}>User (actorName)</Text>
