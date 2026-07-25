@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { Layout, Breadcrumb, Typography, Card, Row, Col, Input, Button, Form, Alert } from 'antd';
+import { Layout, Breadcrumb, Typography, Card, Row, Col, Input, Button, Form, Alert, Divider, message } from 'antd';
 import {
   HomeOutlined, ShoppingCartOutlined, TeamOutlined, AppstoreOutlined,
   DatabaseOutlined, CheckCircleOutlined, LockOutlined, BugOutlined,
   ApartmentOutlined, BankOutlined, SafetyCertificateOutlined, InboxOutlined,
-  DollarOutlined, ReconciliationOutlined,
+  DollarOutlined, ReconciliationOutlined, CloudOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -187,6 +187,36 @@ const PasswordGate: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [fusionLoading, setFusionLoading] = useState(false);
+
+  // Open the real Oracle Cloud (IDCS) sign-in window. On success, capture the
+  // username and unlock the module.
+  const handleFusionLogin = async () => {
+    const api = (window as any).electronAPI;
+    if (!api?.fusionLogin) {
+      setError('Fusion login is only available in the desktop app.');
+      return;
+    }
+    setError('');
+    setFusionLoading(true);
+    try {
+      const res = await api.fusionLogin();
+      if (res?.success) {
+        sessionStorage.setItem(SESSION_KEY, 'true');
+        if (res.username) sessionStorage.setItem('fusion_user', res.username);
+        message.success(`Signed in to Oracle Fusion${res.username ? ` as ${res.username}` : ''}`);
+        onSuccess();
+      } else if (res?.cancelled) {
+        setError('Fusion sign-in was cancelled.');
+      } else {
+        setError(res?.error || 'Fusion sign-in did not complete.');
+      }
+    } catch (e: any) {
+      setError(e?.message || 'Fusion sign-in failed.');
+    } finally {
+      setFusionLoading(false);
+    }
+  };
 
   const handleLogin = () => {
     setLoading(true);
@@ -271,6 +301,22 @@ const PasswordGate: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
             Access Fusion Client
           </Button>
         </Form>
+
+        <Divider plain style={{ fontSize: 12, color: REDWOOD.neutral600, margin: '20px 0 16px' }}>or</Divider>
+
+        <Button
+          block
+          size="large"
+          icon={<CloudOutlined />}
+          loading={fusionLoading}
+          onClick={handleFusionLogin}
+          style={{ height: 44, fontWeight: 600, borderColor: REDWOOD.info, color: REDWOOD.info }}
+        >
+          Login to Fusion
+        </Button>
+        <Text type="secondary" style={{ fontSize: 11, display: 'block', textAlign: 'center', marginTop: 8 }}>
+          Sign in with your Oracle Cloud account
+        </Text>
       </Card>
     </div>
   );

@@ -63,6 +63,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ragDeleteDoc:  (params)   => ipcRenderer.invoke('rag:delete-doc', params),
   ragQuery:      (params)   => ipcRenderer.invoke('rag:query', params),
 
+  // Native Oracle Fusion (IDCS) login — opens the real sign-in window
+  fusionLogin: (url) => ipcRenderer.invoke('fusion-login', { url }),
+
   // Check if running in Electron
   isElectron: true,
 

@@ -914,6 +914,75 @@ ipcMain.handle('clear-fusion-credentials', () => {
   }
 });
 
+// ── Native Oracle Fusion login ──────────────────────────────────────────────
+// Opens the real Oracle Cloud (IDCS) sign-in in a child window. The user
+// authenticates natively; when the browser lands back on the Fusion app domain
+// (…fa.ocs.oraclecloud.com) login has succeeded. The username the user typed on
+// the IDCS page is captured and returned to the renderer.
+ipcMain.handle('fusion-login', async (_event, { url } = {}) => {
+  const { BrowserWindow } = require('electron');
+  const loginUrl = url || 'https://iacney-test.fa.ocs.oraclecloud.com/';
+  return await new Promise((resolve) => {
+    let capturedUser = null;
+    let settled = false;
+    const win = new BrowserWindow({
+      width: 520,
+      height: 720,
+      parent: mainWindow,
+      modal: true,
+      show: true,
+      title: 'Sign in to Oracle Fusion',
+      autoHideMenuBar: true,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        partition: 'persist:fusion',   // keep the Fusion session between logins
+      },
+    });
+
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      try { if (!win.isDestroyed()) win.close(); } catch (_) { /* ignore */ }
+      resolve(result);
+    };
+
+    // Capture the username typed on the IDCS sign-in page (via console channel).
+    win.webContents.on('did-finish-load', () => {
+      win.webContents.executeJavaScript(`(function(){
+        function grab(){
+          var e = document.querySelector('input[name="username"], #idcs-signin-basic-signin-form-username, input[type="email"], input[type="text"]');
+          if (e && e.value) { console.log('FUSION_USER:' + e.value); }
+        }
+        document.addEventListener('input', grab, true);
+        document.addEventListener('click', grab, true);
+        document.addEventListener('keyup', grab, true);
+      })();`).catch(() => {});
+    });
+    win.webContents.on('console-message', (_e, _level, message) => {
+      if (typeof message === 'string' && message.indexOf('FUSION_USER:') === 0) {
+        capturedUser = message.slice('FUSION_USER:'.length).trim();
+      }
+    });
+
+    // Success = navigation settled on the Fusion app domain (not the IDCS
+    // identity domain). The initial redirect to IDCS settles on identity.* so
+    // it does not count; SSO that lands straight on fa.ocs also counts.
+    win.webContents.on('did-stop-loading', () => {
+      if (settled) return;
+      let u = '';
+      try { u = win.webContents.getURL(); } catch (_) { return; }
+      if (/identity\.oraclecloud\.com/i.test(u)) return;          // still on IDCS sign-in
+      if (/\.fa\.ocs\.oraclecloud\.com/i.test(u)) {
+        finish({ success: true, username: capturedUser });
+      }
+    });
+
+    win.on('closed', () => finish({ success: false, cancelled: true }));
+    win.loadURL(loginUrl).catch(() => finish({ success: false, error: 'Failed to open Oracle sign-in' }));
+  });
+});
+
 // ── Auto-update ────────────────────────────────────────────────────────────
 function setupAutoUpdater() {
   // Only run in production with autoUpdater available

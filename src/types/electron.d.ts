@@ -29,6 +29,10 @@ export interface ElectronAPI {
   onBackgroundSyncError: (callback: (error: string) => void) => void;
   removeBackgroundSyncListeners: () => void;
 
+  // Native Oracle Fusion (IDCS) login — resolves once sign-in lands back on the
+  // Fusion app domain; returns the username captured from the sign-in page.
+  fusionLogin: (url?: string) => Promise<{ success: boolean; username?: string | null; cancelled?: boolean; error?: string }>;
+
   // Check if running in Electron
   isElectron: boolean;
 
