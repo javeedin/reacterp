@@ -143,7 +143,8 @@ interface PastedItem {
 // Parse Qty + Price from the cells after the item number.
 // 3+ cells → [item, qty, price]; exactly 2 → [item, price] (qty defaults to 1).
 const parseQtyPrice = (rest: any[]): { qty: number; price: number } => {
-  const cells = rest.map(v => String(v ?? '').trim());
+  // Strip thousands-commas so "10,000" → 10000 (not 10).
+  const cells = rest.map(v => String(v ?? '').trim().replace(/,/g, ''));
   let qty = 1, price = 0;
   if (cells.length >= 2 && cells[1] !== '') {
     qty   = parseFloat(cells[0]) || 1;
@@ -1994,12 +1995,48 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
       .map(line => line.trim())
       .filter(Boolean)
       .map((line, i) => {
-        const parts = line.split(/\t|,/);
+        // Prefer tab-splitting so thousands-commas inside numbers (10,000) survive;
+        // only fall back to comma when the line has no tab.
+        const parts = line.includes('\t') ? line.split('\t') : line.split(',');
         const itemNumber = (parts[0] ?? '').trim().toUpperCase();
         const { qty, price } = parseQtyPrice(parts.slice(1));
         return { key: `paste-${i}-${itemNumber}`, itemNumber, qty, price, status: 'pending' as const };
       })
       .filter(r => r.itemNumber);
+  };
+
+  // Parse the pasted text — but if any row has a comma inside its Qty/Price
+  // (e.g. "10,000"), list those rows and ask the user to confirm the fix
+  // (strip the commas) before applying.
+  const handleParseText = () => {
+    const flagged: string[] = [];
+    pasteText.split('\n').map(l => l.trim()).filter(Boolean).forEach(line => {
+      const parts = line.includes('\t') ? line.split('\t') : line.split(',');
+      const numCells = parts.slice(1);
+      // A comma inside a numeric cell only survives tab-split lines; on comma-split
+      // lines a stray comma shows up as extra numeric cells (>2 after the item).
+      const hasInlineComma = line.includes('\t') && numCells.some(c => /\d,\d/.test(String(c)));
+      const commaSplitExtra = !line.includes('\t') && numCells.length > 2;
+      if (hasInlineComma || commaSplitExtra) flagged.push(line);
+    });
+    if (flagged.length > 0) {
+      Modal.confirm({
+        title: `${flagged.length} row(s) contain a comma in the numbers`,
+        width: 620,
+        okText: 'Remove commas & parse',
+        content: (
+          <div style={{ fontSize: 12 }}>
+            <p>These rows have thousands-commas (e.g. <b>10,000</b>) that would be misread. Confirm to strip the commas and parse them as whole numbers.</p>
+            <pre style={{ fontSize: 11, background: '#f5f5f5', padding: 8, borderRadius: 6, maxHeight: 220, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+{flagged.join('\n')}
+            </pre>
+          </div>
+        ),
+        onOk: () => setPastedRows(parsePasteText(pasteText)),
+      });
+      return;
+    }
+    setPastedRows(parsePasteText(pasteText));
   };
 
   const handleParseExcel = (file: File) => {
@@ -2556,14 +2593,6 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                     />
                   </Tooltip>
                   <Button
-                    icon={<MailOutlined />}
-                    disabled={lines.length === 0}
-                    onClick={() => setApprovalOpen(true)}
-                    style={{ background: C.orange, borderColor: C.orange, color: '#fff', fontWeight: 600 }}
-                  >
-                    Send for Approval
-                  </Button>
-                  <Button
                     icon={<FileTextOutlined />}
                     disabled={lines.length === 0}
                     onClick={handleGeneratePDF}
@@ -2588,6 +2617,9 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                       style={{ background: poHeaderId ? C.green : undefined, borderColor: poHeaderId ? C.green : undefined, color: poHeaderId ? '#fff' : undefined, fontWeight: 600 }}>
                       Submit for Approval
                     </Button>
+                  </Tooltip>
+                  <Tooltip title="Close this tab">
+                    <Button icon={<CloseOutlined />} onClick={exit}>Close</Button>
                   </Tooltip>
                 </Space>
               </div>
@@ -3779,10 +3811,7 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                           size="small"
                           style={{ marginTop: 6 }}
                           disabled={!pasteText.trim()}
-                          onClick={() => {
-                            const parsed = parsePasteText(pasteText);
-                            setPastedRows(parsed);
-                          }}
+                          onClick={() => handleParseText()}
                         >
                           Parse Text ({parsePasteText(pasteText).length} rows)
                         </Button>
