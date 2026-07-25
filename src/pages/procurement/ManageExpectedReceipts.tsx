@@ -281,6 +281,21 @@ const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> =
   const [tempLot, setTempLot]               = useState('');
   const [tempSerial, setTempSerial]         = useState(1);
 
+  // Subinventories for the receiving org — subinventories?q=OrganizationCode=<org>.
+  const [subinvs, setSubinvs] = useState<string[]>([]);
+  useEffect(() => {
+    const org = initialLines[0]?.ToOrganizationCode;
+    if (!org) return;
+    fetch(`${FUSION_BASE}/subinventories?q=OrganizationCode=${encodeURIComponent(org)}&onlyData=true&limit=500`, { headers: FUSION_HDRS })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(d => {
+        const items: any[] = Array.isArray(d) ? d : (d.items ?? []);
+        const names = Array.from(new Set(items.map(i => i.SecondaryInventoryName).filter(Boolean))).sort();
+        setSubinvs(names as string[]);
+      })
+      .catch(() => setSubinvs([]));
+  }, [initialLines]);
+
   const handleRefresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -381,6 +396,11 @@ const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> =
   const [receiveResult, setReceiveResult]   = useState<{ status: number; ok: boolean; body: string; summary?: string } | null>(null);
 
   const openReceive = () => {
+    const missing = rcvSelectedKeys.filter(k => !rcvLineData[k]?.subinventory);
+    if (missing.length > 0) {
+      message.error(`Select a Subinventory on ${missing.length} selected line(s) before receiving.`);
+      return;
+    }
     setReceiveBody(buildReceivingJson());
     setReceiveResult(null);
     setReceiveOpen(true);
@@ -465,6 +485,19 @@ const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> =
       } },
     { title: 'UOM', dataIndex: 'UOMCode', key: 'UOMCode', width: 60, align: 'center' as const,
       render: (v: string) => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+    { title: <span><span style={{ color: REDWOOD.primary, marginRight: 2 }}>*</span>Subinventory</span>, key: 'subinventory', width: 170,
+      render: (_: unknown, r: ReceiptLine) => {
+        const k = String(r.DocumentLineId ?? '');
+        const disabled = !rcvSelectedKeys.includes(k);
+        const val = rcvLineData[k]?.subinventory || undefined;
+        return <Select size="small" showSearch allowClear style={{ width: 158 }} disabled={disabled}
+          placeholder="Select subinventory"
+          status={!disabled && !val ? 'error' : undefined}
+          value={val}
+          onChange={v => rcvUpdateField(k, 'subinventory', v || '')}
+          options={subinvs.map(s => ({ label: s, value: s }))}
+          notFoundContent={subinvs.length === 0 ? 'No subinventories' : undefined} />;
+      } },
     { title: 'Lot Number', key: 'lotNumber', width: 200,
       render: (_: unknown, r: ReceiptLine) => {
         const k = String(r.DocumentLineId ?? '');
