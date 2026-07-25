@@ -233,6 +233,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
   const [editMode, setEditMode]       = useState(!!editPoHeaderId);
   const [editLoading, setEditLoading] = useState(false);
   const [savingEdit, setSavingEdit]   = useState(false);
+  const [editJsonOpen, setEditJsonOpen] = useState(false);
 
   // When opened with a loaded PO snapshot or in edit mode, skip the "New Purchase Order" dialog.
   const [showInitModal, setShowInitModal] = useState(!initialPo && !editPoHeaderId);
@@ -931,6 +932,50 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
     return { ...line, chargeAmounts, totalCharges, landedCost, landedUnitPrice, pctChange };
   });
 
+  // Build one Fusion PO line body (with its schedule + distribution). Used for
+  // the whole-PO create and for adding a single line to an existing draft.
+  // includeLineNumber=false lets Fusion auto-number when appending to a draft.
+  const buildLineBody = (l: POLine, includeLineNumber = true): Record<string, any> => {
+    const orgObj = inventoryOrgs.find(o => o.OrganizationCode === header?.shipToOrg);
+    return {
+      ...(includeLineNumber ? { LineNumber: l.lineNum } : {}),
+      LineType:    'Goods',
+      Item:        l.itemNumber,
+      Description: l.description,
+      Quantity:    l.qty,
+      Price:       l.price,
+      UOM:         l.uom,
+      schedules: [{
+        ScheduleNumber:                 1,
+        Quantity:                       l.qty,
+        ShipToLocation:                 header?.shipToOrg,
+        ShipToOrganizationCode:         header?.shipToOrg,
+        ShipToOrganization:             orgObj?.OrganizationName ?? null,
+        ReceiptCloseTolerancePercent:   0,
+        InvoiceMatchOptionCode:         'P',
+        InvoiceMatchOption:             'Order',
+        EarlyReceiptToleranceDays:      0,
+        InvoiceCloseTolerancePercent:   0,
+        LateReceiptToleranceDays:       0,
+        AccrueAtReceiptFlag:            true,
+        InspectionRequiredFlag:         true,
+        ReceiptRequiredFlag:            false,
+        ReceiptRoutingId:               3,
+        ReceiptRouting:                 'Direct delivery',
+        DestinationTypeCode:            l.destinationType === 'Expense' ? 'EXPENSE' : 'INVENTORY',
+        MatchApprovalLevelCode:         '3-Way',
+        MatchApprovalLevel:             '3 Way',
+        RequestedDeliveryDate:          l.needBy ? l.needBy.format('YYYY-MM-DD') : null,
+        distributions: [{
+          DistributionNumber:             1,
+          DeliverToLocation:              header?.shipToOrg,
+          DeliverToLocationCode:          header?.shipToOrg,
+          Quantity:                       l.qty,
+        }],
+      }],
+    };
+  };
+
   const buildFusionBody = (): Record<string, any> | null => {
     if (!header) return null;
     // ORDS returns snake_case: bu_name, business_unit_id
@@ -942,9 +987,6 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
     if (!header.supplierName) { message.error('Supplier is required.'); return null; }
 
     const currencyObj = currencies.find(c => c.code === header.currency);
-
-    // Match the exact structure required by Oracle Fusion draftPurchaseOrders
-    const orgObj = inventoryOrgs.find(o => o.OrganizationCode === header.shipToOrg);
 
     // Conversion rate — only for a foreign currency (AED is functional).
     // Pulled from the fxRate already shown on the page (rate/type/date).
@@ -971,44 +1013,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
       ModeOfTransportCode:       header.shippingMethod     || null,
       BuyerManagedTransportFlag: false,
       SupplierEmailAddress:      header.communicationEmail || null,
-      lines: lines.map(l => ({
-        LineNumber:  l.lineNum,
-        LineType:    'Goods',
-        Item:        l.itemNumber,
-        Description: l.description,
-        Quantity:    l.qty,
-        Price:       l.price,
-        UOM:         l.uom,
-        schedules: [{
-          ScheduleNumber:                 1,
-          Quantity:                       l.qty,
-          ShipToLocation:                 header.shipToOrg,
-          ShipToOrganization:             orgObj?.OrganizationName ?? null,
-          ReceiptCloseTolerancePercent:   0,
-          InvoiceMatchOptionCode:         'P',
-          InvoiceMatchOption:             'Order',
-          EarlyReceiptToleranceDays:      0,
-          InvoiceCloseTolerancePercent:   0,
-          LateReceiptToleranceDays:       0,
-          AccrueAtReceiptFlag:            true,
-          InspectionRequiredFlag:         true,
-          ReceiptRequiredFlag:            false,
-          ReceiptRoutingId:               3,
-          ReceiptRouting:                 'Direct delivery',
-          DestinationTypeCode:            l.destinationType === 'Expense' ? 'EXPENSE' : 'INVENTORY',
-          MatchApprovalLevelCode:         '3-Way',
-          MatchApprovalLevel:             '3 Way',
-          RequestedDeliveryDate:          l.needBy ? l.needBy.format('YYYY-MM-DD') : null,
-          distributions: [{
-            DistributionNumber:              1,
-            DeliverToLocation:              header.shipToOrg,
-            DeliverToLocationId:            null,
-            DeliverToLocationCode:          header.shipToOrg,
-            DeliverToLocationInternalCode:  null,
-            Quantity:                       l.qty,
-          }],
-        }],
-      })),
+      lines: lines.map(l => buildLineBody(l, true)),
     };
   };
 
@@ -1213,16 +1218,17 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
     let added = 0, updated = 0;
     try {
       for (const l of lines.filter(x => x.poLineId == null)) {
-        const body: Record<string, any> = {
-          LineType: 'Goods', Item: l.itemNumber, Description: l.description,
-          Quantity: l.qty, Price: l.price, UOM: l.uom,
-          schedules: [{ ShipToLocation: header?.shipToOrg, Quantity: l.qty,
-            distributions: [{ DistributionNumber: 1, Quantity: l.qty }] }],
-        };
+        const body = buildLineBody(l, false);   // full schedule incl. ShipToOrganization
         const r = await fetch(`${FUSION_BASE}/draftPurchaseOrders/${poHeaderId}/child/lines`, {
           method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
         });
-        if (r.ok) added++; else { const t = await r.text(); errors.push(`Add ${l.itemNumber}: ${t.slice(0, 300)}`); }
+        if (r.ok) {
+          added++;
+          // Stamp the new POLineId so this line is now "saved" and won't re-POST.
+          const rd = await r.json().catch(() => ({} as any));
+          const newId = rd?.POLineId ?? rd?.LineId;
+          if (newId != null) patchLine(l.key, { poLineId: Number(newId) });
+        } else { const t = await r.text(); errors.push(`Add ${l.itemNumber}: ${t.slice(0, 300)}`); }
       }
       for (const l of lines.filter(x => x.poLineId != null)) {
         const body = { Quantity: l.qty, Price: l.price, Description: l.description };
@@ -1232,17 +1238,33 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
         if (r.ok) updated++; else { const t = await r.text(); errors.push(`Update line ${l.lineNum}: ${t.slice(0, 300)}`); }
       }
       if (errors.length) {
+        // Keep the current lines on screen — successful adds now carry a POLineId,
+        // failed ones stay unsaved so they can be fixed and re-saved. No reload.
         Modal.error({ title: `Saved with ${errors.length} error(s) — ${added} added, ${updated} updated`, width: 640,
           content: <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 300, overflow: 'auto' }}>{errors.join('\n\n')}</pre> });
       } else {
         message.success(`Saved to Fusion — ${added} line(s) added, ${updated} updated`);
+        await loadDraftFromFusion(poHeaderId);   // clean reload only on full success
       }
-      await loadDraftFromFusion(poHeaderId);   // refresh ids/state from Fusion
     } catch (e: any) {
       Modal.error({ title: 'Save changes — network error', content: e.message });
     } finally {
       setSavingEdit(false);
     }
+  };
+
+  // The actual Fusion operations "Save Changes" will run, for the Show JSON dialog
+  // in edit mode (POST for new lines, PATCH for existing ones).
+  const buildEditOps = (): { method: string; url: string; body: any }[] => {
+    const ops: { method: string; url: string; body: any }[] = [];
+    lines.filter(l => l.poLineId == null).forEach(l => ops.push({
+      method: 'POST', url: `${FUSION_BASE}/draftPurchaseOrders/${poHeaderId}/child/lines`, body: buildLineBody(l, false),
+    }));
+    lines.filter(l => l.poLineId != null).forEach(l => ops.push({
+      method: 'PATCH', url: `${FUSION_BASE}/draftPurchaseOrders/${poHeaderId}/child/lines/${l.poLineId}`,
+      body: { Quantity: l.qty, Price: l.price, Description: l.description },
+    }));
+    return ops;
   };
 
   // ── Delete the whole PO from Fusion (draft/Incomplete) ──────────────────────
@@ -2598,10 +2620,10 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                     </Dropdown>
                   </Tooltip>
                   <Button danger onClick={() => setDiscardConfirmOpen(true)}>Discard</Button>
-                  <Tooltip title="Show JSON (Oracle Fusion request body)">
+                  <Tooltip title={editMode ? 'Show the Save Changes operations (POST/PATCH per line)' : 'Show JSON (Oracle Fusion create request body)'}>
                     <Button
                       icon={<CodeOutlined />}
-                      onClick={handleCreateInFusion}
+                      onClick={editMode ? () => setEditJsonOpen(true) : handleCreateInFusion}
                       style={{ background: C.blue, borderColor: C.blue, color: '#fff', fontWeight: 600 }}
                     />
                   </Tooltip>
@@ -4130,6 +4152,42 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
             <Button danger type="primary" onClick={() => { setDiscardConfirmOpen(false); exit(); }}>Discard</Button>
           </Space>}>
           <Text>All unsaved changes will be lost. Are you sure?</Text>
+        </Modal>
+
+        {/* ── Edit mode: Save Changes operations (JSON) ─── */}
+        <Modal
+          open={editJsonOpen}
+          title={<Space><CodeOutlined style={{ color: C.blue }} />Save Changes — Fusion Operations</Space>}
+          onCancel={() => setEditJsonOpen(false)}
+          width={820}
+          footer={<Button onClick={() => setEditJsonOpen(false)}>Close</Button>}
+        >
+          {(() => {
+            const ops = buildEditOps();
+            const adds = ops.filter(o => o.method === 'POST').length;
+            const patches = ops.filter(o => o.method === 'PATCH').length;
+            if (ops.length === 0) return <Alert type="info" showIcon message="No line changes to save." />;
+            return (
+              <>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  On Save Changes these run in order — {adds} new line(s) POSTed, {patches} existing line(s) PATCHed. Deletes happen immediately when you remove a line.
+                </Text>
+                <div style={{ marginTop: 10, maxHeight: 460, overflow: 'auto' }}>
+                  {ops.map((o, i) => (
+                    <div key={i} style={{ border: `1px solid ${C.border}`, borderRadius: 6, padding: 10, marginBottom: 8 }}>
+                      <Space size={8}>
+                        <Tag color={o.method === 'POST' ? 'green' : 'gold'} style={{ fontSize: 11 }}>{o.method}</Tag>
+                        <Text style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>{o.url}</Text>
+                      </Space>
+                      <pre style={{ fontSize: 10.5, background: '#0d0d0d', color: '#a8ff78', borderRadius: 4, padding: 8, margin: '6px 0 0', maxHeight: 220, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                        {JSON.stringify(o.body, null, 2)}
+                      </pre>
+                    </div>
+                  ))}
+                </div>
+              </>
+            );
+          })()}
         </Modal>
 
         {/* ── Custom Fusion PO action ─────────────────── */}
