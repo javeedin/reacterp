@@ -175,7 +175,7 @@ async function fetchLinesToReceive(q: string): Promise<ReceiptLine[]> {
   let offset = 0;
   let hasMore = true;
   while (hasMore) {
-    const url = `${FUSION_BASE}/linesToReceive?${qParam}limit=200&offset=${offset}`;
+    const url = `${FUSION_BASE}/linesToReceive?${qParam}limit=500&offset=${offset}`;
     const res = await fetch(url, { headers: FUSION_HDRS });
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
     const data = await res.json();
@@ -184,8 +184,8 @@ async function fetchLinesToReceive(q: string): Promise<ReceiptLine[]> {
       _selfLink: item.links?.find(l => l.name === 'linesToReceive')?.href,
     }));
     all = [...all, ...items];
-    hasMore = items.length === 200;
-    offset += 200;
+    hasMore = items.length === 500;
+    offset += 500;
   }
   return all;
 }
@@ -692,25 +692,30 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
   const [sourceDoc, setSourceDoc] = useState<string>('');
   const [orgs, setOrgs] = useState<{ code: string; name: string }[]>([]);
   const [orgsLoading, setOrgsLoading] = useState(false);
+  const [orgError, setOrgError] = useState('');
   const [dateMode, setDateMode] = useState<DateMode>('none');
 
   // Inventory organizations for the Organization dropdown — same source as the
   // On-Hand Inventory page (inventoryOrganizations web service).
-  useEffect(() => {
-    setOrgsLoading(true);
-    fetch(`${FUSION_BASE}/inventoryOrganizations?limit=500&onlyData=true&fields=OrganizationCode,OrganizationName`, { headers: FUSION_HDRS })
-      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+  const orgsUrl = `${FUSION_BASE}/inventoryOrganizations?onlyData=true&limit=500`;
+  const loadOrgs = useCallback(() => {
+    setOrgsLoading(true); setOrgError('');
+    fetch(orgsUrl, { headers: FUSION_HDRS })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status} ${r.statusText}`)))
       .then(d => {
         const items: any[] = Array.isArray(d) ? d : (d.items ?? []);
         const seen = new Set<string>();
-        setOrgs(items
-          .map(o => ({ code: o.OrganizationCode, name: o.OrganizationName }))
+        const list = items
+          .map(o => ({ code: o.OrganizationCode ?? o.OrganizationCode, name: o.OrganizationName }))
           .filter(o => o.code && !seen.has(o.code) && seen.add(o.code))
-          .sort((a, b) => String(a.code).localeCompare(String(b.code))));
+          .sort((a, b) => String(a.code).localeCompare(String(b.code)));
+        setOrgs(list);
+        if (list.length === 0) setOrgError('inventoryOrganizations returned no rows.');
       })
-      .catch(() => { /* fall back to free typing */ })
+      .catch((e) => setOrgError(e?.message || 'Failed to load organizations'))
       .finally(() => setOrgsLoading(false));
-  }, []);
+  }, [orgsUrl]);
+  useEffect(() => { loadOrgs(); }, [loadOrgs]);
   const [exactDate, setExactDate] = useState<Dayjs | null>(null);
   const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
   const [groups, setGroups] = useState<POGroup[]>([]);
@@ -724,7 +729,7 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
     let q = buildQuery(org, poNum, dateMode, exactDate, dateRange);
     if (sourceDoc.trim()) q = (q ? q + ';' : '') + `SourceDocumentCode='${sourceDoc.trim()}'`;
     const qParam = q ? `q=${encodeURIComponent(q)}&` : '';
-    return `${FUSION_BASE}/linesToReceive?${qParam}limit=200&offset=0`;
+    return `${FUSION_BASE}/linesToReceive?${qParam}limit=500&offset=0`;
   }, [org, poNum, sourceDoc, dateMode, exactDate, dateRange]);
 
   const handleSearch = useCallback(async () => {
@@ -896,19 +901,30 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
           <Row gutter={[12, 0]} align="bottom">
             <Col xs={24} sm={6}>
               <Form.Item label="Organization" style={{ marginBottom: 0 }}>
-                <Select
-                  showSearch
-                  allowClear
-                  size="small"
-                  loading={orgsLoading}
-                  placeholder="Select inventory org"
-                  value={org || undefined}
-                  onChange={v => setOrg(v || '')}
-                  optionFilterProp="label"
-                  style={{ width: '100%' }}
-                  options={orgs.map(o => ({ label: o.name ? `${o.code} — ${o.name}` : o.code, value: o.code }))}
-                  notFoundContent={orgsLoading ? 'Loading…' : 'No organizations'}
-                />
+                {orgs.length > 0 ? (
+                  <Select
+                    showSearch
+                    allowClear
+                    size="small"
+                    loading={orgsLoading}
+                    placeholder="Select inventory org"
+                    value={org || undefined}
+                    onChange={v => setOrg(v || '')}
+                    optionFilterProp="label"
+                    style={{ width: '100%' }}
+                    options={orgs.map(o => ({ label: o.name ? `${o.code} — ${o.name}` : o.code, value: o.code }))}
+                  />
+                ) : (
+                  <Input
+                    placeholder={orgsLoading ? 'Loading orgs…' : 'e.g. AMS_B2B_GHANA'}
+                    value={org}
+                    onChange={e => setOrg(e.target.value)}
+                    onPressEnter={handleSearch}
+                    allowClear
+                    size="small"
+                    suffix={<Tooltip title="Reload org list"><ReloadOutlined spin={orgsLoading} onClick={loadOrgs} style={{ cursor: 'pointer', color: REDWOOD.info }} /></Tooltip>}
+                  />
+                )}
               </Form.Item>
             </Col>
             <Col xs={24} sm={6}>
@@ -1019,13 +1035,23 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
         title={<Space><ApiOutlined style={{ color: REDWOOD.info }} />Fusion Web Service</Space>}
         width={720}
       >
-        <div style={{ fontSize: 12, marginBottom: 8 }}>
-          <Space size={6}><Tag color="blue">GET</Tag><Text type="secondary">Oracle Fusion — linesToReceive (Expected PO Receipts)</Text></Space>
+        <div style={{ fontSize: 12, marginBottom: 6 }}>
+          <Space size={6}><Tag color="blue">GET</Tag><Text type="secondary">Expected receipts — linesToReceive</Text></Space>
         </div>
         <Text copyable style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>{currentUrl}</Text>
-        <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 12 }}>
-          Query params: ToOrganizationCode, DocumentNumber, SourceDocumentCode, DueDate (from the filters above).
-          The Organization dropdown is loaded from <Text code style={{ fontSize: 11 }}>inventoryOrganizations</Text>.
+
+        <div style={{ fontSize: 12, margin: '16px 0 6px', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Space size={6}><Tag color="blue">GET</Tag><Text type="secondary">Organizations dropdown — inventoryOrganizations</Text></Space>
+          <Tag color={orgError ? 'error' : orgsLoading ? 'processing' : 'success'} style={{ fontSize: 10 }}>
+            {orgsLoading ? 'loading…' : orgError ? 'error' : `${orgs.length} orgs`}
+          </Tag>
+          <Button size="small" icon={<ReloadOutlined />} loading={orgsLoading} onClick={loadOrgs} style={{ marginLeft: 'auto' }}>Reload</Button>
+        </div>
+        <Text copyable style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>{orgsUrl}</Text>
+        {orgError && <div style={{ fontSize: 11, color: REDWOOD.primary, marginTop: 6 }}>Org load error: {orgError}</div>}
+
+        <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 14 }}>
+          linesToReceive params: ToOrganizationCode, DocumentNumber, SourceDocumentCode, DueDate (from the filters above).
         </div>
       </Modal>
 
