@@ -3957,6 +3957,10 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                               render: (v: number) => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{fmt(v)}</Text>,
                             },
                             {
+                              title: 'Value', key: 'value', width: 120, align: 'right' as const,
+                              render: (_: any, r: PastedItem) => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: C.red }}>{fmt((Number(r.qty) || 0) * (Number(r.price) || 0))}</Text>,
+                            },
+                            {
                               title: 'Description (matched)', key: 'desc',
                               render: (_: any, r: PastedItem) => r.matchedItem
                                 ? <Text style={{ fontSize: 12 }}>{r.matchedItem.description ?? '—'}</Text>
@@ -3977,6 +3981,21 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                                 : null,
                             },
                           ]}
+                          summary={() => {
+                            const totQty = pastedRows.reduce((s, r) => s + (Number(r.qty) || 0), 0);
+                            const totVal = pastedRows.reduce((s, r) => s + (Number(r.qty) || 0) * (Number(r.price) || 0), 0);
+                            return (
+                              <Table.Summary fixed>
+                                <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 700 }}>
+                                  <Table.Summary.Cell index={0} colSpan={2}><Text strong>Total ({pastedRows.length})</Text></Table.Summary.Cell>
+                                  <Table.Summary.Cell index={2} align="right"><Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(totQty)}</Text></Table.Summary.Cell>
+                                  <Table.Summary.Cell index={3} />
+                                  <Table.Summary.Cell index={4} align="right"><Text strong style={{ fontVariantNumeric: 'tabular-nums', color: C.red }}>{fmt(totVal)} {header?.currency ?? ''}</Text></Table.Summary.Cell>
+                                  <Table.Summary.Cell index={5} colSpan={3} />
+                                </Table.Summary.Row>
+                              </Table.Summary>
+                            );
+                          }}
                         />
                       </div>
                     )}
