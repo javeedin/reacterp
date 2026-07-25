@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Tabs, Tag, Button, Input, Space,
-  Tooltip, Alert, Modal, message, Steps,
+  Tooltip, Alert, Modal, message, Steps, Select,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -22,6 +22,10 @@ const FUSION_BASE = _isElectron
 const AUTH_HEADER = 'Basic ' + btoa('emparun:Fusion@1234');
 const HDRS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
 const ERP_URL = `${FUSION_BASE}/erpintegrations`;
+
+// Scheduler REST lives under /ess/rest (NOT /fscmRestApi). Direct host in Electron.
+const FUSION_HOST = 'https://iacney-test.fa.ocs.oraclecloud.com';
+const SCHEDULER_URL = _isElectron ? `${FUSION_HOST}/ess/rest/scheduler/v1/requests` : '/fusion-ess/requests';
 
 const REDWOOD = {
   primary: '#C74634', info: '#0572CE', success: '#1D7B4D', warning: '#D4A800', error: '#D93025',
@@ -84,8 +88,52 @@ const statusColor = (s: string): string => {
 const CostManagement: React.FC = () => {
   const [steps, setSteps] = useState<CostStep[]>(loadSteps());
   const [jobs, setJobs]   = useState<EssJob[]>([]);
-  const [seq, setSeq]     = useState(0);
   const [checkId, setCheckId] = useState('');
+
+  // ── ESS Monitor (Scheduler REST — list all requests) ────────────────────────
+  const [monRows, setMonRows]       = useState<any[]>([]);
+  const [monLoading, setMonLoading] = useState(false);
+  const [monError, setMonError]     = useState('');
+  const [monState, setMonState]     = useState<string>('');   // '' = all
+  const [monSearch, setMonSearch]   = useState('');
+  const [monDetails, setMonDetails] = useState<Record<string, string>>({});
+
+  const monUrl = SCHEDULER_URL + `?limit=200${monState ? `&state=${monState}` : ''}`;
+
+  const loadMonitor = async () => {
+    setMonLoading(true); setMonError('');
+    try {
+      const res = await fetch(monUrl, { headers: HDRS });
+      const text = await res.text();
+      let data: any = {}; try { data = JSON.parse(text); } catch { /* non-json */ }
+      if (!res.ok) throw new Error(data?.detail ?? data?.message ?? `HTTP ${res.status}`);
+      const items: any[] = data.items ?? data.requests ?? (Array.isArray(data) ? data : []);
+      setMonRows(items);
+      if (items.length === 0) setMonError('No requests returned.');
+    } catch (e: any) {
+      setMonError(e?.message || 'Failed to load ESS requests');
+      setMonRows([]);
+    } finally { setMonLoading(false); }
+  };
+
+  // Per-request detail (list summary has many nulls; detail fills job name etc.)
+  const loadDetail = async (requestId: string | number) => {
+    try {
+      const res = await fetch(`${SCHEDULER_URL}/${requestId}`, { headers: HDRS });
+      const text = await res.text();
+      let pretty = text; try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* keep */ }
+      setMonDetails(prev => ({ ...prev, [String(requestId)]: pretty }));
+    } catch (e: any) {
+      setMonDetails(prev => ({ ...prev, [String(requestId)]: e?.message ?? 'Failed to load detail' }));
+    }
+  };
+
+  const filteredMon = monRows.filter(r => {
+    const q = monSearch.trim().toLowerCase();
+    if (!q) return true;
+    return [r.requestId, r.state, r.stateDescription, r.jobDescription, r.deployedApplicationName, r.executionType]
+      .some(v => v != null && String(v).toLowerCase().includes(q));
+  });
 
   const persist = (next: CostStep[]) => { setSteps(next); localStorage.setItem(STEPS_KEY, JSON.stringify(next)); };
   const updateStep = (key: string, field: keyof CostStep, value: string) =>
@@ -280,6 +328,62 @@ ${JSON.stringify(body, null, 2)}`}
                       <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 10 }}>
                         Submit: <Text code style={{ fontSize: 11 }}>POST {ERP_URL}</Text> · OperationName <Text code>submitESSJobRequest</Text>.
                         Monitor: same endpoint · OperationName <Text code>getESSJobStatus</Text>.
+                      </div>
+                    </>
+                  ),
+                },
+                {
+                  key: 'monitor',
+                  label: <Space size={4}><SearchOutlined />ESS Monitor</Space>,
+                  children: (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                        <Text strong style={{ fontSize: 12 }}>State</Text>
+                        <Select size="small" style={{ width: 150 }} value={monState || 'ALL'}
+                          onChange={v => setMonState(v === 'ALL' ? '' : v)}
+                          options={['ALL', 'RUNNING', 'WAIT', 'READY', 'BLOCKED', 'COMPLETED', 'SUCCEEDED', 'ERROR', 'WARNING', 'CANCELLED', 'HOLD'].map(s => ({ label: s, value: s }))} />
+                        <Input size="small" style={{ width: 200 }} allowClear placeholder="Filter (id, job, state)…"
+                          value={monSearch} onChange={e => setMonSearch(e.target.value)} prefix={<SearchOutlined />} />
+                        <Button size="small" type="primary" icon={<ReloadOutlined />} loading={monLoading}
+                          style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }} onClick={loadMonitor}>
+                          Load requests
+                        </Button>
+                        <span style={{ marginLeft: 'auto' }} />
+                        <Text type="secondary" style={{ fontSize: 11 }}>{filteredMon.length} shown</Text>
+                      </div>
+                      <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 8 }}>
+                        <Tag color="blue" style={{ fontSize: 10 }}>GET</Tag>
+                        <Text copyable style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>{monUrl}</Text>
+                      </div>
+                      {monError && <Alert type="warning" showIcon closable onClose={() => setMonError('')} message={monError} style={{ marginBottom: 10, fontSize: 12 }} />}
+                      <Table
+                        rowKey={(r: any) => String(r.requestId)}
+                        size="small" bordered loading={monLoading}
+                        dataSource={filteredMon}
+                        pagination={{ pageSize: 25, showSizeChanger: true, showTotal: t => `${t} requests` }}
+                        scroll={{ x: 800 }}
+                        onRow={(r: any) => ({ onClick: () => { if (!monDetails[String(r.requestId)]) loadDetail(r.requestId); } })}
+                        expandable={{
+                          onExpand: (expanded, r: any) => { if (expanded && !monDetails[String(r.requestId)]) loadDetail(r.requestId); },
+                          expandedRowRender: (r: any) => (
+                            <pre style={{ fontSize: 10.5, background: '#0d0d0d', color: '#79c0ff', borderRadius: 4, padding: 8, margin: 0, maxHeight: 260, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                              {monDetails[String(r.requestId)] ?? 'Loading detail…'}
+                            </pre>
+                          ),
+                        }}
+                        columns={[
+                          { title: 'Request', dataIndex: 'requestId', width: 120, render: (v: any) => <Text code>{v}</Text> },
+                          { title: 'State', dataIndex: 'state', width: 150, render: (v: string, r: any) => <Tag color={statusColor(v) as any}>{r.stateDescription || v || '—'}</Tag> },
+                          { title: 'Job / Description', key: 'job', ellipsis: true, render: (_: any, r: any) => <Text style={{ fontSize: 12 }}>{r.jobDescription ?? r.description ?? r.deployedApplicationName ?? '—'}</Text> },
+                          { title: 'Type', dataIndex: 'executionType', width: 110, render: (v: string) => v ? <Tag style={{ fontSize: 10 }}>{v}</Tag> : '—' },
+                          { title: 'Error', dataIndex: 'errorTypeDescription', width: 120, render: (v: string) => v ? <Text style={{ fontSize: 11, color: REDWOOD.error }}>{v}</Text> : '—' },
+                          { title: '', key: 'act', width: 80, render: (_: any, r: any) => <Button size="small" icon={<ReloadOutlined />} onClick={(e) => { e.stopPropagation(); loadDetail(r.requestId); }}>Detail</Button> },
+                        ]}
+                        locale={{ emptyText: 'Click “Load requests” to list ESS jobs' }}
+                      />
+                      <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 8 }}>
+                        List: <Text code style={{ fontSize: 11 }}>GET /ess/rest/scheduler/v1/requests</Text> · per-request detail:
+                        <Text code style={{ fontSize: 11 }}> GET …/requests/{'{requestId}'}</Text> (fills job name/params the summary leaves null).
                       </div>
                     </>
                   ),
