@@ -610,6 +610,18 @@ const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> =
                 <div style={{ paddingTop: 10 }}>
                   {/* Toolbar */}
                   <Space style={{ marginBottom: 12, flexWrap: 'wrap' as const }}>
+                    <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Subinventory for all:</Text>
+                    <Select
+                      size="small" showSearch allowClear style={{ width: 190 }}
+                      placeholder="Apply to all lines"
+                      options={subinvs.map(s => ({ label: s, value: s }))}
+                      onChange={v => setRcvLineData(prev => {
+                        const next = { ...prev };
+                        Object.keys(next).forEach(k => { next[k] = { ...next[k], subinventory: (v as string) || '' }; });
+                        return next;
+                      })}
+                      notFoundContent={subinvs.length === 0 ? 'No subinventories' : undefined}
+                    />
                     <Button
                       type="primary"
                       icon={<InboxOutlined />}
