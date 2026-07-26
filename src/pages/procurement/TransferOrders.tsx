@@ -2,13 +2,14 @@ import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Layout, Breadcrumb, Card, Table, Form, Input, Select, DatePicker, Button,
   Tabs, Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal,
-  InputNumber, Empty,
+  InputNumber, Empty, Divider,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, SwapOutlined, SearchOutlined, ReloadOutlined, PlusOutlined,
   DeleteOutlined, ApiOutlined, CopyOutlined, ClearOutlined, EyeOutlined,
   CheckCircleOutlined, EnvironmentOutlined, InfoCircleOutlined, CloudUploadOutlined,
+  UnorderedListOutlined, EditOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -38,6 +39,25 @@ const REDWOOD = {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 const fmtDate = (d?: string) => { if (!d) return '—'; try { return dayjs(d).format('D-MMM-YYYY'); } catch { return d; } };
 const fmtQty = (v?: number | null) => (v == null ? '—' : new Intl.NumberFormat('en-US').format(v));
+const fmtPrice = (v?: number | null, ccy?: string) => {
+  if (v == null) return '—';
+  const s = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v));
+  return ccy ? `${s} ${ccy}` : s;
+};
+
+// Run async fn over items with limited concurrency (avoids hammering Fusion).
+const mapLimit = async <T, R>(items: T[], limit: number, fn: (t: T, i: number) => Promise<R>): Promise<R[]> => {
+  const out: R[] = new Array(items.length);
+  let idx = 0;
+  const worker = async () => {
+    while (idx < items.length) {
+      const cur = idx++;
+      out[cur] = await fn(items[cur], cur);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+};
 
 const fetchAllPages = async (baseUrl: string): Promise<any[]> => {
   const stripped = baseUrl.replace(/[?&]limit=\d+/gi, '').replace(/[?&]offset=\d+/gi, '').replace(/\?&/, '?').replace(/&&/g, '&');
@@ -102,8 +122,8 @@ const orgOptions = (orgs: Org[]) => orgs.map(o => ({
 // ═══════════════════════════════════════════════════════════════════════════
 //  SEARCH TAB
 // ═══════════════════════════════════════════════════════════════════════════
-const SearchTab: React.FC<{ orgsLoading: boolean; orgsUrl: string; reloadOrgs: () => void }> =
-  ({ orgsLoading, orgsUrl, reloadOrgs }) => {
+const SearchTab: React.FC<{ orgsLoading: boolean; orgsUrl: string; reloadOrgs: () => void; onEdit: (headerId: number, headerNumber: string) => void }> =
+  ({ orgsLoading, orgsUrl, reloadOrgs, onEdit }) => {
   const [form] = Form.useForm();
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -165,7 +185,8 @@ const SearchTab: React.FC<{ orgsLoading: boolean; orgsUrl: string; reloadOrgs: (
 
   const columns: ColumnsType<any> = [
     { title: 'Order #', dataIndex: 'HeaderNumber', width: 100, fixed: 'left',
-      render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 13 }}>{v ?? '—'}</Text> },
+      render: (v, r) => <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 13 }}
+        onClick={() => onEdit(r.HeaderId, String(v))}>{v ?? '—'}</Button> },
     { title: 'Business Unit', dataIndex: 'BusinessUnitName', width: 230, ellipsis: true,
       render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
     { title: 'Source', dataIndex: 'SourceOfTransferOrder', width: 190, ellipsis: true,
@@ -544,11 +565,373 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean }> = ({ orgs, or
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
+//  SEARCH LINES TAB — date-driven orders GET, then fan out to each order's lines
+// ═══════════════════════════════════════════════════════════════════════════
+const SearchLinesTab: React.FC<{ onEdit: (headerId: number, headerNumber: string) => void }> = ({ onEdit }) => {
+  const [dateOp, setDateOp] = useState('>');
+  const [date, setDate]     = useState<Dayjs | null>(dayjs().subtract(30, 'day'));
+  const [allLines, setAllLines] = useState<any[]>([]);
+  const [loading, setLoading]   = useState(false);
+  const [progress, setProgress] = useState('');
+  const [searched, setSearched] = useState(false);
+  const [error, setError]       = useState('');
+  const [apiOpen, setApiOpen]   = useState(false);
+
+  // client-side filters over the fetched lines
+  const [fOrder, setFOrder]   = useState('');
+  const [fItem, setFItem]     = useState('');
+  const [fSrc, setFSrc]       = useState<string>();
+  const [fDst, setFDst]       = useState<string>();
+  const [fStatus, setFStatus] = useState<string>();
+  const [fText, setFText]     = useState('');
+
+  const ordersUrl = useMemo(() => {
+    const q = date ? `q=${encodeURIComponent(`OrderedDate${dateOp}${dayjs(date).format('YYYY-MM-DD')}`)}&` : '';
+    return `${FUSION_BASE}/transferOrders?${q}orderBy=OrderedDate:desc&onlyData=true`;
+  }, [date, dateOp]);
+
+  const run = useCallback(async () => {
+    setLoading(true); setError(''); setSearched(true); setAllLines([]); setProgress('Fetching transfer orders…');
+    try {
+      const headers = await fetchAllPages(ordersUrl);
+      if (headers.length === 0) { setError('No transfer orders in this date range.'); setLoading(false); return; }
+      setProgress(`Loading lines for ${headers.length} order${headers.length !== 1 ? 's' : ''}…`);
+      let done = 0;
+      const perOrder = await mapLimit(headers, 6, async (h) => {
+        const link = h.links?.find((l: any) => l.name === 'transferOrderLines')?.href;
+        const base = link ?? `${FUSION_BASE}/transferOrders/${h.HeaderId}/child/transferOrderLines`;
+        try {
+          const lines = await fetchAllPages(base);
+          return lines.map(ln => ({
+            ...ln,
+            _headerId: h.HeaderId,
+            _headerNumber: h.HeaderNumber,
+            _orderedDate: h.OrderedDate,
+            _headerStatus: h.Status,
+          }));
+        } catch { return []; }
+        finally { done += 1; setProgress(`Loading lines… ${done}/${headers.length} orders`); }
+      });
+      const flat = perOrder.flat();
+      setAllLines(flat);
+      if (flat.length === 0) setError('Orders found but no lines returned.');
+    } catch (e: any) {
+      setError(e.message);
+    } finally { setLoading(false); setProgress(''); }
+  }, [ordersUrl]);
+
+  useEffect(() => { run(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const srcOrgOpts = useMemo(() => Array.from(new Set(allLines.map(l => l.SourceOrganizationCode).filter(Boolean))).sort()
+    .map(c => ({ value: c, label: c })), [allLines]);
+  const dstOrgOpts = useMemo(() => Array.from(new Set(allLines.map(l => l.DestinationOrganizationCode).filter(Boolean))).sort()
+    .map(c => ({ value: c, label: c })), [allLines]);
+  const statusOpts = useMemo(() => Array.from(new Set(allLines.map(l => l.TransferOrderLineStatus).filter(Boolean))).sort()
+    .map(c => ({ value: c, label: c })), [allLines]);
+
+  const filtered = useMemo(() => {
+    const t = fText.trim().toLowerCase();
+    return allLines.filter(l =>
+      (!fOrder.trim() || String(l._headerNumber ?? '').toLowerCase().includes(fOrder.trim().toLowerCase())) &&
+      (!fItem.trim() || String(l.ItemNumber ?? '').toLowerCase().includes(fItem.trim().toLowerCase())) &&
+      (!fSrc || l.SourceOrganizationCode === fSrc) &&
+      (!fDst || l.DestinationOrganizationCode === fDst) &&
+      (!fStatus || l.TransferOrderLineStatus === fStatus) &&
+      (!t || JSON.stringify(l).toLowerCase().includes(t))
+    );
+  }, [allLines, fOrder, fItem, fSrc, fDst, fStatus, fText]);
+
+  const totalPrice = filtered.reduce((s, l) => s + (Number(l.TotalTransferPrice) || 0), 0);
+  const ccy = filtered.find(l => l.CurrencyCode)?.CurrencyCode ?? allLines.find(l => l.CurrencyCode)?.CurrencyCode ?? '';
+
+  const columns: ColumnsType<any> = [
+    { title: 'Order #', dataIndex: '_headerNumber', width: 100, fixed: 'left',
+      render: (v, r) => <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 13 }}
+        onClick={() => onEdit(r._headerId, String(v))}>{v ?? '—'}</Button> },
+    { title: 'Line', dataIndex: 'DisplayLineNumber', width: 55, align: 'center', render: (v, r) => <Tag color="blue" style={{ fontSize: 11 }}>{v ?? r.LineNumber ?? '—'}</Tag> },
+    { title: 'Item', dataIndex: 'ItemNumber', width: 120, render: v => <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>{v ?? '—'}</Text> },
+    { title: 'Description', dataIndex: 'ItemDescription', width: 220, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Source Org', width: 150, ellipsis: true,
+      render: (_, r) => <Tooltip title={r.SourceOrganizationName}><Tag color="blue" style={{ fontSize: 11 }}>{r.SourceOrganizationCode ?? '—'}</Tag>
+        <Text style={{ fontSize: 11 }}>{r.SourceSubinventoryCode ? `· ${r.SourceSubinventoryCode}` : ''}</Text></Tooltip> },
+    { title: 'Dest Org', width: 150, ellipsis: true,
+      render: (_, r) => <Tooltip title={r.DestinationOrganizationName}><Tag color="geekblue" style={{ fontSize: 11 }}>{r.DestinationOrganizationCode ?? '—'}</Tag>
+        <Text style={{ fontSize: 11 }}>{r.DestinationSubinventoryCode ? `· ${r.DestinationSubinventoryCode}` : ''}</Text></Tooltip> },
+    { title: 'UOM', dataIndex: 'QuantityUOMCode', width: 60, align: 'center', render: v => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+    { title: 'Requested', dataIndex: 'RequestedQuantity', width: 90, align: 'right', render: fmtQty },
+    { title: 'Shipped', dataIndex: 'ShippedQuantity', width: 80, align: 'right', render: v => <Text style={{ color: (v ?? 0) > 0 ? REDWOOD.success : undefined }}>{fmtQty(v)}</Text> },
+    { title: 'Received', dataIndex: 'ReceivedQuantity', width: 80, align: 'right', render: v => <Text style={{ color: (v ?? 0) > 0 ? REDWOOD.success : undefined }}>{fmtQty(v)}</Text> },
+    { title: 'Delivered', dataIndex: 'DeliveredQuantity', width: 80, align: 'right', render: fmtQty },
+    { title: 'Unit Price', dataIndex: 'UnitPrice', width: 110, align: 'right', render: (v, r) => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{fmtPrice(v, r.CurrencyCode)}</Text> },
+    { title: 'Total Transfer Price', dataIndex: 'TotalTransferPrice', width: 160, align: 'right',
+      render: (v, r) => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: REDWOOD.primary }}>{fmtPrice(v, r.CurrencyCode)}</Text> },
+    { title: 'Fulfillment', dataIndex: 'FulfillStatusMeaning', width: 150, render: v => statusTag(v) },
+    { title: 'Line Status', dataIndex: 'TransferOrderLineStatus', width: 110, render: v => statusTag(v) },
+    { title: 'Need By', dataIndex: 'NeedByDate', width: 115, render: fmtDate },
+    { title: 'Ordered', dataIndex: '_orderedDate', width: 115, render: fmtDate },
+  ];
+
+  return (
+    <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <Card styles={{ body: { padding: '14px 18px' } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
+        <Row gutter={[10, 10]} align="bottom">
+          <Col xs={24} md={7}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Ordered Date (main GET on transfer orders)</div>
+            <Space.Compact style={{ width: '100%' }}>
+              <Select style={{ width: 72 }} value={dateOp} onChange={setDateOp} options={['>', '>=', '=', '<=', '<'].map(o => ({ value: o, label: o }))} />
+              <DatePicker style={{ width: '100%' }} value={date} onChange={setDate} />
+            </Space.Compact>
+          </Col>
+          <Col xs={24} md={17}>
+            <Space wrap>
+              <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={run}
+                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Fetch Orders &amp; Lines</Button>
+              <Tooltip title="API Inspector"><Button icon={<ApiOutlined />} style={{ borderColor: REDWOOD.info, color: REDWOOD.info }} onClick={() => setApiOpen(true)}>API</Button></Tooltip>
+              {loading && progress && <Text type="secondary" style={{ fontSize: 12 }}><Spin size="small" style={{ marginRight: 6 }} />{progress}</Text>}
+            </Space>
+          </Col>
+        </Row>
+        <Divider style={{ margin: '12px 0' }} />
+        <Row gutter={[10, 10]}>
+          <Col xs={12} md={4}><Input placeholder="Order #" allowClear prefix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />} value={fOrder} onChange={e => setFOrder(e.target.value)} /></Col>
+          <Col xs={12} md={4}><Input placeholder="Item" allowClear value={fItem} onChange={e => setFItem(e.target.value)} /></Col>
+          <Col xs={12} md={4}><Select allowClear showSearch placeholder="Source Org" style={{ width: '100%' }} value={fSrc} onChange={setFSrc} options={srcOrgOpts} /></Col>
+          <Col xs={12} md={4}><Select allowClear showSearch placeholder="Dest Org" style={{ width: '100%' }} value={fDst} onChange={setFDst} options={dstOrgOpts} /></Col>
+          <Col xs={12} md={4}><Select allowClear placeholder="Line Status" style={{ width: '100%' }} value={fStatus} onChange={setFStatus} options={statusOpts} /></Col>
+          <Col xs={12} md={4}><Input placeholder="Filter any text…" allowClear value={fText} onChange={e => setFText(e.target.value)} /></Col>
+        </Row>
+      </Card>
+
+      <Card styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
+        title={<Space><UnorderedListOutlined style={{ color: REDWOOD.primary }} /><Text strong>Transfer Order Lines</Text>
+          {allLines.length > 0 && <Tag>{filtered.length} of {allLines.length} line{allLines.length !== 1 ? 's' : ''}</Tag>}
+          {filtered.length > 0 && <Tag color="volcano">Σ {fmtPrice(totalPrice, ccy)}</Tag>}</Space>}
+        extra={<Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={run}>Refresh</Button>}>
+        {loading ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: 50 }}>
+            <Spin size="large" /><Text type="secondary">{progress}</Text>
+          </div>
+        ) : error && allLines.length === 0 ? (
+          <div style={{ padding: 24, color: REDWOOD.error, background: REDWOOD.error + '10', margin: 16, borderRadius: 6 }}><InfoCircleOutlined style={{ marginRight: 8 }} />{error}</div>
+        ) : !searched ? (
+          <Empty description="Fetch orders & lines" style={{ padding: 60 }} />
+        ) : filtered.length === 0 ? (
+          <Empty description="No lines match the filters" style={{ padding: 60 }} />
+        ) : (
+          <Table columns={columns} dataSource={filtered} rowKey={(r, i) => `${r.LineId ?? i}`} size="small"
+            scroll={{ x: 1900 }} pagination={{ pageSize: 50, size: 'small', showSizeChanger: true }}
+            summary={() => (
+              <Table.Summary fixed>
+                <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+                  <Table.Summary.Cell index={0} colSpan={13} align="right"><Text strong>Total Transfer Price</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={1} align="right"><Text strong style={{ color: REDWOOD.primary }}>{fmtPrice(totalPrice, ccy)}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={2} colSpan={3} />
+                </Table.Summary.Row>
+              </Table.Summary>
+            )} />
+        )}
+      </Card>
+
+      <Modal title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /> Search Lines API</Space>} open={apiOpen} onCancel={() => setApiOpen(false)} footer={null} width={860}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>Step 1 — get transfer orders in the date range. Step 2 — for each order, follow its <Text code>transferOrderLines</Text> link.</Text>
+          {[
+            { lbl: '1. Transfer Orders (by date)', url: ordersUrl },
+            { lbl: '2. Lines per order', url: `${FUSION_BASE}/transferOrders/{HeaderId}/child/transferOrderLines` },
+          ].map(({ lbl, url }) => (
+            <div key={lbl}>
+              <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase' }}>{lbl}</Text>
+              <div style={{ marginTop: 4, padding: '8px 12px', borderRadius: 6, background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info }}>
+                <Tag color="blue">GET</Tag>{url}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Modal>
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  EDIT TRANSFER ORDER TAB
+// ═══════════════════════════════════════════════════════════════════════════
+const EditOrderTab: React.FC<{ headerId: number; headerNumber: string; onClose: () => void }> = ({ headerId, headerNumber, onClose }) => {
+  const [header, setHeader]   = useState<any>(null);
+  const [lines, setLines]     = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState('');
+  const [edits, setEdits]     = useState<Record<number, { RequestedQuantity?: number | null; NeedByDate?: string | null }>>({});
+  const [saving, setSaving]   = useState(false);
+  const [result, setResult]   = useState<string>('');
+
+  const headerUrl = `${FUSION_BASE}/transferOrders/${headerId}`;
+  const linesUrl  = `${FUSION_BASE}/transferOrders/${headerId}/child/transferOrderLines`;
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(''); setEdits({}); setResult('');
+    try {
+      const [h, l] = await Promise.all([
+        fetch(headerUrl, { headers: FUSION_HDRS }).then(r => r.ok ? r.json() : Promise.reject(new Error(`Header HTTP ${r.status}`))),
+        fetchAllPages(linesUrl),
+      ]);
+      setHeader(h); setLines(l);
+    } catch (e: any) { setError(e.message); }
+    finally { setLoading(false); }
+  }, [headerUrl, linesUrl]);
+  useEffect(() => { load(); }, [load]);
+
+  const isEditable = (l: any) => !['CLOSED', 'CANCELED', 'CANCELLED'].includes(String(l.StatusLookup ?? '').toUpperCase());
+  const setEdit = (lineId: number, patch: any) => setEdits(p => ({ ...p, [lineId]: { ...p[lineId], ...patch } }));
+  const dirtyLines = Object.entries(edits).filter(([id, e]) => {
+    const orig = lines.find(l => l.LineId === Number(id));
+    if (!orig) return false;
+    const qChanged = e.RequestedQuantity != null && Number(e.RequestedQuantity) !== Number(orig.RequestedQuantity);
+    const dChanged = e.NeedByDate != null && dayjs(e.NeedByDate).format('YYYY-MM-DD') !== dayjs(orig.NeedByDate).format('YYYY-MM-DD');
+    return qChanged || dChanged;
+  });
+
+  const buildLinePayload = (lineId: number) => {
+    const e = edits[lineId]; const orig = lines.find(l => l.LineId === lineId); const body: any = {};
+    if (e?.RequestedQuantity != null && Number(e.RequestedQuantity) !== Number(orig.RequestedQuantity)) body.RequestedQuantity = Number(e.RequestedQuantity);
+    if (e?.NeedByDate != null && dayjs(e.NeedByDate).format('YYYY-MM-DD') !== dayjs(orig.NeedByDate).format('YYYY-MM-DD')) body.NeedByDate = dayjs(e.NeedByDate).format('YYYY-MM-DD');
+    return body;
+  };
+
+  const save = async () => {
+    if (dirtyLines.length === 0) { message.info('No changes to save'); return; }
+    setSaving(true); setResult('');
+    const log: string[] = [];
+    for (const [id] of dirtyLines) {
+      const lineId = Number(id);
+      const body = buildLinePayload(lineId);
+      try {
+        const r = await fetch(`${linesUrl}/${lineId}`, {
+          method: 'PATCH',
+          headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const raw = await r.text();
+        log.push(`Line ${lineId}: HTTP ${r.status} ${r.ok ? 'OK' : ''} — ${JSON.stringify(body)}${r.ok ? '' : '\n' + raw.slice(0, 400)}`);
+      } catch (e: any) { log.push(`Line ${lineId}: ${e.message}`); }
+    }
+    setResult(log.join('\n\n'));
+    setSaving(false);
+    message.success('Save complete — see results');
+    load();
+  };
+
+  const cols: ColumnsType<any> = [
+    { title: 'Line', dataIndex: 'DisplayLineNumber', width: 55, align: 'center', render: (v, r) => <Tag color="blue">{v ?? r.LineNumber}</Tag> },
+    { title: 'Item', dataIndex: 'ItemNumber', width: 120, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text> },
+    { title: 'Description', dataIndex: 'ItemDescription', width: 200, ellipsis: true },
+    { title: 'Source → Dest', width: 150, render: (_, r) => <span><Tag color="blue" style={{ fontSize: 11 }}>{r.SourceOrganizationCode}</Tag><SwapOutlined style={{ margin: '0 2px', color: REDWOOD.neutral600 }} /><Tag color="geekblue" style={{ fontSize: 11 }}>{r.DestinationOrganizationCode}</Tag></span> },
+    { title: 'UOM', dataIndex: 'QuantityUOMCode', width: 60, align: 'center', render: v => <Tag style={{ fontSize: 11 }}>{v}</Tag> },
+    { title: 'Requested Qty', width: 130, align: 'right',
+      render: (_, r) => isEditable(r)
+        ? <InputNumber min={0} size="small" style={{ width: '100%' }} defaultValue={r.RequestedQuantity}
+            onChange={v => setEdit(r.LineId, { RequestedQuantity: v })} />
+        : <Text>{fmtQty(r.RequestedQuantity)}</Text> },
+    { title: 'Shipped', dataIndex: 'ShippedQuantity', width: 80, align: 'right', render: fmtQty },
+    { title: 'Received', dataIndex: 'ReceivedQuantity', width: 80, align: 'right', render: fmtQty },
+    { title: 'Need By', width: 150,
+      render: (_, r) => isEditable(r)
+        ? <DatePicker size="small" style={{ width: '100%' }} defaultValue={r.NeedByDate ? dayjs(r.NeedByDate) : null}
+            onChange={d => setEdit(r.LineId, { NeedByDate: d ? d.toISOString() : null })} />
+        : <Text>{fmtDate(r.NeedByDate)}</Text> },
+    { title: 'Unit Price', dataIndex: 'UnitPrice', width: 110, align: 'right', render: (v, r) => fmtPrice(v, r.CurrencyCode) },
+    { title: 'Total Transfer Price', dataIndex: 'TotalTransferPrice', width: 150, align: 'right', render: (v, r) => <Text strong style={{ color: REDWOOD.primary }}>{fmtPrice(v, r.CurrencyCode)}</Text> },
+    { title: 'Status', dataIndex: 'TransferOrderLineStatus', width: 110, render: v => statusTag(v) },
+  ];
+
+  const HInfo: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
+    <Col xs={12} sm={8} md={6}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase' }}>{label}</div>
+      <div style={{ fontSize: 13, marginTop: 2 }}>{value ?? '—'}</div>
+    </Col>
+  );
+
+  const grandTotal = lines.reduce((s, l) => s + (Number(l.TotalTransferPrice) || 0), 0);
+  const ccy = lines.find(l => l.CurrencyCode)?.CurrencyCode ?? '';
+
+  return (
+    <div style={{ background: REDWOOD.neutral100, minHeight: '100%' }}>
+      <div style={{ background: REDWOOD.surface, padding: '10px 20px', borderBottom: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <SwapOutlined style={{ color: REDWOOD.primary }} />
+        <Text strong style={{ fontSize: 15 }}>Transfer Order {headerNumber}</Text>
+        {header && statusTag(header.Status)}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <Button icon={<ReloadOutlined />} loading={loading} onClick={load}>Refresh</Button>
+          <Button type="primary" icon={<CloudUploadOutlined />} loading={saving} onClick={save}
+            disabled={dirtyLines.length === 0} style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>
+            Save Changes{dirtyLines.length > 0 ? ` (${dirtyLines.length})` : ''}
+          </Button>
+          <Button onClick={onClose}>Close Tab</Button>
+        </div>
+      </div>
+
+      {loading && !header ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Spin size="large" tip="Loading order…" /></div>
+      ) : error ? (
+        <div style={{ padding: 24, color: REDWOOD.error, background: REDWOOD.error + '10', margin: 16, borderRadius: 6 }}><InfoCircleOutlined style={{ marginRight: 8 }} />{error}</div>
+      ) : (
+        <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {header && (
+            <Card size="small" title={<Text strong>Order Details</Text>} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
+              <Row gutter={[12, 12]}>
+                <HInfo label="Order Number" value={<Text strong>{header.HeaderNumber}</Text>} />
+                <HInfo label="Business Unit" value={header.BusinessUnitName} />
+                <HInfo label="Source" value={header.SourceOfTransferOrder} />
+                <HInfo label="Status" value={statusTag(header.Status)} />
+                <HInfo label="Interface Status" value={statusTag(header.InterfaceStatus)} />
+                <HInfo label="Ordered Date" value={fmtDate(header.OrderedDate)} />
+                <HInfo label="Total Transfer Price" value={<Text strong style={{ color: REDWOOD.primary }}>{fmtPrice(header.TotalTransferPrice ?? grandTotal, ccy)}</Text>} />
+                <HInfo label="Created By" value={header.CreatedBy} />
+              </Row>
+            </Card>
+          )}
+
+          <Card size="small" styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
+            title={<Space><UnorderedListOutlined style={{ color: REDWOOD.primary }} /><Text strong>Lines</Text><Tag>{lines.length}</Tag>
+              <Tag color="volcano">Σ {fmtPrice(grandTotal, ccy)}</Tag></Space>}>
+            <Table columns={cols} dataSource={lines} rowKey={(r, i) => `${r.LineId ?? i}`} size="small" pagination={false} scroll={{ x: 1400 }} />
+          </Card>
+
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            <InfoCircleOutlined style={{ marginRight: 6 }} />
+            Editable fields (Requested Qty, Need-By) PATCH to <Text code>{linesUrl}/{'{LineId}'}</Text>. Closed/canceled lines are read-only.
+          </Text>
+
+          {result && (
+            <div>
+              <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase' }}>Save Results</Text>
+              <div style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 12, borderRadius: 6, fontFamily: 'monospace', fontSize: 11, maxHeight: 260, overflow: 'auto', whiteSpace: 'pre-wrap', marginTop: 4 }}>{result}</div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  PAGE
 // ═══════════════════════════════════════════════════════════════════════════
+interface EditTab { id: string; headerId: number; headerNumber: string }
+
 const TransferOrders: React.FC = () => {
   const { orgs, loading: orgsLoading, load: reloadOrgs, url: orgsUrl } = useOrgs();
   const [tab, setTab] = useState('search');
+  const [editTabs, setEditTabs] = useState<EditTab[]>([]);
+
+  const openEdit = (headerId: number, headerNumber: string) => {
+    const id = `edit-${headerId}`;
+    setEditTabs(prev => prev.find(t => t.id === id) ? prev : [...prev, { id, headerId, headerNumber }]);
+    setTab(id);
+  };
+  const closeEdit = (id: string) => {
+    setEditTabs(prev => prev.filter(t => t.id !== id));
+    setTab('lines');
+  };
 
   return (
     <Layout style={{ minHeight: 'calc(100vh - 64px)', background: REDWOOD.neutral100 }}>
@@ -567,19 +950,36 @@ const TransferOrders: React.FC = () => {
         <Tabs
           activeKey={tab}
           onChange={setTab}
+          type="editable-card"
+          hideAdd
+          onEdit={(key, action) => { if (action === 'remove') closeEdit(String(key)); }}
           style={{ background: REDWOOD.surface }}
           tabBarStyle={{ margin: 0, paddingLeft: 16, borderBottom: `2px solid ${REDWOOD.neutral200}` }}
           items={[
             {
               key: 'search',
               label: <span><SearchOutlined style={{ marginRight: 6 }} />Search Orders</span>,
-              children: <SearchTab orgsLoading={orgsLoading} orgsUrl={orgsUrl} reloadOrgs={reloadOrgs} />,
+              closable: false,
+              children: <SearchTab orgsLoading={orgsLoading} orgsUrl={orgsUrl} reloadOrgs={reloadOrgs} onEdit={openEdit} />,
+            },
+            {
+              key: 'lines',
+              label: <span><UnorderedListOutlined style={{ marginRight: 6 }} />Search Lines</span>,
+              closable: false,
+              children: <SearchLinesTab onEdit={openEdit} />,
             },
             {
               key: 'new',
               label: <span><PlusOutlined style={{ marginRight: 6 }} />New Transfer Order</span>,
+              closable: false,
               children: <NewOrderTab orgs={orgs} orgsLoading={orgsLoading} />,
             },
+            ...editTabs.map(t => ({
+              key: t.id,
+              label: <span><EditOutlined style={{ marginRight: 6, color: REDWOOD.primary }} />Edit {t.headerNumber}</span>,
+              closable: true,
+              children: <EditOrderTab headerId={t.headerId} headerNumber={t.headerNumber} onClose={() => closeEdit(t.id)} />,
+            })),
           ]}
         />
       </Content>
