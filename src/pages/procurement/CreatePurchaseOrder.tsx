@@ -632,22 +632,80 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
      item ↔ inventory-org assignment. Status is tracked per line. */
   const [bulkAssignOrg, setBulkAssignOrg] = useState<string | undefined>();
   const [bulkAssigning, setBulkAssigning] = useState(false);
+  const [assignApiOpen, setAssignApiOpen]     = useState(false);
+  const [assignApiLoading, setAssignApiLoading] = useState(false);
+  const [assignApiTitle, setAssignApiTitle]   = useState('');
+  const [assignApiBody, setAssignApiBody]     = useState<any>(null);
+  const [assignApiMaster, setAssignApiMaster] = useState<any>(null);
 
   const patchLine = (key: string, patch: Partial<POLine>) =>
     setLines(prev => prev.map(l => l.key === key ? { ...l, ...patch } : l));
+
+  // Master-org item attributes to copy onto the child-org assignment. Sales
+  // Account is the headline; the rest are safe org-level attributes/flags.
+  const COPY_ITEM_ATTRS = [
+    'SalesAccountId', 'CostOfSaleAccountId', 'ExpenseAccountId', 'EncumbranceAccountId',
+    'ItemClass', 'PrimaryUOMValue', 'ItemStatusValue', 'LifecyclePhaseValue',
+    'InventoryItemFlag', 'StockEnabledFlag', 'TransactionEnabledFlag', 'ReservableFlag',
+    'PurchasingItemFlag', 'PurchasableFlag', 'CustomerOrderEnabledFlag', 'CustomerOrderFlag',
+    'InternalOrderEnabledFlag', 'InternalOrderFlag', 'ShippableItemFlag', 'InvoiceEnabledFlag',
+    'InvoicedFlag', 'InventoryAssetFlag', 'CostingEnabledFlag', 'IncludeInRollupFlag',
+    'ListPrice', 'MarketPrice', 'UnitWeight', 'UnitVolume', 'AllowSubstituteReceiptsFlag',
+  ];
+
+  // Read the item's master definition (the row that carries the Sales Account).
+  const fetchMasterItem = async (itemNumber: string): Promise<Record<string, any> | null> => {
+    try {
+      const url = `${FUSION_BASE}/itemsV2?q=ItemNumber='${encodeURIComponent(itemNumber)}'&limit=50&onlyData=true`;
+      const r = await fetch(url, { headers: FUSION_HDRS });
+      if (!r.ok) return null;
+      const d = await r.json().catch(() => ({} as any));
+      const items: any[] = d.items ?? [];
+      if (items.length === 0) return null;
+      // Prefer the row that has a Sales Account (the master definition); else first.
+      return items.find(i => i.SalesAccountId != null) ?? items[0];
+    } catch { return null; }
+  };
+
+  // Build the itemsV2 assignment body for a line, copying master-org attributes.
+  const buildAssignBody = (org: string, line: POLine, master: Record<string, any> | null): Record<string, any> => {
+    const copied: Record<string, any> = {};
+    if (master) COPY_ITEM_ATTRS.forEach(a => { if (master[a] != null && master[a] !== '') copied[a] = master[a]; });
+    return {
+      OrganizationCode: org,
+      ItemNumber: line.itemNumber,
+      ItemDescription: master?.ItemDescription || line.description || line.itemNumber,
+      ItemClass: master?.ItemClass || 'Root Item Class',
+      ...copied,
+    };
+  };
+
+  // Show the exact itemsV2 URL + JSON payload (incl. copied master attributes).
+  const previewAssign = async (line: POLine) => {
+    const org = line.assignOrg;
+    if (!org) { message.warning(`Pick an inventory org for ${line.itemNumber} first`); return; }
+    setAssignApiTitle(`${line.itemNumber} → ${org}`);
+    setAssignApiOpen(true);
+    setAssignApiLoading(true);
+    setAssignApiBody(null); setAssignApiMaster(null);
+    const master = await fetchMasterItem(line.itemNumber);
+    setAssignApiMaster(master);
+    setAssignApiBody(buildAssignBody(org, line, master));
+    setAssignApiLoading(false);
+  };
 
   const assignItemToOrg = async (line: POLine): Promise<boolean> => {
     const org = line.assignOrg;
     if (!org) { message.warning(`Pick an inventory org for ${line.itemNumber} first`); return false; }
     if (!line.itemNumber) { message.warning('Line has no item number'); return false; }
-    patchLine(line.key, { assignStatus: 'pending', assignMsg: '' });
-    // itemsV2 create-in-org payload. ItemClass may need to match your setup.
-    const body: Record<string, any> = {
-      OrganizationCode: org,
-      ItemNumber: line.itemNumber,
-      ItemDescription: line.description || line.itemNumber,
-      ItemClass: 'Root Item Class',
-    };
+    patchLine(line.key, { assignStatus: 'pending', assignMsg: 'Reading master item…' });
+
+    // Pull the master-org attributes (incl. Sales Account) to carry to the child org.
+    const master = await fetchMasterItem(line.itemNumber);
+    const copied: Record<string, any> = {};
+    if (master) COPY_ITEM_ATTRS.forEach(a => { if (master[a] != null && master[a] !== '') copied[a] = master[a]; });
+
+    const body = buildAssignBody(org, line, master);
     try {
       const r = await fetch(`${FUSION_BASE}/itemsV2`, {
         method: 'POST',
@@ -661,8 +719,9 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
         message.error(`Assign ${line.itemNumber} → ${org} failed: ${msg}`, 6);
         return false;
       }
-      patchLine(line.key, { assignStatus: 'success', assignMsg: `Assigned to ${org}` });
-      message.success(`Item ${line.itemNumber} assigned to ${org}`);
+      const salesAcct = copied.SalesAccountId != null ? ` (Sales Acct ${copied.SalesAccountId})` : '';
+      patchLine(line.key, { assignStatus: 'success', assignMsg: `Assigned to ${org}${salesAcct}` });
+      message.success(`Item ${line.itemNumber} assigned to ${org}${master ? ` with ${Object.keys(copied).length} master attribute(s)` : ''}`);
       return true;
     } catch (e: any) {
       patchLine(line.key, { assignStatus: 'error', assignMsg: e.message });
@@ -2303,6 +2362,9 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
           onChange={val => patchLine(r.key, { assignOrg: val, assignStatus: 'idle', assignMsg: '' })} />
         <Button size="small" type="primary" ghost loading={r.assignStatus === 'pending'} disabled={!r.assignOrg}
           onClick={() => assignItemToOrg(r)}>Assign</Button>
+        <Tooltip title="Show assignment JSON (itemsV2)">
+          <Button size="small" type="text" icon={<ApiOutlined />} disabled={!r.assignOrg} onClick={() => previewAssign(r)} />
+        </Tooltip>
         {r.assignStatus === 'success' && <Tooltip title={r.assignMsg}><CheckCircleOutlined style={{ color: C.green }} /></Tooltip>}
         {r.assignStatus === 'error'   && <Tooltip title={r.assignMsg}><CloseCircleOutlined style={{ color: C.red }} /></Tooltip>}
       </Space>
@@ -4275,6 +4337,35 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                   );
                 })}
               </div>
+            </>
+          )}
+        </Modal>
+
+        {/* ── Assign to Org — itemsV2 payload preview ─── */}
+        <Modal
+          open={assignApiOpen}
+          onCancel={() => setAssignApiOpen(false)}
+          width={760}
+          title={<Space><ApiOutlined style={{ color: C.blue }} />Assign Item — itemsV2 ({assignApiTitle})</Space>}
+          footer={<Button onClick={() => setAssignApiOpen(false)}>Close</Button>}
+        >
+          <div style={{ fontSize: 12, marginBottom: 6 }}>
+            <Space size={6}><Tag color="green">POST</Tag><Text type="secondary">Assign item to inventory org (copies master-org attributes)</Text></Space>
+          </div>
+          <Text copyable style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>{`${FUSION_BASE}/itemsV2`}</Text>
+          {assignApiLoading ? (
+            <div style={{ textAlign: 'center', padding: 24 }}><Text type="secondary">Reading master item…</Text></div>
+          ) : (
+            <>
+              {assignApiMaster
+                ? <Alert type="success" showIcon style={{ margin: '10px 0', fontSize: 12 }}
+                    message={`Master attributes found — Sales Account: ${assignApiMaster.SalesAccountId ?? '—'}`} />
+                : <Alert type="warning" showIcon style={{ margin: '10px 0', fontSize: 12 }}
+                    message="No master item found — posting base attributes only (Sales Account not copied)." />}
+              <div style={{ fontSize: 12, fontWeight: 600, margin: '8px 0 4px' }}>Request Body (JSON)</div>
+              <pre style={{ fontSize: 11, background: '#0d0d0d', color: '#a8ff78', borderRadius: 4, padding: 10, maxHeight: 340, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                {assignApiBody ? JSON.stringify(assignApiBody, null, 2) : '(no body)'}
+              </pre>
             </>
           )}
         </Modal>
