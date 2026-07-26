@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Layout, Breadcrumb, Card, Table, Form, Input, Select, DatePicker, Button,
   Tabs, Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal,
-  InputNumber, Empty, Divider,
+  InputNumber, Empty, Divider, Segmented,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -552,6 +552,7 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
 
   // Item search/picker (scoped to the source org) → fills a line.
   const [pickerLine, setPickerLine] = useState<number | null>(null);
+  const [pickerField, setPickerField] = useState<'ItemNumber' | 'ItemDescription'>('ItemNumber');
   const [pickerText, setPickerText] = useState('');
   const [pickerRows, setPickerRows] = useState<any[]>([]);
   const [pickerLoading, setPickerLoading] = useState(false);
@@ -661,12 +662,12 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
     setPickerLine(lineKey); setPickerText(seedText); setPickerRows([]); setPickerErr('');
   };
 
-  // Build an itemsV2 search URL. ItemNumber uses a trailing wildcard (prefix
-  // match — leading "*" is unreliable), description uses a contains match.
-  // `org` optionally scopes to an inventory organization.
+  // Build an itemsV2 search URL. Fusion here uses SQL LIKE with single quotes
+  // and % wildcards (e.g. ItemNumber LIKE '167815%'). ItemNumber is a prefix
+  // match; description is a contains match. `org` scopes to an inventory org.
   const itemSearchUrl = (field: 'ItemNumber' | 'ItemDescription', text: string, org?: string) => {
-    const wild = field === 'ItemNumber' ? `${text}*` : `*${text}*`;
-    const q = (org ? `OrganizationCode=${org};` : '') + `${field} like "${wild}"`;
+    const pattern = field === 'ItemNumber' ? `${text}%` : `%${text}%`;
+    const q = (org ? `OrganizationCode=${org};` : '') + `${field} LIKE '${pattern}'`;
     return `${FUSION_BASE}/itemsV2?q=${encodeURIComponent(q)}&limit=100&onlyData=true`;
   };
 
@@ -691,9 +692,9 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
     if (!t) { message.info('Enter a code or description to search'); return; }
     setPickerLoading(true); setPickerErr(''); setPickerRows([]);
 
-    // 1) org-scoped search; 2) fall back to the item master if nothing found.
-    const orgUrls = [itemSearchUrl('ItemDescription', t, srcOrg), itemSearchUrl('ItemNumber', t, srcOrg)];
-    const masterUrls = [itemSearchUrl('ItemDescription', t), itemSearchUrl('ItemNumber', t)];
+    // Search only the chosen field. 1) org-scoped; 2) fall back to item master.
+    const orgUrls = [itemSearchUrl(pickerField, t, srcOrg)];
+    const masterUrls = [itemSearchUrl(pickerField, t)];
     setPickerUrls(orgUrls);
     try {
       let { rows, anyOk, err } = await runItemQueries(orgUrls);
@@ -1110,12 +1111,19 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
       <Modal
         title={<Space><SearchOutlined style={{ color: REDWOOD.info }} /> Find Item in <Tag color="blue">{srcOrg ?? 'source org'}</Tag></Space>}
         open={pickerLine != null} onCancel={() => setPickerLine(null)} footer={null} width={820}>
-        <Space.Compact style={{ width: '100%', marginBottom: 10 }}>
-          <Input autoFocus placeholder="Search by item code or description…" value={pickerText}
-            onChange={e => setPickerText(e.target.value)} onPressEnter={searchItems} allowClear />
-          <Button type="primary" icon={<SearchOutlined />} loading={pickerLoading} onClick={searchItems}
-            style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Search</Button>
-        </Space.Compact>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+          <Segmented
+            value={pickerField}
+            onChange={v => setPickerField(v as any)}
+            options={[{ label: 'Item Number', value: 'ItemNumber' }, { label: 'Description', value: 'ItemDescription' }]}
+          />
+          <Space.Compact style={{ flex: 1, minWidth: 260 }}>
+            <Input autoFocus placeholder={pickerField === 'ItemNumber' ? 'Item code starts with…' : 'Description contains…'}
+              value={pickerText} onChange={e => setPickerText(e.target.value)} onPressEnter={searchItems} allowClear />
+            <Button type="primary" icon={<SearchOutlined />} loading={pickerLoading} onClick={searchItems}
+              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Search</Button>
+          </Space.Compact>
+        </div>
         {pickerErr && <div style={{ color: REDWOOD.error, fontSize: 12, marginBottom: 8 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{pickerErr}</div>}
         {pickerLoading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
           : pickerRows.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Enter a code or description and search" style={{ padding: 30 }} />
