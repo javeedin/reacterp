@@ -511,8 +511,11 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
   const [dstSub, setDstSub]   = useState<string>();
   const [needBy, setNeedBy]   = useState<Dayjs | null>(dayjs().add(3, 'day'));
   const [ifaceCode, setIfaceCode] = useState('EXT');
+  const [procStatus, setProcStatus] = useState('IN_PROCESS');
+  const [orderSource, setOrderSource] = useState('EXT');
   const [lines, setLines]     = useState<NewLine[]>([{ key: 1, itemNumber: '', quantity: null, uom: 'Ea' }]);
   const seqRef = React.useRef(1);
+  const sampleBatchRef = React.useRef(`RE${Date.now()}`);
 
   const [srcSubs, setSrcSubs] = useState<string[]>([]);
   const [dstSubs, setDstSubs] = useState<string[]>([]);
@@ -554,10 +557,19 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
 
   const validLines = lines.filter(l => l.itemNumber.trim() && (l.quantity ?? 0) > 0);
 
-  const payload = useMemo(() => ({
+  // Build the Supply Chain Orchestration (supplyRequests) payload. Header and
+  // lines both carry InterfaceBatchNumber; SCO also requires ProcessStatus,
+  // SupplyRequestDate and SupplyOrderSource. There is NO SupplyRequestLineNumber.
+  const buildPayload = (batchNo: string) => ({
     InterfaceSourceCode: ifaceCode || 'EXT',
-    supplyRequestLines: validLines.map((l, i) => ({
-      SupplyRequestLineNumber: i + 1,
+    InterfaceBatchNumber: batchNo,
+    ProcessStatus: procStatus || 'IN_PROCESS',
+    SupplyRequestDate: dayjs().toISOString(),
+    SupplyOrderSource: orderSource || 'EXT',
+    ProcessRequestFlag: 'Y',
+    supplyRequestLines: validLines.map((l) => ({
+      InterfaceBatchNumber: batchNo,
+      ProcessStatus: procStatus || 'IN_PROCESS',
       SupplyType: 'TRANSFER',
       DestinationTypeCode: 'INVENTORY',
       SourceOrganizationCode: srcOrg,
@@ -569,7 +581,8 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
       ...(srcSub ? { SourceSubinventoryCode: srcSub } : {}),
       ...(dstSub ? { DestinationSubinventoryCode: dstSub } : {}),
     })),
-  }), [ifaceCode, validLines, srcOrg, dstOrg, needBy, srcSub, dstSub]);
+  });
+  const payload = buildPayload(sampleBatchRef.current);   // for preview
 
   const postUrl = `${FUSION_BASE}/supplyRequests`;
 
@@ -600,10 +613,11 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
       onOk: async () => {
         setSubmitting(true); setResult(null);
         try {
+          const body = buildPayload(`RE${Date.now()}`);   // unique batch per submission
           const r = await fetch(postUrl, {
             method: 'POST',
             headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
+            body: JSON.stringify(body),
           });
           const raw = await r.text();
           let pretty = raw; try { pretty = JSON.stringify(JSON.parse(raw), null, 2); } catch { /* keep raw */ }
@@ -660,15 +674,27 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
               options={dstSubs.map(s => ({ value: s, label: s }))}
               notFoundContent={dstSubs.length === 0 ? 'No subinventories' : undefined} />
           </Col>
-          <Col xs={24} md={7} style={{ marginTop: 10 }}>
+          <Col xs={24} md={6} style={{ marginTop: 10 }}>
             <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Need-By Date</div>
             <DatePicker style={{ width: '100%' }} value={needBy} onChange={setNeedBy} />
           </Col>
-          <Col xs={24} md={5} style={{ marginTop: 10 }}>
+          <Col xs={12} md={6} style={{ marginTop: 10 }}>
             <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Interface Source</div>
             <Input value={ifaceCode} onChange={e => setIfaceCode(e.target.value)} placeholder="EXT" />
           </Col>
+          <Col xs={12} md={6} style={{ marginTop: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Supply Order Source</div>
+            <Input value={orderSource} onChange={e => setOrderSource(e.target.value)} placeholder="EXT" />
+          </Col>
+          <Col xs={12} md={6} style={{ marginTop: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Process Status</div>
+            <Input value={procStatus} onChange={e => setProcStatus(e.target.value)} placeholder="IN_PROCESS" />
+          </Col>
         </Row>
+        <div style={{ marginTop: 10, fontSize: 11, color: REDWOOD.neutral600 }}>
+          <InfoCircleOutlined style={{ marginRight: 6 }} />
+          Sent to Supply Chain Orchestration with a unique <b>InterfaceBatchNumber</b>, <b>ProcessRequestFlag=Y</b> and today's <b>SupplyRequestDate</b>. Adjust Process Status / sources only if your instance expects different values.
+        </div>
         {srcOrg && dstOrg && srcOrg === dstOrg && (
           <div style={{ marginTop: 10, color: REDWOOD.error, fontSize: 12 }}>
             <InfoCircleOutlined style={{ marginRight: 6 }} />Source and destination organizations must be different.
