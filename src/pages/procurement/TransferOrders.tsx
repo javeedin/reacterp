@@ -1021,7 +1021,8 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
       <Modal
         title={<Space><EnvironmentOutlined style={{ color: REDWOOD.info }} /> On-Hand Matrix
           <Tag color="blue">{srcOrg ?? 'Source'}</Tag><SwapOutlined style={{ color: REDWOOD.neutral600 }} /><Tag color="geekblue">{dstOrg ?? 'Dest'}</Tag></Space>}
-        open={ohOpen} onCancel={() => setOhOpen(false)} footer={null} width={900}>
+        open={ohOpen} onCancel={() => setOhOpen(false)} maskClosable={false} width={900}
+        footer={<Button onClick={() => setOhOpen(false)}>Close</Button>}>
         {ohLoading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" tip="Loading on-hand…" /></div>
           : ohRows.length === 0 ? <Empty description="No items" style={{ padding: 30 }} />
           : (
@@ -1072,7 +1073,8 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
       {/* ── Item cost (source vs destination) ──────────────────────────── */}
       <Modal
         title={<Space><DollarOutlined style={{ color: REDWOOD.primary }} /> Item Cost — {costItem}</Space>}
-        open={!!costItem} onCancel={() => setCostItem(null)} footer={null} width={820}>
+        open={!!costItem} onCancel={() => setCostItem(null)} maskClosable={false} width={820}
+        footer={<Button onClick={() => setCostItem(null)}>Close</Button>}>
         {costLoading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div> : (
           <Row gutter={[14, 14]}>
             {[
@@ -1090,10 +1092,13 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
                     </div>
                     <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 8 }}>Unit cost{rows.length > 1 ? ` · ${rows.length} rows` : ''}</div>
                     {rows.length > 0 && (
-                      <Table size="small" pagination={false} dataSource={rows} rowKey={(_, i) => `c-${i}`} scroll={{ y: 200 }}
+                      <Table size="small" pagination={false} dataSource={rows} rowKey={(_, i) => `c-${i}`} scroll={{ x: 460, y: 220 }}
                         columns={[
-                          { title: 'Valuation Unit', dataIndex: 'ValuationUnit', ellipsis: true, render: v => <Text style={{ fontSize: 11 }}>{v ?? '—'}</Text> },
-                          { title: 'Unit Cost', width: 100, align: 'right', render: (_, r) => <Text style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>{fmtPrice(pickCost(r), r.CurrencyCode)}</Text> },
+                          { title: 'Cost Org', width: 90, render: (_, r) => { const p = parseVU(r.ValuationUnit); return <Text strong style={{ fontSize: 11 }}>{p.costOrg || '—'}</Text>; } },
+                          { title: 'Inv Org', width: 80, render: (_, r) => { const p = parseVU(r.ValuationUnit); return <Text style={{ fontSize: 11 }}>{p.invOrg || '—'}</Text>; } },
+                          { title: 'Subinv', width: 90, render: (_, r) => { const p = parseVU(r.ValuationUnit); return p.subinv ? <Tag color="cyan" style={{ fontSize: 10 }}>{p.subinv}</Tag> : '—'; } },
+                          { title: 'Lot', width: 110, ellipsis: true, render: (_, r) => { const p = parseVU(r.ValuationUnit); return p.lot ? <Tag color="geekblue" style={{ fontSize: 10 }}>{p.lot}</Tag> : '—'; } },
+                          { title: 'Unit Cost', width: 110, align: 'right', fixed: 'right', render: (_, r) => <Text strong style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>{fmtPrice(pickCost(r), r.CurrencyCode)}</Text> },
                         ]} />
                     )}
                   </Card>
@@ -1110,7 +1115,7 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
       {/* ── Item search / picker (source org) ──────────────────────────── */}
       <Modal
         title={<Space><SearchOutlined style={{ color: REDWOOD.info }} /> Find Item in <Tag color="blue">{srcOrg ?? 'source org'}</Tag></Space>}
-        open={pickerLine != null} onCancel={() => setPickerLine(null)} footer={null} width={820}>
+        open={pickerLine != null} onCancel={() => setPickerLine(null)} maskClosable={false} footer={null} width={820}>
         <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
           <Segmented
             value={pickerField}
