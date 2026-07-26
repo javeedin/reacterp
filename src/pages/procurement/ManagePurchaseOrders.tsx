@@ -234,8 +234,12 @@ const PODetailPage: React.FC<{ po: RawPO; onClose?: () => void; onEdit?: (po: Ra
   const [lcDetail, setLcDetail]       = useState<{ kind: string; rec: any } | null>(null);
   const [lcApiOpen, setLcApiOpen]     = useState(false);
 
-  const lcReceiptsUrl = `${BASE_URL}/purchaseOrderLifecycleDetails/${po.POHeaderId}/child/receipts`;
-  const lcInvoicesUrl = `${BASE_URL}/purchaseOrderLifecycleDetails/${po.POHeaderId}/child/invoices`;
+  // Fusion's canonical resource name capitalises the C (LifeCycle); some
+  // versions/docs use a lowercase c. Try the canonical form first, fall back.
+  const LC_RESOURCES = ['purchaseOrderLifeCycleDetails', 'purchaseOrderLifecycleDetails'];
+  const lcUrl = (resource: string, child: string) => `${BASE_URL}/${resource}/${po.POHeaderId}/child/${child}`;
+  const [lcReceiptsUrl, setLcReceiptsUrl] = useState(lcUrl(LC_RESOURCES[0], 'receipts'));
+  const [lcInvoicesUrl, setLcInvoicesUrl] = useState(lcUrl(LC_RESOURCES[0], 'invoices'));
 
   // Pull first non-empty value across a list of candidate field names.
   const pickField = (rec: any, keys: string[]) => {
@@ -246,24 +250,39 @@ const PODetailPage: React.FC<{ po: RawPO; onClose?: () => void; onEdit?: (po: Ra
     return undefined;
   };
 
+  // Fetch a life-cycle child, trying each resource-name casing until one is
+  // not a 404. Returns the working URL plus the items.
+  const fetchLcChild = useCallback(async (child: string): Promise<{ url: string; items: any[] }> => {
+    let lastErr: any = null;
+    for (const resource of LC_RESOURCES) {
+      const url = lcUrl(resource, child);
+      try {
+        const items = await fetchAllPages(url);
+        return { url, items };
+      } catch (e: any) {
+        lastErr = e;
+        // Only fall through on 404 (wrong casing / not found); rethrow others.
+        if (!String(e?.message ?? '').includes('404')) throw e;
+      }
+    }
+    throw lastErr ?? new Error('Not found');
+  }, [po.POHeaderId]);
+
   const fetchLifecycle = useCallback(async () => {
     setLcLoading(true); setLcError(null);
     const errors: string[] = [];
-    try {
-      const [recRes, invRes] = await Promise.allSettled([
-        fetchAllPages(lcReceiptsUrl),
-        fetchAllPages(lcInvoicesUrl),
-      ]);
-      if (recRes.status === 'fulfilled') setLcReceipts(recRes.value);
-      else errors.push(`Receipts: ${(recRes as any).reason?.message ?? 'failed'}`);
-      if (invRes.status === 'fulfilled') setLcInvoices(invRes.value);
-      else errors.push(`Invoices: ${(invRes as any).reason?.message ?? 'failed'}`);
-      setLcFetched(true);
-      if (errors.length > 0) setLcError(errors.join(' | '));
-    } catch (e: any) {
-      setLcError(e.message);
-    } finally { setLcLoading(false); }
-  }, [lcReceiptsUrl, lcInvoicesUrl]);
+    const [recRes, invRes] = await Promise.allSettled([
+      fetchLcChild('receipts'),
+      fetchLcChild('invoices'),
+    ]);
+    if (recRes.status === 'fulfilled') { setLcReceipts(recRes.value.items); setLcReceiptsUrl(recRes.value.url); }
+    else errors.push(`Receipts: ${(recRes as any).reason?.message ?? 'failed'}`);
+    if (invRes.status === 'fulfilled') { setLcInvoices(invRes.value.items); setLcInvoicesUrl(invRes.value.url); }
+    else errors.push(`Invoices: ${(invRes as any).reason?.message ?? 'failed'}`);
+    setLcFetched(true);
+    if (errors.length > 0) setLcError(errors.join(' | '));
+    setLcLoading(false);
+  }, [fetchLcChild]);
 
   // When opened via the Life Cycle icon in Search Orders, auto-load and scroll to it.
   const lcFetchedRef = useRef(false);
