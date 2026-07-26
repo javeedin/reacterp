@@ -184,6 +184,7 @@ const SearchTab: React.FC<{ orgsLoading: boolean; orgsUrl: string; reloadOrgs: (
   }, [lineCache, lineLoading]);
 
   const columns: ColumnsType<any> = [
+    { title: 'Ordered Date', dataIndex: 'OrderedDate', width: 130, fixed: 'left', render: fmtDate },
     { title: 'Order #', dataIndex: 'HeaderNumber', width: 100, fixed: 'left',
       render: (v, r) => <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 13 }}
         onClick={() => onEdit(r.HeaderId, String(v))}>{v ?? '—'}</Button> },
@@ -194,7 +195,6 @@ const SearchTab: React.FC<{ orgsLoading: boolean; orgsUrl: string; reloadOrgs: (
         <Text style={{ fontSize: 12 }}>{v ?? ''}</Text></Tooltip> },
     { title: 'Status', dataIndex: 'Status', width: 100, render: v => statusTag(v) },
     { title: 'Interface Status', dataIndex: 'InterfaceStatus', width: 170, render: v => statusTag(v) },
-    { title: 'Ordered Date', dataIndex: 'OrderedDate', width: 130, render: fmtDate },
     { title: 'Total Transfer Price', dataIndex: 'TotalTransferPrice', width: 150, align: 'right',
       render: (v, r) => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: REDWOOD.primary }}>
         {v == null ? '—' : new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v)) + (r.CurrencyCode ? ` ${r.CurrencyCode}` : '')}
