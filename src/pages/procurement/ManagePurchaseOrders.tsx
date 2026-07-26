@@ -206,7 +206,8 @@ const buildQParam = (p: SearchParams): string => {
 };
 
 // ── PO Detail Page (shown as a tab) ─────────────────────────────────────────
-const PODetailPage: React.FC<{ po: RawPO; onClose?: () => void; onEdit?: (po: RawPO) => void }> = ({ po, onClose, onEdit }) => {
+const PODetailPage: React.FC<{ po: RawPO; onClose?: () => void; onEdit?: (po: RawPO) => void; lifecycleSignal?: number }> = ({ po, onClose, onEdit, lifecycleSignal }) => {
+  const lifeCycleRef = useRef<HTMLDivElement>(null);
   const [lines, setLines]           = useState<POLine[]>([]);
   const [linesLoading, setLL]       = useState(false);
   const [linesError, setLE]         = useState<string | null>(null);
@@ -263,6 +264,16 @@ const PODetailPage: React.FC<{ po: RawPO; onClose?: () => void; onEdit?: (po: Ra
       setLcError(e.message);
     } finally { setLcLoading(false); }
   }, [lcReceiptsUrl, lcInvoicesUrl]);
+
+  // When opened via the Life Cycle icon in Search Orders, auto-load and scroll to it.
+  const lcFetchedRef = useRef(false);
+  useEffect(() => { lcFetchedRef.current = lcFetched; }, [lcFetched]);
+  useEffect(() => {
+    if (!lifecycleSignal) return;
+    if (!lcFetchedRef.current) fetchLifecycle();
+    const t = setTimeout(() => lifeCycleRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
+    return () => clearTimeout(t);
+  }, [lifecycleSignal, fetchLifecycle]);
 
   const doFetch = useCallback(async (url: string) => {
     setLL(true); setLE(null); setRawResp('');
@@ -887,6 +898,7 @@ ${po.NoteToSupplier ? `<div class="sec">Notes</div><div class="fv">${po.NoteToSu
         </Card>
 
         {/* ── Life Cycle (receipts / invoices / returns) ─────────────────── */}
+        <div ref={lifeCycleRef} style={{ scrollMarginTop: 12 }} />
         <Card
           styles={{ body: { padding: 0 } }}
           style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}
@@ -1157,7 +1169,7 @@ ${po.NoteToSupplier ? `<div class="sec">Notes</div><div class="fv">${po.NoteToSu
 };
 
 // ── Search Tab ───────────────────────────────────────────────────────────────
-const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => void }> = ({ onOpen, onEdit }) => {
+const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => void; onLifeCycle: (po: RawPO) => void }> = ({ onOpen, onEdit, onLifeCycle }) => {
   const [form] = Form.useForm();
   const [data, setData]             = useState<RawPO[]>([]);
   const [loading, setLoading]       = useState(false);
@@ -1387,7 +1399,7 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
       defaultSortOrder: 'descend' as const,
     },
     {
-      title: '', key: 'actions', width: 128, fixed: 'right', align: 'center',
+      title: '', key: 'actions', width: 168, fixed: 'right', align: 'center',
       render: (_: unknown, rec: RawPO) => (
         <Space size={4}>
           {String(rec.StatusCode ?? '').toUpperCase().includes('INCOMPLETE') && (
@@ -1396,6 +1408,10 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
                 style={{ borderColor: REDWOOD.primary, color: REDWOOD.primary, borderRadius: 4, fontSize: 11 }} />
             </Tooltip>
           )}
+          <Tooltip title="Life Cycle — receipts, invoices & returns for this order">
+            <Button size="small" icon={<HistoryOutlined />} onClick={() => onLifeCycle(rec)}
+              style={{ borderColor: REDWOOD.primary, color: REDWOOD.primary, borderRadius: 4, fontSize: 11 }} />
+          </Tooltip>
           <Button size="small" type="primary" icon={<EyeOutlined />} onClick={() => onOpen(rec)}
             style={{ background: REDWOOD.info, borderColor: REDWOOD.info, borderRadius: 4, fontSize: 11 }}>
             Open
@@ -2308,12 +2324,20 @@ const ManagePurchaseOrders: React.FC = () => {
   const createSeqRef = useRef(0);
   const loadPoInputRef = useRef<HTMLInputElement>(null);
 
+  const [lcSignals, setLcSignals] = useState<Record<number, number>>({});
+
   const handleOpen = (po: RawPO) => {
     const key = String(po.POHeaderId);
     if (!openPOs.find(p => p.POHeaderId === po.POHeaderId)) {
       setOpenPOs(prev => [...prev, po]);
     }
     setActiveTab(key);
+  };
+
+  // Open the PO and jump straight to its Life Cycle section.
+  const handleOpenLifecycle = (po: RawPO) => {
+    handleOpen(po);
+    setLcSignals(prev => ({ ...prev, [po.POHeaderId]: (prev[po.POHeaderId] ?? 0) + 1 }));
   };
 
   const handleCloseTab = (key: string) => {
@@ -2375,7 +2399,7 @@ const ManagePurchaseOrders: React.FC = () => {
           <SearchOutlined style={{ fontSize: 13 }} /> Search Orders
         </span>
       ),
-      children: <SearchTab onOpen={handleOpen} onEdit={openEditPO} />,
+      children: <SearchTab onOpen={handleOpen} onEdit={openEditPO} onLifeCycle={handleOpenLifecycle} />,
       closable: false,
     },
     {
@@ -2430,7 +2454,7 @@ const ManagePurchaseOrders: React.FC = () => {
           </span>
         </span>
       ),
-      children: <PODetailPage po={po} onClose={() => handleCloseTab(String(po.POHeaderId))} onEdit={openEditPO} />,
+      children: <PODetailPage po={po} onClose={() => handleCloseTab(String(po.POHeaderId))} onEdit={openEditPO} lifecycleSignal={lcSignals[po.POHeaderId] ?? 0} />,
       closable: true,
     })),
   ];
