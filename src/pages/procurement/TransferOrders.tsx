@@ -528,7 +528,7 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
   const [payloadOpen, setPayloadOpen] = useState(false);
 
   // Per-line item info: description + on-hand qty in source & destination orgs.
-  const [info, setInfo] = useState<Record<number, { desc?: string; srcQoh?: number | null; dstQoh?: number | null; loading?: boolean }>>({});
+  const [info, setInfo] = useState<Record<number, { desc?: string; srcQoh?: number | null; dstQoh?: number | null; srcErr?: string; dstErr?: string; loading?: boolean }>>({});
   // On-hand drill-down modal + item-cost modal.
   const [drill, setDrill] = useState<{ item: string; org: string; label: string } | null>(null);
   const [drillRows, setDrillRows] = useState<any[]>([]);
@@ -543,25 +543,40 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
   const itemCostUrl = (org: string, item: string) => `${LATEST_URL}/itemCosts?q=${encodeURIComponent(`ItemNumber=${item};OrganizationCode like "${org}*"`)}&limit=500`;
   const itemDescUrl = (item: string) => `${FUSION_BASE}/itemsV2?q=ItemNumber='${encodeURIComponent(item)}'&limit=1&onlyData=true`;
 
-  const sumQoh = (json: any) => (json && Array.isArray(json.items)) ? json.items.reduce((s: number, x: any) => s + (Number(x.PrimaryQuantity) || 0), 0) : null;
+  // Sum PrimaryQuantity for an item in one org. Throws on HTTP error so the
+  // caller can distinguish "0 on hand" (returns 0) from "lookup failed".
+  const fetchQoh = async (org: string, item: string): Promise<number> => {
+    const r = await fetch(onhandUrl(org, item), { headers: FUSION_HDRS });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    const items: any[] = Array.isArray(d.items) ? d.items : [];
+    return items.reduce((s, x) => s + (Number(x.PrimaryQuantity) || 0), 0);
+  };
 
-  // Fetch description + source/destination on-hand for one line.
+  // Fetch description + source/destination on-hand for one line. A failed
+  // on-hand call keeps the previous value (so a transient error can't wipe a
+  // good number) and records the error for a tooltip.
   const loadLineInfo = useCallback(async (key: number, item: string) => {
     const it = item.trim();
     if (!it) { setInfo(p => ({ ...p, [key]: {} })); return; }
     setInfo(p => ({ ...p, [key]: { ...p[key], loading: true } }));
     const [descR, srcR, dstR] = await Promise.allSettled([
       fetch(itemDescUrl(it), { headers: FUSION_HDRS }).then(r => r.json()),
-      srcOrg ? fetch(onhandUrl(srcOrg, it), { headers: FUSION_HDRS }).then(r => r.json()) : Promise.resolve(null),
-      dstOrg ? fetch(onhandUrl(dstOrg, it), { headers: FUSION_HDRS }).then(r => r.json()) : Promise.resolve(null),
+      srcOrg ? fetchQoh(srcOrg, it) : Promise.resolve(null),
+      dstOrg ? fetchQoh(dstOrg, it) : Promise.resolve(null),
     ]);
     const desc = descR.status === 'fulfilled' ? descR.value?.items?.[0]?.ItemDescription : undefined;
-    setInfo(p => ({ ...p, [key]: {
-      desc,
-      srcQoh: srcR.status === 'fulfilled' ? sumQoh(srcR.value) : null,
-      dstQoh: dstR.status === 'fulfilled' ? sumQoh(dstR.value) : null,
-      loading: false,
-    } }));
+    setInfo(p => {
+      const prev = p[key] ?? {};
+      return { ...p, [key]: {
+        desc: desc ?? prev.desc,
+        srcQoh: srcR.status === 'fulfilled' ? srcR.value : (prev.srcQoh ?? null),
+        dstQoh: dstR.status === 'fulfilled' ? dstR.value : (prev.dstQoh ?? null),
+        srcErr: srcR.status === 'rejected' ? String((srcR as any).reason?.message ?? 'failed') : undefined,
+        dstErr: dstR.status === 'rejected' ? String((dstR as any).reason?.message ?? 'failed') : undefined,
+        loading: false,
+      } };
+    });
   }, [srcOrg, dstOrg]);
 
   // Re-pull on-hand for all lines when either org changes.
@@ -730,20 +745,28 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
         : <Text style={{ fontSize: 12, color: info[r.key]?.desc ? REDWOOD.neutral900 : REDWOOD.neutral300 }}>{info[r.key]?.desc ?? '—'}</Text> },
     { title: <Tooltip title="On-hand in source org — click to drill to detail">Source QOH</Tooltip>, width: 110, align: 'right',
       render: (_, r) => {
-        const q = info[r.key]?.srcQoh;
-        if (info[r.key]?.loading) return <Spin size="small" />;
-        if (!srcOrg || !r.itemNumber.trim() || q == null) return <Text type="secondary">—</Text>;
+        const i = info[r.key]; const q = i?.srcQoh;
+        if (i?.loading) return <Spin size="small" />;
+        if (!srcOrg || !r.itemNumber.trim()) return <Text type="secondary">—</Text>;
+        if (i?.srcErr) return <Tooltip title={`On-hand lookup failed: ${i.srcErr}`}><Text type="danger" style={{ cursor: 'help' }}>err</Text></Tooltip>;
+        if (q == null) return <Text type="secondary">—</Text>;
         return <a onClick={() => openDrill(r.itemNumber, srcOrg, `Source · ${srcOrg}`)}
-          style={{ fontVariantNumeric: 'tabular-nums', color: (q ?? 0) > 0 ? REDWOOD.success : REDWOOD.error, fontWeight: 600 }}>{fmtQty(q)}</a>;
+          style={{ fontVariantNumeric: 'tabular-nums', color: q > 0 ? REDWOOD.success : REDWOOD.error, fontWeight: 600 }}>{fmtQty(q)}</a>;
       } },
     { title: <Tooltip title="On-hand in destination org — click to drill to detail">Dest QOH</Tooltip>, width: 110, align: 'right',
       render: (_, r) => {
-        const q = info[r.key]?.dstQoh;
-        if (info[r.key]?.loading) return <Spin size="small" />;
-        if (!dstOrg || !r.itemNumber.trim() || q == null) return <Text type="secondary">—</Text>;
+        const i = info[r.key]; const q = i?.dstQoh;
+        if (i?.loading) return <Spin size="small" />;
+        if (!dstOrg || !r.itemNumber.trim()) return <Text type="secondary">—</Text>;
+        if (i?.dstErr) return <Tooltip title={`On-hand lookup failed: ${i.dstErr}`}><Text type="danger" style={{ cursor: 'help' }}>err</Text></Tooltip>;
+        if (q == null) return <Text type="secondary">—</Text>;
         return <a onClick={() => openDrill(r.itemNumber, dstOrg, `Destination · ${dstOrg}`)}
-          style={{ fontVariantNumeric: 'tabular-nums', color: (q ?? 0) > 0 ? REDWOOD.success : REDWOOD.warning, fontWeight: 600 }}>{fmtQty(q)}</a>;
+          style={{ fontVariantNumeric: 'tabular-nums', color: q > 0 ? REDWOOD.success : REDWOOD.warning, fontWeight: 600 }}>{fmtQty(q)}</a>;
       } },
+    { title: '', width: 34, align: 'center',
+      render: (_, r) => r.itemNumber.trim()
+        ? <Tooltip title="Reload description & on-hand"><Button size="small" type="text" icon={<ReloadOutlined />} onClick={() => loadLineInfo(r.key, r.itemNumber)} /></Tooltip>
+        : null },
     { title: 'Cost', width: 70, align: 'center',
       render: (_, r) => r.itemNumber.trim()
         ? <Tooltip title="Item cost in source & destination orgs"><a onClick={() => openCost(r.itemNumber)}><DollarOutlined style={{ color: REDWOOD.primary }} /></a></Tooltip>
@@ -825,7 +848,7 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
           <Button size="small" icon={<PlusOutlined />} onClick={addLine}>Add Line</Button>
           <Button size="small" icon={<ClearOutlined />} onClick={clearLines}>Clear</Button>
         </Space>}>
-        <Table columns={lineColumns} dataSource={lines} rowKey="key" size="small" pagination={false} scroll={{ x: 1120 }} />
+        <Table columns={lineColumns} dataSource={lines} rowKey="key" size="small" pagination={false} scroll={{ x: 1160 }} />
       </Card>
 
       <Card styles={{ body: { padding: '14px 18px' } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
