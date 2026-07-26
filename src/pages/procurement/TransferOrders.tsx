@@ -102,8 +102,8 @@ const orgOptions = (orgs: Org[]) => orgs.map(o => ({
 // ═══════════════════════════════════════════════════════════════════════════
 //  SEARCH TAB
 // ═══════════════════════════════════════════════════════════════════════════
-const SearchTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; orgsUrl: string; reloadOrgs: () => void }> =
-  ({ orgs, orgsLoading, orgsUrl, reloadOrgs }) => {
+const SearchTab: React.FC<{ orgsLoading: boolean; orgsUrl: string; reloadOrgs: () => void }> =
+  ({ orgsLoading, orgsUrl, reloadOrgs }) => {
   const [form] = Form.useForm();
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -113,24 +113,26 @@ const SearchTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; orgsUrl: string; 
   const [lineCache, setLineCache] = useState<Record<number, any[]>>({});
   const [lineLoading, setLineLoading] = useState<Record<number, boolean>>({});
 
-  const [filters, setFilters] = useState<{ header?: string; src?: string; dst?: string; status?: string; dateOp?: string; date?: Dayjs | null }>({
-    dateOp: '>=', date: dayjs().subtract(30, 'day'),
+  const [filters, setFilters] = useState<{ header?: string; bu?: string; status?: string; iface?: string; dateOp?: string; date?: Dayjs | null }>({
+    dateOp: '>', date: dayjs().subtract(30, 'day'),
   });
 
+  // NOTE: the transferOrders header has no org fields (source/destination org
+  // live on the lines). Dates are filtered UNQUOTED, e.g. OrderedDate>2026-04-06.
   const buildQ = useCallback((f: typeof filters) => {
     const parts: string[] = [];
-    if (f.header?.trim()) parts.push(`HeaderNumber LIKE "${f.header.trim()}*"`);
-    if (f.src) parts.push(`SourceOrganizationCode="${f.src}"`);
-    if (f.dst) parts.push(`DestinationOrganizationCode="${f.dst}"`);
+    if (f.header?.trim()) parts.push(`HeaderNumber="${f.header.trim()}"`);
+    if (f.bu?.trim()) parts.push(`BusinessUnitName LIKE "${f.bu.trim()}*"`);
     if (f.status) parts.push(`Status="${f.status}"`);
-    if (f.date) parts.push(`CreationDate${f.dateOp || '>='}"${dayjs(f.date).format('YYYY-MM-DD')}"`);
+    if (f.iface?.trim()) parts.push(`InterfaceStatus LIKE "${f.iface.trim()}*"`);
+    if (f.date) parts.push(`OrderedDate${f.dateOp || '>'}${dayjs(f.date).format('YYYY-MM-DD')}`);
     return parts.join(';');
   }, []);
 
   const searchUrl = useMemo(() => {
     const q = buildQ(filters);
     const qs = q ? `q=${encodeURIComponent(q)}&` : '';
-    return `${FUSION_BASE}/transferOrders?${qs}orderBy=CreationDate:desc&onlyData=true&limit=200`;
+    return `${FUSION_BASE}/transferOrders?${qs}orderBy=OrderedDate:desc&onlyData=true&limit=200`;
   }, [filters, buildQ]);
 
   const runSearch = useCallback(async () => {
@@ -162,33 +164,40 @@ const SearchTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; orgsUrl: string; 
   }, [lineCache, lineLoading]);
 
   const columns: ColumnsType<any> = [
-    { title: 'Order #', dataIndex: 'HeaderNumber', width: 130, fixed: 'left',
+    { title: 'Order #', dataIndex: 'HeaderNumber', width: 100, fixed: 'left',
       render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 13 }}>{v ?? '—'}</Text> },
-    { title: 'Source Org', width: 180, ellipsis: true,
-      render: (_, r) => <span><Tag color="blue" style={{ fontSize: 11 }}>{r.SourceOrganizationCode ?? '—'}</Tag>
-        <Text style={{ fontSize: 12 }}>{r.SourceOrganizationName ?? ''}</Text></span> },
-    { title: '', width: 34, align: 'center', render: () => <SwapOutlined style={{ color: REDWOOD.neutral600 }} /> },
-    { title: 'Destination Org', width: 180, ellipsis: true,
-      render: (_, r) => <span><Tag color="geekblue" style={{ fontSize: 11 }}>{r.DestinationOrganizationCode ?? '—'}</Tag>
-        <Text style={{ fontSize: 12 }}>{r.DestinationOrganizationName ?? ''}</Text></span> },
-    { title: 'Status', dataIndex: 'Status', width: 140, render: v => statusTag(v) },
-    { title: 'Source Type', dataIndex: 'InterfaceSourceCode', width: 110, render: v => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+    { title: 'Business Unit', dataIndex: 'BusinessUnitName', width: 230, ellipsis: true,
+      render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Source', dataIndex: 'SourceOfTransferOrder', width: 190, ellipsis: true,
+      render: (v, r) => <Tooltip title={v}><Tag color="purple" style={{ fontSize: 11 }}>{r.SourceTypeLookup ?? '—'}</Tag>
+        <Text style={{ fontSize: 12 }}>{v ?? ''}</Text></Tooltip> },
+    { title: 'Status', dataIndex: 'Status', width: 100, render: v => statusTag(v) },
+    { title: 'Interface Status', dataIndex: 'InterfaceStatus', width: 170, render: v => statusTag(v) },
+    { title: 'Ordered Date', dataIndex: 'OrderedDate', width: 130, render: fmtDate },
+    { title: 'Total Transfer Price', dataIndex: 'TotalTransferPrice', width: 150, align: 'right',
+      render: (v, r) => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: REDWOOD.primary }}>
+        {v == null ? '—' : new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v)) + (r.CurrencyCode ? ` ${r.CurrencyCode}` : '')}
+      </Text> },
+    { title: 'Created By', dataIndex: 'CreatedBy', width: 110, render: v => v ?? '—' },
     { title: 'Created', dataIndex: 'CreationDate', width: 120, render: fmtDate },
   ];
 
+  const pick = (r: any, keys: string[]) => { for (const k of keys) { const v = r?.[k]; if (v != null && v !== '') return v; } return undefined; };
   const lineColumns: ColumnsType<any> = [
     { title: 'Line', dataIndex: 'LineNumber', width: 55, align: 'center', render: v => <Tag color="blue" style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
-    { title: 'Item', dataIndex: 'ItemNumber', width: 140, render: v => <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>{v ?? '—'}</Text> },
-    { title: 'Description', dataIndex: 'ItemDescription', ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
-    { title: 'UOM', dataIndex: 'UOMCode', width: 70, align: 'center', render: (v, r) => <Tag style={{ fontSize: 11 }}>{v ?? r.UnitOfMeasure ?? '—'}</Tag> },
-    { title: 'Requested Qty', dataIndex: 'Quantity', width: 110, align: 'right', render: (v, r) => fmtQty(v ?? r.RequestedQuantity) },
-    { title: 'Shipped', dataIndex: 'ShippedQuantity', width: 90, align: 'right', render: v => <Text style={{ color: (v ?? 0) > 0 ? REDWOOD.success : undefined }}>{fmtQty(v)}</Text> },
-    { title: 'Received', dataIndex: 'ReceivedQuantity', width: 90, align: 'right', render: v => <Text style={{ color: (v ?? 0) > 0 ? REDWOOD.success : undefined }}>{fmtQty(v)}</Text> },
-    { title: 'Src Subinv', dataIndex: 'SourceSubinventoryCode', width: 110, render: v => v ?? '—' },
-    { title: 'Dst Subinv', dataIndex: 'DestinationSubinventoryCode', width: 110, render: v => v ?? '—' },
-    { title: 'Requested Ship', dataIndex: 'RequestedShipDate', width: 130, render: fmtDate },
-    { title: 'Requested Delivery', dataIndex: 'RequestedDeliveryDate', width: 140, render: fmtDate },
-    { title: 'Status', dataIndex: 'Status', width: 130, render: v => statusTag(v) },
+    { title: 'Item', width: 140, render: (_, r) => <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>{pick(r, ['ItemNumber', 'Item']) ?? '—'}</Text> },
+    { title: 'Description', width: 220, ellipsis: true, render: (_, r) => <Text style={{ fontSize: 12 }}>{pick(r, ['ItemDescription', 'Description']) ?? '—'}</Text> },
+    { title: 'Source Org', width: 130, render: (_, r) => <Tag color="blue" style={{ fontSize: 11 }}>{pick(r, ['SourceOrganizationCode', 'SourceOrganization', 'ShipFromOrganizationCode']) ?? '—'}</Tag> },
+    { title: 'Dest Org', width: 130, render: (_, r) => <Tag color="geekblue" style={{ fontSize: 11 }}>{pick(r, ['DestinationOrganizationCode', 'DestinationOrganization', 'ShipToOrganizationCode']) ?? '—'}</Tag> },
+    { title: 'UOM', width: 70, align: 'center', render: (_, r) => <Tag style={{ fontSize: 11 }}>{pick(r, ['UOMCode', 'UOMName', 'UnitOfMeasure', 'UOM']) ?? '—'}</Tag> },
+    { title: 'Requested Qty', width: 110, align: 'right', render: (_, r) => fmtQty(pick(r, ['Quantity', 'RequestedQuantity', 'OrderedQuantity'])) },
+    { title: 'Shipped', width: 90, align: 'right', render: (_, r) => { const v = pick(r, ['ShippedQuantity', 'QuantityShipped']); return <Text style={{ color: (Number(v) || 0) > 0 ? REDWOOD.success : undefined }}>{fmtQty(v)}</Text>; } },
+    { title: 'Received', width: 90, align: 'right', render: (_, r) => { const v = pick(r, ['ReceivedQuantity', 'QuantityReceived']); return <Text style={{ color: (Number(v) || 0) > 0 ? REDWOOD.success : undefined }}>{fmtQty(v)}</Text>; } },
+    { title: 'Src Subinv', width: 110, render: (_, r) => pick(r, ['SourceSubinventoryCode', 'SourceSubinventory']) ?? '—' },
+    { title: 'Dst Subinv', width: 110, render: (_, r) => pick(r, ['DestinationSubinventoryCode', 'DestinationSubinventory']) ?? '—' },
+    { title: 'Requested Ship', width: 130, render: (_, r) => fmtDate(pick(r, ['RequestedShipDate', 'ScheduledShipDate'])) },
+    { title: 'Requested Delivery', width: 140, render: (_, r) => fmtDate(pick(r, ['RequestedDeliveryDate', 'RequestedArrivalDate'])) },
+    { title: 'Status', width: 120, render: (_, r) => statusTag(pick(r, ['Status', 'StatusCode'])) },
   ];
 
   return (
@@ -202,32 +211,30 @@ const SearchTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; orgsUrl: string; 
                   onChange={e => setFilters(f => ({ ...f, header: e.target.value }))} onPressEnter={runSearch} />
               </Form.Item>
             </Col>
-            <Col xs={24} sm={12} md={5}>
-              <Form.Item label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Source Organization</Text>} style={{ marginBottom: 8 }}>
-                <Select showSearch allowClear placeholder="Any" loading={orgsLoading} options={orgOptions(orgs)}
-                  optionFilterProp="label" value={filters.src}
-                  onChange={v => setFilters(f => ({ ...f, src: v }))} />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12} md={5}>
-              <Form.Item label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Destination Organization</Text>} style={{ marginBottom: 8 }}>
-                <Select showSearch allowClear placeholder="Any" loading={orgsLoading} options={orgOptions(orgs)}
-                  optionFilterProp="label" value={filters.dst}
-                  onChange={v => setFilters(f => ({ ...f, dst: v }))} />
+            <Col xs={24} sm={12} md={6}>
+              <Form.Item label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Business Unit</Text>} style={{ marginBottom: 8 }}>
+                <Input placeholder="Business unit name" allowClear value={filters.bu}
+                  onChange={e => setFilters(f => ({ ...f, bu: e.target.value }))} onPressEnter={runSearch} />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12} md={4}>
               <Form.Item label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Status</Text>} style={{ marginBottom: 8 }}>
                 <Select allowClear placeholder="Any" value={filters.status}
                   onChange={v => setFilters(f => ({ ...f, status: v }))}
-                  options={['Open', 'Closed', 'Canceled', 'Interfaced', 'Pending'].map(s => ({ value: s, label: s }))} />
+                  options={['Open', 'Closed', 'Canceled'].map(s => ({ value: s, label: s }))} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12} md={4}>
+              <Form.Item label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Interface Status</Text>} style={{ marginBottom: 8 }}>
+                <Input placeholder="e.g. Interfaced" allowClear value={filters.iface}
+                  onChange={e => setFilters(f => ({ ...f, iface: e.target.value }))} onPressEnter={runSearch} />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12} md={6}>
-              <Form.Item label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Creation Date</Text>} style={{ marginBottom: 8 }}>
+              <Form.Item label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Ordered Date</Text>} style={{ marginBottom: 8 }}>
                 <Space.Compact style={{ width: '100%' }}>
                   <Select style={{ width: 72 }} value={filters.dateOp} onChange={v => setFilters(f => ({ ...f, dateOp: v }))}
-                    options={['>=', '>', '=', '<=', '<'].map(o => ({ value: o, label: o }))} />
+                    options={['>', '>=', '=', '<=', '<'].map(o => ({ value: o, label: o }))} />
                   <DatePicker style={{ width: '100%' }} value={filters.date} onChange={d => setFilters(f => ({ ...f, date: d }))} />
                 </Space.Compact>
               </Form.Item>
@@ -236,7 +243,7 @@ const SearchTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; orgsUrl: string; 
           <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
             <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={runSearch}
               style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Search</Button>
-            <Button icon={<ClearOutlined />} onClick={() => { setFilters({ dateOp: '>=', date: dayjs().subtract(30, 'day') }); }}>Reset</Button>
+            <Button icon={<ClearOutlined />} onClick={() => { setFilters({ dateOp: '>', date: dayjs().subtract(30, 'day') }); }}>Reset</Button>
             <Tooltip title="API Inspector — transferOrders web service">
               <Button icon={<ApiOutlined />} style={{ marginLeft: 'auto', borderColor: REDWOOD.info, color: REDWOOD.info }}
                 onClick={() => setApiOpen(true)}>API</Button>
@@ -268,7 +275,7 @@ const SearchTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; orgsUrl: string; 
             dataSource={rows}
             rowKey={(r, i) => `${r.HeaderId ?? i}`}
             size="small"
-            scroll={{ x: 1100 }}
+            scroll={{ x: 1350 }}
             pagination={{ pageSize: 25, size: 'small', showSizeChanger: true }}
             expandable={{
               onExpand: (expanded, rec) => { if (expanded) loadLines(rec); },
@@ -566,7 +573,7 @@ const TransferOrders: React.FC = () => {
             {
               key: 'search',
               label: <span><SearchOutlined style={{ marginRight: 6 }} />Search Orders</span>,
-              children: <SearchTab orgs={orgs} orgsLoading={orgsLoading} orgsUrl={orgsUrl} reloadOrgs={reloadOrgs} />,
+              children: <SearchTab orgsLoading={orgsLoading} orgsUrl={orgsUrl} reloadOrgs={reloadOrgs} />,
             },
             {
               key: 'new',
