@@ -550,6 +550,13 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
   const [costData, setCostData] = useState<{ src: any[]; dst: any[] }>({ src: [], dst: [] });
   const [costLoading, setCostLoading] = useState(false);
 
+  // Item search/picker (scoped to the source org) → fills a line.
+  const [pickerLine, setPickerLine] = useState<number | null>(null);
+  const [pickerText, setPickerText] = useState('');
+  const [pickerRows, setPickerRows] = useState<any[]>([]);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerErr, setPickerErr] = useState('');
+
   const COST_FIELDS = ['TotalUnitCost', 'UnitCost', 'ItemCost', 'UnitAverageCost', 'AverageUnitCost'];
   const pickCost = (r: any) => { for (const k of COST_FIELDS) { const v = r?.[k]; if (v != null && v !== '') return Number(v); } return null; };
   const onhandUrl = (org: string, item: string) => `${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(`OrganizationCode=${org};ItemNumber=${item}`)}&onlyData=true&limit=500`;
@@ -648,6 +655,47 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
     finally { setCostLoading(false); }
   };
 
+  const openPicker = (lineKey: number, seedText = '') => {
+    if (!srcOrg) { message.info('Select a source organization first'); return; }
+    setPickerLine(lineKey); setPickerText(seedText); setPickerRows([]); setPickerErr('');
+  };
+
+  // Search itemsV2 in the source org by description and/or item number.
+  const itemSearchUrl = (org: string, field: string, text: string) =>
+    `${FUSION_BASE}/itemsV2?q=${encodeURIComponent(`OrganizationCode=${org};${field} like "*${text}*"`)}&limit=100&onlyData=true`;
+
+  const searchItems = async () => {
+    const t = pickerText.trim();
+    if (!srcOrg) { message.info('Select a source organization first'); return; }
+    if (!t) { message.info('Enter a code or description to search'); return; }
+    setPickerLoading(true); setPickerErr(''); setPickerRows([]);
+    try {
+      const [byDesc, byNum] = await Promise.allSettled([
+        fetch(itemSearchUrl(srcOrg, 'ItemDescription', t), { headers: FUSION_HDRS }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
+        fetch(itemSearchUrl(srcOrg, 'ItemNumber', t), { headers: FUSION_HDRS }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
+      ]);
+      const rows: any[] = []; const seen = new Set<string>();
+      [byDesc, byNum].forEach(res => {
+        if (res.status === 'fulfilled' && Array.isArray((res.value as any).items)) {
+          (res.value as any).items.forEach((it: any) => { if (it.ItemNumber && !seen.has(it.ItemNumber)) { seen.add(it.ItemNumber); rows.push(it); } });
+        }
+      });
+      setPickerRows(rows);
+      if (rows.length === 0) {
+        const anyOk = [byDesc, byNum].some(r => r.status === 'fulfilled');
+        setPickerErr(anyOk ? `No items matched "${t}" in ${srcOrg}` : `Search failed: ${(byDesc as any).reason?.message ?? 'error'}`);
+      }
+    } catch (e: any) { setPickerErr(e.message); }
+    finally { setPickerLoading(false); }
+  };
+
+  const selectItem = (row: any) => {
+    if (pickerLine == null) return;
+    updLine(pickerLine, { itemNumber: row.ItemNumber });
+    loadLineInfo(pickerLine, row.ItemNumber);
+    setPickerLine(null);
+  };
+
   const loadSubs = (org: string | undefined, set: (v: string[]) => void) => {
     if (!org) { set([]); return; }
     fetch(`${FUSION_BASE}/subinventories?q=OrganizationCode=${encodeURIComponent(org)}&onlyData=true&limit=500`, { headers: FUSION_HDRS })
@@ -678,7 +726,11 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
     setTimeout(() => ls.forEach(l => { if (l.itemNumber.trim()) loadLineInfo(l.key, l.itemNumber); }), 0);
   }, [seed?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const addLine = () => { seqRef.current += 1; setLines(l => [...l, { key: seqRef.current, itemNumber: '', quantity: null, uom: 'Ea' }]); };
+  const addLine = () => {
+    seqRef.current += 1; const key = seqRef.current;
+    setLines(l => [...l, { key, itemNumber: '', quantity: null, uom: 'Ea' }]);
+    if (srcOrg) openPicker(key, '');   // open the item search for the new line
+  };
   const delLine = (key: number) => setLines(l => l.filter(x => x.key !== key));
   const clearLines = () => { seqRef.current = 1; setLines([{ key: 1, itemNumber: '', quantity: null, uom: 'Ea' }]); };
   const updLine = (key: number, patch: Partial<NewLine>) => setLines(l => l.map(x => x.key === key ? { ...x, ...patch } : x));
@@ -773,11 +825,12 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
 
   const lineColumns: ColumnsType<NewLine> = [
     { title: '#', width: 40, align: 'center', render: (_, __, i) => <Text style={{ color: REDWOOD.neutral600 }}>{i + 1}</Text> },
-    { title: <span>Item Number <span style={{ color: REDWOOD.error }}>*</span></span>, dataIndex: 'itemNumber', width: 160,
+    { title: <span>Item Number <span style={{ color: REDWOOD.error }}>*</span></span>, dataIndex: 'itemNumber', width: 190,
       render: (v, r) => <Input placeholder="e.g. AS54888" value={v}
         onChange={e => updLine(r.key, { itemNumber: e.target.value })}
         onBlur={() => loadLineInfo(r.key, r.itemNumber)}
-        onPressEnter={() => loadLineInfo(r.key, r.itemNumber)} /> },
+        onPressEnter={() => loadLineInfo(r.key, r.itemNumber)}
+        suffix={<Tooltip title="Search items in source org"><SearchOutlined style={{ cursor: 'pointer', color: REDWOOD.info }} onClick={() => openPicker(r.key, r.itemNumber)} /></Tooltip>} /> },
     { title: 'Description', width: 230, ellipsis: true,
       render: (_, r) => info[r.key]?.loading ? <Spin size="small" />
         : <Text style={{ fontSize: 12, color: info[r.key]?.desc ? REDWOOD.neutral900 : REDWOOD.neutral300 }}>{info[r.key]?.desc ?? '—'}</Text> },
@@ -1019,6 +1072,36 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
         )}
         <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 10 }}>
           <InfoCircleOutlined style={{ marginRight: 6 }} />GET {LATEST_URL}/itemCosts?q=ItemNumber=&lt;item&gt; — rows are matched to each org via the inventory org in <Text code>ValuationUnit</Text>.
+        </Text>
+      </Modal>
+
+      {/* ── Item search / picker (source org) ──────────────────────────── */}
+      <Modal
+        title={<Space><SearchOutlined style={{ color: REDWOOD.info }} /> Find Item in <Tag color="blue">{srcOrg ?? 'source org'}</Tag></Space>}
+        open={pickerLine != null} onCancel={() => setPickerLine(null)} footer={null} width={820}>
+        <Space.Compact style={{ width: '100%', marginBottom: 10 }}>
+          <Input autoFocus placeholder="Search by item code or description…" value={pickerText}
+            onChange={e => setPickerText(e.target.value)} onPressEnter={searchItems} allowClear />
+          <Button type="primary" icon={<SearchOutlined />} loading={pickerLoading} onClick={searchItems}
+            style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Search</Button>
+        </Space.Compact>
+        {pickerErr && <div style={{ color: REDWOOD.error, fontSize: 12, marginBottom: 8 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{pickerErr}</div>}
+        {pickerLoading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+          : pickerRows.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Enter a code or description and search" style={{ padding: 30 }} />
+          : (
+            <Table size="small" dataSource={pickerRows} rowKey={(_, i) => `pk-${i}`}
+              pagination={{ pageSize: 10, size: 'small' }} scroll={{ y: 320 }}
+              onRow={(row) => ({ style: { cursor: 'pointer' }, onClick: () => selectItem(row) })}
+              columns={[
+                { title: 'Item', dataIndex: 'ItemNumber', width: 150, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text> },
+                { title: 'Description', dataIndex: 'ItemDescription', ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+                { title: 'UOM', dataIndex: 'PrimaryUOMValue', width: 80, align: 'center', render: (v, r) => <Tag style={{ fontSize: 11 }}>{v ?? r.PrimaryUOMCode ?? '—'}</Tag> },
+                { title: '', width: 80, align: 'center', render: (_, row) => <Button size="small" type="link" onClick={(e) => { e.stopPropagation(); selectItem(row); }}>Select</Button> },
+              ]} />
+          )}
+        <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8 }}>
+          <InfoCircleOutlined style={{ marginRight: 6 }} />
+          GET itemsV2?q=OrganizationCode={srcOrg ?? '—'};ItemDescription/ItemNumber like "*…*" — searched live in the source organization.
         </Text>
       </Modal>
     </div>
