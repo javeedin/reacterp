@@ -906,6 +906,8 @@ const SearchLinesTab: React.FC<{ onEdit: (headerId: number, headerNumber: string
       render: (v, r) => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: REDWOOD.primary }}>{fmtPrice(v, r.CurrencyCode)}</Text> },
     { title: 'Fulfillment', dataIndex: 'FulfillStatusMeaning', width: 150, render: v => statusTag(v) },
     { title: 'Line Status', dataIndex: 'TransferOrderLineStatus', width: 110, render: v => statusTag(v) },
+    { title: 'Supply Ref', dataIndex: 'SupplyOrderReferenceNumber', width: 130,
+      render: (v, r) => <Text style={{ fontSize: 12 }}>{v ?? r.SupplyOrderReferenceLineNumber ?? '—'}</Text> },
     { title: 'Need By', dataIndex: 'NeedByDate', width: 115, render: fmtDate },
   ];
 
@@ -958,7 +960,7 @@ const SearchLinesTab: React.FC<{ onEdit: (headerId: number, headerNumber: string
           <Empty description="No lines match the filters" style={{ padding: 60 }} />
         ) : (
           <Table columns={columns} dataSource={filtered} rowKey={(r, i) => `${r.LineId ?? i}`} size="small"
-            scroll={{ x: 1950 }}
+            scroll={{ x: 2080 }}
             pagination={{
               current: pg.current, pageSize: pg.pageSize, total: filtered.length,
               size: 'small', showSizeChanger: true, showTotal: t => `${t} lines`,
@@ -970,7 +972,7 @@ const SearchLinesTab: React.FC<{ onEdit: (headerId: number, headerNumber: string
                 <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
                   <Table.Summary.Cell index={0} colSpan={13} align="right"><Text strong>Total Transfer Price</Text></Table.Summary.Cell>
                   <Table.Summary.Cell index={1} align="right"><Text strong style={{ color: REDWOOD.primary }}>{fmtPrice(totalPrice, ccy)}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell index={2} colSpan={3} />
+                  <Table.Summary.Cell index={2} colSpan={4} />
                 </Table.Summary.Row>
               </Table.Summary>
             )} />
