@@ -637,6 +637,32 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
   const [assignApiTitle, setAssignApiTitle]   = useState('');
   const [assignApiBody, setAssignApiBody]     = useState<any>(null);
   const [assignApiMaster, setAssignApiMaster] = useState<any>(null);
+  // Item detail dialog (click an item number in the lines table)
+  const [itemDetailOpen, setItemDetailOpen]       = useState(false);
+  const [itemDetailLoading, setItemDetailLoading] = useState(false);
+  const [itemDetailNumber, setItemDetailNumber]   = useState('');
+  const [itemDetailRows, setItemDetailRows]       = useState<any[]>([]);
+  const [itemDetailErr, setItemDetailErr]         = useState('');
+
+  const showItemDetail = async (itemNumber: string) => {
+    setItemDetailNumber(itemNumber);
+    setItemDetailOpen(true);
+    setItemDetailLoading(true);
+    setItemDetailRows([]); setItemDetailErr('');
+    try {
+      const url = `${FUSION_BASE}/itemsV2?q=ItemNumber='${encodeURIComponent(itemNumber)}'&limit=50&onlyData=true`;
+      const r = await fetch(url, { headers: FUSION_HDRS });
+      const d = await r.json().catch(() => ({} as any));
+      if (!r.ok) throw new Error(d?.detail ?? d?.message ?? `HTTP ${r.status}`);
+      const items: any[] = d.items ?? [];
+      setItemDetailRows(items);
+      if (items.length === 0) setItemDetailErr('No item found in the item master.');
+    } catch (e: any) {
+      setItemDetailErr(e?.message || 'Failed to load item details');
+    } finally {
+      setItemDetailLoading(false);
+    }
+  };
 
   const patchLine = (key: string, patch: Partial<POLine>) =>
     setLines(prev => prev.map(l => l.key === key ? { ...l, ...patch } : l));
@@ -2344,7 +2370,9 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
 
   const lineCols: ColumnsType<POLine> = [
     { title: '#', dataIndex: 'lineNum', width: 46, align: 'center' as const, render: v => <Text style={{ color: C.textMid, fontSize: 12 }}>{v}</Text> },
-    { title: 'Item', dataIndex: 'itemNumber', width: 130, render: v => <Text style={{ fontWeight: 600, color: C.blue, fontSize: 12 }}>{v}</Text> },
+    { title: 'Item', dataIndex: 'itemNumber', width: 130, render: v => v
+      ? <Tooltip title="View item details"><a style={{ fontWeight: 600, color: C.blue, fontSize: 12 }} onClick={() => showItemDetail(v)}>{v}</a></Tooltip>
+      : <Text style={{ fontSize: 12 }}>—</Text> },
     { title: 'Description', dataIndex: 'description', ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v}</Text> },
     { title: 'UOM', dataIndex: 'uom', width: 60, align: 'center' as const },
     { title: 'Qty', dataIndex: 'qty', width: 90, align: 'right' as const, render: (v, r) => <InputNumber size="small" value={v} min={0} precision={4} style={{ width: 80 }} onChange={val => handleLineChange(r.key, 'qty', val ?? 0)} /> },
@@ -4339,6 +4367,48 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
               </div>
             </>
           )}
+        </Modal>
+
+        {/* ── Item Details (click item in lines) ──────── */}
+        <Modal
+          open={itemDetailOpen}
+          onCancel={() => setItemDetailOpen(false)}
+          width={820}
+          title={<Space><SearchOutlined style={{ color: C.blue }} />Item Details — {itemDetailNumber}</Space>}
+          footer={<Button onClick={() => setItemDetailOpen(false)}>Close</Button>}
+        >
+          {itemDetailLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}><Spin /><div style={{ marginTop: 8, color: C.textMid, fontSize: 12 }}>Loading item…</div></div>
+          ) : itemDetailErr ? (
+            <Alert type="warning" showIcon message={itemDetailErr} />
+          ) : (() => {
+            const primary = itemDetailRows.find(i => i.SalesAccountId != null) ?? itemDetailRows[0] ?? {};
+            const entries = Object.entries(primary).filter(([k, v]) => k !== 'links' && v != null && v !== '');
+            return (
+              <>
+                <div style={{ fontSize: 12, color: C.textMid, marginBottom: 10 }}>
+                  Found in <b>{itemDetailRows.length}</b> organization row(s). Showing the master definition
+                  {primary.OrganizationCode ? ` (${primary.OrganizationCode})` : ''}.
+                  {primary.SalesAccountId != null && <Tag color="green" style={{ marginLeft: 8, fontSize: 11 }}>Sales Acct {primary.SalesAccountId}</Tag>}
+                </div>
+                <div style={{ maxHeight: 420, overflow: 'auto', border: `1px solid ${C.border}`, borderRadius: 6 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <tbody>
+                      {entries.map(([k, v]) => (
+                        <tr key={k} style={{ borderBottom: `1px solid ${C.border}` }}>
+                          <td style={{ padding: '5px 10px', fontWeight: 600, width: 260, color: C.textMid, background: '#fafafa', wordBreak: 'break-all' }}>{k}</td>
+                          <td style={{ padding: '5px 10px', wordBreak: 'break-all' }}>{String(v)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ fontSize: 11, color: C.textLight, marginTop: 8 }}>
+                  Source: <Text code style={{ fontSize: 11 }}>GET itemsV2?q=ItemNumber='{itemDetailNumber}'</Text>
+                </div>
+              </>
+            );
+          })()}
         </Modal>
 
         {/* ── Assign to Org — itemsV2 payload preview ─── */}
