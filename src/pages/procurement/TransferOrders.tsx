@@ -134,6 +134,7 @@ const SearchTab: React.FC<{ orgsLoading: boolean; orgsUrl: string; reloadOrgs: (
   const [lineLoading, setLineLoading] = useState<Record<number, boolean>>({});
   const [lineCounts, setLineCounts] = useState<Record<number, number>>({});
   const [countsLoading, setCountsLoading] = useState(false);
+  const [pg, setPg] = useState({ current: 1, pageSize: 25 });
 
   const [filters, setFilters] = useState<{ header?: string; bu?: string; status?: string; iface?: string; dateOp?: string; date?: Dayjs | null }>({
     dateOp: '>', date: dayjs().subtract(30, 'day'),
@@ -176,6 +177,7 @@ const SearchTab: React.FC<{ orgsLoading: boolean; orgsUrl: string; reloadOrgs: (
 
   const runSearch = useCallback(async () => {
     setLoading(true); setError(''); setSearched(true); setLineCache({}); setLineCounts({});
+    setPg(p => ({ ...p, current: 1 }));
     try {
       const items = await fetchAllPages(searchUrl.replace(/&?limit=\d+/, ''));
       setRows(items);
@@ -323,7 +325,11 @@ const SearchTab: React.FC<{ orgsLoading: boolean; orgsUrl: string; reloadOrgs: (
             rowKey={(r, i) => `${r.HeaderId ?? i}`}
             size="small"
             scroll={{ x: 1420 }}
-            pagination={{ pageSize: 25, size: 'small', showSizeChanger: true }}
+            pagination={{
+              current: pg.current, pageSize: pg.pageSize, total: rows.length,
+              size: 'small', showSizeChanger: true, showTotal: t => `${t} orders`,
+              onChange: (current, pageSize) => setPg({ current, pageSize }),
+            }}
             expandable={{
               onExpand: (expanded, rec) => { if (expanded) loadLines(rec); },
               expandedRowRender: (rec) => {
@@ -610,6 +616,7 @@ const SearchLinesTab: React.FC<{ onEdit: (headerId: number, headerNumber: string
   const [fDst, setFDst]       = useState<string>();
   const [fStatus, setFStatus] = useState<string>();
   const [fText, setFText]     = useState('');
+  const [pg, setPg]           = useState({ current: 1, pageSize: 50 });
 
   const ordersUrl = useMemo(() => {
     const q = date ? `q=${encodeURIComponent(`OrderedDate${dateOp}${dayjs(date).format('YYYY-MM-DD')}`)}&` : '';
@@ -678,6 +685,9 @@ const SearchLinesTab: React.FC<{ onEdit: (headerId: number, headerNumber: string
     return m;
   }, [allLines]);
   const multiOrders = useMemo(() => new Set(Object.entries(orderLineCount).filter(([, n]) => n > 1).map(([id]) => Number(id))), [orderLineCount]);
+
+  // Reset to page 1 whenever the filter set changes (avoids landing on an empty page).
+  useEffect(() => { setPg(p => ({ ...p, current: 1 })); }, [fOrder, fItem, fSrc, fDst, fStatus, fText]);
 
   const columns: ColumnsType<any> = [
     { title: 'Ordered', dataIndex: '_orderedDate', width: 115, fixed: 'left', render: fmtDate },
@@ -770,7 +780,12 @@ const SearchLinesTab: React.FC<{ onEdit: (headerId: number, headerNumber: string
           <Empty description="No lines match the filters" style={{ padding: 60 }} />
         ) : (
           <Table columns={columns} dataSource={filtered} rowKey={(r, i) => `${r.LineId ?? i}`} size="small"
-            scroll={{ x: 1950 }} pagination={{ pageSize: 50, size: 'small', showSizeChanger: true }}
+            scroll={{ x: 1950 }}
+            pagination={{
+              current: pg.current, pageSize: pg.pageSize, total: filtered.length,
+              size: 'small', showSizeChanger: true, showTotal: t => `${t} lines`,
+              onChange: (current, pageSize) => setPg({ current, pageSize }),
+            }}
             rowClassName={(r) => multiOrders.has(r._headerId) ? 'to-multi-line' : ''}
             summary={() => (
               <Table.Summary fixed>
