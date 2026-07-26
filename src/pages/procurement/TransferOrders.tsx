@@ -47,6 +47,19 @@ const fmtPrice = (v?: number | null, ccy?: string) => {
   return ccy ? `${s} ${ccy}` : s;
 };
 
+// itemCosts stores org inside ValuationUnit "COSTORG-INVORG-SUBINV-LOT". The
+// inventory org (parts[1]) is what a transfer's source/destination org matches.
+const parseVU = (vu?: string) => {
+  if (!vu) return { costOrg: '', invOrg: '', subinv: '', lot: '' };
+  const parts = String(vu).split(/(?<!\\)-/);
+  return { costOrg: parts[0] || '', invOrg: parts[1] || '', subinv: parts[2] || '', lot: parts.slice(3).join('-').replace(/\\-/g, '-') };
+};
+const rowOrgMatches = (row: any, org?: string) => {
+  if (!org) return false;
+  const p = parseVU(row.ValuationUnit);
+  return [p.invOrg, p.costOrg, row.OrganizationCode, row.OrganizationName].includes(org);
+};
+
 // Run async fn over items with limited concurrency (avoids hammering Fusion).
 const mapLimit = async <T, R>(items: T[], limit: number, fn: (t: T, i: number) => Promise<R>): Promise<R[]> => {
   const out: R[] = new Array(items.length);
@@ -529,10 +542,10 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
 
   // Per-line item info: description + on-hand qty in source & destination orgs.
   const [info, setInfo] = useState<Record<number, { desc?: string; srcQoh?: number | null; dstQoh?: number | null; srcErr?: string; dstErr?: string; loading?: boolean }>>({});
-  // On-hand drill-down modal + item-cost modal.
-  const [drill, setDrill] = useState<{ item: string; org: string; label: string } | null>(null);
-  const [drillRows, setDrillRows] = useState<any[]>([]);
-  const [drillLoading, setDrillLoading] = useState(false);
+  // Combined on-hand matrix modal (source + destination, all lines) + item-cost modal.
+  const [ohOpen, setOhOpen] = useState(false);
+  const [ohLoading, setOhLoading] = useState(false);
+  const [ohRows, setOhRows] = useState<any[]>([]);
   const [costItem, setCostItem] = useState<string | null>(null);
   const [costData, setCostData] = useState<{ src: any[]; dst: any[] }>({ src: [], dst: [] });
   const [costLoading, setCostLoading] = useState(false);
@@ -540,7 +553,7 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
   const COST_FIELDS = ['TotalUnitCost', 'UnitCost', 'ItemCost', 'UnitAverageCost', 'AverageUnitCost'];
   const pickCost = (r: any) => { for (const k of COST_FIELDS) { const v = r?.[k]; if (v != null && v !== '') return Number(v); } return null; };
   const onhandUrl = (org: string, item: string) => `${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(`OrganizationCode=${org};ItemNumber=${item}`)}&onlyData=true&limit=500`;
-  const itemCostUrl = (org: string, item: string) => `${LATEST_URL}/itemCosts?q=${encodeURIComponent(`ItemNumber=${item};OrganizationCode like "${org}*"`)}&limit=500`;
+  const itemCostUrl = (item: string) => `${LATEST_URL}/itemCosts?q=${encodeURIComponent(`ItemNumber=${item}`)}&limit=500`;
   const itemDescUrl = (item: string) => `${FUSION_BASE}/itemsV2?q=ItemNumber='${encodeURIComponent(item)}'&limit=1&onlyData=true`;
 
   // Sum PrimaryQuantity for an item in one org. Throws on HTTP error so the
@@ -584,30 +597,55 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
     lines.forEach(l => { if (l.itemNumber.trim()) loadLineInfo(l.key, l.itemNumber); });
   }, [srcOrg, dstOrg]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const openDrill = async (item: string, org: string, label: string) => {
-    if (!org || !item.trim()) return;
-    setDrill({ item: item.trim(), org, label }); setDrillRows([]); setDrillLoading(true);
-    try {
-      const r = await fetch(onhandUrl(org, item.trim()), { headers: FUSION_HDRS });
-      const d = await r.json();
-      setDrillRows(Array.isArray(d.items) ? d.items : []);
-    } catch { setDrillRows([]); }
-    finally { setDrillLoading(false); }
+  const fetchOnhandRows = async (org: string, item: string): Promise<any[]> => {
+    const r = await fetch(onhandUrl(org, item), { headers: FUSION_HDRS });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    return Array.isArray(d.items) ? d.items : [];
+  };
+
+  // Open the combined on-hand matrix — every line item × {source, destination}.
+  const openMatrix = async () => {
+    const items = Array.from(new Set(lines.map(l => l.itemNumber.trim()).filter(Boolean)));
+    if (items.length === 0) { message.info('Enter at least one item first'); return; }
+    setOhOpen(true); setOhLoading(true); setOhRows([]);
+    const data = await mapLimit(items, 6, async (it) => {
+      const [s, d] = await Promise.allSettled([
+        srcOrg ? fetchOnhandRows(srcOrg, it) : Promise.resolve([]),
+        dstOrg ? fetchOnhandRows(dstOrg, it) : Promise.resolve([]),
+      ]);
+      const srcRows = s.status === 'fulfilled' ? s.value : [];
+      const dstRows = d.status === 'fulfilled' ? d.value : [];
+      const sum = (rows: any[]) => rows.reduce((a, x) => a + (Number(x.PrimaryQuantity) || 0), 0);
+      return {
+        item: it,
+        desc: srcRows[0]?.ItemDescription ?? dstRows[0]?.ItemDescription ?? '',
+        srcRows, dstRows,
+        srcTotal: srcRows.length ? sum(srcRows) : null,
+        dstTotal: dstRows.length ? sum(dstRows) : null,
+        srcErr: s.status === 'rejected' ? String((s as any).reason?.message ?? 'failed') : undefined,
+        dstErr: d.status === 'rejected' ? String((d as any).reason?.message ?? 'failed') : undefined,
+      };
+    });
+    setOhRows(data); setOhLoading(false);
   };
 
   const openCost = async (item: string) => {
-    if (!item.trim()) return;
-    setCostItem(item.trim()); setCostData({ src: [], dst: [] }); setCostLoading(true);
+    const it = item.trim();
+    if (!it) return;
+    setCostItem(it); setCostData({ src: [], dst: [] }); setCostLoading(true);
     try {
-      const [s, d] = await Promise.allSettled([
-        srcOrg ? fetch(itemCostUrl(srcOrg, item.trim()), { headers: FUSION_HDRS }).then(r => r.json()) : Promise.resolve({ items: [] }),
-        dstOrg ? fetch(itemCostUrl(dstOrg, item.trim()), { headers: FUSION_HDRS }).then(r => r.json()) : Promise.resolve({ items: [] }),
-      ]);
+      // itemCosts isn't filterable by inventory org (org lives in ValuationUnit),
+      // so pull all cost rows for the item and split by org on the client.
+      const r = await fetch(itemCostUrl(it), { headers: FUSION_HDRS });
+      const d = await r.json();
+      const rows: any[] = Array.isArray(d.items) ? d.items : [];
       setCostData({
-        src: s.status === 'fulfilled' && Array.isArray(s.value.items) ? s.value.items : [],
-        dst: d.status === 'fulfilled' && Array.isArray(d.value.items) ? d.value.items : [],
+        src: rows.filter(x => rowOrgMatches(x, srcOrg)),
+        dst: rows.filter(x => rowOrgMatches(x, dstOrg)),
       });
-    } finally { setCostLoading(false); }
+    } catch { setCostData({ src: [], dst: [] }); }
+    finally { setCostLoading(false); }
   };
 
   const loadSubs = (org: string | undefined, set: (v: string[]) => void) => {
@@ -750,7 +788,7 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
         if (!srcOrg || !r.itemNumber.trim()) return <Text type="secondary">—</Text>;
         if (i?.srcErr) return <Tooltip title={`On-hand lookup failed: ${i.srcErr}`}><Text type="danger" style={{ cursor: 'help' }}>err</Text></Tooltip>;
         if (q == null) return <Text type="secondary">—</Text>;
-        return <a onClick={() => openDrill(r.itemNumber, srcOrg, `Source · ${srcOrg}`)}
+        return <a onClick={openMatrix}
           style={{ fontVariantNumeric: 'tabular-nums', color: q > 0 ? REDWOOD.success : REDWOOD.error, fontWeight: 600 }}>{fmtQty(q)}</a>;
       } },
     { title: <Tooltip title="On-hand in destination org — click to drill to detail">Dest QOH</Tooltip>, width: 110, align: 'right',
@@ -760,7 +798,7 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
         if (!dstOrg || !r.itemNumber.trim()) return <Text type="secondary">—</Text>;
         if (i?.dstErr) return <Tooltip title={`On-hand lookup failed: ${i.dstErr}`}><Text type="danger" style={{ cursor: 'help' }}>err</Text></Tooltip>;
         if (q == null) return <Text type="secondary">—</Text>;
-        return <a onClick={() => openDrill(r.itemNumber, dstOrg, `Destination · ${dstOrg}`)}
+        return <a onClick={openMatrix}
           style={{ fontVariantNumeric: 'tabular-nums', color: q > 0 ? REDWOOD.success : REDWOOD.warning, fontWeight: 600 }}>{fmtQty(q)}</a>;
       } },
     { title: '', width: 34, align: 'center',
@@ -845,6 +883,7 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
         <Tag>{validLines.length} valid line{validLines.length !== 1 ? 's' : ''}</Tag></Space>}
         styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
         extra={<Space>
+          <Button size="small" icon={<EnvironmentOutlined />} onClick={openMatrix}>On-Hand Matrix</Button>
           <Button size="small" icon={<PlusOutlined />} onClick={addLine}>Add Line</Button>
           <Button size="small" icon={<ClearOutlined />} onClick={clearLines}>Clear</Button>
         </Space>}>
@@ -893,32 +932,55 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
         </Text>
       </Modal>
 
-      {/* ── On-hand drill-down ─────────────────────────────────────────── */}
+      {/* ── On-hand matrix (source + destination, all lines) ───────────── */}
       <Modal
-        title={<Space><EnvironmentOutlined style={{ color: REDWOOD.info }} /> On-Hand Detail — {drill?.item} · {drill?.label}</Space>}
-        open={!!drill} onCancel={() => setDrill(null)} footer={null} width={860}>
-        <div style={{ padding: '6px 10px', borderRadius: 6, background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info, marginBottom: 10 }}>
-          <Tag color="blue">GET</Tag>{drill ? onhandUrl(drill.org, drill.item) : ''}
-        </div>
-        {drillLoading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
-          : drillRows.length === 0 ? <Empty description="No on-hand records" style={{ padding: 30 }} />
+        title={<Space><EnvironmentOutlined style={{ color: REDWOOD.info }} /> On-Hand Matrix
+          <Tag color="blue">{srcOrg ?? 'Source'}</Tag><SwapOutlined style={{ color: REDWOOD.neutral600 }} /><Tag color="geekblue">{dstOrg ?? 'Dest'}</Tag></Space>}
+        open={ohOpen} onCancel={() => setOhOpen(false)} footer={null} width={900}>
+        {ohLoading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" tip="Loading on-hand…" /></div>
+          : ohRows.length === 0 ? <Empty description="No items" style={{ padding: 30 }} />
           : (
-            <Table size="small" pagination={false} scroll={{ x: 720, y: 340 }} dataSource={drillRows} rowKey={(_, i) => `oh-${i}`}
-              columns={[
-                { title: 'Org', dataIndex: 'OrganizationCode', width: 70, render: v => <Tag>{v}</Tag> },
-                { title: 'Subinventory', dataIndex: 'SubinventoryCode', width: 130, render: v => v ?? '—' },
-                { title: 'Locator', dataIndex: 'LocatorName', width: 120, render: (v, r) => v ?? r.Locator ?? '—' },
-                { title: 'Lot', dataIndex: 'LotNumber', width: 110, render: v => v ?? '—' },
-                { title: 'UOM', dataIndex: 'UnitOfMeasure', width: 70, align: 'center', render: (v, r) => <Tag style={{ fontSize: 11 }}>{v ?? r.PrimaryUOMCode ?? '—'}</Tag> },
-                { title: 'On-Hand Qty', dataIndex: 'PrimaryQuantity', width: 110, align: 'right', render: v => <Text strong style={{ color: REDWOOD.success }}>{fmtQty(v)}</Text> },
-              ]}
-              summary={() => (
-                <Table.Summary fixed><Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-                  <Table.Summary.Cell index={0} colSpan={5} align="right"><Text strong>Total</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell index={1} align="right"><Text strong style={{ color: REDWOOD.success }}>
-                    {fmtQty(drillRows.reduce((s, r) => s + (Number(r.PrimaryQuantity) || 0), 0))}</Text></Table.Summary.Cell>
-                </Table.Summary.Row></Table.Summary>
-              )} />
+            <>
+              <Table
+                size="small" pagination={false} scroll={{ x: 640, y: 420 }} dataSource={ohRows} rowKey="item"
+                expandable={{
+                  rowExpandable: (r) => (r.srcRows.length + r.dstRows.length) > 0,
+                  expandedRowRender: (r) => {
+                    const detail = [
+                      ...r.srcRows.map((x: any) => ({ ...x, _side: 'Source', _org: srcOrg })),
+                      ...r.dstRows.map((x: any) => ({ ...x, _side: 'Dest', _org: dstOrg })),
+                    ];
+                    return detail.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No subinventory detail" />
+                      : <Table size="small" pagination={false} dataSource={detail} rowKey={(_, i) => `d-${i}`}
+                          columns={[
+                            { title: '', dataIndex: '_side', width: 80, render: (v) => <Tag color={v === 'Source' ? 'blue' : 'geekblue'} style={{ fontSize: 11 }}>{v}</Tag> },
+                            { title: 'Org', dataIndex: '_org', width: 70, render: v => <Tag>{v}</Tag> },
+                            { title: 'Subinventory', dataIndex: 'SubinventoryCode', width: 140, render: v => v ?? '—' },
+                            { title: 'Locator', dataIndex: 'LocatorName', width: 130, render: (v, x) => v ?? x.Locator ?? '—' },
+                            { title: 'Lot', dataIndex: 'LotNumber', width: 120, render: v => v ?? '—' },
+                            { title: 'UOM', dataIndex: 'UnitOfMeasure', width: 64, align: 'center', render: (v, x) => <Tag style={{ fontSize: 11 }}>{v ?? x.PrimaryUOMCode ?? '—'}</Tag> },
+                            { title: 'Qty', dataIndex: 'PrimaryQuantity', width: 90, align: 'right', render: v => <Text strong style={{ color: REDWOOD.success }}>{fmtQty(v)}</Text> },
+                          ]} />;
+                  },
+                }}
+                columns={[
+                  { title: 'Item', dataIndex: 'item', width: 130, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text> },
+                  { title: 'Description', dataIndex: 'desc', ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+                  { title: <Tooltip title={`On-hand in source org ${srcOrg ?? ''}`}><span>Source QOH</span></Tooltip>, width: 120, align: 'right',
+                    render: (_, r) => r.srcErr ? <Tooltip title={r.srcErr}><Text type="danger">err</Text></Tooltip>
+                      : r.srcTotal == null ? <Text type="secondary">—</Text>
+                      : <Text strong style={{ fontVariantNumeric: 'tabular-nums', color: r.srcTotal > 0 ? REDWOOD.success : REDWOOD.error }}>{fmtQty(r.srcTotal)}</Text> },
+                  { title: <Tooltip title={`On-hand in destination org ${dstOrg ?? ''}`}><span>Dest QOH</span></Tooltip>, width: 120, align: 'right',
+                    render: (_, r) => r.dstErr ? <Tooltip title={r.dstErr}><Text type="danger">err</Text></Tooltip>
+                      : r.dstTotal == null ? <Text type="secondary">—</Text>
+                      : <Text strong style={{ fontVariantNumeric: 'tabular-nums', color: r.dstTotal > 0 ? REDWOOD.success : REDWOOD.warning }}>{fmtQty(r.dstTotal)}</Text> },
+                ]}
+              />
+              <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8 }}>
+                <InfoCircleOutlined style={{ marginRight: 6 }} />Expand a row for subinventory / locator / lot detail. Source =
+                <Text code>{srcOrg ?? '—'}</Text>, Destination = <Text code>{dstOrg ?? '—'}</Text> · GET inventoryOnhandBalances per item &amp; org.
+              </Text>
+            </>
           )}
       </Modal>
 
@@ -956,7 +1018,7 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
           </Row>
         )}
         <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 10 }}>
-          <InfoCircleOutlined style={{ marginRight: 6 }} />GET {LATEST_URL}/itemCosts?q=ItemNumber=&lt;item&gt;;OrganizationCode like "&lt;org&gt;*"
+          <InfoCircleOutlined style={{ marginRight: 6 }} />GET {LATEST_URL}/itemCosts?q=ItemNumber=&lt;item&gt; — rows are matched to each org via the inventory org in <Text code>ValuationUnit</Text>.
         </Text>
       </Modal>
     </div>
