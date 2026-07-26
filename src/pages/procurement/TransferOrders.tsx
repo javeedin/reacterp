@@ -132,6 +132,8 @@ const SearchTab: React.FC<{ orgsLoading: boolean; orgsUrl: string; reloadOrgs: (
   const [apiOpen, setApiOpen] = useState(false);
   const [lineCache, setLineCache] = useState<Record<number, any[]>>({});
   const [lineLoading, setLineLoading] = useState<Record<number, boolean>>({});
+  const [lineCounts, setLineCounts] = useState<Record<number, number>>({});
+  const [countsLoading, setCountsLoading] = useState(false);
 
   const [filters, setFilters] = useState<{ header?: string; bu?: string; status?: string; iface?: string; dateOp?: string; date?: Dayjs | null }>({
     dateOp: '>', date: dayjs().subtract(30, 'day'),
@@ -155,16 +157,34 @@ const SearchTab: React.FC<{ orgsLoading: boolean; orgsUrl: string; reloadOrgs: (
     return `${FUSION_BASE}/transferOrders?${qs}orderBy=OrderedDate:desc&onlyData=true&limit=200`;
   }, [filters, buildQ]);
 
+  // Cheap per-order line count via totalResults (1 row + count).
+  const fetchCounts = useCallback(async (items: any[]) => {
+    if (items.length === 0) { setLineCounts({}); return; }
+    setCountsLoading(true);
+    const counts: Record<number, number> = {};
+    await mapLimit(items, 6, async (o) => {
+      const url = `${FUSION_BASE}/transferOrders/${o.HeaderId}/child/transferOrderLines?onlyData=true&limit=1&totalResults=true`;
+      try {
+        const r = await fetch(url, { headers: FUSION_HDRS });
+        const d = await r.json();
+        counts[o.HeaderId] = d.totalResults ?? (Array.isArray(d.items) ? d.items.length : 0);
+      } catch { /* leave undefined */ }
+    });
+    setLineCounts(counts);
+    setCountsLoading(false);
+  }, []);
+
   const runSearch = useCallback(async () => {
-    setLoading(true); setError(''); setSearched(true); setLineCache({});
+    setLoading(true); setError(''); setSearched(true); setLineCache({}); setLineCounts({});
     try {
       const items = await fetchAllPages(searchUrl.replace(/&?limit=\d+/, ''));
       setRows(items);
       if (items.length === 0) setError('No transfer orders matched.');
+      else fetchCounts(items);
     } catch (e: any) {
       setError(e.message); setRows([]);
     } finally { setLoading(false); }
-  }, [searchUrl]);
+  }, [searchUrl, fetchCounts]);
 
   useEffect(() => { runSearch(); /* initial default search */ }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -190,6 +210,12 @@ const SearchTab: React.FC<{ orgsLoading: boolean; orgsUrl: string; reloadOrgs: (
         onClick={() => onEdit(r.HeaderId, String(v))}>{v ?? '—'}</Button> },
     { title: 'Business Unit', dataIndex: 'BusinessUnitName', width: 230, ellipsis: true,
       render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Lines', key: 'lineCount', width: 70, align: 'center',
+      render: (_, r) => {
+        const n = lineCounts[r.HeaderId];
+        if (n === undefined) return countsLoading ? <Spin size="small" /> : <Text type="secondary">—</Text>;
+        return <Tag color={n > 1 ? 'orange' : 'default'} style={{ fontSize: 11, fontWeight: 600, borderRadius: 10, minWidth: 28 }}>{n}</Tag>;
+      } },
     { title: 'Source', dataIndex: 'SourceOfTransferOrder', width: 190, ellipsis: true,
       render: (v, r) => <Tooltip title={v}><Tag color="purple" style={{ fontSize: 11 }}>{r.SourceTypeLookup ?? '—'}</Tag>
         <Text style={{ fontSize: 12 }}>{v ?? ''}</Text></Tooltip> },
@@ -296,7 +322,7 @@ const SearchTab: React.FC<{ orgsLoading: boolean; orgsUrl: string; reloadOrgs: (
             dataSource={rows}
             rowKey={(r, i) => `${r.HeaderId ?? i}`}
             size="small"
-            scroll={{ x: 1350 }}
+            scroll={{ x: 1420 }}
             pagination={{ pageSize: 25, size: 'small', showSizeChanger: true }}
             expandable={{
               onExpand: (expanded, rec) => { if (expanded) loadLines(rec); },
@@ -644,12 +670,36 @@ const SearchLinesTab: React.FC<{ onEdit: (headerId: number, headerNumber: string
   const totalPrice = filtered.reduce((s, l) => s + (Number(l.TotalTransferPrice) || 0), 0);
   const ccy = filtered.find(l => l.CurrencyCode)?.CurrencyCode ?? allLines.find(l => l.CurrencyCode)?.CurrencyCode ?? '';
 
+  // How many lines each order contributes (over the full fetched set) — used to
+  // flag multi-line orders in the grid.
+  const orderLineCount = useMemo(() => {
+    const m: Record<number, number> = {};
+    allLines.forEach(l => { m[l._headerId] = (m[l._headerId] ?? 0) + 1; });
+    return m;
+  }, [allLines]);
+  const multiOrders = useMemo(() => new Set(Object.entries(orderLineCount).filter(([, n]) => n > 1).map(([id]) => Number(id))), [orderLineCount]);
+
   const columns: ColumnsType<any> = [
     { title: 'Ordered', dataIndex: '_orderedDate', width: 115, fixed: 'left', render: fmtDate },
-    { title: 'Order #', dataIndex: '_headerNumber', width: 100, fixed: 'left',
-      render: (v, r) => <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 13 }}
-        onClick={() => onEdit(r._headerId, String(v))}>{v ?? '—'}</Button> },
-    { title: 'Line', dataIndex: 'DisplayLineNumber', width: 55, align: 'center', render: (v, r) => <Tag color="blue" style={{ fontSize: 11 }}>{v ?? r.LineNumber ?? '—'}</Tag> },
+    { title: 'Order #', dataIndex: '_headerNumber', width: 128, fixed: 'left',
+      render: (v, r) => {
+        const n = orderLineCount[r._headerId] ?? 1;
+        return (
+          <div style={{ borderLeft: n > 1 ? `3px solid ${REDWOOD.warning}` : '3px solid transparent', paddingLeft: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 13 }}
+              onClick={() => onEdit(r._headerId, String(v))}>{v ?? '—'}</Button>
+            {n > 1 && <Tooltip title={`This order has ${n} lines`}><Tag color="orange" style={{ fontSize: 10, margin: 0, lineHeight: '16px', padding: '0 5px' }}>×{n}</Tag></Tooltip>}
+          </div>
+        );
+      } },
+    { title: 'Line', dataIndex: 'DisplayLineNumber', width: 70, align: 'center',
+      render: (v, r) => {
+        const n = orderLineCount[r._headerId] ?? 1;
+        const ln = v ?? r.LineNumber ?? '—';
+        return n > 1
+          ? <Tag color="orange" style={{ fontSize: 11 }}>{ln} / {n}</Tag>
+          : <Tag color="blue" style={{ fontSize: 11 }}>{ln}</Tag>;
+      } },
     { title: 'Item', dataIndex: 'ItemNumber', width: 120, render: v => <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>{v ?? '—'}</Text> },
     { title: 'Description', dataIndex: 'ItemDescription', width: 220, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
     { title: 'Source Org', width: 150, ellipsis: true,
@@ -673,6 +723,7 @@ const SearchLinesTab: React.FC<{ onEdit: (headerId: number, headerNumber: string
 
   return (
     <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <style>{`.to-multi-line > td { background: ${REDWOOD.warning}0F; }`}</style>
       <Card styles={{ body: { padding: '14px 18px' } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
         <Row gutter={[10, 10]} align="bottom">
           <Col xs={24} md={7}>
@@ -719,7 +770,8 @@ const SearchLinesTab: React.FC<{ onEdit: (headerId: number, headerNumber: string
           <Empty description="No lines match the filters" style={{ padding: 60 }} />
         ) : (
           <Table columns={columns} dataSource={filtered} rowKey={(r, i) => `${r.LineId ?? i}`} size="small"
-            scroll={{ x: 1900 }} pagination={{ pageSize: 50, size: 'small', showSizeChanger: true }}
+            scroll={{ x: 1950 }} pagination={{ pageSize: 50, size: 'small', showSizeChanger: true }}
+            rowClassName={(r) => multiOrders.has(r._headerId) ? 'to-multi-line' : ''}
             summary={() => (
               <Table.Summary fixed>
                 <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
