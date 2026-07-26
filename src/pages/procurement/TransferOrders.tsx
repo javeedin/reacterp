@@ -1073,7 +1073,8 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
       {/* ── Item cost (source vs destination) ──────────────────────────── */}
       <Modal
         title={<Space><DollarOutlined style={{ color: REDWOOD.primary }} /> Item Cost — {costItem}</Space>}
-        open={!!costItem} onCancel={() => setCostItem(null)} maskClosable={false} width={820}
+        open={!!costItem} onCancel={() => setCostItem(null)} maskClosable={false} width={1160}
+        style={{ top: 40 }}
         footer={<Button onClick={() => setCostItem(null)}>Close</Button>}>
         {costLoading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div> : (
           <Row gutter={[14, 14]}>
@@ -1092,13 +1093,13 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
                     </div>
                     <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 8 }}>Unit cost{rows.length > 1 ? ` · ${rows.length} rows` : ''}</div>
                     {rows.length > 0 && (
-                      <Table size="small" pagination={false} dataSource={rows} rowKey={(_, i) => `c-${i}`} scroll={{ x: 460, y: 220 }}
+                      <Table size="small" pagination={false} dataSource={rows} rowKey={(_, i) => `c-${i}`} scroll={{ y: 240 }} tableLayout="fixed"
                         columns={[
-                          { title: 'Cost Org', width: 90, render: (_, r) => { const p = parseVU(r.ValuationUnit); return <Text strong style={{ fontSize: 11 }}>{p.costOrg || '—'}</Text>; } },
-                          { title: 'Inv Org', width: 80, render: (_, r) => { const p = parseVU(r.ValuationUnit); return <Text style={{ fontSize: 11 }}>{p.invOrg || '—'}</Text>; } },
-                          { title: 'Subinv', width: 90, render: (_, r) => { const p = parseVU(r.ValuationUnit); return p.subinv ? <Tag color="cyan" style={{ fontSize: 10 }}>{p.subinv}</Tag> : '—'; } },
-                          { title: 'Lot', width: 110, ellipsis: true, render: (_, r) => { const p = parseVU(r.ValuationUnit); return p.lot ? <Tag color="geekblue" style={{ fontSize: 10 }}>{p.lot}</Tag> : '—'; } },
-                          { title: 'Unit Cost', width: 110, align: 'right', fixed: 'right', render: (_, r) => <Text strong style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>{fmtPrice(pickCost(r), r.CurrencyCode)}</Text> },
+                          { title: 'Cost Org', width: 120, ellipsis: true, render: (_, r) => { const p = parseVU(r.ValuationUnit); return <Text strong style={{ fontSize: 11 }}>{p.costOrg || '—'}</Text>; } },
+                          { title: 'Inv Org', width: 110, ellipsis: true, render: (_, r) => { const p = parseVU(r.ValuationUnit); return <Text style={{ fontSize: 11 }}>{p.invOrg || '—'}</Text>; } },
+                          { title: 'Subinv', width: 100, ellipsis: true, render: (_, r) => { const p = parseVU(r.ValuationUnit); return p.subinv ? <Tag color="cyan" style={{ fontSize: 10 }}>{p.subinv}</Tag> : '—'; } },
+                          { title: 'Lot', ellipsis: true, render: (_, r) => { const p = parseVU(r.ValuationUnit); return p.lot ? <Tag color="geekblue" style={{ fontSize: 10 }}>{p.lot}</Tag> : '—'; } },
+                          { title: 'Unit Cost', width: 130, align: 'right', render: (_, r) => <Text strong style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>{fmtPrice(pickCost(r), r.CurrencyCode)}</Text> },
                         ]} />
                     )}
                   </Card>
