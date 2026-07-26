@@ -511,11 +511,12 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
   const [dstSub, setDstSub]   = useState<string>();
   const [needBy, setNeedBy]   = useState<Dayjs | null>(dayjs().add(3, 'day'));
   const [ifaceCode, setIfaceCode] = useState('EXT');
-  const [procStatus, setProcStatus] = useState('IN_PROCESS');
+  const [reqStatus, setReqStatus] = useState('NEW');
   const [orderSource, setOrderSource] = useState('EXT');
   const [lines, setLines]     = useState<NewLine[]>([{ key: 1, itemNumber: '', quantity: null, uom: 'Ea' }]);
   const seqRef = React.useRef(1);
   const sampleBatchRef = React.useRef(`RE${Date.now()}`);
+  const sampleRefIdRef = React.useRef(Number(String(Date.now()).slice(-9)));
 
   const [srcSubs, setSrcSubs] = useState<string[]>([]);
   const [dstSubs, setDstSubs] = useState<string[]>([]);
@@ -557,33 +558,41 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
 
   const validLines = lines.filter(l => l.itemNumber.trim() && (l.quantity ?? 0) > 0);
 
-  // Build the Supply Chain Orchestration (supplyRequests) payload.
-  // ProcessStatus is a LINE attribute only — sending it at the header level is
-  // rejected ("Invalid attribute"), while the header's ProcessStatus requirement
-  // is satisfied by the framework from the line value. There is NO
-  // SupplyRequestLineNumber. Header carries the batch, date and sources.
-  const buildPayload = (batchNo: string) => ({
+  // Build the Supply Chain Orchestration (supplyRequests) payload, matching the
+  // Oracle-documented transfer-order sample. The header status attribute is
+  // SupplyRequestStatus ("NEW") — that is what satisfies the EO ProcessStatus
+  // requirement; there is no separate "ProcessStatus" attribute. Lines carry
+  // their own InterfaceSourceCode / SupplyOrderSource / BackToBackFlag and a
+  // supply-order reference. NeedByDate is a full ISO timestamp.
+  const buildPayload = (batchNo: string, refId: number) => ({
     InterfaceSourceCode: ifaceCode || 'EXT',
     InterfaceBatchNumber: batchNo,
+    SupplyRequestStatus: reqStatus || 'NEW',
     SupplyRequestDate: dayjs().toISOString(),
     SupplyOrderSource: orderSource || 'EXT',
+    SupplyOrderReferenceNumber: batchNo,
+    SupplyOrderReferenceId: refId,
     ProcessRequestFlag: 'Y',
-    supplyRequestLines: validLines.map((l) => ({
+    supplyRequestLines: validLines.map((l, i) => ({
       InterfaceBatchNumber: batchNo,
-      ProcessStatus: procStatus || 'IN_PROCESS',
+      SupplyOrderReferenceLineNumber: `${batchNo}-${i + 1}`,
+      SupplyOrderReferenceLineId: i + 1,
       SupplyType: 'TRANSFER',
       DestinationTypeCode: 'INVENTORY',
       SourceOrganizationCode: srcOrg,
       DestinationOrganizationCode: dstOrg,
-      ItemNumber: l.itemNumber.trim(),
-      Quantity: l.quantity,
-      UOMCode: l.uom || 'Ea',
-      ...(needBy ? { NeedByDate: dayjs(needBy).format('YYYY-MM-DD') } : {}),
       ...(srcSub ? { SourceSubinventoryCode: srcSub } : {}),
       ...(dstSub ? { DestinationSubinventoryCode: dstSub } : {}),
+      ItemNumber: l.itemNumber.trim(),
+      InterfaceSourceCode: ifaceCode || 'EXT',
+      SupplyOrderSource: orderSource || 'EXT',
+      BackToBackFlag: 'N',
+      ...(needBy ? { NeedByDate: dayjs(needBy).toISOString() } : {}),
+      Quantity: l.quantity,
+      UOMCode: l.uom || 'Ea',
     })),
   });
-  const payload = buildPayload(sampleBatchRef.current);   // for preview
+  const payload = buildPayload(sampleBatchRef.current, sampleRefIdRef.current);   // for preview
 
   const postUrl = `${FUSION_BASE}/supplyRequests`;
 
@@ -614,7 +623,8 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
       onOk: async () => {
         setSubmitting(true); setResult(null);
         try {
-          const body = buildPayload(`RE${Date.now()}`);   // unique batch per submission
+          const stamp = Date.now();
+          const body = buildPayload(`RE${stamp}`, Number(String(stamp).slice(-9)));   // unique batch/ref per submission
           const r = await fetch(postUrl, {
             method: 'POST',
             headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' },
@@ -688,13 +698,13 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
             <Input value={orderSource} onChange={e => setOrderSource(e.target.value)} placeholder="EXT" />
           </Col>
           <Col xs={12} md={6} style={{ marginTop: 10 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Process Status</div>
-            <Input value={procStatus} onChange={e => setProcStatus(e.target.value)} placeholder="IN_PROCESS" />
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Supply Request Status</div>
+            <Input value={reqStatus} onChange={e => setReqStatus(e.target.value)} placeholder="NEW" />
           </Col>
         </Row>
         <div style={{ marginTop: 10, fontSize: 11, color: REDWOOD.neutral600 }}>
           <InfoCircleOutlined style={{ marginRight: 6 }} />
-          Sent to Supply Chain Orchestration with a unique <b>InterfaceBatchNumber</b>, <b>ProcessRequestFlag=Y</b> and today's <b>SupplyRequestDate</b>. <b>Process Status</b> is set on each line (not the header). Adjust Process Status / sources only if your instance expects different values.
+          Sent to Supply Chain Orchestration (matching Oracle's transfer-order sample) with a unique <b>InterfaceBatchNumber</b> / supply-order reference, <b>SupplyRequestStatus=NEW</b>, <b>ProcessRequestFlag=Y</b> and today's <b>SupplyRequestDate</b>.
         </div>
         {srcOrg && dstOrg && srcOrg === dstOrg && (
           <div style={{ marginTop: 10, color: REDWOOD.error, fontSize: 12 }}>
