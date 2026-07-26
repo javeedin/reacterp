@@ -5,6 +5,7 @@ import {
   DatabaseOutlined, CheckCircleOutlined, LockOutlined, BugOutlined,
   ApartmentOutlined, BankOutlined, SafetyCertificateOutlined, InboxOutlined,
   DollarOutlined, ReconciliationOutlined, CloudOutlined, HistoryOutlined,
+  SwapOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -103,6 +104,14 @@ const procurementItems: MenuItemType[] = [
     description: 'View and manage purchase order lines pending receipt in Oracle Fusion',
     color: REDWOOD.teal,
     path: '/procurement/expected-receipts',
+  },
+  {
+    key: 'transfer-orders',
+    icon: <SwapOutlined />,
+    label: 'Transfer Orders',
+    description: 'Transfer stock between inventory organizations (search & create via SCO)',
+    color: REDWOOD.info,
+    path: '/procurement/transfer-orders',
   },
   {
     key: 'item-costs',
