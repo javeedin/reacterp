@@ -9,7 +9,7 @@ import {
   HomeOutlined, SwapOutlined, SearchOutlined, ReloadOutlined, PlusOutlined,
   DeleteOutlined, ApiOutlined, CopyOutlined, ClearOutlined, EyeOutlined,
   CheckCircleOutlined, EnvironmentOutlined, InfoCircleOutlined, CloudUploadOutlined,
-  UnorderedListOutlined, EditOutlined,
+  UnorderedListOutlined, EditOutlined, PrinterOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -122,8 +122,8 @@ const orgOptions = (orgs: Org[]) => orgs.map(o => ({
 // ═══════════════════════════════════════════════════════════════════════════
 //  SEARCH TAB
 // ═══════════════════════════════════════════════════════════════════════════
-const SearchTab: React.FC<{ orgsLoading: boolean; orgsUrl: string; reloadOrgs: () => void; onEdit: (headerId: number, headerNumber: string) => void }> =
-  ({ orgsLoading, orgsUrl, reloadOrgs, onEdit }) => {
+const SearchTab: React.FC<{ orgsLoading: boolean; orgsUrl: string; reloadOrgs: () => void; onEdit: (headerId: number, headerNumber: string) => void; onCopyToNew: (seed: NewSeed) => void }> =
+  ({ orgsLoading, orgsUrl, reloadOrgs, onEdit, onCopyToNew }) => {
   const [form] = Form.useForm();
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -135,6 +135,114 @@ const SearchTab: React.FC<{ orgsLoading: boolean; orgsUrl: string; reloadOrgs: (
   const [lineCounts, setLineCounts] = useState<Record<number, number>>({});
   const [countsLoading, setCountsLoading] = useState(false);
   const [pg, setPg] = useState({ current: 1, pageSize: 25 });
+  const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  const getLines = useCallback(async (headerId: number) =>
+    lineCache[headerId] ?? await fetchAllPages(`${FUSION_BASE}/transferOrders/${headerId}/child/transferOrderLines`),
+  [lineCache]);
+
+  // Print the selected transfer order(s) — header + lines in a print window.
+  const printSelected = async () => {
+    const chosen = rows.filter(r => selectedKeys.includes(r.HeaderId));
+    if (chosen.length === 0) return;
+    const win = window.open('', '_blank', 'width=1000,height=820');
+    if (!win) { message.error('Allow popups to print'); return; }
+    win.document.write('<html><head><title>Transfer Orders</title></head><body style="font-family:Segoe UI,Arial,sans-serif;padding:40px">Preparing…</body></html>');
+    setBusy(true);
+    try {
+      const sections: string[] = [];
+      for (const o of chosen) {
+        const lines = await getLines(o.HeaderId);
+        const ccy = lines.find((l: any) => l.CurrencyCode)?.CurrencyCode ?? '';
+        const total = lines.reduce((s: number, l: any) => s + (Number(l.TotalTransferPrice) || 0), 0);
+        const rowsHtml = lines.map((l: any, i: number) => `
+          <tr style="background:${i % 2 ? '#f7f7f7' : '#fff'}">
+            <td>${l.DisplayLineNumber ?? l.LineNumber ?? ''}</td>
+            <td><b>${l.ItemNumber ?? ''}</b></td>
+            <td>${l.ItemDescription ?? ''}</td>
+            <td>${l.SourceOrganizationCode ?? ''}${l.SourceSubinventoryCode ? ' / ' + l.SourceSubinventoryCode : ''}</td>
+            <td>${l.DestinationOrganizationCode ?? ''}${l.DestinationSubinventoryCode ? ' / ' + l.DestinationSubinventoryCode : ''}</td>
+            <td style="text-align:center">${l.QuantityUOMCode ?? ''}</td>
+            <td style="text-align:right">${fmtQty(l.RequestedQuantity)}</td>
+            <td style="text-align:right">${fmtQty(l.ShippedQuantity)}</td>
+            <td style="text-align:right">${fmtQty(l.ReceivedQuantity)}</td>
+            <td style="text-align:right">${fmtPrice(l.UnitPrice)}</td>
+            <td style="text-align:right;color:#C74634;font-weight:700">${fmtPrice(l.TotalTransferPrice)}</td>
+          </tr>`).join('');
+        sections.push(`
+          <div style="margin-bottom:34px">
+            <div style="display:flex;justify-content:space-between;border-bottom:3px solid #C74634;padding-bottom:10px;margin-bottom:12px">
+              <div><div style="font-size:10px;font-weight:700;color:#6b6b6b;text-transform:uppercase">Transfer Order</div>
+                <div style="font-size:22px;font-weight:800">${o.HeaderNumber ?? ''}</div>
+                <div style="font-size:12px;color:#6b6b6b">${o.BusinessUnitName ?? ''}</div></div>
+              <div style="text-align:right;font-size:12px">
+                <div><b>Status:</b> ${o.Status ?? ''}</div>
+                <div><b>Interface:</b> ${o.InterfaceStatus ?? ''}</div>
+                <div><b>Ordered:</b> ${o.OrderedDate ? new Date(o.OrderedDate).toLocaleDateString() : ''}</div>
+                <div><b>Source:</b> ${o.SourceOfTransferOrder ?? ''}</div>
+              </div>
+            </div>
+            <table style="width:100%;border-collapse:collapse;font-size:11px">
+              <thead><tr style="background:#f0f0f0">
+                <th style="text-align:left;padding:5px;border:1px solid #e5e5e5">Line</th>
+                <th style="text-align:left;padding:5px;border:1px solid #e5e5e5">Item</th>
+                <th style="text-align:left;padding:5px;border:1px solid #e5e5e5">Description</th>
+                <th style="text-align:left;padding:5px;border:1px solid #e5e5e5">Source</th>
+                <th style="text-align:left;padding:5px;border:1px solid #e5e5e5">Destination</th>
+                <th style="padding:5px;border:1px solid #e5e5e5">UOM</th>
+                <th style="text-align:right;padding:5px;border:1px solid #e5e5e5">Requested</th>
+                <th style="text-align:right;padding:5px;border:1px solid #e5e5e5">Shipped</th>
+                <th style="text-align:right;padding:5px;border:1px solid #e5e5e5">Received</th>
+                <th style="text-align:right;padding:5px;border:1px solid #e5e5e5">Unit Price</th>
+                <th style="text-align:right;padding:5px;border:1px solid #e5e5e5">Total Price</th>
+              </tr></thead>
+              <tbody>${rowsHtml || '<tr><td colspan="11" style="text-align:center;padding:14px">No lines</td></tr>'}
+                <tr style="background:#f0f0f0;font-weight:700"><td colspan="10" style="text-align:right;padding:6px;border:1px solid #e5e5e5">Total Transfer Price</td>
+                  <td style="text-align:right;padding:6px;border:1px solid #e5e5e5;color:#C74634">${fmtPrice(total, ccy)}</td></tr>
+              </tbody>
+            </table>
+          </div>`);
+      }
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Transfer Order${chosen.length > 1 ? 's' : ' ' + chosen[0].HeaderNumber}</title></head>
+        <body style="font-family:Segoe UI,Arial,sans-serif;padding:32px;color:#1a1a1a">
+          <div style="text-align:right;margin-bottom:16px">
+            <button onclick="window.print()" style="padding:7px 18px;background:#C74634;color:#fff;border:none;border-radius:4px;font-weight:600;cursor:pointer">🖨 Print</button>
+          </div>
+          ${sections.join('')}
+          <div style="margin-top:20px;font-size:10px;color:#6b6b6b;text-align:right">Generated ${new Date().toLocaleString()}</div>
+        </body></html>`;
+      win.document.open(); win.document.write(html); win.document.close();
+    } catch (e: any) {
+      win.document.body.innerHTML = `<p style="color:#c00">Failed to load lines: ${e.message}</p>`;
+    } finally { setBusy(false); }
+  };
+
+  // Copy the single selected order into the New Transfer Order tab as a template.
+  const copySelected = async () => {
+    const chosen = rows.filter(r => selectedKeys.includes(r.HeaderId));
+    if (chosen.length !== 1) { message.info('Select exactly one order to copy'); return; }
+    setBusy(true);
+    try {
+      const o = chosen[0];
+      const lines = await getLines(o.HeaderId);
+      if (lines.length === 0) { message.warning('This order has no lines to copy'); return; }
+      const first = lines[0];
+      const orgs = new Set(lines.map((l: any) => `${l.SourceOrganizationCode}→${l.DestinationOrganizationCode}`));
+      if (orgs.size > 1) message.warning('Lines use different source/destination orgs — using the first line\'s orgs as the header');
+      onCopyToNew({
+        nonce: Date.now(),
+        srcOrg: first.SourceOrganizationCode,
+        dstOrg: first.DestinationOrganizationCode,
+        srcSub: first.SourceSubinventoryCode ?? undefined,
+        dstSub: first.DestinationSubinventoryCode ?? undefined,
+        needBy: first.NeedByDate ?? null,
+        lines: lines.map((l: any) => ({ itemNumber: l.ItemNumber, quantity: Number(l.RequestedQuantity) || null, uom: l.QuantityUOMCode || 'Ea' })),
+      });
+      message.success(`Copied ${lines.length} line(s) from ${o.HeaderNumber} to New Transfer Order`);
+    } catch (e: any) { message.error(e.message); }
+    finally { setBusy(false); }
+  };
 
   const [filters, setFilters] = useState<{ header?: string; bu?: string; status?: string; iface?: string; dateOp?: string; date?: Dayjs | null }>({
     dateOp: '>', date: dayjs().subtract(30, 'day'),
@@ -177,7 +285,7 @@ const SearchTab: React.FC<{ orgsLoading: boolean; orgsUrl: string; reloadOrgs: (
 
   const runSearch = useCallback(async () => {
     setLoading(true); setError(''); setSearched(true); setLineCache({}); setLineCounts({});
-    setPg(p => ({ ...p, current: 1 }));
+    setPg(p => ({ ...p, current: 1 })); setSelectedKeys([]);
     try {
       const items = await fetchAllPages(searchUrl.replace(/&?limit=\d+/, ''));
       setRows(items);
@@ -305,8 +413,19 @@ const SearchTab: React.FC<{ orgsLoading: boolean; orgsUrl: string; reloadOrgs: (
         styles={{ body: { padding: 0 } }}
         style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
         title={<Space><SwapOutlined style={{ color: REDWOOD.primary }} /><Text strong>Transfer Orders</Text>
-          {rows.length > 0 && <Tag>{rows.length} result{rows.length !== 1 ? 's' : ''}</Tag>}</Space>}
-        extra={<Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={runSearch}>Refresh</Button>}
+          {rows.length > 0 && <Tag>{rows.length} result{rows.length !== 1 ? 's' : ''}</Tag>}
+          {selectedKeys.length > 0 && <Tag color="blue">{selectedKeys.length} selected</Tag>}</Space>}
+        extra={<Space>
+          <Tooltip title={selectedKeys.length === 0 ? 'Select one or more orders' : 'Print selected transfer order(s)'}>
+            <Button size="small" icon={<PrinterOutlined />} loading={busy} disabled={selectedKeys.length === 0} onClick={printSelected}
+              style={selectedKeys.length ? { borderColor: REDWOOD.teal, color: REDWOOD.teal } : undefined}>Print</Button>
+          </Tooltip>
+          <Tooltip title={selectedKeys.length === 1 ? 'Copy this order into New Transfer Order' : 'Select exactly one order to copy'}>
+            <Button size="small" icon={<CopyOutlined />} loading={busy} disabled={selectedKeys.length !== 1} onClick={copySelected}
+              style={selectedKeys.length === 1 ? { borderColor: REDWOOD.primary, color: REDWOOD.primary } : undefined}>Copy to New</Button>
+          </Tooltip>
+          <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={runSearch}>Refresh</Button>
+        </Space>}
       >
         {loading ? (
           <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Spin size="large" tip="Loading…" /></div>
@@ -322,9 +441,10 @@ const SearchTab: React.FC<{ orgsLoading: boolean; orgsUrl: string; reloadOrgs: (
           <Table
             columns={columns}
             dataSource={rows}
-            rowKey={(r, i) => `${r.HeaderId ?? i}`}
+            rowKey="HeaderId"
             size="small"
             scroll={{ x: 1420 }}
+            rowSelection={{ selectedRowKeys: selectedKeys, onChange: setSelectedKeys, columnWidth: 44 }}
             pagination={{
               current: pg.current, pageSize: pg.pageSize, total: rows.length,
               size: 'small', showSizeChanger: true, showTotal: t => `${t} orders`,
@@ -382,8 +502,9 @@ const SearchTab: React.FC<{ orgsLoading: boolean; orgsUrl: string; reloadOrgs: (
 //  NEW TRANSFER ORDER TAB
 // ═══════════════════════════════════════════════════════════════════════════
 interface NewLine { key: number; itemNumber: string; quantity: number | null; uom: string; }
+interface NewSeed { nonce: number; srcOrg?: string; dstOrg?: string; srcSub?: string; dstSub?: string; needBy?: string | null; ifaceCode?: string; lines?: { itemNumber: string; quantity: number | null; uom: string }[]; }
 
-const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean }> = ({ orgs, orgsLoading }) => {
+const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed | null }> = ({ orgs, orgsLoading, seed }) => {
   const [srcOrg, setSrcOrg]   = useState<string>();
   const [dstOrg, setDstOrg]   = useState<string>();
   const [srcSub, setSrcSub]   = useState<string>();
@@ -409,8 +530,22 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean }> = ({ orgs, or
       })
       .catch(() => set([]));
   };
-  useEffect(() => { setSrcSub(undefined); loadSubs(srcOrg, setSrcSubs); }, [srcOrg]);
-  useEffect(() => { setDstSub(undefined); loadSubs(dstOrg, setDstSubs); }, [dstOrg]);
+  // Load subinventory lists when the org changes; the selected sub is cleared
+  // by the Select's own onChange (user action), so a seeded value survives.
+  useEffect(() => { loadSubs(srcOrg, setSrcSubs); }, [srcOrg]);
+  useEffect(() => { loadSubs(dstOrg, setDstSubs); }, [dstOrg]);
+
+  // Prefill from a "Copy" action on an existing transfer order.
+  useEffect(() => {
+    if (!seed) return;
+    setSrcOrg(seed.srcOrg); setDstOrg(seed.dstOrg);
+    setSrcSub(seed.srcSub); setDstSub(seed.dstSub);
+    setNeedBy(seed.needBy ? dayjs(seed.needBy) : dayjs().add(3, 'day'));
+    if (seed.ifaceCode) setIfaceCode(seed.ifaceCode);
+    const ls = (seed.lines ?? []).map((l, i) => ({ key: i + 1, itemNumber: l.itemNumber, quantity: l.quantity, uom: l.uom || 'Ea' }));
+    seqRef.current = Math.max(1, ls.length);
+    setLines(ls.length ? ls : [{ key: 1, itemNumber: '', quantity: null, uom: 'Ea' }]);
+  }, [seed?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addLine = () => { seqRef.current += 1; setLines(l => [...l, { key: seqRef.current, itemNumber: '', quantity: null, uom: 'Ea' }]); };
   const delLine = (key: number) => setLines(l => l.filter(x => x.key !== key));
@@ -504,7 +639,7 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean }> = ({ orgs, or
           <Col xs={24} md={7}>
             <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Source Organization <span style={{ color: REDWOOD.error }}>*</span></div>
             <Select showSearch placeholder="From organization" loading={orgsLoading} style={{ width: '100%' }}
-              options={orgOptions(orgs)} optionFilterProp="label" value={srcOrg} onChange={setSrcOrg} />
+              options={orgOptions(orgs)} optionFilterProp="label" value={srcOrg} onChange={v => { setSrcOrg(v); setSrcSub(undefined); }} />
           </Col>
           <Col xs={24} md={5}>
             <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Source Subinventory</div>
@@ -516,7 +651,7 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean }> = ({ orgs, or
           <Col xs={24} md={7}>
             <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Destination Organization <span style={{ color: REDWOOD.error }}>*</span></div>
             <Select showSearch placeholder="To organization" loading={orgsLoading} style={{ width: '100%' }}
-              options={orgOptions(orgs)} optionFilterProp="label" value={dstOrg} onChange={setDstOrg} />
+              options={orgOptions(orgs)} optionFilterProp="label" value={dstOrg} onChange={v => { setDstOrg(v); setDstSub(undefined); }} />
           </Col>
           <Col xs={24} md={5}>
             <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Destination Subinventory</div>
@@ -989,6 +1124,9 @@ const TransferOrders: React.FC = () => {
   const { orgs, loading: orgsLoading, load: reloadOrgs, url: orgsUrl } = useOrgs();
   const [tab, setTab] = useState('search');
   const [editTabs, setEditTabs] = useState<EditTab[]>([]);
+  const [newSeed, setNewSeed] = useState<NewSeed | null>(null);
+
+  const copyToNew = (seed: NewSeed) => { setNewSeed(seed); setTab('new'); };
 
   const openEdit = (headerId: number, headerNumber: string) => {
     const id = `edit-${headerId}`;
@@ -1027,7 +1165,7 @@ const TransferOrders: React.FC = () => {
               key: 'search',
               label: <span><SearchOutlined style={{ marginRight: 6 }} />Search Orders</span>,
               closable: false,
-              children: <SearchTab orgsLoading={orgsLoading} orgsUrl={orgsUrl} reloadOrgs={reloadOrgs} onEdit={openEdit} />,
+              children: <SearchTab orgsLoading={orgsLoading} orgsUrl={orgsUrl} reloadOrgs={reloadOrgs} onEdit={openEdit} onCopyToNew={copyToNew} />,
             },
             {
               key: 'lines',
@@ -1039,7 +1177,7 @@ const TransferOrders: React.FC = () => {
               key: 'new',
               label: <span><PlusOutlined style={{ marginRight: 6 }} />New Transfer Order</span>,
               closable: false,
-              children: <NewOrderTab orgs={orgs} orgsLoading={orgsLoading} />,
+              children: <NewOrderTab orgs={orgs} orgsLoading={orgsLoading} seed={newSeed} />,
             },
             ...editTabs.map(t => ({
               key: t.id,
