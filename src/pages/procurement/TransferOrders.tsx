@@ -549,6 +549,8 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
   const [costItem, setCostItem] = useState<string | null>(null);
   const [costData, setCostData] = useState<{ src: any[]; dst: any[] }>({ src: [], dst: [] });
   const [costLoading, setCostLoading] = useState(false);
+  const [costDetailCache, setCostDetailCache] = useState<Record<string, any[]>>({});
+  const [costDetailLoading, setCostDetailLoading] = useState<Record<string, boolean>>({});
 
   // Item search/picker (scoped to the source org) → fills a line.
   const [pickerLine, setPickerLine] = useState<number | null>(null);
@@ -643,6 +645,7 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
     const it = item.trim();
     if (!it) return;
     setCostItem(it); setCostData({ src: [], dst: [] }); setCostLoading(true);
+    setCostDetailCache({}); setCostDetailLoading({});
     try {
       // itemCosts isn't filterable by inventory org (org lives in ValuationUnit),
       // so pull all cost rows for the item and split by org on the client.
@@ -655,6 +658,24 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
       });
     } catch { setCostData({ src: [], dst: [] }); }
     finally { setCostLoading(false); }
+  };
+
+  // Resolve a cost row's costDetails child URL from its links (or self href).
+  const costDetailsHref = (row: any): string | null => {
+    const child = row?.links?.find((l: any) => l.name === 'costDetails')?.href;
+    if (child) return child;
+    const self = row?.links?.find((l: any) => l.rel === 'self' || l.name === 'itemCosts')?.href;
+    return self ? `${self}/child/costDetails` : null;
+  };
+  const loadCostDetail = async (url: string | null) => {
+    if (!url || costDetailCache[url] || costDetailLoading[url]) return;
+    setCostDetailLoading(p => ({ ...p, [url]: true }));
+    try {
+      const r = await fetch(url, { headers: FUSION_HDRS });
+      const d = await r.json();
+      setCostDetailCache(p => ({ ...p, [url]: Array.isArray(d.items) ? d.items : [] }));
+    } catch { setCostDetailCache(p => ({ ...p, [url]: [] })); }
+    finally { setCostDetailLoading(p => ({ ...p, [url]: false })); }
   };
 
   const openPicker = (lineKey: number, seedText = '') => {
@@ -1093,11 +1114,37 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
                     </div>
                     <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 8 }}>Unit cost{rows.length > 1 ? ` · ${rows.length} rows` : ''}</div>
                     {rows.length > 0 && (
-                      <Table size="small" pagination={false} dataSource={rows} rowKey={(_, i) => `c-${i}`} scroll={{ y: 240 }} tableLayout="fixed"
+                      <Table size="small" pagination={false} dataSource={rows} rowKey={(r, i) => costDetailsHref(r) ?? r.ValuationUnit ?? `c-${i}`} scroll={{ y: 260 }} tableLayout="fixed"
+                        expandable={{
+                          rowExpandable: (r) => !!costDetailsHref(r),
+                          onExpand: (exp, r) => { if (exp) loadCostDetail(costDetailsHref(r)); },
+                          expandedRowRender: (r) => {
+                            const url = costDetailsHref(r); const det = url ? costDetailCache[url] : undefined;
+                            if (url && costDetailLoading[url]) return <Spin size="small" style={{ margin: 8 }} />;
+                            if (!det || det.length === 0) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No cost breakdown" style={{ margin: 6 }} />;
+                            const tot = det.reduce((s: number, x: any) => s + (Number(x.UnitCostAverage) || 0), 0);
+                            return (
+                              <Table size="small" pagination={false} dataSource={det} rowKey={(_, i) => `cd-${i}`}
+                                columns={[
+                                  { title: 'Cost Element', dataIndex: 'CostElement', ellipsis: true, render: v => <Text style={{ fontSize: 11, fontWeight: 600 }}>{v ?? '—'}</Text> },
+                                  { title: 'Type', dataIndex: 'CostElementType', width: 100, render: v => <Tag style={{ fontSize: 10 }}>{v ?? '—'}</Tag> },
+                                  { title: 'Unit Cost', dataIndex: 'UnitCostAverage', width: 130, align: 'right', render: (v, x) => <Text style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>{fmtPrice(v, x.CurrencyCode)}</Text> },
+                                  { title: '%', dataIndex: 'CostPercent', width: 70, align: 'right', render: v => <Text style={{ fontSize: 11 }}>{v == null ? '—' : `${Number(v).toFixed(1)}%`}</Text> },
+                                ]}
+                                summary={() => (
+                                  <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+                                    <Table.Summary.Cell index={0} colSpan={2} align="right"><Text strong style={{ fontSize: 11 }}>Total</Text></Table.Summary.Cell>
+                                    <Table.Summary.Cell index={1} align="right"><Text strong style={{ fontSize: 11, color: REDWOOD.primary }}>{fmtPrice(tot, det[0]?.CurrencyCode)}</Text></Table.Summary.Cell>
+                                    <Table.Summary.Cell index={2} />
+                                  </Table.Summary.Row>
+                                )} />
+                            );
+                          },
+                        }}
                         columns={[
                           { title: 'Cost Org', width: 120, ellipsis: true, render: (_, r) => { const p = parseVU(r.ValuationUnit); return <Text strong style={{ fontSize: 11 }}>{p.costOrg || '—'}</Text>; } },
-                          { title: 'Inv Org', width: 110, ellipsis: true, render: (_, r) => { const p = parseVU(r.ValuationUnit); return <Text style={{ fontSize: 11 }}>{p.invOrg || '—'}</Text>; } },
-                          { title: 'Subinv', width: 100, ellipsis: true, render: (_, r) => { const p = parseVU(r.ValuationUnit); return p.subinv ? <Tag color="cyan" style={{ fontSize: 10 }}>{p.subinv}</Tag> : '—'; } },
+                          { title: 'Inv Org', width: 100, ellipsis: true, render: (_, r) => { const p = parseVU(r.ValuationUnit); return <Text style={{ fontSize: 11 }}>{p.invOrg || '—'}</Text>; } },
+                          { title: 'Subinv', width: 95, ellipsis: true, render: (_, r) => { const p = parseVU(r.ValuationUnit); return p.subinv ? <Tag color="cyan" style={{ fontSize: 10 }}>{p.subinv}</Tag> : '—'; } },
                           { title: 'Lot', ellipsis: true, render: (_, r) => { const p = parseVU(r.ValuationUnit); return p.lot ? <Tag color="geekblue" style={{ fontSize: 10 }}>{p.lot}</Tag> : '—'; } },
                           { title: 'Unit Cost', width: 130, align: 'right', render: (_, r) => <Text strong style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>{fmtPrice(pickCost(r), r.CurrencyCode)}</Text> },
                         ]} />
@@ -1109,7 +1156,7 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
           </Row>
         )}
         <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 10 }}>
-          <InfoCircleOutlined style={{ marginRight: 6 }} />GET {LATEST_URL}/itemCosts?q=ItemNumber=&lt;item&gt; — rows are matched to each org via the inventory org in <Text code>ValuationUnit</Text>.
+          <InfoCircleOutlined style={{ marginRight: 6 }} />GET {LATEST_URL}/itemCosts?q=ItemNumber=&lt;item&gt; — rows are matched to each org via the inventory org in <Text code>ValuationUnit</Text>. Expand a row for the cost-element breakdown (child <Text code>costDetails</Text>).
         </Text>
       </Modal>
 
