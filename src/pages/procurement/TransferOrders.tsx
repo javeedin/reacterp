@@ -556,6 +556,7 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
   const [pickerRows, setPickerRows] = useState<any[]>([]);
   const [pickerLoading, setPickerLoading] = useState(false);
   const [pickerErr, setPickerErr] = useState('');
+  const [pickerUrls, setPickerUrls] = useState<string[]>([]);
 
   const COST_FIELDS = ['TotalUnitCost', 'UnitCost', 'ItemCost', 'UnitAverageCost', 'AverageUnitCost'];
   const pickCost = (r: any) => { for (const k of COST_FIELDS) { const v = r?.[k]; if (v != null && v !== '') return Number(v); } return null; };
@@ -660,31 +661,51 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
     setPickerLine(lineKey); setPickerText(seedText); setPickerRows([]); setPickerErr('');
   };
 
-  // Search itemsV2 in the source org by description and/or item number.
-  const itemSearchUrl = (org: string, field: string, text: string) =>
-    `${FUSION_BASE}/itemsV2?q=${encodeURIComponent(`OrganizationCode=${org};${field} like "*${text}*"`)}&limit=100&onlyData=true`;
+  // Build an itemsV2 search URL. ItemNumber uses a trailing wildcard (prefix
+  // match — leading "*" is unreliable), description uses a contains match.
+  // `org` optionally scopes to an inventory organization.
+  const itemSearchUrl = (field: 'ItemNumber' | 'ItemDescription', text: string, org?: string) => {
+    const wild = field === 'ItemNumber' ? `${text}*` : `*${text}*`;
+    const q = (org ? `OrganizationCode=${org};` : '') + `${field} like "${wild}"`;
+    return `${FUSION_BASE}/itemsV2?q=${encodeURIComponent(q)}&limit=100&onlyData=true`;
+  };
+
+  const runItemQueries = async (urls: string[]) => {
+    const res = await Promise.allSettled(urls.map(u => fetch(u, { headers: FUSION_HDRS }).then(async r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    })));
+    const rows: any[] = []; const seen = new Set<string>();
+    res.forEach(x => {
+      if (x.status === 'fulfilled' && Array.isArray((x.value as any).items)) {
+        (x.value as any).items.forEach((it: any) => { if (it.ItemNumber && !seen.has(it.ItemNumber)) { seen.add(it.ItemNumber); rows.push(it); } });
+      }
+    });
+    const firstErr = res.find(x => x.status === 'rejected') as any;
+    return { rows, anyOk: res.some(x => x.status === 'fulfilled'), err: firstErr?.reason?.message as string | undefined };
+  };
 
   const searchItems = async () => {
     const t = pickerText.trim();
     if (!srcOrg) { message.info('Select a source organization first'); return; }
     if (!t) { message.info('Enter a code or description to search'); return; }
     setPickerLoading(true); setPickerErr(''); setPickerRows([]);
+
+    // 1) org-scoped search; 2) fall back to the item master if nothing found.
+    const orgUrls = [itemSearchUrl('ItemDescription', t, srcOrg), itemSearchUrl('ItemNumber', t, srcOrg)];
+    const masterUrls = [itemSearchUrl('ItemDescription', t), itemSearchUrl('ItemNumber', t)];
+    setPickerUrls(orgUrls);
     try {
-      const [byDesc, byNum] = await Promise.allSettled([
-        fetch(itemSearchUrl(srcOrg, 'ItemDescription', t), { headers: FUSION_HDRS }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
-        fetch(itemSearchUrl(srcOrg, 'ItemNumber', t), { headers: FUSION_HDRS }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
-      ]);
-      const rows: any[] = []; const seen = new Set<string>();
-      [byDesc, byNum].forEach(res => {
-        if (res.status === 'fulfilled' && Array.isArray((res.value as any).items)) {
-          (res.value as any).items.forEach((it: any) => { if (it.ItemNumber && !seen.has(it.ItemNumber)) { seen.add(it.ItemNumber); rows.push(it); } });
-        }
-      });
-      setPickerRows(rows);
+      let { rows, anyOk, err } = await runItemQueries(orgUrls);
+      let scope = srcOrg;
       if (rows.length === 0) {
-        const anyOk = [byDesc, byNum].some(r => r.status === 'fulfilled');
-        setPickerErr(anyOk ? `No items matched "${t}" in ${srcOrg}` : `Search failed: ${(byDesc as any).reason?.message ?? 'error'}`);
+        setPickerUrls([...orgUrls, ...masterUrls]);
+        const master = await runItemQueries(masterUrls);
+        rows = master.rows; anyOk = anyOk || master.anyOk; err = err ?? master.err; scope = 'item master';
       }
+      setPickerRows(rows);
+      if (rows.length === 0) setPickerErr(anyOk ? `No items matched "${t}" (searched ${srcOrg} then item master)` : `Search failed: ${err ?? 'error'}`);
+      else if (scope === 'item master') message.info('No org-scoped match — showing item master results');
     } catch (e: any) { setPickerErr(e.message); }
     finally { setPickerLoading(false); }
   };
@@ -732,7 +753,17 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
     if (srcOrg) openPicker(key, '');   // open the item search for the new line
   };
   const delLine = (key: number) => setLines(l => l.filter(x => x.key !== key));
-  const clearLines = () => { seqRef.current = 1; setLines([{ key: 1, itemNumber: '', quantity: null, uom: 'Ea' }]); };
+  const doClearLines = () => { seqRef.current = 1; setLines([{ key: 1, itemNumber: '', quantity: null, uom: 'Ea' }]); setInfo({}); };
+  const clearLines = () => {
+    const has = lines.some(l => l.itemNumber.trim() || (l.quantity ?? 0) > 0);
+    if (!has) { doClearLines(); return; }
+    Modal.confirm({
+      title: 'Clear all item lines?',
+      content: `This will remove ${lines.length} line${lines.length !== 1 ? 's' : ''} from this transfer order. This cannot be undone.`,
+      okText: 'Clear', okButtonProps: { danger: true },
+      onOk: doClearLines,
+    });
+  };
   const updLine = (key: number, patch: Partial<NewLine>) => setLines(l => l.map(x => x.key === key ? { ...x, ...patch } : x));
 
   const validLines = lines.filter(l => l.itemNumber.trim() && (l.quantity ?? 0) > 0);
@@ -947,7 +978,7 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <Button icon={<EyeOutlined />} onClick={() => setPayloadOpen(true)}>Show Payload</Button>
           <Button type="primary" icon={<CloudUploadOutlined />} loading={submitting} onClick={submit}
-            style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>Create Transfer Order</Button>
+            style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>Save Transfer Order in Fusion</Button>
           <Text type="secondary" style={{ fontSize: 12, marginLeft: 'auto', fontFamily: 'monospace' }}>
             <Tag color="green">POST</Tag>{postUrl}
           </Text>
@@ -1099,10 +1130,20 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
                 { title: '', width: 80, align: 'center', render: (_, row) => <Button size="small" type="link" onClick={(e) => { e.stopPropagation(); selectItem(row); }}>Select</Button> },
               ]} />
           )}
-        <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8 }}>
-          <InfoCircleOutlined style={{ marginRight: 6 }} />
-          GET itemsV2?q=OrganizationCode={srcOrg ?? '—'};ItemDescription/ItemNumber like "*…*" — searched live in the source organization.
-        </Text>
+        <div style={{ marginTop: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase' }}>Requests run</Text>
+            {pickerUrls.length > 0 && <Button size="small" type="text" icon={<CopyOutlined />}
+              onClick={() => { navigator.clipboard.writeText(pickerUrls.join('\n')); message.success('Copied'); }}>Copy</Button>}
+          </div>
+          {pickerUrls.length === 0
+            ? <Text type="secondary" style={{ fontSize: 11 }}>Run a search to see the exact itemsV2 URLs.</Text>
+            : pickerUrls.map((u, i) => (
+              <div key={i} style={{ padding: '6px 10px', borderRadius: 6, background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info, marginBottom: 6 }}>
+                <Tag color="blue">GET</Tag>{decodeURIComponent(u)}
+              </div>
+            ))}
+        </div>
       </Modal>
     </div>
   );
@@ -1504,8 +1545,21 @@ const TransferOrders: React.FC = () => {
   const [tab, setTab] = useState('search');
   const [editTabs, setEditTabs] = useState<EditTab[]>([]);
   const [newSeed, setNewSeed] = useState<NewSeed | null>(null);
+  const [newTabs, setNewTabs] = useState<number[]>([]);   // extra independent New-order tabs
+  const newSeqRef = React.useRef(0);
 
   const copyToNew = (seed: NewSeed) => { setNewSeed(seed); setTab('new'); };
+
+  // Open a fresh, independent New Transfer Order tab.
+  const openNewTab = () => {
+    newSeqRef.current += 1; const id = newSeqRef.current;
+    setNewTabs(prev => [...prev, id]);
+    setTab(`new-${id}`);
+  };
+  const closeNewTab = (id: number) => {
+    setNewTabs(prev => prev.filter(x => x !== id));
+    setTab('new');
+  };
 
   const openEdit = (headerId: number, headerNumber: string) => {
     const id = `edit-${headerId}`;
@@ -1536,9 +1590,24 @@ const TransferOrders: React.FC = () => {
           onChange={setTab}
           type="editable-card"
           hideAdd
-          onEdit={(key, action) => { if (action === 'remove') closeEdit(String(key)); }}
+          onEdit={(key, action) => {
+            if (action !== 'remove') return;
+            const k = String(key);
+            if (k.startsWith('new-')) closeNewTab(Number(k.slice(4)));
+            else closeEdit(k);
+          }}
           style={{ background: REDWOOD.surface }}
           tabBarStyle={{ margin: 0, paddingLeft: 16, borderBottom: `2px solid ${REDWOOD.neutral200}` }}
+          tabBarExtraContent={{
+            right: (
+              <div style={{ paddingRight: 16 }}>
+                <Button type="primary" icon={<PlusOutlined />} onClick={openNewTab}
+                  style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary, fontWeight: 600 }}>
+                  New Transfer Order
+                </Button>
+              </div>
+            ),
+          }}
           items={[
             {
               key: 'search',
@@ -1563,6 +1632,12 @@ const TransferOrders: React.FC = () => {
               label: <span><EditOutlined style={{ marginRight: 6, color: REDWOOD.primary }} />Edit {t.headerNumber}</span>,
               closable: true,
               children: <EditOrderTab headerId={t.headerId} headerNumber={t.headerNumber} onClose={() => closeEdit(t.id)} />,
+            })),
+            ...newTabs.map(id => ({
+              key: `new-${id}`,
+              label: <span><PlusOutlined style={{ marginRight: 6, color: REDWOOD.primary }} />New Transfer Order</span>,
+              closable: true,
+              children: <NewOrderTab orgs={orgs} orgsLoading={orgsLoading} />,
             })),
           ]}
         />
