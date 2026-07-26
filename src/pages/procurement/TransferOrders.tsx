@@ -557,13 +557,14 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
 
   const validLines = lines.filter(l => l.itemNumber.trim() && (l.quantity ?? 0) > 0);
 
-  // Build the Supply Chain Orchestration (supplyRequests) payload. Header and
-  // lines both carry InterfaceBatchNumber; SCO also requires ProcessStatus,
-  // SupplyRequestDate and SupplyOrderSource. There is NO SupplyRequestLineNumber.
+  // Build the Supply Chain Orchestration (supplyRequests) payload.
+  // ProcessStatus is a LINE attribute only — sending it at the header level is
+  // rejected ("Invalid attribute"), while the header's ProcessStatus requirement
+  // is satisfied by the framework from the line value. There is NO
+  // SupplyRequestLineNumber. Header carries the batch, date and sources.
   const buildPayload = (batchNo: string) => ({
     InterfaceSourceCode: ifaceCode || 'EXT',
     InterfaceBatchNumber: batchNo,
-    ProcessStatus: procStatus || 'IN_PROCESS',
     SupplyRequestDate: dayjs().toISOString(),
     SupplyOrderSource: orderSource || 'EXT',
     ProcessRequestFlag: 'Y',
@@ -693,7 +694,7 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
         </Row>
         <div style={{ marginTop: 10, fontSize: 11, color: REDWOOD.neutral600 }}>
           <InfoCircleOutlined style={{ marginRight: 6 }} />
-          Sent to Supply Chain Orchestration with a unique <b>InterfaceBatchNumber</b>, <b>ProcessRequestFlag=Y</b> and today's <b>SupplyRequestDate</b>. Adjust Process Status / sources only if your instance expects different values.
+          Sent to Supply Chain Orchestration with a unique <b>InterfaceBatchNumber</b>, <b>ProcessRequestFlag=Y</b> and today's <b>SupplyRequestDate</b>. <b>Process Status</b> is set on each line (not the header). Adjust Process Status / sources only if your instance expects different values.
         </div>
         {srcOrg && dstOrg && srcOrg === dstOrg && (
           <div style={{ marginTop: 10, color: REDWOOD.error, fontSize: 12 }}>
