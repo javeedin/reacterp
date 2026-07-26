@@ -513,6 +513,7 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
   const [ifaceCode, setIfaceCode] = useState('EXT');
   const [reqStatus, setReqStatus] = useState('NEW');
   const [orderSource, setOrderSource] = useState('EXT');
+  const [email, setEmail] = useState('thiyagarajan@mitsumidistribution.com');
   const [lines, setLines]     = useState<NewLine[]>([{ key: 1, itemNumber: '', quantity: null, uom: 'Ea' }]);
   const seqRef = React.useRef(1);
   const sampleBatchRef = React.useRef(`RE${Date.now()}`);
@@ -587,6 +588,7 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
       InterfaceSourceCode: ifaceCode || 'EXT',
       SupplyOrderSource: orderSource || 'EXT',
       BackToBackFlag: 'N',
+      ...(email.trim() ? { PreparerEmail: email.trim(), DeliverToRequesterEmail: email.trim() } : {}),
       ...(needBy ? { NeedByDate: dayjs(needBy).toISOString() } : {}),
       Quantity: l.quantity,
       UOMCode: l.uom || 'Ea',
@@ -700,6 +702,10 @@ const NewOrderTab: React.FC<{ orgs: Org[]; orgsLoading: boolean; seed?: NewSeed 
           <Col xs={12} md={6} style={{ marginTop: 10 }}>
             <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Supply Request Status</div>
             <Input value={reqStatus} onChange={e => setReqStatus(e.target.value)} placeholder="NEW" />
+          </Col>
+          <Col xs={24} md={12} style={{ marginTop: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Preparer / Requester Email</div>
+            <Input value={email} onChange={e => setEmail(e.target.value)} placeholder="name@company.com" allowClear />
           </Col>
         </Row>
         <div style={{ marginTop: 10, fontSize: 11, color: REDWOOD.neutral600 }}>
