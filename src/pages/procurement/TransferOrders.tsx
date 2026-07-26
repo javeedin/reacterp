@@ -645,6 +645,7 @@ const SearchLinesTab: React.FC<{ onEdit: (headerId: number, headerNumber: string
   const ccy = filtered.find(l => l.CurrencyCode)?.CurrencyCode ?? allLines.find(l => l.CurrencyCode)?.CurrencyCode ?? '';
 
   const columns: ColumnsType<any> = [
+    { title: 'Ordered', dataIndex: '_orderedDate', width: 115, fixed: 'left', render: fmtDate },
     { title: 'Order #', dataIndex: '_headerNumber', width: 100, fixed: 'left',
       render: (v, r) => <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 13 }}
         onClick={() => onEdit(r._headerId, String(v))}>{v ?? '—'}</Button> },
@@ -668,7 +669,6 @@ const SearchLinesTab: React.FC<{ onEdit: (headerId: number, headerNumber: string
     { title: 'Fulfillment', dataIndex: 'FulfillStatusMeaning', width: 150, render: v => statusTag(v) },
     { title: 'Line Status', dataIndex: 'TransferOrderLineStatus', width: 110, render: v => statusTag(v) },
     { title: 'Need By', dataIndex: 'NeedByDate', width: 115, render: fmtDate },
-    { title: 'Ordered', dataIndex: '_orderedDate', width: 115, render: fmtDate },
   ];
 
   return (
