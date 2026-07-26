@@ -14,6 +14,7 @@ import {
   PlusOutlined, BankOutlined, UserOutlined, CalendarOutlined,
   DollarOutlined, FileTextOutlined, DownOutlined, FilePdfOutlined,
   HistoryOutlined, FolderOpenOutlined, EditOutlined,
+  CheckCircleTwoTone, CloseCircleTwoTone,
 } from '@ant-design/icons';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import CreatePurchaseOrder from './CreatePurchaseOrder';
@@ -204,6 +205,17 @@ const buildQParam = (p: SearchParams): string => {
   if (p.statusCode)  parts.push(`StatusCode="${p.statusCode}"`);
   if (p.creationDate) parts.push(`CreationDate${p.dateOp || '>'}${dayjs(p.creationDate).format('YYYY-MM-DD')}`);
   return parts.join(';');
+};
+
+// Per-PO life-cycle presence flags, filled after the Life Cycle dialog loads.
+interface LcSummary { receipts: boolean; invoices: boolean; payment: boolean }
+
+// Tick / cross / not-yet-loaded indicator for the Receipts / Invoices / Payment columns.
+const LcFlag: React.FC<{ state?: boolean }> = ({ state }) => {
+  if (state === undefined) return <Text style={{ color: REDWOOD.neutral300 }}>—</Text>;
+  return state
+    ? <CheckCircleTwoTone twoToneColor={REDWOOD.success} style={{ fontSize: 16 }} />
+    : <CloseCircleTwoTone twoToneColor={REDWOOD.error} style={{ fontSize: 16 }} />;
 };
 
 // ── PO Detail Page (shown as a tab) ─────────────────────────────────────────
@@ -903,7 +915,7 @@ ${po.NoteToSupplier ? `<div class="sec">Notes</div><div class="fv">${po.NoteToSu
 };
 
 // ── Search Tab ───────────────────────────────────────────────────────────────
-const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => void; onLifeCycle: (po: RawPO) => void }> = ({ onOpen, onEdit, onLifeCycle }) => {
+const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => void; onLifeCycle: (po: RawPO) => void; lifecycleSummary: Record<number, LcSummary> }> = ({ onOpen, onEdit, onLifeCycle, lifecycleSummary }) => {
   const [form] = Form.useForm();
   const [data, setData]             = useState<RawPO[]>([]);
   const [loading, setLoading]       = useState(false);
@@ -1081,6 +1093,10 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
   const currentUrl = buildUrl(searchParams, page);
 
   const columns: ColumnsType<RawPO> = [
+    { title: 'Created', dataIndex: 'CreationDate', width: 120, fixed: 'left', render: d => fmtDate(d),
+      sorter: (a, b) => (a.CreationDate ?? '').localeCompare(b.CreationDate ?? ''),
+      defaultSortOrder: 'descend' as const,
+    },
     {
       title: 'Order Number', dataIndex: 'OrderNumber', width: 140, fixed: 'left',
       render: (v, rec) => (
@@ -1128,9 +1144,20 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
     { title: 'Order Date', dataIndex: 'OrderDate', width: 120, render: d => fmtDate(d),
       sorter: (a, b) => (a.OrderDate ?? '').localeCompare(b.OrderDate ?? ''),
     },
-    { title: 'Created', dataIndex: 'CreationDate', width: 140, render: d => fmtDate(d),
-      sorter: (a, b) => (a.CreationDate ?? '').localeCompare(b.CreationDate ?? ''),
-      defaultSortOrder: 'descend' as const,
+    {
+      title: <Tooltip title="Has receipts — fills after opening Life Cycle">Rcpt</Tooltip>,
+      key: 'lcReceipts', width: 60, align: 'center',
+      render: (_: unknown, rec: RawPO) => <LcFlag state={lifecycleSummary?.[rec.POHeaderId]?.receipts} />,
+    },
+    {
+      title: <Tooltip title="Has invoices — fills after opening Life Cycle">Inv</Tooltip>,
+      key: 'lcInvoices', width: 60, align: 'center',
+      render: (_: unknown, rec: RawPO) => <LcFlag state={lifecycleSummary?.[rec.POHeaderId]?.invoices} />,
+    },
+    {
+      title: <Tooltip title="Has a paid invoice — fills after opening Life Cycle">Paid</Tooltip>,
+      key: 'lcPayment', width: 60, align: 'center',
+      render: (_: unknown, rec: RawPO) => <LcFlag state={lifecycleSummary?.[rec.POHeaderId]?.payment} />,
     },
     {
       title: '', key: 'actions', width: 168, fixed: 'right', align: 'center',
@@ -2060,6 +2087,8 @@ const ManagePurchaseOrders: React.FC = () => {
 
   // Life Cycle dialog — receipts / invoices / returns with charts & analytics.
   const [lifecyclePo, setLifecyclePo] = useState<RawPO | null>(null);
+  // Per-PO receipts/invoices/payment presence, filled once the dialog loads.
+  const [lifecycleSummary, setLifecycleSummary] = useState<Record<number, LcSummary>>({});
 
   const handleOpen = (po: RawPO) => {
     const key = String(po.POHeaderId);
@@ -2131,7 +2160,7 @@ const ManagePurchaseOrders: React.FC = () => {
           <SearchOutlined style={{ fontSize: 13 }} /> Search Orders
         </span>
       ),
-      children: <SearchTab onOpen={handleOpen} onEdit={openEditPO} onLifeCycle={handleOpenLifecycle} />,
+      children: <SearchTab onOpen={handleOpen} onEdit={openEditPO} onLifeCycle={handleOpenLifecycle} lifecycleSummary={lifecycleSummary} />,
       closable: false,
     },
     {
@@ -2246,7 +2275,12 @@ const ManagePurchaseOrders: React.FC = () => {
       </Content>
 
       {/* Life Cycle dialog (receipts / invoices / returns + analytics) */}
-      <POLifeCycleModal po={lifecyclePo} open={!!lifecyclePo} onClose={() => setLifecyclePo(null)} />
+      <POLifeCycleModal
+        po={lifecyclePo}
+        open={!!lifecyclePo}
+        onClose={() => setLifecyclePo(null)}
+        onLoaded={(headerId, summary) => setLifecycleSummary(prev => ({ ...prev, [headerId]: summary }))}
+      />
     </Layout>
   );
 };

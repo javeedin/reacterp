@@ -98,7 +98,20 @@ const EmptyChart: React.FC<{ msg?: string }> = ({ msg = 'No data' }) => (
 );
 
 // ── Main modal ────────────────────────────────────────────────────────────────
-const POLifeCycleModal: React.FC<{ po: POLite | null; open: boolean; onClose: () => void }> = ({ po, open, onClose }) => {
+interface LcSummary { receipts: boolean; invoices: boolean; payment: boolean }
+
+// Detect a paid invoice from its status fields.
+const isPaidInvoice = (r: any) => {
+  const s = String(r?.InvoiceStatus ?? r?.InvoiceStatusCode ?? '').toUpperCase();
+  return s.includes('PAID') && !s.includes('UNPAID') && !s.includes('PARTIAL');
+};
+
+const POLifeCycleModal: React.FC<{
+  po: POLite | null;
+  open: boolean;
+  onClose: () => void;
+  onLoaded?: (poHeaderId: number, summary: LcSummary) => void;
+}> = ({ po, open, onClose, onLoaded }) => {
   const [receipts, setReceipts] = useState<any[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
   const [loading, setLoading]   = useState(false);
@@ -132,15 +145,22 @@ const POLifeCycleModal: React.FC<{ po: POLite | null; open: boolean; onClose: ()
     const errs: string[] = [];
     const [rc, inv] = await Promise.allSettled([fetchChild(headerId, 'receipts'), fetchChild(headerId, 'invoices')]);
     const nextUrls = { ...urls };
-    if (rc.status === 'fulfilled') { setReceipts(rc.value.items); nextUrls.receipts = rc.value.url; }
+    let rcItems: any[] = [], invItems: any[] = [];
+    if (rc.status === 'fulfilled') { rcItems = rc.value.items; setReceipts(rcItems); nextUrls.receipts = rc.value.url; }
     else errs.push(`Receipts: ${(rc as any).reason?.message ?? 'failed'}`);
-    if (inv.status === 'fulfilled') { setInvoices(inv.value.items); nextUrls.invoices = inv.value.url; }
+    if (inv.status === 'fulfilled') { invItems = inv.value.items; setInvoices(invItems); nextUrls.invoices = inv.value.url; }
     else errs.push(`Invoices: ${(inv as any).reason?.message ?? 'failed'}`);
     setUrls(nextUrls);
     setFetched(true);
     if (errs.length) setError(errs.join('  |  '));
     setLoading(false);
-  }, [fetchChild]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Report presence flags back to the Search grid.
+    onLoaded?.(headerId, {
+      receipts: rcItems.length > 0,
+      invoices: invItems.length > 0,
+      payment: invItems.some(isPaidInvoice),
+    });
+  }, [fetchChild, onLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load whenever the modal opens for a PO; reset when the PO changes.
   useEffect(() => {
