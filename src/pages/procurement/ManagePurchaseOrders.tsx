@@ -17,6 +17,7 @@ import {
 } from '@ant-design/icons';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import CreatePurchaseOrder from './CreatePurchaseOrder';
+import POLifeCycleModal from './POLifeCycle';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -206,8 +207,7 @@ const buildQParam = (p: SearchParams): string => {
 };
 
 // ── PO Detail Page (shown as a tab) ─────────────────────────────────────────
-const PODetailPage: React.FC<{ po: RawPO; onClose?: () => void; onEdit?: (po: RawPO) => void; lifecycleSignal?: number }> = ({ po, onClose, onEdit, lifecycleSignal }) => {
-  const lifeCycleRef = useRef<HTMLDivElement>(null);
+const PODetailPage: React.FC<{ po: RawPO; onClose?: () => void; onEdit?: (po: RawPO) => void; onLifeCycle?: (po: RawPO) => void }> = ({ po, onClose, onEdit, onLifeCycle }) => {
   const [lines, setLines]           = useState<POLine[]>([]);
   const [linesLoading, setLL]       = useState(false);
   const [linesError, setLE]         = useState<string | null>(null);
@@ -223,76 +223,6 @@ const PODetailPage: React.FC<{ po: RawPO; onClose?: () => void; onEdit?: (po: Ra
   const [schError, setSchError]               = useState<string | null>(null);
   const [schFetched, setSchFetched]           = useState(false);
   const [schDetailRecord, setSchDetailRecord] = useState<POSchedule | null>(null);
-
-  // ── Life Cycle (receipts / invoices / returns) ──────────────────────────
-  const [lcTab, setLcTab]             = useState<'receipts' | 'invoices' | 'returns'>('receipts');
-  const [lcReceipts, setLcReceipts]   = useState<any[]>([]);
-  const [lcInvoices, setLcInvoices]   = useState<any[]>([]);
-  const [lcLoading, setLcLoading]     = useState(false);
-  const [lcError, setLcError]         = useState<string | null>(null);
-  const [lcFetched, setLcFetched]     = useState(false);
-  const [lcDetail, setLcDetail]       = useState<{ kind: string; rec: any } | null>(null);
-  const [lcApiOpen, setLcApiOpen]     = useState(false);
-
-  // Fusion's canonical resource name capitalises the C (LifeCycle); some
-  // versions/docs use a lowercase c. Try the canonical form first, fall back.
-  const LC_RESOURCES = ['purchaseOrderLifeCycleDetails', 'purchaseOrderLifecycleDetails'];
-  const lcUrl = (resource: string, child: string) => `${BASE_URL}/${resource}/${po.POHeaderId}/child/${child}`;
-  const [lcReceiptsUrl, setLcReceiptsUrl] = useState(lcUrl(LC_RESOURCES[0], 'receipts'));
-  const [lcInvoicesUrl, setLcInvoicesUrl] = useState(lcUrl(LC_RESOURCES[0], 'invoices'));
-
-  // Pull first non-empty value across a list of candidate field names.
-  const pickField = (rec: any, keys: string[]) => {
-    for (const k of keys) {
-      const v = rec?.[k];
-      if (v != null && v !== '') return v;
-    }
-    return undefined;
-  };
-
-  // Fetch a life-cycle child, trying each resource-name casing until one is
-  // not a 404. Returns the working URL plus the items.
-  const fetchLcChild = useCallback(async (child: string): Promise<{ url: string; items: any[] }> => {
-    let lastErr: any = null;
-    for (const resource of LC_RESOURCES) {
-      const url = lcUrl(resource, child);
-      try {
-        const items = await fetchAllPages(url);
-        return { url, items };
-      } catch (e: any) {
-        lastErr = e;
-        // Only fall through on 404 (wrong casing / not found); rethrow others.
-        if (!String(e?.message ?? '').includes('404')) throw e;
-      }
-    }
-    throw lastErr ?? new Error('Not found');
-  }, [po.POHeaderId]);
-
-  const fetchLifecycle = useCallback(async () => {
-    setLcLoading(true); setLcError(null);
-    const errors: string[] = [];
-    const [recRes, invRes] = await Promise.allSettled([
-      fetchLcChild('receipts'),
-      fetchLcChild('invoices'),
-    ]);
-    if (recRes.status === 'fulfilled') { setLcReceipts(recRes.value.items); setLcReceiptsUrl(recRes.value.url); }
-    else errors.push(`Receipts: ${(recRes as any).reason?.message ?? 'failed'}`);
-    if (invRes.status === 'fulfilled') { setLcInvoices(invRes.value.items); setLcInvoicesUrl(invRes.value.url); }
-    else errors.push(`Invoices: ${(invRes as any).reason?.message ?? 'failed'}`);
-    setLcFetched(true);
-    if (errors.length > 0) setLcError(errors.join(' | '));
-    setLcLoading(false);
-  }, [fetchLcChild]);
-
-  // When opened via the Life Cycle icon in Search Orders, auto-load and scroll to it.
-  const lcFetchedRef = useRef(false);
-  useEffect(() => { lcFetchedRef.current = lcFetched; }, [lcFetched]);
-  useEffect(() => {
-    if (!lifecycleSignal) return;
-    if (!lcFetchedRef.current) fetchLifecycle();
-    const t = setTimeout(() => lifeCycleRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
-    return () => clearTimeout(t);
-  }, [lifecycleSignal, fetchLifecycle]);
 
   const doFetch = useCallback(async (url: string) => {
     setLL(true); setLE(null); setRawResp('');
@@ -589,72 +519,6 @@ ${po.NoteToSupplier ? `<div class="sec">Notes</div><div class="fv">${po.NoteToSu
       ) },
   ];
 
-  const numCell = (v: any) => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{v == null || v === '' ? '—' : v}</Text>;
-
-  const receiptColumns: ColumnsType<any> = [
-    { title: 'Receipt #', width: 130,
-      render: (_, r) => <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>{pickField(r, ['ReceiptNumber', 'Receipt', 'ReceiptId']) ?? '—'}</Text> },
-    { title: 'Transaction Date', width: 130,
-      render: (_, r) => fmtDate(pickField(r, ['TransactionDate', 'ReceiptDate', 'DeliveryDate', 'CreationDate'])) },
-    { title: 'Type', width: 110,
-      render: (_, r) => <Tag style={{ fontSize: 11 }}>{pickField(r, ['TransactionType', 'ReceiptSourceCode', 'DocumentType']) ?? '—'}</Tag> },
-    { title: 'Line', width: 55, align: 'center',
-      render: (_, r) => <Tag color="blue" style={{ fontSize: 11 }}>{pickField(r, ['DocumentLineNumber', 'POLineNumber', 'LineNumber', 'ScheduleNumber']) ?? '—'}</Tag> },
-    { title: 'Item', width: 130,
-      render: (_, r) => <Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.info }}>{pickField(r, ['ItemNumber', 'Item']) ?? '—'}</Text> },
-    { title: 'Description', ellipsis: true,
-      render: (_, r) => <Text style={{ fontSize: 12 }}>{pickField(r, ['ItemDescription', 'Description']) ?? '—'}</Text> },
-    { title: 'UOM', width: 62, align: 'center',
-      render: (_, r) => <Tag style={{ fontSize: 11 }}>{pickField(r, ['UOM', 'UnitOfMeasure']) ?? '—'}</Tag> },
-    { title: 'Received', width: 90, align: 'right',
-      render: (_, r) => numCell(pickField(r, ['ReceivedQuantity', 'QuantityReceived', 'Quantity'])) },
-    { title: 'Delivered', width: 90, align: 'right',
-      render: (_, r) => numCell(pickField(r, ['DeliveredQuantity', 'QuantityDelivered'])) },
-    { title: 'Returned', width: 90, align: 'right',
-      render: (_, r) => {
-        const v = pickField(r, ['ReturnedQuantity', 'QuantityReturned', 'OrderQuantityReturned']);
-        return <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: (Number(v) || 0) > 0 ? REDWOOD.error : undefined }}>{v == null || v === '' ? '—' : v}</Text>;
-      } },
-    { title: '', key: 'details', width: 46, fixed: 'right', align: 'center',
-      render: (_, r) => (
-        <Tooltip title="More details">
-          <Button size="small" type="text" icon={<InfoCircleOutlined />} style={{ color: REDWOOD.info }}
-            onClick={() => setLcDetail({ kind: 'Receipt', rec: r })} />
-        </Tooltip>
-      ) },
-  ];
-
-  const invoiceColumns: ColumnsType<any> = [
-    { title: 'Invoice #', width: 140,
-      render: (_, r) => <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>{pickField(r, ['InvoiceNumber', 'Invoice', 'InvoiceId']) ?? '—'}</Text> },
-    { title: 'Invoice Date', width: 130,
-      render: (_, r) => fmtDate(pickField(r, ['InvoiceDate', 'AccountingDate', 'CreationDate'])) },
-    { title: 'Supplier', width: 170, ellipsis: true,
-      render: (_, r) => <Text style={{ fontSize: 12 }}>{pickField(r, ['SupplierName', 'Supplier', 'PartyName']) ?? '—'}</Text> },
-    { title: 'Line', width: 55, align: 'center',
-      render: (_, r) => <Tag color="blue" style={{ fontSize: 11 }}>{pickField(r, ['DocumentLineNumber', 'POLineNumber', 'LineNumber']) ?? '—'}</Tag> },
-    { title: 'Item', width: 130,
-      render: (_, r) => <Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.info }}>{pickField(r, ['ItemNumber', 'Item']) ?? '—'}</Text> },
-    { title: 'Qty Invoiced', width: 110, align: 'right',
-      render: (_, r) => numCell(pickField(r, ['InvoicedQuantity', 'QuantityInvoiced', 'Quantity'])) },
-    { title: 'Amount', width: 130, align: 'right',
-      render: (_, r) => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: REDWOOD.primary }}>
-        {fmtAmt(pickField(r, ['InvoiceAmount', 'InvoicedAmount', 'Amount']), pickField(r, ['InvoiceCurrencyCode', 'CurrencyCode']))}
-      </Text> },
-    { title: 'Status', width: 130,
-      render: (_, r) => getStatusTag(pickField(r, ['InvoiceStatus', 'ValidationStatus', 'Status'])) },
-    { title: '', key: 'details', width: 46, fixed: 'right', align: 'center',
-      render: (_, r) => (
-        <Tooltip title="More details">
-          <Button size="small" type="text" icon={<InfoCircleOutlined />} style={{ color: REDWOOD.info }}
-            onClick={() => setLcDetail({ kind: 'Invoice', rec: r })} />
-        </Tooltip>
-      ) },
-  ];
-
-  // Returns = receipt rows carrying a returned quantity.
-  const returnRows = lcReceipts.filter(r => (Number(pickField(r, ['ReturnedQuantity', 'QuantityReturned', 'OrderQuantityReturned'])) || 0) > 0);
-
   return (
     <div style={{ background: REDWOOD.neutral100, minHeight: '100%' }}>
 
@@ -672,6 +536,15 @@ ${po.NoteToSupplier ? `<div class="sec">Notes</div><div class="fv">${po.NoteToSu
             style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary, color: '#fff', fontWeight: 600, borderRadius: 4 }}
           >
             Edit
+          </Button>
+        )}
+        {onLifeCycle && (
+          <Button
+            icon={<HistoryOutlined />}
+            onClick={() => onLifeCycle(po)}
+            style={{ background: '#00918A', borderColor: '#00918A', color: '#fff', fontWeight: 600, borderRadius: 4 }}
+          >
+            Life Cycle
           </Button>
         )}
         <Button
@@ -916,93 +789,6 @@ ${po.NoteToSupplier ? `<div class="sec">Notes</div><div class="fv">${po.NoteToSu
           />
         </Card>
 
-        {/* ── Life Cycle (receipts / invoices / returns) ─────────────────── */}
-        <div ref={lifeCycleRef} style={{ scrollMarginTop: 12 }} />
-        <Card
-          styles={{ body: { padding: 0 } }}
-          style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}
-          title={
-            <Space style={{ fontSize: 13 }}>
-              <HistoryOutlined style={{ color: REDWOOD.primary }} />
-              <Text strong>Life Cycle</Text>
-              {lcFetched && <Tag color="green" style={{ fontSize: 11 }}>{lcReceipts.length} receipt{lcReceipts.length !== 1 ? 's' : ''}</Tag>}
-              {lcFetched && <Tag color="geekblue" style={{ fontSize: 11 }}>{lcInvoices.length} invoice{lcInvoices.length !== 1 ? 's' : ''}</Tag>}
-              {lcFetched && returnRows.length > 0 && <Tag color="red" style={{ fontSize: 11 }}>{returnRows.length} return{returnRows.length !== 1 ? 's' : ''}</Tag>}
-            </Space>
-          }
-          extra={
-            <Space>
-              <Tooltip title="API Inspector — view the life-cycle web service URLs">
-                <Button size="small" icon={<ApiOutlined />}
-                  style={{ borderColor: REDWOOD.info, color: REDWOOD.info, fontSize: 11 }}
-                  onClick={() => setLcApiOpen(true)}>
-                  API
-                </Button>
-              </Tooltip>
-              <Button size="small" icon={<ReloadOutlined />} loading={lcLoading}
-                style={{ fontSize: 11 }} onClick={fetchLifecycle}>
-                {lcFetched ? 'Refresh' : 'Load'}
-              </Button>
-            </Space>
-          }
-        >
-          {!lcFetched && !lcLoading ? (
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={<span style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Click <b>Load</b> to fetch receipts, invoices and returns for this order</span>}
-              style={{ padding: 48 }}
-            />
-          ) : lcLoading ? (
-            <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
-              <Spin size="large" tip="Loading life cycle…" />
-            </div>
-          ) : (
-            <>
-              {lcError && (
-                <div style={{ padding: 12, color: REDWOOD.error, background: REDWOOD.error + '10', borderRadius: 6, margin: 16 }}>
-                  <InfoCircleOutlined style={{ marginRight: 8 }} />{lcError}
-                </div>
-              )}
-              <Tabs
-                activeKey={lcTab}
-                onChange={key => setLcTab(key as 'receipts' | 'invoices' | 'returns')}
-                size="small"
-                style={{ paddingLeft: 16, paddingRight: 16 }}
-                tabBarStyle={{ marginBottom: 0, borderBottom: `1px solid ${REDWOOD.neutral200}` }}
-                items={[
-                  {
-                    key: 'receipts',
-                    label: <span><FolderOpenOutlined style={{ marginRight: 5 }} />Receipts{lcReceipts.length > 0 ? ` (${lcReceipts.length})` : ''}</span>,
-                    children: lcReceipts.length === 0
-                      ? <Empty description="No receipts found for this order" style={{ padding: 48 }} />
-                      : <Table columns={receiptColumns} dataSource={lcReceipts} rowKey={(_, i) => `rc-${i}`}
-                          size="small" pagination={false} scroll={{ x: 1200 }}
-                          rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''} />,
-                  },
-                  {
-                    key: 'invoices',
-                    label: <span><FileTextOutlined style={{ marginRight: 5 }} />Invoices{lcInvoices.length > 0 ? ` (${lcInvoices.length})` : ''}</span>,
-                    children: lcInvoices.length === 0
-                      ? <Empty description="No invoices found for this order" style={{ padding: 48 }} />
-                      : <Table columns={invoiceColumns} dataSource={lcInvoices} rowKey={(_, i) => `inv-${i}`}
-                          size="small" pagination={false} scroll={{ x: 1000 }}
-                          rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''} />,
-                  },
-                  {
-                    key: 'returns',
-                    label: <span><CloseOutlined style={{ marginRight: 5 }} />Returns{returnRows.length > 0 ? ` (${returnRows.length})` : ''}</span>,
-                    children: returnRows.length === 0
-                      ? <Empty description="No returns found for this order" style={{ padding: 48 }} />
-                      : <Table columns={receiptColumns} dataSource={returnRows} rowKey={(_, i) => `ret-${i}`}
-                          size="small" pagination={false} scroll={{ x: 1200 }}
-                          rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''} />,
-                  },
-                ]}
-              />
-            </>
-          )}
-        </Card>
-
       </div>
 
       {/* ── Lines API Inspector Modal ───────────────────────────────────── */}
@@ -1112,77 +898,6 @@ ${po.NoteToSupplier ? `<div class="sec">Notes</div><div class="fv">${po.NoteToSu
         })()}
       </Modal>
 
-      {/* ── Life Cycle API Inspector Modal ─────────────────────────────── */}
-      <Modal
-        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /> Life Cycle API Inspector</Space>}
-        open={lcApiOpen} onCancel={() => setLcApiOpen(false)} footer={null} width={840}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            Life-cycle data is read from the Fusion <b>purchaseOrderLifecycleDetails</b> resource, keyed by this order's
-            POHeaderId (<Text code>{po.POHeaderId}</Text>). Each row is paginated (limit 500) until all pages are retrieved.
-          </Text>
-          {[
-            { lbl: 'Receipts', url: lcReceiptsUrl },
-            { lbl: 'Invoices', url: lcInvoicesUrl },
-          ].map(({ lbl, url }) => (
-            <div key={lbl}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{lbl}</Text>
-                <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginLeft: 'auto' }}
-                  onClick={() => { navigator.clipboard.writeText(url); message.success('Copied'); }}>Copy URL</Button>
-              </div>
-              <div style={{ marginTop: 4, padding: '8px 12px', borderRadius: 6, background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info }}>
-                <Tag color="blue" style={{ marginRight: 8 }}>GET</Tag>{url}
-              </div>
-            </div>
-          ))}
-          <div>
-            <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Headers Sent</Text>
-            <div style={{ marginTop: 4, padding: '8px 12px', borderRadius: 6, background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', fontSize: 12 }}>
-              <div><span style={{ color: REDWOOD.neutral600 }}>Authorization: </span><span style={{ color: REDWOOD.success }}>Basic [emparun:Fusion@1234]</span></div>
-              <div><span style={{ color: REDWOOD.neutral600 }}>Accept: </span>application/json</div>
-            </div>
-          </div>
-          <Text type="secondary" style={{ fontSize: 11 }}>
-            Note: <b>Returns</b> are derived from receipt rows that carry a returned quantity — Fusion reports returns
-            within the receipts collection rather than a separate child resource.
-          </Text>
-        </div>
-      </Modal>
-
-      {/* ── Life Cycle Detail Modal ────────────────────────────────────── */}
-      <Modal
-        title={<Space><InfoCircleOutlined style={{ color: REDWOOD.info }} /> {lcDetail?.kind} Details</Space>}
-        open={!!lcDetail}
-        onCancel={() => setLcDetail(null)}
-        footer={<Button onClick={() => setLcDetail(null)}>Close</Button>}
-        width={780}
-      >
-        {lcDetail && (() => {
-          const entries = Object.entries(lcDetail.rec).filter(([k]) => k !== 'links');
-          const LV: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
-            <Col xs={24} sm={12} md={8}>
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
-                <div style={{ fontSize: 12, color: REDWOOD.neutral900, marginTop: 2, wordBreak: 'break-word' }}>{value ?? '—'}</div>
-              </div>
-            </Col>
-          );
-          return (
-            <Row gutter={[12, 0]}>
-              {entries.map(([key, val]) => (
-                <LV key={key} label={key.replace(/([A-Z])/g, ' $1').trim()} value={
-                  typeof val === 'boolean' ? (val ? 'Yes' : 'No') :
-                  typeof val === 'object' ? JSON.stringify(val) :
-                  (key.toLowerCase().includes('date') && val) ? fmtDate(String(val)) :
-                  String(val ?? '—')
-                } />
-              ))}
-            </Row>
-          );
-        })()}
-      </Modal>
     </div>
   );
 };
@@ -2343,7 +2058,8 @@ const ManagePurchaseOrders: React.FC = () => {
   const createSeqRef = useRef(0);
   const loadPoInputRef = useRef<HTMLInputElement>(null);
 
-  const [lcSignals, setLcSignals] = useState<Record<number, number>>({});
+  // Life Cycle dialog — receipts / invoices / returns with charts & analytics.
+  const [lifecyclePo, setLifecyclePo] = useState<RawPO | null>(null);
 
   const handleOpen = (po: RawPO) => {
     const key = String(po.POHeaderId);
@@ -2353,11 +2069,8 @@ const ManagePurchaseOrders: React.FC = () => {
     setActiveTab(key);
   };
 
-  // Open the PO and jump straight to its Life Cycle section.
-  const handleOpenLifecycle = (po: RawPO) => {
-    handleOpen(po);
-    setLcSignals(prev => ({ ...prev, [po.POHeaderId]: (prev[po.POHeaderId] ?? 0) + 1 }));
-  };
+  // Open the Life Cycle dialog for a PO (from Search row icon or detail toolbar).
+  const handleOpenLifecycle = (po: RawPO) => setLifecyclePo(po);
 
   const handleCloseTab = (key: string) => {
     if (key.startsWith('create-')) {
@@ -2473,7 +2186,7 @@ const ManagePurchaseOrders: React.FC = () => {
           </span>
         </span>
       ),
-      children: <PODetailPage po={po} onClose={() => handleCloseTab(String(po.POHeaderId))} onEdit={openEditPO} lifecycleSignal={lcSignals[po.POHeaderId] ?? 0} />,
+      children: <PODetailPage po={po} onClose={() => handleCloseTab(String(po.POHeaderId))} onEdit={openEditPO} onLifeCycle={handleOpenLifecycle} />,
       closable: true,
     })),
   ];
@@ -2531,6 +2244,9 @@ const ManagePurchaseOrders: React.FC = () => {
         />
 
       </Content>
+
+      {/* Life Cycle dialog (receipts / invoices / returns + analytics) */}
+      <POLifeCycleModal po={lifecyclePo} open={!!lifecyclePo} onClose={() => setLifecyclePo(null)} />
     </Layout>
   );
 };
