@@ -1373,39 +1373,61 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
   const submit = () => form.validateFields().then((v: any) => { onProceed(v); onClose(); }).catch(() => { /* show errors */ });
 
   const req = (msg: string) => [{ required: true, message: msg }];
+  const Section: React.FC<{ icon: React.ReactNode; title: string; color: string; children: React.ReactNode }> = ({ icon, title, color, children }) => (
+    <div style={{ border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 10, padding: '12px 16px 2px', marginBottom: 14, background: REDWOOD.surface }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <span style={{ width: 26, height: 26, borderRadius: 7, background: color + '18', color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>{icon}</span>
+        <Text strong style={{ fontSize: 12.5, color: REDWOOD.neutral900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{title}</Text>
+        <div style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${color}33, transparent)` }} />
+      </div>
+      <Row gutter={14}>{children}</Row>
+    </div>
+  );
   return (
-    <Modal open={open} onCancel={onClose} maskClosable={false} width={920} title={<Space><PlusOutlined style={{ color: REDWOOD.primary }} /> Register New Order</Space>}
+    <Modal open={open} onCancel={onClose} maskClosable={false} width={960} styles={{ body: { background: REDWOOD.neutral100, padding: 18, maxHeight: '76vh', overflowY: 'auto' } }}
+      title={<div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span style={{ width: 38, height: 38, borderRadius: 10, background: `linear-gradient(135deg, ${REDWOOD.primary}, ${REDWOOD.primary}bb)`, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, boxShadow: `0 3px 10px ${REDWOOD.primary}40` }}><PlusOutlined /></span>
+        <div><div style={{ fontSize: 16, fontWeight: 700, color: REDWOOD.neutral900 }}>Register New Order</div>
+          <div style={{ fontSize: 12, color: REDWOOD.neutral600, fontWeight: 400 }}>Set the order header, then proceed to add lines</div></div>
+      </div>}
       footer={<Space><Button onClick={onClose}>Cancel</Button>
-        <Button type="primary" style={{ background: REDWOOD.info, borderColor: REDWOOD.info }} onClick={submit}>Proceed →</Button></Space>}>
-      <Form form={form} layout="horizontal" labelCol={{ flex: '150px' }} labelAlign="right" wrapperCol={{ flex: 1 }} size="small" colon={false}>
-        <Row gutter={16}>
-          <Col span={24}><Form.Item label="Business Unit" name="businessUnit" rules={req('Select business unit')}>
+        <Button type="primary" icon={<ExportOutlined />} style={{ background: REDWOOD.info, borderColor: REDWOOD.info }} onClick={submit}>Proceed to Lines</Button></Space>}>
+      <Form form={form} layout="vertical" size="small" requiredMark colon={false}>
+        <Section icon={<BankOutlined />} title="Order Details" color={REDWOOD.primary}>
+          <Col xs={24} md={12}><Form.Item label="Business Unit" name="businessUnit" rules={req('Select business unit')} style={{ marginBottom: 12 }}>
             <Select showSearch placeholder="Select" onChange={onBU} optionFilterProp="label"
               options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} /></Form.Item></Col>
-          <Col span={12}><Form.Item label="BU Code" name="buCode"><Input placeholder="—" /></Form.Item></Col>
-          <Col span={12}><Form.Item label="Base Currency" name="baseCurrency" rules={req('Base currency')}><Input placeholder="e.g. RWF" /></Form.Item></Col>
-          <Col span={12}><Form.Item label="Transaction Currency" name="txnCurrency" rules={req('Currency')}>
+          <Col xs={12} md={6}><Form.Item label="BU Code" name="buCode" style={{ marginBottom: 12 }}><Input placeholder="—" readOnly /></Form.Item></Col>
+          <Col xs={12} md={6}><Form.Item label="Base Currency" name="baseCurrency" rules={req('Base currency')} style={{ marginBottom: 12 }}><Input placeholder="e.g. AED" readOnly /></Form.Item></Col>
+          <Col xs={12} md={6}><Form.Item label="Transaction Currency" name="txnCurrency" rules={req('Currency')} style={{ marginBottom: 12 }}>
             <Select showSearch placeholder="Currency" options={CURRENCIES.map(c => ({ value: c, label: c }))} /></Form.Item></Col>
-          <Col span={12}><Form.Item label="Rate" name="rate"><InputNumber style={{ width: '100%' }} min={0} /></Form.Item></Col>
-          <Col span={12}><Form.Item label="Order Type" name="orderType" rules={req('Order type')}><Input /></Form.Item></Col>
-          <Col span={12}><Form.Item label="Order Date" name="orderDate" rules={req('Order date')}><DatePicker style={{ width: '100%' }} /></Form.Item></Col>
-          <Col span={12}><Form.Item label="Customer Name" name="customerName" rules={req('Customer')}>
+          <Col xs={12} md={6}><Form.Item label="Rate" name="rate" style={{ marginBottom: 12 }}><InputNumber style={{ width: '100%' }} min={0} /></Form.Item></Col>
+          <Col xs={12} md={6}><Form.Item label="Order Type" name="orderType" rules={req('Order type')} style={{ marginBottom: 12 }}><Input /></Form.Item></Col>
+          <Col xs={12} md={6}><Form.Item label="Order Date" name="orderDate" rules={req('Order date')} style={{ marginBottom: 12 }}><DatePicker style={{ width: '100%' }} /></Form.Item></Col>
+        </Section>
+
+        <Section icon={<ProfileOutlined />} title="Customer" color={REDWOOD.info}>
+          <Col xs={24} md={12}><Form.Item label="Customer Name" name="customerName" rules={req('Customer')} style={{ marginBottom: 12 }}>
             <Select showSearch placeholder="Search customer" onChange={onCustomer} optionFilterProp="label" options={custOptions} notFoundContent={customers.length ? 'No match' : 'Loading…'} /></Form.Item></Col>
-          <Col span={12}><Form.Item label="Account Number" name="accountNumber"><Input placeholder="auto-filled" readOnly /></Form.Item></Col>
-          <Col span={12}><Form.Item label="Bill To Site" name="billToSite"><Input /></Form.Item></Col>
-          <Col span={12}><Form.Item label="Ship To Site" name="shipToSite"><Input /></Form.Item></Col>
-          <Col span={12}><Form.Item label="Bill To Address" name="billToAddress"><Input.TextArea rows={2} /></Form.Item></Col>
-          <Col span={12}><Form.Item label="Ship to Address" name="shipToAddress"><Input.TextArea rows={2} /></Form.Item></Col>
-          <Col span={12}><Form.Item label="Payment Terms" name="paymentTerms" rules={req('Payment terms')}>
+          <Col xs={12} md={6}><Form.Item label="Account Number" name="accountNumber" style={{ marginBottom: 12 }}><Input placeholder="auto-filled" readOnly /></Form.Item></Col>
+          <Col xs={12} md={6} />
+          <Col xs={12} md={6}><Form.Item label="Bill To Site" name="billToSite" style={{ marginBottom: 12 }}><Input readOnly /></Form.Item></Col>
+          <Col xs={12} md={6}><Form.Item label="Bill To Address" name="billToAddress" style={{ marginBottom: 12 }}><Input.TextArea rows={2} readOnly /></Form.Item></Col>
+          <Col xs={12} md={6}><Form.Item label="Ship To Site" name="shipToSite" style={{ marginBottom: 12 }}><Input readOnly /></Form.Item></Col>
+          <Col xs={12} md={6}><Form.Item label="Ship To Address" name="shipToAddress" style={{ marginBottom: 12 }}><Input.TextArea rows={2} readOnly /></Form.Item></Col>
+        </Section>
+
+        <Section icon={<ShoppingOutlined />} title="Terms & Fulfillment" color={REDWOOD.purple}>
+          <Col xs={12} md={6}><Form.Item label="Payment Terms" name="paymentTerms" rules={req('Payment terms')} style={{ marginBottom: 12 }}>
             <Select showSearch placeholder="Terms" optionFilterProp="label" options={payTermOpts} /></Form.Item></Col>
-          <Col span={12}><Form.Item label="Sales Rep Name" name="salesRep">
+          <Col xs={12} md={6}><Form.Item label="Sales Rep Name" name="salesRep" style={{ marginBottom: 12 }}>
             <Select showSearch allowClear placeholder="Salesperson" optionFilterProp="label" options={salesRepOpts} notFoundContent={salesRepOpts.length ? 'No match' : 'Loading…'} /></Form.Item></Col>
-          <Col span={12}><Form.Item label={<WarehouseLabel />} name="warehouse" rules={req('Warehouse')}>
-            <Select showSearch placeholder={buName ? 'Organization' : 'Select business unit first'} onChange={onWarehouse} options={whOptions} optionFilterProp="label" /></Form.Item></Col>
-          <Col span={12}><Form.Item label="Sub Inventory" name="subinventory">
+          <Col xs={12} md={6}><Form.Item label={<WarehouseLabel />} name="warehouse" rules={req('Warehouse')} style={{ marginBottom: 12 }}>
+            <Select showSearch placeholder={buName ? 'Organization' : 'Select BU first'} onChange={onWarehouse} options={whOptions} optionFilterProp="label" /></Form.Item></Col>
+          <Col xs={12} md={6}><Form.Item label="Sub Inventory" name="subinventory" style={{ marginBottom: 12 }}>
             <Select showSearch placeholder="Subinventory" notFoundContent="Pick a warehouse" options={subs.map(s => ({ value: s, label: s }))} /></Form.Item></Col>
-          <Col span={24}><Form.Item label="Remarks" name="remarks"><Input.TextArea rows={2} /></Form.Item></Col>
-        </Row>
+          <Col xs={24}><Form.Item label="Remarks" name="remarks" style={{ marginBottom: 12 }}><Input.TextArea rows={2} placeholder="Optional notes…" /></Form.Item></Col>
+        </Section>
       </Form>
     </Modal>
   );
