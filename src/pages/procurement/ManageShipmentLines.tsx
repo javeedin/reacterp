@@ -166,8 +166,8 @@ const ShipmentOrderDialog: React.FC<{ row: any | null; onClose: () => void }> = 
   });
 
   // Resolve the order type code from the code field, falling back to the
-  // display name. Transfer orders omit OrderType entirely; a sales order must
-  // send OrderType=SALES_ORDER (and any other type sends its own code).
+  // display name. Transfer orders omit OrderType entirely; other types send
+  // OrderType as the space-separated name (e.g. SALES_ORDER -> "SALES ORDER").
   const orderTypeDisplay = String(hdr?.OrderType ?? '').toLowerCase();
   const orderTypeCode = hdr?.OrderTypeCode
     ?? (orderTypeDisplay.includes('transfer') ? 'TRANSFER_ORDER'
@@ -176,13 +176,14 @@ const ShipmentOrderDialog: React.FC<{ row: any | null; onClose: () => void }> = 
       : orderTypeDisplay.includes('return') ? 'RETURN_MATERIAL_AUTHORIZATION'
       : undefined);
   const isTransferOrder = orderTypeCode === 'TRANSFER_ORDER' || orderTypeDisplay.includes('transfer');
+  const orderTypeValue = orderTypeCode?.replace(/_/g, ' ');   // "SALES ORDER"
 
   const pickPayload = {
     SourceSystemName: 'OPS',
     BatchPrefix: `PR-${order}`,
     ShipFromOrganizationCode: hdr?.OrganizationCode,
     ReleaseStatus: 'All',
-    ...(!isTransferOrder && orderTypeCode ? { OrderType: orderTypeCode } : {}),
+    ...(!isTransferOrder && orderTypeValue ? { OrderType: orderTypeValue } : {}),
     OrderNumber: String(order ?? ''),
     PickReleaseFlag: 'true',
     AutoPickConfirmFlag: 'false',
