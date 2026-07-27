@@ -16,3 +16,4 @@ export { default as ConfirmPicks } from './ConfirmPicks';
 export { default as ReviewInventoryTransactions } from './ReviewInventoryTransactions';
 export { default as SalesOrders } from './SalesOrders';
 export { default as PriceList } from './PriceList';
+export { default as PurchaseOrderLoading } from './PurchaseOrderLoading';
