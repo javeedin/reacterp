@@ -1216,21 +1216,23 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
     if (!open) return;
     form.resetFields();
     form.setFieldsValue({ orderType: 'LSO01', rate: 1, orderDate: dayjs() });
-    fetch(`${FUSION_BASE}/finBusinessUnitsLOV?onlyData=true&limit=500`, { headers: FUSION_HDRS })
-      .then(r => r.ok ? r.json() : Promise.reject()).then(d => setBUnits(d.items ?? [])).catch(() => { /* manual */ });
+    // Business units + their payment currency come from payablesOptions.
+    fetch(`${FUSION_BASE}/payablesOptions?onlyData=true&limit=500&fields=businessUnitId,businessUnitName,paymentCurrency,ledgerCurrency`, { headers: FUSION_HDRS })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => {
+        const seen = new Set<string>();
+        const list = (d.items ?? []).filter((b: any) => { const n = b.businessUnitName; if (!n || seen.has(n)) return false; seen.add(n); return true; });
+        setBUnits(list);
+      }).catch(() => { /* manual */ });
     fetch(`${FUSION_BASE}/inventoryOrganizations?onlyData=true&limit=500&fields=OrganizationCode,OrganizationName`, { headers: FUSION_HDRS })
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(d => setOrgs((d.items ?? []).map((o: any) => ({ code: o.OrganizationCode, name: o.OrganizationName })).filter((o: any) => o.code))).catch(() => { /* manual */ });
   }, [open, form]);
 
   const onBU = (name: string) => {
-    const row = bUnits.find(b => b.BusinessUnitName === name);
-    form.setFieldsValue({
-      buCode: pf(row, ['BUCode', 'BusinessUnitCode', 'Code']),
-      baseCurrency: pf(row, ['DefaultCurrencyCode', 'CurrencyCode', 'FunctionalCurrency', 'LedgerCurrency']),
-    });
-    const bc = form.getFieldValue('baseCurrency');
-    if (bc && !form.getFieldValue('txnCurrency')) form.setFieldsValue({ txnCurrency: bc });
+    const row = bUnits.find(b => b.businessUnitName === name);
+    const cur = pf(row, ['paymentCurrency', 'ledgerCurrency', 'invoiceCurrency']);
+    form.setFieldsValue({ baseCurrency: cur, txnCurrency: form.getFieldValue('txnCurrency') || cur });
   };
   const onWarehouse = (code: string) => {
     form.setFieldsValue({ subinventory: undefined }); setSubs([]);
@@ -1249,7 +1251,8 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
       <Form form={form} layout="horizontal" labelCol={{ flex: '150px' }} labelAlign="right" wrapperCol={{ flex: 1 }} size="small" colon={false}>
         <Row gutter={16}>
           <Col span={24}><Form.Item label="Business Unit" name="businessUnit" rules={req('Select business unit')}>
-            <Select showSearch placeholder="Select" onChange={onBU} options={bUnits.map(b => ({ value: b.BusinessUnitName, label: b.BusinessUnitName }))} optionFilterProp="label" /></Form.Item></Col>
+            <Select showSearch placeholder="Select" onChange={onBU} optionFilterProp="label"
+              options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} /></Form.Item></Col>
           <Col span={12}><Form.Item label="BU Code" name="buCode"><Input placeholder="—" /></Form.Item></Col>
           <Col span={12}><Form.Item label="Base Currency" name="baseCurrency" rules={req('Base currency')}><Input placeholder="e.g. RWF" /></Form.Item></Col>
           <Col span={12}><Form.Item label="Transaction Currency" name="txnCurrency" rules={req('Currency')}>
