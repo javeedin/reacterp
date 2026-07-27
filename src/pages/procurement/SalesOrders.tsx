@@ -1409,12 +1409,11 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
         <Section icon={<ProfileOutlined />} title="Customer" color={REDWOOD.info}>
           <Col xs={24} md={12}><Form.Item label="Customer Name" name="customerName" rules={req('Customer')} style={{ marginBottom: 12 }}>
             <Select showSearch placeholder="Search customer" onChange={onCustomer} optionFilterProp="label" options={custOptions} notFoundContent={customers.length ? 'No match' : 'Loading…'} /></Form.Item></Col>
-          <Col xs={12} md={6}><Form.Item label="Account Number" name="accountNumber" style={{ marginBottom: 12 }}><Input placeholder="auto-filled" readOnly /></Form.Item></Col>
-          <Col xs={12} md={6} />
-          <Col xs={12} md={6}><Form.Item label="Bill To Site" name="billToSite" style={{ marginBottom: 12 }}><Input readOnly /></Form.Item></Col>
-          <Col xs={12} md={6}><Form.Item label="Bill To Address" name="billToAddress" style={{ marginBottom: 12 }}><Input.TextArea rows={2} readOnly /></Form.Item></Col>
-          <Col xs={12} md={6}><Form.Item label="Ship To Site" name="shipToSite" style={{ marginBottom: 12 }}><Input readOnly /></Form.Item></Col>
-          <Col xs={12} md={6}><Form.Item label="Ship To Address" name="shipToAddress" style={{ marginBottom: 12 }}><Input.TextArea rows={2} readOnly /></Form.Item></Col>
+          <Col xs={8} md={4}><Form.Item label="Account Number" name="accountNumber" style={{ marginBottom: 12 }}><Input placeholder="—" readOnly /></Form.Item></Col>
+          <Col xs={8} md={4}><Form.Item label="Bill To Site" name="billToSite" style={{ marginBottom: 12 }}><Input placeholder="—" readOnly /></Form.Item></Col>
+          <Col xs={8} md={4}><Form.Item label="Ship To Site" name="shipToSite" style={{ marginBottom: 12 }}><Input placeholder="—" readOnly /></Form.Item></Col>
+          <Col xs={24} md={12}><Form.Item label="Bill To Address" name="billToAddress" style={{ marginBottom: 12 }}><Input.TextArea rows={2} readOnly /></Form.Item></Col>
+          <Col xs={24} md={12}><Form.Item label="Ship To Address" name="shipToAddress" style={{ marginBottom: 12 }}><Input.TextArea rows={2} readOnly /></Form.Item></Col>
         </Section>
 
         <Section icon={<ShoppingOutlined />} title="Terms & Fulfillment" color={REDWOOD.purple}>
