@@ -187,25 +187,6 @@ const useTotals = (order: any | null, active: boolean) => {
   return { href, items, loading, error, load };
 };
 
-// Inline "Order Total" section shown inside the order window.
-const OrderTotalsSection: React.FC<{ totals: ReturnType<typeof useTotals> }> = ({ totals }) => {
-  const { href, items, loading, error, load } = totals;
-  return (
-    <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginTop: 12 }}
-      title={<Space><DollarOutlined style={{ color: REDWOOD.success }} /><Text strong>Order Total</Text></Space>}
-      extra={<Space>
-        <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {href}</span>}>
-          <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} />
-        </Tooltip>
-        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>Reload</Button>
-      </Space>}>
-      {loading ? <div style={{ textAlign: 'center', padding: 24 }}><Spin /></div>
-        : error ? <div style={{ color: REDWOOD.error, fontSize: 12 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div>
-        : <TotalsSummary items={items} />}
-    </Card>
-  );
-};
-
 // ── Order totals drill (…/child/totals) — modal for the search grid ──────────
 const TotalsModal: React.FC<{ order: any | null; onClose: () => void }> = ({ order, onClose }) => {
   const { href, items, loading, error, load } = useTotals(order, !!order);
@@ -394,29 +375,48 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
             style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Print Order</Button>
           <Button size="small" icon={<ProfileOutlined />} onClick={() => setHdrOpen(true)}>All fields</Button>
         </Space>}>
-        <Row gutter={[12, 0]}>
-          <HInfo label="Order Number" value={<Text strong>{order.OrderNumber}</Text>} />
-          <HInfo label="Source Transaction #" value={<span>{order.SourceTransactionNumber ?? '—'}{order.SourceTransactionSystem ? <Tag style={{ marginLeft: 6, fontSize: 10 }}>{order.SourceTransactionSystem}</Tag> : null}</span>} />
-          <HInfo label="Order Key" value={order.OrderKey} />
-          <HInfo label="Transaction Type" value={order.TransactionType ? <Tag color="purple">{order.TransactionType}</Tag> : (order.TransactionTypeCode ?? '—')} />
-          <HInfo label="Business Unit" value={order.BusinessUnitName} />
-          <HInfo label="Customer" value={order.BuyingPartyName} />
-          <HInfo label="Customer #" value={order.BuyingPartyNumber} />
-          <HInfo label="Customer PO" value={order.CustomerPONumber} />
-          <HInfo label="Currency" value={order.TransactionalCurrencyCode ?? order.TransactionalCurrencyName ?? order.AppliedCurrencyCode} />
-          <HInfo label="Payment Terms" value={order.PaymentTerms ?? order.PaymentTermsCode} />
-          <HInfo label="Transaction On" value={fmtDateTime(order.TransactionOn)} />
-          <HInfo label="Requested Ship" value={fmtDate(order.RequestedShipDate)} />
-          <HInfo label="Requested Arrival" value={fmtDate(order.RequestedArrivalDate)} />
-          <HInfo label="Requesting BU" value={order.RequestingBusinessUnitName} />
-          <HInfo label="Legal Entity" value={order.RequestingLegalEntity} />
-          <HInfo label="Status" value={order.Status} />
-          <HInfo label="Created" value={fmtDateTime(order.CreationDate)} />
+        <Row gutter={[16, 12]}>
+          {/* Info fields */}
+          <Col xs={24} lg={17}>
+            <Row gutter={[12, 0]}>
+              <HInfo label="Order Number" value={<Text strong>{order.OrderNumber}</Text>} />
+              <HInfo label="Source Transaction #" value={<span>{order.SourceTransactionNumber ?? '—'}{order.SourceTransactionSystem ? <Tag style={{ marginLeft: 6, fontSize: 10 }}>{order.SourceTransactionSystem}</Tag> : null}</span>} />
+              <HInfo label="Order Key" value={order.OrderKey} />
+              <HInfo label="Transaction Type" value={order.TransactionType ? <Tag color="purple">{order.TransactionType}</Tag> : (order.TransactionTypeCode ?? '—')} />
+              <HInfo label="Business Unit" value={order.BusinessUnitName} />
+              <HInfo label="Customer" value={order.BuyingPartyName} />
+              <HInfo label="Customer #" value={order.BuyingPartyNumber} />
+              <HInfo label="Customer PO" value={order.CustomerPONumber} />
+              <HInfo label="Currency" value={order.TransactionalCurrencyCode ?? order.TransactionalCurrencyName ?? order.AppliedCurrencyCode} />
+              <HInfo label="Payment Terms" value={order.PaymentTerms ?? order.PaymentTermsCode} />
+              <HInfo label="Transaction On" value={fmtDateTime(order.TransactionOn)} />
+              <HInfo label="Requested Ship" value={fmtDate(order.RequestedShipDate)} />
+              <HInfo label="Requested Arrival" value={fmtDate(order.RequestedArrivalDate)} />
+              <HInfo label="Requesting BU" value={order.RequestingBusinessUnitName} />
+              <HInfo label="Legal Entity" value={order.RequestingLegalEntity} />
+              <HInfo label="Created" value={fmtDateTime(order.CreationDate)} />
+            </Row>
+          </Col>
+          {/* Order total — inside the header */}
+          <Col xs={24} lg={7}>
+            <div style={{ borderLeft: `1px solid ${REDWOOD.neutral200}`, paddingLeft: 16, height: '100%' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                <DollarOutlined style={{ color: REDWOOD.success }} />
+                <Text strong style={{ fontSize: 12.5 }}>Order Total</Text>
+                <span style={{ marginLeft: 'auto' }}>
+                  <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {totals.href}</span>}>
+                    <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} />
+                  </Tooltip>
+                  <Button size="small" type="text" icon={<ReloadOutlined />} loading={totals.loading} onClick={totals.load} />
+                </span>
+              </div>
+              {totals.loading ? <div style={{ textAlign: 'center', padding: 24 }}><Spin /></div>
+                : totals.error ? <div style={{ color: REDWOOD.error, fontSize: 12 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{totals.error}</div>
+                : <TotalsSummary items={totals.items} />}
+            </div>
+          </Col>
         </Row>
       </Card>
-
-      {/* Order total summary (formatted like an order) — shown above the lines */}
-      <OrderTotalsSection totals={totals} />
 
       {/* Lines */}
       <Card size="small" styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginTop: 12 }}
