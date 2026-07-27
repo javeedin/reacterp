@@ -1148,6 +1148,47 @@ interface OrderHeader {
 }
 interface NewLine { key: string; itemNumber: string; description?: string; uom?: string; qty: number; unitPrice: number }
 
+const INV_ORGS_URL = `${FUSION_BASE}/inventoryOrganizations?onlyData=true&limit=500`;
+
+// Business units (+ currency) from payablesOptions, deduped by name.
+const usePayablesBUs = (): any[] => {
+  const [bUnits, setBUnits] = useState<any[]>([]);
+  useEffect(() => {
+    fetch(`${FUSION_BASE}/payablesOptions?onlyData=true&limit=500&fields=businessUnitId,businessUnitName,paymentCurrency,ledgerCurrency`, { headers: FUSION_HDRS })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => { const seen = new Set<string>(); setBUnits((d.items ?? []).filter((b: any) => { const n = b.businessUnitName; if (!n || seen.has(n)) return false; seen.add(n); return true; })); })
+      .catch(() => { /* manual */ });
+  }, []);
+  return bUnits;
+};
+// All inventory organizations (full rows so a BU field is available for filtering).
+const useInvOrgs = (): any[] => {
+  const [orgRows, setOrgRows] = useState<any[]>([]);
+  useEffect(() => {
+    fetch(INV_ORGS_URL, { headers: FUSION_HDRS })
+      .then(r => r.ok ? r.json() : Promise.reject()).then(d => setOrgRows(d.items ?? [])).catch(() => { /* manual */ });
+  }, []);
+  return orgRows;
+};
+// Warehouse options filtered to the selected BU (falls back to all if no BU link on the org rows).
+const orgOptionsForBU = (orgs: any[], buRow: any) => {
+  const id = buRow?.businessUnitId; const name = buRow?.businessUnitName;
+  const match = orgs.filter(o => {
+    if (id == null && !name) return true;
+    const oid = pf(o, ['BusinessUnitId', 'ManagementBusinessUnitId', 'ProfitCenterBusinessUnitId']);
+    const oname = pf(o, ['BusinessUnitName', 'ManagementBusinessUnitName', 'ProfitCenterBusinessUnitName']);
+    return (oid != null && String(oid) === String(id)) || (!!oname && !!name && oname === name);
+  });
+  return (match.length ? match : orgs).map(o => ({ value: o.OrganizationCode, label: `${o.OrganizationCode}${o.OrganizationName ? ' — ' + o.OrganizationName : ''}` }));
+};
+const WarehouseLabel: React.FC = () => (
+  <Space size={4}>Warehouse
+    <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {INV_ORGS_URL}<br />filtered by the selected BU (BusinessUnitId / Name on the org)</span>}>
+      <ApiOutlined style={{ color: REDWOOD.info }} />
+    </Tooltip>
+  </Space>
+);
+
 // Item picker (itemsV2), scoped to the warehouse org — like PO Add Lines.
 const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => void; onAdd: (items: any[]) => void }> = ({ open, org, onClose, onAdd }) => {
   const [byDesc, setByDesc] = useState(false);
@@ -1208,31 +1249,26 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
 // Register New Order dialog (collects the header, then opens the creation tab).
 const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProceed: (h: OrderHeader) => void }> = ({ open, onClose, onProceed }) => {
   const [form] = Form.useForm();
-  const [bUnits, setBUnits] = useState<any[]>([]);
-  const [orgs, setOrgs] = useState<{ code: string; name?: string }[]>([]);
+  const bUnits = usePayablesBUs();
+  const orgRows = useInvOrgs();
   const [subs, setSubs] = useState<string[]>([]);
 
   useEffect(() => {
     if (!open) return;
     form.resetFields();
     form.setFieldsValue({ orderType: 'LSO01', rate: 1, orderDate: dayjs() });
-    // Business units + their payment currency come from payablesOptions.
-    fetch(`${FUSION_BASE}/payablesOptions?onlyData=true&limit=500&fields=businessUnitId,businessUnitName,paymentCurrency,ledgerCurrency`, { headers: FUSION_HDRS })
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => {
-        const seen = new Set<string>();
-        const list = (d.items ?? []).filter((b: any) => { const n = b.businessUnitName; if (!n || seen.has(n)) return false; seen.add(n); return true; });
-        setBUnits(list);
-      }).catch(() => { /* manual */ });
-    fetch(`${FUSION_BASE}/inventoryOrganizations?onlyData=true&limit=500&fields=OrganizationCode,OrganizationName`, { headers: FUSION_HDRS })
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => setOrgs((d.items ?? []).map((o: any) => ({ code: o.OrganizationCode, name: o.OrganizationName })).filter((o: any) => o.code))).catch(() => { /* manual */ });
+    setSubs([]);
   }, [open, form]);
+
+  const buName = Form.useWatch('businessUnit', form);
+  const buRow = useMemo(() => bUnits.find(b => b.businessUnitName === buName), [bUnits, buName]);
+  const whOptions = useMemo(() => orgOptionsForBU(orgRows, buRow), [orgRows, buRow]);
 
   const onBU = (name: string) => {
     const row = bUnits.find(b => b.businessUnitName === name);
     const cur = pf(row, ['paymentCurrency', 'ledgerCurrency', 'invoiceCurrency']);
-    form.setFieldsValue({ baseCurrency: cur, txnCurrency: form.getFieldValue('txnCurrency') || cur });
+    form.setFieldsValue({ baseCurrency: cur, txnCurrency: form.getFieldValue('txnCurrency') || cur, warehouse: undefined, subinventory: undefined });
+    setSubs([]);
   };
   const onWarehouse = (code: string) => {
     form.setFieldsValue({ subinventory: undefined }); setSubs([]);
@@ -1269,8 +1305,8 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
           <Col span={12}><Form.Item label="Payment Terms" name="paymentTerms" rules={req('Payment terms')}>
             <Select showSearch placeholder="Terms" options={PAYMENT_TERMS.map(t => ({ value: t, label: t }))} /></Form.Item></Col>
           <Col span={12}><Form.Item label="Sales Rep Name" name="salesRep"><Input /></Form.Item></Col>
-          <Col span={12}><Form.Item label="Warehouse" name="warehouse" rules={req('Warehouse')}>
-            <Select showSearch placeholder="Organization" onChange={onWarehouse} options={orgs.map(o => ({ value: o.code, label: `${o.code}${o.name ? ' — ' + o.name : ''}` }))} optionFilterProp="label" /></Form.Item></Col>
+          <Col span={12}><Form.Item label={<WarehouseLabel />} name="warehouse" rules={req('Warehouse')}>
+            <Select showSearch placeholder={buName ? 'Organization' : 'Select business unit first'} onChange={onWarehouse} options={whOptions} optionFilterProp="label" /></Form.Item></Col>
           <Col span={12}><Form.Item label="Sub Inventory" name="subinventory">
             <Select showSearch placeholder="Subinventory" notFoundContent="Pick a warehouse" options={subs.map(s => ({ value: s, label: s }))} /></Form.Item></Col>
           <Col span={24}><Form.Item label="Remarks" name="remarks"><Input.TextArea rows={2} /></Form.Item></Col>
@@ -1282,12 +1318,40 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
 
 // New order creation tab — header summary + editable lines + save.
 const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
+  const [form] = Form.useForm();
+  const [hdr, setHdr] = useState<OrderHeader>(header);
+  const bUnits = usePayablesBUs();
+  const orgRows = useInvOrgs();
+  const [subs, setSubs] = useState<string[]>([]);
   const [lines, setLines] = useState<NewLine[]>([]);
   const [pickOpen, setPickOpen] = useState(false);
   const [preview, setPreview] = useState(false);
   const [posting, setPosting] = useState(false);
   const [resp, setResp] = useState<{ ok: boolean; status: number; body: string } | null>(null);
-  const ccy = header.txnCurrency;
+  const ccy = hdr.txnCurrency;
+
+  useEffect(() => { form.setFieldsValue(header as any); setHdr(header); /* init once */ }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const syncHdr = () => setHdr(prev => ({ ...prev, ...form.getFieldsValue() }));
+  const loadSubs = useCallback((org?: string) => {
+    if (!org) { setSubs([]); return; }
+    fetch(`${FUSION_BASE}/subinventories?q=OrganizationCode=${encodeURIComponent(org)}&onlyData=true&limit=500`, { headers: FUSION_HDRS })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => setSubs(Array.from(new Set((d.items ?? []).map((s: any) => s.SecondaryInventoryName).filter(Boolean))).sort() as string[])).catch(() => setSubs([]));
+  }, []);
+  useEffect(() => { loadSubs(header.warehouse); }, [header.warehouse, loadSubs]);
+
+  const buName = (Form.useWatch('businessUnit', form) as string) ?? hdr.businessUnit;
+  const buRow = useMemo(() => bUnits.find(b => b.businessUnitName === buName), [bUnits, buName]);
+  const whOptions = useMemo(() => orgOptionsForBU(orgRows, buRow), [orgRows, buRow]);
+
+  const onBU = (name: string) => {
+    const row = bUnits.find(b => b.businessUnitName === name);
+    const cur = pf(row, ['paymentCurrency', 'ledgerCurrency', 'invoiceCurrency']);
+    form.setFieldsValue({ baseCurrency: cur, txnCurrency: form.getFieldValue('txnCurrency') || cur, warehouse: undefined, subinventory: undefined });
+    setSubs([]); syncHdr();
+  };
+  const onWh = (code: string) => { form.setFieldsValue({ subinventory: undefined }); loadSubs(code); syncHdr(); };
 
   const addItems = (items: any[]) => {
     setLines(prev => {
@@ -1304,30 +1368,30 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
 
   // Best-effort DOO order-import payload (finalise once the sample JSON is in).
   const buildPayload = () => {
-    const src = `${header.orderType || 'SO'}-${Date.now()}`;
+    const src = `${hdr.orderType || 'SO'}-${Date.now()}`;
     return {
       SourceTransactionNumber: src, SourceTransactionSystem: 'OPS', SourceTransactionId: src,
-      TransactionalCurrencyCode: header.txnCurrency,
-      RequestingBusinessUnitName: header.businessUnit,
-      ...(header.orderType ? { TransactionTypeCode: header.orderType } : {}),
-      BuyingPartyName: header.customerName,
-      ...(header.accountNumber ? { BuyingPartyNumber: header.accountNumber } : {}),
-      ...(header.paymentTerms ? { PaymentTerms: header.paymentTerms } : {}),
-      ...(header.salesRep ? { Salesperson: header.salesRep } : {}),
-      ...(header.orderDate ? { RequestedShipDate: dayjs(header.orderDate).toISOString() } : {}),
+      TransactionalCurrencyCode: hdr.txnCurrency,
+      RequestingBusinessUnitName: hdr.businessUnit,
+      ...(hdr.orderType ? { TransactionTypeCode: hdr.orderType } : {}),
+      BuyingPartyName: hdr.customerName,
+      ...(hdr.accountNumber ? { BuyingPartyNumber: hdr.accountNumber } : {}),
+      ...(hdr.paymentTerms ? { PaymentTerms: hdr.paymentTerms } : {}),
+      ...(hdr.salesRep ? { Salesperson: hdr.salesRep } : {}),
+      ...(hdr.orderDate ? { RequestedShipDate: dayjs(hdr.orderDate).toISOString() } : {}),
       lines: lines.map((l, i) => ({
         SourceTransactionLineNumber: String(i + 1), SourceTransactionLineId: String(i + 1),
         SourceScheduleNumber: '1', SourceTransactionScheduleId: String(i + 1),
         ProductNumber: l.itemNumber, OrderedQuantity: l.qty,
         ...(l.uom ? { OrderedUOMCode: l.uom } : {}),
         ...(l.unitPrice ? { UnitListPrice: l.unitPrice, UnitSellingPrice: l.unitPrice } : {}),
-        ...(header.warehouse ? { RequestingBusinessUnitName: header.businessUnit, ShipFromOrganizationCode: header.warehouse } : {}),
-        ...(header.subinventory ? { SubinventoryCode: header.subinventory } : {}),
-        ...(header.orderDate ? { RequestedShipDate: dayjs(header.orderDate).toISOString() } : {}),
+        ...(hdr.warehouse ? { RequestingBusinessUnitName: hdr.businessUnit, ShipFromOrganizationCode: hdr.warehouse } : {}),
+        ...(hdr.subinventory ? { SubinventoryCode: hdr.subinventory } : {}),
+        ...(hdr.orderDate ? { RequestedShipDate: dayjs(hdr.orderDate).toISOString() } : {}),
       })),
     };
   };
-  const payloadStr = useMemo(() => JSON.stringify(buildPayload(), null, 2), [lines, header]);
+  const payloadStr = useMemo(() => JSON.stringify(buildPayload(), null, 2), [lines, hdr]);
 
   const save = async () => {
     if (lines.length === 0) { message.warning('Add at least one line'); return; }
@@ -1340,13 +1404,6 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
     } catch (e: any) { setResp({ ok: false, status: 0, body: e.message }); message.error(e.message); }
     finally { setPosting(false); }
   };
-
-  const Info: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
-    <Col xs={12} sm={8} md={6}><div style={{ marginBottom: 8 }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase' }}>{label}</div>
-      <div style={{ fontSize: 12.5, color: REDWOOD.neutral900, marginTop: 2 }}>{value ?? '—'}</div>
-    </div></Col>
-  );
 
   const totQty = lines.reduce((s, l) => s + num(l.qty), 0);
   const totAmt = lines.reduce((s, l) => s + num(l.qty) * num(l.unitPrice), 0);
@@ -1366,25 +1423,35 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
     <div style={{ padding: '4px 2px' }}>
       <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 12 }}
         title={<Space><BankOutlined style={{ color: REDWOOD.primary }} /><Text strong>New Order — Header</Text>
-          <Tag color="purple">{header.orderType}</Tag><Tag>{header.txnCurrency}</Tag></Space>}
+          <Tag color="purple">{hdr.orderType}</Tag><Tag>{hdr.txnCurrency}</Tag><Text type="secondary" style={{ fontSize: 11, fontWeight: 400 }}>editable</Text></Space>}
         extra={<Space>
           <Button icon={<CloudUploadOutlined />} onClick={() => setPreview(true)}>Payload</Button>
           <Button type="primary" icon={<SaveOutlined />} loading={posting} onClick={save} style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>Save Sales Order</Button>
         </Space>}>
-        <Row gutter={[12, 0]}>
-          <Info label="Business Unit" value={header.businessUnit} />
-          <Info label="BU Code" value={header.buCode} />
-          <Info label="Order Type" value={header.orderType} />
-          <Info label="Order Date" value={fmtDate(header.orderDate ? dayjs(header.orderDate).toISOString() : undefined)} />
-          <Info label="Currency" value={`${header.txnCurrency ?? '—'}${header.rate ? ` @ ${header.rate}` : ''}`} />
-          <Info label="Customer" value={header.customerName} />
-          <Info label="Account #" value={header.accountNumber} />
-          <Info label="Payment Terms" value={header.paymentTerms} />
-          <Info label="Salesperson" value={header.salesRep} />
-          <Info label="Warehouse" value={header.warehouse} />
-          <Info label="Sub Inventory" value={header.subinventory} />
-          <Info label="Bill / Ship To" value={`${header.billToSite ?? '—'} / ${header.shipToSite ?? '—'}`} />
-        </Row>
+        <Form form={form} layout="vertical" size="small" onValuesChange={(_c, all) => setHdr(prev => ({ ...prev, ...all }))}>
+          <Row gutter={[10, 0]}>
+            <Col xs={24} sm={12} md={8}><Form.Item label="Business Unit" name="businessUnit" style={{ marginBottom: 8 }}>
+              <Select showSearch placeholder="Select" onChange={onBU} optionFilterProp="label"
+                options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} /></Form.Item></Col>
+            <Col xs={12} sm={6} md={4}><Form.Item label="BU Code" name="buCode" style={{ marginBottom: 8 }}><Input /></Form.Item></Col>
+            <Col xs={12} sm={6} md={4}><Form.Item label="Order Type" name="orderType" style={{ marginBottom: 8 }}><Input /></Form.Item></Col>
+            <Col xs={12} sm={6} md={4}><Form.Item label="Order Date" name="orderDate" style={{ marginBottom: 8 }}><DatePicker style={{ width: '100%' }} /></Form.Item></Col>
+            <Col xs={12} sm={6} md={4}><Form.Item label="Currency" name="txnCurrency" style={{ marginBottom: 8 }}>
+              <Select showSearch options={CURRENCIES.map(c => ({ value: c, label: c }))} /></Form.Item></Col>
+            <Col xs={12} sm={6} md={4}><Form.Item label="Rate" name="rate" style={{ marginBottom: 8 }}><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
+            <Col xs={24} sm={12} md={8}><Form.Item label="Customer" name="customerName" style={{ marginBottom: 8 }}><Input /></Form.Item></Col>
+            <Col xs={12} sm={6} md={4}><Form.Item label="Account #" name="accountNumber" style={{ marginBottom: 8 }}><Input /></Form.Item></Col>
+            <Col xs={12} sm={6} md={4}><Form.Item label="Payment Terms" name="paymentTerms" style={{ marginBottom: 8 }}>
+              <Select showSearch options={PAYMENT_TERMS.map(t => ({ value: t, label: t }))} /></Form.Item></Col>
+            <Col xs={12} sm={6} md={4}><Form.Item label="Salesperson" name="salesRep" style={{ marginBottom: 8 }}><Input /></Form.Item></Col>
+            <Col xs={12} sm={6} md={8}><Form.Item label={<WarehouseLabel />} name="warehouse" style={{ marginBottom: 8 }}>
+              <Select showSearch placeholder={buName ? 'Organization' : 'Select BU first'} onChange={onWh} options={whOptions} optionFilterProp="label" /></Form.Item></Col>
+            <Col xs={12} sm={6} md={4}><Form.Item label="Sub Inventory" name="subinventory" style={{ marginBottom: 8 }}>
+              <Select showSearch notFoundContent="Pick a warehouse" options={subs.map(s => ({ value: s, label: s }))} /></Form.Item></Col>
+            <Col xs={12} sm={6} md={4}><Form.Item label="Bill To Site" name="billToSite" style={{ marginBottom: 8 }}><Input /></Form.Item></Col>
+            <Col xs={12} sm={6} md={4}><Form.Item label="Ship To Site" name="shipToSite" style={{ marginBottom: 8 }}><Input /></Form.Item></Col>
+          </Row>
+        </Form>
       </Card>
 
       <Card size="small" styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
