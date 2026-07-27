@@ -1,7 +1,7 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   Layout, Breadcrumb, Card, Table, Form, Input, Select, DatePicker, Button,
-  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty,
+  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty, Tabs,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -79,6 +79,140 @@ interface Filters {
 const ORDER_TYPES = ['Transfer order', 'Sales order', 'Purchase order', 'Return material authorization'];
 const LINE_STATUSES = ['Ready to release', 'Released', 'Staged', 'Shipped', 'Backordered', 'Interfaced', 'Awaiting shipping'];
 
+const renderVal = (k: string, v: any): React.ReactNode => {
+  if (v == null || v === '') return '—';
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+  if (typeof v === 'object') return JSON.stringify(v);
+  if (/Date$/.test(k) || k.endsWith('DateTime')) return fmtDateTime(String(v));
+  return String(v);
+};
+
+// Build dynamic columns from a set of rows: drop id/href/flexfield columns and
+// any column that's empty across every row.
+const dynamicColumns = (items: any[]): ColumnsType<any> => {
+  const keys: string[] = [];
+  const seen = new Set<string>();
+  items.forEach(it => Object.keys(it ?? {}).forEach(k => {
+    if (seen.has(k) || isHiddenKey(k)) return;
+    if (items.some(row => !isEmpty(row?.[k]))) { seen.add(k); keys.push(k); }
+  }));
+  return keys.map(k => ({
+    title: k.replace(/([A-Z])/g, ' $1').replace(/^ /, ''),
+    dataIndex: k, width: 160, ellipsis: true,
+    render: (v: any) => <Text style={{ fontSize: 12 }}>{renderVal(k, v)}</Text>,
+  }));
+};
+
+// A tab that lazily fetches a child link (attachments, costs, reservations…).
+const ChildLinkTab: React.FC<{ href: string; name: string }> = ({ href, name }) => {
+  const [items, setItems] = useState<any[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    setLoading(true); setError('');
+    try { setItems(await fetchAllPages(href)); }
+    catch (e: any) { setError(e.message); setItems([]); }
+    finally { setLoading(false); }
+  }, [href]);
+  useEffect(() => { load(); }, [load]);
+
+  const cols = useMemo(() => dynamicColumns(items ?? []), [items]);
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <div style={{ flex: 1, padding: '6px 10px', borderRadius: 6, background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info }}>
+          <Tag color="blue">GET</Tag>{href}
+        </div>
+        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>Reload</Button>
+      </div>
+      {loading ? <div style={{ textAlign: 'center', padding: 30 }}><Spin /></div>
+        : error ? <div style={{ color: REDWOOD.error, fontSize: 12 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div>
+        : !items || items.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`No ${name} records`} style={{ padding: 24 }} />
+        : <Table size="small" columns={cols} dataSource={items} rowKey={(_, i) => `${name}-${i}`}
+            pagination={items.length > 20 ? { pageSize: 20, size: 'small' } : false} scroll={{ x: 'max-content', y: 340 }} />}
+    </div>
+  );
+};
+
+// Dialog for one order: Lines tab (re-queried by Order) + one tab per child link.
+const ShipmentOrderDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ row, onClose }) => {
+  const [lines, setLines] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const order = row?.Order;
+  const linesUrl = order ? `${FUSION_BASE}/shipmentLines?q=${encodeURIComponent(`Order='${order}'`)}&orderBy=OrderLine:asc` : '';
+
+  const loadLines = useCallback(async () => {
+    if (!linesUrl) return;
+    setLoading(true); setError('');
+    try { setLines(await fetchAllPages(linesUrl)); }
+    catch (e: any) { setError(e.message); setLines([]); }
+    finally { setLoading(false); }
+  }, [linesUrl]);
+  useEffect(() => { if (row) loadLines(); }, [row, loadLines]);
+
+  const childLinks = (row?.links ?? []).filter((l: any) => l.rel === 'child' && l.href);
+
+  const lineCols: ColumnsType<any> = [
+    { title: 'Ship Line', dataIndex: 'ShipmentLine', width: 100, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text> },
+    { title: 'Line', dataIndex: 'OrderLine', width: 55, align: 'center', render: v => <Tag color="blue" style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+    { title: 'Item', dataIndex: 'Item', width: 130, render: v => <Text strong style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Description', dataIndex: 'ItemDescription', ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Requested Qty', dataIndex: 'RequestedQuantity', width: 110, align: 'right', render: (v, r) => `${fmtQty(v)}${r.RequestedQuantityUOM ? ' ' + r.RequestedQuantityUOM : ''}` },
+    { title: 'Shipped', dataIndex: 'ShippedQuantity', width: 90, align: 'right', render: fmtQty },
+    { title: 'Pending', dataIndex: 'PendingQuantity', width: 90, align: 'right', render: fmtQty },
+    { title: 'Line Status', dataIndex: 'LineStatus', width: 140, render: v => statusTag(v) },
+    { title: 'Org', dataIndex: 'OrganizationCode', width: 75, render: v => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+    { title: 'Src → Dest Subinv', width: 140, render: (_, r) => <span>{r.SourceSubinventory ?? '—'} <SwapMini /> {r.DestinationSubinventory ?? '—'}</span> },
+    { title: 'Requested Date', dataIndex: 'RequestedDate', width: 130, render: fmtDate },
+    { title: 'Shipment', dataIndex: 'Shipment', width: 100, render: v => v ?? '—' },
+  ];
+
+  const iconFor = (name: string) => {
+    if (name === 'costs') return <DollarMini />;
+    return <ProfileOutlined />;
+  };
+
+  return (
+    <Modal
+      open={!!row} onCancel={onClose} maskClosable={false} width={1080} style={{ top: 24 }}
+      footer={<Button onClick={onClose}>Close</Button>}
+      title={<Space><CarOutlined style={{ color: REDWOOD.primary }} /> Order <Tag color="volcano">{order}</Tag>
+        {row?.OrderType && <Tag color="purple">{row.OrderType}</Tag>}
+        <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>(from Shipment Line {row?.ShipmentLine})</Text></Space>}
+    >
+      <Tabs
+        size="small"
+        items={[
+          {
+            key: 'lines',
+            label: <span><ProfileOutlined style={{ marginRight: 5 }} />Lines{lines.length ? ` (${lines.length})` : ''}</span>,
+            children: loading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+              : error ? <div style={{ color: REDWOOD.error, fontSize: 12 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div>
+              : lines.length === 0 ? <Empty description="No lines" style={{ padding: 30 }} />
+              : (<>
+                  <div style={{ marginBottom: 8, fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info, wordBreak: 'break-all' }}>
+                    <Tag color="blue">GET</Tag>{decodeURIComponent(linesUrl)}
+                  </div>
+                  <Table size="small" columns={lineCols} dataSource={lines} rowKey={(r, i) => `${r.ShipmentLine ?? i}`}
+                    pagination={false} scroll={{ x: 1300, y: 360 }} />
+                </>),
+          },
+          ...childLinks.map((l: any) => ({
+            key: l.name,
+            label: <span>{iconFor(l.name)}<span style={{ marginLeft: 5, textTransform: 'capitalize' }}>{l.name}</span></span>,
+            children: <ChildLinkTab href={l.href} name={l.name} />,
+          })),
+        ]}
+      />
+    </Modal>
+  );
+};
+
+const SwapMini = () => <span style={{ color: REDWOOD.neutral600, margin: '0 2px' }}>→</span>;
+const DollarMini = () => <span style={{ color: REDWOOD.primary }}>$</span>;
+
 const ManageShipmentLines: React.FC = () => {
   const [form] = Form.useForm();
   const [rows, setRows] = useState<any[]>([]);
@@ -87,6 +221,7 @@ const ManageShipmentLines: React.FC = () => {
   const [error, setError] = useState('');
   const [apiOpen, setApiOpen] = useState(false);
   const [detail, setDetail] = useState<any | null>(null);
+  const [orderDialog, setOrderDialog] = useState<any | null>(null);
   const [filterText, setFilterText] = useState('');
 
   const [filters, setFilters] = useState<Filters>({ dateOp: '>', date: dayjs().subtract(7, 'day') });
@@ -132,9 +267,12 @@ const ManageShipmentLines: React.FC = () => {
     { title: 'Org', dataIndex: 'OrganizationCode', width: 80, render: (v, r) => <Tooltip title={r.OrganizationName}><Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag></Tooltip> },
     { title: 'Src Subinv', dataIndex: 'SourceSubinventoryName', width: 100, render: (v, r) => v ?? r.SourceSubinventory ?? '—' },
     { title: 'Shipment Line', dataIndex: 'ShipmentLine', width: 110, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Shipment', dataIndex: 'Shipment', width: 110, render: v => v ?? '—' },
     { title: 'Order Type', dataIndex: 'OrderType', width: 130,
       render: (v, r) => <Tooltip title={r.OrderTypeCode}><Tag color="purple" style={{ fontSize: 11 }}>{v ?? '—'}</Tag></Tooltip> },
-    { title: 'Order', dataIndex: 'Order', width: 90, render: v => <Text strong style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Order', dataIndex: 'Order', width: 100,
+      render: (v, r) => v ? <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 12 }}
+        onClick={() => setOrderDialog(r)}>{v}</Button> : <Text>—</Text> },
     { title: 'Line', dataIndex: 'OrderLine', width: 55, align: 'center', render: v => <Tag color="blue" style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
     { title: 'Item', dataIndex: 'Item', width: 130, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v ?? '—'}</Text> },
     { title: 'Description', dataIndex: 'ItemDescription', width: 240, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
@@ -249,7 +387,7 @@ const ManageShipmentLines: React.FC = () => {
               <Empty description="No shipment lines" style={{ padding: 60 }} />
             ) : (
               <Table columns={columns} dataSource={filtered} rowKey={(r, i) => `${r.ShipmentLine ?? i}`} size="small"
-                scroll={{ x: 2100 }} pagination={{ pageSize: 25, size: 'small', showSizeChanger: true, showTotal: t => `${t} lines` }} />
+                scroll={{ x: 2220 }} pagination={{ pageSize: 25, size: 'small', showSizeChanger: true, showTotal: t => `${t} lines` }} />
             )}
           </Card>
         </div>
@@ -304,6 +442,9 @@ const ManageShipmentLines: React.FC = () => {
             );
           })()}
         </Modal>
+
+        {/* Order dialog — Lines tab + one tab per child link */}
+        <ShipmentOrderDialog row={orderDialog} onClose={() => setOrderDialog(null)} />
       </Content>
     </Layout>
   );
