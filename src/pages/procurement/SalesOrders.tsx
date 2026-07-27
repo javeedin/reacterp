@@ -9,6 +9,7 @@ import {
   ApiOutlined, CopyOutlined, InfoCircleOutlined, ExportOutlined, BankOutlined,
   UnorderedListOutlined, ShoppingOutlined, DollarOutlined, PrinterOutlined, DownloadOutlined,
   ReconciliationOutlined, PlusOutlined, SaveOutlined, DeleteOutlined, CloudUploadOutlined,
+  DatabaseOutlined, CheckCircleTwoTone, CloseCircleTwoTone,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -1315,8 +1316,56 @@ const TotalLine: React.FC<{ label: string; value: React.ReactNode; strong?: bool
 // "COSTORG-INVORG-SUBINV-LOT" (not directly filterable), so match client-side.
 const LATEST_URL = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/latest';
 const COST_FIELDS = ['TotalUnitCost', 'UnitCost', 'ItemCost', 'UnitAverageCost', 'AverageUnitCost'];
+const QTY_FIELDS = ['Quantity', 'OnhandQuantity', 'OnHandQuantity', 'TotalQuantity', 'ItemQuantity', 'CostQuantity'];
 const parseVU = (vu?: string) => { const p = String(vu ?? '').split('-'); return { costOrg: p[0], invOrg: p[1], subinv: p[2], lot: p[3] }; };
 const rowOrgMatches = (row: any, org?: string) => { if (!org) return true; const p = parseVU(row.ValuationUnit); return p.invOrg === org || p.costOrg === org; };
+
+// Per-item cost rows (ValuationUnit split + qty) with an on-hand tally check.
+const ItemCostDetail: React.FC<{ item: string; rows: any[] }> = ({ item, rows }) => {
+  const [onh, setOnh] = useState<Record<string, { loading?: boolean; qty?: number; err?: string }>>({});
+  const checkOnhand = async (key: string, invOrg?: string, lot?: string) => {
+    if (!invOrg) { message.warning('No inventory org on this cost row'); return; }
+    setOnh(p => ({ ...p, [key]: { loading: true } }));
+    try {
+      let q = `OrganizationCode=${invOrg};ItemNumber=${item}`;
+      if (lot) q += `;LotNumber=${lot}`;
+      const r = await fetch(`${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(q)}&onlyData=true&limit=500`, { headers: FUSION_HDRS });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      const qty = (d.items ?? []).reduce((s: number, x: any) => s + num(pf(x, ['PrimaryQuantity', 'OnhandQuantity', 'Quantity'])), 0);
+      setOnh(p => ({ ...p, [key]: { qty } }));
+    } catch (e: any) { setOnh(p => ({ ...p, [key]: { err: e.message } })); }
+  };
+  const cols: ColumnsType<any> = [
+    { title: 'Cost Org', width: 110, render: (_, r) => <Text strong style={{ fontSize: 11 }}>{parseVU(r.ValuationUnit).costOrg || '—'}</Text> },
+    { title: 'Inv Org', width: 90, render: (_, r) => <Text style={{ fontSize: 11 }}>{parseVU(r.ValuationUnit).invOrg || '—'}</Text> },
+    { title: 'Subinv', width: 90, render: (_, r) => { const s = parseVU(r.ValuationUnit).subinv; return s ? <Tag color="cyan" style={{ fontSize: 10 }}>{s}</Tag> : '—'; } },
+    { title: 'Lot', width: 120, render: (_, r) => { const l = parseVU(r.ValuationUnit).lot; return l ? <Tag color="geekblue" style={{ fontSize: 10 }}>{l}</Tag> : '—'; } },
+    { title: 'Unit Cost', width: 110, align: 'right', render: (_, r) => <Text strong style={{ fontSize: 11, color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(pf(r, COST_FIELDS), r.CurrencyCode)}</Text> },
+    { title: 'Cost Qty', width: 90, align: 'right', render: (_, r) => <Text style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>{fmtQty(num(pf(r, QTY_FIELDS)))}</Text> },
+    { title: 'On-hand', width: 170, render: (_, r, i) => {
+        const p = parseVU(r.ValuationUnit); const key = String(r.ValuationUnit ?? i);
+        const st = onh[key]; const costQty = num(pf(r, QTY_FIELDS));
+        return (
+          <Space size={4}>
+            <Tooltip title={<span>Check on-hand — org <b>{p.invOrg}</b>, item <b>{item}</b>{p.lot ? <>, lot <b>{p.lot}</b></> : null}</span>}>
+              <Button size="small" type="text" icon={<DatabaseOutlined />} style={{ color: REDWOOD.info }} loading={st?.loading} onClick={() => checkOnhand(key, p.invOrg, p.lot)} />
+            </Tooltip>
+            {st?.qty != null && <>
+              <Text style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>{fmtQty(st.qty)}</Text>
+              {Math.abs(st.qty - costQty) < 0.001
+                ? <Tooltip title="Tallies with cost qty"><CheckCircleTwoTone twoToneColor={REDWOOD.success} /></Tooltip>
+                : <Tooltip title={`Differs — cost ${fmtQty(costQty)} vs on-hand ${fmtQty(st.qty)}`}><CloseCircleTwoTone twoToneColor={REDWOOD.error} /></Tooltip>}
+            </>}
+            {st?.err && <Tooltip title={st.err}><Text type="danger" style={{ fontSize: 10 }}>err</Text></Tooltip>}
+          </Space>
+        );
+      } },
+  ];
+  return rows.length === 0
+    ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No cost rows for this org" style={{ padding: 12 }} />
+    : <Table size="small" columns={cols} dataSource={rows} rowKey={(r, i) => String(r.ValuationUnit ?? i)} pagination={false} scroll={{ x: 780 }} />;
+};
 
 // Item picker (itemsV2), scoped to the warehouse org — like PO Add Lines,
 // showing each item's cost for the selected inventory organization.
@@ -1327,7 +1376,7 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [sel, setSel] = useState<React.Key[]>([]);
-  const [costs, setCosts] = useState<Record<string, { cost?: number; ccy?: string; n: number }>>({});
+  const [costs, setCosts] = useState<Record<string, { cost?: number; ccy?: string; n: number; rows: any[] }>>({});
   const [costLoading, setCostLoading] = useState(false);
   useEffect(() => { if (open) { setTerm(''); setRows([]); setSel([]); setError(''); setCosts({}); } }, [open]);
 
@@ -1344,7 +1393,7 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
   const loadCosts = useCallback(async (items: any[]) => {
     if (!items.length) return;
     setCostLoading(true);
-    const map: Record<string, { cost?: number; ccy?: string; n: number }> = {};
+    const map: Record<string, { cost?: number; ccy?: string; n: number; rows: any[] }> = {};
     await mapLimit(items, 5, async (it) => {
       const item = it.ItemNumber;
       try {
@@ -1352,8 +1401,8 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
         const d = await r.json();
         const matched = (d.items ?? []).filter((x: any) => rowOrgMatches(x, org));
         const row = matched[0];
-        map[item] = { cost: row ? num(pf(row, COST_FIELDS)) : undefined, ccy: row?.CurrencyCode, n: matched.length };
-      } catch { map[item] = { n: 0 }; }
+        map[item] = { cost: row ? num(pf(row, COST_FIELDS)) : undefined, ccy: row?.CurrencyCode, n: matched.length, rows: matched };
+      } catch { map[item] = { n: 0, rows: [] }; }
     });
     setCosts(map); setCostLoading(false);
   }, [org]);
@@ -1397,7 +1446,11 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
       {error ? <div style={{ color: REDWOOD.error, fontSize: 12, marginBottom: 8 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div> : null}
       <Table size="small" columns={cols} dataSource={rows} rowKey="ItemNumber" loading={loading}
         rowSelection={{ selectedRowKeys: sel, onChange: setSel }}
-        pagination={rows.length > 10 ? { pageSize: 10, size: 'small' } : false} scroll={{ y: 320 }}
+        expandable={{
+          rowExpandable: r => (costs[r.ItemNumber]?.n ?? 0) > 0,
+          expandedRowRender: r => <ItemCostDetail item={r.ItemNumber} rows={costs[r.ItemNumber]?.rows ?? []} />,
+        }}
+        pagination={rows.length > 10 ? { pageSize: 10, size: 'small' } : false} scroll={{ y: 340 }}
         locale={{ emptyText: 'Search for items to add' }} />
     </Modal>
   );
