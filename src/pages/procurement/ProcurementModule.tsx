@@ -6,6 +6,7 @@ import {
   ApartmentOutlined, BankOutlined, SafetyCertificateOutlined, InboxOutlined,
   DollarOutlined, ReconciliationOutlined, CloudOutlined, HistoryOutlined,
   SwapOutlined, CarOutlined, CheckSquareOutlined, FileSearchOutlined, UploadOutlined,
+  RightOutlined, SettingOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -33,8 +34,15 @@ interface MenuItemType {
   group: string;
 }
 
-// Section order on the home page.
+// Section order + per-section icon/accent for the home page.
 const GROUP_ORDER = ['Purchasing', 'Inventory', 'Costing', 'Setups', 'Loading'];
+const GROUP_META: Record<string, { icon: React.ReactNode; color: string }> = {
+  Purchasing: { icon: <ShoppingCartOutlined />, color: '#C74634' },
+  Inventory:  { icon: <AppstoreOutlined />,     color: '#0572CE' },
+  Costing:    { icon: <DollarOutlined />,        color: '#1D7B4D' },
+  Setups:     { icon: <SettingOutlined />,       color: '#B07700' },
+  Loading:    { icon: <UploadOutlined />,        color: '#00918A' },
+};
 
 const procurementItems: MenuItemType[] = [
   // ── Purchasing ──────────────────────────────────────────────────────────
@@ -197,47 +205,28 @@ const procurementItems: MenuItemType[] = [
 ];
 
 const TaskCard: React.FC<{ item: MenuItemType; onClick: () => void }> = ({ item, onClick }) => (
-  <Card
-    hoverable={!!item.path}
-    onClick={onClick}
-    style={{
-      borderRadius: 8,
-      border: item.path ? `1px solid ${REDWOOD.success}30` : `1px solid ${REDWOOD.neutral200}`,
-      cursor: item.path ? 'pointer' : 'default',
-      opacity: item.path ? 1 : 0.6,
-      position: 'relative',
-    }}
-    styles={{ body: { padding: '14px 16px' } }}
+  <div
+    className={`fc-tile${item.path ? '' : ' fc-tile-disabled'}`}
+    onClick={item.path ? onClick : undefined}
+    style={{ ['--fc-accent' as any]: item.color }}
   >
-    {item.path && (
-      <div style={{
-        position: 'absolute', top: 6, right: 6,
-        background: REDWOOD.success, color: '#fff',
-        borderRadius: '50%', width: 16, height: 16,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        <CheckCircleOutlined style={{ fontSize: 10 }} />
-      </div>
-    )}
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-      <div style={{
-        width: 36, height: 36, borderRadius: 8, flexShrink: 0,
-        background: item.color + '18',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        color: item.color, fontSize: 18,
-      }}>
+    <span className="fc-accent" style={{ background: item.color }} />
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '14px 16px' }}>
+      <div className="fc-chip" style={{ background: `linear-gradient(135deg, ${item.color} 0%, ${item.color}bb 100%)`, boxShadow: `0 3px 10px ${item.color}40` }}>
         {item.icon}
       </div>
-      <div>
-        <Text strong style={{ fontSize: 13, color: item.path ? item.color : REDWOOD.neutral900 }}>
-          {item.label}
-        </Text>
-        <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 2 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Text strong style={{ fontSize: 13.5, color: REDWOOD.neutral900, lineHeight: 1.25 }}>{item.label}</Text>
+          {!item.path && <Tag style={{ fontSize: 10, lineHeight: '16px', margin: 0, borderRadius: 8 }}>Soon</Tag>}
+          {item.path && <RightOutlined className="fc-chev" style={{ marginLeft: 'auto', fontSize: 12, color: item.color }} />}
+        </div>
+        <Text type="secondary" style={{ fontSize: 11.5, display: 'block', marginTop: 3, lineHeight: 1.4 }}>
           {item.description}
         </Text>
       </div>
     </div>
-  </Card>
+  </div>
 );
 
 // ── Password Gate ────────────────────────────────────────────────────────────
@@ -422,15 +411,44 @@ const ProcurementHome: React.FC = () => {
             </div>
           </div>
 
+          <style>{`
+            .fc-tile { position: relative; background: ${REDWOOD.surface}; border: 1px solid ${REDWOOD.neutral200};
+              border-radius: 12px; overflow: hidden; cursor: pointer; height: 100%;
+              transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+            .fc-tile:hover { transform: translateY(-3px); box-shadow: 0 10px 26px rgba(0,0,0,0.10);
+              border-color: var(--fc-accent); }
+            .fc-tile .fc-accent { position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+              opacity: 0; transition: opacity .18s ease; }
+            .fc-tile:hover .fc-accent { opacity: 1; }
+            .fc-tile .fc-chip { width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0;
+              display: flex; align-items: center; justify-content: center; color: #fff; font-size: 19px;
+              transition: transform .18s ease; }
+            .fc-tile:hover .fc-chip { transform: scale(1.06) rotate(-3deg); }
+            .fc-tile .fc-chev { opacity: 0; transition: opacity .18s ease, transform .18s ease; }
+            .fc-tile:hover .fc-chev { opacity: 1; transform: translateX(3px); }
+            .fc-tile-disabled { cursor: default; opacity: .6; }
+            .fc-tile-disabled:hover { transform: none; box-shadow: none; border-color: ${REDWOOD.neutral200}; }
+            .fc-tile-disabled:hover .fc-chip { transform: none; }
+          `}</style>
+
           {GROUP_ORDER.map(group => {
             const items = procurementItems.filter(i => i.group === group);
             if (items.length === 0) return null;
+            const meta = GROUP_META[group] ?? { icon: null, color: REDWOOD.primary };
+            const active = items.filter(i => i.path).length;
             return (
-              <div key={group} style={{ marginBottom: 24 }}>
-                <Text strong style={{ fontSize: 13, color: REDWOOD.primary, textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 10, borderBottom: `2px solid ${REDWOOD.primary}22`, paddingBottom: 6 }}>
-                  {group}
-                </Text>
-                <Row gutter={[12, 12]}>
+              <div key={group} style={{ marginBottom: 26 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                  <span style={{
+                    width: 28, height: 28, borderRadius: 8, flexShrink: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: meta.color + '18', color: meta.color, fontSize: 15,
+                  }}>{meta.icon}</span>
+                  <Text strong style={{ fontSize: 14, color: REDWOOD.neutral900, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{group}</Text>
+                  <Tag style={{ borderRadius: 10, border: 'none', background: meta.color + '18', color: meta.color, fontSize: 11, fontWeight: 600 }}>{active}</Tag>
+                  <div style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${meta.color}30, transparent)` }} />
+                </div>
+                <Row gutter={[14, 14]}>
                   {items.map(item => (
                     <Col key={item.key} xs={24} sm={12} lg={8}>
                       <TaskCard item={item} onClick={() => item.path && navigate(item.path)} />
