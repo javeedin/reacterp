@@ -1140,8 +1140,11 @@ const SO_CREATE_URL = `${FUSION_BASE}/salesOrdersForOrderHub`;
 const CURRENCIES = ['AED', 'USD', 'RWF', 'EUR', 'GBP', 'INR', 'SAR', 'KES', 'TZS', 'UGX', 'ZAR', 'XOF'];
 const PAYMENT_TERMS = ['Immediate', '30 Net', '45 Net', '60 Net', 'CR7D', 'CR30D', 'CR45D'];
 
-// Custom ORDS lookups (payment terms & salespersons).
-const ORDS_AR = 'https://g827cd88c3cfc03-mitsumioracledb.adb.me-dubai-1.oraclecloudapps.com/ords/test/FUSIONCLIENTERP/ar';
+// Custom ORDS lookups (customers, payment terms, salespersons).
+// Electron goes direct; the browser build routes via the /ords-mitsu proxy to avoid CORS.
+const ORDS_AR = _isElectron
+  ? 'https://g827cd88c3cfc03-mitsumioracledb.adb.me-dubai-1.oraclecloudapps.com/ords/test/FUSIONCLIENTERP/ar'
+  : '/ords-mitsu/ar';
 const PAYMENT_TERMS_URL = `${ORDS_AR}/paymentterms`;
 const SALESREPS_URL = `${ORDS_AR}/salesperson`;
 
@@ -1172,7 +1175,7 @@ const useOrdsOptions = (url: string, keys: string[], fallback: string[] = []): {
   return opts;
 };
 const PAY_TERM_KEYS = ['name', 'Name', 'payment_terms', 'paymentterms', 'term_name', 'termname', 'payment_term', 'value', 'description'];
-const SALESREP_KEYS = ['name', 'Name', 'salesrep_name', 'salesperson', 'salesperson_name', 'salespersonname', 'resource_name', 'full_name', 'value'];
+const SALESREP_KEYS = ['salesrep_name', 'salerep_code', 'name', 'Name', 'salesperson', 'salesperson_name', 'salespersonname', 'resource_name', 'full_name', 'value'];
 
 const CUSTOMERS_URL = `${ORDS_AR}/customers`;
 // Fetch all customer rows (paged) from the ORDS customers endpoint.
