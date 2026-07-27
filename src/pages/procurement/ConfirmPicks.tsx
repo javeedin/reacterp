@@ -7,7 +7,7 @@ import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, CheckSquareOutlined, SearchOutlined, ReloadOutlined, ClearOutlined,
   ApiOutlined, CopyOutlined, InfoCircleOutlined, ExportOutlined, BankOutlined,
-  UnorderedListOutlined, ProfileOutlined,
+  UnorderedListOutlined, ProfileOutlined, CarOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -389,8 +389,83 @@ const ConfirmPickModal: React.FC<{ open: boolean; payload: any | null; onClose: 
   );
 };
 
+// ── Ship Confirm — POST shippingTransactions ─────────────────────────────────
+export const SHIP_CONFIRM_URL = `${FUSION_BASE}/shippingTransactions`;
+
+// Reusable ship-confirm dialog. Body: { ShipmentName, Action:"CONFIRM", Organization }.
+export const ShipConfirmModal: React.FC<{
+  open: boolean; shipmentName?: string; organization?: string; onClose: () => void; onDone?: () => void;
+}> = ({ open, shipmentName, organization, onClose, onDone }) => {
+  const [name, setName] = useState('');
+  const [org, setOrg] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [resp, setResp] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => { if (open) { setName(shipmentName ?? ''); setOrg(organization ?? ''); setResp(null); } }, [open, shipmentName, organization]);
+
+  const payload = useMemo(() => ({ ShipmentName: name, Action: 'CONFIRM', Organization: org }), [name, org]);
+  const body = useMemo(() => JSON.stringify(payload, null, 2), [payload]);
+
+  const submit = async () => {
+    if (!name.trim() || !org.trim()) { message.warning('Shipment and Organization are required'); return; }
+    setSubmitting(true); setResp(null);
+    try {
+      const r = await fetch(SHIP_CONFIRM_URL, {
+        method: 'POST',
+        headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const text = await r.text();
+      let pretty = text; try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* keep raw */ }
+      if (r.ok) { setResp({ ok: true, text: pretty }); message.success('Ship confirmed in Fusion'); onDone?.(); }
+      else { setResp({ ok: false, text: `HTTP ${r.status} ${r.statusText}\n${pretty}` }); message.error(`Ship confirm failed (HTTP ${r.status})`); }
+    } catch (e: any) { setResp({ ok: false, text: e.message }); message.error('Ship confirm failed'); }
+    finally { setSubmitting(false); }
+  };
+
+  return (
+    <Modal open={open} onCancel={onClose} maskClosable={false} width={620}
+      title={<Space><CarOutlined style={{ color: REDWOOD.success }} /> Ship Confirm</Space>}
+      footer={<Space>
+        <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginRight: 'auto' }}
+          onClick={() => { navigator.clipboard.writeText(body); message.success('Copied'); }}>Copy JSON</Button>
+        <Button onClick={onClose}>{resp?.ok ? 'Close' : 'Cancel'}</Button>
+        {!resp?.ok && (
+          <Button type="primary" loading={submitting} onClick={submit}
+            style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>Submit to Fusion</Button>
+        )}
+      </Space>}>
+      <Row gutter={12}>
+        <Col span={16}>
+          <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>Shipment <span style={{ color: REDWOOD.error }}>*</span></div>
+          <Input value={name} placeholder="Shipment name / number" onChange={e => setName(e.target.value)} />
+        </Col>
+        <Col span={8}>
+          <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>Organization <span style={{ color: REDWOOD.error }}>*</span></div>
+          <Input value={org} placeholder="e.g. AMS" onChange={e => setOrg(e.target.value)} />
+        </Col>
+      </Row>
+      <div style={{ fontSize: 12, margin: '12px 0 6px', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Tag color="green">POST</Tag>
+        <Text style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info }}>{SHIP_CONFIRM_URL}</Text>
+      </div>
+      <div style={{ maxHeight: 220, overflow: 'auto', background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, padding: 12 }}>
+        <pre style={{ margin: 0, fontSize: 11, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{body}</pre>
+      </div>
+      {resp && (
+        <div style={{ marginTop: 12, padding: 12, borderRadius: 6,
+          background: (resp.ok ? REDWOOD.success : REDWOOD.error) + '12', border: `1px solid ${(resp.ok ? REDWOOD.success : REDWOOD.error)}55` }}>
+          <div style={{ fontWeight: 700, color: resp.ok ? REDWOOD.success : REDWOOD.error, marginBottom: 6, fontSize: 12 }}>
+            {resp.ok ? <><CheckSquareOutlined /> Success</> : <><InfoCircleOutlined /> Error</>}
+          </div>
+          <pre style={{ margin: 0, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 200, overflow: 'auto' }}>{resp.text}</pre>
+        </div>
+      )}
+    </Modal>
+  );
+};
+
 // ── Pick Slip drill dialog (header + pickLines) ──────────────────────────────
-const PickSlipDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ row, onClose }) => {
+export const PickSlipDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ row, onClose }) => {
   const pickLinesHref = row?.links?.find((l: any) => l.name === 'pickLines')?.href
     ?? (row ? `${FUSION_BASE}/pickSlipDetails/${row.PickSlip}/child/pickLines` : '');
 
@@ -418,6 +493,7 @@ const PickSlipDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ ro
   const [allocLine, setAllocLine] = useState<any | null>(null);
   const [allocations, setAllocations] = useState<Record<string, Allocation>>({});
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [shipOpen, setShipOpen] = useState(false);
   const allocCount = Object.keys(allocations).length;
   const confirmPayload = useMemo(
     () => buildConfirmPayload(row, pickLines, allocations),
@@ -477,6 +553,8 @@ const PickSlipDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ ro
         <Button type="primary" icon={<CheckSquareOutlined />} disabled={allocCount === 0}
           style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
           onClick={() => setConfirmOpen(true)}>Confirm Pick</Button>
+        <Button icon={<CarOutlined />} onClick={() => setShipOpen(true)}
+          style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}>Ship Confirm</Button>
       </Space>}
       title={<Space><CheckSquareOutlined style={{ color: REDWOOD.primary }} /> Pick Slip <Tag color="volcano">{row?.PickSlip}</Tag>
         {row?.PickWave && <Tag color="purple">Wave {row.PickWave}</Tag>}</Space>}
@@ -539,6 +617,9 @@ const PickSlipDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ ro
 
       <ConfirmPickModal open={confirmOpen} payload={confirmPayload}
         onClose={() => setConfirmOpen(false)} onDone={() => { /* keep dialog open to show response */ }} />
+
+      <ShipConfirmModal open={shipOpen} shipmentName={row?.Shipment} organization={row?.Organization}
+        onClose={() => setShipOpen(false)} />
     </Modal>
   );
 };

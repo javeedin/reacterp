@@ -8,10 +8,11 @@ import {
   HomeOutlined, CarOutlined, SearchOutlined, ReloadOutlined, ClearOutlined,
   ApiOutlined, CopyOutlined, InfoCircleOutlined, ProfileOutlined,
   ExportOutlined, ThunderboltOutlined, EyeOutlined, CheckCircleOutlined,
-  UnorderedListOutlined, BankOutlined,
+  UnorderedListOutlined, BankOutlined, CheckSquareOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
+import { ShipConfirmModal, PickSlipDialog } from './ConfirmPicks';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -184,6 +185,27 @@ const ShipmentOrderDialog: React.FC<{ row: any | null; onClose: () => void }> = 
   const [releaseResult, setReleaseResult] = useState<{ ok: boolean; status: number; body: string } | null>(null);
   const [payloadOpen, setPayloadOpen] = useState(false);
 
+  // Ship Confirm (shippingTransactions) — shipment name & org come from the lines.
+  const [shipOpen, setShipOpen] = useState(false);
+  const shipmentName = hdr?.Shipment ?? hdr?.ShipmentName ?? lines.map(l => l.Shipment).find(Boolean);
+
+  // Pickslip — query Confirm-Picks pick slips for this order and reuse its dialog.
+  const [psLoading, setPsLoading] = useState(false);
+  const [psRows, setPsRows] = useState<any[] | null>(null);   // chooser list (>1 slip)
+  const [psDialogRow, setPsDialogRow] = useState<any | null>(null);
+  const openPickSlips = useCallback(async () => {
+    if (!order) return;
+    setPsLoading(true);
+    try {
+      const url = `${FUSION_BASE}/pickSlipDetails?q=${encodeURIComponent(`Order='${order}'`)}&orderBy=CreationDate:desc`;
+      const slips = await fetchAllPages(url);
+      if (slips.length === 0) { message.info(`No pick slips found for order ${order}`); }
+      else if (slips.length === 1) { setPsDialogRow(slips[0]); }
+      else { setPsRows(slips); }
+    } catch (e: any) { message.error(`Pick slip lookup failed: ${e.message}`); }
+    finally { setPsLoading(false); }
+  }, [order]);
+
   const pickRelease = () => {
     Modal.confirm({
       title: 'Pick Release this order?',
@@ -260,6 +282,14 @@ const ShipmentOrderDialog: React.FC<{ row: any | null; onClose: () => void }> = 
             style={canRelease ? { background: REDWOOD.success, borderColor: REDWOOD.success } : undefined}>
             Pick Release
           </Button>
+        </Tooltip>
+        <Tooltip title="Ship confirm this shipment (shippingTransactions)">
+          <Button icon={<CarOutlined />} onClick={() => setShipOpen(true)}
+            style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}>Ship Confirm</Button>
+        </Tooltip>
+        <Tooltip title="Query the Confirm Picks pick slips for this order">
+          <Button icon={<CheckSquareOutlined />} loading={psLoading} onClick={openPickSlips}
+            style={{ borderColor: REDWOOD.purple, color: REDWOOD.purple }}>Pickslip</Button>
         </Tooltip>
         <Button icon={<EyeOutlined />} onClick={() => setPayloadOpen(true)}>Show Payload</Button>
         <Button icon={<ReloadOutlined />} loading={loading} onClick={loadLines}>Refresh</Button>
@@ -341,6 +371,30 @@ const ShipmentOrderDialog: React.FC<{ row: any | null; onClose: () => void }> = 
           {JSON.stringify(pickPayload, null, 2)}
         </div>
       </Modal>
+
+      {/* Ship Confirm (shared dialog → shippingTransactions) */}
+      <ShipConfirmModal open={shipOpen} shipmentName={shipmentName} organization={hdr?.OrganizationCode}
+        onClose={() => setShipOpen(false)} onDone={loadLines} />
+
+      {/* Pick slip chooser when the order has more than one pick slip */}
+      <Modal title={<Space><CheckSquareOutlined style={{ color: REDWOOD.purple }} /> Pick Slips — order {order}</Space>}
+        open={!!psRows} onCancel={() => setPsRows(null)} maskClosable={false} width={720}
+        footer={<Button onClick={() => setPsRows(null)}>Close</Button>}>
+        <Table size="small" pagination={false} scroll={{ y: 360 }}
+          dataSource={(psRows ?? []).map((r, i) => ({ ...r, _k: i }))} rowKey="_k"
+          columns={[
+            { title: 'Pick Slip', dataIndex: 'PickSlip', width: 130, render: (v, r) => (
+              <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info }}
+                onClick={() => { setPsDialogRow(r); setPsRows(null); }}>{v}</Button>) },
+            { title: 'Pick Wave', dataIndex: 'PickWave', width: 110, render: v => v ?? '—' },
+            { title: 'Org', dataIndex: 'Organization', width: 80, render: v => <Tag>{v ?? '—'}</Tag> },
+            { title: '# Picks', dataIndex: 'NumberOfPicks', width: 80, align: 'right', render: v => v ?? '—' },
+            { title: 'Creation Date', dataIndex: 'CreationDate', width: 130, render: fmtDate },
+          ]} />
+      </Modal>
+
+      {/* Same Confirm-Picks pick slip dialog */}
+      <PickSlipDialog row={psDialogRow} onClose={() => setPsDialogRow(null)} />
     </Modal>
   );
 };
