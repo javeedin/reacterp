@@ -7,6 +7,7 @@ import {
   DollarOutlined, ReconciliationOutlined, CloudOutlined, HistoryOutlined,
   SwapOutlined, CarOutlined, CheckSquareOutlined, FileSearchOutlined, UploadOutlined,
   RightOutlined, SettingOutlined, ShoppingOutlined, TagsOutlined, ProfileOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -35,7 +36,7 @@ interface MenuItemType {
 }
 
 // Section order + per-section icon/accent for the home page.
-const GROUP_ORDER = ['Purchasing', 'Order Management', 'Inventory', 'Costing', 'Setups', 'Loading'];
+const GROUP_ORDER = ['Purchasing', 'Order Management', 'Inventory', 'Costing', 'Setups', 'Loading', 'Architecture & Strategy'];
 const GROUP_META: Record<string, { icon: React.ReactNode; color: string }> = {
   Purchasing:        { icon: <ShoppingCartOutlined />, color: '#C74634' },
   'Order Management': { icon: <ProfileOutlined />,       color: '#7245A6' },
@@ -43,6 +44,7 @@ const GROUP_META: Record<string, { icon: React.ReactNode; color: string }> = {
   Costing:           { icon: <DollarOutlined />,        color: '#1D7B4D' },
   Setups:            { icon: <SettingOutlined />,       color: '#B07700' },
   Loading:           { icon: <UploadOutlined />,        color: '#00918A' },
+  'Architecture & Strategy': { icon: <ApartmentOutlined />, color: '#7245A6' },
 };
 
 const procurementItems: MenuItemType[] = [
@@ -277,6 +279,23 @@ const procurementItems: MenuItemType[] = [
     description: 'Bulk-load items (coming soon)',
     color: REDWOOD.warning,
     // path intentionally omitted until the loader is specified
+  },
+  // ── Architecture & Strategy ─────────────────────────────────────────────
+  {
+    key: 'architecture', group: 'Architecture & Strategy',
+    icon: <ApartmentOutlined />,
+    label: 'Fusion Client Architecture',
+    description: 'From single sign-on to fully transactional operations across all modules',
+    color: REDWOOD.info,
+    path: '/procurement/architecture',
+  },
+  {
+    key: 'parallel-run', group: 'Architecture & Strategy',
+    icon: <SyncOutlined />,
+    label: 'Parallel Run / UAT Strategy',
+    description: 'Automated parallel run, auto-reconciliation with legacy & phased go-live',
+    color: '#7245A6',
+    path: '/procurement/parallel-run',
   },
 ];
 

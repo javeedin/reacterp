@@ -142,6 +142,8 @@ const ReviewInventoryTransactions = lazy(() => import('./pages/procurement').the
 const SalesOrders             = lazy(() => import('./pages/procurement').then(m => ({ default: m.SalesOrders })));
 const PriceList               = lazy(() => import('./pages/procurement').then(m => ({ default: m.PriceList })));
 const PurchaseOrderLoading    = lazy(() => import('./pages/procurement').then(m => ({ default: m.PurchaseOrderLoading })));
+const FusionArchitecture      = lazy(() => import('./pages/procurement').then(m => ({ default: m.FusionArchitecture })));
+const ParallelRunStrategy     = lazy(() => import('./pages/procurement').then(m => ({ default: m.ParallelRunStrategy })));
 
 // Placeholder component for modules under development
 const ComingSoon = ({ moduleName }: { moduleName: string }) => (
@@ -288,6 +290,8 @@ function App() {
               <Route path="procurement/sales-orders" element={<SalesOrders />} />
               <Route path="procurement/price-list" element={<PriceList />} />
               <Route path="procurement/po-loading" element={<PurchaseOrderLoading />} />
+              <Route path="procurement/architecture" element={<FusionArchitecture />} />
+              <Route path="procurement/parallel-run" element={<ParallelRunStrategy />} />
               <Route path="ap/suppliers" element={<APManageSuppliers />} />
               <Route path="suppliers/manage" element={<ManageSuppliers />} />
               <Route path="suppliers/balance/:supplierNumber" element={<SupplierBalance />} />
