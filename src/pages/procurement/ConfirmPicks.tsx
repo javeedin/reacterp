@@ -1,0 +1,330 @@
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import {
+  Layout, Breadcrumb, Card, Table, Form, Input, Select, DatePicker, Button,
+  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty,
+} from 'antd';
+import type { ColumnsType } from 'antd/es/table';
+import {
+  HomeOutlined, CheckSquareOutlined, SearchOutlined, ReloadOutlined, ClearOutlined,
+  ApiOutlined, CopyOutlined, InfoCircleOutlined, ExportOutlined, BankOutlined,
+  UnorderedListOutlined,
+} from '@ant-design/icons';
+import { Link } from 'react-router-dom';
+import dayjs, { type Dayjs } from 'dayjs';
+
+const { Content } = Layout;
+const { Title, Text } = Typography;
+
+const _isElectron = !!(window as unknown as { electron?: unknown; electronAPI?: unknown }).electron
+  || !!(window as unknown as { electronAPI?: unknown }).electronAPI;
+const FUSION_BASE = _isElectron
+  ? 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05'
+  : '/fusion-api';
+const AUTH_HEADER = 'Basic ' + btoa('emparun:Fusion@1234');
+const FUSION_HDRS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
+const PAGE_LIMIT = 500;
+
+const REDWOOD = {
+  primary: '#C74634', success: '#1D7B4D', warning: '#B07700', info: '#0572CE',
+  error: '#D93025', teal: '#00918A', purple: '#7245A6',
+  neutral100: '#F7F7F7', neutral200: '#E5E5E5', neutral300: '#C7C7C7',
+  neutral600: '#6B6B6B', neutral900: '#1A1A1A', surface: '#FFFFFF',
+};
+
+const fmtDate = (d?: string) => { if (!d) return '—'; try { return dayjs(d).format('D-MMM-YYYY'); } catch { return d; } };
+const fmtQty = (v?: number | null) => (v == null ? '—' : new Intl.NumberFormat('en-US').format(v));
+
+const fetchAllPages = async (baseUrl: string): Promise<any[]> => {
+  const stripped = baseUrl.replace(/[?&]limit=\d+/gi, '').replace(/[?&]offset=\d+/gi, '').replace(/\?&/, '?').replace(/&&/g, '&');
+  const all: any[] = [];
+  let offset = 0;
+  while (true) {
+    const sep = stripped.includes('?') ? '&' : '?';
+    const url = `${stripped}${sep}limit=${PAGE_LIMIT}&offset=${offset}`;
+    const r = await fetch(url, { headers: FUSION_HDRS });
+    if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+    const d = await r.json();
+    const items: any[] = Array.isArray(d) ? d : (d.items ?? []);
+    all.push(...items);
+    if (!d.hasMore || items.length < PAGE_LIMIT) break;
+    offset += PAGE_LIMIT;
+  }
+  return all;
+};
+
+// ── Pick Slip drill dialog (header + pickLines) ──────────────────────────────
+const PickSlipDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ row, onClose }) => {
+  const [lines, setLines] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const linesHref = row?.links?.find((l: any) => l.name === 'pickLines')?.href
+    ?? (row ? `${FUSION_BASE}/pickSlipDetails/${row.PickSlip}/child/pickLines` : '');
+
+  const loadLines = useCallback(async () => {
+    if (!linesHref) return;
+    setLoading(true); setError('');
+    try { setLines(await fetchAllPages(linesHref)); }
+    catch (e: any) { setError(e.message); setLines([]); }
+    finally { setLoading(false); }
+  }, [linesHref]);
+  useEffect(() => { if (row) loadLines(); }, [row, loadLines]);
+
+  const HInfo: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
+    <Col xs={12} sm={8} md={6}>
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>{label}</div>
+        <div style={{ fontSize: 12.5, color: REDWOOD.neutral900, marginTop: 2, wordBreak: 'break-word' }}>{value ?? '—'}</div>
+      </div>
+    </Col>
+  );
+
+  const lineCols: ColumnsType<any> = [
+    { title: 'Slip Line', dataIndex: 'PickSlipLine', width: 75, align: 'center', render: v => <Tag color="blue" style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+    { title: 'Item', dataIndex: 'Item', width: 130, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Requested Qty', dataIndex: 'RequestedQuantity', width: 110, align: 'right', render: (v, r) => `${fmtQty(v)}${r.UOM ? ' ' + r.UOM : ''}` },
+    { title: 'Max Picked', dataIndex: 'MaximumPickedQuantity', width: 100, align: 'right', render: fmtQty },
+    { title: 'Transaction Type', dataIndex: 'TransactionType', width: 150, render: v => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+    { title: 'Src Subinv', dataIndex: 'SourceSubinventory', width: 110, render: v => v ?? '—' },
+    { title: 'Dest Subinv', dataIndex: 'DestinationSubinventory', width: 110, render: v => v ?? '—' },
+    { title: 'Src Locator', dataIndex: 'SourceLocator', width: 110, render: v => v ?? '—' },
+    { title: 'Required Date', dataIndex: 'RequiredDate', width: 120, render: fmtDate },
+    { title: 'Source Order', dataIndex: 'SourceOrder', width: 110, render: (v, r) => v ? `${v}${r.SourceOrderLine ? ' / ' + r.SourceOrderLine : ''}` : '—' },
+    { title: 'Mv Req Line', dataIndex: 'MovementRequestLine', width: 100, align: 'center', render: v => v ?? '—' },
+    { title: 'Error', dataIndex: 'ErrorExplanation', width: 160, ellipsis: true,
+      render: (v, r) => (v || r.ErrorCode) ? <Text type="danger" style={{ fontSize: 11 }}>{v ?? r.ErrorCode}</Text> : '—' },
+  ];
+
+  return (
+    <Modal
+      open={!!row} onCancel={onClose} maskClosable={false} width={1040} style={{ top: 24 }}
+      footer={<Button onClick={onClose}>Close</Button>}
+      title={<Space><CheckSquareOutlined style={{ color: REDWOOD.primary }} /> Pick Slip <Tag color="volcano">{row?.PickSlip}</Tag>
+        {row?.PickWave && <Tag color="purple">Wave {row.PickWave}</Tag>}</Space>}
+    >
+      {/* Header */}
+      <Card size="small" title={<Space><BankOutlined style={{ color: REDWOOD.primary }} /><Text strong>Header</Text></Space>}
+        style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 12 }}>
+        {!row ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="—" /> : (
+          <Row gutter={[12, 0]}>
+            <HInfo label="Pick Slip" value={<Text strong>{row.PickSlip}</Text>} />
+            <HInfo label="Pick Wave" value={row.PickWave} />
+            <HInfo label="Organization" value={<Tag>{row.Organization}</Tag>} />
+            <HInfo label="Order" value={<Text strong>{row.Order}</Text>} />
+            <HInfo label="Customer" value={row.Customer} />
+            <HInfo label="# Picks" value={row.NumberOfPicks} />
+            <HInfo label="Due Date" value={fmtDate(row.DueDate)} />
+            <HInfo label="Creation Date" value={fmtDate(row.CreationDate)} />
+            <HInfo label="Shipment" value={row.Shipment} />
+            <HInfo label="Movement Request" value={row.MovementRequest} />
+            <HInfo label="Shipping Method" value={row.ShippingMethod} />
+            <HInfo label="Ship To Location" value={row.ShipToLocation} />
+          </Row>
+        )}
+      </Card>
+
+      {/* Lines */}
+      <Card size="small" styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
+        title={<Space><UnorderedListOutlined style={{ color: REDWOOD.primary }} /><Text strong>Pick Lines</Text>
+          {lines.length > 0 && <Tag>{lines.length}</Tag>}</Space>}
+        extra={<Space>
+          <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {linesHref}</span>}>
+            <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} />
+          </Tooltip>
+          <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={loadLines}>Reload</Button>
+        </Space>}>
+        {loading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+          : error ? <div style={{ padding: 16, color: REDWOOD.error, fontSize: 12 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div>
+          : lines.length === 0 ? <Empty description="No pick lines" style={{ padding: 30 }} />
+          : <Table size="small" columns={lineCols} dataSource={lines} rowKey={(r, i) => `${r.PickSlipLine ?? i}`}
+              pagination={false} scroll={{ x: 1400, y: 380 }} />}
+      </Card>
+    </Modal>
+  );
+};
+
+// ── Page ─────────────────────────────────────────────────────────────────────
+interface Filters { dateOp?: string; date?: Dayjs | null; order?: string; org?: string; }
+
+const ConfirmPicks: React.FC = () => {
+  const [form] = Form.useForm();
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [error, setError] = useState('');
+  const [apiOpen, setApiOpen] = useState(false);
+  const [filterText, setFilterText] = useState('');
+  const [dialog, setDialog] = useState<any | null>(null);
+  const [orgs, setOrgs] = useState<string[]>([]);
+
+  const [filters, setFilters] = useState<Filters>({ dateOp: '>', date: dayjs().subtract(7, 'day') });
+
+  // Organization dropdown from inventoryOrganizations.
+  useEffect(() => {
+    fetch(`${FUSION_BASE}/inventoryOrganizations?onlyData=true&limit=500&fields=OrganizationCode`, { headers: FUSION_HDRS })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => setOrgs(Array.from(new Set((d.items ?? []).map((o: any) => o.OrganizationCode).filter(Boolean))).sort() as string[]))
+      .catch(() => { /* free-type fallback via the select's search */ });
+  }, []);
+
+  const buildQ = useCallback((f: Filters) => {
+    const parts: string[] = [];
+    if (f.date) parts.push(`CreationDate${f.dateOp || '>'}${dayjs(f.date).format('YYYY-MM-DD')}`);
+    if (f.order?.trim()) parts.push(`Order='${f.order.trim()}'`);
+    if (f.org) parts.push(`Organization='${f.org}'`);
+    return parts.join(';');
+  }, []);
+
+  const searchUrl = useMemo(() => {
+    const q = buildQ(filters);
+    const qs = q ? `q=${encodeURIComponent(q)}&` : '';
+    return `${FUSION_BASE}/pickSlipDetails?${qs}orderBy=CreationDate:desc`;
+  }, [filters, buildQ]);
+
+  const runSearch = useCallback(async () => {
+    setLoading(true); setError(''); setSearched(true);
+    try {
+      const items = await fetchAllPages(searchUrl);
+      setRows(items);
+      if (items.length === 0) setError('No pick slips matched.');
+    } catch (e: any) { setError(e.message); setRows([]); }
+    finally { setLoading(false); }
+  }, [searchUrl]);
+
+  const filtered = useMemo(() => {
+    const t = filterText.trim().toLowerCase();
+    if (!t) return rows;
+    return rows.filter(r => JSON.stringify(r).toLowerCase().includes(t));
+  }, [rows, filterText]);
+
+  const columns: ColumnsType<any> = [
+    { title: 'Pick Slip', dataIndex: 'PickSlip', width: 130, fixed: 'left',
+      render: (v, r) => (
+        <Space size={2}>
+          <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 12 }} onClick={() => setDialog(r)}>{v}</Button>
+          <Tooltip title="Open pick slip"><Button size="small" type="text" icon={<ExportOutlined />} style={{ color: REDWOOD.info }} onClick={() => setDialog(r)} /></Tooltip>
+        </Space>
+      ) },
+    { title: 'Pick Wave', dataIndex: 'PickWave', width: 100, render: v => v ?? '—' },
+    { title: 'Org', dataIndex: 'Organization', width: 80, render: v => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+    { title: 'Order', dataIndex: 'Order', width: 150, render: v => <Text strong style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Customer', dataIndex: 'Customer', width: 200, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: '# Picks', dataIndex: 'NumberOfPicks', width: 80, align: 'right', render: fmtQty },
+    { title: 'Due Date', dataIndex: 'DueDate', width: 120, render: fmtDate },
+    { title: 'Creation Date', dataIndex: 'CreationDate', width: 130, render: fmtDate,
+      sorter: (a, b) => String(a.CreationDate ?? '').localeCompare(String(b.CreationDate ?? '')) },
+    { title: 'Shipment', dataIndex: 'Shipment', width: 100, render: v => v ?? '—' },
+    { title: 'Movement Request', dataIndex: 'MovementRequest', width: 150, render: v => v ?? '—' },
+    { title: 'Shipping Method', dataIndex: 'ShippingMethod', width: 130, render: v => v ?? '—' },
+    { title: 'Ship To Location', dataIndex: 'ShipToLocation', width: 260, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+  ];
+
+  return (
+    <Layout style={{ minHeight: 'calc(100vh - 64px)', background: REDWOOD.neutral100 }}>
+      <Content>
+        <div style={{ padding: '12px 24px', background: REDWOOD.surface, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+          <Breadcrumb items={[
+            { title: <Link to="/home"><HomeOutlined /> Home</Link> },
+            { title: <Link to="/procurement">Procurement</Link> },
+            { title: 'Confirm Picks' },
+          ]} />
+          <Title level={4} style={{ margin: '8px 0 0', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <CheckSquareOutlined style={{ color: REDWOOD.primary }} /> Confirm Picks
+            <Text type="secondary" style={{ fontSize: 13, fontWeight: 400 }}>— pick slips awaiting confirmation (Fusion pickSlipDetails)</Text>
+          </Title>
+        </div>
+
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <Card styles={{ body: { padding: '14px 18px' } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
+            <Form form={form} layout="vertical" size="small">
+              <Row gutter={[8, 0]}>
+                <Col xs={24} sm={12} md={6}>
+                  <Form.Item label={<Text style={{ fontSize: 11, fontWeight: 600 }}>Creation Date</Text>} style={{ marginBottom: 6 }}>
+                    <Space.Compact style={{ width: '100%' }}>
+                      <Select style={{ width: 62 }} value={filters.dateOp} onChange={v => setFilters(f => ({ ...f, dateOp: v }))}
+                        options={['>', '>=', '=', '<=', '<'].map(o => ({ value: o, label: o }))} />
+                      <DatePicker style={{ width: '100%' }} value={filters.date} onChange={d => setFilters(f => ({ ...f, date: d }))} />
+                    </Space.Compact>
+                  </Form.Item>
+                </Col>
+                <Col xs={12} sm={8} md={5}>
+                  <Form.Item label={<Text style={{ fontSize: 11, fontWeight: 600 }}>Order</Text>} style={{ marginBottom: 6 }}>
+                    <Input placeholder="Order number" allowClear value={filters.order}
+                      onChange={e => setFilters(f => ({ ...f, order: e.target.value }))} onPressEnter={runSearch} />
+                  </Form.Item>
+                </Col>
+                <Col xs={12} sm={8} md={5}>
+                  <Form.Item label={<Text style={{ fontSize: 11, fontWeight: 600 }}>Organization</Text>} style={{ marginBottom: 6 }}>
+                    <Select allowClear showSearch placeholder="Any" value={filters.org}
+                      onChange={v => setFilters(f => ({ ...f, org: v }))}
+                      options={orgs.map(o => ({ value: o, label: o }))} />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <Button type="primary" size="small" icon={<SearchOutlined />} loading={loading} onClick={runSearch}
+                  style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Search</Button>
+                <Button size="small" icon={<ClearOutlined />} onClick={() => setFilters({ dateOp: '>', date: dayjs().subtract(7, 'day') })}>Reset</Button>
+                <Tooltip title="API Inspector — pickSlipDetails web service">
+                  <Button size="small" icon={<ApiOutlined />} style={{ marginLeft: 'auto', borderColor: REDWOOD.info, color: REDWOOD.info }}
+                    onClick={() => setApiOpen(true)}>API</Button>
+                </Tooltip>
+              </div>
+            </Form>
+          </Card>
+
+          <Card styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
+            title={<Space><CheckSquareOutlined style={{ color: REDWOOD.primary }} /><Text strong>Pick Slips</Text>
+              {rows.length > 0 && <Tag>{filtered.length}{filtered.length !== rows.length ? ` of ${rows.length}` : ''} slip{rows.length !== 1 ? 's' : ''}</Tag>}</Space>}
+            extra={<Space>
+              <Input placeholder="Filter any column…" allowClear size="small" prefix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />}
+                value={filterText} onChange={e => setFilterText(e.target.value)} style={{ width: 220 }} />
+              <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={runSearch}>Refresh</Button>
+            </Space>}>
+            {loading ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Spin size="large" tip="Loading…" /></div>
+            ) : error && rows.length === 0 ? (
+              <div style={{ padding: 24, color: REDWOOD.error, background: REDWOOD.error + '10', margin: 16, borderRadius: 6 }}>
+                <InfoCircleOutlined style={{ marginRight: 8 }} />{error}
+              </div>
+            ) : !searched ? (
+              <Empty description="Run a search" style={{ padding: 60 }} />
+            ) : filtered.length === 0 ? (
+              <Empty description="No pick slips" style={{ padding: 60 }} />
+            ) : (
+              <Table columns={columns} dataSource={filtered} rowKey={(r, i) => `${r.PickSlip ?? i}`} size="small"
+                scroll={{ x: 1700 }} pagination={{ pageSize: 25, size: 'small', showSizeChanger: true, showTotal: t => `${t} slips` }} />
+            )}
+          </Card>
+        </div>
+
+        <Modal title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /> Pick Slips API</Space>}
+          open={apiOpen} onCancel={() => setApiOpen(false)} maskClosable={false} width={860}
+          footer={<Button onClick={() => setApiOpen(false)}>Close</Button>}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {[
+              { lbl: 'Search pick slips', url: decodeURIComponent(searchUrl) },
+              { lbl: 'Pick lines (per slip)', url: `${FUSION_BASE}/pickSlipDetails/{PickSlip}/child/pickLines` },
+            ].map(({ lbl, url }) => (
+              <div key={lbl}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase' }}>{lbl}</Text>
+                  <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginLeft: 'auto' }}
+                    onClick={() => { navigator.clipboard.writeText(url); message.success('Copied'); }}>Copy</Button>
+                </div>
+                <div style={{ marginTop: 4, padding: '8px 12px', borderRadius: 6, background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info }}>
+                  <Tag color="blue">GET</Tag>{url}
+                </div>
+              </div>
+            ))}
+            <Text type="secondary" style={{ fontSize: 11 }}>Dates unquoted (CreationDate&gt;2026-07-25); text exact ('value'). Auth: Basic [emparun].</Text>
+          </div>
+        </Modal>
+
+        <PickSlipDialog row={dialog} onClose={() => setDialog(null)} />
+      </Content>
+    </Layout>
+  );
+};
+
+export default ConfirmPicks;

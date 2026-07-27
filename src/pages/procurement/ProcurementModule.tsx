@@ -5,7 +5,7 @@ import {
   DatabaseOutlined, CheckCircleOutlined, LockOutlined, BugOutlined,
   ApartmentOutlined, BankOutlined, SafetyCertificateOutlined, InboxOutlined,
   DollarOutlined, ReconciliationOutlined, CloudOutlined, HistoryOutlined,
-  SwapOutlined, CarOutlined,
+  SwapOutlined, CarOutlined, CheckSquareOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -120,6 +120,14 @@ const procurementItems: MenuItemType[] = [
     description: 'Search pending & in-progress shipment lines from Oracle Fusion (shipmentLines)',
     color: REDWOOD.teal,
     path: '/procurement/shipment-lines',
+  },
+  {
+    key: 'confirm-picks',
+    icon: <CheckSquareOutlined />,
+    label: 'Confirm Picks',
+    description: 'Search pick slips and drill into pick lines (Oracle Fusion pickSlipDetails)',
+    color: REDWOOD.info,
+    path: '/procurement/confirm-picks',
   },
   {
     key: 'item-costs',

@@ -137,6 +137,7 @@ const LoginHistory            = lazy(() => import('./pages/procurement').then(m 
 const CostManagement          = lazy(() => import('./pages/procurement').then(m => ({ default: m.CostManagement })));
 const TransferOrders          = lazy(() => import('./pages/procurement').then(m => ({ default: m.TransferOrders })));
 const ManageShipmentLines     = lazy(() => import('./pages/procurement').then(m => ({ default: m.ManageShipmentLines })));
+const ConfirmPicks            = lazy(() => import('./pages/procurement').then(m => ({ default: m.ConfirmPicks })));
 
 // Placeholder component for modules under development
 const ComingSoon = ({ moduleName }: { moduleName: string }) => (
@@ -278,6 +279,7 @@ function App() {
               <Route path="procurement/cost-management" element={<CostManagement />} />
               <Route path="procurement/transfer-orders" element={<TransferOrders />} />
               <Route path="procurement/shipment-lines" element={<ManageShipmentLines />} />
+              <Route path="procurement/confirm-picks" element={<ConfirmPicks />} />
               <Route path="ap/suppliers" element={<APManageSuppliers />} />
               <Route path="suppliers/manage" element={<ManageSuppliers />} />
               <Route path="suppliers/balance/:supplierNumber" element={<SupplierBalance />} />

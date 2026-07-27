@@ -12,3 +12,4 @@ export { default as LoginHistory } from './LoginHistory';
 export { default as CostManagement } from './CostManagement';
 export { default as TransferOrders } from './TransferOrders';
 export { default as ManageShipmentLines } from './ManageShipmentLines';
+export { default as ConfirmPicks } from './ConfirmPicks';
