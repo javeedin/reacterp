@@ -40,6 +40,7 @@ const fmtQty = (v?: number | null) => (v == null ? '—' : new Intl.NumberFormat
 const num = (v: any) => { const n = Number(v); return isNaN(n) ? 0 : n; };
 const fmt = (v: any) => (v == null || v === '' ? '—' : String(v));
 const norm = (s: string) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+const pf = (r: any, keys: string[]) => { for (const k of keys) { const v = r?.[k]; if (v != null && v !== '') return v; } return undefined; };
 
 // Which line-level child collections to surface as tabs (rest hidden), in order.
 // `customer:true` merges billTo/shipTo into one tab; lineDetails shows as "Billing".
@@ -234,7 +235,7 @@ const TotalsModal: React.FC<{ order: any | null; onClose: () => void }> = ({ ord
 // Aggregate one line-level child collection (e.g. lotSerials) across every
 // order line. The child rows carry no item context, so we prepend the line's
 // Line #, Product, Description and UOM from the parent line.
-const MergedLineChildTab: React.FC<{ lines: any[]; name: string }> = ({ lines, name }) => {
+const MergedLineChildTab: React.FC<{ lines: any[]; name: string; overrides?: { match: string[]; render: (v: any, row: any) => React.ReactNode }[] }> = ({ lines, name, overrides }) => {
   const [items, setItems] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -265,8 +266,11 @@ const MergedLineChildTab: React.FC<{ lines: any[]; name: string }> = ({ lines, n
     { title: 'Line', dataIndex: '_line', width: 60, align: 'center', fixed: 'left', render: v => <Tag color="blue" style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
     { title: 'Product', dataIndex: '_item', width: 130, fixed: 'left', render: v => <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>{v ?? '—'}</Text> },
     { title: 'Description', dataIndex: '_desc', width: 240, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
-    ...dynamicColumns((items ?? []).map(({ _line, _item, _desc, _uom, ...rest }) => rest)),
-  ]), [items]);
+    ...dynamicColumns((items ?? []).map(({ _line, _item, _desc, _uom, ...rest }) => rest)).map((col: any) => {
+      const ov = overrides?.find(o => o.match.includes(norm(String(col.dataIndex ?? ''))));
+      return ov ? { ...col, render: (v: any, row: any) => ov.render(v, row) } : col;
+    }),
+  ]), [items, overrides]);
 
   return (
     <div>
@@ -365,6 +369,97 @@ const ActualCostingTab: React.FC<{ lines: any[]; currency?: string }> = ({ lines
   );
 };
 
+// ── AR invoice drill (receivablesInvoices) by billing transaction number ─────
+const AR_RES = 'receivablesInvoices';
+const AR_LINES = 'receivablesInvoiceLines';
+
+const ARInvoiceDialog: React.FC<{ txn: string | null; onClose: () => void }> = ({ txn, onClose }) => {
+  const [inv, setInv] = useState<any | null>(null);
+  const [lines, setLines] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [allOpen, setAllOpen] = useState(false);
+
+  const url = txn ? `${FUSION_BASE}/${AR_RES}?q=${encodeURIComponent(`TransactionNumber=${txn}`)}&limit=1` : '';
+  const load = useCallback(async () => {
+    if (!url) return;
+    setLoading(true); setError(''); setInv(null); setLines([]);
+    try {
+      const r = await fetch(url, { headers: FUSION_HDRS });
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+      const d = await r.json();
+      const h = (d.items ?? [])[0];
+      if (!h) { setError(`No AR invoice found for transaction ${txn}`); return; }
+      setInv(h);
+      const lh = h.links?.find((l: any) => l.name === AR_LINES)?.href
+        ?? (h.CustomerTransactionId ? `${FUSION_BASE}/${AR_RES}/${h.CustomerTransactionId}/child/${AR_LINES}` : '');
+      if (lh) { try { setLines(await fetchAllPages(lh)); } catch { /* lines optional */ } }
+    } catch (e: any) { setError(e.message); }
+    finally { setLoading(false); }
+  }, [url, txn]);
+  useEffect(() => { if (txn) load(); }, [txn, load]);
+
+  const ccy = pf(inv, ['InvoiceCurrencyCode', 'CurrencyCode']);
+  const HInfo: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
+    <Col xs={12} sm={8} md={6}>
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>{label}</div>
+        <div style={{ fontSize: 12.5, color: REDWOOD.neutral900, marginTop: 2, wordBreak: 'break-word' }}>{value ?? '—'}</div>
+      </div>
+    </Col>
+  );
+  const lineCols = useMemo(() => dynamicColumns(lines), [lines]);
+
+  return (
+    <Modal open={!!txn} onCancel={onClose} maskClosable={false} width={1040} style={{ top: 24 }}
+      footer={<Button onClick={onClose}>Close</Button>}
+      title={<Space><DollarOutlined style={{ color: REDWOOD.primary }} /> AR Invoice
+        <Tag color="volcano">{pf(inv, ['TransactionNumber']) ?? txn}</Tag></Space>}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+        <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {decodeURIComponent(url)}</span>}>
+          <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} />
+        </Tooltip>
+        {inv && <Button size="small" icon={<ProfileOutlined />} onClick={() => setAllOpen(true)}>All fields</Button>}
+        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>Reload</Button>
+      </div>
+
+      {loading ? <div style={{ textAlign: 'center', padding: 50 }}><Spin size="large" /></div>
+        : error ? <div style={{ padding: 20, color: REDWOOD.error, background: REDWOOD.error + '10', borderRadius: 6 }}><InfoCircleOutlined style={{ marginRight: 8 }} />{error}</div>
+        : !inv ? <Empty description="No invoice" style={{ padding: 40 }} />
+        : (
+          <>
+            <Card size="small" title={<Space><BankOutlined style={{ color: REDWOOD.primary }} /><Text strong>Invoice Header</Text></Space>}
+              style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 12 }}>
+              <Row gutter={[12, 0]}>
+                <HInfo label="Transaction #" value={<Text strong>{pf(inv, ['TransactionNumber'])}</Text>} />
+                <HInfo label="Type" value={pf(inv, ['TransactionType', 'TransactionTypeName', 'CustomerTransactionType'])} />
+                <HInfo label="Source" value={pf(inv, ['TransactionSource', 'TransactionSourceName', 'BatchSource'])} />
+                <HInfo label="Date" value={fmtDate(pf(inv, ['TransactionDate']))} />
+                <HInfo label="Accounting Date" value={fmtDate(pf(inv, ['AccountingDate', 'GlDate']))} />
+                <HInfo label="Bill-To Customer" value={pf(inv, ['BillToCustomerName'])} />
+                <HInfo label="Customer #" value={pf(inv, ['BillToCustomerAccountNumber', 'BillToCustomerNumber', 'BillToAccountNumber'])} />
+                <HInfo label="Currency" value={ccy} />
+                <HInfo label="Invoice Amount" value={<Text strong style={{ color: REDWOOD.primary }}>{fmtAmount(pf(inv, ['InvoiceAmount', 'EnteredAmount', 'TotalAmount', 'InvoiceCurrencyAmount']), ccy)}</Text>} />
+                <HInfo label="Business Unit" value={pf(inv, ['BusinessUnit', 'BusinessUnitName'])} />
+                <HInfo label="Payment Terms" value={pf(inv, ['PaymentTerms', 'PaymentTermsName'])} />
+                <HInfo label="Status" value={pf(inv, ['PaymentStatus', 'Status', 'TransactionStatus', 'StatusCode'])} />
+              </Row>
+            </Card>
+
+            <Card size="small" styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
+              title={<Space><UnorderedListOutlined style={{ color: REDWOOD.primary }} /><Text strong>Invoice Lines</Text>{lines.length > 0 && <Tag>{lines.length}</Tag>}</Space>}>
+              {lines.length === 0 ? <Empty description="No invoice lines" style={{ padding: 30 }} />
+                : <Table size="small" columns={lineCols} dataSource={lines} rowKey={(_, i) => `ar-line-${i}`}
+                    pagination={lines.length > 20 ? { pageSize: 20, size: 'small' } : false} scroll={{ x: 'max-content', y: 320 }} />}
+            </Card>
+          </>
+        )}
+
+      <AllFieldsModal title={`AR Invoice ${pf(inv, ['TransactionNumber']) ?? ''} — all fields`} row={allOpen ? inv : null} onClose={() => setAllOpen(false)} />
+    </Modal>
+  );
+};
+
 // ── Order view (header + lines) shown in its own tab ─────────────────────────
 const OrderView: React.FC<{ order: any }> = ({ order }) => {
   const linesHref = order?.links?.find((l: any) => l.name === 'lines')?.href
@@ -376,6 +471,7 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
   const [lineDetail, setLineDetail] = useState<any | null>(null);
   const [hdrOpen, setHdrOpen] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [arTxn, setArTxn] = useState<string | null>(null);
   const totals = useTotals(order, true);
 
   // Distinct line-level child collections across all lines (lotSerials, …).
@@ -399,8 +495,15 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
       }
       const nm = findLink(def.match!);
       if (!nm) return null;
+      // Billing tab: make the Billing Transaction Number drill into the AR invoice.
+      const overrides = def.key === 'billing'
+        ? [{ match: ['billingtransactionnumber', 'billingtrxnumber', 'billingtransactionnum'],
+            render: (v: any) => v
+              ? <Tooltip title="Open AR invoice"><Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 12 }} onClick={() => setArTxn(String(v))}>{v}</Button></Tooltip>
+              : '—' }]
+        : undefined;
       return { key: def.key, label: <span><ProfileOutlined style={{ marginRight: 5 }} />{def.label}</span>,
-        children: <MergedLineChildTab lines={lines} name={nm} /> };
+        children: <MergedLineChildTab lines={lines} name={nm} overrides={overrides} /> };
     }).filter(Boolean) as { key: string; label: React.ReactNode; children: React.ReactNode }[];
   }, [childNames, lines]);
 
@@ -675,6 +778,7 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
 
       <AllFieldsModal title={`Order ${order.OrderNumber} — header`} row={hdrOpen ? order : null} onClose={() => setHdrOpen(false)} />
       <AllFieldsModal title={`Line ${lineDetail?.DisplayLineNumber ?? ''} — ${lineDetail?.ProductNumber ?? ''}`} row={lineDetail} onClose={() => setLineDetail(null)} />
+      <ARInvoiceDialog txn={arTxn} onClose={() => setArTxn(null)} />
     </div>
   );
 };
