@@ -410,8 +410,11 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
         </Row>
       </Card>
 
+      {/* Order total summary (formatted like an order) — shown above the lines */}
+      <OrderTotalsSection totals={totals} />
+
       {/* Lines */}
-      <Card size="small" styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
+      <Card size="small" styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginTop: 12 }}
         title={<Space><UnorderedListOutlined style={{ color: REDWOOD.primary }} /><Text strong>Lines</Text>
           {lines.length > 0 && <Tag>{lines.length}</Tag>}</Space>}
         extra={<Space>
@@ -426,9 +429,6 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
           : <Table size="small" columns={lineCols} dataSource={lines} rowKey={(r, i) => `${r.LineId ?? r.FulfillLineId ?? i}`}
               pagination={lines.length > 25 ? { pageSize: 25, size: 'small' } : false} scroll={{ x: 'max-content', y: 420 }} />}
       </Card>
-
-      {/* Order total summary (formatted like an order) */}
-      <OrderTotalsSection totals={totals} />
 
       {/* Print preview */}
       <Modal open={!!pdfUrl} onCancel={closePdf} maskClosable={false} width={920} style={{ top: 20 }}
