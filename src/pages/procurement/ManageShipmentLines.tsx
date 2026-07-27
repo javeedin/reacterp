@@ -7,7 +7,7 @@ import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, CarOutlined, SearchOutlined, ReloadOutlined, ClearOutlined,
   ApiOutlined, CopyOutlined, InfoCircleOutlined, ProfileOutlined,
-  ExportOutlined, ThunderboltOutlined, EyeOutlined, CheckCircleOutlined,
+  ExportOutlined, ThunderboltOutlined, CheckCircleOutlined,
   UnorderedListOutlined, BankOutlined, CheckSquareOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
@@ -302,25 +302,17 @@ const ShipmentOrderDialog: React.FC<{ row: any | null; onClose: () => void }> = 
           <Button icon={<CheckSquareOutlined />} loading={psLoading} onClick={openPickSlips}
             style={{ borderColor: REDWOOD.purple, color: REDWOOD.purple }}>Pickslip</Button>
         </Tooltip>
-        <Button icon={<EyeOutlined />} onClick={() => setPayloadOpen(true)}>Show Payload</Button>
         <Button icon={<ReloadOutlined />} loading={loading} onClick={loadLines}>Refresh</Button>
-        <Text type="secondary" style={{ marginLeft: 'auto', fontSize: 12, fontFamily: 'monospace' }}><Tag color="green">POST</Tag>…/pickWaves</Text>
+        <Tooltip title={releaseResult
+          ? `Pick Release API — request & last response (HTTP ${releaseResult.status || 'error'})`
+          : 'Pick Release API — URL & request body'}>
+          <Button icon={<ApiOutlined />} onClick={() => setPayloadOpen(true)}
+            style={{ marginLeft: 'auto', borderColor: releaseResult ? (releaseResult.ok ? REDWOOD.success : REDWOOD.error) : REDWOOD.info,
+              color: releaseResult ? (releaseResult.ok ? REDWOOD.success : REDWOOD.error) : REDWOOD.info }}>
+            API{releaseResult ? (releaseResult.ok ? ' ✓' : ' ✗') : ''}
+          </Button>
+        </Tooltip>
       </div>
-
-      {releaseResult && (
-        <div style={{ marginBottom: 12 }}>
-          <Space style={{ marginBottom: 6 }}>
-            <Tag color={releaseResult.ok ? 'success' : releaseResult.status === 0 ? 'default' : 'error'}>
-              {releaseResult.status === 0 ? 'Network Error' : `HTTP ${releaseResult.status}`}
-            </Tag>
-            {releaseResult.ok && <Text style={{ color: REDWOOD.success, fontSize: 12 }}><CheckCircleOutlined /> Pick wave released</Text>}
-            <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(releaseResult.body); message.success('Copied'); }}>Copy</Button>
-          </Space>
-          <div style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 12, borderRadius: 6, fontFamily: 'monospace', fontSize: 11, maxHeight: 220, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {releaseResult.body.slice(0, 5000)}{releaseResult.body.length > 5000 ? '\n\n… (truncated)' : ''}
-          </div>
-        </div>
-      )}
 
       {/* Header */}
       <Card size="small" title={<Space><BankOutlined style={{ color: REDWOOD.primary }} /><Text strong>Header</Text></Space>}
@@ -371,16 +363,39 @@ const ShipmentOrderDialog: React.FC<{ row: any | null; onClose: () => void }> = 
         ]}
       />
 
-      {/* Pick Release payload preview */}
-      <Modal title={<Space><ThunderboltOutlined style={{ color: REDWOOD.success }} /> Pick Release payload — pickWaves</Space>}
-        open={payloadOpen} onCancel={() => setPayloadOpen(false)} maskClosable={false} width={620}
-        footer={<Button icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(JSON.stringify(pickPayload, null, 2)); message.success('Copied'); }}>Copy JSON</Button>}>
-        <div style={{ padding: '6px 10px', borderRadius: 6, background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info, marginBottom: 10 }}>
+      {/* Pick Release API inspector — URL, request body & last response */}
+      <Modal title={<Space><ThunderboltOutlined style={{ color: REDWOOD.success }} /> Pick Release API — pickWaves</Space>}
+        open={payloadOpen} onCancel={() => setPayloadOpen(false)} maskClosable={false} width={680}
+        footer={<Button onClick={() => setPayloadOpen(false)}>Close</Button>}>
+        <div style={{ padding: '6px 10px', borderRadius: 6, background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info, marginBottom: 12 }}>
           <Tag color="green">POST</Tag>{pickUrl}
         </div>
-        <div style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 12, borderRadius: 6, fontFamily: 'monospace', fontSize: 11, maxHeight: 360, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+          <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase' }}>Request body</Text>
+          <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginLeft: 'auto' }}
+            onClick={() => { navigator.clipboard.writeText(JSON.stringify(pickPayload, null, 2)); message.success('Copied'); }}>Copy</Button>
+        </div>
+        <div style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 12, borderRadius: 6, fontFamily: 'monospace', fontSize: 11, maxHeight: 280, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
           {JSON.stringify(pickPayload, null, 2)}
         </div>
+
+        {releaseResult && (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase' }}>Response</Text>
+              <Tag color={releaseResult.ok ? 'success' : releaseResult.status === 0 ? 'default' : 'error'}>
+                {releaseResult.status === 0 ? 'Network Error' : `HTTP ${releaseResult.status}`}
+              </Tag>
+              {releaseResult.ok && <Text style={{ color: REDWOOD.success, fontSize: 12 }}><CheckCircleOutlined /> Pick wave released</Text>}
+              <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginLeft: 'auto' }}
+                onClick={() => { navigator.clipboard.writeText(releaseResult.body); message.success('Copied'); }}>Copy</Button>
+            </div>
+            <div style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 12, borderRadius: 6, fontFamily: 'monospace', fontSize: 11, maxHeight: 280, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {releaseResult.body.slice(0, 8000)}{releaseResult.body.length > 8000 ? '\n\n… (truncated)' : ''}
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* Ship Confirm (shared dialog → shippingTransactions) */}
