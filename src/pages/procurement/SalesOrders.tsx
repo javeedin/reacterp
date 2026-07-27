@@ -1273,6 +1273,27 @@ const WarehouseLabel: React.FC = () => (
   </Space>
 );
 
+// Reusable card-like form section with an icon header.
+const OrderSection: React.FC<{ icon: React.ReactNode; title: string; color: string; children: React.ReactNode }> = ({ icon, title, color, children }) => (
+  <div style={{ border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 10, padding: '12px 16px 2px', marginBottom: 12, background: REDWOOD.surface }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+      <span style={{ width: 24, height: 24, borderRadius: 7, background: color + '18', color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>{icon}</span>
+      <Text strong style={{ fontSize: 12, color: REDWOOD.neutral900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{title}</Text>
+      <div style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${color}33, transparent)` }} />
+    </div>
+    <Row gutter={14}>{children}</Row>
+  </div>
+);
+// A read-only labelled value (for the Address / totals panes).
+const ROField: React.FC<{ label: string; value?: React.ReactNode; span?: number; mono?: boolean }> = ({ label, value, span = 6, mono }) => (
+  <Col xs={12} md={span as any}>
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 12.5, color: REDWOOD.neutral900, fontFamily: mono ? 'monospace' : undefined, wordBreak: 'break-word', minHeight: 20 }}>{value ?? '—'}</div>
+    </div>
+  </Col>
+);
+
 // Item picker (itemsV2), scoped to the warehouse org — like PO Add Lines.
 const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => void; onAdd: (items: any[]) => void }> = ({ open, org, onClose, onAdd }) => {
   const [byDesc, setByDesc] = useState(false);
@@ -1448,6 +1469,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
   const [preview, setPreview] = useState(false);
   const [posting, setPosting] = useState(false);
   const [resp, setResp] = useState<{ ok: boolean; status: number; body: string } | null>(null);
+  const [taxAmt, setTaxAmt] = useState(0);
+  const [discAmt, setDiscAmt] = useState(0);
+  const [expAmt, setExpAmt] = useState(0);
   const ccy = hdr.txnCurrency;
 
   useEffect(() => { form.setFieldsValue(header as any); setHdr(header); /* init once */ }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1543,37 +1567,83 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
   return (
     <div style={{ padding: '4px 2px' }}>
       <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 12 }}
-        title={<Space><BankOutlined style={{ color: REDWOOD.primary }} /><Text strong>New Order — Header</Text>
-          <Tag color="purple">{hdr.orderType}</Tag><Tag>{hdr.txnCurrency}</Tag><Text type="secondary" style={{ fontSize: 11, fontWeight: 400 }}>editable</Text></Space>}
+        styles={{ body: { paddingTop: 4 } }}
+        title={<Space><span style={{ width: 30, height: 30, borderRadius: 8, background: `linear-gradient(135deg, ${REDWOOD.primary}, ${REDWOOD.primary}bb)`, color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 15 }}><BankOutlined /></span>
+          <Text strong style={{ fontSize: 15 }}>New Sales Order</Text>
+          <Tag color="purple">{hdr.orderType}</Tag><Tag>{hdr.txnCurrency}</Tag>{hdr.customerName && <Tag color="blue">{hdr.customerName}</Tag>}</Space>}
         extra={<Space>
           <Button icon={<CloudUploadOutlined />} onClick={() => setPreview(true)}>Payload</Button>
           <Button type="primary" icon={<SaveOutlined />} loading={posting} onClick={save} style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>Save Sales Order</Button>
         </Space>}>
         <Form form={form} layout="vertical" size="small" onValuesChange={(_c, all) => setHdr(prev => ({ ...prev, ...all }))}>
-          <Row gutter={[10, 0]}>
-            <Col xs={24} sm={12} md={8}><Form.Item label="Business Unit" name="businessUnit" style={{ marginBottom: 8 }}>
-              <Select showSearch placeholder="Select" onChange={onBU} optionFilterProp="label"
-                options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} /></Form.Item></Col>
-            <Col xs={12} sm={6} md={4}><Form.Item label="BU Code" name="buCode" style={{ marginBottom: 8 }}><Input /></Form.Item></Col>
-            <Col xs={12} sm={6} md={4}><Form.Item label="Order Type" name="orderType" style={{ marginBottom: 8 }}><Input /></Form.Item></Col>
-            <Col xs={12} sm={6} md={4}><Form.Item label="Order Date" name="orderDate" style={{ marginBottom: 8 }}><DatePicker style={{ width: '100%' }} /></Form.Item></Col>
-            <Col xs={12} sm={6} md={4}><Form.Item label="Currency" name="txnCurrency" style={{ marginBottom: 8 }}>
-              <Select showSearch options={CURRENCIES.map(c => ({ value: c, label: c }))} /></Form.Item></Col>
-            <Col xs={12} sm={6} md={4}><Form.Item label="Rate" name="rate" style={{ marginBottom: 8 }}><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
-            <Col xs={24} sm={12} md={8}><Form.Item label="Customer" name="customerName" style={{ marginBottom: 8 }}>
-              <Select showSearch placeholder="Search customer" onChange={onCustomer} optionFilterProp="label" options={custOptions} notFoundContent={customers.length ? 'No match' : 'Loading…'} /></Form.Item></Col>
-            <Col xs={12} sm={6} md={4}><Form.Item label="Account #" name="accountNumber" style={{ marginBottom: 8 }}><Input readOnly /></Form.Item></Col>
-            <Col xs={12} sm={6} md={4}><Form.Item label="Payment Terms" name="paymentTerms" style={{ marginBottom: 8 }}>
-              <Select showSearch optionFilterProp="label" options={payTermOpts} /></Form.Item></Col>
-            <Col xs={12} sm={6} md={4}><Form.Item label="Salesperson" name="salesRep" style={{ marginBottom: 8 }}>
-              <Select showSearch allowClear optionFilterProp="label" options={salesRepOpts} notFoundContent={salesRepOpts.length ? 'No match' : 'Loading…'} /></Form.Item></Col>
-            <Col xs={12} sm={6} md={8}><Form.Item label={<WarehouseLabel />} name="warehouse" style={{ marginBottom: 8 }}>
-              <Select showSearch placeholder={buName ? 'Organization' : 'Select BU first'} onChange={onWh} options={whOptions} optionFilterProp="label" /></Form.Item></Col>
-            <Col xs={12} sm={6} md={4}><Form.Item label="Sub Inventory" name="subinventory" style={{ marginBottom: 8 }}>
-              <Select showSearch notFoundContent="Pick a warehouse" options={subs.map(s => ({ value: s, label: s }))} /></Form.Item></Col>
-            <Col xs={12} sm={6} md={4}><Form.Item label="Bill To Site" name="billToSite" style={{ marginBottom: 8 }}><Input /></Form.Item></Col>
-            <Col xs={12} sm={6} md={4}><Form.Item label="Ship To Site" name="shipToSite" style={{ marginBottom: 8 }}><Input /></Form.Item></Col>
-          </Row>
+          <Tabs size="small" items={[
+            {
+              key: 'header', label: <span><BankOutlined style={{ marginRight: 5 }} />Header</span>,
+              children: (
+                <>
+                  <OrderSection icon={<BankOutlined />} title="Order" color={REDWOOD.primary}>
+                    <Col xs={24} md={10}><Form.Item label="Business Unit" name="businessUnit" style={{ marginBottom: 12 }}>
+                      <Select showSearch placeholder="Select" onChange={onBU} optionFilterProp="label"
+                        options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} /></Form.Item></Col>
+                    <Col xs={12} md={4}><Form.Item label="Order Date" name="orderDate" style={{ marginBottom: 12 }}><DatePicker style={{ width: '100%' }} /></Form.Item></Col>
+                    <Col xs={12} md={4}><Form.Item label="Order Type" name="orderType" style={{ marginBottom: 12 }}><Input /></Form.Item></Col>
+                    <Col xs={12} md={3}><Form.Item label="BU Code" name="buCode" style={{ marginBottom: 12 }}><Input readOnly placeholder="—" /></Form.Item></Col>
+                    <Col xs={12} md={3}><Form.Item label="Base Currency" name="baseCurrency" style={{ marginBottom: 12 }}><Input readOnly placeholder="—" /></Form.Item></Col>
+                  </OrderSection>
+
+                  <OrderSection icon={<ProfileOutlined />} title="Customer Information" color={REDWOOD.info}>
+                    <Col xs={24} md={10}><Form.Item label="Customer Name" name="customerName" style={{ marginBottom: 12 }}>
+                      <Select showSearch placeholder="Search customer" onChange={onCustomer} optionFilterProp="label" options={custOptions} notFoundContent={customers.length ? 'No match' : 'Loading…'} /></Form.Item></Col>
+                    <Col xs={12} md={4}><Form.Item label="Customer Number" name="accountNumber" style={{ marginBottom: 12 }}><Input readOnly placeholder="—" /></Form.Item></Col>
+                    <Col xs={12} md={5}><Form.Item label="Payment Terms" name="paymentTerms" style={{ marginBottom: 12 }}>
+                      <Select showSearch optionFilterProp="label" options={payTermOpts} /></Form.Item></Col>
+                    <Col xs={12} md={5}><Form.Item label="Salesperson" name="salesRep" style={{ marginBottom: 12 }}>
+                      <Select showSearch allowClear optionFilterProp="label" options={salesRepOpts} notFoundContent={salesRepOpts.length ? 'No match' : 'Loading…'} /></Form.Item></Col>
+                  </OrderSection>
+
+                  <OrderSection icon={<ShoppingOutlined />} title="Warehouse" color={REDWOOD.teal}>
+                    <Col xs={24} md={12}><Form.Item label={<WarehouseLabel />} name="warehouse" style={{ marginBottom: 12 }}>
+                      <Select showSearch placeholder={buName ? 'Organization' : 'Select BU first'} onChange={onWh} options={whOptions} optionFilterProp="label" /></Form.Item></Col>
+                    <Col xs={24} md={12}><Form.Item label="Sub Inventory" name="subinventory" style={{ marginBottom: 12 }}>
+                      <Select showSearch notFoundContent="Pick a warehouse" options={subs.map(s => ({ value: s, label: s }))} /></Form.Item></Col>
+                  </OrderSection>
+
+                  <OrderSection icon={<DollarOutlined />} title="Totals" color={REDWOOD.success}>
+                    <Col xs={12} md={4}><Form.Item label="Transaction Currency" name="txnCurrency" style={{ marginBottom: 12 }}>
+                      <Select showSearch options={CURRENCIES.map(c => ({ value: c, label: c }))} /></Form.Item></Col>
+                    <Col xs={12} md={3}><Form.Item label="Rate" name="rate" style={{ marginBottom: 12 }}><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
+                    <ROField label="Gross" value={<Text strong>{fmtAmount(totAmt, ccy)}</Text>} span={4} />
+                    <Col xs={8} md={3}><div style={{ marginBottom: 12 }}><div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>Tax</div><InputNumber size="small" min={0} value={taxAmt} onChange={v => setTaxAmt(Number(v) || 0)} style={{ width: '100%' }} /></div></Col>
+                    <Col xs={8} md={3}><div style={{ marginBottom: 12 }}><div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>Discount</div><InputNumber size="small" min={0} value={discAmt} onChange={v => setDiscAmt(Number(v) || 0)} style={{ width: '100%' }} /></div></Col>
+                    <Col xs={8} md={3}><div style={{ marginBottom: 12 }}><div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>Expense</div><InputNumber size="small" min={0} value={expAmt} onChange={v => setExpAmt(Number(v) || 0)} style={{ width: '100%' }} /></div></Col>
+                    <ROField label="Net (Trx Currency)" value={<Text strong style={{ color: REDWOOD.primary }}>{fmtAmount(totAmt + num(taxAmt) + num(expAmt) - num(discAmt), ccy)}</Text>} span={5} />
+                    <ROField label="Net (Base Currency)" value={<Text strong style={{ color: REDWOOD.success }}>{fmtAmount((totAmt + num(taxAmt) + num(expAmt) - num(discAmt)) * (num(hdr.rate) || 1), hdr.baseCurrency ?? ccy)}</Text>} span={5} />
+                  </OrderSection>
+                </>
+              ),
+            },
+            {
+              key: 'address', label: <span><ProfileOutlined style={{ marginRight: 5 }} />Customer Address</span>,
+              children: (
+                <OrderSection icon={<ProfileOutlined />} title="Bill-To / Ship-To" color={REDWOOD.info}>
+                  <ROField label="Bill To Site" value={hdr.billToSite} mono span={6} />
+                  <ROField label="Ship To Site" value={hdr.shipToSite} mono span={6} />
+                  <ROField label="Account Number" value={hdr.accountNumber} span={6} />
+                  <ROField label="Customer" value={hdr.customerName} span={6} />
+                  <ROField label="Bill To Address" value={hdr.billToAddress} span={12} />
+                  <ROField label="Ship To Address" value={hdr.shipToAddress} span={12} />
+                </OrderSection>
+              ),
+            },
+            { key: 'additional', label: <span><ProfileOutlined style={{ marginRight: 5 }} />Additional Info</span>,
+              children: <OrderSection icon={<ProfileOutlined />} title="Additional Information" color={REDWOOD.purple}>
+                <Col xs={24}><Form.Item label="Remarks" name="remarks" style={{ marginBottom: 12 }}><Input.TextArea rows={3} placeholder="Optional notes…" /></Form.Item></Col>
+              </OrderSection> },
+            { key: 'credit', label: <span><ReconciliationOutlined style={{ marginRight: 5 }} />Customer Credit Check</span>,
+              children: <div style={{ padding: 8 }}><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Customer credit check — connect the credit web service to show limit, exposure and available credit." style={{ padding: 24 }} /></div> },
+            { key: 'validations', label: <span><InfoCircleOutlined style={{ marginRight: 5 }} />Order Validations</span>,
+              children: <div style={{ padding: 8 }}><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Order validations — item, warehouse and customer checks will appear here before submission." style={{ padding: 24 }} /></div> },
+          ]} />
         </Form>
       </Card>
 
