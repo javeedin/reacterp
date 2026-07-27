@@ -94,8 +94,11 @@ const ClampTip: React.FC<{ text?: string }> = ({ text }) => {
   );
 };
 
+interface AllocRow { line: any; item: string; lot?: string; from?: string; to?: string; qty: number }
+
 // Aggregate one line-level child (e.g. itemLots) across every pick line.
-const MergedChildTab: React.FC<{ lines: any[]; name: string }> = ({ lines, name }) => {
+// `allocRows` (used for itemSerials) is shown when the collection is empty.
+const MergedChildTab: React.FC<{ lines: any[]; name: string; allocRows?: AllocRow[] }> = ({ lines, name, allocRows }) => {
   const [items, setItems] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -137,15 +140,34 @@ const MergedChildTab: React.FC<{ lines: any[]; name: string }> = ({ lines, name 
       </div>
       {loading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
         : error ? <div style={{ color: REDWOOD.error, fontSize: 12 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div>
-        : !items || items.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`No ${name} across the pick lines`} style={{ padding: 24 }} />
-        : <Table size="small" columns={cols} dataSource={items} rowKey={(_, i) => `${name}-${i}`}
-            pagination={items.length > 20 ? { pageSize: 20, size: 'small' } : false} scroll={{ x: 'max-content', y: 360 }} />}
+        : items && items.length > 0
+          ? <Table size="small" columns={cols} dataSource={items} rowKey={(_, i) => `${name}-${i}`}
+              pagination={items.length > 20 ? { pageSize: 20, size: 'small' } : false} scroll={{ x: 'max-content', y: 360 }} />
+        : (allocRows && allocRows.length > 0) ? (
+          <div>
+            <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 8 }}>
+              <InfoCircleOutlined style={{ marginRight: 6 }} />No {name} on the pick lines yet — showing your serial allocation.
+            </div>
+            <Table size="small" pagination={false} scroll={{ x: 700, y: 360 }}
+              dataSource={allocRows.map((a, i) => ({ ...a, key: i }))} rowKey="key"
+              columns={[
+                { title: 'Line', dataIndex: 'line', width: 60, align: 'center', render: (v: any) => <Tag color="blue" style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+                { title: 'Item', dataIndex: 'item', width: 140, render: (v: any) => <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>{v ?? '—'}</Text> },
+                { title: 'Selected Lot', dataIndex: 'lot', width: 140, render: (v: any) => v ? <Tag color="geekblue" style={{ fontSize: 11 }}>{v}</Tag> : <Text type="secondary">—</Text> },
+                { title: 'Serial From', dataIndex: 'from', width: 140, render: (v: any) => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+                { title: 'Serial To', dataIndex: 'to', width: 140, render: (v: any) => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+                { title: 'Qty', dataIndex: 'qty', width: 70, align: 'right', render: (v: any) => <Text strong>{v}</Text> },
+              ]} />
+          </div>
+        ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`No ${name} across the pick lines`} style={{ padding: 24 }} />}
     </div>
   );
 };
 
 // ── Lot / Serial allocation for a pick line (from on-hand) ───────────────────
-const AllocateModal: React.FC<{ line: any | null; org?: string; onClose: () => void }> = ({ line, org, onClose }) => {
+interface Allocation { item: string; lot?: string; serials: string[] }
+
+const AllocateModal: React.FC<{ line: any | null; org?: string; onClose: () => void; onApply: (pickSlipLine: any, alloc: Allocation) => void }> = ({ line, org, onClose, onApply }) => {
   const item = line?.Item;
   const subinv = line?.SourceSubinventory;
   const reqQty = num(line?.RequestedQuantity);
@@ -208,7 +230,11 @@ const AllocateModal: React.FC<{ line: any | null; org?: string; onClose: () => v
         <Button onClick={onClose}>Cancel</Button>
         <Button type="primary" disabled={selSerials.length === 0 || overAllocated}
           style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
-          onClick={() => { message.success(`Allocated ${selSerials.length} serial(s)${selLot ? ` from lot ${selLot}` : ''} to line ${line?.PickSlipLine}`); onClose(); }}>
+          onClick={() => {
+            onApply(line?.PickSlipLine, { item, lot: selLot, serials: [...selSerials] });
+            message.success(`Allocated ${selSerials.length} serial(s)${selLot ? ` from lot ${selLot}` : ''} to line ${line?.PickSlipLine}`);
+            onClose();
+          }}>
           Apply Allocation
         </Button>
       </Space>}
@@ -296,6 +322,15 @@ const PickSlipDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ ro
   }, [pickLines]);
 
   const [allocLine, setAllocLine] = useState<any | null>(null);
+  const [allocations, setAllocations] = useState<Record<string, Allocation>>({});
+
+  // Turn recorded allocations into rows (Line, Item, Lot, Serial From/To, Qty).
+  const allocRows: AllocRow[] = useMemo(() => Object.entries(allocations).map(([line, a]) => {
+    const sorted = [...a.serials].sort((x, y) => x.localeCompare(y, undefined, { numeric: true }));
+    return { line, item: a.item, lot: a.lot, from: sorted[0], to: sorted[sorted.length - 1], qty: a.serials.length };
+  }), [allocations]);
+  // Clear recorded allocations when a different pick slip is opened.
+  useEffect(() => { setAllocations({}); }, [row?.PickSlip]);
 
   const HInfo: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
     <Col xs={12} sm={8} md={6}>
@@ -382,13 +417,15 @@ const PickSlipDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ ro
           },
           ...childNames.map((name) => ({
             key: name,
-            label: <span><ProfileOutlined style={{ marginRight: 5 }} /><span style={{ textTransform: 'capitalize' }}>{name}</span></span>,
-            children: <MergedChildTab lines={pickLines} name={name} />,
+            label: <span><ProfileOutlined style={{ marginRight: 5 }} /><span style={{ textTransform: 'capitalize' }}>{name}</span>
+              {name === 'itemSerials' && allocRows.length > 0 && <Tag color="green" style={{ marginLeft: 5, fontSize: 10 }}>alloc {allocRows.length}</Tag>}</span>,
+            children: <MergedChildTab lines={pickLines} name={name} allocRows={name === 'itemSerials' ? allocRows : undefined} />,
           })),
         ]}
       />
 
-      <AllocateModal line={allocLine} org={row?.Organization} onClose={() => setAllocLine(null)} />
+      <AllocateModal line={allocLine} org={row?.Organization} onClose={() => setAllocLine(null)}
+        onApply={(k, a) => setAllocations(p => ({ ...p, [String(k)]: a }))} />
     </Modal>
   );
 };
