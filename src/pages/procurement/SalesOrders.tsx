@@ -122,11 +122,53 @@ const fmtAmount = (v?: number | null, ccy?: string) => {
   return ccy ? `${s} ${ccy}` : s;
 };
 
-// ── Order totals drill (…/child/totals) ──────────────────────────────────────
-const TotalsModal: React.FC<{ order: any | null; onClose: () => void }> = ({ order, onClose }) => {
-  const href = order?.links?.find((l: any) => l.name === 'totals')?.href
-    ?? (order?.HeaderId ? `${FUSION_BASE}/salesOrdersForOrderHub/${order.HeaderId}/child/totals` : '');
+const totalsHref = (order: any) => order?.links?.find((l: any) => l.name === 'totals')?.href
+  ?? (order?.HeaderId ? `${FUSION_BASE}/salesOrdersForOrderHub/${order.HeaderId}/child/totals` : '');
 
+// Classify a total line so the summary can order & label it like an order.
+const totalRank = (t: any) => {
+  const c = String(t.TotalCode ?? t.TotalName ?? '').toUpperCase();
+  if (/SUB.?TOTAL|LINE|ITEM/.test(c)) return 0;
+  if (/DISC/.test(c)) return 1;
+  if (/SHIP|FREIGHT|HANDLING/.test(c)) return 2;
+  if (/TAX/.test(c)) return 3;
+  if (/CHARGE|MISC/.test(c)) return 4;
+  return 5;
+};
+const isGrandTotal = (t: any) => t.PrimaryFlag
+  || (/ORDER|GRAND|NET/.test(String(t.TotalCode ?? '').toUpperCase()) && !/TAX|SHIP|DISC|SUB|LINE|CHARGE|MARGIN/.test(String(t.TotalCode ?? '').toUpperCase()));
+
+// Invoice-style order total summary (right-aligned rows + emphasized total).
+const TotalsSummary: React.FC<{ items: any[] }> = ({ items }) => {
+  if (!items.length) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No totals" style={{ padding: 20 }} />;
+  const ccy = items.find(i => i.CurrencyCode)?.CurrencyCode;
+  const grand = items.find(isGrandTotal);
+  const rows = items.filter(i => i !== grand).sort((a, b) => totalRank(a) - totalRank(b));
+  return (
+    <div style={{ maxWidth: 400, marginLeft: 'auto' }}>
+      {rows.map((t, i) => (
+        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '6px 0', borderBottom: `1px dashed ${REDWOOD.neutral200}` }}>
+          <span style={{ color: REDWOOD.neutral600, fontSize: 12.5 }}>
+            {t.TotalName ?? t.TotalCode}
+            {t.EstimatedFlag && <Tag color="gold" style={{ fontSize: 9, marginLeft: 6, lineHeight: '15px' }}>est</Tag>}
+          </span>
+          <span style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: REDWOOD.neutral900 }}>{fmtAmount(t.TotalAmount, t.CurrencyCode ?? ccy)}</span>
+        </div>
+      ))}
+      {grand && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, padding: '11px 0 2px', marginTop: 4, borderTop: `2px solid ${REDWOOD.neutral300}` }}>
+          <span style={{ fontWeight: 700, fontSize: 13.5, color: REDWOOD.neutral900 }}>{grand.TotalName ?? 'Order Total'}</span>
+          <span style={{ fontWeight: 800, fontSize: 18, color: REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(grand.TotalAmount, grand.CurrencyCode ?? ccy)}</span>
+        </div>
+      )}
+      {ccy && <div style={{ textAlign: 'right', marginTop: 4 }}><Text type="secondary" style={{ fontSize: 11 }}>Amounts in {ccy}</Text></div>}
+    </div>
+  );
+};
+
+// Fetches totals for an order (used by the inline section and the modal).
+const useTotals = (order: any | null, active: boolean) => {
+  const href = totalsHref(order);
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -137,26 +179,35 @@ const TotalsModal: React.FC<{ order: any | null; onClose: () => void }> = ({ ord
     catch (e: any) { setError(e.message); setItems([]); }
     finally { setLoading(false); }
   }, [href]);
-  useEffect(() => { if (order) load(); }, [order, load]);
+  useEffect(() => { if (active && order) load(); }, [active, order, load]);
+  return { href, items, loading, error, load };
+};
 
-  const ccy = items.find(i => i.CurrencyCode)?.CurrencyCode;
-  // The primary/order total gets the headline treatment.
-  const primary = items.find(i => i.PrimaryFlag)
-    ?? items.find(i => /ORDER/i.test(i.TotalCode ?? '') && !/TAX|SHIP|DISC/i.test(i.TotalCode ?? ''));
-
-  const cols: ColumnsType<any> = [
-    { title: 'Total', dataIndex: 'TotalName', width: 200,
-      render: (v, r) => <Space size={4}>{r.PrimaryFlag && <DollarOutlined style={{ color: REDWOOD.success }} />}<Text strong={r.PrimaryFlag} style={{ fontSize: 12 }}>{v ?? r.TotalCode ?? '—'}</Text></Space> },
-    { title: 'Code', dataIndex: 'TotalCode', width: 160, render: v => v ? <Tag style={{ fontSize: 11 }}>{v}</Tag> : '—' },
-    { title: 'Amount', dataIndex: 'TotalAmount', width: 150, align: 'right',
-      render: (v, r) => <Text strong style={{ fontSize: 12.5, color: r.PrimaryFlag ? REDWOOD.success : REDWOOD.neutral900, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(v, r.CurrencyCode)}</Text> },
-    { title: 'Group', dataIndex: 'TotalGroup', width: 90, align: 'center', render: v => v ?? '—' },
-    { title: 'Estimated', dataIndex: 'EstimatedFlag', width: 90, align: 'center', render: v => (v ? <Tag color="gold" style={{ fontSize: 10 }}>Estimated</Tag> : '—') },
-  ];
-
+// Inline "Order Total" section shown inside the order window.
+const OrderTotalsSection: React.FC<{ order: any }> = ({ order }) => {
+  const { href, items, loading, error, load } = useTotals(order, true);
   return (
-    <Modal open={!!order} onCancel={onClose} maskClosable={false} width={760}
-      title={<Space><DollarOutlined style={{ color: REDWOOD.success }} /> Order Totals
+    <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginTop: 12 }}
+      title={<Space><DollarOutlined style={{ color: REDWOOD.success }} /><Text strong>Order Total</Text></Space>}
+      extra={<Space>
+        <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {href}</span>}>
+          <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} />
+        </Tooltip>
+        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>Reload</Button>
+      </Space>}>
+      {loading ? <div style={{ textAlign: 'center', padding: 24 }}><Spin /></div>
+        : error ? <div style={{ color: REDWOOD.error, fontSize: 12 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div>
+        : <TotalsSummary items={items} />}
+    </Card>
+  );
+};
+
+// ── Order totals drill (…/child/totals) — modal for the search grid ──────────
+const TotalsModal: React.FC<{ order: any | null; onClose: () => void }> = ({ order, onClose }) => {
+  const { href, items, loading, error, load } = useTotals(order, !!order);
+  return (
+    <Modal open={!!order} onCancel={onClose} maskClosable={false} width={560}
+      title={<Space><DollarOutlined style={{ color: REDWOOD.success }} /> Order Total
         <Tag color="volcano">{order?.OrderNumber}</Tag></Space>}
       footer={<Space>
         <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {href}</span>}>
@@ -167,25 +218,7 @@ const TotalsModal: React.FC<{ order: any | null; onClose: () => void }> = ({ ord
       </Space>}>
       {loading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
         : error ? <div style={{ color: REDWOOD.error, fontSize: 12 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div>
-        : items.length === 0 ? <Empty description="No totals" style={{ padding: 30 }} />
-        : (
-          <>
-            {primary && (
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '10px 14px', marginBottom: 12, borderRadius: 8,
-                background: REDWOOD.success + '12', border: `1px solid ${REDWOOD.success}44` }}>
-                <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase' }}>{primary.TotalName ?? 'Order Total'}</Text>
-                <Text strong style={{ fontSize: 20, color: REDWOOD.success, marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(primary.TotalAmount, primary.CurrencyCode)}</Text>
-              </div>
-            )}
-            <Table size="small" columns={cols} dataSource={items} rowKey={(r, i) => `${r.OrderTotalId ?? i}`}
-              pagination={false} scroll={{ y: 340 }}
-              rowClassName={(r) => (r.PrimaryFlag ? 'so-total-primary' : '')} />
-            <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8 }}>
-              {items.length} total line{items.length !== 1 ? 's' : ''}{ccy ? ` · ${ccy}` : ''}
-            </Text>
-            <style>{`.so-total-primary td { background: ${REDWOOD.success}0c !important; }`}</style>
-          </>
-        )}
+        : <TotalsSummary items={items} />}
     </Modal>
   );
 };
@@ -200,7 +233,6 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
   const [error, setError] = useState('');
   const [lineDetail, setLineDetail] = useState<any | null>(null);
   const [hdrOpen, setHdrOpen] = useState(false);
-  const [totalsOpen, setTotalsOpen] = useState(false);
 
   const loadLines = useCallback(async () => {
     if (!linesHref) return;
@@ -251,23 +283,21 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
       <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 12 }}
         title={<Space><BankOutlined style={{ color: REDWOOD.primary }} /><Text strong>Header</Text>
           <Tag color="volcano">{order.OrderNumber}</Tag>{statusTag(order.Status, order.StatusCode)}</Space>}
-        extra={<Space>
-          <Button size="small" icon={<DollarOutlined />} style={{ borderColor: REDWOOD.success, color: REDWOOD.success }} onClick={() => setTotalsOpen(true)}>Totals</Button>
-          <Button size="small" icon={<ProfileOutlined />} onClick={() => setHdrOpen(true)}>All fields</Button>
-        </Space>}>
+        extra={<Button size="small" icon={<ProfileOutlined />} onClick={() => setHdrOpen(true)}>All fields</Button>}>
         <Row gutter={[12, 0]}>
           <HInfo label="Order Number" value={<Text strong>{order.OrderNumber}</Text>} />
+          <HInfo label="Source Transaction #" value={<span>{order.SourceTransactionNumber ?? '—'}{order.SourceTransactionSystem ? <Tag style={{ marginLeft: 6, fontSize: 10 }}>{order.SourceTransactionSystem}</Tag> : null}</span>} />
           <HInfo label="Order Key" value={order.OrderKey} />
+          <HInfo label="Transaction Type" value={order.TransactionType ? <Tag color="purple">{order.TransactionType}</Tag> : (order.TransactionTypeCode ?? '—')} />
           <HInfo label="Business Unit" value={order.BusinessUnitName} />
           <HInfo label="Customer" value={order.BuyingPartyName} />
           <HInfo label="Customer #" value={order.BuyingPartyNumber} />
+          <HInfo label="Customer PO" value={order.CustomerPONumber} />
+          <HInfo label="Currency" value={order.TransactionalCurrencyCode ?? order.TransactionalCurrencyName ?? order.AppliedCurrencyCode} />
+          <HInfo label="Payment Terms" value={order.PaymentTerms ?? order.PaymentTermsCode} />
           <HInfo label="Transaction On" value={fmtDateTime(order.TransactionOn)} />
           <HInfo label="Requested Ship" value={fmtDate(order.RequestedShipDate)} />
           <HInfo label="Requested Arrival" value={fmtDate(order.RequestedArrivalDate)} />
-          <HInfo label="Source System" value={order.SourceTransactionSystem} />
-          <HInfo label="Source Number" value={order.SourceTransactionNumber} />
-          <HInfo label="Customer PO" value={order.CustomerPONumber} />
-          <HInfo label="Currency" value={order.TransactionalCurrencyCode ?? order.TransactionalCurrencyName} />
           <HInfo label="Requesting BU" value={order.RequestingBusinessUnitName} />
           <HInfo label="Legal Entity" value={order.RequestingLegalEntity} />
           <HInfo label="Status" value={order.Status} />
@@ -292,9 +322,11 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
               pagination={lines.length > 25 ? { pageSize: 25, size: 'small' } : false} scroll={{ x: 'max-content', y: 420 }} />}
       </Card>
 
+      {/* Order total summary (formatted like an order) */}
+      <OrderTotalsSection order={order} />
+
       <AllFieldsModal title={`Order ${order.OrderNumber} — header`} row={hdrOpen ? order : null} onClose={() => setHdrOpen(false)} />
       <AllFieldsModal title={`Line ${lineDetail?.DisplayLineNumber ?? ''} — ${lineDetail?.ProductNumber ?? ''}`} row={lineDetail} onClose={() => setLineDetail(null)} />
-      <TotalsModal order={totalsOpen ? order : null} onClose={() => setTotalsOpen(false)} />
     </div>
   );
 };
