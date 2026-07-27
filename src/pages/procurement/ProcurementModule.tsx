@@ -6,7 +6,7 @@ import {
   ApartmentOutlined, BankOutlined, SafetyCertificateOutlined, InboxOutlined,
   DollarOutlined, ReconciliationOutlined, CloudOutlined, HistoryOutlined,
   SwapOutlined, CarOutlined, CheckSquareOutlined, FileSearchOutlined, UploadOutlined,
-  RightOutlined, SettingOutlined,
+  RightOutlined, SettingOutlined, ShoppingOutlined, TagsOutlined, ProfileOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -35,13 +35,14 @@ interface MenuItemType {
 }
 
 // Section order + per-section icon/accent for the home page.
-const GROUP_ORDER = ['Purchasing', 'Inventory', 'Costing', 'Setups', 'Loading'];
+const GROUP_ORDER = ['Purchasing', 'Order Management', 'Inventory', 'Costing', 'Setups', 'Loading'];
 const GROUP_META: Record<string, { icon: React.ReactNode; color: string }> = {
-  Purchasing: { icon: <ShoppingCartOutlined />, color: '#C74634' },
-  Inventory:  { icon: <AppstoreOutlined />,     color: '#0572CE' },
-  Costing:    { icon: <DollarOutlined />,        color: '#1D7B4D' },
-  Setups:     { icon: <SettingOutlined />,       color: '#B07700' },
-  Loading:    { icon: <UploadOutlined />,        color: '#00918A' },
+  Purchasing:        { icon: <ShoppingCartOutlined />, color: '#C74634' },
+  'Order Management': { icon: <ProfileOutlined />,       color: '#7245A6' },
+  Inventory:         { icon: <AppstoreOutlined />,     color: '#0572CE' },
+  Costing:           { icon: <DollarOutlined />,        color: '#1D7B4D' },
+  Setups:            { icon: <SettingOutlined />,       color: '#B07700' },
+  Loading:           { icon: <UploadOutlined />,        color: '#00918A' },
 };
 
 const procurementItems: MenuItemType[] = [
@@ -61,6 +62,23 @@ const procurementItems: MenuItemType[] = [
     description: 'Manage supplier records, sites and contacts',
     color: REDWOOD.info,
     path: '/procurement/suppliers',
+  },
+  // ── Order Management ────────────────────────────────────────────────────
+  {
+    key: 'sales-orders', group: 'Order Management',
+    icon: <ShoppingOutlined />,
+    label: 'Sales Orders',
+    description: 'Search sales orders and drill into header & lines (Fusion salesOrdersForOrderHub)',
+    color: REDWOOD.primary,
+    path: '/procurement/sales-orders',
+  },
+  {
+    key: 'price-list', group: 'Order Management',
+    icon: <TagsOutlined />,
+    label: 'Price List',
+    description: 'Manage and review price lists',
+    color: '#7245A6',
+    path: '/procurement/price-list',
   },
   // ── Inventory ───────────────────────────────────────────────────────────
   {

@@ -14,3 +14,5 @@ export { default as TransferOrders } from './TransferOrders';
 export { default as ManageShipmentLines } from './ManageShipmentLines';
 export { default as ConfirmPicks } from './ConfirmPicks';
 export { default as ReviewInventoryTransactions } from './ReviewInventoryTransactions';
+export { default as SalesOrders } from './SalesOrders';
+export { default as PriceList } from './PriceList';
