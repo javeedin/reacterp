@@ -39,6 +39,22 @@ const fmtDateTime = (d?: string) => { if (!d) return '—'; try { return dayjs(d
 const fmtQty = (v?: number | null) => (v == null ? '—' : new Intl.NumberFormat('en-US').format(v));
 const num = (v: any) => { const n = Number(v); return isNaN(n) ? 0 : n; };
 const fmt = (v: any) => (v == null || v === '' ? '—' : String(v));
+const norm = (s: string) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// Which line-level child collections to surface as tabs (rest hidden), in order.
+// `customer:true` merges billTo/shipTo into one tab; lineDetails shows as "Billing".
+const LINE_TAB_DEFS: { key: string; label: string; match?: string[]; customer?: boolean }[] = [
+  { key: 'additionalInformation', label: 'Additional Information', match: ['additionalinformation', 'additionalinfo'] },
+  { key: 'attachments', label: 'Attachments', match: ['attachments', 'attachment'] },
+  { key: 'customers', label: 'Customers', customer: true },
+  { key: 'charges', label: 'Charges', match: ['charges', 'charge'] },
+  { key: 'holds', label: 'Holds', match: ['holds', 'hold'] },
+  { key: 'billing', label: 'Billing', match: ['linedetails', 'linedetail'] },
+  { key: 'lotSerials', label: 'Lot Serials', match: ['lotserials', 'lotserial'] },
+  { key: 'notes', label: 'Notes', match: ['notes', 'note'] },
+];
+const CUST_BILL_MATCH = ['billtocustomer', 'billto'];
+const CUST_SHIP_MATCH = ['shiptocustomer', 'shipto'];
 
 const mapLimit = async <T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> => {
   const out: R[] = new Array(items.length); let idx = 0;
@@ -271,6 +287,26 @@ const MergedLineChildTab: React.FC<{ lines: any[]; name: string }> = ({ lines, n
   );
 };
 
+// Merged Bill-To + Ship-To customer tab (two sections).
+const CustomerTab: React.FC<{ lines: any[]; billName?: string; shipName?: string }> = ({ lines, billName, shipName }) => {
+  const Section: React.FC<{ title: string; name: string }> = ({ title, name }) => (
+    <div style={{ marginBottom: 18 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <ProfileOutlined style={{ color: REDWOOD.primary }} />
+        <Text strong style={{ fontSize: 13 }}>{title}</Text>
+      </div>
+      <MergedLineChildTab lines={lines} name={name} />
+    </div>
+  );
+  if (!billName && !shipName) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No customer details" style={{ padding: 24 }} />;
+  return (
+    <div>
+      {billName && <Section title="Bill-To Customer" name={billName} />}
+      {shipName && <Section title="Ship-To Customer" name={shipName} />}
+    </div>
+  );
+};
+
 // Actual costing tab: per-line price + an order-level margin summary.
 const ActualCostingTab: React.FC<{ lines: any[]; currency?: string }> = ({ lines, currency }) => {
   const totalPrice = (l: any) => (l.ExtendedAmount != null ? num(l.ExtendedAmount) : num(l.OrderedQuantity) * num(l.UnitSellingPrice));
@@ -280,13 +316,17 @@ const ActualCostingTab: React.FC<{ lines: any[]; currency?: string }> = ({ lines
   const marginPct = totExt ? (totMargin / totExt) * 100 : null;
   const marginColor = totMargin < 0 ? REDWOOD.error : REDWOOD.success;
 
+  const marginOf = (v?: any) => (v == null ? '—' : <Text strong style={{ color: num(v) < 0 ? REDWOOD.error : REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(v, currency)}</Text>);
+
   const cols: ColumnsType<any> = [
     { title: 'Line', dataIndex: 'DisplayLineNumber', width: 60, align: 'center', render: (v, r) => <Tag color="blue" style={{ fontSize: 11 }}>{v ?? r.LineNumber ?? '—'}</Tag> },
-    { title: 'Item', dataIndex: 'ProductNumber', width: 140, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v ?? '—'}</Text> },
-    { title: 'Description', dataIndex: 'ProductDescription', width: 300, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
-    { title: 'Qty', dataIndex: 'OrderedQuantity', width: 90, align: 'right', render: (v, r) => `${fmtQty(v)}${r.OrderedUOM ? ' ' + r.OrderedUOM : ''}` },
-    { title: 'Unit Price', dataIndex: 'UnitSellingPrice', width: 110, align: 'right', render: v => (v == null ? '—' : fmtAmount(v, currency)) },
-    { title: 'Total Price', key: 'tot', width: 130, align: 'right', render: (_, r) => <Text strong style={{ color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(totalPrice(r), currency)}</Text> },
+    { title: 'Item', dataIndex: 'ProductNumber', width: 130, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Description', dataIndex: 'ProductDescription', width: 240, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Qty', dataIndex: 'OrderedQuantity', width: 80, align: 'right', render: (v, r) => `${fmtQty(v)}${r.OrderedUOM ? ' ' + r.OrderedUOM : ''}` },
+    { title: 'Unit Price', dataIndex: 'UnitSellingPrice', width: 100, align: 'right', render: v => (v == null ? '—' : fmtAmount(v, currency)) },
+    { title: 'Total Price', key: 'tot', width: 120, align: 'right', render: (_, r) => <Text strong style={{ color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(totalPrice(r), currency)}</Text> },
+    { title: 'Est Fulfillment Cost', dataIndex: 'EstimateFulfillmentCost', width: 130, align: 'right', render: v => (v == null ? '—' : fmtAmount(v, currency)) },
+    { title: 'Est Margin', dataIndex: 'EstimateMargin', width: 120, align: 'right', render: marginOf },
   ];
 
   const MRow: React.FC<{ label: string; value: React.ReactNode; strong?: boolean; color?: string }> = ({ label, value, strong, color }) => (
@@ -299,7 +339,7 @@ const ActualCostingTab: React.FC<{ lines: any[]; currency?: string }> = ({ lines
   return (
     <div>
       <Table size="small" columns={cols} dataSource={lines} rowKey={(r, i) => `${r.LineId ?? r.FulfillLineId ?? i}`}
-        pagination={lines.length > 25 ? { pageSize: 25, size: 'small' } : false} scroll={{ x: 830, y: 320 }}
+        pagination={lines.length > 25 ? { pageSize: 25, size: 'small' } : false} scroll={{ x: 980, y: 320 }}
         summary={(data) => (
           <Table.Summary fixed>
             <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
@@ -307,6 +347,8 @@ const ActualCostingTab: React.FC<{ lines: any[]; currency?: string }> = ({ lines
               <Table.Summary.Cell index={3} />
               <Table.Summary.Cell index={4} />
               <Table.Summary.Cell index={5} align="right"><Text strong style={{ color: REDWOOD.primary }}>{fmtAmount(totExt, currency)}</Text></Table.Summary.Cell>
+              <Table.Summary.Cell index={6} align="right"><Text strong>{fmtAmount(totCost, currency)}</Text></Table.Summary.Cell>
+              <Table.Summary.Cell index={7} align="right"><Text strong style={{ color: marginColor }}>{fmtAmount(totMargin, currency)}</Text></Table.Summary.Cell>
             </Table.Summary.Row>
           </Table.Summary>
         )} />
@@ -342,6 +384,25 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
     lines.forEach(l => (l.links ?? []).forEach((x: any) => { if (x.rel === 'child' && x.name) s.add(x.name); }));
     return Array.from(s).sort();
   }, [lines]);
+
+  // Only the allowlisted child collections become tabs (rest hidden); billTo +
+  // shipTo merge into a single Customers tab; lineDetails shows as "Billing".
+  const childTabItems = useMemo(() => {
+    const findLink = (matches: string[]) => childNames.find(n => matches.includes(norm(n)));
+    const billLink = findLink(CUST_BILL_MATCH);
+    const shipLink = findLink(CUST_SHIP_MATCH);
+    return LINE_TAB_DEFS.map(def => {
+      if (def.customer) {
+        if (!billLink && !shipLink) return null;
+        return { key: def.key, label: <span><ProfileOutlined style={{ marginRight: 5 }} />Customers</span>,
+          children: <CustomerTab lines={lines} billName={billLink} shipName={shipLink} /> };
+      }
+      const nm = findLink(def.match!);
+      if (!nm) return null;
+      return { key: def.key, label: <span><ProfileOutlined style={{ marginRight: 5 }} />{def.label}</span>,
+        children: <MergedLineChildTab lines={lines} name={nm} /> };
+    }).filter(Boolean) as { key: string; label: React.ReactNode; children: React.ReactNode }[];
+  }, [childNames, lines]);
 
   // Fulfillment org & subinventory come from the lines — surface the distinct
   // values in the header.
@@ -598,11 +659,7 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
               ? <Empty description="No lines" style={{ padding: 30 }} />
               : <ActualCostingTab lines={lines} currency={order.TransactionalCurrencyCode ?? order.AppliedCurrencyCode ?? order.TransactionalCurrencyName} />,
           },
-          ...childNames.map((name) => ({
-            key: name,
-            label: <span><ProfileOutlined style={{ marginRight: 5 }} /><span style={{ textTransform: 'capitalize' }}>{name}</span></span>,
-            children: <MergedLineChildTab lines={lines} name={name} />,
-          })),
+          ...childTabItems,
         ]} />
       </Card>
 
