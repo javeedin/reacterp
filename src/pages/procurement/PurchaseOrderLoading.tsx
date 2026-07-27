@@ -8,6 +8,7 @@ import {
   HomeOutlined, UploadOutlined, DownloadOutlined, InboxOutlined,
   CheckCircleTwoTone, CloseCircleTwoTone, InfoCircleOutlined, SafetyCertificateOutlined,
   ShoppingCartOutlined, BankOutlined, ThunderboltOutlined, DeleteOutlined, MinusCircleOutlined,
+  CloudUploadOutlined, CopyOutlined, CheckCircleOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -23,6 +24,7 @@ const FUSION_BASE = _isElectron
   : '/fusion-api';
 const AUTH_HEADER = 'Basic ' + btoa('emparun:Fusion@1234');
 const FUSION_HDRS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
+const DRAFT_PO_URL = `${FUSION_BASE}/draftPurchaseOrders`;
 
 const REDWOOD = {
   primary: '#C74634', success: '#1D7B4D', warning: '#B07700', info: '#0572CE',
@@ -114,6 +116,10 @@ const ValidateDialog: React.FC<{
   const [results, setResults] = useState<Record<number, LineResult>>({});
   const [validating, setValidating] = useState(false);
   const [summary, setSummary] = useState<{ suppliers?: string; items?: string; wh?: string } | null>(null);
+  const [posting, setPosting] = useState(false);
+  const [loadResults, setLoadResults] = useState<{ po: string; ok: boolean; status: number; body: string; orderNumber?: string; payload: string }[] | null>(null);
+  const validated = Object.keys(results).length > 0;
+  const allValid = validated && lines.every(l => { const r = results[l.__idx]; return r && r.supplier && r.item && r.warehouse; });
 
   const orgSet = useMemo(() => new Set(orgs.map(o => o.code)), [orgs]);
 
@@ -211,6 +217,57 @@ const ValidateDialog: React.FC<{
     finally { setValidating(false); }
   };
 
+  // Build a draftPurchaseOrders body for one PO (grouped lines).
+  const buildPoPayload = (poLines: POLine[]) => {
+    const first = poLines[0];
+    const bu = selBU ?? first.businessUnit;
+    return {
+      ...(bu ? { ProcurementBU: bu, RequisitioningBU: bu } : {}),
+      ...(first.supplierCode ? { SupplierNumber: first.supplierCode } : {}),
+      ...(first.currency ? { CurrencyCode: first.currency } : {}),
+      ...(first.trxCode ? { StyleDisplayName: first.trxCode } : {}),
+      lines: poLines.map((l, i) => {
+        const org = effOrg(l); const sub = effSub(l);
+        return {
+          LineNumber: i + 1,
+          LineType: 'Goods',
+          ...(l.itemCode ? { Item: l.itemCode } : {}),
+          ...(l.qty != null ? { Quantity: l.qty } : {}),
+          ...(l.unitPrice != null ? { Price: l.unitPrice } : {}),
+          schedules: [{
+            ScheduleNumber: 1,
+            ...(org ? { ShipToOrganizationCode: org } : {}),
+            ...(l.qty != null ? { Quantity: l.qty } : {}),
+            ...(l.needByDate ? { RequestedDeliveryDate: dayjs(l.needByDate).format('YYYY-MM-DD') } : {}),
+            ...(sub ? { distributions: [{ DistributionNumber: 1, ...(l.qty != null ? { Quantity: l.qty } : {}), DestinationSubinventory: sub }] } : {}),
+          }],
+        };
+      }),
+    };
+  };
+
+  const runLoad = async () => {
+    setPosting(true); setLoadResults(null);
+    const byPo: Record<string, POLine[]> = {};
+    lines.forEach(l => { const k = l.poNumber ?? '(blank)'; (byPo[k] ??= []).push(l); });
+    const out: NonNullable<typeof loadResults> = [];
+    for (const [po, pls] of Object.entries(byPo)) {
+      const payload = buildPoPayload(pls);
+      const payloadStr = JSON.stringify(payload, null, 2);
+      try {
+        const r = await fetch(DRAFT_PO_URL, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const text = await r.text();
+        let parsed: any = null; try { parsed = JSON.parse(text); } catch { /* keep raw */ }
+        out.push({ po, ok: r.ok, status: r.status, body: parsed ? JSON.stringify(parsed, null, 2) : text, orderNumber: parsed?.OrderNumber, payload: payloadStr });
+      } catch (e: any) { out.push({ po, ok: false, status: 0, body: e.message, payload: payloadStr }); }
+    }
+    setLoadResults(out);
+    setPosting(false);
+    const okc = out.filter(o => o.ok).length;
+    if (okc === out.length) message.success(`Loaded ${okc} draft PO(s) in Fusion`);
+    else message.warning(`${okc}/${out.length} PO(s) loaded — check the errors`);
+  };
+
   const cols: ColumnsType<POLine> = [
     { title: 'PO', dataIndex: 'poNumber', width: 110, fixed: 'left', render: v => <Text strong style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
     { title: 'Supplier', dataIndex: 'supplierCode', width: 110, render: (v, r) => <Space size={4}><Flag ok={results[r.__idx]?.supplier} label="Supplier" /><Text style={{ fontSize: 12 }}>{v ?? '—'}</Text></Space> },
@@ -240,10 +297,16 @@ const ValidateDialog: React.FC<{
       title={<Space><SafetyCertificateOutlined style={{ color: REDWOOD.primary }} /> Validate PO Load
         <Tag color="volcano">{uniq(lines.map(l => l.poNumber)).length} PO(s)</Tag><Tag>{lines.length} lines</Tag></Space>}
       footer={<Space>
-        {summary && <Text type="secondary" style={{ marginRight: 'auto', fontSize: 12 }}>{summary.suppliers} · {summary.items} · {summary.wh}</Text>}
+        {summary && <Text type={allValid ? 'success' : undefined} style={{ marginRight: 'auto', fontSize: 12 }}>
+          {summary.suppliers} · {summary.items} · {summary.wh}{allValid ? ' — all valid ✓' : ''}
+        </Text>}
         <Button onClick={onClose}>Close</Button>
         <Button type="primary" icon={<SafetyCertificateOutlined />} loading={validating} onClick={validate}
           style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>Validate</Button>
+        <Tooltip title={validated ? (allValid ? 'Create draft purchase orders in Fusion' : 'Some lines are invalid — fix them or load anyway') : 'Validate first'}>
+          <Button type="primary" icon={<CloudUploadOutlined />} loading={posting} disabled={!validated} onClick={runLoad}
+            style={validated ? { background: REDWOOD.primary, borderColor: REDWOOD.primary } : undefined}>Load to Fusion</Button>
+        </Tooltip>
       </Space>}>
       {/* Header controls */}
       <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 12 }}
@@ -277,6 +340,33 @@ const ValidateDialog: React.FC<{
 
       <Table size="small" columns={cols} dataSource={lines} rowKey="__idx"
         pagination={lines.length > 50 ? { pageSize: 50, size: 'small' } : false} scroll={{ x: 960, y: 380 }} />
+
+      {/* Load results */}
+      <Modal open={!!loadResults} onCancel={() => setLoadResults(null)} maskClosable={false} width={820}
+        title={<Space><CloudUploadOutlined style={{ color: REDWOOD.primary }} /> Load to Fusion — draftPurchaseOrders
+          {loadResults && <Tag color={loadResults.every(r => r.ok) ? 'success' : 'error'}>{loadResults.filter(r => r.ok).length}/{loadResults.length} OK</Tag>}</Space>}
+        footer={<Button onClick={() => setLoadResults(null)}>Close</Button>}>
+        <div style={{ fontSize: 12, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Tag color="green">POST</Tag><Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info, wordBreak: 'break-all' }}>{DRAFT_PO_URL}</Text>
+        </div>
+        <div style={{ maxHeight: '60vh', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {(loadResults ?? []).map((r, i) => (
+            <div key={i} style={{ border: `1px solid ${(r.ok ? REDWOOD.success : REDWOOD.error)}55`, borderRadius: 8, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: (r.ok ? REDWOOD.success : REDWOOD.error) + '12' }}>
+                {r.ok ? <CheckCircleOutlined style={{ color: REDWOOD.success }} /> : <InfoCircleOutlined style={{ color: REDWOOD.error }} />}
+                <Text strong style={{ fontSize: 13 }}>PO {r.po}</Text>
+                <Tag color={r.ok ? 'success' : r.status === 0 ? 'default' : 'error'}>{r.status === 0 ? 'Network Error' : `HTTP ${r.status}`}</Tag>
+                {r.orderNumber && <Tag color="volcano">Order {r.orderNumber}</Tag>}
+                <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginLeft: 'auto' }}
+                  onClick={() => { navigator.clipboard.writeText(r.payload); message.success('Payload copied'); }}>Payload</Button>
+                <Button size="small" type="text" icon={<CopyOutlined />}
+                  onClick={() => { navigator.clipboard.writeText(r.body); message.success('Response copied'); }}>Response</Button>
+              </div>
+              <pre style={{ margin: 0, padding: 12, fontSize: 11, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 220, overflow: 'auto', background: REDWOOD.neutral100 }}>{r.body.slice(0, 6000)}{r.body.length > 6000 ? '\n\n… (truncated)' : ''}</pre>
+            </div>
+          ))}
+        </div>
+      </Modal>
     </Modal>
   );
 };
