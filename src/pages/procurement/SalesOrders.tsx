@@ -40,6 +40,13 @@ const fmtQty = (v?: number | null) => (v == null ? '—' : new Intl.NumberFormat
 const num = (v: any) => { const n = Number(v); return isNaN(n) ? 0 : n; };
 const fmt = (v: any) => (v == null || v === '' ? '—' : String(v));
 
+const mapLimit = async <T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> => {
+  const out: R[] = new Array(items.length); let idx = 0;
+  const worker = async () => { while (idx < items.length) { const c = idx++; out[c] = await fn(items[c]); } };
+  await Promise.all(Array.from({ length: Math.min(limit, Math.max(1, items.length)) }, worker));
+  return out;
+};
+
 const fetchAllPages = async (baseUrl: string): Promise<any[]> => {
   const stripped = baseUrl.replace(/[?&]limit=\d+/gi, '').replace(/[?&]offset=\d+/gi, '').replace(/\?&/, '?').replace(/&&/g, '&');
   const all: any[] = [];
@@ -208,6 +215,62 @@ const TotalsModal: React.FC<{ order: any | null; onClose: () => void }> = ({ ord
   );
 };
 
+// Aggregate one line-level child collection (e.g. lotSerials) across every
+// order line. The child rows carry no item context, so we prepend the line's
+// Line #, Product, Description and UOM from the parent line.
+const MergedLineChildTab: React.FC<{ lines: any[]; name: string }> = ({ lines, name }) => {
+  const [items, setItems] = useState<any[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const targets = useMemo(() =>
+    lines.map(l => ({ line: l, href: l.links?.find((x: any) => x.name === name)?.href }))
+      .filter(t => t.href) as { line: any; href: string }[],
+  [lines, name]);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError('');
+    try {
+      const results = await mapLimit(targets, 6, async (t) => {
+        try {
+          const rows = await fetchAllPages(t.href);
+          return rows.map(r => ({ ...r,
+            _line: t.line.DisplayLineNumber ?? t.line.LineNumber,
+            _item: t.line.ProductNumber, _desc: t.line.ProductDescription, _uom: t.line.OrderedUOM }));
+        } catch { return []; }
+      });
+      setItems(results.flat());
+    } catch (e: any) { setError(e.message); setItems([]); }
+    finally { setLoading(false); }
+  }, [targets]);
+  useEffect(() => { load(); }, [load]);
+
+  const cols = useMemo<ColumnsType<any>>(() => ([
+    { title: 'Line', dataIndex: '_line', width: 60, align: 'center', fixed: 'left', render: v => <Tag color="blue" style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+    { title: 'Product', dataIndex: '_item', width: 130, fixed: 'left', render: v => <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>{v ?? '—'}</Text> },
+    { title: 'Description', dataIndex: '_desc', width: 240, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    ...dynamicColumns((items ?? []).map(({ _line, _item, _desc, _uom, ...rest }) => rest)),
+  ]), [items]);
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+        <Text type="secondary" style={{ marginRight: 'auto', fontSize: 11 }}>Merged from {targets.length} line{targets.length !== 1 ? 's' : ''}</Text>
+        <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11 }}><b>GET</b> …/lines/&#123;line&#125;/child/{name}</span>}>
+          <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} />
+        </Tooltip>
+        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>Reload</Button>
+      </div>
+      {loading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+        : error ? <div style={{ color: REDWOOD.error, fontSize: 12 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div>
+        : items && items.length > 0
+          ? <Table size="small" columns={cols} dataSource={items} rowKey={(_, i) => `${name}-${i}`}
+              pagination={items.length > 25 ? { pageSize: 25, size: 'small' } : false} scroll={{ x: 'max-content', y: 380 }} />
+          : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`No ${name} across the order lines`} style={{ padding: 24 }} />}
+    </div>
+  );
+};
+
 // ── Order view (header + lines) shown in its own tab ─────────────────────────
 const OrderView: React.FC<{ order: any }> = ({ order }) => {
   const linesHref = order?.links?.find((l: any) => l.name === 'lines')?.href
@@ -220,6 +283,13 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
   const [hdrOpen, setHdrOpen] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const totals = useTotals(order, true);
+
+  // Distinct line-level child collections across all lines (lotSerials, …).
+  const childNames = useMemo(() => {
+    const s = new Set<string>();
+    lines.forEach(l => (l.links ?? []).forEach((x: any) => { if (x.rel === 'child' && x.name) s.add(x.name); }));
+    return Array.from(s).sort();
+  }, [lines]);
 
   const loadLines = useCallback(async () => {
     if (!linesHref) return;
@@ -418,38 +488,51 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
         </Row>
       </Card>
 
-      {/* Lines */}
-      <Card size="small" styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginTop: 12 }}
-        title={<Space><UnorderedListOutlined style={{ color: REDWOOD.primary }} /><Text strong>Lines</Text>
-          {lines.length > 0 && <Tag>{lines.length}</Tag>}</Space>}
-        extra={<Space>
-          <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {linesHref}</span>}>
-            <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} />
-          </Tooltip>
-          <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={loadLines}>Reload</Button>
-        </Space>}>
-        {loading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
-          : error ? <div style={{ color: REDWOOD.error, fontSize: 12, padding: 16 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div>
-          : lines.length === 0 ? <Empty description="No lines" style={{ padding: 30 }} />
-          : <Table size="small" columns={lineCols} dataSource={lines} rowKey={(r, i) => `${r.LineId ?? r.FulfillLineId ?? i}`}
-              pagination={lines.length > 25 ? { pageSize: 25, size: 'small' } : false} scroll={{ x: 'max-content', y: 420 }}
-              summary={(data) => {
-                const ordCcy = order.TransactionalCurrencyCode ?? order.AppliedCurrencyCode ?? order.TransactionalCurrencyName;
-                const totQty = data.reduce((s, r) => s + num(r.OrderedQuantity), 0);
-                const totAmt = data.reduce((s, r) => s + num(r.OrderedQuantity) * num(r.UnitSellingPrice), 0);
-                return (
-                  <Table.Summary fixed>
-                    <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-                      <Table.Summary.Cell index={0} colSpan={3}><Text strong>Total ({data.length} line{data.length !== 1 ? 's' : ''})</Text></Table.Summary.Cell>
-                      <Table.Summary.Cell index={3} align="right"><Text strong>{fmtQty(totQty)}</Text></Table.Summary.Cell>
-                      <Table.Summary.Cell index={4} />
-                      <Table.Summary.Cell index={5} />
-                      <Table.Summary.Cell index={6} align="right"><Text strong style={{ color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(totAmt, ordCcy)}</Text></Table.Summary.Cell>
-                      <Table.Summary.Cell index={7} colSpan={Math.max(1, lineCols.length - 7)} />
-                    </Table.Summary.Row>
-                  </Table.Summary>
-                );
-              }} />}
+      {/* Lines + one tab per line-level child collection (lotSerials, …) */}
+      <Card size="small" styles={{ body: { padding: '4px 10px 10px' } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginTop: 12 }}>
+        <Tabs size="small" items={[
+          {
+            key: 'lines',
+            label: <span><UnorderedListOutlined style={{ marginRight: 5 }} />Lines{lines.length ? ` (${lines.length})` : ''}</span>,
+            children: (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 8 }}>
+                  <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {linesHref}</span>}>
+                    <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} />
+                  </Tooltip>
+                  <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={loadLines}>Reload</Button>
+                </div>
+                {loading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+                  : error ? <div style={{ color: REDWOOD.error, fontSize: 12, padding: 16 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div>
+                  : lines.length === 0 ? <Empty description="No lines" style={{ padding: 30 }} />
+                  : <Table size="small" columns={lineCols} dataSource={lines} rowKey={(r, i) => `${r.LineId ?? r.FulfillLineId ?? i}`}
+                      pagination={lines.length > 25 ? { pageSize: 25, size: 'small' } : false} scroll={{ x: 'max-content', y: 420 }}
+                      summary={(data) => {
+                        const ordCcy = order.TransactionalCurrencyCode ?? order.AppliedCurrencyCode ?? order.TransactionalCurrencyName;
+                        const totQty = data.reduce((s, r) => s + num(r.OrderedQuantity), 0);
+                        const totAmt = data.reduce((s, r) => s + num(r.OrderedQuantity) * num(r.UnitSellingPrice), 0);
+                        return (
+                          <Table.Summary fixed>
+                            <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+                              <Table.Summary.Cell index={0} colSpan={3}><Text strong>Total ({data.length} line{data.length !== 1 ? 's' : ''})</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={3} align="right"><Text strong>{fmtQty(totQty)}</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={4} />
+                              <Table.Summary.Cell index={5} />
+                              <Table.Summary.Cell index={6} align="right"><Text strong style={{ color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(totAmt, ordCcy)}</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={7} colSpan={Math.max(1, lineCols.length - 7)} />
+                            </Table.Summary.Row>
+                          </Table.Summary>
+                        );
+                      }} />}
+              </div>
+            ),
+          },
+          ...childNames.map((name) => ({
+            key: name,
+            label: <span><ProfileOutlined style={{ marginRight: 5 }} /><span style={{ textTransform: 'capitalize' }}>{name}</span></span>,
+            children: <MergedLineChildTab lines={lines} name={name} />,
+          })),
+        ]} />
       </Card>
 
       {/* Print preview */}
