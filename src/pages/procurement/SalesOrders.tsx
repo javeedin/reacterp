@@ -8,6 +8,7 @@ import {
   HomeOutlined, ProfileOutlined, SearchOutlined, ReloadOutlined, ClearOutlined,
   ApiOutlined, CopyOutlined, InfoCircleOutlined, ExportOutlined, BankOutlined,
   UnorderedListOutlined, ShoppingOutlined, DollarOutlined, PrinterOutlined, DownloadOutlined,
+  ReconciliationOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -373,12 +374,53 @@ const ActualCostingTab: React.FC<{ lines: any[]; currency?: string }> = ({ lines
 const AR_RES = 'receivablesInvoices';
 const AR_LINES = 'receivablesInvoiceLines';
 
+// Small labelled field (label right-aligned, value bold) — mirrors the AR form.
+const ARField: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
+  <div style={{ display: 'flex', gap: 10, marginBottom: 7, fontSize: 12.5, alignItems: 'baseline' }}>
+    <span style={{ color: REDWOOD.neutral600, minWidth: 118, textAlign: 'right', flexShrink: 0 }}>{label}</span>
+    <span style={{ color: REDWOOD.neutral900, fontWeight: 600, wordBreak: 'break-word' }}>{value ?? '—'}</span>
+  </div>
+);
+const ARSection: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
+  <div style={{ marginBottom: 18 }}>
+    <div style={{ fontSize: 13.5, fontWeight: 700, color: REDWOOD.primary, borderBottom: `2px solid ${REDWOOD.primary}22`, paddingBottom: 5, marginBottom: 12 }}>{title}</div>
+    {children}
+  </div>
+);
+
+// Loads a child collection href and shows it as a generic table (accounting…).
+const ChildDataModal: React.FC<{ href: string | null; title: string; onClose: () => void }> = ({ href, title, onClose }) => {
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    if (!href) return;
+    setLoading(true); setError('');
+    try { setItems(await fetchAllPages(href)); }
+    catch (e: any) { setError(e.message); setItems([]); }
+    finally { setLoading(false); }
+  }, [href]);
+  useEffect(() => { if (href) load(); }, [href, load]);
+  const cols = useMemo(() => dynamicColumns(items), [items]);
+  return (
+    <Modal open={!!href} onCancel={onClose} maskClosable={false} width={960} title={<Space><ProfileOutlined style={{ color: REDWOOD.info }} /> {title}</Space>}
+      footer={<Button onClick={onClose}>Close</Button>}>
+      {loading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+        : error ? <div style={{ color: REDWOOD.error, fontSize: 12 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div>
+        : items.length === 0 ? <Empty description="No records" style={{ padding: 30 }} />
+        : <Table size="small" columns={cols} dataSource={items} rowKey={(_, i) => `cd-${i}`}
+            pagination={items.length > 20 ? { pageSize: 20, size: 'small' } : false} scroll={{ x: 'max-content', y: 400 }} />}
+    </Modal>
+  );
+};
+
 const ARInvoiceDialog: React.FC<{ txn: string | null; onClose: () => void }> = ({ txn, onClose }) => {
   const [inv, setInv] = useState<any | null>(null);
   const [lines, setLines] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [allOpen, setAllOpen] = useState(false);
+  const [acctHref, setAcctHref] = useState<string | null>(null);
 
   const url = txn ? `${FUSION_BASE}/${AR_RES}?q=${encodeURIComponent(`TransactionNumber=${txn}`)}&limit=1` : '';
   const load = useCallback(async () => {
@@ -400,25 +442,53 @@ const ARInvoiceDialog: React.FC<{ txn: string | null; onClose: () => void }> = (
   useEffect(() => { if (txn) load(); }, [txn, load]);
 
   const ccy = pf(inv, ['InvoiceCurrencyCode', 'CurrencyCode']);
-  const HInfo: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
-    <Col xs={12} sm={8} md={6}>
-      <div style={{ marginBottom: 8 }}>
-        <div style={{ fontSize: 10, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>{label}</div>
-        <div style={{ fontSize: 12.5, color: REDWOOD.neutral900, marginTop: 2, wordBreak: 'break-word' }}>{value ?? '—'}</div>
-      </div>
-    </Col>
-  );
-  const lineCols = useMemo(() => dynamicColumns(lines), [lines]);
+  const amt = (v: any) => fmtAmount(v, ccy);
+
+  // Line classification → header amounts (fall back to header fields).
+  const typeOf = (l: any) => String(pf(l, ['LineType', 'TransactionLineType', 'LineTypeCode']) ?? 'LINE').toUpperCase();
+  const amtOf = (l: any) => num(pf(l, ['LineAmount', 'Amount', 'ExtendedAmount', 'RevenueAmount']));
+  const productLines = lines.filter(l => { const t = typeOf(l); return !t.includes('TAX') && !t.includes('FREIGHT') && !t.includes('CHARGE'); });
+  const linesTotal = productLines.reduce((s, l) => s + amtOf(l), 0);
+  const taxTotal = num(pf(inv, ['TaxAmount', 'TotalTax']) ?? lines.filter(l => typeOf(l).includes('TAX')).reduce((s, l) => s + amtOf(l), 0));
+  const freight = num(pf(inv, ['FreightAmount', 'Freight']) ?? lines.filter(l => typeOf(l).includes('FREIGHT')).reduce((s, l) => s + amtOf(l), 0));
+  const charges = num(pf(inv, ['ChargeAmount', 'Charges']) ?? lines.filter(l => typeOf(l).includes('CHARGE')).reduce((s, l) => s + amtOf(l), 0));
+  const total = num(pf(inv, ['TransactionTotal', 'InvoiceAmount', 'TotalAmount', 'EnteredAmount']) ?? (linesTotal + taxTotal + freight + charges));
+
+  // Detect an accounting / distributions child link on the header or lines.
+  const acctLink = useMemo(() => {
+    const hit = (inv?.links ?? []).find((l: any) => l.rel === 'child' && /account|distribut|journal/i.test(l.name ?? ''));
+    if (hit) return hit.href;
+    const lhit = (lines[0]?.links ?? []).find((l: any) => l.rel === 'child' && /account|distribut|journal/i.test(l.name ?? ''));
+    return lhit?.href;
+  }, [inv, lines]);
+
+  const shipToHeader = pf(inv, ['ShipToCustomerName', 'ShipToPartyName']);
+
+  const lineCols: ColumnsType<any> = [
+    { title: 'Line', dataIndex: 'x', width: 55, align: 'center', render: (_, l) => <Tag color="blue" style={{ fontSize: 11 }}>{pf(l, ['LineNumber', 'CustomerTrxLineNumber']) ?? '—'}</Tag> },
+    { title: 'Item', width: 120, render: (_, l) => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{pf(l, ['ItemNumber', 'InventoryItemNumber', 'Item']) ?? '—'}</Text> },
+    { title: 'Description', width: 260, ellipsis: true, render: (_, l) => <Text style={{ fontSize: 12 }}>{pf(l, ['Description', 'LineDescription']) ?? '—'}</Text> },
+    { title: 'UOM', width: 70, render: (_, l) => pf(l, ['UnitOfMeasure', 'UOM', 'UOMCode']) ?? '—' },
+    { title: 'Quantity', width: 90, align: 'right', render: (_, l) => fmtQty(pf(l, ['Quantity', 'InvoicedQuantity'])) },
+    { title: 'Unit Price', width: 100, align: 'right', render: (_, l) => amt(pf(l, ['UnitSellingPrice', 'UnitPrice', 'UnitStandardPrice'])) },
+    { title: 'Amount', width: 120, align: 'right', render: (_, l) => <Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{amt(amtOf(l))}</Text> },
+    { title: 'Sales Order', width: 150, render: (_, l) => pf(l, ['SalesOrderNumber', 'SalesOrder', 'InterfaceLineAttribute1']) ?? '—' },
+    { title: 'Date', width: 110, render: (_, l) => fmtDate(pf(l, ['SalesOrderDate', 'LineDate', 'RuleStartDate'])) },
+    { title: 'Ship-to Customer', width: 180, ellipsis: true, render: (_, l) => pf(l, ['ShipToCustomerName']) ?? shipToHeader ?? '—' },
+    { title: 'Tax Classification', width: 140, ellipsis: true, render: (_, l) => pf(l, ['TaxClassificationCode', 'TaxClassification']) ?? '—' },
+  ];
 
   return (
-    <Modal open={!!txn} onCancel={onClose} maskClosable={false} width={1040} style={{ top: 24 }}
+    <Modal open={!!txn} onCancel={onClose} maskClosable={false} width={1120} style={{ top: 16 }}
       footer={<Button onClick={onClose}>Close</Button>}
       title={<Space><DollarOutlined style={{ color: REDWOOD.primary }} /> AR Invoice
-        <Tag color="volcano">{pf(inv, ['TransactionNumber']) ?? txn}</Tag></Space>}>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+        <Tag color="volcano">{pf(inv, ['TransactionNumber']) ?? txn}</Tag>
+        {inv && <Tag color={/complete/i.test(String(pf(inv, ['Status', 'TransactionStatus']) ?? '')) ? 'green' : 'blue'}>{pf(inv, ['Status', 'TransactionStatus', 'PaymentStatus', 'StatusCode'])}</Tag>}</Space>}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 10, alignItems: 'center' }}>
         <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {decodeURIComponent(url)}</span>}>
           <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} />
         </Tooltip>
+        {acctLink && <Button size="small" icon={<ReconciliationOutlined />} style={{ borderColor: REDWOOD.purple, color: REDWOOD.purple }} onClick={() => setAcctHref(acctLink)}>View Accounting</Button>}
         {inv && <Button size="small" icon={<ProfileOutlined />} onClick={() => setAllOpen(true)}>All fields</Button>}
         <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>Reload</Button>
       </div>
@@ -428,34 +498,93 @@ const ARInvoiceDialog: React.FC<{ txn: string | null; onClose: () => void }> = (
         : !inv ? <Empty description="No invoice" style={{ padding: 40 }} />
         : (
           <>
-            <Card size="small" title={<Space><BankOutlined style={{ color: REDWOOD.primary }} /><Text strong>Invoice Header</Text></Space>}
-              style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 12 }}>
-              <Row gutter={[12, 0]}>
-                <HInfo label="Transaction #" value={<Text strong>{pf(inv, ['TransactionNumber'])}</Text>} />
-                <HInfo label="Type" value={pf(inv, ['TransactionType', 'TransactionTypeName', 'CustomerTransactionType'])} />
-                <HInfo label="Source" value={pf(inv, ['TransactionSource', 'TransactionSourceName', 'BatchSource'])} />
-                <HInfo label="Date" value={fmtDate(pf(inv, ['TransactionDate']))} />
-                <HInfo label="Accounting Date" value={fmtDate(pf(inv, ['AccountingDate', 'GlDate']))} />
-                <HInfo label="Bill-To Customer" value={pf(inv, ['BillToCustomerName'])} />
-                <HInfo label="Customer #" value={pf(inv, ['BillToCustomerAccountNumber', 'BillToCustomerNumber', 'BillToAccountNumber'])} />
-                <HInfo label="Currency" value={ccy} />
-                <HInfo label="Invoice Amount" value={<Text strong style={{ color: REDWOOD.primary }}>{fmtAmount(pf(inv, ['InvoiceAmount', 'EnteredAmount', 'TotalAmount', 'InvoiceCurrencyAmount']), ccy)}</Text>} />
-                <HInfo label="Business Unit" value={pf(inv, ['BusinessUnit', 'BusinessUnitName'])} />
-                <HInfo label="Payment Terms" value={pf(inv, ['PaymentTerms', 'PaymentTermsName'])} />
-                <HInfo label="Status" value={pf(inv, ['PaymentStatus', 'Status', 'TransactionStatus', 'StatusCode'])} />
+            {/* General Information */}
+            <ARSection title="General Information">
+              <Row gutter={[16, 0]}>
+                <Col xs={24} md={9}>
+                  <ARField label="Business Unit" value={pf(inv, ['BusinessUnit', 'BusinessUnitName'])} />
+                  <ARField label="Transaction Source" value={pf(inv, ['TransactionSource', 'TransactionBatchSource', 'BatchSource', 'TransactionSourceName'])} />
+                  <ARField label="Transaction Type" value={pf(inv, ['TransactionType', 'TransactionTypeName'])} />
+                  <ARField label="Transaction Number" value={<Text strong>{pf(inv, ['TransactionNumber'])}</Text>} />
+                  <ARField label="Sales Order" value={pf(inv, ['SalesOrderNumber']) ?? pf(productLines[0], ['SalesOrderNumber', 'SalesOrder', 'InterfaceLineAttribute1'])} />
+                  <ARField label="Status" value={pf(inv, ['Status', 'TransactionStatus', 'PaymentStatus', 'StatusCode'])} />
+                </Col>
+                <Col xs={24} md={8}>
+                  <ARField label="Transaction Date" value={fmtDate(pf(inv, ['TransactionDate']))} />
+                  <ARField label="Accounting Date" value={fmtDate(pf(inv, ['AccountingDate', 'GlDate']))} />
+                  <ARField label="Currency" value={ccy} />
+                  <ARField label="Comments" value={pf(inv, ['Comments'])} />
+                </Col>
+                <Col xs={24} md={7}>
+                  <div style={{ border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 8, padding: '10px 14px', background: REDWOOD.neutral100 }}>
+                    {[
+                      ['Transaction Total', amt(total), true],
+                      ['Lines', amt(linesTotal), false],
+                      ['Tax', amt(taxTotal), false],
+                      ['Freight', amt(freight), false],
+                      ['Charges', amt(charges), false],
+                    ].map(([lbl, val, strong]) => (
+                      <div key={lbl as string} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '5px 0', borderBottom: `1px dashed ${REDWOOD.neutral200}` }}>
+                        <span style={{ color: REDWOOD.neutral600, fontSize: 12.5, fontWeight: strong ? 700 : 400 }}>{lbl}</span>
+                        <span style={{ fontWeight: strong ? 800 : 600, fontSize: strong ? 15 : 13, color: strong ? REDWOOD.primary : REDWOOD.neutral900, fontVariantNumeric: 'tabular-nums' }}>{val}</span>
+                      </div>
+                    ))}
+                  </div>
+                </Col>
               </Row>
-            </Card>
+            </ARSection>
 
+            {/* Customer + Payment */}
+            <Row gutter={[16, 0]}>
+              <Col xs={24} md={16}>
+                <ARSection title="Customer">
+                  <Row gutter={[16, 0]}>
+                    <Col xs={24} sm={12}>
+                      <ARField label="Bill-to Name" value={pf(inv, ['BillToCustomerName'])} />
+                      <ARField label="Bill-to Site" value={pf(inv, ['BillToSite', 'BillToCustomerSiteNumber', 'BillToSiteNumber', 'BillToCustomerAccountSiteId'])} />
+                    </Col>
+                    <Col xs={24} sm={12}>
+                      <ARField label="Ship-to Name" value={pf(inv, ['ShipToCustomerName'])} />
+                      <ARField label="Ship-to Site" value={pf(inv, ['ShipToSite', 'ShipToCustomerSiteNumber', 'ShipToSiteNumber'])} />
+                    </Col>
+                  </Row>
+                </ARSection>
+              </Col>
+              <Col xs={24} md={8}>
+                <ARSection title="Payment">
+                  <ARField label="Payment Terms" value={pf(inv, ['PaymentTerms', 'PaymentTermsName'])} />
+                  <ARField label="Due Date" value={fmtDate(pf(inv, ['DueDate', 'PaymentDueDate']))} />
+                </ARSection>
+              </Col>
+            </Row>
+
+            {/* Invoice Lines */}
             <Card size="small" styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
-              title={<Space><UnorderedListOutlined style={{ color: REDWOOD.primary }} /><Text strong>Invoice Lines</Text>{lines.length > 0 && <Tag>{lines.length}</Tag>}</Space>}>
-              {lines.length === 0 ? <Empty description="No invoice lines" style={{ padding: 30 }} />
-                : <Table size="small" columns={lineCols} dataSource={lines} rowKey={(_, i) => `ar-line-${i}`}
-                    pagination={lines.length > 20 ? { pageSize: 20, size: 'small' } : false} scroll={{ x: 'max-content', y: 320 }} />}
+              title={<Space><UnorderedListOutlined style={{ color: REDWOOD.primary }} /><Text strong>Invoice Lines</Text>{productLines.length > 0 && <Tag>{productLines.length}</Tag>}</Space>}>
+              {productLines.length === 0 ? <Empty description="No invoice lines" style={{ padding: 30 }} />
+                : <Table size="small" columns={lineCols} dataSource={productLines} rowKey={(_, i) => `ar-line-${i}`}
+                    pagination={productLines.length > 20 ? { pageSize: 20, size: 'small' } : false} scroll={{ x: 1500, y: 300 }}
+                    summary={(data) => {
+                      const q = data.reduce((s, l) => s + num(pf(l, ['Quantity', 'InvoicedQuantity'])), 0);
+                      const a = data.reduce((s, l) => s + amtOf(l), 0);
+                      return (
+                        <Table.Summary fixed>
+                          <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+                            <Table.Summary.Cell index={0} colSpan={4} align="right"><Text strong>Total</Text></Table.Summary.Cell>
+                            <Table.Summary.Cell index={4} align="right"><Text strong>{fmtQty(q)}</Text></Table.Summary.Cell>
+                            <Table.Summary.Cell index={5} />
+                            <Table.Summary.Cell index={6} align="right"><Text strong style={{ color: REDWOOD.primary }}>{amt(a)}</Text></Table.Summary.Cell>
+                            <Table.Summary.Cell index={7} colSpan={4} />
+                          </Table.Summary.Row>
+                        </Table.Summary>
+                      );
+                    }} />}
             </Card>
           </>
         )}
 
       <AllFieldsModal title={`AR Invoice ${pf(inv, ['TransactionNumber']) ?? ''} — all fields`} row={allOpen ? inv : null} onClose={() => setAllOpen(false)} />
+      <ChildDataModal href={acctHref} title="Invoice Accounting" onClose={() => setAcctHref(null)} />
     </Modal>
   );
 };
