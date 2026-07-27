@@ -1,13 +1,13 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   Layout, Breadcrumb, Card, Table, Form, Input, Select, DatePicker, Button,
-  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty,
+  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty, Tabs,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, CheckSquareOutlined, SearchOutlined, ReloadOutlined, ClearOutlined,
   ApiOutlined, CopyOutlined, InfoCircleOutlined, ExportOutlined, BankOutlined,
-  UnorderedListOutlined,
+  UnorderedListOutlined, ProfileOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -52,23 +52,76 @@ const fetchAllPages = async (baseUrl: string): Promise<any[]> => {
   return all;
 };
 
-// ── Pick Slip drill dialog (header + pickLines) ──────────────────────────────
-const PickSlipDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ row, onClose }) => {
-  const [lines, setLines] = useState<any[]>([]);
+// A field is hidden from generic tables when it's an id/href or empty.
+const isHiddenKey = (k: string) => /Id$/.test(k) || k === 'links';
+const isEmpty = (v: any) => v == null || v === '' || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v ?? {}).length === 0);
+const renderVal = (k: string, v: any): React.ReactNode => {
+  if (isEmpty(v)) return '—';
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+  if (typeof v === 'object') return JSON.stringify(v);
+  if (/Date$/.test(k)) return fmtDate(String(v));
+  return String(v);
+};
+const dynamicColumns = (items: any[]): ColumnsType<any> => {
+  const keys: string[] = []; const seen = new Set<string>();
+  items.forEach(it => Object.keys(it ?? {}).forEach(k => {
+    if (seen.has(k) || isHiddenKey(k)) return;
+    if (items.some(row => !isEmpty(row?.[k]))) { seen.add(k); keys.push(k); }
+  }));
+  return keys.map(k => ({
+    title: k.replace(/([A-Z])/g, ' $1').replace(/^ /, ''),
+    dataIndex: k, width: 160, ellipsis: true,
+    render: (v: any) => <Text style={{ fontSize: 12 }}>{renderVal(k, v)}</Text>,
+  }));
+};
+
+// Clamp long text to 2 lines with a hover tooltip showing the full value.
+const ClampTip: React.FC<{ text?: string }> = ({ text }) => {
+  if (!text) return <>—</>;
+  return (
+    <Tooltip title={text}>
+      <div style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', cursor: 'help' }}>{text}</div>
+    </Tooltip>
+  );
+};
+
+// Lazily fetch a child link (pickLines or any other) and render it.
+const ChildLinkTab: React.FC<{ href: string; name: string; columns?: ColumnsType<any>; rowKey?: (r: any, i: number) => string }> =
+  ({ href, name, columns, rowKey }) => {
+  const [items, setItems] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
-  const linesHref = row?.links?.find((l: any) => l.name === 'pickLines')?.href
-    ?? (row ? `${FUSION_BASE}/pickSlipDetails/${row.PickSlip}/child/pickLines` : '');
-
-  const loadLines = useCallback(async () => {
-    if (!linesHref) return;
+  const load = useCallback(async () => {
     setLoading(true); setError('');
-    try { setLines(await fetchAllPages(linesHref)); }
-    catch (e: any) { setError(e.message); setLines([]); }
+    try { setItems(await fetchAllPages(href)); }
+    catch (e: any) { setError(e.message); setItems([]); }
     finally { setLoading(false); }
-  }, [linesHref]);
-  useEffect(() => { if (row) loadLines(); }, [row, loadLines]);
+  }, [href]);
+  useEffect(() => { load(); }, [load]);
+  const cols = useMemo(() => columns ?? dynamicColumns(items ?? []), [columns, items]);
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+        <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {href}</span>}>
+          <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} />
+        </Tooltip>
+        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>Reload</Button>
+      </div>
+      {loading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+        : error ? <div style={{ color: REDWOOD.error, fontSize: 12 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div>
+        : !items || items.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`No ${name} records`} style={{ padding: 24 }} />
+        : <Table size="small" columns={cols} dataSource={items} rowKey={(rowKey ?? ((_: any, i: number) => `${name}-${i}`)) as any}
+            pagination={items.length > 20 ? { pageSize: 20, size: 'small' } : false} scroll={{ x: 'max-content', y: 360 }} />}
+    </div>
+  );
+};
+
+// ── Pick Slip drill dialog (header + pickLines) ──────────────────────────────
+const PickSlipDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ row, onClose }) => {
+  const childLinks = (row?.links ?? []).filter((l: any) => l.rel === 'child' && l.href);
+  const pickLinesHref = childLinks.find((l: any) => l.name === 'pickLines')?.href
+    ?? (row ? `${FUSION_BASE}/pickSlipDetails/${row.PickSlip}/child/pickLines` : '');
+  const otherLinks = childLinks.filter((l: any) => l.name !== 'pickLines');
 
   const HInfo: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
     <Col xs={12} sm={8} md={6}>
@@ -118,27 +171,28 @@ const PickSlipDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ ro
             <HInfo label="Shipment" value={row.Shipment} />
             <HInfo label="Movement Request" value={row.MovementRequest} />
             <HInfo label="Shipping Method" value={row.ShippingMethod} />
-            <HInfo label="Ship To Location" value={row.ShipToLocation} />
+            <HInfo label="Ship To Location" value={<ClampTip text={row.ShipToLocation} />} />
           </Row>
         )}
       </Card>
 
-      {/* Lines */}
-      <Card size="small" styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
-        title={<Space><UnorderedListOutlined style={{ color: REDWOOD.primary }} /><Text strong>Pick Lines</Text>
-          {lines.length > 0 && <Tag>{lines.length}</Tag>}</Space>}
-        extra={<Space>
-          <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {linesHref}</span>}>
-            <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} />
-          </Tooltip>
-          <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={loadLines}>Reload</Button>
-        </Space>}>
-        {loading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
-          : error ? <div style={{ padding: 16, color: REDWOOD.error, fontSize: 12 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div>
-          : lines.length === 0 ? <Empty description="No pick lines" style={{ padding: 30 }} />
-          : <Table size="small" columns={lineCols} dataSource={lines} rowKey={(r, i) => `${r.PickSlipLine ?? i}`}
-              pagination={false} scroll={{ x: 1400, y: 380 }} />}
-      </Card>
+      {/* Pick Lines + one tab per child link */}
+      <Tabs
+        size="small"
+        items={[
+          {
+            key: 'pickLines',
+            label: <span><UnorderedListOutlined style={{ marginRight: 5 }} />Pick Lines</span>,
+            children: <ChildLinkTab href={pickLinesHref} name="pickLines" columns={lineCols}
+              rowKey={(r, i) => `${r.PickSlipLine ?? i}`} />,
+          },
+          ...otherLinks.map((l: any) => ({
+            key: l.name,
+            label: <span><ProfileOutlined style={{ marginRight: 5 }} /><span style={{ textTransform: 'capitalize' }}>{l.name}</span></span>,
+            children: <ChildLinkTab href={l.href} name={l.name} />,
+          })),
+        ]}
+      />
     </Modal>
   );
 };
