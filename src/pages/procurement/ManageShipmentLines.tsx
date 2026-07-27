@@ -1,0 +1,309 @@
+import React, { useState, useCallback, useMemo } from 'react';
+import {
+  Layout, Breadcrumb, Card, Table, Form, Input, Select, DatePicker, Button,
+  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty,
+} from 'antd';
+import type { ColumnsType } from 'antd/es/table';
+import {
+  HomeOutlined, CarOutlined, SearchOutlined, ReloadOutlined, ClearOutlined,
+  ApiOutlined, CopyOutlined, InfoCircleOutlined, ProfileOutlined,
+} from '@ant-design/icons';
+import { Link } from 'react-router-dom';
+import dayjs, { type Dayjs } from 'dayjs';
+
+const { Content } = Layout;
+const { Title, Text } = Typography;
+
+// Electron goes direct (no CORS); browser dev routes via the Vite proxy.
+const _isElectron = !!(window as unknown as { electron?: unknown; electronAPI?: unknown }).electron
+  || !!(window as unknown as { electronAPI?: unknown }).electronAPI;
+const FUSION_BASE = _isElectron
+  ? 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05'
+  : '/fusion-api';
+const AUTH_HEADER = 'Basic ' + btoa('emparun:Fusion@1234');
+const FUSION_HDRS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
+const PAGE_LIMIT = 500;
+
+const REDWOOD = {
+  primary: '#C74634', primaryLight: '#E85D4A', success: '#1D7B4D', warning: '#B07700',
+  info: '#0572CE', error: '#D93025', teal: '#00918A', purple: '#7245A6',
+  neutral100: '#F7F7F7', neutral200: '#E5E5E5', neutral300: '#C7C7C7',
+  neutral600: '#6B6B6B', neutral900: '#1A1A1A', surface: '#FFFFFF',
+};
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+const fmtDate = (d?: string) => { if (!d) return '—'; try { return dayjs(d).format('D-MMM-YYYY'); } catch { return d; } };
+const fmtDateTime = (d?: string) => { if (!d) return '—'; try { return dayjs(d).format('D-MMM-YYYY HH:mm'); } catch { return d; } };
+const fmtQty = (v?: number | null) => (v == null ? '—' : new Intl.NumberFormat('en-US').format(v));
+const fmtPrice = (v?: number | null, ccy?: string) => {
+  if (v == null) return '—';
+  const s = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v));
+  return ccy ? `${s} ${ccy}` : s;
+};
+
+const fetchAllPages = async (baseUrl: string): Promise<any[]> => {
+  const stripped = baseUrl.replace(/[?&]limit=\d+/gi, '').replace(/[?&]offset=\d+/gi, '').replace(/\?&/, '?').replace(/&&/g, '&');
+  const all: any[] = [];
+  let offset = 0;
+  while (true) {
+    const sep = stripped.includes('?') ? '&' : '?';
+    const url = `${stripped}${sep}limit=${PAGE_LIMIT}&offset=${offset}`;
+    const r = await fetch(url, { headers: FUSION_HDRS });
+    if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+    const d = await r.json();
+    const items: any[] = Array.isArray(d) ? d : (d.items ?? []);
+    all.push(...items);
+    if (!d.hasMore || items.length < PAGE_LIMIT) break;
+    offset += PAGE_LIMIT;
+  }
+  return all;
+};
+
+const statusTag = (s?: string) => {
+  if (!s) return <Tag>—</Tag>;
+  const up = s.toUpperCase();
+  const color = up.includes('SHIP') ? 'green' : up.includes('BACKORDER') ? 'red'
+    : up.includes('STAGED') ? 'gold' : up.includes('RELEASE') ? 'blue' : 'geekblue';
+  return <Tag color={color} style={{ fontSize: 11 }}>{s}</Tag>;
+};
+
+// A field is hidden from the "all fields" detail view when it's an id/href or empty.
+const isHiddenKey = (k: string) => /Id$/.test(k) || /Id[0-9]+$/.test(k) || k === 'links' || k.startsWith('Src') || /^QuickShip/.test(k);
+const isEmpty = (v: any) => v == null || v === '' || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v ?? {}).length === 0);
+
+interface Filters {
+  dateOp?: string; date?: Dayjs | null;
+  orderType?: string; order?: string; item?: string; itemDesc?: string; lineStatus?: string;
+}
+
+const ORDER_TYPES = ['Transfer order', 'Sales order', 'Purchase order', 'Return material authorization'];
+const LINE_STATUSES = ['Ready to release', 'Released', 'Staged', 'Shipped', 'Backordered', 'Interfaced', 'Awaiting shipping'];
+
+const ManageShipmentLines: React.FC = () => {
+  const [form] = Form.useForm();
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [error, setError] = useState('');
+  const [apiOpen, setApiOpen] = useState(false);
+  const [detail, setDetail] = useState<any | null>(null);
+  const [filterText, setFilterText] = useState('');
+
+  const [filters, setFilters] = useState<Filters>({ dateOp: '>', date: dayjs().subtract(7, 'day') });
+
+  // Fusion here uses SQL LIKE with single quotes and % wildcards; dates unquoted.
+  const buildQ = useCallback((f: Filters) => {
+    const parts: string[] = [];
+    if (f.date) parts.push(`CreationDate${f.dateOp || '>'}${dayjs(f.date).format('YYYY-MM-DD')}`);
+    if (f.orderType) parts.push(`OrderType='${f.orderType}'`);
+    if (f.order?.trim()) parts.push(`Order='${f.order.trim()}'`);
+    if (f.item?.trim()) parts.push(`Item LIKE '${f.item.trim()}%'`);
+    if (f.itemDesc?.trim()) parts.push(`ItemDescription LIKE '%${f.itemDesc.trim()}%'`);
+    if (f.lineStatus) parts.push(`LineStatus='${f.lineStatus}'`);
+    return parts.join(';');
+  }, []);
+
+  const searchUrl = useMemo(() => {
+    const q = buildQ(filters);
+    const qs = q ? `q=${encodeURIComponent(q)}&` : '';
+    return `${FUSION_BASE}/shipmentLines?${qs}orderBy=CreationDate:desc&onlyData=false`;
+  }, [filters, buildQ]);
+
+  const runSearch = useCallback(async () => {
+    setLoading(true); setError(''); setSearched(true);
+    try {
+      const items = await fetchAllPages(searchUrl);
+      setRows(items);
+      if (items.length === 0) setError('No shipment lines matched.');
+    } catch (e: any) { setError(e.message); setRows([]); }
+    finally { setLoading(false); }
+  }, [searchUrl]);
+
+  const filtered = useMemo(() => {
+    const t = filterText.trim().toLowerCase();
+    if (!t) return rows;
+    return rows.filter(r => JSON.stringify(r).toLowerCase().includes(t));
+  }, [rows, filterText]);
+
+  const columns: ColumnsType<any> = [
+    { title: 'Requested Date', dataIndex: 'RequestedDate', width: 130, fixed: 'left', render: fmtDate,
+      sorter: (a, b) => String(a.RequestedDate ?? '').localeCompare(String(b.RequestedDate ?? '')) },
+    { title: 'Line Status', dataIndex: 'LineStatus', width: 140, render: v => statusTag(v) },
+    { title: 'Org', dataIndex: 'OrganizationCode', width: 80, render: (v, r) => <Tooltip title={r.OrganizationName}><Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag></Tooltip> },
+    { title: 'Src Subinv', dataIndex: 'SourceSubinventoryName', width: 100, render: (v, r) => v ?? r.SourceSubinventory ?? '—' },
+    { title: 'Shipment Line', dataIndex: 'ShipmentLine', width: 110, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Order Type', dataIndex: 'OrderType', width: 130,
+      render: (v, r) => <Tooltip title={r.OrderTypeCode}><Tag color="purple" style={{ fontSize: 11 }}>{v ?? '—'}</Tag></Tooltip> },
+    { title: 'Order', dataIndex: 'Order', width: 90, render: v => <Text strong style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Line', dataIndex: 'OrderLine', width: 55, align: 'center', render: v => <Tag color="blue" style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+    { title: 'Item', dataIndex: 'Item', width: 130, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Description', dataIndex: 'ItemDescription', width: 240, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Requested Qty', dataIndex: 'RequestedQuantity', width: 110, align: 'right', render: (v, r) => <span><Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{fmtQty(v)}</Text>{r.RequestedQuantityUOM ? <Text type="secondary" style={{ fontSize: 11 }}> {r.RequestedQuantityUOM}</Text> : ''}</span> },
+    { title: 'Selling Price', dataIndex: 'SellingPrice', width: 110, align: 'right', render: (v, r) => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{fmtPrice(v, r.CurrencyCode)}</Text> },
+    { title: 'Currency', dataIndex: 'CurrencyCode', width: 80, align: 'center', render: v => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+    { title: 'Business Unit', dataIndex: 'BusinessUnit', width: 200, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Line Unit Price', dataIndex: 'LineUnitPrice', width: 120, align: 'right', render: (v, r) => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: REDWOOD.primary }}>{fmtPrice(v, r.CurrencyCode)}</Text> },
+    { title: 'Ship To Location', dataIndex: 'ShipToLocation', width: 200, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Dest Subinv', dataIndex: 'DestinationSubinventory', width: 100, render: (v, r) => v ?? r.DestinationSubinventoryName ?? '—' },
+    { title: '', key: 'more', width: 46, fixed: 'right', align: 'center',
+      render: (_, r) => (
+        <Tooltip title="Show all remaining fields">
+          <Button size="small" type="text" icon={<ProfileOutlined />} style={{ color: REDWOOD.info }} onClick={() => setDetail(r)} />
+        </Tooltip>
+      ) },
+  ];
+
+  return (
+    <Layout style={{ minHeight: 'calc(100vh - 64px)', background: REDWOOD.neutral100 }}>
+      <Content>
+        <div style={{ padding: '12px 24px', background: REDWOOD.surface, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+          <Breadcrumb items={[
+            { title: <Link to="/home"><HomeOutlined /> Home</Link> },
+            { title: <Link to="/procurement">Procurement</Link> },
+            { title: 'Manage Shipment Lines' },
+          ]} />
+          <Title level={4} style={{ margin: '8px 0 0', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <CarOutlined style={{ color: REDWOOD.primary }} /> Manage Shipment Lines
+            <Text type="secondary" style={{ fontSize: 13, fontWeight: 400 }}>— pending &amp; in-progress shipment lines (Fusion shipmentLines)</Text>
+          </Title>
+        </div>
+
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Search panel */}
+          <Card styles={{ body: { padding: '14px 18px' } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
+            <Form form={form} layout="vertical">
+              <Row gutter={[10, 0]}>
+                <Col xs={24} sm={12} md={6}>
+                  <Form.Item label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Creation Date</Text>} style={{ marginBottom: 8 }}>
+                    <Space.Compact style={{ width: '100%' }}>
+                      <Select style={{ width: 72 }} value={filters.dateOp} onChange={v => setFilters(f => ({ ...f, dateOp: v }))}
+                        options={['>', '>=', '=', '<=', '<'].map(o => ({ value: o, label: o }))} />
+                      <DatePicker style={{ width: '100%' }} value={filters.date} onChange={d => setFilters(f => ({ ...f, date: d }))} />
+                    </Space.Compact>
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={12} md={5}>
+                  <Form.Item label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Order Type</Text>} style={{ marginBottom: 8 }}>
+                    <Select allowClear showSearch placeholder="Any" value={filters.orderType}
+                      onChange={v => setFilters(f => ({ ...f, orderType: v }))}
+                      options={ORDER_TYPES.map(s => ({ value: s, label: s }))} />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={12} md={4}>
+                  <Form.Item label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Order</Text>} style={{ marginBottom: 8 }}>
+                    <Input placeholder="Order number" allowClear value={filters.order}
+                      onChange={e => setFilters(f => ({ ...f, order: e.target.value }))} onPressEnter={runSearch} />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={12} md={4}>
+                  <Form.Item label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Item</Text>} style={{ marginBottom: 8 }}>
+                    <Input placeholder="Item code" allowClear value={filters.item}
+                      onChange={e => setFilters(f => ({ ...f, item: e.target.value }))} onPressEnter={runSearch} />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={12} md={5}>
+                  <Form.Item label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Line Status</Text>} style={{ marginBottom: 8 }}>
+                    <Select allowClear showSearch placeholder="Any" value={filters.lineStatus}
+                      onChange={v => setFilters(f => ({ ...f, lineStatus: v }))}
+                      options={LINE_STATUSES.map(s => ({ value: s, label: s }))} />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={12} md={10}>
+                  <Form.Item label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Item Description contains</Text>} style={{ marginBottom: 8 }}>
+                    <Input placeholder="e.g. FUJIFILM" allowClear value={filters.itemDesc}
+                      onChange={e => setFilters(f => ({ ...f, itemDesc: e.target.value }))} onPressEnter={runSearch} />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+                <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={runSearch}
+                  style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Search</Button>
+                <Button icon={<ClearOutlined />} onClick={() => setFilters({ dateOp: '>', date: dayjs().subtract(7, 'day') })}>Reset</Button>
+                <Input placeholder="Filter results…" allowClear prefix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />}
+                  value={filterText} onChange={e => setFilterText(e.target.value)} style={{ width: 200 }} />
+                <Tooltip title="API Inspector — shipmentLines web service">
+                  <Button icon={<ApiOutlined />} style={{ marginLeft: 'auto', borderColor: REDWOOD.info, color: REDWOOD.info }}
+                    onClick={() => setApiOpen(true)}>API</Button>
+                </Tooltip>
+              </div>
+            </Form>
+          </Card>
+
+          {/* Results */}
+          <Card styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
+            title={<Space><CarOutlined style={{ color: REDWOOD.primary }} /><Text strong>Shipment Lines</Text>
+              {rows.length > 0 && <Tag>{filtered.length}{filtered.length !== rows.length ? ` of ${rows.length}` : ''} line{rows.length !== 1 ? 's' : ''}</Tag>}</Space>}
+            extra={<Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={runSearch}>Refresh</Button>}>
+            {loading ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Spin size="large" tip="Loading…" /></div>
+            ) : error && rows.length === 0 ? (
+              <div style={{ padding: 24, color: REDWOOD.error, background: REDWOOD.error + '10', margin: 16, borderRadius: 6 }}>
+                <InfoCircleOutlined style={{ marginRight: 8 }} />{error}
+              </div>
+            ) : !searched ? (
+              <Empty description="Run a search" style={{ padding: 60 }} />
+            ) : filtered.length === 0 ? (
+              <Empty description="No shipment lines" style={{ padding: 60 }} />
+            ) : (
+              <Table columns={columns} dataSource={filtered} rowKey={(r, i) => `${r.ShipmentLine ?? i}`} size="small"
+                scroll={{ x: 2100 }} pagination={{ pageSize: 25, size: 'small', showSizeChanger: true, showTotal: t => `${t} lines` }} />
+            )}
+          </Card>
+        </div>
+
+        {/* API inspector */}
+        <Modal title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /> Shipment Lines API</Space>}
+          open={apiOpen} onCancel={() => setApiOpen(false)} maskClosable={false} width={860}
+          footer={<Button onClick={() => setApiOpen(false)}>Close</Button>}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase' }}>Search shipment lines</Text>
+                <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginLeft: 'auto' }}
+                  onClick={() => { navigator.clipboard.writeText(decodeURIComponent(searchUrl)); message.success('Copied'); }}>Copy</Button>
+              </div>
+              <div style={{ marginTop: 4, padding: '8px 12px', borderRadius: 6, background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info }}>
+                <Tag color="blue">GET</Tag>{decodeURIComponent(searchUrl)}
+              </div>
+            </div>
+            <Text type="secondary" style={{ fontSize: 11 }}>Dates are unquoted (CreationDate&gt;2026-07-25); text uses SQL LIKE. Auth: Basic [emparun].</Text>
+          </div>
+        </Modal>
+
+        {/* Full-detail modal — remaining fields, null & id columns hidden */}
+        <Modal
+          title={<Space><ProfileOutlined style={{ color: REDWOOD.info }} /> Shipment Line {detail?.ShipmentLine} — all fields</Space>}
+          open={!!detail} onCancel={() => setDetail(null)} maskClosable={false} width={900}
+          footer={<Button onClick={() => setDetail(null)}>Close</Button>}>
+          {detail && (() => {
+            const entries = Object.entries(detail).filter(([k, v]) => !isHiddenKey(k) && !isEmpty(v));
+            const LV: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
+              <Col xs={24} sm={12} md={8}>
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>{label}</div>
+                  <div style={{ fontSize: 12, color: REDWOOD.neutral900, marginTop: 2, wordBreak: 'break-word' }}>{value}</div>
+                </div>
+              </Col>
+            );
+            return (
+              <div style={{ maxHeight: '65vh', overflowY: 'auto' }}>
+                <Row gutter={[12, 0]}>
+                  {entries.map(([k, v]) => (
+                    <LV key={k} label={k.replace(/([A-Z])/g, ' $1').replace(/^ /, '')} value={
+                      typeof v === 'boolean' ? (v ? 'Yes' : 'No')
+                        : typeof v === 'object' ? JSON.stringify(v)
+                        : /Date$/.test(k) || k.endsWith('DateTime') ? fmtDateTime(String(v))
+                        : String(v)
+                    } />
+                  ))}
+                </Row>
+              </div>
+            );
+          })()}
+        </Modal>
+      </Content>
+    </Layout>
+  );
+};
+
+export default ManageShipmentLines;

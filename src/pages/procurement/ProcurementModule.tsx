@@ -5,7 +5,7 @@ import {
   DatabaseOutlined, CheckCircleOutlined, LockOutlined, BugOutlined,
   ApartmentOutlined, BankOutlined, SafetyCertificateOutlined, InboxOutlined,
   DollarOutlined, ReconciliationOutlined, CloudOutlined, HistoryOutlined,
-  SwapOutlined,
+  SwapOutlined, CarOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -112,6 +112,14 @@ const procurementItems: MenuItemType[] = [
     description: 'Transfer stock between inventory organizations (search & create via SCO)',
     color: REDWOOD.info,
     path: '/procurement/transfer-orders',
+  },
+  {
+    key: 'shipment-lines',
+    icon: <CarOutlined />,
+    label: 'Manage Shipment Lines',
+    description: 'Search pending & in-progress shipment lines from Oracle Fusion (shipmentLines)',
+    color: REDWOOD.teal,
+    path: '/procurement/shipment-lines',
   },
   {
     key: 'item-costs',

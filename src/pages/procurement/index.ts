@@ -11,3 +11,4 @@ export { default as TrialBalanceLoading } from './TrialBalanceLoading';
 export { default as LoginHistory } from './LoginHistory';
 export { default as CostManagement } from './CostManagement';
 export { default as TransferOrders } from './TransferOrders';
+export { default as ManageShipmentLines } from './ManageShipmentLines';
