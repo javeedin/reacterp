@@ -7,7 +7,7 @@ import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, ProfileOutlined, SearchOutlined, ReloadOutlined, ClearOutlined,
   ApiOutlined, CopyOutlined, InfoCircleOutlined, ExportOutlined, BankOutlined,
-  UnorderedListOutlined, ShoppingOutlined,
+  UnorderedListOutlined, ShoppingOutlined, DollarOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -116,6 +116,80 @@ const AllFieldsModal: React.FC<{ title: string; row: any | null; onClose: () => 
   </Modal>
 );
 
+const fmtAmount = (v?: number | null, ccy?: string) => {
+  if (v == null) return '—';
+  const s = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v));
+  return ccy ? `${s} ${ccy}` : s;
+};
+
+// ── Order totals drill (…/child/totals) ──────────────────────────────────────
+const TotalsModal: React.FC<{ order: any | null; onClose: () => void }> = ({ order, onClose }) => {
+  const href = order?.links?.find((l: any) => l.name === 'totals')?.href
+    ?? (order?.HeaderId ? `${FUSION_BASE}/salesOrdersForOrderHub/${order.HeaderId}/child/totals` : '');
+
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    if (!href) return;
+    setLoading(true); setError('');
+    try { setItems(await fetchAllPages(href)); }
+    catch (e: any) { setError(e.message); setItems([]); }
+    finally { setLoading(false); }
+  }, [href]);
+  useEffect(() => { if (order) load(); }, [order, load]);
+
+  const ccy = items.find(i => i.CurrencyCode)?.CurrencyCode;
+  // The primary/order total gets the headline treatment.
+  const primary = items.find(i => i.PrimaryFlag)
+    ?? items.find(i => /ORDER/i.test(i.TotalCode ?? '') && !/TAX|SHIP|DISC/i.test(i.TotalCode ?? ''));
+
+  const cols: ColumnsType<any> = [
+    { title: 'Total', dataIndex: 'TotalName', width: 200,
+      render: (v, r) => <Space size={4}>{r.PrimaryFlag && <DollarOutlined style={{ color: REDWOOD.success }} />}<Text strong={r.PrimaryFlag} style={{ fontSize: 12 }}>{v ?? r.TotalCode ?? '—'}</Text></Space> },
+    { title: 'Code', dataIndex: 'TotalCode', width: 160, render: v => v ? <Tag style={{ fontSize: 11 }}>{v}</Tag> : '—' },
+    { title: 'Amount', dataIndex: 'TotalAmount', width: 150, align: 'right',
+      render: (v, r) => <Text strong style={{ fontSize: 12.5, color: r.PrimaryFlag ? REDWOOD.success : REDWOOD.neutral900, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(v, r.CurrencyCode)}</Text> },
+    { title: 'Group', dataIndex: 'TotalGroup', width: 90, align: 'center', render: v => v ?? '—' },
+    { title: 'Estimated', dataIndex: 'EstimatedFlag', width: 90, align: 'center', render: v => (v ? <Tag color="gold" style={{ fontSize: 10 }}>Estimated</Tag> : '—') },
+  ];
+
+  return (
+    <Modal open={!!order} onCancel={onClose} maskClosable={false} width={760}
+      title={<Space><DollarOutlined style={{ color: REDWOOD.success }} /> Order Totals
+        <Tag color="volcano">{order?.OrderNumber}</Tag></Space>}
+      footer={<Space>
+        <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {href}</span>}>
+          <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info, marginRight: 'auto' }} />
+        </Tooltip>
+        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>Reload</Button>
+        <Button onClick={onClose}>Close</Button>
+      </Space>}>
+      {loading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+        : error ? <div style={{ color: REDWOOD.error, fontSize: 12 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div>
+        : items.length === 0 ? <Empty description="No totals" style={{ padding: 30 }} />
+        : (
+          <>
+            {primary && (
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '10px 14px', marginBottom: 12, borderRadius: 8,
+                background: REDWOOD.success + '12', border: `1px solid ${REDWOOD.success}44` }}>
+                <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase' }}>{primary.TotalName ?? 'Order Total'}</Text>
+                <Text strong style={{ fontSize: 20, color: REDWOOD.success, marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(primary.TotalAmount, primary.CurrencyCode)}</Text>
+              </div>
+            )}
+            <Table size="small" columns={cols} dataSource={items} rowKey={(r, i) => `${r.OrderTotalId ?? i}`}
+              pagination={false} scroll={{ y: 340 }}
+              rowClassName={(r) => (r.PrimaryFlag ? 'so-total-primary' : '')} />
+            <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8 }}>
+              {items.length} total line{items.length !== 1 ? 's' : ''}{ccy ? ` · ${ccy}` : ''}
+            </Text>
+            <style>{`.so-total-primary td { background: ${REDWOOD.success}0c !important; }`}</style>
+          </>
+        )}
+    </Modal>
+  );
+};
+
 // ── Order view (header + lines) shown in its own tab ─────────────────────────
 const OrderView: React.FC<{ order: any }> = ({ order }) => {
   const linesHref = order?.links?.find((l: any) => l.name === 'lines')?.href
@@ -126,6 +200,7 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
   const [error, setError] = useState('');
   const [lineDetail, setLineDetail] = useState<any | null>(null);
   const [hdrOpen, setHdrOpen] = useState(false);
+  const [totalsOpen, setTotalsOpen] = useState(false);
 
   const loadLines = useCallback(async () => {
     if (!linesHref) return;
@@ -176,7 +251,10 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
       <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 12 }}
         title={<Space><BankOutlined style={{ color: REDWOOD.primary }} /><Text strong>Header</Text>
           <Tag color="volcano">{order.OrderNumber}</Tag>{statusTag(order.Status, order.StatusCode)}</Space>}
-        extra={<Button size="small" icon={<ProfileOutlined />} onClick={() => setHdrOpen(true)}>All fields</Button>}>
+        extra={<Space>
+          <Button size="small" icon={<DollarOutlined />} style={{ borderColor: REDWOOD.success, color: REDWOOD.success }} onClick={() => setTotalsOpen(true)}>Totals</Button>
+          <Button size="small" icon={<ProfileOutlined />} onClick={() => setHdrOpen(true)}>All fields</Button>
+        </Space>}>
         <Row gutter={[12, 0]}>
           <HInfo label="Order Number" value={<Text strong>{order.OrderNumber}</Text>} />
           <HInfo label="Order Key" value={order.OrderKey} />
@@ -216,6 +294,7 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
 
       <AllFieldsModal title={`Order ${order.OrderNumber} — header`} row={hdrOpen ? order : null} onClose={() => setHdrOpen(false)} />
       <AllFieldsModal title={`Line ${lineDetail?.DisplayLineNumber ?? ''} — ${lineDetail?.ProductNumber ?? ''}`} row={lineDetail} onClose={() => setLineDetail(null)} />
+      <TotalsModal order={totalsOpen ? order : null} onClose={() => setTotalsOpen(false)} />
     </div>
   );
 };
@@ -247,6 +326,7 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void }> = ({ onOpen }) => {
   const [apiOpen, setApiOpen] = useState(false);
   const [filterText, setFilterText] = useState('');
   const [detail, setDetail] = useState<any | null>(null);
+  const [totalsOrder, setTotalsOrder] = useState<any | null>(null);
 
   const [filters, setFilters] = useState<Filters>({
     dateFrom: dayjs().subtract(1, 'month'), dateTo: dayjs().add(1, 'day'),
@@ -310,6 +390,12 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void }> = ({ onOpen }) => {
     { title: 'Source System', dataIndex: 'SourceTransactionSystem', width: 110, render: v => v ? <Tag style={{ fontSize: 11 }}>{v}</Tag> : '—' },
     { title: 'Order Key', dataIndex: 'OrderKey', width: 200, ellipsis: true, render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v ?? '—'}</Text> },
     { title: 'Created', dataIndex: 'CreationDate', width: 130, render: fmtDateTime },
+    { title: '', key: 'totals', width: 44, fixed: 'right', align: 'center',
+      render: (_, r) => (
+        <Tooltip title="Order totals">
+          <Button size="small" type="text" icon={<DollarOutlined />} style={{ color: REDWOOD.success }} onClick={() => setTotalsOrder(r)} />
+        </Tooltip>
+      ) },
     { title: '', key: 'more', width: 46, fixed: 'right', align: 'center',
       render: (_, r) => (
         <Tooltip title="All fields (null & id hidden)">
@@ -395,7 +481,7 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void }> = ({ onOpen }) => {
           <Empty description="No sales orders" style={{ padding: 60 }} />
         ) : (
           <Table columns={columns} dataSource={filtered} rowKey={(r, i) => `${r.HeaderId ?? r.OrderKey ?? i}`} size="small"
-            scroll={{ x: 2140 }} pagination={{ pageSize: 25, size: 'small', showSizeChanger: true, showTotal: t => `${t} orders` }} />
+            scroll={{ x: 2184 }} pagination={{ pageSize: 25, size: 'small', showSizeChanger: true, showTotal: t => `${t} orders` }} />
         )}
       </Card>
 
@@ -423,6 +509,7 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void }> = ({ onOpen }) => {
       </Modal>
 
       <AllFieldsModal title={`Order ${detail?.OrderNumber ?? ''} — all fields`} row={detail} onClose={() => setDetail(null)} />
+      <TotalsModal order={totalsOrder} onClose={() => setTotalsOrder(null)} />
     </div>
   );
 };
