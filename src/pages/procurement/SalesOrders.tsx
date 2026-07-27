@@ -7,10 +7,12 @@ import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, ProfileOutlined, SearchOutlined, ReloadOutlined, ClearOutlined,
   ApiOutlined, CopyOutlined, InfoCircleOutlined, ExportOutlined, BankOutlined,
-  UnorderedListOutlined, ShoppingOutlined, DollarOutlined,
+  UnorderedListOutlined, ShoppingOutlined, DollarOutlined, PrinterOutlined, DownloadOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -35,6 +37,8 @@ const REDWOOD = {
 const fmtDate = (d?: string) => { if (!d) return '—'; try { return dayjs(d).format('D-MMM-YYYY'); } catch { return d; } };
 const fmtDateTime = (d?: string) => { if (!d) return '—'; try { return dayjs(d).format('D-MMM-YYYY HH:mm'); } catch { return d; } };
 const fmtQty = (v?: number | null) => (v == null ? '—' : new Intl.NumberFormat('en-US').format(v));
+const num = (v: any) => { const n = Number(v); return isNaN(n) ? 0 : n; };
+const fmt = (v: any) => (v == null || v === '' ? '—' : String(v));
 
 const fetchAllPages = async (baseUrl: string): Promise<any[]> => {
   const stripped = baseUrl.replace(/[?&]limit=\d+/gi, '').replace(/[?&]offset=\d+/gi, '').replace(/\?&/, '?').replace(/&&/g, '&');
@@ -184,8 +188,8 @@ const useTotals = (order: any | null, active: boolean) => {
 };
 
 // Inline "Order Total" section shown inside the order window.
-const OrderTotalsSection: React.FC<{ order: any }> = ({ order }) => {
-  const { href, items, loading, error, load } = useTotals(order, true);
+const OrderTotalsSection: React.FC<{ totals: ReturnType<typeof useTotals> }> = ({ totals }) => {
+  const { href, items, loading, error, load } = totals;
   return (
     <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginTop: 12 }}
       title={<Space><DollarOutlined style={{ color: REDWOOD.success }} /><Text strong>Order Total</Text></Space>}
@@ -233,6 +237,8 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
   const [error, setError] = useState('');
   const [lineDetail, setLineDetail] = useState<any | null>(null);
   const [hdrOpen, setHdrOpen] = useState(false);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const totals = useTotals(order, true);
 
   const loadLines = useCallback(async () => {
     if (!linesHref) return;
@@ -277,13 +283,112 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
       ) },
   ]), [lines]);
 
+  // Build a nicely formatted Sales Order PDF (header + lines + totals).
+  const buildPdf = () => {
+    const doc = new jsPDF('p', 'mm', 'a4');
+    const pageW = doc.internal.pageSize.getWidth();
+    const RED: [number, number, number] = [199, 70, 52];
+    const GREEN: [number, number, number] = [29, 123, 77];
+
+    doc.setFillColor(...RED); doc.rect(0, 0, pageW, 24, 'F');
+    doc.setTextColor(255); doc.setFont('helvetica', 'bold'); doc.setFontSize(16);
+    doc.text('SALES ORDER', 14, 15);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+    doc.text(`Order ${fmt(order.OrderNumber)}`, pageW - 14, 10, { align: 'right' });
+    doc.text(`Status: ${fmt(order.Status)}`, pageW - 14, 15.5, { align: 'right' });
+    doc.text(`Date: ${fmtDate(order.TransactionOn)}`, pageW - 14, 21, { align: 'right' });
+    doc.setTextColor(0);
+
+    let y = 32;
+    autoTable(doc, {
+      startY: y,
+      body: [
+        ['Business Unit', fmt(order.BusinessUnitName), 'Customer', fmt(order.BuyingPartyName)],
+        ['Legal Entity', fmt(order.RequestingLegalEntity), 'Customer #', fmt(order.BuyingPartyNumber)],
+        ['Source Txn #', `${fmt(order.SourceTransactionNumber)} (${fmt(order.SourceTransactionSystem)})`, 'Customer PO', fmt(order.CustomerPONumber)],
+        ['Transaction Type', fmt(order.TransactionType ?? order.TransactionTypeCode), 'Currency', fmt(order.TransactionalCurrencyCode ?? order.AppliedCurrencyCode)],
+        ['Payment Terms', fmt(order.PaymentTerms ?? order.PaymentTermsCode), 'Requested Ship', fmtDate(order.RequestedShipDate)],
+        ['Order Key', fmt(order.OrderKey), 'Created', fmtDateTime(order.CreationDate)],
+      ],
+      styles: { fontSize: 9, cellPadding: 2.2 },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 32, fillColor: [245, 245, 245] }, 2: { fontStyle: 'bold', cellWidth: 30, fillColor: [245, 245, 245] } },
+      margin: { left: 14, right: 14 },
+    });
+    y = (doc as any).lastAutoTable.finalY + 6;
+
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.text('Lines', 14, y); y += 2;
+    autoTable(doc, {
+      startY: y,
+      head: [['#', 'Product', 'Description', 'Qty', 'Unit List', 'Unit Price', 'Extended', 'Status']],
+      body: lines.map(l => {
+        const ext = num(l.OrderedQuantity) * num(l.UnitSellingPrice);
+        return [
+          fmt(l.DisplayLineNumber ?? l.LineNumber),
+          fmt(l.ProductNumber),
+          fmt(l.ProductDescription),
+          `${fmtQty(l.OrderedQuantity)}${l.OrderedUOM ? ' ' + l.OrderedUOM : ''}`,
+          l.UnitListPrice == null ? '—' : fmtAmount(l.UnitListPrice),
+          l.UnitSellingPrice == null ? '—' : fmtAmount(l.UnitSellingPrice),
+          fmtAmount(ext),
+          fmt(l.Status),
+        ];
+      }),
+      styles: { fontSize: 8, cellPadding: 1.8, overflow: 'linebreak' },
+      headStyles: { fillColor: [58, 58, 58], textColor: 255 },
+      alternateRowStyles: { fillColor: [249, 249, 249] },
+      columnStyles: { 0: { cellWidth: 10, halign: 'center' }, 1: { cellWidth: 26 }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' }, 7: { cellWidth: 22 } },
+      margin: { left: 14, right: 14 },
+    });
+    y = (doc as any).lastAutoTable.finalY + 6;
+
+    const tItems = totals.items;
+    if (tItems.length) {
+      const grand = tItems.find(isGrandTotal);
+      const rows = tItems.filter(t => t !== grand).sort((a, b) => totalRank(a) - totalRank(b));
+      autoTable(doc, {
+        startY: y,
+        body: rows.map(t => [fmt(t.TotalName ?? t.TotalCode), fmtAmount(t.TotalAmount, t.CurrencyCode)]),
+        foot: grand ? [[fmt(grand.TotalName ?? 'Order Total'), fmtAmount(grand.TotalAmount, grand.CurrencyCode)]] : undefined,
+        styles: { fontSize: 9, cellPadding: 2 },
+        footStyles: { fillColor: GREEN, textColor: 255, fontStyle: 'bold', fontSize: 11 },
+        columnStyles: { 0: { fontStyle: 'bold' }, 1: { halign: 'right' } },
+        tableWidth: 80,
+        margin: { left: pageW - 94, right: 14 },
+      });
+      y = (doc as any).lastAutoTable.finalY + 6;
+    }
+
+    const pageCount = doc.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i); doc.setFontSize(8); doc.setTextColor(120);
+      doc.text(`Page ${i} of ${pageCount}`, pageW / 2, 290, { align: 'center' });
+      doc.text('Generated by Fusion Client', 14, 290);
+      doc.setTextColor(0);
+    }
+    return doc;
+  };
+
+  const printOrder = () => {
+    try {
+      const doc = buildPdf();
+      const url = URL.createObjectURL(doc.output('blob'));
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+      setPdfUrl(url);
+    } catch (e: any) { message.error(`Print failed: ${e.message}`); }
+  };
+  const closePdf = () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl); setPdfUrl(null); };
+
   return (
     <div style={{ padding: '4px 2px' }}>
       {/* Header card */}
       <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 12 }}
         title={<Space><BankOutlined style={{ color: REDWOOD.primary }} /><Text strong>Header</Text>
           <Tag color="volcano">{order.OrderNumber}</Tag>{statusTag(order.Status, order.StatusCode)}</Space>}
-        extra={<Button size="small" icon={<ProfileOutlined />} onClick={() => setHdrOpen(true)}>All fields</Button>}>
+        extra={<Space>
+          <Button size="small" type="primary" icon={<PrinterOutlined />} onClick={printOrder}
+            style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Print Order</Button>
+          <Button size="small" icon={<ProfileOutlined />} onClick={() => setHdrOpen(true)}>All fields</Button>
+        </Space>}>
         <Row gutter={[12, 0]}>
           <HInfo label="Order Number" value={<Text strong>{order.OrderNumber}</Text>} />
           <HInfo label="Source Transaction #" value={<span>{order.SourceTransactionNumber ?? '—'}{order.SourceTransactionSystem ? <Tag style={{ marginLeft: 6, fontSize: 10 }}>{order.SourceTransactionSystem}</Tag> : null}</span>} />
@@ -323,7 +428,17 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
       </Card>
 
       {/* Order total summary (formatted like an order) */}
-      <OrderTotalsSection order={order} />
+      <OrderTotalsSection totals={totals} />
+
+      {/* Print preview */}
+      <Modal open={!!pdfUrl} onCancel={closePdf} maskClosable={false} width={920} style={{ top: 20 }}
+        title={<Space><PrinterOutlined style={{ color: REDWOOD.primary }} /> Order {order.OrderNumber} — Print Preview</Space>}
+        footer={<Space>
+          <Button icon={<DownloadOutlined />} onClick={() => { if (!pdfUrl) return; const a = document.createElement('a'); a.href = pdfUrl; a.download = `SalesOrder_${order.OrderNumber}.pdf`; a.click(); }}>Download</Button>
+          <Button onClick={closePdf}>Close</Button>
+        </Space>}>
+        {pdfUrl && <iframe src={pdfUrl} title="order-pdf" style={{ width: '100%', height: '72vh', border: 'none' }} />}
+      </Modal>
 
       <AllFieldsModal title={`Order ${order.OrderNumber} — header`} row={hdrOpen ? order : null} onClose={() => setHdrOpen(false)} />
       <AllFieldsModal title={`Line ${lineDetail?.DisplayLineNumber ?? ''} — ${lineDetail?.ProductNumber ?? ''}`} row={lineDetail} onClose={() => setLineDetail(null)} />
@@ -400,10 +515,11 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void }> = ({ onOpen }) => {
   }, [rows, filterText]);
 
   const columns = useMemo<ColumnsType<any>>(() => ([
-    { title: 'Source Txn #', dataIndex: 'SourceTransactionNumber', width: 120, fixed: 'left',
+    { title: 'Source Txn #', dataIndex: 'SourceTransactionNumber', width: 185, fixed: 'left',
       render: (v, r) => (
-        <Space size={2}>
-          <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 12 }} onClick={() => onOpen(r)}>{v ?? r.OrderNumber ?? '—'}</Button>
+        <Space size={2} style={{ maxWidth: '100%' }}>
+          <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 12, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}
+            title={v ?? r.OrderNumber} onClick={() => onOpen(r)}>{v ?? r.OrderNumber ?? '—'}</Button>
           <Tooltip title="Open order"><Button size="small" type="text" icon={<ExportOutlined />} style={{ color: REDWOOD.info }} onClick={() => onOpen(r)} /></Tooltip>
         </Space>
       ) },
@@ -513,7 +629,7 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void }> = ({ onOpen }) => {
           <Empty description="No sales orders" style={{ padding: 60 }} />
         ) : (
           <Table columns={columns} dataSource={filtered} rowKey={(r, i) => `${r.HeaderId ?? r.OrderKey ?? i}`} size="small"
-            scroll={{ x: 2184 }} pagination={{ pageSize: 25, size: 'small', showSizeChanger: true, showTotal: t => `${t} orders` }} />
+            scroll={{ x: 2249 }} pagination={{ pageSize: 25, size: 'small', showSizeChanger: true, showTotal: t => `${t} orders` }} />
         )}
       </Card>
 
