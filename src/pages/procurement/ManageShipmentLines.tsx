@@ -165,13 +165,24 @@ const ShipmentOrderDialog: React.FC<{ row: any | null; onClose: () => void }> = 
     return s.startsWith('ready to release') || s.includes('backorder');
   });
 
-  // OrderType uses OrderTypeCode, but it's omitted entirely for transfer orders.
+  // Resolve the order type code from the code field, falling back to the
+  // display name. Transfer orders omit OrderType entirely; a sales order must
+  // send OrderType=SALES_ORDER (and any other type sends its own code).
+  const orderTypeDisplay = String(hdr?.OrderType ?? '').toLowerCase();
+  const orderTypeCode = hdr?.OrderTypeCode
+    ?? (orderTypeDisplay.includes('transfer') ? 'TRANSFER_ORDER'
+      : orderTypeDisplay.includes('sales') ? 'SALES_ORDER'
+      : orderTypeDisplay.includes('purchase') ? 'PURCHASE_ORDER'
+      : orderTypeDisplay.includes('return') ? 'RETURN_MATERIAL_AUTHORIZATION'
+      : undefined);
+  const isTransferOrder = orderTypeCode === 'TRANSFER_ORDER' || orderTypeDisplay.includes('transfer');
+
   const pickPayload = {
     SourceSystemName: 'OPS',
     BatchPrefix: `PR-${order}`,
     ShipFromOrganizationCode: hdr?.OrganizationCode,
     ReleaseStatus: 'All',
-    ...(hdr?.OrderTypeCode && hdr.OrderTypeCode !== 'TRANSFER_ORDER' ? { OrderType: hdr.OrderTypeCode } : {}),
+    ...(!isTransferOrder && orderTypeCode ? { OrderType: orderTypeCode } : {}),
     OrderNumber: String(order ?? ''),
     PickReleaseFlag: 'true',
     AutoPickConfirmFlag: 'false',
