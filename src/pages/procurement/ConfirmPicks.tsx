@@ -34,6 +34,13 @@ const REDWOOD = {
 const fmtDate = (d?: string) => { if (!d) return '—'; try { return dayjs(d).format('D-MMM-YYYY'); } catch { return d; } };
 const fmtQty = (v?: number | null) => (v == null ? '—' : new Intl.NumberFormat('en-US').format(v));
 
+const mapLimit = async <T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> => {
+  const out: R[] = new Array(items.length); let idx = 0;
+  const worker = async () => { while (idx < items.length) { const c = idx++; out[c] = await fn(items[c]); } };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+};
+
 const fetchAllPages = async (baseUrl: string): Promise<any[]> => {
   const stripped = baseUrl.replace(/[?&]limit=\d+/gi, '').replace(/[?&]offset=\d+/gi, '').replace(/\?&/, '?').replace(/&&/g, '&');
   const all: any[] = [];
@@ -85,32 +92,51 @@ const ClampTip: React.FC<{ text?: string }> = ({ text }) => {
   );
 };
 
-// Lazily fetch a child link (pickLines or any other) and render it.
-const ChildLinkTab: React.FC<{ href: string; name: string; columns?: ColumnsType<any>; rowKey?: (r: any, i: number) => string }> =
-  ({ href, name, columns, rowKey }) => {
+// Aggregate one line-level child (e.g. itemLots) across every pick line.
+const MergedChildTab: React.FC<{ lines: any[]; name: string }> = ({ lines, name }) => {
   const [items, setItems] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const targets = useMemo(() =>
+    lines.map(l => ({ line: l, href: l.links?.find((x: any) => x.name === name)?.href }))
+      .filter(t => t.href) as { line: any; href: string }[],
+  [lines, name]);
+
   const load = useCallback(async () => {
     setLoading(true); setError('');
-    try { setItems(await fetchAllPages(href)); }
-    catch (e: any) { setError(e.message); setItems([]); }
+    try {
+      const results = await mapLimit(targets, 6, async (t) => {
+        try {
+          const rows = await fetchAllPages(t.href);
+          return rows.map(r => ({ ...r, _pickSlipLine: t.line.PickSlipLine, _item: t.line.Item }));
+        } catch { return []; }
+      });
+      setItems(results.flat());
+    } catch (e: any) { setError(e.message); setItems([]); }
     finally { setLoading(false); }
-  }, [href]);
+  }, [targets]);
   useEffect(() => { load(); }, [load]);
-  const cols = useMemo(() => columns ?? dynamicColumns(items ?? []), [columns, items]);
+
+  const cols = useMemo<ColumnsType<any>>(() => ([
+    { title: 'Line', dataIndex: '_pickSlipLine', width: 60, align: 'center', fixed: 'left', render: (v: any) => <Tag color="blue" style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+    { title: 'Item', dataIndex: '_item', width: 130, render: (v: any) => <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>{v ?? '—'}</Text> },
+    ...dynamicColumns((items ?? []).map(({ _pickSlipLine, _item, ...rest }) => rest)),
+  ]), [items]);
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-        <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {href}</span>}>
+        <Text type="secondary" style={{ marginRight: 'auto', fontSize: 11 }}>Merged from {targets.length} line{targets.length !== 1 ? 's' : ''}</Text>
+        <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11 }}><b>GET</b> …/pickLines/&#123;line&#125;/child/{name}</span>}>
           <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} />
         </Tooltip>
         <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>Reload</Button>
       </div>
       {loading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
         : error ? <div style={{ color: REDWOOD.error, fontSize: 12 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div>
-        : !items || items.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`No ${name} records`} style={{ padding: 24 }} />
-        : <Table size="small" columns={cols} dataSource={items} rowKey={(rowKey ?? ((_: any, i: number) => `${name}-${i}`)) as any}
+        : !items || items.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`No ${name} across the pick lines`} style={{ padding: 24 }} />
+        : <Table size="small" columns={cols} dataSource={items} rowKey={(_, i) => `${name}-${i}`}
             pagination={items.length > 20 ? { pageSize: 20, size: 'small' } : false} scroll={{ x: 'max-content', y: 360 }} />}
     </div>
   );
@@ -118,10 +144,29 @@ const ChildLinkTab: React.FC<{ href: string; name: string; columns?: ColumnsType
 
 // ── Pick Slip drill dialog (header + pickLines) ──────────────────────────────
 const PickSlipDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ row, onClose }) => {
-  const childLinks = (row?.links ?? []).filter((l: any) => l.rel === 'child' && l.href);
-  const pickLinesHref = childLinks.find((l: any) => l.name === 'pickLines')?.href
+  const pickLinesHref = row?.links?.find((l: any) => l.name === 'pickLines')?.href
     ?? (row ? `${FUSION_BASE}/pickSlipDetails/${row.PickSlip}/child/pickLines` : '');
-  const otherLinks = childLinks.filter((l: any) => l.name !== 'pickLines');
+
+  // Load the pick lines (with their links) at the dialog level so we can also
+  // aggregate each line-level child (itemLots, itemSerials, …) across lines.
+  const [pickLines, setPickLines] = useState<any[]>([]);
+  const [linesLoading, setLinesLoading] = useState(false);
+  const [linesError, setLinesError] = useState('');
+  const loadPickLines = useCallback(async () => {
+    if (!pickLinesHref) return;
+    setLinesLoading(true); setLinesError('');
+    try { setPickLines(await fetchAllPages(pickLinesHref)); }
+    catch (e: any) { setLinesError(e.message); setPickLines([]); }
+    finally { setLinesLoading(false); }
+  }, [pickLinesHref]);
+  useEffect(() => { if (row) loadPickLines(); }, [row, loadPickLines]);
+
+  // Distinct line-level child collections across all pick lines → one tab each.
+  const childNames = useMemo(() => {
+    const s = new Set<string>();
+    pickLines.forEach(l => (l.links ?? []).forEach((x: any) => { if (x.rel === 'child' && x.name) s.add(x.name); }));
+    return Array.from(s).sort();
+  }, [pickLines]);
 
   const HInfo: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
     <Col xs={12} sm={8} md={6}>
@@ -176,20 +221,33 @@ const PickSlipDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ ro
         )}
       </Card>
 
-      {/* Pick Lines + one tab per child link */}
+      {/* Pick Lines + one tab per line-level child collection (merged across lines) */}
       <Tabs
         size="small"
         items={[
           {
             key: 'pickLines',
-            label: <span><UnorderedListOutlined style={{ marginRight: 5 }} />Pick Lines</span>,
-            children: <ChildLinkTab href={pickLinesHref} name="pickLines" columns={lineCols}
-              rowKey={(r, i) => `${r.PickSlipLine ?? i}`} />,
+            label: <span><UnorderedListOutlined style={{ marginRight: 5 }} />Pick Lines{pickLines.length ? ` (${pickLines.length})` : ''}</span>,
+            children: (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 8 }}>
+                  <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {pickLinesHref}</span>}>
+                    <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} />
+                  </Tooltip>
+                  <Button size="small" icon={<ReloadOutlined />} loading={linesLoading} onClick={loadPickLines}>Reload</Button>
+                </div>
+                {linesLoading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+                  : linesError ? <div style={{ color: REDWOOD.error, fontSize: 12 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{linesError}</div>
+                  : pickLines.length === 0 ? <Empty description="No pick lines" style={{ padding: 30 }} />
+                  : <Table size="small" columns={lineCols} dataSource={pickLines} rowKey={(r, i) => `${r.PickSlipLine ?? i}`}
+                      pagination={false} scroll={{ x: 1400, y: 340 }} />}
+              </div>
+            ),
           },
-          ...otherLinks.map((l: any) => ({
-            key: l.name,
-            label: <span><ProfileOutlined style={{ marginRight: 5 }} /><span style={{ textTransform: 'capitalize' }}>{l.name}</span></span>,
-            children: <ChildLinkTab href={l.href} name={l.name} />,
+          ...childNames.map((name) => ({
+            key: name,
+            label: <span><ProfileOutlined style={{ marginRight: 5 }} /><span style={{ textTransform: 'capitalize' }}>{name}</span></span>,
+            children: <MergedChildTab lines={pickLines} name={name} />,
           })),
         ]}
       />
