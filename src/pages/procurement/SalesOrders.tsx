@@ -1311,7 +1311,15 @@ const TotalLine: React.FC<{ label: string; value: React.ReactNode; strong?: bool
   </div>
 );
 
-// Item picker (itemsV2), scoped to the warehouse org — like PO Add Lines.
+// itemCosts lives on the "latest" resource version; org is inside ValuationUnit
+// "COSTORG-INVORG-SUBINV-LOT" (not directly filterable), so match client-side.
+const LATEST_URL = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/latest';
+const COST_FIELDS = ['TotalUnitCost', 'UnitCost', 'ItemCost', 'UnitAverageCost', 'AverageUnitCost'];
+const parseVU = (vu?: string) => { const p = String(vu ?? '').split('-'); return { costOrg: p[0], invOrg: p[1], subinv: p[2], lot: p[3] }; };
+const rowOrgMatches = (row: any, org?: string) => { if (!org) return true; const p = parseVU(row.ValuationUnit); return p.invOrg === org || p.costOrg === org; };
+
+// Item picker (itemsV2), scoped to the warehouse org — like PO Add Lines,
+// showing each item's cost for the selected inventory organization.
 const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => void; onAdd: (items: any[]) => void }> = ({ open, org, onClose, onAdd }) => {
   const [byDesc, setByDesc] = useState(false);
   const [term, setTerm] = useState('');
@@ -1319,7 +1327,9 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [sel, setSel] = useState<React.Key[]>([]);
-  useEffect(() => { if (open) { setTerm(''); setRows([]); setSel([]); setError(''); } }, [open]);
+  const [costs, setCosts] = useState<Record<string, { cost?: number; ccy?: string; n: number }>>({});
+  const [costLoading, setCostLoading] = useState(false);
+  useEffect(() => { if (open) { setTerm(''); setRows([]); setSel([]); setError(''); setCosts({}); } }, [open]);
 
   const url = useMemo(() => {
     const t = term.trim(); if (!t) return '';
@@ -1330,18 +1340,43 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
     return `${FUSION_BASE}/itemsV2?q=${encodeURIComponent(q)}&limit=100&onlyData=true`;
   }, [term, byDesc, org]);
 
+  // Fetch each item's cost (matched to the selected inventory org via ValuationUnit).
+  const loadCosts = useCallback(async (items: any[]) => {
+    if (!items.length) return;
+    setCostLoading(true);
+    const map: Record<string, { cost?: number; ccy?: string; n: number }> = {};
+    await mapLimit(items, 5, async (it) => {
+      const item = it.ItemNumber;
+      try {
+        const r = await fetch(`${LATEST_URL}/itemCosts?q=${encodeURIComponent(`ItemNumber=${item}`)}&onlyData=true&limit=500`, { headers: FUSION_HDRS });
+        const d = await r.json();
+        const matched = (d.items ?? []).filter((x: any) => rowOrgMatches(x, org));
+        const row = matched[0];
+        map[item] = { cost: row ? num(pf(row, COST_FIELDS)) : undefined, ccy: row?.CurrencyCode, n: matched.length };
+      } catch { map[item] = { n: 0 }; }
+    });
+    setCosts(map); setCostLoading(false);
+  }, [org]);
+
   const search = useCallback(async () => {
     if (!url) { message.warning('Enter a search term'); return; }
-    setLoading(true); setError(''); setSel([]);
-    try { setRows(await fetchAllPages(url)); }
+    setLoading(true); setError(''); setSel([]); setCosts({});
+    try { const items = await fetchAllPages(url); setRows(items); loadCosts(items); }
     catch (e: any) { setError(e.message); setRows([]); }
     finally { setLoading(false); }
-  }, [url]);
+  }, [url, loadCosts]);
 
   const cols: ColumnsType<any> = [
-    { title: 'Item', dataIndex: 'ItemNumber', width: 150, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text> },
+    { title: 'Item', dataIndex: 'ItemNumber', width: 140, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text> },
     { title: 'Description', dataIndex: 'ItemDescription', ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
-    { title: 'UOM', width: 80, render: (_, r) => pf(r, ['PrimaryUOMValue', 'PrimaryUOMCode', 'PrimaryUnitOfMeasure', 'UOMCode']) ?? '—' },
+    { title: 'UOM', width: 70, render: (_, r) => pf(r, ['PrimaryUOMValue', 'PrimaryUOMCode', 'PrimaryUnitOfMeasure', 'UOMCode']) ?? '—' },
+    { title: <Tooltip title={`Item cost in ${org ?? 'the selected org'} (itemCosts, matched via ValuationUnit)`}><span>Item Cost {org ? <Tag style={{ fontSize: 10 }}>{org}</Tag> : null}</span></Tooltip>, width: 130, align: 'right',
+      render: (_, r) => {
+        const c = costs[r.ItemNumber];
+        if (costLoading && !c) return <Spin size="small" />;
+        if (!c || c.cost == null) return <Text type="secondary" style={{ fontSize: 11 }}>—</Text>;
+        return <Tooltip title={c.n > 1 ? `${c.n} cost rows for this org` : undefined}><Text strong style={{ fontSize: 12, color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(c.cost, c.ccy)}</Text></Tooltip>;
+      } },
   ];
 
   return (
@@ -1351,7 +1386,7 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
         <Text type="secondary" style={{ marginRight: 'auto', fontSize: 12 }}>{sel.length} selected</Text>
         <Button onClick={onClose}>Cancel</Button>
         <Button type="primary" disabled={sel.length === 0} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-          onClick={() => { onAdd(rows.filter(r => sel.includes(r.ItemNumber))); onClose(); }}>Add {sel.length || ''} Item(s)</Button>
+          onClick={() => { onAdd(rows.filter(r => sel.includes(r.ItemNumber)).map(r => ({ ...r, _cost: costs[r.ItemNumber]?.cost }))); onClose(); }}>Add {sel.length || ''} Item(s)</Button>
       </Space>}>
       <Space.Compact style={{ width: '100%', marginBottom: 10 }}>
         <Select value={byDesc ? 'desc' : 'num'} style={{ width: 130 }} onChange={v => setByDesc(v === 'desc')}
@@ -1520,7 +1555,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
       const existing = new Set(prev.map(l => l.itemNumber));
       const add = items.filter(it => !existing.has(it.ItemNumber)).map((it, i) => ({
         key: `${it.ItemNumber}-${prev.length + i}`, itemNumber: it.ItemNumber,
-        description: it.ItemDescription, uom: pf(it, ['PrimaryUOMValue', 'PrimaryUOMCode', 'UOMCode']), qty: 1, unitPrice: 0,
+        description: it.ItemDescription, uom: pf(it, ['PrimaryUOMValue', 'PrimaryUOMCode', 'UOMCode']), qty: 1, unitPrice: num(it._cost),
       }));
       return [...prev, ...add];
     });
