@@ -288,15 +288,19 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void }> = ({ onOpen }) => {
   }, [rows, filterText]);
 
   const columns = useMemo<ColumnsType<any>>(() => ([
-    { title: 'Order', dataIndex: 'OrderNumber', width: 120, fixed: 'left',
+    { title: 'Source Txn #', dataIndex: 'SourceTransactionNumber', width: 120, fixed: 'left',
       render: (v, r) => (
         <Space size={2}>
-          <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 12 }} onClick={() => onOpen(r)}>{v}</Button>
+          <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 12 }} onClick={() => onOpen(r)}>{v ?? r.OrderNumber ?? '—'}</Button>
           <Tooltip title="Open order"><Button size="small" type="text" icon={<ExportOutlined />} style={{ color: REDWOOD.info }} onClick={() => onOpen(r)} /></Tooltip>
         </Space>
       ) },
+    { title: 'Order', dataIndex: 'OrderNumber', width: 100, render: v => <Text strong style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
     { title: 'Order Date', dataIndex: 'TransactionOn', width: 130, render: fmtDateTime,
       sorter: (a, b) => String(a.TransactionOn ?? '').localeCompare(String(b.TransactionOn ?? '')) },
+    { title: 'Transaction Type', dataIndex: 'TransactionType', width: 140, render: (v, r) => v ? <Tag color="purple" style={{ fontSize: 11 }}>{v}</Tag> : (r.TransactionTypeCode ? <Tag style={{ fontSize: 11 }}>{r.TransactionTypeCode}</Tag> : '—') },
+    { title: 'Currency', dataIndex: 'TransactionalCurrencyCode', width: 90, align: 'center', render: (v, r) => <Tag style={{ fontSize: 11 }}>{v ?? r.AppliedCurrencyCode ?? '—'}</Tag> },
+    { title: 'Payment Terms', dataIndex: 'PaymentTerms', width: 150, ellipsis: true, render: (v, r) => <Text style={{ fontSize: 12 }}>{v ?? r.PaymentTermsCode ?? '—'}</Text> },
     { title: 'Status', dataIndex: 'Status', width: 120, render: (v, r) => statusTag(v, r.StatusCode) },
     { title: 'Business Unit', dataIndex: 'BusinessUnitName', width: 220, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
     { title: 'Customer', dataIndex: 'BuyingPartyName', width: 220, ellipsis: true, render: v => <Text strong style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
@@ -391,7 +395,7 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void }> = ({ onOpen }) => {
           <Empty description="No sales orders" style={{ padding: 60 }} />
         ) : (
           <Table columns={columns} dataSource={filtered} rowKey={(r, i) => `${r.HeaderId ?? r.OrderKey ?? i}`} size="small"
-            scroll={{ x: 1660 }} pagination={{ pageSize: 25, size: 'small', showSizeChanger: true, showTotal: t => `${t} orders` }} />
+            scroll={{ x: 2140 }} pagination={{ pageSize: 25, size: 'small', showSizeChanger: true, showTotal: t => `${t} orders` }} />
         )}
       </Card>
 
