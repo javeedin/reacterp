@@ -33,6 +33,8 @@ const REDWOOD = {
 
 const fmtDate = (d?: string) => { if (!d) return '—'; try { return dayjs(d).format('D-MMM-YYYY'); } catch { return d; } };
 const fmtQty = (v?: number | null) => (v == null ? '—' : new Intl.NumberFormat('en-US').format(v));
+const num = (v: any) => { const n = Number(v); return isNaN(n) ? 0 : n; };
+const pickField = (r: any, keys: string[]) => { for (const k of keys) { const v = r?.[k]; if (v != null && v !== '') return v; } return undefined; };
 
 const mapLimit = async <T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> => {
   const out: R[] = new Array(items.length); let idx = 0;
@@ -142,6 +144,131 @@ const MergedChildTab: React.FC<{ lines: any[]; name: string }> = ({ lines, name 
   );
 };
 
+// ── Lot / Serial allocation for a pick line (from on-hand) ───────────────────
+const AllocateModal: React.FC<{ line: any | null; org?: string; onClose: () => void }> = ({ line, org, onClose }) => {
+  const item = line?.Item;
+  const subinv = line?.SourceSubinventory;
+  const reqQty = num(line?.RequestedQuantity);
+
+  const [balances, setBalances] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [selLot, setSelLot] = useState<string | undefined>(undefined);
+  const [selSerials, setSelSerials] = useState<string[]>([]);
+
+  const url = useMemo(() => {
+    if (!org || !item) return '';
+    const q = `OrganizationCode=${org};ItemNumber=${item}` + (subinv ? `;SubinventoryCode=${subinv}` : '');
+    return `${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(q)}&expand=lots.lotSerials,serials&onlyData=true&limit=500`;
+  }, [org, item, subinv]);
+
+  const load = useCallback(async () => {
+    if (!url) return;
+    setLoading(true); setError(''); setSelLot(undefined); setSelSerials([]);
+    try { setBalances(await fetchAllPages(url)); }
+    catch (e: any) { setError(e.message); setBalances([]); }
+    finally { setLoading(false); }
+  }, [url]);
+  useEffect(() => { if (line) load(); }, [line, load]);
+
+  // Available lots (aggregated across balances) with their serials.
+  const lots = useMemo(() => {
+    const map: Record<string, { lot: string; qty: number; serials: string[] }> = {};
+    balances.forEach(b => (b.lots ?? []).forEach((lot: any) => {
+      const ln = lot.LotNumber; if (!ln) return;
+      if (!map[ln]) map[ln] = { lot: ln, qty: 0, serials: [] };
+      map[ln].qty += num(pickField(lot, ['OnhandQuantity', 'PrimaryQuantity', 'Quantity', 'LotQuantity']));
+      (lot.lotSerials ?? []).forEach((s: any) => { const sn = pickField(s, ['SerialNumber', 'FmSerialNumber']); if (sn) map[ln].serials.push(sn); });
+    }));
+    return Object.values(map).sort((a, b) => a.lot.localeCompare(b.lot));
+  }, [balances]);
+
+  // Serial-only items (no lot control): serials live directly under the balance.
+  const serialOnly = useMemo(() =>
+    Array.from(new Set(balances.flatMap(b => (b.serials ?? []).map((s: any) => pickField(s, ['SerialNumber', 'FmSerialNumber'])).filter(Boolean)))),
+  [balances]);
+
+  const availSerials: string[] = useMemo(() => {
+    if (selLot) return lots.find(l => l.lot === selLot)?.serials ?? [];
+    return serialOnly as string[];
+  }, [selLot, lots, serialOnly]);
+
+  const isLotControlled = lots.length > 0;
+  const overAllocated = selSerials.length > reqQty;
+
+  return (
+    <Modal
+      open={!!line} onCancel={onClose} maskClosable={false} width={720}
+      title={<Space><ProfileOutlined style={{ color: REDWOOD.primary }} /> Allocate — <Text strong>{item}</Text>
+        <Tag color="blue">Line {line?.PickSlipLine}</Tag></Space>}
+      footer={<Space>
+        <Text type={overAllocated ? 'danger' : undefined} style={{ marginRight: 'auto', fontSize: 12 }}>
+          Allocated <b>{selSerials.length}</b> of <b>{reqQty}</b>{overAllocated ? ' — over requested!' : ''}
+        </Text>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button type="primary" disabled={selSerials.length === 0 || overAllocated}
+          style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+          onClick={() => { message.success(`Allocated ${selSerials.length} serial(s)${selLot ? ` from lot ${selLot}` : ''} to line ${line?.PickSlipLine}`); onClose(); }}>
+          Apply Allocation
+        </Button>
+      </Space>}
+    >
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 12, fontSize: 12 }}>
+        <span><Text type="secondary">Org: </Text><Tag>{org}</Tag></span>
+        <span><Text type="secondary">Requested: </Text><b>{fmtQty(reqQty)} {line?.UOM}</b></span>
+        {subinv && <span><Text type="secondary">Subinventory: </Text>{subinv}</span>}
+        <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {url}</span>}>
+          <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info, marginLeft: 'auto' }} />
+        </Tooltip>
+        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>Reload</Button>
+      </div>
+
+      {loading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+        : error ? <div style={{ color: REDWOOD.error, fontSize: 12 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div>
+        : (
+          <>
+            {isLotControlled && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Lot <span style={{ color: REDWOOD.error }}>*</span> <Text type="secondary" style={{ fontWeight: 400 }}>(change lot for this line)</Text></div>
+                <Select showSearch style={{ width: '100%' }} placeholder="Select a lot from on-hand" value={selLot}
+                  onChange={v => { setSelLot(v); setSelSerials([]); }}
+                  options={lots.map(l => ({ value: l.lot, label: `${l.lot} — on-hand ${fmtQty(l.qty)}${l.serials.length ? ` · ${l.serials.length} serial(s)` : ''}` }))}
+                  notFoundContent="No lots on hand" />
+              </div>
+            )}
+            {!isLotControlled && serialOnly.length === 0 ? (
+              <Empty description="No lots or serials on hand for this item / subinventory" style={{ padding: 24 }} />
+            ) : (
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+                  Available Serial Numbers {selLot ? <Text type="secondary" style={{ fontWeight: 400 }}>for lot {selLot}</Text> : ''}
+                  {availSerials.length > 0 && <Tag style={{ marginLeft: 6 }}>{availSerials.length}</Tag>}
+                </div>
+                {isLotControlled && !selLot ? (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Select a lot to see its serials" style={{ padding: 20 }} />
+                ) : availSerials.length === 0 ? (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No serials on hand" style={{ padding: 20 }} />
+                ) : (
+                  <Table
+                    size="small" scroll={{ y: 300 }} pagination={false}
+                    dataSource={availSerials.map((s, i) => ({ key: `${s}-${i}`, SerialNumber: s }))}
+                    rowKey="SerialNumber"
+                    rowSelection={{
+                      selectedRowKeys: selSerials,
+                      onChange: (keys) => setSelSerials(keys as string[]),
+                      getCheckboxProps: (rec: any) => ({ disabled: !selSerials.includes(rec.SerialNumber) && selSerials.length >= reqQty }),
+                    }}
+                    columns={[{ title: 'Serial Number', dataIndex: 'SerialNumber', render: v => <Text strong style={{ fontSize: 12 }}>{v}</Text> }]}
+                  />
+                )}
+              </div>
+            )}
+          </>
+        )}
+    </Modal>
+  );
+};
+
 // ── Pick Slip drill dialog (header + pickLines) ──────────────────────────────
 const PickSlipDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ row, onClose }) => {
   const pickLinesHref = row?.links?.find((l: any) => l.name === 'pickLines')?.href
@@ -168,6 +295,8 @@ const PickSlipDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ ro
     return Array.from(s).sort();
   }, [pickLines]);
 
+  const [allocLine, setAllocLine] = useState<any | null>(null);
+
   const HInfo: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
     <Col xs={12} sm={8} md={6}>
       <div style={{ marginBottom: 8 }}>
@@ -191,6 +320,13 @@ const PickSlipDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ ro
     { title: 'Mv Req Line', dataIndex: 'MovementRequestLine', width: 100, align: 'center', render: v => v ?? '—' },
     { title: 'Error', dataIndex: 'ErrorExplanation', width: 160, ellipsis: true,
       render: (v, r) => (v || r.ErrorCode) ? <Text type="danger" style={{ fontSize: 11 }}>{v ?? r.ErrorCode}</Text> : '—' },
+    { title: '', key: 'alloc', width: 110, fixed: 'right', align: 'center',
+      render: (_, r) => (
+        <Tooltip title="Change lot & allocate serials from on-hand">
+          <Button size="small" icon={<ProfileOutlined />} style={{ borderColor: REDWOOD.primary, color: REDWOOD.primary, fontSize: 11 }}
+            onClick={() => setAllocLine(r)}>Allocate</Button>
+        </Tooltip>
+      ) },
   ];
 
   return (
@@ -240,7 +376,7 @@ const PickSlipDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ ro
                   : linesError ? <div style={{ color: REDWOOD.error, fontSize: 12 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{linesError}</div>
                   : pickLines.length === 0 ? <Empty description="No pick lines" style={{ padding: 30 }} />
                   : <Table size="small" columns={lineCols} dataSource={pickLines} rowKey={(r, i) => `${r.PickSlipLine ?? i}`}
-                      pagination={false} scroll={{ x: 1400, y: 340 }} />}
+                      pagination={false} scroll={{ x: 1520, y: 340 }} />}
               </div>
             ),
           },
@@ -251,6 +387,8 @@ const PickSlipDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ ro
           })),
         ]}
       />
+
+      <AllocateModal line={allocLine} org={row?.Organization} onClose={() => setAllocLine(null)} />
     </Modal>
   );
 };
