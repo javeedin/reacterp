@@ -171,58 +171,56 @@ const ManageShipmentLines: React.FC = () => {
         <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
           {/* Search panel */}
           <Card styles={{ body: { padding: '14px 18px' } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
-            <Form form={form} layout="vertical">
-              <Row gutter={[10, 0]}>
-                <Col xs={24} sm={12} md={6}>
-                  <Form.Item label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Creation Date</Text>} style={{ marginBottom: 8 }}>
+            <Form form={form} layout="vertical" size="small">
+              <Row gutter={[8, 0]}>
+                <Col xs={24} sm={12} md={5}>
+                  <Form.Item label={<Text style={{ fontSize: 11, fontWeight: 600 }}>Creation Date</Text>} style={{ marginBottom: 6 }}>
                     <Space.Compact style={{ width: '100%' }}>
-                      <Select style={{ width: 72 }} value={filters.dateOp} onChange={v => setFilters(f => ({ ...f, dateOp: v }))}
+                      <Select style={{ width: 62 }} value={filters.dateOp} onChange={v => setFilters(f => ({ ...f, dateOp: v }))}
                         options={['>', '>=', '=', '<=', '<'].map(o => ({ value: o, label: o }))} />
                       <DatePicker style={{ width: '100%' }} value={filters.date} onChange={d => setFilters(f => ({ ...f, date: d }))} />
                     </Space.Compact>
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12} md={5}>
-                  <Form.Item label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Order Type</Text>} style={{ marginBottom: 8 }}>
+                <Col xs={12} sm={12} md={4}>
+                  <Form.Item label={<Text style={{ fontSize: 11, fontWeight: 600 }}>Order Type</Text>} style={{ marginBottom: 6 }}>
                     <Select allowClear showSearch placeholder="Any" value={filters.orderType}
                       onChange={v => setFilters(f => ({ ...f, orderType: v }))}
                       options={ORDER_TYPES.map(s => ({ value: s, label: s }))} />
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12} md={4}>
-                  <Form.Item label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Order</Text>} style={{ marginBottom: 8 }}>
-                    <Input placeholder="Order number" allowClear value={filters.order}
+                <Col xs={12} sm={8} md={3}>
+                  <Form.Item label={<Text style={{ fontSize: 11, fontWeight: 600 }}>Order</Text>} style={{ marginBottom: 6 }}>
+                    <Input placeholder="Order #" allowClear value={filters.order}
                       onChange={e => setFilters(f => ({ ...f, order: e.target.value }))} onPressEnter={runSearch} />
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12} md={4}>
-                  <Form.Item label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Item</Text>} style={{ marginBottom: 8 }}>
+                <Col xs={12} sm={8} md={3}>
+                  <Form.Item label={<Text style={{ fontSize: 11, fontWeight: 600 }}>Item</Text>} style={{ marginBottom: 6 }}>
                     <Input placeholder="Item code" allowClear value={filters.item}
                       onChange={e => setFilters(f => ({ ...f, item: e.target.value }))} onPressEnter={runSearch} />
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12} md={5}>
-                  <Form.Item label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Line Status</Text>} style={{ marginBottom: 8 }}>
+                <Col xs={12} sm={8} md={4}>
+                  <Form.Item label={<Text style={{ fontSize: 11, fontWeight: 600 }}>Line Status</Text>} style={{ marginBottom: 6 }}>
                     <Select allowClear showSearch placeholder="Any" value={filters.lineStatus}
                       onChange={v => setFilters(f => ({ ...f, lineStatus: v }))}
                       options={LINE_STATUSES.map(s => ({ value: s, label: s }))} />
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12} md={10}>
-                  <Form.Item label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Item Description contains</Text>} style={{ marginBottom: 8 }}>
+                <Col xs={24} sm={12} md={5}>
+                  <Form.Item label={<Text style={{ fontSize: 11, fontWeight: 600 }}>Description contains</Text>} style={{ marginBottom: 6 }}>
                     <Input placeholder="e.g. FUJIFILM" allowClear value={filters.itemDesc}
                       onChange={e => setFilters(f => ({ ...f, itemDesc: e.target.value }))} onPressEnter={runSearch} />
                   </Form.Item>
                 </Col>
               </Row>
-              <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
-                <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={runSearch}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <Button type="primary" size="small" icon={<SearchOutlined />} loading={loading} onClick={runSearch}
                   style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Search</Button>
-                <Button icon={<ClearOutlined />} onClick={() => setFilters({ dateOp: '>', date: dayjs().subtract(7, 'day') })}>Reset</Button>
-                <Input placeholder="Filter results…" allowClear prefix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />}
-                  value={filterText} onChange={e => setFilterText(e.target.value)} style={{ width: 200 }} />
+                <Button size="small" icon={<ClearOutlined />} onClick={() => setFilters({ dateOp: '>', date: dayjs().subtract(7, 'day') })}>Reset</Button>
                 <Tooltip title="API Inspector — shipmentLines web service">
-                  <Button icon={<ApiOutlined />} style={{ marginLeft: 'auto', borderColor: REDWOOD.info, color: REDWOOD.info }}
+                  <Button size="small" icon={<ApiOutlined />} style={{ marginLeft: 'auto', borderColor: REDWOOD.info, color: REDWOOD.info }}
                     onClick={() => setApiOpen(true)}>API</Button>
                 </Tooltip>
               </div>
@@ -233,7 +231,12 @@ const ManageShipmentLines: React.FC = () => {
           <Card styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
             title={<Space><CarOutlined style={{ color: REDWOOD.primary }} /><Text strong>Shipment Lines</Text>
               {rows.length > 0 && <Tag>{filtered.length}{filtered.length !== rows.length ? ` of ${rows.length}` : ''} line{rows.length !== 1 ? 's' : ''}</Tag>}</Space>}
-            extra={<Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={runSearch}>Refresh</Button>}>
+            extra={<Space>
+              <Input placeholder="Filter any column…" allowClear size="small"
+                prefix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />}
+                value={filterText} onChange={e => setFilterText(e.target.value)} style={{ width: 240 }} />
+              <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={runSearch}>Refresh</Button>
+            </Space>}>
             {loading ? (
               <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Spin size="large" tip="Loading…" /></div>
             ) : error && rows.length === 0 ? (
