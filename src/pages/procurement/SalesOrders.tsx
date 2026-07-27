@@ -388,44 +388,19 @@ const ARSection: React.FC<{ title: string; children: React.ReactNode }> = ({ tit
   </div>
 );
 
-// Loads a child collection href and shows it as a generic table (accounting…).
-const ChildDataModal: React.FC<{ href: string | null; title: string; onClose: () => void }> = ({ href, title, onClose }) => {
-  const [items, setItems] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const load = useCallback(async () => {
-    if (!href) return;
-    setLoading(true); setError('');
-    try { setItems(await fetchAllPages(href)); }
-    catch (e: any) { setError(e.message); setItems([]); }
-    finally { setLoading(false); }
-  }, [href]);
-  useEffect(() => { if (href) load(); }, [href, load]);
-  const cols = useMemo(() => dynamicColumns(items), [items]);
-  return (
-    <Modal open={!!href} onCancel={onClose} maskClosable={false} width={960} title={<Space><ProfileOutlined style={{ color: REDWOOD.info }} /> {title}</Space>}
-      footer={<Button onClick={onClose}>Close</Button>}>
-      {loading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
-        : error ? <div style={{ color: REDWOOD.error, fontSize: 12 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div>
-        : items.length === 0 ? <Empty description="No records" style={{ padding: 30 }} />
-        : <Table size="small" columns={cols} dataSource={items} rowKey={(_, i) => `cd-${i}`}
-            pagination={items.length > 20 ? { pageSize: 20, size: 'small' } : false} scroll={{ x: 'max-content', y: 400 }} />}
-    </Modal>
-  );
-};
-
 const ARInvoiceDialog: React.FC<{ txn: string | null; onClose: () => void }> = ({ txn, onClose }) => {
   const [inv, setInv] = useState<any | null>(null);
   const [lines, setLines] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [allOpen, setAllOpen] = useState(false);
-  const [acctHref, setAcctHref] = useState<string | null>(null);
+  const [dists, setDists] = useState<any[]>([]);
+  const [acctOpen, setAcctOpen] = useState(false);
 
   const url = txn ? `${FUSION_BASE}/${AR_RES}?q=${encodeURIComponent(`TransactionNumber=${txn}`)}&limit=1` : '';
   const load = useCallback(async () => {
     if (!url) return;
-    setLoading(true); setError(''); setInv(null); setLines([]);
+    setLoading(true); setError(''); setInv(null); setLines([]); setDists([]);
     try {
       const r = await fetch(url, { headers: FUSION_HDRS });
       if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
@@ -435,7 +410,29 @@ const ARInvoiceDialog: React.FC<{ txn: string | null; onClose: () => void }> = (
       setInv(h);
       const lh = h.links?.find((l: any) => l.name === AR_LINES)?.href
         ?? (h.CustomerTransactionId ? `${FUSION_BASE}/${AR_RES}/${h.CustomerTransactionId}/child/${AR_LINES}` : '');
-      if (lh) { try { setLines(await fetchAllPages(lh)); } catch { /* lines optional */ } }
+      let ld: any[] = [];
+      if (lh) { try { ld = await fetchAllPages(lh); setLines(ld); } catch { /* lines optional */ } }
+
+      // Accounting distributions — the source of tax / freight / charges amounts.
+      const isAcct = (n: string) => /account|distribut|journal/i.test(n ?? '');
+      const hAcct = (h.links ?? []).find((l: any) => l.rel === 'child' && isAcct(l.name));
+      let dl: any[] = [];
+      try {
+        if (hAcct?.href) {
+          dl = await fetchAllPages(hAcct.href);
+        } else {
+          const lname = (ld[0]?.links ?? []).find((l: any) => l.rel === 'child' && isAcct(l.name))?.name;
+          if (lname) {
+            const res = await mapLimit(ld, 6, async (l: any) => {
+              const href = l.links?.find((x: any) => x.name === lname)?.href;
+              if (!href) return [];
+              try { return await fetchAllPages(href); } catch { return []; }
+            });
+            dl = res.flat();
+          }
+        }
+      } catch { /* accounting optional */ }
+      setDists(dl);
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); }
   }, [url, txn]);
@@ -449,18 +446,20 @@ const ARInvoiceDialog: React.FC<{ txn: string | null; onClose: () => void }> = (
   const amtOf = (l: any) => num(pf(l, ['LineAmount', 'Amount', 'ExtendedAmount', 'RevenueAmount']));
   const productLines = lines.filter(l => { const t = typeOf(l); return !t.includes('TAX') && !t.includes('FREIGHT') && !t.includes('CHARGE'); });
   const linesTotal = productLines.reduce((s, l) => s + amtOf(l), 0);
-  const taxTotal = num(pf(inv, ['TaxAmount', 'TotalTax']) ?? lines.filter(l => typeOf(l).includes('TAX')).reduce((s, l) => s + amtOf(l), 0));
-  const freight = num(pf(inv, ['FreightAmount', 'Freight']) ?? lines.filter(l => typeOf(l).includes('FREIGHT')).reduce((s, l) => s + amtOf(l), 0));
-  const charges = num(pf(inv, ['ChargeAmount', 'Charges']) ?? lines.filter(l => typeOf(l).includes('CHARGE')).reduce((s, l) => s + amtOf(l), 0));
-  const total = num(pf(inv, ['TransactionTotal', 'InvoiceAmount', 'TotalAmount', 'EnteredAmount']) ?? (linesTotal + taxTotal + freight + charges));
 
-  // Detect an accounting / distributions child link on the header or lines.
-  const acctLink = useMemo(() => {
-    const hit = (inv?.links ?? []).find((l: any) => l.rel === 'child' && /account|distribut|journal/i.test(l.name ?? ''));
-    if (hit) return hit.href;
-    const lhit = (lines[0]?.links ?? []).find((l: any) => l.rel === 'child' && /account|distribut|journal/i.test(l.name ?? ''));
-    return lhit?.href;
-  }, [inv, lines]);
+  // Amounts from accounting distributions, grouped by AR account class:
+  // REC = receivable (= transaction total), REV = revenue, TAX, FREIGHT, CHARGES.
+  const nz = (v: any) => (v == null || v === '' || isNaN(Number(v)) ? undefined : Number(v));
+  const distClass = (d: any) => String(pf(d, ['AccountClass', 'AccountClassCode', 'ClassCode', 'AccountClassMeaning']) ?? '').toUpperCase();
+  const distAmt = (d: any) => Math.abs(num(pf(d, ['Amount', 'AccountedAmount', 'AmountDr', 'DistributionAmount', 'LineAmount'])));
+  const distSum = (test: (c: string) => boolean) => dists.filter(d => test(distClass(d))).reduce((s, d) => s + distAmt(d), 0);
+  const dOn = dists.length > 0;
+  const lineTaxSum = lines.filter(l => typeOf(l).includes('TAX')).reduce((s, l) => s + amtOf(l), 0);
+  const taxTotal = dOn ? distSum(c => c.includes('TAX')) : (nz(pf(inv, ['TaxAmount', 'TotalTax'])) ?? lineTaxSum);
+  const freight = dOn ? distSum(c => c.includes('FREIGHT')) : (nz(pf(inv, ['FreightAmount', 'Freight'])) ?? 0);
+  const charges = dOn ? distSum(c => c.includes('CHARGE')) : (nz(pf(inv, ['ChargeAmount', 'Charges'])) ?? 0);
+  const recTotal = dOn ? distSum(c => c.includes('REC')) : 0;
+  const total = recTotal || nz(pf(inv, ['TransactionTotal', 'InvoiceAmount', 'TotalAmount', 'EnteredAmount'])) || (linesTotal + taxTotal + freight + charges);
 
   const shipToHeader = pf(inv, ['ShipToCustomerName', 'ShipToPartyName']);
 
@@ -488,7 +487,7 @@ const ARInvoiceDialog: React.FC<{ txn: string | null; onClose: () => void }> = (
         <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {decodeURIComponent(url)}</span>}>
           <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} />
         </Tooltip>
-        {acctLink && <Button size="small" icon={<ReconciliationOutlined />} style={{ borderColor: REDWOOD.purple, color: REDWOOD.purple }} onClick={() => setAcctHref(acctLink)}>View Accounting</Button>}
+        {dists.length > 0 && <Button size="small" icon={<ReconciliationOutlined />} style={{ borderColor: REDWOOD.purple, color: REDWOOD.purple }} onClick={() => setAcctOpen(true)}>View Accounting ({dists.length})</Button>}
         {inv && <Button size="small" icon={<ProfileOutlined />} onClick={() => setAllOpen(true)}>All fields</Button>}
         <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>Reload</Button>
       </div>
@@ -584,7 +583,14 @@ const ARInvoiceDialog: React.FC<{ txn: string | null; onClose: () => void }> = (
         )}
 
       <AllFieldsModal title={`AR Invoice ${pf(inv, ['TransactionNumber']) ?? ''} — all fields`} row={allOpen ? inv : null} onClose={() => setAllOpen(false)} />
-      <ChildDataModal href={acctHref} title="Invoice Accounting" onClose={() => setAcctHref(null)} />
+
+      <Modal open={acctOpen} onCancel={() => setAcctOpen(false)} maskClosable={false} width={1000}
+        title={<Space><ReconciliationOutlined style={{ color: REDWOOD.purple }} /> Invoice Accounting <Tag color="volcano">{pf(inv, ['TransactionNumber']) ?? ''}</Tag></Space>}
+        footer={<Button onClick={() => setAcctOpen(false)}>Close</Button>}>
+        {dists.length === 0 ? <Empty description="No accounting distributions" style={{ padding: 30 }} />
+          : <Table size="small" columns={dynamicColumns(dists)} dataSource={dists} rowKey={(_, i) => `dist-${i}`}
+              pagination={dists.length > 20 ? { pageSize: 20, size: 'small' } : false} scroll={{ x: 'max-content', y: 400 }} />}
+      </Modal>
     </Modal>
   );
 };
