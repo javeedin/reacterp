@@ -7,6 +7,8 @@ import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, CarOutlined, SearchOutlined, ReloadOutlined, ClearOutlined,
   ApiOutlined, CopyOutlined, InfoCircleOutlined, ProfileOutlined,
+  ExportOutlined, ThunderboltOutlined, EyeOutlined, CheckCircleOutlined,
+  UnorderedListOutlined, BankOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -153,6 +155,74 @@ const ShipmentOrderDialog: React.FC<{ row: any | null; onClose: () => void }> = 
   useEffect(() => { if (row) loadLines(); }, [row, loadLines]);
 
   const childLinks = (row?.links ?? []).filter((l: any) => l.rel === 'child' && l.href);
+  const hdr = lines[0] ?? row;   // header info comes from the order's lines
+
+  // Pick Release is allowed when any line is Ready to release or Backordered.
+  const releaseSource = lines.length ? lines : (row ? [row] : []);
+  const canRelease = releaseSource.some(l => {
+    const s = String(l?.LineStatus ?? '').toLowerCase();
+    return s.startsWith('ready to release') || s.includes('backorder');
+  });
+
+  const pickPayload = {
+    SourceSystemName: 'OPS',
+    BatchPrefix: `PR-${order}`,
+    ShipFromOrganizationCode: hdr?.OrganizationCode,
+    ReleaseStatus: 'All',
+    OrderType: hdr?.OrderTypeCode,           // OrderTypeCode, e.g. TRANSFER_ORDER
+    OrderNumber: String(order ?? ''),
+    PickReleaseFlag: 'true',
+    AutoPickConfirmFlag: 'false',
+    ShipConfirmRule: '002_Ship_Confirm_Rule',
+    CreateShipmentsFlag: 'true',
+    ShipmentCreationCriteria: 'Across orders',
+  };
+  const pickUrl = `${FUSION_BASE}/pickWaves`;
+
+  const [releasing, setReleasing] = useState(false);
+  const [releaseResult, setReleaseResult] = useState<{ ok: boolean; status: number; body: string } | null>(null);
+  const [payloadOpen, setPayloadOpen] = useState(false);
+
+  const pickRelease = () => {
+    Modal.confirm({
+      title: 'Pick Release this order?',
+      width: 560,
+      content: (
+        <div style={{ fontSize: 13 }}>
+          Release order <Tag color="volcano">{order}</Tag> from <Tag color="blue">{hdr?.OrganizationCode}</Tag> for picking &amp; shipment via <b>pickWaves</b>.
+          <div style={{ marginTop: 8, color: REDWOOD.neutral600, fontSize: 12 }}>POST {pickUrl}</div>
+        </div>
+      ),
+      okText: 'Pick Release',
+      onOk: async () => {
+        setReleasing(true); setReleaseResult(null);
+        try {
+          const r = await fetch(pickUrl, {
+            method: 'POST',
+            headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' },
+            body: JSON.stringify(pickPayload),
+          });
+          const raw = await r.text();
+          let pretty = raw; try { pretty = JSON.stringify(JSON.parse(raw), null, 2); } catch { /* keep raw */ }
+          setReleaseResult({ ok: r.ok, status: r.status, body: pretty });
+          if (r.ok) { message.success('Pick wave released'); loadLines(); }
+          else message.error(`Pick release failed (HTTP ${r.status})`);
+        } catch (e: any) {
+          setReleaseResult({ ok: false, status: 0, body: `Network error: ${e.message}` });
+          message.error(e.message);
+        } finally { setReleasing(false); }
+      },
+    });
+  };
+
+  const HInfo: React.FC<{ label: string; value: React.ReactNode; icon?: React.ReactNode }> = ({ label, value, icon }) => (
+    <Col xs={12} sm={8} md={6}>
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>{icon}{icon ? ' ' : ''}{label}</div>
+        <div style={{ fontSize: 12.5, color: REDWOOD.neutral900, marginTop: 2 }}>{value ?? '—'}</div>
+      </div>
+    </Col>
+  );
 
   const lineCols: ColumnsType<any> = [
     { title: 'Ship Line', dataIndex: 'ShipmentLine', width: 100, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text> },
@@ -179,15 +249,65 @@ const ShipmentOrderDialog: React.FC<{ row: any | null; onClose: () => void }> = 
       open={!!row} onCancel={onClose} maskClosable={false} width={1080} style={{ top: 24 }}
       footer={<Button onClick={onClose}>Close</Button>}
       title={<Space><CarOutlined style={{ color: REDWOOD.primary }} /> Order <Tag color="volcano">{order}</Tag>
-        {row?.OrderType && <Tag color="purple">{row.OrderType}</Tag>}
-        <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>(from Shipment Line {row?.ShipmentLine})</Text></Space>}
+        {hdr?.OrderType && <Tag color="purple">{hdr.OrderType}</Tag>}
+        {statusTag(hdr?.LineStatus)}</Space>}
     >
+      {/* Toolbar */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <Tooltip title={canRelease ? 'Release this order for picking & shipment' : 'Pick Release needs a line in Ready to release or Backordered status'}>
+          <Button type="primary" icon={<ThunderboltOutlined />} disabled={!canRelease} loading={releasing} onClick={pickRelease}
+            style={canRelease ? { background: REDWOOD.success, borderColor: REDWOOD.success } : undefined}>
+            Pick Release
+          </Button>
+        </Tooltip>
+        <Button icon={<EyeOutlined />} onClick={() => setPayloadOpen(true)}>Show Payload</Button>
+        <Button icon={<ReloadOutlined />} loading={loading} onClick={loadLines}>Refresh</Button>
+        <Text type="secondary" style={{ marginLeft: 'auto', fontSize: 12, fontFamily: 'monospace' }}><Tag color="green">POST</Tag>…/pickWaves</Text>
+      </div>
+
+      {releaseResult && (
+        <div style={{ marginBottom: 12 }}>
+          <Space style={{ marginBottom: 6 }}>
+            <Tag color={releaseResult.ok ? 'success' : releaseResult.status === 0 ? 'default' : 'error'}>
+              {releaseResult.status === 0 ? 'Network Error' : `HTTP ${releaseResult.status}`}
+            </Tag>
+            {releaseResult.ok && <Text style={{ color: REDWOOD.success, fontSize: 12 }}><CheckCircleOutlined /> Pick wave released</Text>}
+            <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(releaseResult.body); message.success('Copied'); }}>Copy</Button>
+          </Space>
+          <div style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 12, borderRadius: 6, fontFamily: 'monospace', fontSize: 11, maxHeight: 220, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {releaseResult.body.slice(0, 5000)}{releaseResult.body.length > 5000 ? '\n\n… (truncated)' : ''}
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
+      <Card size="small" title={<Space><BankOutlined style={{ color: REDWOOD.primary }} /><Text strong>Header</Text></Space>}
+        style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 12 }}>
+        {!hdr ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="—" /> : (
+          <Row gutter={[12, 0]}>
+            <HInfo label="Order" value={<Text strong>{order}</Text>} />
+            <HInfo label="Order Type" value={<span>{hdr.OrderType}{hdr.OrderTypeCode ? <Tag style={{ marginLeft: 6, fontSize: 10 }}>{hdr.OrderTypeCode}</Tag> : null}</span>} />
+            <HInfo label="Ship-From Org" value={<span><Tag>{hdr.OrganizationCode}</Tag>{hdr.OrganizationName ?? ''}</span>} />
+            <HInfo label="Destination Org" value={hdr.DestinationOrganizationCode ?? '—'} />
+            <HInfo label="Business Unit" value={hdr.BusinessUnit ?? '—'} />
+            <HInfo label="Legal Entity" value={hdr.LegalEntity ?? '—'} />
+            <HInfo label="Requested Date" value={fmtDate(hdr.RequestedDate)} />
+            <HInfo label="Scheduled Ship" value={fmtDate(hdr.ScheduledShipDate)} />
+            <HInfo label="Creation Date" value={fmtDate(hdr.CreationDate)} />
+            <HInfo label="Currency" value={hdr.CurrencyCode ?? '—'} />
+            <HInfo label="Ship To Location" value={hdr.ShipToLocation ?? '—'} />
+            <HInfo label="Src / Dest Subinv" value={`${hdr.SourceSubinventory ?? '—'} → ${hdr.DestinationSubinventory ?? '—'}`} />
+          </Row>
+        )}
+      </Card>
+
+      {/* Lines + child-link tabs */}
       <Tabs
         size="small"
         items={[
           {
             key: 'lines',
-            label: <span><ProfileOutlined style={{ marginRight: 5 }} />Lines{lines.length ? ` (${lines.length})` : ''}</span>,
+            label: <span><UnorderedListOutlined style={{ marginRight: 5 }} />Lines{lines.length ? ` (${lines.length})` : ''}</span>,
             children: loading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
               : error ? <div style={{ color: REDWOOD.error, fontSize: 12 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div>
               : lines.length === 0 ? <Empty description="No lines" style={{ padding: 30 }} />
@@ -196,7 +316,7 @@ const ShipmentOrderDialog: React.FC<{ row: any | null; onClose: () => void }> = 
                     <Tag color="blue">GET</Tag>{decodeURIComponent(linesUrl)}
                   </div>
                   <Table size="small" columns={lineCols} dataSource={lines} rowKey={(r, i) => `${r.ShipmentLine ?? i}`}
-                    pagination={false} scroll={{ x: 1300, y: 360 }} />
+                    pagination={false} scroll={{ x: 1300, y: 340 }} />
                 </>),
           },
           ...childLinks.map((l: any) => ({
@@ -206,6 +326,18 @@ const ShipmentOrderDialog: React.FC<{ row: any | null; onClose: () => void }> = 
           })),
         ]}
       />
+
+      {/* Pick Release payload preview */}
+      <Modal title={<Space><ThunderboltOutlined style={{ color: REDWOOD.success }} /> Pick Release payload — pickWaves</Space>}
+        open={payloadOpen} onCancel={() => setPayloadOpen(false)} maskClosable={false} width={620}
+        footer={<Button icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(JSON.stringify(pickPayload, null, 2)); message.success('Copied'); }}>Copy JSON</Button>}>
+        <div style={{ padding: '6px 10px', borderRadius: 6, background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info, marginBottom: 10 }}>
+          <Tag color="green">POST</Tag>{pickUrl}
+        </div>
+        <div style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 12, borderRadius: 6, fontFamily: 'monospace', fontSize: 11, maxHeight: 360, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+          {JSON.stringify(pickPayload, null, 2)}
+        </div>
+      </Modal>
     </Modal>
   );
 };
@@ -270,9 +402,14 @@ const ManageShipmentLines: React.FC = () => {
     { title: 'Shipment', dataIndex: 'Shipment', width: 110, render: v => v ?? '—' },
     { title: 'Order Type', dataIndex: 'OrderType', width: 130,
       render: (v, r) => <Tooltip title={r.OrderTypeCode}><Tag color="purple" style={{ fontSize: 11 }}>{v ?? '—'}</Tag></Tooltip> },
-    { title: 'Order', dataIndex: 'Order', width: 100,
-      render: (v, r) => v ? <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 12 }}
-        onClick={() => setOrderDialog(r)}>{v}</Button> : <Text>—</Text> },
+    { title: 'Order', dataIndex: 'Order', width: 120,
+      render: (v, r) => v ? (
+        <Space size={2}>
+          <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 12 }}
+            onClick={() => setOrderDialog(r)}>{v}</Button>
+          <Tooltip title="Open order"><Button size="small" type="text" icon={<ExportOutlined />} style={{ color: REDWOOD.info }} onClick={() => setOrderDialog(r)} /></Tooltip>
+        </Space>
+      ) : <Text>—</Text> },
     { title: 'Line', dataIndex: 'OrderLine', width: 55, align: 'center', render: v => <Tag color="blue" style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
     { title: 'Item', dataIndex: 'Item', width: 130, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v ?? '—'}</Text> },
     { title: 'Description', dataIndex: 'ItemDescription', width: 240, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
