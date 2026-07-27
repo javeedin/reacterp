@@ -5,7 +5,7 @@ import {
   DatabaseOutlined, CheckCircleOutlined, LockOutlined, BugOutlined,
   ApartmentOutlined, BankOutlined, SafetyCertificateOutlined, InboxOutlined,
   DollarOutlined, ReconciliationOutlined, CloudOutlined, HistoryOutlined,
-  SwapOutlined, CarOutlined, CheckSquareOutlined,
+  SwapOutlined, CarOutlined, CheckSquareOutlined, FileSearchOutlined, UploadOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -30,11 +30,16 @@ interface MenuItemType {
   description: string;
   color: string;
   path?: string;
+  group: string;
 }
 
+// Section order on the home page.
+const GROUP_ORDER = ['Purchasing', 'Inventory', 'Costing', 'Setups', 'Loading'];
+
 const procurementItems: MenuItemType[] = [
+  // ── Purchasing ──────────────────────────────────────────────────────────
   {
-    key: 'purchase-orders',
+    key: 'purchase-orders', group: 'Purchasing',
     icon: <ShoppingCartOutlined />,
     label: 'Purchase Orders',
     description: 'Search, view and manage purchase orders from Oracle Fusion',
@@ -42,55 +47,16 @@ const procurementItems: MenuItemType[] = [
     path: '/procurement/purchase-orders',
   },
   {
-    key: 'suppliers',
+    key: 'suppliers', group: 'Purchasing',
     icon: <TeamOutlined />,
     label: 'Suppliers',
     description: 'Manage supplier records, sites and contacts',
     color: REDWOOD.info,
     path: '/procurement/suppliers',
   },
+  // ── Inventory ───────────────────────────────────────────────────────────
   {
-    key: 'items',
-    icon: <AppstoreOutlined />,
-    label: 'Items',
-    description: 'Manage item master, categories and attributes',
-    color: REDWOOD.warning,
-    path: '/inventory/items',
-  },
-  {
-    key: 'on-hand-inventory',
-    icon: <DatabaseOutlined />,
-    label: 'On-Hand Inventory',
-    description: 'View current on-hand stock levels by item and location',
-    color: REDWOOD.success,
-    path: '/inventory/onhand',
-  },
-  {
-    key: 'subinventories',
-    icon: <ApartmentOutlined />,
-    label: 'Subinventories',
-    description: 'Warehouse and subinventory hierarchy by business unit',
-    color: REDWOOD.teal,
-    path: '/inventory/subinventories',
-  },
-  {
-    key: 'business-units',
-    icon: <BankOutlined />,
-    label: 'Business Units',
-    description: 'Oracle Fusion business units',
-    color: REDWOOD.info,
-    path: '/procurement/business-units',
-  },
-  {
-    key: 'legal-entities',
-    icon: <SafetyCertificateOutlined />,
-    label: 'Legal Entities',
-    description: 'Legal entity setup and configuration',
-    color: REDWOOD.warning,
-    path: '/procurement/legal-entities',
-  },
-  {
-    key: 'item-master',
+    key: 'item-master', group: 'Inventory',
     icon: <AppstoreOutlined />,
     label: 'Item Master',
     description: 'Item catalog with attributes, pricing and flags',
@@ -98,7 +64,23 @@ const procurementItems: MenuItemType[] = [
     path: '/inventory/items',
   },
   {
-    key: 'expected-receipts',
+    key: 'subinventories', group: 'Inventory',
+    icon: <ApartmentOutlined />,
+    label: 'Subinventories',
+    description: 'Warehouse and subinventory hierarchy by business unit',
+    color: REDWOOD.teal,
+    path: '/inventory/subinventories',
+  },
+  {
+    key: 'on-hand-inventory', group: 'Inventory',
+    icon: <DatabaseOutlined />,
+    label: 'On-Hand',
+    description: 'View current on-hand stock levels by item and location',
+    color: REDWOOD.success,
+    path: '/inventory/onhand',
+  },
+  {
+    key: 'expected-receipts', group: 'Inventory',
     icon: <InboxOutlined />,
     label: 'Expected PO Receipts',
     description: 'View and manage purchase order lines pending receipt in Oracle Fusion',
@@ -106,7 +88,7 @@ const procurementItems: MenuItemType[] = [
     path: '/procurement/expected-receipts',
   },
   {
-    key: 'transfer-orders',
+    key: 'transfer-orders', group: 'Inventory',
     icon: <SwapOutlined />,
     label: 'Transfer Orders',
     description: 'Transfer stock between inventory organizations (search & create via SCO)',
@@ -114,7 +96,7 @@ const procurementItems: MenuItemType[] = [
     path: '/procurement/transfer-orders',
   },
   {
-    key: 'shipment-lines',
+    key: 'shipment-lines', group: 'Inventory',
     icon: <CarOutlined />,
     label: 'Manage Shipment Lines',
     description: 'Search pending & in-progress shipment lines from Oracle Fusion (shipmentLines)',
@@ -122,7 +104,7 @@ const procurementItems: MenuItemType[] = [
     path: '/procurement/shipment-lines',
   },
   {
-    key: 'confirm-picks',
+    key: 'confirm-picks', group: 'Inventory',
     icon: <CheckSquareOutlined />,
     label: 'Confirm Picks',
     description: 'Search pick slips and drill into pick lines (Oracle Fusion pickSlipDetails)',
@@ -130,23 +112,57 @@ const procurementItems: MenuItemType[] = [
     path: '/procurement/confirm-picks',
   },
   {
-    key: 'item-costs',
+    key: 'inv-completed-txns', group: 'Inventory',
+    icon: <FileSearchOutlined />,
+    label: 'Review Inventory Completed Transactions',
+    description: 'Search completed inventory transactions by organization, item and date',
+    color: REDWOOD.warning,
+    path: '/procurement/inventory-transactions',
+  },
+  // ── Costing ─────────────────────────────────────────────────────────────
+  {
+    key: 'item-costs', group: 'Costing',
     icon: <DollarOutlined />,
-    label: 'Manage Item Cost',
+    label: 'Item Cost',
     description: 'Search item costs from Oracle Fusion (itemCosts)',
     color: REDWOOD.primary,
     path: '/procurement/item-costs',
   },
   {
-    key: 'receipt-costs',
+    key: 'receipt-costs', group: 'Costing',
     icon: <ReconciliationOutlined />,
-    label: 'Manage Receipt Cost',
+    label: 'Receipt Cost',
     description: 'Search receipt costs from Oracle Fusion (receiptCosts)',
     color: REDWOOD.teal,
     path: '/procurement/receipt-costs',
   },
   {
-    key: 'uat',
+    key: 'cost-management', group: 'Costing',
+    icon: <DollarOutlined />,
+    label: 'Cost Management',
+    description: 'Cost received items — Receipt & Cost Accounting ESS jobs (run & monitor)',
+    color: REDWOOD.primary,
+    path: '/procurement/cost-management',
+  },
+  // ── Setups ──────────────────────────────────────────────────────────────
+  {
+    key: 'business-units', group: 'Setups',
+    icon: <BankOutlined />,
+    label: 'Business Units',
+    description: 'Oracle Fusion business units',
+    color: REDWOOD.info,
+    path: '/procurement/business-units',
+  },
+  {
+    key: 'legal-entities', group: 'Setups',
+    icon: <SafetyCertificateOutlined />,
+    label: 'Legal Entities',
+    description: 'Legal entity setup and configuration',
+    color: REDWOOD.warning,
+    path: '/procurement/legal-entities',
+  },
+  {
+    key: 'uat', group: 'Setups',
     icon: <BugOutlined />,
     label: 'UAT / Diagnostics',
     description: 'Automated UAT scripts — fetch live data from Fusion and validate expected values',
@@ -154,28 +170,29 @@ const procurementItems: MenuItemType[] = [
     path: '/procurement/uat',
   },
   {
-    key: 'tb-loading',
-    icon: <DatabaseOutlined />,
-    label: 'Trial Balance Loading',
-    description: 'Load trial balance from Excel, filter and review the data',
-    color: '#0572CE',
-    path: '/procurement/tb-loading',
-  },
-  {
-    key: 'login-history',
+    key: 'login-history', group: 'Setups',
     icon: <HistoryOutlined />,
     label: 'Login History',
     description: 'Oracle Fusion (IDCS) sign-in history via Audit Events',
     color: REDWOOD.info,
     path: '/procurement/login-history',
   },
+  // ── Loading ─────────────────────────────────────────────────────────────
   {
-    key: 'cost-management',
-    icon: <DollarOutlined />,
-    label: 'Cost Management',
-    description: 'Cost received items — Receipt & Cost Accounting ESS jobs (run & monitor)',
-    color: REDWOOD.primary,
-    path: '/procurement/cost-management',
+    key: 'tb-loading', group: 'Loading',
+    icon: <DatabaseOutlined />,
+    label: 'Trial Balance',
+    description: 'Load trial balance from Excel, filter and review the data',
+    color: '#0572CE',
+    path: '/procurement/tb-loading',
+  },
+  {
+    key: 'items-load', group: 'Loading',
+    icon: <UploadOutlined />,
+    label: 'Items Load',
+    description: 'Bulk-load items (coming soon)',
+    color: REDWOOD.warning,
+    // path intentionally omitted until the loader is specified
   },
 ];
 
@@ -405,18 +422,24 @@ const ProcurementHome: React.FC = () => {
             </div>
           </div>
 
-          <div style={{ marginBottom: 24 }}>
-            <Text strong style={{ fontSize: 13, color: REDWOOD.neutral900, textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 10 }}>
-              FUSION CLIENT
-            </Text>
-            <Row gutter={[12, 12]}>
-              {procurementItems.map(item => (
-                <Col key={item.key} xs={24} sm={12} lg={8}>
-                  <TaskCard item={item} onClick={() => item.path && navigate(item.path)} />
-                </Col>
-              ))}
-            </Row>
-          </div>
+          {GROUP_ORDER.map(group => {
+            const items = procurementItems.filter(i => i.group === group);
+            if (items.length === 0) return null;
+            return (
+              <div key={group} style={{ marginBottom: 24 }}>
+                <Text strong style={{ fontSize: 13, color: REDWOOD.primary, textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 10, borderBottom: `2px solid ${REDWOOD.primary}22`, paddingBottom: 6 }}>
+                  {group}
+                </Text>
+                <Row gutter={[12, 12]}>
+                  {items.map(item => (
+                    <Col key={item.key} xs={24} sm={12} lg={8}>
+                      <TaskCard item={item} onClick={() => item.path && navigate(item.path)} />
+                    </Col>
+                  ))}
+                </Row>
+              </div>
+            );
+          })}
         </div>
       </Content>
     </Layout>
