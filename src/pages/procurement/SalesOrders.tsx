@@ -143,9 +143,9 @@ const isGrandTotal = (t: any) => t.PrimaryFlag
   || (/ORDER|GRAND|NET/.test(String(t.TotalCode ?? '').toUpperCase()) && !/TAX|SHIP|DISC|SUB|LINE|CHARGE|MARGIN/.test(String(t.TotalCode ?? '').toUpperCase()));
 
 // Invoice-style order total summary (right-aligned rows + emphasized total).
-const TotalsSummary: React.FC<{ items: any[] }> = ({ items }) => {
+const TotalsSummary: React.FC<{ items: any[]; currency?: string }> = ({ items, currency }) => {
   if (!items.length) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No totals" style={{ padding: 20 }} />;
-  const ccy = items.find(i => i.CurrencyCode)?.CurrencyCode;
+  const ccy = items.find(i => i.CurrencyCode)?.CurrencyCode ?? currency;
   const grand = items.find(isGrandTotal);
   const rows = items.filter(i => i !== grand).sort((a, b) => totalRank(a) - totalRank(b));
   return (
@@ -203,7 +203,7 @@ const TotalsModal: React.FC<{ order: any | null; onClose: () => void }> = ({ ord
       </Space>}>
       {loading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
         : error ? <div style={{ color: REDWOOD.error, fontSize: 12 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div>
-        : <TotalsSummary items={items} />}
+        : <TotalsSummary items={items} currency={order?.TransactionalCurrencyCode ?? order?.AppliedCurrencyCode} />}
     </Modal>
   );
 };
@@ -412,7 +412,7 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
               </div>
               {totals.loading ? <div style={{ textAlign: 'center', padding: 24 }}><Spin /></div>
                 : totals.error ? <div style={{ color: REDWOOD.error, fontSize: 12 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{totals.error}</div>
-                : <TotalsSummary items={totals.items} />}
+                : <TotalsSummary items={totals.items} currency={order.TransactionalCurrencyCode ?? order.AppliedCurrencyCode ?? order.TransactionalCurrencyName} />}
             </div>
           </Col>
         </Row>
@@ -432,7 +432,24 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
           : error ? <div style={{ color: REDWOOD.error, fontSize: 12, padding: 16 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div>
           : lines.length === 0 ? <Empty description="No lines" style={{ padding: 30 }} />
           : <Table size="small" columns={lineCols} dataSource={lines} rowKey={(r, i) => `${r.LineId ?? r.FulfillLineId ?? i}`}
-              pagination={lines.length > 25 ? { pageSize: 25, size: 'small' } : false} scroll={{ x: 'max-content', y: 420 }} />}
+              pagination={lines.length > 25 ? { pageSize: 25, size: 'small' } : false} scroll={{ x: 'max-content', y: 420 }}
+              summary={(data) => {
+                const ordCcy = order.TransactionalCurrencyCode ?? order.AppliedCurrencyCode ?? order.TransactionalCurrencyName;
+                const totQty = data.reduce((s, r) => s + num(r.OrderedQuantity), 0);
+                const totAmt = data.reduce((s, r) => s + num(r.OrderedQuantity) * num(r.UnitSellingPrice), 0);
+                return (
+                  <Table.Summary fixed>
+                    <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+                      <Table.Summary.Cell index={0} colSpan={3}><Text strong>Total ({data.length} line{data.length !== 1 ? 's' : ''})</Text></Table.Summary.Cell>
+                      <Table.Summary.Cell index={3} align="right"><Text strong>{fmtQty(totQty)}</Text></Table.Summary.Cell>
+                      <Table.Summary.Cell index={4} />
+                      <Table.Summary.Cell index={5} />
+                      <Table.Summary.Cell index={6} align="right"><Text strong style={{ color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(totAmt, ordCcy)}</Text></Table.Summary.Cell>
+                      <Table.Summary.Cell index={7} colSpan={Math.max(1, lineCols.length - 7)} />
+                    </Table.Summary.Row>
+                  </Table.Summary>
+                );
+              }} />}
       </Card>
 
       {/* Print preview */}
