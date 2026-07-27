@@ -295,6 +295,100 @@ const AllocateModal: React.FC<{ line: any | null; org?: string; onClose: () => v
   );
 };
 
+// ── Confirm Pick — build pickTransactions body & POST ────────────────────────
+const CONFIRM_URL = `${FUSION_BASE}/pickTransactions`;
+
+// Build the pickTransactions payload from the recorded per-line allocations.
+// Shape mirrors the Fusion pickTransactions resource:
+//   { pickLines:[ { PickSlip, PickSlipLine, PickedQuantity, SubinventoryCode,
+//       lotSerialItemLots:[ { Lot, Quantity,
+//         lotSerialItemSerials:[ { FromSerialNumber, ToSerialNumber } ] } ] } ] }
+const buildConfirmPayload = (row: any, pickLines: any[], allocations: Record<string, Allocation>) => {
+  const lineByKey: Record<string, any> = {};
+  pickLines.forEach(l => { lineByKey[String(l.PickSlipLine)] = l; });
+  const lines = Object.entries(allocations).map(([lineKey, a]) => {
+    const l = lineByKey[lineKey] ?? {};
+    const qty = a.serials.length;
+    const subinv = pickField(l, ['SourceSubinventory', 'DestinationSubinventory', 'Subinventory']);
+    const base: any = {
+      PickSlip: String(row?.PickSlip ?? l.PickSlip ?? ''),
+      PickSlipLine: String(lineKey),
+      PickedQuantity: String(qty),
+      ...(subinv ? { SubinventoryCode: subinv } : {}),
+    };
+    const serials = a.serials.map(s => ({ FromSerialNumber: s, ToSerialNumber: s }));
+    if (a.lot) {
+      base.lotSerialItemLots = [{ Lot: a.lot, Quantity: String(qty), lotSerialItemSerials: serials }];
+    } else if (serials.length) {
+      base.serialItemSerials = serials;
+    }
+    return base;
+  });
+  return { pickLines: lines };
+};
+
+const ConfirmPickModal: React.FC<{ open: boolean; payload: any | null; onClose: () => void; onDone: () => void }> = ({ open, payload, onClose, onDone }) => {
+  const [submitting, setSubmitting] = useState(false);
+  const [resp, setResp] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => { if (open) setResp(null); }, [open]);
+
+  const body = useMemo(() => (payload ? JSON.stringify(payload, null, 2) : ''), [payload]);
+  const nLines = payload?.pickLines?.length ?? 0;
+
+  const submit = async () => {
+    if (!payload) return;
+    setSubmitting(true); setResp(null);
+    try {
+      const r = await fetch(CONFIRM_URL, {
+        method: 'POST',
+        headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const text = await r.text();
+      let pretty = text; try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* keep raw */ }
+      if (r.ok) { setResp({ ok: true, text: pretty }); message.success('Pick confirmed in Fusion'); onDone(); }
+      else { setResp({ ok: false, text: `HTTP ${r.status} ${r.statusText}\n${pretty}` }); message.error(`Confirm failed (HTTP ${r.status})`); }
+    } catch (e: any) { setResp({ ok: false, text: e.message }); message.error('Confirm failed'); }
+    finally { setSubmitting(false); }
+  };
+
+  return (
+    <Modal open={open} onCancel={onClose} maskClosable={false} width={780}
+      title={<Space><CheckSquareOutlined style={{ color: REDWOOD.success }} /> Confirm Pick
+        <Tag color="green">{nLines} line{nLines !== 1 ? 's' : ''}</Tag></Space>}
+      footer={<Space>
+        <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginRight: 'auto' }}
+          onClick={() => { navigator.clipboard.writeText(body); message.success('Copied'); }}>Copy JSON</Button>
+        <Button onClick={onClose}>{resp?.ok ? 'Close' : 'Cancel'}</Button>
+        {!resp?.ok && (
+          <Button type="primary" loading={submitting} disabled={nLines === 0}
+            style={{ background: REDWOOD.success, borderColor: REDWOOD.success }} onClick={submit}>Submit to Fusion</Button>
+        )}
+      </Space>}>
+      <div style={{ fontSize: 12, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Tag color="green">POST</Tag>
+        <Text style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info }}>{CONFIRM_URL}</Text>
+      </div>
+      {nLines === 0
+        ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No allocated lines to confirm — use Allocate on a pick line first." style={{ padding: 24 }} />
+        : (
+          <div style={{ maxHeight: 340, overflow: 'auto', background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, padding: 12 }}>
+            <pre style={{ margin: 0, fontSize: 11, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{body}</pre>
+          </div>
+        )}
+      {resp && (
+        <div style={{ marginTop: 12, padding: 12, borderRadius: 6,
+          background: (resp.ok ? REDWOOD.success : REDWOOD.error) + '12', border: `1px solid ${(resp.ok ? REDWOOD.success : REDWOOD.error)}55` }}>
+          <div style={{ fontWeight: 700, color: resp.ok ? REDWOOD.success : REDWOOD.error, marginBottom: 6, fontSize: 12 }}>
+            {resp.ok ? <><CheckSquareOutlined /> Success</> : <><InfoCircleOutlined /> Error</>}
+          </div>
+          <pre style={{ margin: 0, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 200, overflow: 'auto' }}>{resp.text}</pre>
+        </div>
+      )}
+    </Modal>
+  );
+};
+
 // ── Pick Slip drill dialog (header + pickLines) ──────────────────────────────
 const PickSlipDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ row, onClose }) => {
   const pickLinesHref = row?.links?.find((l: any) => l.name === 'pickLines')?.href
@@ -323,6 +417,12 @@ const PickSlipDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ ro
 
   const [allocLine, setAllocLine] = useState<any | null>(null);
   const [allocations, setAllocations] = useState<Record<string, Allocation>>({});
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const allocCount = Object.keys(allocations).length;
+  const confirmPayload = useMemo(
+    () => buildConfirmPayload(row, pickLines, allocations),
+    [row, pickLines, allocations],
+  );
 
   // Turn recorded allocations into rows (Line, Item, Lot, Serial From/To, Qty).
   const allocRows: AllocRow[] = useMemo(() => Object.entries(allocations).map(([line, a]) => {
@@ -367,7 +467,17 @@ const PickSlipDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ ro
   return (
     <Modal
       open={!!row} onCancel={onClose} maskClosable={false} width={1040} style={{ top: 24 }}
-      footer={<Button onClick={onClose}>Close</Button>}
+      footer={<Space>
+        <Text type="secondary" style={{ marginRight: 'auto', fontSize: 12 }}>
+          {allocCount > 0
+            ? <>Allocated <b>{allocCount}</b> line{allocCount !== 1 ? 's' : ''} — ready to confirm</>
+            : 'Use Allocate on a pick line to enable Confirm Pick'}
+        </Text>
+        <Button onClick={onClose}>Close</Button>
+        <Button type="primary" icon={<CheckSquareOutlined />} disabled={allocCount === 0}
+          style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+          onClick={() => setConfirmOpen(true)}>Confirm Pick</Button>
+      </Space>}
       title={<Space><CheckSquareOutlined style={{ color: REDWOOD.primary }} /> Pick Slip <Tag color="volcano">{row?.PickSlip}</Tag>
         {row?.PickWave && <Tag color="purple">Wave {row.PickWave}</Tag>}</Space>}
     >
@@ -426,6 +536,9 @@ const PickSlipDialog: React.FC<{ row: any | null; onClose: () => void }> = ({ ro
 
       <AllocateModal line={allocLine} org={row?.Organization} onClose={() => setAllocLine(null)}
         onApply={(k, a) => setAllocations(p => ({ ...p, [String(k)]: a }))} />
+
+      <ConfirmPickModal open={confirmOpen} payload={confirmPayload}
+        onClose={() => setConfirmOpen(false)} onDone={() => { /* keep dialog open to show response */ }} />
     </Modal>
   );
 };
