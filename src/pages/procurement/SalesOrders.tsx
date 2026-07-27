@@ -1,14 +1,14 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   Layout, Breadcrumb, Card, Table, Form, Input, Select, DatePicker, Button,
-  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty, Tabs,
+  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty, Tabs, InputNumber,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, ProfileOutlined, SearchOutlined, ReloadOutlined, ClearOutlined,
   ApiOutlined, CopyOutlined, InfoCircleOutlined, ExportOutlined, BankOutlined,
   UnorderedListOutlined, ShoppingOutlined, DollarOutlined, PrinterOutlined, DownloadOutlined,
-  ReconciliationOutlined,
+  ReconciliationOutlined, PlusOutlined, SaveOutlined, DeleteOutlined, CloudUploadOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -1135,8 +1135,302 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void }> = ({ onOpen }) => {
 };
 
 // ── Page (Search tab + one tab per opened order) ─────────────────────────────
+// ── Create New Order ─────────────────────────────────────────────────────────
+const SO_CREATE_URL = `${FUSION_BASE}/salesOrdersForOrderHub`;
+const CURRENCIES = ['AED', 'USD', 'RWF', 'EUR', 'GBP', 'INR', 'SAR', 'KES', 'TZS', 'UGX', 'ZAR', 'XOF'];
+const PAYMENT_TERMS = ['Immediate', '30 Net', '45 Net', '60 Net', 'CR7D', 'CR30D', 'CR45D'];
+
+interface OrderHeader {
+  businessUnit?: string; buCode?: string; baseCurrency?: string; txnCurrency?: string; rate?: number;
+  orderType?: string; orderDate?: Dayjs | null; customerName?: string; accountNumber?: string;
+  billToSite?: string; shipToSite?: string; billToAddress?: string; shipToAddress?: string;
+  paymentTerms?: string; salesRep?: string; warehouse?: string; subinventory?: string; remarks?: string;
+}
+interface NewLine { key: string; itemNumber: string; description?: string; uom?: string; qty: number; unitPrice: number }
+
+// Item picker (itemsV2), scoped to the warehouse org — like PO Add Lines.
+const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => void; onAdd: (items: any[]) => void }> = ({ open, org, onClose, onAdd }) => {
+  const [byDesc, setByDesc] = useState(false);
+  const [term, setTerm] = useState('');
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [sel, setSel] = useState<React.Key[]>([]);
+  useEffect(() => { if (open) { setTerm(''); setRows([]); setSel([]); setError(''); } }, [open]);
+
+  const url = useMemo(() => {
+    const t = term.trim(); if (!t) return '';
+    const field = byDesc ? 'ItemDescription' : 'ItemNumber';
+    const pattern = byDesc ? `%${t}%` : `${t}%`;
+    let q = `${field} LIKE '${pattern}'`;
+    if (org) q += `;OrganizationCode=${org}`;
+    return `${FUSION_BASE}/itemsV2?q=${encodeURIComponent(q)}&limit=100&onlyData=true`;
+  }, [term, byDesc, org]);
+
+  const search = useCallback(async () => {
+    if (!url) { message.warning('Enter a search term'); return; }
+    setLoading(true); setError(''); setSel([]);
+    try { setRows(await fetchAllPages(url)); }
+    catch (e: any) { setError(e.message); setRows([]); }
+    finally { setLoading(false); }
+  }, [url]);
+
+  const cols: ColumnsType<any> = [
+    { title: 'Item', dataIndex: 'ItemNumber', width: 150, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text> },
+    { title: 'Description', dataIndex: 'ItemDescription', ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'UOM', width: 80, render: (_, r) => pf(r, ['PrimaryUOMValue', 'PrimaryUOMCode', 'PrimaryUnitOfMeasure', 'UOMCode']) ?? '—' },
+  ];
+
+  return (
+    <Modal open={open} onCancel={onClose} maskClosable={false} width={780}
+      title={<Space><SearchOutlined style={{ color: REDWOOD.primary }} /> Search Items{org ? <Tag>{org}</Tag> : null}</Space>}
+      footer={<Space>
+        <Text type="secondary" style={{ marginRight: 'auto', fontSize: 12 }}>{sel.length} selected</Text>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button type="primary" disabled={sel.length === 0} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+          onClick={() => { onAdd(rows.filter(r => sel.includes(r.ItemNumber))); onClose(); }}>Add {sel.length || ''} Item(s)</Button>
+      </Space>}>
+      <Space.Compact style={{ width: '100%', marginBottom: 10 }}>
+        <Select value={byDesc ? 'desc' : 'num'} style={{ width: 130 }} onChange={v => setByDesc(v === 'desc')}
+          options={[{ value: 'num', label: 'Item Number' }, { value: 'desc', label: 'Description' }]} />
+        <Input placeholder={byDesc ? 'e.g. TONER' : 'e.g. CC531'} value={term} onChange={e => setTerm(e.target.value)} onPressEnter={search} allowClear />
+        <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={search} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Search</Button>
+      </Space.Compact>
+      {error ? <div style={{ color: REDWOOD.error, fontSize: 12, marginBottom: 8 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div> : null}
+      <Table size="small" columns={cols} dataSource={rows} rowKey="ItemNumber" loading={loading}
+        rowSelection={{ selectedRowKeys: sel, onChange: setSel }}
+        pagination={rows.length > 10 ? { pageSize: 10, size: 'small' } : false} scroll={{ y: 320 }}
+        locale={{ emptyText: 'Search for items to add' }} />
+    </Modal>
+  );
+};
+
+// Register New Order dialog (collects the header, then opens the creation tab).
+const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProceed: (h: OrderHeader) => void }> = ({ open, onClose, onProceed }) => {
+  const [form] = Form.useForm();
+  const [bUnits, setBUnits] = useState<any[]>([]);
+  const [orgs, setOrgs] = useState<{ code: string; name?: string }[]>([]);
+  const [subs, setSubs] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    form.resetFields();
+    form.setFieldsValue({ orderType: 'LSO01', rate: 1, orderDate: dayjs() });
+    fetch(`${FUSION_BASE}/finBusinessUnitsLOV?onlyData=true&limit=500`, { headers: FUSION_HDRS })
+      .then(r => r.ok ? r.json() : Promise.reject()).then(d => setBUnits(d.items ?? [])).catch(() => { /* manual */ });
+    fetch(`${FUSION_BASE}/inventoryOrganizations?onlyData=true&limit=500&fields=OrganizationCode,OrganizationName`, { headers: FUSION_HDRS })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => setOrgs((d.items ?? []).map((o: any) => ({ code: o.OrganizationCode, name: o.OrganizationName })).filter((o: any) => o.code))).catch(() => { /* manual */ });
+  }, [open, form]);
+
+  const onBU = (name: string) => {
+    const row = bUnits.find(b => b.BusinessUnitName === name);
+    form.setFieldsValue({
+      buCode: pf(row, ['BUCode', 'BusinessUnitCode', 'Code']),
+      baseCurrency: pf(row, ['DefaultCurrencyCode', 'CurrencyCode', 'FunctionalCurrency', 'LedgerCurrency']),
+    });
+    const bc = form.getFieldValue('baseCurrency');
+    if (bc && !form.getFieldValue('txnCurrency')) form.setFieldsValue({ txnCurrency: bc });
+  };
+  const onWarehouse = (code: string) => {
+    form.setFieldsValue({ subinventory: undefined }); setSubs([]);
+    fetch(`${FUSION_BASE}/subinventories?q=OrganizationCode=${encodeURIComponent(code)}&onlyData=true&limit=500`, { headers: FUSION_HDRS })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => setSubs(Array.from(new Set((d.items ?? []).map((s: any) => s.SecondaryInventoryName).filter(Boolean))).sort() as string[])).catch(() => setSubs([]));
+  };
+
+  const submit = () => form.validateFields().then((v: any) => { onProceed(v); onClose(); }).catch(() => { /* show errors */ });
+
+  const req = (msg: string) => [{ required: true, message: msg }];
+  return (
+    <Modal open={open} onCancel={onClose} maskClosable={false} width={920} title={<Space><PlusOutlined style={{ color: REDWOOD.primary }} /> Register New Order</Space>}
+      footer={<Space><Button onClick={onClose}>Cancel</Button>
+        <Button type="primary" style={{ background: REDWOOD.info, borderColor: REDWOOD.info }} onClick={submit}>Proceed →</Button></Space>}>
+      <Form form={form} layout="horizontal" labelCol={{ flex: '150px' }} labelAlign="right" wrapperCol={{ flex: 1 }} size="small" colon={false}>
+        <Row gutter={16}>
+          <Col span={24}><Form.Item label="Business Unit" name="businessUnit" rules={req('Select business unit')}>
+            <Select showSearch placeholder="Select" onChange={onBU} options={bUnits.map(b => ({ value: b.BusinessUnitName, label: b.BusinessUnitName }))} optionFilterProp="label" /></Form.Item></Col>
+          <Col span={12}><Form.Item label="BU Code" name="buCode"><Input placeholder="—" /></Form.Item></Col>
+          <Col span={12}><Form.Item label="Base Currency" name="baseCurrency" rules={req('Base currency')}><Input placeholder="e.g. RWF" /></Form.Item></Col>
+          <Col span={12}><Form.Item label="Transaction Currency" name="txnCurrency" rules={req('Currency')}>
+            <Select showSearch placeholder="Currency" options={CURRENCIES.map(c => ({ value: c, label: c }))} /></Form.Item></Col>
+          <Col span={12}><Form.Item label="Rate" name="rate"><InputNumber style={{ width: '100%' }} min={0} /></Form.Item></Col>
+          <Col span={12}><Form.Item label="Order Type" name="orderType" rules={req('Order type')}><Input /></Form.Item></Col>
+          <Col span={12}><Form.Item label="Order Date" name="orderDate" rules={req('Order date')}><DatePicker style={{ width: '100%' }} /></Form.Item></Col>
+          <Col span={12}><Form.Item label="Customer Name" name="customerName" rules={req('Customer')}><Input placeholder="Buying party name" /></Form.Item></Col>
+          <Col span={12}><Form.Item label="Account Number" name="accountNumber"><Input placeholder="Customer number" /></Form.Item></Col>
+          <Col span={12}><Form.Item label="Bill To Site" name="billToSite"><Input /></Form.Item></Col>
+          <Col span={12}><Form.Item label="Ship To Site" name="shipToSite"><Input /></Form.Item></Col>
+          <Col span={12}><Form.Item label="Bill To Address" name="billToAddress"><Input.TextArea rows={2} /></Form.Item></Col>
+          <Col span={12}><Form.Item label="Ship to Address" name="shipToAddress"><Input.TextArea rows={2} /></Form.Item></Col>
+          <Col span={12}><Form.Item label="Payment Terms" name="paymentTerms" rules={req('Payment terms')}>
+            <Select showSearch placeholder="Terms" options={PAYMENT_TERMS.map(t => ({ value: t, label: t }))} /></Form.Item></Col>
+          <Col span={12}><Form.Item label="Sales Rep Name" name="salesRep"><Input /></Form.Item></Col>
+          <Col span={12}><Form.Item label="Warehouse" name="warehouse" rules={req('Warehouse')}>
+            <Select showSearch placeholder="Organization" onChange={onWarehouse} options={orgs.map(o => ({ value: o.code, label: `${o.code}${o.name ? ' — ' + o.name : ''}` }))} optionFilterProp="label" /></Form.Item></Col>
+          <Col span={12}><Form.Item label="Sub Inventory" name="subinventory">
+            <Select showSearch placeholder="Subinventory" notFoundContent="Pick a warehouse" options={subs.map(s => ({ value: s, label: s }))} /></Form.Item></Col>
+          <Col span={24}><Form.Item label="Remarks" name="remarks"><Input.TextArea rows={2} /></Form.Item></Col>
+        </Row>
+      </Form>
+    </Modal>
+  );
+};
+
+// New order creation tab — header summary + editable lines + save.
+const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
+  const [lines, setLines] = useState<NewLine[]>([]);
+  const [pickOpen, setPickOpen] = useState(false);
+  const [preview, setPreview] = useState(false);
+  const [posting, setPosting] = useState(false);
+  const [resp, setResp] = useState<{ ok: boolean; status: number; body: string } | null>(null);
+  const ccy = header.txnCurrency;
+
+  const addItems = (items: any[]) => {
+    setLines(prev => {
+      const existing = new Set(prev.map(l => l.itemNumber));
+      const add = items.filter(it => !existing.has(it.ItemNumber)).map((it, i) => ({
+        key: `${it.ItemNumber}-${prev.length + i}`, itemNumber: it.ItemNumber,
+        description: it.ItemDescription, uom: pf(it, ['PrimaryUOMValue', 'PrimaryUOMCode', 'UOMCode']), qty: 1, unitPrice: 0,
+      }));
+      return [...prev, ...add];
+    });
+  };
+  const upd = (key: string, patch: Partial<NewLine>) => setLines(prev => prev.map(l => l.key === key ? { ...l, ...patch } : l));
+  const del = (key: string) => setLines(prev => prev.filter(l => l.key !== key));
+
+  // Best-effort DOO order-import payload (finalise once the sample JSON is in).
+  const buildPayload = () => {
+    const src = `${header.orderType || 'SO'}-${Date.now()}`;
+    return {
+      SourceTransactionNumber: src, SourceTransactionSystem: 'OPS', SourceTransactionId: src,
+      TransactionalCurrencyCode: header.txnCurrency,
+      RequestingBusinessUnitName: header.businessUnit,
+      ...(header.orderType ? { TransactionTypeCode: header.orderType } : {}),
+      BuyingPartyName: header.customerName,
+      ...(header.accountNumber ? { BuyingPartyNumber: header.accountNumber } : {}),
+      ...(header.paymentTerms ? { PaymentTerms: header.paymentTerms } : {}),
+      ...(header.salesRep ? { Salesperson: header.salesRep } : {}),
+      ...(header.orderDate ? { RequestedShipDate: dayjs(header.orderDate).toISOString() } : {}),
+      lines: lines.map((l, i) => ({
+        SourceTransactionLineNumber: String(i + 1), SourceTransactionLineId: String(i + 1),
+        SourceScheduleNumber: '1', SourceTransactionScheduleId: String(i + 1),
+        ProductNumber: l.itemNumber, OrderedQuantity: l.qty,
+        ...(l.uom ? { OrderedUOMCode: l.uom } : {}),
+        ...(l.unitPrice ? { UnitListPrice: l.unitPrice, UnitSellingPrice: l.unitPrice } : {}),
+        ...(header.warehouse ? { RequestingBusinessUnitName: header.businessUnit, ShipFromOrganizationCode: header.warehouse } : {}),
+        ...(header.subinventory ? { SubinventoryCode: header.subinventory } : {}),
+        ...(header.orderDate ? { RequestedShipDate: dayjs(header.orderDate).toISOString() } : {}),
+      })),
+    };
+  };
+  const payloadStr = useMemo(() => JSON.stringify(buildPayload(), null, 2), [lines, header]);
+
+  const save = async () => {
+    if (lines.length === 0) { message.warning('Add at least one line'); return; }
+    setPosting(true); setResp(null);
+    try {
+      const r = await fetch(SO_CREATE_URL, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: payloadStr });
+      const text = await r.text(); let pretty = text; try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* raw */ }
+      setResp({ ok: r.ok, status: r.status, body: pretty });
+      if (r.ok) message.success('Sales order created'); else message.error(`Create failed (HTTP ${r.status})`);
+    } catch (e: any) { setResp({ ok: false, status: 0, body: e.message }); message.error(e.message); }
+    finally { setPosting(false); }
+  };
+
+  const Info: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
+    <Col xs={12} sm={8} md={6}><div style={{ marginBottom: 8 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase' }}>{label}</div>
+      <div style={{ fontSize: 12.5, color: REDWOOD.neutral900, marginTop: 2 }}>{value ?? '—'}</div>
+    </div></Col>
+  );
+
+  const totQty = lines.reduce((s, l) => s + num(l.qty), 0);
+  const totAmt = lines.reduce((s, l) => s + num(l.qty) * num(l.unitPrice), 0);
+
+  const cols: ColumnsType<NewLine> = [
+    { title: 'Line', width: 55, align: 'center', render: (_, __, i) => <Tag color="blue">{i + 1}</Tag> },
+    { title: 'Item', dataIndex: 'itemNumber', width: 140, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text> },
+    { title: 'Description', dataIndex: 'description', width: 260, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'UOM', dataIndex: 'uom', width: 80, render: v => v ?? '—' },
+    { title: 'Qty', dataIndex: 'qty', width: 100, align: 'right', render: (v, r) => <InputNumber size="small" min={0} value={v} onChange={n => upd(r.key, { qty: Number(n) || 0 })} style={{ width: 84 }} /> },
+    { title: 'Unit Price', dataIndex: 'unitPrice', width: 120, align: 'right', render: (v, r) => <InputNumber size="small" min={0} value={v} onChange={n => upd(r.key, { unitPrice: Number(n) || 0 })} style={{ width: 100 }} /> },
+    { title: 'Line Total', width: 120, align: 'right', render: (_, r) => <Text strong style={{ color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(r.qty) * num(r.unitPrice), ccy)}</Text> },
+    { title: '', width: 44, align: 'center', render: (_, r) => <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => del(r.key)} /> },
+  ];
+
+  return (
+    <div style={{ padding: '4px 2px' }}>
+      <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 12 }}
+        title={<Space><BankOutlined style={{ color: REDWOOD.primary }} /><Text strong>New Order — Header</Text>
+          <Tag color="purple">{header.orderType}</Tag><Tag>{header.txnCurrency}</Tag></Space>}
+        extra={<Space>
+          <Button icon={<CloudUploadOutlined />} onClick={() => setPreview(true)}>Payload</Button>
+          <Button type="primary" icon={<SaveOutlined />} loading={posting} onClick={save} style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>Save Sales Order</Button>
+        </Space>}>
+        <Row gutter={[12, 0]}>
+          <Info label="Business Unit" value={header.businessUnit} />
+          <Info label="BU Code" value={header.buCode} />
+          <Info label="Order Type" value={header.orderType} />
+          <Info label="Order Date" value={fmtDate(header.orderDate ? dayjs(header.orderDate).toISOString() : undefined)} />
+          <Info label="Currency" value={`${header.txnCurrency ?? '—'}${header.rate ? ` @ ${header.rate}` : ''}`} />
+          <Info label="Customer" value={header.customerName} />
+          <Info label="Account #" value={header.accountNumber} />
+          <Info label="Payment Terms" value={header.paymentTerms} />
+          <Info label="Salesperson" value={header.salesRep} />
+          <Info label="Warehouse" value={header.warehouse} />
+          <Info label="Sub Inventory" value={header.subinventory} />
+          <Info label="Bill / Ship To" value={`${header.billToSite ?? '—'} / ${header.shipToSite ?? '—'}`} />
+        </Row>
+      </Card>
+
+      <Card size="small" styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
+        title={<Space><UnorderedListOutlined style={{ color: REDWOOD.primary }} /><Text strong>Lines</Text>{lines.length > 0 && <Tag>{lines.length}</Tag>}</Space>}
+        extra={<Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setPickOpen(true)} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Add Lines</Button>}>
+        {lines.length === 0 ? <Empty description="No lines — use Add Lines to search items" style={{ padding: 30 }} />
+          : <Table size="small" columns={cols} dataSource={lines} rowKey="key" pagination={false} scroll={{ x: 900, y: 360 }}
+              summary={() => (
+                <Table.Summary fixed>
+                  <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+                    <Table.Summary.Cell index={0} colSpan={4} align="right"><Text strong>Total</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={4} align="right"><Text strong>{fmtQty(totQty)}</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={5} />
+                    <Table.Summary.Cell index={6} align="right"><Text strong style={{ color: REDWOOD.primary }}>{fmtAmount(totAmt, ccy)}</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={7} />
+                  </Table.Summary.Row>
+                </Table.Summary>
+              )} />}
+      </Card>
+
+      <ItemSearchModal open={pickOpen} org={header.warehouse} onClose={() => setPickOpen(false)} onAdd={addItems} />
+
+      <Modal open={preview} onCancel={() => setPreview(false)} maskClosable={false} width={760}
+        title={<Space><CloudUploadOutlined style={{ color: REDWOOD.primary }} /> Create Order payload</Space>}
+        footer={<Space>
+          <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(payloadStr); message.success('Copied'); }}>Copy</Button>
+          <Button onClick={() => setPreview(false)}>Close</Button>
+        </Space>}>
+        <div style={{ fontSize: 12, marginBottom: 8 }}><Tag color="green">POST</Tag><Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info, wordBreak: 'break-all' }}>{SO_CREATE_URL}</Text></div>
+        <div style={{ maxHeight: 360, overflow: 'auto', background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, padding: 12 }}>
+          <pre style={{ margin: 0, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{payloadStr}</pre>
+        </div>
+      </Modal>
+
+      {resp && (
+        <Modal open onCancel={() => setResp(null)} maskClosable={false} width={760}
+          title={<Space>{resp.ok ? <SaveOutlined style={{ color: REDWOOD.success }} /> : <InfoCircleOutlined style={{ color: REDWOOD.error }} />} Create Order — {resp.status === 0 ? 'Network Error' : `HTTP ${resp.status}`}</Space>}
+          footer={<Button onClick={() => setResp(null)}>Close</Button>}>
+          <pre style={{ margin: 0, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 420, overflow: 'auto', background: REDWOOD.neutral100, padding: 12, borderRadius: 6 }}>{resp.body}</pre>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
 const SalesOrders: React.FC = () => {
   const [openTabs, setOpenTabs] = useState<{ key: string; order: any }[]>([]);
+  const [newTabs, setNewTabs] = useState<{ key: string; header: OrderHeader }[]>([]);
+  const [registerOpen, setRegisterOpen] = useState(false);
   const [activeKey, setActiveKey] = useState('search');
 
   const openOrder = useCallback((order: any) => {
@@ -1147,7 +1441,14 @@ const SalesOrders: React.FC = () => {
 
   const removeTab = (key: string) => {
     setOpenTabs(prev => prev.filter(t => t.key !== key));
+    setNewTabs(prev => prev.filter(t => t.key !== key));
     setActiveKey(cur => (cur === key ? 'search' : cur));
+  };
+
+  const proceedNewOrder = (header: OrderHeader) => {
+    const key = `new-${Date.now()}`;
+    setNewTabs(prev => [...prev, { key, header }]);
+    setActiveKey(key);
   };
 
   const items = [
@@ -1157,6 +1458,12 @@ const SalesOrders: React.FC = () => {
       closable: false,
       children: <SearchTab onOpen={openOrder} />,
     },
+    ...newTabs.map((t, i) => ({
+      key: t.key,
+      label: <span><PlusOutlined style={{ marginRight: 5 }} />New Order{newTabs.length > 1 ? ` ${i + 1}` : ''}</span>,
+      closable: true,
+      children: <NewOrderTab header={t.header} />,
+    })),
     ...openTabs.map(t => ({
       key: t.key,
       label: <span><ShoppingOutlined style={{ marginRight: 5 }} />{t.order.SourceTransactionNumber ?? t.order.OrderNumber}</span>,
@@ -1183,8 +1490,12 @@ const SalesOrders: React.FC = () => {
         <div style={{ padding: '12px 20px' }}>
           <Tabs type="editable-card" hideAdd size="small" activeKey={activeKey}
             onChange={setActiveKey} onEdit={(key, action) => { if (action === 'remove') removeTab(key as string); }}
+            tabBarExtraContent={<Button type="primary" icon={<PlusOutlined />} onClick={() => setRegisterOpen(true)}
+              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Create New Order</Button>}
             items={items} />
         </div>
+
+        <RegisterOrderModal open={registerOpen} onClose={() => setRegisterOpen(false)} onProceed={proceedNewOrder} />
       </Content>
     </Layout>
   );
