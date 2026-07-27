@@ -122,10 +122,10 @@ const ChildLinkTab: React.FC<{ href: string; name: string }> = ({ href, name }) 
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <div style={{ flex: 1, padding: '6px 10px', borderRadius: 6, background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info }}>
-          <Tag color="blue">GET</Tag>{href}
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginBottom: 8 }}>
+        <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {href}</span>}>
+          <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} />
+        </Tooltip>
         <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>Reload</Button>
       </div>
       {loading ? <div style={{ textAlign: 'center', padding: 30 }}><Spin /></div>
@@ -313,8 +313,10 @@ const ShipmentOrderDialog: React.FC<{ row: any | null; onClose: () => void }> = 
               : error ? <div style={{ color: REDWOOD.error, fontSize: 12 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div>
               : lines.length === 0 ? <Empty description="No lines" style={{ padding: 30 }} />
               : (<>
-                  <div style={{ marginBottom: 8, fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info, wordBreak: 'break-all' }}>
-                    <Tag color="blue">GET</Tag>{decodeURIComponent(linesUrl)}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
+                    <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {decodeURIComponent(linesUrl)}</span>}>
+                      <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} />
+                    </Tooltip>
                   </div>
                   <Table size="small" columns={lineCols} dataSource={lines} rowKey={(r, i) => `${r.ShipmentLine ?? i}`}
                     pagination={false} scroll={{ x: 1300, y: 340 }} />
