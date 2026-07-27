@@ -164,12 +164,13 @@ const ShipmentOrderDialog: React.FC<{ row: any | null; onClose: () => void }> = 
     return s.startsWith('ready to release') || s.includes('backorder');
   });
 
+  // OrderType uses OrderTypeCode, but it's omitted entirely for transfer orders.
   const pickPayload = {
     SourceSystemName: 'OPS',
     BatchPrefix: `PR-${order}`,
     ShipFromOrganizationCode: hdr?.OrganizationCode,
     ReleaseStatus: 'All',
-    OrderType: hdr?.OrderTypeCode,           // OrderTypeCode, e.g. TRANSFER_ORDER
+    ...(hdr?.OrderTypeCode && hdr.OrderTypeCode !== 'TRANSFER_ORDER' ? { OrderType: hdr.OrderTypeCode } : {}),
     OrderNumber: String(order ?? ''),
     PickReleaseFlag: 'true',
     AutoPickConfirmFlag: 'false',
