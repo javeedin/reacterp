@@ -1319,6 +1319,9 @@ const COST_FIELDS = ['TotalUnitCost', 'UnitCost', 'ItemCost', 'UnitAverageCost',
 const QTY_FIELDS = ['Quantity', 'OnhandQuantity', 'OnHandQuantity', 'TotalQuantity', 'ItemQuantity', 'CostQuantity'];
 const parseVU = (vu?: string) => { const p = String(vu ?? '').split('-'); return { costOrg: p[0], invOrg: p[1], subinv: p[2], lot: p[3] }; };
 const rowOrgMatches = (row: any, org?: string) => { if (!org) return true; const p = parseVU(row.ValuationUnit); return p.invOrg === org || p.costOrg === org; };
+// Fusion child-resource links come back as absolute URLs; in the browser they must
+// go through the /fusion-api dev proxy, so rewrite the host+version prefix.
+const fusionHref = (href: string) => _isElectron ? href : href.replace(/^https?:\/\/[^/]+\/fscmRestApi\/resources\/[^/]+/, '/fusion-api');
 
 // Item picker (itemsV2) — single-line editable grid: cost, on-hand, qty, price,
 // total, margin, tax and net; select rows and add them as order lines.
@@ -1329,10 +1332,10 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [sel, setSel] = useState<React.Key[]>([]);
-  const [costs, setCosts] = useState<Record<string, { cost?: number; ccy?: string; n: number; rows: any[] }>>({});
+  const [costs, setCosts] = useState<Record<string, { cost?: number; ccy?: string; onhand?: number; n: number; rows: any[] }>>({});
   const [costLoading, setCostLoading] = useState(false);
   const [draft, setDraft] = useState<Record<string, { qty: number; price: number; taxCode?: string; tax: number }>>({});
-  const [onh, setOnh] = useState<Record<string, { loading?: boolean; qty?: number; err?: string }>>({});
+  const [onh, setOnh] = useState<Record<string, { loading?: boolean; qty?: number; lots?: string[]; err?: string }>>({});
   const [apiOpen, setApiOpen] = useState(false);
   useEffect(() => { if (open) { setTerm(''); setRows([]); setSel([]); setError(''); setCosts({}); setDraft({}); setOnh({}); } }, [open]);
 
@@ -1348,15 +1351,16 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
   const loadCosts = useCallback(async (items: any[]) => {
     if (!items.length) return;
     setCostLoading(true);
-    const map: Record<string, { cost?: number; ccy?: string; n: number; rows: any[] }> = {};
+    const map: Record<string, { cost?: number; ccy?: string; onhand?: number; n: number; rows: any[] }> = {};
     await mapLimit(items, 5, async (it) => {
       const item = it.ItemNumber;
       try {
+        // itemCosts is queryable directly by ItemNumber; org lives in ValuationUnit.
         const r = await fetch(`${LATEST_URL}/itemCosts?q=${encodeURIComponent(`ItemNumber=${item}`)}&onlyData=true&limit=500`, { headers: FUSION_HDRS });
         const d = await r.json();
         const matched = (d.items ?? []).filter((x: any) => rowOrgMatches(x, org));
         const row = matched[0];
-        map[item] = { cost: row ? num(pf(row, COST_FIELDS)) : undefined, ccy: row?.CurrencyCode, n: matched.length, rows: matched };
+        map[item] = { cost: row ? num(pf(row, COST_FIELDS)) : undefined, ccy: row?.CurrencyCode, onhand: row ? num(pf(row, ['QuantityOnhand', ...QTY_FIELDS])) : undefined, n: matched.length, rows: matched };
       } catch { map[item] = { n: 0, rows: [] }; }
     });
     setCosts(map); setCostLoading(false);
@@ -1375,18 +1379,39 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
     setDraft(p => ({ ...p, [item]: { ...(p[item] ?? { qty: 1, price: num(costs[item]?.cost), tax: 0 }), ...patch } }));
   const vuOf = (item: string) => parseVU(costs[item]?.rows?.[0]?.ValuationUnit);
   const costQtyOf = (item: string) => num(pf(costs[item]?.rows?.[0], QTY_FIELDS));
+  const costOnhandOf = (item: string) => costs[item]?.onhand;
   const num2 = (v: number) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
+  const onhQty = (x: any) => num(pf(x, ['PrimaryQuantity', 'QuantityOnhand', 'OnhandQuantity', 'Quantity']));
 
-  const checkOnhand = async (item: string, invOrg?: string, lot?: string) => {
+  // On-hand: query the org+item (+subinventory) balances, follow each balance's
+  // lot child link to read per-lot quantities, then match the cost row's lot.
+  const checkOnhand = async (item: string, invOrg?: string, subinv?: string, lot?: string) => {
     if (!invOrg) { message.warning('No inventory org on the cost row'); return; }
     setOnh(p => ({ ...p, [item]: { loading: true } }));
     try {
-      let q = `OrganizationCode=${invOrg};ItemNumber=${item}`; if (lot) q += `;LotNumber=${lot}`;
-      const r = await fetch(`${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(q)}&onlyData=true&limit=500`, { headers: FUSION_HDRS });
+      let q = `OrganizationCode=${invOrg};ItemNumber=${item}`; if (subinv) q += `;SubinventoryCode=${subinv}`;
+      const r = await fetch(`${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(q)}&limit=500`, { headers: FUSION_HDRS });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
-      const qty = (d.items ?? []).reduce((s: number, x: any) => s + num(pf(x, ['PrimaryQuantity', 'OnhandQuantity', 'Quantity'])), 0);
-      setOnh(p => ({ ...p, [item]: { qty } }));
+      const balances: any[] = d.items ?? [];
+      // Collect lot-level rows: use LotNumber when present on the balance itself,
+      // otherwise follow the balance's lot child link to fetch per-lot detail.
+      const lotRows: any[] = [];
+      for (const b of balances) {
+        if (pf(b, ['LotNumber']) != null) { lotRows.push(b); continue; }
+        const child = (b.links ?? []).find((l: any) => l.rel === 'child' && /lot/i.test(l.href || l.name || ''));
+        if (child?.href) {
+          try {
+            const cr = await fetch(`${fusionHref(child.href)}${child.href.includes('?') ? '&' : '?'}limit=500`, { headers: FUSION_HDRS });
+            const cd = await cr.json();
+            (cd.items ?? []).forEach((x: any) => lotRows.push(x));
+          } catch { /* skip this balance's lot detail */ }
+        } else { lotRows.push(b); }
+      }
+      const lots = Array.from(new Set(lotRows.map(x => pf(x, ['LotNumber'])).filter(Boolean))) as string[];
+      const matched = lot ? lotRows.filter(x => String(pf(x, ['LotNumber']) ?? '') === String(lot)) : lotRows;
+      const qty = (matched.length ? matched : lotRows).reduce((s, x) => s + onhQty(x), 0);
+      setOnh(p => ({ ...p, [item]: { qty, lots } }));
     } catch (e: any) { setOnh(p => ({ ...p, [item]: { err: e.message } })); }
   };
 
@@ -1400,12 +1425,16 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
     { title: 'Lot', width: 120, ellipsis: true, render: (_, r) => { const l = vuOf(r.ItemNumber).lot; return l ? <Tag color="geekblue" style={{ fontSize: 10 }}>{l}</Tag> : '—'; } },
     { title: 'Item Cost', width: 95, align: 'right', render: (_, r) => { const c = costs[r.ItemNumber]; if (costLoading && !c) return <Spin size="small" />; return (c?.cost == null) ? <Text type="secondary" style={{ fontSize: 11 }}>—</Text> : <Text strong style={{ fontSize: 11.5, color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{num2(c.cost)}</Text>; } },
     { title: 'Cost Qty', width: 78, align: 'right', render: (_, r) => <Text style={{ fontSize: 11 }}>{fmtQty(costQtyOf(r.ItemNumber))}</Text> },
-    { title: 'On-hand', width: 140, render: (_, r) => {
-        const item = r.ItemNumber; const p = vuOf(item); const st = onh[item]; const cq = costQtyOf(item);
+    { title: 'O/H (Cost)', width: 82, align: 'right', render: (_, r) => { const c = costs[r.ItemNumber]; if (costLoading && !c) return <Spin size="small" />; return (c?.onhand == null) ? <Text type="secondary" style={{ fontSize: 11 }}>—</Text> : <Text style={{ fontSize: 11, color: REDWOOD.info, fontVariantNumeric: 'tabular-nums' }}>{fmtQty(c.onhand)}</Text>; } },
+    { title: 'On-hand', width: 150, render: (_, r) => {
+        const item = r.ItemNumber; const p = vuOf(item); const st = onh[item]; const base = costOnhandOf(item);
         return <Space size={4}>
-          <Tooltip title={<span>On-hand — org <b>{p.invOrg}</b>, item <b>{item}</b>{p.lot ? <>, lot <b>{p.lot}</b></> : null}</span>}>
-            <Button size="small" type="text" icon={<DatabaseOutlined />} style={{ color: REDWOOD.info }} loading={st?.loading} onClick={() => checkOnhand(item, p.invOrg, p.lot)} /></Tooltip>
-          {st?.qty != null && <><Text style={{ fontSize: 11 }}>{fmtQty(st.qty)}</Text>{Math.abs(st.qty - cq) < 0.001 ? <CheckCircleTwoTone twoToneColor={REDWOOD.success} /> : <CloseCircleTwoTone twoToneColor={REDWOOD.error} />}</>}
+          <Tooltip title={<span>On-hand — org <b>{p.invOrg}</b>, item <b>{item}</b>{p.subinv ? <>, subinv <b>{p.subinv}</b></> : null}{p.lot ? <>, lot <b>{p.lot}</b></> : null}</span>}>
+            <Button size="small" type="text" icon={<DatabaseOutlined />} style={{ color: REDWOOD.info }} loading={st?.loading} onClick={() => checkOnhand(item, p.invOrg, p.subinv, p.lot)} /></Tooltip>
+          {st?.qty != null && <>
+            <Tooltip title={st.lots?.length ? <span>Lots: {st.lots.join(', ')}</span> : 'No lot detail'}><Text style={{ fontSize: 11 }}>{fmtQty(st.qty)}</Text></Tooltip>
+            {base != null && (Math.abs(st.qty - base) < 0.001 ? <CheckCircleTwoTone twoToneColor={REDWOOD.success} /> : <CloseCircleTwoTone twoToneColor={REDWOOD.error} />)}
+          </>}
           {st?.err && <Tooltip title={st.err}><Text type="danger" style={{ fontSize: 10 }}>err</Text></Tooltip>}
         </Space>;
       } },
@@ -1440,7 +1469,7 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
       {error ? <div style={{ color: REDWOOD.error, fontSize: 12, marginBottom: 8 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div> : null}
       <Table size="small" columns={cols} dataSource={rows} rowKey="ItemNumber" loading={loading}
         rowSelection={{ selectedRowKeys: sel, onChange: setSel }}
-        pagination={rows.length > 12 ? { pageSize: 12, size: 'small' } : false} scroll={{ x: 1960, y: 360 }}
+        pagination={rows.length > 12 ? { pageSize: 12, size: 'small' } : false} scroll={{ x: 2060, y: 360 }}
         locale={{ emptyText: 'Search for items to add' }} />
 
       <Modal open={apiOpen} onCancel={() => setApiOpen(false)} maskClosable={false} width={880}
@@ -1449,8 +1478,9 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {[
             { lbl: 'Item search (itemsV2)', u: searchUrlPretty },
-            { lbl: 'Item cost — matched to org via ValuationUnit (itemCosts)', u: `${LATEST_URL}/itemCosts?q=ItemNumber=<item>` },
-            { lbl: 'On-hand check (inventoryOnhandBalances)', u: `${FUSION_BASE}/inventoryOnhandBalances?q=OrganizationCode=${org ?? '<org>'};ItemNumber=<item>;LotNumber=<lot>` },
+            { lbl: 'Item cost — direct by ItemNumber, org via ValuationUnit (itemCosts)', u: `${LATEST_URL}/itemCosts?q=ItemNumber=<item>` },
+            { lbl: 'On-hand by subinventory (inventoryOnhandBalances)', u: `${FUSION_BASE}/inventoryOnhandBalances?q=OrganizationCode=${org ?? '<org>'};ItemNumber=<item>;SubinventoryCode=<subinv>` },
+            { lbl: 'On-hand lot detail — followed from each balance’s child link', u: '<inventoryOnhandBalance href>/child/... (lot rows)' },
           ].map(({ lbl, u }) => (
             <div key={lbl}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
