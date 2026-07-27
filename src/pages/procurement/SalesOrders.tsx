@@ -271,6 +271,58 @@ const MergedLineChildTab: React.FC<{ lines: any[]; name: string }> = ({ lines, n
   );
 };
 
+// Actual costing tab: per-line price + an order-level margin summary.
+const ActualCostingTab: React.FC<{ lines: any[]; currency?: string }> = ({ lines, currency }) => {
+  const totalPrice = (l: any) => (l.ExtendedAmount != null ? num(l.ExtendedAmount) : num(l.OrderedQuantity) * num(l.UnitSellingPrice));
+  const totExt = lines.reduce((s, l) => s + totalPrice(l), 0);
+  const totCost = lines.reduce((s, l) => s + num(l.EstimateFulfillmentCost), 0);
+  const totMargin = lines.reduce((s, l) => s + (l.EstimateMargin != null ? num(l.EstimateMargin) : 0), 0);
+  const marginPct = totExt ? (totMargin / totExt) * 100 : null;
+  const marginColor = totMargin < 0 ? REDWOOD.error : REDWOOD.success;
+
+  const cols: ColumnsType<any> = [
+    { title: 'Line', dataIndex: 'DisplayLineNumber', width: 60, align: 'center', render: (v, r) => <Tag color="blue" style={{ fontSize: 11 }}>{v ?? r.LineNumber ?? '—'}</Tag> },
+    { title: 'Item', dataIndex: 'ProductNumber', width: 140, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Description', dataIndex: 'ProductDescription', width: 300, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Qty', dataIndex: 'OrderedQuantity', width: 90, align: 'right', render: (v, r) => `${fmtQty(v)}${r.OrderedUOM ? ' ' + r.OrderedUOM : ''}` },
+    { title: 'Unit Price', dataIndex: 'UnitSellingPrice', width: 110, align: 'right', render: v => (v == null ? '—' : fmtAmount(v, currency)) },
+    { title: 'Total Price', key: 'tot', width: 130, align: 'right', render: (_, r) => <Text strong style={{ color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(totalPrice(r), currency)}</Text> },
+  ];
+
+  const MRow: React.FC<{ label: string; value: React.ReactNode; strong?: boolean; color?: string }> = ({ label, value, strong, color }) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, padding: '7px 0', borderBottom: `1px dashed ${REDWOOD.neutral200}` }}>
+      <span style={{ color: REDWOOD.neutral600, fontSize: 12.5, fontWeight: strong ? 700 : 400 }}>{label}</span>
+      <span style={{ fontSize: strong ? 16 : 13, fontWeight: strong ? 800 : 500, color: color ?? REDWOOD.neutral900, fontVariantNumeric: 'tabular-nums' }}>{value}</span>
+    </div>
+  );
+
+  return (
+    <div>
+      <Table size="small" columns={cols} dataSource={lines} rowKey={(r, i) => `${r.LineId ?? r.FulfillLineId ?? i}`}
+        pagination={lines.length > 25 ? { pageSize: 25, size: 'small' } : false} scroll={{ x: 830, y: 320 }}
+        summary={(data) => (
+          <Table.Summary fixed>
+            <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+              <Table.Summary.Cell index={0} colSpan={3}><Text strong>Total ({data.length})</Text></Table.Summary.Cell>
+              <Table.Summary.Cell index={3} />
+              <Table.Summary.Cell index={4} />
+              <Table.Summary.Cell index={5} align="right"><Text strong style={{ color: REDWOOD.primary }}>{fmtAmount(totExt, currency)}</Text></Table.Summary.Cell>
+            </Table.Summary.Row>
+          </Table.Summary>
+        )} />
+
+      {/* Order margin */}
+      <div style={{ maxWidth: 420, marginLeft: 'auto', marginTop: 16 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>Order Margin</div>
+        <MRow label="Extended Amount (revenue)" value={fmtAmount(totExt, currency)} />
+        <MRow label="Estimate Fulfillment Cost" value={fmtAmount(totCost, currency)} />
+        <MRow label="Estimate Margin" strong color={marginColor}
+          value={<span>{fmtAmount(totMargin, currency)}{marginPct != null && <Text style={{ fontSize: 12, marginLeft: 8, color: marginColor }}>({marginPct.toFixed(1)}%)</Text>}</span>} />
+      </div>
+    </div>
+  );
+};
+
 // ── Order view (header + lines) shown in its own tab ─────────────────────────
 const OrderView: React.FC<{ order: any }> = ({ order }) => {
   const linesHref = order?.links?.find((l: any) => l.name === 'lines')?.href
@@ -290,6 +342,12 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
     lines.forEach(l => (l.links ?? []).forEach((x: any) => { if (x.rel === 'child' && x.name) s.add(x.name); }));
     return Array.from(s).sort();
   }, [lines]);
+
+  // Fulfillment org & subinventory come from the lines — surface the distinct
+  // values in the header.
+  const orgList = useMemo(() => Array.from(new Set(lines.map((l: any) => l.RequestedFulfillmentOrganizationCode).filter(Boolean))) as string[], [lines]);
+  const orgNameOf = (code: string) => lines.find((l: any) => l.RequestedFulfillmentOrganizationCode === code)?.RequestedFulfillmentOrganizationName;
+  const subList = useMemo(() => Array.from(new Set(lines.map((l: any) => l.SubinventoryCode).filter(Boolean))) as string[], [lines]);
 
   const loadLines = useCallback(async () => {
     if (!linesHref) return;
@@ -327,9 +385,13 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
     { title: 'Status', dataIndex: 'Status', width: 120, render: (v, r) => statusTag(v, r.StatusCode) },
     { title: 'Req Ship Date', dataIndex: 'RequestedShipDate', width: 120, render: fmtDate },
     { title: 'Inv Org', dataIndex: 'InventoryOrganizationCode', width: 90, render: v => v ? <Tag style={{ fontSize: 11 }}>{v}</Tag> : '—' },
+    { title: 'Organization', dataIndex: 'RequestedFulfillmentOrganizationCode', width: 120,
+      render: (v, r) => v ? <Tooltip title={r.RequestedFulfillmentOrganizationName}><Tag style={{ fontSize: 11 }}>{v}</Tag></Tooltip> : '—' },
+    { title: 'Subinventory', dataIndex: 'SubinventoryCode', width: 120, render: v => v ?? '—' },
     ...dynamicColumns(lines, [
       'DisplayLineNumber', 'LineNumber', 'ProductNumber', 'ProductDescription', 'OrderedQuantity', 'OrderedUOM',
       'UnitListPrice', 'UnitSellingPrice', 'Status', 'StatusCode', 'RequestedShipDate', 'InventoryOrganizationCode',
+      'RequestedFulfillmentOrganizationCode', 'RequestedFulfillmentOrganizationName', 'SubinventoryCode', 'Subinventory',
     ]),
     { title: '', key: 'more', width: 46, fixed: 'right', align: 'center',
       render: (_, r) => (
@@ -464,6 +526,8 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
               <HInfo label="Requested Arrival" value={fmtDate(order.RequestedArrivalDate)} />
               <HInfo label="Requesting BU" value={order.RequestingBusinessUnitName} />
               <HInfo label="Legal Entity" value={order.RequestingLegalEntity} />
+              <HInfo label="Organization" value={orgList.length ? <Space size={4} wrap>{orgList.map(o => <Tooltip key={o} title={orgNameOf(o)}><Tag style={{ margin: 0 }}>{o}</Tag></Tooltip>)}</Space> : '—'} />
+              <HInfo label="Subinventory" value={subList.length ? <Space size={4} wrap>{subList.map(s => <Tag key={s} style={{ margin: 0 }}>{s}</Tag>)}</Space> : '—'} />
               <HInfo label="Created" value={fmtDateTime(order.CreationDate)} />
             </Row>
           </Col>
@@ -526,6 +590,13 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
                       }} />}
               </div>
             ),
+          },
+          {
+            key: 'actualCosting',
+            label: <span><DollarOutlined style={{ marginRight: 5 }} />Actual Costing</span>,
+            children: lines.length === 0
+              ? <Empty description="No lines" style={{ padding: 30 }} />
+              : <ActualCostingTab lines={lines} currency={order.TransactionalCurrencyCode ?? order.AppliedCurrencyCode ?? order.TransactionalCurrencyName} />,
           },
           ...childNames.map((name) => ({
             key: name,
@@ -792,7 +863,7 @@ const SalesOrders: React.FC = () => {
     },
     ...openTabs.map(t => ({
       key: t.key,
-      label: <span><ShoppingOutlined style={{ marginRight: 5 }} />Order {t.order.OrderNumber}</span>,
+      label: <span><ShoppingOutlined style={{ marginRight: 5 }} />{t.order.SourceTransactionNumber ?? t.order.OrderNumber}</span>,
       closable: true,
       children: <OrderView order={t.order} />,
     })),
