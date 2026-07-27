@@ -1140,11 +1140,92 @@ const SO_CREATE_URL = `${FUSION_BASE}/salesOrdersForOrderHub`;
 const CURRENCIES = ['AED', 'USD', 'RWF', 'EUR', 'GBP', 'INR', 'SAR', 'KES', 'TZS', 'UGX', 'ZAR', 'XOF'];
 const PAYMENT_TERMS = ['Immediate', '30 Net', '45 Net', '60 Net', 'CR7D', 'CR30D', 'CR45D'];
 
+// Custom ORDS lookups (payment terms & salespersons).
+const ORDS_AR = 'https://g827cd88c3cfc03-mitsumioracledb.adb.me-dubai-1.oraclecloudapps.com/ords/test/FUSIONCLIENTERP/ar';
+const PAYMENT_TERMS_URL = `${ORDS_AR}/paymentterms`;
+const SALESREPS_URL = `${ORDS_AR}/salesperson`;
+
+// Pick a display label from an ORDS row (candidate keys, else first non-id string).
+const ordsLabel = (row: any, keys: string[]): string | undefined => {
+  const v = pf(row, keys);
+  if (v != null && v !== '') return String(v);
+  const e = Object.entries(row ?? {}).find(([k, val]) => typeof val === 'string' && String(val).trim() && !/id$/i.test(k) && k !== 'links');
+  return e ? String(e[1]) : undefined;
+};
+// Fetch an ORDS list → distinct {value,label} options (empty on failure).
+const useOrdsOptions = (url: string, keys: string[], fallback: string[] = []): { value: string; label: string }[] => {
+  const [opts, setOpts] = useState<{ value: string; label: string }[]>([]);
+  useEffect(() => {
+    let live = true;
+    fetch(url, { headers: { Accept: 'application/json' } })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => {
+        if (!live) return;
+        const rows = d.items ?? (Array.isArray(d) ? d : []);
+        const seen = new Set<string>(); const list: { value: string; label: string }[] = [];
+        rows.forEach((row: any) => { const lbl = ordsLabel(row, keys); if (lbl && !seen.has(lbl)) { seen.add(lbl); list.push({ value: lbl, label: lbl }); } });
+        setOpts(list.length ? list : fallback.map(f => ({ value: f, label: f })));
+      })
+      .catch(() => { if (live) setOpts(fallback.map(f => ({ value: f, label: f }))); });
+    return () => { live = false; };
+  }, [url]); // eslint-disable-line react-hooks/exhaustive-deps
+  return opts;
+};
+const PAY_TERM_KEYS = ['name', 'Name', 'payment_terms', 'paymentterms', 'term_name', 'termname', 'payment_term', 'value', 'description'];
+const SALESREP_KEYS = ['name', 'Name', 'salesrep_name', 'salesperson', 'salesperson_name', 'salespersonname', 'resource_name', 'full_name', 'value'];
+
+const CUSTOMERS_URL = `${ORDS_AR}/customers`;
+// Fetch all customer rows (paged) from the ORDS customers endpoint.
+const useCustomers = (): any[] => {
+  const [rows, setRows] = useState<any[]>([]);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const all: any[] = []; let offset = 0;
+        for (let i = 0; i < 20; i++) {
+          const r = await fetch(`${CUSTOMERS_URL}?limit=500&offset=${offset}`, { headers: { Accept: 'application/json' } });
+          if (!r.ok) break;
+          const d = await r.json(); const items = d.items ?? (Array.isArray(d) ? d : []);
+          all.push(...items);
+          if (!d.hasMore || items.length === 0) break;
+          offset += 500;
+        }
+        if (live) setRows(all);
+      } catch { /* ignore */ }
+    })();
+    return () => { live = false; };
+  }, []);
+  return rows;
+};
+const custAcct = (c: any) => pf(c, ['account_number', 'ACCOUNT_NUMBER', 'AccountNumber']);
+const custName = (c: any) => pf(c, ['account_name', 'ACCOUNT_NAME', 'AccountName']);
+const custOptionList = (customers: any[]) => {
+  const seen = new Set<string>();
+  return customers.map(c => ({ value: String(custName(c) ?? ''), label: `${custName(c) ?? ''}${custAcct(c) ? ` (${custAcct(c)})` : ''}`, _c: c }))
+    .filter(o => o.value && !seen.has(o.value) && seen.add(o.value));
+};
+// Field values to set when a customer is picked (fills sites + addresses).
+const customerFill = (row: any) => {
+  const join = (...ks: string[][]) => ks.map(k => pf(row, k)).filter(Boolean).join(', ');
+  const idStr = (k: string[]) => { const v = pf(row, k); return v == null || v === '' ? undefined : String(v); };
+  return {
+    customerName: custName(row), accountNumber: custAcct(row),
+    billToSite: idStr(['bill_to_site_use_id', 'BILL_TO_SITE_USE_ID']),
+    shipToSite: idStr(['ship_to_party_site_id', 'SHIP_TO_PARTY_SITE_ID']),
+    billToAddress: join(['bill_to_address1', 'BILL_TO_ADDRESS1'], ['bill_to_address2', 'BILL_TO_ADDRESS2'], ['bill_to_city', 'BILL_TO_CITY']),
+    shipToAddress: join(['ship_to_address1', 'SHIP_TO_ADDRESS1'], ['ship_to_address2', 'SHIP_TO_ADDRESS2'], ['ship_to_city', 'SHIP_TO_CITY'], ['ship_to_country', 'SHIP_TO_COUNTRY']),
+    custAccountId: idStr(['cust_account_id', 'CUST_ACCOUNT_ID']),
+    partyId: idStr(['party_id', 'PARTY_ID']),
+  };
+};
+
 interface OrderHeader {
   businessUnit?: string; buCode?: string; baseCurrency?: string; txnCurrency?: string; rate?: number;
   orderType?: string; orderDate?: Dayjs | null; customerName?: string; accountNumber?: string;
   billToSite?: string; shipToSite?: string; billToAddress?: string; shipToAddress?: string;
   paymentTerms?: string; salesRep?: string; warehouse?: string; subinventory?: string; remarks?: string;
+  custAccountId?: string; partyId?: string;
 }
 interface NewLine { key: string; itemNumber: string; description?: string; uom?: string; qty: number; unitPrice: number }
 
@@ -1251,6 +1332,10 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
   const [form] = Form.useForm();
   const bUnits = usePayablesBUs();
   const orgRows = useInvOrgs();
+  const customers = useCustomers();
+  const payTermOpts = useOrdsOptions(PAYMENT_TERMS_URL, PAY_TERM_KEYS, PAYMENT_TERMS);
+  const salesRepOpts = useOrdsOptions(SALESREPS_URL, SALESREP_KEYS);
+  const custOptions = useMemo(() => custOptionList(customers), [customers]);
   const [subs, setSubs] = useState<string[]>([]);
 
   useEffect(() => {
@@ -1259,6 +1344,11 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
     form.setFieldsValue({ orderType: 'LSO01', rate: 1, orderDate: dayjs() });
     setSubs([]);
   }, [open, form]);
+
+  const onCustomer = (name: string, opt: any) => {
+    const row = opt?._c ?? customers.find(c => custName(c) === name);
+    if (row) form.setFieldsValue(customerFill(row));
+  };
 
   const buName = Form.useWatch('businessUnit', form);
   const buRow = useMemo(() => bUnits.find(b => b.businessUnitName === buName), [bUnits, buName]);
@@ -1296,15 +1386,17 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
           <Col span={12}><Form.Item label="Rate" name="rate"><InputNumber style={{ width: '100%' }} min={0} /></Form.Item></Col>
           <Col span={12}><Form.Item label="Order Type" name="orderType" rules={req('Order type')}><Input /></Form.Item></Col>
           <Col span={12}><Form.Item label="Order Date" name="orderDate" rules={req('Order date')}><DatePicker style={{ width: '100%' }} /></Form.Item></Col>
-          <Col span={12}><Form.Item label="Customer Name" name="customerName" rules={req('Customer')}><Input placeholder="Buying party name" /></Form.Item></Col>
-          <Col span={12}><Form.Item label="Account Number" name="accountNumber"><Input placeholder="Customer number" /></Form.Item></Col>
+          <Col span={12}><Form.Item label="Customer Name" name="customerName" rules={req('Customer')}>
+            <Select showSearch placeholder="Search customer" onChange={onCustomer} optionFilterProp="label" options={custOptions} notFoundContent={customers.length ? 'No match' : 'Loading…'} /></Form.Item></Col>
+          <Col span={12}><Form.Item label="Account Number" name="accountNumber"><Input placeholder="auto-filled" readOnly /></Form.Item></Col>
           <Col span={12}><Form.Item label="Bill To Site" name="billToSite"><Input /></Form.Item></Col>
           <Col span={12}><Form.Item label="Ship To Site" name="shipToSite"><Input /></Form.Item></Col>
           <Col span={12}><Form.Item label="Bill To Address" name="billToAddress"><Input.TextArea rows={2} /></Form.Item></Col>
           <Col span={12}><Form.Item label="Ship to Address" name="shipToAddress"><Input.TextArea rows={2} /></Form.Item></Col>
           <Col span={12}><Form.Item label="Payment Terms" name="paymentTerms" rules={req('Payment terms')}>
-            <Select showSearch placeholder="Terms" options={PAYMENT_TERMS.map(t => ({ value: t, label: t }))} /></Form.Item></Col>
-          <Col span={12}><Form.Item label="Sales Rep Name" name="salesRep"><Input /></Form.Item></Col>
+            <Select showSearch placeholder="Terms" optionFilterProp="label" options={payTermOpts} /></Form.Item></Col>
+          <Col span={12}><Form.Item label="Sales Rep Name" name="salesRep">
+            <Select showSearch allowClear placeholder="Salesperson" optionFilterProp="label" options={salesRepOpts} notFoundContent={salesRepOpts.length ? 'No match' : 'Loading…'} /></Form.Item></Col>
           <Col span={12}><Form.Item label={<WarehouseLabel />} name="warehouse" rules={req('Warehouse')}>
             <Select showSearch placeholder={buName ? 'Organization' : 'Select business unit first'} onChange={onWarehouse} options={whOptions} optionFilterProp="label" /></Form.Item></Col>
           <Col span={12}><Form.Item label="Sub Inventory" name="subinventory">
@@ -1322,6 +1414,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
   const [hdr, setHdr] = useState<OrderHeader>(header);
   const bUnits = usePayablesBUs();
   const orgRows = useInvOrgs();
+  const customers = useCustomers();
+  const payTermOpts = useOrdsOptions(PAYMENT_TERMS_URL, PAY_TERM_KEYS, PAYMENT_TERMS);
+  const salesRepOpts = useOrdsOptions(SALESREPS_URL, SALESREP_KEYS);
+  const custOptions = useMemo(() => custOptionList(customers), [customers]);
   const [subs, setSubs] = useState<string[]>([]);
   const [lines, setLines] = useState<NewLine[]>([]);
   const [pickOpen, setPickOpen] = useState(false);
@@ -1352,6 +1448,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
     setSubs([]); syncHdr();
   };
   const onWh = (code: string) => { form.setFieldsValue({ subinventory: undefined }); loadSubs(code); syncHdr(); };
+  const onCustomer = (name: string, opt: any) => { const row = opt?._c ?? customers.find(c => custName(c) === name); if (row) { const fill = customerFill(row); form.setFieldsValue(fill); setHdr(prev => ({ ...prev, ...fill })); } };
 
   const addItems = (items: any[]) => {
     setLines(prev => {
@@ -1439,11 +1536,13 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
             <Col xs={12} sm={6} md={4}><Form.Item label="Currency" name="txnCurrency" style={{ marginBottom: 8 }}>
               <Select showSearch options={CURRENCIES.map(c => ({ value: c, label: c }))} /></Form.Item></Col>
             <Col xs={12} sm={6} md={4}><Form.Item label="Rate" name="rate" style={{ marginBottom: 8 }}><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
-            <Col xs={24} sm={12} md={8}><Form.Item label="Customer" name="customerName" style={{ marginBottom: 8 }}><Input /></Form.Item></Col>
-            <Col xs={12} sm={6} md={4}><Form.Item label="Account #" name="accountNumber" style={{ marginBottom: 8 }}><Input /></Form.Item></Col>
+            <Col xs={24} sm={12} md={8}><Form.Item label="Customer" name="customerName" style={{ marginBottom: 8 }}>
+              <Select showSearch placeholder="Search customer" onChange={onCustomer} optionFilterProp="label" options={custOptions} notFoundContent={customers.length ? 'No match' : 'Loading…'} /></Form.Item></Col>
+            <Col xs={12} sm={6} md={4}><Form.Item label="Account #" name="accountNumber" style={{ marginBottom: 8 }}><Input readOnly /></Form.Item></Col>
             <Col xs={12} sm={6} md={4}><Form.Item label="Payment Terms" name="paymentTerms" style={{ marginBottom: 8 }}>
-              <Select showSearch options={PAYMENT_TERMS.map(t => ({ value: t, label: t }))} /></Form.Item></Col>
-            <Col xs={12} sm={6} md={4}><Form.Item label="Salesperson" name="salesRep" style={{ marginBottom: 8 }}><Input /></Form.Item></Col>
+              <Select showSearch optionFilterProp="label" options={payTermOpts} /></Form.Item></Col>
+            <Col xs={12} sm={6} md={4}><Form.Item label="Salesperson" name="salesRep" style={{ marginBottom: 8 }}>
+              <Select showSearch allowClear optionFilterProp="label" options={salesRepOpts} notFoundContent={salesRepOpts.length ? 'No match' : 'Loading…'} /></Form.Item></Col>
             <Col xs={12} sm={6} md={8}><Form.Item label={<WarehouseLabel />} name="warehouse" style={{ marginBottom: 8 }}>
               <Select showSearch placeholder={buName ? 'Organization' : 'Select BU first'} onChange={onWh} options={whOptions} optionFilterProp="label" /></Form.Item></Col>
             <Col xs={12} sm={6} md={4}><Form.Item label="Sub Inventory" name="subinventory" style={{ marginBottom: 8 }}>
