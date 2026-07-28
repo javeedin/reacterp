@@ -1052,6 +1052,30 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
       ),
     },
     {
+      title: 'ASN',
+      dataIndex: 'ASNNumbers',
+      key: 'ASNNumbers',
+      width: 160,
+      ellipsis: true,
+      render: (v: string) => v
+        ? <Tooltip title={v}><Tag color="purple" style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>{v}</Tag></Tooltip>
+        : <span style={{ color: REDWOOD.neutral600 }}>—</span>,
+    },
+    {
+      title: 'No. of Lines',
+      dataIndex: 'linesCount',
+      key: 'linesCount',
+      width: 90,
+      align: 'center' as const,
+      render: (v: number) => (
+        <Badge
+          count={v}
+          style={{ background: REDWOOD.teal, fontWeight: 600 }}
+          overflowCount={999}
+        />
+      ),
+    },
+    {
       title: 'Organization',
       dataIndex: 'ToOrganizationCode',
       key: 'ToOrganizationCode',
@@ -1092,16 +1116,6 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
       render: (v: string) => <StatusTag status={v} />,
     },
     {
-      title: 'ASN',
-      dataIndex: 'ASNNumbers',
-      key: 'ASNNumbers',
-      width: 160,
-      ellipsis: true,
-      render: (v: string) => v
-        ? <Tooltip title={v}><Tag color="purple" style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>{v}</Tag></Tooltip>
-        : <span style={{ color: REDWOOD.neutral600 }}>—</span>,
-    },
-    {
       title: 'Due Date',
       dataIndex: 'dueDateEarliest',
       key: 'dueDateEarliest',
@@ -1126,20 +1140,6 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
           </Space>
         );
       },
-    },
-    {
-      title: 'Lines',
-      dataIndex: 'linesCount',
-      key: 'linesCount',
-      width: 70,
-      align: 'center' as const,
-      render: (v: number) => (
-        <Badge
-          count={v}
-          style={{ background: REDWOOD.teal, fontWeight: 600 }}
-          overflowCount={999}
-        />
-      ),
     },
   ];
 
