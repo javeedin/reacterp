@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Layout, Typography, Card, Table, Button, Form, Input, Space, Tabs,
-  Tooltip, Row, Col, Tag, Select, Segmented, Empty, Spin, DatePicker,
+  Tooltip, Row, Col, Tag, Select, Segmented, Empty, Spin, DatePicker, Progress,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
@@ -33,7 +33,11 @@ const REDWOOD = {
 const BASE_URL = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05';
 const AUTH_HEADER = 'Basic ' + btoa('emparun:Fusion@1234');
 const HEADERS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
-const PAGE_LIMIT = 500;
+// Small pages fetched in parallel are far faster than one large sequential page:
+// Fusion computes a 500-row page slowly, whereas ten 50-row pages return quickly
+// and can run concurrently. CONCURRENCY caps how many are in flight at once.
+const PAGE_LIMIT = 50;
+const CONCURRENCY = 8;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const numFmt = (v: any) =>
@@ -111,23 +115,55 @@ const buildCols = (rows: any[]): ColumnsType<any> => {
   return cols;
 };
 
-// Pull all receiptCosts (paged) — capped so a broad search can't run away.
-const fetchAllReceiptCosts = async (baseUrl: string, cap = 5000): Promise<any[]> => {
+// Pull all receiptCosts — capped so a broad search can't run away.
+// Strategy: fetch page 0 with totalResults=true to learn the row count, then
+// fan the remaining offsets out in parallel (CONCURRENCY at a time) using small
+// PAGE_LIMIT pages. Pages are reassembled in offset order so results stay stable.
+// onProgress(loaded, total) fires as each page lands so the UI can show a bar.
+const fetchAllReceiptCosts = async (
+  baseUrl: string,
+  onProgress?: (loaded: number, total: number) => void,
+  cap = 5000,
+): Promise<any[]> => {
   const stripped = baseUrl.replace(/[?&]limit=\d+/gi, '').replace(/[?&]offset=\d+/gi, '').replace(/\?&/, '?').replace(/&&/g, '&');
-  const all: any[] = [];
-  let offset = 0;
-  const step = PAGE_LIMIT;
-  while (all.length < cap) {
-    const sep = stripped.includes('?') ? '&' : '?';
-    const r = await fetch(`${stripped}${sep}limit=${step}&offset=${offset}`, { headers: HEADERS });
-    if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
-    const d = await r.json();
-    const items: any[] = Array.isArray(d) ? d : (d.items ?? []);
-    all.push(...items);
-    if (!d.hasMore || items.length < step) break;
-    offset += step;
-  }
-  return all;
+  const sep = stripped.includes('?') ? '&' : '?';
+  const pageUrl = (offset: number) => `${stripped}${sep}limit=${PAGE_LIMIT}&offset=${offset}`;
+
+  // First page also asks Fusion for the total count.
+  const r0 = await fetch(`${pageUrl(0)}&totalResults=true`, { headers: HEADERS });
+  if (!r0.ok) throw new Error(`HTTP ${r0.status}: ${r0.statusText}`);
+  const d0 = await r0.json();
+  const first: any[] = Array.isArray(d0) ? d0 : (d0.items ?? []);
+  const total = Math.min(
+    typeof d0.totalResults === 'number' && d0.totalResults > 0 ? d0.totalResults : first.length,
+    cap,
+  );
+
+  let loaded = first.length;
+  onProgress?.(loaded, total);
+  if (first.length < PAGE_LIMIT || loaded >= total) return first.slice(0, cap);
+
+  // Remaining offsets to fetch.
+  const offsets: number[] = [];
+  for (let off = PAGE_LIMIT; off < total; off += PAGE_LIMIT) offsets.push(off);
+
+  const pages: any[][] = new Array(offsets.length);
+  let next = 0;
+  const worker = async () => {
+    while (true) {
+      const my = next++;
+      if (my >= offsets.length) return;
+      const r = await fetch(pageUrl(offsets[my]), { headers: HEADERS });
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+      const d = await r.json();
+      const items: any[] = Array.isArray(d) ? d : (d.items ?? []);
+      pages[my] = items;
+      loaded += items.length;
+      onProgress?.(Math.min(loaded, total), total);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, offsets.length) }, worker));
+  return [first, ...pages].flat().slice(0, cap);
 };
 
 // ── Shared search params ──────────────────────────────────────────────────────
@@ -144,7 +180,10 @@ const buildQueryUrl = (vals: SearchVals): string => {
   const clauses: string[] = [];
   if (vals.inventoryOrg) clauses.push(`InventoryOrganizationName=${vals.inventoryOrg}`);
   if (vals.reference)    clauses.push(`ReferenceNumber=${vals.reference}`);
-  if (vals.item)         clauses.push(`Item like "${vals.item}*"`);
+  // Fusion q row-finder: string literals use single quotes and % as the wildcard.
+  // The previous `Item like "val*"` (double quotes, * wildcard) was invalid syntax
+  // and got silently dropped, so the item filter was never applied.
+  if (vals.item)         clauses.push(`Item LIKE '${String(vals.item).trim()}%'`);
   if (vals.costDate) {
     const op = vals.costDateOp || '=';
     const d = typeof vals.costDate === 'string' ? vals.costDate : dayjs(vals.costDate).format('YYYY-MM-DD');
@@ -162,6 +201,8 @@ const buildQueryUrl = (vals: SearchVals): string => {
 const groupedCols: ColumnsType<any> = [
   { title: 'Cost Org',      dataIndex: 'costOrg', key: 'costOrg', width: 150, ellipsis: true, render: (v: string) => <Text strong style={{ fontSize: 12 }}>{v || '—'}</Text> },
   { title: 'Inventory Org', dataIndex: 'invOrg',  key: 'invOrg',  width: 150, ellipsis: true, render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+  { title: 'Item',          dataIndex: 'item',    key: 'item',    width: 140, ellipsis: true, render: (v: string) => v ? <Text strong style={{ fontSize: 12 }}>{v}</Text> : <span style={{ color: REDWOOD.neutral300 }}>—</span> },
+  { title: 'Transaction Type', dataIndex: 'transactionType', key: 'transactionType', width: 180, ellipsis: true, render: (v: string) => v ? <Text style={{ fontSize: 12 }}>{v}</Text> : <span style={{ color: REDWOOD.neutral300 }}>—</span> },
   { title: 'Subinventory',  dataIndex: 'subinv',  key: 'subinv',  width: 130, render: (v: string) => v ? <Tag color="cyan">{v}</Tag> : '—' },
   { title: 'Lot',           dataIndex: 'lot',     key: 'lot',     width: 180, ellipsis: true, render: (v: string) => v ? <Tag color="geekblue">{v}</Tag> : '—' },
   { title: 'Receipt #',     dataIndex: 'receiptNumber',   key: 'receiptNumber',   width: 130, ellipsis: true, render: (v: string) => v || <span style={{ color: REDWOOD.neutral300 }}>—</span> },
@@ -184,18 +225,22 @@ const SearchTable: React.FC<{ rows: any[]; loading: boolean; err: string; ran: b
     rows.forEach(r => {
       const vu = String(r.ValuationUnit ?? '');
       let g = map.get(vu);
-      if (!g) { g = { vu, ...parseValuationUnit(vu), totalUnitCost: null, receiptQty: 0, onhandQty: 0, count: 0, _recpt: new Set<string>(), _ref: new Set<string>() }; map.set(vu, g); }
+      if (!g) { g = { vu, ...parseValuationUnit(vu), totalUnitCost: null, receiptQty: 0, onhandQty: 0, count: 0, _recpt: new Set<string>(), _ref: new Set<string>(), _item: new Set<string>(), _txn: new Set<string>() }; map.set(vu, g); }
       g.receiptQty += Number(r.ReceiptQuantity) || 0;
       g.onhandQty  += Number(r.QuantityOnhand)  || 0;
       g.count      += 1;
       if (r.TotalUnitCost != null && r.TotalUnitCost !== '') g.totalUnitCost = r.TotalUnitCost;
-      if (r.ReceiptNumber)   g._recpt.add(String(r.ReceiptNumber));
-      if (r.ReferenceNumber) g._ref.add(String(r.ReferenceNumber));
+      if (r.ReceiptNumber)        g._recpt.add(String(r.ReceiptNumber));
+      if (r.ReferenceNumber)      g._ref.add(String(r.ReferenceNumber));
+      if (r.Item)                 g._item.add(String(r.Item));
+      if (r.TransactionTypeName)  g._txn.add(String(r.TransactionTypeName));
     });
     return Array.from(map.values()).map(g => ({
       ...g,
       receiptNumber: Array.from(g._recpt).join(', '),
       referenceNumber: Array.from(g._ref).join(', '),
+      item: Array.from(g._item).join(', '),
+      transactionType: Array.from(g._txn).join(', '),
     }));
   }, [rows]);
 
@@ -231,10 +276,10 @@ const SearchTable: React.FC<{ rows: any[]; loading: boolean; err: string; ran: b
         summary={() => (hasVU && filtered.length > 0) ? (
           <Table.Summary fixed>
             <Table.Summary.Row style={{ background: REDWOOD.neutral100, fontWeight: 700 }}>
-              <Table.Summary.Cell index={0} colSpan={7}><Text strong>Total ({filtered.length})</Text></Table.Summary.Cell>
-              <Table.Summary.Cell index={7} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{numFmt(filtered.reduce((s: number, g: any) => s + g.receiptQty, 0))}</Text></Table.Summary.Cell>
-              <Table.Summary.Cell index={8} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.success }}>{numFmt(filtered.reduce((s: number, g: any) => s + g.onhandQty, 0))}</Text></Table.Summary.Cell>
-              <Table.Summary.Cell index={9} />
+              <Table.Summary.Cell index={0} colSpan={9}><Text strong>Total ({filtered.length})</Text></Table.Summary.Cell>
+              <Table.Summary.Cell index={9} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{numFmt(filtered.reduce((s: number, g: any) => s + g.receiptQty, 0))}</Text></Table.Summary.Cell>
+              <Table.Summary.Cell index={10} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.success }}>{numFmt(filtered.reduce((s: number, g: any) => s + g.onhandQty, 0))}</Text></Table.Summary.Cell>
+              <Table.Summary.Cell index={11} />
             </Table.Summary.Row>
           </Table.Summary>
         ) : null}
@@ -482,6 +527,7 @@ const ManageReceiptCost: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [err, setErr]         = useState('');
   const [ran, setRan]         = useState(false);
+  const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
 
   // Inventory Organization options — from inventoryOrganizations.
   const [orgs, setOrgs] = useState<{ name: string; code: string }[]>([]);
@@ -502,14 +548,14 @@ const ManageReceiptCost: React.FC = () => {
 
   const search = useCallback(() => {
     const vals = form.getFieldsValue() as SearchVals;
-    setLoading(true); setErr(''); setRan(true);
-    fetchAllReceiptCosts(buildQueryUrl(vals))
+    setLoading(true); setErr(''); setRan(true); setProgress({ loaded: 0, total: 0 });
+    fetchAllReceiptCosts(buildQueryUrl(vals), (loaded, total) => setProgress({ loaded, total }))
       .then(d => setRows(d))
       .catch(e => { setErr(e.message); setRows([]); })
       .finally(() => setLoading(false));
   }, [form]);
 
-  const reset = () => { form.resetFields(); setRows([]); setRan(false); setErr(''); };
+  const reset = () => { form.resetFields(); setRows([]); setRan(false); setErr(''); setProgress(null); };
 
   const vals = form.getFieldsValue() as SearchVals;
   const previewUrl = `${buildQueryUrl(vals)}${buildQueryUrl(vals).includes('?') ? '&' : '?'}limit=${PAGE_LIMIT}`;
@@ -597,6 +643,26 @@ const ManageReceiptCost: React.FC = () => {
               </Row>
             </Form>
           </Card>
+
+          {/* Live paging progress — parallel small pages fetched via totalResults */}
+          {loading && progress && (
+            <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 14 }} styles={{ body: { padding: '10px 16px' } }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <Progress
+                  style={{ flex: 1, marginBottom: 0 }}
+                  percent={progress.total > 0 ? Math.round((progress.loaded / progress.total) * 100) : 0}
+                  status="active"
+                  strokeColor={REDWOOD.teal}
+                  size="small"
+                />
+                <Text type="secondary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+                  {progress.total > 0
+                    ? `Loaded ${numFmt(progress.loaded)} of ${numFmt(progress.total)} receipt cost records…`
+                    : 'Counting records…'}
+                </Text>
+              </div>
+            </Card>
+          )}
 
           <Card styles={{ body: { padding: 0 } }}
             style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
