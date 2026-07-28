@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   Layout, Breadcrumb, Card, Table, Form, Input, Select, DatePicker, Button,
   Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty, Tabs, InputNumber,
@@ -1231,7 +1231,7 @@ interface OrderHeader {
   paymentTerms?: string; salesRep?: string; warehouse?: string; subinventory?: string; remarks?: string;
   custAccountId?: string; partyId?: string;
 }
-interface NewLine { key: string; itemNumber: string; description?: string; uom?: string; qty: number; unitPrice: number; costUnit?: number; taxCode?: string; taxAmount?: number; lot?: string; lots?: string[] }
+interface NewLine { key: string; itemNumber: string; description?: string; uom?: string; qty: number; unitPrice: number; costUnit?: number; taxCode?: string; taxAmount?: number; lot?: string; lots?: string[]; qoh?: number; ohLoading?: boolean }
 
 const INV_ORGS_URL = `${FUSION_BASE}/inventoryOrganizations?onlyData=true&limit=500`;
 
@@ -1322,6 +1322,44 @@ const rowOrgMatches = (row: any, org?: string) => { if (!org) return true; const
 // Fusion child-resource links come back as absolute URLs; in the browser they must
 // go through the /fusion-api dev proxy, so rewrite the host+version prefix.
 const fusionHref = (href: string) => _isElectron ? href : href.replace(/^https?:\/\/[^/]+\/fscmRestApi\/resources\/[^/]+/, '/fusion-api');
+const onhQtyOf = (x: any) => num(pf(x, ['PrimaryQuantity', 'QuantityOnhand', 'OnhandQuantity', 'Quantity']));
+
+// Shared Fusion lookups (used by the picker modal and inline new-line search).
+async function fetchItemCostRows(item: string, org?: string) {
+  const r = await fetch(`${LATEST_URL}/itemCosts?q=${encodeURIComponent(`ItemNumber=${item}`)}&onlyData=true&limit=500`, { headers: FUSION_HDRS });
+  const d = await r.json();
+  return ((d.items ?? []) as any[]).filter(x => rowOrgMatches(x, org));
+}
+async function fetchOnhand(item: string, invOrg: string, subinv?: string, lot?: string): Promise<{ qty: number; lots: string[] }> {
+  let q = `OrganizationCode=${invOrg};ItemNumber=${item}`; if (subinv) q += `;SubinventoryCode=${subinv}`;
+  const r = await fetch(`${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(q)}&limit=500`, { headers: FUSION_HDRS });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const d = await r.json();
+  const lotRows: any[] = [];
+  for (const b of (d.items ?? [])) {
+    if (pf(b, ['LotNumber']) != null) { lotRows.push(b); continue; }
+    const child = (b.links ?? []).find((l: any) => l.rel === 'child' && /lot/i.test(l.href || l.name || ''));
+    if (child?.href) {
+      try { const cr = await fetch(`${fusionHref(child.href)}${child.href.includes('?') ? '&' : '?'}limit=500`, { headers: FUSION_HDRS }); const cd = await cr.json(); (cd.items ?? []).forEach((x: any) => lotRows.push(x)); }
+      catch { /* skip this balance's lot detail */ }
+    } else { lotRows.push(b); }
+  }
+  const lots = Array.from(new Set(lotRows.map(x => pf(x, ['LotNumber'])).filter(Boolean))) as string[];
+  const matched = lot ? lotRows.filter(x => String(pf(x, ['LotNumber']) ?? '') === String(lot)) : lotRows;
+  const qty = (matched.length ? matched : lotRows).reduce((s, x) => s + onhQtyOf(x), 0);
+  return { qty, lots };
+}
+// Type-ahead item search by code OR description (merged, deduped by ItemNumber).
+async function searchItems(text: string, org?: string): Promise<any[]> {
+  const t = text.trim(); if (!t) return [];
+  const esc = t.replace(/'/g, "''");
+  const one = async (q: string) => { try { const r = await fetch(`${FUSION_BASE}/itemsV2?q=${encodeURIComponent(q)}&limit=25&onlyData=true`, { headers: FUSION_HDRS }); const d = await r.json(); return (d.items ?? []) as any[]; } catch { return []; } };
+  const orgQ = org ? `;OrganizationCode=${org}` : '';
+  const [a, b] = await Promise.all([one(`ItemNumber LIKE '${esc}%'${orgQ}`), one(`ItemDescription LIKE '%${esc}%'${orgQ}`)]);
+  const map = new Map<string, any>();
+  [...a, ...b].forEach(x => { if (!map.has(x.ItemNumber)) map.set(x.ItemNumber, x); });
+  return Array.from(map.values()).slice(0, 40);
+}
 
 // Item picker (itemsV2) — single-line editable grid: cost, on-hand, qty, price,
 // total, margin, tax and net; select rows and add them as order lines.
@@ -1416,7 +1454,12 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
   };
 
   // Changing Ord Qty auto-selects the row so it will be added on "Add".
-  const setQty = (item: string, v: number) => { dset(item, { qty: v }); if (v > 0) setSel(s => s.includes(item) ? s : [...s, item]); };
+  const maxQohOf = (item: string) => onh[item]?.qty ?? costs[item]?.onhand;
+  const setQty = (item: string, v: number) => {
+    const cap = maxQohOf(item);
+    if (cap != null && v > cap) { v = cap; message.warning(`Cannot order more than on-hand (${fmtQty(cap)})`); }
+    dset(item, { qty: v }); if (v > 0) setSel(s => s.includes(item) ? s : [...s, item]);
+  };
 
   const cols: ColumnsType<any> = [
     { title: 'Item', dataIndex: 'ItemNumber', width: 140, fixed: 'left', render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text> },
@@ -1437,7 +1480,7 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
           {st?.err && <Tooltip title={st.err}><Text type="danger" style={{ fontSize: 10 }}>err</Text></Tooltip>}
         </Space>;
       } },
-    { title: 'Ord Qty', width: 88, render: (_, r) => <InputNumber size="small" min={0} value={dget(r.ItemNumber).qty} onChange={v => setQty(r.ItemNumber, Number(v) || 0)} style={{ width: 76 }} /> },
+    { title: 'Ord Qty', width: 88, render: (_, r) => { const cap = maxQohOf(r.ItemNumber); return <InputNumber size="small" min={0} max={cap != null ? cap : undefined} value={dget(r.ItemNumber).qty} onChange={v => setQty(r.ItemNumber, Number(v) || 0)} style={{ width: 76 }} />; } },
     { title: 'Unit Price', width: 98, render: (_, r) => <InputNumber size="small" min={0} value={dget(r.ItemNumber).price} onChange={v => dset(r.ItemNumber, { price: Number(v) || 0 })} style={{ width: 86 }} /> },
     { title: 'Total', width: 98, align: 'right', render: (_, r) => { const d = dget(r.ItemNumber); return <Text style={{ fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{num2(d.qty * d.price)}</Text>; } },
     { title: 'Margin', width: 98, align: 'right', render: (_, r) => { const d = dget(r.ItemNumber); const m = (d.price - num(costs[r.ItemNumber]?.cost)) * d.qty; return <Text strong style={{ fontSize: 11.5, color: m < 0 ? REDWOOD.error : REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{num2(m)}</Text>; } },
@@ -1461,7 +1504,7 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
         <Button onClick={onClose}>Close</Button>
         <Button type="primary" disabled={sel.length === 0} icon={<PlusOutlined />} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
           onClick={() => {
-            const picked = rows.filter(r => sel.includes(r.ItemNumber)).map(r => { const d = dget(r.ItemNumber); const p = vuOf(r.ItemNumber); return { ...r, _cost: costs[r.ItemNumber]?.cost, _qty: d.qty, _price: d.price, _taxCode: d.taxCode, _tax: d.tax, _lot: p.lot, _lots: onh[r.ItemNumber]?.lots, _costOrg: p.costOrg, _invOrg: p.invOrg, _subinv: p.subinv }; });
+            const picked = rows.filter(r => sel.includes(r.ItemNumber)).map(r => { const d = dget(r.ItemNumber); const p = vuOf(r.ItemNumber); return { ...r, _cost: costs[r.ItemNumber]?.cost, _qty: d.qty, _price: d.price, _taxCode: d.taxCode, _tax: d.tax, _lot: p.lot, _lots: onh[r.ItemNumber]?.lots, _costOrg: p.costOrg, _invOrg: p.invOrg, _subinv: p.subinv, _qoh: maxQohOf(r.ItemNumber) }; });
             onAdd(picked);
             message.success(`Added ${picked.length} line(s) — pick more or Close`);
             setSel([]); // keep the dialog open so more items can be added
@@ -1625,6 +1668,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
   const [resp, setResp] = useState<{ ok: boolean; status: number; body: string } | null>(null);
   const [discAmt, setDiscAmt] = useState(0);
   const [expAmt, setExpAmt] = useState(0);
+  const [lineSearch, setLineSearch] = useState<Record<string, { loading?: boolean; opts: any[] }>>({});
+  const [lotPick, setLotPick] = useState<{ key: string; item: string; rows: any[]; onh: Record<string, { loading?: boolean; qty?: number }> } | null>(null);
+  const [ohLoading, setOhLoading] = useState(false);
+  const searchTimer = useRef<Record<string, any>>({});
   const ccy = hdr.txnCurrency;
 
   useEffect(() => { form.setFieldsValue(header as any); setHdr(header); /* init once */ }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1660,12 +1707,69 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
         qty: num(it._qty), unitPrice: it._price != null ? num(it._price) : num(it._cost),
         costUnit: num(it._cost), taxCode: it._taxCode, taxAmount: num(it._tax),
         lot: it._lot, lots: (it._lots && it._lots.length) ? it._lots : (it._lot ? [it._lot] : []),
+        qoh: it._qoh != null ? num(it._qoh) : undefined,
       }));
       return [...prev, ...add];
     });
   };
   const upd = (key: string, patch: Partial<NewLine>) => setLines(prev => prev.map(l => l.key === key ? { ...l, ...patch } : l));
   const del = (key: string) => setLines(prev => prev.filter(l => l.key !== key));
+
+  // "New Line" — append a blank, editable line the user fills via inline search.
+  const addBlankLine = () => setLines(prev => [...prev, { key: `new-${Date.now()}-${prev.length}`, itemNumber: '', qty: 0, unitPrice: 0 }]);
+
+  // Debounced type-ahead for a blank line's item cell (by code or description).
+  const onLineSearch = (key: string, text: string) => {
+    clearTimeout(searchTimer.current[key]);
+    if (!text.trim()) { setLineSearch(p => ({ ...p, [key]: { opts: [] } })); return; }
+    setLineSearch(p => ({ ...p, [key]: { loading: true, opts: p[key]?.opts ?? [] } }));
+    searchTimer.current[key] = setTimeout(async () => {
+      const items = await searchItems(text, header.warehouse);
+      setLineSearch(p => ({ ...p, [key]: { loading: false, opts: items } }));
+    }, 350);
+  };
+
+  // Apply the chosen item + a specific lot to the line: cost, price, on-hand.
+  const applyItemToLine = async (key: string, item: any, costRows: any[], lot?: string) => {
+    const row = lot ? costRows.find(c => parseVU(c.ValuationUnit).lot === lot) : costRows[0];
+    const vu = parseVU(row?.ValuationUnit);
+    const cost = row ? num(pf(row, COST_FIELDS)) : undefined;
+    const uom = pf(item, ['PrimaryUOMValue', 'PrimaryUOMCode', 'UOMCode']);
+    upd(key, { itemNumber: item.ItemNumber, ...(item.ItemDescription ? { description: item.ItemDescription } : {}), ...(uom ? { uom } : {}), costUnit: cost, unitPrice: cost ?? 0, lot, ohLoading: true });
+    try {
+      const oh = await fetchOnhand(item.ItemNumber, vu.invOrg || header.warehouse || '', vu.subinv || header.subinventory, lot);
+      upd(key, { qoh: oh.qty, lots: oh.lots.length ? oh.lots : (lot ? [lot] : []), ohLoading: false });
+    } catch { upd(key, { ohLoading: false }); }
+  };
+
+  // User picked an item from the inline search — fetch cost rows, then either
+  // apply directly or prompt for a lot when several lots exist.
+  const pickInlineItem = async (key: string, itemNumber: string) => {
+    const item = (lineSearch[key]?.opts ?? []).find(o => o.ItemNumber === itemNumber) ?? { ItemNumber: itemNumber };
+    upd(key, { itemNumber, description: item.ItemDescription, uom: pf(item, ['PrimaryUOMValue', 'PrimaryUOMCode', 'UOMCode']), ohLoading: true });
+    setLineSearch(p => ({ ...p, [key]: { opts: [] } }));
+    let costRows: any[] = [];
+    try { costRows = await fetchItemCostRows(itemNumber, header.warehouse); } catch { /* none */ }
+    const lots = Array.from(new Set(costRows.map(c => parseVU(c.ValuationUnit).lot).filter(Boolean))) as string[];
+    if (lots.length > 1) { upd(key, { ohLoading: false }); setLotPick({ key, item: itemNumber, rows: costRows, onh: {} }); }
+    else { await applyItemToLine(key, item, costRows, lots[0]); }
+  };
+
+  // "Check On-Hand" — refresh QoH for every populated line from Fusion.
+  const checkAllOnhand = async () => {
+    const withItems = lines.filter(l => l.itemNumber);
+    if (!withItems.length) { message.warning('No lines to check'); return; }
+    if (!header.warehouse) { message.warning('No warehouse selected on the header'); return; }
+    setOhLoading(true);
+    setLines(prev => prev.map(l => l.itemNumber ? { ...l, ohLoading: true } : l));
+    try {
+      await mapLimit(withItems, 4, async (l) => {
+        try { const oh = await fetchOnhand(l.itemNumber, header.warehouse!, header.subinventory, l.lot); upd(l.key, { qoh: oh.qty, lots: oh.lots.length ? oh.lots : l.lots, ohLoading: false }); }
+        catch { upd(l.key, { ohLoading: false }); }
+      });
+      message.success('On-hand updated from Fusion');
+    } finally { setOhLoading(false); }
+  };
 
   // Best-effort DOO order-import payload (finalise once the sample JSON is in).
   const buildPayload = () => {
@@ -1712,11 +1816,18 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
 
   const cols: ColumnsType<NewLine> = [
     { title: 'Line', width: 50, align: 'center', fixed: 'left', render: (_, __, i) => <Tag color="blue">{i + 1}</Tag> },
-    { title: 'Item', dataIndex: 'itemNumber', width: 140, fixed: 'left', render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text> },
-    { title: 'Description', dataIndex: 'description', width: 240, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Item', dataIndex: 'itemNumber', width: 210, fixed: 'left', render: (v, r) => v
+        ? <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text>
+        : <Select showSearch size="small" style={{ width: 196 }} placeholder="Search item code / description" value={undefined}
+            filterOption={false} loading={lineSearch[r.key]?.loading} onSearch={t => onLineSearch(r.key, t)} onChange={val => pickInlineItem(r.key, val)}
+            notFoundContent={lineSearch[r.key]?.loading ? <Spin size="small" /> : null}
+            options={(lineSearch[r.key]?.opts ?? []).map(o => ({ value: o.ItemNumber, label: <span><Text strong style={{ fontSize: 11 }}>{o.ItemNumber}</Text>{o.ItemDescription ? <Text type="secondary" style={{ fontSize: 11 }}> — {o.ItemDescription}</Text> : null}</span> }))} /> },
+    { title: 'Description', dataIndex: 'description', width: 240, ellipsis: true, render: (v, r) => r.ohLoading && v == null ? <Spin size="small" /> : <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
     { title: 'UOM', dataIndex: 'uom', width: 70, render: v => v ?? '—' },
     { title: 'Cost', dataIndex: 'costUnit', width: 90, align: 'right', render: v => v == null ? '—' : <Text type="secondary" style={{ fontSize: 11 }}>{fmtAmount(v, ccy)}</Text> },
-    { title: 'Qty', dataIndex: 'qty', width: 90, align: 'right', render: (v, r) => <InputNumber size="small" min={0} value={v} onChange={n => upd(r.key, { qty: Number(n) || 0 })} style={{ width: 78 }} /> },
+    { title: 'QoH', dataIndex: 'qoh', width: 80, align: 'right', render: (v, r) => r.ohLoading ? <Spin size="small" /> : (v == null ? <Text type="secondary" style={{ fontSize: 11 }}>—</Text> : <Text style={{ fontSize: 11.5, color: REDWOOD.info, fontVariantNumeric: 'tabular-nums' }}>{fmtQty(num(v))}</Text>) },
+    { title: 'Qty', dataIndex: 'qty', width: 90, align: 'right', render: (v, r) => <InputNumber size="small" min={0} max={r.qoh != null ? r.qoh : undefined} value={v}
+        onChange={n => { let q = Number(n) || 0; if (r.qoh != null && q > r.qoh) { q = r.qoh; message.warning(`Cannot order more than on-hand (${fmtQty(r.qoh)})`); } upd(r.key, { qty: q }); }} style={{ width: 78 }} /> },
     { title: 'Unit Price', dataIndex: 'unitPrice', width: 100, align: 'right', render: (v, r) => <InputNumber size="small" min={0} value={v} onChange={n => upd(r.key, { unitPrice: Number(n) || 0 })} style={{ width: 88 }} /> },
     { title: 'Line Total', width: 110, align: 'right', render: (_, r) => <Text strong style={{ color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(r.qty) * num(r.unitPrice), ccy)}</Text> },
     { title: 'Margin', width: 100, align: 'right', render: (_, r) => { const m = (num(r.unitPrice) - num(r.costUnit)) * num(r.qty); return <Text style={{ fontSize: 11.5, color: m < 0 ? REDWOOD.error : REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(m, ccy)}</Text>; } },
@@ -1844,30 +1955,34 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
 
       <Card size="small" styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
         title={<Space><UnorderedListOutlined style={{ color: REDWOOD.primary }} /><Text strong>Lines</Text>{lines.length > 0 && <Tag>{lines.length}</Tag>}</Space>}
-        extra={<Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setPickOpen(true)} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Add Lines</Button>}>
-        {lines.length === 0 ? <Empty description="No lines — use Add Lines to search items" style={{ padding: 30 }} />
-          : <Tabs size="small" tabBarStyle={{ padding: '0 12px', marginBottom: 0 }} items={[
+        extra={<Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setPickOpen(true)} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Add Multiple Lines</Button>}>
+        {<Tabs size="small" tabBarStyle={{ padding: '0 12px', marginBottom: 0 }}
+            tabBarExtraContent={{ right: <Space size={6} style={{ paddingRight: 4 }}>
+              <Button size="small" icon={<PlusOutlined />} onClick={addBlankLine}>New Line</Button>
+              <Button size="small" icon={<DatabaseOutlined />} loading={ohLoading} onClick={checkAllOnhand} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>Check On-Hand</Button>
+            </Space> }} items={[
               {
                 key: 'lines', label: <Space size={6}><UnorderedListOutlined />Lines<Tag style={{ marginInlineEnd: 0 }}>{lines.length}</Tag></Space>,
-                children: <Table size="small" columns={cols} dataSource={lines} rowKey="key" pagination={false} scroll={{ x: 1470, y: 360 }}
-                  summary={() => {
+                children: <Table size="small" columns={cols} dataSource={lines} rowKey="key" pagination={false} scroll={{ x: 1620, y: 360 }}
+                  locale={{ emptyText: 'No lines — use “Add Multiple Lines” or “New Line”' }}
+                  summary={() => lines.length === 0 ? null : (() => {
                     const totMargin = lines.reduce((s, l) => s + (num(l.unitPrice) - num(l.costUnit)) * num(l.qty), 0);
                     return (
                       <Table.Summary fixed>
                         <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-                          <Table.Summary.Cell index={0} colSpan={5} align="right"><Text strong>Total</Text></Table.Summary.Cell>
-                          <Table.Summary.Cell index={5} align="right"><Text strong>{fmtQty(totQty)}</Text></Table.Summary.Cell>
-                          <Table.Summary.Cell index={6} />
-                          <Table.Summary.Cell index={7} align="right"><Text strong style={{ color: REDWOOD.primary }}>{fmtAmount(totAmt, ccy)}</Text></Table.Summary.Cell>
-                          <Table.Summary.Cell index={8} align="right"><Text strong style={{ color: totMargin < 0 ? REDWOOD.error : REDWOOD.success }}>{fmtAmount(totMargin, ccy)}</Text></Table.Summary.Cell>
-                          <Table.Summary.Cell index={9} />
-                          <Table.Summary.Cell index={10} align="right"><Text strong>{fmtAmount(lineTax, ccy)}</Text></Table.Summary.Cell>
-                          <Table.Summary.Cell index={11} align="right"><Text strong style={{ color: REDWOOD.success }}>{fmtAmount(totAmt + lineTax, ccy)}</Text></Table.Summary.Cell>
-                          <Table.Summary.Cell index={12} />
+                          <Table.Summary.Cell index={0} colSpan={6} align="right"><Text strong>Total</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={6} align="right"><Text strong>{fmtQty(totQty)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={7} />
+                          <Table.Summary.Cell index={8} align="right"><Text strong style={{ color: REDWOOD.primary }}>{fmtAmount(totAmt, ccy)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={9} align="right"><Text strong style={{ color: totMargin < 0 ? REDWOOD.error : REDWOOD.success }}>{fmtAmount(totMargin, ccy)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={10} />
+                          <Table.Summary.Cell index={11} align="right"><Text strong>{fmtAmount(lineTax, ccy)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={12} align="right"><Text strong style={{ color: REDWOOD.success }}>{fmtAmount(totAmt + lineTax, ccy)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={13} />
                         </Table.Summary.Row>
                       </Table.Summary>
                     );
-                  }} />,
+                  })() } />,
               },
               {
                 key: 'margin', label: <Space size={6}><RiseOutlined />Margin</Space>,
@@ -1895,6 +2010,24 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
       </Card>
 
       <ItemSearchModal open={pickOpen} org={header.warehouse} onClose={() => setPickOpen(false)} onAdd={addItems} />
+
+      <Modal open={!!lotPick} onCancel={() => setLotPick(null)} maskClosable={false} width={620} footer={<Button onClick={() => setLotPick(null)}>Cancel</Button>}
+        title={<Space><TagsOutlined style={{ color: REDWOOD.info }} /> Select a lot{lotPick ? <Tag color="blue">{lotPick.item}</Tag> : null}</Space>}>
+        <Text type="secondary" style={{ fontSize: 12 }}>This item has multiple lots — pick one to bring its cost and on-hand.</Text>
+        <Table size="small" style={{ marginTop: 10 }} pagination={false} rowKey={(_, i) => `lp-${i}`}
+          dataSource={lotPick ? Array.from(new Set(lotPick.rows.map(r => parseVU(r.ValuationUnit).lot).filter(Boolean))).map(lot => {
+            const row = lotPick.rows.find(r => parseVU(r.ValuationUnit).lot === lot);
+            return { lot, cost: row ? num(pf(row, COST_FIELDS)) : undefined, subinv: parseVU(row?.ValuationUnit).subinv, invOrg: parseVU(row?.ValuationUnit).invOrg };
+          }) : []}
+          columns={[
+            { title: 'Lot', dataIndex: 'lot', render: v => <Tag color="geekblue">{v}</Tag> },
+            { title: 'Inv Org', dataIndex: 'invOrg', render: v => v || '—' },
+            { title: 'Subinv', dataIndex: 'subinv', render: v => v ? <Tag color="cyan">{v}</Tag> : '—' },
+            { title: 'Cost', dataIndex: 'cost', align: 'right', render: v => v == null ? '—' : fmtAmount(num(v), ccy) },
+            { title: '', align: 'right', render: (_, r: any) => <Button size="small" type="primary" style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+                onClick={() => { const lp = lotPick!; setLotPick(null); applyItemToLine(lp.key, { ItemNumber: lp.item }, lp.rows, r.lot); }}>Select</Button> },
+          ]} />
+      </Modal>
 
       <Modal open={preview} onCancel={() => setPreview(false)} maskClosable={false} width={760}
         title={<Space><CloudUploadOutlined style={{ color: REDWOOD.primary }} /> Create Order payload</Space>}
