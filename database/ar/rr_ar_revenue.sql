@@ -61,8 +61,12 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_REVENUE_PKG AS
     BEGIN v := TO_DATE(SUBSTR(p_s,1,10), 'YYYY-MM-DD'); RETURN v; EXCEPTION WHEN OTHERS THEN NULL; END;
     BEGIN v := TO_DATE(p_s, 'DD-MON-YYYY');              RETURN v; EXCEPTION WHEN OTHERS THEN NULL; END;
     BEGIN v := TO_DATE(p_s, 'DD-MON-RR');                RETURN v; EXCEPTION WHEN OTHERS THEN NULL; END;
-    BEGIN v := TO_DATE(p_s, 'DD/MM/YYYY');               RETURN v; EXCEPTION WHEN OTHERS THEN NULL; END;
+    -- Contract dates are entered US-style (MM/DD/YYYY), matching the frontend's
+    -- parseFlexDate. Try MM/DD/YYYY BEFORE DD/MM/YYYY: for an ambiguous value
+    -- like "10/1/2025" (Oct 1) DD/MM would wrongly parse it as Jan 10, which
+    -- stretched the schedule span (e.g. 12 months read as 21).
     BEGIN v := TO_DATE(p_s, 'MM/DD/YYYY');               RETURN v; EXCEPTION WHEN OTHERS THEN NULL; END;
+    BEGIN v := TO_DATE(p_s, 'DD/MM/YYYY');               RETURN v; EXCEPTION WHEN OTHERS THEN NULL; END;
     RETURN NULL;
   END to_dt;
 
