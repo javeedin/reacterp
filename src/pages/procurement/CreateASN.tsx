@@ -120,7 +120,8 @@ const CreateASN: React.FC = () => {
   const [numContainers, setNumContainers]   = useState<number | null>(null);
   const [comments, setComments]             = useState('');
 
-  // Inspector + submit state
+  // Details dialog + inspector + submit state
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [inspectOpen, setInspectOpen] = useState(false);
   const [submitting, setSubmitting]   = useState(false);
   const [result, setResult]           = useState<null | {
@@ -209,6 +210,13 @@ const CreateASN: React.FC = () => {
     return null;
   };
 
+  // Open the ASN details dialog once lines are selected.
+  const openDetails = () => {
+    if (selectedLines.length === 0) { message.warning('Select at least one PO line to ship'); return; }
+    setResult(null);
+    setDetailsOpen(true);
+  };
+
   const openInspect = () => {
     const v = validateBeforeSubmit();
     if (v) { message.error(v); return; }
@@ -266,6 +274,7 @@ const CreateASN: React.FC = () => {
       if (ok) {
         message.success(`ASN ${shipmentNumber} submitted${headerId ? ` · Hdr ${headerId}` : ''}`);
         setInspectOpen(false);
+        setDetailsOpen(false);
       }
     } catch (e: any) {
       setResult({ ok: false, http: 0, status: 'ERROR', message: e?.message ?? 'Network error', body: e?.message ?? '' });
@@ -380,7 +389,21 @@ const CreateASN: React.FC = () => {
           {err && <div style={{ color: REDWOOD.error, fontSize: 12, marginBottom: 10 }}>Failed to load: {err}</div>}
 
           {/* PO lines available to ship */}
-          <Card size="small" title={<Space><InboxOutlined style={{ color: REDWOOD.teal }} /><span style={{ fontSize: 13 }}>PO Lines Available to Ship</span>{lines.length > 0 && <Tag color="blue">{lines.length}</Tag>}</Space>}
+          <Card size="small"
+            title={<Space><InboxOutlined style={{ color: REDWOOD.teal }} /><span style={{ fontSize: 13 }}>PO Lines Available to Ship</span>{lines.length > 0 && <Tag color="blue">{lines.length}</Tag>}</Space>}
+            extra={
+              <Space>
+                {result && (
+                  result.ok
+                    ? <Tag icon={<CheckCircleTwoTone twoToneColor={REDWOOD.success} />} color="success">{result.status}{result.headerId ? ` · Hdr ${result.headerId}` : ''}</Tag>
+                    : <Tag icon={<CloseCircleTwoTone twoToneColor={REDWOOD.error} />} color="error">{result.status}</Tag>
+                )}
+                <Button type="primary" icon={<SendOutlined />} disabled={selectedLines.length === 0} onClick={openDetails}
+                  style={selectedLines.length === 0 ? undefined : { background: REDWOOD.info, borderColor: REDWOOD.info }}>
+                  Create ASN{selectedLines.length ? ` (${selectedLines.length})` : ''}
+                </Button>
+              </Space>
+            }
             style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 14 }} styles={{ body: { padding: 0 } }}>
             <Table
               rowKey={lineKey}
@@ -399,50 +422,47 @@ const CreateASN: React.FC = () => {
             />
           </Card>
 
-          {/* ASN header + submit — only meaningful once lines are selected */}
-          <Card size="small" title={<Space><CarOutlined style={{ color: REDWOOD.info }} /><span style={{ fontSize: 13 }}>ASN / Shipment Details</span>
-              <Tag color={selectedLines.length ? 'geekblue' : 'default'}>{selectedLines.length} line(s) selected</Tag></Space>}
-            style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }} styles={{ body: { padding: '14px 16px 4px' } }}>
-            <Row gutter={12}>
-              {asnHeaderField('Shipment (ASN) Number *',
-                <Input value={shipmentNumber} onChange={e => setShipmentNumber(e.target.value)} placeholder="ASN number" />)}
-              {asnHeaderField('Shipment Date',
-                <DatePicker value={shipmentDate} onChange={setShipmentDate} format="YYYY-MM-DD" style={{ width: '100%' }} />)}
-              {asnHeaderField('Expected Receipt Date',
-                <DatePicker value={expectedDate} onChange={setExpectedDate} format="YYYY-MM-DD" style={{ width: '100%' }} />)}
-              {asnHeaderField('Freight Carrier',
-                <Input value={carrier} onChange={e => setCarrier(e.target.value)} placeholder="e.g. DHL" />)}
-              {asnHeaderField('Bill of Lading',
-                <Input value={billOfLading} onChange={e => setBillOfLading(e.target.value)} placeholder="BOL #" />)}
-              {asnHeaderField('Packing Slip',
-                <Input value={packingSlip} onChange={e => setPackingSlip(e.target.value)} placeholder="Packing slip #" />)}
-              {asnHeaderField('# Containers',
-                <InputNumber value={numContainers} onChange={(v) => setNumContainers(v as number)} min={0} style={{ width: '100%' }} placeholder="0" />)}
-              {asnHeaderField('Comments',
-                <Input value={comments} onChange={e => setComments(e.target.value)} placeholder="Optional" />)}
-            </Row>
-
-            <Divider style={{ margin: '4px 0 12px' }} />
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, paddingBottom: 10 }}>
-              <Space>
-                {result && (
-                  result.ok
-                    ? <Tag icon={<CheckCircleTwoTone twoToneColor={REDWOOD.success} />} color="success">{result.status}{result.headerId ? ` · Hdr ${result.headerId}` : ''}</Tag>
-                    : <Tag icon={<CloseCircleTwoTone twoToneColor={REDWOOD.error} />} color="error">{result.status}</Tag>
-                )}
-                {result && <Text type={result.ok ? 'secondary' : 'danger'} style={{ fontSize: 12 }}>{result.message}</Text>}
-              </Space>
-              <Space>
-                <Button icon={<ApiOutlined />} onClick={openInspect}>Inspect Request</Button>
-                <Button type="primary" icon={<SendOutlined />} loading={submitting} onClick={submitAsn}
-                  style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}>
-                  Create ASN
-                </Button>
-              </Space>
-            </div>
-          </Card>
         </div>
+
+        {/* ASN / Shipment Details dialog — opened from the Create ASN button */}
+        <Modal
+          open={detailsOpen}
+          onCancel={() => { if (!submitting) setDetailsOpen(false); }}
+          width={780}
+          title={<Space><CarOutlined style={{ color: REDWOOD.info }} /><span>ASN / Shipment Details</span>
+            <Tag color="geekblue">{selectedLines.length} line(s) selected</Tag></Space>}
+          footer={[
+            <Button key="close" disabled={submitting} onClick={() => setDetailsOpen(false)}>Close</Button>,
+            <Button key="inspect" icon={<ApiOutlined />} onClick={openInspect}>Inspect Request</Button>,
+            <Button key="create" type="primary" icon={<SendOutlined />} loading={submitting} onClick={submitAsn}
+              style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}>Create</Button>,
+          ]}
+        >
+          <Row gutter={12}>
+            {asnHeaderField('Shipment (ASN) Number *',
+              <Input value={shipmentNumber} onChange={e => setShipmentNumber(e.target.value)} placeholder="ASN number" />)}
+            {asnHeaderField('Shipment Date',
+              <DatePicker value={shipmentDate} onChange={setShipmentDate} format="YYYY-MM-DD" style={{ width: '100%' }} />)}
+            {asnHeaderField('Expected Receipt Date',
+              <DatePicker value={expectedDate} onChange={setExpectedDate} format="YYYY-MM-DD" style={{ width: '100%' }} />)}
+            {asnHeaderField('Freight Carrier',
+              <Input value={carrier} onChange={e => setCarrier(e.target.value)} placeholder="e.g. DHL" />)}
+            {asnHeaderField('Bill of Lading',
+              <Input value={billOfLading} onChange={e => setBillOfLading(e.target.value)} placeholder="BOL #" />)}
+            {asnHeaderField('Packing Slip',
+              <Input value={packingSlip} onChange={e => setPackingSlip(e.target.value)} placeholder="Packing slip #" />)}
+            {asnHeaderField('# Containers',
+              <InputNumber value={numContainers} onChange={(v) => setNumContainers(v as number)} min={0} style={{ width: '100%' }} placeholder="0" />)}
+            {asnHeaderField('Comments',
+              <Input value={comments} onChange={e => setComments(e.target.value)} placeholder="Optional" />)}
+          </Row>
+          {result && !result.ok && (
+            <div style={{ marginTop: 4 }}>
+              <Tag icon={<CloseCircleTwoTone twoToneColor={REDWOOD.error} />} color="error">{result.status}</Tag>
+              <Text type="danger" style={{ fontSize: 12 }}>{result.message}</Text>
+            </div>
+          )}
+        </Modal>
 
         {/* API Inspector — the exact POST that will be sent */}
         <Modal
