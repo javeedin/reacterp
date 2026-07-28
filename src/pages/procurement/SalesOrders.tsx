@@ -9,7 +9,7 @@ import {
   ApiOutlined, CopyOutlined, InfoCircleOutlined, ExportOutlined, BankOutlined,
   UnorderedListOutlined, ShoppingOutlined, DollarOutlined, PrinterOutlined, DownloadOutlined,
   ReconciliationOutlined, PlusOutlined, SaveOutlined, DeleteOutlined, CloudUploadOutlined,
-  DatabaseOutlined, CheckCircleTwoTone, CloseCircleTwoTone,
+  DatabaseOutlined, CheckCircleTwoTone, CloseCircleTwoTone, RiseOutlined, TagsOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -1231,7 +1231,7 @@ interface OrderHeader {
   paymentTerms?: string; salesRep?: string; warehouse?: string; subinventory?: string; remarks?: string;
   custAccountId?: string; partyId?: string;
 }
-interface NewLine { key: string; itemNumber: string; description?: string; uom?: string; qty: number; unitPrice: number; costUnit?: number; taxCode?: string; taxAmount?: number }
+interface NewLine { key: string; itemNumber: string; description?: string; uom?: string; qty: number; unitPrice: number; costUnit?: number; taxCode?: string; taxAmount?: number; lot?: string; lots?: string[] }
 
 const INV_ORGS_URL = `${FUSION_BASE}/inventoryOrganizations?onlyData=true&limit=500`;
 
@@ -1374,9 +1374,9 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
     finally { setLoading(false); }
   }, [url, loadCosts]);
 
-  const dget = (item: string) => draft[item] ?? { qty: 1, price: num(costs[item]?.cost), tax: 0, taxCode: undefined as string | undefined };
+  const dget = (item: string) => draft[item] ?? { qty: 0, price: num(costs[item]?.cost), tax: 0, taxCode: undefined as string | undefined };
   const dset = (item: string, patch: Partial<{ qty: number; price: number; taxCode?: string; tax: number }>) =>
-    setDraft(p => ({ ...p, [item]: { ...(p[item] ?? { qty: 1, price: num(costs[item]?.cost), tax: 0 }), ...patch } }));
+    setDraft(p => ({ ...p, [item]: { ...(p[item] ?? { qty: 0, price: num(costs[item]?.cost), tax: 0 }), ...patch } }));
   const vuOf = (item: string) => parseVU(costs[item]?.rows?.[0]?.ValuationUnit);
   const costQtyOf = (item: string) => num(pf(costs[item]?.rows?.[0], QTY_FIELDS));
   const costOnhandOf = (item: string) => costs[item]?.onhand;
@@ -1415,16 +1415,15 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
     } catch (e: any) { setOnh(p => ({ ...p, [item]: { err: e.message } })); }
   };
 
+  // Changing Ord Qty auto-selects the row so it will be added on "Add".
+  const setQty = (item: string, v: number) => { dset(item, { qty: v }); if (v > 0) setSel(s => s.includes(item) ? s : [...s, item]); };
+
   const cols: ColumnsType<any> = [
     { title: 'Item', dataIndex: 'ItemNumber', width: 140, fixed: 'left', render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text> },
     { title: 'Description', dataIndex: 'ItemDescription', width: 200, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
     { title: 'UOM', width: 60, render: (_, r) => pf(r, ['PrimaryUOMValue', 'PrimaryUOMCode', 'PrimaryUnitOfMeasure', 'UOMCode']) ?? '—' },
-    { title: 'Cost Org', width: 105, render: (_, r) => <Text style={{ fontSize: 11 }}>{vuOf(r.ItemNumber).costOrg || '—'}</Text> },
-    { title: 'Inv Org', width: 95, render: (_, r) => <Text style={{ fontSize: 11 }}>{vuOf(r.ItemNumber).invOrg || '—'}</Text> },
-    { title: 'Subinv', width: 85, render: (_, r) => { const s = vuOf(r.ItemNumber).subinv; return s ? <Tag color="cyan" style={{ fontSize: 10 }}>{s}</Tag> : '—'; } },
     { title: 'Lot', width: 120, ellipsis: true, render: (_, r) => { const l = vuOf(r.ItemNumber).lot; return l ? <Tag color="geekblue" style={{ fontSize: 10 }}>{l}</Tag> : '—'; } },
     { title: 'Item Cost', width: 95, align: 'right', render: (_, r) => { const c = costs[r.ItemNumber]; if (costLoading && !c) return <Spin size="small" />; return (c?.cost == null) ? <Text type="secondary" style={{ fontSize: 11 }}>—</Text> : <Text strong style={{ fontSize: 11.5, color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{num2(c.cost)}</Text>; } },
-    { title: 'Cost Qty', width: 78, align: 'right', render: (_, r) => <Text style={{ fontSize: 11 }}>{fmtQty(costQtyOf(r.ItemNumber))}</Text> },
     { title: 'O/H (Cost)', width: 82, align: 'right', render: (_, r) => { const c = costs[r.ItemNumber]; if (costLoading && !c) return <Spin size="small" />; return (c?.onhand == null) ? <Text type="secondary" style={{ fontSize: 11 }}>—</Text> : <Text style={{ fontSize: 11, color: REDWOOD.info, fontVariantNumeric: 'tabular-nums' }}>{fmtQty(c.onhand)}</Text>; } },
     { title: 'On-hand', width: 150, render: (_, r) => {
         const item = r.ItemNumber; const p = vuOf(item); const st = onh[item]; const base = costOnhandOf(item);
@@ -1438,14 +1437,17 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
           {st?.err && <Tooltip title={st.err}><Text type="danger" style={{ fontSize: 10 }}>err</Text></Tooltip>}
         </Space>;
       } },
-    { title: 'Ord Qty', width: 88, render: (_, r) => <InputNumber size="small" min={0} value={dget(r.ItemNumber).qty} onChange={v => dset(r.ItemNumber, { qty: Number(v) || 0 })} style={{ width: 76 }} /> },
+    { title: 'Ord Qty', width: 88, render: (_, r) => <InputNumber size="small" min={0} value={dget(r.ItemNumber).qty} onChange={v => setQty(r.ItemNumber, Number(v) || 0)} style={{ width: 76 }} /> },
     { title: 'Unit Price', width: 98, render: (_, r) => <InputNumber size="small" min={0} value={dget(r.ItemNumber).price} onChange={v => dset(r.ItemNumber, { price: Number(v) || 0 })} style={{ width: 86 }} /> },
     { title: 'Total', width: 98, align: 'right', render: (_, r) => { const d = dget(r.ItemNumber); return <Text style={{ fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{num2(d.qty * d.price)}</Text>; } },
     { title: 'Margin', width: 98, align: 'right', render: (_, r) => { const d = dget(r.ItemNumber); const m = (d.price - num(costs[r.ItemNumber]?.cost)) * d.qty; return <Text strong style={{ fontSize: 11.5, color: m < 0 ? REDWOOD.error : REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{num2(m)}</Text>; } },
     { title: 'Margin %', width: 78, align: 'right', render: (_, r) => { const d = dget(r.ItemNumber); const t = d.qty * d.price; const m = (d.price - num(costs[r.ItemNumber]?.cost)) * d.qty; const pct = t ? (m / t) * 100 : 0; return <Text style={{ fontSize: 11, color: pct < 0 ? REDWOOD.error : REDWOOD.success }}>{t ? pct.toFixed(1) + '%' : '—'}</Text>; } },
     { title: 'Tax Code', width: 95, render: (_, r) => <Input size="small" value={dget(r.ItemNumber).taxCode} onChange={e => dset(r.ItemNumber, { taxCode: e.target.value })} style={{ width: 84 }} placeholder="—" /> },
     { title: 'Tax Amt', width: 86, render: (_, r) => <InputNumber size="small" min={0} value={dget(r.ItemNumber).tax} onChange={v => dset(r.ItemNumber, { tax: Number(v) || 0 })} style={{ width: 74 }} /> },
-    { title: 'Net', width: 108, align: 'right', fixed: 'right', render: (_, r) => { const d = dget(r.ItemNumber); return <Text strong style={{ fontSize: 12, color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{num2(d.qty * d.price + num(d.tax))}</Text>; } },
+    { title: 'Net', width: 108, align: 'right', render: (_, r) => { const d = dget(r.ItemNumber); return <Text strong style={{ fontSize: 12, color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{num2(d.qty * d.price + num(d.tax))}</Text>; } },
+    { title: 'Cost Org', width: 105, render: (_, r) => <Text style={{ fontSize: 11 }}>{vuOf(r.ItemNumber).costOrg || '—'}</Text> },
+    { title: 'Inv Org', width: 95, render: (_, r) => <Text style={{ fontSize: 11 }}>{vuOf(r.ItemNumber).invOrg || '—'}</Text> },
+    { title: 'Subinv', width: 85, render: (_, r) => { const s = vuOf(r.ItemNumber).subinv; return s ? <Tag color="cyan" style={{ fontSize: 10 }}>{s}</Tag> : '—'; } },
   ];
 
   const searchUrlPretty = url ? decodeURIComponent(url) : `${FUSION_BASE}/itemsV2?q=ItemNumber LIKE 'x%';OrganizationCode=${org ?? '<org>'}`;
@@ -1456,9 +1458,14 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
         <Tooltip title="Web services used"><Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} onClick={() => setApiOpen(true)} /></Tooltip></Space>}
       footer={<Space>
         <Text type="secondary" style={{ marginRight: 'auto', fontSize: 12 }}>{sel.length} selected</Text>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button type="primary" disabled={sel.length === 0} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-          onClick={() => { onAdd(rows.filter(r => sel.includes(r.ItemNumber)).map(r => { const d = dget(r.ItemNumber); return { ...r, _cost: costs[r.ItemNumber]?.cost, _qty: d.qty, _price: d.price, _taxCode: d.taxCode, _tax: d.tax }; })); onClose(); }}>Add {sel.length || ''} Item(s)</Button>
+        <Button onClick={onClose}>Close</Button>
+        <Button type="primary" disabled={sel.length === 0} icon={<PlusOutlined />} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+          onClick={() => {
+            const picked = rows.filter(r => sel.includes(r.ItemNumber)).map(r => { const d = dget(r.ItemNumber); const p = vuOf(r.ItemNumber); return { ...r, _cost: costs[r.ItemNumber]?.cost, _qty: d.qty, _price: d.price, _taxCode: d.taxCode, _tax: d.tax, _lot: p.lot, _lots: onh[r.ItemNumber]?.lots, _costOrg: p.costOrg, _invOrg: p.invOrg, _subinv: p.subinv }; });
+            onAdd(picked);
+            message.success(`Added ${picked.length} line(s) — pick more or Close`);
+            setSel([]); // keep the dialog open so more items can be added
+          }}>Add {sel.length || ''} Item(s)</Button>
       </Space>}>
       <Space.Compact style={{ width: '100%', marginBottom: 10 }}>
         <Select value={byDesc ? 'desc' : 'num'} style={{ width: 130 }} onChange={v => setByDesc(v === 'desc')}
@@ -1469,7 +1476,7 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
       {error ? <div style={{ color: REDWOOD.error, fontSize: 12, marginBottom: 8 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div> : null}
       <Table size="small" columns={cols} dataSource={rows} rowKey="ItemNumber" loading={loading}
         rowSelection={{ selectedRowKeys: sel, onChange: setSel }}
-        pagination={rows.length > 12 ? { pageSize: 12, size: 'small' } : false} scroll={{ x: 2060, y: 360 }}
+        pagination={rows.length > 12 ? { pageSize: 12, size: 'small' } : false} scroll={{ x: 1980, y: 360 }}
         locale={{ emptyText: 'Search for items to add' }} />
 
       <Modal open={apiOpen} onCancel={() => setApiOpen(false)} maskClosable={false} width={880}
@@ -1650,8 +1657,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
       const add = items.filter(it => !existing.has(it.ItemNumber)).map((it, i) => ({
         key: `${it.ItemNumber}-${prev.length + i}`, itemNumber: it.ItemNumber,
         description: it.ItemDescription, uom: pf(it, ['PrimaryUOMValue', 'PrimaryUOMCode', 'UOMCode']),
-        qty: num(it._qty) || 1, unitPrice: it._price != null ? num(it._price) : num(it._cost),
+        qty: num(it._qty), unitPrice: it._price != null ? num(it._price) : num(it._cost),
         costUnit: num(it._cost), taxCode: it._taxCode, taxAmount: num(it._tax),
+        lot: it._lot, lots: (it._lots && it._lots.length) ? it._lots : (it._lot ? [it._lot] : []),
       }));
       return [...prev, ...add];
     });
@@ -1716,6 +1724,31 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
     { title: 'Tax', dataIndex: 'taxAmount', width: 90, align: 'right', render: (v, r) => <InputNumber size="small" min={0} value={v} onChange={n => upd(r.key, { taxAmount: Number(n) || 0 })} style={{ width: 80 }} /> },
     { title: 'Net', width: 110, align: 'right', fixed: 'right', render: (_, r) => <Text strong style={{ color: REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(r.qty) * num(r.unitPrice) + num(r.taxAmount), ccy)}</Text> },
     { title: '', width: 40, align: 'center', fixed: 'right', render: (_, r) => <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => del(r.key)} /> },
+  ];
+
+  // Margin tab — item code / description plus margin figures.
+  const marginCols: ColumnsType<NewLine> = [
+    { title: 'Item', dataIndex: 'itemNumber', width: 150, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text> },
+    { title: 'Description', dataIndex: 'description', width: 260, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Qty', dataIndex: 'qty', width: 80, align: 'right', render: v => fmtQty(num(v)) },
+    { title: 'Cost', dataIndex: 'costUnit', width: 100, align: 'right', render: v => v == null ? '—' : <Text type="secondary" style={{ fontSize: 11 }}>{fmtAmount(num(v), ccy)}</Text> },
+    { title: 'Unit Price', dataIndex: 'unitPrice', width: 100, align: 'right', render: v => fmtAmount(num(v), ccy) },
+    { title: 'Margin', width: 120, align: 'right', render: (_, r) => { const m = (num(r.unitPrice) - num(r.costUnit)) * num(r.qty); return <Text strong style={{ color: m < 0 ? REDWOOD.error : REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(m, ccy)}</Text>; } },
+    { title: 'Margin %', width: 90, align: 'right', render: (_, r) => { const t = num(r.qty) * num(r.unitPrice); const m = (num(r.unitPrice) - num(r.costUnit)) * num(r.qty); const pct = t ? (m / t) * 100 : 0; return <Text style={{ fontSize: 11.5, color: pct < 0 ? REDWOOD.error : REDWOOD.success }}>{t ? pct.toFixed(1) + '%' : '—'}</Text>; } },
+  ];
+
+  // Lot Details tab — one row per selected lot with item code / description.
+  const lotRows = useMemo(() => lines.flatMap(l => {
+    const ls = (l.lots && l.lots.length) ? l.lots : (l.lot ? [l.lot] : []);
+    return ls.length
+      ? ls.map((lot, i) => ({ key: `${l.key}-lot-${i}`, itemNumber: l.itemNumber, description: l.description, lot, qty: l.qty }))
+      : [{ key: `${l.key}-nolot`, itemNumber: l.itemNumber, description: l.description, lot: undefined as string | undefined, qty: l.qty }];
+  }), [lines]);
+  const lotCols: ColumnsType<any> = [
+    { title: 'Item', dataIndex: 'itemNumber', width: 150, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text> },
+    { title: 'Description', dataIndex: 'description', width: 300, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Lot', dataIndex: 'lot', width: 200, render: v => v ? <Tag color="geekblue">{v}</Tag> : <Text type="secondary">— no lot —</Text> },
+    { title: 'Ord Qty', dataIndex: 'qty', width: 100, align: 'right', render: v => fmtQty(num(v)) },
   ];
 
   return (
@@ -1813,25 +1846,52 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
         title={<Space><UnorderedListOutlined style={{ color: REDWOOD.primary }} /><Text strong>Lines</Text>{lines.length > 0 && <Tag>{lines.length}</Tag>}</Space>}
         extra={<Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setPickOpen(true)} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Add Lines</Button>}>
         {lines.length === 0 ? <Empty description="No lines — use Add Lines to search items" style={{ padding: 30 }} />
-          : <Table size="small" columns={cols} dataSource={lines} rowKey="key" pagination={false} scroll={{ x: 1470, y: 360 }}
-              summary={() => {
-                const totMargin = lines.reduce((s, l) => s + (num(l.unitPrice) - num(l.costUnit)) * num(l.qty), 0);
-                return (
-                  <Table.Summary fixed>
-                    <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-                      <Table.Summary.Cell index={0} colSpan={5} align="right"><Text strong>Total</Text></Table.Summary.Cell>
-                      <Table.Summary.Cell index={5} align="right"><Text strong>{fmtQty(totQty)}</Text></Table.Summary.Cell>
-                      <Table.Summary.Cell index={6} />
-                      <Table.Summary.Cell index={7} align="right"><Text strong style={{ color: REDWOOD.primary }}>{fmtAmount(totAmt, ccy)}</Text></Table.Summary.Cell>
-                      <Table.Summary.Cell index={8} align="right"><Text strong style={{ color: totMargin < 0 ? REDWOOD.error : REDWOOD.success }}>{fmtAmount(totMargin, ccy)}</Text></Table.Summary.Cell>
-                      <Table.Summary.Cell index={9} />
-                      <Table.Summary.Cell index={10} align="right"><Text strong>{fmtAmount(lineTax, ccy)}</Text></Table.Summary.Cell>
-                      <Table.Summary.Cell index={11} align="right"><Text strong style={{ color: REDWOOD.success }}>{fmtAmount(totAmt + lineTax, ccy)}</Text></Table.Summary.Cell>
-                      <Table.Summary.Cell index={12} />
-                    </Table.Summary.Row>
-                  </Table.Summary>
-                );
-              }} />}
+          : <Tabs size="small" tabBarStyle={{ padding: '0 12px', marginBottom: 0 }} items={[
+              {
+                key: 'lines', label: <Space size={6}><UnorderedListOutlined />Lines<Tag style={{ marginInlineEnd: 0 }}>{lines.length}</Tag></Space>,
+                children: <Table size="small" columns={cols} dataSource={lines} rowKey="key" pagination={false} scroll={{ x: 1470, y: 360 }}
+                  summary={() => {
+                    const totMargin = lines.reduce((s, l) => s + (num(l.unitPrice) - num(l.costUnit)) * num(l.qty), 0);
+                    return (
+                      <Table.Summary fixed>
+                        <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+                          <Table.Summary.Cell index={0} colSpan={5} align="right"><Text strong>Total</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={5} align="right"><Text strong>{fmtQty(totQty)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={6} />
+                          <Table.Summary.Cell index={7} align="right"><Text strong style={{ color: REDWOOD.primary }}>{fmtAmount(totAmt, ccy)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={8} align="right"><Text strong style={{ color: totMargin < 0 ? REDWOOD.error : REDWOOD.success }}>{fmtAmount(totMargin, ccy)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={9} />
+                          <Table.Summary.Cell index={10} align="right"><Text strong>{fmtAmount(lineTax, ccy)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={11} align="right"><Text strong style={{ color: REDWOOD.success }}>{fmtAmount(totAmt + lineTax, ccy)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={12} />
+                        </Table.Summary.Row>
+                      </Table.Summary>
+                    );
+                  }} />,
+              },
+              {
+                key: 'margin', label: <Space size={6}><RiseOutlined />Margin</Space>,
+                children: <Table size="small" columns={marginCols} dataSource={lines} rowKey="key" pagination={false} scroll={{ x: 900, y: 360 }}
+                  summary={() => {
+                    const totMargin = lines.reduce((s, l) => s + (num(l.unitPrice) - num(l.costUnit)) * num(l.qty), 0);
+                    const pct = totAmt ? (totMargin / totAmt) * 100 : 0;
+                    return (
+                      <Table.Summary fixed>
+                        <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+                          <Table.Summary.Cell index={0} colSpan={5} align="right"><Text strong>Total Margin</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={5} align="right"><Text strong style={{ color: totMargin < 0 ? REDWOOD.error : REDWOOD.success }}>{fmtAmount(totMargin, ccy)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={6} align="right"><Text strong style={{ color: pct < 0 ? REDWOOD.error : REDWOOD.success }}>{totAmt ? pct.toFixed(1) + '%' : '—'}</Text></Table.Summary.Cell>
+                        </Table.Summary.Row>
+                      </Table.Summary>
+                    );
+                  }} />,
+              },
+              {
+                key: 'lots', label: <Space size={6}><TagsOutlined />Lot Details<Tag style={{ marginInlineEnd: 0 }}>{lotRows.length}</Tag></Space>,
+                children: <Table size="small" columns={lotCols} dataSource={lotRows} rowKey="key" pagination={false} scroll={{ x: 750, y: 360 }}
+                  locale={{ emptyText: 'No lot details on the selected items' }} />,
+              },
+            ]} />}
       </Card>
 
       <ItemSearchModal open={pickOpen} org={header.warehouse} onClose={() => setPickOpen(false)} onAdd={addItems} />
