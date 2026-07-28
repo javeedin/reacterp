@@ -72,6 +72,7 @@ interface ReceiptLine {
 }
 
 interface POGroup {
+  _key: string;
   DocumentNumber: string;
   ToOrganizationCode: string;
   SourceDocumentCode: string;
@@ -89,6 +90,7 @@ interface POGroup {
 interface OpenTab {
   key: string;
   poNumber: string;
+  asn?: string;
   lines: ReceiptLine[];
 }
 
@@ -131,7 +133,11 @@ function groupRows(rows: ReceiptLine[]): POGroup[] {
   }>();
 
   for (const row of rows) {
-    const key = row.DocumentNumber ?? '';
+    // Group by PO number AND ASN number: lines already shipped on an ASN form
+    // their own group (one row per ASN), and lines not yet on an ASN group under
+    // the same PO with an empty ASN. So a PO with 2 ASNs shows as 3 rows max.
+    const asnKey = String(row.ASNNumber ?? '').trim();
+    const key = `${row.DocumentNumber ?? ''}||${asnKey}`;
     if (!map.has(key)) {
       map.set(key, {
         ToOrganizationCode: new Set(),
@@ -160,9 +166,11 @@ function groupRows(rows: ReceiptLine[]): POGroup[] {
   const pick = (s: Set<string>) => s.size === 0 ? '—' : s.size === 1 ? [...s][0] : 'Multiple';
   const pickStatus = (s: Set<string>) => s.size === 0 ? '—' : s.size === 1 ? [...s][0] : 'Mixed';
 
-  return Array.from(map.entries()).map(([docNum, g]) => {
+  return Array.from(map.entries()).map(([key, g]) => {
+    const [docNum, asnKey] = key.split('||');
     const sorted = [...g.dueDates].sort();
     return {
+      _key: key,
       DocumentNumber: docNum,
       ToOrganizationCode: pick(g.ToOrganizationCode),
       SourceDocumentCode: pick(g.SourceDocumentCode),
@@ -170,7 +178,7 @@ function groupRows(rows: ReceiptLine[]): POGroup[] {
       DestinationType: pick(g.DestinationType),
       ShipToLocation: pick(g.ShipToLocation),
       IntegrationStatus: pickStatus(g.IntegrationStatus),
-      ASNNumbers: Array.from(g.ASNNumbers).join(', '),
+      ASNNumbers: asnKey || Array.from(g.ASNNumbers).join(', '),
       dueDateEarliest: sorted[0] ?? '',
       dueDateLatest: sorted[sorted.length - 1] ?? '',
       linesCount: g.lines.length,
@@ -1352,7 +1360,7 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
           <Table<POGroup>
             dataSource={filteredGroups}
             columns={columns}
-            rowKey="DocumentNumber"
+            rowKey="_key"
             size="small"
             scroll={{ x: 'max-content' }}
             loading={loading}
@@ -1370,10 +1378,10 @@ const ManageExpectedReceipts: React.FC = () => {
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
 
   const handleOpenPO = useCallback((group: POGroup) => {
-    const key = `po-${group.DocumentNumber}`;
+    const key = `po-${group._key}`;
     setOpenTabs(prev => {
       if (prev.find(t => t.key === key)) return prev;
-      return [...prev, { key, poNumber: group.DocumentNumber, lines: group.lines }];
+      return [...prev, { key, poNumber: group.DocumentNumber, asn: group.ASNNumbers, lines: group.lines }];
     });
     setActiveTab(key);
   }, []);
@@ -1407,7 +1415,7 @@ const ManageExpectedReceipts: React.FC = () => {
       label: (
         <span>
           <InboxOutlined style={{ marginRight: 4 }} />
-          {`PO ${tab.poNumber}`}
+          {`PO ${tab.poNumber}`}{tab.asn ? ` · ASN ${tab.asn}` : ''}
         </span>
       ),
       closable: true,
