@@ -728,10 +728,15 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
     setAssignApiBody(null); setAssignApiMaster(null); setAssignApiUpdate(false); setAssignApiHref('');
     const master = await fetchMasterItem(line.itemNumber);
     setAssignApiMaster(master);
-    // Always POST with Upsert-Mode; the body carries the natural key so Fusion
-    // updates the row when it already exists, or creates it otherwise.
-    setAssignApiUpdate(!!(await getItemSelfHref(line.itemNumber, org)));
-    setAssignApiBody(buildAssignBody(org, line, master));
+    // Already assigned → PATCH /itemsV2/{UniqID} with attributes only; new → POST.
+    const selfHref = await getItemSelfHref(line.itemNumber, org);
+    if (selfHref) {
+      const copied: Record<string, any> = {};
+      if (master) COPY_ITEM_ATTRS.forEach(a => { if (master[a] != null && master[a] !== '') copied[a] = master[a]; });
+      setAssignApiUpdate(true); setAssignApiHref(selfHref); setAssignApiBody(copied);
+    } else {
+      setAssignApiBody(buildAssignBody(org, line, master));
+    }
     setAssignApiLoading(false);
   };
 
@@ -759,21 +764,31 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
     const copied: Record<string, any> = {};
     if (master) COPY_ITEM_ATTRS.forEach(a => { if (master[a] != null && master[a] !== '') copied[a] = master[a]; });
 
-    // itemsV2 has no updatable PATCH row (PATCH → InvalidOperationUpdateForThe
-    // SpecifiedResource); Fusion's create-or-update is POST with Upsert-Mode:true,
-    // which matches on OrganizationCode + ItemNumber and updates if it exists.
+    // Already assigned → PATCH the item row (Update one item /itemsV2/{UniqID});
+    // new → POST to assign. If PATCH is rejected (InvalidOperationUpdate…), fall
+    // back to the Upsert-Mode POST which also creates-or-updates.
     patchLine(line.key, { assignStatus: 'pending', assignMsg: 'Checking existing assignment…' });
-    const isUpdate = !!(await getItemSelfHref(line.itemNumber, org));
-    const body = buildAssignBody(org, line, master); // full body incl. the natural key
+    const selfHref = await getItemSelfHref(line.itemNumber, org);
+    const isUpdate = !!selfHref;
+    if (isUpdate && Object.keys(copied).length === 0) {
+      patchLine(line.key, { assignStatus: 'success', assignMsg: `Already in ${org} — no master attributes to update` });
+      message.info(`Item ${line.itemNumber} is already assigned to ${org}; nothing to update`);
+      return true;
+    }
+    const errOf = (data: any, r: Response) => data?.detail || data?.message || (Array.isArray(data?.['o:errorDetails']) ? data['o:errorDetails'][0]?.detail : '') || `HTTP ${r.status}`;
+    const doPatch = () => fetch(selfHref!, { method: 'PATCH', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(copied) });
+    const doUpsert = () => fetch(`${FUSION_BASE}/itemsV2`, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json', 'Upsert-Mode': 'true' }, body: JSON.stringify(buildAssignBody(org, line, master)) });
+    const doPost = () => fetch(`${FUSION_BASE}/itemsV2`, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(buildAssignBody(org, line, master)) });
     try {
-      const r = await fetch(`${FUSION_BASE}/itemsV2`, {
-        method: 'POST',
-        headers: { ...FUSION_HDRS, 'Content-Type': 'application/json', 'Upsert-Mode': 'true' },
-        body: JSON.stringify(body),
-      });
-      const data = await r.json().catch(() => ({} as any));
+      let r = await (isUpdate ? doPatch() : doPost());
+      let data = await r.json().catch(() => ({} as any));
+      // PATCH rejected as an invalid update? retry once via Upsert-Mode POST.
+      if (!r.ok && isUpdate && /InvalidOperationUpdate/i.test(JSON.stringify(data))) {
+        patchLine(line.key, { assignStatus: 'pending', assignMsg: 'PATCH rejected — retrying via Upsert-Mode…' });
+        r = await doUpsert(); data = await r.json().catch(() => ({} as any));
+      }
       if (!r.ok) {
-        const msg = data?.detail || data?.message || (Array.isArray(data?.['o:errorDetails']) ? data['o:errorDetails'][0]?.detail : '') || `HTTP ${r.status}`;
+        const msg = errOf(data, r);
         patchLine(line.key, { assignStatus: 'error', assignMsg: String(msg) });
         message.error(`${isUpdate ? 'Update' : 'Assign'} ${line.itemNumber} → ${org} failed: ${msg}`, 6);
         return false;
@@ -4457,11 +4472,11 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
           footer={<Button onClick={() => setAssignApiOpen(false)}>Close</Button>}
         >
           <div style={{ fontSize: 12, marginBottom: 6 }}>
-            <Space size={6}><Tag color="green">POST</Tag><Tag color="blue">Upsert-Mode: true</Tag>
-              <Text type="secondary">{assignApiUpdate ? 'Already assigned — upsert updates the existing item row' : 'Assign item to inventory org (copies master-org attributes)'}</Text></Space>
+            <Space size={6}><Tag color={assignApiUpdate ? 'orange' : 'green'}>{assignApiUpdate ? 'PATCH' : 'POST'}</Tag>
+              <Text type="secondary">{assignApiUpdate ? 'Already assigned — Update one item /itemsV2/{itemsV2UniqID} (attributes only)' : 'Assign item to inventory org (copies master-org attributes)'}</Text></Space>
           </div>
-          <Text copyable style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>{`${FUSION_BASE}/itemsV2`}</Text>
-          <div style={{ fontSize: 11, color: C.textLight, marginTop: 4 }}>Header <Text code style={{ fontSize: 11 }}>Upsert-Mode: true</Text> — matches on OrganizationCode + ItemNumber, so it creates or updates in one call (no PATCH).</div>
+          <Text copyable style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>{assignApiUpdate ? assignApiHref : `${FUSION_BASE}/itemsV2`}</Text>
+          {assignApiUpdate && <div style={{ fontSize: 11, color: C.textLight, marginTop: 4 }}>If the server rejects PATCH (InvalidOperationUpdate…), it retries once via <Text code style={{ fontSize: 11 }}>POST + Upsert-Mode: true</Text>.</div>}
           {assignApiLoading ? (
             <div style={{ textAlign: 'center', padding: 24 }}><Text type="secondary">Reading master item…</Text></div>
           ) : (
