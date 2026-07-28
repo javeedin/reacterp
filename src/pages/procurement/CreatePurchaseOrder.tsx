@@ -643,6 +643,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
   const [itemDetailNumber, setItemDetailNumber]   = useState('');
   const [itemDetailRows, setItemDetailRows]       = useState<any[]>([]);
   const [itemDetailErr, setItemDetailErr]         = useState('');
+  const [itemDetailApiUrl, setItemDetailApiUrl]   = useState('');
 
   const showItemDetail = async (itemNumber: string) => {
     setItemDetailNumber(itemNumber);
@@ -650,13 +651,18 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
     setItemDetailLoading(true);
     setItemDetailRows([]); setItemDetailErr('');
     try {
-      const url = `${FUSION_BASE}/itemsV2?q=ItemNumber='${encodeURIComponent(itemNumber)}'&limit=50&onlyData=true`;
+      // Scope the item to the header's Ship-to Organization so the shown
+      // attributes are the org-specific definition, not the item master (AMS).
+      const org = header?.shipToOrg;
+      const q = `ItemNumber='${itemNumber}'${org ? `;OrganizationCode=${org}` : ''}`;
+      const url = `${FUSION_BASE}/itemsV2?q=${encodeURIComponent(q)}&limit=50&onlyData=true`;
+      setItemDetailApiUrl(`GET itemsV2?q=${q}`);
       const r = await fetch(url, { headers: FUSION_HDRS });
       const d = await r.json().catch(() => ({} as any));
       if (!r.ok) throw new Error(d?.detail ?? d?.message ?? `HTTP ${r.status}`);
       const items: any[] = d.items ?? [];
       setItemDetailRows(items);
-      if (items.length === 0) setItemDetailErr('No item found in the item master.');
+      if (items.length === 0) setItemDetailErr(org ? `No item found for organization ${org}.` : 'No item found in the item master.');
     } catch (e: any) {
       setItemDetailErr(e?.message || 'Failed to load item details');
     } finally {
@@ -4382,13 +4388,15 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
           ) : itemDetailErr ? (
             <Alert type="warning" showIcon message={itemDetailErr} />
           ) : (() => {
-            const primary = itemDetailRows.find(i => i.SalesAccountId != null) ?? itemDetailRows[0] ?? {};
+            const org = header?.shipToOrg;
+            const primary = itemDetailRows.find(i => org && i.OrganizationCode === org) ?? itemDetailRows.find(i => i.SalesAccountId != null) ?? itemDetailRows[0] ?? {};
             const entries = Object.entries(primary).filter(([k, v]) => k !== 'links' && v != null && v !== '');
             return (
               <>
                 <div style={{ fontSize: 12, color: C.textMid, marginBottom: 10 }}>
-                  Found in <b>{itemDetailRows.length}</b> organization row(s). Showing the master definition
-                  {primary.OrganizationCode ? ` (${primary.OrganizationCode})` : ''}.
+                  {org
+                    ? <>Showing attributes for Ship-to Organization <Tag color="cyan" style={{ fontSize: 11 }}>{primary.OrganizationCode ?? org}</Tag>({itemDetailRows.length} row{itemDetailRows.length !== 1 ? 's' : ''}).</>
+                    : <>Found in <b>{itemDetailRows.length}</b> organization row(s). Showing the master definition{primary.OrganizationCode ? ` (${primary.OrganizationCode})` : ''}.</>}
                   {primary.SalesAccountId != null && <Tag color="green" style={{ marginLeft: 8, fontSize: 11 }}>Sales Acct {primary.SalesAccountId}</Tag>}
                 </div>
                 <div style={{ maxHeight: 420, overflow: 'auto', border: `1px solid ${C.border}`, borderRadius: 6 }}>
@@ -4404,7 +4412,7 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                   </table>
                 </div>
                 <div style={{ fontSize: 11, color: C.textLight, marginTop: 8 }}>
-                  Source: <Text code style={{ fontSize: 11 }}>GET itemsV2?q=ItemNumber='{itemDetailNumber}'</Text>
+                  Source: <Text code style={{ fontSize: 11 }}>{itemDetailApiUrl || `GET itemsV2?q=ItemNumber='${itemDetailNumber}'`}</Text>
                 </div>
               </>
             );
