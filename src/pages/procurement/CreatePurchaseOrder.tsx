@@ -676,7 +676,8 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
   // Master-org item attributes to copy onto the child-org assignment. Sales
   // Account is the headline; the rest are safe org-level attributes/flags.
   const COPY_ITEM_ATTRS = [
-    'SalesAccountId', 'CostOfSaleAccountId', 'ExpenseAccountId', 'EncumbranceAccountId',
+    'SalesAccountId', 'SalesAccountValue', 'CostOfSaleAccountId', 'CostOfSaleAccountValue',
+    'ExpenseAccountId', 'ExpenseAccountValue', 'EncumbranceAccountId', 'EncumbranceAccountValue',
     'ItemClass', 'PrimaryUOMValue', 'ItemStatusValue', 'LifecyclePhaseValue',
     'InventoryItemFlag', 'StockEnabledFlag', 'TransactionEnabledFlag', 'ReservableFlag',
     'PurchasingItemFlag', 'PurchasableFlag', 'CustomerOrderEnabledFlag', 'CustomerOrderFlag',
@@ -694,8 +695,11 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
       const d = await r.json().catch(() => ({} as any));
       const items: any[] = d.items ?? [];
       if (items.length === 0) return null;
-      // Prefer the row that has a Sales Account (the master definition); else first.
-      return items.find(i => i.SalesAccountId != null) ?? items[0];
+      // Prefer the AMS master row that carries the Sales Account (Value or Id).
+      return items.find(i => i.SalesAccountValue != null && i.SalesAccountValue !== '')
+        ?? items.find(i => i.SalesAccountId != null)
+        ?? items.find(i => i.OrganizationCode === 'AMS')
+        ?? items[0];
     } catch { return null; }
   };
 
@@ -4437,7 +4441,7 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
             <>
               {assignApiMaster
                 ? <Alert type="success" showIcon style={{ margin: '10px 0', fontSize: 12 }}
-                    message={`Master attributes found — Sales Account: ${assignApiMaster.SalesAccountId ?? '—'}`} />
+                    message={`Master attributes found — Sales Account: ${assignApiMaster.SalesAccountValue ?? assignApiMaster.SalesAccountId ?? '—'}`} />
                 : <Alert type="warning" showIcon style={{ margin: '10px 0', fontSize: 12 }}
                     message="No master item found — posting base attributes only (Sales Account not copied)." />}
               <div style={{ fontSize: 12, fontWeight: 600, margin: '8px 0 4px' }}>Request Body (JSON)</div>
