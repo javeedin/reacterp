@@ -728,14 +728,10 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
     setAssignApiBody(null); setAssignApiMaster(null); setAssignApiUpdate(false); setAssignApiHref('');
     const master = await fetchMasterItem(line.itemNumber);
     setAssignApiMaster(master);
-    const selfHref = await getItemSelfHref(line.itemNumber, org);
-    if (selfHref) {
-      const copied: Record<string, any> = {};
-      if (master) COPY_ITEM_ATTRS.forEach(a => { if (master[a] != null && master[a] !== '') copied[a] = master[a]; });
-      setAssignApiUpdate(true); setAssignApiHref(selfHref); setAssignApiBody(copied);
-    } else {
-      setAssignApiBody(buildAssignBody(org, line, master));
-    }
+    // Always POST with Upsert-Mode; the body carries the natural key so Fusion
+    // updates the row when it already exists, or creates it otherwise.
+    setAssignApiUpdate(!!(await getItemSelfHref(line.itemNumber, org)));
+    setAssignApiBody(buildAssignBody(org, line, master));
     setAssignApiLoading(false);
   };
 
@@ -763,21 +759,16 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
     const copied: Record<string, any> = {};
     if (master) COPY_ITEM_ATTRS.forEach(a => { if (master[a] != null && master[a] !== '') copied[a] = master[a]; });
 
-    // If the item already exists in the org, PATCH the attributes; else POST to assign.
+    // itemsV2 has no updatable PATCH row (PATCH → InvalidOperationUpdateForThe
+    // SpecifiedResource); Fusion's create-or-update is POST with Upsert-Mode:true,
+    // which matches on OrganizationCode + ItemNumber and updates if it exists.
     patchLine(line.key, { assignStatus: 'pending', assignMsg: 'Checking existing assignment…' });
-    const selfHref = await getItemSelfHref(line.itemNumber, org);
-    const isUpdate = !!selfHref;
-    if (isUpdate && Object.keys(copied).length === 0) {
-      patchLine(line.key, { assignStatus: 'success', assignMsg: `Already in ${org} — no master attributes to update` });
-      message.info(`Item ${line.itemNumber} is already assigned to ${org}; nothing to update`);
-      return true;
-    }
-    // PATCH updates attributes only (no identity fields); POST assigns the full body.
-    const body = isUpdate ? copied : buildAssignBody(org, line, master);
+    const isUpdate = !!(await getItemSelfHref(line.itemNumber, org));
+    const body = buildAssignBody(org, line, master); // full body incl. the natural key
     try {
-      const r = await fetch(isUpdate ? selfHref! : `${FUSION_BASE}/itemsV2`, {
-        method: isUpdate ? 'PATCH' : 'POST',
-        headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' },
+      const r = await fetch(`${FUSION_BASE}/itemsV2`, {
+        method: 'POST',
+        headers: { ...FUSION_HDRS, 'Content-Type': 'application/json', 'Upsert-Mode': 'true' },
         body: JSON.stringify(body),
       });
       const data = await r.json().catch(() => ({} as any));
@@ -4466,10 +4457,11 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
           footer={<Button onClick={() => setAssignApiOpen(false)}>Close</Button>}
         >
           <div style={{ fontSize: 12, marginBottom: 6 }}>
-            <Space size={6}><Tag color={assignApiUpdate ? 'orange' : 'green'}>{assignApiUpdate ? 'PATCH' : 'POST'}</Tag>
-              <Text type="secondary">{assignApiUpdate ? 'Already assigned — update attributes on the existing item row' : 'Assign item to inventory org (copies master-org attributes)'}</Text></Space>
+            <Space size={6}><Tag color="green">POST</Tag><Tag color="blue">Upsert-Mode: true</Tag>
+              <Text type="secondary">{assignApiUpdate ? 'Already assigned — upsert updates the existing item row' : 'Assign item to inventory org (copies master-org attributes)'}</Text></Space>
           </div>
-          <Text copyable style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>{assignApiUpdate ? assignApiHref : `${FUSION_BASE}/itemsV2`}</Text>
+          <Text copyable style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>{`${FUSION_BASE}/itemsV2`}</Text>
+          <div style={{ fontSize: 11, color: C.textLight, marginTop: 4 }}>Header <Text code style={{ fontSize: 11 }}>Upsert-Mode: true</Text> — matches on OrganizationCode + ItemNumber, so it creates or updates in one call (no PATCH).</div>
           {assignApiLoading ? (
             <div style={{ textAlign: 'center', padding: 24 }}><Text type="secondary">Reading master item…</Text></div>
           ) : (
