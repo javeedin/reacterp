@@ -1178,6 +1178,34 @@ const useOrdsOptions = (url: string, keys: string[], fallback: string[] = []): {
 const PAY_TERM_KEYS = ['name', 'Name', 'payment_terms', 'paymentterms', 'term_name', 'termname', 'payment_term', 'value', 'description'];
 const SALESREP_KEYS = ['salesrep_name', 'salerep_code', 'name', 'Name', 'salesperson', 'salesperson_name', 'salespersonname', 'resource_name', 'full_name', 'value'];
 
+// Tax codes for a business unit (ORDS: FUSION_TAX_CODES where BUSINESS_UNIT = :P_BUSINESS_UNIT).
+export interface TaxCode { code: string; pct: number }
+const TAXCODES_URL = `${ORDS_AR}/taxcodes`;
+const useTaxCodes = (bu?: string): TaxCode[] => {
+  const [rows, setRows] = useState<TaxCode[]>([]);
+  useEffect(() => {
+    if (!bu) { setRows([]); return; }
+    let live = true;
+    const qs = new URLSearchParams({ P_BUSINESS_UNIT: bu, business_unit: bu }).toString();
+    fetch(`${TAXCODES_URL}?${qs}`, { headers: { Accept: 'application/json' } })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => {
+        if (!live) return;
+        const items = d.items ?? (Array.isArray(d) ? d : []);
+        const seen = new Set<string>(); const list: TaxCode[] = [];
+        items.forEach((x: any) => {
+          const code = String(pf(x, ['tax_code', 'TAX_CODE', 'code', 'name']) ?? '').trim();
+          if (code && !seen.has(code)) { seen.add(code); list.push({ code, pct: num(pf(x, ['tax_code_per', 'TAX_CODE_PER', 'rate', 'pct', 'percentage'])) }); }
+        });
+        setRows(list);
+      })
+      .catch(() => { if (live) setRows([]); });
+    return () => { live = false; };
+  }, [bu]);
+  return rows;
+};
+const round2 = (v: number) => Math.round((num(v) + Number.EPSILON) * 100) / 100;
+
 const CUSTOMERS_URL = `${ORDS_AR}/customers`;
 // Fetch all customer rows (paged) from the ORDS customers endpoint.
 const useCustomers = (): any[] => {
@@ -1231,7 +1259,7 @@ interface OrderHeader {
   paymentTerms?: string; salesRep?: string; warehouse?: string; subinventory?: string; remarks?: string;
   custAccountId?: string; partyId?: string;
 }
-interface NewLine { key: string; itemNumber: string; description?: string; uom?: string; qty: number; unitPrice: number; costUnit?: number; taxCode?: string; taxAmount?: number; lot?: string; lots?: string[]; qoh?: number; ohLoading?: boolean }
+interface NewLine { key: string; itemNumber: string; description?: string; uom?: string; qty: number; unitPrice: number; costUnit?: number; taxCode?: string; taxPct?: number; taxAmount?: number; lot?: string; lots?: string[]; qoh?: number; ohLoading?: boolean }
 
 const INV_ORGS_URL = `${FUSION_BASE}/inventoryOrganizations?onlyData=true&limit=500`;
 
@@ -1363,7 +1391,7 @@ async function searchItems(text: string, org?: string): Promise<any[]> {
 
 // Item picker (itemsV2) — single-line editable grid: cost, on-hand, qty, price,
 // total, margin, tax and net; select rows and add them as order lines.
-const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => void; onAdd: (items: any[]) => void }> = ({ open, org, onClose, onAdd }) => {
+const ItemSearchModal: React.FC<{ open: boolean; org?: string; taxOptions?: { value: string; label: string; pct: number }[]; onClose: () => void; onAdd: (items: any[]) => void }> = ({ open, org, taxOptions = [], onClose, onAdd }) => {
   const [byDesc, setByDesc] = useState(false);
   const [term, setTerm] = useState('');
   const [rows, setRows] = useState<any[]>([]);
@@ -1372,7 +1400,7 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
   const [sel, setSel] = useState<React.Key[]>([]);
   const [costs, setCosts] = useState<Record<string, { cost?: number; ccy?: string; onhand?: number; n: number; rows: any[] }>>({});
   const [costLoading, setCostLoading] = useState(false);
-  const [draft, setDraft] = useState<Record<string, { qty: number; price: number; taxCode?: string; tax: number }>>({});
+  const [draft, setDraft] = useState<Record<string, { qty: number; price: number; taxCode?: string; taxPct?: number; tax: number }>>({});
   const [onh, setOnh] = useState<Record<string, { loading?: boolean; qty?: number; lots?: string[]; err?: string }>>({});
   const [apiOpen, setApiOpen] = useState(false);
   useEffect(() => { if (open) { setTerm(''); setRows([]); setSel([]); setError(''); setCosts({}); setDraft({}); setOnh({}); } }, [open]);
@@ -1412,9 +1440,10 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
     finally { setLoading(false); }
   }, [url, loadCosts]);
 
-  const dget = (item: string) => draft[item] ?? { qty: 0, price: num(costs[item]?.cost), tax: 0, taxCode: undefined as string | undefined };
-  const dset = (item: string, patch: Partial<{ qty: number; price: number; taxCode?: string; tax: number }>) =>
-    setDraft(p => ({ ...p, [item]: { ...(p[item] ?? { qty: 0, price: num(costs[item]?.cost), tax: 0 }), ...patch } }));
+  const dget = (item: string) => draft[item] ?? { qty: 0, price: num(costs[item]?.cost), tax: 0, taxCode: undefined as string | undefined, taxPct: undefined as number | undefined };
+  const dset = (item: string, patch: Partial<{ qty: number; price: number; taxCode?: string; taxPct?: number; tax: number }>) =>
+    // Re-derive tax from the chosen tax_code_per whenever qty/price/tax code change.
+    setDraft(p => { const base = p[item] ?? { qty: 0, price: num(costs[item]?.cost), tax: 0 }; const m = { ...base, ...patch }; if (m.taxPct != null) m.tax = round2(m.qty * m.price * m.taxPct / 100); return { ...p, [item]: m }; });
   const vuOf = (item: string) => parseVU(costs[item]?.rows?.[0]?.ValuationUnit);
   const costQtyOf = (item: string) => num(pf(costs[item]?.rows?.[0], QTY_FIELDS));
   const costOnhandOf = (item: string) => costs[item]?.onhand;
@@ -1485,8 +1514,10 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
     { title: 'Total', width: 98, align: 'right', render: (_, r) => { const d = dget(r.ItemNumber); return <Text style={{ fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{num2(d.qty * d.price)}</Text>; } },
     { title: 'Margin', width: 98, align: 'right', render: (_, r) => { const d = dget(r.ItemNumber); const m = (d.price - num(costs[r.ItemNumber]?.cost)) * d.qty; return <Text strong style={{ fontSize: 11.5, color: m < 0 ? REDWOOD.error : REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{num2(m)}</Text>; } },
     { title: 'Margin %', width: 78, align: 'right', render: (_, r) => { const d = dget(r.ItemNumber); const t = d.qty * d.price; const m = (d.price - num(costs[r.ItemNumber]?.cost)) * d.qty; const pct = t ? (m / t) * 100 : 0; return <Text style={{ fontSize: 11, color: pct < 0 ? REDWOOD.error : REDWOOD.success }}>{t ? pct.toFixed(1) + '%' : '—'}</Text>; } },
-    { title: 'Tax Code', width: 95, render: (_, r) => <Input size="small" value={dget(r.ItemNumber).taxCode} onChange={e => dset(r.ItemNumber, { taxCode: e.target.value })} style={{ width: 84 }} placeholder="—" /> },
-    { title: 'Tax Amt', width: 86, render: (_, r) => <InputNumber size="small" min={0} value={dget(r.ItemNumber).tax} onChange={v => dset(r.ItemNumber, { tax: Number(v) || 0 })} style={{ width: 74 }} /> },
+    { title: 'Tax Code', width: 130, render: (_, r) => <Select size="small" showSearch allowClear style={{ width: 118 }} value={dget(r.ItemNumber).taxCode || undefined} placeholder="—"
+        options={taxOptions} optionFilterProp="value" notFoundContent={taxOptions.length ? undefined : 'No tax codes'}
+        onChange={val => { const opt = taxOptions.find(o => o.value === val); dset(r.ItemNumber, { taxCode: val, taxPct: opt ? opt.pct : undefined }); }} /> },
+    { title: 'Tax Amt', width: 92, align: 'right', render: (_, r) => { const d = dget(r.ItemNumber); return <Text style={{ fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{num2(num(d.tax))}</Text>; } },
     { title: 'Net', width: 108, align: 'right', render: (_, r) => { const d = dget(r.ItemNumber); return <Text strong style={{ fontSize: 12, color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{num2(d.qty * d.price + num(d.tax))}</Text>; } },
     { title: 'Cost Org', width: 105, render: (_, r) => <Text style={{ fontSize: 11 }}>{vuOf(r.ItemNumber).costOrg || '—'}</Text> },
     { title: 'Inv Org', width: 95, render: (_, r) => <Text style={{ fontSize: 11 }}>{vuOf(r.ItemNumber).invOrg || '—'}</Text> },
@@ -1504,7 +1535,7 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
         <Button onClick={onClose}>Close</Button>
         <Button type="primary" disabled={sel.length === 0} icon={<PlusOutlined />} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
           onClick={() => {
-            const picked = rows.filter(r => sel.includes(r.ItemNumber)).map(r => { const d = dget(r.ItemNumber); const p = vuOf(r.ItemNumber); return { ...r, _cost: costs[r.ItemNumber]?.cost, _qty: d.qty, _price: d.price, _taxCode: d.taxCode, _tax: d.tax, _lot: p.lot, _lots: onh[r.ItemNumber]?.lots, _costOrg: p.costOrg, _invOrg: p.invOrg, _subinv: p.subinv, _qoh: maxQohOf(r.ItemNumber) }; });
+            const picked = rows.filter(r => sel.includes(r.ItemNumber)).map(r => { const d = dget(r.ItemNumber); const p = vuOf(r.ItemNumber); return { ...r, _cost: costs[r.ItemNumber]?.cost, _qty: d.qty, _price: d.price, _taxCode: d.taxCode, _taxPct: d.taxPct, _tax: d.tax, _lot: p.lot, _lots: onh[r.ItemNumber]?.lots, _costOrg: p.costOrg, _invOrg: p.invOrg, _subinv: p.subinv, _qoh: maxQohOf(r.ItemNumber) }; });
             onAdd(picked);
             message.success(`Added ${picked.length} line(s) — pick more or Close`);
             setSel([]); // keep the dialog open so more items can be added
@@ -1531,6 +1562,7 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; onClose: () => vo
             { lbl: 'Item cost — direct by ItemNumber, org via ValuationUnit (itemCosts)', u: `${LATEST_URL}/itemCosts?q=ItemNumber=<item>` },
             { lbl: 'On-hand by subinventory (inventoryOnhandBalances)', u: `${FUSION_BASE}/inventoryOnhandBalances?q=OrganizationCode=${org ?? '<org>'};ItemNumber=<item>;SubinventoryCode=<subinv>` },
             { lbl: 'On-hand lot detail — followed from each balance’s child link', u: '<inventoryOnhandBalance href>/child/... (lot rows)' },
+            { lbl: 'Tax codes by business unit (ORDS FUSION_TAX_CODES)', u: `${TAXCODES_URL}?P_BUSINESS_UNIT=<business unit>` },
           ].map(({ lbl, u }) => (
             <div key={lbl}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1660,6 +1692,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
   const payTermOpts = useOrdsOptions(PAYMENT_TERMS_URL, PAY_TERM_KEYS, PAYMENT_TERMS);
   const salesRepOpts = useOrdsOptions(SALESREPS_URL, SALESREP_KEYS);
   const custOptions = useMemo(() => custOptionList(customers), [customers]);
+  const taxCodes = useTaxCodes(hdr.businessUnit);
+  const taxOptions = useMemo(() => taxCodes.map(t => ({ value: t.code, label: `${t.code} (${t.pct}%)`, pct: t.pct })), [taxCodes]);
   const [subs, setSubs] = useState<string[]>([]);
   const [lines, setLines] = useState<NewLine[]>([]);
   const [pickOpen, setPickOpen] = useState(false);
@@ -1705,7 +1739,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
         key: `${it.ItemNumber}-${prev.length + i}`, itemNumber: it.ItemNumber,
         description: it.ItemDescription, uom: pf(it, ['PrimaryUOMValue', 'PrimaryUOMCode', 'UOMCode']),
         qty: num(it._qty), unitPrice: it._price != null ? num(it._price) : num(it._cost),
-        costUnit: num(it._cost), taxCode: it._taxCode, taxAmount: num(it._tax),
+        costUnit: num(it._cost), taxCode: it._taxCode, taxPct: it._taxPct != null ? num(it._taxPct) : undefined, taxAmount: num(it._tax),
         lot: it._lot, lots: (it._lots && it._lots.length) ? it._lots : (it._lot ? [it._lot] : []),
         qoh: it._qoh != null ? num(it._qoh) : undefined,
       }));
@@ -1713,6 +1747,13 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
     });
   };
   const upd = (key: string, patch: Partial<NewLine>) => setLines(prev => prev.map(l => l.key === key ? { ...l, ...patch } : l));
+  // Like upd, but re-derives tax from tax_code_per whenever qty/price/tax code change.
+  const updLine = (key: string, patch: Partial<NewLine>) => setLines(prev => prev.map(l => {
+    if (l.key !== key) return l;
+    const m = { ...l, ...patch };
+    if (m.taxPct != null) m.taxAmount = round2(num(m.qty) * num(m.unitPrice) * num(m.taxPct) / 100);
+    return m;
+  }));
   const del = (key: string) => setLines(prev => prev.filter(l => l.key !== key));
 
   // "New Line" — append a blank, editable line the user fills via inline search.
@@ -1827,12 +1868,15 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
     { title: 'Cost', dataIndex: 'costUnit', width: 90, align: 'right', render: v => v == null ? '—' : <Text type="secondary" style={{ fontSize: 11 }}>{fmtAmount(v, ccy)}</Text> },
     { title: 'QoH', dataIndex: 'qoh', width: 80, align: 'right', render: (v, r) => r.ohLoading ? <Spin size="small" /> : (v == null ? <Text type="secondary" style={{ fontSize: 11 }}>—</Text> : <Text style={{ fontSize: 11.5, color: REDWOOD.info, fontVariantNumeric: 'tabular-nums' }}>{fmtQty(num(v))}</Text>) },
     { title: 'Qty', dataIndex: 'qty', width: 90, align: 'right', render: (v, r) => <InputNumber size="small" min={0} max={r.qoh != null ? r.qoh : undefined} value={v}
-        onChange={n => { let q = Number(n) || 0; if (r.qoh != null && q > r.qoh) { q = r.qoh; message.warning(`Cannot order more than on-hand (${fmtQty(r.qoh)})`); } upd(r.key, { qty: q }); }} style={{ width: 78 }} /> },
-    { title: 'Unit Price', dataIndex: 'unitPrice', width: 100, align: 'right', render: (v, r) => <InputNumber size="small" min={0} value={v} onChange={n => upd(r.key, { unitPrice: Number(n) || 0 })} style={{ width: 88 }} /> },
+        onChange={n => { let q = Number(n) || 0; if (r.qoh != null && q > r.qoh) { q = r.qoh; message.warning(`Cannot order more than on-hand (${fmtQty(r.qoh)})`); } updLine(r.key, { qty: q }); }} style={{ width: 78 }} /> },
+    { title: 'Unit Price', dataIndex: 'unitPrice', width: 100, align: 'right', render: (v, r) => <InputNumber size="small" min={0} value={v} onChange={n => updLine(r.key, { unitPrice: Number(n) || 0 })} style={{ width: 88 }} /> },
     { title: 'Line Total', width: 110, align: 'right', render: (_, r) => <Text strong style={{ color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(r.qty) * num(r.unitPrice), ccy)}</Text> },
     { title: 'Margin', width: 100, align: 'right', render: (_, r) => { const m = (num(r.unitPrice) - num(r.costUnit)) * num(r.qty); return <Text style={{ fontSize: 11.5, color: m < 0 ? REDWOOD.error : REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(m, ccy)}</Text>; } },
-    { title: 'Tax Code', dataIndex: 'taxCode', width: 90, render: (v, r) => <Input size="small" value={v} onChange={e => upd(r.key, { taxCode: e.target.value })} style={{ width: 78 }} placeholder="—" /> },
-    { title: 'Tax', dataIndex: 'taxAmount', width: 90, align: 'right', render: (v, r) => <InputNumber size="small" min={0} value={v} onChange={n => upd(r.key, { taxAmount: Number(n) || 0 })} style={{ width: 80 }} /> },
+    { title: 'Tax Code', dataIndex: 'taxCode', width: 130, render: (v, r) => <Select size="small" showSearch allowClear style={{ width: 118 }} value={v || undefined} placeholder="—"
+        options={taxOptions} optionFilterProp="value"
+        notFoundContent={taxOptions.length ? undefined : (hdr.businessUnit ? 'No tax codes' : 'Select a business unit')}
+        onChange={val => { const opt = taxOptions.find(o => o.value === val); updLine(r.key, { taxCode: val, taxPct: opt ? opt.pct : undefined }); }} /> },
+    { title: 'Tax', dataIndex: 'taxAmount', width: 96, align: 'right', render: (v, r) => <Tooltip title={r.taxPct != null ? `${r.taxPct}% of ${fmtAmount(num(r.qty) * num(r.unitPrice), ccy)}` : 'Pick a tax code'}><Text style={{ fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(v), ccy)}</Text></Tooltip> },
     { title: 'Net', width: 110, align: 'right', fixed: 'right', render: (_, r) => <Text strong style={{ color: REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(r.qty) * num(r.unitPrice) + num(r.taxAmount), ccy)}</Text> },
     { title: '', width: 40, align: 'center', fixed: 'right', render: (_, r) => <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => del(r.key)} /> },
   ];
@@ -1963,7 +2007,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
             </Space> }} items={[
               {
                 key: 'lines', label: <Space size={6}><UnorderedListOutlined />Lines<Tag style={{ marginInlineEnd: 0 }}>{lines.length}</Tag></Space>,
-                children: <Table size="small" columns={cols} dataSource={lines} rowKey="key" pagination={false} scroll={{ x: 1620, y: 360 }}
+                children: <Table size="small" columns={cols} dataSource={lines} rowKey="key" pagination={false} scroll={{ x: 1700, y: 360 }}
                   locale={{ emptyText: 'No lines — use “Add Multiple Lines” or “New Line”' }}
                   summary={() => lines.length === 0 ? null : (() => {
                     const totMargin = lines.reduce((s, l) => s + (num(l.unitPrice) - num(l.costUnit)) * num(l.qty), 0);
@@ -2009,7 +2053,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
             ]} />}
       </Card>
 
-      <ItemSearchModal open={pickOpen} org={header.warehouse} onClose={() => setPickOpen(false)} onAdd={addItems} />
+      <ItemSearchModal open={pickOpen} org={header.warehouse} taxOptions={taxOptions} onClose={() => setPickOpen(false)} onAdd={addItems} />
 
       <Modal open={!!lotPick} onCancel={() => setLotPick(null)} maskClosable={false} width={620} footer={<Button onClick={() => setLotPick(null)}>Cancel</Button>}
         title={<Space><TagsOutlined style={{ color: REDWOOD.info }} /> Select a lot{lotPick ? <Tag color="blue">{lotPick.item}</Tag> : null}</Space>}>
