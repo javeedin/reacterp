@@ -76,6 +76,36 @@ const defaultShipmentNumber = () => `ASN${dayjs().format('YYMMDDHHmm')}`;
 
 const lineKey = (l: POLine) => String(l.DocumentLineId ?? `${l.DocumentNumber}-${l.DocumentLineNumber}-${l.DocumentScheduleNumber}`);
 
+// Fusion HATEOAS links are absolute URLs to the real host. In the browser (dev)
+// that bypasses the Vite proxy and trips CORS, so rewrite the resource prefix to
+// FUSION_BASE (a no-op in Electron, → /fusion-api in the browser).
+const proxied = (href: string) =>
+  href.replace(/^https?:\/\/[^/]+\/fscmRestApi\/resources\/11\.13\.18\.05/i, FUSION_BASE);
+
+// Follow the processingErrors child link on each ASN line and collect the
+// human-readable error messages Fusion recorded during derive/validate.
+async function fetchProcessingErrors(headerId: string | number): Promise<string[]> {
+  const out: string[] = [];
+  try {
+    const r = await fetch(`${ASN_ENDPOINT}/${headerId}?expand=lines`, { headers: FUSION_HDRS });
+    const d = await r.json();
+    const lines: any[] = d?.lines?.items ?? d?.lines ?? [];
+    for (const ln of lines) {
+      const link = (ln?.links ?? []).find((l: any) => l?.name === 'processingErrors');
+      if (!link?.href) continue;
+      try {
+        const pr = await fetch(proxied(link.href), { headers: FUSION_HDRS });
+        const pd = await pr.json();
+        (pd?.items ?? []).forEach((it: any) => {
+          const msg = it?.ErrorMessage ?? it?.Message ?? it?.ErrorMessageText ?? it?.ErrorMessageName;
+          if (msg) out.push(String(msg));
+        });
+      } catch { /* skip this line's errors */ }
+    }
+  } catch { /* header re-read failed */ }
+  return out;
+}
+
 // Pull all PO lines available to ship (paged).
 async function fetchLinesToReceive(q: string): Promise<POLine[]> {
   const qParam = q ? `q=${encodeURIComponent(q)}&` : '';
@@ -112,7 +142,7 @@ const CreateASN: React.FC = () => {
 
   // ASN header form state
   const [shipmentNumber, setShipmentNumber] = useState(defaultShipmentNumber());
-  const [shipmentDate, setShipmentDate]     = useState<any>(dayjs());
+  const [shipmentDate, setShipmentDate]     = useState<any>(dayjs().subtract(1, 'day')); // must be before today
   const [expectedDate, setExpectedDate]     = useState<any>(dayjs().add(3, 'day'));
   const [billOfLading, setBillOfLading]     = useState('');
   const [packingSlip, setPackingSlip]       = useState('');
@@ -127,6 +157,7 @@ const CreateASN: React.FC = () => {
   const [result, setResult]           = useState<null | {
     ok: boolean; http: number; status: string; headerId?: string | number; message: string; body: string;
   }>(null);
+  const [procErrors, setProcErrors]   = useState<string[]>([]);
 
   const buildQuery = (po: string, org: string): string => {
     const parts: string[] = [];
@@ -203,6 +234,9 @@ const CreateASN: React.FC = () => {
   const validateBeforeSubmit = (): string | null => {
     if (selectedLines.length === 0) return 'Select at least one PO line to ship.';
     if (!shipmentNumber.trim())     return 'Enter a Shipment (ASN) number.';
+    if (!shipmentDate)              return 'Enter a shipment date (before today).';
+    if (!dayjs(shipmentDate).isBefore(dayjs().startOf('day')))
+      return 'Shipment date must be before today.';
     const badQty = selectedLines.find(l => !(Number(shipQty[lineKey(l)]) > 0));
     if (badQty) return `Enter a ship quantity greater than 0 for item ${badQty.ItemNumber ?? ''}.`;
     const orgs = new Set(selectedLines.map(l => l.ToOrganizationCode));
@@ -223,12 +257,13 @@ const CreateASN: React.FC = () => {
     setInspectOpen(true);
   };
 
-  // POST the ASN, then poll the HeaderInterfaceId for the processing outcome —
-  // a 201 only means "landed in the interface as PENDING", not "posted".
+  // POST the ASN, then read ProcessingStatusCode. A 201 only means "landed in the
+  // interface" — Fusion validates asynchronously, so poll until PENDING resolves.
+  // SUCCESS → refresh the lines; ERROR → surface ReturnMessage + processingErrors.
   const submitAsn = async () => {
     const v = validateBeforeSubmit();
     if (v) { message.error(v); return; }
-    setSubmitting(true); setResult(null);
+    setSubmitting(true); setResult(null); setProcErrors([]);
     try {
       const res = await fetch(ASN_ENDPOINT, {
         method: 'POST',
@@ -239,39 +274,56 @@ const CreateASN: React.FC = () => {
       let data: any = null, pretty = text;
       try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* not json */ }
 
-      const headerId  = data?.HeaderInterfaceId ?? data?.headerInterfaceId;
-      const retStatus = data?.ReturnStatus ?? data?.returnStatus;
-      const returnOk  = !retStatus || String(retStatus).toUpperCase() !== 'ERROR';
-      if (!res.ok || !returnOk) {
+      const headerId = data?.HeaderInterfaceId ?? data?.headerInterfaceId;
+
+      // Transport-level failure (no interface record created).
+      if (!res.ok) {
         const msg = data?.ReturnMessage ?? data?.returnMessage ?? data?.detail ?? data?.title ?? `HTTP ${res.status}`;
         setResult({ ok: false, http: res.status, status: 'ERROR', headerId, message: String(msg), body: pretty });
         setSubmitting(false);
         return;
       }
 
-      // Landed. Poll processing status.
+      // Read ProcessingStatusCode; poll the header while still PENDING.
       let pStatus = String(data?.ProcessingStatusCode ?? 'PENDING').toUpperCase();
+      let retMsg  = data?.ReturnMessage ?? data?.returnMessage ?? '';
       let pollBody = pretty;
       if (headerId != null) {
-        for (let i = 0; i < 6 && pStatus === 'PENDING'; i++) {
+        for (let i = 0; i < 8 && pStatus === 'PENDING'; i++) {
           await new Promise(r => setTimeout(r, 2000));
           try {
             const pr = await fetch(`${ASN_ENDPOINT}/${headerId}`, { headers: FUSION_HDRS });
-            const pt = await pr.text();
-            try { const pd = JSON.parse(pt); pStatus = String(pd?.ProcessingStatusCode ?? pStatus).toUpperCase(); pollBody = JSON.stringify(pd, null, 2); }
-            catch { /* keep */ }
+            const pd = await pr.json();
+            pStatus = String(pd?.ProcessingStatusCode ?? pStatus).toUpperCase();
+            retMsg  = pd?.ReturnMessage ?? retMsg;
+            pollBody = JSON.stringify(pd, null, 2);
           } catch { /* keep polling */ }
         }
       }
-      const ok = pStatus === 'SUCCESS' || pStatus === 'PENDING';
-      setResult({
-        ok, http: res.status, status: pStatus, headerId,
-        message: pStatus === 'SUCCESS' ? 'ASN processed successfully.'
-          : pStatus === 'PENDING' ? 'ASN submitted — still processing in Fusion (PENDING). Check Manage Inbound Shipments shortly.'
-          : `ASN processing returned ${pStatus}.`,
-        body: pollBody,
-      });
-      if (ok) {
+
+      if (pStatus === 'SUCCESS') {
+        setResult({ ok: true, http: res.status, status: 'SUCCESS', headerId, message: 'ASN created successfully.', body: pollBody });
+        message.success(`ASN ${shipmentNumber} created${headerId ? ` · Hdr ${headerId}` : ''}`);
+        setInspectOpen(false);
+        setDetailsOpen(false);
+        // Refresh so the just-shipped lines drop off (they now carry an ASN).
+        await search();
+      } else if (pStatus === 'ERROR') {
+        const errs = headerId != null ? await fetchProcessingErrors(headerId) : [];
+        setProcErrors(errs);
+        setResult({
+          ok: false, http: res.status, status: 'ERROR', headerId,
+          message: retMsg || 'The receiving transactions couldn’t be processed.',
+          body: pollBody,
+        });
+        message.error('ASN processing failed — see the errors below.');
+      } else {
+        // Still PENDING after polling — treat as submitted-but-not-yet-confirmed.
+        setResult({
+          ok: true, http: res.status, status: pStatus || 'PENDING', headerId,
+          message: 'ASN submitted — still processing in Fusion (PENDING). Check Manage Inbound Shipments shortly.',
+          body: pollBody,
+        });
         message.success(`ASN ${shipmentNumber} submitted${headerId ? ` · Hdr ${headerId}` : ''}`);
         setInspectOpen(false);
         setDetailsOpen(false);
@@ -441,8 +493,9 @@ const CreateASN: React.FC = () => {
           <Row gutter={12}>
             {asnHeaderField('Shipment (ASN) Number *',
               <Input value={shipmentNumber} onChange={e => setShipmentNumber(e.target.value)} placeholder="ASN number" />)}
-            {asnHeaderField('Shipment Date',
-              <DatePicker value={shipmentDate} onChange={setShipmentDate} format="YYYY-MM-DD" style={{ width: '100%' }} />)}
+            {asnHeaderField('Shipment Date (before today) *',
+              <DatePicker value={shipmentDate} onChange={setShipmentDate} format="YYYY-MM-DD" style={{ width: '100%' }}
+                disabledDate={(d) => !!d && !d.isBefore(dayjs().startOf('day'))} />)}
             {asnHeaderField('Expected Receipt Date',
               <DatePicker value={expectedDate} onChange={setExpectedDate} format="YYYY-MM-DD" style={{ width: '100%' }} />)}
             {asnHeaderField('Freight Carrier',
@@ -457,9 +510,18 @@ const CreateASN: React.FC = () => {
               <Input value={comments} onChange={e => setComments(e.target.value)} placeholder="Optional" />)}
           </Row>
           {result && !result.ok && (
-            <div style={{ marginTop: 4 }}>
-              <Tag icon={<CloseCircleTwoTone twoToneColor={REDWOOD.error} />} color="error">{result.status}</Tag>
-              <Text type="danger" style={{ fontSize: 12 }}>{result.message}</Text>
+            <div style={{ marginTop: 8, background: '#FFF1F0', border: '1px solid #FFCCC7', borderRadius: 6, padding: '10px 12px' }}>
+              <div style={{ marginBottom: procErrors.length ? 8 : 0 }}>
+                <Tag icon={<CloseCircleTwoTone twoToneColor={REDWOOD.error} />} color="error">{result.status}</Tag>
+                <Text type="danger" style={{ fontSize: 12 }}>{result.message}</Text>
+              </div>
+              {procErrors.length > 0 && (
+                <ul style={{ margin: 0, paddingLeft: 18 }}>
+                  {procErrors.map((e, i) => (
+                    <li key={i}><Text style={{ fontSize: 12, color: REDWOOD.error }}>{e}</Text></li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
         </Modal>
