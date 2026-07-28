@@ -637,6 +637,8 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
   const [assignApiTitle, setAssignApiTitle]   = useState('');
   const [assignApiBody, setAssignApiBody]     = useState<any>(null);
   const [assignApiMaster, setAssignApiMaster] = useState<any>(null);
+  const [assignApiUpdate, setAssignApiUpdate] = useState(false);
+  const [assignApiHref, setAssignApiHref]     = useState('');
   // Item detail dialog (click an item number in the lines table)
   const [itemDetailOpen, setItemDetailOpen]       = useState(false);
   const [itemDetailLoading, setItemDetailLoading] = useState(false);
@@ -716,18 +718,38 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
     };
   };
 
-  // Show the exact itemsV2 URL + JSON payload (incl. copied master attributes).
+  // Show the exact itemsV2 URL + JSON payload (POST to assign, or PATCH to update).
   const previewAssign = async (line: POLine) => {
     const org = line.assignOrg;
     if (!org) { message.warning(`Pick an inventory org for ${line.itemNumber} first`); return; }
     setAssignApiTitle(`${line.itemNumber} → ${org}`);
     setAssignApiOpen(true);
     setAssignApiLoading(true);
-    setAssignApiBody(null); setAssignApiMaster(null);
+    setAssignApiBody(null); setAssignApiMaster(null); setAssignApiUpdate(false); setAssignApiHref('');
     const master = await fetchMasterItem(line.itemNumber);
     setAssignApiMaster(master);
-    setAssignApiBody(buildAssignBody(org, line, master));
+    const selfHref = await getItemSelfHref(line.itemNumber, org);
+    if (selfHref) {
+      const copied: Record<string, any> = {};
+      if (master) COPY_ITEM_ATTRS.forEach(a => { if (master[a] != null && master[a] !== '') copied[a] = master[a]; });
+      setAssignApiUpdate(true); setAssignApiHref(selfHref); setAssignApiBody(copied);
+    } else {
+      setAssignApiBody(buildAssignBody(org, line, master));
+    }
     setAssignApiLoading(false);
+  };
+
+  // Self link of an item's org row (present when already assigned) — used to
+  // PATCH attribute updates, since itemsV2 POST only creates the assignment.
+  const getItemSelfHref = async (itemNumber: string, org: string): Promise<string | null> => {
+    try {
+      const url = `${FUSION_BASE}/itemsV2?q=ItemNumber='${itemNumber}';OrganizationCode=${org}&limit=1`;
+      const r = await fetch(url, { headers: FUSION_HDRS });
+      if (!r.ok) return null;
+      const d = await r.json().catch(() => ({} as any));
+      const row = d.items?.[0];
+      return row?.links?.find((l: any) => l.rel === 'self')?.href ?? null;
+    } catch { return null; }
   };
 
   const assignItemToOrg = async (line: POLine): Promise<boolean> => {
@@ -741,10 +763,20 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
     const copied: Record<string, any> = {};
     if (master) COPY_ITEM_ATTRS.forEach(a => { if (master[a] != null && master[a] !== '') copied[a] = master[a]; });
 
-    const body = buildAssignBody(org, line, master);
+    // If the item already exists in the org, PATCH the attributes; else POST to assign.
+    patchLine(line.key, { assignStatus: 'pending', assignMsg: 'Checking existing assignment…' });
+    const selfHref = await getItemSelfHref(line.itemNumber, org);
+    const isUpdate = !!selfHref;
+    if (isUpdate && Object.keys(copied).length === 0) {
+      patchLine(line.key, { assignStatus: 'success', assignMsg: `Already in ${org} — no master attributes to update` });
+      message.info(`Item ${line.itemNumber} is already assigned to ${org}; nothing to update`);
+      return true;
+    }
+    // PATCH updates attributes only (no identity fields); POST assigns the full body.
+    const body = isUpdate ? copied : buildAssignBody(org, line, master);
     try {
-      const r = await fetch(`${FUSION_BASE}/itemsV2`, {
-        method: 'POST',
+      const r = await fetch(isUpdate ? selfHref! : `${FUSION_BASE}/itemsV2`, {
+        method: isUpdate ? 'PATCH' : 'POST',
         headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
@@ -752,16 +784,18 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
       if (!r.ok) {
         const msg = data?.detail || data?.message || (Array.isArray(data?.['o:errorDetails']) ? data['o:errorDetails'][0]?.detail : '') || `HTTP ${r.status}`;
         patchLine(line.key, { assignStatus: 'error', assignMsg: String(msg) });
-        message.error(`Assign ${line.itemNumber} → ${org} failed: ${msg}`, 6);
+        message.error(`${isUpdate ? 'Update' : 'Assign'} ${line.itemNumber} → ${org} failed: ${msg}`, 6);
         return false;
       }
-      const salesAcct = copied.SalesAccountId != null ? ` (Sales Acct ${copied.SalesAccountId})` : '';
-      patchLine(line.key, { assignStatus: 'success', assignMsg: `Assigned to ${org}${salesAcct}` });
-      message.success(`Item ${line.itemNumber} assigned to ${org}${master ? ` with ${Object.keys(copied).length} master attribute(s)` : ''}`);
+      const sa = copied.SalesAccountValue ?? copied.SalesAccountId;
+      const salesAcct = sa != null ? ` (Sales Acct ${sa})` : '';
+      const verb = isUpdate ? 'Updated' : 'Assigned';
+      patchLine(line.key, { assignStatus: 'success', assignMsg: `${verb} ${org}${salesAcct}` });
+      message.success(`Item ${line.itemNumber} ${isUpdate ? 'updated in' : 'assigned to'} ${org}${master ? ` with ${Object.keys(copied).length} master attribute(s)` : ''}`);
       return true;
     } catch (e: any) {
       patchLine(line.key, { assignStatus: 'error', assignMsg: e.message });
-      message.error(`Assign ${line.itemNumber} failed: ${e.message}`, 6);
+      message.error(`${isUpdate ? 'Update' : 'Assign'} ${line.itemNumber} failed: ${e.message}`, 6);
       return false;
     }
   };
@@ -4432,9 +4466,10 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
           footer={<Button onClick={() => setAssignApiOpen(false)}>Close</Button>}
         >
           <div style={{ fontSize: 12, marginBottom: 6 }}>
-            <Space size={6}><Tag color="green">POST</Tag><Text type="secondary">Assign item to inventory org (copies master-org attributes)</Text></Space>
+            <Space size={6}><Tag color={assignApiUpdate ? 'orange' : 'green'}>{assignApiUpdate ? 'PATCH' : 'POST'}</Tag>
+              <Text type="secondary">{assignApiUpdate ? 'Already assigned — update attributes on the existing item row' : 'Assign item to inventory org (copies master-org attributes)'}</Text></Space>
           </div>
-          <Text copyable style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>{`${FUSION_BASE}/itemsV2`}</Text>
+          <Text copyable style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>{assignApiUpdate ? assignApiHref : `${FUSION_BASE}/itemsV2`}</Text>
           {assignApiLoading ? (
             <div style={{ textAlign: 'center', padding: 24 }}><Text type="secondary">Reading master item…</Text></div>
           ) : (
