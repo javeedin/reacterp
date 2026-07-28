@@ -4,6 +4,7 @@ export { default as BusinessUnits } from './BusinessUnits';
 export { default as LegalEntities } from './LegalEntities';
 export { default as CreatePurchaseOrder } from './CreatePurchaseOrder';
 export { default as ManageExpectedReceipts } from './ManageExpectedReceipts';
+export { default as CreateASN } from './CreateASN';
 export { default as ManageItemCost } from './ManageItemCost';
 export { default as ManageReceiptCost } from './ManageReceiptCost';
 export { default as UATDiagnostics } from './UATDiagnostics';

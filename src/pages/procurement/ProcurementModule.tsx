@@ -116,6 +116,14 @@ const procurementItems: MenuItemType[] = [
     path: '/procurement/expected-receipts',
   },
   {
+    key: 'create-asn', group: 'Inventory',
+    icon: <CarOutlined />,
+    label: 'Create ASN',
+    description: 'Query a purchase order and create an Advance Shipment Notice (ASN) in Oracle Fusion',
+    color: REDWOOD.info,
+    path: '/procurement/create-asn',
+  },
+  {
     key: 'transfer-orders', group: 'Inventory',
     icon: <SwapOutlined />,
     label: 'Transfer Orders',
