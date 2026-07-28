@@ -1391,7 +1391,7 @@ async function searchItems(text: string, org?: string): Promise<any[]> {
 
 // Item picker (itemsV2) — single-line editable grid: cost, on-hand, qty, price,
 // total, margin, tax and net; select rows and add them as order lines.
-const ItemSearchModal: React.FC<{ open: boolean; org?: string; taxOptions?: { value: string; label: string; pct: number }[]; onClose: () => void; onAdd: (items: any[]) => void }> = ({ open, org, taxOptions = [], onClose, onAdd }) => {
+const ItemSearchModal: React.FC<{ open: boolean; org?: string; subinv?: string; taxOptions?: { value: string; label: string; pct: number }[]; onClose: () => void; onAdd: (items: any[]) => void }> = ({ open, org, subinv, taxOptions = [], onClose, onAdd }) => {
   const [byDesc, setByDesc] = useState(false);
   const [term, setTerm] = useState('');
   const [rows, setRows] = useState<any[]>([]);
@@ -1499,9 +1499,10 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; taxOptions?: { va
     { title: 'O/H (Cost)', width: 82, align: 'right', render: (_, r) => { const c = costs[r.ItemNumber]; if (costLoading && !c) return <Spin size="small" />; return (c?.onhand == null) ? <Text type="secondary" style={{ fontSize: 11 }}>—</Text> : <Text style={{ fontSize: 11, color: REDWOOD.info, fontVariantNumeric: 'tabular-nums' }}>{fmtQty(c.onhand)}</Text>; } },
     { title: 'On-hand', width: 150, render: (_, r) => {
         const item = r.ItemNumber; const p = vuOf(item); const st = onh[item]; const base = costOnhandOf(item);
+        const invOrg = org || p.invOrg; const sub = subinv || p.subinv; // prefer the header warehouse/subinventory
         return <Space size={4}>
-          <Tooltip title={<span>On-hand — org <b>{p.invOrg}</b>, item <b>{item}</b>{p.subinv ? <>, subinv <b>{p.subinv}</b></> : null}{p.lot ? <>, lot <b>{p.lot}</b></> : null}</span>}>
-            <Button size="small" type="text" icon={<DatabaseOutlined />} style={{ color: REDWOOD.info }} loading={st?.loading} onClick={() => checkOnhand(item, p.invOrg, p.subinv, p.lot)} /></Tooltip>
+          <Tooltip title={<span>On-hand — org <b>{invOrg}</b>, item <b>{item}</b>{sub ? <>, subinv <b>{sub}</b></> : null}{p.lot ? <>, lot <b>{p.lot}</b></> : null}</span>}>
+            <Button size="small" type="text" icon={<DatabaseOutlined />} style={{ color: REDWOOD.info }} loading={st?.loading} onClick={() => checkOnhand(item, invOrg, sub, p.lot)} /></Tooltip>
           {st?.qty != null && <>
             <Tooltip title={st.lots?.length ? <span>Lots: {st.lots.join(', ')}</span> : 'No lot detail'}><Text style={{ fontSize: 11 }}>{fmtQty(st.qty)}</Text></Tooltip>
             {base != null && (Math.abs(st.qty - base) < 0.001 ? <CheckCircleTwoTone twoToneColor={REDWOOD.success} /> : <CloseCircleTwoTone twoToneColor={REDWOOD.error} />)}
@@ -1784,7 +1785,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
     if (t.length < 3) { setLineSearch(p => ({ ...p, [key]: { opts: [], tooShort: true } })); return; }
     setLineSearch(p => ({ ...p, [key]: { loading: true, opts: p[key]?.opts ?? [] } }));
     searchTimer.current[key] = setTimeout(async () => {
-      const items = await searchItems(t, header.warehouse);
+      const items = await searchItems(t, hdr.warehouse);
       if (items.length > MANY_ITEMS) {
         setLineSearch(p => ({ ...p, [key]: { loading: false, opts: [] } }));
         setItemModal({ key, term: t, rows: items }); setItemFilter('');
@@ -1802,7 +1803,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
     const uom = pf(item, ['PrimaryUOMValue', 'PrimaryUOMCode', 'UOMCode']);
     upd(key, { itemNumber: item.ItemNumber, ...(item.ItemDescription ? { description: item.ItemDescription } : {}), ...(uom ? { uom } : {}), costUnit: cost, unitPrice: cost ?? 0, lot, ohLoading: true });
     try {
-      const oh = await fetchOnhand(item.ItemNumber, vu.invOrg || header.warehouse || '', vu.subinv || header.subinventory, lot);
+      const oh = await fetchOnhand(item.ItemNumber, hdr.warehouse || vu.invOrg || '', hdr.subinventory || vu.subinv, lot);
       upd(key, { qoh: oh.qty, lots: oh.lots.length ? oh.lots : (lot ? [lot] : []), ohLoading: false });
     } catch { upd(key, { ohLoading: false }); }
   };
@@ -1814,7 +1815,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
     upd(key, { itemNumber, description: item.ItemDescription, uom: pf(item, ['PrimaryUOMValue', 'PrimaryUOMCode', 'UOMCode']), ohLoading: true });
     setLineSearch(p => ({ ...p, [key]: { opts: [] } }));
     let costRows: any[] = [];
-    try { costRows = await fetchItemCostRows(itemNumber, header.warehouse); } catch { /* none */ }
+    try { costRows = await fetchItemCostRows(itemNumber, hdr.warehouse); } catch { /* none */ }
     const lots = Array.from(new Set(costRows.map(c => parseVU(c.ValuationUnit).lot).filter(Boolean))) as string[];
     if (lots.length > 1) { upd(key, { ohLoading: false }); setLotPick({ key, item: itemNumber, rows: costRows, onh: {} }); }
     else { await applyItemToLine(key, item, costRows, lots[0]); }
@@ -1824,12 +1825,12 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
   const checkAllOnhand = async () => {
     const withItems = lines.filter(l => l.itemNumber);
     if (!withItems.length) { message.warning('No lines to check'); return; }
-    if (!header.warehouse) { message.warning('No warehouse selected on the header'); return; }
+    if (!hdr.warehouse) { message.warning('No warehouse selected on the header'); return; }
     setOhLoading(true);
     setLines(prev => prev.map(l => l.itemNumber ? { ...l, ohLoading: true } : l));
     try {
       await mapLimit(withItems, 4, async (l) => {
-        try { const oh = await fetchOnhand(l.itemNumber, header.warehouse!, header.subinventory, l.lot); upd(l.key, { qoh: oh.qty, lots: oh.lots.length ? oh.lots : l.lots, ohLoading: false }); }
+        try { const oh = await fetchOnhand(l.itemNumber, hdr.warehouse!, hdr.subinventory, l.lot); upd(l.key, { qoh: oh.qty, lots: oh.lots.length ? oh.lots : l.lots, ohLoading: false }); }
         catch { upd(l.key, { ohLoading: false }); }
       });
       message.success('On-hand updated from Fusion');
@@ -2129,7 +2130,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
             ]} />}
       </Card>
 
-      <ItemSearchModal open={pickOpen} org={header.warehouse} taxOptions={taxOptions} onClose={() => setPickOpen(false)} onAdd={addItems} />
+      <ItemSearchModal open={pickOpen} org={hdr.warehouse} subinv={hdr.subinventory} taxOptions={taxOptions} onClose={() => setPickOpen(false)} onAdd={addItems} />
 
       <Modal open={!!itemModal} onCancel={() => setItemModal(null)} maskClosable={false} width={760} style={{ top: 24 }}
         footer={<Button onClick={() => setItemModal(null)}>Cancel</Button>}
