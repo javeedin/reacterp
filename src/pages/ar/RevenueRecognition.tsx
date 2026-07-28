@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Layout, Card, Typography, Table, Button, Space, Tag, Breadcrumb, Tabs,
   message, Input, Tooltip, Row, Col, Statistic, Modal, Alert, Select, Divider,
@@ -58,6 +58,7 @@ const RR_DEBIT_ACCOUNT  = '2313111';   // Dr — unbilled/deferred revenue contr
 const RR_CREDIT_ACCOUNT = '4111101';   // Cr — revenue
 const RR_SEGMENTS_BEFORE_ACCOUNT = ['00', '00'];                    // seg2, seg3 (between company & account)
 const RR_REMAINING_SEGMENTS = ['0000', '000', '00', '000', '000']; // seg5..seg9 (after the account)
+const RR_SEG5_DEFAULT = RR_REMAINING_SEGMENTS[0];                   // '0000' when no subaccount on the contract
 const RR_SOURCE = 'AR_REVENUE_RECOGNIZATION';   // reference5
 
 // Company segment derived from the business unit. Populated at runtime from the
@@ -72,8 +73,14 @@ const companyFromBU = (bu?: string): string => {
   const hit = BU_TO_COMPANY[bu.trim()] ?? BU_TO_COMPANY[bu.trim().toUpperCase()];
   return hit ?? DEFAULT_COMPANY;
 };
-const buildCombination = (company: string, account: string): string =>
-  [company, ...RR_SEGMENTS_BEFORE_ACCOUNT, account, ...RR_REMAINING_SEGMENTS].join('-');
+// The 5th segment (seg5) is the sub-account. It comes from the contract
+// (RR_AR_REVENUE_CONTRACT); when the contract has no sub-account we fall back
+// to the '0000' default. seg6..seg9 are unchanged.
+const buildCombination = (company: string, account: string, subaccount?: string): string => {
+  const seg5 = subaccount && String(subaccount).trim() ? String(subaccount).trim() : RR_SEG5_DEFAULT;
+  const [, ...seg6to9] = RR_REMAINING_SEGMENTS;
+  return [company, ...RR_SEGMENTS_BEFORE_ACCOUNT, account, seg5, ...seg6to9].join('-');
+};
 
 // Journal line description: period + period number + unit + tenant + trx.
 const revLineDesc = (s: RevenueSchedule): string =>
@@ -108,8 +115,8 @@ const buildAcctLines = (rows: RevenueSchedule[]): AcctLine[] => {
       description: revLineDesc(s),
       reference1: String(s.trxNumber ?? ''), reference2: String(s.id), reference5: RR_SOURCE,
     };
-    lines.push({ ...base, key: `${s.id}-DR`, lineType: 'DR', accountCombination: buildCombination(company, RR_DEBIT_ACCOUNT),  debit: amount, credit: 0 });
-    lines.push({ ...base, key: `${s.id}-CR`, lineType: 'CR', accountCombination: buildCombination(company, RR_CREDIT_ACCOUNT), debit: 0, credit: amount });
+    lines.push({ ...base, key: `${s.id}-DR`, lineType: 'DR', accountCombination: buildCombination(company, RR_DEBIT_ACCOUNT, s.subaccount),  debit: amount, credit: 0 });
+    lines.push({ ...base, key: `${s.id}-CR`, lineType: 'CR', accountCombination: buildCombination(company, RR_CREDIT_ACCOUNT, s.subaccount), debit: 0, credit: amount });
   });
   return lines;
 };
@@ -322,8 +329,21 @@ const RevenueRecognition: React.FC = () => {
     () => (postPeriod ? schedules.filter(s => s.periodName === postPeriod) : []),
     [schedules, postPeriod]);
 
+  // The sub-account (COA seg5) lives on the contract, but schedules only carry
+  // contractId — so resolve it from the loaded contracts and stamp each schedule
+  // before it feeds the accounting builders (preview, post, and debug all use it).
+  const subByContract = useMemo(() => {
+    const m = new Map<number, string>();
+    contracts.forEach(c => { if (c.subaccount) m.set(c.id, String(c.subaccount).trim()); });
+    return m;
+  }, [contracts]);
+  const withSubaccount = useCallback(
+    (s: RevenueSchedule): RevenueSchedule =>
+      ({ ...s, subaccount: (s.subaccount || subByContract.get(s.contractId) || '').trim() }),
+    [subByContract]);
+
   const openAcctPreview = () => {
-    const chosen = postSchedules.filter(s => postSelectedKeys.includes(s.id));
+    const chosen = postSchedules.filter(s => postSelectedKeys.includes(s.id)).map(withSubaccount);
     if (chosen.length === 0) { message.warning('Select one or more schedules'); return; }
     setAcctSchedules(chosen);
     setAcctLines(buildAcctLines(chosen));
@@ -372,10 +392,10 @@ const RevenueRecognition: React.FC = () => {
         createdBy: postedBy,
       },
       lines: [
-        { lineNumber: 1, lineType: 'DR', accountingClass: 'RECEIVABLE', accountCombination: buildCombination(company, RR_DEBIT_ACCOUNT),
+        { lineNumber: 1, lineType: 'DR', accountingClass: 'RECEIVABLE', accountCombination: buildCombination(company, RR_DEBIT_ACCOUNT, s.subaccount),
           enteredDr: amount, enteredCr: 0, accountedDr: amount, accountedCr: 0, currencyCode: 'AED', exchangeRate: 1,
           description: revLineDesc(s), sourceLineId: s.id, sourceLineNumber: 1 },
-        { lineNumber: 2, lineType: 'CR', accountingClass: 'REVENUE', accountCombination: buildCombination(company, RR_CREDIT_ACCOUNT),
+        { lineNumber: 2, lineType: 'CR', accountingClass: 'REVENUE', accountCombination: buildCombination(company, RR_CREDIT_ACCOUNT, s.subaccount),
           enteredDr: 0, enteredCr: amount, accountedDr: 0, accountedCr: amount, currencyCode: 'AED', exchangeRate: 1,
           description: revLineDesc(s), sourceLineId: s.id, sourceLineNumber: 2 },
       ],
@@ -396,10 +416,10 @@ const RevenueRecognition: React.FC = () => {
       lines: [
         { lineType: 'DR', enteredDr: amount, enteredCr: 0, accountedDr: amount, accountedCr: 0,
           description: revLineDesc(s), currencyCode: 'AED', accountingDate: acctDate,
-          accountCombination: buildCombination(company, RR_DEBIT_ACCOUNT), accountingClass: 'RECEIVABLE', legalEntity: null },
+          accountCombination: buildCombination(company, RR_DEBIT_ACCOUNT, s.subaccount), accountingClass: 'RECEIVABLE', legalEntity: null },
         { lineType: 'CR', enteredDr: 0, enteredCr: amount, accountedDr: 0, accountedCr: amount,
           description: revLineDesc(s), currencyCode: 'AED', accountingDate: acctDate,
-          accountCombination: buildCombination(company, RR_CREDIT_ACCOUNT), accountingClass: 'REVENUE', legalEntity: null },
+          accountCombination: buildCombination(company, RR_CREDIT_ACCOUNT, s.subaccount), accountingClass: 'REVENUE', legalEntity: null },
       ],
     };
   };
@@ -455,7 +475,7 @@ const RevenueRecognition: React.FC = () => {
 
   // ── Create-accounting debug: build all steps for the first selected schedule ──
   const openAcctDebug = async () => {
-    const chosen = postSchedules.filter(s => postSelectedKeys.includes(s.id));
+    const chosen = postSchedules.filter(s => postSelectedKeys.includes(s.id)).map(withSubaccount);
     const s = chosen[0];
     if (!s) { message.warning('Select a schedule to debug'); return; }
     const postedBy = loggedUser;

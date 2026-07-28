@@ -31,6 +31,7 @@ export interface RevenueSchedule {
   status: string;
   accountStatus: string;
   businessUnit: string;
+  subaccount?: string;   // COA 5th segment, sourced from the parent contract
 }
 
 // ORDS json/collection folds quoted camelCase aliases to lowercase, so read
@@ -64,6 +65,7 @@ const mapSchedule = (r: any): RevenueSchedule => ({
   status: r.status ?? '',
   accountStatus: r.accountStatus ?? r.accountstatus ?? '',
   businessUnit: r.businessUnit ?? r.business_unit ?? r.businessunit ?? r.bu ?? '',
+  subaccount: r.subaccount ?? r.subAccount ?? r.sub_account ?? '',
 });
 
 export const getRevenueContracts = async (): Promise<RevenueContract[]> => {
