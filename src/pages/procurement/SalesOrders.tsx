@@ -1514,10 +1514,10 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; taxOptions?: { va
     { title: 'Total', width: 98, align: 'right', render: (_, r) => { const d = dget(r.ItemNumber); return <Text style={{ fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{num2(d.qty * d.price)}</Text>; } },
     { title: 'Margin', width: 98, align: 'right', render: (_, r) => { const d = dget(r.ItemNumber); const m = (d.price - num(costs[r.ItemNumber]?.cost)) * d.qty; return <Text strong style={{ fontSize: 11.5, color: m < 0 ? REDWOOD.error : REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{num2(m)}</Text>; } },
     { title: 'Margin %', width: 78, align: 'right', render: (_, r) => { const d = dget(r.ItemNumber); const t = d.qty * d.price; const m = (d.price - num(costs[r.ItemNumber]?.cost)) * d.qty; const pct = t ? (m / t) * 100 : 0; return <Text style={{ fontSize: 11, color: pct < 0 ? REDWOOD.error : REDWOOD.success }}>{t ? pct.toFixed(1) + '%' : '—'}</Text>; } },
-    { title: 'Tax Code', width: 130, render: (_, r) => <Select size="small" showSearch allowClear style={{ width: 118 }} value={dget(r.ItemNumber).taxCode || undefined} placeholder="—"
+    { title: 'Tax Code', width: 130, render: (_, r) => <Select size="small" showSearch allowClear style={{ width: 118 }} popupMatchSelectWidth={false} value={dget(r.ItemNumber).taxCode || undefined} placeholder="—"
         options={taxOptions} optionFilterProp="value" notFoundContent={taxOptions.length ? undefined : 'No tax codes'}
         onChange={val => { const opt = taxOptions.find(o => o.value === val); dset(r.ItemNumber, { taxCode: val, taxPct: opt ? opt.pct : undefined }); }} /> },
-    { title: 'Tax Amt', width: 92, align: 'right', render: (_, r) => { const d = dget(r.ItemNumber); return <Text style={{ fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{num2(num(d.tax))}</Text>; } },
+    { title: 'Tax Amt', width: 108, align: 'right', render: (_, r) => { const d = dget(r.ItemNumber); return <Space size={4}>{d.taxPct != null && <Tag color="gold" style={{ margin: 0, fontSize: 10 }}>{d.taxPct}%</Tag>}<Text style={{ fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{num2(num(d.tax))}</Text></Space>; } },
     { title: 'Net', width: 108, align: 'right', render: (_, r) => { const d = dget(r.ItemNumber); return <Text strong style={{ fontSize: 12, color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{num2(d.qty * d.price + num(d.tax))}</Text>; } },
     { title: 'Cost Org', width: 105, render: (_, r) => <Text style={{ fontSize: 11 }}>{vuOf(r.ItemNumber).costOrg || '—'}</Text> },
     { title: 'Inv Org', width: 95, render: (_, r) => <Text style={{ fontSize: 11 }}>{vuOf(r.ItemNumber).invOrg || '—'}</Text> },
@@ -1872,11 +1872,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
     { title: 'Unit Price', dataIndex: 'unitPrice', width: 100, align: 'right', render: (v, r) => <InputNumber size="small" min={0} value={v} onChange={n => updLine(r.key, { unitPrice: Number(n) || 0 })} style={{ width: 88 }} /> },
     { title: 'Line Total', width: 110, align: 'right', render: (_, r) => <Text strong style={{ color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(r.qty) * num(r.unitPrice), ccy)}</Text> },
     { title: 'Margin', width: 100, align: 'right', render: (_, r) => { const m = (num(r.unitPrice) - num(r.costUnit)) * num(r.qty); return <Text style={{ fontSize: 11.5, color: m < 0 ? REDWOOD.error : REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(m, ccy)}</Text>; } },
-    { title: 'Tax Code', dataIndex: 'taxCode', width: 130, render: (v, r) => <Select size="small" showSearch allowClear style={{ width: 118 }} value={v || undefined} placeholder="—"
+    { title: 'Tax Code', dataIndex: 'taxCode', width: 140, render: (v, r) => <Select size="small" showSearch allowClear style={{ width: 128 }} popupMatchSelectWidth={false} value={v || undefined} placeholder="—"
         options={taxOptions} optionFilterProp="value"
         notFoundContent={taxOptions.length ? undefined : (hdr.businessUnit ? 'No tax codes' : 'Select a business unit')}
         onChange={val => { const opt = taxOptions.find(o => o.value === val); updLine(r.key, { taxCode: val, taxPct: opt ? opt.pct : undefined }); }} /> },
-    { title: 'Tax', dataIndex: 'taxAmount', width: 96, align: 'right', render: (v, r) => <Tooltip title={r.taxPct != null ? `${r.taxPct}% of ${fmtAmount(num(r.qty) * num(r.unitPrice), ccy)}` : 'Pick a tax code'}><Text style={{ fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(v), ccy)}</Text></Tooltip> },
+    { title: 'Tax', dataIndex: 'taxAmount', width: 120, align: 'right', render: (v, r) => <Space size={4}>{r.taxPct != null && <Tag color="gold" style={{ margin: 0, fontSize: 10 }}>{r.taxPct}%</Tag>}<Text style={{ fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(v), ccy)}</Text></Space> },
     { title: 'Net', width: 110, align: 'right', fixed: 'right', render: (_, r) => <Text strong style={{ color: REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(r.qty) * num(r.unitPrice) + num(r.taxAmount), ccy)}</Text> },
     { title: '', width: 40, align: 'center', fixed: 'right', render: (_, r) => <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => del(r.key)} /> },
   ];
@@ -1917,14 +1917,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
           <Button icon={<CloudUploadOutlined />} onClick={() => setPreview(true)}>Payload</Button>
           <Button type="primary" icon={<SaveOutlined />} loading={posting} onClick={save} style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>Save Sales Order</Button>
         </Space>}>
-        <Form form={form} layout="vertical" size="small" onValuesChange={(_c, all) => setHdr(prev => ({ ...prev, ...all }))}>
+        <Form form={form} layout="horizontal" size="small" labelAlign="left" colon labelWrap
+          labelCol={{ flex: '0 0 104px' }} wrapperCol={{ flex: '1 1 auto' }}
+          onValuesChange={(_c, all) => setHdr(prev => ({ ...prev, ...all }))}>
           <Tabs size="small" items={[
             {
               key: 'header', label: <span><BankOutlined style={{ marginRight: 5 }} />Header</span>,
               children: (
                 <Row gutter={[12, 12]} align="stretch">
                   {/* S1 — Order */}
-                  <Col xs={24} sm={12} md={6}><VSection icon={<BankOutlined />} title="Order" color={REDWOOD.primary}>
+                  <Col xs={24} sm={12} md={5}><VSection icon={<BankOutlined />} title="Order" color={REDWOOD.primary}>
                     <Form.Item label="Business Unit" name="businessUnit" style={{ marginBottom: 10 }}>
                       <Select showSearch placeholder="Select" onChange={onBU} optionFilterProp="label"
                         options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} /></Form.Item>
@@ -1934,10 +1936,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
                   </VSection></Col>
 
                   {/* S2 — Customer Information */}
-                  <Col xs={24} sm={12} md={6}><VSection icon={<ProfileOutlined />} title="Customer Information" color={REDWOOD.info}>
-                    <Form.Item label="Customer Name" name="customerName" style={{ marginBottom: 10 }}>
+                  <Col xs={24} sm={12} md={8}><VSection icon={<ProfileOutlined />} title="Customer Information" color={REDWOOD.info}>
+                    <Form.Item label="Customer Name" name="customerName" layout="vertical" style={{ marginBottom: hdr.customerName ? 2 : 10 }}>
                       <Select showSearch placeholder="Search customer" onChange={onCustomer} optionFilterProp="label" options={custOptions} notFoundContent={customers.length ? 'No match' : 'Loading…'} /></Form.Item>
-                    <Form.Item label="Customer Number" name="accountNumber" style={{ marginBottom: 10 }}><Input readOnly placeholder="—" /></Form.Item>
+                    {hdr.customerName && <div style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.info, whiteSpace: 'normal', lineHeight: 1.35, margin: '0 0 10px' }}>{hdr.customerName}</div>}
+                    <Form.Item label="Cust Number" name="accountNumber" style={{ marginBottom: 10 }}><Input readOnly placeholder="—" /></Form.Item>
                     <Form.Item label="Payment Terms" name="paymentTerms" style={{ marginBottom: 10 }}>
                       <Select showSearch optionFilterProp="label" options={payTermOpts} /></Form.Item>
                     <Form.Item label="Salesperson" name="salesRep" style={{ marginBottom: 10 }}>
@@ -1945,7 +1948,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
                   </VSection></Col>
 
                   {/* S3 — Warehouse */}
-                  <Col xs={24} sm={12} md={5}><VSection icon={<ShoppingOutlined />} title="Warehouse" color={REDWOOD.teal}>
+                  <Col xs={24} sm={12} md={4}><VSection icon={<ShoppingOutlined />} title="Warehouse" color={REDWOOD.teal}>
                     <Form.Item label={<WarehouseLabel />} name="warehouse" style={{ marginBottom: 10 }}>
                       <Select showSearch placeholder={buName ? 'Organization' : 'Select BU first'} onChange={onWh} options={whOptions} optionFilterProp="label" /></Form.Item>
                     <Form.Item label="Sub Inventory" name="subinventory" style={{ marginBottom: 10 }}>
@@ -1956,9 +1959,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
                   {/* S4 — Totals */}
                   <Col xs={24} sm={12} md={7}><VSection icon={<DollarOutlined />} title="Totals" color={REDWOOD.success}>
                     <Row gutter={8}>
-                      <Col span={14}><Form.Item label="Transaction Currency" name="txnCurrency" style={{ marginBottom: 10 }}>
+                      <Col span={14}><Form.Item label="Txn Currency" name="txnCurrency" layout="vertical" style={{ marginBottom: 10 }}>
                         <Select showSearch options={CURRENCIES.map(c => ({ value: c, label: c }))} /></Form.Item></Col>
-                      <Col span={10}><Form.Item label="Rate" name="rate" style={{ marginBottom: 10 }}><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
+                      <Col span={10}><Form.Item label="Rate" name="rate" layout="vertical" style={{ marginBottom: 10 }}><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
                     </Row>
                     <TotalLine label="Gross" value={fmtAmount(totAmt, ccy)} />
                     <TotalLine label="Tax (from lines)" value={fmtAmount(lineTax, ccy)} />
@@ -1987,7 +1990,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
             },
             { key: 'additional', label: <span><ProfileOutlined style={{ marginRight: 5 }} />Additional Info</span>,
               children: <OrderSection icon={<ProfileOutlined />} title="Additional Information" color={REDWOOD.purple}>
-                <Col xs={24}><Form.Item label="Remarks" name="remarks" style={{ marginBottom: 12 }}><Input.TextArea rows={3} placeholder="Optional notes…" /></Form.Item></Col>
+                <Col xs={24}><Form.Item label="Remarks" name="remarks" layout="vertical" style={{ marginBottom: 12 }}><Input.TextArea rows={3} placeholder="Optional notes…" /></Form.Item></Col>
               </OrderSection> },
             { key: 'credit', label: <span><ReconciliationOutlined style={{ marginRight: 5 }} />Customer Credit Check</span>,
               children: <div style={{ padding: 8 }}><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Customer credit check — connect the credit web service to show limit, exposure and available credit." style={{ padding: 24 }} /></div> },
@@ -2007,7 +2010,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
             </Space> }} items={[
               {
                 key: 'lines', label: <Space size={6}><UnorderedListOutlined />Lines<Tag style={{ marginInlineEnd: 0 }}>{lines.length}</Tag></Space>,
-                children: <Table size="small" columns={cols} dataSource={lines} rowKey="key" pagination={false} scroll={{ x: 1700, y: 360 }}
+                children: <Table size="small" columns={cols} dataSource={lines} rowKey="key" pagination={false} scroll={{ x: 1760, y: 360 }}
                   locale={{ emptyText: 'No lines — use “Add Multiple Lines” or “New Line”' }}
                   summary={() => lines.length === 0 ? null : (() => {
                     const totMargin = lines.reduce((s, l) => s + (num(l.unitPrice) - num(l.costUnit)) * num(l.qty), 0);
