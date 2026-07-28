@@ -275,8 +275,8 @@ const AllFieldsModal: React.FC<{
 // ── PO Detail Tab ───────────────────────────────────────────────────────────────
 interface RcvData { lotNumber: string; locator: string; subinventory: string; fromSerial: string; toSerial: string; qty: number; }
 
-const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> = ({
-  poNumber, initialLines,
+const PODetailTab: React.FC<{ poNumber: string; asn?: string; initialLines: ReceiptLine[] }> = ({
+  poNumber, asn, initialLines,
 }) => {
   const [lines, setLines]   = useState<ReceiptLine[]>(initialLines);
   const [loading, setLoading] = useState(false);
@@ -296,6 +296,14 @@ const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> =
   const [rcvSerialOpen, setRcvSerialOpen]   = useState(false);
   const [tempLot, setTempLot]               = useState('');
   const [tempSerial, setTempSerial]         = useState(1);
+
+  // ASN shown in the header: prefer the group's ASN passed from the search row,
+  // else derive the distinct ASN number(s) present on the current lines.
+  const asnDisplay = useMemo(() => {
+    if (asn && asn.trim()) return asn.trim();
+    const set = Array.from(new Set(lines.map(l => String(l.ASNNumber ?? '').trim()).filter(Boolean)));
+    return set.join(', ');
+  }, [asn, lines]);
 
   // Subinventories for the receiving org — subinventories?q=OrganizationCode=<org>.
   const [subinvs, setSubinvs] = useState<string[]>([]);
@@ -620,6 +628,8 @@ const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> =
       >
         <Row gutter={[8, 8]}>
           <Col xs={12} sm={8} md={4}><InfoTile label="PO Number" value={<span style={{ color: REDWOOD.info, fontWeight: 700 }}>{poNumber}</span>} /></Col>
+          <Col xs={12} sm={8} md={4}><InfoTile label="ASN" value={asnDisplay ? <Tag color="purple" style={{ margin: 0 }}>{asnDisplay}</Tag> : '—'} /></Col>
+          <Col xs={12} sm={8} md={4}><InfoTile label="No. of Lines" value={String(lines.length)} /></Col>
           <Col xs={12} sm={8} md={4}><InfoTile label="Organization" value={firstLine?.ToOrganizationCode} /></Col>
           <Col xs={12} sm={8} md={4}><InfoTile label="Vendor" value={firstLine?.VendorName} /></Col>
           <Col xs={12} sm={8} md={4}><InfoTile label="Vendor Site" value={firstLine?.VendorSiteCode} /></Col>
@@ -628,7 +638,6 @@ const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> =
           <Col xs={12} sm={8} md={4}><InfoTile label="Destination Type" value={firstLine?.DestinationType} /></Col>
           <Col xs={12} sm={8} md={4}><InfoTile label="Ship To Location" value={firstLine?.ShipToLocation as string} /></Col>
           <Col xs={12} sm={8} md={4}><InfoTile label="Integration Status" value={firstLine?.IntegrationStatus} /></Col>
-          <Col xs={12} sm={8} md={4}><InfoTile label="Total Lines" value={String(lines.length)} /></Col>
         </Row>
       </Card>
 
@@ -1422,6 +1431,7 @@ const ManageExpectedReceipts: React.FC = () => {
       children: (
         <PODetailTab
           poNumber={tab.poNumber}
+          asn={tab.asn}
           initialLines={tab.lines}
         />
       ),
