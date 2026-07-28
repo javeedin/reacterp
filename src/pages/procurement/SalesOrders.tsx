@@ -1709,8 +1709,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
   const [resp, setResp] = useState<{ ok: boolean; status: number; body: string } | null>(null);
   const [discAmt, setDiscAmt] = useState(0);
   const [expAmt, setExpAmt] = useState(0);
-  const [lineSearch, setLineSearch] = useState<Record<string, { loading?: boolean; opts: any[] }>>({});
+  const [lineSearch, setLineSearch] = useState<Record<string, { loading?: boolean; tooShort?: boolean; opts: any[] }>>({});
   const [lotPick, setLotPick] = useState<{ key: string; item: string; rows: any[]; onh: Record<string, { loading?: boolean; qty?: number }> } | null>(null);
+  const [itemModal, setItemModal] = useState<{ key: string; term: string; rows: any[] } | null>(null);
+  const [itemFilter, setItemFilter] = useState('');
   const [ohLoading, setOhLoading] = useState(false);
   const searchTimer = useRef<Record<string, any>>({});
   const ccy = hdr.txnCurrency;
@@ -1774,13 +1776,21 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
   const addBlankLine = () => setLines(prev => [...prev, { key: `new-${Date.now()}-${prev.length}`, itemNumber: '', qty: 0, unitPrice: 0 }]);
 
   // Debounced type-ahead for a blank line's item cell (by code or description).
+  // Query only after 3 chars; when many rows come back, open a filter popup.
+  const MANY_ITEMS = 12;
   const onLineSearch = (key: string, text: string) => {
     clearTimeout(searchTimer.current[key]);
-    if (!text.trim()) { setLineSearch(p => ({ ...p, [key]: { opts: [] } })); return; }
+    const t = text.trim();
+    if (t.length < 3) { setLineSearch(p => ({ ...p, [key]: { opts: [], tooShort: true } })); return; }
     setLineSearch(p => ({ ...p, [key]: { loading: true, opts: p[key]?.opts ?? [] } }));
     searchTimer.current[key] = setTimeout(async () => {
-      const items = await searchItems(text, header.warehouse);
-      setLineSearch(p => ({ ...p, [key]: { loading: false, opts: items } }));
+      const items = await searchItems(t, header.warehouse);
+      if (items.length > MANY_ITEMS) {
+        setLineSearch(p => ({ ...p, [key]: { loading: false, opts: [] } }));
+        setItemModal({ key, term: t, rows: items }); setItemFilter('');
+      } else {
+        setLineSearch(p => ({ ...p, [key]: { loading: false, opts: items } }));
+      }
     }, 350);
   };
 
@@ -1799,8 +1809,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
 
   // User picked an item from the inline search — fetch cost rows, then either
   // apply directly or prompt for a lot when several lots exist.
-  const pickInlineItem = async (key: string, itemNumber: string) => {
-    const item = (lineSearch[key]?.opts ?? []).find(o => o.ItemNumber === itemNumber) ?? { ItemNumber: itemNumber };
+  const pickInlineItem = async (key: string, itemNumber: string, itemRow?: any) => {
+    const item = itemRow ?? (lineSearch[key]?.opts ?? []).find(o => o.ItemNumber === itemNumber) ?? { ItemNumber: itemNumber };
     upd(key, { itemNumber, description: item.ItemDescription, uom: pf(item, ['PrimaryUOMValue', 'PrimaryUOMCode', 'UOMCode']), ohLoading: true });
     setLineSearch(p => ({ ...p, [key]: { opts: [] } }));
     let costRows: any[] = [];
@@ -1917,9 +1927,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
     { title: 'Line', width: 50, align: 'center', fixed: 'left', render: (_, __, i) => <Tag color="blue">{i + 1}</Tag> },
     { title: 'Item', dataIndex: 'itemNumber', width: 210, fixed: 'left', render: (v, r) => v
         ? <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text>
-        : <Select showSearch size="small" style={{ width: 196 }} placeholder="Search item code / description" value={undefined}
+        : <Select showSearch size="small" style={{ width: 196 }} placeholder="Type 3+ chars — code / desc" value={undefined}
             filterOption={false} loading={lineSearch[r.key]?.loading} onSearch={t => onLineSearch(r.key, t)} onChange={val => pickInlineItem(r.key, val)}
-            notFoundContent={lineSearch[r.key]?.loading ? <Spin size="small" /> : null}
+            notFoundContent={lineSearch[r.key]?.loading ? <Spin size="small" /> : (lineSearch[r.key]?.tooShort ? 'Type at least 3 characters' : 'No match')}
             options={(lineSearch[r.key]?.opts ?? []).map(o => ({ value: o.ItemNumber, label: <span><Text strong style={{ fontSize: 11 }}>{o.ItemNumber}</Text>{o.ItemDescription ? <Text type="secondary" style={{ fontSize: 11 }}> — {o.ItemDescription}</Text> : null}</span> }))} /> },
     { title: 'Description', dataIndex: 'description', width: 240, ellipsis: true, render: (v, r) => r.ohLoading && v == null ? <Spin size="small" /> : <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
     { title: 'UOM', dataIndex: 'uom', width: 70, render: v => v ?? '—' },
@@ -2120,6 +2130,25 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
       </Card>
 
       <ItemSearchModal open={pickOpen} org={header.warehouse} taxOptions={taxOptions} onClose={() => setPickOpen(false)} onAdd={addItems} />
+
+      <Modal open={!!itemModal} onCancel={() => setItemModal(null)} maskClosable={false} width={760} style={{ top: 24 }}
+        footer={<Button onClick={() => setItemModal(null)}>Cancel</Button>}
+        title={<Space><SearchOutlined style={{ color: REDWOOD.primary }} /> Select item{itemModal ? <Tag color="blue">“{itemModal.term}”</Tag> : null}<Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>{itemModal?.rows.length ?? 0} matches — filter to narrow</Text></Space>}>
+        <Input allowClear autoFocus prefix={<SearchOutlined />} placeholder="Filter by code or description" value={itemFilter} onChange={e => setItemFilter(e.target.value)} style={{ marginBottom: 10 }} />
+        {itemModal && (() => {
+          const f = itemFilter.trim().toLowerCase();
+          const rows = f ? itemModal.rows.filter(r => String(r.ItemNumber ?? '').toLowerCase().includes(f) || String(r.ItemDescription ?? '').toLowerCase().includes(f)) : itemModal.rows;
+          return <Table size="small" rowKey="ItemNumber" dataSource={rows} pagination={rows.length > 10 ? { pageSize: 10, size: 'small' } : false} scroll={{ y: 340 }}
+            locale={{ emptyText: 'No items match the filter' }}
+            onRow={rec => ({ style: { cursor: 'pointer' }, onClick: () => { const mk = itemModal.key; setItemModal(null); pickInlineItem(mk, rec.ItemNumber, rec); } })}
+            columns={[
+              { title: 'Item', dataIndex: 'ItemNumber', width: 160, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text> },
+              { title: 'Description', dataIndex: 'ItemDescription', ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+              { title: 'UOM', width: 70, render: (_, r: any) => pf(r, ['PrimaryUOMValue', 'PrimaryUOMCode', 'PrimaryUnitOfMeasure', 'UOMCode']) ?? '—' },
+              { title: '', width: 70, align: 'right', render: (_, r: any) => <Button size="small" type="primary" style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }} onClick={e => { e.stopPropagation(); const mk = itemModal.key; setItemModal(null); pickInlineItem(mk, r.ItemNumber, r); }}>Select</Button> },
+            ]} />;
+        })()}
+      </Modal>
 
       <Modal open={!!lotPick} onCancel={() => setLotPick(null)} maskClosable={false} width={620} footer={<Button onClick={() => setLotPick(null)}>Cancel</Button>}
         title={<Space><TagsOutlined style={{ color: REDWOOD.info }} /> Select a lot{lotPick ? <Tag color="blue">{lotPick.item}</Tag> : null}</Space>}>
