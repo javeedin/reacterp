@@ -1253,7 +1253,7 @@ const customerFill = (row: any) => {
 };
 
 interface OrderHeader {
-  businessUnit?: string; buCode?: string; baseCurrency?: string; txnCurrency?: string; rate?: number;
+  businessUnit?: string; businessUnitId?: number | string; buCode?: string; baseCurrency?: string; txnCurrency?: string; rate?: number;
   orderType?: string; orderDate?: Dayjs | null; customerName?: string; accountNumber?: string;
   billToSite?: string; shipToSite?: string; billToAddress?: string; shipToAddress?: string;
   paymentTerms?: string; salesRep?: string; warehouse?: string; subinventory?: string; remarks?: string;
@@ -1707,6 +1707,13 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
   const [ohLoading, setOhLoading] = useState(false);
   const searchTimer = useRef<Record<string, any>>({});
   const ccy = hdr.txnCurrency;
+  // Order sequence (stands in for the APEX id) — generated once per new-order tab.
+  const [orderSeq] = useState(() => Math.floor(Date.now() / 1000) % 100000);
+  // Order number: {orderType}{YYYY}{MM}{seq} e.g. LSO01 → LSO012026071428.
+  const orderNumber = useMemo(() => {
+    const d = hdr.orderDate ? dayjs(hdr.orderDate) : dayjs();
+    return `${hdr.orderType || 'SO'}${d.format('YYYYMM')}${orderSeq}`;
+  }, [hdr.orderType, hdr.orderDate, orderSeq]);
 
   useEffect(() => { form.setFieldsValue(header as any); setHdr(header); /* init once */ }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1727,7 +1734,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
     const row = bUnits.find(b => b.businessUnitName === name);
     const cur = pf(row, ['paymentCurrency', 'ledgerCurrency', 'invoiceCurrency']);
     form.setFieldsValue({ baseCurrency: cur, txnCurrency: form.getFieldValue('txnCurrency') || cur, warehouse: undefined, subinventory: undefined });
-    setSubs([]); syncHdr();
+    setSubs([]); setHdr(prev => ({ ...prev, ...form.getFieldsValue(), businessUnitId: row?.businessUnitId }));
   };
   const onWh = (code: string) => { form.setFieldsValue({ subinventory: undefined }); loadSubs(code); syncHdr(); };
   const onCustomer = (name: string, opt: any) => { const row = opt?._c ?? customers.find(c => custName(c) === name); if (row) { const fill = customerFill(row); form.setFieldsValue(fill); setHdr(prev => ({ ...prev, ...fill })); } };
@@ -1812,32 +1819,76 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
     } finally { setOhLoading(false); }
   };
 
-  // Best-effort DOO order-import payload (finalise once the sample JSON is in).
+  // DOO order-import payload matching the target JSON (billTo/shipTo, salesCredits, per-line charges).
   const buildPayload = () => {
-    const src = `${hdr.orderType || 'SO'}-${Date.now()}`;
+    const dateIso = (hdr.orderDate ? dayjs(hdr.orderDate) : dayjs()).format('YYYY-MM-DD[T]00:00:00[Z]');
+    const numOrStr = (v: any) => { const n = Number(v); return v != null && v !== '' && !Number.isNaN(n) ? n : v; };
     return {
-      SourceTransactionNumber: src, SourceTransactionSystem: 'OPS', SourceTransactionId: src,
+      SourceTransactionNumber: orderNumber,
+      SourceTransactionSystem: 'OPS',
+      SourceTransactionId: `APEX:${orderSeq}`,
       TransactionalCurrencyCode: hdr.txnCurrency,
-      RequestingBusinessUnitName: hdr.businessUnit,
-      ...(hdr.orderType ? { TransactionTypeCode: hdr.orderType } : {}),
-      BuyingPartyName: hdr.customerName,
+      ...(hdr.businessUnitId != null ? { BusinessUnitId: numOrStr(hdr.businessUnitId) } : {}),
       ...(hdr.accountNumber ? { BuyingPartyNumber: hdr.accountNumber } : {}),
+      RequestedShipDate: dateIso,
+      TransactionOn: dateIso,
+      ...(hdr.orderType ? { TransactionTypeCode: hdr.orderType, TransactionType: hdr.orderType } : {}),
+      SubmittedFlag: 'true',
+      FreezePriceFlag: 'true',
+      FreezeShippingChargeFlag: 'true',
+      FreezeTaxFlag: 'true',
+      ...(hdr.businessUnitId != null ? { RequestingBusinessUnitId: numOrStr(hdr.businessUnitId) } : {}),
       ...(hdr.paymentTerms ? { PaymentTerms: hdr.paymentTerms } : {}),
-      ...(hdr.salesRep ? { Salesperson: hdr.salesRep } : {}),
-      ...(hdr.orderDate ? { RequestedShipDate: dayjs(hdr.orderDate).toISOString() } : {}),
-      lines: lines.map((l, i) => ({
-        SourceTransactionLineNumber: String(i + 1), SourceTransactionLineId: String(i + 1),
-        SourceScheduleNumber: '1', SourceTransactionScheduleId: String(i + 1),
-        ProductNumber: l.itemNumber, OrderedQuantity: l.qty,
-        ...(l.uom ? { OrderedUOMCode: l.uom } : {}),
-        ...(l.unitPrice ? { UnitListPrice: l.unitPrice, UnitSellingPrice: l.unitPrice } : {}),
-        ...(hdr.warehouse ? { RequestingBusinessUnitName: hdr.businessUnit, ShipFromOrganizationCode: hdr.warehouse } : {}),
-        ...(hdr.subinventory ? { SubinventoryCode: hdr.subinventory } : {}),
-        ...(hdr.orderDate ? { RequestedShipDate: dayjs(hdr.orderDate).toISOString() } : {}),
-      })),
+      ...(hdr.warehouse ? { RequestedFulfillmentOrganizationCode: hdr.warehouse } : {}),
+      billToCustomer: [{
+        ...(hdr.custAccountId != null ? { CustomerAccountId: numOrStr(hdr.custAccountId) } : {}),
+        ...(hdr.billToSite != null ? { SiteUseId: numOrStr(hdr.billToSite) } : {}),
+      }],
+      shipToCustomer: [{
+        ...(hdr.partyId != null ? { PartyId: String(hdr.partyId) } : {}),
+        ...(hdr.shipToSite != null ? { SiteId: numOrStr(hdr.shipToSite) } : {}),
+      }],
+      ...(hdr.salesRep ? { salesCredits: [{ SourceTransactionSalesCreditIdentifier: orderSeq, Salesperson: hdr.salesRep, Percent: '100', SalesCreditTypeId: '1' }] } : {}),
+      lines: lines.map((l, i) => {
+        const qty = num(l.qty), price = num(l.unitPrice), tax = num(l.taxAmount);
+        const ext = round2(price * qty), taxUnit = qty ? round2(tax / qty) : 0;
+        const lineId = orderSeq * 100 + (i + 1);
+        return {
+          SourceTransactionLineId: lineId,
+          SourceTransactionLineNumber: i + 1,
+          SourceTransactionScheduleId: lineId,
+          SourceScheduleNumber: lineId,
+          ...(l.uom ? { OrderedUOMCode: l.uom } : {}),
+          OrderedQuantity: qty,
+          ProductNumber: l.itemNumber,
+          ...(hdr.subinventory ? { SubinventoryCode: hdr.subinventory } : {}),
+          ...(hdr.paymentTerms ? { PaymentTerms: hdr.paymentTerms } : {}),
+          TransactionCategoryCode: 'ORDER',
+          charges: [{
+            SourceChargeId: `C${i + 1}`,
+            ApplyTo: 'Price',
+            PricedQuantity: qty,
+            GSAUnitPrice: price,
+            PriceType: 'One time',
+            ChargeType: 'Sale',
+            ChargeSubType: 'Price',
+            ChargeCurrencyCode: hdr.txnCurrency,
+            SequenceNumber: 1,
+            ChargeDefinitionCode: 'QP_SALE_PRICE',
+            PrimaryFlag: 'true',
+            RollupFlag: 'false',
+            chargeComponents: [
+              { SourceChargeComponentId: `C${i + 1}-CC1`, PriceElementCode: 'QP_LIST_PRICE', PriceElementUsageCode: 'LIST_PRICE', HeaderCurrencyUnitPrice: price, HeaderCurrencyExtendedAmount: ext, RollupFlag: 'false', SequenceNumber: 1 },
+              { SourceChargeComponentId: `C${i + 1}-CC2`, PriceElementCode: 'QP_NET_PRICE', PriceElementUsageCode: 'NET_PRICE', HeaderCurrencyUnitPrice: price, HeaderCurrencyExtendedAmount: ext, RollupFlag: 'false', SequenceNumber: 2 },
+              { SourceChargeComponentId: `C${i + 1}-CC3`, PriceElementCode: 'QP_EXCLUSIVE_TAX', PriceElementUsageCode: 'EXCLUSIVE_TAX', HeaderCurrencyUnitPrice: taxUnit, HeaderCurrencyExtendedAmount: tax, RollupFlag: 'false', SequenceNumber: 3 },
+              { SourceChargeComponentId: `C${i + 1}-CC4`, PriceElementCode: 'QP_NET_PRICE_PLUS_TAX', PriceElementUsageCode: 'NET_PRICE_PLUS_TAX', HeaderCurrencyUnitPrice: round2(price + taxUnit), HeaderCurrencyExtendedAmount: round2(ext + tax), RollupFlag: 'false', SequenceNumber: 4 },
+            ],
+          }],
+        };
+      }),
     };
   };
-  const payloadStr = useMemo(() => JSON.stringify(buildPayload(), null, 2), [lines, hdr]);
+  const payloadStr = useMemo(() => JSON.stringify(buildPayload(), null, 2), [lines, hdr, orderNumber, orderSeq]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async () => {
     if (lines.length === 0) { message.warning('Add at least one line'); return; }
@@ -1912,6 +1963,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
         styles={{ body: { paddingTop: 4 } }}
         title={<Space><span style={{ width: 30, height: 30, borderRadius: 8, background: `linear-gradient(135deg, ${REDWOOD.primary}, ${REDWOOD.primary}bb)`, color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 15 }}><BankOutlined /></span>
           <Text strong style={{ fontSize: 15 }}>New Sales Order</Text>
+          <Tag color="geekblue" style={{ fontVariantNumeric: 'tabular-nums' }}>{orderNumber}</Tag>
           <Tag color="purple">{hdr.orderType}</Tag><Tag>{hdr.txnCurrency}</Tag>{hdr.customerName && <Tag color="blue">{hdr.customerName}</Tag>}</Space>}
         extra={<Space>
           <Button icon={<CloudUploadOutlined />} onClick={() => setPreview(true)}>Payload</Button>
@@ -1927,6 +1979,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
                 <Row gutter={[12, 12]} align="stretch">
                   {/* S1 — Order */}
                   <Col xs={24} sm={12} md={5}><VSection icon={<BankOutlined />} title="Order" color={REDWOOD.primary}>
+                    <Form.Item label="Order No" style={{ marginBottom: 10 }}>
+                      <Text strong style={{ color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{orderNumber}</Text></Form.Item>
                     <Form.Item label="Business Unit" name="businessUnit" style={{ marginBottom: 10 }}>
                       <Select showSearch placeholder="Select" onChange={onBU} optionFilterProp="label"
                         options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} /></Form.Item>
@@ -1979,10 +2033,12 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
               key: 'address', label: <span><ProfileOutlined style={{ marginRight: 5 }} />Customer Address</span>,
               children: (
                 <OrderSection icon={<ProfileOutlined />} title="Bill-To / Ship-To" color={REDWOOD.info}>
-                  <ROField label="Bill To Site" value={hdr.billToSite} mono span={6} />
-                  <ROField label="Ship To Site" value={hdr.shipToSite} mono span={6} />
+                  <ROField label="Cust Account Id" value={hdr.custAccountId} mono span={6} />
+                  <ROField label="Party Id" value={hdr.partyId} mono span={6} />
+                  <ROField label="Bill To Site Use Id" value={hdr.billToSite} mono span={6} />
+                  <ROField label="Ship To Party Site Id" value={hdr.shipToSite} mono span={6} />
                   <ROField label="Account Number" value={hdr.accountNumber} span={6} />
-                  <ROField label="Customer" value={hdr.customerName} span={6} />
+                  <ROField label="Customer" value={hdr.customerName} span={18} />
                   <ROField label="Bill To Address" value={hdr.billToAddress} span={12} />
                   <ROField label="Ship To Address" value={hdr.shipToAddress} span={12} />
                 </OrderSection>
