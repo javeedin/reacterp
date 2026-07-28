@@ -50,6 +50,7 @@ interface ReceiptLine {
   DocumentNumber?: string;
   DocumentLineNumber?: number;
   DocumentScheduleNumber?: number;
+  ASNNumber?: string;
   ItemNumber?: string;
   ItemDescription?: string;
   ToOrganizationCode?: string;
@@ -78,6 +79,7 @@ interface POGroup {
   DestinationType: string;
   ShipToLocation: string;
   IntegrationStatus: string;
+  ASNNumbers: string;
   dueDateEarliest: string;
   dueDateLatest: string;
   linesCount: number;
@@ -96,10 +98,12 @@ type DateMode = 'none' | 'exact' | 'last7' | 'last15' | 'range';
 const buildQuery = (
   org: string, poNum: string, dateMode: DateMode,
   exactDate: Dayjs | null, dateRange: [Dayjs | null, Dayjs | null] | null,
+  asn = '',
 ): string => {
   const parts: string[] = [];
   if (org.trim()) parts.push(`ToOrganizationCode='${org.trim()}'`);
   if (poNum.trim()) parts.push(`DocumentNumber='${poNum.trim()}'`);
+  if (asn.trim()) parts.push(`ASNNumber='${asn.trim()}'`);
   if (dateMode === 'exact' && exactDate)
     parts.push(`DueDate='${exactDate.format('YYYY-MM-DD')}'`);
   else if (dateMode === 'last7')
@@ -121,6 +125,7 @@ function groupRows(rows: ReceiptLine[]): POGroup[] {
     DestinationType: Set<string>;
     ShipToLocation: Set<string>;
     IntegrationStatus: Set<string>;
+    ASNNumbers: Set<string>;
     dueDates: string[];
     lines: ReceiptLine[];
   }>();
@@ -135,6 +140,7 @@ function groupRows(rows: ReceiptLine[]): POGroup[] {
         DestinationType: new Set(),
         ShipToLocation: new Set(),
         IntegrationStatus: new Set(),
+        ASNNumbers: new Set(),
         dueDates: [],
         lines: [],
       });
@@ -146,6 +152,7 @@ function groupRows(rows: ReceiptLine[]): POGroup[] {
     if (row.DestinationType) g.DestinationType.add(row.DestinationType);
     if (row.ShipToLocation) g.ShipToLocation.add(String(row.ShipToLocation));
     if (row.IntegrationStatus) g.IntegrationStatus.add(row.IntegrationStatus);
+    if (row.ASNNumber && String(row.ASNNumber).trim()) g.ASNNumbers.add(String(row.ASNNumber).trim());
     if (row.DueDate) g.dueDates.push(row.DueDate);
     g.lines.push(row);
   }
@@ -163,6 +170,7 @@ function groupRows(rows: ReceiptLine[]): POGroup[] {
       DestinationType: pick(g.DestinationType),
       ShipToLocation: pick(g.ShipToLocation),
       IntegrationStatus: pickStatus(g.IntegrationStatus),
+      ASNNumbers: Array.from(g.ASNNumbers).join(', '),
       dueDateEarliest: sorted[0] ?? '',
       dueDateLatest: sorted[sorted.length - 1] ?? '',
       linesCount: g.lines.length,
@@ -495,6 +503,10 @@ const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> =
     { title: 'Currency', dataIndex: 'CurrencyCode', key: 'CurrencyCode', width: 80 },
     { title: 'Status', dataIndex: 'IntegrationStatus', key: 'IntegrationStatus', width: 170,
       render: (v: string) => <StatusTag status={v} /> },
+    { title: 'ASN', dataIndex: 'ASNNumber', key: 'ASNNumber', width: 150, ellipsis: true,
+      render: (v: string) => v
+        ? <Tooltip title={v}><Tag color="purple" style={{ margin: 0 }}>{v}</Tag></Tooltip>
+        : <span style={{ color: REDWOOD.neutral600 }}>—</span> },
     { title: '', key: 'actions', width: 48, fixed: 'right' as const,
       render: (_: unknown, record: ReceiptLine) => (
         <Tooltip title="View all fields">
@@ -901,6 +913,7 @@ const PODetailTab: React.FC<{ poNumber: string; initialLines: ReceiptLine[] }> =
 const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ onOpenPO }) => {
   const [org, setOrg] = useState('');
   const [poNum, setPoNum] = useState('');
+  const [asn, setAsn] = useState('');
   const [sourceDoc, setSourceDoc] = useState<string>('');
   const [orgs, setOrgs] = useState<{ code: string; name: string }[]>([]);
   const [orgsLoading, setOrgsLoading] = useState(false);
@@ -938,18 +951,18 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
 
   // The exact linesToReceive request the current filters will run.
   const currentUrl = useMemo(() => {
-    let q = buildQuery(org, poNum, dateMode, exactDate, dateRange);
+    let q = buildQuery(org, poNum, dateMode, exactDate, dateRange, asn);
     if (sourceDoc.trim()) q = (q ? q + ';' : '') + `SourceDocumentCode='${sourceDoc.trim()}'`;
     const qParam = q ? `q=${encodeURIComponent(q)}&` : '';
     return `${FUSION_BASE}/linesToReceive?${qParam}limit=500&offset=0`;
-  }, [org, poNum, sourceDoc, dateMode, exactDate, dateRange]);
+  }, [org, poNum, asn, sourceDoc, dateMode, exactDate, dateRange]);
 
   const handleSearch = useCallback(async () => {
     setLoading(true);
     setSearched(true);
     setFilterText('');
     try {
-      let q = buildQuery(org, poNum, dateMode, exactDate, dateRange);
+      let q = buildQuery(org, poNum, dateMode, exactDate, dateRange, asn);
       if (sourceDoc.trim()) q = (q ? q + ';' : '') + `SourceDocumentCode='${sourceDoc.trim()}'`;
       const rows = await fetchLinesToReceive(q);
       const grouped = groupRows(rows);
@@ -960,10 +973,10 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
     } finally {
       setLoading(false);
     }
-  }, [org, poNum, sourceDoc, dateMode, exactDate, dateRange]);
+  }, [org, poNum, asn, sourceDoc, dateMode, exactDate, dateRange]);
 
   const handleClear = () => {
-    setOrg(''); setPoNum(''); setSourceDoc(''); setDateMode('none');
+    setOrg(''); setPoNum(''); setAsn(''); setSourceDoc(''); setDateMode('none');
     setExactDate(null); setDateRange(null);
     setGroups([]); setSearched(false); setFilterText('');
   };
@@ -974,7 +987,7 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
     return groups.filter(g =>
       [g.DocumentNumber, g.VendorName, g.ToOrganizationCode,
        g.SourceDocumentCode, g.DestinationType, g.ShipToLocation,
-       g.IntegrationStatus, g.dueDateEarliest]
+       g.IntegrationStatus, g.ASNNumbers, g.dueDateEarliest]
         .some(v => v?.toLowerCase().includes(term))
     );
   }, [groups, filterText]);
@@ -989,6 +1002,7 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
       'Destination Type': g.DestinationType,
       'Ship To Location': g.ShipToLocation,
       'Integration Status': g.IntegrationStatus,
+      'ASN Number': g.ASNNumbers,
       'Earliest Due Date': g.dueDateEarliest,
       'Latest Due Date': g.dueDateLatest !== g.dueDateEarliest ? g.dueDateLatest : '',
       'Lines Count': g.linesCount,
@@ -996,7 +1010,7 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
     const ws = XLSX.utils.json_to_sheet(sheetData);
     ws['!cols'] = [
       { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 36 },
-      { wch: 18 }, { wch: 26 }, { wch: 22 }, { wch: 16 }, { wch: 16 }, { wch: 10 },
+      { wch: 18 }, { wch: 26 }, { wch: 22 }, { wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 10 },
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Expected PO Receipts');
@@ -1059,6 +1073,16 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
       key: 'IntegrationStatus',
       width: 170,
       render: (v: string) => <StatusTag status={v} />,
+    },
+    {
+      title: 'ASN',
+      dataIndex: 'ASNNumbers',
+      key: 'ASNNumbers',
+      width: 160,
+      ellipsis: true,
+      render: (v: string) => v
+        ? <Tooltip title={v}><Tag color="purple" style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>{v}</Tag></Tooltip>
+        : <span style={{ color: REDWOOD.neutral600 }}>—</span>,
     },
     {
       title: 'Due Date',
@@ -1145,6 +1169,18 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
                   placeholder="e.g. 2026020014"
                   value={poNum}
                   onChange={e => setPoNum(e.target.value)}
+                  onPressEnter={handleSearch}
+                  allowClear
+                  size="small"
+                />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={6}>
+              <Form.Item label="ASN Number" style={{ marginBottom: 0 }}>
+                <Input
+                  placeholder="e.g. ASN2607282232"
+                  value={asn}
+                  onChange={e => setAsn(e.target.value)}
                   onPressEnter={handleSearch}
                   allowClear
                   size="small"

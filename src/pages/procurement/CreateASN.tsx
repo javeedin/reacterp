@@ -49,6 +49,7 @@ interface POLine {
   DocumentNumber?: string;
   DocumentLineNumber?: number;
   DocumentScheduleNumber?: number;
+  ASNNumber?: string;          // populated once an ASN has been created for the line
   ItemNumber?: string;
   ItemDescription?: string;
   ToOrganizationCode?: string;
@@ -138,7 +139,9 @@ const CreateASN: React.FC = () => {
     if (!po.trim() && !org.trim()) { message.warning('Enter a PO number (or organization) to search'); return; }
     setLoading(true); setErr(''); setRan(true); setResult(null);
     try {
-      const rows = await fetchLinesToReceive(buildQuery(po, org));
+      const fetched = await fetchLinesToReceive(buildQuery(po, org));
+      // Omit lines that already have an ASN — those are already shipped/noticed.
+      const rows = fetched.filter(l => !String(l.ASNNumber ?? '').trim());
       setLines(rows);
       // Default each line's ship qty to the quantity still available to receive.
       const q: Record<string, number> = {};
@@ -172,7 +175,7 @@ const CreateASN: React.FC = () => {
       VendorName:        first?.VendorName ?? '',
     };
     if (first?.VendorSiteCode) header.VendorSiteCode = first.VendorSiteCode;
-    if (shipmentDate)  header.ShipmentDate        = dayjs(shipmentDate).format('YYYY-MM-DD');
+    if (shipmentDate)  header.ShippedDate         = dayjs(shipmentDate).format('YYYY-MM-DD');
     if (expectedDate)  header.ExpectedReceiptDate = dayjs(expectedDate).format('YYYY-MM-DD');
     if (billOfLading.trim()) header.BillOfLading      = billOfLading.trim();
     if (packingSlip.trim())  header.PackingSlip       = packingSlip.trim();
@@ -187,8 +190,7 @@ const CreateASN: React.FC = () => {
       AutoTransactCode:       'SHIP',
       OrganizationCode:       l.ToOrganizationCode ?? '',
       DocumentNumber:         l.DocumentNumber ?? '',
-      DocumentLineNumber:     l.DocumentLineNumber,
-      DocumentScheduleNumber: l.DocumentScheduleNumber,
+      DocumentLineNumber:     String(l.DocumentLineNumber ?? ''),
       ItemNumber:             l.ItemNumber ?? '',
       Quantity:               shipQty[lineKey(l)] ?? 0,
       UnitOfMeasure:          l.UnitOfMeasure ?? l.UOMCode ?? '',
