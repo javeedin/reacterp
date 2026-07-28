@@ -13,6 +13,7 @@ export interface RevenueContract {
   status: string;
   rentTotal: number;
   scheduleCount: number;
+  subaccount: string;
 }
 
 export interface RevenueSchedule {
@@ -45,6 +46,7 @@ const mapContract = (r: any): RevenueContract => ({
   status: r.status ?? '',
   rentTotal: Number(r.rentTotal ?? r.renttotal ?? 0),
   scheduleCount: Number(r.scheduleCount ?? r.schedulecount ?? 0),
+  subaccount: r.subaccount ?? r.subAccount ?? r.sub_account ?? '',
 });
 
 const mapSchedule = (r: any): RevenueSchedule => ({
