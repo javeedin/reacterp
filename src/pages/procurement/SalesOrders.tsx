@@ -1620,7 +1620,14 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
       .then(d => setSubs(Array.from(new Set((d.items ?? []).map((s: any) => s.SecondaryInventoryName).filter(Boolean))).sort() as string[])).catch(() => setSubs([]));
   };
 
-  const submit = () => form.validateFields().then((v: any) => { onProceed(v); onClose(); }).catch(() => { /* show errors */ });
+  const submit = () => form.validateFields().then(() => {
+    // getFieldsValue(true) keeps values set via setFieldsValue that have no
+    // Form.Item (customer ids, sites, addresses); add the BU id from its row.
+    const all = form.getFieldsValue(true);
+    const bu = bUnits.find(b => b.businessUnitName === all.businessUnit);
+    onProceed({ ...all, businessUnitId: bu?.businessUnitId });
+    onClose();
+  }).catch(() => { /* show errors */ });
 
   const req = (msg: string) => [{ required: true, message: msg }];
   const Section: React.FC<{ icon: React.ReactNode; title: string; color: string; children: React.ReactNode }> = ({ icon, title, color, children }) => (
