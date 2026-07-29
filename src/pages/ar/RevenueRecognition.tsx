@@ -621,11 +621,13 @@ const RevenueRecognition: React.FC = () => {
       render: (_: any, row: any) => {
         const s: RevenueSchedule | undefined = row.cells[m.name];
         if (!s) return <Text type="secondary">—</Text>;
+        const acct = isAccounted(s);
+        // Show the amount only once the period is accounted (posted); otherwise 0.
         return (
-          <Tooltip title={`Accounted: ${isAccounted(s) ? 'Yes' : 'No'}${s.invoiceNumber ? ` · Inv ${s.invoiceNumber}` : ''}`}>
+          <Tooltip title={`Accounted: ${acct ? 'Yes' : 'No'} · Schedule amount ${fmt(s.amount)}${s.invoiceNumber ? ` · Inv ${s.invoiceNumber}` : ''}`}>
             <div style={{ lineHeight: 1.3 }}>
-              <div style={{ fontFamily: 'monospace', fontSize: 12 }}>{fmt(s.amount)}</div>
-              {isAccounted(s) && <div><Tag color="green" style={{ fontSize: 9, padding: '0 4px', lineHeight: '14px' }}>Acct</Tag></div>}
+              <div style={{ fontFamily: 'monospace', fontSize: 12, color: acct ? undefined : REDWOOD.neutral500 }}>{acct ? fmt(s.amount) : fmt(0)}</div>
+              {acct && <div><Tag color="green" style={{ fontSize: 9, padding: '0 4px', lineHeight: '14px' }}>Acct</Tag></div>}
             </div>
           </Tooltip>
         );
@@ -899,7 +901,8 @@ const RevenueRecognition: React.FC = () => {
                               {matrix.months.map((m, i) => (
                                 <Table.Summary.Cell key={m.name} index={3 + i} align="center">
                                   <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>
-                                    {fmt(matrix.rows.reduce((s: number, r: any) => s + (Number(r.cells[m.name]?.amount) || 0), 0))}
+                                    {/* accounted-only period total, matching the 0-when-unaccounted cells */}
+                                    {fmt(matrix.rows.reduce((s: number, r: any) => { const c = r.cells[m.name]; return s + (c && isAccounted(c) ? (Number(c.amount) || 0) : 0); }, 0))}
                                   </Text>
                                 </Table.Summary.Cell>
                               ))}
