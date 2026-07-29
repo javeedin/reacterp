@@ -1340,6 +1340,9 @@ interface NewLine { key: string; itemNumber: string; description?: string; uom?:
   returnLine?: boolean; returnReason?: string; maxQty?: number;
   refHeaderId?: string | number; refLineId?: string | number; refFulfillLineId?: string | number;
   refOrderNumber?: string; refLineNumber?: string | number;
+  // Original shipped lot/serial pulled from completed inventory transactions —
+  // sent back on the return line's lotSerials child (one serial per entry).
+  retLots?: { lot?: string; serial?: string; qty: number }[];
   error?: string }
 
 const INV_ORGS_URL = `${FUSION_BASE}/inventoryOrganizations?onlyData=true&limit=500`;
@@ -1553,6 +1556,61 @@ async function fetchReserveDetail(item: string, invOrg: string, subinv?: string,
       if (m) { out.inventoryItemId = pf(m, ['InventoryItemId', 'ItemId']); if (out.organizationId == null) out.organizationId = pf(m, ['OrganizationId']); }
     } catch { /* ignore */ }
   }
+  return out;
+}
+// Expand a serial range (e.g. SNA0001..SNA0003) into individual serials.
+function expandSerialRange(from?: any, to?: any): string[] {
+  if (from == null || from === '') return [];
+  const f = String(from); const t = to != null && to !== '' ? String(to) : f;
+  if (f === t) return [f];
+  const m1 = f.match(/^(.*?)(\d+)$/); const m2 = t.match(/^(.*?)(\d+)$/);
+  if (m1 && m2 && m1[1] === m2[1]) {
+    const start = parseInt(m1[2], 10), end = parseInt(m2[2], 10), width = m1[2].length;
+    if (end >= start && end - start < 5000) {
+      const arr: string[] = [];
+      for (let n = start; n <= end; n++) arr.push(m1[1] + String(n).padStart(width, '0'));
+      return arr;
+    }
+  }
+  return [f, t];
+}
+// Pull the lot/serial numbers actually shipped for a sales-order line from
+// completed inventory transactions (TransactionType "Sales order issue"), tied
+// back by order number + item + org. Returns one entry per serial (qty 1), or
+// one per lot (with its qty) for lot-only items.
+async function fetchShippedLotSerials(item: string, org: string, orderNumbers: (string | undefined)[]): Promise<{ lot?: string; serial?: string; qty: number }[]> {
+  const out: { lot?: string; serial?: string; qty: number }[] = [];
+  const seen = new Set<string>();
+  const add = (lot?: any, serial?: any, qty?: number) => {
+    const k = `${lot ?? ''}|${serial ?? ''}`;
+    if (seen.has(k)) return; seen.add(k);
+    out.push({ lot: lot != null && lot !== '' ? String(lot) : undefined, serial: serial != null && serial !== '' ? String(serial) : undefined, qty: qty ?? 1 });
+  };
+  const tryQuery = async (srcName: string) => {
+    if (!org || !item) return;
+    const q = `OrganizationCode=${org};ItemNumber=${item};TransactionType=Sales order issue;TransactionSourceName=${srcName}`;
+    const url = `${FUSION_BASE}/inventoryCompletedTransactions?q=${encodeURIComponent(q)}&expand=lots,lots.lotSerials,serials&onlyData=true&limit=200`;
+    try {
+      const r = await fetch(url, { headers: FUSION_HDRS });
+      if (!r.ok) return;
+      const d = await r.json();
+      for (const t of (d.items ?? [])) {
+        const lots: any[] = t.lots ?? [];
+        const serialsTop: any[] = t.serials ?? [];
+        if (lots.length) {
+          for (const lt of lots) {
+            const lotNo = pf(lt, ['LotNumber']);
+            const ls: any[] = lt.lotSerials ?? [];
+            if (ls.length) ls.forEach(s => expandSerialRange(pf(s, ['FmSerialNumber', 'SerialNumber']), pf(s, ['ToSerialNumber'])).forEach(sn => add(lotNo, sn, 1)));
+            else add(lotNo, undefined, Math.abs(num(pf(lt, ['TransactionQuantity']))) || 1);
+          }
+        } else if (serialsTop.length) {
+          serialsTop.forEach(s => expandSerialRange(pf(s, ['FmSerialNumber', 'SerialNumber']), pf(s, ['ToSerialNumber'])).forEach(sn => add(undefined, sn, 1)));
+        }
+      }
+    } catch { /* ignore this source name */ }
+  };
+  for (const n of orderNumbers) { if (n && out.length === 0) await tryQuery(String(n)); }
   return out;
 }
 // Type-ahead item search by code OR description (merged, deduped by ItemNumber).
@@ -2033,6 +2091,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const RESERVE_URL = `${FUSION_BASE}/inventoryReservations`;
   const [reserveOpen, setReserveOpen] = useState(false);
   const [reserveRows, setReserveRows] = useState<{ key: string; item: string; body: any; status?: number; ok?: boolean; errors?: string[]; response?: string }[]>([]);
+  // Return lot/serial viewer-editor (which shipped lots/serials to send back).
+  const [retLsKey, setRetLsKey] = useState<string | null>(null);
   // Return (RMA) mode: live DOO_RETURN_REASON codes (fallback = static list).
   const [returnReasonOpts, setReturnReasonOpts] = useState(RETURN_REASONS);
   useEffect(() => {
@@ -2369,6 +2429,15 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         LineCategoryCode: 'RETURN',
         ReturnReasonCode: l.returnReason || DEFAULT_RETURN_REASON,
         ...(l.refFulfillLineId != null ? { originalOrderReference: [{ OriginalFulfillLineId: num(l.refFulfillLineId) }] } : {}),
+        // Lot/serial being returned (from the original shipment) — one entry per
+        // serial (Quantity 1, From==To); lot-only items carry LotNumber + Quantity.
+        ...((l.retLots && l.retLots.length) ? {
+          lotSerials: l.retLots.map(x => ({
+            ...(x.lot ? { LotNumber: x.lot } : {}),
+            ...(x.serial ? { ItemSerialNumberFrom: x.serial, ItemSerialNumberTo: x.serial } : {}),
+            Quantity: x.serial ? 1 : (x.qty || 1),
+          })),
+        } : {}),
       } : {}),
       // lotSerials is NOT sent on outbound lines (FOM-4515328); lot goes to the EFF.
       ...(effLineChild(l) ? { additionalInformation: [effLineChild(l)] } : {}),
@@ -2752,10 +2821,20 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     { title: 'UOM', dataIndex: 'uom', width: 70, render: v => v ?? '—' },
     { title: 'Cost', dataIndex: 'costUnit', width: 90, align: 'right', render: v => v == null ? '—' : <Text type="secondary" style={{ fontSize: 11 }}>{fmtAmount(v, ccy)}</Text> },
     { title: 'QoH', dataIndex: 'qoh', width: 80, align: 'right', render: (v, r) => r.ohLoading ? <Spin size="small" /> : (v == null ? <Text type="secondary" style={{ fontSize: 11 }}>—</Text> : <Text style={{ fontSize: 11.5, color: REDWOOD.info, fontVariantNumeric: 'tabular-nums' }}>{fmtQty(num(v))}</Text>) },
-    { title: returnMode ? 'Return Qty' : 'Qty', dataIndex: 'qty', width: returnMode ? 100 : 90, align: 'right', render: (v, r) => <InputNumber size="small" min={0} max={returnMode && r.maxQty != null ? r.maxQty : (r.qoh != null ? r.qoh : undefined)} value={v} disabled={!!r.canceled || (editMode && !!r.existing)}
+    { title: returnMode ? 'Return Qty' : 'Qty', dataIndex: 'qty', width: returnMode ? 100 : 90, align: 'right', render: (v, r) => <InputNumber size="small" min={0} max={returnMode && r.maxQty != null ? r.maxQty : (r.qoh != null ? r.qoh : undefined)} value={v} disabled={!!r.canceled || (editMode && !!r.existing) || (returnMode && !!r.retLots?.length)}
         onChange={n => { let q = Number(n) || 0; if (returnMode && r.maxQty != null && q > r.maxQty) { q = r.maxQty; message.warning(`Cannot return more than ordered (${fmtQty(r.maxQty)})`); } else if (!returnMode && r.qoh != null && q > r.qoh) { q = r.qoh; message.warning(`Cannot order more than on-hand (${fmtQty(r.qoh)})`); } updLine(r.key, { qty: q }); }} style={{ width: returnMode ? 88 : 78 }} /> },
     ...(returnMode ? [{ title: 'Return Reason', dataIndex: 'returnReason', width: 190, render: (v: any, r: NewLine) => <Select size="small" showSearch style={{ width: 178 }} value={v || undefined} placeholder="Reason" popupMatchSelectWidth={false}
         options={returnReasonOpts} optionFilterProp="label" onChange={val => updLine(r.key, { returnReason: val })} /> } as any] : []),
+    ...(returnMode ? [{ title: 'Lot / Serial', dataIndex: 'retLots', width: 150, render: (_: any, r: NewLine) => {
+        const n = r.retLots?.length ?? 0;
+        const lots = Array.from(new Set((r.retLots ?? []).map(x => x.lot).filter(Boolean)));
+        const serN = (r.retLots ?? []).filter(x => x.serial).length;
+        return n
+          ? <Button size="small" type="link" style={{ padding: 0 }} icon={<TagsOutlined />} onClick={() => setRetLsKey(r.key)}>
+              {serN ? `${serN} serial${serN !== 1 ? 's' : ''}` : `${lots.length} lot${lots.length !== 1 ? 's' : ''}`}
+            </Button>
+          : <Text type="secondary" style={{ fontSize: 11 }}>— none —</Text>;
+      } } as any] : []),
     { title: 'Unit Price', dataIndex: 'unitPrice', width: 100, align: 'right', render: (v, r) => <InputNumber size="small" min={0} value={v} disabled={!!r.canceled || (editMode && !!r.existing) || returnMode} onChange={n => updLine(r.key, { unitPrice: Number(n) || 0 })} style={{ width: 88 }} /> },
     { title: 'Line Total', width: 110, align: 'right', render: (_, r) => <Text strong style={{ color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(r.qty) * num(r.unitPrice), ccy)}</Text> },
     { title: 'Margin', width: 100, align: 'right', render: (_, r) => { const m = (num(r.unitPrice) - num(r.costUnit)) * num(r.qty); return <Text style={{ fontSize: 11.5, color: m < 0 ? REDWOOD.error : REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(m, ccy)}</Text>; } },
@@ -3254,6 +3333,32 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             </div>}
       </Modal>
 
+      {/* Return lot/serial editor — the shipped lots/serials to send back on this line */}
+      {(() => {
+        const rl = lines.find(l => l.key === retLsKey);
+        if (!rl) return null;
+        const rows = (rl.retLots ?? []).map((x, i) => ({ ...x, _i: i, key: `${x.lot ?? ''}-${x.serial ?? ''}-${i}` }));
+        const removeAt = (i: number) => {
+          const next = (rl.retLots ?? []).filter((_, j) => j !== i);
+          updLine(rl.key, { retLots: next, qty: next.reduce((s, x) => s + (x.qty || 0), 0) });
+        };
+        return (
+          <Modal open onCancel={() => setRetLsKey(null)} width={600} footer={<Button onClick={() => setRetLsKey(null)}>Close</Button>}
+            title={<Space><TagsOutlined style={{ color: REDWOOD.info }} /> Lot / Serial to return <Tag color="blue">{rl.itemNumber}</Tag></Space>}>
+            <div style={{ fontSize: 12, marginBottom: 8 }}><Text type="secondary">Pulled from the original shipment (completed inventory transactions). Remove any you are not returning — the return quantity follows this list.</Text></div>
+            <Table size="small" rowKey="key" dataSource={rows} pagination={rows.length > 12 ? { pageSize: 12 } : false}
+              columns={[
+                { title: '#', width: 44, align: 'center', render: (_: any, __: any, i: number) => <Tag color="blue">{i + 1}</Tag> },
+                { title: 'Lot', dataIndex: 'lot', render: (v: any) => v ? <Tag color="geekblue">{v}</Tag> : <Text type="secondary">—</Text> },
+                { title: 'Serial', dataIndex: 'serial', render: (v: any) => v ? <Text code style={{ fontSize: 11 }}>{v}</Text> : <Text type="secondary">—</Text> },
+                { title: 'Qty', dataIndex: 'qty', width: 70, align: 'right', render: (v: any) => fmtQty(num(v)) },
+                { title: '', width: 50, align: 'center', render: (_: any, row: any) => <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => removeAt(row._i)} /> },
+              ]} />
+            <div style={{ marginTop: 8, textAlign: 'right' }}><Text strong>Return quantity: {fmtQty(rows.reduce((s, x) => s + (x.qty || 0), 0))}</Text></div>
+          </Modal>
+        );
+      })()}
+
     </div>
   );
 };
@@ -3323,20 +3428,37 @@ const SalesOrders: React.FC = () => {
   }, []);
 
   // Return an order (or selected lines) → a new RMA order referencing the original.
+  // For each line, pull the lot/serial numbers that were actually shipped from
+  // completed inventory transactions so the return carries them back.
   const openReturn = useCallback(async (order: any, lines: any[]) => {
     const key = `return-${order.OrderKey ?? order.HeaderId ?? order.OrderNumber}-${Date.now()}`;
-    const hide = message.loading('Creating return…', 0);
+    const hide = message.loading('Creating return (fetching shipped lot/serial)…', 0);
     const refs = await fetchOrderCustomerRefs(order, lines);
-    hide();
-    const draft: SoDraft = {
-      header: { ...headerFromOrder(order), ...refs },
-      lines: (lines ?? []).map((l, i) => orderLineToNewLine(l, i, {
+    const orderNos = [order.OrderNumber, order.SourceTransactionNumber];
+    const idxLines = (lines ?? []).map((l, i) => ({ l, i }));
+    const retLines = await mapLimit(idxLines, 4, async ({ l, i }) => {
+      const nl = orderLineToNewLine(l, i, {
         asReturn: true, refOrderNumber: String(order.OrderNumber ?? order.SourceTransactionNumber ?? ''), refHeaderId: order.HeaderId ?? order.OrderKey,
-      })),
-    };
+      });
+      const org = l.RequestedFulfillmentOrganizationCode ?? order.RequestedFulfillmentOrganizationCode ?? '';
+      try {
+        const ls = await fetchShippedLotSerials(nl.itemNumber, org, orderNos);
+        if (ls.length) {
+          nl.retLots = ls;
+          const lots = Array.from(new Set(ls.map(x => x.lot).filter(Boolean))) as string[];
+          if (lots.length) { nl.lot = lots[0]; nl.lots = lots; }
+          const total = ls.reduce((s, x) => s + (x.qty || 0), 0);
+          if (total > 0) nl.qty = total; // return exactly what was shipped
+        }
+      } catch { /* no shipped lot/serial found */ }
+      return nl;
+    });
+    hide();
+    const draft: SoDraft = { header: { ...headerFromOrder(order), ...refs }, lines: retLines };
     setNewTabs(prev => [...prev, { key, header: draft.header, draft, returnMode: true }]);
     setActiveKey(key);
-    message.success(`Return created for ${draft.lines.length} line(s)`);
+    const withLs = retLines.filter(l => l.retLots && l.retLots.length).length;
+    message.success(`Return created for ${draft.lines.length} line(s)${withLs ? ` — lot/serial pulled for ${withLs}` : ''}`);
   }, []);
 
   const removeTab = (key: string) => {
