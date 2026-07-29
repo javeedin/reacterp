@@ -1,4 +1,5 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { useAccountDescriptions } from '../../hooks/useAccountDescriptions';
 import dayjs, { type Dayjs } from 'dayjs';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
@@ -270,6 +271,15 @@ const ViewAcctModal: React.FC<{
   loading: boolean;
   onClose: () => void;
 }> = ({ open, txn, hdr, lines, loading, onClose }) => {
+  // Resolve each account combination → natural-account segment description so we
+  // can show it beneath the code in the Account column. Hook runs unconditionally.
+  const acctCodes = useMemo(() => {
+    const fromLines = (lines ?? []).map((l: any) => l.accountCombination).filter(Boolean);
+    const fb = txn ? [txn.assetAccountCombination, txn.offsetAccountCombination] : [];
+    return [...fromLines, ...fb].filter(Boolean) as string[];
+  }, [lines, txn]);
+  const acctDescMap = useAccountDescriptions(acctCodes);
+
   if (!txn) return null;
 
   const direction = txn.transactionDirection ?? ((txn.amount ?? 0) >= 0 ? 'DR' : 'CR');
@@ -379,8 +389,12 @@ const ViewAcctModal: React.FC<{
       <tr key={l.lineId ?? i} style={{ background: rowBg }}>
         <td style={ts({ textAlign: 'center', color: '#6b7280' })}>{l.lineNumber ?? i + 1}</td>
         <td style={ts({ fontWeight: 700, color: lineColor })}>{l.lineType}</td>
-        <td style={ts()}>{l.accountCombination || '—'}</td>
-        <td style={ts({ fontSize: 10, color: '#6b7280' })}>{l.accountDescription || '—'}</td>
+        <td style={ts()}>
+          <div>{l.accountCombination || '—'}</div>
+          {(acctDescMap[l.accountCombination] || l.accountDescription) && (
+            <div style={{ fontSize: 10, color: '#6b7280', fontWeight: 400, whiteSpace: 'normal' }}>{acctDescMap[l.accountCombination] || l.accountDescription}</div>
+          )}
+        </td>
         <td style={ts({ fontSize: 10, color: '#6b7280' })}>{l.accountingClass || '—'}</td>
         <td style={ts({ fontSize: 10 })}>{l.description || '—'}</td>
         <td style={ts({ textAlign: 'right', color: '#0572CE', fontWeight: l.enteredDr ? 600 : 400 })}>
@@ -403,8 +417,10 @@ const ViewAcctModal: React.FC<{
     <tr key="dr">
       <td style={ts({ textAlign: 'center' })}>1</td>
       <td style={ts({ fontWeight: 700, color: '#0572CE' })}>DR</td>
-      <td style={ts()}>{drAcctFb || '—'}</td>
-      <td style={ts({ fontSize: 10 })}>—</td>
+      <td style={ts()}>
+        <div>{drAcctFb || '—'}</div>
+        {acctDescMap[drAcctFb] && <div style={{ fontSize: 10, color: '#6b7280', fontWeight: 400, whiteSpace: 'normal' }}>{acctDescMap[drAcctFb]}</div>}
+      </td>
       <td style={ts({ fontSize: 10 })}>{drLabelFb}</td>
       <td style={ts({ fontSize: 10 })}>—</td>
       <td style={ts({ textAlign: 'right', color: '#0572CE', fontWeight: 600 })}>{fmtAmount(absAmount)}</td>
@@ -415,8 +431,10 @@ const ViewAcctModal: React.FC<{
     <tr key="cr" style={{ background: '#f9fafb' }}>
       <td style={ts({ textAlign: 'center' })}>2</td>
       <td style={ts({ fontWeight: 700, color: '#389e0d' })}>CR</td>
-      <td style={ts()}>{crAcctFb || '—'}</td>
-      <td style={ts({ fontSize: 10 })}>—</td>
+      <td style={ts()}>
+        <div>{crAcctFb || '—'}</div>
+        {acctDescMap[crAcctFb] && <div style={{ fontSize: 10, color: '#6b7280', fontWeight: 400, whiteSpace: 'normal' }}>{acctDescMap[crAcctFb]}</div>}
+      </td>
       <td style={ts({ fontSize: 10 })}>{crLabelFb}</td>
       <td style={ts({ fontSize: 10 })}>—</td>
       <td style={ts({ textAlign: 'right' })}>—</td>
@@ -486,7 +504,6 @@ const ViewAcctModal: React.FC<{
             <th style={ts({ textAlign: 'center', width: 32 })}>#</th>
             <th style={ts({ textAlign: 'left', width: 38 })}>Dr/Cr</th>
             <th style={ts({ textAlign: 'left' })}>Account</th>
-            <th style={ts({ textAlign: 'left', width: 110, fontSize: 10 })}>Acct Desc</th>
             <th style={ts({ textAlign: 'left', width: 90, fontSize: 10 })}>Class</th>
             <th style={ts({ textAlign: 'left', width: 140, fontSize: 10 })}>Description</th>
             <th colSpan={2} style={ts({ textAlign: 'center', background: '#e6f4ff', color: '#0572CE' })}>
@@ -497,7 +514,7 @@ const ViewAcctModal: React.FC<{
             </th>
           </tr>
           <tr style={{ background: '#f9fafb' }}>
-            <th style={ts()} /><th style={ts()} /><th style={ts()} /><th style={ts()} /><th style={ts()} /><th style={ts()} />
+            <th style={ts()} /><th style={ts()} /><th style={ts()} /><th style={ts()} /><th style={ts()} />
             <th style={ts({ textAlign: 'right', background: '#e6f4ff', fontSize: 10 })}>DR</th>
             <th style={ts({ textAlign: 'right', background: '#e6f4ff', fontSize: 10 })}>CR</th>
             <th style={ts({ textAlign: 'right', background: '#f6ffed', fontSize: 10 })}>DR</th>
