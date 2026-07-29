@@ -2179,11 +2179,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         if (l.canceled) ops.push({ kind: 'cancel', method: 'PATCH', url: href, body: { CanceledFlag: true, CancelReasonCode: 'CUSTOMER_REQUEST' }, lineKey: l.key, label, srcLineNumber: l.srcLineNumber });
         else if (num(l.qty) !== num(l.origQty)) ops.push({ kind: 'update', method: 'PATCH', url: href, body: { OrderedQuantity: num(l.qty) }, lineKey: l.key, label, srcLineNumber: l.srcLineNumber });
       } else {
-        // Add a line = POST the base salesOrdersForOrderHub with { OrderKey, lines:[newLine] }
-        // (only the new line — no header, so no BillTo/ShipTo is required). Fusion
-        // attaches it to the existing order identified by OrderKey.
-        ops.push({ kind: 'add', method: 'POST', url: SO_CREATE_URL,
-          body: { OrderKey: String(orderKey), lines: [buildFullLine(l, i)] },
+        // Add a line = POST the order's lines child with the full line object.
+        ops.push({ kind: 'add', method: 'POST', url: `${childBase}`,
+          body: buildFullLine(l, i),
           lineKey: l.key, label, srcLineNumber: i + 1 });
       }
     });
