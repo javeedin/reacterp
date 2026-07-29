@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   Layout, Breadcrumb, Card, Table, Form, Input, Select, DatePicker, Button,
-  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty, Tabs, InputNumber, Upload,
+  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty, Tabs, InputNumber, Upload, Checkbox,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -982,6 +982,7 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
   const [error, setError] = useState('');
   const [apiOpen, setApiOpen] = useState(false);
   const [filterText, setFilterText] = useState('');
+  const [showDooRef, setShowDooRef] = useState(false);
   const [detail, setDetail] = useState<any | null>(null);
   const [totalsOrder, setTotalsOrder] = useState<any | null>(null);
 
@@ -1019,10 +1020,13 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
   }, [searchUrl]);
 
   const filtered = useMemo(() => {
+    let base = rows;
+    // Hide reference/skeleton orders (StatusCode DOO_REFERENCE) unless opted in.
+    if (!showDooRef) base = base.filter(r => String(r.StatusCode ?? '').toUpperCase() !== 'DOO_REFERENCE');
     const t = filterText.trim().toLowerCase();
-    if (!t) return rows;
-    return rows.filter(r => JSON.stringify(r).toLowerCase().includes(t));
-  }, [rows, filterText]);
+    if (!t) return base;
+    return base.filter(r => JSON.stringify(r).toLowerCase().includes(t));
+  }, [rows, filterText, showDooRef]);
 
   const columns = useMemo<ColumnsType<any>>(() => ([
     { title: 'Source Txn #', dataIndex: 'SourceTransactionNumber', width: 185, fixed: 'left',
@@ -1129,6 +1133,9 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
         title={<Space><ShoppingOutlined style={{ color: REDWOOD.primary }} /><Text strong>Sales Orders</Text>
           {rows.length > 0 && <Tag>{filtered.length}{filtered.length !== rows.length ? ` of ${rows.length}` : ''} order{rows.length !== 1 ? 's' : ''}</Tag>}</Space>}
         extra={<Space>
+          <Tooltip title="Include reference/skeleton orders with StatusCode DOO_REFERENCE">
+            <Checkbox checked={showDooRef} onChange={e => setShowDooRef(e.target.checked)} style={{ fontSize: 12 }}>DOO_REFERENCE</Checkbox>
+          </Tooltip>
           <Input placeholder="Filter any column…" allowClear size="small" prefix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />}
             value={filterText} onChange={e => setFilterText(e.target.value)} style={{ width: 220 }} />
           <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={runSearch}>Refresh</Button>
