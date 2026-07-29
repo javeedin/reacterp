@@ -300,7 +300,7 @@ const RevenueRecognition: React.FC = () => {
     const q = contractSearch.trim().toLowerCase();
     if (!q) return contracts;
     return contracts.filter(c =>
-      [c.trxNumber, c.unit, c.location, c.tenant, c.subaccount, c.status].some(v => v != null && String(v).toLowerCase().includes(q)));
+      [c.trxNumber, c.unit, c.location, c.tenant, c.status].some(v => v != null && String(v).toLowerCase().includes(q)));
   }, [contracts, contractSearch]);
 
   const filteredSchedules = useMemo(() => {
@@ -661,8 +661,6 @@ const RevenueRecognition: React.FC = () => {
     { title: 'Unit', dataIndex: 'unit', key: 'unit', width: 120 },
     { title: 'Location', dataIndex: 'location', key: 'location', width: 150, ellipsis: true },
     { title: 'Tenant', dataIndex: 'tenant', key: 'tenant', width: 180, ellipsis: true },
-    { title: 'Subaccount', dataIndex: 'subaccount', key: 'subaccount', width: 120, ellipsis: true,
-      render: (v: string) => v ? <Text>{v}</Text> : <Text type="secondary">—</Text> },
     { title: 'Start', dataIndex: 'contractStartDate', key: 'contractStartDate', width: 110 },
     { title: 'End', dataIndex: 'contractEndDate', key: 'contractEndDate', width: 110 },
     { title: 'Total Periods', key: 'periods', width: 110, align: 'center' as const,
@@ -708,7 +706,6 @@ const RevenueRecognition: React.FC = () => {
     if (filteredContracts.length === 0) { message.warning('No contracts to export'); return; }
     const data = filteredContracts.map(c => ({
       'Trx #': c.trxNumber, 'Unit': c.unit, 'Location': c.location, 'Tenant': c.tenant,
-      'Subaccount': c.subaccount,
       'Start': c.contractStartDate, 'End': c.contractEndDate,
       'Total Periods': contractMonths(c.contractStartDate, c.contractEndDate) ?? '',
       'Rent Total': Number(c.rentTotal) || 0, 'Status': c.status, 'Schedules': c.scheduleCount,
@@ -807,10 +804,10 @@ const RevenueRecognition: React.FC = () => {
                         summary={() => filteredContracts.length === 0 ? null : (
                           <Table.Summary fixed>
                             <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 700 }}>
-                              {/* +1 leading slot for the selection column */}
-                              <Table.Summary.Cell index={0} colSpan={9}><Text strong>Total ({filteredContracts.length})</Text></Table.Summary.Cell>
-                              <Table.Summary.Cell index={9} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(filteredContracts.reduce((s, c) => s + (Number(c.rentTotal) || 0), 0))}</Text></Table.Summary.Cell>
-                              <Table.Summary.Cell index={10} colSpan={2} />
+                              {/* selection + Trx# + Unit + Location + Tenant + Start + End + Total Periods = 8 slots → Rent Total at index 8 */}
+                              <Table.Summary.Cell index={0} colSpan={8}><Text strong>Total ({filteredContracts.length})</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={8} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(filteredContracts.reduce((s, c) => s + (Number(c.rentTotal) || 0), 0))}</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={9} colSpan={2} />
                             </Table.Summary.Row>
                           </Table.Summary>
                         )}
