@@ -731,6 +731,7 @@ ipcMain.handle('select-folder', async () => {
 
 ipcMain.handle('save-file-to-folder', async (_event, { buffer, folderPath, filename }) => {
   try {
+    fs.mkdirSync(folderPath, { recursive: true });
     const filePath = path.join(folderPath, filename);
     fs.writeFileSync(filePath, Buffer.from(buffer));
     return { success: true, filePath };

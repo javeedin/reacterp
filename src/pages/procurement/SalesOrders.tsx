@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   Layout, Breadcrumb, Card, Table, Form, Input, Select, DatePicker, Button,
-  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty, Tabs, InputNumber,
+  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty, Tabs, InputNumber, Upload,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -1728,9 +1728,66 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
 };
 
 // New order creation tab — header summary + editable lines + save.
-const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
+// ── Sales-order draft: Save/Load the full on-screen state as JSON ────────────
+// Captures the header plus every line (item, qty, price, cost, lots, on-hand,
+// tax) so a draft round-trips exactly. Tolerant loader accepts a bare
+// { header, lines } too.
+const SO_DRAFT_TYPE = 'reacterp.salesOrderDraft';
+interface SoDraft { header: OrderHeader; lines: NewLine[]; discAmt?: number; expAmt?: number }
+const downloadJson = (obj: any, filename: string) => {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+const readJsonFile = (file: File): Promise<any> => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => { try { resolve(JSON.parse(String(reader.result))); } catch { reject(new Error('Not valid JSON')); } };
+  reader.onerror = () => reject(new Error('Could not read file'));
+  reader.readAsText(file);
+});
+// Save the create-order response (success or failure) to a local folder instead
+// of showing the raw JSON on screen. Electron-only; a no-op in the browser.
+const ORDER_LOG_FOLDER = 'c:/fusionclient/orderloading';
+const saveOrderLog = async (filename: string, content: string): Promise<string | null> => {
+  const api = (window as any).electronAPI;
+  if (!api?.saveFileToFolder) return null;
+  try {
+    const bytes = new TextEncoder().encode(content);
+    const res = await api.saveFileToFolder(bytes, ORDER_LOG_FOLDER, filename);
+    return res?.success ? (res.filePath ?? `${ORDER_LOG_FOLDER}/${filename}`) : null;
+  } catch { return null; }
+};
+// Pull a readable error message out of a DOO error response.
+const extractOrderError = (data: any, status: number, text: string): string => {
+  if (data && typeof data === 'object') {
+    const parts: string[] = [];
+    if (data.title) parts.push(String(data.title));
+    if (data.detail && data.detail !== data.title) parts.push(String(data.detail));
+    const details = data['o:errorDetails'] ?? data.errorDetails;
+    if (Array.isArray(details)) details.forEach((d: any) => { const m = d?.detail ?? d?.title; if (m) parts.push(String(m)); });
+    if (parts.length) return parts.join('\n');
+  }
+  return (text || '').trim().slice(0, 3000) || `HTTP ${status}`;
+};
+
+const toSoDraft = (raw: any): SoDraft | null => {
+  if (!raw || typeof raw !== 'object') return null;
+  const header = raw.header ?? raw.Header ?? raw.hdr;
+  const lines = raw.lines ?? raw.Lines;
+  if (!header && !Array.isArray(lines)) return null;
+  return {
+    header: (header ?? {}) as OrderHeader,
+    lines: Array.isArray(lines) ? lines : [],
+    discAmt: Number(raw.discAmt) || 0,
+    expAmt: Number(raw.expAmt) || 0,
+  };
+};
+
+const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft }> = ({ header, initialDraft }) => {
   const [form] = Form.useForm();
-  const [hdr, setHdr] = useState<OrderHeader>(header);
+  const [hdr, setHdr] = useState<OrderHeader>(initialDraft?.header ?? header);
   const bUnits = usePayablesBUs();
   const orgRows = useInvOrgs();
   const customers = useCustomers();
@@ -1740,11 +1797,12 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
   const taxCodes = useTaxCodes(hdr.businessUnit);
   const taxOptions = useMemo(() => taxCodes.map(t => ({ value: t.code, label: `${t.code} (${t.pct}%)`, pct: t.pct })), [taxCodes]);
   const [subs, setSubs] = useState<string[]>([]);
-  const [lines, setLines] = useState<NewLine[]>([]);
+  const [lines, setLines] = useState<NewLine[]>(initialDraft?.lines ?? []);
   const [pickOpen, setPickOpen] = useState(false);
   const [preview, setPreview] = useState(false);
   const [posting, setPosting] = useState(false);
-  const [resp, setResp] = useState<{ ok: boolean; status: number; body: string } | null>(null);
+  // Error message from the last save (drives the result dialog's error state).
+  const [saveError, setSaveError] = useState<string | null>(null);
   // Success celebration + created-order tracking (line status refresh).
   const [confetti, setConfetti] = useState<{ id: number; x: number; color: string; delay: number; size: number }[]>([]);
   const [successInfo, setSuccessInfo] = useState<{ orderNumber: string; status: string } | null>(null);
@@ -1770,8 +1828,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
     if (Object.keys(seg).length <= 1) return null; // only ContextCode → nothing to send
     return { CategoryCode: effMeta.category, [effMeta.voName]: [seg] };
   };
-  const [discAmt, setDiscAmt] = useState(0);
-  const [expAmt, setExpAmt] = useState(0);
+  const [discAmt, setDiscAmt] = useState(initialDraft?.discAmt ?? 0);
+  const [expAmt, setExpAmt] = useState(initialDraft?.expAmt ?? 0);
   const [lineSearch, setLineSearch] = useState<Record<string, { loading?: boolean; tooShort?: boolean; opts: any[] }>>({});
   const [lotPick, setLotPick] = useState<{ key: string; item: string; rows: any[]; onh: Record<string, { loading?: boolean; qty?: number }> } | null>(null);
   const [itemModal, setItemModal] = useState<{ key: string; term: string; rows: any[] } | null>(null);
@@ -1787,7 +1845,26 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
     return `${hdr.orderType || 'SO'}${d.format('YYYYMM')}${orderSeq}`;
   }, [hdr.orderType, hdr.orderDate, orderSeq]);
 
-  useEffect(() => { form.setFieldsValue(header as any); setHdr(header); /* init once */ }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { const h = initialDraft?.header ?? header; form.setFieldsValue(h as any); setHdr(h); /* init once */ }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Save / Load the full draft (header + all lines) as JSON ──
+  const saveDraftJson = () => {
+    const draft = { __type: SO_DRAFT_TYPE, version: 1, orderNumber, header: hdr, lines, discAmt, expAmt };
+    downloadJson(draft, `sales-order-${orderNumber || 'draft'}.json`);
+    message.success('Order saved to JSON');
+  };
+  const loadDraftJson = async (file: File) => {
+    try {
+      const draft = toSoDraft(await readJsonFile(file));
+      if (!draft) { message.error('Not a sales-order JSON (missing header/lines)'); return; }
+      setHdr(draft.header);
+      form.setFieldsValue(draft.header as any);
+      setLines(draft.lines);
+      setDiscAmt(draft.discAmt ?? 0);
+      setExpAmt(draft.expAmt ?? 0);
+      message.success(`Loaded ${draft.lines.length} line(s) from JSON`);
+    } catch (e: any) { message.error(`Load failed: ${e.message}`); }
+  };
 
   const syncHdr = () => setHdr(prev => ({ ...prev, ...form.getFieldsValue() }));
   const loadSubs = useCallback((org?: string) => {
@@ -2003,14 +2080,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
 
   const save = async () => {
     if (lines.length === 0) { message.warning('Add at least one line'); return; }
-    setPosting(true); setResp(null);
+    setPosting(true); setSaveError(null);
+    const stamp = String(Date.now());
     try {
       const r = await fetch(SO_CREATE_URL, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: payloadStr });
       const text = await r.text(); let data: any = null, pretty = text;
       try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* raw */ }
-      setResp({ ok: r.ok, status: r.status, body: pretty });
+
       if (r.ok && data?.OrderNumber) {
-        // Celebrate 🎉 (mirrors the Purchase Order success modal).
+        // Success — write the response to the order-loading folder (no on-screen log).
+        saveOrderLog(`order-${data.OrderNumber}-${stamp}.json`, pretty);
         const pieces = Array.from({ length: 60 }, (_, i) => ({
           id: i, x: Math.random() * 100,
           color: ['#C74634', '#1D7B4D', '#0572CE', '#D4A800', '#00918A', '#6B21A8', '#FF6B35', '#4ECDC4'][Math.floor(Math.random() * 8)],
@@ -2018,19 +2097,29 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
         }));
         setConfetti(pieces);
         setSuccessInfo({ orderNumber: data.OrderNumber, status: data.StatusCode ?? data.Status ?? 'Created' });
+        setSaveError(null);
         setSuccessOpen(true);
         const orderKey = data.OrderKey ?? data.HeaderId ?? null;
         setCreatedOrderKey(orderKey != null ? String(orderKey) : null);
         message.success(`Sales order ${data.OrderNumber} created`);
-        // Bring the line statuses straight back into the grid.
         if (orderKey != null) refreshLineStatuses(String(orderKey));
-      } else if (r.ok) {
-        message.success('Sales order created');
       } else {
-        message.error(`Create failed (HTTP ${r.status})`);
+        // Failure — write the response + payload to the folder, show the error dialog.
+        const msg = extractOrderError(data, r.status, text);
+        saveOrderLog(`order-ERROR-${orderNumber || 'draft'}-${stamp}.json`,
+          `HTTP ${r.status}\n\n=== RESPONSE ===\n${pretty}\n\n=== REQUEST PAYLOAD ===\n${payloadStr}`);
+        setConfetti([]);
+        setSaveError(msg);
+        setSuccessOpen(true);
+        message.error('Sales order creation failed');
       }
-    } catch (e: any) { setResp({ ok: false, status: 0, body: e.message }); message.error(e.message); }
-    finally { setPosting(false); }
+    } catch (e: any) {
+      saveOrderLog(`order-ERROR-${orderNumber || 'draft'}-${stamp}.json`, `NETWORK ERROR: ${e?.message}\n\n=== REQUEST PAYLOAD ===\n${payloadStr}`);
+      setConfetti([]);
+      setSaveError(e?.message || 'Network error');
+      setSuccessOpen(true);
+      message.error('Sales order creation failed');
+    } finally { setPosting(false); }
   };
 
   const totQty = lines.reduce((s, l) => s + num(l.qty), 0);
@@ -2098,6 +2187,13 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
           <Tag color="geekblue" style={{ fontVariantNumeric: 'tabular-nums' }}>{orderNumber}</Tag>
           <Tag color="purple">{hdr.orderType}</Tag><Tag>{hdr.txnCurrency}</Tag>{hdr.customerName && <Tag color="blue">{hdr.customerName}</Tag>}</Space>}
         extra={<Space>
+          {/* JSON Actions — save/load the full on-screen draft (header + lines) */}
+          <Space.Compact>
+            <Button icon={<DownloadOutlined />} onClick={saveDraftJson}>Save JSON</Button>
+            <Upload accept=".json,application/json" showUploadList={false} beforeUpload={(f) => { loadDraftJson(f); return false; }}>
+              <Button icon={<CloudUploadOutlined />}>Load JSON</Button>
+            </Upload>
+          </Space.Compact>
           <Button icon={<CloudUploadOutlined />} onClick={() => setPreview(true)}>Payload</Button>
           <Button type="primary" icon={<SaveOutlined />} loading={posting} onClick={save} style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>Save Sales Order</Button>
         </Space>}>
@@ -2255,56 +2351,78 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
 
       <ItemSearchModal open={pickOpen} org={hdr.warehouse} subinv={hdr.subinventory} taxOptions={taxOptions} onClose={() => setPickOpen(false)} onAdd={addItems} />
 
-      {/* ── Sales Order success celebration (mirrors the PO success modal) ── */}
+      {/* ── Save result dialog — celebration on success, error state on failure ── */}
       <Modal
         open={successOpen}
         title={null}
-        closable={false}
+        closable={!!saveError}
         centered
         width={480}
+        onCancel={() => { setSuccessOpen(false); setConfetti([]); }}
         footer={
-          <Space style={{ justifyContent: 'center', width: '100%' }} wrap>
-            <Button size="large" icon={<ReloadOutlined />} loading={statusLoading} onClick={() => refreshLineStatuses()}>
-              Refresh Line Status
-            </Button>
-            <Button type="primary" size="large" icon={<CheckCircleOutlined />}
-              style={{ background: REDWOOD.success, borderColor: REDWOOD.success, fontWeight: 700 }}
-              onClick={() => { setSuccessOpen(false); setConfetti([]); }}>
-              Done
-            </Button>
-          </Space>
+          saveError
+            ? <Space style={{ justifyContent: 'center', width: '100%' }} wrap>
+                <Button size="large" icon={<DownloadOutlined />} onClick={saveDraftJson}>Save Order to JSON</Button>
+                <Button danger type="primary" size="large" onClick={() => setSuccessOpen(false)}>Close</Button>
+              </Space>
+            : <Space style={{ justifyContent: 'center', width: '100%' }} wrap>
+                <Button size="large" icon={<ReloadOutlined />} loading={statusLoading} onClick={() => refreshLineStatuses()}>
+                  Refresh Line Status
+                </Button>
+                <Button type="primary" size="large" icon={<CheckCircleOutlined />}
+                  style={{ background: REDWOOD.success, borderColor: REDWOOD.success, fontWeight: 700 }}
+                  onClick={() => { setSuccessOpen(false); setConfetti([]); }}>
+                  Done
+                </Button>
+              </Space>
         }
       >
         <style>{`
           @keyframes so-confetti-fall { 0% { transform: translateY(-20px) rotate(0deg); opacity: 1; } 100% { transform: translateY(110vh) rotate(720deg); opacity: 0; } }
           @keyframes so-success-pop { 0% { transform: scale(0.4); opacity: 0; } 60% { transform: scale(1.12); } 100% { transform: scale(1); opacity: 1; } }
         `}</style>
-        {confetti.map(p => (
+        {!saveError && confetti.map(p => (
           <div key={p.id} style={{
             position: 'fixed', top: 0, left: `${p.x}%`, width: p.size, height: p.size * 0.6,
             background: p.color, borderRadius: 2, pointerEvents: 'none', zIndex: 99999,
             animation: `so-confetti-fall ${1.8 + (p.id % 5) * 0.24}s ease-in forwards`, animationDelay: `${p.delay}s`,
           }} />
         ))}
-        <div style={{ textAlign: 'center', padding: '32px 16px 16px', animation: 'so-success-pop 0.5s ease-out' }}>
-          <div style={{ fontSize: 64, lineHeight: 1, marginBottom: 12 }}>🎉</div>
-          <CheckCircleOutlined style={{ fontSize: 48, color: REDWOOD.success, marginBottom: 10 }} />
-          <div style={{ fontSize: 15, color: REDWOOD.neutral600, marginBottom: 6 }}>
-            Sales Order created successfully in Oracle Fusion
-          </div>
-          <div style={{ fontSize: 28, fontWeight: 800, color: REDWOOD.info, letterSpacing: '0.04em', fontFamily: 'monospace', marginBottom: 10 }}>
-            {successInfo?.orderNumber}
-          </div>
-          {successInfo?.status && (
-            <Tag color="green" style={{ fontWeight: 700, fontSize: 13, padding: '2px 14px' }}>{successInfo.status}</Tag>
+        {saveError
+          ? (
+            <div style={{ textAlign: 'center', padding: '28px 16px 8px' }}>
+              <CloseCircleTwoTone twoToneColor={REDWOOD.error} style={{ fontSize: 52, marginBottom: 12 }} />
+              <div style={{ fontSize: 16, fontWeight: 700, color: REDWOOD.neutral900, marginBottom: 4 }}>Sales Order creation failed</div>
+              <Tag color="error" style={{ fontWeight: 700, marginBottom: 12 }}>ERROR</Tag>
+              <div style={{ fontSize: 12, color: REDWOOD.error, whiteSpace: 'pre-wrap', textAlign: 'left', background: '#FFF1F0', border: '1px solid #FFCCC7', borderRadius: 6, padding: '10px 12px', maxHeight: 260, overflow: 'auto' }}>
+                {saveError}
+              </div>
+              <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 10 }}>
+                The full response &amp; payload were saved to <Text code style={{ fontSize: 11 }}>{ORDER_LOG_FOLDER}</Text>.
+              </div>
+            </div>
+          )
+          : (
+            <div style={{ textAlign: 'center', padding: '32px 16px 16px', animation: 'so-success-pop 0.5s ease-out' }}>
+              <div style={{ fontSize: 64, lineHeight: 1, marginBottom: 12 }}>🎉</div>
+              <CheckCircleOutlined style={{ fontSize: 48, color: REDWOOD.success, marginBottom: 10 }} />
+              <div style={{ fontSize: 15, color: REDWOOD.neutral600, marginBottom: 6 }}>
+                Sales Order created successfully in Oracle Fusion
+              </div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: REDWOOD.info, letterSpacing: '0.04em', fontFamily: 'monospace', marginBottom: 10 }}>
+                {successInfo?.orderNumber}
+              </div>
+              {successInfo?.status && (
+                <Tag color="green" style={{ fontWeight: 700, fontSize: 13, padding: '2px 14px' }}>{successInfo.status}</Tag>
+              )}
+              <div style={{ marginTop: 16, padding: '10px 16px', background: '#F0FFF4', borderRadius: 8, border: '1px solid #b7ebc8' }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {lines.length} line{lines.length !== 1 ? 's' : ''} &nbsp;·&nbsp; Total:&nbsp;
+                </Text>
+                <Text strong style={{ color: REDWOOD.teal, fontSize: 13 }}>{fmtAmount(totAmt + lineTax, ccy)}</Text>
+              </div>
+            </div>
           )}
-          <div style={{ marginTop: 16, padding: '10px 16px', background: '#F0FFF4', borderRadius: 8, border: '1px solid #b7ebc8' }}>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {lines.length} line{lines.length !== 1 ? 's' : ''} &nbsp;·&nbsp; Total:&nbsp;
-            </Text>
-            <Text strong style={{ color: REDWOOD.teal, fontSize: 13 }}>{fmtAmount(totAmt + lineTax, ccy)}</Text>
-          </div>
-        </div>
       </Modal>
 
       <Modal open={!!itemModal} onCancel={() => setItemModal(null)} maskClosable={false} width={760} style={{ top: 24 }}
@@ -2356,20 +2474,13 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
         </div>
       </Modal>
 
-      {resp && (
-        <Modal open onCancel={() => setResp(null)} maskClosable={false} width={760}
-          title={<Space>{resp.ok ? <SaveOutlined style={{ color: REDWOOD.success }} /> : <InfoCircleOutlined style={{ color: REDWOOD.error }} />} Create Order — {resp.status === 0 ? 'Network Error' : `HTTP ${resp.status}`}</Space>}
-          footer={<Button onClick={() => setResp(null)}>Close</Button>}>
-          <pre style={{ margin: 0, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 420, overflow: 'auto', background: REDWOOD.neutral100, padding: 12, borderRadius: 6 }}>{resp.body}</pre>
-        </Modal>
-      )}
     </div>
   );
 };
 
 const SalesOrders: React.FC = () => {
   const [openTabs, setOpenTabs] = useState<{ key: string; order: any }[]>([]);
-  const [newTabs, setNewTabs] = useState<{ key: string; header: OrderHeader }[]>([]);
+  const [newTabs, setNewTabs] = useState<{ key: string; header: OrderHeader; draft?: SoDraft }[]>([]);
   const [registerOpen, setRegisterOpen] = useState(false);
   const [activeKey, setActiveKey] = useState('search');
 
@@ -2391,6 +2502,19 @@ const SalesOrders: React.FC = () => {
     setActiveKey(key);
   };
 
+  // Open a new-order tab pre-populated from a saved draft JSON.
+  const loadNewOrderFromJson = async (file: File) => {
+    try {
+      const draft = toSoDraft(await readJsonFile(file));
+      if (!draft) { message.error('Not a sales-order JSON (missing header/lines)'); return false; }
+      const key = `new-${Date.now()}`;
+      setNewTabs(prev => [...prev, { key, header: draft.header, draft }]);
+      setActiveKey(key);
+      message.success(`Loaded ${draft.lines.length} line(s) from JSON`);
+    } catch (e: any) { message.error(`Load failed: ${e.message}`); }
+    return false;
+  };
+
   const items = [
     {
       key: 'search',
@@ -2402,7 +2526,7 @@ const SalesOrders: React.FC = () => {
       key: t.key,
       label: <span><PlusOutlined style={{ marginRight: 5 }} />New Order{newTabs.length > 1 ? ` ${i + 1}` : ''}</span>,
       closable: true,
-      children: <NewOrderTab header={t.header} />,
+      children: <NewOrderTab header={t.header} initialDraft={t.draft} />,
     })),
     ...openTabs.map(t => ({
       key: t.key,
@@ -2430,8 +2554,13 @@ const SalesOrders: React.FC = () => {
         <div style={{ padding: '12px 20px' }}>
           <Tabs type="editable-card" hideAdd size="small" activeKey={activeKey}
             onChange={setActiveKey} onEdit={(key, action) => { if (action === 'remove') removeTab(key as string); }}
-            tabBarExtraContent={<Button type="primary" icon={<PlusOutlined />} onClick={() => setRegisterOpen(true)}
-              style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Create New Order</Button>}
+            tabBarExtraContent={<Space>
+              <Upload accept=".json,application/json" showUploadList={false} beforeUpload={(f) => loadNewOrderFromJson(f)}>
+                <Button icon={<CloudUploadOutlined />}>Load from JSON</Button>
+              </Upload>
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setRegisterOpen(true)}
+                style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Create New Order</Button>
+            </Space>}
             items={items} />
         </div>
 
