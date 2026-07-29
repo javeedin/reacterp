@@ -11,6 +11,7 @@ import {
   ReconciliationOutlined, PlusOutlined, SaveOutlined, DeleteOutlined, CloudUploadOutlined,
   DatabaseOutlined, CheckCircleTwoTone, CloseCircleTwoTone, RiseOutlined, TagsOutlined,
   CheckCircleOutlined, EyeOutlined, EditOutlined,
+  SafetyCertificateOutlined, StopOutlined, SendOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -1866,7 +1867,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [successInfo, setSuccessInfo] = useState<{ orderNumber: string; status: string } | null>(null);
   const [successOpen, setSuccessOpen] = useState(false);
   const [createdOrderKey, setCreatedOrderKey] = useState<string | null>(null);
+  const [createdOrderNumber, setCreatedOrderNumber] = useState<string | null>(editOrder?.OrderNumber ? String(editOrder.OrderNumber) : null);
   const [statusLoading, setStatusLoading] = useState(false);
+  // Draft workflow (Save→Confirm→Reserve/Unreserve): busy flag + last action result.
+  const [workBusy, setWorkBusy] = useState<null | 'confirm' | 'reserve' | 'unreserve'>(null);
+  const [confirmed, setConfirmed] = useState(false);
   // Discovered line EFF (for saving lot number + item cost as additional info).
   const [effMeta, setEffMeta] = useState<EffMeta | null>(null);
   useEffect(() => {
@@ -2144,7 +2149,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       RequestedShipDate: dateIso,
       TransactionOn: dateIso,
       ...(hdr.orderType ? { TransactionTypeCode: hdr.orderType, TransactionType: hdr.orderType } : {}),
-      SubmittedFlag: 'true',
+      SubmittedFlag: 'false',   // save as DRAFT; Confirm later submits it
       FreezePriceFlag: 'true',
       FreezeShippingChargeFlag: 'true',
       FreezeTaxFlag: 'true',
@@ -2270,10 +2275,19 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       const items: any[] = d.items ?? [];
       setLines(prev => prev.map((l, i) => {
         const match =
-          items.find(it => String(pf(it, ['SourceTransactionLineNumber']) ?? '') === String(i + 1)) ??
+          items.find(it => String(pf(it, ['SourceTransactionLineNumber']) ?? '') === String(l.srcLineNumber ?? i + 1)) ??
           items.find(it => String(pf(it, ['ProductNumber', 'Product', 'ItemNumber']) ?? '') === String(l.itemNumber));
         if (!match) return l;
-        return { ...l, status: pf(match, ['Status', 'DisplayStatus', 'FulfillLineStatus']), statusCode: pf(match, ['StatusCode']) };
+        const self = (match.links ?? []).find((x: any) => x.rel === 'self')?.href;
+        return {
+          ...l, existing: true,
+          status: pf(match, ['Status', 'DisplayStatus', 'FulfillLineStatus']), statusCode: pf(match, ['StatusCode']),
+          fulfillLineId: pf(match, ['FulfillLineId']) ?? l.fulfillLineId,
+          lineHref: self ?? l.lineHref,
+          srcLineNumber: l.srcLineNumber ?? pf(match, ['SourceTransactionLineNumber']),
+          srcLineId: l.srcLineId ?? (pf(match, ['SourceTransactionLineId']) != null ? String(pf(match, ['SourceTransactionLineId'])) : undefined),
+          uom: l.uom ?? pf(match, ['OrderedUOMCode', 'OrderedUOM']),
+        };
       }));
       message.success('Line statuses refreshed from Fusion');
     } catch (e: any) { message.error(`Refresh failed: ${e.message}`); }
@@ -2313,7 +2327,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         setSuccessOpen(true);
         const orderKey = data.OrderKey ?? data.HeaderId ?? null;
         setCreatedOrderKey(orderKey != null ? String(orderKey) : null);
-        message.success(`Sales order ${data.OrderNumber} ${editMode ? 'updated' : 'created'}`);
+        setCreatedOrderNumber(String(data.OrderNumber));
+        setConfirmed(String(data.StatusCode ?? '').toUpperCase() !== 'DOO_DRAFT' && String(data.SubmittedFlag) === 'true');
+        message.success(`Sales order ${data.OrderNumber} saved as draft`);
         if (orderKey != null) refreshLineStatuses(String(orderKey));
       } else {
         // Failure — map errors onto lines + Errors tab, write the log, show the dialog.
@@ -2409,6 +2425,107 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       message.error(`${failed} change(s) failed`);
     }
     setPosting(false);
+  };
+
+  // ── Draft workflow: Confirm (submit the draft), Reserve / Unreserve stock ──
+  // The key/number of the live order — from the create response or the edited order.
+  const liveOrderKey = () => createdOrderKey ?? (editOrder ? String(editOrder.OrderKey ?? editOrder.HeaderId ?? '') : '');
+  const liveOrderNumber = () => createdOrderNumber ?? (editOrder ? String(editOrder.OrderNumber ?? orderNumber) : orderNumber);
+
+  // Confirm the draft → submit the order (StatusCode leaves DOO_DRAFT).
+  const confirmOrder = async () => {
+    const key = liveOrderKey();
+    if (!key) { message.warning('Save the order first'); return; }
+    setWorkBusy('confirm');
+    try {
+      const url = `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(key)}`;
+      const r = await fetch(url, { method: 'PATCH', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify({ SubmittedFlag: 'true' }) });
+      const text = await r.text(); let data: any = null, pretty = text;
+      try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* raw */ }
+      setLastResponse(`PATCH ${url}\nHTTP ${r.status}\n\n${pretty}`);
+      saveOrderLog(`order-CONFIRM-${liveOrderNumber()}-${Date.now()}.json`, `HTTP ${r.status}\n\n${pretty}`);
+      if (r.ok) {
+        setConfirmed(true);
+        message.success(`Order ${liveOrderNumber()} confirmed / submitted`);
+        refreshLineStatuses(key);
+      } else {
+        Modal.error({ title: 'Confirm failed', width: 640, content: <pre style={{ maxHeight: 380, overflow: 'auto', fontSize: 12 }}>{(collectOrderErrors(data, text, true).join('\n\n')) || `HTTP ${r.status}`}</pre> });
+      }
+    } catch (e: any) { message.error(e?.message || 'Confirm failed'); }
+    finally { setWorkBusy(null); }
+  };
+
+  // Reserve on-hand stock for each line via inventoryReservations.
+  const reserveStock = async () => {
+    const key = liveOrderKey();
+    if (!key) { message.warning('Save the order first'); return; }
+    const org = hdr.warehouse;
+    if (!org) { message.warning('No warehouse (organization) on the header'); return; }
+    // Ensure we have each line's FulfillLineId (needed as the demand line).
+    await refreshLineStatuses(key);
+    setWorkBusy('reserve');
+    const orderNo = liveOrderNumber();
+    const results: any[] = [];
+    try {
+      const targets = lines.filter(l => l.itemNumber && !l.canceled && num(l.qty) > 0);
+      for (const l of targets) {
+        const body: any = {
+          DemandSourceType: 'Sales order',
+          DemandSourceHeaderNumber: String(orderNo),
+          ...(l.fulfillLineId != null ? { DemandSourceLineNumber: String(l.fulfillLineId) } : {}),
+          ItemNumber: l.itemNumber,
+          OrganizationCode: org,
+          ReservationQuantity: num(l.qty),
+          ...(l.uom ? { ReservationUOMCode: l.uom } : {}),
+          SupplySourceType: 'On hand',
+          ...(hdr.subinventory ? { SubinventoryCode: hdr.subinventory } : {}),
+          ...(l.lot ? { LotNumber: l.lot } : {}),
+        };
+        try {
+          const r = await fetch(`${FUSION_BASE}/inventoryReservations`, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          const text = await r.text(); let data: any = null, pretty = text;
+          try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* raw */ }
+          results.push({ item: l.itemNumber, status: r.status, ok: r.ok, request: body, response: pretty,
+            errors: r.ok ? [] : (collectOrderErrors(data, text, true).length ? collectOrderErrors(data, text, true) : [`HTTP ${r.status}`]) });
+        } catch (e: any) { results.push({ item: l.itemNumber, status: 0, ok: false, request: body, response: e?.message, errors: [e?.message ?? 'Network error'] }); }
+      }
+      setLastResponse(JSON.stringify(results, null, 2));
+      saveOrderLog(`order-RESERVE-${orderNo}-${Date.now()}.json`, JSON.stringify(results, null, 2));
+      const okN = results.filter(x => x.ok).length, bad = results.filter(x => !x.ok);
+      if (bad.length === 0) message.success(`Reserved ${okN} line(s) for order ${orderNo}`);
+      else Modal.error({ title: `Reserve: ${okN} ok, ${bad.length} failed`, width: 680,
+        content: <pre style={{ maxHeight: 380, overflow: 'auto', fontSize: 12 }}>{bad.map(b => `• ${b.item}: ${b.errors.join('; ')}`).join('\n')}</pre> });
+    } finally { setWorkBusy(null); }
+  };
+
+  // Unreserve — find reservations for this order number and delete each.
+  const unreserveStock = async () => {
+    const orderNo = liveOrderNumber();
+    if (!orderNo) { message.warning('Save the order first'); return; }
+    setWorkBusy('unreserve');
+    try {
+      const q = encodeURIComponent(`DemandSourceHeaderNumber='${orderNo}'`);
+      const listUrl = `${FUSION_BASE}/inventoryReservations?q=${q}&onlyData=true&limit=500`;
+      const lr = await fetch(listUrl, { headers: FUSION_HDRS });
+      const ld = lr.ok ? await lr.json() : { items: [] };
+      const items: any[] = ld.items ?? [];
+      if (!items.length) { message.info(`No reservations found for order ${orderNo}`); return; }
+      const results: any[] = [];
+      for (const it of items) {
+        const rid = pf(it, ['ReservationId']);
+        if (rid == null) continue;
+        try {
+          const dr = await fetch(`${FUSION_BASE}/inventoryReservations/${encodeURIComponent(String(rid))}`, { method: 'DELETE', headers: FUSION_HDRS });
+          results.push({ reservationId: rid, item: pf(it, ['ItemNumber']), status: dr.status, ok: dr.ok });
+        } catch (e: any) { results.push({ reservationId: rid, status: 0, ok: false, error: e?.message }); }
+      }
+      setLastResponse(JSON.stringify(results, null, 2));
+      saveOrderLog(`order-UNRESERVE-${orderNo}-${Date.now()}.json`, JSON.stringify(results, null, 2));
+      const okN = results.filter(x => x.ok).length, bad = results.length - okN;
+      if (bad === 0) message.success(`Unreserved ${okN} reservation(s) for order ${orderNo}`);
+      else Modal.error({ title: `Unreserve: ${okN} ok, ${bad} failed`, content: <pre style={{ maxHeight: 300, overflow: 'auto', fontSize: 12 }}>{JSON.stringify(results, null, 2)}</pre>, width: 620 });
+    } catch (e: any) { message.error(e?.message || 'Unreserve failed'); }
+    finally { setWorkBusy(null); }
   };
 
   const totQty = lines.reduce((s, l) => s + num(l.qty), 0);
@@ -2524,8 +2641,17 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           <Button icon={<CloudUploadOutlined />} onClick={() => setPreview(true)}>Payload</Button>
           <Button type="primary" icon={<SaveOutlined />} loading={posting} onClick={editMode ? updateOrder : save}
             style={{ background: editMode ? '#B07700' : REDWOOD.success, borderColor: editMode ? '#B07700' : REDWOOD.success }}>
-            {editMode ? `Update Order${editOps.length ? ` (${editOps.length})` : ''}` : 'Save Sales Order'}
+            {editMode ? `Update Order${editOps.length ? ` (${editOps.length})` : ''}` : 'Save (Draft)'}
           </Button>
+          {/* Draft workflow — enabled once the order exists (saved or being edited) */}
+          {(!!createdOrderKey || editMode) && <Space.Compact>
+            <Button icon={<SendOutlined />} loading={workBusy === 'confirm'} disabled={confirmed} onClick={confirmOrder}
+              style={confirmed ? undefined : { background: REDWOOD.primary, borderColor: REDWOOD.primary, color: '#fff' }}>
+              {confirmed ? 'Confirmed' : 'Confirm Order'}
+            </Button>
+            <Button icon={<SafetyCertificateOutlined />} loading={workBusy === 'reserve'} onClick={reserveStock}>Reserve</Button>
+            <Button icon={<StopOutlined />} loading={workBusy === 'unreserve'} onClick={unreserveStock}>Unreserve</Button>
+          </Space.Compact>}
         </Space>}>
         <Form form={form} layout="horizontal" size="small" labelAlign="left" colon labelWrap
           labelCol={{ flex: '0 0 104px' }} wrapperCol={{ flex: '1 1 auto' }}
