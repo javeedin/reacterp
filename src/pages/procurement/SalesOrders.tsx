@@ -1842,6 +1842,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   // Per-save error breakdown: general (order-level) messages + a click-to-view modal.
   const [orderErrors, setOrderErrors] = useState<string[]>([]);
   const [errModal, setErrModal] = useState<{ title: string; msg: string } | null>(null);
+  // Full raw response of the last save/update (shown via the "Show Response" button).
+  const [lastResponse, setLastResponse] = useState<string>('');
+  const [respOpen, setRespOpen] = useState(false);
   // Success celebration + created-order tracking (line status refresh).
   const [confetti, setConfetti] = useState<{ id: number; x: number; color: string; delay: number; size: number }[]>([]);
   const [successInfo, setSuccessInfo] = useState<{ orderNumber: string; status: string } | null>(null);
@@ -2231,6 +2234,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       const r = await fetch(SO_CREATE_URL, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: payloadStr });
       const text = await r.text(); let data: any = null, pretty = text;
       try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* raw */ }
+      setLastResponse(`HTTP ${r.status}\n\n${pretty}`);
 
       if (r.ok && data?.OrderNumber) {
         // Success — write the response to the order-loading folder (no on-screen log).
@@ -2263,6 +2267,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     } catch (e: any) {
       saveOrderLog(`order-ERROR-${orderNumber || 'draft'}-${stamp}.json`, `NETWORK ERROR: ${e?.message}\n\n=== REQUEST PAYLOAD ===\n${payloadStr}`);
       setConfetti([]);
+      setLastResponse(`NETWORK ERROR: ${e?.message}`);
       setSaveError(e?.message || 'Network error');
       setOrderErrors([e?.message || 'Network error']);
       setSuccessOpen(true);
@@ -2298,6 +2303,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       }
     }
     saveOrderLog(`order-EDIT-${editOrder.OrderNumber ?? orderKey}-${stamp}.json`, JSON.stringify({ operations: editOps, results }, null, 2));
+    setLastResponse(JSON.stringify(results, null, 2));
     setLines(prev => prev.map(l => ({ ...l, error: errByKey[l.key]?.join('\n\n') })));
     setOrderErrors(general);
     const failed = results.filter(r => !r.ok).length;
@@ -2620,6 +2626,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         </div>
       </Modal>
 
+      {/* Full response of the last save/update (opened from "Show Response") */}
+      <Modal open={respOpen} onCancel={() => setRespOpen(false)} width={760}
+        title={<Space><CopyOutlined style={{ color: REDWOOD.info }} /> Response</Space>}
+        footer={<Space>
+          <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(lastResponse); message.success('Copied'); }}>Copy</Button>
+          <Button onClick={() => setRespOpen(false)}>Close</Button>
+        </Space>}>
+        <pre style={{ margin: 0, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 460, overflow: 'auto', background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, padding: 12 }}>{lastResponse || '—'}</pre>
+      </Modal>
+
       {/* ── Save result dialog — celebration on success, error state on failure ── */}
       <Modal
         open={successOpen}
@@ -2632,12 +2648,14 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           saveError
             ? <Space style={{ justifyContent: 'center', width: '100%' }} wrap>
                 <Button size="large" icon={<DownloadOutlined />} onClick={saveDraftJson}>Save Order to JSON</Button>
+                <Button size="large" icon={<CopyOutlined />} disabled={!lastResponse} onClick={() => setRespOpen(true)}>Show Response</Button>
                 <Button danger type="primary" size="large" onClick={() => setSuccessOpen(false)}>Close</Button>
               </Space>
             : <Space style={{ justifyContent: 'center', width: '100%' }} wrap>
                 <Button size="large" icon={<ReloadOutlined />} loading={statusLoading} onClick={() => refreshLineStatuses()}>
                   Refresh Line Status
                 </Button>
+                <Button size="large" icon={<CopyOutlined />} disabled={!lastResponse} onClick={() => setRespOpen(true)}>Show Response</Button>
                 <Button type="primary" size="large" icon={<CheckCircleOutlined />}
                   style={{ background: REDWOOD.success, borderColor: REDWOOD.success, fontWeight: 700 }}
                   onClick={() => { setSuccessOpen(false); setConfetti([]); }}>
