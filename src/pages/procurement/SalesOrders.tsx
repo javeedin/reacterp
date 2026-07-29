@@ -2098,66 +2098,65 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         ...(hdr.shipToSite != null ? { SiteId: numOrStr(hdr.shipToSite) } : {}),
       }],
       ...(hdr.salesRep ? { salesCredits: [{ SourceTransactionSalesCreditIdentifier: orderSeq, Salesperson: hdr.salesRep, Percent: '100', SalesCreditTypeId: '1' }] } : {}),
-      lines: lines.map((l, i) => {
-        const qty = num(l.qty), price = num(l.unitPrice), tax = num(l.taxAmount);
-        const ext = round2(price * qty), taxUnit = qty ? round2(tax / qty) : 0;
-        // Preserve the original source line id for existing lines (so a change
-        // order maps onto the right fulfillment line); mint one for added lines.
-        const lineId = l.srcLineId ?? (editMode ? `N${i + 1}` : String(orderSeq * 100 + (i + 1)));
-        const lineNum = l.srcLineNumber ?? (i + 1);
-        const schedNum = l.srcScheduleNumber ?? lineId;
-        // Canceled line → minimal change-order entry with CanceledFlag (no charges).
-        if (editMode && l.canceled) {
-          return {
-            SourceTransactionLineId: String(lineId),
-            SourceTransactionLineNumber: String(lineNum),
-            SourceScheduleNumber: String(schedNum),
-            ProductNumber: l.itemNumber,
-            OrderedQuantity: 0,
-            CanceledFlag: true,
-            CancelReasonCode: 'CUSTOMER_REQUEST',
-          };
-        }
-        return {
-          SourceTransactionLineId: String(lineId),
-          SourceTransactionLineNumber: lineNum,
-          SourceTransactionScheduleId: schedNum,
-          SourceScheduleNumber: schedNum,
-          ...(l.uom ? { OrderedUOMCode: l.uom } : {}),
-          OrderedQuantity: qty,
-          ProductNumber: l.itemNumber,
-          ...(hdr.subinventory ? { SubinventoryCode: hdr.subinventory } : {}),
-          ...(hdr.paymentTerms ? { PaymentTerms: hdr.paymentTerms } : {}),
-          TransactionCategoryCode: 'ORDER',
-          // NOTE: lotSerials is NOT sent on standard outbound order lines — Fusion
-          // rejects it (FOM-4515328) because a shippable ORDER line has no inventory
-          // transaction; lot/serial is assigned downstream at pick/ship confirm.
-          // The lot is instead carried in the line EFF below (additionalInformation).
-          // Line EFF (additionalInformation) — populated dynamically from the
-          // instance's configured line context/segments (see effLineChild).
-          ...(effLineChild(l) ? { additionalInformation: [effLineChild(l)] } : {}),
-          charges: [{
-            SourceChargeId: `C${i + 1}`,
-            ApplyTo: 'Price',
-            PricedQuantity: qty,
-            GSAUnitPrice: price,
-            PriceType: 'One time',
-            ChargeType: 'Sale',
-            ChargeSubType: 'Price',
-            ChargeCurrencyCode: hdr.txnCurrency,
-            SequenceNumber: 1,
-            ChargeDefinitionCode: 'QP_SALE_PRICE',
-            PrimaryFlag: 'true',
-            RollupFlag: 'false',
-            chargeComponents: [
-              { SourceChargeComponentId: `C${i + 1}-CC1`, PriceElementCode: 'QP_LIST_PRICE', PriceElementUsageCode: 'LIST_PRICE', HeaderCurrencyUnitPrice: price, HeaderCurrencyExtendedAmount: ext, RollupFlag: 'false', SequenceNumber: 1 },
-              { SourceChargeComponentId: `C${i + 1}-CC2`, PriceElementCode: 'QP_NET_PRICE', PriceElementUsageCode: 'NET_PRICE', HeaderCurrencyUnitPrice: price, HeaderCurrencyExtendedAmount: ext, RollupFlag: 'false', SequenceNumber: 2 },
-              { SourceChargeComponentId: `C${i + 1}-CC3`, PriceElementCode: 'QP_EXCLUSIVE_TAX', PriceElementUsageCode: 'EXCLUSIVE_TAX', HeaderCurrencyUnitPrice: taxUnit, HeaderCurrencyExtendedAmount: tax, RollupFlag: 'false', SequenceNumber: 3 },
-              { SourceChargeComponentId: `C${i + 1}-CC4`, PriceElementCode: 'QP_NET_PRICE_PLUS_TAX', PriceElementUsageCode: 'NET_PRICE_PLUS_TAX', HeaderCurrencyUnitPrice: round2(price + taxUnit), HeaderCurrencyExtendedAmount: round2(ext + tax), RollupFlag: 'false', SequenceNumber: 4 },
-            ],
-          }],
-        };
-      }),
+      lines: lines.map((l, i) => (editMode && l.canceled) ? buildCancelLine(l, i) : buildFullLine(l, i)),
+    };
+  };
+
+  // A full order line (with charges) — used for the create payload and for
+  // adding a line to an existing order (POST base + { OrderKey, lines:[...] }).
+  const buildFullLine = (l: NewLine, i: number) => {
+    const qty = num(l.qty), price = num(l.unitPrice), tax = num(l.taxAmount);
+    const ext = round2(price * qty), taxUnit = qty ? round2(tax / qty) : 0;
+    // Preserve the original source line id for existing lines; mint one for added.
+    const lineId = l.srcLineId ?? (editMode ? `N${i + 1}` : String(orderSeq * 100 + (i + 1)));
+    const lineNum = l.srcLineNumber ?? (i + 1);
+    const schedNum = l.srcScheduleNumber ?? lineId;
+    return {
+      SourceTransactionLineId: String(lineId),
+      SourceTransactionLineNumber: lineNum,
+      SourceTransactionScheduleId: schedNum,
+      SourceScheduleNumber: schedNum,
+      ...(l.uom ? { OrderedUOMCode: l.uom } : {}),
+      OrderedQuantity: qty,
+      ProductNumber: l.itemNumber,
+      ...(hdr.subinventory ? { SubinventoryCode: hdr.subinventory } : {}),
+      ...(hdr.paymentTerms ? { PaymentTerms: hdr.paymentTerms } : {}),
+      TransactionCategoryCode: 'ORDER',
+      // lotSerials is NOT sent on outbound lines (FOM-4515328); lot goes to the EFF.
+      ...(effLineChild(l) ? { additionalInformation: [effLineChild(l)] } : {}),
+      charges: [{
+        SourceChargeId: `C${i + 1}`,
+        ApplyTo: 'Price',
+        PricedQuantity: qty,
+        GSAUnitPrice: price,
+        PriceType: 'One time',
+        ChargeType: 'Sale',
+        ChargeSubType: 'Price',
+        ChargeCurrencyCode: hdr.txnCurrency,
+        SequenceNumber: 1,
+        ChargeDefinitionCode: 'QP_SALE_PRICE',
+        PrimaryFlag: 'true',
+        RollupFlag: 'false',
+        chargeComponents: [
+          { SourceChargeComponentId: `C${i + 1}-CC1`, PriceElementCode: 'QP_LIST_PRICE', PriceElementUsageCode: 'LIST_PRICE', HeaderCurrencyUnitPrice: price, HeaderCurrencyExtendedAmount: ext, RollupFlag: 'false', SequenceNumber: 1 },
+          { SourceChargeComponentId: `C${i + 1}-CC2`, PriceElementCode: 'QP_NET_PRICE', PriceElementUsageCode: 'NET_PRICE', HeaderCurrencyUnitPrice: price, HeaderCurrencyExtendedAmount: ext, RollupFlag: 'false', SequenceNumber: 2 },
+          { SourceChargeComponentId: `C${i + 1}-CC3`, PriceElementCode: 'QP_EXCLUSIVE_TAX', PriceElementUsageCode: 'EXCLUSIVE_TAX', HeaderCurrencyUnitPrice: taxUnit, HeaderCurrencyExtendedAmount: tax, RollupFlag: 'false', SequenceNumber: 3 },
+          { SourceChargeComponentId: `C${i + 1}-CC4`, PriceElementCode: 'QP_NET_PRICE_PLUS_TAX', PriceElementUsageCode: 'NET_PRICE_PLUS_TAX', HeaderCurrencyUnitPrice: round2(price + taxUnit), HeaderCurrencyExtendedAmount: round2(ext + tax), RollupFlag: 'false', SequenceNumber: 4 },
+        ],
+      }],
+    };
+  };
+  // Minimal change-order entry that cancels an existing line.
+  const buildCancelLine = (l: NewLine, i: number) => {
+    const lineId = l.srcLineId ?? `N${i + 1}`;
+    return {
+      SourceTransactionLineId: String(lineId),
+      SourceTransactionLineNumber: String(l.srcLineNumber ?? (i + 1)),
+      SourceScheduleNumber: String(l.srcScheduleNumber ?? lineId),
+      ProductNumber: l.itemNumber,
+      OrderedQuantity: 0,
+      CanceledFlag: true,
+      CancelReasonCode: 'CUSTOMER_REQUEST',
     };
   };
   const payloadStr = useMemo(() => JSON.stringify(buildPayload(), null, 2), [lines, hdr, orderNumber, orderSeq, effMeta, editOrder]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -2170,24 +2169,25 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const editOps: EditOp[] = useMemo(() => {
     if (!editMode) return [];
     const orderKey = editOrder.OrderKey ?? editOrder.HeaderId;
-    const addUrl = `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(String(orderKey))}/child/lines`;
+    const childBase = `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(String(orderKey))}/child/lines`;
     const ops: EditOp[] = [];
     lines.forEach((l, i) => {
       const label = `${l.itemNumber || '(item)'}${l.srcLineNumber != null ? ` · line ${l.srcLineNumber}` : ''}`;
       if (l.existing) {
-        const href = l.lineHref ? fusionHref(l.lineHref) : (l.fulfillLineId != null ? `${addUrl}/${l.fulfillLineId}` : '');
+        const href = l.lineHref ? fusionHref(l.lineHref) : (l.fulfillLineId != null ? `${childBase}/${l.fulfillLineId}` : '');
         if (!href) return;
         if (l.canceled) ops.push({ kind: 'cancel', method: 'PATCH', url: href, body: { CanceledFlag: true, CancelReasonCode: 'CUSTOMER_REQUEST' }, lineKey: l.key, label, srcLineNumber: l.srcLineNumber });
         else if (num(l.qty) !== num(l.origQty)) ops.push({ kind: 'update', method: 'PATCH', url: href, body: { OrderedQuantity: num(l.qty) }, lineKey: l.key, label, srcLineNumber: l.srcLineNumber });
       } else {
-        ops.push({ kind: 'add', method: 'POST', url: addUrl, body: {
-          ProductNumber: l.itemNumber, OrderedQuantity: num(l.qty), ...(l.uom ? { OrderedUOMCode: l.uom } : {}),
-          SourceTransactionLineId: `N${i + 1}`, SourceTransactionLineNumber: String(i + 1), SourceScheduleNumber: `N${i + 1}`,
-        }, lineKey: l.key, label, srcLineNumber: i + 1 });
+        // Add a line = POST the base resource with the OrderKey + a full line
+        // (charges included), so Fusion attaches it to the existing order.
+        ops.push({ kind: 'add', method: 'POST', url: SO_CREATE_URL,
+          body: { OrderKey: String(orderKey), lines: [buildFullLine(l, i)] },
+          lineKey: l.key, label, srcLineNumber: i + 1 });
       }
     });
     return ops;
-  }, [editMode, editOrder, lines]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [editMode, editOrder, lines, hdr, effMeta]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // What the Payload button shows: the ops list in edit mode, else the create body.
   const previewStr = editMode
