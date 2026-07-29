@@ -1301,6 +1301,8 @@ interface NewLine { key: string; itemNumber: string; description?: string; uom?:
   // Edit mode: original DOO source line keys (preserved so a change order maps
   // onto the existing fulfillment line) + a cancel marker (there is no DELETE).
   srcLineId?: string; srcLineNumber?: string | number; srcScheduleNumber?: string | number; existing?: boolean; canceled?: boolean;
+  // Fusion system ids captured on edit load (to target PATCH/DELETE on the line).
+  fulfillLineId?: string | number; lineHref?: string; origQty?: number; origUnitPrice?: number;
   error?: string }
 
 const INV_ORGS_URL = `${FUSION_BASE}/inventoryOrganizations?onlyData=true&limit=500`;
@@ -1896,20 +1898,26 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     (async () => {
       try {
         const rows = await fetchAllPages(href);
-        setLines(rows.map((l: any, i: number): NewLine => ({
-          key: `edit-${pf(l, ['FulfillLineId']) ?? pf(l, ['SourceTransactionLineId']) ?? i}`,
-          itemNumber: String(pf(l, ['ProductNumber', 'Product', 'ItemNumber']) ?? ''),
-          description: pf(l, ['ProductDescription', 'ItemDescription']),
-          uom: pf(l, ['OrderedUOMCode', 'OrderedUOM']),
-          qty: num(pf(l, ['OrderedQuantity'])),
-          unitPrice: num(pf(l, ['UnitSellingPrice', 'UnitListPrice'])),
-          status: pf(l, ['DisplayStatus', 'Status']),
-          statusCode: pf(l, ['StatusCode']),
-          srcLineId: pf(l, ['SourceTransactionLineId']) != null ? String(pf(l, ['SourceTransactionLineId'])) : undefined,
-          srcLineNumber: pf(l, ['SourceTransactionLineNumber']),
-          srcScheduleNumber: pf(l, ['SourceScheduleNumber', 'SourceTransactionScheduleId']),
-          existing: true,
-        })));
+        setLines(rows.map((l: any, i: number): NewLine => {
+          const q = num(pf(l, ['OrderedQuantity']));
+          const price = num(pf(l, ['UnitSellingPrice', 'UnitListPrice']));
+          const selfHref = (l.links ?? []).find((x: any) => x.rel === 'self')?.href;
+          return {
+            key: `edit-${pf(l, ['FulfillLineId']) ?? pf(l, ['SourceTransactionLineId']) ?? i}`,
+            itemNumber: String(pf(l, ['ProductNumber', 'Product', 'ItemNumber']) ?? ''),
+            description: pf(l, ['ProductDescription', 'ItemDescription']),
+            uom: pf(l, ['OrderedUOMCode', 'OrderedUOM']),
+            qty: q, unitPrice: price, origQty: q, origUnitPrice: price,
+            status: pf(l, ['DisplayStatus', 'Status']),
+            statusCode: pf(l, ['StatusCode']),
+            srcLineId: pf(l, ['SourceTransactionLineId']) != null ? String(pf(l, ['SourceTransactionLineId'])) : undefined,
+            srcLineNumber: pf(l, ['SourceTransactionLineNumber']),
+            srcScheduleNumber: pf(l, ['SourceScheduleNumber', 'SourceTransactionScheduleId']),
+            fulfillLineId: pf(l, ['FulfillLineId']),
+            lineHref: selfHref,
+            existing: true,
+          };
+        }));
       } catch (e: any) { message.error(`Failed to load order lines: ${e.message}`); }
     })();
   }, [editOrder]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -2151,6 +2159,38 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   };
   const payloadStr = useMemo(() => JSON.stringify(buildPayload(), null, 2), [lines, hdr, orderNumber, orderSeq, effMeta, editOrder]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Edit mode: build the exact per-line REST operations against the live order.
+  //   update qty  → PATCH  {OrderKey}/child/lines/{linesUniqID}  { OrderedQuantity }
+  //   add line    → POST   {OrderKey}/child/lines                 { Product, Qty, ... }
+  //   remove line → PATCH  {OrderKey}/child/lines/{linesUniqID}  { CanceledFlag: true }
+  interface EditOp { kind: 'update' | 'add' | 'cancel'; method: string; url: string; body: any; lineKey: string; label: string; srcLineNumber: any }
+  const editOps: EditOp[] = useMemo(() => {
+    if (!editMode) return [];
+    const orderKey = editOrder.OrderKey ?? editOrder.HeaderId;
+    const addUrl = `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(String(orderKey))}/child/lines`;
+    const ops: EditOp[] = [];
+    lines.forEach((l, i) => {
+      const label = `${l.itemNumber || '(item)'}${l.srcLineNumber != null ? ` · line ${l.srcLineNumber}` : ''}`;
+      if (l.existing) {
+        const href = l.lineHref ? fusionHref(l.lineHref) : (l.fulfillLineId != null ? `${addUrl}/${l.fulfillLineId}` : '');
+        if (!href) return;
+        if (l.canceled) ops.push({ kind: 'cancel', method: 'PATCH', url: href, body: { CanceledFlag: true, CancelReasonCode: 'CUSTOMER_REQUEST' }, lineKey: l.key, label, srcLineNumber: l.srcLineNumber });
+        else if (num(l.qty) !== num(l.origQty)) ops.push({ kind: 'update', method: 'PATCH', url: href, body: { OrderedQuantity: num(l.qty) }, lineKey: l.key, label, srcLineNumber: l.srcLineNumber });
+      } else {
+        ops.push({ kind: 'add', method: 'POST', url: addUrl, body: {
+          ProductNumber: l.itemNumber, OrderedQuantity: num(l.qty), ...(l.uom ? { OrderedUOMCode: l.uom } : {}),
+          SourceTransactionLineId: `N${i + 1}`, SourceTransactionLineNumber: String(i + 1), SourceScheduleNumber: `N${i + 1}`,
+        }, lineKey: l.key, label, srcLineNumber: i + 1 });
+      }
+    });
+    return ops;
+  }, [editMode, editOrder, lines]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // What the Payload button shows: the ops list in edit mode, else the create body.
+  const previewStr = editMode
+    ? JSON.stringify(editOps.map(o => ({ operation: o.kind, method: o.method, url: o.url, body: o.body })), null, 2)
+    : payloadStr;
+
   // Pull the created order's lines from Fusion and stamp each grid line's status.
   // Match by SourceTransactionLineNumber (what we sent), then fall back to item.
   const refreshLineStatuses = async (orderKey?: string) => {
@@ -2230,6 +2270,56 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     } finally { setPosting(false); }
   };
 
+  // Edit mode: run each per-line operation (PATCH update / POST add / PATCH cancel)
+  // against the live order and collect per-line results.
+  const updateOrder = async () => {
+    const orderKey = editOrder.OrderKey ?? editOrder.HeaderId;
+    if (editOps.length === 0) { message.warning('No changes to save'); return; }
+    setPosting(true); setSaveError(null); setOrderErrors([]);
+    setLines(prev => prev.map(l => l.error ? { ...l, error: undefined } : l));
+    const stamp = String(Date.now());
+    const results: any[] = [];
+    const errByKey: Record<string, string[]> = {};
+    const general: string[] = [];
+    for (const op of editOps) {
+      try {
+        const r = await fetch(op.url, { method: op.method, headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(op.body) });
+        const text = await r.text(); let data: any = null, pretty = text;
+        try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* raw */ }
+        results.push({ operation: op.kind, method: op.method, url: op.url, status: r.status, ok: r.ok, request: op.body, response: pretty });
+        if (!r.ok) {
+          const msgs = collectOrderErrors(data, text, true);
+          const use = msgs.length ? msgs : [`HTTP ${r.status}`];
+          (errByKey[op.lineKey] ??= []).push(...use); general.push(...use);
+        }
+      } catch (e: any) {
+        results.push({ operation: op.kind, method: op.method, url: op.url, status: 0, ok: false, request: op.body, response: e?.message });
+        (errByKey[op.lineKey] ??= []).push(e?.message ?? 'Network error'); general.push(e?.message ?? 'Network error');
+      }
+    }
+    saveOrderLog(`order-EDIT-${editOrder.OrderNumber ?? orderKey}-${stamp}.json`, JSON.stringify({ operations: editOps, results }, null, 2));
+    setLines(prev => prev.map(l => ({ ...l, error: errByKey[l.key]?.join('\n\n') })));
+    setOrderErrors(general);
+    const failed = results.filter(r => !r.ok).length;
+    if (failed === 0) {
+      const pieces = Array.from({ length: 60 }, (_, i) => ({
+        id: i, x: Math.random() * 100,
+        color: ['#C74634', '#1D7B4D', '#0572CE', '#D4A800', '#00918A', '#6B21A8', '#FF6B35', '#4ECDC4'][Math.floor(Math.random() * 8)],
+        delay: Math.random() * 1.2, size: 6 + Math.random() * 8,
+      }));
+      setConfetti(pieces);
+      setSuccessInfo({ orderNumber: editOrder.OrderNumber ?? String(orderKey), status: `${results.length} change(s) applied` });
+      setSaveError(null); setSuccessOpen(true);
+      message.success(`Order updated — ${results.length} change(s)`);
+      refreshLineStatuses(String(orderKey));
+    } else {
+      setSaveError(`${failed} of ${results.length} change(s) failed. See the Errors tab / red ✗ on the lines.`);
+      setSuccessOpen(true);
+      message.error(`${failed} change(s) failed`);
+    }
+    setPosting(false);
+  };
+
   const totQty = lines.reduce((s, l) => s + num(l.qty), 0);
   const totAmt = lines.reduce((s, l) => s + num(l.qty) * num(l.unitPrice), 0);
   const lineTax = lines.reduce((s, l) => s + num(l.taxAmount), 0);
@@ -2306,6 +2396,14 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     return rows;
   }, [lines, orderErrors]);
 
+  // System IDs tab (edit mode) — the Fusion keys we use to target each line.
+  const sysIdRows = useMemo(() => lines.map((l, i) => ({
+    key: l.key, lineNo: l.srcLineNumber ?? i + 1, item: l.itemNumber,
+    fulfillLineId: l.fulfillLineId, srcLineId: l.srcLineId,
+    linesUniqID: l.lineHref ? l.lineHref.split('/child/lines/')[1]?.split(/[?#]/)[0] : undefined,
+    state: !l.existing ? 'New' : (l.canceled ? 'Cancel' : (num(l.qty) !== num(l.origQty) ? 'Update' : 'Unchanged')),
+  })), [lines]);
+
   return (
     <div style={{ padding: '4px 2px' }}>
       <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 12 }}
@@ -2324,9 +2422,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             </Upload>
           </Space.Compact>
           <Button icon={<CloudUploadOutlined />} onClick={() => setPreview(true)}>Payload</Button>
-          <Button type="primary" icon={<SaveOutlined />} loading={posting} onClick={save}
+          <Button type="primary" icon={<SaveOutlined />} loading={posting} onClick={editMode ? updateOrder : save}
             style={{ background: editMode ? '#B07700' : REDWOOD.success, borderColor: editMode ? '#B07700' : REDWOOD.success }}>
-            {editMode ? 'Update Order' : 'Save Sales Order'}
+            {editMode ? `Update Order${editOps.length ? ` (${editOps.length})` : ''}` : 'Save Sales Order'}
           </Button>
         </Space>}>
         <Form form={form} layout="horizontal" size="small" labelAlign="left" colon labelWrap
@@ -2489,6 +2587,25 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                     { title: 'Error', dataIndex: 'msg', render: (v: string) => <Text style={{ fontSize: 12, color: REDWOOD.error }}>{v}</Text> },
                   ]} />,
               },
+              ...(editMode ? [{
+                key: 'sysids', label: <Space size={6}><DatabaseOutlined />System IDs</Space>,
+                children: <>
+                  <div style={{ padding: '6px 8px', fontSize: 12 }}>
+                    <Text type="secondary">Order Key </Text><Text code>{editOrder?.OrderKey ?? '—'}</Text>
+                    <Text type="secondary"> · Header Id </Text><Text code>{editOrder?.HeaderId ?? '—'}</Text>
+                    <Text type="secondary"> · Order # </Text><Text code>{editOrder?.OrderNumber ?? '—'}</Text>
+                  </div>
+                  <Table size="small" rowKey="key" pagination={false} scroll={{ x: 900, y: 320 }} dataSource={sysIdRows}
+                    columns={[
+                      { title: 'Line', dataIndex: 'lineNo', width: 60, align: 'center' as const },
+                      { title: 'Item', dataIndex: 'item', width: 150, render: (v: string) => <Text strong style={{ fontSize: 12, color: REDWOOD.info }}>{v || '—'}</Text> },
+                      { title: 'Action', dataIndex: 'state', width: 100, render: (v: string) => <Tag color={v === 'New' ? 'green' : v === 'Cancel' ? 'red' : v === 'Update' ? 'blue' : 'default'} style={{ fontSize: 11 }}>{v}</Tag> },
+                      { title: 'FulfillLineId', dataIndex: 'fulfillLineId', width: 170, render: (v: any) => v != null ? <Text code style={{ fontSize: 11 }}>{v}</Text> : <Text type="secondary">— new —</Text> },
+                      { title: 'Source Line Id', dataIndex: 'srcLineId', width: 140, render: (v: any) => v != null ? <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v}</Text> : <Text type="secondary">—</Text> },
+                      { title: 'linesUniqID (PATCH key)', dataIndex: 'linesUniqID', ellipsis: true, render: (v: any) => v ? <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v}</Text> : <Text type="secondary">—</Text> },
+                    ]} />
+                </>,
+              }] : []),
             ]} />}
       </Card>
 
@@ -2615,14 +2732,18 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       </Modal>
 
       <Modal open={preview} onCancel={() => setPreview(false)} maskClosable={false} width={760}
-        title={<Space><CloudUploadOutlined style={{ color: REDWOOD.primary }} /> Create Order payload</Space>}
+        title={<Space><CloudUploadOutlined style={{ color: REDWOOD.primary }} /> {editMode ? `Update operations (${editOps.length})` : 'Create Order payload'}</Space>}
         footer={<Space>
-          <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(payloadStr); message.success('Copied'); }}>Copy</Button>
+          <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(previewStr); message.success('Copied'); }}>Copy</Button>
           <Button onClick={() => setPreview(false)}>Close</Button>
         </Space>}>
-        <div style={{ fontSize: 12, marginBottom: 8 }}><Tag color="green">POST</Tag><Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info, wordBreak: 'break-all' }}>{SO_CREATE_URL}</Text></div>
+        <div style={{ fontSize: 12, marginBottom: 8 }}>
+          {editMode
+            ? <Text type="secondary" style={{ fontSize: 12 }}>Each change runs as its own request: <Tag color="blue">PATCH</Tag> update qty · <Tag color="green">POST</Tag> add line · <Tag color="volcano">PATCH CanceledFlag</Tag> remove line.</Text>
+            : <><Tag color="green">POST</Tag><Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info, wordBreak: 'break-all' }}>{SO_CREATE_URL}</Text></>}
+        </div>
         <div style={{ maxHeight: 360, overflow: 'auto', background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, padding: 12 }}>
-          <pre style={{ margin: 0, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{payloadStr}</pre>
+          <pre style={{ margin: 0, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{previewStr}</pre>
         </div>
       </Modal>
 
