@@ -5,7 +5,7 @@ import {
 } from 'antd';
 import {
   HomeOutlined, ReloadOutlined, ThunderboltOutlined, SearchOutlined,
-  FileExcelOutlined, ApiOutlined, DollarOutlined, CheckCircleTwoTone, CloseCircleTwoTone,
+  FileExcelOutlined, ApiOutlined, DollarOutlined,
   TableOutlined, AuditOutlined, FileSearchOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
@@ -622,15 +622,11 @@ const RevenueRecognition: React.FC = () => {
       render: (_: any, row: any) => {
         const s: RevenueSchedule | undefined = row.cells[m.name];
         if (!s) return <Text type="secondary">—</Text>;
-        const billed = isBilled(s);
         return (
-          <Tooltip title={`Billed: ${billed ? 'Yes' : 'No'} · Accounted: ${isAccounted(s) ? 'Yes' : 'No'}${s.invoiceNumber ? ` · Inv ${s.invoiceNumber}` : ''}`}>
+          <Tooltip title={`Accounted: ${isAccounted(s) ? 'Yes' : 'No'}${s.invoiceNumber ? ` · Inv ${s.invoiceNumber}` : ''}`}>
             <div style={{ lineHeight: 1.3 }}>
               <div style={{ fontFamily: 'monospace', fontSize: 12 }}>{fmt(s.amount)}</div>
-              <div>
-                {billed ? <CheckCircleTwoTone twoToneColor="#1D7B4D" /> : <CloseCircleTwoTone twoToneColor="#C74634" />}
-                {isAccounted(s) && <Tag color="green" style={{ marginLeft: 4, fontSize: 9, padding: '0 4px', lineHeight: '14px' }}>Acct</Tag>}
-              </div>
+              {isAccounted(s) && <div><Tag color="green" style={{ fontSize: 9, padding: '0 4px', lineHeight: '14px' }}>Acct</Tag></div>}
             </div>
           </Tooltip>
         );
@@ -638,20 +634,8 @@ const RevenueRecognition: React.FC = () => {
     })),
     { title: 'Total Amount', dataIndex: 'total', key: 'total', width: 120, align: 'right' as const, fixed: 'right' as const,
       render: (v: number) => <Text strong style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
-    { title: 'Billed', dataIndex: 'billedAmount', key: 'billedAmount', width: 110, align: 'right' as const, fixed: 'right' as const,
-      render: (v: number) => <Text style={{ fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(v)}</Text> },
-    { title: 'Balance', dataIndex: 'balance', key: 'balance', width: 120, align: 'right' as const, fixed: 'right' as const,
-      render: (v: number) => <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(v)}</Text> },
-    { title: 'Periods', key: 'periods', width: 130, align: 'center' as const, fixed: 'right' as const,
-      render: (_: any, r: any) => (
-        <Tooltip title={`Total ${r.totalPeriods} · Billed ${r.billedPeriods} · Remaining ${r.remainingPeriods}`}>
-          <Text style={{ fontSize: 12 }}>
-            <Tag color="green" style={{ marginInlineEnd: 2 }}>{r.billedPeriods}</Tag>
-            /<Tag color="orange" style={{ margin: '0 2px' }}>{r.remainingPeriods}</Tag>
-            / {r.totalPeriods}
-          </Text>
-        </Tooltip>
-      ) },
+    { title: 'Periods', key: 'periods', width: 90, align: 'center' as const, fixed: 'right' as const,
+      render: (_: any, r: any) => <Text style={{ fontSize: 12 }}>{r.totalPeriods}</Text> },
   ], [matrix.months]);
 
   // ── Columns ────────────────────────────────────────────────────────────────
@@ -721,10 +705,6 @@ const RevenueRecognition: React.FC = () => {
       const row: Record<string, any> = { 'Trx #': r.trxNumber, 'Unit': r.unit, 'Tenant': r.tenant };
       matrix.months.forEach(m => { row[m.name] = Number(r.cells[m.name]?.amount) || 0; });
       row['Total Amount'] = r.total;
-      row['Billed'] = r.billedAmount;
-      row['Balance'] = r.balance;
-      row['Billed Periods'] = r.billedPeriods;
-      row['Remaining Periods'] = r.remainingPeriods;
       row['Total Periods'] = r.totalPeriods;
       return row;
     });
@@ -863,23 +843,15 @@ const RevenueRecognition: React.FC = () => {
                   children: (
                     <>
                       <Row gutter={12} style={{ marginBottom: 12 }}>
-                        <Col xs={12} md={5}><Card size="small"><Statistic title={<Text style={{ fontSize: 11 }}>Contract Total</Text>} value={matrix.totals.total} precision={2} valueStyle={{ fontSize: 15 }} /></Card></Col>
-                        <Col xs={12} md={5}><Card size="small"><Statistic title={<Text style={{ fontSize: 11 }}>Total Billed</Text>} value={matrix.totals.billedAmount} precision={2} valueStyle={{ fontSize: 15, color: REDWOOD.success }} /></Card></Col>
-                        <Col xs={12} md={5}><Card size="small"><Statistic title={<Text style={{ fontSize: 11 }}>Balance</Text>} value={matrix.totals.balance} precision={2} valueStyle={{ fontSize: 15, color: REDWOOD.primary }} /></Card></Col>
-                        <Col xs={12} md={9}><Card size="small"><Statistic title={<Text style={{ fontSize: 11 }}>Periods (billed / remaining / total)</Text>} valueRender={() => (
-                          <Space size={4}>
-                            <Tag color="green" style={{ fontSize: 13 }}>{matrix.totals.billedPeriods}</Tag>/
-                            <Tag color="orange" style={{ fontSize: 13 }}>{matrix.totals.remainingPeriods}</Tag>/
-                            <Text strong>{matrix.totals.totalPeriods}</Text>
-                          </Space>
-                        )} /></Card></Col>
+                        <Col xs={12} md={8}><Card size="small"><Statistic title={<Text style={{ fontSize: 11 }}>Contract Total</Text>} value={matrix.totals.total} precision={2} valueStyle={{ fontSize: 15 }} /></Card></Col>
+                        <Col xs={12} md={8}><Card size="small"><Statistic title={<Text style={{ fontSize: 11 }}>Total Periods</Text>} value={matrix.totals.totalPeriods} valueStyle={{ fontSize: 15 }} /></Card></Col>
                       </Row>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
                         <Space wrap>
                           <Input allowClear prefix={<SearchOutlined />} placeholder="Filter…"
                             value={scheduleSearch} onChange={e => setScheduleSearch(e.target.value)} style={{ width: 240 }} />
                           <Text type="secondary" style={{ fontSize: 12 }}>
-                            <CheckCircleTwoTone twoToneColor="#1D7B4D" /> billed &nbsp; <CloseCircleTwoTone twoToneColor="#C74634" /> not billed &nbsp; <Tag color="green" style={{ fontSize: 9 }}>Acct</Tag> accounted
+                            <Tag color="green" style={{ fontSize: 9 }}>Acct</Tag> accounted
                           </Text>
                         </Space>
                         <Space>
@@ -894,7 +866,7 @@ const RevenueRecognition: React.FC = () => {
                         loading={schedulesLoading}
                         size="small"
                         bordered
-                        scroll={{ x: 300 + matrix.months.length * 110 + 480 }}
+                        scroll={{ x: 300 + matrix.months.length * 110 + 220 }}
                         pagination={{ pageSize: 50, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'], showTotal: (t) => `${t} contracts` }}
                         locale={{ emptyText: 'No schedules — generate them from the Contracts tab' }}
                         summary={() => matrix.rows.length === 0 ? null : (
@@ -909,11 +881,7 @@ const RevenueRecognition: React.FC = () => {
                                 </Table.Summary.Cell>
                               ))}
                               <Table.Summary.Cell index={3 + matrix.months.length} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{fmt(matrix.totals.total)}</Text></Table.Summary.Cell>
-                              <Table.Summary.Cell index={4 + matrix.months.length} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(matrix.totals.billedAmount)}</Text></Table.Summary.Cell>
-                              <Table.Summary.Cell index={5 + matrix.months.length} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(matrix.totals.balance)}</Text></Table.Summary.Cell>
-                              <Table.Summary.Cell index={6 + matrix.months.length} align="center">
-                                <Text style={{ fontSize: 11 }}>{matrix.totals.billedPeriods}/{matrix.totals.remainingPeriods}/{matrix.totals.totalPeriods}</Text>
-                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={4 + matrix.months.length} align="center"><Text strong style={{ fontSize: 11 }}>{matrix.totals.totalPeriods}</Text></Table.Summary.Cell>
                             </Table.Summary.Row>
                           </Table.Summary>
                         )}
@@ -987,7 +955,6 @@ const RevenueRecognition: React.FC = () => {
                           { title: 'Company', key: 'company', width: 90, render: (_: any, r: RevenueSchedule) => <Tag color="blue">{companyFromBU(buForSchedule(r))}</Tag> },
                           { title: '#', dataIndex: 'scheduleNum', width: 55, align: 'right' as const },
                           { title: 'Amount', dataIndex: 'amount', width: 120, align: 'right' as const, render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
-                          { title: 'Billed', key: 'billed', width: 70, align: 'center' as const, render: (_: any, r: RevenueSchedule) => isBilled(r) ? <CheckCircleTwoTone twoToneColor="#1D7B4D" /> : <CloseCircleTwoTone twoToneColor="#C74634" /> },
                           { title: 'Accounted', key: 'acct', width: 130, align: 'center' as const, render: (_: any, r: RevenueSchedule) => isAccounted(r)
                             ? <Space size={4}>
                                 <Tag color="green" style={{ marginInlineEnd: 0 }}>Accounted</Tag>
@@ -1000,10 +967,10 @@ const RevenueRecognition: React.FC = () => {
                         summary={() => postSchedules.length === 0 ? null : (
                           <Table.Summary fixed>
                             <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 700 }}>
-                              {/* slots: selection + BU + Period + SchedID + Trx + Invoice + Unit + Tenant + Company + # = 10 → Amount at index 10 */}
+                              {/* slots: selection + BU + Period + SchedID + Trx + Invoice + Unit + Tenant + Company + # = 10 → Amount at index 10, Accounted at 11 */}
                               <Table.Summary.Cell index={0} colSpan={10}><Text strong>Total ({postSchedules.length})</Text></Table.Summary.Cell>
                               <Table.Summary.Cell index={10} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(postSchedules.reduce((s, r) => s + (Number(r.amount) || 0), 0))}</Text></Table.Summary.Cell>
-                              <Table.Summary.Cell index={11} colSpan={2} />
+                              <Table.Summary.Cell index={11} />
                             </Table.Summary.Row>
                           </Table.Summary>
                         )}
