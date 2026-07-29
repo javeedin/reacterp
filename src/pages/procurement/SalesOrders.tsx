@@ -1857,6 +1857,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   // Full raw response of the last save/update (shown via the "Show Response" button).
   const [lastResponse, setLastResponse] = useState<string>('');
   const [respOpen, setRespOpen] = useState(false);
+  // Per-line update dialog (edit mode): existing lines are locked; edit via this.
+  const [updTarget, setUpdTarget] = useState<NewLine | null>(null);
+  const [updQty, setUpdQty] = useState<number>(0);
+  const [updBusy, setUpdBusy] = useState(false);
   // Success celebration + created-order tracking (line status refresh).
   const [confetti, setConfetti] = useState<{ id: number; x: number; color: string; delay: number; size: number }[]>([]);
   const [successInfo, setSuccessInfo] = useState<{ orderNumber: string; status: string } | null>(null);
@@ -2067,6 +2071,38 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     const lots = Array.from(new Set(costRows.map(c => parseVU(c.ValuationUnit).lot).filter(Boolean)));
     if (!lots.length) { message.info(`No lots found for ${l.itemNumber}`); return; }
     setLotPick({ key: l.key, item: l.itemNumber, rows: costRows, onh: {} });
+  };
+
+  // An existing line can be updated unless it's already Awaiting Billing / Closed
+  // (or canceled). Checks both the display status and the status code.
+  const lineLocked = (l: NewLine) => /billing|close/.test(`${l.status ?? ''} ${l.statusCode ?? ''}`.toLowerCase());
+  const canUpdateLine = (l: NewLine) => !!l.existing && !l.canceled && !lineLocked(l);
+
+  const openUpdateLine = (l: NewLine) => { setUpdTarget(l); setUpdQty(num(l.qty)); };
+  const doUpdateLine = async () => {
+    const l = updTarget; if (!l) return;
+    const orderKey = editOrder?.OrderKey ?? editOrder?.HeaderId;
+    const href = l.lineHref ? fusionHref(l.lineHref)
+      : (l.fulfillLineId != null ? `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(String(orderKey))}/child/lines/${l.fulfillLineId}` : '');
+    if (!href) { message.error('No line id available to update'); return; }
+    setUpdBusy(true);
+    try {
+      const r = await fetch(href, { method: 'PATCH', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify({ OrderedQuantity: num(updQty) }) });
+      const text = await r.text(); let data: any = null, pretty = text;
+      try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* raw */ }
+      setLastResponse(`PATCH ${href}\nHTTP ${r.status}\n\n${pretty}`);
+      if (r.ok) {
+        upd(l.key, { qty: num(updQty), origQty: num(updQty), status: data?.DisplayStatus ?? data?.Status ?? l.status, statusCode: data?.StatusCode ?? l.statusCode, error: undefined });
+        message.success(`Line ${l.itemNumber} updated to qty ${num(updQty)}`);
+        setUpdTarget(null);
+      } else {
+        const msgs = collectOrderErrors(data, text, true);
+        upd(l.key, { error: (msgs.length ? msgs : [`HTTP ${r.status}`]).join('\n\n') });
+        message.error('Line update failed — see the red ✗ / Errors tab');
+        setUpdTarget(null);
+      }
+    } catch (e: any) { upd(l.key, { error: e?.message }); message.error(e?.message || 'Update failed'); setUpdTarget(null); }
+    finally { setUpdBusy(false); }
   };
 
   // "Check On-Hand" — refresh QoH for every populated line from Fusion.
@@ -2392,9 +2428,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     { title: 'UOM', dataIndex: 'uom', width: 70, render: v => v ?? '—' },
     { title: 'Cost', dataIndex: 'costUnit', width: 90, align: 'right', render: v => v == null ? '—' : <Text type="secondary" style={{ fontSize: 11 }}>{fmtAmount(v, ccy)}</Text> },
     { title: 'QoH', dataIndex: 'qoh', width: 80, align: 'right', render: (v, r) => r.ohLoading ? <Spin size="small" /> : (v == null ? <Text type="secondary" style={{ fontSize: 11 }}>—</Text> : <Text style={{ fontSize: 11.5, color: REDWOOD.info, fontVariantNumeric: 'tabular-nums' }}>{fmtQty(num(v))}</Text>) },
-    { title: 'Qty', dataIndex: 'qty', width: 90, align: 'right', render: (v, r) => <InputNumber size="small" min={0} max={r.qoh != null ? r.qoh : undefined} value={v} disabled={!!r.canceled}
+    { title: 'Qty', dataIndex: 'qty', width: 90, align: 'right', render: (v, r) => <InputNumber size="small" min={0} max={r.qoh != null ? r.qoh : undefined} value={v} disabled={!!r.canceled || (editMode && !!r.existing)}
         onChange={n => { let q = Number(n) || 0; if (r.qoh != null && q > r.qoh) { q = r.qoh; message.warning(`Cannot order more than on-hand (${fmtQty(r.qoh)})`); } updLine(r.key, { qty: q }); }} style={{ width: 78 }} /> },
-    { title: 'Unit Price', dataIndex: 'unitPrice', width: 100, align: 'right', render: (v, r) => <InputNumber size="small" min={0} value={v} disabled={!!r.canceled} onChange={n => updLine(r.key, { unitPrice: Number(n) || 0 })} style={{ width: 88 }} /> },
+    { title: 'Unit Price', dataIndex: 'unitPrice', width: 100, align: 'right', render: (v, r) => <InputNumber size="small" min={0} value={v} disabled={!!r.canceled || (editMode && !!r.existing)} onChange={n => updLine(r.key, { unitPrice: Number(n) || 0 })} style={{ width: 88 }} /> },
     { title: 'Line Total', width: 110, align: 'right', render: (_, r) => <Text strong style={{ color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(r.qty) * num(r.unitPrice), ccy)}</Text> },
     { title: 'Margin', width: 100, align: 'right', render: (_, r) => { const m = (num(r.unitPrice) - num(r.costUnit)) * num(r.qty); return <Text style={{ fontSize: 11.5, color: m < 0 ? REDWOOD.error : REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(m, ccy)}</Text>; } },
     { title: 'Tax Code', dataIndex: 'taxCode', width: 140, render: (v, r) => <Select size="small" showSearch allowClear style={{ width: 128 }} popupMatchSelectWidth={false} value={v || undefined} placeholder="—"
@@ -2410,10 +2446,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         : r.canceled
           ? <Tag color="error" style={{ fontSize: 11 }}>Canceled</Tag>
           : (v || r.statusCode ? statusTag(v, r.statusCode) : <Text type="secondary" style={{ fontSize: 11 }}>—</Text>) },
-    { title: '', width: 40, align: 'center', fixed: 'right', render: (_, r) => (editMode && r.existing)
-        ? <Tooltip title={r.canceled ? 'Restore line' : 'Cancel line'}>
-            <Button size="small" type="text" danger={!r.canceled} icon={r.canceled ? <ReloadOutlined /> : <DeleteOutlined />} onClick={() => del(r.key)} />
-          </Tooltip>
+    { title: '', width: 76, align: 'center', fixed: 'right', render: (_, r) => (editMode && r.existing)
+        ? <Space size={0}>
+            <Tooltip title={r.canceled ? 'Line canceled' : (canUpdateLine(r) ? 'Update line' : 'Locked — Awaiting Billing / Closed')}>
+              <Button size="small" type="text" icon={<EditOutlined />} disabled={!canUpdateLine(r)}
+                style={{ color: canUpdateLine(r) ? REDWOOD.info : undefined }} onClick={() => openUpdateLine(r)} />
+            </Tooltip>
+            <Tooltip title={r.canceled ? 'Restore line' : 'Cancel line'}>
+              <Button size="small" type="text" danger={!r.canceled} icon={r.canceled ? <ReloadOutlined /> : <DeleteOutlined />} onClick={() => del(r.key)} />
+            </Tooltip>
+          </Space>
         : <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => del(r.key)} /> },
   ];
 
@@ -2666,6 +2708,32 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       </Card>
 
       <ItemSearchModal open={pickOpen} org={hdr.warehouse} subinv={hdr.subinventory} taxOptions={taxOptions} onClose={() => setPickOpen(false)} onAdd={addItems} />
+
+      {/* Update Line dialog (edit mode) — PATCH the existing line's quantity */}
+      <Modal open={!!updTarget} onCancel={() => !updBusy && setUpdTarget(null)} width={460}
+        title={<Space><EditOutlined style={{ color: REDWOOD.info }} /> Update Line</Space>}
+        footer={<Space>
+          <Button disabled={updBusy} onClick={() => setUpdTarget(null)}>Cancel</Button>
+          <Button type="primary" loading={updBusy} icon={<SaveOutlined />} onClick={doUpdateLine}
+            style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}>Update (PATCH)</Button>
+        </Space>}>
+        {updTarget && (
+          <div style={{ fontSize: 13 }}>
+            <Row gutter={[10, 10]}>
+              <Col span={12}><Text type="secondary" style={{ fontSize: 11 }}>Item</Text><div><Text strong style={{ color: REDWOOD.info }}>{updTarget.itemNumber}</Text></div></Col>
+              <Col span={12}><Text type="secondary" style={{ fontSize: 11 }}>Status</Text><div>{updTarget.status || updTarget.statusCode ? statusTag(updTarget.status, updTarget.statusCode) : '—'}</div></Col>
+              <Col span={12}><Text type="secondary" style={{ fontSize: 11 }}>Current Qty</Text><div><Text>{fmtQty(num(updTarget.origQty ?? updTarget.qty))}</Text></div></Col>
+              <Col span={12}>
+                <Text type="secondary" style={{ fontSize: 11 }}>New Ordered Quantity</Text>
+                <div><InputNumber min={0} value={updQty} onChange={v => setUpdQty(Number(v) || 0)} style={{ width: '100%' }} autoFocus /></div>
+              </Col>
+            </Row>
+            <div style={{ marginTop: 12, fontSize: 11, color: REDWOOD.neutral600 }}>
+              Sends <Text code style={{ fontSize: 11 }}>PATCH …/child/lines/{'{linesUniqID}'}</Text> with <Text code style={{ fontSize: 11 }}>{'{ OrderedQuantity }'}</Text>.
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Line error detail (opened from the red ✗ in the Status column) */}
       <Modal open={!!errModal} onCancel={() => setErrModal(null)} width={640}
