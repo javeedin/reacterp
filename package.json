@@ -1,7 +1,7 @@
 {
   "name": "reacterp",
   "private": true,
-  "version": "2.1.0",
+  "version": "2.2.0",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -62,7 +62,7 @@
   },
   "build": {
     "appId": "com.buimerc.reacterp",
-    "productName": "ReactERP v2.1.0",
+    "productName": "ReactERP v2.2.0",
     "directories": {
       "output": "dist-electron"
     },
