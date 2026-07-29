@@ -10,7 +10,7 @@ import {
   UnorderedListOutlined, ShoppingOutlined, DollarOutlined, PrinterOutlined, DownloadOutlined,
   ReconciliationOutlined, PlusOutlined, SaveOutlined, DeleteOutlined, CloudUploadOutlined,
   DatabaseOutlined, CheckCircleTwoTone, CloseCircleTwoTone, RiseOutlined, TagsOutlined,
-  CheckCircleOutlined,
+  CheckCircleOutlined, EyeOutlined, EditOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -974,7 +974,7 @@ const STATUS_CODES = [
   { value: 'DOO_CANCELED', label: 'Canceled (DOO_CANCELED)' },
 ];
 
-const SearchTab: React.FC<{ onOpen: (order: any) => void }> = ({ onOpen }) => {
+const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) => void }> = ({ onOpen, onEdit }) => {
   const [form] = Form.useForm();
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -1028,9 +1028,10 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void }> = ({ onOpen }) => {
     { title: 'Source Txn #', dataIndex: 'SourceTransactionNumber', width: 185, fixed: 'left',
       render: (v, r) => (
         <Space size={2} style={{ maxWidth: '100%' }}>
-          <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 12, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}
+          <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 12, maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis' }}
             title={v ?? r.OrderNumber} onClick={() => onOpen(r)}>{v ?? r.OrderNumber ?? '—'}</Button>
-          <Tooltip title="Open order"><Button size="small" type="text" icon={<ExportOutlined />} style={{ color: REDWOOD.info }} onClick={() => onOpen(r)} /></Tooltip>
+          <Tooltip title="View order"><Button size="small" type="text" icon={<EyeOutlined />} style={{ color: REDWOOD.info }} onClick={() => onOpen(r)} /></Tooltip>
+          <Tooltip title="Edit order (change order)"><Button size="small" type="text" icon={<EditOutlined />} style={{ color: '#B07700' }} onClick={() => onEdit(r)} /></Tooltip>
         </Space>
       ) },
     { title: 'Order', dataIndex: 'OrderNumber', width: 100, render: v => <Text strong style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
@@ -1060,7 +1061,7 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void }> = ({ onOpen }) => {
           <Button size="small" type="text" icon={<ProfileOutlined />} style={{ color: REDWOOD.info }} onClick={() => setDetail(r)} />
         </Tooltip>
       ) },
-  ]), [onOpen]);
+  ]), [onOpen, onEdit]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -1296,7 +1297,10 @@ interface OrderHeader {
   paymentTerms?: string; salesRep?: string; warehouse?: string; subinventory?: string; remarks?: string;
   custAccountId?: string; partyId?: string;
 }
-interface NewLine { key: string; itemNumber: string; description?: string; uom?: string; qty: number; unitPrice: number; costUnit?: number; taxCode?: string; taxPct?: number; taxAmount?: number; lot?: string; lots?: string[]; qoh?: number; ohLoading?: boolean; status?: string; statusCode?: string }
+interface NewLine { key: string; itemNumber: string; description?: string; uom?: string; qty: number; unitPrice: number; costUnit?: number; taxCode?: string; taxPct?: number; taxAmount?: number; lot?: string; lots?: string[]; qoh?: number; ohLoading?: boolean; status?: string; statusCode?: string;
+  // Edit mode: original DOO source line keys (preserved so a change order maps
+  // onto the existing fulfillment line) + a cancel marker (there is no DELETE).
+  srcLineId?: string; srcLineNumber?: string | number; srcScheduleNumber?: string | number; existing?: boolean; canceled?: boolean }
 
 const INV_ORGS_URL = `${FUSION_BASE}/inventoryOrganizations?onlyData=true&limit=500`;
 
@@ -1785,7 +1789,8 @@ const toSoDraft = (raw: any): SoDraft | null => {
   };
 };
 
-const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft }> = ({ header, initialDraft }) => {
+const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editOrder?: any }> = ({ header, initialDraft, editOrder }) => {
+  const editMode = !!editOrder;
   const [form] = Form.useForm();
   const [hdr, setHdr] = useState<OrderHeader>(initialDraft?.header ?? header);
   const bUnits = usePayablesBUs();
@@ -1846,6 +1851,36 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft }> = (
   }, [hdr.orderType, hdr.orderDate, orderSeq]);
 
   useEffect(() => { const h = initialDraft?.header ?? header; form.setFieldsValue(h as any); setHdr(h); /* init once */ }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Edit mode: pull the existing order's lines and map them into the grid,
+  // preserving each line's DOO source keys (for the change-order re-POST).
+  useEffect(() => {
+    if (!editOrder) return;
+    const key = editOrder.OrderKey ?? editOrder.HeaderId;
+    if (key != null) setCreatedOrderKey(String(key));
+    const href = editOrder?.links?.find((l: any) => l.name === 'lines')?.href
+      ?? (key != null ? `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(key)}/child/lines` : '');
+    if (!href) return;
+    (async () => {
+      try {
+        const rows = await fetchAllPages(href);
+        setLines(rows.map((l: any, i: number): NewLine => ({
+          key: `edit-${pf(l, ['FulfillLineId']) ?? pf(l, ['SourceTransactionLineId']) ?? i}`,
+          itemNumber: String(pf(l, ['ProductNumber', 'Product', 'ItemNumber']) ?? ''),
+          description: pf(l, ['ProductDescription', 'ItemDescription']),
+          uom: pf(l, ['OrderedUOMCode', 'OrderedUOM']),
+          qty: num(pf(l, ['OrderedQuantity'])),
+          unitPrice: num(pf(l, ['UnitSellingPrice', 'UnitListPrice'])),
+          status: pf(l, ['DisplayStatus', 'Status']),
+          statusCode: pf(l, ['StatusCode']),
+          srcLineId: pf(l, ['SourceTransactionLineId']) != null ? String(pf(l, ['SourceTransactionLineId'])) : undefined,
+          srcLineNumber: pf(l, ['SourceTransactionLineNumber']),
+          srcScheduleNumber: pf(l, ['SourceScheduleNumber', 'SourceTransactionScheduleId']),
+          existing: true,
+        })));
+      } catch (e: any) { message.error(`Failed to load order lines: ${e.message}`); }
+    })();
+  }, [editOrder]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Save / Load the full draft (header + all lines) as JSON ──
   const saveDraftJson = () => {
@@ -1910,7 +1945,14 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft }> = (
     if (m.taxPct != null) m.taxAmount = round2(num(m.qty) * num(m.unitPrice) * num(m.taxPct) / 100);
     return m;
   }));
-  const del = (key: string) => setLines(prev => prev.filter(l => l.key !== key));
+  // In edit mode, "removing" an existing line means cancelling it (a change order
+  // must still carry the line with CanceledFlag) — toggle it. Added lines and all
+  // create-mode lines are removed outright.
+  const del = (key: string) => setLines(prev => {
+    const l = prev.find(x => x.key === key);
+    if (editMode && l?.existing) return prev.map(x => x.key === key ? { ...x, canceled: !x.canceled } : x);
+    return prev.filter(x => x.key !== key);
+  });
 
   // "New Line" — append a blank, editable line the user fills via inline search.
   const addBlankLine = () => setLines(prev => [...prev, { key: `new-${Date.now()}-${prev.length}`, itemNumber: '', qty: 0, unitPrice: 0 }]);
@@ -1980,10 +2022,17 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft }> = (
   const buildPayload = () => {
     const dateIso = (hdr.orderDate ? dayjs(hdr.orderDate) : dayjs()).format('YYYY-MM-DD[T]00:00:00[Z]');
     const numOrStr = (v: any) => { const n = Number(v); return v != null && v !== '' && !Number.isNaN(n) ? n : v; };
+    // Edit = DOO change order: reuse the original source keys + bump the revision
+    // so Fusion updates the existing order instead of creating a new one.
+    const srcNumber = editMode ? editOrder.SourceTransactionNumber : orderNumber;
+    const srcSystem = editMode ? (editOrder.SourceTransactionSystem ?? 'OPS') : 'OPS';
+    const srcId     = editMode ? editOrder.SourceTransactionId : `APEX:${orderSeq}`;
+    const revision  = editMode ? (Number(editOrder.SourceTransactionRevisionNumber) || 1) + 1 : undefined;
     return {
-      SourceTransactionNumber: orderNumber,
-      SourceTransactionSystem: 'OPS',
-      SourceTransactionId: `APEX:${orderSeq}`,
+      SourceTransactionNumber: srcNumber,
+      SourceTransactionSystem: srcSystem,
+      SourceTransactionId: srcId,
+      ...(revision != null ? { SourceTransactionRevisionNumber: revision } : {}),
       TransactionalCurrencyCode: hdr.txnCurrency,
       ...(hdr.businessUnitId != null ? { BusinessUnitId: numOrStr(hdr.businessUnitId) } : {}),
       ...(hdr.accountNumber ? { BuyingPartyNumber: hdr.accountNumber } : {}),
@@ -2009,12 +2058,28 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft }> = (
       lines: lines.map((l, i) => {
         const qty = num(l.qty), price = num(l.unitPrice), tax = num(l.taxAmount);
         const ext = round2(price * qty), taxUnit = qty ? round2(tax / qty) : 0;
-        const lineId = orderSeq * 100 + (i + 1);
+        // Preserve the original source line id for existing lines (so a change
+        // order maps onto the right fulfillment line); mint one for added lines.
+        const lineId = l.srcLineId ?? (editMode ? `N${i + 1}` : String(orderSeq * 100 + (i + 1)));
+        const lineNum = l.srcLineNumber ?? (i + 1);
+        const schedNum = l.srcScheduleNumber ?? lineId;
+        // Canceled line → minimal change-order entry with CanceledFlag (no charges).
+        if (editMode && l.canceled) {
+          return {
+            SourceTransactionLineId: String(lineId),
+            SourceTransactionLineNumber: String(lineNum),
+            SourceScheduleNumber: String(schedNum),
+            ProductNumber: l.itemNumber,
+            OrderedQuantity: 0,
+            CanceledFlag: true,
+            CancelReasonCode: 'CUSTOMER_REQUEST',
+          };
+        }
         return {
-          SourceTransactionLineId: lineId,
-          SourceTransactionLineNumber: i + 1,
-          SourceTransactionScheduleId: lineId,
-          SourceScheduleNumber: lineId,
+          SourceTransactionLineId: String(lineId),
+          SourceTransactionLineNumber: lineNum,
+          SourceTransactionScheduleId: schedNum,
+          SourceScheduleNumber: schedNum,
           ...(l.uom ? { OrderedUOMCode: l.uom } : {}),
           OrderedQuantity: qty,
           ProductNumber: l.itemNumber,
@@ -2052,7 +2117,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft }> = (
       }),
     };
   };
-  const payloadStr = useMemo(() => JSON.stringify(buildPayload(), null, 2), [lines, hdr, orderNumber, orderSeq, effMeta]); // eslint-disable-line react-hooks/exhaustive-deps
+  const payloadStr = useMemo(() => JSON.stringify(buildPayload(), null, 2), [lines, hdr, orderNumber, orderSeq, effMeta, editOrder]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pull the created order's lines from Fusion and stamp each grid line's status.
   // Match by SourceTransactionLineNumber (what we sent), then fall back to item.
@@ -2096,12 +2161,12 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft }> = (
           delay: Math.random() * 1.2, size: 6 + Math.random() * 8,
         }));
         setConfetti(pieces);
-        setSuccessInfo({ orderNumber: data.OrderNumber, status: data.StatusCode ?? data.Status ?? 'Created' });
+        setSuccessInfo({ orderNumber: data.OrderNumber, status: data.StatusCode ?? data.Status ?? (editMode ? 'Updated' : 'Created') });
         setSaveError(null);
         setSuccessOpen(true);
         const orderKey = data.OrderKey ?? data.HeaderId ?? null;
         setCreatedOrderKey(orderKey != null ? String(orderKey) : null);
-        message.success(`Sales order ${data.OrderNumber} created`);
+        message.success(`Sales order ${data.OrderNumber} ${editMode ? 'updated' : 'created'}`);
         if (orderKey != null) refreshLineStatuses(String(orderKey));
       } else {
         // Failure — write the response + payload to the folder, show the error dialog.
@@ -2138,9 +2203,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft }> = (
     { title: 'UOM', dataIndex: 'uom', width: 70, render: v => v ?? '—' },
     { title: 'Cost', dataIndex: 'costUnit', width: 90, align: 'right', render: v => v == null ? '—' : <Text type="secondary" style={{ fontSize: 11 }}>{fmtAmount(v, ccy)}</Text> },
     { title: 'QoH', dataIndex: 'qoh', width: 80, align: 'right', render: (v, r) => r.ohLoading ? <Spin size="small" /> : (v == null ? <Text type="secondary" style={{ fontSize: 11 }}>—</Text> : <Text style={{ fontSize: 11.5, color: REDWOOD.info, fontVariantNumeric: 'tabular-nums' }}>{fmtQty(num(v))}</Text>) },
-    { title: 'Qty', dataIndex: 'qty', width: 90, align: 'right', render: (v, r) => <InputNumber size="small" min={0} max={r.qoh != null ? r.qoh : undefined} value={v}
+    { title: 'Qty', dataIndex: 'qty', width: 90, align: 'right', render: (v, r) => <InputNumber size="small" min={0} max={r.qoh != null ? r.qoh : undefined} value={v} disabled={!!r.canceled}
         onChange={n => { let q = Number(n) || 0; if (r.qoh != null && q > r.qoh) { q = r.qoh; message.warning(`Cannot order more than on-hand (${fmtQty(r.qoh)})`); } updLine(r.key, { qty: q }); }} style={{ width: 78 }} /> },
-    { title: 'Unit Price', dataIndex: 'unitPrice', width: 100, align: 'right', render: (v, r) => <InputNumber size="small" min={0} value={v} onChange={n => updLine(r.key, { unitPrice: Number(n) || 0 })} style={{ width: 88 }} /> },
+    { title: 'Unit Price', dataIndex: 'unitPrice', width: 100, align: 'right', render: (v, r) => <InputNumber size="small" min={0} value={v} disabled={!!r.canceled} onChange={n => updLine(r.key, { unitPrice: Number(n) || 0 })} style={{ width: 88 }} /> },
     { title: 'Line Total', width: 110, align: 'right', render: (_, r) => <Text strong style={{ color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(r.qty) * num(r.unitPrice), ccy)}</Text> },
     { title: 'Margin', width: 100, align: 'right', render: (_, r) => { const m = (num(r.unitPrice) - num(r.costUnit)) * num(r.qty); return <Text style={{ fontSize: 11.5, color: m < 0 ? REDWOOD.error : REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(m, ccy)}</Text>; } },
     { title: 'Tax Code', dataIndex: 'taxCode', width: 140, render: (v, r) => <Select size="small" showSearch allowClear style={{ width: 128 }} popupMatchSelectWidth={false} value={v || undefined} placeholder="—"
@@ -2149,8 +2214,14 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft }> = (
         onChange={val => { const opt = taxOptions.find(o => o.value === val); updLine(r.key, { taxCode: val, taxPct: opt ? opt.pct : undefined }); }} /> },
     { title: 'Tax', dataIndex: 'taxAmount', width: 120, align: 'right', render: (v, r) => <Space size={4}>{r.taxPct != null && <Tag color="gold" style={{ margin: 0, fontSize: 10 }}>{r.taxPct}%</Tag>}<Text style={{ fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(v), ccy)}</Text></Space> },
     { title: 'Net', width: 110, align: 'right', fixed: 'right', render: (_, r) => <Text strong style={{ color: REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(r.qty) * num(r.unitPrice) + num(r.taxAmount), ccy)}</Text> },
-    { title: 'Status', dataIndex: 'status', width: 130, fixed: 'right', render: (v, r) => v || r.statusCode ? statusTag(v, r.statusCode) : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
-    { title: '', width: 40, align: 'center', fixed: 'right', render: (_, r) => <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => del(r.key)} /> },
+    { title: 'Status', dataIndex: 'status', width: 130, fixed: 'right', render: (v, r) => r.canceled
+        ? <Tag color="error" style={{ fontSize: 11 }}>Canceled</Tag>
+        : (v || r.statusCode ? statusTag(v, r.statusCode) : <Text type="secondary" style={{ fontSize: 11 }}>—</Text>) },
+    { title: '', width: 40, align: 'center', fixed: 'right', render: (_, r) => (editMode && r.existing)
+        ? <Tooltip title={r.canceled ? 'Restore line' : 'Cancel line'}>
+            <Button size="small" type="text" danger={!r.canceled} icon={r.canceled ? <ReloadOutlined /> : <DeleteOutlined />} onClick={() => del(r.key)} />
+          </Tooltip>
+        : <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => del(r.key)} /> },
   ];
 
   // Margin tab — item code / description plus margin figures.
@@ -2182,9 +2253,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft }> = (
     <div style={{ padding: '4px 2px' }}>
       <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 12 }}
         styles={{ body: { paddingTop: 4 } }}
-        title={<Space><span style={{ width: 30, height: 30, borderRadius: 8, background: `linear-gradient(135deg, ${REDWOOD.primary}, ${REDWOOD.primary}bb)`, color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 15 }}><BankOutlined /></span>
-          <Text strong style={{ fontSize: 15 }}>New Sales Order</Text>
-          <Tag color="geekblue" style={{ fontVariantNumeric: 'tabular-nums' }}>{orderNumber}</Tag>
+        title={<Space><span style={{ width: 30, height: 30, borderRadius: 8, background: editMode ? 'linear-gradient(135deg, #B07700, #8a5e00)' : `linear-gradient(135deg, ${REDWOOD.primary}, ${REDWOOD.primary}bb)`, color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 15 }}>{editMode ? <EditOutlined /> : <BankOutlined />}</span>
+          <Text strong style={{ fontSize: 15 }}>{editMode ? 'Edit Sales Order' : 'New Sales Order'}</Text>
+          {editMode && <Tag color="warning" style={{ fontWeight: 700 }}>EDIT MODE · rev {(Number(editOrder?.SourceTransactionRevisionNumber) || 1) + 1}</Tag>}
+          <Tag color="geekblue" style={{ fontVariantNumeric: 'tabular-nums' }}>{editMode ? (editOrder?.OrderNumber ?? orderNumber) : orderNumber}</Tag>
           <Tag color="purple">{hdr.orderType}</Tag><Tag>{hdr.txnCurrency}</Tag>{hdr.customerName && <Tag color="blue">{hdr.customerName}</Tag>}</Space>}
         extra={<Space>
           {/* JSON Actions — save/load the full on-screen draft (header + lines) */}
@@ -2195,7 +2267,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft }> = (
             </Upload>
           </Space.Compact>
           <Button icon={<CloudUploadOutlined />} onClick={() => setPreview(true)}>Payload</Button>
-          <Button type="primary" icon={<SaveOutlined />} loading={posting} onClick={save} style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>Save Sales Order</Button>
+          <Button type="primary" icon={<SaveOutlined />} loading={posting} onClick={save}
+            style={{ background: editMode ? '#B07700' : REDWOOD.success, borderColor: editMode ? '#B07700' : REDWOOD.success }}>
+            {editMode ? 'Update Order' : 'Save Sales Order'}
+          </Button>
         </Space>}>
         <Form form={form} layout="horizontal" size="small" labelAlign="left" colon labelWrap
           labelCol={{ flex: '0 0 104px' }} wrapperCol={{ flex: '1 1 auto' }}
@@ -2407,7 +2482,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft }> = (
               <div style={{ fontSize: 64, lineHeight: 1, marginBottom: 12 }}>🎉</div>
               <CheckCircleOutlined style={{ fontSize: 48, color: REDWOOD.success, marginBottom: 10 }} />
               <div style={{ fontSize: 15, color: REDWOOD.neutral600, marginBottom: 6 }}>
-                Sales Order created successfully in Oracle Fusion
+                Sales Order {editMode ? 'updated' : 'created'} successfully in Oracle Fusion
               </div>
               <div style={{ fontSize: 28, fontWeight: 800, color: REDWOOD.info, letterSpacing: '0.04em', fontFamily: 'monospace', marginBottom: 10 }}>
                 {successInfo?.orderNumber}
@@ -2480,13 +2555,33 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft }> = (
 
 const SalesOrders: React.FC = () => {
   const [openTabs, setOpenTabs] = useState<{ key: string; order: any }[]>([]);
-  const [newTabs, setNewTabs] = useState<{ key: string; header: OrderHeader; draft?: SoDraft }[]>([]);
+  const [newTabs, setNewTabs] = useState<{ key: string; header: OrderHeader; draft?: SoDraft; editOrder?: any }[]>([]);
   const [registerOpen, setRegisterOpen] = useState(false);
   const [activeKey, setActiveKey] = useState('search');
 
   const openOrder = useCallback((order: any) => {
     const key = String(order.OrderKey ?? order.HeaderId ?? order.OrderNumber);
     setOpenTabs(prev => (prev.some(t => t.key === key) ? prev : [...prev, { key, order }]));
+    setActiveKey(key);
+  }, []);
+
+  // Open an existing order in the create page as an editable change order.
+  const openEdit = useCallback((order: any) => {
+    const key = `edit-${order.OrderKey ?? order.HeaderId ?? order.OrderNumber}`;
+    const header: OrderHeader = {
+      businessUnit: order.BusinessUnitName ?? undefined,
+      businessUnitId: order.BusinessUnitId ?? undefined,
+      txnCurrency: order.TransactionalCurrencyCode ?? order.AppliedCurrencyCode ?? 'AED',
+      baseCurrency: order.TransactionalCurrencyCode ?? 'AED',
+      orderType: order.TransactionTypeCode ?? order.TransactionType ?? undefined,
+      orderDate: order.TransactionOn ? dayjs(order.TransactionOn) : dayjs(),
+      customerName: order.BuyingPartyName ?? undefined,
+      accountNumber: order.BuyingPartyNumber ?? undefined,
+      paymentTerms: order.PaymentTerms ?? order.PaymentTermsCode ?? undefined,
+      warehouse: order.RequestedFulfillmentOrganizationCode ?? undefined,
+      rate: 1,
+    };
+    setNewTabs(prev => (prev.some(t => t.key === key) ? prev : [...prev, { key, header, editOrder: order }]));
     setActiveKey(key);
   }, []);
 
@@ -2520,13 +2615,15 @@ const SalesOrders: React.FC = () => {
       key: 'search',
       label: <span><SearchOutlined style={{ marginRight: 5 }} />Search</span>,
       closable: false,
-      children: <SearchTab onOpen={openOrder} />,
+      children: <SearchTab onOpen={openOrder} onEdit={openEdit} />,
     },
     ...newTabs.map((t, i) => ({
       key: t.key,
-      label: <span><PlusOutlined style={{ marginRight: 5 }} />New Order{newTabs.length > 1 ? ` ${i + 1}` : ''}</span>,
+      label: t.editOrder
+        ? <span><EditOutlined style={{ marginRight: 5, color: '#B07700' }} />Edit {t.editOrder.OrderNumber ?? ''}</span>
+        : <span><PlusOutlined style={{ marginRight: 5 }} />New Order{newTabs.filter(x => !x.editOrder).length > 1 ? ` ${i + 1}` : ''}</span>,
       closable: true,
-      children: <NewOrderTab header={t.header} initialDraft={t.draft} />,
+      children: <NewOrderTab header={t.header} initialDraft={t.draft} editOrder={t.editOrder} />,
     })),
     ...openTabs.map(t => ({
       key: t.key,
