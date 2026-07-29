@@ -238,13 +238,23 @@ const ShipmentOrderDialog: React.FC<{ row: any | null; onClose: () => void }> = 
             body: JSON.stringify(pickPayload),
           });
           const raw = await r.text();
-          let pretty = raw; try { pretty = JSON.stringify(JSON.parse(raw), null, 2); } catch { /* keep raw */ }
-          setReleaseResult({ ok: r.ok, status: r.status, body: pretty });
-          if (r.ok) { message.success('Pick wave released'); loadLines(); }
-          else message.error(`Pick release failed (HTTP ${r.status})`);
+          let data: any = null, pretty = raw;
+          try { data = JSON.parse(raw); pretty = JSON.stringify(data, null, 2); } catch { /* keep raw */ }
+          // pickWaves can return HTTP 200 with ReturnStatus 'E' — treat that as a failure.
+          const retStatus = String(data?.ReturnStatus ?? data?.returnStatus ?? '').toUpperCase();
+          const retMsg = data?.ReturnMessage ?? data?.returnMessage;
+          const ok = r.ok && retStatus !== 'E';
+          setReleaseResult({ ok, status: r.status, body: pretty });
+          if (ok) {
+            message.success('Pick Release Success');
+            loadLines();
+          } else {
+            const msg = retMsg || `Pick release failed (HTTP ${r.status})`;
+            Modal.error({ title: 'Pick Release Failed', width: 600, content: <div style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>{msg}</div> });
+          }
         } catch (e: any) {
           setReleaseResult({ ok: false, status: 0, body: `Network error: ${e.message}` });
-          message.error(e.message);
+          Modal.error({ title: 'Pick Release Failed', content: e.message });
         } finally { setReleasing(false); }
       },
     });
