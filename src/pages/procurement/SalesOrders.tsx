@@ -1433,6 +1433,75 @@ const rowOrgMatches = (row: any, org?: string) => { if (!org) return true; const
 const fusionHref = (href: string) => _isElectron ? href : href.replace(/^https?:\/\/[^/]+\/fscmRestApi\/resources\/[^/]+/, '/fusion-api');
 const onhQtyOf = (x: any) => num(pf(x, ['PrimaryQuantity', 'QuantityOnhand', 'OnhandQuantity', 'Quantity']));
 
+// Look up a customer in the ORDS customer master by account number and map the
+// same fields the create flow uses (custAccountId / partyId / bill+ship sites).
+const custMasterRefs = async (accountNumber?: string): Promise<Partial<OrderHeader>> => {
+  if (!accountNumber) return {};
+  try {
+    for (let offset = 0; offset < 4000; offset += 500) {
+      const r = await fetch(`${CUSTOMERS_URL}?limit=500&offset=${offset}`, { headers: { Accept: 'application/json' } });
+      if (!r.ok) break;
+      const d = await r.json();
+      const items: any[] = d.items ?? [];
+      const row = items.find(c => String(custAcct(c) ?? '') === String(accountNumber));
+      if (row) { const f = customerFill(row); return { custAccountId: f.custAccountId, partyId: f.partyId, billToSite: f.billToSite, shipToSite: f.shipToSite }; }
+      if (d.hasMore === false || items.length < 500) break;
+    }
+  } catch { /* ignore */ }
+  return {};
+};
+
+// Read the bill-to / ship-to ids off an existing order so a Copy / Edit / Return
+// can repopulate the header (Cust Account Id, Party Id, Bill-To / Ship-To sites)
+// and the create payload's billToCustomer / shipToCustomer. These values live in
+// the LINE-level billToCustomer / shipToCustomer child collections, not the header.
+const fetchOrderCustomerRefs = async (order: any, providedLines?: any[]): Promise<Partial<OrderHeader>> => {
+  let lines = providedLines;
+  if (!lines || !lines.length) {
+    const linesHref = order?.links?.find((l: any) => l.name === 'lines')?.href
+      ?? (order?.OrderKey ? `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(order.OrderKey)}/child/lines` : '');
+    if (linesHref) { try { lines = await fetchAllPages(fusionHref(linesHref)); } catch { lines = []; } }
+  }
+  const first = (lines ?? [])[0];
+  const out: Partial<OrderHeader> = {};
+  if (!first) return out;
+  const childHref = (match: string) => {
+    const link = (first.links ?? []).find((x: any) => x.rel === 'child' && norm(String(x.name)) === match);
+    return link?.href ? fusionHref(link.href) : '';
+  };
+  const getFirstRow = async (match: string) => {
+    const h = childHref(match);
+    if (!h) return null;
+    try {
+      const url = h + (h.includes('?') ? '&' : '?') + 'onlyData=true&limit=1';
+      const r = await fetch(url, { headers: FUSION_HDRS });
+      if (!r.ok) return null;
+      const d = await r.json();
+      return (d.items && d.items[0]) ?? null;
+    } catch { return null; }
+  };
+  const [bill, ship] = await Promise.all([getFirstRow('billtocustomer'), getFirstRow('shiptocustomer')]);
+  const acct   = pf(bill ?? {}, ['CustomerAccountId', 'AccountId', 'BillToCustomerId']) ?? pf(first, ['SoldToCustomerId', 'BillToCustomerId', 'CustomerAccountId']);
+  const bSite  = pf(bill ?? {}, ['SiteUseId', 'CustomerAccountSiteUseId', 'BillToSiteUseId']) ?? pf(first, ['BillToCustomerUseId', 'BillToSiteUseId']);
+  const sParty = pf(ship ?? {}, ['PartyId', 'ShipToPartyId']) ?? pf(first, ['ShipToPartyId', 'PartyId']);
+  const sSite  = pf(ship ?? {}, ['SiteId', 'PartySiteId', 'ShipToPartySiteId', 'SiteUseId']) ?? pf(first, ['ShipToPartySiteId', 'ShipToPartySiteUseId']);
+  if (acct != null) out.custAccountId = String(acct);
+  if (bSite != null) out.billToSite = String(bSite);
+  if (sParty != null) out.partyId = String(sParty);
+  if (sSite != null) out.shipToSite = String(sSite);
+  // Fill any gaps from the customer master (same source the create flow uses),
+  // matched by the order's account number.
+  if (out.custAccountId == null || out.partyId == null || out.billToSite == null || out.shipToSite == null) {
+    const acctNo = pf(order ?? {}, ['BuyingPartyNumber', 'SoldToPartyNumber']) ?? pf(first, ['BuyingPartyNumber', 'SoldToPartyNumber']);
+    const m = await custMasterRefs(acctNo != null ? String(acctNo) : undefined);
+    if (out.custAccountId == null && m.custAccountId != null) out.custAccountId = m.custAccountId;
+    if (out.partyId == null && m.partyId != null) out.partyId = m.partyId;
+    if (out.billToSite == null && m.billToSite != null) out.billToSite = m.billToSite;
+    if (out.shipToSite == null && m.shipToSite != null) out.shipToSite = m.shipToSite;
+  }
+  return out;
+};
+
 // Shared Fusion lookups (used by the picker modal and inline new-line search).
 async function fetchItemCostRows(item: string, org?: string) {
   const r = await fetch(`${LATEST_URL}/itemCosts?q=${encodeURIComponent(`ItemNumber=${item}`)}&onlyData=true&limit=500`, { headers: FUSION_HDRS });
@@ -3110,8 +3179,10 @@ const SalesOrders: React.FC = () => {
   }, []);
 
   // Open an existing order in the create page as an editable change order.
-  const openEdit = useCallback((order: any) => {
+  const openEdit = useCallback(async (order: any) => {
     const key = `edit-${order.OrderKey ?? order.HeaderId ?? order.OrderNumber}`;
+    setActiveKey(key);
+    if (newTabs.some(t => t.key === key)) return;
     const header: OrderHeader = {
       businessUnit: order.BusinessUnitName ?? undefined,
       businessUnitId: order.BusinessUnitId ?? undefined,
@@ -3125,9 +3196,12 @@ const SalesOrders: React.FC = () => {
       warehouse: order.RequestedFulfillmentOrganizationCode ?? undefined,
       rate: 1,
     };
-    setNewTabs(prev => (prev.some(t => t.key === key) ? prev : [...prev, { key, header, editOrder: order }]));
+    const hide = message.loading('Loading customer details…', 0);
+    const refs = await fetchOrderCustomerRefs(order);
+    hide();
+    setNewTabs(prev => (prev.some(t => t.key === key) ? prev : [...prev, { key, header: { ...header, ...refs }, editOrder: order }]));
     setActiveKey(key);
-  }, []);
+  }, [newTabs]);
 
   // Header carried over from an existing order (for copy / return).
   const headerFromOrder = (order: any): OrderHeader => ({
@@ -3145,19 +3219,25 @@ const SalesOrders: React.FC = () => {
   });
 
   // Copy an order → a brand-new draft order pre-filled with the same lines.
-  const openCopy = useCallback((order: any, lines: any[]) => {
+  const openCopy = useCallback(async (order: any, lines: any[]) => {
     const key = `copy-${order.OrderKey ?? order.HeaderId ?? order.OrderNumber}-${Date.now()}`;
-    const draft: SoDraft = { header: headerFromOrder(order), lines: (lines ?? []).map((l, i) => orderLineToNewLine(l, i)) };
+    const hide = message.loading('Copying order…', 0);
+    const refs = await fetchOrderCustomerRefs(order, lines);
+    hide();
+    const draft: SoDraft = { header: { ...headerFromOrder(order), ...refs }, lines: (lines ?? []).map((l, i) => orderLineToNewLine(l, i)) };
     setNewTabs(prev => [...prev, { key, header: draft.header, draft }]);
     setActiveKey(key);
     message.success(`Copied ${draft.lines.length} line(s) into a new order`);
   }, []);
 
   // Return an order (or selected lines) → a new RMA order referencing the original.
-  const openReturn = useCallback((order: any, lines: any[]) => {
+  const openReturn = useCallback(async (order: any, lines: any[]) => {
     const key = `return-${order.OrderKey ?? order.HeaderId ?? order.OrderNumber}-${Date.now()}`;
+    const hide = message.loading('Creating return…', 0);
+    const refs = await fetchOrderCustomerRefs(order, lines);
+    hide();
     const draft: SoDraft = {
-      header: headerFromOrder(order),
+      header: { ...headerFromOrder(order), ...refs },
       lines: (lines ?? []).map((l, i) => orderLineToNewLine(l, i, {
         asReturn: true, refOrderNumber: String(order.OrderNumber ?? order.SourceTransactionNumber ?? ''), refHeaderId: order.HeaderId ?? order.OrderKey,
       })),
