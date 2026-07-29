@@ -1899,9 +1899,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [orderSeq] = useState(() => Math.floor(Date.now() / 1000) % 100000);
   // Order number: {orderType}{YYYY}{MM}{seq} e.g. LSO01 → LSO012026071428.
   const orderNumber = useMemo(() => {
+    // Editing an existing order → keep its own number, never regenerate one.
+    if (editMode) return String(editOrder?.SourceTransactionNumber ?? editOrder?.OrderNumber ?? '');
     const d = hdr.orderDate ? dayjs(hdr.orderDate) : dayjs();
     return `${hdr.orderType || 'SO'}${d.format('YYYYMM')}${orderSeq}`;
-  }, [hdr.orderType, hdr.orderDate, orderSeq]);
+  }, [hdr.orderType, hdr.orderDate, orderSeq, editMode, editOrder]);
 
   useEffect(() => { const h = initialDraft?.header ?? header; form.setFieldsValue(h as any); setHdr(h); /* init once */ }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
