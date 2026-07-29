@@ -113,6 +113,42 @@ const dynamicColumns = (items: any[], exclude: string[] = []): ColumnsType<any> 
   }));
 };
 
+// ── Line EFF (extensible flexfield) discovery ────────────────────────────────
+// The DOO line EFF is exposed on the additionalInformation child via a nested
+// FulfillLineEffB<Context>privateVO array keyed by ContextCode, one field per
+// segment API name. Config is instance-specific, so discover it from the
+// describe metadata and map "lot"/"cost" to segments by name. Returns null when
+// nothing suitable is configured (then no EFF is sent — a safe no-op).
+interface EffMeta { category: string; voName: string; contextCode: string; lotSeg?: string; costSeg?: string; segs: { name: string; label: string }[] }
+const parseEffDescribe = (d: any): EffMeta | null => {
+  try {
+    let found: { voName: string; node: any } | null = null;
+    const visit = (o: any) => {
+      if (!o || typeof o !== 'object' || found) return;
+      for (const k of Object.keys(o)) {
+        if (/EffB.+privateVO$/i.test(k)) { found = { voName: k, node: (o as any)[k] }; return; }
+        visit((o as any)[k]);
+      }
+    };
+    visit(d);
+    if (!found) return null;
+    const node: any = found.node;
+    const attrObjs: any[] = node?.attributes ?? node?.Attributes ?? (Array.isArray(node) ? node : []);
+    const segs: { name: string; label: string }[] = [];
+    for (const a of attrObjs) {
+      const name = a?.name ?? a?.Name;
+      const label = a?.title ?? a?.label ?? a?.Title ?? name;
+      if (name && !/^(ContextCode|EffLineId|.*Id)$/i.test(String(name))) segs.push({ name: String(name), label: String(label) });
+    }
+    const ctxMatch = found.voName.match(/EffB(.+)privateVO$/i);
+    const contextCode = node?.contextCode ?? node?.ContextCode ?? (ctxMatch ? ctxMatch[1].replace(/_+/g, ' ').trim() : '');
+    const lotSeg = segs.find(s => /lot/i.test(s.name) || /lot/i.test(s.label))?.name;
+    const costSeg = segs.find(s => /cost/i.test(s.name) || /cost/i.test(s.label))?.name;
+    if (!lotSeg && !costSeg) return null;
+    return { category: 'DOO_FULFILL_LINES_ADD_INFO', voName: found.voName, contextCode, lotSeg, costSeg, segs };
+  } catch { return null; }
+};
+
 const statusTag = (s?: string, code?: string) => {
   if (!s && !code) return <Tag>—</Tag>;
   const up = String(code || s).toUpperCase();
@@ -1715,6 +1751,25 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
   const [successOpen, setSuccessOpen] = useState(false);
   const [createdOrderKey, setCreatedOrderKey] = useState<string | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
+  // Discovered line EFF (for saving lot number + item cost as additional info).
+  const [effMeta, setEffMeta] = useState<EffMeta | null>(null);
+  useEffect(() => {
+    const url = `${FUSION_BASE}/salesOrdersForOrderHub/describe?polymorphicType=${encodeURIComponent('salesOrdersForOrderHub.lines.additionalInformation:DOO_FULFILL_LINES_ADD_INFO')}`;
+    fetch(url, { headers: FUSION_HDRS })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(d => setEffMeta(parseEffDescribe(d)))
+      .catch(() => setEffMeta(null));
+  }, []);
+  // Build one additionalInformation EFF entry for a line, populating the
+  // discovered lot/cost segments. null when no line EFF context is configured.
+  const effLineChild = (l: NewLine) => {
+    if (!effMeta) return null;
+    const seg: Record<string, any> = { ContextCode: effMeta.contextCode };
+    if (effMeta.lotSeg && l.lot) seg[effMeta.lotSeg] = l.lot;
+    if (effMeta.costSeg && l.costUnit != null) seg[effMeta.costSeg] = l.costUnit;
+    if (Object.keys(seg).length <= 1) return null; // only ContextCode → nothing to send
+    return { CategoryCode: effMeta.category, [effMeta.voName]: [seg] };
+  };
   const [discAmt, setDiscAmt] = useState(0);
   const [expAmt, setExpAmt] = useState(0);
   const [lineSearch, setLineSearch] = useState<Record<string, { loading?: boolean; tooShort?: boolean; opts: any[] }>>({});
@@ -1889,6 +1944,12 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
           ...(hdr.subinventory ? { SubinventoryCode: hdr.subinventory } : {}),
           ...(hdr.paymentTerms ? { PaymentTerms: hdr.paymentTerms } : {}),
           TransactionCategoryCode: 'ORDER',
+          // Lot → order lots (lotSerials child). One entry per line carrying the
+          // chosen lot for the full ordered quantity.
+          ...(l.lot ? { lotSerials: [{ SourceLotSerialId: `${lineId}-L1`, LotNumber: l.lot, Quantity: qty }] } : {}),
+          // Line EFF (additionalInformation) — populated dynamically from the
+          // instance's configured line context/segments (see effLineChild).
+          ...(effLineChild(l) ? { additionalInformation: [effLineChild(l)] } : {}),
           charges: [{
             SourceChargeId: `C${i + 1}`,
             ApplyTo: 'Price',
@@ -1913,7 +1974,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
       }),
     };
   };
-  const payloadStr = useMemo(() => JSON.stringify(buildPayload(), null, 2), [lines, hdr, orderNumber, orderSeq]); // eslint-disable-line react-hooks/exhaustive-deps
+  const payloadStr = useMemo(() => JSON.stringify(buildPayload(), null, 2), [lines, hdr, orderNumber, orderSeq, effMeta]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pull the created order's lines from Fusion and stamp each grid line's status.
   // Match by SourceTransactionLineNumber (what we sent), then fall back to item.
@@ -2127,7 +2188,14 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
       </Card>
 
       <Card size="small" styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
-        title={<Space><UnorderedListOutlined style={{ color: REDWOOD.primary }} /><Text strong>Lines</Text>{lines.length > 0 && <Tag>{lines.length}</Tag>}</Space>}
+        title={<Space><UnorderedListOutlined style={{ color: REDWOOD.primary }} /><Text strong>Lines</Text>{lines.length > 0 && <Tag>{lines.length}</Tag>}
+          {effMeta
+            ? <Tooltip title={`Line EFF context "${effMeta.contextCode}" — lot → ${effMeta.lotSeg ?? '(none)'}, cost → ${effMeta.costSeg ?? '(none)'}`}>
+                <Tag color="purple" style={{ fontSize: 10 }}>EFF: lot {effMeta.lotSeg ? '✓' : '—'} · cost {effMeta.costSeg ? '✓' : '—'}</Tag>
+              </Tooltip>
+            : <Tooltip title="No line extensible flexfield context with lot/cost segments was auto-detected. Lot still saves via lotSerials; item cost stays in the grid only. Send me your EFF context code + segment API names to wire cost.">
+                <Tag color="default" style={{ fontSize: 10 }}>EFF: not detected</Tag>
+              </Tooltip>}</Space>}
         extra={<Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setPickOpen(true)} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Add Multiple Lines</Button>}>
         {<Tabs size="small" tabBarStyle={{ padding: '0 12px', marginBottom: 0 }}
             tabBarExtraContent={{ right: <Space size={6} style={{ paddingRight: 4 }}>
