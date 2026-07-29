@@ -2045,6 +2045,18 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     else { await applyItemToLine(key, item, costRows, lots[0]); }
   };
 
+  // Re-open the "Select a lot" popup for a line that already has an item.
+  const reopenLotPick = async (l: NewLine) => {
+    if (!l.itemNumber) { message.warning('Pick an item first'); return; }
+    upd(l.key, { ohLoading: true });
+    let costRows: any[] = [];
+    try { costRows = await fetchItemCostRows(l.itemNumber, hdr.warehouse); } catch { /* none */ }
+    upd(l.key, { ohLoading: false });
+    const lots = Array.from(new Set(costRows.map(c => parseVU(c.ValuationUnit).lot).filter(Boolean)));
+    if (!lots.length) { message.info(`No lots found for ${l.itemNumber}`); return; }
+    setLotPick({ key: l.key, item: l.itemNumber, rows: costRows, onh: {} });
+  };
+
   // "Check On-Hand" — refresh QoH for every populated line from Fusion.
   const checkAllOnhand = async () => {
     const withItems = lines.filter(l => l.itemNumber);
@@ -2332,7 +2344,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const cols: ColumnsType<NewLine> = [
     { title: 'Line', width: 50, align: 'center', fixed: 'left', render: (_, __, i) => <Tag color="blue">{i + 1}</Tag> },
     { title: 'Item', dataIndex: 'itemNumber', width: 210, fixed: 'left', render: (v, r) => v
-        ? <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text>
+        ? <Space size={4}>
+            <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text>
+            <Tooltip title="Select / change lot"><Button size="small" type="text" icon={<TagsOutlined />} style={{ color: REDWOOD.info }} onClick={() => reopenLotPick(r)} /></Tooltip>
+          </Space>
         : <Select showSearch size="small" style={{ width: 196 }} placeholder="Type 3+ chars — code / desc" value={undefined}
             filterOption={false} loading={lineSearch[r.key]?.loading} onSearch={t => onLineSearch(r.key, t)} onChange={val => pickInlineItem(r.key, val)}
             notFoundContent={lineSearch[r.key]?.loading ? <Spin size="small" /> : (lineSearch[r.key]?.tooShort ? 'Type at least 3 characters' : 'No match')}
