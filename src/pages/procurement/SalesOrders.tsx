@@ -1527,6 +1527,34 @@ async function fetchOnhand(item: string, invOrg: string, subinv?: string, lot?: 
   const qty = (matched.length ? matched : lotRows).reduce((s, x) => s + onhQtyOf(x), 0);
   return { qty, lots };
 }
+// Resolve the numeric ids + lot / subinventory / serials for a reservation from
+// on-hand balances (falls back to itemsV2 for the item id when there's no stock).
+async function fetchReserveDetail(item: string, invOrg: string, subinv?: string, lot?: string): Promise<{ inventoryItemId?: any; organizationId?: any; subinventoryCode?: string; lotNumber?: string; serials: string[] }> {
+  const out: { inventoryItemId?: any; organizationId?: any; subinventoryCode?: string; lotNumber?: string; serials: string[] } = { serials: [] };
+  let q = `OrganizationCode=${invOrg};ItemNumber=${item}`; if (subinv) q += `;SubinventoryCode=${subinv}`;
+  try {
+    const r = await fetch(`${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(q)}&limit=200`, { headers: FUSION_HDRS });
+    if (r.ok) {
+      const d = await r.json();
+      const rows: any[] = d.items ?? [];
+      const pick = (lot ? rows.find(x => String(pf(x, ['LotNumber']) ?? '') === String(lot)) : null) ?? rows.find(x => onhQtyOf(x) > 0) ?? rows[0];
+      if (pick) {
+        out.inventoryItemId = pf(pick, ['InventoryItemId']);
+        out.organizationId = pf(pick, ['OrganizationId']);
+        out.subinventoryCode = pf(pick, ['SubinventoryCode']);
+        out.lotNumber = pf(pick, ['LotNumber']);
+      }
+    }
+  } catch { /* fall through to itemsV2 */ }
+  if (out.inventoryItemId == null) {
+    try {
+      const items = await searchItems(item, invOrg);
+      const m = items.find(x => x.ItemNumber === item) ?? items[0];
+      if (m) { out.inventoryItemId = pf(m, ['InventoryItemId', 'ItemId']); if (out.organizationId == null) out.organizationId = pf(m, ['OrganizationId']); }
+    } catch { /* ignore */ }
+  }
+  return out;
+}
 // Type-ahead item search by code OR description (merged, deduped by ItemNumber).
 async function searchItems(text: string, org?: string): Promise<any[]> {
   const t = text.trim(); if (!t) return [];
@@ -2000,7 +2028,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   // Draft workflow (Save→Confirm→Reserve/Unreserve): busy flag + last action result.
   const [workBusy, setWorkBusy] = useState<null | 'confirm' | 'reserve' | 'unreserve'>(null);
   const [confirmed, setConfirmed] = useState(false);
-  // Reserve dialog: shows the exact endpoint + per-line JSON payloads before running.
+  // Reserve dialog — inventoryReservations (User Defined demand keyed by the
+  // order number). Shows the exact endpoint + per-line JSON body before running.
   const RESERVE_URL = `${FUSION_BASE}/inventoryReservations`;
   const [reserveOpen, setReserveOpen] = useState(false);
   const [reserveRows, setReserveRows] = useState<{ key: string; item: string; body: any; status?: number; ok?: boolean; errors?: string[]; response?: string }[]>([]);
@@ -2607,41 +2636,50 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     finally { setWorkBusy(null); }
   };
 
-  // Build the inventoryReservations POST body for one line.
-  const buildReserveBody = (l: NewLine, org: string, orderNo: string) => ({
-    DemandSourceType: 'Sales order',
-    DemandSourceHeaderNumber: String(orderNo),
-    ...(l.fulfillLineId != null ? { DemandSourceLineNumber: String(l.fulfillLineId) } : {}),
-    ItemNumber: l.itemNumber,
-    OrganizationCode: org,
-    ReservationQuantity: num(l.qty),
-    ...(l.uom ? { ReservationUOMCode: l.uom } : {}),
-    SupplySourceType: 'On hand',
-    ...(hdr.subinventory ? { SubinventoryCode: hdr.subinventory } : {}),
-    ...(l.lot ? { LotNumber: l.lot } : {}),
-  });
+  // The salesOrderActionRequests POST body for the current action + rows.
+  // Resolve the org id for the header warehouse from the loaded org list.
+  const warehouseOrgId = () => {
+    const o = orgRows.find((x: any) => pf(x, ['OrganizationCode']) === hdr.warehouse);
+    return o ? pf(o, ['OrganizationId']) : undefined;
+  };
 
-  // Open the Reserve dialog — shows the endpoint + the exact JSON per line
-  // BEFORE anything is posted, so the request is visible for debugging.
+  // Open the Reserve dialog — resolves each line's InventoryItemId / OrganizationId /
+  // subinventory / lot from on-hand, builds the inventoryReservations body
+  // (User Defined demand keyed by the order number), and shows it before posting.
   const openReserveDialog = async () => {
     const key = liveOrderKey();
     if (!key) { message.warning('Save the order first'); return; }
     const org = hdr.warehouse;
     if (!org) { message.warning('No warehouse (organization) on the header'); return; }
     setWorkBusy('reserve');
-    // Refresh statuses so each line has its FulfillLineId (the demand line).
-    await refreshLineStatuses(key);
-    setWorkBusy(null);
     const orderNo = liveOrderNumber();
-    setLines(prev => {
-      const targets = prev.filter(l => l.itemNumber && !l.canceled && num(l.qty) > 0);
-      setReserveRows(targets.map(l => ({ key: l.key, item: l.itemNumber, body: buildReserveBody(l, org, orderNo) })));
-      return prev;
-    });
-    setReserveOpen(true);
+    const orgId = warehouseOrgId();
+    try {
+      const targets = lines.filter(l => l.itemNumber && !l.canceled && num(l.qty) > 0);
+      const rows = await mapLimit(targets, 4, async (l) => {
+        const d = await fetchReserveDetail(l.itemNumber, org, hdr.subinventory, l.lot);
+        const lotNo = l.lot ?? d.lotNumber;
+        const body: any = {
+          ...(d.inventoryItemId != null ? { InventoryItemId: d.inventoryItemId } : {}),
+          ...((d.organizationId ?? orgId) != null ? { OrganizationId: d.organizationId ?? orgId } : {}),
+          DemandSourceType: 'User Defined',
+          DemandSourceName: String(orderNo),
+          SupplySourceType: 'On hand',
+          ...(l.uom ? { ReservationUOMCode: l.uom } : {}),
+          ...((d.subinventoryCode ?? hdr.subinventory) ? { SubinventoryCode: d.subinventoryCode ?? hdr.subinventory } : {}),
+          ReservationQuantity: num(l.qty),
+          ...(lotNo ? { LotNumber: lotNo } : {}),
+          ...(d.serials.length ? { serials: d.serials.map(s => ({ SerialNumber: s })) } : {}),
+        };
+        return { key: l.key, item: l.itemNumber, body };
+      });
+      setReserveRows(rows);
+      setReserveOpen(true);
+    } finally { setWorkBusy(null); }
   };
 
-  // Run the reservations shown in the dialog (POST each), recording results inline.
+  // Run the reservations shown in the dialog (one POST per line), recording
+  // each line's HTTP status + errors inline.
   const runReserve = async () => {
     setWorkBusy('reserve');
     const orderNo = liveOrderNumber();
@@ -2664,14 +2702,15 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     setWorkBusy(null);
   };
 
-  // Unreserve — find reservations for this order number and delete each.
+  // Unreserve — find the reservations created for this order (DemandSourceName =
+  // order number) and delete each.
   const unreserveStock = async () => {
     const orderNo = liveOrderNumber();
     if (!orderNo) { message.warning('Save the order first'); return; }
     setWorkBusy('unreserve');
     try {
-      const q = encodeURIComponent(`DemandSourceHeaderNumber='${orderNo}'`);
-      const listUrl = `${FUSION_BASE}/inventoryReservations?q=${q}&onlyData=true&limit=500`;
+      const q = encodeURIComponent(`DemandSourceName='${orderNo}'`);
+      const listUrl = `${RESERVE_URL}?q=${q}&onlyData=true&limit=500`;
       const lr = await fetch(listUrl, { headers: FUSION_HDRS });
       const ld = lr.ok ? await lr.json() : { items: [] };
       const items: any[] = ld.items ?? [];
@@ -2681,7 +2720,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         const rid = pf(it, ['ReservationId']);
         if (rid == null) continue;
         try {
-          const dr = await fetch(`${FUSION_BASE}/inventoryReservations/${encodeURIComponent(String(rid))}`, { method: 'DELETE', headers: FUSION_HDRS });
+          const dr = await fetch(`${RESERVE_URL}/${encodeURIComponent(String(rid))}`, { method: 'DELETE', headers: FUSION_HDRS });
           results.push({ reservationId: rid, item: pf(it, ['ItemNumber']), status: dr.status, ok: dr.ok });
         } catch (e: any) { results.push({ reservationId: rid, status: 0, ok: false, error: e?.message }); }
       }
@@ -2689,7 +2728,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       saveOrderLog(`order-UNRESERVE-${orderNo}-${Date.now()}.json`, JSON.stringify(results, null, 2));
       const okN = results.filter(x => x.ok).length, bad = results.length - okN;
       if (bad === 0) message.success(`Unreserved ${okN} reservation(s) for order ${orderNo}`);
-      else Modal.error({ title: `Unreserve: ${okN} ok, ${bad} failed`, content: <pre style={{ maxHeight: 300, overflow: 'auto', fontSize: 12 }}>{JSON.stringify(results, null, 2)}</pre>, width: 620 });
+      else Modal.error({ title: `Unreserve: ${okN} ok, ${bad} failed`, width: 620, content: <pre style={{ maxHeight: 300, overflow: 'auto', fontSize: 12 }}>{JSON.stringify(results, null, 2)}</pre> });
     } catch (e: any) { message.error(e?.message || 'Unreserve failed'); }
     finally { setWorkBusy(null); }
   };
@@ -3180,8 +3219,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         </div>
       </Modal>
 
-      {/* Reserve dialog — shows the endpoint + the exact JSON payload per line */}
-      <Modal open={reserveOpen} onCancel={() => setReserveOpen(false)} maskClosable={false} width={780}
+      {/* Reserve dialog — shows the inventoryReservations endpoint + per-line JSON body */}
+      <Modal open={reserveOpen} onCancel={() => setReserveOpen(false)} maskClosable={false} width={800}
         title={<Space><SafetyCertificateOutlined style={{ color: REDWOOD.primary }} /> Reserve stock — order {liveOrderNumber()}</Space>}
         footer={<Space>
           <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(reserveRows.map(r => `POST ${RESERVE_URL}\n${JSON.stringify(r.body, null, 2)}`).join('\n\n')); message.success('Copied'); }}>Copy all</Button>
@@ -3191,16 +3230,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         </Space>}>
         <div style={{ fontSize: 12, marginBottom: 10 }}>
           <Tag color="green">POST</Tag><Text style={{ fontFamily: 'monospace', fontSize: 11.5, color: REDWOOD.info, wordBreak: 'break-all' }}>{RESERVE_URL}</Text>
-          <div style={{ marginTop: 6 }}><Text type="secondary" style={{ fontSize: 11.5 }}>One POST per line. <b>DemandSourceHeaderNumber</b> = order number <Tag style={{ marginInline: 4 }}>{liveOrderNumber()}</Tag>, <b>DemandSourceLineNumber</b> = the line's FulfillLineId.</Text></div>
+          <div style={{ marginTop: 6 }}><Text type="secondary" style={{ fontSize: 11.5 }}>One POST per line. <b>DemandSourceType</b> <Tag style={{ marginInline: 3 }}>User Defined</Tag> · <b>DemandSourceName</b> = order number <Tag style={{ marginInline: 3 }}>{liveOrderNumber()}</Tag>. Item/org resolved to <b>InventoryItemId</b> / <b>OrganizationId</b>; <b>LotNumber</b> included when the line has a lot.</Text></div>
         </div>
         {reserveRows.length === 0
           ? <Empty description="No reservable lines" style={{ padding: 20 }} />
-          : <div style={{ maxHeight: 420, overflow: 'auto' }}>
+          : <div style={{ maxHeight: 440, overflow: 'auto' }}>
               {reserveRows.map((r, i) => (
                 <div key={r.key} style={{ marginBottom: 12, border: `1px solid ${r.ok === false ? REDWOOD.error : r.ok ? REDWOOD.success : REDWOOD.neutral200}`, borderRadius: 6, overflow: 'hidden' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px', background: REDWOOD.neutral100 }}>
                     <Tag color="blue">{i + 1}</Tag><Text strong style={{ fontSize: 12, color: REDWOOD.info }}>{r.item}</Text>
-                    {r.body.DemandSourceLineNumber == null && <Tag color="warning" style={{ fontSize: 10 }}>no FulfillLineId</Tag>}
+                    {r.body.InventoryItemId == null && <Tag color="warning" style={{ fontSize: 10 }}>no InventoryItemId (no on-hand?)</Tag>}
                     <span style={{ marginLeft: 'auto' }}>
                       {r.ok === true && <Tag color="success">HTTP {r.status} · reserved</Tag>}
                       {r.ok === false && <Tag color="error">HTTP {r.status || '—'} · failed</Tag>}
