@@ -1944,9 +1944,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
           ...(hdr.subinventory ? { SubinventoryCode: hdr.subinventory } : {}),
           ...(hdr.paymentTerms ? { PaymentTerms: hdr.paymentTerms } : {}),
           TransactionCategoryCode: 'ORDER',
-          // Lot → order lots (lotSerials child). One entry per line carrying the
-          // chosen lot for the full ordered quantity.
-          ...(l.lot ? { lotSerials: [{ SourceLotSerialId: `${lineId}-L1`, LotNumber: l.lot, Quantity: qty }] } : {}),
+          // NOTE: lotSerials is NOT sent on standard outbound order lines — Fusion
+          // rejects it (FOM-4515328) because a shippable ORDER line has no inventory
+          // transaction; lot/serial is assigned downstream at pick/ship confirm.
+          // The lot is instead carried in the line EFF below (additionalInformation).
           // Line EFF (additionalInformation) — populated dynamically from the
           // instance's configured line context/segments (see effLineChild).
           ...(effLineChild(l) ? { additionalInformation: [effLineChild(l)] } : {}),
@@ -2193,7 +2194,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
             ? <Tooltip title={`Line EFF context "${effMeta.contextCode}" — lot → ${effMeta.lotSeg ?? '(none)'}, cost → ${effMeta.costSeg ?? '(none)'}`}>
                 <Tag color="purple" style={{ fontSize: 10 }}>EFF: lot {effMeta.lotSeg ? '✓' : '—'} · cost {effMeta.costSeg ? '✓' : '—'}</Tag>
               </Tooltip>
-            : <Tooltip title="No line extensible flexfield context with lot/cost segments was auto-detected. Lot still saves via lotSerials; item cost stays in the grid only. Send me your EFF context code + segment API names to wire cost.">
+            : <Tooltip title="No line extensible flexfield context with lot/cost segments was auto-detected, so lot number and item cost are kept in the grid only (not sent to Fusion). Lot/serial on a standard sales order is assigned at pick/ship confirm. Send me your EFF context code + segment API names to save them.">
                 <Tag color="default" style={{ fontSize: 10 }}>EFF: not detected</Tag>
               </Tooltip>}</Space>}
         extra={<Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setPickOpen(true)} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Add Multiple Lines</Button>}>
