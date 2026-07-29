@@ -11,7 +11,7 @@ import {
   ReconciliationOutlined, PlusOutlined, SaveOutlined, DeleteOutlined, CloudUploadOutlined,
   DatabaseOutlined, CheckCircleTwoTone, CloseCircleTwoTone, RiseOutlined, TagsOutlined,
   CheckCircleOutlined, EyeOutlined, EditOutlined,
-  SafetyCertificateOutlined, StopOutlined, SendOutlined,
+  SafetyCertificateOutlined, StopOutlined, SendOutlined, RollbackOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -635,7 +635,7 @@ const ARInvoiceDialog: React.FC<{ txn: string | null; onClose: () => void }> = (
 };
 
 // ── Order view (header + lines) shown in its own tab ─────────────────────────
-const OrderView: React.FC<{ order: any }> = ({ order }) => {
+const OrderView: React.FC<{ order: any; onCopy?: (order: any, lines: any[]) => void; onReturn?: (order: any, lines: any[]) => void }> = ({ order, onCopy, onReturn }) => {
   const linesHref = order?.links?.find((l: any) => l.name === 'lines')?.href
     ?? (order?.OrderKey ? `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(order.OrderKey)}/child/lines` : '');
 
@@ -646,7 +646,15 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
   const [hdrOpen, setHdrOpen] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [arTxn, setArTxn] = useState<string | null>(null);
+  const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const totals = useTotals(order, true);
+  const lineKey = (r: any, i: number) => `${r.LineId ?? r.FulfillLineId ?? i}`;
+  const selectedLines = () => lines.filter((l, i) => selectedKeys.includes(lineKey(l, i)));
+  const doReturn = (all: boolean) => {
+    const picked = all ? lines : selectedLines();
+    if (!picked.length) { message.warning('Select at least one line to return'); return; }
+    onReturn?.(order, picked);
+  };
 
   // Distinct line-level child collections across all lines (lotSerials, …).
   const childNames = useMemo(() => {
@@ -843,6 +851,16 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
         extra={<Space>
           <Button size="small" type="primary" icon={<PrinterOutlined />} onClick={printOrder}
             style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Print Order</Button>
+          <Tooltip title="Copy this order into a new draft order">
+            <Button size="small" icon={<CopyOutlined />} disabled={!lines.length} onClick={() => onCopy?.(order, lines)}
+              style={lines.length ? { color: REDWOOD.info, borderColor: REDWOOD.info } : undefined}>Copy Order</Button>
+          </Tooltip>
+          <Tooltip title={selectedKeys.length ? `Return the ${selectedKeys.length} selected line(s)` : 'Return the whole order (select lines below to return only some)'}>
+            <Button size="small" icon={<RollbackOutlined />} disabled={!lines.length} onClick={() => doReturn(selectedKeys.length === 0)}
+              style={lines.length ? { color: '#B12A5B', borderColor: '#B12A5B' } : undefined}>
+              {selectedKeys.length ? `Return ${selectedKeys.length} Line(s)` : 'Return Order'}
+            </Button>
+          </Tooltip>
           <Button size="small" icon={<ProfileOutlined />} onClick={() => setHdrOpen(true)}>All fields</Button>
         </Space>}>
         <Row gutter={[16, 12]}>
@@ -907,7 +925,8 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
                 {loading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
                   : error ? <div style={{ color: REDWOOD.error, fontSize: 12, padding: 16 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div>
                   : lines.length === 0 ? <Empty description="No lines" style={{ padding: 30 }} />
-                  : <Table size="small" columns={lineCols} dataSource={lines} rowKey={(r, i) => `${r.LineId ?? r.FulfillLineId ?? i}`}
+                  : <Table size="small" columns={lineCols} dataSource={lines} rowKey={lineKey}
+                      rowSelection={{ selectedRowKeys: selectedKeys, onChange: setSelectedKeys, columnWidth: 40, fixed: true }}
                       pagination={lines.length > 25 ? { pageSize: 25, size: 'small' } : false} scroll={{ x: 'max-content', y: 420 }}
                       summary={(data) => {
                         const ordCcy = order.TransactionalCurrencyCode ?? order.AppliedCurrencyCode ?? order.TransactionalCurrencyName;
@@ -916,12 +935,13 @@ const OrderView: React.FC<{ order: any }> = ({ order }) => {
                         return (
                           <Table.Summary fixed>
                             <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-                              <Table.Summary.Cell index={0} colSpan={3}><Text strong>Total ({data.length} line{data.length !== 1 ? 's' : ''})</Text></Table.Summary.Cell>
-                              <Table.Summary.Cell index={3} align="right"><Text strong>{fmtQty(totQty)}</Text></Table.Summary.Cell>
-                              <Table.Summary.Cell index={4} />
+                              <Table.Summary.Cell index={0} />
+                              <Table.Summary.Cell index={1} colSpan={3}><Text strong>Total ({data.length} line{data.length !== 1 ? 's' : ''})</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={4} align="right"><Text strong>{fmtQty(totQty)}</Text></Table.Summary.Cell>
                               <Table.Summary.Cell index={5} />
-                              <Table.Summary.Cell index={6} align="right"><Text strong style={{ color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(totAmt, ordCcy)}</Text></Table.Summary.Cell>
-                              <Table.Summary.Cell index={7} colSpan={Math.max(1, lineCols.length - 7)} />
+                              <Table.Summary.Cell index={6} />
+                              <Table.Summary.Cell index={7} align="right"><Text strong style={{ color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(totAmt, ordCcy)}</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={8} colSpan={Math.max(1, lineCols.length - 7)} />
                             </Table.Summary.Row>
                           </Table.Summary>
                         );
@@ -1316,6 +1336,10 @@ interface NewLine { key: string; itemNumber: string; description?: string; uom?:
   srcLineId?: string; srcLineNumber?: string | number; srcScheduleNumber?: string | number; existing?: boolean; canceled?: boolean;
   // Fusion system ids captured on edit load (to target PATCH/DELETE on the line).
   fulfillLineId?: string | number; lineHref?: string; origQty?: number; origUnitPrice?: number; cancelSaved?: boolean;
+  // Return (RMA) line: references the original order line being returned.
+  returnLine?: boolean; returnReason?: string; maxQty?: number;
+  refHeaderId?: string | number; refLineId?: string | number; refFulfillLineId?: string | number;
+  refOrderNumber?: string; refLineNumber?: string | number;
   error?: string }
 
 const INV_ORGS_URL = `${FUSION_BASE}/inventoryOrganizations?onlyData=true&limit=500`;
@@ -1833,7 +1857,42 @@ const toSoDraft = (raw: any): SoDraft | null => {
   };
 };
 
-const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editOrder?: any }> = ({ header, initialDraft, editOrder }) => {
+// Return reasons (Fusion DOO_RETURN_REASON lookup — loaded live at runtime;
+// this is the fallback list). ORA_QTY_CHANGE is a confirmed seeded code.
+const RETURN_REASONS = [
+  { value: 'ORA_QTY_CHANGE', label: 'Quantity change' },
+  { value: 'ORA_DAMAGED', label: 'Damaged item' },
+  { value: 'ORA_DEFECTIVE', label: 'Defective item' },
+  { value: 'ORA_WRONG_ITEM', label: 'Wrong item shipped' },
+  { value: 'ORA_NOT_REQUIRED', label: 'No longer required' },
+];
+const DEFAULT_RETURN_REASON = 'ORA_QTY_CHANGE';
+const RETURN_REASON_LOV = `${FUSION_BASE}/standardLookupsLOV?finder=LookupTypeFinder;LookupType=DOO_RETURN_REASON&onlyData=true&limit=200`;
+
+// Map a Fusion order line (…/child/lines) to a NewLine for copy or return.
+const orderLineToNewLine = (l: any, i: number, opts: { asReturn?: boolean; refOrderNumber?: string; refHeaderId?: any } = {}): NewLine => {
+  const qty = num(l.OrderedQuantity);
+  const price = num(l.UnitSellingPrice ?? l.UnitListPrice ?? l.UnitPrice);
+  const base: NewLine = {
+    key: `${opts.asReturn ? 'r' : 'c'}${i}-${Math.random().toString(36).slice(2, 8)}`,
+    itemNumber: l.ProductNumber ?? l.ItemNumber ?? '',
+    description: l.ProductDescription ?? l.ItemDescription ?? l.ProductDescriptionText,
+    uom: l.OrderedUOMCode ?? l.OrderedUOM,
+    qty, unitPrice: price,
+  };
+  if (!opts.asReturn) return base;
+  return {
+    ...base,
+    returnLine: true, maxQty: qty, returnReason: DEFAULT_RETURN_REASON,
+    refOrderNumber: opts.refOrderNumber,
+    refHeaderId: opts.refHeaderId ?? l.HeaderId,
+    refLineId: l.LineId ?? l.SourceTransactionLineId,
+    refFulfillLineId: l.FulfillLineId,
+    refLineNumber: l.DisplayLineNumber ?? l.LineNumber ?? (i + 1),
+  };
+};
+
+const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editOrder?: any; returnMode?: boolean }> = ({ header, initialDraft, editOrder, returnMode }) => {
   const editMode = !!editOrder;
   const [form] = Form.useForm();
   const [hdr, setHdr] = useState<OrderHeader>(initialDraft?.header ?? header);
@@ -1872,6 +1931,18 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   // Draft workflow (Save→Confirm→Reserve/Unreserve): busy flag + last action result.
   const [workBusy, setWorkBusy] = useState<null | 'confirm' | 'reserve' | 'unreserve'>(null);
   const [confirmed, setConfirmed] = useState(false);
+  // Return (RMA) mode: live DOO_RETURN_REASON codes (fallback = static list).
+  const [returnReasonOpts, setReturnReasonOpts] = useState(RETURN_REASONS);
+  useEffect(() => {
+    if (!returnMode) return;
+    fetch(RETURN_REASON_LOV, { headers: FUSION_HDRS })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(d => {
+        const opts = (d.items ?? []).map((it: any) => ({ value: it.LookupCode, label: it.Meaning ?? it.LookupCode })).filter((o: any) => o.value);
+        if (opts.length) setReturnReasonOpts(opts);
+      })
+      .catch(() => { /* keep fallback list */ });
+  }, [returnMode]);
   // Discovered line EFF (for saving lot number + item cost as additional info).
   const [effMeta, setEffMeta] = useState<EffMeta | null>(null);
   useEffect(() => {
@@ -2186,12 +2257,20 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       ...(l.uom ? { OrderedUOMCode: l.uom } : {}),
       OrderedQuantity: qty,
       ProductNumber: l.itemNumber,
-      ...(hdr.subinventory ? { SubinventoryCode: hdr.subinventory } : {}),
+      ...(hdr.subinventory && !(returnMode && l.returnLine) ? { SubinventoryCode: hdr.subinventory } : {}),
       ...(hdr.paymentTerms ? { PaymentTerms: hdr.paymentTerms } : {}),
-      TransactionCategoryCode: 'ORDER',
+      TransactionCategoryCode: (returnMode && l.returnLine) ? 'RETURN' : 'ORDER',
+      // Return (RMA) line — LineCategoryCode RETURN + reference the original
+      // fulfillment line via the originalOrderReference child (referenced return;
+      // Oracle derives price from the reference, so no charges are sent).
+      ...((returnMode && l.returnLine) ? {
+        LineCategoryCode: 'RETURN',
+        ReturnReasonCode: l.returnReason || DEFAULT_RETURN_REASON,
+        ...(l.refFulfillLineId != null ? { originalOrderReference: [{ OriginalFulfillLineId: num(l.refFulfillLineId) }] } : {}),
+      } : {}),
       // lotSerials is NOT sent on outbound lines (FOM-4515328); lot goes to the EFF.
       ...(effLineChild(l) ? { additionalInformation: [effLineChild(l)] } : {}),
-      charges: [{
+      ...((returnMode && l.returnLine) ? {} : { charges: [{
         SourceChargeId: `C${i + 1}`,
         ApplyTo: 'Price',
         PricedQuantity: qty,
@@ -2210,7 +2289,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           { SourceChargeComponentId: `C${i + 1}-CC3`, PriceElementCode: 'QP_EXCLUSIVE_TAX', PriceElementUsageCode: 'EXCLUSIVE_TAX', HeaderCurrencyUnitPrice: taxUnit, HeaderCurrencyExtendedAmount: tax, RollupFlag: 'false', SequenceNumber: 3 },
           { SourceChargeComponentId: `C${i + 1}-CC4`, PriceElementCode: 'QP_NET_PRICE_PLUS_TAX', PriceElementUsageCode: 'NET_PRICE_PLUS_TAX', HeaderCurrencyUnitPrice: round2(price + taxUnit), HeaderCurrencyExtendedAmount: round2(ext + tax), RollupFlag: 'false', SequenceNumber: 4 },
         ],
-      }],
+      }] }),
     };
   };
   // Minimal change-order entry that cancels an existing line.
@@ -2547,9 +2626,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     { title: 'UOM', dataIndex: 'uom', width: 70, render: v => v ?? '—' },
     { title: 'Cost', dataIndex: 'costUnit', width: 90, align: 'right', render: v => v == null ? '—' : <Text type="secondary" style={{ fontSize: 11 }}>{fmtAmount(v, ccy)}</Text> },
     { title: 'QoH', dataIndex: 'qoh', width: 80, align: 'right', render: (v, r) => r.ohLoading ? <Spin size="small" /> : (v == null ? <Text type="secondary" style={{ fontSize: 11 }}>—</Text> : <Text style={{ fontSize: 11.5, color: REDWOOD.info, fontVariantNumeric: 'tabular-nums' }}>{fmtQty(num(v))}</Text>) },
-    { title: 'Qty', dataIndex: 'qty', width: 90, align: 'right', render: (v, r) => <InputNumber size="small" min={0} max={r.qoh != null ? r.qoh : undefined} value={v} disabled={!!r.canceled || (editMode && !!r.existing)}
-        onChange={n => { let q = Number(n) || 0; if (r.qoh != null && q > r.qoh) { q = r.qoh; message.warning(`Cannot order more than on-hand (${fmtQty(r.qoh)})`); } updLine(r.key, { qty: q }); }} style={{ width: 78 }} /> },
-    { title: 'Unit Price', dataIndex: 'unitPrice', width: 100, align: 'right', render: (v, r) => <InputNumber size="small" min={0} value={v} disabled={!!r.canceled || (editMode && !!r.existing)} onChange={n => updLine(r.key, { unitPrice: Number(n) || 0 })} style={{ width: 88 }} /> },
+    { title: returnMode ? 'Return Qty' : 'Qty', dataIndex: 'qty', width: returnMode ? 100 : 90, align: 'right', render: (v, r) => <InputNumber size="small" min={0} max={returnMode && r.maxQty != null ? r.maxQty : (r.qoh != null ? r.qoh : undefined)} value={v} disabled={!!r.canceled || (editMode && !!r.existing)}
+        onChange={n => { let q = Number(n) || 0; if (returnMode && r.maxQty != null && q > r.maxQty) { q = r.maxQty; message.warning(`Cannot return more than ordered (${fmtQty(r.maxQty)})`); } else if (!returnMode && r.qoh != null && q > r.qoh) { q = r.qoh; message.warning(`Cannot order more than on-hand (${fmtQty(r.qoh)})`); } updLine(r.key, { qty: q }); }} style={{ width: returnMode ? 88 : 78 }} /> },
+    ...(returnMode ? [{ title: 'Return Reason', dataIndex: 'returnReason', width: 190, render: (v: any, r: NewLine) => <Select size="small" showSearch style={{ width: 178 }} value={v || undefined} placeholder="Reason" popupMatchSelectWidth={false}
+        options={returnReasonOpts} optionFilterProp="label" onChange={val => updLine(r.key, { returnReason: val })} /> } as any] : []),
+    { title: 'Unit Price', dataIndex: 'unitPrice', width: 100, align: 'right', render: (v, r) => <InputNumber size="small" min={0} value={v} disabled={!!r.canceled || (editMode && !!r.existing) || returnMode} onChange={n => updLine(r.key, { unitPrice: Number(n) || 0 })} style={{ width: 88 }} /> },
     { title: 'Line Total', width: 110, align: 'right', render: (_, r) => <Text strong style={{ color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(r.qty) * num(r.unitPrice), ccy)}</Text> },
     { title: 'Margin', width: 100, align: 'right', render: (_, r) => { const m = (num(r.unitPrice) - num(r.costUnit)) * num(r.qty); return <Text style={{ fontSize: 11.5, color: m < 0 ? REDWOOD.error : REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(m, ccy)}</Text>; } },
     { title: 'Tax Code', dataIndex: 'taxCode', width: 140, render: (v, r) => <Select size="small" showSearch allowClear style={{ width: 128 }} popupMatchSelectWidth={false} value={v || undefined} placeholder="—"
@@ -2625,9 +2706,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     <div style={{ padding: '4px 2px' }}>
       <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 12 }}
         styles={{ body: { paddingTop: 4 } }}
-        title={<Space><span style={{ width: 30, height: 30, borderRadius: 8, background: editMode ? 'linear-gradient(135deg, #B07700, #8a5e00)' : `linear-gradient(135deg, ${REDWOOD.primary}, ${REDWOOD.primary}bb)`, color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 15 }}>{editMode ? <EditOutlined /> : <BankOutlined />}</span>
-          <Text strong style={{ fontSize: 15 }}>{editMode ? 'Edit Sales Order' : 'New Sales Order'}</Text>
+        title={<Space><span style={{ width: 30, height: 30, borderRadius: 8, background: editMode ? 'linear-gradient(135deg, #B07700, #8a5e00)' : returnMode ? 'linear-gradient(135deg, #B12A5B, #7d1c3f)' : `linear-gradient(135deg, ${REDWOOD.primary}, ${REDWOOD.primary}bb)`, color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 15 }}>{editMode ? <EditOutlined /> : returnMode ? <RollbackOutlined /> : <BankOutlined />}</span>
+          <Text strong style={{ fontSize: 15 }}>{editMode ? 'Edit Sales Order' : returnMode ? 'Return Order (RMA)' : 'New Sales Order'}</Text>
           {editMode && <Tag color="warning" style={{ fontWeight: 700 }}>EDIT MODE · rev {(Number(editOrder?.SourceTransactionRevisionNumber) || 1) + 1}</Tag>}
+          {returnMode && <Tag color="magenta" style={{ fontWeight: 700 }}>RETURN · ref {lines[0]?.refOrderNumber ?? '—'}</Tag>}
           <Tag color="geekblue" style={{ fontVariantNumeric: 'tabular-nums' }}>{editMode ? (editOrder?.OrderNumber ?? orderNumber) : orderNumber}</Tag>
           <Tag color="purple">{hdr.orderType}</Tag><Tag>{hdr.txnCurrency}</Tag>{hdr.customerName && <Tag color="blue">{hdr.customerName}</Tag>}</Space>}
         extra={<Space>
@@ -2641,7 +2723,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           <Button icon={<CloudUploadOutlined />} onClick={() => setPreview(true)}>Payload</Button>
           <Button type="primary" icon={<SaveOutlined />} loading={posting} onClick={editMode ? updateOrder : save}
             style={{ background: editMode ? '#B07700' : REDWOOD.success, borderColor: editMode ? '#B07700' : REDWOOD.success }}>
-            {editMode ? `Update Order${editOps.length ? ` (${editOps.length})` : ''}` : 'Save (Draft)'}
+            {editMode ? `Update Order${editOps.length ? ` (${editOps.length})` : ''}` : returnMode ? 'Save Return (Draft)' : 'Save (Draft)'}
           </Button>
           {/* Draft workflow — enabled once the order exists (saved or being edited) */}
           {(!!createdOrderKey || editMode) && <Space.Compact>
@@ -2649,8 +2731,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               style={confirmed ? undefined : { background: REDWOOD.primary, borderColor: REDWOOD.primary, color: '#fff' }}>
               {confirmed ? 'Confirmed' : 'Confirm Order'}
             </Button>
-            <Button icon={<SafetyCertificateOutlined />} loading={workBusy === 'reserve'} onClick={reserveStock}>Reserve</Button>
-            <Button icon={<StopOutlined />} loading={workBusy === 'unreserve'} onClick={unreserveStock}>Unreserve</Button>
+            {!returnMode && <Button icon={<SafetyCertificateOutlined />} loading={workBusy === 'reserve'} onClick={reserveStock}>Reserve</Button>}
+            {!returnMode && <Button icon={<StopOutlined />} loading={workBusy === 'unreserve'} onClick={unreserveStock}>Unreserve</Button>}
           </Space.Compact>}
         </Space>}>
         <Form form={form} layout="horizontal" size="small" labelAlign="left" colon labelWrap
@@ -3017,7 +3099,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
 
 const SalesOrders: React.FC = () => {
   const [openTabs, setOpenTabs] = useState<{ key: string; order: any }[]>([]);
-  const [newTabs, setNewTabs] = useState<{ key: string; header: OrderHeader; draft?: SoDraft; editOrder?: any }[]>([]);
+  const [newTabs, setNewTabs] = useState<{ key: string; header: OrderHeader; draft?: SoDraft; editOrder?: any; returnMode?: boolean }[]>([]);
   const [registerOpen, setRegisterOpen] = useState(false);
   const [activeKey, setActiveKey] = useState('search');
 
@@ -3045,6 +3127,44 @@ const SalesOrders: React.FC = () => {
     };
     setNewTabs(prev => (prev.some(t => t.key === key) ? prev : [...prev, { key, header, editOrder: order }]));
     setActiveKey(key);
+  }, []);
+
+  // Header carried over from an existing order (for copy / return).
+  const headerFromOrder = (order: any): OrderHeader => ({
+    businessUnit: order.BusinessUnitName ?? undefined,
+    businessUnitId: order.BusinessUnitId ?? undefined,
+    txnCurrency: order.TransactionalCurrencyCode ?? order.AppliedCurrencyCode ?? 'AED',
+    baseCurrency: order.TransactionalCurrencyCode ?? 'AED',
+    orderType: order.TransactionTypeCode ?? order.TransactionType ?? undefined,
+    orderDate: dayjs(),
+    customerName: order.BuyingPartyName ?? undefined,
+    accountNumber: order.BuyingPartyNumber ?? undefined,
+    paymentTerms: order.PaymentTerms ?? order.PaymentTermsCode ?? undefined,
+    warehouse: order.RequestedFulfillmentOrganizationCode ?? undefined,
+    rate: 1,
+  });
+
+  // Copy an order → a brand-new draft order pre-filled with the same lines.
+  const openCopy = useCallback((order: any, lines: any[]) => {
+    const key = `copy-${order.OrderKey ?? order.HeaderId ?? order.OrderNumber}-${Date.now()}`;
+    const draft: SoDraft = { header: headerFromOrder(order), lines: (lines ?? []).map((l, i) => orderLineToNewLine(l, i)) };
+    setNewTabs(prev => [...prev, { key, header: draft.header, draft }]);
+    setActiveKey(key);
+    message.success(`Copied ${draft.lines.length} line(s) into a new order`);
+  }, []);
+
+  // Return an order (or selected lines) → a new RMA order referencing the original.
+  const openReturn = useCallback((order: any, lines: any[]) => {
+    const key = `return-${order.OrderKey ?? order.HeaderId ?? order.OrderNumber}-${Date.now()}`;
+    const draft: SoDraft = {
+      header: headerFromOrder(order),
+      lines: (lines ?? []).map((l, i) => orderLineToNewLine(l, i, {
+        asReturn: true, refOrderNumber: String(order.OrderNumber ?? order.SourceTransactionNumber ?? ''), refHeaderId: order.HeaderId ?? order.OrderKey,
+      })),
+    };
+    setNewTabs(prev => [...prev, { key, header: draft.header, draft, returnMode: true }]);
+    setActiveKey(key);
+    message.success(`Return created for ${draft.lines.length} line(s)`);
   }, []);
 
   const removeTab = (key: string) => {
@@ -3083,15 +3203,19 @@ const SalesOrders: React.FC = () => {
       key: t.key,
       label: t.editOrder
         ? <span><EditOutlined style={{ marginRight: 5, color: '#B07700' }} />Edit {t.editOrder.OrderNumber ?? ''}</span>
-        : <span><PlusOutlined style={{ marginRight: 5 }} />New Order{newTabs.filter(x => !x.editOrder).length > 1 ? ` ${i + 1}` : ''}</span>,
+        : t.returnMode
+        ? <span><RollbackOutlined style={{ marginRight: 5, color: '#B12A5B' }} />Return {t.draft?.lines?.[0]?.refOrderNumber ?? ''}</span>
+        : t.key.startsWith('copy-')
+        ? <span><CopyOutlined style={{ marginRight: 5, color: REDWOOD.info }} />Copy Order</span>
+        : <span><PlusOutlined style={{ marginRight: 5 }} />New Order{newTabs.filter(x => !x.editOrder && !x.returnMode && !x.key.startsWith('copy-')).length > 1 ? ` ${i + 1}` : ''}</span>,
       closable: true,
-      children: <NewOrderTab header={t.header} initialDraft={t.draft} editOrder={t.editOrder} />,
+      children: <NewOrderTab header={t.header} initialDraft={t.draft} editOrder={t.editOrder} returnMode={t.returnMode} />,
     })),
     ...openTabs.map(t => ({
       key: t.key,
       label: <span><ShoppingOutlined style={{ marginRight: 5 }} />{t.order.SourceTransactionNumber ?? t.order.OrderNumber}</span>,
       closable: true,
-      children: <OrderView order={t.order} />,
+      children: <OrderView order={t.order} onCopy={openCopy} onReturn={openReturn} />,
     })),
   ];
 
