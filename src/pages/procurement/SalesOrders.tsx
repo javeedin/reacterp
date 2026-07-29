@@ -1314,7 +1314,7 @@ interface NewLine { key: string; itemNumber: string; description?: string; uom?:
   // onto the existing fulfillment line) + a cancel marker (there is no DELETE).
   srcLineId?: string; srcLineNumber?: string | number; srcScheduleNumber?: string | number; existing?: boolean; canceled?: boolean;
   // Fusion system ids captured on edit load (to target PATCH/DELETE on the line).
-  fulfillLineId?: string | number; lineHref?: string; origQty?: number; origUnitPrice?: number;
+  fulfillLineId?: string | number; lineHref?: string; origQty?: number; origUnitPrice?: number; cancelSaved?: boolean;
   error?: string }
 
 const INV_ORGS_URL = `${FUSION_BASE}/inventoryOrganizations?onlyData=true&limit=500`;
@@ -2200,7 +2200,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       if (l.existing) {
         const href = l.lineHref ? fusionHref(l.lineHref) : (l.fulfillLineId != null ? `${childBase}/${l.fulfillLineId}` : '');
         if (!href) return;
-        if (l.canceled) ops.push({ kind: 'cancel', method: 'PATCH', url: href, body: { CanceledFlag: true, CancelReasonCode: 'CUSTOMER_REQUEST' }, lineKey: l.key, label, srcLineNumber: l.srcLineNumber });
+        // Only fire once: skip already-saved cancels; only PATCH when qty changed.
+        if (l.canceled) { if (!l.cancelSaved) ops.push({ kind: 'cancel', method: 'PATCH', url: href, body: { CanceledFlag: true, CancelReasonCode: 'CUSTOMER_REQUEST' }, lineKey: l.key, label, srcLineNumber: l.srcLineNumber }); }
         else if (num(l.qty) !== num(l.origQty)) ops.push({ kind: 'update', method: 'PATCH', url: href, body: { OrderedQuantity: num(l.qty) }, lineKey: l.key, label, srcLineNumber: l.srcLineNumber });
       } else {
         // Add a line = POST the order's lines child with the full line object.
@@ -2309,13 +2310,35 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     const results: any[] = [];
     const errByKey: Record<string, string[]> = {};
     const general: string[] = [];
+    // "Settle" succeeded ops so the SAME change is never resent on the next save:
+    //   add   → the line becomes existing (with its new Fusion ids)
+    //   update→ its original qty/price advance to the saved values
+    //   cancel→ marked cancelSaved so it won't re-cancel
+    const settle: Record<string, Partial<NewLine>> = {};
     for (const op of editOps) {
       try {
         const r = await fetch(op.url, { method: op.method, headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(op.body) });
         const text = await r.text(); let data: any = null, pretty = text;
         try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* raw */ }
         results.push({ operation: op.kind, method: op.method, url: op.url, status: r.status, ok: r.ok, request: op.body, response: pretty });
-        if (!r.ok) {
+        const cur = lines.find(x => x.key === op.lineKey);
+        if (r.ok) {
+          if (op.kind === 'add') {
+            settle[op.lineKey] = {
+              existing: true, origQty: num(cur?.qty), origUnitPrice: num(cur?.unitPrice),
+              srcLineId: data?.SourceTransactionLineId != null ? String(data.SourceTransactionLineId) : op.body?.SourceTransactionLineId,
+              srcLineNumber: data?.SourceTransactionLineNumber ?? op.body?.SourceTransactionLineNumber,
+              srcScheduleNumber: data?.SourceScheduleNumber ?? op.body?.SourceScheduleNumber,
+              fulfillLineId: data?.FulfillLineId,
+              lineHref: (data?.links ?? []).find((x: any) => x.rel === 'self')?.href,
+              status: data?.DisplayStatus ?? data?.Status ?? 'Created', statusCode: data?.StatusCode,
+            };
+          } else if (op.kind === 'update') {
+            settle[op.lineKey] = { origQty: num(cur?.qty), origUnitPrice: num(cur?.unitPrice), status: data?.DisplayStatus ?? data?.Status ?? 'Updated', statusCode: data?.StatusCode };
+          } else if (op.kind === 'cancel') {
+            settle[op.lineKey] = { cancelSaved: true, status: 'Canceled', statusCode: data?.StatusCode };
+          }
+        } else {
           const msgs = collectOrderErrors(data, text, true);
           const use = msgs.length ? msgs : [`HTTP ${r.status}`];
           (errByKey[op.lineKey] ??= []).push(...use); general.push(...use);
@@ -2327,7 +2350,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     }
     saveOrderLog(`order-EDIT-${editOrder.OrderNumber ?? orderKey}-${stamp}.json`, JSON.stringify({ operations: editOps, results }, null, 2));
     setLastResponse(JSON.stringify(results, null, 2));
-    setLines(prev => prev.map(l => ({ ...l, error: errByKey[l.key]?.join('\n\n') })));
+    // Apply settle + errors together so succeeded lines can't be resent.
+    setLines(prev => prev.map(l => ({ ...l, ...(settle[l.key] ?? {}), error: errByKey[l.key]?.join('\n\n') })));
     setOrderErrors(general);
     const failed = results.filter(r => !r.ok).length;
     if (failed === 0) {
