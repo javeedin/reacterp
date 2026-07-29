@@ -2000,6 +2000,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   // Draft workflow (Save→Confirm→Reserve/Unreserve): busy flag + last action result.
   const [workBusy, setWorkBusy] = useState<null | 'confirm' | 'reserve' | 'unreserve'>(null);
   const [confirmed, setConfirmed] = useState(false);
+  // Reserve dialog: shows the exact endpoint + per-line JSON payloads before running.
+  const RESERVE_URL = `${FUSION_BASE}/inventoryReservations`;
+  const [reserveOpen, setReserveOpen] = useState(false);
+  const [reserveRows, setReserveRows] = useState<{ key: string; item: string; body: any; status?: number; ok?: boolean; errors?: string[]; response?: string }[]>([]);
   // Return (RMA) mode: live DOO_RETURN_REASON codes (fallback = static list).
   const [returnReasonOpts, setReturnReasonOpts] = useState(RETURN_REASONS);
   useEffect(() => {
@@ -2603,47 +2607,61 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     finally { setWorkBusy(null); }
   };
 
-  // Reserve on-hand stock for each line via inventoryReservations.
-  const reserveStock = async () => {
+  // Build the inventoryReservations POST body for one line.
+  const buildReserveBody = (l: NewLine, org: string, orderNo: string) => ({
+    DemandSourceType: 'Sales order',
+    DemandSourceHeaderNumber: String(orderNo),
+    ...(l.fulfillLineId != null ? { DemandSourceLineNumber: String(l.fulfillLineId) } : {}),
+    ItemNumber: l.itemNumber,
+    OrganizationCode: org,
+    ReservationQuantity: num(l.qty),
+    ...(l.uom ? { ReservationUOMCode: l.uom } : {}),
+    SupplySourceType: 'On hand',
+    ...(hdr.subinventory ? { SubinventoryCode: hdr.subinventory } : {}),
+    ...(l.lot ? { LotNumber: l.lot } : {}),
+  });
+
+  // Open the Reserve dialog — shows the endpoint + the exact JSON per line
+  // BEFORE anything is posted, so the request is visible for debugging.
+  const openReserveDialog = async () => {
     const key = liveOrderKey();
     if (!key) { message.warning('Save the order first'); return; }
     const org = hdr.warehouse;
     if (!org) { message.warning('No warehouse (organization) on the header'); return; }
-    // Ensure we have each line's FulfillLineId (needed as the demand line).
+    setWorkBusy('reserve');
+    // Refresh statuses so each line has its FulfillLineId (the demand line).
     await refreshLineStatuses(key);
+    setWorkBusy(null);
+    const orderNo = liveOrderNumber();
+    setLines(prev => {
+      const targets = prev.filter(l => l.itemNumber && !l.canceled && num(l.qty) > 0);
+      setReserveRows(targets.map(l => ({ key: l.key, item: l.itemNumber, body: buildReserveBody(l, org, orderNo) })));
+      return prev;
+    });
+    setReserveOpen(true);
+  };
+
+  // Run the reservations shown in the dialog (POST each), recording results inline.
+  const runReserve = async () => {
     setWorkBusy('reserve');
     const orderNo = liveOrderNumber();
-    const results: any[] = [];
-    try {
-      const targets = lines.filter(l => l.itemNumber && !l.canceled && num(l.qty) > 0);
-      for (const l of targets) {
-        const body: any = {
-          DemandSourceType: 'Sales order',
-          DemandSourceHeaderNumber: String(orderNo),
-          ...(l.fulfillLineId != null ? { DemandSourceLineNumber: String(l.fulfillLineId) } : {}),
-          ItemNumber: l.itemNumber,
-          OrganizationCode: org,
-          ReservationQuantity: num(l.qty),
-          ...(l.uom ? { ReservationUOMCode: l.uom } : {}),
-          SupplySourceType: 'On hand',
-          ...(hdr.subinventory ? { SubinventoryCode: hdr.subinventory } : {}),
-          ...(l.lot ? { LotNumber: l.lot } : {}),
-        };
-        try {
-          const r = await fetch(`${FUSION_BASE}/inventoryReservations`, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-          const text = await r.text(); let data: any = null, pretty = text;
-          try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* raw */ }
-          results.push({ item: l.itemNumber, status: r.status, ok: r.ok, request: body, response: pretty,
-            errors: r.ok ? [] : (collectOrderErrors(data, text, true).length ? collectOrderErrors(data, text, true) : [`HTTP ${r.status}`]) });
-        } catch (e: any) { results.push({ item: l.itemNumber, status: 0, ok: false, request: body, response: e?.message, errors: [e?.message ?? 'Network error'] }); }
-      }
-      setLastResponse(JSON.stringify(results, null, 2));
-      saveOrderLog(`order-RESERVE-${orderNo}-${Date.now()}.json`, JSON.stringify(results, null, 2));
-      const okN = results.filter(x => x.ok).length, bad = results.filter(x => !x.ok);
-      if (bad.length === 0) message.success(`Reserved ${okN} line(s) for order ${orderNo}`);
-      else Modal.error({ title: `Reserve: ${okN} ok, ${bad.length} failed`, width: 680,
-        content: <pre style={{ maxHeight: 380, overflow: 'auto', fontSize: 12 }}>{bad.map(b => `• ${b.item}: ${b.errors.join('; ')}`).join('\n')}</pre> });
-    } finally { setWorkBusy(null); }
+    const out: typeof reserveRows = [];
+    for (const row of reserveRows) {
+      try {
+        const r = await fetch(RESERVE_URL, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(row.body) });
+        const text = await r.text(); let data: any = null, pretty = text;
+        try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* raw */ }
+        out.push({ ...row, status: r.status, ok: r.ok, response: pretty,
+          errors: r.ok ? [] : (collectOrderErrors(data, text, true).length ? collectOrderErrors(data, text, true) : [`HTTP ${r.status}`]) });
+      } catch (e: any) { out.push({ ...row, status: 0, ok: false, response: e?.message, errors: [e?.message ?? 'Network error'] }); }
+    }
+    setReserveRows(out);
+    setLastResponse(JSON.stringify(out, null, 2));
+    saveOrderLog(`order-RESERVE-${orderNo}-${Date.now()}.json`, JSON.stringify(out, null, 2));
+    const okN = out.filter(x => x.ok).length, bad = out.length - okN;
+    if (bad === 0) message.success(`Reserved ${okN} line(s) for order ${orderNo}`);
+    else message.error(`${bad} of ${out.length} reservation(s) failed — see the dialog`);
+    setWorkBusy(null);
   };
 
   // Unreserve — find reservations for this order number and delete each.
@@ -2800,7 +2818,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               style={confirmed ? undefined : { background: REDWOOD.primary, borderColor: REDWOOD.primary, color: '#fff' }}>
               {confirmed ? 'Confirmed' : 'Confirm Order'}
             </Button>
-            {!returnMode && <Button icon={<SafetyCertificateOutlined />} loading={workBusy === 'reserve'} onClick={reserveStock}>Reserve</Button>}
+            {!returnMode && <Button icon={<SafetyCertificateOutlined />} loading={workBusy === 'reserve'} onClick={openReserveDialog}>Reserve</Button>}
             {!returnMode && <Button icon={<StopOutlined />} loading={workBusy === 'unreserve'} onClick={unreserveStock}>Unreserve</Button>}
           </Space.Compact>}
         </Space>}>
@@ -3160,6 +3178,41 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         <div style={{ maxHeight: 360, overflow: 'auto', background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, padding: 12 }}>
           <pre style={{ margin: 0, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{previewStr}</pre>
         </div>
+      </Modal>
+
+      {/* Reserve dialog — shows the endpoint + the exact JSON payload per line */}
+      <Modal open={reserveOpen} onCancel={() => setReserveOpen(false)} maskClosable={false} width={780}
+        title={<Space><SafetyCertificateOutlined style={{ color: REDWOOD.primary }} /> Reserve stock — order {liveOrderNumber()}</Space>}
+        footer={<Space>
+          <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(reserveRows.map(r => `POST ${RESERVE_URL}\n${JSON.stringify(r.body, null, 2)}`).join('\n\n')); message.success('Copied'); }}>Copy all</Button>
+          <Button onClick={() => setReserveOpen(false)}>Close</Button>
+          <Button type="primary" icon={<SafetyCertificateOutlined />} loading={workBusy === 'reserve'} disabled={!reserveRows.length} onClick={runReserve}
+            style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>Run Reservation ({reserveRows.length})</Button>
+        </Space>}>
+        <div style={{ fontSize: 12, marginBottom: 10 }}>
+          <Tag color="green">POST</Tag><Text style={{ fontFamily: 'monospace', fontSize: 11.5, color: REDWOOD.info, wordBreak: 'break-all' }}>{RESERVE_URL}</Text>
+          <div style={{ marginTop: 6 }}><Text type="secondary" style={{ fontSize: 11.5 }}>One POST per line. <b>DemandSourceHeaderNumber</b> = order number <Tag style={{ marginInline: 4 }}>{liveOrderNumber()}</Tag>, <b>DemandSourceLineNumber</b> = the line's FulfillLineId.</Text></div>
+        </div>
+        {reserveRows.length === 0
+          ? <Empty description="No reservable lines" style={{ padding: 20 }} />
+          : <div style={{ maxHeight: 420, overflow: 'auto' }}>
+              {reserveRows.map((r, i) => (
+                <div key={r.key} style={{ marginBottom: 12, border: `1px solid ${r.ok === false ? REDWOOD.error : r.ok ? REDWOOD.success : REDWOOD.neutral200}`, borderRadius: 6, overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px', background: REDWOOD.neutral100 }}>
+                    <Tag color="blue">{i + 1}</Tag><Text strong style={{ fontSize: 12, color: REDWOOD.info }}>{r.item}</Text>
+                    {r.body.DemandSourceLineNumber == null && <Tag color="warning" style={{ fontSize: 10 }}>no FulfillLineId</Tag>}
+                    <span style={{ marginLeft: 'auto' }}>
+                      {r.ok === true && <Tag color="success">HTTP {r.status} · reserved</Tag>}
+                      {r.ok === false && <Tag color="error">HTTP {r.status || '—'} · failed</Tag>}
+                    </span>
+                  </div>
+                  <pre style={{ margin: 0, fontSize: 11, padding: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{JSON.stringify(r.body, null, 2)}</pre>
+                  {r.errors && r.errors.length > 0 && <div style={{ padding: '6px 10px', background: '#fff1f0', borderTop: `1px solid ${REDWOOD.error}` }}>
+                    {r.errors.map((e, j) => <div key={j} style={{ fontSize: 11.5, color: REDWOOD.error }}>• {e}</div>)}
+                  </div>}
+                </div>
+              ))}
+            </div>}
       </Modal>
 
     </div>
