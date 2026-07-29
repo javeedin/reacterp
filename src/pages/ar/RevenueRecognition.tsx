@@ -115,7 +115,7 @@ const buildAcctLines = (rows: RevenueSchedule[]): AcctLine[] => {
       description: revLineDesc(s),
       reference1: String(s.trxNumber ?? ''), reference2: String(s.id), reference5: RR_SOURCE,
     };
-    lines.push({ ...base, key: `${s.id}-DR`, lineType: 'DR', accountCombination: buildCombination(company, RR_DEBIT_ACCOUNT, s.subaccount),  debit: amount, credit: 0 });
+    lines.push({ ...base, key: `${s.id}-DR`, lineType: 'DR', accountCombination: buildCombination(company, RR_DEBIT_ACCOUNT),  debit: amount, credit: 0 });
     lines.push({ ...base, key: `${s.id}-CR`, lineType: 'CR', accountCombination: buildCombination(company, RR_CREDIT_ACCOUNT, s.subaccount), debit: 0, credit: amount });
   });
   return lines;
@@ -392,7 +392,7 @@ const RevenueRecognition: React.FC = () => {
         createdBy: postedBy,
       },
       lines: [
-        { lineNumber: 1, lineType: 'DR', accountingClass: 'RECEIVABLE', accountCombination: buildCombination(company, RR_DEBIT_ACCOUNT, s.subaccount),
+        { lineNumber: 1, lineType: 'DR', accountingClass: 'RECEIVABLE', accountCombination: buildCombination(company, RR_DEBIT_ACCOUNT),
           enteredDr: amount, enteredCr: 0, accountedDr: amount, accountedCr: 0, currencyCode: 'AED', exchangeRate: 1,
           description: revLineDesc(s), sourceLineId: s.id, sourceLineNumber: 1 },
         { lineNumber: 2, lineType: 'CR', accountingClass: 'REVENUE', accountCombination: buildCombination(company, RR_CREDIT_ACCOUNT, s.subaccount),
@@ -416,7 +416,7 @@ const RevenueRecognition: React.FC = () => {
       lines: [
         { lineType: 'DR', enteredDr: amount, enteredCr: 0, accountedDr: amount, accountedCr: 0,
           description: revLineDesc(s), currencyCode: 'AED', accountingDate: acctDate,
-          accountCombination: buildCombination(company, RR_DEBIT_ACCOUNT, s.subaccount), accountingClass: 'RECEIVABLE', legalEntity: null },
+          accountCombination: buildCombination(company, RR_DEBIT_ACCOUNT), accountingClass: 'RECEIVABLE', legalEntity: null },
         { lineType: 'CR', enteredDr: 0, enteredCr: amount, accountedDr: 0, accountedCr: amount,
           description: revLineDesc(s), currencyCode: 'AED', accountingDate: acctDate,
           accountCombination: buildCombination(company, RR_CREDIT_ACCOUNT, s.subaccount), accountingClass: 'REVENUE', legalEntity: null },
@@ -804,6 +804,16 @@ const RevenueRecognition: React.FC = () => {
                         scroll={{ x: 1100 }}
                         rowSelection={{ selectedRowKeys: selectedKeys, onChange: setSelectedKeys }}
                         pagination={{ pageSize: 50, showSizeChanger: true, pageSizeOptions: ['25', '50', '100', '200'], showTotal: (t) => `${t} contracts` }}
+                        summary={() => filteredContracts.length === 0 ? null : (
+                          <Table.Summary fixed>
+                            <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 700 }}>
+                              {/* +1 leading slot for the selection column */}
+                              <Table.Summary.Cell index={0} colSpan={9}><Text strong>Total ({filteredContracts.length})</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={9} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(filteredContracts.reduce((s, c) => s + (Number(c.rentTotal) || 0), 0))}</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={10} colSpan={2} />
+                            </Table.Summary.Row>
+                          </Table.Summary>
+                        )}
                       />
                     </>
                   ),
@@ -971,6 +981,7 @@ const RevenueRecognition: React.FC = () => {
                             const bu = buForSchedule(r);
                             return bu ? bu : <span style={{ color: REDWOOD.neutral500 }}>— select BU —</span>;
                           } },
+                          { title: 'Period', dataIndex: 'periodName', width: 100, render: (v: string) => <Tag color="purple">{v || postPeriod || '—'}</Tag> },
                           { title: 'Schedule ID', dataIndex: 'id', width: 100, render: (v: number) => <Text code>{v}</Text> },
                           { title: 'Trx #', dataIndex: 'trxNumber', width: 90, render: (v: any) => <Text strong>{v ?? '—'}</Text> },
                           { title: 'Invoice #', dataIndex: 'invoiceNumber', width: 120, render: (v: any) => v || <span style={{ color: REDWOOD.neutral500 }}>—</span> },
@@ -992,9 +1003,10 @@ const RevenueRecognition: React.FC = () => {
                         summary={() => postSchedules.length === 0 ? null : (
                           <Table.Summary fixed>
                             <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 700 }}>
-                              <Table.Summary.Cell index={0} colSpan={8}><Text strong>Total ({postSchedules.length})</Text></Table.Summary.Cell>
-                              <Table.Summary.Cell index={8} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{fmt(postSchedules.reduce((s, r) => s + (Number(r.amount) || 0), 0))}</Text></Table.Summary.Cell>
-                              <Table.Summary.Cell index={9} colSpan={2} />
+                              {/* slots: selection + BU + Period + SchedID + Trx + Invoice + Unit + Tenant + Company + # = 10 → Amount at index 10 */}
+                              <Table.Summary.Cell index={0} colSpan={10}><Text strong>Total ({postSchedules.length})</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={10} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(postSchedules.reduce((s, r) => s + (Number(r.amount) || 0), 0))}</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={11} colSpan={2} />
                             </Table.Summary.Row>
                           </Table.Summary>
                         )}
