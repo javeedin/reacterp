@@ -10,6 +10,7 @@ import {
   UnorderedListOutlined, ShoppingOutlined, DollarOutlined, PrinterOutlined, DownloadOutlined,
   ReconciliationOutlined, PlusOutlined, SaveOutlined, DeleteOutlined, CloudUploadOutlined,
   DatabaseOutlined, CheckCircleTwoTone, CloseCircleTwoTone, RiseOutlined, TagsOutlined,
+  CheckCircleOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -1259,7 +1260,7 @@ interface OrderHeader {
   paymentTerms?: string; salesRep?: string; warehouse?: string; subinventory?: string; remarks?: string;
   custAccountId?: string; partyId?: string;
 }
-interface NewLine { key: string; itemNumber: string; description?: string; uom?: string; qty: number; unitPrice: number; costUnit?: number; taxCode?: string; taxPct?: number; taxAmount?: number; lot?: string; lots?: string[]; qoh?: number; ohLoading?: boolean }
+interface NewLine { key: string; itemNumber: string; description?: string; uom?: string; qty: number; unitPrice: number; costUnit?: number; taxCode?: string; taxPct?: number; taxAmount?: number; lot?: string; lots?: string[]; qoh?: number; ohLoading?: boolean; status?: string; statusCode?: string }
 
 const INV_ORGS_URL = `${FUSION_BASE}/inventoryOrganizations?onlyData=true&limit=500`;
 
@@ -1708,6 +1709,12 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
   const [preview, setPreview] = useState(false);
   const [posting, setPosting] = useState(false);
   const [resp, setResp] = useState<{ ok: boolean; status: number; body: string } | null>(null);
+  // Success celebration + created-order tracking (line status refresh).
+  const [confetti, setConfetti] = useState<{ id: number; x: number; color: string; delay: number; size: number }[]>([]);
+  const [successInfo, setSuccessInfo] = useState<{ orderNumber: string; status: string } | null>(null);
+  const [successOpen, setSuccessOpen] = useState(false);
+  const [createdOrderKey, setCreatedOrderKey] = useState<string | null>(null);
+  const [statusLoading, setStatusLoading] = useState(false);
   const [discAmt, setDiscAmt] = useState(0);
   const [expAmt, setExpAmt] = useState(0);
   const [lineSearch, setLineSearch] = useState<Record<string, { loading?: boolean; tooShort?: boolean; opts: any[] }>>({});
@@ -1908,14 +1915,58 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
   };
   const payloadStr = useMemo(() => JSON.stringify(buildPayload(), null, 2), [lines, hdr, orderNumber, orderSeq]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Pull the created order's lines from Fusion and stamp each grid line's status.
+  // Match by SourceTransactionLineNumber (what we sent), then fall back to item.
+  const refreshLineStatuses = async (orderKey?: string) => {
+    const key = orderKey ?? createdOrderKey;
+    if (!key) { message.warning('Save the order first, then refresh statuses'); return; }
+    setStatusLoading(true);
+    try {
+      const url = `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(key)}/child/lines?onlyData=true&limit=500`;
+      const r = await fetch(url, { headers: FUSION_HDRS });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      const items: any[] = d.items ?? [];
+      setLines(prev => prev.map((l, i) => {
+        const match =
+          items.find(it => String(pf(it, ['SourceTransactionLineNumber']) ?? '') === String(i + 1)) ??
+          items.find(it => String(pf(it, ['ProductNumber', 'Product', 'ItemNumber']) ?? '') === String(l.itemNumber));
+        if (!match) return l;
+        return { ...l, status: pf(match, ['Status', 'DisplayStatus', 'FulfillLineStatus']), statusCode: pf(match, ['StatusCode']) };
+      }));
+      message.success('Line statuses refreshed from Fusion');
+    } catch (e: any) { message.error(`Refresh failed: ${e.message}`); }
+    finally { setStatusLoading(false); }
+  };
+
   const save = async () => {
     if (lines.length === 0) { message.warning('Add at least one line'); return; }
     setPosting(true); setResp(null);
     try {
       const r = await fetch(SO_CREATE_URL, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: payloadStr });
-      const text = await r.text(); let pretty = text; try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* raw */ }
+      const text = await r.text(); let data: any = null, pretty = text;
+      try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* raw */ }
       setResp({ ok: r.ok, status: r.status, body: pretty });
-      if (r.ok) message.success('Sales order created'); else message.error(`Create failed (HTTP ${r.status})`);
+      if (r.ok && data?.OrderNumber) {
+        // Celebrate 🎉 (mirrors the Purchase Order success modal).
+        const pieces = Array.from({ length: 60 }, (_, i) => ({
+          id: i, x: Math.random() * 100,
+          color: ['#C74634', '#1D7B4D', '#0572CE', '#D4A800', '#00918A', '#6B21A8', '#FF6B35', '#4ECDC4'][Math.floor(Math.random() * 8)],
+          delay: Math.random() * 1.2, size: 6 + Math.random() * 8,
+        }));
+        setConfetti(pieces);
+        setSuccessInfo({ orderNumber: data.OrderNumber, status: data.StatusCode ?? data.Status ?? 'Created' });
+        setSuccessOpen(true);
+        const orderKey = data.OrderKey ?? data.HeaderId ?? null;
+        setCreatedOrderKey(orderKey != null ? String(orderKey) : null);
+        message.success(`Sales order ${data.OrderNumber} created`);
+        // Bring the line statuses straight back into the grid.
+        if (orderKey != null) refreshLineStatuses(String(orderKey));
+      } else if (r.ok) {
+        message.success('Sales order created');
+      } else {
+        message.error(`Create failed (HTTP ${r.status})`);
+      }
     } catch (e: any) { setResp({ ok: false, status: 0, body: e.message }); message.error(e.message); }
     finally { setPosting(false); }
   };
@@ -1947,6 +1998,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
         onChange={val => { const opt = taxOptions.find(o => o.value === val); updLine(r.key, { taxCode: val, taxPct: opt ? opt.pct : undefined }); }} /> },
     { title: 'Tax', dataIndex: 'taxAmount', width: 120, align: 'right', render: (v, r) => <Space size={4}>{r.taxPct != null && <Tag color="gold" style={{ margin: 0, fontSize: 10 }}>{r.taxPct}%</Tag>}<Text style={{ fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(v), ccy)}</Text></Space> },
     { title: 'Net', width: 110, align: 'right', fixed: 'right', render: (_, r) => <Text strong style={{ color: REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(r.qty) * num(r.unitPrice) + num(r.taxAmount), ccy)}</Text> },
+    { title: 'Status', dataIndex: 'status', width: 130, fixed: 'right', render: (v, r) => v || r.statusCode ? statusTag(v, r.statusCode) : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
     { title: '', width: 40, align: 'center', fixed: 'right', render: (_, r) => <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => del(r.key)} /> },
   ];
 
@@ -2081,10 +2133,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
             tabBarExtraContent={{ right: <Space size={6} style={{ paddingRight: 4 }}>
               <Button size="small" icon={<PlusOutlined />} onClick={addBlankLine}>New Line</Button>
               <Button size="small" icon={<DatabaseOutlined />} loading={ohLoading} onClick={checkAllOnhand} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>Check On-Hand</Button>
+              <Button size="small" icon={<ReloadOutlined />} loading={statusLoading} disabled={!createdOrderKey} onClick={() => refreshLineStatuses()} style={createdOrderKey ? { color: REDWOOD.success, borderColor: REDWOOD.success } : undefined}>Refresh Status</Button>
             </Space> }} items={[
               {
                 key: 'lines', label: <Space size={6}><UnorderedListOutlined />Lines<Tag style={{ marginInlineEnd: 0 }}>{lines.length}</Tag></Space>,
-                children: <Table size="small" columns={cols} dataSource={lines} rowKey="key" pagination={false} scroll={{ x: 1760, y: 360 }}
+                children: <Table size="small" columns={cols} dataSource={lines} rowKey="key" pagination={false} scroll={{ x: 1890, y: 360 }}
                   locale={{ emptyText: 'No lines — use “Add Multiple Lines” or “New Line”' }}
                   summary={() => lines.length === 0 ? null : (() => {
                     const totMargin = lines.reduce((s, l) => s + (num(l.unitPrice) - num(l.costUnit)) * num(l.qty), 0);
@@ -2100,6 +2153,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
                           <Table.Summary.Cell index={11} align="right"><Text strong>{fmtAmount(lineTax, ccy)}</Text></Table.Summary.Cell>
                           <Table.Summary.Cell index={12} align="right"><Text strong style={{ color: REDWOOD.success }}>{fmtAmount(totAmt + lineTax, ccy)}</Text></Table.Summary.Cell>
                           <Table.Summary.Cell index={13} />
+                          <Table.Summary.Cell index={14} />
                         </Table.Summary.Row>
                       </Table.Summary>
                     );
@@ -2131,6 +2185,58 @@ const NewOrderTab: React.FC<{ header: OrderHeader }> = ({ header }) => {
       </Card>
 
       <ItemSearchModal open={pickOpen} org={hdr.warehouse} subinv={hdr.subinventory} taxOptions={taxOptions} onClose={() => setPickOpen(false)} onAdd={addItems} />
+
+      {/* ── Sales Order success celebration (mirrors the PO success modal) ── */}
+      <Modal
+        open={successOpen}
+        title={null}
+        closable={false}
+        centered
+        width={480}
+        footer={
+          <Space style={{ justifyContent: 'center', width: '100%' }} wrap>
+            <Button size="large" icon={<ReloadOutlined />} loading={statusLoading} onClick={() => refreshLineStatuses()}>
+              Refresh Line Status
+            </Button>
+            <Button type="primary" size="large" icon={<CheckCircleOutlined />}
+              style={{ background: REDWOOD.success, borderColor: REDWOOD.success, fontWeight: 700 }}
+              onClick={() => { setSuccessOpen(false); setConfetti([]); }}>
+              Done
+            </Button>
+          </Space>
+        }
+      >
+        <style>{`
+          @keyframes so-confetti-fall { 0% { transform: translateY(-20px) rotate(0deg); opacity: 1; } 100% { transform: translateY(110vh) rotate(720deg); opacity: 0; } }
+          @keyframes so-success-pop { 0% { transform: scale(0.4); opacity: 0; } 60% { transform: scale(1.12); } 100% { transform: scale(1); opacity: 1; } }
+        `}</style>
+        {confetti.map(p => (
+          <div key={p.id} style={{
+            position: 'fixed', top: 0, left: `${p.x}%`, width: p.size, height: p.size * 0.6,
+            background: p.color, borderRadius: 2, pointerEvents: 'none', zIndex: 99999,
+            animation: `so-confetti-fall ${1.8 + (p.id % 5) * 0.24}s ease-in forwards`, animationDelay: `${p.delay}s`,
+          }} />
+        ))}
+        <div style={{ textAlign: 'center', padding: '32px 16px 16px', animation: 'so-success-pop 0.5s ease-out' }}>
+          <div style={{ fontSize: 64, lineHeight: 1, marginBottom: 12 }}>🎉</div>
+          <CheckCircleOutlined style={{ fontSize: 48, color: REDWOOD.success, marginBottom: 10 }} />
+          <div style={{ fontSize: 15, color: REDWOOD.neutral600, marginBottom: 6 }}>
+            Sales Order created successfully in Oracle Fusion
+          </div>
+          <div style={{ fontSize: 28, fontWeight: 800, color: REDWOOD.info, letterSpacing: '0.04em', fontFamily: 'monospace', marginBottom: 10 }}>
+            {successInfo?.orderNumber}
+          </div>
+          {successInfo?.status && (
+            <Tag color="green" style={{ fontWeight: 700, fontSize: 13, padding: '2px 14px' }}>{successInfo.status}</Tag>
+          )}
+          <div style={{ marginTop: 16, padding: '10px 16px', background: '#F0FFF4', borderRadius: 8, border: '1px solid #b7ebc8' }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {lines.length} line{lines.length !== 1 ? 's' : ''} &nbsp;·&nbsp; Total:&nbsp;
+            </Text>
+            <Text strong style={{ color: REDWOOD.teal, fontSize: 13 }}>{fmtAmount(totAmt + lineTax, ccy)}</Text>
+          </div>
+        </div>
+      </Modal>
 
       <Modal open={!!itemModal} onCancel={() => setItemModal(null)} maskClosable={false} width={760} style={{ top: 24 }}
         footer={<Button onClick={() => setItemModal(null)}>Cancel</Button>}
