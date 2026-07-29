@@ -1007,7 +1007,10 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
         if (data.status === 'ok') {
           setBmsRate({ rate: data.rate, inverseRate: data.inverseRate, rateType: data.rateType || 'Corporate', rateDate: data.rateDate });
           if (apply) {
-            setJournalData(prev => ({ ...prev, conversionRate: data.rate, inverseRate: data.inverseRate, conversionRateType: data.rateType || 'Corporate' }));
+            // When the rate type is 'User', the rate is manual — never override it.
+            setJournalData(prev => prev.conversionRateType === 'User'
+              ? prev
+              : { ...prev, conversionRate: data.rate, inverseRate: data.inverseRate, conversionRateType: data.rateType || 'Corporate' });
           }
         }
       })
@@ -2656,7 +2659,8 @@ const CreateJournal: React.FC<CreateJournalProps> = ({ embeddedMode = false, onS
                         value={journalData.conversionRateType}
                         onChange={(val) => {
                           setJournalData(prev => ({ ...prev, conversionRateType: val }));
-                          if (journalData.currency && journalData.currency !== 'AED') {
+                          // 'User' rate is entered manually — don't fetch/override it.
+                          if (val !== 'User' && journalData.currency && journalData.currency !== 'AED') {
                             fetchBmsRate(journalData.currency, journalData.conversionDate, true);
                           }
                         }}
