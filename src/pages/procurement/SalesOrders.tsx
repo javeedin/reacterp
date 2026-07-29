@@ -1300,7 +1300,8 @@ interface OrderHeader {
 interface NewLine { key: string; itemNumber: string; description?: string; uom?: string; qty: number; unitPrice: number; costUnit?: number; taxCode?: string; taxPct?: number; taxAmount?: number; lot?: string; lots?: string[]; qoh?: number; ohLoading?: boolean; status?: string; statusCode?: string;
   // Edit mode: original DOO source line keys (preserved so a change order maps
   // onto the existing fulfillment line) + a cancel marker (there is no DELETE).
-  srcLineId?: string; srcLineNumber?: string | number; srcScheduleNumber?: string | number; existing?: boolean; canceled?: boolean }
+  srcLineId?: string; srcLineNumber?: string | number; srcScheduleNumber?: string | number; existing?: boolean; canceled?: boolean;
+  error?: string }
 
 const INV_ORGS_URL = `${FUSION_BASE}/inventoryOrganizations?onlyData=true&limit=500`;
 
@@ -1763,6 +1764,34 @@ const saveOrderLog = async (filename: string, content: string): Promise<string |
     return res?.success ? (res.filePath ?? `${ORDER_LOG_FOLDER}/${filename}`) : null;
   } catch { return null; }
 };
+// Collect individual error lines from a DOO response (title, o:errorDetails,
+// or the raw text on a hard failure), split into one message per line.
+const collectOrderErrors = (data: any, text: string, includeRawText: boolean): string[] => {
+  const out: string[] = [];
+  if (data && typeof data === 'object') {
+    if (data.title) out.push(String(data.title));
+    if (data.detail && data.detail !== data.title) out.push(String(data.detail));
+    const details = data['o:errorDetails'] ?? data.errorDetails;
+    if (Array.isArray(details)) details.forEach((d: any) => { const m = d?.detail ?? d?.title; if (m) out.push(String(m)); });
+  }
+  if (!out.length && includeRawText && text) out.push(text.trim());
+  return out.flatMap(s => s.split('\n')).map(s => s.trim()).filter(Boolean);
+};
+// Split error messages into per-line (keyed by NewLine.key) and general buckets,
+// matching on "SourceTransactionLineNumber N" (which Fusion embeds in messages).
+const mapErrorsToLines = (msgs: string[], lines: NewLine[]): { byKey: Record<string, string[]>; general: string[] } => {
+  const byKey: Record<string, string[]> = {};
+  const general: string[] = [];
+  msgs.forEach(msg => {
+    const m = msg.match(/SourceTransactionLineNumber\s+["']?(\w+)/i);
+    const lineNo = m ? m[1] : null;
+    const target = lineNo ? lines.find((l, i) => String(l.srcLineNumber ?? (i + 1)) === lineNo) : undefined;
+    if (target) (byKey[target.key] ??= []).push(msg);
+    else general.push(msg);
+  });
+  return { byKey, general };
+};
+
 // Pull a readable error message out of a DOO error response.
 const extractOrderError = (data: any, status: number, text: string): string => {
   if (data && typeof data === 'object') {
@@ -1808,6 +1837,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [posting, setPosting] = useState(false);
   // Error message from the last save (drives the result dialog's error state).
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Per-save error breakdown: general (order-level) messages + a click-to-view modal.
+  const [orderErrors, setOrderErrors] = useState<string[]>([]);
+  const [errModal, setErrModal] = useState<{ title: string; msg: string } | null>(null);
   // Success celebration + created-order tracking (line status refresh).
   const [confetti, setConfetti] = useState<{ id: number; x: number; color: string; delay: number; size: number }[]>([]);
   const [successInfo, setSuccessInfo] = useState<{ orderNumber: string; status: string } | null>(null);
@@ -2145,8 +2177,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
 
   const save = async () => {
     if (lines.length === 0) { message.warning('Add at least one line'); return; }
-    setPosting(true); setSaveError(null);
+    setPosting(true); setSaveError(null); setOrderErrors([]);
+    setLines(prev => prev.map(l => l.error ? { ...l, error: undefined } : l));
     const stamp = String(Date.now());
+    // Map response errors onto lines (red ✗) + the Errors tab.
+    const applyErrors = (data: any, text: string, includeRaw: boolean) => {
+      const msgs = collectOrderErrors(data, text, includeRaw);
+      const { byKey } = mapErrorsToLines(msgs, lines);
+      setLines(prev => prev.map(l => ({ ...l, error: byKey[l.key]?.join('\n\n') })));
+      setOrderErrors(msgs);
+    };
     try {
       const r = await fetch(SO_CREATE_URL, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: payloadStr });
       const text = await r.text(); let data: any = null, pretty = text;
@@ -2154,6 +2194,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
 
       if (r.ok && data?.OrderNumber) {
         // Success — write the response to the order-loading folder (no on-screen log).
+        applyErrors(data, '', false); // surface any per-line warnings the create still returned
         saveOrderLog(`order-${data.OrderNumber}-${stamp}.json`, pretty);
         const pieces = Array.from({ length: 60 }, (_, i) => ({
           id: i, x: Math.random() * 100,
@@ -2169,7 +2210,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         message.success(`Sales order ${data.OrderNumber} ${editMode ? 'updated' : 'created'}`);
         if (orderKey != null) refreshLineStatuses(String(orderKey));
       } else {
-        // Failure — write the response + payload to the folder, show the error dialog.
+        // Failure — map errors onto lines + Errors tab, write the log, show the dialog.
+        applyErrors(data, text, true);
         const msg = extractOrderError(data, r.status, text);
         saveOrderLog(`order-ERROR-${orderNumber || 'draft'}-${stamp}.json`,
           `HTTP ${r.status}\n\n=== RESPONSE ===\n${pretty}\n\n=== REQUEST PAYLOAD ===\n${payloadStr}`);
@@ -2182,6 +2224,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       saveOrderLog(`order-ERROR-${orderNumber || 'draft'}-${stamp}.json`, `NETWORK ERROR: ${e?.message}\n\n=== REQUEST PAYLOAD ===\n${payloadStr}`);
       setConfetti([]);
       setSaveError(e?.message || 'Network error');
+      setOrderErrors([e?.message || 'Network error']);
       setSuccessOpen(true);
       message.error('Sales order creation failed');
     } finally { setPosting(false); }
@@ -2214,9 +2257,13 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         onChange={val => { const opt = taxOptions.find(o => o.value === val); updLine(r.key, { taxCode: val, taxPct: opt ? opt.pct : undefined }); }} /> },
     { title: 'Tax', dataIndex: 'taxAmount', width: 120, align: 'right', render: (v, r) => <Space size={4}>{r.taxPct != null && <Tag color="gold" style={{ margin: 0, fontSize: 10 }}>{r.taxPct}%</Tag>}<Text style={{ fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(v), ccy)}</Text></Space> },
     { title: 'Net', width: 110, align: 'right', fixed: 'right', render: (_, r) => <Text strong style={{ color: REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(r.qty) * num(r.unitPrice) + num(r.taxAmount), ccy)}</Text> },
-    { title: 'Status', dataIndex: 'status', width: 130, fixed: 'right', render: (v, r) => r.canceled
-        ? <Tag color="error" style={{ fontSize: 11 }}>Canceled</Tag>
-        : (v || r.statusCode ? statusTag(v, r.statusCode) : <Text type="secondary" style={{ fontSize: 11 }}>—</Text>) },
+    { title: 'Status', dataIndex: 'status', width: 130, fixed: 'right', render: (v, r, i) => r.error
+        ? <Tooltip title="Click to view the error"><Button size="small" type="text" danger style={{ padding: '0 4px' }}
+            icon={<CloseCircleTwoTone twoToneColor={REDWOOD.error} />}
+            onClick={() => setErrModal({ title: `Line ${r.srcLineNumber ?? i + 1}${r.itemNumber ? ` · ${r.itemNumber}` : ''}`, msg: r.error! })}>Error</Button></Tooltip>
+        : r.canceled
+          ? <Tag color="error" style={{ fontSize: 11 }}>Canceled</Tag>
+          : (v || r.statusCode ? statusTag(v, r.statusCode) : <Text type="secondary" style={{ fontSize: 11 }}>—</Text>) },
     { title: '', width: 40, align: 'center', fixed: 'right', render: (_, r) => (editMode && r.existing)
         ? <Tooltip title={r.canceled ? 'Restore line' : 'Cancel line'}>
             <Button size="small" type="text" danger={!r.canceled} icon={r.canceled ? <ReloadOutlined /> : <DeleteOutlined />} onClick={() => del(r.key)} />
@@ -2248,6 +2295,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     { title: 'Lot', dataIndex: 'lot', width: 200, render: v => v ? <Tag color="geekblue">{v}</Tag> : <Text type="secondary">— no lot —</Text> },
     { title: 'Ord Qty', dataIndex: 'qty', width: 100, align: 'right', render: v => fmtQty(num(v)) },
   ];
+
+  // Errors tab — per-line errors + general order-level errors from the last save.
+  const errorRows = useMemo(() => {
+    const rows: { key: string; scope: string; item?: string; msg: string }[] = [];
+    lines.forEach((l, i) => {
+      if (l.error) l.error.split('\n\n').forEach((m, j) => rows.push({ key: `${l.key}-e${j}`, scope: `Line ${l.srcLineNumber ?? i + 1}`, item: l.itemNumber, msg: m }));
+    });
+    orderErrors.filter(m => !lines.some(l => l.error?.includes(m))).forEach((m, j) => rows.push({ key: `gen-${j}`, scope: 'Order', msg: m }));
+    return rows;
+  }, [lines, orderErrors]);
 
   return (
     <div style={{ padding: '4px 2px' }}>
@@ -2421,10 +2478,30 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                 children: <Table size="small" columns={lotCols} dataSource={lotRows} rowKey="key" pagination={false} scroll={{ x: 750, y: 360 }}
                   locale={{ emptyText: 'No lot details on the selected items' }} />,
               },
+              {
+                key: 'errors', label: <Space size={6}><CloseCircleTwoTone twoToneColor={errorRows.length ? REDWOOD.error : '#bbb'} />Errors{errorRows.length > 0 && <Tag color="error" style={{ marginInlineEnd: 0 }}>{errorRows.length}</Tag>}</Space>,
+                children: <Table size="small" rowKey="key" pagination={false} scroll={{ x: 700, y: 360 }}
+                  dataSource={errorRows}
+                  locale={{ emptyText: 'No errors from the last save' }}
+                  columns={[
+                    { title: 'Where', dataIndex: 'scope', width: 110, render: (v: string) => <Tag color={v === 'Order' ? 'volcano' : 'red'} style={{ fontSize: 11 }}>{v}</Tag> },
+                    { title: 'Item', dataIndex: 'item', width: 150, render: (v: string) => v ? <Text style={{ fontSize: 12 }}>{v}</Text> : <Text type="secondary">—</Text> },
+                    { title: 'Error', dataIndex: 'msg', render: (v: string) => <Text style={{ fontSize: 12, color: REDWOOD.error }}>{v}</Text> },
+                  ]} />,
+              },
             ]} />}
       </Card>
 
       <ItemSearchModal open={pickOpen} org={hdr.warehouse} subinv={hdr.subinventory} taxOptions={taxOptions} onClose={() => setPickOpen(false)} onAdd={addItems} />
+
+      {/* Line error detail (opened from the red ✗ in the Status column) */}
+      <Modal open={!!errModal} onCancel={() => setErrModal(null)} width={640}
+        title={<Space><CloseCircleTwoTone twoToneColor={REDWOOD.error} /> Error — {errModal?.title}</Space>}
+        footer={<Button onClick={() => setErrModal(null)}>Close</Button>}>
+        <div style={{ fontSize: 12, color: REDWOOD.error, whiteSpace: 'pre-wrap', background: '#FFF1F0', border: '1px solid #FFCCC7', borderRadius: 6, padding: '10px 12px', maxHeight: 360, overflow: 'auto' }}>
+          {errModal?.msg}
+        </div>
+      </Modal>
 
       {/* ── Save result dialog — celebration on success, error state on failure ── */}
       <Modal
