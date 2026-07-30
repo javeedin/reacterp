@@ -1662,6 +1662,10 @@ interface NewLine { key: string; itemNumber: string; description?: string; uom?:
   // Amounts as STORED in Fusion at load time (frozen charge totals). Kept so the
   // grid can show the figure as-is and flag when qty×price disagrees with it.
   loadedExt?: number; loadedTax?: number;
+  // Child-collection hrefs captured on load → drill into charges / lot-serials.
+  chargesHref?: string; lotSerialsHref?: string;
+  // lotSerials rows fetched from Fusion (shown in the Lot Details tab).
+  lineLots?: any[];
   // Return (RMA) line: references the original order line being returned.
   returnLine?: boolean; returnReason?: string; maxQty?: number;
   refHeaderId?: string | number; refLineId?: string | number; refFulfillLineId?: string | number;
@@ -2967,6 +2971,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [updTaxPct, setUpdTaxPct] = useState<number | undefined>();
   const [updLot, setUpdLot] = useState<string | undefined>();
   const [updLots, setUpdLots] = useState<{ lot?: string; subinventory?: string; qty: number }[]>([]);
+  // Line-Total drill → charges/chargeComponents fetched live from Fusion.
+  const [chargeDrill, setChargeDrill] = useState<{ line: NewLine; loading: boolean; url: string; charges: any[]; error?: string } | null>(null);
   // Success celebration + created-order tracking (line status refresh).
   const [confetti, setConfetti] = useState<{ id: number; x: number; color: string; delay: number; size: number }[]>([]);
   const [successInfo, setSuccessInfo] = useState<{ orderNumber: string; status: string } | null>(null);
@@ -3084,15 +3090,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     const linesHref = editOrder?.links?.find((l: any) => l.name === 'lines')?.href
       ?? (key != null ? `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(key)}/child/lines` : '');
     if (!linesHref) return;
-    // Expand charges so we can read the frozen tax (QP_EXCLUSIVE_TAX component) and
-    // surface the line's tax classification code when the order is opened for edit.
-    const href = `${linesHref}${linesHref.includes('?') ? '&' : '?'}expand=charges.chargeComponents`;
+    // Expand charges (frozen tax lives in QP_EXCLUSIVE_TAX) and lotSerials (shown in
+    // Lot Details) so opening the order surfaces tax + lots in one round-trip.
+    const href = `${linesHref}${linesHref.includes('?') ? '&' : '?'}expand=charges.chargeComponents,lotSerials`;
     (async () => {
       try {
         const rows = await fetchAllPages(href);
         setLines(rows.map((l: any, i: number): NewLine => {
           const q = num(pf(l, ['OrderedQuantity']));
           const price = num(pf(l, ['UnitSellingPrice', 'UnitListPrice']));
+          const linkOf = (name: string) => { const h = (l.links ?? []).find((x: any) => x.name === name && x.rel === 'child')?.href; return h ? fusionHref(h) : undefined; };
           const selfHref = (l.links ?? []).find((x: any) => x.rel === 'self')?.href;
           // Frozen tax lives in the primary charge's QP_EXCLUSIVE_TAX component.
           const charges = l.charges?.items ?? l.charges ?? [];
@@ -3105,8 +3112,12 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           const loadedExtRaw = netComp ? num(pf(netComp, ['HeaderCurrencyExtendedAmount', 'ChargeCurrencyExtendedAmount'])) : num(pf(l, ['ExtendedAmount']));
           const loadedExt = loadedExtRaw ? round2(loadedExtRaw) : undefined;
           const basis = loadedExt ?? round2(price * q);          // derive tax % off the stored net
-          const taxCode = pf(l, ['TaxClassificationCode', 'TaxClassification', 'TaxCode']);
+          // Tax classification code (often null even when tax applies) → fall back to
+          // the tax rate name carried on the QP_EXCLUSIVE_TAX component.
+          const taxCode = pf(l, ['TaxClassificationCode', 'TaxClassification', 'TaxCode'])
+            ?? (taxComp ? pf(taxComp, ['TaxRateName', 'TaxClassificationCode', 'TaxCode']) : undefined);
           const taxPct = (basis && taxAmt) ? round2((taxAmt / basis) * 100) : undefined;
+          const lotSerials = l.lotSerials?.items ?? l.lotSerials ?? [];
           return {
             key: `edit-${pf(l, ['FulfillLineId']) ?? pf(l, ['SourceTransactionLineId']) ?? i}`,
             itemNumber: String(pf(l, ['ProductNumber', 'Product', 'ItemNumber']) ?? ''),
@@ -3122,12 +3133,32 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             srcScheduleNumber: pf(l, ['SourceScheduleNumber', 'SourceTransactionScheduleId']),
             fulfillLineId: pf(l, ['FulfillLineId']),
             lineHref: selfHref,
+            chargesHref: linkOf('charges'), lotSerialsHref: linkOf('lotSerials'),
+            lineLots: Array.isArray(lotSerials) ? lotSerials : [],
             existing: true,
           };
         }));
       } catch (e: any) { message.error(`Failed to load order lines: ${e.message}`); }
     })();
   }, [editOrder]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Tax code often comes back null on the line even when tax applies. Once the BU's
+  // tax codes load, back-fill any line that has a derived tax % but no recognised
+  // code by matching the rate — unambiguous only when a single code carries that %.
+  useEffect(() => {
+    if (!taxOptions.length) return;
+    setLines(prev => {
+      let changed = false;
+      const next = prev.map(l => {
+        if (l.taxPct == null || l.taxPct === 0) return l;
+        if (l.taxCode && taxOptions.some(o => o.value === l.taxCode)) return l; // already valid
+        const hits = taxOptions.filter(o => round2(o.pct) === round2(num(l.taxPct)));
+        if (hits.length === 1) { changed = true; return { ...l, taxCode: hits[0].value }; }
+        return l;
+      });
+      return changed ? next : prev;
+    });
+  }, [taxOptions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Save / Load the full draft (header + all lines) as JSON ──
   const saveDraftJson = () => {
@@ -3192,14 +3223,65 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     if (m.taxPct != null) m.taxAmount = round2(num(m.qty) * num(m.unitPrice) * num(m.taxPct) / 100);
     return m;
   }));
-  // In edit mode, "removing" an existing line marks it for removal (toggle). On save
-  // a DRAFT order hard-DELETEs the line; a processing order cancels it via a change
-  // order (CanceledFlag). Added lines and all create-mode lines drop immediately.
-  const del = (key: string) => setLines(prev => {
-    const l = prev.find(x => x.key === key);
-    if (editMode && l?.existing) return prev.map(x => x.key === key ? { ...x, canceled: !x.canceled } : x);
-    return prev.filter(x => x.key !== key);
-  });
+  // Remove an EXISTING line immediately (after confirmation): a DRAFT order line is
+  // hard-DELETEd; a processing order line is canceled via PATCH { CanceledFlag }.
+  const removeExistingLine = async (l: NewLine) => {
+    const orderKey = editOrder?.OrderKey ?? editOrder?.HeaderId;
+    const href = l.lineHref ? fusionHref(l.lineHref)
+      : (l.fulfillLineId != null ? `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(String(orderKey))}/child/lines/${l.fulfillLineId}` : '');
+    if (!href) { message.error('No line id available to remove'); return; }
+    const draft = isDraftStatus;
+    try {
+      const init: RequestInit = draft
+        ? { method: 'DELETE', headers: { ...FUSION_HDRS } }
+        : { method: 'PATCH', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify({ CanceledFlag: true, CancelReasonCode: 'CUSTOMER_REQUEST' }) };
+      const r = await fetch(href, init);
+      const text = await r.text(); let data: any = null, pretty = text;
+      try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* raw */ }
+      setLastResponse(`${draft ? 'DELETE' : 'PATCH'} ${href}\nHTTP ${r.status}\n\n${pretty}`);
+      if (r.ok) {
+        if (draft) { setLines(prev => prev.filter(x => x.key !== l.key)); message.success(`Line ${l.itemNumber} deleted`); }
+        else { upd(l.key, { canceled: true, cancelSaved: true, status: 'Canceled', statusCode: data?.StatusCode, error: undefined }); message.success(`Line ${l.itemNumber} canceled`); }
+      } else {
+        const msgs = collectOrderErrors(data, text, true);
+        upd(l.key, { error: (msgs.length ? msgs : [`HTTP ${r.status}`]).join('\n\n') });
+        message.error(`${draft ? 'Delete' : 'Cancel'} failed — see the red ✗ / Errors tab`);
+      }
+    } catch (e: any) { upd(l.key, { error: e?.message }); message.error(e?.message || 'Request failed'); }
+  };
+
+  // Trash-icon handler: confirm first, then run the related web service. Unsaved
+  // (new / create-mode) lines are just dropped locally after the confirm.
+  const confirmRemoveLine = (l: NewLine) => {
+    if (!editMode || !l.existing) {
+      Modal.confirm({ title: 'Remove this line?', content: `${l.itemNumber || 'This line'} will be removed from the order.`, okText: 'Remove', okButtonProps: { danger: true }, onOk: () => setLines(prev => prev.filter(x => x.key !== l.key)) });
+      return;
+    }
+    const draft = isDraftStatus;
+    Modal.confirm({
+      title: draft ? 'Delete this line?' : 'Cancel this line?',
+      width: 480,
+      content: draft
+        ? <span>Line <b>{l.itemNumber}</b> will be <b>permanently deleted</b> from the order (<Text code style={{ fontSize: 11 }}>DELETE …/child/lines/{'{id}'}</Text>). This can’t be undone.</span>
+        : <span>Line <b>{l.itemNumber}</b> will be canceled (<Text code style={{ fontSize: 11 }}>PATCH …/child/lines/{'{id}'} {'{ CanceledFlag: true }'}</Text>). It stays on the order as a canceled line.</span>,
+      okText: draft ? 'Delete line' : 'Cancel line', okButtonProps: { danger: true }, cancelText: 'Keep',
+      onOk: () => removeExistingLine(l),
+    });
+  };
+
+  // Line-Total drill → GET the line's charges child (with components) live from Fusion.
+  const openChargeDrill = async (l: NewLine) => {
+    const base = l.chargesHref ?? (l.lineHref ? `${fusionHref(l.lineHref)}/child/charges` : undefined);
+    if (!base) { message.warning('No charges link on this line — save the order first'); return; }
+    const url = `${base}${base.includes('?') ? '&' : '?'}expand=chargeComponents`;
+    setChargeDrill({ line: l, loading: true, url, charges: [] });
+    try {
+      const r = await fetch(url, { headers: FUSION_HDRS });
+      const d = await r.json().catch(() => ({} as any));
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setChargeDrill({ line: l, loading: false, url, charges: d.items ?? [] });
+    } catch (e: any) { setChargeDrill({ line: l, loading: false, url, charges: [], error: e?.message }); }
+  };
 
   // "New Line" — append a blank, editable line the user fills via inline search.
   const addBlankLine = () => setLines(prev => [...prev, { key: `new-${Date.now()}-${prev.length}`, itemNumber: '', qty: 0, unitPrice: 0 }]);
@@ -3940,9 +4022,12 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         // Show the amount AS LOADED from Fusion; flag when it disagrees with qty×price.
         const shown = r.loadedExt != null ? r.loadedExt : calc;
         const mismatch = r.loadedExt != null && round2(r.loadedExt) !== calc;
+        const canDrill = !!(r.chargesHref || r.lineHref);   // existing line → drill to charges
         return <Space size={4}>
           {mismatch && <Tooltip title={`Stored amount ${fmtAmount(r.loadedExt, ccy)} ≠ Qty×Price ${fmtAmount(calc, ccy)} — line total is inconsistent in Fusion`}><WarningFilled style={{ color: REDWOOD.error }} /></Tooltip>}
-          <Text strong style={{ color: mismatch ? REDWOOD.error : REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(shown, ccy)}</Text>
+          {canDrill
+            ? <Tooltip title="View charges & price components"><a onClick={() => openChargeDrill(r)} style={{ color: mismatch ? REDWOOD.error : REDWOOD.primary, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(shown, ccy)}</a></Tooltip>
+            : <Text strong style={{ color: mismatch ? REDWOOD.error : REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(shown, ccy)}</Text>}
         </Space>;
       } },
     { title: 'Margin', width: 100, align: 'right', render: (_, r) => { const m = (num(r.unitPrice) - num(r.costUnit)) * num(r.qty); return <Text style={{ fontSize: 11.5, color: m < 0 ? REDWOOD.error : REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(m, ccy)}</Text>; } },
@@ -3957,19 +4042,21 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             icon={<CloseCircleTwoTone twoToneColor={REDWOOD.error} />}
             onClick={() => setErrModal({ title: `Line ${r.srcLineNumber ?? i + 1}${r.itemNumber ? ` · ${r.itemNumber}` : ''}`, msg: r.error! })}>Error</Button></Tooltip>
         : r.canceled
-          ? <Tag color="error" style={{ fontSize: 11 }}>{isDraftStatus ? 'To delete' : 'Canceled'}</Tag>
+          ? <Tag color="error" style={{ fontSize: 11 }}>Canceled</Tag>
           : (v || r.statusCode ? statusTag(v, r.statusCode) : <Text type="secondary" style={{ fontSize: 11 }}>—</Text>) },
-    { title: '', width: 76, align: 'center', fixed: 'right', render: (_, r) => (editMode && r.existing)
+    { title: '', width: 76, align: 'center', fixed: 'right', render: (_, r) => r.canceled
+        ? <Text type="secondary" style={{ fontSize: 11 }}>—</Text>
+        : (editMode && r.existing)
         ? <Space size={0}>
-            <Tooltip title={r.canceled ? (isDraftStatus ? 'Marked for delete' : 'Line canceled') : (canUpdateLine(r) ? 'Update line' : 'Locked — Awaiting Billing / Closed')}>
+            <Tooltip title={canUpdateLine(r) ? 'Update line' : 'Locked — Awaiting Billing / Closed'}>
               <Button size="small" type="text" icon={<EditOutlined />} disabled={!canUpdateLine(r)}
                 style={{ color: canUpdateLine(r) ? REDWOOD.info : undefined }} onClick={() => openUpdateLine(r)} />
             </Tooltip>
-            <Tooltip title={r.canceled ? 'Restore line' : (isDraftStatus ? 'Delete line' : 'Cancel line')}>
-              <Button size="small" type="text" danger={!r.canceled} icon={r.canceled ? <ReloadOutlined /> : <DeleteOutlined />} onClick={() => del(r.key)} />
+            <Tooltip title={isDraftStatus ? 'Delete line' : 'Cancel line'}>
+              <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => confirmRemoveLine(r)} />
             </Tooltip>
           </Space>
-        : <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => del(r.key)} /> },
+        : <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => confirmRemoveLine(r)} /> },
   ];
 
   // Margin tab — item code / description plus margin figures.
@@ -3983,18 +4070,33 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     { title: 'Margin %', width: 90, align: 'right', render: (_, r) => { const t = num(r.qty) * num(r.unitPrice); const m = (num(r.unitPrice) - num(r.costUnit)) * num(r.qty); const pct = t ? (m / t) * 100 : 0; return <Text style={{ fontSize: 11.5, color: pct < 0 ? REDWOOD.error : REDWOOD.success }}>{t ? pct.toFixed(1) + '%' : '—'}</Text>; } },
   ];
 
-  // Lot Details tab — one row per selected lot with item code / description.
+  // Lot Details tab — one row per lotSerial fetched from the line's lotSerials child
+  // (falls back to the locally-selected lot(s) for create-mode / not-yet-saved lines).
   const lotRows = useMemo(() => lines.flatMap(l => {
+    const fusionLots = l.lineLots ?? [];
+    if (fusionLots.length) {
+      return fusionLots.map((ls: any, i: number) => ({
+        key: `${l.key}-ls-${i}`, itemNumber: l.itemNumber, description: l.description,
+        lot: pf(ls, ['LotNumber', 'Lot']),
+        serialFrom: pf(ls, ['ItemSerialNumberFrom', 'FromSerialNumber']),
+        serialTo: pf(ls, ['ItemSerialNumberTo', 'ToSerialNumber']),
+        subinventory: pf(ls, ['SubinventoryCode', 'Subinventory']),
+        qty: num(pf(ls, ['Quantity', 'LotQuantity'])) || l.qty,
+        source: 'fusion' as const,
+      }));
+    }
     const ls = (l.lots && l.lots.length) ? l.lots : (l.lot ? [l.lot] : []);
     return ls.length
-      ? ls.map((lot, i) => ({ key: `${l.key}-lot-${i}`, itemNumber: l.itemNumber, description: l.description, lot, qty: l.qty }))
-      : [{ key: `${l.key}-nolot`, itemNumber: l.itemNumber, description: l.description, lot: undefined as string | undefined, qty: l.qty }];
+      ? ls.map((lot, i) => ({ key: `${l.key}-lot-${i}`, itemNumber: l.itemNumber, description: l.description, lot, qty: l.qty, source: 'local' as const }))
+      : [{ key: `${l.key}-nolot`, itemNumber: l.itemNumber, description: l.description, lot: undefined as string | undefined, qty: l.qty, source: 'local' as const }];
   }), [lines]);
   const lotCols: ColumnsType<any> = [
     { title: 'Item', dataIndex: 'itemNumber', width: 150, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text> },
-    { title: 'Description', dataIndex: 'description', width: 300, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
-    { title: 'Lot', dataIndex: 'lot', width: 200, render: v => v ? <Tag color="geekblue">{v}</Tag> : <Text type="secondary">— no lot —</Text> },
-    { title: 'Ord Qty', dataIndex: 'qty', width: 100, align: 'right', render: v => fmtQty(num(v)) },
+    { title: 'Description', dataIndex: 'description', width: 240, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Lot', dataIndex: 'lot', width: 180, render: v => v ? <Tag color="geekblue">{v}</Tag> : <Text type="secondary">— no lot —</Text> },
+    { title: 'Serial', width: 160, render: (_, r) => r.serialFrom ? <Text style={{ fontSize: 11.5 }}>{r.serialFrom}{r.serialTo && r.serialTo !== r.serialFrom ? ` → ${r.serialTo}` : ''}</Text> : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
+    { title: 'Subinventory', dataIndex: 'subinventory', width: 130, render: v => v ? <Text style={{ fontSize: 11.5 }}>{v}</Text> : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
+    { title: 'Qty', dataIndex: 'qty', width: 90, align: 'right', render: v => fmtQty(num(v)) },
   ];
 
   // Errors tab — per-line errors + general order-level errors from the last save.
@@ -4320,6 +4422,44 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           </div>
           );
         })()}
+      </Modal>
+
+      {/* Line-Total drill → the line's charges + price components, straight from Fusion */}
+      <Modal open={!!chargeDrill} onCancel={() => setChargeDrill(null)} width={760} style={{ top: 24 }}
+        title={<Space><DollarOutlined style={{ color: REDWOOD.primary }} /> Charges — {chargeDrill?.line.itemNumber}</Space>}
+        footer={<Button onClick={() => setChargeDrill(null)}>Close</Button>}>
+        {chargeDrill && (
+          <div>
+            <div style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.neutral600, wordBreak: 'break-all', marginBottom: 10 }}>
+              <b>GET</b> {chargeDrill.url}
+            </div>
+            {chargeDrill.loading ? <div style={{ textAlign: 'center', padding: 30 }}><Spin /></div>
+              : chargeDrill.error ? <div style={{ color: REDWOOD.error, fontSize: 12 }}>{chargeDrill.error}</div>
+              : chargeDrill.charges.length === 0 ? <Empty description="No charges on this line" />
+              : chargeDrill.charges.map((c: any, ci: number) => {
+                  const comps = c.chargeComponents?.items ?? c.chargeComponents ?? [];
+                  return (
+                    <div key={ci} style={{ marginBottom: 14, border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 8, overflow: 'hidden' }}>
+                      <div style={{ background: REDWOOD.neutral100, padding: '6px 10px', fontSize: 12 }}>
+                        <Space size={12} wrap>
+                          <Text strong>{pf(c, ['ChargeDefinitionCode', 'ChargeName']) ?? 'Charge'}</Text>
+                          {String(c.PrimaryFlag) === 'true' && <Tag color="blue" style={{ margin: 0 }}>Primary</Tag>}
+                          <Text type="secondary" style={{ fontSize: 11 }}>Unit {fmtAmount(num(pf(c, ['ChargeCurrencyUnitPrice', 'GSAUnitPrice', 'HeaderCurrencyUnitPrice'])), ccy)}</Text>
+                          <Text type="secondary" style={{ fontSize: 11 }}>Ext {fmtAmount(num(pf(c, ['ChargeCurrencyExtendedAmount', 'HeaderCurrencyExtendedAmount'])), ccy)}</Text>
+                          <Text type="secondary" style={{ fontSize: 11 }}>Priced Qty {fmtQty(num(pf(c, ['PricedQuantity'])))}</Text>
+                        </Space>
+                      </div>
+                      <Table size="small" rowKey={(_, i) => String(i)} pagination={false}
+                        dataSource={comps} columns={[
+                          { title: 'Price Element', dataIndex: 'PriceElementCode', width: 200, render: (v: any) => <Text style={{ fontSize: 11.5 }}>{v}</Text> },
+                          { title: 'Unit Price', width: 130, align: 'right', render: (_: any, cc: any) => <Text style={{ fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(pf(cc, ['HeaderCurrencyUnitPrice', 'ChargeCurrencyUnitPrice'])), ccy)}</Text> },
+                          { title: 'Extended', width: 130, align: 'right', render: (_: any, cc: any) => <Text strong style={{ fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(pf(cc, ['HeaderCurrencyExtendedAmount', 'ChargeCurrencyExtendedAmount'])), ccy)}</Text> },
+                        ] as any} />
+                    </div>
+                  );
+                })}
+          </div>
+        )}
       </Modal>
 
       {/* Line error detail (opened from the red ✗ in the Status column) */}
