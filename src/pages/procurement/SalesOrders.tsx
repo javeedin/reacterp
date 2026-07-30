@@ -13,7 +13,7 @@ import {
   CheckCircleOutlined, EyeOutlined, EditOutlined,
   SafetyCertificateOutlined, StopOutlined, SendOutlined, RollbackOutlined,
   FilePdfOutlined, FileExcelOutlined, SnippetsOutlined, ImportOutlined, TableOutlined, DownOutlined,
-  ThunderboltOutlined, CarOutlined, InboxOutlined,
+  ThunderboltOutlined, CarOutlined, InboxOutlined, WarningFilled,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { ShipConfirmModal, PickSlipDialog } from './ConfirmPicks';
@@ -1659,6 +1659,9 @@ interface NewLine { key: string; itemNumber: string; description?: string; uom?:
   srcLineId?: string; srcLineNumber?: string | number; srcScheduleNumber?: string | number; existing?: boolean; canceled?: boolean;
   // Fusion system ids captured on edit load (to target PATCH/DELETE on the line).
   fulfillLineId?: string | number; lineHref?: string; origQty?: number; origUnitPrice?: number; cancelSaved?: boolean;
+  // Amounts as STORED in Fusion at load time (frozen charge totals). Kept so the
+  // grid can show the figure as-is and flag when qty×price disagrees with it.
+  loadedExt?: number; loadedTax?: number;
   // Return (RMA) line: references the original order line being returned.
   returnLine?: boolean; returnReason?: string; maxQty?: number;
   refHeaderId?: string | number; refLineId?: string | number; refFulfillLineId?: string | number;
@@ -3097,9 +3100,13 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           const comps = primaryCharge ? (primaryCharge.chargeComponents?.items ?? primaryCharge.chargeComponents ?? []) : [];
           const taxComp = comps.find((c: any) => c.PriceElementCode === 'QP_EXCLUSIVE_TAX');
           const taxAmt = round2(taxComp ? num(pf(taxComp, ['HeaderCurrencyExtendedAmount', 'ChargeCurrencyExtendedAmount'])) : num(pf(l, ['TaxAmount', 'TotalTax'])));
-          const ext = round2(price * q);
+          // Loaded net line amount AS STORED (QP_NET_PRICE ext → else line ExtendedAmount).
+          const netComp = comps.find((c: any) => c.PriceElementCode === 'QP_NET_PRICE') ?? comps.find((c: any) => c.PriceElementCode === 'QP_LIST_PRICE');
+          const loadedExtRaw = netComp ? num(pf(netComp, ['HeaderCurrencyExtendedAmount', 'ChargeCurrencyExtendedAmount'])) : num(pf(l, ['ExtendedAmount']));
+          const loadedExt = loadedExtRaw ? round2(loadedExtRaw) : undefined;
+          const basis = loadedExt ?? round2(price * q);          // derive tax % off the stored net
           const taxCode = pf(l, ['TaxClassificationCode', 'TaxClassification', 'TaxCode']);
-          const taxPct = (ext && taxAmt) ? round2((taxAmt / ext) * 100) : undefined;
+          const taxPct = (basis && taxAmt) ? round2((taxAmt / basis) * 100) : undefined;
           return {
             key: `edit-${pf(l, ['FulfillLineId']) ?? pf(l, ['SourceTransactionLineId']) ?? i}`,
             itemNumber: String(pf(l, ['ProductNumber', 'Product', 'ItemNumber']) ?? ''),
@@ -3107,6 +3114,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             uom: pf(l, ['OrderedUOMCode', 'OrderedUOM']),
             qty: q, unitPrice: price, origQty: q, origUnitPrice: price,
             taxCode, taxPct, taxAmount: taxAmt || undefined,
+            loadedExt, loadedTax: taxAmt || undefined,
             status: pf(l, ['DisplayStatus', 'Status']),
             statusCode: pf(l, ['StatusCode']),
             srcLineId: pf(l, ['SourceTransactionLineId']) != null ? String(pf(l, ['SourceTransactionLineId'])) : undefined,
@@ -3352,6 +3360,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         qty: q, origQty: q,
         unitPrice: price, origUnitPrice: price,
         taxCode: updTaxCode, taxPct: updTaxPct, taxAmount: taxAmt, lot: updLot,
+        // We just wrote consistent charge totals → stored amount now equals qty×price.
+        loadedExt: ext, loadedTax: taxAmt,
         lots: updLot ? [updLot] : l.lots,
         status: lineRes.data?.DisplayStatus ?? lineRes.data?.Status ?? l.status,
         statusCode: lineRes.data?.StatusCode ?? l.statusCode, error: undefined,
@@ -3909,14 +3919,23 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           : <Text type="secondary" style={{ fontSize: 11 }}>— none —</Text>;
       } } as any] : []),
     { title: 'Unit Price', dataIndex: 'unitPrice', width: 100, align: 'right', render: (v, r) => <InputNumber size="small" min={0} value={v} disabled={!!r.canceled || (editMode && !!r.existing) || returnMode} onChange={n => updLine(r.key, { unitPrice: Number(n) || 0 })} style={{ width: 88 }} /> },
-    { title: 'Line Total', width: 110, align: 'right', render: (_, r) => <Text strong style={{ color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(r.qty) * num(r.unitPrice), ccy)}</Text> },
+    { title: 'Line Total', width: 118, align: 'right', render: (_, r) => {
+        const calc = round2(num(r.qty) * num(r.unitPrice));
+        // Show the amount AS LOADED from Fusion; flag when it disagrees with qty×price.
+        const shown = r.loadedExt != null ? r.loadedExt : calc;
+        const mismatch = r.loadedExt != null && round2(r.loadedExt) !== calc;
+        return <Space size={4}>
+          {mismatch && <Tooltip title={`Stored amount ${fmtAmount(r.loadedExt, ccy)} ≠ Qty×Price ${fmtAmount(calc, ccy)} — line total is inconsistent in Fusion`}><WarningFilled style={{ color: REDWOOD.error }} /></Tooltip>}
+          <Text strong style={{ color: mismatch ? REDWOOD.error : REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(shown, ccy)}</Text>
+        </Space>;
+      } },
     { title: 'Margin', width: 100, align: 'right', render: (_, r) => { const m = (num(r.unitPrice) - num(r.costUnit)) * num(r.qty); return <Text style={{ fontSize: 11.5, color: m < 0 ? REDWOOD.error : REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(m, ccy)}</Text>; } },
     { title: 'Tax Code', dataIndex: 'taxCode', width: 140, render: (v, r) => <Select size="small" showSearch allowClear style={{ width: 128 }} popupMatchSelectWidth={false} value={v || undefined} placeholder="—"
         options={taxOptions} optionFilterProp="value"
         notFoundContent={taxOptions.length ? undefined : (hdr.businessUnit ? 'No tax codes' : 'Select a business unit')}
         onChange={val => { const opt = taxOptions.find(o => o.value === val); updLine(r.key, { taxCode: val, taxPct: opt ? opt.pct : undefined }); }} /> },
     { title: 'Tax', dataIndex: 'taxAmount', width: 120, align: 'right', render: (v, r) => <Space size={4}>{r.taxPct != null && <Tag color="gold" style={{ margin: 0, fontSize: 10 }}>{r.taxPct}%</Tag>}<Text style={{ fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(v), ccy)}</Text></Space> },
-    { title: 'Net', width: 110, align: 'right', fixed: 'right', render: (_, r) => <Text strong style={{ color: REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(r.qty) * num(r.unitPrice) + num(r.taxAmount), ccy)}</Text> },
+    { title: 'Net', width: 110, align: 'right', fixed: 'right', render: (_, r) => { const base = r.loadedExt != null ? r.loadedExt : round2(num(r.qty) * num(r.unitPrice)); return <Text strong style={{ color: REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(base + num(r.taxAmount), ccy)}</Text>; } },
     { title: 'Status', dataIndex: 'status', width: 130, fixed: 'right', render: (v, r, i) => r.error
         ? <Tooltip title="Click to view the error"><Button size="small" type="text" danger style={{ padding: '0 4px' }}
             icon={<CloseCircleTwoTone twoToneColor={REDWOOD.error} />}
@@ -4259,6 +4278,13 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                   options={lotOpts} onChange={v => setUpdLot(v || undefined)} />
               </Col>
             </Row>
+            {/* Flag when the amount stored in Fusion is inconsistent with qty×price. */}
+            {updTarget.loadedExt != null && round2(updTarget.loadedExt) !== round2(num(updTarget.origQty ?? updTarget.qty) * num(updTarget.origUnitPrice ?? updTarget.unitPrice)) && (
+              <div style={{ marginTop: 10, padding: '6px 10px', background: '#FFF1F0', border: `1px solid ${REDWOOD.error}`, borderRadius: 6, fontSize: 12 }}>
+                <WarningFilled style={{ color: REDWOOD.error, marginRight: 6 }} />
+                Stored amount <Text strong>{fmtAmount(updTarget.loadedExt, ccy)}</Text> ≠ Qty×Price <Text strong>{fmtAmount(round2(num(updTarget.origQty ?? updTarget.qty) * num(updTarget.origUnitPrice ?? updTarget.unitPrice)), ccy)}</Text>. Saving reprices the charge to <Text strong>{fmtAmount(round2(num(updQty) * num(updPrice)), ccy)}</Text>.
+              </div>
+            )}
             {/* Reprice summary — cost, tax, total, margin */}
             <div style={{ marginTop: 12, padding: 10, background: REDWOOD.neutral100, borderRadius: 6 }}>
               <Row gutter={[10, 6]}>
