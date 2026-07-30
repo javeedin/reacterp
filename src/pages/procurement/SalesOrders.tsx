@@ -3223,15 +3223,25 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     if (m.taxPct != null) m.taxAmount = round2(num(m.qty) * num(m.unitPrice) * num(m.taxPct) / 100);
     return m;
   }));
-  // The exact REST request used to remove a line: DELETE on a draft order line,
-  // PATCH { CanceledFlag } on a processing order line. Returned so the confirm
-  // dialog can show the full URL + payload before it runs.
+  // The exact REST request used to remove a line. Line-level DELETE is not enabled
+  // on the order hub, so a DRAFT line is removed with a header PATCH that zeroes its
+  // ordered quantity (change-order style); a processing line is canceled via
+  // PATCH { CanceledFlag } on the line. Returned so the confirm dialog can show it.
   const lineRemoveRequest = (l: NewLine) => {
     const orderKey = editOrder?.OrderKey ?? editOrder?.HeaderId;
-    const href = l.lineHref ? fusionHref(l.lineHref)
-      : (l.fulfillLineId != null ? `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(String(orderKey))}/child/lines/${l.fulfillLineId}` : '');
+    const headerUrl = `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(String(orderKey))}`;
     const draft = isDraftStatus;
-    return { href, draft, method: draft ? 'DELETE' : 'PATCH', body: draft ? undefined : { CanceledFlag: true, CancelReasonCode: 'CUSTOMER_REQUEST' } };
+    if (draft) {
+      const body = { lines: [{
+        SourceTransactionLineId: String(l.srcLineId ?? l.fulfillLineId ?? ''),
+        SourceTransactionScheduleId: String(l.srcScheduleNumber ?? l.srcLineId ?? ''),
+        OrderedQuantity: 0,
+      }] };
+      return { href: headerUrl, draft, method: 'PATCH', body, hasKeys: !!(l.srcLineId ?? l.fulfillLineId) };
+    }
+    const lineHref = l.lineHref ? fusionHref(l.lineHref)
+      : (l.fulfillLineId != null ? `${headerUrl}/child/lines/${l.fulfillLineId}` : '');
+    return { href: lineHref, draft, method: 'PATCH', body: { CanceledFlag: true, CancelReasonCode: 'CUSTOMER_REQUEST' }, hasKeys: !!lineHref };
   };
 
   // Remove an EXISTING line immediately (after confirmation).
@@ -3239,20 +3249,19 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     const { href, draft, method, body } = lineRemoveRequest(l);
     if (!href) { message.error('No line id available to remove'); return; }
     try {
-      const init: RequestInit = body
-        ? { method, headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-        : { method, headers: { ...FUSION_HDRS } };
-      const r = await fetch(href, init);
+      const r = await fetch(href, { method, headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const text = await r.text(); let data: any = null, pretty = text;
       try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* raw */ }
-      setLastResponse(`${method} ${href}\n${body ? JSON.stringify(body) + '\n' : ''}HTTP ${r.status}\n\n${pretty}`);
+      setLastResponse(`${method} ${href}\n${JSON.stringify(body)}\nHTTP ${r.status}\n\n${pretty}`);
       if (r.ok) {
-        if (draft) { setLines(prev => prev.filter(x => x.key !== l.key)); message.success(`Line ${l.itemNumber} deleted`); }
+        // Draft: the line is zeroed (still present in Fusion at qty 0) → drop it from
+        // the grid. Processing: it stays as a canceled line.
+        if (draft) { setLines(prev => prev.filter(x => x.key !== l.key)); message.success(`Line ${l.itemNumber} removed (qty set to 0)`); }
         else { upd(l.key, { canceled: true, cancelSaved: true, status: 'Canceled', statusCode: data?.StatusCode, error: undefined }); message.success(`Line ${l.itemNumber} canceled`); }
       } else {
         const msgs = collectOrderErrors(data, text, true);
-        upd(l.key, { error: [`${method} ${href}`, `HTTP ${r.status}`, ...(msgs.length ? msgs : [])].join('\n\n') });
-        message.error(`${draft ? 'Delete' : 'Cancel'} failed — see the red ✗ / Errors tab`);
+        upd(l.key, { error: [`${method} ${href}`, JSON.stringify(body), `HTTP ${r.status}`, ...(msgs.length ? msgs : [])].join('\n\n') });
+        message.error(`${draft ? 'Remove' : 'Cancel'} failed — see the red ✗ / Errors tab`);
       }
     } catch (e: any) { upd(l.key, { error: [`${method} ${href}`, e?.message].filter(Boolean).join('\n\n') }); message.error(e?.message || 'Request failed'); }
   };
@@ -3264,24 +3273,25 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       Modal.confirm({ title: 'Remove this line?', content: `${l.itemNumber || 'This line'} will be removed from the order.`, okText: 'Remove', okButtonProps: { danger: true }, onOk: () => setLines(prev => prev.filter(x => x.key !== l.key)) });
       return;
     }
-    const { href, draft, method, body } = lineRemoveRequest(l);
+    const { href, draft, method, body, hasKeys } = lineRemoveRequest(l);
     Modal.confirm({
-      title: draft ? 'Delete this line?' : 'Cancel this line?',
-      width: 640, icon: <ApiOutlined style={{ color: draft ? REDWOOD.error : REDWOOD.primary }} />,
+      title: draft ? 'Remove this line?' : 'Cancel this line?',
+      width: 660, icon: <ApiOutlined style={{ color: draft ? REDWOOD.error : REDWOOD.primary }} />,
       content: (
         <div>
           <div style={{ marginBottom: 10 }}>
             {draft
-              ? <span>Line <b>{l.itemNumber}</b> will be <b>permanently deleted</b>. This can’t be undone.</span>
+              ? <span>Line <b>{l.itemNumber}</b> will be removed by setting its ordered quantity to <b>0</b> (line-level delete isn’t supported on the order hub).</span>
               : <span>Line <b>{l.itemNumber}</b> will be canceled and stays on the order as a canceled line.</span>}
           </div>
           <div style={{ fontSize: 11, fontFamily: 'monospace', wordBreak: 'break-all', background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, padding: '8px 10px' }}>
-            <div><b style={{ color: draft ? REDWOOD.error : REDWOOD.primary }}>{method}</b> {href || '(no line id available)'}</div>
-            {body && <div style={{ marginTop: 4 }}>{JSON.stringify(body)}</div>}
+            <div><b style={{ color: draft ? REDWOOD.error : REDWOOD.primary }}>{method}</b> {href || '(no order key)'}</div>
+            <div style={{ marginTop: 4 }}>{JSON.stringify(body)}</div>
           </div>
+          {!hasKeys && <div style={{ marginTop: 8, color: REDWOOD.error, fontSize: 12 }}>Missing source line keys — reload the order before removing.</div>}
         </div>
       ),
-      okText: draft ? 'Delete line' : 'Cancel line', okButtonProps: { danger: true, disabled: !href }, cancelText: 'Keep',
+      okText: draft ? 'Remove line' : 'Cancel line', okButtonProps: { danger: true, disabled: !hasKeys }, cancelText: 'Keep',
       onOk: () => removeExistingLine(l),
     });
   };
@@ -3607,13 +3617,15 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   // Edit mode: build the exact per-line REST operations against the live order.
   //   update qty  → PATCH  {OrderKey}/child/lines/{linesUniqID}  { OrderedQuantity }
   //   add line    → POST   {OrderKey}/child/lines                 { Product, Qty, ... }
-  //   remove line → DRAFT order: DELETE {OrderKey}/child/lines/{linesUniqID} (hard delete);
-  //                 processing order: PATCH … { CanceledFlag: true } (change-order cancel)
+  //   remove line → line-level DELETE is NOT enabled on the order hub, so:
+  //     DRAFT order      → PATCH {OrderKey} { lines:[{ SourceTransactionLineId, SourceTransactionScheduleId, OrderedQuantity: 0 }] }
+  //     processing order → PATCH {OrderKey}/child/lines/{id} { CanceledFlag: true }
   interface EditOp { kind: 'update' | 'add' | 'cancel' | 'delete'; method: string; url: string; body: any; lineKey: string; label: string; srcLineNumber: any }
   const editOps: EditOp[] = useMemo(() => {
     if (!editMode) return [];
     const orderKey = editOrder.OrderKey ?? editOrder.HeaderId;
-    const childBase = `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(String(orderKey))}/child/lines`;
+    const headerUrl = `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(String(orderKey))}`;
+    const childBase = `${headerUrl}/child/lines`;
     const ops: EditOp[] = [];
     lines.forEach((l, i) => {
       const label = `${l.itemNumber || '(item)'}${l.srcLineNumber != null ? ` · line ${l.srcLineNumber}` : ''}`;
@@ -3623,9 +3635,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         // Only fire once: skip already-saved removals; only PATCH when qty changed.
         if (l.canceled) {
           if (!l.cancelSaved) {
-            // A draft order line has never entered fulfillment, so it can be hard
-            // DELETEd; a processing order must keep it and cancel via CanceledFlag.
-            if (isDraftStatus) ops.push({ kind: 'delete', method: 'DELETE', url: href, body: undefined, lineKey: l.key, label, srcLineNumber: l.srcLineNumber });
+            if (isDraftStatus) ops.push({ kind: 'cancel', method: 'PATCH', url: headerUrl, body: { lines: [{ SourceTransactionLineId: String(l.srcLineId ?? l.fulfillLineId ?? ''), SourceTransactionScheduleId: String(l.srcScheduleNumber ?? l.srcLineId ?? ''), OrderedQuantity: 0 }] }, lineKey: l.key, label, srcLineNumber: l.srcLineNumber });
             else ops.push({ kind: 'cancel', method: 'PATCH', url: href, body: { CanceledFlag: true, CancelReasonCode: 'CUSTOMER_REQUEST' }, lineKey: l.key, label, srcLineNumber: l.srcLineNumber });
           }
         }
