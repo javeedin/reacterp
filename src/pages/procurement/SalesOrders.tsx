@@ -638,31 +638,39 @@ const ARInvoiceDialog: React.FC<{ txn: string | null; onClose: () => void }> = (
   );
 };
 
-// ── Inventory reservations for an order (created with DemandSourceName = order#) ──
+// ── Inventory reservations for an order (DemandSourceName = source txn number) ──
+// The inventoryReservations GET needs a complete filter group; the working form
+// is per-item: q=ItemNumber=<item>;DemandSourceName=<source txn number>.
 const RESV_URL = `${FUSION_BASE}/inventoryReservations`;
-async function fetchReservations(orderNo: string): Promise<any[]> {
-  if (!orderNo) return [];
-  const q = encodeURIComponent(`DemandSourceName='${orderNo}' or DemandSourceHeaderNumber='${orderNo}'`);
-  try {
-    const r = await fetch(`${RESV_URL}?q=${q}&onlyData=true&limit=500`, { headers: FUSION_HDRS });
-    if (!r.ok) return [];
-    const d = await r.json();
-    return d.items ?? [];
-  } catch { return []; }
+async function fetchReservations(demandName: string, items: string[]): Promise<any[]> {
+  if (!demandName || !items.length) return [];
+  const uniq = Array.from(new Set(items.map(i => String(i ?? '').trim()).filter(Boolean)));
+  const seen = new Set<string>();
+  const out: any[] = [];
+  await mapLimit(uniq, 4, async (item) => {
+    const q = `ItemNumber=${item};DemandSourceName=${demandName}`;
+    try {
+      const r = await fetch(`${RESV_URL}?q=${encodeURIComponent(q)}&onlyData=true&limit=500`, { headers: FUSION_HDRS });
+      if (!r.ok) return;
+      const d = await r.json();
+      (d.items ?? []).forEach((it: any) => { const id = String(pf(it, ['ReservationId']) ?? ''); if (id && !seen.has(id)) { seen.add(id); out.push(it); } });
+    } catch { /* skip this item */ }
+  });
+  return out;
 }
-// The GET used to look up an order's reservations (shown behind the API icon).
-const reservationsQueryUrl = (orderNo?: string) =>
-  `${RESV_URL}?q=DemandSourceName='${orderNo ?? '<order#>'}' or DemandSourceHeaderNumber='${orderNo ?? '<order#>'}'&onlyData=true&limit=500`;
+// The GET used to look up an order's reservations (shown behind the API icon; one per item).
+const reservationsQueryUrl = (demandName?: string, sampleItem?: string) =>
+  `${RESV_URL}?q=ItemNumber=${sampleItem ?? '<item>'};DemandSourceName=${demandName ?? '<source txn #>'}&onlyData=true&limit=500`;
 // Read-only reservations list for an order (used by the order view + create tab).
-const ReservationsView: React.FC<{ orderNo?: string; open: boolean; onClose: () => void; reloadKey?: number }> = ({ orderNo, open, onClose, reloadKey }) => {
+const ReservationsView: React.FC<{ orderNo?: string; items?: string[]; open: boolean; onClose: () => void; reloadKey?: number }> = ({ orderNo, items = [], open, onClose, reloadKey }) => {
   const [list, setList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const apiUrl = reservationsQueryUrl(orderNo);
+  const apiUrl = reservationsQueryUrl(orderNo, items[0]);
   useEffect(() => {
     if (!open || !orderNo) return;
     setLoading(true);
-    fetchReservations(String(orderNo)).then(setList).finally(() => setLoading(false));
-  }, [open, orderNo, reloadKey]);
+    fetchReservations(String(orderNo), items).then(setList).finally(() => setLoading(false));
+  }, [open, orderNo, reloadKey, items.join(',')]);
   const cols: ColumnsType<any> = [
     { title: 'Item', width: 150, render: (_, r) => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{pf(r, ['ItemNumber']) ?? '—'}</Text> },
     { title: 'Lot', width: 130, render: (_, r) => { const l = pf(r, ['LotNumber']); return l ? <Tag color="geekblue">{l}</Tag> : <Text type="secondary">—</Text>; } },
@@ -680,6 +688,7 @@ const ReservationsView: React.FC<{ orderNo?: string; open: boolean; onClose: () 
         </Tooltip></Space>}>
       <div style={{ fontSize: 11.5, marginBottom: 8 }}>
         <Tag color="green">GET</Tag><Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info, wordBreak: 'break-all' }}>{apiUrl}</Text>
+        <div><Text type="secondary" style={{ fontSize: 11 }}>One call per line item · DemandSourceName = source transaction number.</Text></div>
       </div>
       <Table size="small" loading={loading} columns={cols} dataSource={list} rowKey={(r, i) => String(pf(r, ['ReservationId']) ?? i)}
         pagination={list.length > 20 ? { pageSize: 20 } : false} scroll={{ x: 'max-content', y: 360 }}
@@ -944,8 +953,7 @@ const OrderView: React.FC<{ order: any; onCopy?: (order: any, lines: any[]) => v
   const [resvCount, setResvCount] = useState<number | null>(null);
   const [arOpen, setArOpen] = useState(false);
   const orderNo = String(order.OrderNumber ?? order.SourceTransactionNumber ?? '');
-  const sourceNo = String(order.SourceTransactionNumber ?? order.OrderNumber ?? '');  // AutoInvoice filters by source order number
-  useEffect(() => { if (orderNo) fetchReservations(orderNo).then(l => setResvCount(l.length)); }, [orderNo]);
+  const sourceNo = String(order.SourceTransactionNumber ?? order.OrderNumber ?? '');  // reservations + AutoInvoice key off the source order number
   const totals = useTotals(order, true);
   const lineKey = (r: any, i: number) => `${r.LineId ?? r.FulfillLineId ?? i}`;
   const selectedLines = () => lines.filter((l, i) => selectedKeys.includes(lineKey(l, i)));
@@ -993,6 +1001,9 @@ const OrderView: React.FC<{ order: any; onCopy?: (order: any, lines: any[]) => v
   const orgList = useMemo(() => Array.from(new Set(lines.map((l: any) => l.RequestedFulfillmentOrganizationCode).filter(Boolean))) as string[], [lines]);
   const orgNameOf = (code: string) => lines.find((l: any) => l.RequestedFulfillmentOrganizationCode === code)?.RequestedFulfillmentOrganizationName;
   const subList = useMemo(() => Array.from(new Set(lines.map((l: any) => l.SubinventoryCode).filter(Boolean))) as string[], [lines]);
+  const lineItems = useMemo(() => Array.from(new Set(lines.map((l: any) => pf(l, ['ProductNumber', 'Item', 'ItemNumber'])).filter(Boolean))) as string[], [lines]);
+  // Reservation count (found by item + source txn number) once the lines load.
+  useEffect(() => { if (sourceNo && lineItems.length) fetchReservations(sourceNo, lineItems).then(l => setResvCount(l.length)); else setResvCount(0); }, [sourceNo, lineItems.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadLines = useCallback(async () => {
     if (!linesHref) return;
@@ -1283,7 +1294,7 @@ const OrderView: React.FC<{ order: any; onCopy?: (order: any, lines: any[]) => v
       <AllFieldsModal title={`Order ${order.OrderNumber} — header`} row={hdrOpen ? order : null} onClose={() => setHdrOpen(false)} />
       <AllFieldsModal title={`Line ${lineDetail?.DisplayLineNumber ?? ''} — ${lineDetail?.ProductNumber ?? ''}`} row={lineDetail} onClose={() => setLineDetail(null)} />
       <ARInvoiceDialog txn={arTxn} onClose={() => setArTxn(null)} />
-      <ReservationsView orderNo={orderNo} open={resvOpen} onClose={() => setResvOpen(false)} />
+      <ReservationsView orderNo={sourceNo} items={lineItems} open={resvOpen} onClose={() => setResvOpen(false)} />
       <AutoInvoiceModal orderNo={sourceNo} buId={order.BusinessUnitId} open={arOpen} onClose={() => setArOpen(false)} />
     </div>
   );
@@ -3613,7 +3624,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     const key = liveOrderKey();
     if (!key) { message.warning('Save the order first'); return; }
     setWorkBusy('confirm');
-    const resv = await fetchReservations(liveOrderNumber());
+    const resv = await fetchReservations(orderNumber, lines.map(l => l.itemNumber));
     setWorkBusy(null);
     if (resv.length) { setConfirmResvList(resv); setConfirmResvOpen(true); return; }
     doConfirm();
@@ -3622,7 +3633,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const proceedConfirm = async () => {
     setConfirmResvOpen(false);
     setWorkBusy('confirm');
-    try { await deleteReservationsFor(liveOrderNumber()); setResvReloadKey(k => k + 1); } catch { /* continue to confirm */ }
+    try { await deleteReservationsFor(orderNumber); setResvReloadKey(k => k + 1); } catch { /* continue to confirm */ }
     await doConfirm();
   };
 
@@ -3681,7 +3692,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   // Run the reservations shown in the dialog (one POST per line), recording
   // each line's HTTP status + errors inline.
   const runReserve = async () => {
-    const orderNo = liveOrderNumber();
+    // Reservations are keyed by the SOURCE transaction number (e.g. LSO…), not
+    // the Fusion order number — so View/Unreserve can find them by item + name.
+    const orderNo = orderNumber;
     // Guard: lot-controlled lines must have a lot + subinventory selected.
     const missing = reserveRows.filter(r => r.lotControlled && (!r.lot || !r.subinventory));
     if (missing.length) { message.warning(`Select a lot & subinventory for: ${missing.map(m => m.item).join(', ')}`); return; }
@@ -3708,11 +3721,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
 
   // Unreserve — find the reservations created for this order (DemandSourceName =
   // order number) and delete each.
-  // Delete every reservation for an order; returns the per-line results.
-  const deleteReservationsFor = async (orderNo: string) => {
-    const items = await fetchReservations(orderNo);
+  // Delete every reservation for the order (found by item + source txn number).
+  const deleteReservationsFor = async (demandName: string) => {
+    const reservations = await fetchReservations(demandName, lines.map(l => l.itemNumber));
     const results: any[] = [];
-    for (const it of items) {
+    for (const it of reservations) {
       const rid = pf(it, ['ReservationId']);
       if (rid == null) continue;
       try {
@@ -3721,10 +3734,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       } catch (e: any) { results.push({ reservationId: rid, status: 0, ok: false, error: e?.message }); }
     }
     const okN = results.filter(x => x.ok).length;
-    return { count: items.length, okN, bad: results.length - okN, results };
+    return { count: reservations.length, okN, bad: results.length - okN, results };
   };
   const unreserveStock = async () => {
-    const orderNo = liveOrderNumber();
+    const orderNo = orderNumber;
     if (!orderNo) { message.warning('Save the order first'); return; }
     setWorkBusy('unreserve');
     try {
@@ -4327,7 +4340,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       </Modal>
 
       {/* Reservations viewer (from the Reservations dropdown) */}
-      <ReservationsView orderNo={liveOrderNumber()} open={resvViewOpen} onClose={() => setResvViewOpen(false)} reloadKey={resvReloadKey} />
+      <ReservationsView orderNo={orderNumber} items={lines.map(l => l.itemNumber)} open={resvViewOpen} onClose={() => setResvViewOpen(false)} reloadKey={resvReloadKey} />
 
       {/* Auto Ship Confirm — pick release → pick confirm → ship confirm workflow */}
       {/* shipmentLines are keyed by the SOURCE transaction number (e.g. LSO…), not the Fusion order number */}
