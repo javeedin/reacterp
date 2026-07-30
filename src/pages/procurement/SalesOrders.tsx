@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   Layout, Breadcrumb, Card, Table, Form, Input, Select, DatePicker, Button,
-  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty, Tabs, InputNumber, Upload, Checkbox,
+  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty, Tabs, InputNumber, Upload, Checkbox, Dropdown,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -12,7 +12,7 @@ import {
   DatabaseOutlined, CheckCircleTwoTone, CloseCircleTwoTone, RiseOutlined, TagsOutlined,
   CheckCircleOutlined, EyeOutlined, EditOutlined,
   SafetyCertificateOutlined, StopOutlined, SendOutlined, RollbackOutlined,
-  FilePdfOutlined, FileExcelOutlined, SnippetsOutlined, ImportOutlined, TableOutlined,
+  FilePdfOutlined, FileExcelOutlined, SnippetsOutlined, ImportOutlined, TableOutlined, DownOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -636,6 +636,46 @@ const ARInvoiceDialog: React.FC<{ txn: string | null; onClose: () => void }> = (
   );
 };
 
+// ── Inventory reservations for an order (created with DemandSourceName = order#) ──
+const RESV_URL = `${FUSION_BASE}/inventoryReservations`;
+async function fetchReservations(orderNo: string): Promise<any[]> {
+  if (!orderNo) return [];
+  const q = encodeURIComponent(`DemandSourceName='${orderNo}' or DemandSourceHeaderNumber='${orderNo}'`);
+  try {
+    const r = await fetch(`${RESV_URL}?q=${q}&onlyData=true&limit=500`, { headers: FUSION_HDRS });
+    if (!r.ok) return [];
+    const d = await r.json();
+    return d.items ?? [];
+  } catch { return []; }
+}
+// Read-only reservations list for an order (used by the order view + create tab).
+const ReservationsView: React.FC<{ orderNo?: string; open: boolean; onClose: () => void; reloadKey?: number }> = ({ orderNo, open, onClose, reloadKey }) => {
+  const [list, setList] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!open || !orderNo) return;
+    setLoading(true);
+    fetchReservations(String(orderNo)).then(setList).finally(() => setLoading(false));
+  }, [open, orderNo, reloadKey]);
+  const cols: ColumnsType<any> = [
+    { title: 'Item', width: 150, render: (_, r) => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{pf(r, ['ItemNumber']) ?? '—'}</Text> },
+    { title: 'Lot', width: 130, render: (_, r) => { const l = pf(r, ['LotNumber']); return l ? <Tag color="geekblue">{l}</Tag> : <Text type="secondary">—</Text>; } },
+    { title: 'Subinv', width: 100, render: (_, r) => { const s = pf(r, ['SubinventoryCode']); return s ? <Tag color="cyan">{s}</Tag> : '—'; } },
+    { title: 'Org', width: 80, render: (_, r) => pf(r, ['OrganizationCode']) ?? '—' },
+    { title: 'Qty', width: 90, align: 'right', render: (_, r) => <Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtQty(num(pf(r, ['ReservationQuantity'])))}{pf(r, ['ReservationUOMCode']) ? ` ${pf(r, ['ReservationUOMCode'])}` : ''}</Text> },
+    { title: 'Demand', width: 120, render: (_, r) => <Text style={{ fontSize: 11 }}>{pf(r, ['DemandSourceType']) ?? '—'}</Text> },
+    { title: 'Reservation Id', width: 150, render: (_, r) => <Text code style={{ fontSize: 11 }}>{pf(r, ['ReservationId']) ?? '—'}</Text> },
+  ];
+  return (
+    <Modal open={open} onCancel={onClose} width={860} footer={<Button onClick={onClose}>Close</Button>}
+      title={<Space><SafetyCertificateOutlined style={{ color: REDWOOD.success }} /> Reservations — order {orderNo}{list.length ? <Tag color="green">{list.length}</Tag> : null}</Space>}>
+      <Table size="small" loading={loading} columns={cols} dataSource={list} rowKey={(r, i) => String(pf(r, ['ReservationId']) ?? i)}
+        pagination={list.length > 20 ? { pageSize: 20 } : false} scroll={{ x: 'max-content', y: 380 }}
+        locale={{ emptyText: 'No reservations for this order' }} />
+    </Modal>
+  );
+};
+
 // ── Order view (header + lines) shown in its own tab ─────────────────────────
 const OrderView: React.FC<{ order: any; onCopy?: (order: any, lines: any[]) => void; onReturn?: (order: any, lines: any[]) => void }> = ({ order, onCopy, onReturn }) => {
   const linesHref = order?.links?.find((l: any) => l.name === 'lines')?.href
@@ -649,6 +689,10 @@ const OrderView: React.FC<{ order: any; onCopy?: (order: any, lines: any[]) => v
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [arTxn, setArTxn] = useState<string | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
+  const [resvOpen, setResvOpen] = useState(false);
+  const [resvCount, setResvCount] = useState<number | null>(null);
+  const orderNo = String(order.OrderNumber ?? order.SourceTransactionNumber ?? '');
+  useEffect(() => { if (orderNo) fetchReservations(orderNo).then(l => setResvCount(l.length)); }, [orderNo]);
   const totals = useTotals(order, true);
   const lineKey = (r: any, i: number) => `${r.LineId ?? r.FulfillLineId ?? i}`;
   const selectedLines = () => lines.filter((l, i) => selectedKeys.includes(lineKey(l, i)));
@@ -863,6 +907,12 @@ const OrderView: React.FC<{ order: any; onCopy?: (order: any, lines: any[]) => v
               {selectedKeys.length ? `Return ${selectedKeys.length} Line(s)` : 'Return Order'}
             </Button>
           </Tooltip>
+          <Tooltip title={resvCount ? `${resvCount} reservation(s) exist for this order` : 'View stock reservations for this order'}>
+            <Button size="small" icon={<SafetyCertificateOutlined />} onClick={() => setResvOpen(true)}
+              style={resvCount ? { color: REDWOOD.success, borderColor: REDWOOD.success, fontWeight: 600 } : undefined}>
+              Reservations{resvCount ? ` (${resvCount})` : ''}
+            </Button>
+          </Tooltip>
           <Button size="small" icon={<ProfileOutlined />} onClick={() => setHdrOpen(true)}>All fields</Button>
         </Space>}>
         <Row gutter={[16, 12]}>
@@ -975,6 +1025,7 @@ const OrderView: React.FC<{ order: any; onCopy?: (order: any, lines: any[]) => v
       <AllFieldsModal title={`Order ${order.OrderNumber} — header`} row={hdrOpen ? order : null} onClose={() => setHdrOpen(false)} />
       <AllFieldsModal title={`Line ${lineDetail?.DisplayLineNumber ?? ''} — ${lineDetail?.ProductNumber ?? ''}`} row={lineDetail} onClose={() => setLineDetail(null)} />
       <ARInvoiceDialog txn={arTxn} onClose={() => setArTxn(null)} />
+      <ReservationsView orderNo={orderNo} open={resvOpen} onClose={() => setResvOpen(false)} />
     </div>
   );
 };
@@ -2647,6 +2698,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   // Draft workflow (Save→Confirm→Reserve/Unreserve): busy flag + last action result.
   const [workBusy, setWorkBusy] = useState<null | 'confirm' | 'reserve' | 'unreserve'>(null);
   const [confirmed, setConfirmed] = useState(false);
+  const [resvViewOpen, setResvViewOpen] = useState(false);
+  const [resvReloadKey, setResvReloadKey] = useState(0);
+  // Confirm pre-check — existing reservations shown before submitting the order.
+  const [confirmResvOpen, setConfirmResvOpen] = useState(false);
+  const [confirmResvList, setConfirmResvList] = useState<any[]>([]);
   // Reserve dialog — inventoryReservations (User Defined demand keyed by the
   // order number). Shows the exact endpoint + per-line JSON body before running.
   const RESERVE_URL = `${FUSION_BASE}/inventoryReservations`;
@@ -3247,8 +3303,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const liveOrderKey = () => createdOrderKey ?? (editOrder ? String(editOrder.OrderKey ?? editOrder.HeaderId ?? '') : '');
   const liveOrderNumber = () => createdOrderNumber ?? (editOrder ? String(editOrder.OrderNumber ?? orderNumber) : orderNumber);
 
-  // Confirm the draft → submit the order (StatusCode leaves DOO_DRAFT).
-  const confirmOrder = async () => {
+  // The actual submit: PATCH SubmittedFlag → order leaves DOO_DRAFT.
+  const doConfirm = async () => {
     const key = liveOrderKey();
     if (!key) { message.warning('Save the order first'); return; }
     setWorkBusy('confirm');
@@ -3268,6 +3324,24 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       }
     } catch (e: any) { message.error(e?.message || 'Confirm failed'); }
     finally { setWorkBusy(null); }
+  };
+  // Confirm the draft — first check existing (manual) reservations. If any, warn
+  // that confirming will unreserve them (the order re-reserves for shipping).
+  const confirmOrder = async () => {
+    const key = liveOrderKey();
+    if (!key) { message.warning('Save the order first'); return; }
+    setWorkBusy('confirm');
+    const resv = await fetchReservations(liveOrderNumber());
+    setWorkBusy(null);
+    if (resv.length) { setConfirmResvList(resv); setConfirmResvOpen(true); return; }
+    doConfirm();
+  };
+  // Proceed: drop the manual reservations, then submit the order.
+  const proceedConfirm = async () => {
+    setConfirmResvOpen(false);
+    setWorkBusy('confirm');
+    try { await deleteReservationsFor(liveOrderNumber()); setResvReloadKey(k => k + 1); } catch { /* continue to confirm */ }
+    await doConfirm();
   };
 
   // Resolve the org id for the header warehouse from the loaded org list.
@@ -3352,29 +3426,31 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
 
   // Unreserve — find the reservations created for this order (DemandSourceName =
   // order number) and delete each.
+  // Delete every reservation for an order; returns the per-line results.
+  const deleteReservationsFor = async (orderNo: string) => {
+    const items = await fetchReservations(orderNo);
+    const results: any[] = [];
+    for (const it of items) {
+      const rid = pf(it, ['ReservationId']);
+      if (rid == null) continue;
+      try {
+        const dr = await fetch(`${RESERVE_URL}/${encodeURIComponent(String(rid))}`, { method: 'DELETE', headers: FUSION_HDRS });
+        results.push({ reservationId: rid, item: pf(it, ['ItemNumber']), status: dr.status, ok: dr.ok });
+      } catch (e: any) { results.push({ reservationId: rid, status: 0, ok: false, error: e?.message }); }
+    }
+    const okN = results.filter(x => x.ok).length;
+    return { count: items.length, okN, bad: results.length - okN, results };
+  };
   const unreserveStock = async () => {
     const orderNo = liveOrderNumber();
     if (!orderNo) { message.warning('Save the order first'); return; }
     setWorkBusy('unreserve');
     try {
-      const q = encodeURIComponent(`DemandSourceName='${orderNo}'`);
-      const listUrl = `${RESERVE_URL}?q=${q}&onlyData=true&limit=500`;
-      const lr = await fetch(listUrl, { headers: FUSION_HDRS });
-      const ld = lr.ok ? await lr.json() : { items: [] };
-      const items: any[] = ld.items ?? [];
-      if (!items.length) { message.info(`No reservations found for order ${orderNo}`); return; }
-      const results: any[] = [];
-      for (const it of items) {
-        const rid = pf(it, ['ReservationId']);
-        if (rid == null) continue;
-        try {
-          const dr = await fetch(`${RESERVE_URL}/${encodeURIComponent(String(rid))}`, { method: 'DELETE', headers: FUSION_HDRS });
-          results.push({ reservationId: rid, item: pf(it, ['ItemNumber']), status: dr.status, ok: dr.ok });
-        } catch (e: any) { results.push({ reservationId: rid, status: 0, ok: false, error: e?.message }); }
-      }
+      const { count, okN, bad, results } = await deleteReservationsFor(orderNo);
+      if (!count) { message.info(`No reservations found for order ${orderNo}`); return; }
       setLastResponse(JSON.stringify(results, null, 2));
       saveOrderLog(`order-UNRESERVE-${orderNo}-${Date.now()}.json`, JSON.stringify(results, null, 2));
-      const okN = results.filter(x => x.ok).length, bad = results.length - okN;
+      setResvReloadKey(k => k + 1);
       if (bad === 0) message.success(`Unreserved ${okN} reservation(s) for order ${orderNo}`);
       else Modal.error({ title: `Unreserve: ${okN} ok, ${bad} failed`, width: 620, content: <pre style={{ maxHeight: 300, overflow: 'auto', fontSize: 12 }}>{JSON.stringify(results, null, 2)}</pre> });
     } catch (e: any) { message.error(e?.message || 'Unreserve failed'); }
@@ -3510,14 +3586,22 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             {editMode ? `Update Order${editOps.length ? ` (${editOps.length})` : ''}` : returnMode ? 'Save Return (Draft)' : 'Save (Draft)'}
           </Button>
           {/* Draft workflow — enabled once the order exists (saved or being edited) */}
-          {(!!createdOrderKey || editMode) && <Space.Compact>
+          {(!!createdOrderKey || editMode) && <Space>
             <Button icon={<SendOutlined />} loading={workBusy === 'confirm'} disabled={confirmed} onClick={confirmOrder}
               style={confirmed ? undefined : { background: REDWOOD.primary, borderColor: REDWOOD.primary, color: '#fff' }}>
               {confirmed ? 'Confirmed' : 'Confirm Order'}
             </Button>
-            {!returnMode && <Button icon={<SafetyCertificateOutlined />} loading={workBusy === 'reserve'} onClick={openReserveDialog}>Reserve</Button>}
-            {!returnMode && <Button icon={<StopOutlined />} loading={workBusy === 'unreserve'} onClick={unreserveStock}>Unreserve</Button>}
-          </Space.Compact>}
+            {!returnMode && <Dropdown menu={{ items: [
+              { key: 'reserve', icon: <SafetyCertificateOutlined />, label: 'Reserve', onClick: openReserveDialog },
+              { key: 'unreserve', icon: <StopOutlined />, label: 'Unreserve', onClick: unreserveStock },
+              { type: 'divider' },
+              { key: 'view', icon: <TableOutlined />, label: 'View reservations', onClick: () => setResvViewOpen(true) },
+            ] }}>
+              <Button loading={workBusy === 'reserve' || workBusy === 'unreserve'}>
+                <Space><SafetyCertificateOutlined />Reservations<DownOutlined style={{ fontSize: 10 }} /></Space>
+              </Button>
+            </Dropdown>}
+          </Space>}
         </Space>}>
         <Form form={form} layout="horizontal" size="small" labelAlign="left" colon labelWrap
           labelCol={{ flex: '0 0 104px' }} wrapperCol={{ flex: '1 1 auto' }}
@@ -3940,6 +4024,29 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                 );
               })}
             </div>}
+      </Modal>
+
+      {/* Reservations viewer (from the Reservations dropdown) */}
+      <ReservationsView orderNo={liveOrderNumber()} open={resvViewOpen} onClose={() => setResvViewOpen(false)} reloadKey={resvReloadKey} />
+
+      {/* Confirm pre-check — existing reservations will be dropped on confirm */}
+      <Modal open={confirmResvOpen} onCancel={() => setConfirmResvOpen(false)} width={820}
+        title={<Space><SendOutlined style={{ color: REDWOOD.primary }} /> Confirm order {liveOrderNumber()}</Space>}
+        footer={<Space>
+          <Button onClick={() => setConfirmResvOpen(false)}>Cancel</Button>
+          <Button type="primary" icon={<SendOutlined />} loading={workBusy === 'confirm'} onClick={proceedConfirm}
+            style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Proceed (unreserve &amp; confirm)</Button>
+        </Space>}>
+        <div style={{ background: '#fff7e6', border: '1px solid #ffd591', borderRadius: 6, padding: '10px 12px', marginBottom: 12 }}>
+          <Text><InfoCircleOutlined style={{ color: '#d46b08', marginRight: 6 }} />This order has <b>{confirmResvList.length}</b> reservation(s). Confirming will <b>unreserve</b> them — the order re-reserves stock for shipping once submitted.</Text>
+        </div>
+        <Table size="small" columns={[
+          { title: 'Item', width: 150, render: (_: any, r: any) => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{pf(r, ['ItemNumber']) ?? '—'}</Text> },
+          { title: 'Lot', width: 130, render: (_: any, r: any) => { const l = pf(r, ['LotNumber']); return l ? <Tag color="geekblue">{l}</Tag> : '—'; } },
+          { title: 'Subinv', width: 100, render: (_: any, r: any) => pf(r, ['SubinventoryCode']) ?? '—' },
+          { title: 'Qty', width: 90, align: 'right', render: (_: any, r: any) => fmtQty(num(pf(r, ['ReservationQuantity']))) },
+          { title: 'Reservation Id', render: (_: any, r: any) => <Text code style={{ fontSize: 11 }}>{pf(r, ['ReservationId']) ?? '—'}</Text> },
+        ]} dataSource={confirmResvList} rowKey={(r, i) => String(pf(r, ['ReservationId']) ?? i)} pagination={false} scroll={{ y: 300 }} />
       </Modal>
 
       {/* Return lot/serial editor — the shipped lots/serials to send back on this line */}
