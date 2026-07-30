@@ -794,6 +794,121 @@ const AutoShipConfirmModal: React.FC<{ orderNo?: string; org?: string; open: boo
   );
 };
 
+// ── AR AutoInvoice (Import Receivables Transactions Using AutoInvoice) ────────
+// Submits the ESS job via erpintegrations / submitESSJobRequest, filtered to
+// one order via the From/To Sales Order Number parameters, then polls status.
+const ERP_INT_URL = `${FUSION_BASE}/erpintegrations`;
+const AI_JOB_PACKAGE = '/oracle/apps/ess/financials/receivables/transactions/autoInvoices';
+const AI_JOB_DEF = 'AutoInvoiceMasterEss';
+// Parameter order = the on-screen order of "Import Receivables Transactions
+// Using AutoInvoice" (the process UI order is the ESSParameters positional order).
+const AI_PARAM_LABELS = [
+  'Number of Workers', 'Business Unit', 'Transaction Source', 'Default Date', 'Transaction Type',
+  'From Customer', 'To Customer', 'From Customer Account Number', 'To Customer Account Number',
+  'From Accounting Date', 'To Accounting Date', 'From Transaction Number', 'To Transaction Number',
+  'From Sales Order Number', 'To Sales Order Number', 'From Transaction Date', 'To Transaction Date',
+  'From Ship-to Customer Account Number', 'To Ship-to Customer Account Number',
+  'From Ship-to Customer Name', 'To Ship-to Customer Name', 'Base Due Date on Transaction Date',
+  'Due Date Adjustment Days', 'Load Request ID',
+];
+const AutoInvoiceModal: React.FC<{ orderNo?: string; buId?: string | number; open: boolean; onClose: () => void }> = ({ orderNo, buId, open, onClose }) => {
+  const [jobPackage, setJobPackage] = useState(AI_JOB_PACKAGE);
+  const [jobDef, setJobDef] = useState(AI_JOB_DEF);
+  const [vals, setVals] = useState<string[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [reqId, setReqId] = useState<string>('');
+  const [status, setStatus] = useState<string>('');
+  const [resp, setResp] = useState<string>('');
+  useEffect(() => {
+    if (!open) return;
+    const v = AI_PARAM_LABELS.map(() => '');
+    v[0] = '1';                                        // Number of Workers
+    if (buId != null && String(buId).trim()) v[1] = String(buId);  // Business Unit id
+    v[2] = 'DISTRIBUTED_ORDER_ORCHESTRATION';         // Transaction Source (edit to your source name/id)
+    v[3] = new Date().toISOString().slice(0, 10);     // Default Date (YYYY-MM-DD)
+    v[13] = String(orderNo ?? '');                    // From Sales Order Number
+    v[14] = String(orderNo ?? '');                    // To Sales Order Number
+    v[21] = 'Y';                                       // Base Due Date on Transaction Date
+    setVals(v); setReqId(''); setStatus(''); setResp('');
+  }, [open, orderNo, buId]);
+  const setVal = (i: number, s: string) => setVals(p => p.map((x, j) => j === i ? s : x));
+  const essParams = vals.map(v => (v == null || v.trim() === '') ? '#NULL' : v.trim()).join(',');
+  const body = { OperationName: 'submitESSJobRequest', JobPackageName: jobPackage.trim(), JobDefName: jobDef.trim(), ESSParameters: essParams };
+
+  const submit = async () => {
+    if (!vals[2] || vals[2].trim() === '') { message.warning('Transaction Source is required'); return; }
+    setSubmitting(true); setStatus(''); setResp('');
+    try {
+      const r = await fetch(ERP_INT_URL, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const text = await r.text(); let data: any = null; try { data = JSON.parse(text); } catch { /* raw */ }
+      setResp(text);
+      const id = data?.ReqstId ?? data?.reqstId ?? data?.RequestId ?? data?.DocumentId ?? '';
+      if (!r.ok || !id) { message.error('AutoInvoice submit failed — see the response'); return; }
+      setReqId(String(id)); setStatus('RUNNING');
+      message.success(`AutoInvoice submitted — request ${id}`);
+      pollStatus(String(id));
+    } catch (e: any) { setResp(e?.message); message.error(e?.message || 'Submit failed'); }
+    finally { setSubmitting(false); }
+  };
+  const pollStatus = async (id: string) => {
+    try {
+      const r = await fetch(`${ERP_INT_URL}?finder=ESSJobStatusRF;requestId=${encodeURIComponent(id)}`, { headers: FUSION_HDRS });
+      const text = await r.text(); let data: any = null; try { data = JSON.parse(text); } catch { /* raw */ }
+      const st = data?.items?.[0]?.RequestStatus ?? data?.RequestStatus ?? data?.requestStatus ?? (r.ok ? 'UNKNOWN' : `HTTP ${r.status}`);
+      setStatus(String(st));
+    } catch (e: any) { setStatus(`status error: ${e?.message}`); }
+  };
+  const stTag = (s: string) => {
+    const u = s.toUpperCase();
+    if (u.includes('SUCCEED')) return <Tag color="success">{s}</Tag>;
+    if (u.includes('ERROR') || u.includes('WARN')) return <Tag color="error">{s}</Tag>;
+    if (u.includes('RUN') || u.includes('WAIT') || u.includes('READY')) return <Tag color="processing">{s}</Tag>;
+    return <Tag>{s}</Tag>;
+  };
+  return (
+    <Modal open={open} onCancel={onClose} width={720} maskClosable={false}
+      title={<Space><DollarOutlined style={{ color: REDWOOD.primary }} /> Push to AR — Import AutoInvoice{orderNo ? <Tag color="geekblue">{orderNo}</Tag> : null}</Space>}
+      footer={<Space>
+        <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(`POST ${ERP_INT_URL}\n${JSON.stringify(body, null, 2)}`); message.success('Copied'); }}>Copy request</Button>
+        {reqId && <Button icon={<ReloadOutlined />} onClick={() => pollStatus(reqId)}>Refresh status</Button>}
+        <Button onClick={onClose}>Close</Button>
+        <Button type="primary" icon={<SendOutlined />} loading={submitting} onClick={submit}
+          style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Submit AutoInvoice</Button>
+      </Space>}>
+      <div style={{ fontSize: 12, marginBottom: 8 }}>
+        <Tag color="green">POST</Tag><Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info, wordBreak: 'break-all' }}>{ERP_INT_URL}</Text>
+        <div style={{ marginTop: 4 }}><Text type="secondary" style={{ fontSize: 11.5 }}>OperationName <b>submitESSJobRequest</b> · job <b>{jobDef}</b>. The order is filtered via From/To Sales Order Number.</Text></div>
+      </div>
+      <Row gutter={[8, 6]}>
+        <Col span={12}><Text style={{ fontSize: 11 }}>Job Package</Text><Input size="small" value={jobPackage} onChange={e => setJobPackage(e.target.value)} /></Col>
+        <Col span={12}><Text style={{ fontSize: 11 }}>Job Definition</Text><Input size="small" value={jobDef} onChange={e => setJobDef(e.target.value)} /></Col>
+      </Row>
+      <div style={{ fontSize: 11, color: REDWOOD.neutral500, margin: '10px 0 4px' }}>Parameters (blank → #NULL). Set <b>Transaction Source</b> to your AR source (id or name) and <b>Business Unit</b> to its id.</div>
+      <div style={{ maxHeight: 260, overflow: 'auto', border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, padding: 8 }}>
+        <Row gutter={[8, 6]}>
+          {AI_PARAM_LABELS.map((lbl, i) => {
+            const key = i === 13 || i === 14;
+            const req = i === 0 || i === 2 || i === 3 || i === 21;
+            return <Col span={12} key={i}>
+              <Text style={{ fontSize: 10.5, color: key ? REDWOOD.primary : undefined, fontWeight: key ? 700 : 400 }}>{i + 1}. {lbl}{req ? ' *' : ''}</Text>
+              <Input size="small" value={vals[i] ?? ''} placeholder="#NULL" onChange={e => setVal(i, e.target.value)}
+                style={key ? { borderColor: REDWOOD.primary } : undefined} />
+            </Col>;
+          })}
+        </Row>
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <Text style={{ fontSize: 11, color: REDWOOD.neutral500 }}>ESSParameters</Text>
+        <pre style={{ margin: '2px 0 0', fontSize: 10.5, background: REDWOOD.neutral100, borderRadius: 6, padding: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{essParams}</pre>
+      </div>
+      {(reqId || resp) && <div style={{ marginTop: 8 }}>
+        {reqId && <div style={{ marginBottom: 4 }}><Text style={{ fontSize: 12 }}>Request <Text code>{reqId}</Text> — status {stTag(status || '—')}</Text></div>}
+        {resp && <pre style={{ margin: 0, fontSize: 10.5, background: '#0b0b0b', color: '#d6f5d6', borderRadius: 6, padding: 8, maxHeight: 140, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{resp}</pre>}
+      </div>}
+    </Modal>
+  );
+};
+
 // ── Order view (header + lines) shown in its own tab ─────────────────────────
 const OrderView: React.FC<{ order: any; onCopy?: (order: any, lines: any[]) => void; onReturn?: (order: any, lines: any[]) => void }> = ({ order, onCopy, onReturn }) => {
   const linesHref = order?.links?.find((l: any) => l.name === 'lines')?.href
@@ -2819,6 +2934,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [resvViewOpen, setResvViewOpen] = useState(false);
   const [resvReloadKey, setResvReloadKey] = useState(0);
   const [autoShipOpen, setAutoShipOpen] = useState(false);
+  const [autoInvoiceOpen, setAutoInvoiceOpen] = useState(false);
   const jsonInputRef = useRef<HTMLInputElement>(null);
   // Current order status — reservations are only allowed while it's still a draft.
   const [orderStatus, setOrderStatus] = useState<string>(String(editOrder?.StatusCode ?? ''));
@@ -3733,6 +3849,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             </Dropdown>}
             {!returnMode && <Button icon={<CarOutlined />} onClick={() => setAutoShipOpen(true)}
               style={{ borderColor: REDWOOD.success, color: REDWOOD.success }}>Auto Shipconfirm</Button>}
+            {!returnMode && <Button icon={<DollarOutlined />} onClick={() => setAutoInvoiceOpen(true)}
+              style={{ borderColor: REDWOOD.primary, color: REDWOOD.primary }}>Push to AR</Button>}
           </Space>}
         </Space>}>
         <Form form={form} layout="horizontal" size="small" labelAlign="left" colon labelWrap
@@ -4164,6 +4282,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       {/* Auto Ship Confirm — pick release → pick confirm → ship confirm workflow */}
       {/* shipmentLines are keyed by the SOURCE transaction number (e.g. LSO…), not the Fusion order number */}
       <AutoShipConfirmModal orderNo={orderNumber} org={hdr.warehouse} open={autoShipOpen} onClose={() => setAutoShipOpen(false)} />
+
+      {/* Push to AR — Import AutoInvoice ESS job, filtered to this order number */}
+      <AutoInvoiceModal orderNo={orderNumber} buId={hdr.businessUnitId} open={autoInvoiceOpen} onClose={() => setAutoInvoiceOpen(false)} />
 
       {/* Confirm pre-check — existing reservations will be dropped on confirm */}
       <Modal open={confirmResvOpen} onCancel={() => setConfirmResvOpen(false)} width={820}
