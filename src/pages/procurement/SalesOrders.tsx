@@ -3325,13 +3325,17 @@ const ChargesModal: React.FC<{ open: boolean; onClose: () => void; orderKey: str
   useEffect(() => { if (open && line) loadExisting(); }, [open, line?.key, loadExisting]);
 
   const applyPreset = (k: string) => { const p = CHARGE_PRESETS.find(x => x.key === k)!; setPreset(k); if (k !== 'Custom') { setDef(p.def); setSub(p.sub); setApplyTo(p.applyTo); setChType(p.type); } };
+  // Source ids are REQUIRED (Fusion errors "required attribute SourceChargeId /
+  // SourceChargeComponentId"); keep them stable per line + charge position.
+  const srcChargeId = `MC-${line?.fulfillLineId ?? line?.srcLineId ?? 'x'}-${(existing.length || 0) + 1}`;
   const body = {
+    SourceChargeId: srcChargeId,
     ChargeDefinitionCode: def, ...(chType ? { ChargeType: chType } : {}), ChargeSubType: sub, ApplyTo: applyTo,
     PriceType: 'One time', ...(ccy ? { ChargeCurrencyCode: ccy } : {}), GSAUnitPrice: num(amount),
     SequenceNumber: (existing.length || 0) + 1, PrimaryFlag: 'false', RollupFlag: 'false',
     chargeComponents: [
-      { PriceElementCode: 'QP_LIST_PRICE', HeaderCurrencyUnitPrice: num(amount), HeaderCurrencyExtendedAmount: num(amount), ChargeCurrencyUnitPrice: num(amount), ChargeCurrencyExtendedAmount: num(amount), RollupFlag: 'false', SequenceNumber: 1 },
-      { PriceElementCode: 'QP_NET_PRICE', HeaderCurrencyUnitPrice: num(amount), HeaderCurrencyExtendedAmount: num(amount), ChargeCurrencyUnitPrice: num(amount), ChargeCurrencyExtendedAmount: num(amount), RollupFlag: 'false', SequenceNumber: 2 },
+      { SourceChargeComponentId: `${srcChargeId}-CC1`, SourceChargeId: srcChargeId, PriceElementCode: 'QP_LIST_PRICE', PriceElementUsageCode: 'LIST_PRICE', HeaderCurrencyUnitPrice: num(amount), HeaderCurrencyExtendedAmount: num(amount), RollupFlag: 'false', SequenceNumber: 1 },
+      { SourceChargeComponentId: `${srcChargeId}-CC2`, SourceChargeId: srcChargeId, PriceElementCode: 'QP_NET_PRICE', PriceElementUsageCode: 'NET_PRICE', HeaderCurrencyUnitPrice: num(amount), HeaderCurrencyExtendedAmount: num(amount), RollupFlag: 'false', SequenceNumber: 2 },
     ],
   };
   const url = chargesUrl(line);
