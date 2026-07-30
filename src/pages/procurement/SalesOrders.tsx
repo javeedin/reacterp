@@ -743,12 +743,16 @@ const AutoShipConfirmModal: React.FC<{ orderNo?: string; org?: string; open: boo
     } catch (e: any) { message.error(e.message); }
   };
   const cols: ColumnsType<any> = [
-    { title: 'Line', dataIndex: 'OrderLine', width: 60, align: 'center', render: v => <Tag color="blue">{v ?? '—'}</Tag> },
-    { title: 'Item', dataIndex: 'Item', width: 160, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v ?? '—'}</Text> },
-    { title: 'Requested', dataIndex: 'RequestedQuantity', width: 100, align: 'right', render: v => fmtQty(num(v)) },
-    { title: 'Shipped', dataIndex: 'ShippedQuantity', width: 100, align: 'right', render: v => fmtQty(num(v)) },
-    { title: 'Shipment', dataIndex: 'Shipment', width: 130, render: v => v ? <Tag>{v}</Tag> : '—' },
-    { title: 'Line Status', dataIndex: 'LineStatus', width: 160, render: v => statusTag(v) },
+    { title: 'Line', dataIndex: 'OrderLine', width: 55, align: 'center', fixed: 'left' as const, render: v => <Tag color="blue">{v ?? '—'}</Tag> },
+    { title: 'Item', dataIndex: 'Item', width: 150, fixed: 'left' as const, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Description', dataIndex: 'ItemDescription', width: 240, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Requested', dataIndex: 'RequestedQuantity', width: 100, align: 'right', render: (v, r) => <span>{fmtQty(num(v))}{pf(r, ['RequestedQuantityUOMCode', 'RequestedQuantityUOM']) ? <Text type="secondary" style={{ fontSize: 11 }}> {pf(r, ['RequestedQuantityUOMCode', 'RequestedQuantityUOM'])}</Text> : null}</span> },
+    { title: 'Shipped', dataIndex: 'ShippedQuantity', width: 90, align: 'right', render: v => fmtQty(num(v)) },
+    { title: 'Unit Price', width: 100, align: 'right', render: (_, r) => { const p = pf(r, ['SellingPrice', 'UnitPrice']); return p != null ? <Text style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(p))}</Text> : '—'; } },
+    { title: 'Subinv', dataIndex: 'Subinventory', width: 100, render: v => v ? <Tag color="cyan">{v}</Tag> : '—' },
+    { title: 'Organization', width: 160, render: (_, r) => { const c = pf(r, ['OrganizationCode']); const n = pf(r, ['OrganizationName']); return c ? <Tooltip title={n}><Tag>{c}</Tag></Tooltip> : '—'; } },
+    { title: 'Shipment', dataIndex: 'Shipment', width: 120, render: v => v ? <Tag>{v}</Tag> : '—' },
+    { title: 'Line Status', dataIndex: 'LineStatus', width: 150, fixed: 'right' as const, render: v => statusTag(v) },
   ];
   return (
     <Modal open={open} onCancel={onClose} width={940} footer={<Button onClick={onClose}>Close</Button>}
