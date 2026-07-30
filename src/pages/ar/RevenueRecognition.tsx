@@ -999,6 +999,7 @@ const RevenueRecognition: React.FC = () => {
                         size="small"
                         loading={schedulesLoading}
                         dataSource={postSchedules}
+                        scroll={{ x: 'max-content' }}
                         pagination={{ pageSize: 25, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'], showTotal: (t) => `${t} schedules` }}
                         rowSelection={{ selectedRowKeys: postSelectedKeys, onChange: setPostSelectedKeys,
                           getCheckboxProps: (r) => ({ disabled: isAccounted(r) }) }}
@@ -1018,8 +1019,8 @@ const RevenueRecognition: React.FC = () => {
                           { title: 'Contract Start', key: 'cStart', width: 115, render: (_: any, r: RevenueSchedule) => { const d = scheduleDates(r); return d?.start ? <Tag color="geekblue">{d.start}</Tag> : <span style={{ color: REDWOOD.neutral500 }}>—</span>; } },
                           { title: 'Contract End', key: 'cEnd', width: 115, render: (_: any, r: RevenueSchedule) => { const d = scheduleDates(r); return d?.end ? <Tag color="volcano">{d.end}</Tag> : <span style={{ color: REDWOOD.neutral500 }}>—</span>; } },
                           { title: '#', dataIndex: 'scheduleNum', width: 55, align: 'right' as const },
-                          { title: 'Amount', dataIndex: 'amount', width: 120, align: 'right' as const, render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
-                          { title: 'Accounted', key: 'acct', width: 130, align: 'center' as const, render: (_: any, r: RevenueSchedule) => isAccounted(r)
+                          { title: 'Amount', dataIndex: 'amount', width: 120, align: 'right' as const, fixed: 'right' as const, render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
+                          { title: 'Accounted', key: 'acct', width: 130, align: 'center' as const, fixed: 'right' as const, render: (_: any, r: RevenueSchedule) => isAccounted(r)
                             ? <Space size={4}>
                                 <Tag color="green" style={{ marginInlineEnd: 0 }}>Accounted</Tag>
                                 <Tooltip title="View accounting / journal details">
