@@ -4149,7 +4149,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       <ReservationsView orderNo={liveOrderNumber()} open={resvViewOpen} onClose={() => setResvViewOpen(false)} reloadKey={resvReloadKey} />
 
       {/* Auto Ship Confirm — pick release → pick confirm → ship confirm workflow */}
-      <AutoShipConfirmModal orderNo={liveOrderNumber()} org={hdr.warehouse} open={autoShipOpen} onClose={() => setAutoShipOpen(false)} />
+      {/* shipmentLines are keyed by the SOURCE transaction number (e.g. LSO…), not the Fusion order number */}
+      <AutoShipConfirmModal orderNo={orderNumber} org={hdr.warehouse} open={autoShipOpen} onClose={() => setAutoShipOpen(false)} />
 
       {/* Confirm pre-check — existing reservations will be dropped on confirm */}
       <Modal open={confirmResvOpen} onCancel={() => setConfirmResvOpen(false)} width={820}
