@@ -2966,85 +2966,88 @@ const orderLineToNewLine = (l: any, i: number, opts: { asReturn?: boolean; refOr
   };
 };
 
-// ── Sales Credits panel (edit mode) — CRUD on the order's salesCredits child ──
-//   GET/POST  {OrderKey}/child/salesCredits          PATCH/DELETE .../{SalesCreditId}
-const SalesCreditsPanel: React.FC<{ orderKey: string; salesRepOpts: SalesRepOpt[]; ccy?: string }> = ({ orderKey, salesRepOpts }) => {
-  const base = `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(orderKey)}/child/salesCredits`;
+// ── Sales credits (order salesCredits child) — shared by the header salesperson
+//    display and the Sales Credits tab so both stay in sync.
+type ScEdit = { href?: string; salesRep?: string; percent: number } | null;
+const scSelfHref = (o: any) => { const h = (o?.links ?? []).find((x: any) => x.rel === 'self' || x.name === 'self')?.href; return h ? fusionHref(h) : ''; };
+const scName = (r: any) => pf(r, ['Salesperson', 'SalespersonName']) ?? (pf(r, ['SalespersonId']) != null ? `#${pf(r, ['SalespersonId'])}` : '—');
+const useSalesCredits = (orderKey?: string) => {
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [editing, setEditing] = useState<{ id?: string; href?: string; salesRep?: string; percent: number } | null>(null);
-  const selfHref = (o: any) => { const h = (o?.links ?? []).find((x: any) => x.rel === 'self' || x.name === 'self')?.href; return h ? fusionHref(h) : ''; };
-
-  const load = useCallback(async () => {
+  const reload = useCallback(async () => {
+    if (!orderKey) { setRows([]); return; }
     setLoading(true);
     try {
-      const r = await fetch(`${base}?onlyData=false&limit=100`, { headers: FUSION_HDRS });
+      const r = await fetch(`${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(orderKey)}/child/salesCredits?limit=100`, { headers: FUSION_HDRS });
       const d = await r.json().catch(() => ({} as any));
       setRows(d.items ?? []);
-    } catch { setRows([]); }
-    finally { setLoading(false); }
-  }, [base]);
-  useEffect(() => { load(); }, [load]);
+    } catch { setRows([]); } finally { setLoading(false); }
+  }, [orderKey]);
+  useEffect(() => { reload(); }, [reload]);
+  return { rows, loading, reload };
+};
 
-  const total = rows.reduce((s, r) => s + num(pf(r, ['Percent'])), 0);
+// The Add / Edit Sales Credit dialog (POST or PATCH salesCredits). Shared.
+const SalesCreditEditModal: React.FC<{ editing: ScEdit; orderKey: string; salesRepOpts: SalesRepOpt[]; onClose: () => void; onSaved: () => void }> = ({ editing, orderKey, salesRepOpts, onClose, onSaved }) => {
+  const base = `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(orderKey)}/child/salesCredits`;
+  const [local, setLocal] = useState<ScEdit>(editing);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => { setLocal(editing); setErr(''); }, [editing]);
   const save = async () => {
-    if (!editing) return;
-    const repId = salesRepOpts.find(o => o.value === editing.salesRep)?.id;
-    setBusy(true);
+    if (!local) return;
+    const rid = salesRepOpts.find(o => o.value === local.salesRep)?.id;
+    const edit = !!local.href;
+    const body: any = edit
+      ? { ...(local.salesRep ? { Salesperson: local.salesRep } : {}), ...(rid != null ? { SalespersonId: rid } : {}), Percent: num(local.percent) }
+      : { SourceTransactionSalesCreditIdentifier: `SC-${orderKey}-1`, ...(rid != null ? { SalespersonId: rid } : {}), Salesperson: local.salesRep, SalesCreditTypeId: 1, Percent: num(local.percent) };
+    const url = edit ? local.href! : base;
+    setBusy(true); setErr('');
     try {
-      const isEdit = !!editing.href;
-      const url = isEdit ? editing.href! : base;
-      const body: any = isEdit
-        ? { ...(editing.salesRep ? { Salesperson: editing.salesRep } : {}), ...(repId != null ? { SalespersonId: repId } : {}), Percent: num(editing.percent) }
-        : { SourceTransactionSalesCreditIdentifier: `SC-${orderKey}-${Date.now() % 100000}`, ...(repId != null ? { SalespersonId: repId } : {}), Salesperson: editing.salesRep, SalesCreditTypeId: 1, Percent: num(editing.percent) };
-      const r = await fetch(url!, { method: isEdit ? 'PATCH' : 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!r.ok) { const t = await r.text(); throw new Error(collectOrderErrors(null, t, true)[0] || `HTTP ${r.status}`); }
-      message.success(isEdit ? 'Sales credit updated' : 'Sales credit added');
-      setEditing(null); load();
-    } catch (e: any) { message.error(e?.message || 'Save failed'); }
-    finally { setBusy(false); }
+      const r = await fetch(url, { method: edit ? 'PATCH' : 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const t = await r.text();
+      if (!r.ok) throw new Error([`${edit ? 'PATCH' : 'POST'} ${url}`, `HTTP ${r.status}`, ...collectOrderErrors(null, t, true)].join('\n'));
+      message.success(edit ? 'Sales credit updated' : 'Sales credit added'); onSaved();
+    } catch (e: any) { setErr(e?.message || 'Save failed'); message.error('Sales credit save failed'); } finally { setBusy(false); }
   };
-  const del = (row: any) => Modal.confirm({
-    title: 'Delete this sales credit?', okText: 'Delete', okButtonProps: { danger: true },
-    content: <div style={{ fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all' }}>DELETE {selfHref(row)}</div>,
-    onOk: async () => {
-      try { const r = await fetch(selfHref(row), { method: 'DELETE', headers: FUSION_HDRS }); if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`); message.success('Sales credit deleted'); load(); }
-      catch (e: any) { message.error(e?.message || 'Delete failed'); }
-    },
-  });
+  return (
+    <Modal open={!!editing} onCancel={() => !busy && onClose()} width={480}
+      title={<Space><TagsOutlined style={{ color: REDWOOD.primary }} />{local?.href ? 'Edit' : 'Add'} Sales Credit</Space>}
+      footer={<Space><Button onClick={onClose} disabled={busy}>Cancel</Button><Button type="primary" loading={busy} icon={<SaveOutlined />} onClick={save} disabled={!local?.salesRep}>Save</Button></Space>}>
+      {local && <div>
+        <div style={{ marginBottom: 6, fontSize: 12, color: REDWOOD.neutral600 }}>Salesperson</div>
+        <Select showSearch allowClear style={{ width: '100%', marginBottom: 12 }} placeholder="Select salesperson" optionFilterProp="label"
+          value={local.salesRep} options={salesRepOpts} onChange={v => setLocal({ ...local, salesRep: v })} notFoundContent={salesRepOpts.length ? 'No match' : 'Loading…'} />
+        <div style={{ marginBottom: 6, fontSize: 12, color: REDWOOD.neutral600 }}>Percent</div>
+        <InputNumber min={0} max={100} style={{ width: '100%' }} value={local.percent} onChange={v => setLocal({ ...local, percent: Number(v) || 0 })} addonAfter="%" />
+        {err && <div style={{ marginTop: 10, fontSize: 11, color: REDWOOD.error, whiteSpace: 'pre-wrap', background: '#FFF1F0', border: '1px solid #FFCCC7', borderRadius: 6, padding: '8px 10px', maxHeight: 160, overflow: 'auto' }}>{err}</div>}
+      </div>}
+    </Modal>
+  );
+};
 
+// Presentational Sales Credits tab — data + actions come from the parent.
+const SalesCreditsPanel: React.FC<{ rows: any[]; loading: boolean; onReload: () => void; onAdd: () => void; onEdit: (row: any) => void; onDelete: (row: any) => void }> = ({ rows, loading, onReload, onAdd, onEdit, onDelete }) => {
+  const total = rows.reduce((s, r) => s + num(pf(r, ['Percent'])), 0);
   return (
     <div style={{ padding: '6px 4px' }}>
       <Space style={{ marginBottom: 10 }}>
-        <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => setEditing({ salesRep: undefined, percent: Math.max(0, 100 - total) })}>Add Sales Credit</Button>
-        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>Refresh</Button>
+        <Button size="small" type="primary" icon={<PlusOutlined />} onClick={onAdd}>Add Sales Credit</Button>
+        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={onReload}>Refresh</Button>
         <Tag color={round2(total) === 100 ? 'green' : 'orange'}>Total {total}%</Tag>
         {round2(total) !== 100 && rows.length > 0 && <Text type="warning" style={{ fontSize: 12 }}>Quota credits should total 100%</Text>}
       </Space>
       <Table size="small" rowKey={(r) => String(pf(r, ['SalesCreditId']) ?? Math.random())} pagination={false} loading={loading} dataSource={rows}
         locale={{ emptyText: 'No sales credits on this order' }}
         columns={[
-          { title: 'Salesperson', render: (_: any, r: any) => <Text strong style={{ fontSize: 12 }}>{pf(r, ['Salesperson', 'SalespersonName']) ?? pf(r, ['SalespersonId']) ?? '—'}</Text> },
+          { title: 'Salesperson', render: (_: any, r: any) => <Text strong style={{ fontSize: 12 }}>{scName(r)}</Text> },
           { title: 'Type', width: 160, render: (_: any, r: any) => <Text style={{ fontSize: 12 }}>{pf(r, ['SalesCreditType']) ?? (num(pf(r, ['SalesCreditTypeId'])) === 1 ? 'Quota Sales Credit' : pf(r, ['SalesCreditTypeId'])) ?? '—'}</Text> },
           { title: 'Percent', width: 100, align: 'right', render: (_: any, r: any) => <Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{num(pf(r, ['Percent']))}%</Text> },
           { title: '', width: 90, align: 'center', render: (_: any, r: any) => <Space size={0}>
-              <Button size="small" type="text" icon={<EditOutlined />} style={{ color: REDWOOD.info }} onClick={() => setEditing({ href: selfHref(r), id: String(pf(r, ['SalesCreditId'])), salesRep: pf(r, ['Salesperson', 'SalespersonName']), percent: num(pf(r, ['Percent'])) })} />
-              <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => del(r)} />
+              <Button size="small" type="text" icon={<EditOutlined />} style={{ color: REDWOOD.info }} onClick={() => onEdit(r)} />
+              <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => onDelete(r)} />
             </Space> },
         ] as any} />
-
-      <Modal open={!!editing} onCancel={() => !busy && setEditing(null)} width={460}
-        title={<Space><TagsOutlined style={{ color: REDWOOD.primary }} />{editing?.href ? 'Edit' : 'Add'} Sales Credit</Space>}
-        footer={<Space><Button onClick={() => setEditing(null)} disabled={busy}>Cancel</Button><Button type="primary" loading={busy} icon={<SaveOutlined />} onClick={save} disabled={!editing?.salesRep}>Save</Button></Space>}>
-        {editing && <div>
-          <div style={{ marginBottom: 6, fontSize: 12, color: REDWOOD.neutral600 }}>Salesperson</div>
-          <Select showSearch allowClear style={{ width: '100%', marginBottom: 12 }} placeholder="Select salesperson" optionFilterProp="label"
-            value={editing.salesRep} options={salesRepOpts} onChange={v => setEditing({ ...editing, salesRep: v })} notFoundContent={salesRepOpts.length ? 'No match' : 'Loading…'} />
-          <div style={{ marginBottom: 6, fontSize: 12, color: REDWOOD.neutral600 }}>Percent</div>
-          <InputNumber min={0} max={100} style={{ width: '100%' }} value={editing.percent} onChange={v => setEditing({ ...editing, percent: Number(v) || 0 })} addonAfter="%" />
-        </div>}
-      </Modal>
     </div>
   );
 };
@@ -3657,6 +3660,110 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       setChargeDrill({ line: l, loading: false, url, charges: d.items ?? [] });
     } catch (e: any) { setChargeDrill({ line: l, loading: false, url, charges: [], error: e?.message }); }
+  };
+
+  // Order key for order-level children (sales credits, notes, attachments, header PATCH).
+  const childOrderKey = String((editMode ? (editOrder?.OrderKey ?? editOrder?.HeaderId) : createdOrderKey) ?? '');
+  // Sales credits — shown read-only in the header + editable on the Sales Credits tab.
+  const salesCredits = useSalesCredits(childOrderKey || undefined);
+  const [scEdit, setScEdit] = useState<ScEdit>(null);
+  const scTotal = salesCredits.rows.reduce((s, r) => s + num(pf(r, ['Percent'])), 0);
+  const addSalesCredit = () => setScEdit({ percent: round2(Math.max(0, 100 - scTotal)) });
+  const editSalesCredit = (row: any) => setScEdit({ href: scSelfHref(row), salesRep: pf(row, ['Salesperson', 'SalespersonName']), percent: num(pf(row, ['Percent'])) });
+  const deleteSalesCredit = (row: any) => Modal.confirm({
+    title: 'Delete this sales credit?', okText: 'Delete', okButtonProps: { danger: true },
+    content: <div style={{ fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all' }}>DELETE {scSelfHref(row)}</div>,
+    onOk: async () => {
+      try { const r = await fetch(scSelfHref(row), { method: 'DELETE', headers: FUSION_HDRS }); if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`); message.success('Sales credit deleted'); salesCredits.reload(); }
+      catch (e: any) { message.error(e?.message || 'Delete failed'); }
+    },
+  });
+
+  // Header edit lock — in edit mode everything is read-only until the pencil is
+  // clicked; only Order Date and Order Type ever become editable.
+  const [hdrUnlocked, setHdrUnlocked] = useState(false);
+  const [hdrSaving, setHdrSaving] = useState(false);
+  const saveHeaderFields = async () => {
+    if (!childOrderKey) return;
+    setHdrSaving(true);
+    const cur = form.getFieldsValue();
+    const iso = cur.orderDate ? dayjs(cur.orderDate).format('YYYY-MM-DD[T]00:00:00[Z]') : undefined;
+    const body: any = {
+      ...(cur.orderType ? { TransactionTypeCode: cur.orderType, TransactionType: cur.orderType } : {}),
+      ...(iso ? { TransactionOn: iso, RequestedShipDate: iso } : {}),
+    };
+    const url = `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(childOrderKey)}`;
+    try {
+      const r = await fetch(url, { method: 'PATCH', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const t = await r.text(); let data: any = null; try { data = JSON.parse(t); } catch { /* raw */ }
+      setLastResponse(`PATCH ${url}\n${JSON.stringify(body)}\nHTTP ${r.status}\n\n${t}`);
+      if (!r.ok) throw new Error(collectOrderErrors(data, t, true)[0] || `HTTP ${r.status}`);
+      message.success('Order header updated'); setHdrUnlocked(false);
+    } catch (e: any) { message.error(e?.message || 'Header update failed'); }
+    finally { setHdrSaving(false); }
+  };
+
+  // Shipping & packing instructions — PATCHed onto the order header.
+  const [shipPack, setShipPack] = useState({
+    packing: editOrder?.PackingInstructions ?? '', shipping: editOrder?.ShippingInstructions ?? '', fob: editOrder?.FOBPointCode ?? editOrder?.FOBPoint ?? undefined as string | undefined,
+  });
+  const [shipPackSaving, setShipPackSaving] = useState(false);
+  const saveShipPack = async () => {
+    if (!childOrderKey) { message.warning('Save the order first'); return; }
+    setShipPackSaving(true);
+    const body = { PackingInstructions: shipPack.packing || null, ShippingInstructions: shipPack.shipping || null, FOBPointCode: shipPack.fob || null };
+    const url = `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(childOrderKey)}`;
+    try {
+      const r = await fetch(url, { method: 'PATCH', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const t = await r.text(); let data: any = null; try { data = JSON.parse(t); } catch { /* raw */ }
+      setLastResponse(`PATCH ${url}\n${JSON.stringify(body)}\nHTTP ${r.status}\n\n${t}`);
+      if (!r.ok) throw new Error(collectOrderErrors(data, t, true)[0] || `HTTP ${r.status}`);
+      message.success('Shipping & packing instructions saved');
+    } catch (e: any) { message.error(e?.message || 'Save failed'); }
+    finally { setShipPackSaving(false); }
+  };
+
+  // Order Actions — Cancel Order (cancel every line) / Discard Draft (delete order).
+  const [orderActionBusy, setOrderActionBusy] = useState(false);
+  const discardDraft = () => Modal.confirm({
+    title: 'Discard this draft order?', okText: 'Discard order', okButtonProps: { danger: true }, cancelText: 'Keep',
+    icon: <ApiOutlined style={{ color: REDWOOD.error }} />,
+    content: <div><div style={{ marginBottom: 8 }}>The entire draft order will be <b>permanently deleted</b> from Fusion.</div>
+      <div style={{ fontSize: 11, fontFamily: 'monospace', wordBreak: 'break-all', background: REDWOOD.neutral100, borderRadius: 6, padding: '8px 10px' }}><b style={{ color: REDWOOD.error }}>DELETE</b> …/salesOrdersForOrderHub/{childOrderKey}</div></div>,
+    onOk: async () => {
+      setOrderActionBusy(true);
+      const url = `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(childOrderKey)}`;
+      try {
+        const r = await fetch(url, { method: 'DELETE', headers: FUSION_HDRS });
+        setLastResponse(`DELETE ${url}\nHTTP ${r.status}`);
+        if (!r.ok && r.status !== 204) { const t = await r.text(); throw new Error(collectOrderErrors(null, t, true)[0] || `HTTP ${r.status}`); }
+        message.success('Draft order discarded'); setLines([]); setConfirmed(false);
+      } catch (e: any) { message.error(e?.message || 'Discard failed'); }
+      finally { setOrderActionBusy(false); }
+    },
+  });
+  const cancelOrder = () => {
+    const orderKey = editOrder?.OrderKey ?? editOrder?.HeaderId ?? createdOrderKey;
+    const targets = lines.filter(l => l.existing && !l.canceled);
+    Modal.confirm({
+      title: 'Cancel this order?', okText: 'Cancel order', okButtonProps: { danger: true }, cancelText: 'Keep',
+      icon: <StopOutlined style={{ color: REDWOOD.error }} />,
+      content: <div>Every line ({targets.length}) will be canceled via <Text code style={{ fontSize: 11 }}>PATCH …/child/lines/{'{id}'} {'{ CanceledFlag: true }'}</Text>.</div>,
+      onOk: async () => {
+        setOrderActionBusy(true);
+        let failed = 0;
+        for (const l of targets) {
+          const href = l.lineHref ? fusionHref(l.lineHref) : (l.fulfillLineId != null ? `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(String(orderKey))}/child/lines/${l.fulfillLineId}` : '');
+          if (!href) { failed++; continue; }
+          try {
+            const r = await fetch(href, { method: 'PATCH', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify({ CanceledFlag: true, CancelReasonCode: 'CUSTOMER_REQUEST' }) });
+            if (r.ok) upd(l.key, { canceled: true, cancelSaved: true, status: 'Canceled' }); else failed++;
+          } catch { failed++; }
+        }
+        setOrderActionBusy(false);
+        if (failed) message.error(`${failed} line(s) failed to cancel`); else message.success('Order canceled');
+      },
+    });
   };
 
   // "New Line" — append a blank, editable line the user fills via inline search.
@@ -4553,6 +4660,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               style={{ borderColor: REDWOOD.success, color: REDWOOD.success }}>Auto Shipconfirm</Button>}
             {!returnMode && anyAwaitingBilling && <Button icon={<DollarOutlined />} onClick={() => setAutoInvoiceOpen(true)}
               style={{ borderColor: REDWOOD.primary, color: REDWOOD.primary }}>Create AR Invoice</Button>}
+            {/* Order Actions — Discard Draft (draft only) / Cancel Order (processing) */}
+            {(editMode || !!createdOrderKey) && (
+              <Dropdown trigger={['click']} disabled={orderActionBusy} menu={{ items: [
+                ...(isDraftStatus ? [{ key: 'discard', danger: true, icon: <DeleteOutlined />, label: 'Discard Draft', onClick: discardDraft }] : []),
+                ...(!isDraftStatus ? [{ key: 'cancel', danger: true, icon: <StopOutlined />, label: 'Cancel Order', onClick: cancelOrder }] : []),
+                ...(isDraftStatus ? [{ key: 'cancelDraft', danger: true, icon: <StopOutlined />, label: 'Cancel Order (cancel all lines)', onClick: cancelOrder }] : []),
+              ] }}>
+                <Button danger loading={orderActionBusy}><Space size={4}>Order Actions<DownOutlined style={{ fontSize: 10 }} /></Space></Button>
+              </Dropdown>
+            )}
           </Space>}
         </Space>}>
         <Form form={form} layout="horizontal" size="small" labelAlign="left" colon labelWrap
@@ -4563,27 +4680,57 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               key: 'header', label: <span><BankOutlined style={{ marginRight: 5 }} />Header</span>,
               children: (
                 <Row gutter={[12, 12]} align="stretch">
-                  {/* S1 — Order */}
+                  {/* S1 — Order. In edit mode everything is locked; the pencil (draft
+                      only) unlocks just Order Date + Order Type, saved via header PATCH. */}
                   <Col xs={24} sm={12} md={5}><VSection icon={<BankOutlined />} title="Order" color={REDWOOD.primary}>
+                    {editMode && (
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
+                        {!isDraftStatus
+                          ? <Tag color="default" style={{ fontSize: 10 }}>Locked — not a draft</Tag>
+                          : hdrUnlocked
+                            ? <Space size={4}>
+                                <Button size="small" type="primary" icon={<SaveOutlined />} loading={hdrSaving} onClick={saveHeaderFields}>Save</Button>
+                                <Button size="small" onClick={() => { form.setFieldsValue({ orderType: hdr.orderType, orderDate: hdr.orderDate ? dayjs(hdr.orderDate) : undefined }); setHdrUnlocked(false); }}>Cancel</Button>
+                              </Space>
+                            : <Button size="small" icon={<EditOutlined />} style={{ color: REDWOOD.info }} onClick={() => setHdrUnlocked(true)}>Edit</Button>}
+                      </div>
+                    )}
                     <Form.Item label="Order No" style={{ marginBottom: 10 }}>
                       <Text strong style={{ color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{orderNumber}</Text></Form.Item>
                     <Form.Item label="Business Unit" name="businessUnit" style={{ marginBottom: 10 }}>
-                      <Select showSearch placeholder="Select" onChange={onBU} optionFilterProp="label"
+                      <Select showSearch placeholder="Select" onChange={onBU} optionFilterProp="label" disabled={editMode}
                         options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} /></Form.Item>
-                    <Form.Item label="Order Date" name="orderDate" style={{ marginBottom: 10 }}><DatePicker style={{ width: '100%' }} /></Form.Item>
-                    <Form.Item label="Order Type" name="orderType" style={{ marginBottom: 10 }}><Input /></Form.Item>
+                    <Form.Item label="Order Date" name="orderDate" style={{ marginBottom: 10 }}><DatePicker style={{ width: '100%' }} disabled={editMode && !hdrUnlocked} /></Form.Item>
+                    <Form.Item label="Order Type" name="orderType" style={{ marginBottom: 10 }}><Input disabled={editMode && !hdrUnlocked} /></Form.Item>
                   </VSection></Col>
 
-                  {/* S2 — Customer Information */}
+                  {/* S2 — Customer Information. Customer is locked in edit mode (a DOO
+                      order's buying party can't be changed via REST). */}
                   <Col xs={24} sm={12} md={9}><VSection icon={<ProfileOutlined />} title="Customer Information" color={REDWOOD.info}>
                     <Form.Item label="Customer Name" name="customerName" layout="vertical" labelCol={{ span: 24 }} wrapperCol={{ span: 24 }} style={{ marginBottom: hdr.customerName ? 2 : 10 }}>
-                      <Select showSearch placeholder="Search customer" onChange={onCustomer} optionFilterProp="label" options={custOptions} notFoundContent={customers.length ? 'No match' : 'Loading…'} /></Form.Item>
+                      <Select showSearch placeholder="Search customer" onChange={onCustomer} optionFilterProp="label" options={custOptions} disabled={editMode} notFoundContent={customers.length ? 'No match' : 'Loading…'} /></Form.Item>
                     {hdr.customerName && <div style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.info, whiteSpace: 'normal', lineHeight: 1.35, margin: '0 0 10px' }}>{hdr.customerName}</div>}
                     <Form.Item label="Cust Number" name="accountNumber" style={{ marginBottom: 10 }}><Input readOnly placeholder="—" /></Form.Item>
                     <Form.Item label="Payment Terms" name="paymentTerms" style={{ marginBottom: 10 }}>
-                      <Select showSearch optionFilterProp="label" options={payTermOpts} /></Form.Item>
-                    <Form.Item label="Salesperson" name="salesRep" style={{ marginBottom: 10 }}>
-                      <Select showSearch allowClear optionFilterProp="label" options={salesRepOpts} notFoundContent={salesRepOpts.length ? 'No match' : 'Loading…'} /></Form.Item>
+                      <Select showSearch optionFilterProp="label" options={payTermOpts} disabled={editMode} /></Form.Item>
+                    {editMode ? (
+                      // Salesperson comes from the order's sales credits (read-only here);
+                      // the pencil opens the Add/Edit Sales Credit dialog.
+                      <Form.Item label="Salesperson" style={{ marginBottom: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ flex: 1, minWidth: 0, fontSize: 12 }}>
+                            {salesCredits.rows.length ? salesCredits.rows.map(scName).join(', ') : <Text type="secondary">— no sales credit —</Text>}
+                          </span>
+                          <Tooltip title={salesCredits.rows.length ? 'Edit sales credit' : 'Add sales credit'}>
+                            <Button size="small" icon={<EditOutlined />} style={{ color: REDWOOD.info }}
+                              onClick={() => salesCredits.rows.length ? editSalesCredit(salesCredits.rows[0]) : addSalesCredit()} />
+                          </Tooltip>
+                        </div>
+                      </Form.Item>
+                    ) : (
+                      <Form.Item label="Salesperson" name="salesRep" style={{ marginBottom: 10 }}>
+                        <Select showSearch allowClear optionFilterProp="label" options={salesRepOpts} notFoundContent={salesRepOpts.length ? 'No match' : 'Loading…'} /></Form.Item>
+                    )}
                   </VSection></Col>
 
                   {/* S3 — Warehouse */}
@@ -4630,9 +4777,32 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               ),
             },
             { key: 'additional', label: <span><ProfileOutlined style={{ marginRight: 5 }} />Additional Info</span>,
-              children: <OrderSection icon={<ProfileOutlined />} title="Additional Information" color={REDWOOD.purple}>
-                <Col xs={24}><Form.Item label="Remarks" name="remarks" layout="vertical" style={{ marginBottom: 12 }}><Input.TextArea rows={3} placeholder="Optional notes…" /></Form.Item></Col>
-              </OrderSection> },
+              children: <>
+                <OrderSection icon={<ProfileOutlined />} title="Additional Information" color={REDWOOD.purple}>
+                  <Col xs={24}><Form.Item label="Remarks" name="remarks" layout="vertical" style={{ marginBottom: 12 }}><Input.TextArea rows={3} placeholder="Optional notes…" /></Form.Item></Col>
+                </OrderSection>
+                {/* Shipping & Packing — PATCHed onto the order header */}
+                <OrderSection icon={<CarOutlined />} title="Shipping & Packing Instructions" color={REDWOOD.teal}>
+                  <Col xs={24} md={12}>
+                    <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>Packing Instructions</div>
+                    <Input.TextArea rows={2} value={shipPack.packing} onChange={e => setShipPack(s => ({ ...s, packing: e.target.value }))} placeholder="Packing instructions" style={{ marginBottom: 12 }} />
+                  </Col>
+                  <Col xs={24} md={12}>
+                    <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>Shipping Instructions</div>
+                    <Input.TextArea rows={2} value={shipPack.shipping} onChange={e => setShipPack(s => ({ ...s, shipping: e.target.value }))} placeholder="Shipping instructions" style={{ marginBottom: 12 }} />
+                  </Col>
+                  <Col xs={24} md={8}>
+                    <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>FOB Point</div>
+                    <Select style={{ width: '100%', marginBottom: 12 }} allowClear placeholder="—" value={shipPack.fob} onChange={v => setShipPack(s => ({ ...s, fob: v }))}
+                      options={[{ value: 'Destination', label: 'Destination' }, { value: 'Origin', label: 'Origin' }]} />
+                  </Col>
+                  <Col xs={24}>
+                    <Button type="primary" icon={<SaveOutlined />} loading={shipPackSaving} onClick={saveShipPack} disabled={!childOrderKey}
+                      style={childOrderKey ? { background: REDWOOD.teal, borderColor: REDWOOD.teal } : undefined}>Save Instructions</Button>
+                    {!childOrderKey && <Text type="secondary" style={{ marginLeft: 10, fontSize: 12 }}>Save the order first to enable</Text>}
+                  </Col>
+                </OrderSection>
+              </> },
             ...((editMode ? (editOrder?.OrderKey ?? editOrder?.HeaderId) : createdOrderKey) != null ? [{
               key: 'notesAtt', label: <span><PaperClipOutlined style={{ marginRight: 5 }} />Notes &amp; Attachments</span>,
               children: <div style={{ padding: 8 }}><NotesAttachmentsPanel orderKey={String(editMode ? (editOrder?.OrderKey ?? editOrder?.HeaderId) : createdOrderKey)} /></div>,
@@ -4757,7 +4927,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               // Edit mode: Sales Credits + Notes & Attachments (order-level children).
               ...(editMode && (editOrder?.OrderKey ?? editOrder?.HeaderId) != null ? [{
                 key: 'salesCredits', label: vTab(<ReconciliationOutlined />, 'Sales Credits', '#0572CE'),
-                children: <SalesCreditsPanel orderKey={String(editOrder?.OrderKey ?? editOrder?.HeaderId)} salesRepOpts={salesRepOpts} ccy={ccy} />,
+                children: <SalesCreditsPanel rows={salesCredits.rows} loading={salesCredits.loading} onReload={salesCredits.reload} onAdd={addSalesCredit} onEdit={editSalesCredit} onDelete={deleteSalesCredit} />,
               }] : []),
             ]} />}
       </Card>
@@ -4837,6 +5007,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       </Modal>
 
       {/* Line-Total drill → the line's charges + price components, straight from Fusion */}
+      {/* Add / Edit Sales Credit — shared by the header pencil and the Sales Credits tab */}
+      {childOrderKey && <SalesCreditEditModal editing={scEdit} orderKey={childOrderKey} salesRepOpts={salesRepOpts}
+        onClose={() => setScEdit(null)} onSaved={() => { setScEdit(null); salesCredits.reload(); }} />}
+
       <Modal open={!!chargeDrill} onCancel={() => setChargeDrill(null)} width={760} style={{ top: 24 }}
         title={<Space><DollarOutlined style={{ color: REDWOOD.primary }} /> Charges — {chargeDrill?.line.itemNumber}</Space>}
         footer={<Button onClick={() => setChargeDrill(null)}>Close</Button>}>
