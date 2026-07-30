@@ -12,11 +12,13 @@ import {
   DatabaseOutlined, CheckCircleTwoTone, CloseCircleTwoTone, RiseOutlined, TagsOutlined,
   CheckCircleOutlined, EyeOutlined, EditOutlined,
   SafetyCertificateOutlined, StopOutlined, SendOutlined, RollbackOutlined,
+  FilePdfOutlined, FileExcelOutlined, SnippetsOutlined, ImportOutlined, TableOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -1644,9 +1646,296 @@ async function searchItems(text: string, org?: string): Promise<any[]> {
   return Array.from(map.values()).slice(0, 40);
 }
 
+// ── Multi-line import (PDF / Excel / CSV / paste / price list) ───────────────
+interface ImpRow { key: string; itemNumber: string; description?: string; uom?: string; qty: number; price: number; valid?: boolean; note?: string }
+let _impSeq = 0;
+const impKey = () => `imp-${++_impSeq}`;
+
+// Resolve a batch of item numbers against itemsV2 (validity + description + UOM).
+async function resolveItems(numbers: string[], org?: string): Promise<Record<string, { ItemDescription?: string; uom?: string; exists: boolean }>> {
+  const out: Record<string, { ItemDescription?: string; uom?: string; exists: boolean }> = {};
+  const uniq = Array.from(new Set(numbers.map(n => String(n ?? '').trim()).filter(Boolean)));
+  for (let i = 0; i < uniq.length; i += 20) {
+    const chunk = uniq.slice(i, i + 20);
+    const inList = chunk.map(n => `'${n.replace(/'/g, "''")}'`).join(',');
+    let q = `ItemNumber in (${inList})`; if (org) q += `;OrganizationCode=${org}`;
+    try {
+      const items = await fetchAllPages(`${FUSION_BASE}/itemsV2?q=${encodeURIComponent(q)}&limit=200&onlyData=true`);
+      items.forEach((it: any) => { out[String(it.ItemNumber)] = { ItemDescription: it.ItemDescription, uom: pf(it, ['PrimaryUOMValue', 'PrimaryUOMCode', 'UOMCode']), exists: true }; });
+    } catch { /* leave unresolved */ }
+  }
+  uniq.forEach(n => { if (!out[n]) out[n] = { exists: false }; });
+  return out;
+}
+
+// Shared preview/validate/add grid for every import source. Takes parsed rows,
+// lets the user tweak qty/price, validates the items, shows totals, then adds.
+const StagedPreview: React.FC<{ rows: ImpRow[]; org?: string; ccy?: string; onAdd: (items: any[]) => void; onReset: () => void }> = ({ rows, org, ccy, onAdd, onReset }) => {
+  const [data, setData] = useState<ImpRow[]>(rows);
+  const [validating, setValidating] = useState(false);
+  const [validated, setValidated] = useState(false);
+  useEffect(() => { setData(rows); setValidated(false); }, [rows]);
+  const upd = (key: string, patch: Partial<ImpRow>) => setData(p => p.map(r => r.key === key ? { ...r, ...patch } : r));
+  const remove = (key: string) => setData(p => p.filter(r => r.key !== key));
+  const validate = async () => {
+    setValidating(true);
+    try {
+      const res = await resolveItems(data.map(r => r.itemNumber), org);
+      setData(p => p.map(r => { const m = res[r.itemNumber.trim()]; return { ...r, valid: !!m?.exists, description: r.description || m?.ItemDescription, uom: r.uom || m?.uom, note: m?.exists ? undefined : 'Item not found' }; }));
+      setValidated(true);
+      const bad = data.filter(r => !res[r.itemNumber.trim()]?.exists).length;
+      if (bad === 0) message.success('All items valid'); else message.warning(`${bad} item(s) not found — fix or remove them`);
+    } finally { setValidating(false); }
+  };
+  const totQty = data.reduce((s, r) => s + num(r.qty), 0);
+  const totAmt = data.reduce((s, r) => s + num(r.qty) * num(r.price), 0);
+  const badN = data.filter(r => r.valid === false).length;
+  const cols: ColumnsType<ImpRow> = [
+    { title: '#', width: 40, align: 'center', render: (_, __, i) => <Tag color="blue">{i + 1}</Tag> },
+    { title: 'Item', dataIndex: 'itemNumber', width: 180, render: (v, r) => <Space size={4}><Input size="small" value={v} style={{ width: 130 }} onChange={e => upd(r.key, { itemNumber: e.target.value, valid: undefined })} />
+        {r.valid === true && <CheckCircleTwoTone twoToneColor={REDWOOD.success} />}{r.valid === false && <Tooltip title={r.note}><CloseCircleTwoTone twoToneColor={REDWOOD.error} /></Tooltip>}</Space> },
+    { title: 'Description', dataIndex: 'description', ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'UOM', dataIndex: 'uom', width: 70, render: v => v ?? '—' },
+    { title: 'Qty', dataIndex: 'qty', width: 90, align: 'right', render: (v, r) => <InputNumber size="small" min={0} value={v} onChange={n => upd(r.key, { qty: Number(n) || 0 })} style={{ width: 78 }} /> },
+    { title: 'Unit Price', dataIndex: 'price', width: 110, align: 'right', render: (v, r) => <InputNumber size="small" min={0} value={v} onChange={n => upd(r.key, { price: Number(n) || 0 })} style={{ width: 96 }} /> },
+    { title: 'Total', width: 110, align: 'right', render: (_, r) => <Text strong style={{ color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(r.qty) * num(r.price), ccy)}</Text> },
+    { title: '', width: 44, align: 'center', render: (_, r) => <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => remove(r.key)} /> },
+  ];
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+        <Button icon={<SearchOutlined />} loading={validating} onClick={validate}>Validate items</Button>
+        <Button icon={<RollbackOutlined />} onClick={onReset}>Start over</Button>
+        <Text type="secondary" style={{ fontSize: 12 }}>{data.length} row(s){validated ? ` · ${badN} invalid` : ''}</Text>
+        <span style={{ marginLeft: 'auto' }}><Text strong>Total: {fmtQty(totQty)} unit(s) · {fmtAmount(totAmt, ccy)}</Text></span>
+      </div>
+      <Table size="small" columns={cols} dataSource={data} rowKey="key" pagination={data.length > 50 ? { pageSize: 50 } : false} scroll={{ y: 360 }}
+        rowClassName={r => r.valid === false ? 'imp-bad' : ''} />
+      <div style={{ marginTop: 10, textAlign: 'right' }}>
+        <Button type="primary" icon={<PlusOutlined />} disabled={!data.length} style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+          onClick={() => {
+            const picked = data.filter(r => r.itemNumber.trim()).map(r => ({ ItemNumber: r.itemNumber.trim(), ItemDescription: r.description, PrimaryUOMValue: r.uom, _qty: num(r.qty), _price: num(r.price) }));
+            if (!picked.length) { message.warning('Nothing to add'); return; }
+            onAdd(picked); message.success(`Added ${picked.length} line(s) to the order`);
+          }}>Add {data.length} line(s) to order{badN ? ` (${badN} unverified)` : ''}</Button>
+      </div>
+    </div>
+  );
+};
+
+// Guess a column index from a set of header keywords.
+const guessCol = (headers: string[], keys: string[]) => headers.findIndex(h => keys.some(k => norm(String(h)).includes(k)));
+// Parse a table (array-of-arrays) into ImpRows using column indices.
+const tableToRows = (grid: any[][], map: { item: number; qty: number; price: number; desc: number }, headerRow: number): ImpRow[] => {
+  const out: ImpRow[] = [];
+  for (let i = headerRow + 1; i < grid.length; i++) {
+    const row = grid[i] ?? [];
+    const item = map.item >= 0 ? String(row[map.item] ?? '').trim() : '';
+    if (!item) continue;
+    const qty = map.qty >= 0 ? num(String(row[map.qty] ?? '').replace(/,/g, '')) : 0;
+    const price = map.price >= 0 ? num(String(row[map.price] ?? '').replace(/[^0-9.\-]/g, '')) : 0;
+    const desc = map.desc >= 0 ? String(row[map.desc] ?? '').trim() : undefined;
+    out.push({ key: impKey(), itemNumber: item, description: desc, qty: qty || 1, price });
+  }
+  return out;
+};
+
+// Column-mapping bar shared by the Excel and Paste panels.
+const MapBar: React.FC<{ headers: string[]; map: any; setMap: (m: any) => void; headerRow: number; setHeaderRow: (n: number) => void; maxHeader: number }> = ({ headers, map, setMap, headerRow, setHeaderRow, maxHeader }) => {
+  const opts = headers.map((h, i) => ({ value: i, label: `${i + 1}: ${String(h ?? '').slice(0, 24) || '(empty)'}` }));
+  const none = [{ value: -1, label: '— none —' }];
+  const field = (label: string, k: string, required?: boolean) => (
+    <span style={{ fontSize: 12 }}>{label}{required ? ' *' : ''}:
+      <Select size="small" style={{ width: 150, marginLeft: 4 }} value={map[k]} popupMatchSelectWidth={false}
+        options={(required ? [] : none).concat(opts)} onChange={v => setMap({ ...map, [k]: v })} /></span>
+  );
+  return (
+    <Space wrap style={{ marginBottom: 10 }}>
+      <span style={{ fontSize: 12 }}>Header row:
+        <InputNumber size="small" min={1} max={maxHeader} value={headerRow + 1} style={{ width: 64, marginLeft: 4 }} onChange={v => setHeaderRow((Number(v) || 1) - 1)} /></span>
+      {field('Item', 'item', true)}{field('Qty', 'qty')}{field('Price', 'price')}{field('Description', 'desc')}
+    </Space>
+  );
+};
+
+// From Excel / CSV
+const ExcelPanel: React.FC<{ org?: string; ccy?: string; onAdd: (items: any[]) => void }> = ({ org, ccy, onAdd }) => {
+  const [grid, setGrid] = useState<any[][] | null>(null);
+  const [fileName, setFileName] = useState('');
+  const [headerRow, setHeaderRow] = useState(0);
+  const [map, setMap] = useState({ item: -1, qty: -1, price: -1, desc: -1 });
+  const [rows, setRows] = useState<ImpRow[] | null>(null);
+  const readFile = async (f: File) => {
+    try {
+      const buf = await f.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const g = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, blankrows: false, defval: '' });
+      setGrid(g); setFileName(f.name); setRows(null);
+      const hdr = (g[0] ?? []).map(String);
+      setHeaderRow(0);
+      setMap({ item: guessCol(hdr, ['item', 'sku', 'product', 'partno', 'code']), qty: guessCol(hdr, ['qty', 'quantity', 'ordered']), price: guessCol(hdr, ['price', 'rate', 'unitprice', 'amount']), desc: guessCol(hdr, ['desc', 'name', 'particular']) });
+    } catch (e: any) { message.error(`Read failed: ${e.message}`); }
+    return false;
+  };
+  if (rows) return <StagedPreview rows={rows} org={org} ccy={ccy} onAdd={onAdd} onReset={() => setRows(null)} />;
+  const headers = (grid?.[headerRow] ?? []).map(String);
+  return (
+    <div>
+      <Upload accept=".xlsx,.xls,.csv" showUploadList={false} beforeUpload={readFile}>
+        <Button icon={<FileExcelOutlined />} type="primary" ghost>Select Excel / CSV file</Button>
+      </Upload>
+      {fileName && <Tag style={{ marginLeft: 8 }}>{fileName}</Tag>}
+      {grid && <div style={{ marginTop: 12 }}>
+        <MapBar headers={headers} map={map} setMap={setMap} headerRow={headerRow} setHeaderRow={setHeaderRow} maxHeader={grid.length} />
+        <div style={{ maxHeight: 240, overflow: 'auto', border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6 }}>
+          <table style={{ borderCollapse: 'collapse', fontSize: 11.5, width: '100%' }}>
+            <tbody>
+              {grid.slice(0, 30).map((r, ri) => (
+                <tr key={ri} style={{ background: ri === headerRow ? REDWOOD.neutral100 : undefined, fontWeight: ri === headerRow ? 700 : 400 }}>
+                  <td style={{ padding: '2px 6px', color: REDWOOD.neutral600, borderBottom: `1px solid ${REDWOOD.neutral200}` }}>{ri + 1}</td>
+                  {(r ?? []).map((c: any, ci: number) => <td key={ci} style={{ padding: '2px 8px', borderBottom: `1px solid ${REDWOOD.neutral200}`, whiteSpace: 'nowrap' }}>{String(c ?? '')}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ marginTop: 10, textAlign: 'right' }}>
+          <Button type="primary" icon={<ImportOutlined />} disabled={map.item < 0} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+            onClick={() => { const rs = tableToRows(grid, map, headerRow); if (!rs.length) { message.warning('No item rows found — check the column mapping'); return; } setRows(rs); }}>Build preview ({Math.max(0, grid.length - headerRow - 1)} rows)</Button>
+        </div>
+      </div>}
+    </div>
+  );
+};
+
+// From copy-paste (tab / comma / multi-space separated)
+const PastePanel: React.FC<{ org?: string; ccy?: string; onAdd: (items: any[]) => void }> = ({ org, ccy, onAdd }) => {
+  const [text, setText] = useState('');
+  const [grid, setGrid] = useState<any[][] | null>(null);
+  const [headerRow, setHeaderRow] = useState(0);
+  const [hasHeader, setHasHeader] = useState(true);
+  const [map, setMap] = useState({ item: 0, qty: 1, price: 2, desc: -1 });
+  const [rows, setRows] = useState<ImpRow[] | null>(null);
+  const parse = () => {
+    const lines = text.split(/\r?\n/).filter(l => l.trim());
+    if (!lines.length) { message.warning('Paste some rows first'); return; }
+    const delim = lines[0].includes('\t') ? /\t/ : (lines[0].includes(',') ? /,/ : /\s{2,}|\s+/);
+    const g = lines.map(l => l.split(delim).map(s => s.trim()));
+    setGrid(g); setRows(null);
+    const hdr = (g[0] ?? []).map(String);
+    const looksHeader = hdr.some(h => /item|qty|price|desc|product|sku/i.test(h));
+    setHasHeader(looksHeader); setHeaderRow(0);
+    setMap({ item: Math.max(0, guessCol(hdr, ['item', 'sku', 'product', 'code'])), qty: guessCol(hdr, ['qty', 'quantity']) < 0 ? 1 : guessCol(hdr, ['qty', 'quantity']), price: guessCol(hdr, ['price', 'rate', 'amount']) < 0 ? 2 : guessCol(hdr, ['price', 'rate', 'amount']), desc: guessCol(hdr, ['desc', 'name']) });
+  };
+  if (rows) return <StagedPreview rows={rows} org={org} ccy={ccy} onAdd={onAdd} onReset={() => setRows(null)} />;
+  const headers = grid ? (hasHeader ? grid[headerRow] : grid[headerRow].map((_, i) => `Col ${i + 1}`)).map(String) : [];
+  return (
+    <div>
+      <Input.TextArea rows={6} value={text} onChange={e => setText(e.target.value)}
+        placeholder={'Paste rows — tab, comma or space separated. e.g.\nItem\tQty\tPrice\nSM-A057FZKGAFB\t2\t95.22'} />
+      <div style={{ marginTop: 8 }}>
+        <Button type="primary" icon={<SnippetsOutlined />} onClick={parse} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Parse</Button>
+      </div>
+      {grid && <div style={{ marginTop: 12 }}>
+        <Space style={{ marginBottom: 8 }}><Checkbox checked={hasHeader} onChange={e => setHasHeader(e.target.checked)}>First row is a header</Checkbox></Space>
+        <MapBar headers={headers} map={map} setMap={setMap} headerRow={hasHeader ? headerRow : -1 + 0} setHeaderRow={setHeaderRow} maxHeader={grid.length} />
+        <div style={{ textAlign: 'right' }}>
+          <Button type="primary" icon={<ImportOutlined />} disabled={map.item < 0} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+            onClick={() => { const rs = tableToRows(grid, map, hasHeader ? headerRow : -1); if (!rs.length) { message.warning('No item rows found'); return; } setRows(rs); }}>Build preview</Button>
+        </div>
+      </div>}
+    </div>
+  );
+};
+
+// From PDF — extract text rows per page; user ticks the item rows; parse to columns.
+const PdfPanel: React.FC<{ org?: string; ccy?: string; onAdd: (items: any[]) => void }> = ({ org, ccy, onAdd }) => {
+  const [pages, setPages] = useState<{ page: number; rows: { key: string; text: string; tokens: string[] }[] }[] | null>(null);
+  const [fileName, setFileName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [rows, setRows] = useState<ImpRow[] | null>(null);
+  const readPdf = async (f: File) => {
+    setLoading(true); setPages(null); setRows(null); setChecked(new Set());
+    try {
+      const pdfjsLib: any = await import('pdfjs-dist');
+      const ver: string = pdfjsLib.version;
+      const ext = ver.startsWith('3.') || ver.startsWith('2.') ? 'min.js' : 'min.mjs';
+      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${ver}/build/pdf.worker.${ext}`;
+      const buf = await f.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: buf, useSystemFonts: true }).promise;
+      const out: { page: number; rows: { key: string; text: string; tokens: string[] }[] }[] = [];
+      for (let p = 1; p <= pdf.numPages; p++) {
+        const page = await pdf.getPage(p); const content = await page.getTextContent();
+        const items = content.items.filter((it: any) => 'str' in it && it.str.trim()).map((it: any) => ({ str: it.str.trim(), x: it.transform[4], y: it.transform[5] }));
+        const rowMap = new Map<number, { str: string; x: number }[]>();
+        items.forEach((it: any) => { const key = Math.round(it.y / 3) * 3; if (!rowMap.has(key)) rowMap.set(key, []); rowMap.get(key)!.push(it); });
+        const prows = [...rowMap.entries()].sort((a, b) => b[0] - a[0]).map(([, its], i) => { const toks = its.sort((a, b) => a.x - b.x).map(t => t.str); return { key: `p${p}-r${i}`, text: toks.join('  '), tokens: toks }; });
+        out.push({ page: p, rows: prows });
+      }
+      setPages(out); setFileName(f.name);
+    } catch (e: any) { message.error(`PDF read failed: ${e.message}`); }
+    finally { setLoading(false); }
+  };
+  // Parse a text row's tokens: item = first token with letters+digits; price =
+  // last numeric; qty = the numeric before it (else 1).
+  const parseRow = (tokens: string[]): ImpRow | null => {
+    const item = tokens.find(t => /[A-Za-z]/.test(t) && /\d/.test(t) && t.length >= 4) ?? tokens[0];
+    const nums = tokens.map(t => ({ t, n: Number(t.replace(/,/g, '')) })).filter(x => !Number.isNaN(x.n) && /^[\d,]+(\.\d+)?$/.test(x.t));
+    const price = nums.length ? nums[nums.length - 1].n : 0;
+    const qty = nums.length >= 2 ? nums[nums.length - 2].n : 1;
+    const descToks = tokens.filter(t => t !== item && !/^[\d,]+(\.\d+)?$/.test(t));
+    if (!item) return null;
+    return { key: impKey(), itemNumber: item, description: descToks.join(' ') || undefined, qty: qty || 1, price };
+  };
+  const buildPreview = () => {
+    const picked: ImpRow[] = [];
+    pages?.forEach(pg => pg.rows.forEach(r => { if (checked.has(r.key)) { const pr = parseRow(r.tokens); if (pr) picked.push(pr); } }));
+    if (!picked.length) { message.warning('Tick the item rows first'); return; }
+    setRows(picked);
+  };
+  const toggle = (key: string) => setChecked(s => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n; });
+  const togglePage = (pg: { rows: { key: string }[] }, on: boolean) => setChecked(s => { const n = new Set(s); pg.rows.forEach(r => on ? n.add(r.key) : n.delete(r.key)); return n; });
+  if (rows) return <StagedPreview rows={rows} org={org} ccy={ccy} onAdd={onAdd} onReset={() => setRows(null)} />;
+  return (
+    <div>
+      <Upload accept=".pdf" showUploadList={false} beforeUpload={readPdf}>
+        <Button icon={<FilePdfOutlined />} type="primary" ghost loading={loading}>Select PDF file</Button>
+      </Upload>
+      {fileName && <Tag style={{ marginLeft: 8 }}>{fileName}</Tag>}
+      {pages && <div style={{ marginTop: 12 }}>
+        <Text type="secondary" style={{ fontSize: 12 }}>Tick the rows that are order lines (page by page). Each ticked row is parsed into item · qty · price.</Text>
+        <div style={{ maxHeight: 340, overflow: 'auto', marginTop: 8 }}>
+          {pages.map(pg => (
+            <div key={pg.page} style={{ marginBottom: 12, border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px', background: REDWOOD.neutral100 }}>
+                <Text strong style={{ fontSize: 12 }}>Page {pg.page}</Text>
+                <Button size="small" type="link" onClick={() => togglePage(pg, true)}>Select all</Button>
+                <Button size="small" type="link" onClick={() => togglePage(pg, false)}>Clear</Button>
+              </div>
+              <div>
+                {pg.rows.map(r => (
+                  <label key={r.key} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '3px 10px', borderTop: `1px solid ${REDWOOD.neutral100}`, cursor: 'pointer', fontSize: 11.5, background: checked.has(r.key) ? '#e6f4ff' : undefined }}>
+                    <Checkbox checked={checked.has(r.key)} onChange={() => toggle(r.key)} />
+                    <span style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>{r.text}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop: 10, textAlign: 'right' }}>
+          <Button type="primary" icon={<ImportOutlined />} disabled={!checked.size} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }} onClick={buildPreview}>Build preview ({checked.size} row(s))</Button>
+        </div>
+      </div>}
+    </div>
+  );
+};
+
 // Item picker (itemsV2) — single-line editable grid: cost, on-hand, qty, price,
 // total, margin, tax and net; select rows and add them as order lines.
-const ItemSearchModal: React.FC<{ open: boolean; org?: string; subinv?: string; taxOptions?: { value: string; label: string; pct: number }[]; onClose: () => void; onAdd: (items: any[]) => void }> = ({ open, org, subinv, taxOptions = [], onClose, onAdd }) => {
+const ItemCostSearch: React.FC<{ org?: string; subinv?: string; taxOptions?: { value: string; label: string; pct: number }[]; onAdd: (items: any[]) => void }> = ({ org, subinv, taxOptions = [], onAdd }) => {
   const [byDesc, setByDesc] = useState(false);
   const [term, setTerm] = useState('');
   const [rows, setRows] = useState<any[]>([]);
@@ -1658,7 +1947,6 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; subinv?: string; 
   const [draft, setDraft] = useState<Record<string, { qty: number; price: number; taxCode?: string; taxPct?: number; tax: number }>>({});
   const [onh, setOnh] = useState<Record<string, { loading?: boolean; qty?: number; lots?: string[]; err?: string }>>({});
   const [apiOpen, setApiOpen] = useState(false);
-  useEffect(() => { if (open) { setTerm(''); setRows([]); setSel([]); setError(''); setCosts({}); setDraft({}); setOnh({}); } }, [open]);
 
   const url = useMemo(() => {
     const t = term.trim(); if (!t) return '';
@@ -1782,32 +2070,32 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; subinv?: string; 
 
   const searchUrlPretty = url ? decodeURIComponent(url) : `${FUSION_BASE}/itemsV2?q=ItemNumber LIKE 'x%';OrganizationCode=${org ?? '<org>'}`;
 
+  const addSelected = () => {
+    const picked = rows.filter(r => sel.includes(r.ItemNumber)).map(r => { const d = dget(r.ItemNumber); const p = vuOf(r.ItemNumber); return { ...r, _cost: costs[r.ItemNumber]?.cost, _qty: d.qty, _price: d.price, _taxCode: d.taxCode, _taxPct: d.taxPct, _tax: d.tax, _lot: p.lot, _lots: onh[r.ItemNumber]?.lots, _costOrg: p.costOrg, _invOrg: p.invOrg, _subinv: p.subinv, _qoh: maxQohOf(r.ItemNumber) }; });
+    if (!picked.length) { message.warning('Select at least one item'); return; }
+    onAdd(picked);
+    message.success(`Added ${picked.length} line(s) to the order`);
+    setSel([]);
+  };
   return (
-    <Modal open={open} onCancel={onClose} maskClosable={false} width={1260} style={{ top: 16 }}
-      title={<Space><SearchOutlined style={{ color: REDWOOD.primary }} /> Search Items{org ? <Tag>{org}</Tag> : null}
-        <Tooltip title="Web services used"><Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} onClick={() => setApiOpen(true)} /></Tooltip></Space>}
-      footer={<Space>
-        <Text type="secondary" style={{ marginRight: 'auto', fontSize: 12 }}>{sel.length} selected</Text>
-        <Button onClick={onClose}>Close</Button>
-        <Button type="primary" disabled={sel.length === 0} icon={<PlusOutlined />} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-          onClick={() => {
-            const picked = rows.filter(r => sel.includes(r.ItemNumber)).map(r => { const d = dget(r.ItemNumber); const p = vuOf(r.ItemNumber); return { ...r, _cost: costs[r.ItemNumber]?.cost, _qty: d.qty, _price: d.price, _taxCode: d.taxCode, _taxPct: d.taxPct, _tax: d.tax, _lot: p.lot, _lots: onh[r.ItemNumber]?.lots, _costOrg: p.costOrg, _invOrg: p.invOrg, _subinv: p.subinv, _qoh: maxQohOf(r.ItemNumber) }; });
-            onAdd(picked);
-            message.success(`Added ${picked.length} line(s) — pick more or Close`);
-            setSel([]); // keep the dialog open so more items can be added
-          }}>Add {sel.length || ''} Item(s)</Button>
-      </Space>}>
+    <div>
       <Space.Compact style={{ width: '100%', marginBottom: 10 }}>
         <Select value={byDesc ? 'desc' : 'num'} style={{ width: 130 }} onChange={v => setByDesc(v === 'desc')}
           options={[{ value: 'num', label: 'Item Number' }, { value: 'desc', label: 'Description' }]} />
         <Input placeholder={byDesc ? 'e.g. TONER' : 'e.g. SM-A057'} value={term} onChange={e => setTerm(e.target.value)} onPressEnter={search} allowClear />
         <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={search} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Search</Button>
+        <Tooltip title="Web services used"><Button icon={<ApiOutlined />} onClick={() => setApiOpen(true)} /></Tooltip>
       </Space.Compact>
       {error ? <div style={{ color: REDWOOD.error, fontSize: 12, marginBottom: 8 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{error}</div> : null}
       <Table size="small" columns={cols} dataSource={rows} rowKey="ItemNumber" loading={loading}
         rowSelection={{ selectedRowKeys: sel, onChange: setSel }}
-        pagination={rows.length > 12 ? { pageSize: 12, size: 'small' } : false} scroll={{ x: 1980, y: 360 }}
+        pagination={rows.length > 12 ? { pageSize: 12, size: 'small' } : false} scroll={{ x: 1980, y: 340 }}
         locale={{ emptyText: 'Search for items to add' }} />
+      <div style={{ marginTop: 10, display: 'flex', alignItems: 'center' }}>
+        <Text type="secondary" style={{ fontSize: 12 }}>{sel.length} selected</Text>
+        <Button type="primary" disabled={sel.length === 0} icon={<PlusOutlined />} style={{ marginLeft: 'auto', background: REDWOOD.success, borderColor: REDWOOD.success }}
+          onClick={addSelected}>Add {sel.length || ''} line(s) to order</Button>
+      </div>
 
       <Modal open={apiOpen} onCancel={() => setApiOpen(false)} maskClosable={false} width={880}
         title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /> Web services used</Space>}
@@ -1832,6 +2120,78 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; subinv?: string; 
           ))}
         </div>
       </Modal>
+    </div>
+  );
+};
+
+// From Price List — bulk item search that stages items with an editable price.
+const PriceListPanel: React.FC<{ org?: string; ccy?: string; onAdd: (items: any[]) => void }> = ({ org, ccy, onAdd }) => {
+  const [byDesc, setByDesc] = useState(false);
+  const [term, setTerm] = useState('');
+  const [found, setFound] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [sel, setSel] = useState<React.Key[]>([]);
+  const [rows, setRows] = useState<ImpRow[] | null>(null);
+  const search = async () => {
+    const t = term.trim(); if (!t) { message.warning('Enter a search term'); return; }
+    setLoading(true);
+    try {
+      const field = byDesc ? 'ItemDescription' : 'ItemNumber';
+      const pattern = byDesc ? `%${t}%` : `${t}%`;
+      let q = `${field} LIKE '${pattern}'`; if (org) q += `;OrganizationCode=${org}`;
+      const items = await fetchAllPages(`${FUSION_BASE}/itemsV2?q=${encodeURIComponent(q)}&limit=200&onlyData=true`);
+      setFound(items); setSel([]);
+      if (!items.length) message.info('No items found');
+    } catch (e: any) { message.error(e.message); }
+    finally { setLoading(false); }
+  };
+  if (rows) return <StagedPreview rows={rows} org={org} ccy={ccy} onAdd={onAdd} onReset={() => setRows(null)} />;
+  const cols: ColumnsType<any> = [
+    { title: 'Item', dataIndex: 'ItemNumber', width: 160, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text> },
+    { title: 'Description', dataIndex: 'ItemDescription', ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'List Price', width: 110, align: 'right', render: (_, r) => { const p = num(pf(r, ['ListPrice', 'SalesPrice', 'UnitPrice', 'ItemPrice'])); return p ? <Text strong style={{ color: REDWOOD.primary }}>{fmtAmount(p, ccy)}</Text> : <Text type="secondary" style={{ fontSize: 11 }}>— enter —</Text>; } },
+  ];
+  return (
+    <div>
+      <Space.Compact style={{ width: '100%', marginBottom: 10 }}>
+        <Select value={byDesc ? 'desc' : 'num'} style={{ width: 130 }} onChange={v => setByDesc(v === 'desc')}
+          options={[{ value: 'num', label: 'Item Number' }, { value: 'desc', label: 'Description' }]} />
+        <Input placeholder={byDesc ? 'e.g. TONER' : 'e.g. SM-A057'} value={term} onChange={e => setTerm(e.target.value)} onPressEnter={search} allowClear />
+        <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={search} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Search</Button>
+      </Space.Compact>
+      <Table size="small" columns={cols} dataSource={found} rowKey="ItemNumber" loading={loading}
+        rowSelection={{ selectedRowKeys: sel, onChange: setSel }} pagination={found.length > 15 ? { pageSize: 15 } : false} scroll={{ y: 340 }}
+        locale={{ emptyText: 'Search items to add from the price list' }} />
+      <div style={{ marginTop: 10, display: 'flex', alignItems: 'center' }}>
+        <Text type="secondary" style={{ fontSize: 12 }}>{sel.length} selected</Text>
+        <Button type="primary" disabled={!sel.length} icon={<ImportOutlined />} style={{ marginLeft: 'auto', background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+          onClick={() => setRows(found.filter(r => sel.includes(r.ItemNumber)).map(r => ({ key: impKey(), itemNumber: r.ItemNumber, description: r.ItemDescription, uom: pf(r, ['PrimaryUOMValue', 'PrimaryUOMCode', 'UOMCode']), qty: 1, price: num(pf(r, ['ListPrice', 'SalesPrice', 'UnitPrice', 'ItemPrice'])), valid: true })))}>Stage {sel.length || ''} for preview</Button>
+      </div>
+    </div>
+  );
+};
+
+// Add Multiple Lines — tabbed importer (item cost · price list · PDF · Excel/CSV · paste).
+const ItemSearchModal: React.FC<{ open: boolean; org?: string; subinv?: string; ccy?: string; taxOptions?: { value: string; label: string; pct: number }[]; onClose: () => void; onAdd: (items: any[]) => void }> = ({ open, org, subinv, ccy, taxOptions = [], onClose, onAdd }) => {
+  const [fileSrc, setFileSrc] = useState<'pdf' | 'excel'>('pdf');
+  return (
+    <Modal open={open} onCancel={onClose} maskClosable={false} width={1280} style={{ top: 14 }}
+      title={<Space><ImportOutlined style={{ color: REDWOOD.primary }} /> Add Multiple Lines{org ? <Tag>{org}</Tag> : null}</Space>}
+      footer={<Button onClick={onClose}>Close</Button>}>
+      <Tabs size="small" defaultActiveKey="cost" items={[
+        { key: 'cost', label: <span><DollarOutlined /> From Item Cost</span>, children: <ItemCostSearch org={org} subinv={subinv} taxOptions={taxOptions} onAdd={onAdd} /> },
+        { key: 'price', label: <span><TableOutlined /> From Price List</span>, children: <PriceListPanel org={org} ccy={ccy} onAdd={onAdd} /> },
+        { key: 'file', label: <span><FilePdfOutlined /> From PDF / Excel / CSV</span>, children: (
+          <div>
+            <Space style={{ marginBottom: 12 }}>
+              <Button type={fileSrc === 'pdf' ? 'primary' : 'default'} icon={<FilePdfOutlined />} onClick={() => setFileSrc('pdf')} style={fileSrc === 'pdf' ? { background: REDWOOD.primary, borderColor: REDWOOD.primary } : undefined}>PDF</Button>
+              <Button type={fileSrc === 'excel' ? 'primary' : 'default'} icon={<FileExcelOutlined />} onClick={() => setFileSrc('excel')} style={fileSrc === 'excel' ? { background: REDWOOD.primary, borderColor: REDWOOD.primary } : undefined}>Excel / CSV</Button>
+            </Space>
+            {fileSrc === 'pdf' ? <PdfPanel org={org} ccy={ccy} onAdd={onAdd} /> : <ExcelPanel org={org} ccy={ccy} onAdd={onAdd} />}
+          </div>
+        ) },
+        { key: 'paste', label: <span><SnippetsOutlined /> From Copy-Paste</span>, children: <PastePanel org={org} ccy={ccy} onAdd={onAdd} /> },
+      ]} />
     </Modal>
   );
 };
@@ -3159,7 +3519,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             ]} />}
       </Card>
 
-      <ItemSearchModal open={pickOpen} org={hdr.warehouse} subinv={hdr.subinventory} taxOptions={taxOptions} onClose={() => setPickOpen(false)} onAdd={addItems} />
+      <ItemSearchModal open={pickOpen} org={hdr.warehouse} subinv={hdr.subinventory} ccy={ccy} taxOptions={taxOptions} onClose={() => setPickOpen(false)} onAdd={addItems} />
 
       {/* Update Line dialog (edit mode) — PATCH the existing line's quantity */}
       <Modal open={!!updTarget} onCancel={() => !updBusy && setUpdTarget(null)} width={460}
