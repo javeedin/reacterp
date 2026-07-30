@@ -341,6 +341,18 @@ const RevenueRecognition: React.FC = () => {
       ({ ...s, subaccount: (s.subaccount || subByContract.get(s.contractId) || '').trim() }),
     [subByContract]);
 
+  // Contract start/end dates for the Post Revenue grid — schedules only carry
+  // contractId, so resolve from the loaded contracts (fallback to trx number).
+  const contractDates = useMemo(() => {
+    const byId = new Map<number, { start: string; end: string }>();
+    const byTrx = new Map<number, { start: string; end: string }>();
+    contracts.forEach(c => { const d = { start: c.contractStartDate, end: c.contractEndDate }; if (c.id != null) byId.set(c.id, d); if (c.trxNumber != null) byTrx.set(Number(c.trxNumber), d); });
+    return { byId, byTrx };
+  }, [contracts]);
+  const scheduleDates = useCallback((r: RevenueSchedule) =>
+    contractDates.byId.get(r.contractId) ?? (r.trxNumber != null ? contractDates.byTrx.get(Number(r.trxNumber)) : undefined),
+    [contractDates]);
+
   const openAcctPreview = () => {
     const chosen = postSchedules.filter(s => postSelectedKeys.includes(s.id)).map(withSubaccount);
     if (chosen.length === 0) { message.warning('Select one or more schedules'); return; }
@@ -983,6 +995,8 @@ const RevenueRecognition: React.FC = () => {
                           { title: 'Unit', dataIndex: 'unit', width: 110 },
                           { title: 'Tenant', dataIndex: 'tenant', width: 170, ellipsis: true },
                           { title: 'Company', key: 'company', width: 90, render: (_: any, r: RevenueSchedule) => <Tag color="blue">{companyFromBU(buForSchedule(r))}</Tag> },
+                          { title: 'Contract Start', key: 'cStart', width: 115, render: (_: any, r: RevenueSchedule) => { const d = scheduleDates(r); return d?.start ? <Tag color="geekblue">{d.start}</Tag> : <span style={{ color: REDWOOD.neutral500 }}>—</span>; } },
+                          { title: 'Contract End', key: 'cEnd', width: 115, render: (_: any, r: RevenueSchedule) => { const d = scheduleDates(r); return d?.end ? <Tag color="volcano">{d.end}</Tag> : <span style={{ color: REDWOOD.neutral500 }}>—</span>; } },
                           { title: '#', dataIndex: 'scheduleNum', width: 55, align: 'right' as const },
                           { title: 'Amount', dataIndex: 'amount', width: 120, align: 'right' as const, render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
                           { title: 'Accounted', key: 'acct', width: 130, align: 'center' as const, render: (_: any, r: RevenueSchedule) => isAccounted(r)
@@ -997,10 +1011,10 @@ const RevenueRecognition: React.FC = () => {
                         summary={() => postSchedules.length === 0 ? null : (
                           <Table.Summary fixed>
                             <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 700 }}>
-                              {/* slots: selection + BU + Period + SchedID + Trx + Invoice + Unit + Tenant + Company + # = 10 → Amount at index 10, Accounted at 11 */}
-                              <Table.Summary.Cell index={0} colSpan={10}><Text strong>Total ({postSchedules.length})</Text></Table.Summary.Cell>
-                              <Table.Summary.Cell index={10} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(postSchedules.reduce((s, r) => s + (Number(r.amount) || 0), 0))}</Text></Table.Summary.Cell>
-                              <Table.Summary.Cell index={11} />
+                              {/* slots: selection + BU + Period + SchedID + Trx + Invoice + Unit + Tenant + Company + Contract Start + Contract End + # = 12 → Amount at index 12, Accounted at 13 */}
+                              <Table.Summary.Cell index={0} colSpan={12}><Text strong>Total ({postSchedules.length})</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={12} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(postSchedules.reduce((s, r) => s + (Number(r.amount) || 0), 0))}</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={13} />
                             </Table.Summary.Row>
                           </Table.Summary>
                         )}
