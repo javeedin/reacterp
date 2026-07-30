@@ -344,9 +344,9 @@ const RevenueRecognition: React.FC = () => {
   // Contract start/end dates for the Post Revenue grid — schedules only carry
   // contractId, so resolve from the loaded contracts (fallback to trx number).
   const contractDates = useMemo(() => {
-    const byId = new Map<number, { start: string; end: string }>();
-    const byTrx = new Map<number, { start: string; end: string }>();
-    contracts.forEach(c => { const d = { start: c.contractStartDate, end: c.contractEndDate }; if (c.id != null) byId.set(c.id, d); if (c.trxNumber != null) byTrx.set(Number(c.trxNumber), d); });
+    const byId = new Map<number, { start: string; end: string; total: number }>();
+    const byTrx = new Map<number, { start: string; end: string; total: number }>();
+    contracts.forEach(c => { const d = { start: c.contractStartDate, end: c.contractEndDate, total: Number(c.rentTotal) || 0 }; if (c.id != null) byId.set(c.id, d); if (c.trxNumber != null) byTrx.set(Number(c.trxNumber), d); });
     return { byId, byTrx };
   }, [contracts]);
   const scheduleDates = useCallback((r: RevenueSchedule) =>
@@ -730,7 +730,8 @@ const RevenueRecognition: React.FC = () => {
       const d = scheduleDates(s);
       return {
         'Business Unit': buForSchedule(s), 'Period': s.periodName || postPeriod || '',
-        'Schedule ID': s.id, 'Trx #': s.trxNumber ?? '', 'Invoice #': s.invoiceNumber ?? '',
+        'Schedule ID': s.id, 'Trx #': s.trxNumber ?? '', 'Contract Amount': d?.total ?? '',
+        'Invoice #': s.invoiceNumber ?? '',
         'Unit': s.unit, 'Tenant': s.tenant, 'Company': companyFromBU(buForSchedule(s)),
         'Contract Start': d?.start ?? '', 'Contract End': d?.end ?? '',
         '#': s.scheduleNum, 'Amount': Number(s.amount) || 0,
@@ -1012,6 +1013,7 @@ const RevenueRecognition: React.FC = () => {
                           { title: 'Period', dataIndex: 'periodName', width: 100, render: (v: string) => <Tag color="purple">{v || postPeriod || '—'}</Tag> },
                           { title: 'Schedule ID', dataIndex: 'id', width: 100, render: (v: number) => <Text code>{v}</Text> },
                           { title: 'Trx #', dataIndex: 'trxNumber', width: 90, render: (v: any) => <Text strong>{v ?? '—'}</Text> },
+                          { title: 'Contract Amount', key: 'cAmount', width: 130, align: 'right' as const, render: (_: any, r: RevenueSchedule) => { const d = scheduleDates(r); return d?.total ? <Text style={{ fontFamily: 'monospace', color: REDWOOD.info }}>{fmt(d.total)}</Text> : <span style={{ color: REDWOOD.neutral500 }}>—</span>; } },
                           { title: 'Invoice #', dataIndex: 'invoiceNumber', width: 120, render: (v: any) => v || <span style={{ color: REDWOOD.neutral500 }}>—</span> },
                           { title: 'Unit', dataIndex: 'unit', width: 110 },
                           { title: 'Tenant', dataIndex: 'tenant', width: 170, ellipsis: true },
@@ -1032,10 +1034,10 @@ const RevenueRecognition: React.FC = () => {
                         summary={() => postSchedules.length === 0 ? null : (
                           <Table.Summary fixed>
                             <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 700 }}>
-                              {/* slots: selection + BU + Period + SchedID + Trx + Invoice + Unit + Tenant + Company + Contract Start + Contract End + # = 12 → Amount at index 12, Accounted at 13 */}
-                              <Table.Summary.Cell index={0} colSpan={12}><Text strong>Total ({postSchedules.length})</Text></Table.Summary.Cell>
-                              <Table.Summary.Cell index={12} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(postSchedules.reduce((s, r) => s + (Number(r.amount) || 0), 0))}</Text></Table.Summary.Cell>
-                              <Table.Summary.Cell index={13} />
+                              {/* slots: selection + BU + Period + SchedID + Trx + Contract Amount + Invoice + Unit + Tenant + Company + Contract Start + Contract End + # = 13 → Amount at index 13, Accounted at 14 */}
+                              <Table.Summary.Cell index={0} colSpan={13}><Text strong>Total ({postSchedules.length})</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={13} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(postSchedules.reduce((s, r) => s + (Number(r.amount) || 0), 0))}</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={14} />
                             </Table.Summary.Row>
                           </Table.Summary>
                         )}
