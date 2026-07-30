@@ -800,17 +800,21 @@ const AutoShipConfirmModal: React.FC<{ orderNo?: string; org?: string; open: boo
 const ERP_INT_URL = `${FUSION_BASE}/erpintegrations`;
 const AI_JOB_PACKAGE = '/oracle/apps/ess/financials/receivables/transactions/autoInvoices';
 const AI_JOB_DEF = 'AutoInvoiceMasterEss';
-// Parameter order = the on-screen order of "Import Receivables Transactions
-// Using AutoInvoice" (the process UI order is the ESSParameters positional order).
+// Parameter order = the 26 positional args of the standard "Import Receivables
+// Transactions Using AutoInvoice" (AutoInvoiceMasterEss) job. argument3
+// (Transaction Source) is the numeric batch-source id; the sales-order filter is
+// From/To Sales Order Number (args 16/17); Base Due Date is arg 24.
 const AI_PARAM_LABELS = [
   'Number of Workers', 'Business Unit', 'Transaction Source', 'Default Date', 'Transaction Type',
   'From Customer', 'To Customer', 'From Customer Account Number', 'To Customer Account Number',
-  'From Accounting Date', 'To Accounting Date', 'From Transaction Number', 'To Transaction Number',
-  'From Sales Order Number', 'To Sales Order Number', 'From Transaction Date', 'To Transaction Date',
-  'From Ship-to Customer Account Number', 'To Ship-to Customer Account Number',
-  'From Ship-to Customer Name', 'To Ship-to Customer Name', 'Base Due Date on Transaction Date',
-  'Due Date Adjustment Days', 'Load Request ID',
+  'From Accounting Date', 'To Accounting Date', 'From Ship Date', 'To Ship Date',
+  'From Transaction Number', 'To Transaction Number', 'From Sales Order Number', 'To Sales Order Number',
+  'From Transaction Date', 'To Transaction Date', 'From Ship-to Customer Account Number',
+  'To Ship-to Customer Account Number', 'From Ship-to Customer Name', 'To Ship-to Customer Name',
+  'Base Due Date on Transaction Date', 'Due Date Adjustment Days', 'Load Request ID',
 ];
+// 0-based indices used for defaults / highlighting.
+const AI_IX = { workers: 0, bu: 1, source: 2, date: 3, soFrom: 15, soTo: 16, baseDue: 23 };
 const AutoInvoiceModal: React.FC<{ orderNo?: string; buId?: string | number; open: boolean; onClose: () => void }> = ({ orderNo, buId, open, onClose }) => {
   const [jobPackage, setJobPackage] = useState(AI_JOB_PACKAGE);
   const [jobDef, setJobDef] = useState(AI_JOB_DEF);
@@ -822,13 +826,14 @@ const AutoInvoiceModal: React.FC<{ orderNo?: string; buId?: string | number; ope
   useEffect(() => {
     if (!open) return;
     const v = AI_PARAM_LABELS.map(() => '');
-    v[0] = '1';                                        // Number of Workers
-    if (buId != null && String(buId).trim()) v[1] = String(buId);  // Business Unit id
-    v[2] = 'DISTRIBUTED_ORDER_ORCHESTRATION';         // Transaction Source (edit to your source name/id)
-    v[3] = new Date().toISOString().slice(0, 10);     // Default Date (YYYY-MM-DD)
-    v[13] = String(orderNo ?? '');                    // From Sales Order Number
-    v[14] = String(orderNo ?? '');                    // To Sales Order Number
-    v[21] = 'Y';                                       // Base Due Date on Transaction Date
+    v[AI_IX.workers] = '1';                                    // Number of Workers
+    if (buId != null && String(buId).trim()) v[AI_IX.bu] = String(buId);  // Business Unit id
+    // Transaction Source is the numeric batch-source id (e.g. 5 = Distributed
+    // Order Orchestration) — left blank so it's set explicitly per pod.
+    v[AI_IX.date] = new Date().toISOString().slice(0, 10);    // Default Date (YYYY-MM-DD)
+    v[AI_IX.soFrom] = String(orderNo ?? '');                  // From Sales Order Number (arg 16)
+    v[AI_IX.soTo] = String(orderNo ?? '');                    // To Sales Order Number (arg 17)
+    v[AI_IX.baseDue] = 'Y';                                    // Base Due Date on Transaction Date (arg 24)
     setVals(v); setReqId(''); setStatus(''); setResp('');
   }, [open, orderNo, buId]);
   const setVal = (i: number, s: string) => setVals(p => p.map((x, j) => j === i ? s : x));
@@ -836,7 +841,7 @@ const AutoInvoiceModal: React.FC<{ orderNo?: string; buId?: string | number; ope
   const body = { OperationName: 'submitESSJobRequest', JobPackageName: jobPackage.trim(), JobDefName: jobDef.trim(), ESSParameters: essParams };
 
   const submit = async () => {
-    if (!vals[2] || vals[2].trim() === '') { message.warning('Transaction Source is required'); return; }
+    if (!vals[AI_IX.source] || vals[AI_IX.source].trim() === '') { message.warning('Transaction Source (batch-source id, e.g. 5) is required'); return; }
     setSubmitting(true); setStatus(''); setResp('');
     try {
       const r = await fetch(ERP_INT_URL, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -883,12 +888,12 @@ const AutoInvoiceModal: React.FC<{ orderNo?: string; buId?: string | number; ope
         <Col span={12}><Text style={{ fontSize: 11 }}>Job Package</Text><Input size="small" value={jobPackage} onChange={e => setJobPackage(e.target.value)} /></Col>
         <Col span={12}><Text style={{ fontSize: 11 }}>Job Definition</Text><Input size="small" value={jobDef} onChange={e => setJobDef(e.target.value)} /></Col>
       </Row>
-      <div style={{ fontSize: 11, color: REDWOOD.neutral500, margin: '10px 0 4px' }}>Parameters (blank → #NULL). Set <b>Transaction Source</b> to your AR source (id or name) and <b>Business Unit</b> to its id.</div>
+      <div style={{ fontSize: 11, color: REDWOOD.neutral500, margin: '10px 0 4px' }}>Parameters (blank → #NULL). 26 positional args. <b>Transaction Source</b> = the numeric batch-source id (e.g. <b>5</b> = Distributed Order Orchestration); <b>Business Unit</b> = its id (blank = all).</div>
       <div style={{ maxHeight: 260, overflow: 'auto', border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, padding: 8 }}>
         <Row gutter={[8, 6]}>
           {AI_PARAM_LABELS.map((lbl, i) => {
-            const key = i === 13 || i === 14;
-            const req = i === 0 || i === 2 || i === 3 || i === 21;
+            const key = i === AI_IX.soFrom || i === AI_IX.soTo;
+            const req = i === AI_IX.workers || i === AI_IX.source || i === AI_IX.date || i === AI_IX.baseDue;
             return <Col span={12} key={i}>
               <Text style={{ fontSize: 10.5, color: key ? REDWOOD.primary : undefined, fontWeight: key ? 700 : 400 }}>{i + 1}. {lbl}{req ? ' *' : ''}</Text>
               <Input size="small" value={vals[i] ?? ''} placeholder="#NULL" onChange={e => setVal(i, e.target.value)}
