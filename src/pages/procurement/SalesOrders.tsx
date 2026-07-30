@@ -4504,6 +4504,17 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     state: !l.existing ? 'New' : (l.canceled ? (isDraftStatus ? 'Delete' : 'Cancel') : (num(l.qty) !== num(l.origQty) ? 'Update' : 'Unchanged')),
   })), [lines]);
 
+  // Vertical icon-rail tab label (Fusion-style): colourful icon + tooltip on hover,
+  // with an optional count badge. Text shows on mouse-over.
+  const vTab = (icon: React.ReactNode, title: string, color: string, count?: number, badgeColor?: string) => (
+    <Tooltip title={title} placement="right">
+      <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, width: 50, padding: '8px 0' }}>
+        <span style={{ fontSize: 20, color, lineHeight: 1 }}>{icon}</span>
+        {count != null && count > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: badgeColor ?? color, borderRadius: 9, padding: '0 6px', minWidth: 18, textAlign: 'center', lineHeight: '16px' }}>{count}</span>}
+      </span>
+    </Tooltip>
+  );
+
   return (
     <div style={{ padding: '4px 2px' }}>
       <Card size="small" style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, marginBottom: 12 }}
@@ -4646,15 +4657,23 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             : <Tooltip title="No line extensible flexfield context with lot/cost segments was auto-detected, so lot number and item cost are kept in the grid only (not sent to Fusion). Lot/serial on a standard sales order is assigned at pick/ship confirm. Send me your EFF context code + segment API names to save them.">
                 <Tag color="default" style={{ fontSize: 10 }}>EFF: not detected</Tag>
               </Tooltip>}</Space>}
-        extra={<Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setPickOpen(true)} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Add Multiple Lines</Button>}>
-        {<Tabs size="small" tabBarStyle={{ padding: '0 12px', marginBottom: 0 }}
-            tabBarExtraContent={{ right: <Space size={6} style={{ paddingRight: 4 }}>
-              <Button size="small" icon={<PlusOutlined />} onClick={addBlankLine}>New Line</Button>
-              <Button size="small" icon={<DatabaseOutlined />} loading={ohLoading} onClick={checkAllOnhand} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>Check On-Hand</Button>
-              <Button size="small" icon={<ReloadOutlined />} loading={statusLoading} disabled={!createdOrderKey} onClick={() => refreshLineStatuses()} style={createdOrderKey ? { color: REDWOOD.success, borderColor: REDWOOD.success } : undefined}>Refresh Status</Button>
-            </Space> }} items={[
+        extra={<Space size={6} wrap>
+          <Button size="small" icon={<PlusOutlined />} onClick={addBlankLine}>New Line</Button>
+          <Button size="small" icon={<DatabaseOutlined />} loading={ohLoading} onClick={checkAllOnhand} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>Check On-Hand</Button>
+          <Button size="small" icon={<ReloadOutlined />} loading={statusLoading} disabled={!createdOrderKey} onClick={() => refreshLineStatuses()} style={createdOrderKey ? { color: REDWOOD.success, borderColor: REDWOOD.success } : undefined}>Refresh Status</Button>
+          <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setPickOpen(true)} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Add Multiple Lines</Button>
+        </Space>}>
+        <style>{`
+          .so-lines-vtabs .ant-tabs-nav { padding: 6px 4px; background: ${REDWOOD.neutral100}; border-right: 1px solid ${REDWOOD.neutral200}; }
+          .so-lines-vtabs .ant-tabs-tab { padding: 0 !important; margin: 3px 0 !important; border-radius: 10px; justify-content: center; transition: background .15s; }
+          .so-lines-vtabs .ant-tabs-tab:hover { background: #fff; }
+          .so-lines-vtabs .ant-tabs-tab-active { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+          .so-lines-vtabs .ant-tabs-ink-bar { width: 3px; border-radius: 3px; }
+          .so-lines-vtabs .ant-tabs-content-holder { padding-left: 4px; }
+        `}</style>
+        {<Tabs size="small" tabPosition="left" className="so-lines-vtabs" tabBarStyle={{ minWidth: 60, marginBottom: 0 }} items={[
               {
-                key: 'lines', label: <Space size={6}><UnorderedListOutlined />Lines<Tag style={{ marginInlineEnd: 0 }}>{lines.length}</Tag></Space>,
+                key: 'lines', label: vTab(<UnorderedListOutlined />, 'Lines', REDWOOD.primary, lines.length),
                 children: <Table size="small" columns={cols} dataSource={lines} rowKey="key" pagination={false} scroll={{ x: 1890, y: 360 }}
                   locale={{ emptyText: 'No lines — use “Add Multiple Lines” or “New Line”' }}
                   summary={() => lines.length === 0 ? null : (() => {
@@ -4678,7 +4697,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                   })() } />,
               },
               {
-                key: 'margin', label: <Space size={6}><RiseOutlined />Margin</Space>,
+                key: 'margin', label: vTab(<RiseOutlined />, 'Margin', REDWOOD.success),
                 children: <Table size="small" columns={marginCols} dataSource={lines} rowKey="key" pagination={false} scroll={{ x: 900, y: 360 }}
                   summary={() => {
                     const totMargin = lines.reduce((s, l) => s + (num(l.unitPrice) - num(l.costUnit)) * num(l.qty), 0);
@@ -4695,12 +4714,12 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                   }} />,
               },
               {
-                key: 'lots', label: <Space size={6}><TagsOutlined />Lot Details<Tag style={{ marginInlineEnd: 0 }}>{lotRows.length}</Tag></Space>,
+                key: 'lots', label: vTab(<TagsOutlined />, 'Lot Details', REDWOOD.info, lotRows.length),
                 children: <Table size="small" columns={lotCols} dataSource={lotRows} rowKey="key" pagination={false} scroll={{ x: 750, y: 360 }}
                   locale={{ emptyText: 'No lot details on the selected items' }} />,
               },
               {
-                key: 'errors', label: <Space size={6}><CloseCircleTwoTone twoToneColor={errorRows.length ? REDWOOD.error : '#bbb'} />Errors{errorRows.length > 0 && <Tag color="error" style={{ marginInlineEnd: 0 }}>{errorRows.length}</Tag>}</Space>,
+                key: 'errors', label: vTab(<CloseCircleTwoTone twoToneColor={errorRows.length ? REDWOOD.error : '#bbb'} />, 'Errors', REDWOOD.error, errorRows.length, REDWOOD.error),
                 children: <Table size="small" rowKey="key" pagination={false} scroll={{ x: 700, y: 360 }}
                   dataSource={errorRows}
                   locale={{ emptyText: 'No errors from the last save' }}
@@ -4711,7 +4730,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                   ]} />,
               },
               ...(editMode ? [{
-                key: 'sysids', label: <Space size={6}><DatabaseOutlined />System IDs</Space>,
+                key: 'sysids', label: vTab(<DatabaseOutlined />, 'System IDs', REDWOOD.purple ?? '#6B21A8'),
                 children: <>
                   <div style={{ padding: '6px 8px', fontSize: 12 }}>
                     <Text type="secondary">Order Key </Text><Text code>{editOrder?.OrderKey ?? '—'}</Text>
@@ -4731,16 +4750,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               }] : []),
               // Edit mode: Actual Costing + Billing tabs from the live Fusion lines.
               ...(editMode && rawLines.length ? [{
-                key: 'actualCosting', label: <Space size={6}><DollarOutlined />Actual Costing</Space>,
+                key: 'actualCosting', label: vTab(<DollarOutlined />, 'Actual Costing', '#D4A800'),
                 children: <ActualCostingTab lines={rawLines} currency={ccy} />,
               }] : []),
               ...(editMode && rawLines.length && billingChildName ? [{
-                key: 'billing', label: <Space size={6}><ProfileOutlined />Billing</Space>,
+                key: 'billing', label: vTab(<ProfileOutlined />, 'Billing', REDWOOD.teal ?? '#00918A'),
                 children: <MergedLineChildTab lines={rawLines} name={billingChildName} />,
               }] : []),
               // Edit mode: Sales Credits + Notes & Attachments (order-level children).
               ...(editMode && (editOrder?.OrderKey ?? editOrder?.HeaderId) != null ? [{
-                key: 'salesCredits', label: <Space size={6}><TagsOutlined />Sales Credits</Space>,
+                key: 'salesCredits', label: vTab(<ReconciliationOutlined />, 'Sales Credits', '#0572CE'),
                 children: <SalesCreditsPanel orderKey={String(editOrder?.OrderKey ?? editOrder?.HeaderId)} salesRepOpts={salesRepOpts} ccy={ccy} />,
               }] : []),
             ]} />}
