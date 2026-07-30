@@ -1778,9 +1778,9 @@ const VSection: React.FC<{ icon: React.ReactNode; title: string; color: string; 
   </div>
 );
 // A compact label:value row for the Totals column.
-const TotalLine: React.FC<{ label: string; value: React.ReactNode; strong?: boolean; color?: string }> = ({ label, value, strong, color }) => (
-  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, padding: '2px 0', borderBottom: `1px dashed ${REDWOOD.neutral200}` }}>
-    <span style={{ fontSize: 12, color: REDWOOD.neutral600, fontWeight: strong ? 700 : 400 }}>{label}</span>
+const TotalLine: React.FC<{ label: string; value: React.ReactNode; strong?: boolean; color?: string; onClick?: () => void }> = ({ label, value, strong, color, onClick }) => (
+  <div onClick={onClick} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, padding: '2px 0', borderBottom: `1px dashed ${REDWOOD.neutral200}`, cursor: onClick ? 'pointer' : undefined }}>
+    <span style={{ fontSize: 12, color: onClick ? REDWOOD.info : REDWOOD.neutral600, fontWeight: strong ? 700 : 400 }}>{label}{onClick && <ApiOutlined style={{ marginLeft: 5, fontSize: 11 }} />}</span>
     <span style={{ fontSize: strong ? 15 : 13, fontWeight: strong ? 800 : 600, color: color ?? REDWOOD.neutral900, fontVariantNumeric: 'tabular-nums' }}>{value}</span>
   </div>
 );
@@ -3439,6 +3439,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   // Line-Total drill → charges/chargeComponents fetched live from Fusion.
   const [chargeDrill, setChargeDrill] = useState<{ line: NewLine; loading: boolean; url: string; charges: any[]; error?: string } | null>(null);
   const [chargesOpen, setChargesOpen] = useState(false);
+  // Order totals drill — GET {OrderKey}/child/totals when a Net total is clicked.
+  const [totals, setTotals] = useState<{ open: boolean; loading: boolean; url: string; rows: any[]; error?: string }>({ open: false, loading: false, url: '', rows: [] });
   // Success celebration + created-order tracking (line status refresh).
   const [confetti, setConfetti] = useState<{ id: number; x: number; color: string; delay: number; size: number }[]>([]);
   const [successInfo, setSuccessInfo] = useState<{ orderNumber: string; status: string } | null>(null);
@@ -3778,6 +3780,17 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
 
   // Order key for order-level children (sales credits, notes, attachments, header PATCH).
   const childOrderKey = String((editMode ? (editOrder?.OrderKey ?? editOrder?.HeaderId) : createdOrderKey) ?? '');
+  const openOrderTotals = async () => {
+    if (!childOrderKey) { message.warning('Save the order first to see Fusion totals'); return; }
+    const url = `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(childOrderKey)}/child/totals?limit=200`;
+    setTotals({ open: true, loading: true, url, rows: [] });
+    try {
+      const r = await fetch(url, { headers: FUSION_HDRS });
+      const d = await r.json().catch(() => ({} as any));
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setTotals({ open: true, loading: false, url, rows: d.items ?? [] });
+    } catch (e: any) { setTotals({ open: true, loading: false, url, rows: [], error: e?.message }); }
+  };
   // Sales credits — shown read-only in the header + editable on the Sales Credits tab.
   const salesCredits = useSalesCredits(childOrderKey || undefined);
   const [scEdit, setScEdit] = useState<ScEdit>(null);
@@ -4871,8 +4884,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                       <span style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Discount</span><InputNumber size="small" min={0} value={discAmt} onChange={v => setDiscAmt(Number(v) || 0)} style={{ width: 120 }} /></div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '2px 0', borderBottom: `1px dashed ${REDWOOD.neutral200}` }}>
                       <span style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Expense</span><InputNumber size="small" min={0} value={expAmt} onChange={v => setExpAmt(Number(v) || 0)} style={{ width: 120 }} /></div>
-                    <TotalLine label="Net (Trx Currency)" strong color={REDWOOD.primary} value={fmtAmount(totAmt + lineTax + num(expAmt) - num(discAmt), ccy)} />
-                    <TotalLine label="Net (Base Currency)" strong color={REDWOOD.success} value={fmtAmount((totAmt + lineTax + num(expAmt) - num(discAmt)) * (num(hdr.rate) || 1), hdr.baseCurrency ?? ccy)} />
+                    <TotalLine label="Net (Trx Currency)" strong color={REDWOOD.primary} onClick={childOrderKey ? openOrderTotals : undefined} value={fmtAmount(totAmt + lineTax + num(expAmt) - num(discAmt), ccy)} />
+                    <TotalLine label="Net (Base Currency)" strong color={REDWOOD.success} onClick={childOrderKey ? openOrderTotals : undefined} value={fmtAmount((totAmt + lineTax + num(expAmt) - num(discAmt)) * (num(hdr.rate) || 1), hdr.baseCurrency ?? ccy)} />
                   </VSection></Col>
                 </Row>
               ),
@@ -5130,6 +5143,22 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
 
       {/* Manual charges — add freight/handling/… to a line's charges child */}
       {childOrderKey && <ChargesModal open={chargesOpen} onClose={() => setChargesOpen(false)} orderKey={childOrderKey} lines={lines} ccy={ccy} />}
+
+      {/* Order totals — GET {OrderKey}/child/totals */}
+      <Modal open={totals.open} onCancel={() => setTotals(t => ({ ...t, open: false }))} width={620}
+        title={<Space><DollarOutlined style={{ color: REDWOOD.success }} />Order Totals</Space>}
+        footer={<Space><Button icon={<ReloadOutlined />} loading={totals.loading} onClick={openOrderTotals}>Refresh</Button><Button onClick={() => setTotals(t => ({ ...t, open: false }))}>Close</Button></Space>}>
+        <div style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.neutral600, wordBreak: 'break-all', marginBottom: 10 }}><b>GET</b> {totals.url}</div>
+        {totals.loading ? <div style={{ textAlign: 'center', padding: 24 }}><Spin /></div>
+          : totals.error ? <div style={{ color: REDWOOD.error, fontSize: 12 }}>{totals.error}</div>
+          : <Table size="small" rowKey={(_, i) => String(i)} pagination={false} dataSource={totals.rows}
+              locale={{ emptyText: 'No totals returned' }}
+              columns={[
+                { title: 'Total', render: (_: any, r: any) => <Text strong style={{ fontSize: 12 }}>{pf(r, ['TotalName', 'TotalCode', 'TotalTypeCode', 'Total']) ?? '—'}</Text> },
+                { title: 'Code', width: 150, render: (_: any, r: any) => <Text type="secondary" style={{ fontSize: 11 }}>{pf(r, ['TotalCode', 'TotalTypeCode']) ?? '—'}</Text> },
+                { title: 'Amount', width: 150, align: 'right', render: (_: any, r: any) => <Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(pf(r, ['TotalAmount', 'Amount', 'Value'])), pf(r, ['CurrencyCode', 'Currency']) ?? ccy)}</Text> },
+              ] as any} />}
+      </Modal>
 
       <Modal open={!!chargeDrill} onCancel={() => setChargeDrill(null)} width={760} style={{ top: 24 }}
         title={<Space><DollarOutlined style={{ color: REDWOOD.primary }} /> Charges — {chargeDrill?.line.itemNumber}</Space>}
