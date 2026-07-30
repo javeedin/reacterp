@@ -2987,6 +2987,12 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     rawLines.forEach(l => (l.links ?? []).forEach((x: any) => { if (x.rel === 'child' && x.name) names.add(x.name); }));
     return Array.from(names).find(n => ['linedetails', 'linedetail'].includes(norm(n)));
   }, [rawLines]);
+  // Whether any line is at a given status (checks the grid + the raw Fusion lines).
+  const anyLineStatus = (re: RegExp) =>
+    lines.some(l => re.test(`${l.status ?? ''} ${l.statusCode ?? ''}`)) ||
+    rawLines.some(l => re.test(`${pf(l, ['DisplayStatus', 'Status', 'FulfillLineStatus']) ?? ''} ${pf(l, ['StatusCode']) ?? ''}`));
+  const anyAwaitingShipping = anyLineStatus(/awaiting\s*shipping/i);
+  const anyAwaitingBilling = anyLineStatus(/awaiting\s*billing/i);
   // Current order status — reservations are only allowed while it's still a draft.
   const [orderStatus, setOrderStatus] = useState<string>(String(editOrder?.StatusCode ?? ''));
   // Confirm pre-check — existing reservations shown before submitting the order.
@@ -3913,10 +3919,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               style={resvCount ? { color: REDWOOD.success, borderColor: REDWOOD.success, fontWeight: 600 } : undefined}>
               Reservations{resvCount ? ` (${resvCount})` : ''}
             </Button>}
-            {!returnMode && <Button icon={<CarOutlined />} onClick={() => setAutoShipOpen(true)}
+            {!returnMode && anyAwaitingShipping && <Button icon={<CarOutlined />} onClick={() => setAutoShipOpen(true)}
               style={{ borderColor: REDWOOD.success, color: REDWOOD.success }}>Auto Shipconfirm</Button>}
-            {!returnMode && <Button icon={<DollarOutlined />} onClick={() => setAutoInvoiceOpen(true)}
-              style={{ borderColor: REDWOOD.primary, color: REDWOOD.primary }}>Push to AR</Button>}
+            {!returnMode && anyAwaitingBilling && <Button icon={<DollarOutlined />} onClick={() => setAutoInvoiceOpen(true)}
+              style={{ borderColor: REDWOOD.primary, color: REDWOOD.primary }}>Create AR Invoice</Button>}
           </Space>}
         </Space>}>
         <Form form={form} layout="horizontal" size="small" labelAlign="left" colon labelWrap
