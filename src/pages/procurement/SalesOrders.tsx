@@ -3078,9 +3078,12 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     if (!editOrder) return;
     const key = editOrder.OrderKey ?? editOrder.HeaderId;
     if (key != null) setCreatedOrderKey(String(key));
-    const href = editOrder?.links?.find((l: any) => l.name === 'lines')?.href
+    const linesHref = editOrder?.links?.find((l: any) => l.name === 'lines')?.href
       ?? (key != null ? `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(key)}/child/lines` : '');
-    if (!href) return;
+    if (!linesHref) return;
+    // Expand charges so we can read the frozen tax (QP_EXCLUSIVE_TAX component) and
+    // surface the line's tax classification code when the order is opened for edit.
+    const href = `${linesHref}${linesHref.includes('?') ? '&' : '?'}expand=charges.chargeComponents`;
     (async () => {
       try {
         const rows = await fetchAllPages(href);
@@ -3088,12 +3091,22 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           const q = num(pf(l, ['OrderedQuantity']));
           const price = num(pf(l, ['UnitSellingPrice', 'UnitListPrice']));
           const selfHref = (l.links ?? []).find((x: any) => x.rel === 'self')?.href;
+          // Frozen tax lives in the primary charge's QP_EXCLUSIVE_TAX component.
+          const charges = l.charges?.items ?? l.charges ?? [];
+          const primaryCharge = charges.find((c: any) => String(c.PrimaryFlag) === 'true') ?? charges[0];
+          const comps = primaryCharge ? (primaryCharge.chargeComponents?.items ?? primaryCharge.chargeComponents ?? []) : [];
+          const taxComp = comps.find((c: any) => c.PriceElementCode === 'QP_EXCLUSIVE_TAX');
+          const taxAmt = round2(taxComp ? num(pf(taxComp, ['HeaderCurrencyExtendedAmount', 'ChargeCurrencyExtendedAmount'])) : num(pf(l, ['TaxAmount', 'TotalTax'])));
+          const ext = round2(price * q);
+          const taxCode = pf(l, ['TaxClassificationCode', 'TaxClassification', 'TaxCode']);
+          const taxPct = (ext && taxAmt) ? round2((taxAmt / ext) * 100) : undefined;
           return {
             key: `edit-${pf(l, ['FulfillLineId']) ?? pf(l, ['SourceTransactionLineId']) ?? i}`,
             itemNumber: String(pf(l, ['ProductNumber', 'Product', 'ItemNumber']) ?? ''),
             description: pf(l, ['ProductDescription', 'ItemDescription']),
             uom: pf(l, ['OrderedUOMCode', 'OrderedUOM']),
             qty: q, unitPrice: price, origQty: q, origUnitPrice: price,
+            taxCode, taxPct, taxAmount: taxAmt || undefined,
             status: pf(l, ['DisplayStatus', 'Status']),
             statusCode: pf(l, ['StatusCode']),
             srcLineId: pf(l, ['SourceTransactionLineId']) != null ? String(pf(l, ['SourceTransactionLineId'])) : undefined,
@@ -3257,6 +3270,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     }
   };
   const updTax = num(updQty) * num(updPrice) * num(updTaxPct) / 100;
+  // Reprice an existing FROZEN-price line. The price/totals live in the line's
+  // charges (FreezePriceFlag='true' → Fusion does NOT recompute), so we PATCH the
+  // primary charge + its price-element components with mutually-consistent unit
+  // AND extended amounts — the same shape the add-line payload builds. Sending
+  // UnitSellingPrice on the line does nothing on a frozen order.
   const doUpdateLine = async () => {
     const l = updTarget; if (!l) return;
     const orderKey = editOrder?.OrderKey ?? editOrder?.HeaderId;
@@ -3264,34 +3282,83 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       : (l.fulfillLineId != null ? `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(String(orderKey))}/child/lines/${l.fulfillLineId}` : '');
     if (!href) { message.error('No line id available to update'); return; }
     setUpdBusy(true);
-    // Full reprice: qty + unit price (+ tax code passed through). Price change is
-    // sent as UnitListPrice/UnitSellingPrice; Fusion reprices the line.
-    const priceChanged = round2(num(updPrice)) !== round2(num(l.unitPrice));
-    const body: any = { OrderedQuantity: num(updQty) };
-    if (priceChanged) { body.UnitListPrice = num(updPrice); body.UnitSellingPrice = num(updPrice); }
+
+    const q = num(updQty), price = num(updPrice), taxPct = num(updTaxPct);
+    const ext = round2(price * q);                     // line extended (net) amount
+    const taxUnit = round2(price * taxPct / 100);      // per-unit tax
+    const taxAmt = round2(ext * taxPct / 100);         // extended tax
+    const qtyChanged = round2(q) !== round2(num(l.qty));
+    const priceChanged = round2(price) !== round2(num(l.unitPrice));
+    const taxChanged = round2(taxPct) !== round2(num(l.taxPct)) || (updTaxCode ?? '') !== (l.taxCode ?? '');
+    const logs: string[] = [];
+    const doPatch = async (url: string, body: any) => {
+      const r = await fetch(url, { method: 'PATCH', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const text = await r.text(); let data: any = null;
+      try { data = JSON.parse(text); } catch { /* raw */ }
+      logs.push(`PATCH ${url}\n${JSON.stringify(body)}\nHTTP ${r.status}`);
+      return { ok: r.ok, data, text, status: r.status };
+    };
+    const selfHref = (o: any) => { const h = (o?.links ?? []).find((x: any) => x.rel === 'self' || x.name === 'self')?.href; return h ? fusionHref(h) : ''; };
+
     try {
-      const r = await fetch(href, { method: 'PATCH', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const text = await r.text(); let data: any = null, pretty = text;
-      try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* raw */ }
-      setLastResponse(`PATCH ${href}\n${JSON.stringify(body)}\nHTTP ${r.status}\n\n${pretty}`);
-      if (r.ok) {
-        const taxAmt = round2(num(updQty) * num(updPrice) * num(updTaxPct) / 100);
-        upd(l.key, {
-          qty: num(updQty), origQty: num(updQty),
-          unitPrice: num(updPrice), origUnitPrice: num(updPrice),
-          taxCode: updTaxCode, taxPct: updTaxPct, taxAmount: taxAmt, lot: updLot,
-          lots: updLot ? [updLot] : l.lots,
-          status: data?.DisplayStatus ?? data?.Status ?? l.status, statusCode: data?.StatusCode ?? l.statusCode, error: undefined,
-        });
-        message.success(`Line ${l.itemNumber} updated${priceChanged ? ' (repriced)' : ''}`);
-        setUpdTarget(null);
-      } else {
-        const msgs = collectOrderErrors(data, text, true);
-        upd(l.key, { error: (msgs.length ? msgs : [`HTTP ${r.status}`]).join('\n\n') });
+      // 1. Quantity on the line itself (the one attribute the line still owns).
+      const lineRes = await doPatch(href, { OrderedQuantity: q });
+      if (!lineRes.ok) {
+        setLastResponse(logs.join('\n\n'));
+        const msgs = collectOrderErrors(lineRes.data, lineRes.text, true);
+        upd(l.key, { error: (msgs.length ? msgs : [`HTTP ${lineRes.status}`]).join('\n\n') });
         message.error('Line update failed — see the red ✗ / Errors tab');
-        setUpdTarget(null);
+        setUpdTarget(null); setUpdBusy(false); return;
       }
-    } catch (e: any) { upd(l.key, { error: e?.message }); message.error(e?.message || 'Update failed'); setUpdTarget(null); }
+
+      // 1b. Tax classification code (best-effort — never block the reprice on it).
+      if ((updTaxCode ?? '') !== (l.taxCode ?? '')) {
+        try { await doPatch(href, { TaxClassificationCode: updTaxCode || null }); } catch { /* non-fatal */ }
+      }
+
+      // 2. Reprice via charges whenever qty, price, or tax moved (extended amounts
+      //    depend on qty, so a qty change alone still rewrites the totals).
+      if (qtyChanged || priceChanged || taxChanged) {
+        const chRes = await fetch(`${href}/child/charges?expand=chargeComponents&limit=50`, { headers: FUSION_HDRS });
+        const chJson = await chRes.json().catch(() => ({} as any));
+        const charges = chJson.items ?? [];
+        const primary = charges.find((c: any) => String(c.PrimaryFlag) === 'true') ?? charges[0];
+        if (primary) {
+          const chargeHref = selfHref(primary);
+          if (chargeHref) {
+            await doPatch(chargeHref, {
+              GSAUnitPrice: price, PricedQuantity: q,
+              ChargeCurrencyUnitPrice: price, ChargeCurrencyExtendedAmount: ext,
+              HeaderCurrencyUnitPrice: price, HeaderCurrencyExtendedAmount: ext,
+            });
+          }
+          const comps = primary.chargeComponents?.items ?? primary.chargeComponents ?? [];
+          const compVals: Record<string, [number, number]> = {
+            QP_LIST_PRICE: [price, ext],
+            QP_NET_PRICE: [price, ext],
+            QP_EXCLUSIVE_TAX: [taxUnit, taxAmt],
+            QP_NET_PRICE_PLUS_TAX: [round2(price + taxUnit), round2(ext + taxAmt)],
+          };
+          for (const comp of comps) {
+            const vals = compVals[comp.PriceElementCode]; const cHref = selfHref(comp);
+            if (!vals || !cHref) continue;
+            await doPatch(cHref, { HeaderCurrencyUnitPrice: vals[0], HeaderCurrencyExtendedAmount: vals[1], ChargeCurrencyUnitPrice: vals[0], ChargeCurrencyExtendedAmount: vals[1] });
+          }
+        }
+      }
+
+      setLastResponse(logs.join('\n\n'));
+      upd(l.key, {
+        qty: q, origQty: q,
+        unitPrice: price, origUnitPrice: price,
+        taxCode: updTaxCode, taxPct: updTaxPct, taxAmount: taxAmt, lot: updLot,
+        lots: updLot ? [updLot] : l.lots,
+        status: lineRes.data?.DisplayStatus ?? lineRes.data?.Status ?? l.status,
+        statusCode: lineRes.data?.StatusCode ?? l.statusCode, error: undefined,
+      });
+      message.success(`Line ${l.itemNumber} updated${(priceChanged || taxChanged) ? ' (repriced)' : ''}`);
+      setUpdTarget(null);
+    } catch (e: any) { setLastResponse(logs.join('\n\n')); upd(l.key, { error: e?.message }); message.error(e?.message || 'Update failed'); setUpdTarget(null); }
     finally { setUpdBusy(false); }
   };
 
@@ -4204,7 +4271,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               </Row>
             </div>
             <div style={{ marginTop: 10, fontSize: 11, color: REDWOOD.neutral600 }}>
-              Sends <Text code style={{ fontSize: 11 }}>PATCH …/child/lines/{'{linesUniqID}'}</Text> with <Text code style={{ fontSize: 11 }}>{round2(num(updPrice)) !== round2(num(updTarget.unitPrice)) ? '{ OrderedQuantity, UnitListPrice, UnitSellingPrice }' : '{ OrderedQuantity }'}</Text>.
+              {(round2(num(updPrice)) !== round2(num(updTarget.unitPrice)) || round2(num(updQty)) !== round2(num(updTarget.qty)) || round2(num(updTaxPct)) !== round2(num(updTarget.taxPct)))
+                ? <>Frozen price → PATCHes <Text code style={{ fontSize: 11 }}>lines/{'{id}'}</Text> {'{ OrderedQuantity }'}, then reprices <Text code style={{ fontSize: 11 }}>charges/{'{id}'}</Text> and its <Text code style={{ fontSize: 11 }}>chargeComponents</Text> (QP_LIST_PRICE / QP_NET_PRICE / QP_EXCLUSIVE_TAX / QP_NET_PRICE_PLUS_TAX) with unit&nbsp;{fmtAmount(round2(num(updPrice)), ccy)} · ext&nbsp;{fmtAmount(round2(num(updQty) * num(updPrice)), ccy)}.</>
+                : <>Sends <Text code style={{ fontSize: 11 }}>PATCH …/child/lines/{'{linesUniqID}'}</Text> with <Text code style={{ fontSize: 11 }}>{'{ OrderedQuantity }'}</Text>.</>}
             </div>
           </div>
           );
