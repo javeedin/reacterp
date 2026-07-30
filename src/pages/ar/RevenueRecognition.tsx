@@ -724,6 +724,24 @@ const RevenueRecognition: React.FC = () => {
     saveWb(wb, 'revenue_contracts');
   };
 
+  const exportPostRevenue = () => {
+    if (postSchedules.length === 0) { message.warning('No schedules to export'); return; }
+    const data = postSchedules.map(s => {
+      const d = scheduleDates(s);
+      return {
+        'Business Unit': buForSchedule(s), 'Period': s.periodName || postPeriod || '',
+        'Schedule ID': s.id, 'Trx #': s.trxNumber ?? '', 'Invoice #': s.invoiceNumber ?? '',
+        'Unit': s.unit, 'Tenant': s.tenant, 'Company': companyFromBU(buForSchedule(s)),
+        'Contract Start': d?.start ?? '', 'Contract End': d?.end ?? '',
+        '#': s.scheduleNum, 'Amount': Number(s.amount) || 0,
+        'Accounted': isAccounted(s) ? 'Accounted' : 'Pending',
+      };
+    });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Post Revenue');
+    saveWb(wb, `post_revenue${postPeriod ? `_${postPeriod}` : ''}`);
+  };
+
   const exportMatrix = () => {
     if (matrix.rows.length === 0) { message.warning('No schedules to export'); return; }
     const data = matrix.rows.map((r: any) => {
@@ -971,6 +989,8 @@ const RevenueRecognition: React.FC = () => {
                             Create Accounting ({postSelectedKeys.length})
                           </Button>
                           <Button icon={<ApiOutlined />} disabled={postSelectedKeys.length === 0} onClick={openAcctDebug}>Debug</Button>
+                          <Button icon={<FileExcelOutlined />} disabled={postSchedules.length === 0} onClick={exportPostRevenue}
+                            style={postSchedules.length ? { color: '#1D6F42', borderColor: '#1D6F42' } : undefined}>Export Excel</Button>
                           <Button icon={<ReloadOutlined />} onClick={loadSchedules} loading={schedulesLoading}>Refresh</Button>
                         </Space>
                       </div>
