@@ -2958,6 +2958,12 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [updTarget, setUpdTarget] = useState<NewLine | null>(null);
   const [updQty, setUpdQty] = useState<number>(0);
   const [updBusy, setUpdBusy] = useState(false);
+  // Update Line dialog — full reprice fields (qty / price / tax / lot).
+  const [updPrice, setUpdPrice] = useState<number>(0);
+  const [updTaxCode, setUpdTaxCode] = useState<string | undefined>();
+  const [updTaxPct, setUpdTaxPct] = useState<number | undefined>();
+  const [updLot, setUpdLot] = useState<string | undefined>();
+  const [updLots, setUpdLots] = useState<{ lot?: string; subinventory?: string; qty: number }[]>([]);
   // Success celebration + created-order tracking (line status refresh).
   const [confetti, setConfetti] = useState<{ id: number; x: number; color: string; delay: number; size: number }[]>([]);
   const [successInfo, setSuccessInfo] = useState<{ orderNumber: string; status: string } | null>(null);
@@ -3239,7 +3245,18 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const lineLocked = (l: NewLine) => /billing|close/.test(`${l.status ?? ''} ${l.statusCode ?? ''}`.toLowerCase());
   const canUpdateLine = (l: NewLine) => !!l.existing && !l.canceled && !lineLocked(l);
 
-  const openUpdateLine = (l: NewLine) => { setUpdTarget(l); setUpdQty(num(l.qty)); };
+  const openUpdateLine = (l: NewLine) => {
+    setUpdTarget(l); setUpdQty(num(l.qty)); setUpdPrice(num(l.unitPrice));
+    setUpdTaxCode(l.taxCode); setUpdTaxPct(l.taxPct); setUpdLot(l.lot);
+    setUpdLots((l.lots ?? []).map(lot => ({ lot, qty: 0 })));
+    // Fetch available on-hand lots for the item so the user can pick one.
+    if (hdr.warehouse && l.itemNumber) {
+      fetchReserveOptions(l.itemNumber, hdr.warehouse, hdr.subinventory)
+        .then(d => { if (d.options.length) setUpdLots(d.options.filter(o => o.lot)); })
+        .catch(() => { /* keep the line's own lots */ });
+    }
+  };
+  const updTax = num(updQty) * num(updPrice) * num(updTaxPct) / 100;
   const doUpdateLine = async () => {
     const l = updTarget; if (!l) return;
     const orderKey = editOrder?.OrderKey ?? editOrder?.HeaderId;
@@ -3247,14 +3264,26 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       : (l.fulfillLineId != null ? `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(String(orderKey))}/child/lines/${l.fulfillLineId}` : '');
     if (!href) { message.error('No line id available to update'); return; }
     setUpdBusy(true);
+    // Full reprice: qty + unit price (+ tax code passed through). Price change is
+    // sent as UnitListPrice/UnitSellingPrice; Fusion reprices the line.
+    const priceChanged = round2(num(updPrice)) !== round2(num(l.unitPrice));
+    const body: any = { OrderedQuantity: num(updQty) };
+    if (priceChanged) { body.UnitListPrice = num(updPrice); body.UnitSellingPrice = num(updPrice); }
     try {
-      const r = await fetch(href, { method: 'PATCH', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify({ OrderedQuantity: num(updQty) }) });
+      const r = await fetch(href, { method: 'PATCH', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const text = await r.text(); let data: any = null, pretty = text;
       try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* raw */ }
-      setLastResponse(`PATCH ${href}\nHTTP ${r.status}\n\n${pretty}`);
+      setLastResponse(`PATCH ${href}\n${JSON.stringify(body)}\nHTTP ${r.status}\n\n${pretty}`);
       if (r.ok) {
-        upd(l.key, { qty: num(updQty), origQty: num(updQty), status: data?.DisplayStatus ?? data?.Status ?? l.status, statusCode: data?.StatusCode ?? l.statusCode, error: undefined });
-        message.success(`Line ${l.itemNumber} updated to qty ${num(updQty)}`);
+        const taxAmt = round2(num(updQty) * num(updPrice) * num(updTaxPct) / 100);
+        upd(l.key, {
+          qty: num(updQty), origQty: num(updQty),
+          unitPrice: num(updPrice), origUnitPrice: num(updPrice),
+          taxCode: updTaxCode, taxPct: updTaxPct, taxAmount: taxAmt, lot: updLot,
+          lots: updLot ? [updLot] : l.lots,
+          status: data?.DisplayStatus ?? data?.Status ?? l.status, statusCode: data?.StatusCode ?? l.statusCode, error: undefined,
+        });
+        message.success(`Line ${l.itemNumber} updated${priceChanged ? ' (repriced)' : ''}`);
         setUpdTarget(null);
       } else {
         const msgs = collectOrderErrors(data, text, true);
@@ -3709,11 +3738,12 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     buildReserveRows();
     loadResvList();
   };
-  // Reservation count on the toolbar button — refreshed when the order exists.
+  // Reservation count on the toolbar button — auto-run once the order's lines are
+  // loaded (e.g. opening a draft order to edit) and after any reserve/unreserve.
   useEffect(() => {
-    if (!liveOrderKey() || !lines.length) { return; }
+    if (!liveOrderKey() || !lines.length) return;
     fetchReservations(orderNumber, lines.map(x => x.itemNumber)).then(l => setResvCount(l.length)).catch(() => {});
-  }, [createdOrderKey, resvReloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [createdOrderKey, resvReloadKey, lines.length > 0]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Run the reservations shown in the dialog (one POST per line), recording
   // each line's HTTP status + errors inline.
@@ -4118,30 +4148,67 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
 
       <ItemSearchModal open={pickOpen} org={hdr.warehouse} subinv={hdr.subinventory} ccy={ccy} taxOptions={taxOptions} onClose={() => setPickOpen(false)} onAdd={addItems} />
 
-      {/* Update Line dialog (edit mode) — PATCH the existing line's quantity */}
-      <Modal open={!!updTarget} onCancel={() => !updBusy && setUpdTarget(null)} width={460}
-        title={<Space><EditOutlined style={{ color: REDWOOD.info }} /> Update Line</Space>}
+      {/* Update Line dialog (edit mode) — full reprice PATCH of the line */}
+      <Modal open={!!updTarget} onCancel={() => !updBusy && setUpdTarget(null)} width={560}
+        title={<Space><EditOutlined style={{ color: REDWOOD.info }} /> Update / Reprice Line</Space>}
         footer={<Space>
           <Button disabled={updBusy} onClick={() => setUpdTarget(null)}>Cancel</Button>
           <Button type="primary" loading={updBusy} icon={<SaveOutlined />} onClick={doUpdateLine}
             style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}>Update (PATCH)</Button>
         </Space>}>
-        {updTarget && (
+        {updTarget && (() => {
+          const cost = num(updTarget.costUnit);
+          const lineTotal = num(updQty) * num(updPrice);
+          const margin = (num(updPrice) - cost) * num(updQty);
+          const marginPct = lineTotal ? (margin / lineTotal) * 100 : 0;
+          const lotOpts = Array.from(new Set(updLots.map(o => o.lot).filter(Boolean))).map(lot => {
+            const q = updLots.filter(o => o.lot === lot).reduce((s, o) => s + (o.qty || 0), 0);
+            return { value: lot as string, label: q ? `${lot} — ${fmtQty(q)}` : (lot as string) };
+          });
+          return (
           <div style={{ fontSize: 13 }}>
             <Row gutter={[10, 10]}>
               <Col span={12}><Text type="secondary" style={{ fontSize: 11 }}>Item</Text><div><Text strong style={{ color: REDWOOD.info }}>{updTarget.itemNumber}</Text></div></Col>
               <Col span={12}><Text type="secondary" style={{ fontSize: 11 }}>Status</Text><div>{updTarget.status || updTarget.statusCode ? statusTag(updTarget.status, updTarget.statusCode) : '—'}</div></Col>
-              <Col span={12}><Text type="secondary" style={{ fontSize: 11 }}>Current Qty</Text><div><Text>{fmtQty(num(updTarget.origQty ?? updTarget.qty))}</Text></div></Col>
+              <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Current Qty</Text><div><Text>{fmtQty(num(updTarget.origQty ?? updTarget.qty))}</Text></div></Col>
+              <Col span={8}>
+                <Text type="secondary" style={{ fontSize: 11 }}>New Qty</Text>
+                <InputNumber min={0} value={updQty} onChange={v => setUpdQty(Number(v) || 0)} style={{ width: '100%' }} />
+              </Col>
+              <Col span={8}>
+                <Text type="secondary" style={{ fontSize: 11 }}>Unit Price</Text>
+                <InputNumber min={0} value={updPrice} onChange={v => setUpdPrice(Number(v) || 0)} style={{ width: '100%' }} />
+              </Col>
               <Col span={12}>
-                <Text type="secondary" style={{ fontSize: 11 }}>New Ordered Quantity</Text>
-                <div><InputNumber min={0} value={updQty} onChange={v => setUpdQty(Number(v) || 0)} style={{ width: '100%' }} autoFocus /></div>
+                <Text type="secondary" style={{ fontSize: 11 }}>Tax Code</Text>
+                <Select size="middle" showSearch allowClear style={{ width: '100%' }} popupMatchSelectWidth={false}
+                  value={updTaxCode || undefined} placeholder="—" options={taxOptions} optionFilterProp="value"
+                  onChange={val => { const opt = taxOptions.find(o => o.value === val); setUpdTaxCode(val); setUpdTaxPct(opt ? opt.pct : undefined); }} />
+              </Col>
+              <Col span={12}>
+                <Text type="secondary" style={{ fontSize: 11 }}>Lot</Text>
+                <Select size="middle" showSearch allowClear style={{ width: '100%' }} popupMatchSelectWidth={false}
+                  value={updLot || undefined} placeholder={lotOpts.length ? 'Select lot' : 'no lots on hand'}
+                  options={lotOpts} onChange={v => setUpdLot(v || undefined)} />
               </Col>
             </Row>
-            <div style={{ marginTop: 12, fontSize: 11, color: REDWOOD.neutral600 }}>
-              Sends <Text code style={{ fontSize: 11 }}>PATCH …/child/lines/{'{linesUniqID}'}</Text> with <Text code style={{ fontSize: 11 }}>{'{ OrderedQuantity }'}</Text>.
+            {/* Reprice summary — cost, tax, total, margin */}
+            <div style={{ marginTop: 12, padding: 10, background: REDWOOD.neutral100, borderRadius: 6 }}>
+              <Row gutter={[10, 6]}>
+                <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Cost</Text><div>{cost ? fmtAmount(cost, ccy) : <Text type="secondary">—</Text>}</div></Col>
+                <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Tax{updTaxPct != null ? ` (${updTaxPct}%)` : ''}</Text><div>{fmtAmount(round2(updTax), ccy)}</div></Col>
+                <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Line Total</Text><div><Text strong style={{ color: REDWOOD.primary }}>{fmtAmount(lineTotal, ccy)}</Text></div></Col>
+                <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Margin</Text><div><Text strong style={{ color: margin < 0 ? REDWOOD.error : REDWOOD.success }}>{fmtAmount(margin, ccy)}</Text></div></Col>
+                <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Margin %</Text><div><Text style={{ color: marginPct < 0 ? REDWOOD.error : REDWOOD.success }}>{lineTotal ? marginPct.toFixed(1) + '%' : '—'}</Text></div></Col>
+                <Col span={8}><Text type="secondary" style={{ fontSize: 11 }}>Net</Text><div><Text strong style={{ color: REDWOOD.success }}>{fmtAmount(lineTotal + round2(updTax), ccy)}</Text></div></Col>
+              </Row>
+            </div>
+            <div style={{ marginTop: 10, fontSize: 11, color: REDWOOD.neutral600 }}>
+              Sends <Text code style={{ fontSize: 11 }}>PATCH …/child/lines/{'{linesUniqID}'}</Text> with <Text code style={{ fontSize: 11 }}>{round2(num(updPrice)) !== round2(num(updTarget.unitPrice)) ? '{ OrderedQuantity, UnitListPrice, UnitSellingPrice }' : '{ OrderedQuantity }'}</Text>.
             </div>
           </div>
-        )}
+          );
+        })()}
       </Modal>
 
       {/* Line error detail (opened from the red ✗ in the Status column) */}
