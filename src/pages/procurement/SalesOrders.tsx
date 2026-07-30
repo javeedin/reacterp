@@ -1769,8 +1769,8 @@ const ROField: React.FC<{ label: string; value?: React.ReactNode; span?: number;
 );
 // Vertical section (a full-height column card) — fields stack inside it.
 const VSection: React.FC<{ icon: React.ReactNode; title: string; color: string; children: React.ReactNode }> = ({ icon, title, color, children }) => (
-  <div style={{ border: `1px solid ${REDWOOD.neutral200}`, borderTop: `3px solid ${color}`, borderRadius: 10, padding: '12px 14px 4px', background: REDWOOD.surface, height: '100%' }}>
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+  <div style={{ border: `1px solid ${REDWOOD.neutral200}`, borderTop: `3px solid ${color}`, borderRadius: 10, padding: '7px 12px 2px', background: REDWOOD.surface, height: '100%' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
       <span style={{ width: 24, height: 24, borderRadius: 7, background: color + '18', color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>{icon}</span>
       <Text strong style={{ fontSize: 12, color: REDWOOD.neutral900, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{title}</Text>
     </div>
@@ -1779,7 +1779,7 @@ const VSection: React.FC<{ icon: React.ReactNode; title: string; color: string; 
 );
 // A compact label:value row for the Totals column.
 const TotalLine: React.FC<{ label: string; value: React.ReactNode; strong?: boolean; color?: string }> = ({ label, value, strong, color }) => (
-  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, padding: '5px 0', borderBottom: `1px dashed ${REDWOOD.neutral200}` }}>
+  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, padding: '2px 0', borderBottom: `1px dashed ${REDWOOD.neutral200}` }}>
     <span style={{ fontSize: 12, color: REDWOOD.neutral600, fontWeight: strong ? 700 : 400 }}>{label}</span>
     <span style={{ fontSize: strong ? 15 : 13, fontWeight: strong ? 800 : 600, color: color ?? REDWOOD.neutral900, fontVariantNumeric: 'tabular-nums' }}>{value}</span>
   </div>
@@ -2811,7 +2811,6 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
           <Col xs={24} md={12}><Form.Item label="Business Unit" name="businessUnit" rules={req('Select business unit')} style={{ marginBottom: 12 }}>
             <Select showSearch placeholder="Select" onChange={onBU} optionFilterProp="label"
               options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} /></Form.Item></Col>
-          <Col xs={12} md={6}><Form.Item label="BU Code" name="buCode" style={{ marginBottom: 12 }}><Input placeholder="—" readOnly /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label="Base Currency" name="baseCurrency" rules={req('Base currency')} style={{ marginBottom: 12 }}><Input placeholder="e.g. AED" readOnly /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label="Transaction Currency" name="txnCurrency" rules={req('Currency')} style={{ marginBottom: 12 }}>
             <Select showSearch placeholder="Currency" options={CURRENCIES.map(c => ({ value: c, label: c }))} /></Form.Item></Col>
@@ -4504,13 +4503,12 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     state: !l.existing ? 'New' : (l.canceled ? (isDraftStatus ? 'Delete' : 'Cancel') : (num(l.qty) !== num(l.origQty) ? 'Update' : 'Unchanged')),
   })), [lines]);
 
-  // Vertical icon-rail tab label (Fusion-style): colourful icon + tooltip on hover,
-  // with an optional count badge. Text shows on mouse-over.
-  const vTab = (icon: React.ReactNode, title: string, color: string, count?: number, badgeColor?: string) => (
-    <Tooltip title={title} placement="right">
-      <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, width: 50, padding: '8px 0' }}>
+  // Vertical icon-rail tab label (Fusion-style): a colourful icon only; the tab
+  // name — and its count when there is one — appear in the tooltip on hover.
+  const vTab = (icon: React.ReactNode, title: string, color: string, count?: number) => (
+    <Tooltip title={count != null ? `${title} (${count})` : title} placement="right">
+      <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 46, padding: '9px 0' }}>
         <span style={{ fontSize: 20, color, lineHeight: 1 }}>{icon}</span>
-        {count != null && count > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: badgeColor ?? color, borderRadius: 9, padding: '0 6px', minWidth: 18, textAlign: 'center', lineHeight: '16px' }}>{count}</span>}
       </span>
     </Tooltip>
   );
@@ -4574,7 +4572,6 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                         options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} /></Form.Item>
                     <Form.Item label="Order Date" name="orderDate" style={{ marginBottom: 10 }}><DatePicker style={{ width: '100%' }} /></Form.Item>
                     <Form.Item label="Order Type" name="orderType" style={{ marginBottom: 10 }}><Input /></Form.Item>
-                    <Form.Item label="BU Code" name="buCode" style={{ marginBottom: 10 }}><Input readOnly placeholder="—" /></Form.Item>
                   </VSection></Col>
 
                   {/* S2 — Customer Information */}
@@ -4600,16 +4597,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
 
                   {/* S4 — Totals */}
                   <Col xs={24} sm={12} md={6}><VSection icon={<DollarOutlined />} title="Totals" color={REDWOOD.success}>
-                    <Row gutter={8}>
-                      <Col span={14}><Form.Item label="Txn Currency" name="txnCurrency" layout="vertical" labelCol={{ span: 24 }} wrapperCol={{ span: 24 }} style={{ marginBottom: 10 }}>
+                    <Row gutter={8} style={{ marginBottom: 4 }}>
+                      <Col span={14}><Form.Item label="Txn Currency" name="txnCurrency" layout="vertical" labelCol={{ span: 24 }} wrapperCol={{ span: 24 }} style={{ marginBottom: 2 }}>
                         <Select showSearch options={CURRENCIES.map(c => ({ value: c, label: c }))} /></Form.Item></Col>
-                      <Col span={10}><Form.Item label="Rate" name="rate" layout="vertical" labelCol={{ span: 24 }} wrapperCol={{ span: 24 }} style={{ marginBottom: 10 }}><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
+                      <Col span={10}><Form.Item label="Rate" name="rate" layout="vertical" labelCol={{ span: 24 }} wrapperCol={{ span: 24 }} style={{ marginBottom: 2 }}><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
                     </Row>
                     <TotalLine label="Gross" value={fmtAmount(totAmt, ccy)} />
                     <TotalLine label="Tax (from lines)" value={fmtAmount(lineTax, ccy)} />
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0', borderBottom: `1px dashed ${REDWOOD.neutral200}` }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '2px 0', borderBottom: `1px dashed ${REDWOOD.neutral200}` }}>
                       <span style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Discount</span><InputNumber size="small" min={0} value={discAmt} onChange={v => setDiscAmt(Number(v) || 0)} style={{ width: 120 }} /></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0', borderBottom: `1px dashed ${REDWOOD.neutral200}` }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '2px 0', borderBottom: `1px dashed ${REDWOOD.neutral200}` }}>
                       <span style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Expense</span><InputNumber size="small" min={0} value={expAmt} onChange={v => setExpAmt(Number(v) || 0)} style={{ width: 120 }} /></div>
                     <TotalLine label="Net (Trx Currency)" strong color={REDWOOD.primary} value={fmtAmount(totAmt + lineTax + num(expAmt) - num(discAmt), ccy)} />
                     <TotalLine label="Net (Base Currency)" strong color={REDWOOD.success} value={fmtAmount((totAmt + lineTax + num(expAmt) - num(discAmt)) * (num(hdr.rate) || 1), hdr.baseCurrency ?? ccy)} />
