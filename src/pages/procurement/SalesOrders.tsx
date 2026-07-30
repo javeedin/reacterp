@@ -648,10 +648,14 @@ async function fetchReservations(orderNo: string): Promise<any[]> {
     return d.items ?? [];
   } catch { return []; }
 }
+// The GET used to look up an order's reservations (shown behind the API icon).
+const reservationsQueryUrl = (orderNo?: string) =>
+  `${RESV_URL}?q=DemandSourceName='${orderNo ?? '<order#>'}' or DemandSourceHeaderNumber='${orderNo ?? '<order#>'}'&onlyData=true&limit=500`;
 // Read-only reservations list for an order (used by the order view + create tab).
 const ReservationsView: React.FC<{ orderNo?: string; open: boolean; onClose: () => void; reloadKey?: number }> = ({ orderNo, open, onClose, reloadKey }) => {
   const [list, setList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const apiUrl = reservationsQueryUrl(orderNo);
   useEffect(() => {
     if (!open || !orderNo) return;
     setLoading(true);
@@ -668,9 +672,15 @@ const ReservationsView: React.FC<{ orderNo?: string; open: boolean; onClose: () 
   ];
   return (
     <Modal open={open} onCancel={onClose} width={860} footer={<Button onClick={onClose}>Close</Button>}
-      title={<Space><SafetyCertificateOutlined style={{ color: REDWOOD.success }} /> Reservations — order {orderNo}{list.length ? <Tag color="green">{list.length}</Tag> : null}</Space>}>
+      title={<Space><SafetyCertificateOutlined style={{ color: REDWOOD.success }} /> Reservations — order {orderNo}{list.length ? <Tag color="green">{list.length}</Tag> : null}
+        <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {apiUrl}</span>}>
+          <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} onClick={() => { navigator.clipboard.writeText(apiUrl); message.success('Reservations query copied'); }} />
+        </Tooltip></Space>}>
+      <div style={{ fontSize: 11.5, marginBottom: 8 }}>
+        <Tag color="green">GET</Tag><Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info, wordBreak: 'break-all' }}>{apiUrl}</Text>
+      </div>
       <Table size="small" loading={loading} columns={cols} dataSource={list} rowKey={(r, i) => String(pf(r, ['ReservationId']) ?? i)}
-        pagination={list.length > 20 ? { pageSize: 20 } : false} scroll={{ x: 'max-content', y: 380 }}
+        pagination={list.length > 20 ? { pageSize: 20 } : false} scroll={{ x: 'max-content', y: 360 }}
         locale={{ emptyText: 'No reservations for this order' }} />
     </Modal>
   );
