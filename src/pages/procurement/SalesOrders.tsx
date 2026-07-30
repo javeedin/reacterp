@@ -2968,7 +2968,6 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   // Draft workflow (Save→Confirm→Reserve/Unreserve): busy flag + last action result.
   const [workBusy, setWorkBusy] = useState<null | 'confirm' | 'reserve' | 'unreserve'>(null);
   const [confirmed, setConfirmed] = useState(false);
-  const [resvViewOpen, setResvViewOpen] = useState(false);
   const [resvReloadKey, setResvReloadKey] = useState(0);
   const [autoShipOpen, setAutoShipOpen] = useState(false);
   const [autoInvoiceOpen, setAutoInvoiceOpen] = useState(false);
@@ -2998,6 +2997,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   // order number). Shows the exact endpoint + per-line JSON body before running.
   const RESERVE_URL = `${FUSION_BASE}/inventoryReservations`;
   const [reserveOpen, setReserveOpen] = useState(false);
+  const [resvTab, setResvTab] = useState<'create' | 'view'>('view');
+  const [resvList, setResvList] = useState<any[]>([]);
+  const [resvListLoading, setResvListLoading] = useState(false);
+  const [resvCount, setResvCount] = useState<number | null>(null);
   const [reserveRows, setReserveRows] = useState<{
     key: string; item: string; uom?: string; inventoryItemId?: any; organizationId?: any;
     lotControlled: boolean; options: ReserveOpt[]; lot?: string; subinventory?: string; qty: number;
@@ -3662,19 +3665,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   // Open the Reserve dialog — resolve each line's InventoryItemId / OrganizationId
   // and the AVAILABLE on-hand lots (+ their subinventory + qty) so the user can
   // pick the lot to reserve (required for lot-controlled items — INV-2416216).
-  const openReserveDialog = async () => {
-    const key = liveOrderKey();
-    if (!key) { message.warning('Save the order first'); return; }
-    const org = hdr.warehouse;
-    if (!org) { message.warning('No warehouse (organization) on the header'); return; }
+  // Build the Create-Reservation rows (resolve item/org ids + on-hand lots).
+  const buildReserveRows = async () => {
+    const key = liveOrderKey(); const org = hdr.warehouse;
+    if (!key || !org) return;
     setWorkBusy('reserve');
     const orgId = warehouseOrgId();
     try {
       const targets = lines.filter(l => l.itemNumber && !l.canceled && num(l.qty) > 0);
       const rows = await mapLimit(targets, 4, async (l) => {
         const d = await fetchReserveOptions(l.itemNumber, org, hdr.subinventory);
-        // Default selection: the line's existing lot if still available, else the
-        // largest-stock option.
         const chosen = (l.lot ? d.options.find(o => o.lot === l.lot) : undefined) ?? d.options[0];
         return {
           key: l.key, item: l.itemNumber, uom: l.uom,
@@ -3685,9 +3685,29 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         };
       });
       setReserveRows(rows);
-      setReserveOpen(true);
     } finally { setWorkBusy(null); }
   };
+  // Load the existing reservations list (item + source txn number) + count.
+  const loadResvList = async () => {
+    setResvListLoading(true);
+    try { const l = await fetchReservations(orderNumber, lines.map(x => x.itemNumber)); setResvList(l); setResvCount(l.length); }
+    finally { setResvListLoading(false); }
+  };
+  // Open the single Reservations hub (tabs: Create / View). Default to whichever
+  // is more useful — View when reservations already exist, else Create.
+  const openReservationsHub = () => {
+    const key = liveOrderKey();
+    if (!key) { message.warning('Save the order first'); return; }
+    setReserveOpen(true);
+    setResvTab((resvCount ?? 0) > 0 ? 'view' : 'create');
+    buildReserveRows();
+    loadResvList();
+  };
+  // Reservation count on the toolbar button — refreshed when the order exists.
+  useEffect(() => {
+    if (!liveOrderKey() || !lines.length) { return; }
+    fetchReservations(orderNumber, lines.map(x => x.itemNumber)).then(l => setResvCount(l.length)).catch(() => {});
+  }, [createdOrderKey, resvReloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Run the reservations shown in the dialog (one POST per line), recording
   // each line's HTTP status + errors inline.
@@ -3889,18 +3909,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               style={confirmed ? undefined : { background: REDWOOD.primary, borderColor: REDWOOD.primary, color: '#fff' }}>
               {confirmed ? 'Confirmed' : 'Confirm Order'}
             </Button>
-            {!returnMode && <Dropdown menu={{ items: [
-              { key: 'reserve', icon: <SafetyCertificateOutlined />, label: 'Reserve', disabled: !isDraftStatus, onClick: openReserveDialog },
-              { key: 'unreserve', icon: <StopOutlined />, label: 'Unreserve', disabled: !isDraftStatus, onClick: unreserveStock },
-              { type: 'divider' },
-              { key: 'view', icon: <TableOutlined />, label: 'View reservations', onClick: () => setResvViewOpen(true) },
-            ] }}>
-              <Tooltip title={isDraftStatus ? undefined : 'Reservations are only allowed while the order is a draft (lines not started)'}>
-                <Button loading={workBusy === 'reserve' || workBusy === 'unreserve'}>
-                  <Space size={4}><SafetyCertificateOutlined />Reservations<DownOutlined style={{ fontSize: 10 }} /></Space>
-                </Button>
-              </Tooltip>
-            </Dropdown>}
+            {!returnMode && <Button icon={<SafetyCertificateOutlined />} loading={workBusy === 'reserve' || workBusy === 'unreserve'} onClick={openReservationsHub}
+              style={resvCount ? { color: REDWOOD.success, borderColor: REDWOOD.success, fontWeight: 600 } : undefined}>
+              Reservations{resvCount ? ` (${resvCount})` : ''}
+            </Button>}
             {!returnMode && <Button icon={<CarOutlined />} onClick={() => setAutoShipOpen(true)}
               style={{ borderColor: REDWOOD.success, color: REDWOOD.success }}>Auto Shipconfirm</Button>}
             {!returnMode && <Button icon={<DollarOutlined />} onClick={() => setAutoInvoiceOpen(true)}
@@ -4274,24 +4286,40 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         </div>
       </Modal>
 
-      {/* Reserve dialog — pick a lot + subinventory per line, then POST inventoryReservations */}
-      <Modal open={reserveOpen} onCancel={() => setReserveOpen(false)} maskClosable={false} width={860}
-        title={<Space><SafetyCertificateOutlined style={{ color: REDWOOD.primary }} /> Reserve stock — order {liveOrderNumber()}</Space>}
-        footer={<Space>
-          <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(reserveRows.map(r => `POST ${RESERVE_URL}\n${JSON.stringify(reserveRowBody(r, liveOrderNumber()), null, 2)}`).join('\n\n')); message.success('Copied'); }}>Copy all</Button>
-          <Button onClick={() => setReserveOpen(false)}>Close</Button>
-          <Button type="primary" icon={<SafetyCertificateOutlined />} loading={workBusy === 'reserve'} disabled={!reserveRows.length} onClick={runReserve}
-            style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>Run Reservation ({reserveRows.length})</Button>
-        </Space>}>
+      {/* Reservations hub — Create + View (with Unreserve) in one tabbed dialog */}
+      <Modal open={reserveOpen} onCancel={() => setReserveOpen(false)} maskClosable={false} width={880}
+        title={<Space><SafetyCertificateOutlined style={{ color: REDWOOD.primary }} /> Reservations — order {orderNumber}{resvList.length ? <Tag color="green">{resvList.length}</Tag> : null}</Space>}
+        footer={resvTab === 'create'
+          ? <Space>
+              <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(reserveRows.map(r => `POST ${RESERVE_URL}\n${JSON.stringify(reserveRowBody(r, orderNumber), null, 2)}`).join('\n\n')); message.success('Copied'); }}>Copy all</Button>
+              <Button onClick={() => setReserveOpen(false)}>Close</Button>
+              <Tooltip title={isDraftStatus ? undefined : 'Reservations are only allowed while the order is a draft'}>
+                <Button type="primary" icon={<SafetyCertificateOutlined />} loading={workBusy === 'reserve'} disabled={!reserveRows.length || !isDraftStatus}
+                  onClick={async () => { await runReserve(); await loadResvList(); setResvTab('view'); }}
+                  style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>Run Reservation ({reserveRows.length})</Button>
+              </Tooltip>
+            </Space>
+          : <Space>
+              <Button icon={<ReloadOutlined />} loading={resvListLoading} onClick={loadResvList}>Refresh</Button>
+              <Button onClick={() => setReserveOpen(false)}>Close</Button>
+              <Tooltip title={isDraftStatus ? undefined : 'Reservations are only allowed while the order is a draft'}>
+                <Button danger icon={<StopOutlined />} loading={workBusy === 'unreserve'} disabled={!resvList.length || !isDraftStatus}
+                  onClick={async () => { await unreserveStock(); await loadResvList(); }}>Unreserve all ({resvList.length})</Button>
+              </Tooltip>
+            </Space>}>
+        <Tabs size="small" activeKey={resvTab} onChange={k => setResvTab(k as 'create' | 'view')} items={[
+        {
+          key: 'create', label: <Space size={5}><SafetyCertificateOutlined />Create Reservation</Space>,
+          children: <>
         <div style={{ fontSize: 12, marginBottom: 10 }}>
           <Tag color="green">POST</Tag><Text style={{ fontFamily: 'monospace', fontSize: 11.5, color: REDWOOD.info, wordBreak: 'break-all' }}>{RESERVE_URL}</Text>
-          <div style={{ marginTop: 6 }}><Text type="secondary" style={{ fontSize: 11.5 }}>One POST per line · <b>DemandSourceType</b> <Tag style={{ marginInline: 3 }}>User Defined</Tag> · <b>DemandSourceName</b> = <Tag style={{ marginInline: 3 }}>{liveOrderNumber()}</Tag>. Lot-controlled items require a <b>Lot</b> + <b>Subinventory</b> (INV-2416216) — pick them below.</Text></div>
+          <div style={{ marginTop: 6 }}><Text type="secondary" style={{ fontSize: 11.5 }}>One POST per line · <b>DemandSourceType</b> <Tag style={{ marginInline: 3 }}>User Defined</Tag> · <b>DemandSourceName</b> = <Tag style={{ marginInline: 3 }}>{orderNumber}</Tag> (source txn #). Lot-controlled items require a <b>Lot</b> + <b>Subinventory</b> (INV-2416216).</Text></div>
         </div>
         {reserveRows.length === 0
-          ? <Empty description="No reservable lines" style={{ padding: 20 }} />
-          : <div style={{ maxHeight: 460, overflow: 'auto' }}>
+          ? <Empty description={workBusy === 'reserve' ? 'Loading lines…' : 'No reservable lines'} style={{ padding: 20 }} />
+          : <div style={{ maxHeight: 420, overflow: 'auto' }}>
               {reserveRows.map((r, i) => {
-                const body = reserveRowBody(r, liveOrderNumber());
+                const body = reserveRowBody(r, orderNumber);
                 const needLot = r.lotControlled && !r.lot;
                 const needSub = !r.subinventory;
                 const optOf = (lot?: string, sub?: string) => r.options.find(o => (o.lot ?? '') === (lot ?? '') && (o.subinventory ?? '') === (sub ?? ''));
@@ -4337,10 +4365,30 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                 );
               })}
             </div>}
+          </>,
+        },
+        {
+          key: 'view', label: <Space size={5}><TableOutlined />View Reservations{resvList.length ? <Tag color="green" style={{ marginInlineEnd: 0 }}>{resvList.length}</Tag> : null}</Space>,
+          children: <>
+            <div style={{ fontSize: 11.5, marginBottom: 8 }}>
+              <Tag color="green">GET</Tag><Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info, wordBreak: 'break-all' }}>{reservationsQueryUrl(orderNumber, lines[0]?.itemNumber)}</Text>
+              <div><Text type="secondary" style={{ fontSize: 11 }}>One call per line item · DemandSourceName = source transaction number.</Text></div>
+            </div>
+            <Table size="small" loading={resvListLoading} dataSource={resvList} rowKey={(r, i) => String(pf(r, ['ReservationId']) ?? i)}
+              pagination={resvList.length > 20 ? { pageSize: 20 } : false} scroll={{ x: 'max-content', y: 340 }}
+              locale={{ emptyText: 'No reservations for this order' }}
+              columns={[
+                { title: 'Item', width: 150, render: (_: any, r: any) => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{pf(r, ['ItemNumber']) ?? '—'}</Text> },
+                { title: 'Lot', width: 130, render: (_: any, r: any) => { const l = pf(r, ['LotNumber']); return l ? <Tag color="geekblue">{l}</Tag> : <Text type="secondary">—</Text>; } },
+                { title: 'Subinv', width: 100, render: (_: any, r: any) => { const s = pf(r, ['SubinventoryCode']); return s ? <Tag color="cyan">{s}</Tag> : '—'; } },
+                { title: 'Org', width: 80, render: (_: any, r: any) => pf(r, ['OrganizationCode']) ?? '—' },
+                { title: 'Qty', width: 90, align: 'right' as const, render: (_: any, r: any) => <Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtQty(num(pf(r, ['ReservationQuantity'])))}{pf(r, ['ReservationUOMCode']) ? ` ${pf(r, ['ReservationUOMCode'])}` : ''}</Text> },
+                { title: 'Reservation Id', width: 150, render: (_: any, r: any) => <Text code style={{ fontSize: 11 }}>{pf(r, ['ReservationId']) ?? '—'}</Text> },
+              ]} />
+          </>,
+        },
+        ]} />
       </Modal>
-
-      {/* Reservations viewer (from the Reservations dropdown) */}
-      <ReservationsView orderNo={orderNumber} items={lines.map(l => l.itemNumber)} open={resvViewOpen} onClose={() => setResvViewOpen(false)} reloadKey={resvReloadKey} />
 
       {/* Auto Ship Confirm — pick release → pick confirm → ship confirm workflow */}
       {/* shipmentLines are keyed by the SOURCE transaction number (e.g. LSO…), not the Fusion order number */}
