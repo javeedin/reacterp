@@ -355,6 +355,23 @@ const RevenueRecognition: React.FC = () => {
   const scheduleDates = useCallback((r: RevenueSchedule) =>
     contractDates.byId.get(r.contractId) ?? (r.trxNumber != null ? contractDates.byTrx.get(Number(r.trxNumber)) : undefined),
     [contractDates]);
+  // Per-schedule day count (days of this period-month inside the contract span)
+  // and the contract's daily rate (RENT_TOTAL / total inclusive days).
+  const schedulePeriodInfo = useCallback((r: RevenueSchedule): { days: number; dailyRate: number } | null => {
+    const d = scheduleDates(r);
+    if (!d) return null;
+    const start = parseFlexDate(d.start), end = parseFlexDate(d.end), pd = parseFlexDate(r.periodDate);
+    if (!start || !end || !pd) return null;
+    const DAY = 86400000;
+    const totalDays = Math.round((end.getTime() - start.getTime()) / DAY) + 1;
+    const dailyRate = totalDays > 0 ? d.total / totalDays : 0;
+    const firstOfMonth = new Date(pd.getFullYear(), pd.getMonth(), 1);
+    const lastOfMonth = new Date(pd.getFullYear(), pd.getMonth() + 1, 0);
+    const segStart = new Date(Math.max(firstOfMonth.getTime(), start.getTime()));
+    const segEnd = new Date(Math.min(lastOfMonth.getTime(), end.getTime()));
+    const days = segEnd >= segStart ? Math.round((segEnd.getTime() - segStart.getTime()) / DAY) + 1 : 0;
+    return { days, dailyRate };
+  }, [scheduleDates]);
 
   const openAcctPreview = () => {
     const chosen = postSchedules.filter(s => postSelectedKeys.includes(s.id)).map(withSubaccount);
@@ -731,13 +748,15 @@ const RevenueRecognition: React.FC = () => {
     if (postSchedules.length === 0) { message.warning('No schedules to export'); return; }
     const data = postSchedules.map(s => {
       const d = scheduleDates(s);
+      const p = schedulePeriodInfo(s);
       return {
         'Business Unit': buForSchedule(s), 'Period': s.periodName || postPeriod || '',
         'Schedule ID': s.id, 'Trx #': s.trxNumber ?? '', 'Contract Amount': d?.total ?? '',
         'Invoice #': s.invoiceNumber ?? '',
         'Unit': s.unit, 'Tenant': s.tenant, 'Company': companyFromBU(buForSchedule(s)),
         'Contract Start': d?.start ?? '', 'Contract End': d?.end ?? '',
-        '#': s.scheduleNum, 'Amount': Number(s.amount) || 0,
+        '#': s.scheduleNum, 'Days': p?.days ?? '', 'Daily Rate': p?.dailyRate ?? '',
+        'Amount': Number(s.amount) || 0,
         'Accounted': isAccounted(s) ? 'Accounted' : 'Pending',
       };
     });
@@ -1027,6 +1046,8 @@ const RevenueRecognition: React.FC = () => {
                           { title: 'Contract Start', key: 'cStart', width: 115, render: (_: any, r: RevenueSchedule) => { const d = scheduleDates(r); return d?.start ? <Tag color="geekblue">{d.start}</Tag> : <span style={{ color: REDWOOD.neutral500 }}>—</span>; } },
                           { title: 'Contract End', key: 'cEnd', width: 115, render: (_: any, r: RevenueSchedule) => { const d = scheduleDates(r); return d?.end ? <Tag color="volcano">{d.end}</Tag> : <span style={{ color: REDWOOD.neutral500 }}>—</span>; } },
                           { title: '#', dataIndex: 'scheduleNum', width: 55, align: 'right' as const },
+                          { title: 'Days', key: 'days', width: 70, align: 'right' as const, render: (_: any, r: RevenueSchedule) => { const p = schedulePeriodInfo(r); return p ? <Tag color="geekblue" style={{ marginInlineEnd: 0 }}>{p.days}</Tag> : <span style={{ color: REDWOOD.neutral500 }}>—</span>; } },
+                          { title: 'Daily Rate', key: 'dailyRate', width: 110, align: 'right' as const, render: (_: any, r: RevenueSchedule) => { const p = schedulePeriodInfo(r); return p ? <Text style={{ fontFamily: 'monospace', color: REDWOOD.info }}>{fmt(p.dailyRate)}</Text> : <span style={{ color: REDWOOD.neutral500 }}>—</span>; } },
                           { title: 'Amount', dataIndex: 'amount', width: 120, align: 'right' as const, fixed: 'right' as const, render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
                           { title: 'Accounted', key: 'acct', width: 130, align: 'center' as const, fixed: 'right' as const, render: (_: any, r: RevenueSchedule) => isAccounted(r)
                             ? <Space size={4}>
@@ -1040,10 +1061,10 @@ const RevenueRecognition: React.FC = () => {
                         summary={() => postSchedules.length === 0 ? null : (
                           <Table.Summary fixed>
                             <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 700 }}>
-                              {/* slots: selection + BU + Period + SchedID + Trx + Contract Amount + Invoice + Unit + Tenant + Company + Contract Start + Contract End + # = 13 → Amount at index 13, Accounted at 14 */}
-                              <Table.Summary.Cell index={0} colSpan={13}><Text strong>Total ({postSchedules.length})</Text></Table.Summary.Cell>
-                              <Table.Summary.Cell index={13} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(postSchedules.reduce((s, r) => s + (Number(r.amount) || 0), 0))}</Text></Table.Summary.Cell>
-                              <Table.Summary.Cell index={14} />
+                              {/* slots: selection + BU + Period + SchedID + Trx + Contract Amount + Invoice + Unit + Tenant + Company + Contract Start + Contract End + # + Days + Daily Rate = 15 → Amount at index 15, Accounted at 16 */}
+                              <Table.Summary.Cell index={0} colSpan={15}><Text strong>Total ({postSchedules.length})</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={15} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(postSchedules.reduce((s, r) => s + (Number(r.amount) || 0), 0))}</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell index={16} />
                             </Table.Summary.Row>
                           </Table.Summary>
                         )}
