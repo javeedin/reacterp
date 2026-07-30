@@ -3062,20 +3062,26 @@ const NotesAttachmentsPanel: React.FC<{ orderKey: string }> = ({ orderKey }) => 
   const [notesLoading, setNotesLoading] = useState(false);
   const [noteEdit, setNoteEdit] = useState<{ href?: string; text: string; visibility: string } | null>(null);
   const [noteBusy, setNoteBusy] = useState(false);
+  const [noteErr, setNoteErr] = useState('');
+  // The exact request the note editor will run — shown via the API icon.
+  const noteReq = noteEdit
+    ? { method: noteEdit.href ? 'PATCH' : 'POST', url: noteEdit.href || NOTES,
+        body: noteEdit.href ? { NoteTxt: noteEdit.text, VisibilityCode: noteEdit.visibility }
+          : { NoteTxt: noteEdit.text, NoteTypeCode: 'GENERAL', VisibilityCode: noteEdit.visibility } }
+    : null;
   const loadNotes = useCallback(async () => {
     setNotesLoading(true);
     try { const r = await fetch(`${NOTES}?limit=100`, { headers: FUSION_HDRS }); const d = await r.json().catch(() => ({} as any)); setNotes(d.items ?? []); }
     catch { setNotes([]); } finally { setNotesLoading(false); }
   }, [NOTES]);
   const saveNote = async () => {
-    if (!noteEdit) return; setNoteBusy(true);
+    if (!noteReq) return; setNoteBusy(true); setNoteErr('');
     try {
-      const isEdit = !!noteEdit.href;
-      const body: any = isEdit ? { NoteTxt: noteEdit.text, VisibilityCode: noteEdit.visibility } : { NoteTxt: noteEdit.text, NoteTypeCode: 'GENERAL', VisibilityCode: noteEdit.visibility };
-      const r = await fetch(isEdit ? noteEdit.href! : NOTES, { method: isEdit ? 'PATCH' : 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!r.ok) { const t = await r.text(); throw new Error(collectOrderErrors(null, t, true)[0] || `HTTP ${r.status}`); }
-      message.success(isEdit ? 'Note updated' : 'Note added'); setNoteEdit(null); loadNotes();
-    } catch (e: any) { message.error(e?.message || 'Save failed'); } finally { setNoteBusy(false); }
+      const r = await fetch(noteReq.url, { method: noteReq.method, headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(noteReq.body) });
+      const t = await r.text();
+      if (!r.ok) throw new Error([`${noteReq.method} ${noteReq.url}`, `HTTP ${r.status}`, ...collectOrderErrors(null, t, true)].join('\n'));
+      message.success(noteReq.method === 'PATCH' ? 'Note updated' : 'Note added'); setNoteEdit(null); loadNotes();
+    } catch (e: any) { setNoteErr(e?.message || 'Save failed'); message.error('Note save failed — see the details in the dialog'); } finally { setNoteBusy(false); }
   };
   const delNote = (row: any) => Modal.confirm({
     title: 'Delete this note?', okText: 'Delete', okButtonProps: { danger: true },
@@ -3173,7 +3179,7 @@ const NotesAttachmentsPanel: React.FC<{ orderKey: string }> = ({ orderKey }) => 
             <Text strong>Order Notes</Text>
             <Tag style={{ marginLeft: 8 }}>{notes.length}</Tag>
             <Space style={{ marginLeft: 'auto' }}>
-              <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => setNoteEdit({ text: '', visibility: 'INTERNAL' })}>New Note</Button>
+              <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => { setNoteErr(''); setNoteEdit({ text: '', visibility: 'INTERNAL' }); }}>New Note</Button>
               <Button size="small" icon={<ReloadOutlined />} loading={notesLoading} onClick={loadNotes} />
             </Space>
           </div>
@@ -3184,7 +3190,7 @@ const NotesAttachmentsPanel: React.FC<{ orderKey: string }> = ({ orderKey }) => 
                   <Tag color={pf(n, ['VisibilityCode']) === 'EXTERNAL' ? 'blue' : 'default'} style={{ fontSize: 10 }}>{pf(n, ['VisibilityCode']) ?? 'INTERNAL'}</Tag>
                   <Text type="secondary" style={{ fontSize: 11 }}>{pf(n, ['NoteTypeCode']) ?? 'GENERAL'}{pf(n, ['CreationDate']) ? ` · ${String(pf(n, ['CreationDate'])).slice(0, 10)}` : ''}</Text>
                   <Space size={0} style={{ marginLeft: 'auto' }}>
-                    <Button size="small" type="text" icon={<EditOutlined />} style={{ color: REDWOOD.info }} onClick={() => setNoteEdit({ href: selfHref(n), text: pf(n, ['NoteTxt']) ?? '', visibility: pf(n, ['VisibilityCode']) ?? 'INTERNAL' })} />
+                    <Button size="small" type="text" icon={<EditOutlined />} style={{ color: REDWOOD.info }} onClick={() => { setNoteErr(''); setNoteEdit({ href: selfHref(n), text: pf(n, ['NoteTxt']) ?? '', visibility: pf(n, ['VisibilityCode']) ?? 'INTERNAL' }); }} />
                     <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => delNote(n)} />
                   </Space>
                 </div>
@@ -3222,7 +3228,7 @@ const NotesAttachmentsPanel: React.FC<{ orderKey: string }> = ({ orderKey }) => 
       </Row>
 
       {/* Note editor */}
-      <Modal open={!!noteEdit} onCancel={() => !noteBusy && setNoteEdit(null)} width={520}
+      <Modal open={!!noteEdit} onCancel={() => !noteBusy && setNoteEdit(null)} width={560}
         title={<Space><ProfileOutlined style={{ color: REDWOOD.primary }} />{noteEdit?.href ? 'Edit Note' : 'New Note'}</Space>}
         footer={<Space><Button onClick={() => setNoteEdit(null)} disabled={noteBusy}>Cancel</Button><Button type="primary" loading={noteBusy} icon={<SaveOutlined />} onClick={saveNote} disabled={!noteEdit?.text?.trim()}>Save</Button></Space>}>
         {noteEdit && <div>
@@ -3231,6 +3237,19 @@ const NotesAttachmentsPanel: React.FC<{ orderKey: string }> = ({ orderKey }) => 
             options={[{ value: 'INTERNAL', label: 'Internal' }, { value: 'EXTERNAL', label: 'External' }]} />
           <div style={{ marginBottom: 6, fontSize: 12, color: REDWOOD.neutral600 }}>Note text</div>
           <Input.TextArea rows={5} value={noteEdit.text} onChange={e => setNoteEdit({ ...noteEdit, text: e.target.value })} placeholder="Type the note…" />
+          {/* API request preview — the exact call Save will run */}
+          {noteReq && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}><ApiOutlined style={{ marginRight: 4 }} />REST request</div>
+              <div style={{ fontSize: 11, fontFamily: 'monospace', wordBreak: 'break-all', background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, padding: '8px 10px' }}>
+                <div><b style={{ color: REDWOOD.primary }}>{noteReq.method}</b> {noteReq.url}</div>
+                <div style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}>{JSON.stringify(noteReq.body, null, 2)}</div>
+              </div>
+            </div>
+          )}
+          {noteErr && (
+            <div style={{ marginTop: 10, fontSize: 12, color: REDWOOD.error, whiteSpace: 'pre-wrap', background: '#FFF1F0', border: '1px solid #FFCCC7', borderRadius: 6, padding: '8px 10px', maxHeight: 200, overflow: 'auto' }}>{noteErr}</div>
+          )}
         </div>}
       </Modal>
 
@@ -4606,6 +4625,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               children: <OrderSection icon={<ProfileOutlined />} title="Additional Information" color={REDWOOD.purple}>
                 <Col xs={24}><Form.Item label="Remarks" name="remarks" layout="vertical" style={{ marginBottom: 12 }}><Input.TextArea rows={3} placeholder="Optional notes…" /></Form.Item></Col>
               </OrderSection> },
+            ...((editMode ? (editOrder?.OrderKey ?? editOrder?.HeaderId) : createdOrderKey) != null ? [{
+              key: 'notesAtt', label: <span><PaperClipOutlined style={{ marginRight: 5 }} />Notes &amp; Attachments</span>,
+              children: <div style={{ padding: 8 }}><NotesAttachmentsPanel orderKey={String(editMode ? (editOrder?.OrderKey ?? editOrder?.HeaderId) : createdOrderKey)} /></div>,
+            }] : []),
             { key: 'credit', label: <span><ReconciliationOutlined style={{ marginRight: 5 }} />Customer Credit Check</span>,
               children: <div style={{ padding: 8 }}><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Customer credit check — connect the credit web service to show limit, exposure and available credit." style={{ padding: 24 }} /></div> },
             { key: 'validations', label: <span><InfoCircleOutlined style={{ marginRight: 5 }} />Order Validations</span>,
@@ -4719,10 +4742,6 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               ...(editMode && (editOrder?.OrderKey ?? editOrder?.HeaderId) != null ? [{
                 key: 'salesCredits', label: <Space size={6}><TagsOutlined />Sales Credits</Space>,
                 children: <SalesCreditsPanel orderKey={String(editOrder?.OrderKey ?? editOrder?.HeaderId)} salesRepOpts={salesRepOpts} ccy={ccy} />,
-              }] : []),
-              ...((editMode ? (editOrder?.OrderKey ?? editOrder?.HeaderId) : createdOrderKey) != null ? [{
-                key: 'notesAtt', label: <Space size={6}><PaperClipOutlined />Notes &amp; Attachments</Space>,
-                children: <NotesAttachmentsPanel orderKey={String(editMode ? (editOrder?.OrderKey ?? editOrder?.HeaderId) : createdOrderKey)} />,
               }] : []),
             ]} />}
       </Card>
