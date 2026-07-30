@@ -4629,7 +4629,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           {editMode && <Tag color="warning" style={{ fontWeight: 700 }}>EDIT MODE · rev {(Number(editOrder?.SourceTransactionRevisionNumber) || 1) + 1}</Tag>}
           {returnMode && <Tag color="magenta" style={{ fontWeight: 700 }}>RETURN · ref {lines[0]?.refOrderNumber ?? '—'}</Tag>}
           <Tag color="geekblue" style={{ fontVariantNumeric: 'tabular-nums' }}>{editMode ? (editOrder?.OrderNumber ?? orderNumber) : orderNumber}</Tag>
-          <Tag color="purple">{hdr.orderType}</Tag><Tag>{hdr.txnCurrency}</Tag>{hdr.customerName && <Tag color="blue">{hdr.customerName}</Tag>}</Space>}
+          {editMode
+            ? (() => { const s = String(orderStatus || pf(editOrder, ['StatusCode', 'Status']) || 'DOO_DRAFT').replace(/^DOO_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); return <Tag color={isDraftStatus ? 'gold' : 'green'} style={{ fontWeight: 600 }}>Status: {s}</Tag>; })()
+            : <><Tag color="purple">{hdr.orderType}</Tag><Tag>{hdr.txnCurrency}</Tag></>}</Space>}
         extra={<Space>
           {/* JSON Actions — save/load the full on-screen draft + payload preview */}
           <Dropdown menu={{ items: [
