@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   Layout, Breadcrumb, Card, Table, Form, Input, Select, DatePicker, Button,
-  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty, Tabs, InputNumber, Upload, Checkbox, Dropdown, Steps, Collapse,
+  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty, Tabs, InputNumber, Upload, Checkbox, Dropdown, Steps, Collapse, Segmented,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -14,6 +14,7 @@ import {
   SafetyCertificateOutlined, StopOutlined, SendOutlined, RollbackOutlined,
   FilePdfOutlined, FileExcelOutlined, SnippetsOutlined, ImportOutlined, TableOutlined, DownOutlined,
   ThunderboltOutlined, CarOutlined, InboxOutlined, WarningFilled,
+  PaperClipOutlined, FileTextOutlined, LinkOutlined, FileOutlined, FileImageOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { ShipConfirmModal, PickSlipDialog } from './ConfirmPicks';
@@ -1571,6 +1572,36 @@ const useOrdsOptions = (url: string, keys: string[], fallback: string[] = []): {
 };
 const PAY_TERM_KEYS = ['name', 'Name', 'payment_terms', 'paymentterms', 'term_name', 'termname', 'payment_term', 'value', 'description'];
 const SALESREP_KEYS = ['salesrep_name', 'salerep_code', 'name', 'Name', 'salesperson', 'salesperson_name', 'salespersonname', 'resource_name', 'full_name', 'value'];
+const SALESREP_ID_KEYS = ['resource_id', 'resourceid', 'salesrep_id', 'salesrepid', 'salesperson_id', 'salespersonid', 'resource_salesrep_id', 'party_id', 'partyid', 'person_id', 'personid'];
+
+// Salesperson options that also carry the resource id (SalespersonId) so the
+// sales-credit payload can send a deterministic id, not just a name.
+export interface SalesRepOpt { value: string; label: string; id?: number }
+const useSalesReps = (): SalesRepOpt[] => {
+  const [opts, setOpts] = useState<SalesRepOpt[]>([]);
+  useEffect(() => {
+    let live = true;
+    fetch(SALESREPS_URL, { headers: { Accept: 'application/json' } })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => {
+        if (!live) return;
+        const rows = d.items ?? (Array.isArray(d) ? d : []);
+        const seen = new Set<string>(); const list: SalesRepOpt[] = [];
+        rows.forEach((row: any) => {
+          const lbl = ordsLabel(row, SALESREP_KEYS);
+          if (!lbl || seen.has(lbl)) return;
+          seen.add(lbl);
+          const idRaw = pf(row, SALESREP_ID_KEYS);
+          const id = idRaw != null && idRaw !== '' && !Number.isNaN(Number(idRaw)) ? Number(idRaw) : undefined;
+          list.push({ value: lbl, label: lbl, id });
+        });
+        setOpts(list);
+      })
+      .catch(() => { if (live) setOpts([]); });
+    return () => { live = false; };
+  }, []);
+  return opts;
+};
 
 // Tax codes for a business unit (ORDS: FUSION_TAX_CODES where BUSINESS_UNIT = :P_BUSINESS_UNIT).
 export interface TaxCode { code: string; pct: number }
@@ -2936,6 +2967,306 @@ const orderLineToNewLine = (l: any, i: number, opts: { asReturn?: boolean; refOr
   };
 };
 
+// ── Sales Credits panel (edit mode) — CRUD on the order's salesCredits child ──
+//   GET/POST  {OrderKey}/child/salesCredits          PATCH/DELETE .../{SalesCreditId}
+const SalesCreditsPanel: React.FC<{ orderKey: string; salesRepOpts: SalesRepOpt[]; ccy?: string }> = ({ orderKey, salesRepOpts }) => {
+  const base = `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(orderKey)}/child/salesCredits`;
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<{ id?: string; href?: string; salesRep?: string; percent: number } | null>(null);
+  const selfHref = (o: any) => { const h = (o?.links ?? []).find((x: any) => x.rel === 'self' || x.name === 'self')?.href; return h ? fusionHref(h) : ''; };
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(`${base}?onlyData=false&limit=100`, { headers: FUSION_HDRS });
+      const d = await r.json().catch(() => ({} as any));
+      setRows(d.items ?? []);
+    } catch { setRows([]); }
+    finally { setLoading(false); }
+  }, [base]);
+  useEffect(() => { load(); }, [load]);
+
+  const total = rows.reduce((s, r) => s + num(pf(r, ['Percent'])), 0);
+  const save = async () => {
+    if (!editing) return;
+    const repId = salesRepOpts.find(o => o.value === editing.salesRep)?.id;
+    setBusy(true);
+    try {
+      const isEdit = !!editing.href;
+      const url = isEdit ? editing.href! : base;
+      const body: any = isEdit
+        ? { ...(editing.salesRep ? { Salesperson: editing.salesRep } : {}), ...(repId != null ? { SalespersonId: repId } : {}), Percent: num(editing.percent) }
+        : { SourceTransactionSalesCreditIdentifier: `SC-${orderKey}-${Date.now() % 100000}`, ...(repId != null ? { SalespersonId: repId } : {}), Salesperson: editing.salesRep, SalesCreditTypeId: 1, Percent: num(editing.percent) };
+      const r = await fetch(url!, { method: isEdit ? 'PATCH' : 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) { const t = await r.text(); throw new Error(collectOrderErrors(null, t, true)[0] || `HTTP ${r.status}`); }
+      message.success(isEdit ? 'Sales credit updated' : 'Sales credit added');
+      setEditing(null); load();
+    } catch (e: any) { message.error(e?.message || 'Save failed'); }
+    finally { setBusy(false); }
+  };
+  const del = (row: any) => Modal.confirm({
+    title: 'Delete this sales credit?', okText: 'Delete', okButtonProps: { danger: true },
+    content: <div style={{ fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all' }}>DELETE {selfHref(row)}</div>,
+    onOk: async () => {
+      try { const r = await fetch(selfHref(row), { method: 'DELETE', headers: FUSION_HDRS }); if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`); message.success('Sales credit deleted'); load(); }
+      catch (e: any) { message.error(e?.message || 'Delete failed'); }
+    },
+  });
+
+  return (
+    <div style={{ padding: '6px 4px' }}>
+      <Space style={{ marginBottom: 10 }}>
+        <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => setEditing({ salesRep: undefined, percent: Math.max(0, 100 - total) })}>Add Sales Credit</Button>
+        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>Refresh</Button>
+        <Tag color={round2(total) === 100 ? 'green' : 'orange'}>Total {total}%</Tag>
+        {round2(total) !== 100 && rows.length > 0 && <Text type="warning" style={{ fontSize: 12 }}>Quota credits should total 100%</Text>}
+      </Space>
+      <Table size="small" rowKey={(r) => String(pf(r, ['SalesCreditId']) ?? Math.random())} pagination={false} loading={loading} dataSource={rows}
+        locale={{ emptyText: 'No sales credits on this order' }}
+        columns={[
+          { title: 'Salesperson', render: (_: any, r: any) => <Text strong style={{ fontSize: 12 }}>{pf(r, ['Salesperson', 'SalespersonName']) ?? pf(r, ['SalespersonId']) ?? '—'}</Text> },
+          { title: 'Type', width: 160, render: (_: any, r: any) => <Text style={{ fontSize: 12 }}>{pf(r, ['SalesCreditType']) ?? (num(pf(r, ['SalesCreditTypeId'])) === 1 ? 'Quota Sales Credit' : pf(r, ['SalesCreditTypeId'])) ?? '—'}</Text> },
+          { title: 'Percent', width: 100, align: 'right', render: (_: any, r: any) => <Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{num(pf(r, ['Percent']))}%</Text> },
+          { title: '', width: 90, align: 'center', render: (_: any, r: any) => <Space size={0}>
+              <Button size="small" type="text" icon={<EditOutlined />} style={{ color: REDWOOD.info }} onClick={() => setEditing({ href: selfHref(r), id: String(pf(r, ['SalesCreditId'])), salesRep: pf(r, ['Salesperson', 'SalespersonName']), percent: num(pf(r, ['Percent'])) })} />
+              <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => del(r)} />
+            </Space> },
+        ] as any} />
+
+      <Modal open={!!editing} onCancel={() => !busy && setEditing(null)} width={460}
+        title={<Space><TagsOutlined style={{ color: REDWOOD.primary }} />{editing?.href ? 'Edit' : 'Add'} Sales Credit</Space>}
+        footer={<Space><Button onClick={() => setEditing(null)} disabled={busy}>Cancel</Button><Button type="primary" loading={busy} icon={<SaveOutlined />} onClick={save} disabled={!editing?.salesRep}>Save</Button></Space>}>
+        {editing && <div>
+          <div style={{ marginBottom: 6, fontSize: 12, color: REDWOOD.neutral600 }}>Salesperson</div>
+          <Select showSearch allowClear style={{ width: '100%', marginBottom: 12 }} placeholder="Select salesperson" optionFilterProp="label"
+            value={editing.salesRep} options={salesRepOpts} onChange={v => setEditing({ ...editing, salesRep: v })} notFoundContent={salesRepOpts.length ? 'No match' : 'Loading…'} />
+          <div style={{ marginBottom: 6, fontSize: 12, color: REDWOOD.neutral600 }}>Percent</div>
+          <InputNumber min={0} max={100} style={{ width: '100%' }} value={editing.percent} onChange={v => setEditing({ ...editing, percent: Number(v) || 0 })} addonAfter="%" />
+        </div>}
+      </Modal>
+    </div>
+  );
+};
+
+// ── Notes & Attachments panel (edit mode) — CRUD on the order's notes + attachments ──
+const NotesAttachmentsPanel: React.FC<{ orderKey: string }> = ({ orderKey }) => {
+  const base = `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(orderKey)}`;
+  const NOTES = `${base}/child/notes`, ATTS = `${base}/child/attachments`;
+  const selfHref = (o: any) => { const h = (o?.links ?? []).find((x: any) => x.rel === 'self' || x.name === 'self')?.href; return h ? fusionHref(h) : ''; };
+  const enclosureHref = (o: any, name: string) => { const h = (o?.links ?? []).find((x: any) => x.rel === 'enclosure' && x.name === name)?.href; return h ? fusionHref(h) : ''; };
+
+  // Notes state
+  const [notes, setNotes] = useState<any[]>([]);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [noteEdit, setNoteEdit] = useState<{ href?: string; text: string; visibility: string } | null>(null);
+  const [noteBusy, setNoteBusy] = useState(false);
+  const loadNotes = useCallback(async () => {
+    setNotesLoading(true);
+    try { const r = await fetch(`${NOTES}?limit=100`, { headers: FUSION_HDRS }); const d = await r.json().catch(() => ({} as any)); setNotes(d.items ?? []); }
+    catch { setNotes([]); } finally { setNotesLoading(false); }
+  }, [NOTES]);
+  const saveNote = async () => {
+    if (!noteEdit) return; setNoteBusy(true);
+    try {
+      const isEdit = !!noteEdit.href;
+      const body: any = isEdit ? { NoteTxt: noteEdit.text, VisibilityCode: noteEdit.visibility } : { NoteTxt: noteEdit.text, NoteTypeCode: 'GENERAL', VisibilityCode: noteEdit.visibility };
+      const r = await fetch(isEdit ? noteEdit.href! : NOTES, { method: isEdit ? 'PATCH' : 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) { const t = await r.text(); throw new Error(collectOrderErrors(null, t, true)[0] || `HTTP ${r.status}`); }
+      message.success(isEdit ? 'Note updated' : 'Note added'); setNoteEdit(null); loadNotes();
+    } catch (e: any) { message.error(e?.message || 'Save failed'); } finally { setNoteBusy(false); }
+  };
+  const delNote = (row: any) => Modal.confirm({
+    title: 'Delete this note?', okText: 'Delete', okButtonProps: { danger: true },
+    onOk: async () => {
+      try {
+        const r = await fetch(selfHref(row), { method: 'DELETE', headers: FUSION_HDRS });
+        if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`);
+        message.success('Note deleted'); loadNotes();
+      } catch (e: any) { message.error(e?.message || 'Delete failed'); }
+    },
+  });
+
+  // Attachments state
+  const [atts, setAtts] = useState<any[]>([]);
+  const [attLoading, setAttLoading] = useState(false);
+  const [attAdd, setAttAdd] = useState<{ type: 'FILE' | 'TEXT' | 'WEB_PAGE'; title: string; text?: string; url?: string; file?: File } | null>(null);
+  const [attBusy, setAttBusy] = useState(false);
+  const [preview, setPreview] = useState<{ title: string; kind: 'image' | 'pdf' | 'text' | 'other'; src?: string; text?: string } | null>(null);
+  const loadAtts = useCallback(async () => {
+    setAttLoading(true);
+    try { const r = await fetch(`${ATTS}?limit=100`, { headers: FUSION_HDRS }); const d = await r.json().catch(() => ({} as any)); setAtts(d.items ?? []); }
+    catch { setAtts([]); } finally { setAttLoading(false); }
+  }, [ATTS]);
+  useEffect(() => { loadNotes(); loadAtts(); }, [loadNotes, loadAtts]);
+
+  const toBase64 = (file: File) => new Promise<string>((res, rej) => { const rd = new FileReader(); rd.onload = () => res(String(rd.result).split(',')[1] || ''); rd.onerror = rej; rd.readAsDataURL(file); });
+  const saveAtt = async () => {
+    if (!attAdd) return; setAttBusy(true);
+    try {
+      let body: any;
+      if (attAdd.type === 'FILE') {
+        if (!attAdd.file) throw new Error('Choose a file');
+        const b64 = await toBase64(attAdd.file);
+        body = { DatatypeCode: 'FILE', FileName: attAdd.file.name, UploadedFileName: attAdd.file.name, UploadedFileContentType: attAdd.file.type || 'application/octet-stream', Title: attAdd.title || attAdd.file.name, CategoryName: 'MISC', FileContents: b64 };
+      } else if (attAdd.type === 'TEXT') {
+        body = { DatatypeCode: 'TEXT', Title: attAdd.title || 'Text', CategoryName: 'MISC', UploadedText: attAdd.text || '' };
+      } else {
+        body = { DatatypeCode: 'WEB_PAGE', Title: attAdd.title || attAdd.url, CategoryName: 'MISC', Url: attAdd.url };
+      }
+      const r = await fetch(ATTS, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) { const t = await r.text(); throw new Error(collectOrderErrors(null, t, true)[0] || `HTTP ${r.status}`); }
+      message.success('Attachment added'); setAttAdd(null); loadAtts();
+    } catch (e: any) { message.error(e?.message || 'Upload failed'); } finally { setAttBusy(false); }
+  };
+  const delAtt = (row: any) => Modal.confirm({
+    title: 'Delete this attachment?', okText: 'Delete', okButtonProps: { danger: true },
+    onOk: async () => {
+      try {
+        const r = await fetch(selfHref(row), { method: 'DELETE', headers: FUSION_HDRS });
+        if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`);
+        message.success('Attachment deleted'); loadAtts();
+      } catch (e: any) { message.error(e?.message || 'Delete failed'); }
+    },
+  });
+
+  const openPreview = async (row: any) => {
+    const dtype = pf(row, ['DatatypeCode']);
+    const title = pf(row, ['Title', 'FileName', 'UploadedFileName']) ?? 'Attachment';
+    if (dtype === 'WEB_PAGE') { const u = pf(row, ['Url']); if (u) window.open(u, '_blank'); return; }
+    if (dtype === 'TEXT') { setPreview({ title, kind: 'text', text: pf(row, ['UploadedText', 'Description']) ?? '' }); return; }
+    // FILE → fetch the enclosure bytes with auth, show as a blob URL.
+    const ctype = String(pf(row, ['UploadedFileContentType', 'ContentType']) ?? '');
+    const fname = String(pf(row, ['FileName', 'UploadedFileName']) ?? '');
+    const href = enclosureHref(row, 'FileContents') || pf(row, ['FileUrl']);
+    if (!href) { message.warning('No file content link'); return; }
+    const isImg = /image\//i.test(ctype) || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(fname);
+    const isPdf = /pdf/i.test(ctype) || /\.pdf$/i.test(fname);
+    try {
+      const r = await fetch(href, { headers: FUSION_HDRS });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const blob = await r.blob();
+      const src = URL.createObjectURL(blob);
+      if (isImg) setPreview({ title, kind: 'image', src });
+      else if (isPdf) setPreview({ title, kind: 'pdf', src });
+      else { const a = document.createElement('a'); a.href = src; a.download = fname || title; a.click(); }
+    } catch (e: any) { message.error(e?.message || 'Preview failed'); }
+  };
+  const attIcon = (row: any) => {
+    const dtype = pf(row, ['DatatypeCode']); const fname = String(pf(row, ['FileName', 'UploadedFileName']) ?? '');
+    if (dtype === 'WEB_PAGE') return <LinkOutlined style={{ color: REDWOOD.info }} />;
+    if (dtype === 'TEXT') return <FileTextOutlined style={{ color: REDWOOD.neutral600 }} />;
+    if (/\.pdf$/i.test(fname)) return <FilePdfOutlined style={{ color: REDWOOD.error }} />;
+    if (/\.(xlsx?|csv)$/i.test(fname)) return <FileExcelOutlined style={{ color: REDWOOD.success }} />;
+    if (/\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(fname)) return <FileImageOutlined style={{ color: REDWOOD.primary }} />;
+    return <FileOutlined style={{ color: REDWOOD.neutral600 }} />;
+  };
+
+  return (
+    <div style={{ padding: '4px 2px' }}>
+      <Row gutter={16}>
+        {/* Notes */}
+        <Col xs={24} lg={12}>
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+            <ProfileOutlined style={{ color: REDWOOD.primary, marginRight: 6 }} />
+            <Text strong>Order Notes</Text>
+            <Tag style={{ marginLeft: 8 }}>{notes.length}</Tag>
+            <Space style={{ marginLeft: 'auto' }}>
+              <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => setNoteEdit({ text: '', visibility: 'INTERNAL' })}>New Note</Button>
+              <Button size="small" icon={<ReloadOutlined />} loading={notesLoading} onClick={loadNotes} />
+            </Space>
+          </div>
+          {notes.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No notes" />
+            : notes.map((n, i) => (
+              <div key={i} style={{ border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+                  <Tag color={pf(n, ['VisibilityCode']) === 'EXTERNAL' ? 'blue' : 'default'} style={{ fontSize: 10 }}>{pf(n, ['VisibilityCode']) ?? 'INTERNAL'}</Tag>
+                  <Text type="secondary" style={{ fontSize: 11 }}>{pf(n, ['NoteTypeCode']) ?? 'GENERAL'}{pf(n, ['CreationDate']) ? ` · ${String(pf(n, ['CreationDate'])).slice(0, 10)}` : ''}</Text>
+                  <Space size={0} style={{ marginLeft: 'auto' }}>
+                    <Button size="small" type="text" icon={<EditOutlined />} style={{ color: REDWOOD.info }} onClick={() => setNoteEdit({ href: selfHref(n), text: pf(n, ['NoteTxt']) ?? '', visibility: pf(n, ['VisibilityCode']) ?? 'INTERNAL' })} />
+                    <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => delNote(n)} />
+                  </Space>
+                </div>
+                <Text style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{pf(n, ['NoteTxt']) ?? '—'}</Text>
+              </div>
+            ))}
+        </Col>
+
+        {/* Attachments */}
+        <Col xs={24} lg={12}>
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+            <PaperClipOutlined style={{ color: REDWOOD.primary, marginRight: 6 }} />
+            <Text strong>Attachments</Text>
+            <Tag style={{ marginLeft: 8 }}>{atts.length}</Tag>
+            <Space style={{ marginLeft: 'auto' }}>
+              <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => setAttAdd({ type: 'FILE', title: '' })}>Add</Button>
+              <Button size="small" icon={<ReloadOutlined />} loading={attLoading} onClick={loadAtts} />
+            </Space>
+          </div>
+          {atts.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No attachments" />
+            : atts.map((a, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
+                <span style={{ fontSize: 18, marginRight: 10 }}>{attIcon(a)}</span>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div><Text strong style={{ fontSize: 12 }} ellipsis>{pf(a, ['Title', 'FileName', 'UploadedFileName']) ?? '—'}</Text></div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>{pf(a, ['DatatypeCode'])}{pf(a, ['FileName']) && pf(a, ['DatatypeCode']) === 'FILE' ? ` · ${pf(a, ['FileName'])}` : ''}</Text>
+                </div>
+                <Space size={0}>
+                  <Tooltip title={pf(a, ['DatatypeCode']) === 'WEB_PAGE' ? 'Open link' : 'Preview / download'}><Button size="small" type="text" icon={<EyeOutlined />} style={{ color: REDWOOD.info }} onClick={() => openPreview(a)} /></Tooltip>
+                  <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => delAtt(a)} />
+                </Space>
+              </div>
+            ))}
+        </Col>
+      </Row>
+
+      {/* Note editor */}
+      <Modal open={!!noteEdit} onCancel={() => !noteBusy && setNoteEdit(null)} width={520}
+        title={<Space><ProfileOutlined style={{ color: REDWOOD.primary }} />{noteEdit?.href ? 'Edit Note' : 'New Note'}</Space>}
+        footer={<Space><Button onClick={() => setNoteEdit(null)} disabled={noteBusy}>Cancel</Button><Button type="primary" loading={noteBusy} icon={<SaveOutlined />} onClick={saveNote} disabled={!noteEdit?.text?.trim()}>Save</Button></Space>}>
+        {noteEdit && <div>
+          <div style={{ marginBottom: 6, fontSize: 12, color: REDWOOD.neutral600 }}>Visibility</div>
+          <Select style={{ width: 200, marginBottom: 12 }} value={noteEdit.visibility} onChange={v => setNoteEdit({ ...noteEdit, visibility: v })}
+            options={[{ value: 'INTERNAL', label: 'Internal' }, { value: 'EXTERNAL', label: 'External' }]} />
+          <div style={{ marginBottom: 6, fontSize: 12, color: REDWOOD.neutral600 }}>Note text</div>
+          <Input.TextArea rows={5} value={noteEdit.text} onChange={e => setNoteEdit({ ...noteEdit, text: e.target.value })} placeholder="Type the note…" />
+        </div>}
+      </Modal>
+
+      {/* Attachment add */}
+      <Modal open={!!attAdd} onCancel={() => !attBusy && setAttAdd(null)} width={520}
+        title={<Space><PaperClipOutlined style={{ color: REDWOOD.primary }} />Add Attachment</Space>}
+        footer={<Space><Button onClick={() => setAttAdd(null)} disabled={attBusy}>Cancel</Button><Button type="primary" loading={attBusy} icon={<CloudUploadOutlined />} onClick={saveAtt}>Add</Button></Space>}>
+        {attAdd && <div>
+          <Segmented block value={attAdd.type} onChange={(v: any) => setAttAdd({ ...attAdd, type: v })}
+            options={[{ value: 'FILE', label: 'File', icon: <FileOutlined /> }, { value: 'TEXT', label: 'Text', icon: <FileTextOutlined /> }, { value: 'WEB_PAGE', label: 'URL', icon: <LinkOutlined /> }]} style={{ marginBottom: 14 }} />
+          <div style={{ marginBottom: 6, fontSize: 12, color: REDWOOD.neutral600 }}>Title</div>
+          <Input value={attAdd.title} onChange={e => setAttAdd({ ...attAdd, title: e.target.value })} placeholder="Display title" style={{ marginBottom: 12 }} />
+          {attAdd.type === 'FILE' && (
+            <Upload.Dragger beforeUpload={(f) => { setAttAdd({ ...attAdd, file: f, title: attAdd.title || f.name }); return false; }} maxCount={1} onRemove={() => setAttAdd({ ...attAdd, file: undefined })}
+              fileList={attAdd.file ? [{ uid: '1', name: attAdd.file.name } as any] : []}>
+              <p style={{ margin: 0 }}><InboxOutlined style={{ fontSize: 28, color: REDWOOD.primary }} /></p>
+              <p style={{ margin: '6px 0 0', fontSize: 12 }}>Click or drag a file to upload</p>
+            </Upload.Dragger>
+          )}
+          {attAdd.type === 'TEXT' && <Input.TextArea rows={5} value={attAdd.text} onChange={e => setAttAdd({ ...attAdd, text: e.target.value })} placeholder="Text content" />}
+          {attAdd.type === 'WEB_PAGE' && <Input value={attAdd.url} onChange={e => setAttAdd({ ...attAdd, url: e.target.value })} placeholder="https://…" prefix={<LinkOutlined />} />}
+        </div>}
+      </Modal>
+
+      {/* Preview */}
+      <Modal open={!!preview} onCancel={() => { if (preview?.src) URL.revokeObjectURL(preview.src); setPreview(null); }} width={preview?.kind === 'pdf' ? 900 : 680} style={{ top: 20 }}
+        title={<Space><EyeOutlined style={{ color: REDWOOD.primary }} />{preview?.title}</Space>}
+        footer={<Button onClick={() => { if (preview?.src) URL.revokeObjectURL(preview.src); setPreview(null); }}>Close</Button>}>
+        {preview?.kind === 'image' && <img src={preview.src} alt={preview.title} style={{ maxWidth: '100%', display: 'block', margin: '0 auto' }} />}
+        {preview?.kind === 'pdf' && <iframe title={preview.title} src={preview.src} style={{ width: '100%', height: '70vh', border: 0 }} />}
+        {preview?.kind === 'text' && <div style={{ whiteSpace: 'pre-wrap', fontSize: 13, maxHeight: '60vh', overflow: 'auto' }}>{preview.text || '— empty —'}</div>}
+      </Modal>
+    </div>
+  );
+};
+
 const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editOrder?: any; returnMode?: boolean }> = ({ header, initialDraft, editOrder, returnMode }) => {
   const editMode = !!editOrder;
   const [form] = Form.useForm();
@@ -2944,7 +3275,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const orgRows = useInvOrgs();
   const customers = useCustomers();
   const payTermOpts = useOrdsOptions(PAYMENT_TERMS_URL, PAY_TERM_KEYS, PAYMENT_TERMS);
-  const salesRepOpts = useOrdsOptions(SALESREPS_URL, SALESREP_KEYS);
+  const salesRepOpts = useSalesReps();
   const custOptions = useMemo(() => custOptionList(customers), [customers]);
   const taxCodes = useTaxCodes(hdr.businessUnit);
   const taxOptions = useMemo(() => taxCodes.map(t => ({ value: t.code, label: `${t.code} (${t.pct}%)`, pct: t.pct })), [taxCodes]);
@@ -3533,7 +3864,17 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         ...(hdr.partyId != null ? { PartyId: String(hdr.partyId) } : {}),
         ...(hdr.shipToSite != null ? { SiteId: numOrStr(hdr.shipToSite) } : {}),
       }],
-      ...(hdr.salesRep ? { salesCredits: [{ SourceTransactionSalesCreditIdentifier: orderSeq, Salesperson: hdr.salesRep, Percent: '100', SalesCreditTypeId: '1' }] } : {}),
+      // Sales credit — only when a rep is chosen. Send a numeric SalespersonId when
+      // we can resolve it (name-only credits get dropped during import if ambiguous),
+      // a stable identifier so a change-order revision UPDATES rather than duplicates,
+      // and numeric Percent / quota credit type (1 = Quota Sales Credit).
+      ...(hdr.salesRep ? { salesCredits: [{
+        SourceTransactionSalesCreditIdentifier: `SC-${srcNumber}-1`,
+        ...(salesRepOpts.find(o => o.value === hdr.salesRep)?.id != null ? { SalespersonId: salesRepOpts.find(o => o.value === hdr.salesRep)!.id } : {}),
+        Salesperson: hdr.salesRep,
+        SalesCreditTypeId: 1,
+        Percent: 100,
+      }] } : {}),
       lines: lines.map((l, i) => (editMode && l.canceled) ? buildCancelLine(l, i) : buildFullLine(l, i)),
     };
   };
@@ -4373,6 +4714,15 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               ...(editMode && rawLines.length && billingChildName ? [{
                 key: 'billing', label: <Space size={6}><ProfileOutlined />Billing</Space>,
                 children: <MergedLineChildTab lines={rawLines} name={billingChildName} />,
+              }] : []),
+              // Edit mode: Sales Credits + Notes & Attachments (order-level children).
+              ...(editMode && (editOrder?.OrderKey ?? editOrder?.HeaderId) != null ? [{
+                key: 'salesCredits', label: <Space size={6}><TagsOutlined />Sales Credits</Space>,
+                children: <SalesCreditsPanel orderKey={String(editOrder?.OrderKey ?? editOrder?.HeaderId)} salesRepOpts={salesRepOpts} ccy={ccy} />,
+              }] : []),
+              ...((editMode ? (editOrder?.OrderKey ?? editOrder?.HeaderId) : createdOrderKey) != null ? [{
+                key: 'notesAtt', label: <Space size={6}><PaperClipOutlined />Notes &amp; Attachments</Space>,
+                children: <NotesAttachmentsPanel orderKey={String(editMode ? (editOrder?.OrderKey ?? editOrder?.HeaderId) : createdOrderKey)} />,
               }] : []),
             ]} />}
       </Card>
