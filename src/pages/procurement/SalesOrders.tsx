@@ -2272,48 +2272,82 @@ const ItemCostSearch: React.FC<{ org?: string; subinv?: string; taxOptions?: { v
   );
 };
 
-// From Price List — bulk item search that stages items with an editable price.
+// From Price List — list Fusion price lists (priceLists), load the chosen list's
+// items with their BasePrice (priceLists/{id}/child/items?expand=charges), then
+// select items + qty and stage them for the order.
+const plItemNumber = (it: any) => pf(it, ['Item', 'ItemNumber', 'ProductNumber']);
+const plBasePrice = (it: any) => {
+  const charges: any[] = it.charges ?? it.Charges ?? [];
+  const withPrice = charges.find(c => pf(c, ['BasePrice', 'CalculationAmount', 'ListPrice']) != null) ?? charges[0];
+  return num(pf(withPrice ?? {}, ['BasePrice', 'CalculationAmount', 'ListPrice']));
+};
 const PriceListPanel: React.FC<{ org?: string; ccy?: string; onAdd: (items: any[]) => void }> = ({ org, ccy, onAdd }) => {
-  const [byDesc, setByDesc] = useState(false);
-  const [term, setTerm] = useState('');
-  const [found, setFound] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [priceLists, setPriceLists] = useState<any[]>([]);
+  const [plLoading, setPlLoading] = useState(false);
+  const [plId, setPlId] = useState<string | undefined>();
+  const [items, setItems] = useState<any[]>([]);
+  const [itemsLoading, setItemsLoading] = useState(false);
+  const [filter, setFilter] = useState('');
   const [sel, setSel] = useState<React.Key[]>([]);
+  const [qtys, setQtys] = useState<Record<string, number>>({});
   const [rows, setRows] = useState<ImpRow[] | null>(null);
-  const search = async () => {
-    const t = term.trim(); if (!t) { message.warning('Enter a search term'); return; }
-    setLoading(true);
+  useEffect(() => {
+    setPlLoading(true);
+    fetch(`${FUSION_BASE}/priceLists?onlyData=true&limit=500`, { headers: FUSION_HDRS })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(d => setPriceLists(d.items ?? []))
+      .catch(e => message.error(`Price lists: ${e.message}`))
+      .finally(() => setPlLoading(false));
+  }, []);
+  const pl = priceLists.find(p => String(pf(p, ['PriceListId'])) === plId);
+  const plCcy = pf(pl ?? {}, ['CurrencyCode', 'Currency']) ?? ccy;
+  const loadItems = async (id: string) => {
+    setItemsLoading(true); setItems([]); setSel([]); setQtys({});
     try {
-      const field = byDesc ? 'ItemDescription' : 'ItemNumber';
-      const pattern = byDesc ? `%${t}%` : `${t}%`;
-      let q = `${field} LIKE '${pattern}'`; if (org) q += `;OrganizationCode=${org}`;
-      const items = await fetchAllPages(`${FUSION_BASE}/itemsV2?q=${encodeURIComponent(q)}&limit=200&onlyData=true`);
-      setFound(items); setSel([]);
-      if (!items.length) message.info('No items found');
-    } catch (e: any) { message.error(e.message); }
-    finally { setLoading(false); }
+      const all: any[] = []; let offset = 0;
+      for (let i = 0; i < 15; i++) {
+        const r = await fetch(`${FUSION_BASE}/priceLists/${encodeURIComponent(id)}/child/items?expand=charges&onlyData=true&limit=100&offset=${offset}`, { headers: FUSION_HDRS });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = await r.json(); all.push(...(d.items ?? []));
+        if (!d.hasMore) break; offset += 100;
+      }
+      setItems(all);
+      if (!all.length) message.info('This price list has no items');
+      else if (all.length >= 1500) message.info('Showing the first 1500 items — use the filter');
+    } catch (e: any) { message.error(`Items: ${e.message}`); }
+    finally { setItemsLoading(false); }
   };
-  if (rows) return <StagedPreview rows={rows} org={org} ccy={ccy} onAdd={onAdd} onReset={() => setRows(null)} />;
+  const onPickList = (id: string) => { setPlId(id); setRows(null); if (id) loadItems(id); };
+  const setQty = (item: string, v: number) => { setQtys(q => ({ ...q, [item]: v })); if (v > 0) setSel(s => s.includes(item) ? s : [...s, item]); };
+  const filtered = useMemo(() => {
+    const f = filter.trim().toLowerCase(); if (!f) return items;
+    return items.filter(it => String(plItemNumber(it) ?? '').toLowerCase().includes(f) || String(pf(it, ['Description', 'ItemDescription']) ?? '').toLowerCase().includes(f));
+  }, [items, filter]);
+  if (rows) return <StagedPreview rows={rows} org={org} ccy={plCcy} onAdd={onAdd} onReset={() => setRows(null)} />;
   const cols: ColumnsType<any> = [
-    { title: 'Item', dataIndex: 'ItemNumber', width: 160, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text> },
-    { title: 'Description', dataIndex: 'ItemDescription', ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
-    { title: 'List Price', width: 110, align: 'right', render: (_, r) => { const p = num(pf(r, ['ListPrice', 'SalesPrice', 'UnitPrice', 'ItemPrice'])); return p ? <Text strong style={{ color: REDWOOD.primary }}>{fmtAmount(p, ccy)}</Text> : <Text type="secondary" style={{ fontSize: 11 }}>— enter —</Text>; } },
+    { title: 'Item', width: 170, render: (_, r) => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{plItemNumber(r) ?? '—'}</Text> },
+    { title: 'Description', ellipsis: true, render: (_, r) => <Text style={{ fontSize: 12 }}>{pf(r, ['Description', 'ItemDescription']) ?? '—'}</Text> },
+    { title: 'Line Type', width: 90, render: (_, r) => { const t = pf(r, ['LineType']); return t ? <Tag style={{ fontSize: 10 }}>{t}</Tag> : '—'; } },
+    { title: 'List Price', width: 120, align: 'right', render: (_, r) => { const p = plBasePrice(r); return p ? <Text strong style={{ color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(p, plCcy)}</Text> : <Text type="secondary" style={{ fontSize: 11 }}>—</Text>; } },
+    { title: 'Order Qty', width: 100, render: (_, r) => { const it = plItemNumber(r); return <InputNumber size="small" min={0} value={qtys[it] ?? 0} onChange={v => setQty(it, Number(v) || 0)} style={{ width: 84 }} />; } },
   ];
   return (
     <div>
-      <Space.Compact style={{ width: '100%', marginBottom: 10 }}>
-        <Select value={byDesc ? 'desc' : 'num'} style={{ width: 130 }} onChange={v => setByDesc(v === 'desc')}
-          options={[{ value: 'num', label: 'Item Number' }, { value: 'desc', label: 'Description' }]} />
-        <Input placeholder={byDesc ? 'e.g. TONER' : 'e.g. SM-A057'} value={term} onChange={e => setTerm(e.target.value)} onPressEnter={search} allowClear />
-        <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={search} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Search</Button>
-      </Space.Compact>
-      <Table size="small" columns={cols} dataSource={found} rowKey="ItemNumber" loading={loading}
-        rowSelection={{ selectedRowKeys: sel, onChange: setSel }} pagination={found.length > 15 ? { pageSize: 15 } : false} scroll={{ y: 340 }}
-        locale={{ emptyText: 'Search items to add from the price list' }} />
+      <Space wrap style={{ marginBottom: 10 }}>
+        <Select showSearch style={{ width: 340 }} loading={plLoading} placeholder="Select a price list" optionFilterProp="label"
+          value={plId} onChange={onPickList}
+          options={priceLists.map(p => ({ value: String(pf(p, ['PriceListId'])), label: `${pf(p, ['Name', 'PriceListName']) ?? pf(p, ['PriceListId'])}${pf(p, ['CurrencyCode', 'Currency']) ? ` — ${pf(p, ['CurrencyCode', 'Currency'])}` : ''}${pf(p, ['StatusCode', 'Status']) ? ` · ${pf(p, ['StatusCode', 'Status'])}` : ''}` }))}
+          notFoundContent={plLoading ? <Spin size="small" /> : 'No price lists'} />
+        {pl && <Input allowClear placeholder="Filter items…" prefix={<SearchOutlined />} style={{ width: 220 }} value={filter} onChange={e => setFilter(e.target.value)} />}
+        {plCcy && pl && <Tag color="blue">{plCcy}</Tag>}
+      </Space>
+      <Table size="small" columns={cols} dataSource={filtered} rowKey={r => String(plItemNumber(r))} loading={itemsLoading}
+        rowSelection={{ selectedRowKeys: sel, onChange: setSel }} pagination={filtered.length > 20 ? { pageSize: 20, size: 'small' } : false} scroll={{ y: 330 }}
+        locale={{ emptyText: plId ? 'No items' : 'Select a price list to see its items' }} />
       <div style={{ marginTop: 10, display: 'flex', alignItems: 'center' }}>
-        <Text type="secondary" style={{ fontSize: 12 }}>{sel.length} selected</Text>
+        <Text type="secondary" style={{ fontSize: 12 }}>{sel.length} selected · {items.length} item(s) in list</Text>
         <Button type="primary" disabled={!sel.length} icon={<ImportOutlined />} style={{ marginLeft: 'auto', background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-          onClick={() => setRows(found.filter(r => sel.includes(r.ItemNumber)).map(r => ({ key: impKey(), itemNumber: r.ItemNumber, description: r.ItemDescription, uom: pf(r, ['PrimaryUOMValue', 'PrimaryUOMCode', 'UOMCode']), qty: 1, price: num(pf(r, ['ListPrice', 'SalesPrice', 'UnitPrice', 'ItemPrice'])), valid: true })))}>Stage {sel.length || ''} for preview</Button>
+          onClick={() => setRows(items.filter(r => sel.includes(String(plItemNumber(r)))).map(r => { const item = String(plItemNumber(r)); return { key: impKey(), itemNumber: item, description: pf(r, ['Description', 'ItemDescription']), qty: qtys[item] || 1, price: plBasePrice(r), valid: true }; }))}>Stage {sel.length || ''} for preview</Button>
       </div>
     </div>
   );
