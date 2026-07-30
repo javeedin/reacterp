@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   Layout, Breadcrumb, Card, Table, Form, Input, Select, DatePicker, Button,
-  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty, Tabs, InputNumber, Upload, Checkbox, Dropdown, Steps,
+  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty, Tabs, InputNumber, Upload, Checkbox, Dropdown, Steps, Collapse,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -828,8 +828,7 @@ const AutoInvoiceModal: React.FC<{ orderNo?: string; buId?: string | number; ope
     const v = AI_PARAM_LABELS.map(() => '');
     v[AI_IX.workers] = '1';                                    // Number of Workers
     if (buId != null && String(buId).trim()) v[AI_IX.bu] = String(buId);  // Business Unit id
-    // Transaction Source is the numeric batch-source id (e.g. 5 = Distributed
-    // Order Orchestration) — left blank so it's set explicitly per pod.
+    v[AI_IX.source] = '5';                                     // Transaction Source (5 = Distributed Order Orchestration)
     v[AI_IX.date] = new Date().toISOString().slice(0, 10);    // Default Date (YYYY-MM-DD)
     v[AI_IX.soFrom] = String(orderNo ?? '');                  // From Sales Order Number (arg 16)
     v[AI_IX.soTo] = String(orderNo ?? '');                    // To Sales Order Number (arg 17)
@@ -880,36 +879,50 @@ const AutoInvoiceModal: React.FC<{ orderNo?: string; buId?: string | number; ope
         <Button type="primary" icon={<SendOutlined />} loading={submitting} onClick={submit}
           style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Submit AutoInvoice</Button>
       </Space>}>
-      <div style={{ fontSize: 12, marginBottom: 8 }}>
-        <Tag color="green">POST</Tag><Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info, wordBreak: 'break-all' }}>{ERP_INT_URL}</Text>
-        <div style={{ marginTop: 4 }}><Text type="secondary" style={{ fontSize: 11.5 }}>OperationName <b>submitESSJobRequest</b> · job <b>{jobDef}</b>. The order is filtered via From/To Sales Order Number.</Text></div>
+      {/* Status — the main thing to watch after submit */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 8, marginBottom: 12 }}>
+        <DollarOutlined style={{ color: REDWOOD.primary }} />
+        {reqId
+          ? <Space size={8}><Text style={{ fontSize: 13 }}>Request</Text><Text code>{reqId}</Text><Text style={{ fontSize: 13 }}>status</Text>{stTag(status || '—')}
+              <Button size="small" icon={<ReloadOutlined />} onClick={() => pollStatus(reqId)}>Refresh</Button></Space>
+          : <Text type="secondary" style={{ fontSize: 12.5 }}>Submit AutoInvoice to push order <b>{orderNo}</b> into Receivables. Filtered by sales-order number; source id <b>{vals[AI_IX.source] || '5'}</b>.</Text>}
       </div>
-      <Row gutter={[8, 6]}>
-        <Col span={12}><Text style={{ fontSize: 11 }}>Job Package</Text><Input size="small" value={jobPackage} onChange={e => setJobPackage(e.target.value)} /></Col>
-        <Col span={12}><Text style={{ fontSize: 11 }}>Job Definition</Text><Input size="small" value={jobDef} onChange={e => setJobDef(e.target.value)} /></Col>
-      </Row>
-      <div style={{ fontSize: 11, color: REDWOOD.neutral500, margin: '10px 0 4px' }}>Parameters (blank → #NULL). 26 positional args. <b>Transaction Source</b> = the numeric batch-source id (e.g. <b>5</b> = Distributed Order Orchestration); <b>Business Unit</b> = its id (blank = all).</div>
-      <div style={{ maxHeight: 260, overflow: 'auto', border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, padding: 8 }}>
-        <Row gutter={[8, 6]}>
-          {AI_PARAM_LABELS.map((lbl, i) => {
-            const key = i === AI_IX.soFrom || i === AI_IX.soTo;
-            const req = i === AI_IX.workers || i === AI_IX.source || i === AI_IX.date || i === AI_IX.baseDue;
-            return <Col span={12} key={i}>
-              <Text style={{ fontSize: 10.5, color: key ? REDWOOD.primary : undefined, fontWeight: key ? 700 : 400 }}>{i + 1}. {lbl}{req ? ' *' : ''}</Text>
-              <Input size="small" value={vals[i] ?? ''} placeholder="#NULL" onChange={e => setVal(i, e.target.value)}
-                style={key ? { borderColor: REDWOOD.primary } : undefined} />
-            </Col>;
-          })}
-        </Row>
-      </div>
-      <div style={{ marginTop: 8 }}>
-        <Text style={{ fontSize: 11, color: REDWOOD.neutral500 }}>ESSParameters</Text>
-        <pre style={{ margin: '2px 0 0', fontSize: 10.5, background: REDWOOD.neutral100, borderRadius: 6, padding: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{essParams}</pre>
-      </div>
-      {(reqId || resp) && <div style={{ marginTop: 8 }}>
-        {reqId && <div style={{ marginBottom: 4 }}><Text style={{ fontSize: 12 }}>Request <Text code>{reqId}</Text> — status {stTag(status || '—')}</Text></div>}
-        {resp && <pre style={{ margin: 0, fontSize: 10.5, background: '#0b0b0b', color: '#d6f5d6', borderRadius: 6, padding: 8, maxHeight: 140, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{resp}</pre>}
-      </div>}
+
+      {/* Everything else — collapsed by default */}
+      <Collapse ghost size="small" items={[{
+        key: 'req', label: <Text style={{ fontSize: 12 }}>Request details &amp; parameters ({AI_PARAM_LABELS.length} args) · edit if needed</Text>,
+        children: (
+          <div>
+            <div style={{ fontSize: 12, marginBottom: 8 }}>
+              <Tag color="green">POST</Tag><Text style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.info, wordBreak: 'break-all' }}>{ERP_INT_URL}</Text>
+              <div style={{ marginTop: 4 }}><Text type="secondary" style={{ fontSize: 11.5 }}>OperationName <b>submitESSJobRequest</b> · job <b>{jobDef}</b>.</Text></div>
+            </div>
+            <Row gutter={[8, 6]}>
+              <Col span={12}><Text style={{ fontSize: 11 }}>Job Package</Text><Input size="small" value={jobPackage} onChange={e => setJobPackage(e.target.value)} /></Col>
+              <Col span={12}><Text style={{ fontSize: 11 }}>Job Definition</Text><Input size="small" value={jobDef} onChange={e => setJobDef(e.target.value)} /></Col>
+            </Row>
+            <div style={{ fontSize: 11, color: REDWOOD.neutral500, margin: '10px 0 4px' }}>Parameters (blank → #NULL). 26 positional args. <b>Transaction Source</b> = batch-source id (5 = DOO); <b>Business Unit</b> = its id (blank = all).</div>
+            <div style={{ maxHeight: 240, overflow: 'auto', border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, padding: 8 }}>
+              <Row gutter={[8, 6]}>
+                {AI_PARAM_LABELS.map((lbl, i) => {
+                  const key = i === AI_IX.soFrom || i === AI_IX.soTo;
+                  const req = i === AI_IX.workers || i === AI_IX.source || i === AI_IX.date || i === AI_IX.baseDue;
+                  return <Col span={12} key={i}>
+                    <Text style={{ fontSize: 10.5, color: key ? REDWOOD.primary : undefined, fontWeight: key ? 700 : 400 }}>{i + 1}. {lbl}{req ? ' *' : ''}</Text>
+                    <Input size="small" value={vals[i] ?? ''} placeholder="#NULL" onChange={e => setVal(i, e.target.value)}
+                      style={key ? { borderColor: REDWOOD.primary } : undefined} />
+                  </Col>;
+                })}
+              </Row>
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <Text style={{ fontSize: 11, color: REDWOOD.neutral500 }}>ESSParameters</Text>
+              <pre style={{ margin: '2px 0 0', fontSize: 10.5, background: REDWOOD.neutral100, borderRadius: 6, padding: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{essParams}</pre>
+            </div>
+            {resp && <pre style={{ marginTop: 8, fontSize: 10.5, background: '#0b0b0b', color: '#d6f5d6', borderRadius: 6, padding: 8, maxHeight: 160, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{resp}</pre>}
+          </div>
+        ),
+      }]} />
     </Modal>
   );
 };
@@ -929,7 +942,9 @@ const OrderView: React.FC<{ order: any; onCopy?: (order: any, lines: any[]) => v
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const [resvOpen, setResvOpen] = useState(false);
   const [resvCount, setResvCount] = useState<number | null>(null);
+  const [arOpen, setArOpen] = useState(false);
   const orderNo = String(order.OrderNumber ?? order.SourceTransactionNumber ?? '');
+  const sourceNo = String(order.SourceTransactionNumber ?? order.OrderNumber ?? '');  // AutoInvoice filters by source order number
   useEffect(() => { if (orderNo) fetchReservations(orderNo).then(l => setResvCount(l.length)); }, [orderNo]);
   const totals = useTotals(order, true);
   const lineKey = (r: any, i: number) => `${r.LineId ?? r.FulfillLineId ?? i}`;
@@ -1151,6 +1166,11 @@ const OrderView: React.FC<{ order: any; onCopy?: (order: any, lines: any[]) => v
               Reservations{resvCount ? ` (${resvCount})` : ''}
             </Button>
           </Tooltip>
+          {lines.some(l => /awaiting\s*billing/i.test(`${pf(l, ['DisplayStatus', 'Status', 'FulfillLineStatus']) ?? ''} ${pf(l, ['StatusCode']) ?? ''}`)) &&
+            <Tooltip title="Line(s) awaiting billing — run Import AutoInvoice to push to AR">
+              <Button size="small" icon={<DollarOutlined />} onClick={() => setArOpen(true)}
+                style={{ color: REDWOOD.primary, borderColor: REDWOOD.primary, fontWeight: 600 }}>Push to AR</Button>
+            </Tooltip>}
           <Button size="small" icon={<ProfileOutlined />} onClick={() => setHdrOpen(true)}>All fields</Button>
         </Space>}>
         <Row gutter={[16, 12]}>
@@ -1264,6 +1284,7 @@ const OrderView: React.FC<{ order: any; onCopy?: (order: any, lines: any[]) => v
       <AllFieldsModal title={`Line ${lineDetail?.DisplayLineNumber ?? ''} — ${lineDetail?.ProductNumber ?? ''}`} row={lineDetail} onClose={() => setLineDetail(null)} />
       <ARInvoiceDialog txn={arTxn} onClose={() => setArTxn(null)} />
       <ReservationsView orderNo={orderNo} open={resvOpen} onClose={() => setResvOpen(false)} />
+      <AutoInvoiceModal orderNo={sourceNo} buId={order.BusinessUnitId} open={arOpen} onClose={() => setArOpen(false)} />
     </div>
   );
 };
@@ -2941,6 +2962,21 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [autoShipOpen, setAutoShipOpen] = useState(false);
   const [autoInvoiceOpen, setAutoInvoiceOpen] = useState(false);
   const jsonInputRef = useRef<HTMLInputElement>(null);
+  // Edit mode: the raw Fusion order lines (with child links) for the Billing /
+  // Actual Costing tabs (the grid uses a simplified NewLine shape).
+  const [rawLines, setRawLines] = useState<any[]>([]);
+  useEffect(() => {
+    if (!editMode) return;
+    const key = editOrder?.OrderKey ?? editOrder?.HeaderId;
+    if (key == null) return;
+    fetchAllPages(`${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(String(key))}/child/lines`)
+      .then(setRawLines).catch(() => setRawLines([]));
+  }, [editMode, editOrder]);
+  const billingChildName = useMemo(() => {
+    const names = new Set<string>();
+    rawLines.forEach(l => (l.links ?? []).forEach((x: any) => { if (x.rel === 'child' && x.name) names.add(x.name); }));
+    return Array.from(names).find(n => ['linedetails', 'linedetail'].includes(norm(n)));
+  }, [rawLines]);
   // Current order status — reservations are only allowed while it's still a draft.
   const [orderStatus, setOrderStatus] = useState<string>(String(editOrder?.StatusCode ?? ''));
   // Confirm pre-check — existing reservations shown before submitting the order.
@@ -4036,6 +4072,15 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                       { title: 'linesUniqID (PATCH key)', dataIndex: 'linesUniqID', ellipsis: true, render: (v: any) => v ? <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v}</Text> : <Text type="secondary">—</Text> },
                     ]} />
                 </>,
+              }] : []),
+              // Edit mode: Actual Costing + Billing tabs from the live Fusion lines.
+              ...(editMode && rawLines.length ? [{
+                key: 'actualCosting', label: <Space size={6}><DollarOutlined />Actual Costing</Space>,
+                children: <ActualCostingTab lines={rawLines} currency={ccy} />,
+              }] : []),
+              ...(editMode && rawLines.length && billingChildName ? [{
+                key: 'billing', label: <Space size={6}><ProfileOutlined />Billing</Space>,
+                children: <MergedLineChildTab lines={rawLines} name={billingChildName} />,
               }] : []),
             ]} />}
       </Card>
