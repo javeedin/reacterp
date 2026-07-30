@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Layout, Card, Typography, Table, Button, Space, Tag, Breadcrumb, Tabs,
-  message, Input, Tooltip, Row, Col, Statistic, Modal, Alert, Select, Divider, Segmented,
+  message, Input, Tooltip, Row, Col, Statistic, Modal, Alert, Select, Divider, Segmented, Dropdown,
 } from 'antd';
 import {
   HomeOutlined, ReloadOutlined, ThunderboltOutlined, SearchOutlined,
   FileExcelOutlined, ApiOutlined, DollarOutlined,
-  TableOutlined, AuditOutlined, FileSearchOutlined,
+  TableOutlined, AuditOutlined, FileSearchOutlined, DownOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -249,8 +249,9 @@ const RevenueRecognition: React.FC = () => {
 
   useEffect(() => { loadContracts(); loadSchedules(); loadBusinessUnits(); }, []);
 
-  const openGenerate = () => {
+  const openGenerate = (mode: 'monthly' | 'daily' = 'monthly') => {
     if (selectedKeys.length === 0) { message.warning('Select one or more contracts'); return; }
+    setGenMode(mode);
     setGenStatus(null);
     setGenResponse('');
     setGenOpen(true);
@@ -814,12 +815,15 @@ const RevenueRecognition: React.FC = () => {
                         <Space>
                           <Button icon={<FileExcelOutlined />} style={{ color: REDWOOD.success, borderColor: REDWOOD.success }} onClick={exportContracts}>Excel</Button>
                           <Button icon={<ReloadOutlined />} onClick={loadContracts} loading={contractsLoading}>Refresh</Button>
-                          <Button type="primary" icon={<ThunderboltOutlined />}
+                          <Dropdown.Button type="primary" icon={<DownOutlined />}
                             disabled={selectedKeys.length === 0}
-                            style={selectedKeys.length > 0 ? { background: REDWOOD.primary, borderColor: REDWOOD.primary } : {}}
-                            onClick={openGenerate}>
-                            Generate Schedule ({selectedKeys.length})
-                          </Button>
+                            onClick={() => openGenerate('monthly')}
+                            menu={{ items: [
+                              { key: 'monthly', icon: <ThunderboltOutlined />, label: 'Generate — Monthly (equal split)', onClick: () => openGenerate('monthly') },
+                              { key: 'daily', icon: <ThunderboltOutlined />, label: 'Generate — Daily (prorated)', onClick: () => openGenerate('daily') },
+                            ] }}>
+                            <ThunderboltOutlined /> Generate Schedule ({selectedKeys.length})
+                          </Dropdown.Button>
                         </Space>
                       </div>
                       <Table
