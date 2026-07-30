@@ -3223,48 +3223,65 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     if (m.taxPct != null) m.taxAmount = round2(num(m.qty) * num(m.unitPrice) * num(m.taxPct) / 100);
     return m;
   }));
-  // Remove an EXISTING line immediately (after confirmation): a DRAFT order line is
-  // hard-DELETEd; a processing order line is canceled via PATCH { CanceledFlag }.
-  const removeExistingLine = async (l: NewLine) => {
+  // The exact REST request used to remove a line: DELETE on a draft order line,
+  // PATCH { CanceledFlag } on a processing order line. Returned so the confirm
+  // dialog can show the full URL + payload before it runs.
+  const lineRemoveRequest = (l: NewLine) => {
     const orderKey = editOrder?.OrderKey ?? editOrder?.HeaderId;
     const href = l.lineHref ? fusionHref(l.lineHref)
       : (l.fulfillLineId != null ? `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(String(orderKey))}/child/lines/${l.fulfillLineId}` : '');
-    if (!href) { message.error('No line id available to remove'); return; }
     const draft = isDraftStatus;
+    return { href, draft, method: draft ? 'DELETE' : 'PATCH', body: draft ? undefined : { CanceledFlag: true, CancelReasonCode: 'CUSTOMER_REQUEST' } };
+  };
+
+  // Remove an EXISTING line immediately (after confirmation).
+  const removeExistingLine = async (l: NewLine) => {
+    const { href, draft, method, body } = lineRemoveRequest(l);
+    if (!href) { message.error('No line id available to remove'); return; }
     try {
-      const init: RequestInit = draft
-        ? { method: 'DELETE', headers: { ...FUSION_HDRS } }
-        : { method: 'PATCH', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify({ CanceledFlag: true, CancelReasonCode: 'CUSTOMER_REQUEST' }) };
+      const init: RequestInit = body
+        ? { method, headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+        : { method, headers: { ...FUSION_HDRS } };
       const r = await fetch(href, init);
       const text = await r.text(); let data: any = null, pretty = text;
       try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* raw */ }
-      setLastResponse(`${draft ? 'DELETE' : 'PATCH'} ${href}\nHTTP ${r.status}\n\n${pretty}`);
+      setLastResponse(`${method} ${href}\n${body ? JSON.stringify(body) + '\n' : ''}HTTP ${r.status}\n\n${pretty}`);
       if (r.ok) {
         if (draft) { setLines(prev => prev.filter(x => x.key !== l.key)); message.success(`Line ${l.itemNumber} deleted`); }
         else { upd(l.key, { canceled: true, cancelSaved: true, status: 'Canceled', statusCode: data?.StatusCode, error: undefined }); message.success(`Line ${l.itemNumber} canceled`); }
       } else {
         const msgs = collectOrderErrors(data, text, true);
-        upd(l.key, { error: (msgs.length ? msgs : [`HTTP ${r.status}`]).join('\n\n') });
+        upd(l.key, { error: [`${method} ${href}`, `HTTP ${r.status}`, ...(msgs.length ? msgs : [])].join('\n\n') });
         message.error(`${draft ? 'Delete' : 'Cancel'} failed — see the red ✗ / Errors tab`);
       }
-    } catch (e: any) { upd(l.key, { error: e?.message }); message.error(e?.message || 'Request failed'); }
+    } catch (e: any) { upd(l.key, { error: [`${method} ${href}`, e?.message].filter(Boolean).join('\n\n') }); message.error(e?.message || 'Request failed'); }
   };
 
-  // Trash-icon handler: confirm first, then run the related web service. Unsaved
-  // (new / create-mode) lines are just dropped locally after the confirm.
+  // Trash-icon handler: confirm first (showing the exact URL + payload), then run
+  // the web service. Unsaved (new / create-mode) lines just drop locally.
   const confirmRemoveLine = (l: NewLine) => {
     if (!editMode || !l.existing) {
       Modal.confirm({ title: 'Remove this line?', content: `${l.itemNumber || 'This line'} will be removed from the order.`, okText: 'Remove', okButtonProps: { danger: true }, onOk: () => setLines(prev => prev.filter(x => x.key !== l.key)) });
       return;
     }
-    const draft = isDraftStatus;
+    const { href, draft, method, body } = lineRemoveRequest(l);
     Modal.confirm({
       title: draft ? 'Delete this line?' : 'Cancel this line?',
-      width: 480,
-      content: draft
-        ? <span>Line <b>{l.itemNumber}</b> will be <b>permanently deleted</b> from the order (<Text code style={{ fontSize: 11 }}>DELETE …/child/lines/{'{id}'}</Text>). This can’t be undone.</span>
-        : <span>Line <b>{l.itemNumber}</b> will be canceled (<Text code style={{ fontSize: 11 }}>PATCH …/child/lines/{'{id}'} {'{ CanceledFlag: true }'}</Text>). It stays on the order as a canceled line.</span>,
-      okText: draft ? 'Delete line' : 'Cancel line', okButtonProps: { danger: true }, cancelText: 'Keep',
+      width: 640, icon: <ApiOutlined style={{ color: draft ? REDWOOD.error : REDWOOD.primary }} />,
+      content: (
+        <div>
+          <div style={{ marginBottom: 10 }}>
+            {draft
+              ? <span>Line <b>{l.itemNumber}</b> will be <b>permanently deleted</b>. This can’t be undone.</span>
+              : <span>Line <b>{l.itemNumber}</b> will be canceled and stays on the order as a canceled line.</span>}
+          </div>
+          <div style={{ fontSize: 11, fontFamily: 'monospace', wordBreak: 'break-all', background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, padding: '8px 10px' }}>
+            <div><b style={{ color: draft ? REDWOOD.error : REDWOOD.primary }}>{method}</b> {href || '(no line id available)'}</div>
+            {body && <div style={{ marginTop: 4 }}>{JSON.stringify(body)}</div>}
+          </div>
+        </div>
+      ),
+      okText: draft ? 'Delete line' : 'Cancel line', okButtonProps: { danger: true, disabled: !href }, cancelText: 'Keep',
       onOk: () => removeExistingLine(l),
     });
   };
