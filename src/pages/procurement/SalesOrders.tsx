@@ -3288,6 +3288,115 @@ const NotesAttachmentsPanel: React.FC<{ orderKey: string }> = ({ orderKey }) => 
   );
 };
 
+// ── Manual Charges dialog — add an extra charge (freight/handling/…) to a line's
+//    charges child. A charge carries its own amount, so it applies on a frozen
+//    order without repricing. Codes are pricing-setup-specific → all editable.
+const CHARGE_PRESETS: { key: string; label: string; def: string; sub: string; applyTo: string; type: string }[] = [
+  { key: 'Freight',    label: 'Freight',    def: 'QP_SHIP_FREIGHT',     sub: 'ORA_PRICE', applyTo: 'Shipping', type: 'Freight' },
+  { key: 'Handling',   label: 'Handling',   def: 'QP_HANDLING_CHARGE',  sub: 'ORA_PRICE', applyTo: 'Price',    type: 'Handling' },
+  { key: 'Restocking', label: 'Restocking', def: 'QP_RESTOCKING_CHARGE', sub: 'ORA_PRICE', applyTo: 'Return',   type: 'Restocking' },
+  { key: 'Custom',     label: 'Custom',     def: '',                    sub: 'ORA_PRICE', applyTo: 'Price',    type: '' },
+];
+const ChargesModal: React.FC<{ open: boolean; onClose: () => void; orderKey: string; lines: NewLine[]; ccy?: string }> = ({ open, onClose, orderKey, lines, ccy }) => {
+  const eligible = lines.filter(l => !l.canceled && (l.fulfillLineId != null || l.lineHref));
+  const [lineKey, setLineKey] = useState<string | undefined>();
+  const line = eligible.find(l => l.key === lineKey) ?? eligible[0];
+  const [preset, setPreset] = useState('Freight');
+  const [def, setDef] = useState('QP_SHIP_FREIGHT');
+  const [sub, setSub] = useState('ORA_PRICE');
+  const [applyTo, setApplyTo] = useState('Shipping');
+  const [chType, setChType] = useState('Freight');
+  const [amount, setAmount] = useState<number>(0);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [existing, setExisting] = useState<any[]>([]);
+  const [exLoading, setExLoading] = useState(false);
+  const selfHref = (o: any) => { const h = (o?.links ?? []).find((x: any) => x.rel === 'self' || x.name === 'self')?.href; return h ? fusionHref(h) : ''; };
+  const chargesUrl = (l?: NewLine) => l?.chargesHref
+    ?? (l?.lineHref ? `${fusionHref(l.lineHref)}/child/charges` : (l?.fulfillLineId != null ? `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(orderKey)}/child/lines/${l.fulfillLineId}/child/charges` : ''));
+
+  useEffect(() => { if (open && eligible.length && !lineKey) setLineKey(eligible[0].key); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const loadExisting = useCallback(async () => {
+    const url = chargesUrl(line); if (!url) { setExisting([]); return; }
+    setExLoading(true);
+    try { const r = await fetch(`${url}${url.includes('?') ? '&' : '?'}expand=chargeComponents&limit=50`, { headers: FUSION_HDRS }); const d = await r.json().catch(() => ({} as any)); setExisting(d.items ?? []); }
+    catch { setExisting([]); } finally { setExLoading(false); }
+  }, [line?.key]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open && line) loadExisting(); }, [open, line?.key, loadExisting]);
+
+  const applyPreset = (k: string) => { const p = CHARGE_PRESETS.find(x => x.key === k)!; setPreset(k); if (k !== 'Custom') { setDef(p.def); setSub(p.sub); setApplyTo(p.applyTo); setChType(p.type); } };
+  const body = {
+    ChargeDefinitionCode: def, ...(chType ? { ChargeType: chType } : {}), ChargeSubType: sub, ApplyTo: applyTo,
+    PriceType: 'One time', ...(ccy ? { ChargeCurrencyCode: ccy } : {}), GSAUnitPrice: num(amount),
+    SequenceNumber: (existing.length || 0) + 1, PrimaryFlag: 'false', RollupFlag: 'false',
+    chargeComponents: [
+      { PriceElementCode: 'QP_LIST_PRICE', HeaderCurrencyUnitPrice: num(amount), HeaderCurrencyExtendedAmount: num(amount), ChargeCurrencyUnitPrice: num(amount), ChargeCurrencyExtendedAmount: num(amount), RollupFlag: 'false', SequenceNumber: 1 },
+      { PriceElementCode: 'QP_NET_PRICE', HeaderCurrencyUnitPrice: num(amount), HeaderCurrencyExtendedAmount: num(amount), ChargeCurrencyUnitPrice: num(amount), ChargeCurrencyExtendedAmount: num(amount), RollupFlag: 'false', SequenceNumber: 2 },
+    ],
+  };
+  const url = chargesUrl(line);
+  const add = async () => {
+    if (!url) { message.error('No line selected'); return; }
+    setBusy(true); setErr('');
+    try {
+      const r = await fetch(url, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const t = await r.text();
+      if (!r.ok) throw new Error([`POST ${url}`, `HTTP ${r.status}`, ...collectOrderErrors(null, t, true)].join('\n'));
+      message.success(`${chType || 'Charge'} of ${fmtAmount(num(amount), ccy)} added`); setAmount(0); loadExisting();
+    } catch (e: any) { setErr(e?.message || 'Add failed'); message.error('Charge add failed'); } finally { setBusy(false); }
+  };
+  const delCharge = (row: any) => Modal.confirm({
+    title: 'Delete this charge?', okText: 'Delete', okButtonProps: { danger: true },
+    content: <div style={{ fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all' }}>DELETE {selfHref(row)}</div>,
+    onOk: async () => { try { const r = await fetch(selfHref(row), { method: 'DELETE', headers: FUSION_HDRS }); if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`); message.success('Charge deleted'); loadExisting(); } catch (e: any) { message.error(e?.message || 'Delete failed'); } },
+  });
+  const chargeAmt = (c: any) => { const comps = c.chargeComponents?.items ?? c.chargeComponents ?? []; const net = comps.find((x: any) => x.PriceElementCode === 'QP_NET_PRICE') ?? comps.find((x: any) => x.PriceElementCode === 'QP_LIST_PRICE'); return num(pf(net ?? {}, ['HeaderCurrencyExtendedAmount', 'HeaderCurrencyUnitPrice'])) || num(pf(c, ['GSAUnitPrice'])); };
+
+  return (
+    <Modal open={open} onCancel={() => !busy && onClose()} width={720} style={{ top: 20 }}
+      title={<Space><DollarOutlined style={{ color: REDWOOD.primary }} />Charges</Space>}
+      footer={<Space><Button onClick={onClose} disabled={busy}>Close</Button><Button type="primary" loading={busy} icon={<PlusOutlined />} onClick={add} disabled={!url || !def || !num(amount)}>Add Charge</Button></Space>}>
+      <div style={{ marginBottom: 6, fontSize: 12, color: REDWOOD.neutral600 }}>Line</div>
+      <Select style={{ width: '100%', marginBottom: 14 }} value={line?.key} onChange={setLineKey}
+        options={eligible.map((l, i) => ({ value: l.key, label: `${l.srcLineNumber ?? i + 1} · ${l.itemNumber}${l.description ? ` — ${l.description}` : ''}` }))} />
+
+      {/* Existing charges on the line */}
+      <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>Existing charges {exLoading && <Spin size="small" />}</div>
+      <Table size="small" rowKey={(_, i) => String(i)} pagination={false} dataSource={existing} style={{ marginBottom: 16 }}
+        locale={{ emptyText: 'No charges' }}
+        columns={[
+          { title: 'Charge', render: (_: any, c: any) => <Text style={{ fontSize: 12 }}>{pf(c, ['ChargeType', 'ChargeDefinitionCode']) ?? '—'}{String(c.PrimaryFlag) === 'true' ? ' (Sale)' : ''}</Text> },
+          { title: 'Definition', width: 160, render: (_: any, c: any) => <Text type="secondary" style={{ fontSize: 11 }}>{pf(c, ['ChargeDefinitionCode'])}</Text> },
+          { title: 'Amount', width: 120, align: 'right', render: (_: any, c: any) => <Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(chargeAmt(c), ccy)}</Text> },
+          { title: '', width: 44, align: 'center', render: (_: any, c: any) => String(c.PrimaryFlag) === 'true' ? <Text type="secondary">—</Text> : <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => delCharge(c)} /> },
+        ] as any} />
+
+      {/* Add a charge */}
+      <div style={{ border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 8, padding: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Add charge</div>
+        <Segmented block value={preset} onChange={(v: any) => applyPreset(v)} options={CHARGE_PRESETS.map(p => ({ value: p.key, label: p.label }))} style={{ marginBottom: 12 }} />
+        <Row gutter={10}>
+          <Col span={8}><div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Charge Definition Code</div><Input value={def} onChange={e => setDef(e.target.value)} placeholder="QP_SHIP_FREIGHT" /></Col>
+          <Col span={8}><div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Charge Type</div><Input value={chType} onChange={e => setChType(e.target.value)} placeholder="Freight" /></Col>
+          <Col span={8}><div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Sub Type</div><Input value={sub} onChange={e => setSub(e.target.value)} placeholder="ORA_PRICE" /></Col>
+          <Col span={8} style={{ marginTop: 10 }}><div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Apply To</div>
+            <Select style={{ width: '100%' }} value={applyTo} onChange={setApplyTo} options={['Price', 'Shipping', 'Return'].map(v => ({ value: v, label: v }))} /></Col>
+          <Col span={8} style={{ marginTop: 10 }}><div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Amount</div>
+            <InputNumber min={0} style={{ width: '100%' }} value={amount} onChange={v => setAmount(Number(v) || 0)} addonAfter={ccy} /></Col>
+        </Row>
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}><ApiOutlined style={{ marginRight: 4 }} />REST request</div>
+          <div style={{ fontSize: 10.5, fontFamily: 'monospace', wordBreak: 'break-all', background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, padding: '8px 10px', maxHeight: 160, overflow: 'auto' }}>
+            <div><b style={{ color: REDWOOD.primary }}>POST</b> {url || '(no line)'}</div>
+            <div style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}>{JSON.stringify(body, null, 2)}</div>
+          </div>
+        </div>
+        {err && <div style={{ marginTop: 10, fontSize: 11, color: REDWOOD.error, whiteSpace: 'pre-wrap', background: '#FFF1F0', border: '1px solid #FFCCC7', borderRadius: 6, padding: '8px 10px', maxHeight: 160, overflow: 'auto' }}>{err}</div>}
+      </div>
+    </Modal>
+  );
+};
+
 const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editOrder?: any; returnMode?: boolean }> = ({ header, initialDraft, editOrder, returnMode }) => {
   const editMode = !!editOrder;
   const [form] = Form.useForm();
@@ -3325,6 +3434,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [updLots, setUpdLots] = useState<{ lot?: string; subinventory?: string; qty: number }[]>([]);
   // Line-Total drill → charges/chargeComponents fetched live from Fusion.
   const [chargeDrill, setChargeDrill] = useState<{ line: NewLine; loading: boolean; url: string; charges: any[]; error?: string } | null>(null);
+  const [chargesOpen, setChargesOpen] = useState(false);
   // Success celebration + created-order tracking (line status refresh).
   const [confetti, setConfetti] = useState<{ id: number; x: number; color: string; delay: number; size: number }[]>([]);
   const [successInfo, setSuccessInfo] = useState<{ orderNumber: string; status: string } | null>(null);
@@ -4830,6 +4940,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           <Button size="small" icon={<PlusOutlined />} onClick={addBlankLine}>New Line</Button>
           <Button size="small" icon={<DatabaseOutlined />} loading={ohLoading} onClick={checkAllOnhand} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>Check On-Hand</Button>
           <Button size="small" icon={<ReloadOutlined />} loading={statusLoading} disabled={!createdOrderKey} onClick={() => refreshLineStatuses()} style={createdOrderKey ? { color: REDWOOD.success, borderColor: REDWOOD.success } : undefined}>Refresh Status</Button>
+          {!!childOrderKey && lines.some(l => l.existing) && <Button size="small" icon={<DollarOutlined />} onClick={() => setChargesOpen(true)} style={{ color: REDWOOD.primary, borderColor: REDWOOD.primary }}>Charges</Button>}
           <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setPickOpen(true)} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Add Multiple Lines</Button>
         </Space>}>
         <style>{`
@@ -5012,6 +5123,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       {/* Add / Edit Sales Credit — shared by the header pencil and the Sales Credits tab */}
       {childOrderKey && <SalesCreditEditModal editing={scEdit} orderKey={childOrderKey} salesRepOpts={salesRepOpts}
         onClose={() => setScEdit(null)} onSaved={() => { setScEdit(null); salesCredits.reload(); }} />}
+
+      {/* Manual charges — add freight/handling/… to a line's charges child */}
+      {childOrderKey && <ChargesModal open={chargesOpen} onClose={() => setChargesOpen(false)} orderKey={childOrderKey} lines={lines} ccy={ccy} />}
 
       <Modal open={!!chargeDrill} onCancel={() => setChargeDrill(null)} width={760} style={{ top: 24 }}
         title={<Space><DollarOutlined style={{ color: REDWOOD.primary }} /> Charges — {chargeDrill?.line.itemNumber}</Space>}
