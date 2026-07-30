@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   Layout, Breadcrumb, Card, Table, Form, Input, Select, DatePicker, Button,
-  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty, Tabs, InputNumber, Upload, Checkbox, Dropdown,
+  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty, Tabs, InputNumber, Upload, Checkbox, Dropdown, Steps,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -13,8 +13,10 @@ import {
   CheckCircleOutlined, EyeOutlined, EditOutlined,
   SafetyCertificateOutlined, StopOutlined, SendOutlined, RollbackOutlined,
   FilePdfOutlined, FileExcelOutlined, SnippetsOutlined, ImportOutlined, TableOutlined, DownOutlined,
+  ThunderboltOutlined, CarOutlined, InboxOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
+import { ShipConfirmModal, PickSlipDialog } from './ConfirmPicks';
 import dayjs, { type Dayjs } from 'dayjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -682,6 +684,99 @@ const ReservationsView: React.FC<{ orderNo?: string; open: boolean; onClose: () 
       <Table size="small" loading={loading} columns={cols} dataSource={list} rowKey={(r, i) => String(pf(r, ['ReservationId']) ?? i)}
         pagination={list.length > 20 ? { pageSize: 20 } : false} scroll={{ x: 'max-content', y: 360 }}
         locale={{ emptyText: 'No reservations for this order' }} />
+    </Modal>
+  );
+};
+
+// ── Auto Ship Confirm — orchestrates pick release → pick confirm → ship confirm ──
+const SHIPLINES_URL = (order: string) => `${FUSION_BASE}/shipmentLines?q=${encodeURIComponent(`Order='${order}'`)}&orderBy=OrderLine:asc`;
+const PICKWAVES_URL = `${FUSION_BASE}/pickWaves`;
+const PICKSLIPS_URL = (order: string) => `${FUSION_BASE}/pickSlipDetails?q=${encodeURIComponent(`Order='${order}'`)}&orderBy=CreationDate:desc`;
+// Map the shipment-line statuses to a stage: 0 Open · 1 Pick Released · 2 Pick Confirmed · 3 Ship Confirmed.
+const shipStage = (lines: any[]): number => {
+  const st = lines.map(l => String(pf(l, ['LineStatus']) ?? '').toLowerCase());
+  if (!st.length) return 0;
+  if (st.some(s => s.includes('shipped') || (s.includes('ship') && s.includes('confirm')))) return 3;
+  if (st.some(s => s.includes('stage') || s.includes('pick confirm') || s.includes('picked'))) return 2;
+  if (st.some(s => s.includes('released') || s.includes('backorder') || s.includes('warehouse'))) return 1;
+  return 0;
+};
+const AutoShipConfirmModal: React.FC<{ orderNo?: string; org?: string; open: boolean; onClose: () => void }> = ({ orderNo, org, open, onClose }) => {
+  const [lines, setLines] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [releasing, setReleasing] = useState(false);
+  const [psRows, setPsRows] = useState<any[] | null>(null);
+  const [psRow, setPsRow] = useState<any | null>(null);
+  const [shipOpen, setShipOpen] = useState(false);
+  const load = useCallback(async () => {
+    if (!orderNo) return;
+    setLoading(true);
+    try { setLines(await fetchAllPages(SHIPLINES_URL(orderNo))); }
+    catch (e: any) { message.error(`Shipment lines: ${e.message}`); setLines([]); }
+    finally { setLoading(false); }
+  }, [orderNo]);
+  useEffect(() => { if (open) load(); }, [open, load]);
+  const stage = shipStage(lines);
+  const orgCode = org ?? lines.map(l => pf(l, ['OrganizationCode'])).find(Boolean);
+  const shipmentName = lines.map(l => pf(l, ['Shipment', 'ShipmentName'])).find(Boolean);
+
+  const pickRelease = async () => {
+    if (!orgCode) { message.warning('No organization on the shipment lines'); return; }
+    setReleasing(true);
+    try {
+      const body = { SourceSystemName: 'OPS', BatchPrefix: `PR-${orderNo}`, ShipFromOrganizationCode: orgCode, ReleaseStatus: 'All', OrderNumber: String(orderNo), PickReleaseFlag: 'true', AutoPickConfirmFlag: 'false', ShipConfirmRule: '002_Ship_Confirm_Rule', CreateShipmentsFlag: 'true', ShipmentCreationCriteria: 'Across orders' };
+      const r = await fetch(PICKWAVES_URL, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const text = await r.text(); let data: any = null; try { data = JSON.parse(text); } catch { /* raw */ }
+      const ret = String(data?.ReturnStatus ?? data?.returnStatus ?? '').toUpperCase();
+      if (r.ok && ret !== 'E') { message.success('Pick Release Success'); load(); }
+      else Modal.error({ title: 'Pick Release Failed', width: 600, content: <div style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>{data?.ReturnMessage ?? data?.returnMessage ?? `HTTP ${r.status}`}</div> });
+    } catch (e: any) { message.error(e.message); }
+    finally { setReleasing(false); }
+  };
+  const openPickConfirm = async () => {
+    if (!orderNo) return;
+    try {
+      const slips = await fetchAllPages(PICKSLIPS_URL(orderNo));
+      if (!slips.length) message.info('No pick slips yet — run Pick Release first');
+      else if (slips.length === 1) setPsRow(slips[0]);
+      else setPsRows(slips);
+    } catch (e: any) { message.error(e.message); }
+  };
+  const cols: ColumnsType<any> = [
+    { title: 'Line', dataIndex: 'OrderLine', width: 60, align: 'center', render: v => <Tag color="blue">{v ?? '—'}</Tag> },
+    { title: 'Item', dataIndex: 'Item', width: 160, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Requested', dataIndex: 'RequestedQuantity', width: 100, align: 'right', render: v => fmtQty(num(v)) },
+    { title: 'Shipped', dataIndex: 'ShippedQuantity', width: 100, align: 'right', render: v => fmtQty(num(v)) },
+    { title: 'Shipment', dataIndex: 'Shipment', width: 130, render: v => v ? <Tag>{v}</Tag> : '—' },
+    { title: 'Line Status', dataIndex: 'LineStatus', width: 160, render: v => statusTag(v) },
+  ];
+  return (
+    <Modal open={open} onCancel={onClose} width={940} footer={<Button onClick={onClose}>Close</Button>}
+      title={<Space><CarOutlined style={{ color: REDWOOD.success }} /> Auto Ship Confirm — order {orderNo}
+        <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {SHIPLINES_URL(String(orderNo ?? ''))}</span>}>
+          <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} /></Tooltip></Space>}>
+      <Steps size="small" current={stage} style={{ marginBottom: 16 }}
+        items={[{ title: 'Open' }, { title: 'Pick Released' }, { title: 'Pick Confirmed' }, { title: 'Ship Confirmed' }]} />
+      <Space wrap style={{ marginBottom: 10 }}>
+        <Button icon={<ReloadOutlined />} loading={loading} onClick={load}>Check Status</Button>
+        <Button type="primary" icon={<ThunderboltOutlined />} loading={releasing} disabled={stage >= 1 || !lines.length} onClick={pickRelease}
+          style={stage >= 1 || !lines.length ? undefined : { background: REDWOOD.success, borderColor: REDWOOD.success }}>Pick Release</Button>
+        <Button icon={<InboxOutlined />} disabled={stage < 1} onClick={openPickConfirm}>Pick Confirm — assign lots / serials</Button>
+        <Button icon={<CarOutlined />} disabled={stage < 2} onClick={() => setShipOpen(true)}>Ship Confirm</Button>
+      </Space>
+      {loading ? <div style={{ textAlign: 'center', padding: 30 }}><Spin /></div>
+        : lines.length === 0 ? <Empty description="No shipment lines yet for this order — confirm the order first, then Check Status" style={{ padding: 24 }} />
+        : <Table size="small" columns={cols} dataSource={lines} rowKey={(r, i) => String(pf(r, ['ShipmentLine', 'OrderLine']) ?? i)} pagination={lines.length > 20 ? { pageSize: 20 } : false} scroll={{ x: 'max-content', y: 320 }} />}
+
+      {/* Pick slip chooser when more than one exists */}
+      <Modal open={!!psRows} onCancel={() => setPsRows(null)} width={560} footer={<Button onClick={() => setPsRows(null)}>Cancel</Button>}
+        title={<Space><InboxOutlined style={{ color: REDWOOD.info }} /> Choose a pick slip</Space>}>
+        <Table size="small" dataSource={psRows ?? []} rowKey={(r, i) => String(r.PickSlip ?? i)} pagination={false}
+          columns={[{ title: 'Pick Slip', dataIndex: 'PickSlip' }, { title: 'Status', dataIndex: 'PickSlipStatus', render: v => statusTag(v) },
+            { title: '', align: 'right', render: (_, r) => <Button size="small" type="primary" style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }} onClick={() => { setPsRow(r); setPsRows(null); }}>Open</Button> }]} />
+      </Modal>
+      <PickSlipDialog row={psRow} onClose={() => { setPsRow(null); load(); }} />
+      <ShipConfirmModal open={shipOpen} shipmentName={shipmentName} organization={orgCode} onClose={() => setShipOpen(false)} onDone={load} />
     </Modal>
   );
 };
@@ -2710,9 +2805,14 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [confirmed, setConfirmed] = useState(false);
   const [resvViewOpen, setResvViewOpen] = useState(false);
   const [resvReloadKey, setResvReloadKey] = useState(0);
+  const [autoShipOpen, setAutoShipOpen] = useState(false);
+  const jsonInputRef = useRef<HTMLInputElement>(null);
+  // Current order status — reservations are only allowed while it's still a draft.
+  const [orderStatus, setOrderStatus] = useState<string>(String(editOrder?.StatusCode ?? ''));
   // Confirm pre-check — existing reservations shown before submitting the order.
   const [confirmResvOpen, setConfirmResvOpen] = useState(false);
   const [confirmResvList, setConfirmResvList] = useState<any[]>([]);
+  const isDraftStatus = !orderStatus || /draft/i.test(orderStatus);
   // Reserve dialog — inventoryReservations (User Defined demand keyed by the
   // order number). Shows the exact endpoint + per-line JSON body before running.
   const RESERVE_URL = `${FUSION_BASE}/inventoryReservations`;
@@ -3209,6 +3309,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         const orderKey = data.OrderKey ?? data.HeaderId ?? null;
         setCreatedOrderKey(orderKey != null ? String(orderKey) : null);
         setCreatedOrderNumber(String(data.OrderNumber));
+        setOrderStatus(String(data.StatusCode ?? 'DOO_DRAFT'));
         setConfirmed(String(data.StatusCode ?? '').toUpperCase() !== 'DOO_DRAFT' && String(data.SubmittedFlag) === 'true');
         message.success(`Sales order ${data.OrderNumber} saved as draft`);
         if (orderKey != null) refreshLineStatuses(String(orderKey));
@@ -3327,6 +3428,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       saveOrderLog(`order-CONFIRM-${liveOrderNumber()}-${Date.now()}.json`, `HTTP ${r.status}\n\n${pretty}`);
       if (r.ok) {
         setConfirmed(true);
+        setOrderStatus('DOO_SUBMITTED');
         message.success(`Order ${liveOrderNumber()} confirmed / submitted`);
         refreshLineStatuses(key);
       } else {
@@ -3583,14 +3685,17 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           <Tag color="geekblue" style={{ fontVariantNumeric: 'tabular-nums' }}>{editMode ? (editOrder?.OrderNumber ?? orderNumber) : orderNumber}</Tag>
           <Tag color="purple">{hdr.orderType}</Tag><Tag>{hdr.txnCurrency}</Tag>{hdr.customerName && <Tag color="blue">{hdr.customerName}</Tag>}</Space>}
         extra={<Space>
-          {/* JSON Actions — save/load the full on-screen draft (header + lines) */}
-          <Space.Compact>
-            <Button icon={<DownloadOutlined />} onClick={saveDraftJson}>Save JSON</Button>
-            <Upload accept=".json,application/json" showUploadList={false} beforeUpload={(f) => { loadDraftJson(f); return false; }}>
-              <Button icon={<CloudUploadOutlined />}>Load JSON</Button>
-            </Upload>
-          </Space.Compact>
-          <Button icon={<CloudUploadOutlined />} onClick={() => setPreview(true)}>Payload</Button>
+          {/* JSON Actions — save/load the full on-screen draft + payload preview */}
+          <Dropdown menu={{ items: [
+            { key: 'save', icon: <DownloadOutlined />, label: 'Save JSON', onClick: saveDraftJson },
+            { key: 'load', icon: <CloudUploadOutlined />, label: 'Load JSON', onClick: () => jsonInputRef.current?.click() },
+            { type: 'divider' },
+            { key: 'payload', icon: <ProfileOutlined />, label: 'Payload', onClick: () => setPreview(true) },
+          ] }}>
+            <Button icon={<DatabaseOutlined />}><Space size={4}>JSON Actions<DownOutlined style={{ fontSize: 10 }} /></Space></Button>
+          </Dropdown>
+          <input ref={jsonInputRef} type="file" accept=".json,application/json" style={{ display: 'none' }}
+            onChange={e => { const f = e.target.files?.[0]; if (f) loadDraftJson(f); e.target.value = ''; }} />
           <Button type="primary" icon={<SaveOutlined />} loading={posting} onClick={editMode ? updateOrder : save}
             style={{ background: editMode ? '#B07700' : REDWOOD.success, borderColor: editMode ? '#B07700' : REDWOOD.success }}>
             {editMode ? `Update Order${editOps.length ? ` (${editOps.length})` : ''}` : returnMode ? 'Save Return (Draft)' : 'Save (Draft)'}
@@ -3602,15 +3707,19 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               {confirmed ? 'Confirmed' : 'Confirm Order'}
             </Button>
             {!returnMode && <Dropdown menu={{ items: [
-              { key: 'reserve', icon: <SafetyCertificateOutlined />, label: 'Reserve', onClick: openReserveDialog },
-              { key: 'unreserve', icon: <StopOutlined />, label: 'Unreserve', onClick: unreserveStock },
+              { key: 'reserve', icon: <SafetyCertificateOutlined />, label: 'Reserve', disabled: !isDraftStatus, onClick: openReserveDialog },
+              { key: 'unreserve', icon: <StopOutlined />, label: 'Unreserve', disabled: !isDraftStatus, onClick: unreserveStock },
               { type: 'divider' },
               { key: 'view', icon: <TableOutlined />, label: 'View reservations', onClick: () => setResvViewOpen(true) },
             ] }}>
-              <Button loading={workBusy === 'reserve' || workBusy === 'unreserve'}>
-                <Space><SafetyCertificateOutlined />Reservations<DownOutlined style={{ fontSize: 10 }} /></Space>
-              </Button>
+              <Tooltip title={isDraftStatus ? undefined : 'Reservations are only allowed while the order is a draft (lines not started)'}>
+                <Button loading={workBusy === 'reserve' || workBusy === 'unreserve'}>
+                  <Space size={4}><SafetyCertificateOutlined />Reservations<DownOutlined style={{ fontSize: 10 }} /></Space>
+                </Button>
+              </Tooltip>
             </Dropdown>}
+            {!returnMode && <Button icon={<CarOutlined />} onClick={() => setAutoShipOpen(true)}
+              style={{ borderColor: REDWOOD.success, color: REDWOOD.success }}>Auto Shipconfirm</Button>}
           </Space>}
         </Space>}>
         <Form form={form} layout="horizontal" size="small" labelAlign="left" colon labelWrap
@@ -4038,6 +4147,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
 
       {/* Reservations viewer (from the Reservations dropdown) */}
       <ReservationsView orderNo={liveOrderNumber()} open={resvViewOpen} onClose={() => setResvViewOpen(false)} reloadKey={resvReloadKey} />
+
+      {/* Auto Ship Confirm — pick release → pick confirm → ship confirm workflow */}
+      <AutoShipConfirmModal orderNo={liveOrderNumber()} org={hdr.warehouse} open={autoShipOpen} onClose={() => setAutoShipOpen(false)} />
 
       {/* Confirm pre-check — existing reservations will be dropped on confirm */}
       <Modal open={confirmResvOpen} onCancel={() => setConfirmResvOpen(false)} width={820}
