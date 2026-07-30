@@ -692,14 +692,23 @@ const ReservationsView: React.FC<{ orderNo?: string; open: boolean; onClose: () 
 const SHIPLINES_URL = (order: string) => `${FUSION_BASE}/shipmentLines?q=${encodeURIComponent(`Order='${order}'`)}&orderBy=OrderLine:asc`;
 const PICKWAVES_URL = `${FUSION_BASE}/pickWaves`;
 const PICKSLIPS_URL = (order: string) => `${FUSION_BASE}/pickSlipDetails?q=${encodeURIComponent(`Order='${order}'`)}&orderBy=CreationDate:desc`;
-// Map the shipment-line statuses to a stage: 0 Open · 1 Pick Released · 2 Pick Confirmed · 3 Ship Confirmed.
-const shipStage = (lines: any[]): number => {
-  const st = lines.map(l => String(pf(l, ['LineStatus']) ?? '').toLowerCase());
-  if (!st.length) return 0;
-  if (st.some(s => s.includes('shipped') || (s.includes('ship') && s.includes('confirm')))) return 3;
-  if (st.some(s => s.includes('stage') || s.includes('pick confirm') || s.includes('picked'))) return 2;
-  if (st.some(s => s.includes('released') || s.includes('backorder') || s.includes('warehouse'))) return 1;
+// Per-line stage: 0 Open · 1 Pick Released · 2 Pick Confirmed · 3 Ship Confirmed.
+// A line counts as fully shipped when its status is Interfaced / Shipped /
+// Ship Confirmed, OR its Shipped quantity has reached the Requested quantity.
+const lineStage = (l: any): number => {
+  const s = String(pf(l, ['LineStatus']) ?? '').toLowerCase();
+  const shipped = num(pf(l, ['ShippedQuantity'])), req = num(pf(l, ['RequestedQuantity']));
+  if (s.includes('interfaced') || s.includes('shipped') || (s.includes('ship') && s.includes('confirm')) || (req > 0 && shipped >= req)) return 3;
+  if (s.includes('stage') || s.includes('pick confirm') || s.includes('picked')) return 2;
+  if (s.includes('released') || s.includes('backorder') || s.includes('warehouse')) return 1;
   return 0;
+};
+// Overall Steps `current`: the least-progressed line drives it, so all four
+// steps tick (current = 4) only once every line is shipped / interfaced.
+const shipStage = (lines: any[]): number => {
+  if (!lines.length) return 0;
+  const m = Math.min(...lines.map(lineStage));
+  return m >= 3 ? 4 : m;
 };
 const AutoShipConfirmModal: React.FC<{ orderNo?: string; org?: string; open: boolean; onClose: () => void }> = ({ orderNo, org, open, onClose }) => {
   const [lines, setLines] = useState<any[]>([]);
