@@ -3192,9 +3192,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     if (m.taxPct != null) m.taxAmount = round2(num(m.qty) * num(m.unitPrice) * num(m.taxPct) / 100);
     return m;
   }));
-  // In edit mode, "removing" an existing line means cancelling it (a change order
-  // must still carry the line with CanceledFlag) — toggle it. Added lines and all
-  // create-mode lines are removed outright.
+  // In edit mode, "removing" an existing line marks it for removal (toggle). On save
+  // a DRAFT order hard-DELETEs the line; a processing order cancels it via a change
+  // order (CanceledFlag). Added lines and all create-mode lines drop immediately.
   const del = (key: string) => setLines(prev => {
     const l = prev.find(x => x.key === key);
     if (editMode && l?.existing) return prev.map(x => x.key === key ? { ...x, canceled: !x.canceled } : x);
@@ -3508,8 +3508,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   // Edit mode: build the exact per-line REST operations against the live order.
   //   update qty  → PATCH  {OrderKey}/child/lines/{linesUniqID}  { OrderedQuantity }
   //   add line    → POST   {OrderKey}/child/lines                 { Product, Qty, ... }
-  //   remove line → PATCH  {OrderKey}/child/lines/{linesUniqID}  { CanceledFlag: true }
-  interface EditOp { kind: 'update' | 'add' | 'cancel'; method: string; url: string; body: any; lineKey: string; label: string; srcLineNumber: any }
+  //   remove line → DRAFT order: DELETE {OrderKey}/child/lines/{linesUniqID} (hard delete);
+  //                 processing order: PATCH … { CanceledFlag: true } (change-order cancel)
+  interface EditOp { kind: 'update' | 'add' | 'cancel' | 'delete'; method: string; url: string; body: any; lineKey: string; label: string; srcLineNumber: any }
   const editOps: EditOp[] = useMemo(() => {
     if (!editMode) return [];
     const orderKey = editOrder.OrderKey ?? editOrder.HeaderId;
@@ -3520,8 +3521,15 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       if (l.existing) {
         const href = l.lineHref ? fusionHref(l.lineHref) : (l.fulfillLineId != null ? `${childBase}/${l.fulfillLineId}` : '');
         if (!href) return;
-        // Only fire once: skip already-saved cancels; only PATCH when qty changed.
-        if (l.canceled) { if (!l.cancelSaved) ops.push({ kind: 'cancel', method: 'PATCH', url: href, body: { CanceledFlag: true, CancelReasonCode: 'CUSTOMER_REQUEST' }, lineKey: l.key, label, srcLineNumber: l.srcLineNumber }); }
+        // Only fire once: skip already-saved removals; only PATCH when qty changed.
+        if (l.canceled) {
+          if (!l.cancelSaved) {
+            // A draft order line has never entered fulfillment, so it can be hard
+            // DELETEd; a processing order must keep it and cancel via CanceledFlag.
+            if (isDraftStatus) ops.push({ kind: 'delete', method: 'DELETE', url: href, body: undefined, lineKey: l.key, label, srcLineNumber: l.srcLineNumber });
+            else ops.push({ kind: 'cancel', method: 'PATCH', url: href, body: { CanceledFlag: true, CancelReasonCode: 'CUSTOMER_REQUEST' }, lineKey: l.key, label, srcLineNumber: l.srcLineNumber });
+          }
+        }
         else if (num(l.qty) !== num(l.origQty)) ops.push({ kind: 'update', method: 'PATCH', url: href, body: { OrderedQuantity: num(l.qty) }, lineKey: l.key, label, srcLineNumber: l.srcLineNumber });
       } else {
         // Add a line = POST the order's lines child with the full line object.
@@ -3531,7 +3539,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       }
     });
     return ops;
-  }, [editMode, editOrder, lines, hdr, effMeta]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [editMode, editOrder, lines, hdr, effMeta, isDraftStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // What the Payload button shows: the ops list in edit mode, else the create body.
   const previewStr = editMode
@@ -3647,15 +3655,22 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     //   update→ its original qty/price advance to the saved values
     //   cancel→ marked cancelSaved so it won't re-cancel
     const settle: Record<string, Partial<NewLine>> = {};
+    const deletedKeys = new Set<string>();     // draft lines hard-DELETEd → drop from the grid
     for (const op of editOps) {
       try {
-        const r = await fetch(op.url, { method: op.method, headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(op.body) });
+        // DELETE carries no body; PATCH/POST send JSON.
+        const init: RequestInit = op.method === 'DELETE'
+          ? { method: 'DELETE', headers: { ...FUSION_HDRS } }
+          : { method: op.method, headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(op.body) };
+        const r = await fetch(op.url, init);
         const text = await r.text(); let data: any = null, pretty = text;
         try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* raw */ }
         results.push({ operation: op.kind, method: op.method, url: op.url, status: r.status, ok: r.ok, request: op.body, response: pretty });
         const cur = lines.find(x => x.key === op.lineKey);
         if (r.ok) {
-          if (op.kind === 'add') {
+          if (op.kind === 'delete') {
+            deletedKeys.add(op.lineKey);
+          } else if (op.kind === 'add') {
             settle[op.lineKey] = {
               existing: true, origQty: num(cur?.qty), origUnitPrice: num(cur?.unitPrice),
               srcLineId: data?.SourceTransactionLineId != null ? String(data.SourceTransactionLineId) : op.body?.SourceTransactionLineId,
@@ -3682,8 +3697,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     }
     saveOrderLog(`order-EDIT-${editOrder.OrderNumber ?? orderKey}-${stamp}.json`, JSON.stringify({ operations: editOps, results }, null, 2));
     setLastResponse(JSON.stringify(results, null, 2));
-    // Apply settle + errors together so succeeded lines can't be resent.
-    setLines(prev => prev.map(l => ({ ...l, ...(settle[l.key] ?? {}), error: errByKey[l.key]?.join('\n\n') })));
+    // Apply settle + errors together so succeeded lines can't be resent; drop any
+    // draft lines that were hard-DELETEd from Fusion.
+    setLines(prev => prev.filter(l => !deletedKeys.has(l.key)).map(l => ({ ...l, ...(settle[l.key] ?? {}), error: errByKey[l.key]?.join('\n\n') })));
     setOrderErrors(general);
     const failed = results.filter(r => !r.ok).length;
     if (failed === 0) {
@@ -3941,15 +3957,15 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             icon={<CloseCircleTwoTone twoToneColor={REDWOOD.error} />}
             onClick={() => setErrModal({ title: `Line ${r.srcLineNumber ?? i + 1}${r.itemNumber ? ` · ${r.itemNumber}` : ''}`, msg: r.error! })}>Error</Button></Tooltip>
         : r.canceled
-          ? <Tag color="error" style={{ fontSize: 11 }}>Canceled</Tag>
+          ? <Tag color="error" style={{ fontSize: 11 }}>{isDraftStatus ? 'To delete' : 'Canceled'}</Tag>
           : (v || r.statusCode ? statusTag(v, r.statusCode) : <Text type="secondary" style={{ fontSize: 11 }}>—</Text>) },
     { title: '', width: 76, align: 'center', fixed: 'right', render: (_, r) => (editMode && r.existing)
         ? <Space size={0}>
-            <Tooltip title={r.canceled ? 'Line canceled' : (canUpdateLine(r) ? 'Update line' : 'Locked — Awaiting Billing / Closed')}>
+            <Tooltip title={r.canceled ? (isDraftStatus ? 'Marked for delete' : 'Line canceled') : (canUpdateLine(r) ? 'Update line' : 'Locked — Awaiting Billing / Closed')}>
               <Button size="small" type="text" icon={<EditOutlined />} disabled={!canUpdateLine(r)}
                 style={{ color: canUpdateLine(r) ? REDWOOD.info : undefined }} onClick={() => openUpdateLine(r)} />
             </Tooltip>
-            <Tooltip title={r.canceled ? 'Restore line' : 'Cancel line'}>
+            <Tooltip title={r.canceled ? 'Restore line' : (isDraftStatus ? 'Delete line' : 'Cancel line')}>
               <Button size="small" type="text" danger={!r.canceled} icon={r.canceled ? <ReloadOutlined /> : <DeleteOutlined />} onClick={() => del(r.key)} />
             </Tooltip>
           </Space>
@@ -3996,7 +4012,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     key: l.key, lineNo: l.srcLineNumber ?? i + 1, item: l.itemNumber,
     fulfillLineId: l.fulfillLineId, srcLineId: l.srcLineId,
     linesUniqID: l.lineHref ? l.lineHref.split('/child/lines/')[1]?.split(/[?#]/)[0] : undefined,
-    state: !l.existing ? 'New' : (l.canceled ? 'Cancel' : (num(l.qty) !== num(l.origQty) ? 'Update' : 'Unchanged')),
+    state: !l.existing ? 'New' : (l.canceled ? (isDraftStatus ? 'Delete' : 'Cancel') : (num(l.qty) !== num(l.origQty) ? 'Update' : 'Unchanged')),
   })), [lines]);
 
   return (
