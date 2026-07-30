@@ -1849,15 +1849,48 @@ const PastePanel: React.FC<{ org?: string; ccy?: string; onAdd: (items: any[]) =
   );
 };
 
-// From PDF — extract text rows per page; user ticks the item rows; parse to columns.
+// ── PDF marking templates (saved to localStorage + exportable JSON) ──────────
+type PdfField = 'item' | 'qty' | 'price' | 'desc' | 'customer';
+interface PdfMark { field: PdfField; xMin: number; xMax: number; yMin: number; yMax: number; page: number } // all normalized 0..1
+interface PdfTpl { name: string; signature: string[]; marks: PdfMark[] }
+const PDF_TPL_KEY = 'reacterp.pdfLineTemplates';
+const loadPdfTpls = (): PdfTpl[] => { try { return JSON.parse(localStorage.getItem(PDF_TPL_KEY) || '[]'); } catch { return []; } };
+const savePdfTpls = (t: PdfTpl[]) => { try { localStorage.setItem(PDF_TPL_KEY, JSON.stringify(t)); } catch { /* ignore quota */ } };
+const pdfTokens = (s: string) => (s.toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 2 && !/^\d+$/.test(t)));
+const jaccard = (a: string[], b: string[]) => { const A = new Set(a), B = new Set(b); if (!A.size || !B.size) return 0; let inter = 0; A.forEach(x => { if (B.has(x)) inter++; }); return inter / new Set([...a, ...b]).size; };
+const PDF_FIELDS: { field: PdfField; label: string; color: string }[] = [
+  { field: 'item', label: 'Item', color: '#C74634' }, { field: 'qty', label: 'Qty', color: '#1D7B4D' },
+  { field: 'price', label: 'Price', color: '#0572CE' }, { field: 'desc', label: 'Description', color: '#6B21A8' },
+  { field: 'customer', label: 'Customer', color: '#B07700' },
+];
+const numTok = (s: string) => { const n = Number(String(s).replace(/,/g, '')); return /^[\d,]+(\.\d+)?$/.test(String(s).trim()) && !Number.isNaN(n) ? n : null; };
+
+// From PDF — render pages, mark columns/customer by drawing boxes, save/auto-detect
+// a template, then extract order lines by column. Falls back to a no-mapping parse.
+interface PdfPage { page: number; img: string; w: number; h: number; items: { str: string; nx: number; ny: number }[] }
 const PdfPanel: React.FC<{ org?: string; ccy?: string; onAdd: (items: any[]) => void }> = ({ org, ccy, onAdd }) => {
-  const [pages, setPages] = useState<{ page: number; rows: { key: string; text: string; tokens: string[] }[] }[] | null>(null);
+  const [pages, setPages] = useState<PdfPage[] | null>(null);
   const [fileName, setFileName] = useState('');
   const [loading, setLoading] = useState(false);
-  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [view, setView] = useState(0);
+  const [marks, setMarks] = useState<PdfMark[]>([]);
+  const [drawField, setDrawField] = useState<PdfField>('item');
+  const [draft, setDraft] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const [tpls, setTpls] = useState<PdfTpl[]>(loadPdfTpls());
+  const [tplName, setTplName] = useState('');
   const [rows, setRows] = useState<ImpRow[] | null>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const dragStart = useRef<{ x: number; y: number } | null>(null);
+
+  const signatureOf = (pd: PdfPage[]): string[] => {
+    const p0 = pd[0]; if (!p0) return [];
+    const head = p0.items.filter(it => it.ny < 0.28).map(it => it.str).join(' ');
+    return Array.from(new Set(pdfTokens(head)));
+  };
+  const applyTpl = (t: PdfTpl) => { setMarks(t.marks); message.success(`Applied template “${t.name}”`); };
+
   const readPdf = async (f: File) => {
-    setLoading(true); setPages(null); setRows(null); setChecked(new Set());
+    setLoading(true); setPages(null); setRows(null); setMarks([]); setView(0);
     try {
       const pdfjsLib: any = await import('pdfjs-dist');
       const ver: string = pdfjsLib.version;
@@ -1865,70 +1898,185 @@ const PdfPanel: React.FC<{ org?: string; ccy?: string; onAdd: (items: any[]) => 
       pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${ver}/build/pdf.worker.${ext}`;
       const buf = await f.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: buf, useSystemFonts: true }).promise;
-      const out: { page: number; rows: { key: string; text: string; tokens: string[] }[] }[] = [];
+      const out: PdfPage[] = [];
       for (let p = 1; p <= pdf.numPages; p++) {
-        const page = await pdf.getPage(p); const content = await page.getTextContent();
-        const items = content.items.filter((it: any) => 'str' in it && it.str.trim()).map((it: any) => ({ str: it.str.trim(), x: it.transform[4], y: it.transform[5] }));
-        const rowMap = new Map<number, { str: string; x: number }[]>();
-        items.forEach((it: any) => { const key = Math.round(it.y / 3) * 3; if (!rowMap.has(key)) rowMap.set(key, []); rowMap.get(key)!.push(it); });
-        const prows = [...rowMap.entries()].sort((a, b) => b[0] - a[0]).map(([, its], i) => { const toks = its.sort((a, b) => a.x - b.x).map(t => t.str); return { key: `p${p}-r${i}`, text: toks.join('  '), tokens: toks }; });
-        out.push({ page: p, rows: prows });
+        const page = await pdf.getPage(p);
+        const scale = Math.min(1.5, 900 / page.getViewport({ scale: 1 }).width);
+        const viewport = page.getViewport({ scale });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width; canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d')!;
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        const content = await page.getTextContent();
+        const items = content.items.filter((it: any) => 'str' in it && it.str.trim()).map((it: any) => {
+          const tx = pdfjsLib.Util.transform(viewport.transform, it.transform);
+          const w = (it.width || 0) * scale;
+          return { str: it.str.trim(), nx: (tx[4] + w / 2) / viewport.width, ny: tx[5] / viewport.height };
+        });
+        out.push({ page: p, img: canvas.toDataURL('image/png'), w: viewport.width, h: viewport.height, items });
       }
       setPages(out); setFileName(f.name);
+      // Auto-detect a saved template by header signature.
+      const sig = signatureOf(out);
+      let best: { t: PdfTpl; s: number } | null = null;
+      loadPdfTpls().forEach(t => { const s = jaccard(sig, t.signature); if (!best || s > best.s) best = { t, s }; });
+      if (best && best.s >= 0.5) applyTpl(best.t);
+      else message.info('No matching template — draw column boxes to create one, or use “Extract all rows”.');
     } catch (e: any) { message.error(`PDF read failed: ${e.message}`); }
     finally { setLoading(false); }
   };
-  // Parse a text row's tokens: item = first token with letters+digits; price =
-  // last numeric; qty = the numeric before it (else 1).
-  const parseRow = (tokens: string[]): ImpRow | null => {
-    const item = tokens.find(t => /[A-Za-z]/.test(t) && /\d/.test(t) && t.length >= 4) ?? tokens[0];
-    const nums = tokens.map(t => ({ t, n: Number(t.replace(/,/g, '')) })).filter(x => !Number.isNaN(x.n) && /^[\d,]+(\.\d+)?$/.test(x.t));
-    const price = nums.length ? nums[nums.length - 1].n : 0;
-    const qty = nums.length >= 2 ? nums[nums.length - 2].n : 1;
-    const descToks = tokens.filter(t => t !== item && !/^[\d,]+(\.\d+)?$/.test(t));
-    if (!item) return null;
-    return { key: impKey(), itemNumber: item, description: descToks.join(' ') || undefined, qty: qty || 1, price };
+
+  // Mouse → normalized coords within the current page overlay.
+  const toNorm = (e: React.MouseEvent) => { const r = overlayRef.current!.getBoundingClientRect(); return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) }; };
+  const onDown = (e: React.MouseEvent) => { const p = toNorm(e); dragStart.current = p; setDraft({ x0: p.x, y0: p.y, x1: p.x, y1: p.y }); };
+  const onMove = (e: React.MouseEvent) => { if (!dragStart.current) return; const p = toNorm(e); const s = dragStart.current; setDraft({ x0: Math.min(s.x, p.x), y0: Math.min(s.y, p.y), x1: Math.max(s.x, p.x), y1: Math.max(s.y, p.y) }); };
+  const onUp = () => {
+    if (draft && (draft.x1 - draft.x0 > 0.01)) {
+      const m: PdfMark = { field: drawField, xMin: draft.x0, xMax: draft.x1, yMin: draft.y0, yMax: draft.y1, page: view };
+      setMarks(prev => [...prev.filter(x => x.field !== drawField), m]); // one box per field
+    }
+    dragStart.current = null; setDraft(null);
   };
-  const buildPreview = () => {
-    const picked: ImpRow[] = [];
-    pages?.forEach(pg => pg.rows.forEach(r => { if (checked.has(r.key)) { const pr = parseRow(r.tokens); if (pr) picked.push(pr); } }));
-    if (!picked.length) { message.warning('Tick the item rows first'); return; }
-    setRows(picked);
+
+  const colFor = (nx: number) => marks.find(m => m.field !== 'customer' && nx >= m.xMin && nx <= m.xMax);
+  const getMark = (f: PdfField) => marks.find(m => m.field === f);
+
+  // Extract order lines using the column marks (x-ranges applied to every page).
+  const extractByColumns = (): ImpRow[] => {
+    const itemCol = getMark('item'); if (!itemCol) return [];
+    const out: ImpRow[] = [];
+    (pages ?? []).forEach(pg => {
+      const rowMap = new Map<number, { str: string; nx: number }[]>();
+      pg.items.forEach(it => { const k = Math.round(it.ny * 250); if (!rowMap.has(k)) rowMap.set(k, []); rowMap.get(k)!.push(it); });
+      [...rowMap.values()].forEach(cells => {
+        const bucket: Record<string, string[]> = {};
+        cells.sort((a, b) => a.nx - b.nx).forEach(c => { const col = colFor(c.nx); if (col) (bucket[col.field] ??= []).push(c.str); });
+        const item = (bucket.item ?? []).join('').trim();
+        if (!item || !/\d/.test(item) || item.length < 3) return;
+        const priceToks = (bucket.price ?? []).map(numTok).filter((n): n is number => n != null);
+        const qtyToks = (bucket.qty ?? []).map(numTok).filter((n): n is number => n != null);
+        out.push({ key: impKey(), itemNumber: item, description: (bucket.desc ?? []).join(' ') || undefined, qty: qtyToks[0] || 1, price: priceToks.length ? priceToks[priceToks.length - 1] : 0 });
+      });
+    });
+    return out;
   };
-  const toggle = (key: string) => setChecked(s => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n; });
-  const togglePage = (pg: { rows: { key: string }[] }, on: boolean) => setChecked(s => { const n = new Set(s); pg.rows.forEach(r => on ? n.add(r.key) : n.delete(r.key)); return n; });
+  // No-mapping fallback: parse every row heuristically (item = first alnum token,
+  // price = last number, qty = the number before it).
+  const extractAll = (): ImpRow[] => {
+    const out: ImpRow[] = [];
+    (pages ?? []).forEach(pg => {
+      const rowMap = new Map<number, { str: string; nx: number }[]>();
+      pg.items.forEach(it => { const k = Math.round(it.ny * 250); if (!rowMap.has(k)) rowMap.set(k, []); rowMap.get(k)!.push(it); });
+      [...rowMap.values()].forEach(cells => {
+        const toks = cells.sort((a, b) => a.nx - b.nx).map(c => c.str);
+        const item = toks.find(t => /[A-Za-z]/.test(t) && /\d/.test(t) && t.length >= 4) ?? toks.find(t => /^\d{4,}$/.test(t));
+        if (!item) return;
+        const nums = toks.map(numTok).filter((n): n is number => n != null);
+        out.push({ key: impKey(), itemNumber: item, description: toks.filter(t => t !== item && numTok(t) == null).join(' ') || undefined, qty: nums.length >= 2 ? nums[nums.length - 2] : 1, price: nums.length ? nums[nums.length - 1] : 0 });
+      });
+    });
+    return out;
+  };
+
+  const customerText = useMemo(() => {
+    const c = getMark('customer'); if (!c || !pages) return '';
+    const pg = pages[c.page]; if (!pg) return '';
+    return pg.items.filter(it => it.nx >= c.xMin && it.nx <= c.xMax && it.ny >= c.yMin && it.ny <= c.yMax).map(it => it.str).join(' ');
+  }, [marks, pages]);
+
+  const saveTemplate = () => {
+    if (!tplName.trim()) { message.warning('Enter a template name'); return; }
+    if (!getMark('item')) { message.warning('Mark at least the Item column'); return; }
+    const t: PdfTpl = { name: tplName.trim(), signature: signatureOf(pages ?? []), marks };
+    const next = [...tpls.filter(x => x.name !== t.name), t];
+    setTpls(next); savePdfTpls(next); setTplName('');
+    message.success(`Template “${t.name}” saved`);
+  };
+  const exportTemplate = () => {
+    if (!getMark('item')) { message.warning('Mark the Item column first'); return; }
+    downloadJson({ __type: 'reacterp.pdfLineTemplate', version: 1, name: tplName.trim() || fileName.replace(/\.pdf$/i, ''), signature: signatureOf(pages ?? []), marks }, `${(tplName.trim() || 'pdf-template')}.json`);
+  };
+  const importTemplate = async (f: File) => {
+    try {
+      const raw = await readJsonFile(f);
+      if (!Array.isArray(raw.marks)) { message.error('Not a PDF marking template'); return false; }
+      const t: PdfTpl = { name: raw.name || f.name.replace(/\.json$/i, ''), signature: raw.signature ?? [], marks: raw.marks };
+      const next = [...tpls.filter(x => x.name !== t.name), t];
+      setTpls(next); savePdfTpls(next); applyTpl(t);
+    } catch (e: any) { message.error(`Load failed: ${e.message}`); }
+    return false;
+  };
+
   if (rows) return <StagedPreview rows={rows} org={org} ccy={ccy} onAdd={onAdd} onReset={() => setRows(null)} />;
+  const pg = pages?.[view];
+  const fieldColor = (f: PdfField) => PDF_FIELDS.find(x => x.field === f)!.color;
+  const boxStyle = (m: { xMin: number; yMin: number; xMax: number; yMax: number }, color: string): React.CSSProperties => ({ position: 'absolute', left: `${m.xMin * 100}%`, top: `${m.yMin * 100}%`, width: `${(m.xMax - m.xMin) * 100}%`, height: `${(m.yMax - m.yMin) * 100}%`, border: `2px solid ${color}`, background: `${color}22`, pointerEvents: 'none' });
+
   return (
     <div>
-      <Upload accept=".pdf" showUploadList={false} beforeUpload={readPdf}>
-        <Button icon={<FilePdfOutlined />} type="primary" ghost loading={loading}>Select PDF file</Button>
-      </Upload>
-      {fileName && <Tag style={{ marginLeft: 8 }}>{fileName}</Tag>}
-      {pages && <div style={{ marginTop: 12 }}>
-        <Text type="secondary" style={{ fontSize: 12 }}>Tick the rows that are order lines (page by page). Each ticked row is parsed into item · qty · price.</Text>
-        <div style={{ maxHeight: 340, overflow: 'auto', marginTop: 8 }}>
-          {pages.map(pg => (
-            <div key={pg.page} style={{ marginBottom: 12, border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px', background: REDWOOD.neutral100 }}>
-                <Text strong style={{ fontSize: 12 }}>Page {pg.page}</Text>
-                <Button size="small" type="link" onClick={() => togglePage(pg, true)}>Select all</Button>
-                <Button size="small" type="link" onClick={() => togglePage(pg, false)}>Clear</Button>
-              </div>
-              <div>
-                {pg.rows.map(r => (
-                  <label key={r.key} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '3px 10px', borderTop: `1px solid ${REDWOOD.neutral100}`, cursor: 'pointer', fontSize: 11.5, background: checked.has(r.key) ? '#e6f4ff' : undefined }}>
-                    <Checkbox checked={checked.has(r.key)} onChange={() => toggle(r.key)} />
-                    <span style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>{r.text}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
+      <Space wrap style={{ marginBottom: 10 }}>
+        <Upload accept=".pdf" showUploadList={false} beforeUpload={readPdf}>
+          <Button icon={<FilePdfOutlined />} type="primary" ghost loading={loading}>Select PDF file</Button>
+        </Upload>
+        {fileName && <Tag>{fileName}</Tag>}
+        {pages && <>
+          <Select size="small" style={{ width: 200 }} placeholder="Apply saved template" popupMatchSelectWidth={false}
+            value={undefined} options={tpls.map(t => ({ value: t.name, label: t.name }))}
+            onChange={(v) => { const t = tpls.find(x => x.name === v); if (t) applyTpl(t); }} notFoundContent="No templates yet" />
+          <Upload accept=".json,application/json" showUploadList={false} beforeUpload={importTemplate}>
+            <Button size="small" icon={<CloudUploadOutlined />}>Load template JSON</Button>
+          </Upload>
+        </>}
+      </Space>
+
+      {pg && <>
+        {/* Field palette + template save */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>Draw a box for:</Text>
+          {PDF_FIELDS.map(f => (
+            <Button key={f.field} size="small" onClick={() => setDrawField(f.field)}
+              style={{ borderColor: f.color, color: drawField === f.field ? '#fff' : f.color, background: drawField === f.field ? f.color : '#fff', fontWeight: 600 }}>
+              {f.label}{getMark(f.field) ? ' ✓' : ''}
+            </Button>
           ))}
+          <Button size="small" icon={<DeleteOutlined />} onClick={() => setMarks([])} disabled={!marks.length}>Clear marks</Button>
+          <span style={{ marginLeft: 'auto' }} />
+          <Input size="small" style={{ width: 150 }} placeholder="Template name" value={tplName} onChange={e => setTplName(e.target.value)} />
+          <Button size="small" icon={<SaveOutlined />} onClick={saveTemplate}>Save</Button>
+          <Button size="small" icon={<DownloadOutlined />} onClick={exportTemplate}>Export JSON</Button>
         </div>
-        <div style={{ marginTop: 10, textAlign: 'right' }}>
-          <Button type="primary" icon={<ImportOutlined />} disabled={!checked.size} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }} onClick={buildPreview}>Build preview ({checked.size} row(s))</Button>
+        {customerText && <div style={{ marginBottom: 8 }}><Tag color="gold">Customer (marked)</Tag><Text style={{ fontSize: 12 }}>{customerText}</Text></div>}
+
+        {/* Page pager */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <Button size="small" disabled={view === 0} onClick={() => setView(v => v - 1)}>‹ Prev</Button>
+          <Text style={{ fontSize: 12 }}>Page {view + 1} / {pages!.length}</Text>
+          <Button size="small" disabled={view >= pages!.length - 1} onClick={() => setView(v => v + 1)}>Next ›</Button>
+          <Text type="secondary" style={{ fontSize: 11.5, marginLeft: 8 }}>Drag on the page to mark a column (Item/Qty/Price/Description) or the Customer block. Column x-ranges apply to every page.</Text>
         </div>
-      </div>}
+
+        {/* Rendered page + marking overlay */}
+        <div style={{ maxHeight: 460, overflow: 'auto', border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, background: REDWOOD.neutral100 }}>
+          <div style={{ position: 'relative', width: '100%' }}>
+            <img src={pg.img} alt={`page ${view + 1}`} style={{ width: '100%', display: 'block' }} draggable={false} />
+            <div ref={overlayRef} onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
+              style={{ position: 'absolute', inset: 0, cursor: 'crosshair' }}>
+              {marks.filter(m => m.field === 'customer' ? m.page === view : true).map((m, i) => (
+                <div key={i} style={boxStyle(m, fieldColor(m.field))}>
+                  <span style={{ position: 'absolute', top: -16, left: 0, fontSize: 10, fontWeight: 700, color: fieldColor(m.field), background: '#fff', padding: '0 3px' }}>{m.field}</span>
+                </div>
+              ))}
+              {draft && <div style={boxStyle({ xMin: draft.x0, yMin: draft.y0, xMax: draft.x1, yMax: draft.y1 }, fieldColor(drawField))} />}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 10, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <Button icon={<ImportOutlined />} onClick={() => { const rs = extractAll(); if (!rs.length) { message.warning('No item-like rows found'); return; } setRows(rs); }}>Extract all rows (no mapping)</Button>
+          <Button type="primary" icon={<TableOutlined />} disabled={!getMark('item')} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+            onClick={() => { const rs = extractByColumns(); if (!rs.length) { message.warning('No lines matched the columns — check the Item/Price boxes'); return; } setRows(rs); }}>Extract with columns</Button>
+        </div>
+      </>}
     </div>
   );
 };
