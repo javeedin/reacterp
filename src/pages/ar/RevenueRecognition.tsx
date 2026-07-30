@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Layout, Card, Typography, Table, Button, Space, Tag, Breadcrumb, Tabs,
-  message, Input, Tooltip, Row, Col, Statistic, Modal, Alert, Select, Divider,
+  message, Input, Tooltip, Row, Col, Statistic, Modal, Alert, Select, Divider, Segmented,
 } from 'antd';
 import {
   HomeOutlined, ReloadOutlined, ThunderboltOutlined, SearchOutlined,
@@ -162,8 +162,10 @@ const RevenueRecognition: React.FC = () => {
   const [genOpen, setGenOpen] = useState(false);
   const [genStatus, setGenStatus] = useState<number | null>(null);
   const [genResponse, setGenResponse] = useState<string>('');
+  // 'monthly' = equal split by month (default); 'daily' = day-wise proration.
+  const [genMode, setGenMode] = useState<'monthly' | 'daily'>('monthly');
 
-  const GEN_URL = `${APEX_DB_CONFIG.baseUrl}/ar/revenue-schedules/generate`;
+  const GEN_URL = `${APEX_DB_CONFIG.baseUrl}/ar/revenue-schedules/${genMode === 'daily' ? 'generate-daily' : 'generate'}`;
   const genPayload = { contractIds: selectedKeys.map(Number), createdBy: loggedUser };
 
   // Schedules
@@ -1068,6 +1070,17 @@ const RevenueRecognition: React.FC = () => {
             </Space>
           }
         >
+          <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Calculation method</div>
+          <Segmented value={genMode} onChange={(v) => setGenMode(v as 'monthly' | 'daily')}
+            options={[
+              { label: 'Monthly (equal split)', value: 'monthly' },
+              { label: 'Daily (prorated)', value: 'daily' },
+            ]} />
+          <div style={{ fontSize: 11.5, color: REDWOOD.neutral500, margin: '6px 0 12px' }}>
+            {genMode === 'daily'
+              ? 'Day-wise: RENT_TOTAL ÷ total days; each month gets daily rate × its days inside the contract span — partial first/last months are prorated.'
+              : 'Monthly: RENT_TOTAL ÷ inclusive month count, equal per period (partial months counted as full).'}
+          </div>
           <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Method / URL</div>
           <Typography.Text copyable code style={{ fontSize: 12, wordBreak: 'break-all' }}>{`POST ${GEN_URL}`}</Typography.Text>
 

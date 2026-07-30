@@ -47,7 +47,11 @@ END;
 /
 
 CREATE OR REPLACE PACKAGE RR_AR_REVENUE_PKG AS
+  -- Monthly split: RENT_TOTAL / inclusive-month-count, equal per period.
   PROCEDURE GENERATE_SCHEDULES(p_body IN CLOB, p_status OUT NUMBER, p_result OUT CLOB);
+  -- Daily (prorated) split: each period = daily rate * days of that period that
+  -- fall inside [start,end]. Handles partial first/last months correctly.
+  PROCEDURE GENERATE_SCHEDULES_DAILY(p_body IN CLOB, p_status OUT NUMBER, p_result OUT CLOB);
 END RR_AR_REVENUE_PKG;
 /
 
@@ -153,6 +157,108 @@ CREATE OR REPLACE PACKAGE BODY RR_AR_REVENUE_PKG AS
       p_result := '{"success":false,"error":"' || REPLACE(SQLERRM,'"','\"') || '"}';
   END GENERATE_SCHEDULES;
 
+  -- Day-wise (prorated) revenue schedules. The contract's RENT_TOTAL is spread
+  -- over the inclusive day span [start,end]; each calendar month's schedule gets
+  -- daily_rate * (days of that month that fall inside the span), so partial
+  -- first/last months are prorated. The final period absorbs the rounding
+  -- remainder so the schedule sum ties exactly to RENT_TOTAL.
+  PROCEDURE GENERATE_SCHEDULES_DAILY(p_body IN CLOB, p_status OUT NUMBER, p_result OUT CLOB) IS
+    v_cnt        NUMBER;
+    v_by         VARCHAR2(240);
+    v_id         NUMBER;
+    v_sdt        VARCHAR2(50);
+    v_edt        VARCHAR2(50);
+    v_start      DATE;
+    v_end        DATE;
+    v_total      NUMBER;
+    v_days       NUMBER;
+    v_daily      NUMBER;
+    v_running    NUMBER;
+    v_amt        NUMBER;
+    v_pdate      DATE;   -- first-of-month bucket (period_date)
+    v_seg_start  DATE;
+    v_seg_end    DATE;
+    v_seg_days   NUMBER;
+    v_seq        NUMBER;
+    v_contracts  NUMBER := 0;
+    v_rows       NUMBER := 0;
+  BEGIN
+    APEX_JSON.PARSE(p_body);
+    v_by  := NVL(APEX_JSON.GET_VARCHAR2(p_path => 'createdBy'), 'REACTERP');
+    v_cnt := NVL(APEX_JSON.GET_COUNT(p_path => 'contractIds'), 0);
+    IF v_cnt = 0 THEN
+      p_status := 400; p_result := '{"success":false,"error":"contractIds is required"}'; RETURN;
+    END IF;
+
+    FOR i IN 1 .. v_cnt LOOP
+      v_id := APEX_JSON.GET_NUMBER(p_path => 'contractIds[%d]', p0 => i);
+
+      BEGIN
+        SELECT CONTRACT_START_DATE, CONTRACT_END_DATE, NVL(RENT_TOTAL,0)
+          INTO v_sdt, v_edt, v_total
+          FROM RR_AR_REVENUE_CONTRACT
+         WHERE ID = v_id;
+      EXCEPTION WHEN NO_DATA_FOUND THEN
+        CONTINUE;
+      END;
+
+      v_start := to_dt(v_sdt);
+      v_end   := to_dt(v_edt);
+      IF v_start IS NULL OR v_end IS NULL OR v_end < v_start THEN CONTINUE; END IF;
+
+      -- Inclusive day span and daily rate.
+      v_days  := (v_end - v_start) + 1;
+      v_daily := v_total / v_days;
+      v_running := 0;
+      v_seq := 0;
+
+      -- Regenerate: clear any previous schedule for this contract.
+      DELETE FROM RR_AR_REVENUE_SCHDULES WHERE CONTRACT_ID = v_id;
+
+      -- Walk each month bucket from the start month to the end month.
+      v_pdate := TRUNC(v_start, 'MM');
+      WHILE v_pdate <= v_end LOOP
+        v_seq := v_seq + 1;
+        v_seg_start := GREATEST(v_pdate, v_start);
+        v_seg_end   := LEAST(LAST_DAY(v_pdate), v_end);
+        v_seg_days  := (v_seg_end - v_seg_start) + 1;
+
+        IF v_end <= LAST_DAY(v_pdate) THEN
+          -- final period → absorb the remainder so the sum ties to RENT_TOTAL
+          v_amt := ROUND(v_total - v_running, 2);
+        ELSE
+          v_amt := ROUND(v_daily * v_seg_days, 2);
+          v_running := v_running + v_amt;
+        END IF;
+
+        INSERT INTO RR_AR_REVENUE_SCHDULES (
+          CONTRACT_ID, TRX_NUMBER, UNIT, LOCATION, TENANT,
+          SCHEDULE_NUM, PERIOD_NAME, PERIOD_DATE, AMOUNT,
+          INVOICE_NUMBER, STATUS, ACCOUNT_STATUS, CREATION_DATE, CREATED_BY
+        )
+        SELECT c.ID, c.TRX_NUMBER, c.UNIT, c.LOCATION, c.TENANT,
+               v_seq, TO_CHAR(v_pdate, 'Mon-RR'), v_pdate, v_amt,
+               NULL, 'PENDING', 'UNACCOUNTED', SYSTIMESTAMP, v_by
+          FROM RR_AR_REVENUE_CONTRACT c
+         WHERE c.ID = v_id;
+        v_rows := v_rows + 1;
+
+        v_pdate := ADD_MONTHS(v_pdate, 1);
+      END LOOP;
+
+      v_contracts := v_contracts + 1;
+    END LOOP;
+
+    COMMIT;
+    p_status := 200;
+    p_result := '{"success":true,"contracts":' || v_contracts || ',"schedules":' || v_rows || '}';
+  EXCEPTION
+    WHEN OTHERS THEN
+      ROLLBACK;
+      p_status := 500;
+      p_result := '{"success":false,"error":"' || REPLACE(SQLERRM,'"','\"') || '"}';
+  END GENERATE_SCHEDULES_DAILY;
+
 END RR_AR_REVENUE_PKG;
 /
 
@@ -213,6 +319,37 @@ DECLARE
   v_status NUMBER; v_result CLOB;
 BEGIN
   RR_AR_REVENUE_PKG.GENERATE_SCHEDULES(:body_text, v_status, v_result);
+  :status_code := v_status;
+  HTP.P(v_result);
+END;
+]'
+  );
+  COMMIT;
+END;
+/
+
+-- ── POST reerp/ar/revenue-schedules/generate-daily (day-wise proration) ──────
+BEGIN ORDS.DELETE_HANDLER(p_module_name => 'reerp', p_pattern => 'ar/revenue-schedules/generate-daily', p_method => 'POST'); COMMIT; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN
+  ORDS.DEFINE_TEMPLATE(p_module_name => 'reerp', p_pattern => 'ar/revenue-schedules/generate-daily', p_priority => 0, p_etag_type => 'HASH');
+  COMMIT;
+EXCEPTION WHEN OTHERS THEN NULL;
+END;
+/
+BEGIN
+  ORDS.DEFINE_HANDLER(
+    p_module_name    => 'reerp',
+    p_pattern        => 'ar/revenue-schedules/generate-daily',
+    p_method         => 'POST',
+    p_source_type    => 'plsql/block',
+    p_items_per_page => 0,
+    p_mimes_allowed  => 'application/json',
+    p_source         => q'[
+DECLARE
+  v_status NUMBER; v_result CLOB;
+BEGIN
+  RR_AR_REVENUE_PKG.GENERATE_SCHEDULES_DAILY(:body_text, v_status, v_result);
   :status_code := v_status;
   HTP.P(v_result);
 END;

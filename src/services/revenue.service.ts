@@ -114,11 +114,14 @@ export const markRevenueScheduleAccounted = async (
   return { success: true, scheduleId, rowsUpdated: data?.rowsUpdated };
 };
 
+// mode 'monthly' = equal split by inclusive month count (default, unchanged);
+// mode 'daily' = day-wise proration (prorates partial first/last months).
 export const generateRevenueSchedules = async (
-  contractIds: number[], createdBy?: string,
+  contractIds: number[], createdBy?: string, mode: 'monthly' | 'daily' = 'monthly',
 ): Promise<{ success: boolean; contracts?: number; schedules?: number; error?: string }> => {
   try {
-    const res = await fetch(`${BASE}/ar/revenue-schedules/generate`, {
+    const path = mode === 'daily' ? 'ar/revenue-schedules/generate-daily' : 'ar/revenue-schedules/generate';
+    const res = await fetch(`${BASE}/${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ contractIds, createdBy }),
