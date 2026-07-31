@@ -9,7 +9,7 @@ import {
   ReloadOutlined, DownloadOutlined, SearchOutlined, AppstoreOutlined,
 } from '@ant-design/icons';
 import {
-  parseSetupExport, getSetupCache, setSetupCache, type SetupTask, type SetupModule,
+  parseSetupExport, getSetupCache, setSetupCache, mergeSetupTasks, type SetupTask, type SetupModule,
 } from '../../utils/fusionSetupZip';
 
 const { Text, Title } = Typography;
@@ -22,26 +22,30 @@ const MOD_ARGB: Record<SetupModule, string> = { 'Financials': 'FF0572CE', 'Suppl
 const MODULES: SetupModule[] = ['Financials', 'Supply Chain', 'Common'];
 const fill = (argb: string) => ({ type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb } });
 
+const TAB_MODULES: SetupModule[] = ['Financials', 'Supply Chain', 'Common'];
+
 const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultModule }) => {
   const [tasks, setTasks] = useState<SetupTask[]>(() => getSetupCache()?.tasks ?? []);
-  const [fileName, setFileName] = useState<string>(() => getSetupCache()?.fileName ?? '');
+  const [fileNames, setFileNames] = useState<string[]>(() => getSetupCache()?.fileNames ?? []);
   const [parsing, setParsing] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
-  const [modFilter, setModFilter] = useState<'All' | SetupModule>(defaultModule ?? 'All');
+  const [activeMod, setActiveMod] = useState<SetupModule>(defaultModule ?? 'Financials');
   const [search, setSearch] = useState('');
   const [configuredOnly, setConfiguredOnly] = useState(false);
   const [detail, setDetail] = useState<SetupTask | null>(null);
   const [view, setView] = useState<'explorer' | 'analysis'>('explorer');
   const [buSearch, setBuSearch] = useState('');
 
-  useEffect(() => { setModFilter(defaultModule ?? 'All'); }, [defaultModule]);
+  useEffect(() => { if (defaultModule) setActiveMod(defaultModule); }, [defaultModule]);
 
   const onFile = async (file: File) => {
     setParsing(true); setProgress({ done: 0, total: 0 });
     try {
       const parsed = await parseSetupExport(file, (done, total) => setProgress({ done, total }));
-      setTasks(parsed); setFileName(file.name); setSetupCache(file.name, parsed);
-      message.success(`Parsed ${parsed.length} setup tasks from ${file.name}`);
+      const merged = mergeSetupTasks(tasks, parsed);
+      const names = Array.from(new Set([...fileNames, file.name]));
+      setTasks(merged); setFileNames(names); setSetupCache(names, merged);
+      message.success(`Added ${parsed.length} tasks from ${file.name} (${merged.length} total)`);
     } catch (e: any) { message.error(`Could not read the export: ${e?.message ?? e}`); }
     finally { setParsing(false); setProgress(null); }
     return false;
@@ -61,35 +65,35 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
   const filtered = useMemo(() => {
     const s = search.trim().toLowerCase();
     return tasks.filter(t =>
-      (modFilter === 'All' || t.module === modFilter) &&
+      t.module === activeMod &&
       (!configuredOnly || t.hasData) &&
       (!s || t.name.toLowerCase().includes(s)));
-  }, [tasks, modFilter, search, configuredOnly]);
+  }, [tasks, activeMod, search, configuredOnly]);
 
-  // ── Analysis: Business-Unit × Setup-task matrix ─────────────────────────────
+  // ── Analysis: Business-Unit × Setup-task matrix, scoped to the active module ──
   const analysis = useMemo(() => {
-    const scoped = tasks.filter(t => t.businessUnits.length > 0).sort((a, b) => b.businessUnits.length - a.businessUnits.length);
+    const scoped = tasks.filter(t => t.module === activeMod && t.businessUnits.length > 0).sort((a, b) => b.businessUnits.length - a.businessUnits.length);
     const buUniverse = Array.from(new Set(scoped.flatMap(t => t.businessUnits))).sort((a, b) => a.localeCompare(b));
     const has = (bu: string, t: SetupTask) => t.businessUnits.includes(bu);
     const buRows = buUniverse.map(bu => {
       const done = scoped.filter(t => has(bu, t));
       return { bu, doneCount: done.length, doneTasks: done.map(t => t.name), cells: Object.fromEntries(scoped.map(t => [t.name, has(bu, t)])) as Record<string, boolean> };
     }).sort((a, b) => b.doneCount - a.doneCount || a.bu.localeCompare(b.bu));
-    // module status rollup
+    // module status rollup (all modules — context)
     const modRows = MODULES.map(m => {
       const t = tasks.filter(x => x.module === m);
       const configured = t.filter(x => x.hasData).length;
       return { module: m, total: t.length, configured, empty: t.length - configured, records: t.reduce((s, x) => s + x.recordCount, 0), pct: t.length ? Math.round((configured / t.length) * 100) : 0 };
     });
     return { scoped, buUniverse, buRows, modRows };
-  }, [tasks]);
+  }, [tasks, activeMod]);
 
   const buRowsFiltered = useMemo(() => {
     const s = buSearch.trim().toLowerCase();
     return s ? analysis.buRows.filter(r => r.bu.toLowerCase().includes(s)) : analysis.buRows;
   }, [analysis.buRows, buSearch]);
 
-  const base = fileName.replace(/\.zip$/i, '') || 'export';
+  const base = (fileNames[0] || 'export').replace(/\.zip$/i, '') || 'export';
   const download = (buf: ArrayBuffer, name: string) => {
     const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
     const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url);
@@ -170,13 +174,13 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
     <div style={{ padding: '8px 4px' }}>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
         <DatabaseOutlined style={{ fontSize: 20, color: RW.primary }} />
-        <Title level={4} style={{ margin: 0 }}>Setup Data{defaultModule ? ` — ${defaultModule}` : ''}</Title>
-        {fileName && <Tag color="default" style={{ fontSize: 11 }}>{fileName}</Tag>}
+        <Title level={4} style={{ margin: 0 }}>Setup Data Analysis</Title>
+        {fileNames.map(f => <Tag key={f} color="default" style={{ fontSize: 11 }}>{f}</Tag>)}
         {hasData && <Segmented value={view} onChange={v => setView(v as any)} options={[{ value: 'explorer', label: 'Explorer' }, { value: 'analysis', label: 'BU & Module Analysis' }]} />}
         <span style={{ marginLeft: 'auto' }} />
         {hasData && <>
           <Button size="small" icon={<DownloadOutlined />} onClick={view === 'analysis' ? exportMatrix : exportSummary}>Export {view === 'analysis' ? 'analysis' : 'summary'}</Button>
-          <Upload accept=".zip" showUploadList={false} beforeUpload={onFile}><Button size="small" icon={<ReloadOutlined />} loading={parsing}>Re-upload</Button></Upload>
+          <Upload accept=".zip" showUploadList={false} beforeUpload={onFile}><Button size="small" type="primary" icon={<InboxOutlined />} loading={parsing} style={{ background: RW.primary, borderColor: RW.primary }}>Add export…</Button></Upload>
         </>}
       </div>
 
@@ -189,9 +193,9 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
             {parsing && progress && <div style={{ marginTop: 16, maxWidth: 360, marginInline: 'auto' }}><Progress percent={progress.total ? Math.round((progress.done / progress.total) * 100) : 0} size="small" /><Text type="secondary" style={{ fontSize: 11 }}>Parsing {progress.done}/{progress.total} tasks…</Text></div>}
           </Upload.Dragger>
         </Card>
-      ) : view === 'explorer' ? (
+      ) : (
         <>
-          {/* Dashboard */}
+          {/* Dashboard (global across all uploaded exports) */}
           <Row gutter={[12, 12]} style={{ marginBottom: 14 }}>
             <Col xs={24} md={6}>
               <Card size="small" style={{ borderRadius: 10, borderTop: `3px solid ${RW.primary}`, height: '100%' }}>
@@ -210,7 +214,7 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
               const s = stats.byMod[m];
               return (
                 <Col xs={24} md={6} key={m}>
-                  <Card size="small" hoverable onClick={() => setModFilter(m)} style={{ borderRadius: 10, borderTop: `3px solid ${MOD_COLOR[m]}`, height: '100%', cursor: 'pointer', outline: modFilter === m ? `2px solid ${MOD_COLOR[m]}` : undefined }}>
+                  <Card size="small" hoverable onClick={() => setActiveMod(m)} style={{ borderRadius: 10, borderTop: `3px solid ${MOD_COLOR[m]}`, height: '100%', cursor: 'pointer', outline: activeMod === m ? `2px solid ${MOD_COLOR[m]}` : undefined }}>
                     <Statistic title={<Text strong style={{ color: MOD_COLOR[m] }}>{m}</Text>} value={s.configured} suffix={<Text type="secondary" style={{ fontSize: 13 }}>/ {s.total} tasks</Text>} />
                     <div style={{ marginTop: 8 }}><Progress percent={s.pct} strokeColor={MOD_COLOR[m]} size="small" /></div>
                     <div style={{ marginTop: 4, fontSize: 12 }}><Text type="secondary">Records </Text><Text strong>{s.records.toLocaleString()}</Text></div>
@@ -220,21 +224,23 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
             })}
           </Row>
 
-          {/* Filter bar */}
-          <Card size="small" style={{ borderRadius: 10 }}
-            styles={{ body: { padding: 10 } }}
-            title={<Space wrap>
-              <Segmented value={modFilter} onChange={v => setModFilter(v as any)}
-                options={['All', ...MODULES].map(m => ({ value: m, label: m === 'All' ? `All (${stats.all.total})` : `${m} (${stats.byMod[m as SetupModule].total})` }))} />
-              <Input allowClear size="small" prefix={<SearchOutlined />} placeholder="Search task…" value={search} onChange={e => setSearch(e.target.value)} style={{ width: 220 }} />
-              <Button size="small" type={configuredOnly ? 'primary' : 'default'} onClick={() => setConfiguredOnly(v => !v)} style={configuredOnly ? { background: RW.success, borderColor: RW.success } : undefined}>Configured only</Button>
-            </Space>}>
-            <Table size="small" rowKey="name" columns={cols} dataSource={filtered} pagination={{ defaultPageSize: 25, showSizeChanger: true, pageSizeOptions: [25, 50, 100, 200, 500] }}
-              scroll={{ x: 720 }} locale={{ emptyText: 'No tasks match' }} />
-          </Card>
-        </>
-      ) : (
-        <>
+          {/* Module tabs — Financials / Supply Chain / Common */}
+          <Tabs activeKey={activeMod} onChange={k => setActiveMod(k as SetupModule)} style={{ marginBottom: 4 }}
+            items={TAB_MODULES.map(m => ({ key: m, label: <span style={{ fontWeight: 600, color: activeMod === m ? MOD_COLOR[m] : undefined }}>{m} <Tag style={{ marginInlineStart: 4, background: MOD_COLOR[m], color: '#fff', border: 'none' }}>{stats.byMod[m].configured}/{stats.byMod[m].total}</Tag></span> }))} />
+
+          {view === 'explorer' ? (
+            <Card size="small" style={{ borderRadius: 10 }}
+              styles={{ body: { padding: 10 } }}
+              title={<Space wrap>
+                <Text strong style={{ color: MOD_COLOR[activeMod] }}>{activeMod} tasks</Text>
+                <Input allowClear size="small" prefix={<SearchOutlined />} placeholder="Search task…" value={search} onChange={e => setSearch(e.target.value)} style={{ width: 220 }} />
+                <Button size="small" type={configuredOnly ? 'primary' : 'default'} onClick={() => setConfiguredOnly(v => !v)} style={configuredOnly ? { background: RW.success, borderColor: RW.success } : undefined}>Configured only</Button>
+              </Space>}>
+              <Table size="small" rowKey="name" columns={cols} dataSource={filtered} pagination={{ defaultPageSize: 25, showSizeChanger: true, pageSizeOptions: [25, 50, 100, 200, 500] }}
+                scroll={{ x: 720 }} locale={{ emptyText: 'No tasks match' }} />
+            </Card>
+          ) : (
+          <>
           {/* Module status */}
           <Card size="small" title={<Space><AppstoreOutlined style={{ color: RW.primary }} />Module-wise setup status</Space>} style={{ borderRadius: 10, marginBottom: 14 }}>
             <Table size="small" rowKey="module" pagination={false} dataSource={analysis.modRows}
@@ -296,6 +302,8 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
                     dataSource={f.rows.map((r, ri) => ({ key: ri, ...Object.fromEntries(r.map((c, ci) => [ci, c])) }))} />,
             }))} />)}
       </Drawer>
+        </>
+      )}
     </div>
   );
 };
