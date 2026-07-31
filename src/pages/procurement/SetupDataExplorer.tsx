@@ -80,13 +80,15 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
       const done = scoped.filter(t => has(bu, t));
       return { bu, doneCount: done.length, doneTasks: done.map(t => t.name), cells: Object.fromEntries(scoped.map(t => [t.name, has(bu, t)])) as Record<string, boolean> };
     }).sort((a, b) => b.doneCount - a.doneCount || a.bu.localeCompare(b.bu));
+    // per-column tick count — how many BUs have each setup task configured
+    const colCounts = Object.fromEntries(scoped.map(t => [t.name, buUniverse.filter(bu => has(bu, t)).length])) as Record<string, number>;
     // module status rollup (all modules — context)
     const modRows = MODULES.map(m => {
       const t = tasks.filter(x => x.module === m);
       const configured = t.filter(x => x.hasData).length;
       return { module: m, total: t.length, configured, empty: t.length - configured, records: t.reduce((s, x) => s + x.recordCount, 0), pct: t.length ? Math.round((configured / t.length) * 100) : 0 };
     });
-    return { scoped, buUniverse, buRows, modRows };
+    return { scoped, buUniverse, buRows, colCounts, modRows };
   }, [tasks, activeMod]);
 
   const buRowsFiltered = useMemo(() => {
@@ -285,7 +287,11 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
                     { title: 'Setups Done', dataIndex: 'doneCount', width: 150, fixed: 'left' as const, align: 'left' as const, sorter: (a: any, b: any) => a.doneCount - b.doneCount, defaultSortOrder: 'descend' as const,
                       render: (n: number) => <Space size={6}><Text strong style={{ color: RW.primary }}>{n}/{analysis.scoped.length}</Text><Progress percent={Math.round((n / analysis.scoped.length) * 100)} size="small" showInfo={false} style={{ width: 70 }} strokeColor={RW.teal} /></Space> },
                     ...analysis.scoped.map(t => ({
-                      title: <Tooltip title={t.name}><span style={{ fontSize: 10.5 }}>{t.name.length > 16 ? t.name.slice(0, 15) + '…' : t.name}</span></Tooltip>,
+                      title: <Tooltip title={`${t.name} — ${analysis.colCounts[t.name]} of ${analysis.buUniverse.length} BUs configured`}>
+                        <div style={{ textAlign: 'center' as const, lineHeight: 1.2 }}>
+                          <div style={{ fontSize: 10.5 }}>{t.name.length > 16 ? t.name.slice(0, 15) + '…' : t.name}</div>
+                          <Tag style={{ marginTop: 3, marginInline: 0, fontSize: 10, lineHeight: '15px', padding: '0 5px', background: RW.success, color: '#fff', border: 'none', fontWeight: 600 }}>{analysis.colCounts[t.name]}</Tag>
+                        </div></Tooltip>,
                       dataIndex: ['cells', t.name], width: 92, align: 'center' as const,
                       render: (_: any, r: any) => r.cells[t.name] ? <CheckCircleTwoTone twoToneColor={RW.success} /> : <span style={{ color: RW.n200 }}>·</span>,
                     })),
