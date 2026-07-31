@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Card, Row, Col, Statistic, Progress, Table, Tag, Upload, Segmented, Input, Button,
-  Drawer, Empty, Space, Typography, message, Tabs, Tooltip,
+  Drawer, Empty, Space, Typography, message, Tabs, Tooltip, Breadcrumb,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { Link } from 'react-router-dom';
 import {
   InboxOutlined, DatabaseOutlined, CheckCircleTwoTone, MinusCircleOutlined, EyeOutlined,
-  ReloadOutlined, DownloadOutlined, SearchOutlined, AppstoreOutlined,
+  ReloadOutlined, DownloadOutlined, SearchOutlined, AppstoreOutlined, HomeOutlined,
 } from '@ant-design/icons';
 import {
   parseSetupExport, getSetupCache, setSetupCache, mergeSetupTasks, type SetupTask, type SetupModule,
@@ -172,6 +173,12 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
 
   return (
     <div style={{ padding: '8px 4px' }}>
+      <Breadcrumb style={{ marginBottom: 12 }} items={[
+        { title: <Link to="/home"><HomeOutlined /> Home</Link> },
+        { title: <Link to="/procurement">Procurement</Link> },
+        { title: <Link to="/procurement/setup-data">Setup Data</Link> },
+        { title: defaultModule ?? 'Overview' },
+      ]} />
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
         <DatabaseOutlined style={{ fontSize: 20, color: RW.primary }} />
         <Title level={4} style={{ margin: 0 }}>Setup Data Analysis</Title>
