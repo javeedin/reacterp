@@ -1223,6 +1223,9 @@ const OrderView: React.FC<{ order: any; onCopy?: (order: any, lines: any[]) => v
                 style={{ color: REDWOOD.primary, borderColor: REDWOOD.primary, fontWeight: 600 }}>Push to AR</Button>
             </Tooltip>}
           <Button size="small" icon={<ProfileOutlined />} onClick={() => setHdrOpen(true)}>All fields</Button>
+          <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {fusionHref(linesHref || '(no order lines link)')}</span>}>
+            <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} />
+          </Tooltip>
         </Space>}>
         <Row gutter={[16, 12]}>
           {/* Info fields */}
@@ -3706,6 +3709,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             existing: true,
           };
         }));
+        // Subinventory is stored per line (SubinventoryCode); bring the saved value
+        // into the header field on edit (mirrors what create sent).
+        const savedSub = rows.map((l: any) => pf(l, ['SubinventoryCode'])).find(Boolean);
+        if (savedSub) { form.setFieldsValue({ subinventory: savedSub }); setHdr(prev => ({ ...prev, subinventory: String(savedSub) })); }
       } catch (e: any) { message.error(`Failed to load order lines: ${e.message}`); }
       finally { setRefreshing(false); }
     })();
