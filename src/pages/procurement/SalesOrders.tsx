@@ -3291,11 +3291,11 @@ const NotesAttachmentsPanel: React.FC<{ orderKey: string }> = ({ orderKey }) => 
 // ── Manual Charges dialog — add an extra charge (freight/handling/…) to a line's
 //    charges child. A charge carries its own amount, so it applies on a frozen
 //    order without repricing. Codes are pricing-setup-specific → all editable.
-const CHARGE_PRESETS: { key: string; label: string; def: string; sub: string; applyTo: string; type: string }[] = [
-  { key: 'Freight',    label: 'Freight',    def: 'QP_SHIP_FREIGHT',     sub: 'ORA_PRICE', applyTo: 'Shipping', type: 'Freight' },
-  { key: 'Handling',   label: 'Handling',   def: 'QP_HANDLING_CHARGE',  sub: 'ORA_PRICE', applyTo: 'Price',    type: 'Handling' },
-  { key: 'Restocking', label: 'Restocking', def: 'QP_RESTOCKING_CHARGE', sub: 'ORA_PRICE', applyTo: 'Return',   type: 'Restocking' },
-  { key: 'Custom',     label: 'Custom',     def: '',                    sub: 'ORA_PRICE', applyTo: 'Price',    type: '' },
+const CHARGE_PRESETS: { key: string; label: string; def: string; sub: string; applyTo: string; typeCode: string }[] = [
+  { key: 'Freight',    label: 'Freight',    def: 'QP_SHIP_FREIGHT',      sub: 'Price', applyTo: 'SHIPPING', typeCode: 'ORA_SHIPPING_FREIGHT' },
+  { key: 'Handling',   label: 'Handling',   def: 'QP_SHIP_HANDLING',     sub: 'Price', applyTo: 'SHIPPING', typeCode: 'ORA_SHIPPING_HANDLING' },
+  { key: 'Restocking', label: 'Restocking', def: 'QP_RESTOCKING_CHARGE', sub: 'Price', applyTo: 'RETURN',   typeCode: 'ORA_RESTOCKING' },
+  { key: 'Custom',     label: 'Custom',     def: '',                     sub: 'Price', applyTo: 'PRICE',    typeCode: '' },
 ];
 const ChargesModal: React.FC<{ open: boolean; onClose: () => void; orderKey: string; lines: NewLine[]; ccy?: string }> = ({ open, onClose, orderKey, lines, ccy }) => {
   const eligible = lines.filter(l => !l.canceled && (l.fulfillLineId != null || l.lineHref));
@@ -3303,9 +3303,9 @@ const ChargesModal: React.FC<{ open: boolean; onClose: () => void; orderKey: str
   const line = eligible.find(l => l.key === lineKey) ?? eligible[0];
   const [preset, setPreset] = useState('Freight');
   const [def, setDef] = useState('QP_SHIP_FREIGHT');
-  const [sub, setSub] = useState('ORA_PRICE');
-  const [applyTo, setApplyTo] = useState('Shipping');
-  const [chType, setChType] = useState('Freight');
+  const [sub, setSub] = useState('Price');
+  const [applyTo, setApplyTo] = useState('SHIPPING');
+  const [chTypeCode, setChTypeCode] = useState('ORA_SHIPPING_FREIGHT');
   const [amount, setAmount] = useState<number>(0);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -3324,18 +3324,28 @@ const ChargesModal: React.FC<{ open: boolean; onClose: () => void; orderKey: str
   }, [line?.key]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (open && line) loadExisting(); }, [open, line?.key, loadExisting]);
 
-  const applyPreset = (k: string) => { const p = CHARGE_PRESETS.find(x => x.key === k)!; setPreset(k); if (k !== 'Custom') { setDef(p.def); setSub(p.sub); setApplyTo(p.applyTo); setChType(p.type); } };
+  const applyPreset = (k: string) => { const p = CHARGE_PRESETS.find(x => x.key === k)!; setPreset(k); if (k !== 'Custom') { setDef(p.def); setSub(p.sub); setApplyTo(p.applyTo); setChTypeCode(p.typeCode); } };
   // Source ids are REQUIRED (Fusion errors "required attribute SourceChargeId /
   // SourceChargeComponentId"); keep them stable per line + charge position.
   const srcChargeId = `MC-${line?.fulfillLineId ?? line?.srcLineId ?? 'x'}-${(existing.length || 0) + 1}`;
+  // Primary within its ApplyTo context — true only if no existing primary charge
+  // already applies to the same target (so freight/shipping can be primary while
+  // the item's Sale price stays primary for PRICE).
+  const primary = !existing.some(c => String(pf(c, ['ApplyToCode', 'ApplyTo']) ?? '').toUpperCase() === applyTo.toUpperCase() && String(c.PrimaryFlag) === 'true');
   const body = {
     SourceChargeId: srcChargeId,
-    ChargeDefinitionCode: def, ...(chType ? { ChargeType: chType } : {}), ChargeSubType: sub, ApplyTo: applyTo,
-    PriceType: 'One time', ...(ccy ? { ChargeCurrencyCode: ccy } : {}), GSAUnitPrice: num(amount),
-    SequenceNumber: (existing.length || 0) + 1, PrimaryFlag: 'false', RollupFlag: 'false',
+    ApplyToCode: applyTo,
+    PriceType: 'One time',
+    ...(chTypeCode ? { ChargeTypeCode: chTypeCode } : {}),
+    ChargeSubType: sub,
+    ...(ccy ? { ChargeCurrencyCode: ccy } : {}),
+    SequenceNumber: (existing.length || 0) + 1,
+    ChargeDefinitionCode: def,
+    PrimaryFlag: primary,
+    RollupFlag: false,
     chargeComponents: [
-      { SourceChargeComponentId: `${srcChargeId}-CC1`, SourceChargeId: srcChargeId, PriceElementCode: 'QP_LIST_PRICE', PriceElementUsageCode: 'LIST_PRICE', HeaderCurrencyUnitPrice: num(amount), HeaderCurrencyExtendedAmount: num(amount), RollupFlag: 'false', SequenceNumber: 1 },
-      { SourceChargeComponentId: `${srcChargeId}-CC2`, SourceChargeId: srcChargeId, PriceElementCode: 'QP_NET_PRICE', PriceElementUsageCode: 'NET_PRICE', HeaderCurrencyUnitPrice: num(amount), HeaderCurrencyExtendedAmount: num(amount), RollupFlag: 'false', SequenceNumber: 2 },
+      { SourceChargeComponentId: `${srcChargeId}-SCC1`, PriceElementCode: 'QP_LIST_PRICE', PriceElementUsageCode: 'LIST_PRICE', HeaderCurrencyUnitPrice: num(amount), HeaderCurrencyExtendedAmount: num(amount), RollupFlag: false, SequenceNumber: 1 },
+      { SourceChargeComponentId: `${srcChargeId}-SCC2`, PriceElementCode: 'QP_NET_PRICE', PriceElementUsageCode: 'NET_PRICE', HeaderCurrencyUnitPrice: num(amount), HeaderCurrencyExtendedAmount: num(amount), RollupFlag: false, SequenceNumber: 2 },
     ],
   };
   const url = chargesUrl(line);
@@ -3346,7 +3356,7 @@ const ChargesModal: React.FC<{ open: boolean; onClose: () => void; orderKey: str
       const r = await fetch(url, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const t = await r.text();
       if (!r.ok) throw new Error([`POST ${url}`, `HTTP ${r.status}`, ...collectOrderErrors(null, t, true)].join('\n'));
-      message.success(`${chType || 'Charge'} of ${fmtAmount(num(amount), ccy)} added`); setAmount(0); loadExisting();
+      message.success(`Charge of ${fmtAmount(num(amount), ccy)} added`); setAmount(0); loadExisting();
     } catch (e: any) { setErr(e?.message || 'Add failed'); message.error('Charge add failed'); } finally { setBusy(false); }
   };
   const delCharge = (row: any) => Modal.confirm({
@@ -3381,10 +3391,10 @@ const ChargesModal: React.FC<{ open: boolean; onClose: () => void; orderKey: str
         <Segmented block value={preset} onChange={(v: any) => applyPreset(v)} options={CHARGE_PRESETS.map(p => ({ value: p.key, label: p.label }))} style={{ marginBottom: 12 }} />
         <Row gutter={10}>
           <Col span={8}><div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Charge Definition Code</div><Input value={def} onChange={e => setDef(e.target.value)} placeholder="QP_SHIP_FREIGHT" /></Col>
-          <Col span={8}><div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Charge Type</div><Input value={chType} onChange={e => setChType(e.target.value)} placeholder="Freight" /></Col>
-          <Col span={8}><div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Sub Type</div><Input value={sub} onChange={e => setSub(e.target.value)} placeholder="ORA_PRICE" /></Col>
-          <Col span={8} style={{ marginTop: 10 }}><div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Apply To</div>
-            <Select style={{ width: '100%' }} value={applyTo} onChange={setApplyTo} options={['Price', 'Shipping', 'Return'].map(v => ({ value: v, label: v }))} /></Col>
+          <Col span={8}><div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Charge Type Code</div><Input value={chTypeCode} onChange={e => setChTypeCode(e.target.value)} placeholder="ORA_SHIPPING_FREIGHT" /></Col>
+          <Col span={8}><div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Sub Type</div><Input value={sub} onChange={e => setSub(e.target.value)} placeholder="Price" /></Col>
+          <Col span={8} style={{ marginTop: 10 }}><div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Apply To Code</div>
+            <Select style={{ width: '100%' }} value={applyTo} onChange={setApplyTo} options={['PRICE', 'SHIPPING', 'RETURN'].map(v => ({ value: v, label: v }))} /></Col>
           <Col span={8} style={{ marginTop: 10 }}><div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Amount</div>
             <InputNumber min={0} style={{ width: '100%' }} value={amount} onChange={v => setAmount(Number(v) || 0)} addonAfter={ccy} /></Col>
         </Row>
