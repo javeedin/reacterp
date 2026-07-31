@@ -3468,6 +3468,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [pickOpen, setPickOpen] = useState(false);
   const [preview, setPreview] = useState(false);
   const [posting, setPosting] = useState(false);
+  // Bumped by the header Refresh button to re-pull the whole order from Fusion.
+  const [reloadKey, setReloadKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
   // Error message from the last save (drives the result dialog's error state).
   const [saveError, setSaveError] = useState<string | null>(null);
   // Per-save error breakdown: general (order-level) messages + a click-to-view modal.
@@ -3514,7 +3517,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     if (key == null) return;
     fetchAllPages(`${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(String(key))}/child/lines`)
       .then(setRawLines).catch(() => setRawLines([]));
-  }, [editMode, editOrder]);
+  }, [editMode, editOrder, reloadKey]);
   const billingChildName = useMemo(() => {
     const names = new Set<string>();
     rawLines.forEach(l => (l.links ?? []).forEach((x: any) => { if (x.rel === 'child' && x.name) names.add(x.name); }));
@@ -3664,8 +3667,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           };
         }));
       } catch (e: any) { message.error(`Failed to load order lines: ${e.message}`); }
+      finally { setRefreshing(false); }
     })();
-  }, [editOrder]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [editOrder, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Tax code often comes back null on the line even when tax applies. Once the BU's
   // tax codes load, back-fill any line that has a derived tax % but no recognised
@@ -3856,6 +3860,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       } catch { return null; }
     }));
     setLines(prev => prev.map(l => { const u = updated.find(x => x && x.key === l.key); return u ? { ...l, chargeAmount: u.chargeAmount } : l; }));
+  };
+  // Header Refresh — re-pull the whole order (lines + charges + tax + lots + raw
+  // lines + sales credits) from Fusion; the load effects clear the busy flag.
+  const refreshOrder = () => {
+    if (!editMode) { message.warning('Nothing to refresh yet'); return; }
+    setRefreshing(true);
+    setReloadKey(k => k + 1);
+    salesCredits.reload();
+    setResvReloadKey(k => k + 1);
+    message.success('Refreshing order…');
   };
   const openOrderTotals = async () => {
     if (!childOrderKey) { message.warning('Save the order first to see Fusion totals'); return; }
@@ -4849,6 +4863,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             ? (() => { const s = String(orderStatus || pf(editOrder, ['StatusCode', 'Status']) || 'DOO_DRAFT').replace(/^DOO_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); return <Tag color={isDraftStatus ? 'gold' : 'green'} style={{ fontWeight: 600 }}>Status: {s}</Tag>; })()
             : <><Tag color="purple">{hdr.orderType}</Tag><Tag>{hdr.txnCurrency}</Tag></>}</Space>}
         extra={<Space>
+          {/* Refresh — re-pull the whole order (lines, charges, tax, totals) from Fusion */}
+          {editMode && <Button icon={<ReloadOutlined />} loading={refreshing} onClick={refreshOrder} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>Refresh</Button>}
           {/* JSON Actions — save/load the full on-screen draft + payload preview */}
           <Dropdown menu={{ items: [
             { key: 'save', icon: <DownloadOutlined />, label: 'Save JSON', onClick: saveDraftJson },
