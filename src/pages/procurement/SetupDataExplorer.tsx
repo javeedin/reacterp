@@ -8,7 +8,6 @@ import {
   InboxOutlined, DatabaseOutlined, CheckCircleTwoTone, MinusCircleOutlined, EyeOutlined,
   ReloadOutlined, DownloadOutlined, SearchOutlined, AppstoreOutlined,
 } from '@ant-design/icons';
-import * as XLSX from 'xlsx';
 import {
   parseSetupExport, getSetupCache, setSetupCache, type SetupTask, type SetupModule,
 } from '../../utils/fusionSetupZip';
@@ -19,7 +18,9 @@ const RW = {
   purple: '#6B21A8', teal: '#00918A', n100: '#F4F4F2', n200: '#E4E1DD', n600: '#6B6862', n900: '#1B1A17',
 };
 const MOD_COLOR: Record<SetupModule, string> = { 'Financials': RW.info, 'Supply Chain': RW.teal, 'Common': RW.purple };
+const MOD_ARGB: Record<SetupModule, string> = { 'Financials': 'FF0572CE', 'Supply Chain': 'FF00918A', 'Common': 'FF6B21A8' };
 const MODULES: SetupModule[] = ['Financials', 'Supply Chain', 'Common'];
+const fill = (argb: string) => ({ type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb } });
 
 const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultModule }) => {
   const [tasks, setTasks] = useState<SetupTask[]>(() => getSetupCache()?.tasks ?? []);
@@ -88,28 +89,73 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
     return s ? analysis.buRows.filter(r => r.bu.toLowerCase().includes(s)) : analysis.buRows;
   }, [analysis.buRows, buSearch]);
 
-  const exportMatrix = () => {
-    const rows = analysis.buRows.map(r => ({
-      'Business Unit': r.bu, 'Setups Done': r.doneCount, 'Of Tasks': analysis.scoped.length,
-      '% Complete': analysis.scoped.length ? Math.round((r.doneCount / analysis.scoped.length) * 100) : 0,
-      ...Object.fromEntries(analysis.scoped.map(t => [t.name, r.cells[t.name] ? 'Y' : ''])),
-    }));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'BU x Setup');
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(analysis.modRows.map(m => ({ Module: m.module, Total: m.total, Configured: m.configured, Empty: m.empty, '% Done': m.pct, Records: m.records }))), 'Module Status');
-    XLSX.writeFile(wb, `setup-bu-analysis-${fileName.replace(/\.zip$/i, '') || 'export'}.xlsx`);
+  const base = fileName.replace(/\.zip$/i, '') || 'export';
+  const download = (buf: ArrayBuffer, name: string) => {
+    const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url);
   };
 
-  const exportSummary = () => {
-    const rows = tasks.map(t => ({ Task: t.name, Module: t.module, Status: t.hasData ? 'Configured' : 'Not configured', Records: t.recordCount, Files: t.files.length, Batch: t.batch ? 'Yes' : '' }));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Setup Tasks');
-    XLSX.writeFile(wb, `setup-summary-${fileName.replace(/\.zip$/i, '') || 'export'}.xlsx`);
+  // Styled Excel (exceljs) mirroring the on-screen look — coloured headers, module
+  // fills, green ✓ ticks, % formatting.
+  const exportMatrix = async () => {
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    const thin = { style: 'thin' as const, color: { argb: 'FFE4E1DD' } };
+    const bd = { top: thin, bottom: thin, left: thin, right: thin };
+    const hdr = (row: any, rotate = false) => row.eachCell((c: any) => { c.fill = fill('FFC74634'); c.font = { bold: true, color: { argb: 'FFFFFFFF' } }; c.alignment = { horizontal: 'center', vertical: rotate ? 'bottom' : 'middle', textRotation: rotate ? 90 : 0, wrapText: true }; c.border = bd; });
+
+    const ms = wb.addWorksheet('Module Status', { views: [{ state: 'frozen', ySplit: 1 }] });
+    ms.columns = [{ header: 'Module', width: 20 }, { header: 'Tasks', width: 10 }, { header: 'Configured', width: 12 }, { header: 'Empty', width: 10 }, { header: '% Done', width: 10 }, { header: 'Records', width: 12 }];
+    hdr(ms.getRow(1));
+    analysis.modRows.forEach(m => {
+      const r = ms.addRow([m.module, m.total, m.configured, m.empty, m.pct / 100, m.records]);
+      r.eachCell((c: any) => { c.border = bd; });
+      r.getCell(1).fill = fill(MOD_ARGB[m.module]); r.getCell(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      r.getCell(3).font = { bold: true, color: { argb: 'FF1D7B4D' } };
+      r.getCell(5).numFmt = '0%'; r.getCell(6).font = { bold: true, color: { argb: 'FFC74634' } };
+    });
+    const t = analysis.modRows.reduce((a, m) => ({ total: a.total + m.total, configured: a.configured + m.configured, empty: a.empty + m.empty, records: a.records + m.records }), { total: 0, configured: 0, empty: 0, records: 0 });
+    const tr = ms.addRow(['All modules', t.total, t.configured, t.empty, t.total ? t.configured / t.total : 0, t.records]);
+    tr.eachCell((c: any) => { c.font = { bold: true }; c.fill = fill('FFF4F4F2'); c.border = bd; }); tr.getCell(5).numFmt = '0%';
+
+    const bm = wb.addWorksheet('BU x Setup', { views: [{ state: 'frozen', xSplit: 3, ySplit: 1 }] });
+    bm.columns = [{ header: 'Business Unit', width: 38 }, { header: 'Setups Done', width: 12 }, { header: '% Complete', width: 11 }, ...analysis.scoped.map(tk => ({ header: tk.name, width: 5.5 }))];
+    const hr = bm.getRow(1); hr.height = 150; hdr(hr, true);
+    [1, 2, 3].forEach(i => { hr.getCell(i).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; });
+    analysis.buRows.forEach(row => {
+      const r = bm.addRow([row.bu, `${row.doneCount}/${analysis.scoped.length}`, analysis.scoped.length ? row.doneCount / analysis.scoped.length : 0, ...analysis.scoped.map(tk => row.cells[tk.name] ? '✓' : '')]);
+      r.eachCell((c: any) => { c.border = bd; });
+      r.getCell(1).font = { bold: true };
+      r.getCell(2).font = { bold: true, color: { argb: 'FF00918A' } }; r.getCell(2).alignment = { horizontal: 'center' };
+      r.getCell(3).numFmt = '0%'; r.getCell(3).alignment = { horizontal: 'center' };
+      analysis.scoped.forEach((tk, i) => { const c = r.getCell(4 + i); c.alignment = { horizontal: 'center' }; if (row.cells[tk.name]) { c.font = { bold: true, color: { argb: 'FF1D7B4D' } }; c.fill = fill('FFEAF6EE'); } });
+    });
+    download(await wb.xlsx.writeBuffer() as ArrayBuffer, `setup-bu-analysis-${base}.xlsx`);
+    message.success('Analysis exported');
+  };
+
+  const exportSummary = async () => {
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    const thin = { style: 'thin' as const, color: { argb: 'FFE4E1DD' } };
+    const bd = { top: thin, bottom: thin, left: thin, right: thin };
+    const ws = wb.addWorksheet('Setup Tasks', { views: [{ state: 'frozen', ySplit: 1 }] });
+    ws.columns = [{ header: 'Setup Task', width: 46 }, { header: 'Module', width: 16 }, { header: 'Status', width: 16 }, { header: 'Records', width: 10 }, { header: 'Files', width: 8 }, { header: 'Batch', width: 8 }];
+    ws.getRow(1).eachCell((c: any) => { c.fill = fill('FFC74634'); c.font = { bold: true, color: { argb: 'FFFFFFFF' } }; c.alignment = { horizontal: 'center' }; c.border = bd; });
+    tasks.forEach(t => {
+      const r = ws.addRow([t.name, t.module, t.hasData ? 'Configured' : 'Not configured', t.recordCount, t.files.length, t.batch ? 'Yes' : '']);
+      r.eachCell((c: any) => { c.border = bd; });
+      r.getCell(2).fill = fill(MOD_ARGB[t.module]); r.getCell(2).font = { bold: true, color: { argb: 'FFFFFFFF' } }; r.getCell(2).alignment = { horizontal: 'center' };
+      r.getCell(3).font = { bold: true, color: { argb: t.hasData ? 'FF1D7B4D' : 'FF9A9691' } };
+      r.getCell(4).font = { color: { argb: t.recordCount ? 'FFC74634' : 'FF9A9691' } };
+    });
+    download(await wb.xlsx.writeBuffer() as ArrayBuffer, `setup-summary-${base}.xlsx`);
+    message.success('Summary exported');
   };
 
   const cols: ColumnsType<SetupTask> = [
     { title: 'Setup Task', dataIndex: 'name', render: (v, t) => <Space size={6}><Text strong style={{ fontSize: 12.5 }}>{v}</Text>{t.batch && <Tag color="geekblue" style={{ fontSize: 10 }}>batch</Tag>}</Space>, sorter: (a, b) => a.name.localeCompare(b.name) },
-    { title: 'Module', dataIndex: 'module', width: 150, filters: MODULES.map(m => ({ text: m, value: m })), onFilter: (v, t) => t.module === v, render: (m: SetupModule) => <Tag color={MOD_COLOR[m]} style={{ color: '#fff', border: 'none' }}>{m}</Tag> },
+    { title: 'Module', dataIndex: 'module', width: 150, filters: MODULES.map(m => ({ text: m, value: m })), onFilter: (v, t) => t.module === v, render: (m: SetupModule) => <Tag style={{ background: MOD_COLOR[m], color: '#fff', border: 'none', fontWeight: 600 }}>{m}</Tag> },
     { title: 'Status', dataIndex: 'hasData', width: 170, sorter: (a, b) => Number(a.hasData) - Number(b.hasData), render: (_, t) => t.hasData
         ? <Space size={6}><CheckCircleTwoTone twoToneColor={RW.success} /><Text style={{ fontSize: 12 }}>Configured</Text></Space>
         : <Space size={6}><MinusCircleOutlined style={{ color: RW.n600 }} /><Text type="secondary" style={{ fontSize: 12 }}>Not configured</Text></Space> },
@@ -183,7 +229,7 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
               <Input allowClear size="small" prefix={<SearchOutlined />} placeholder="Search task…" value={search} onChange={e => setSearch(e.target.value)} style={{ width: 220 }} />
               <Button size="small" type={configuredOnly ? 'primary' : 'default'} onClick={() => setConfiguredOnly(v => !v)} style={configuredOnly ? { background: RW.success, borderColor: RW.success } : undefined}>Configured only</Button>
             </Space>}>
-            <Table size="small" rowKey="name" columns={cols} dataSource={filtered} pagination={{ pageSize: 25, showSizeChanger: true }}
+            <Table size="small" rowKey="name" columns={cols} dataSource={filtered} pagination={{ defaultPageSize: 25, showSizeChanger: true, pageSizeOptions: [25, 50, 100, 200, 500] }}
               scroll={{ x: 720 }} locale={{ emptyText: 'No tasks match' }} />
           </Card>
         </>
@@ -193,7 +239,7 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
           <Card size="small" title={<Space><AppstoreOutlined style={{ color: RW.primary }} />Module-wise setup status</Space>} style={{ borderRadius: 10, marginBottom: 14 }}>
             <Table size="small" rowKey="module" pagination={false} dataSource={analysis.modRows}
               columns={[
-                { title: 'Module', dataIndex: 'module', render: (m: SetupModule) => <Tag color={MOD_COLOR[m]} style={{ color: '#fff', border: 'none' }}>{m}</Tag> },
+                { title: 'Module', dataIndex: 'module', render: (m: SetupModule) => <Tag style={{ background: MOD_COLOR[m], color: '#fff', border: 'none', fontWeight: 600 }}>{m}</Tag> },
                 { title: 'Tasks', dataIndex: 'total', width: 90, align: 'right' },
                 { title: 'Configured', dataIndex: 'configured', width: 110, align: 'right', render: (v: number) => <Text strong style={{ color: RW.success }}>{v}</Text> },
                 { title: 'Empty', dataIndex: 'empty', width: 90, align: 'right', render: (v: number) => <Text type="secondary">{v}</Text> },
@@ -219,7 +265,7 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
               <Input allowClear size="small" prefix={<SearchOutlined />} placeholder="Search BU…" value={buSearch} onChange={e => setBuSearch(e.target.value)} style={{ width: 200 }} /></Space>}>
             {analysis.scoped.length === 0
               ? <Empty description="No business-unit-scoped setup tasks found in this export" />
-              : <Table size="small" rowKey="bu" dataSource={buRowsFiltered} pagination={{ pageSize: 30, showSizeChanger: true }}
+              : <Table size="small" rowKey="bu" dataSource={buRowsFiltered} pagination={{ defaultPageSize: 30, showSizeChanger: true, pageSizeOptions: [30, 50, 100, 200, 500] }}
                   scroll={{ x: 300 + analysis.scoped.length * 92, y: 520 }}
                   columns={[
                     { title: 'Business Unit', dataIndex: 'bu', width: 250, fixed: 'left' as const, render: (v: string) => <Text strong style={{ fontSize: 12 }}>{v}</Text> },
@@ -236,7 +282,7 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
       )}
 
       {/* Task detail — the parsed setup data */}
-      <Drawer open={!!detail} onClose={() => setDetail(null)} width={920} title={detail && <Space><DatabaseOutlined style={{ color: MOD_COLOR[detail.module] }} />{detail.name}<Tag color={MOD_COLOR[detail.module]} style={{ color: '#fff', border: 'none' }}>{detail.module}</Tag>{detail.hasData ? <Tag color="success">{detail.recordCount} record(s)</Tag> : <Tag>empty</Tag>}</Space>}>
+      <Drawer open={!!detail} onClose={() => setDetail(null)} width={920} title={detail && <Space><DatabaseOutlined style={{ color: MOD_COLOR[detail.module] }} />{detail.name}<Tag style={{ background: MOD_COLOR[detail.module], color: '#fff', border: 'none', fontWeight: 600 }}>{detail.module}</Tag>{detail.hasData ? <Tag color="success">{detail.recordCount} record(s)</Tag> : <Tag>empty</Tag>}</Space>}>
         {detail && (detail.files.length === 0
           ? <Empty description={detail.batch ? 'Batch-format task — records are in a nested import batch (not table-parsed).' : 'No setup data (task not configured).'} />
           : <Tabs size="small" items={detail.files.map((f, i) => ({
