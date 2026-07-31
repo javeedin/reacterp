@@ -702,6 +702,9 @@ const ReservationsView: React.FC<{ orderNo?: string; items?: string[]; open: boo
 const SHIPLINES_URL = (order: string) => `${FUSION_BASE}/shipmentLines?q=${encodeURIComponent(`Order='${order}'`)}&orderBy=OrderLine:asc`;
 const PICKWAVES_URL = `${FUSION_BASE}/pickWaves`;
 const PICKSLIPS_URL = (order: string) => `${FUSION_BASE}/pickSlipDetails?q=${encodeURIComponent(`Order='${order}'`)}&orderBy=CreationDate:desc`;
+// Assign staged lines (no Shipment yet — e.g. deallocated after a backorder) to a
+// shipment. shipmentLines has no create action; the assign action mints/attaches one.
+const SHIPASSIGN_URL = `${FUSION_BASE}/shipmentLineChangeRequests/action/assign`;
 // Per-line stage: 0 Open · 1 Pick Released · 2 Pick Confirmed · 3 Ship Confirmed.
 // A line counts as fully shipped when its status is Interfaced / Shipped /
 // Ship Confirmed, OR its Shipped quantity has reached the Requested quantity.
@@ -724,6 +727,7 @@ const AutoShipConfirmModal: React.FC<{ orderNo?: string; org?: string; open: boo
   const [lines, setLines] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [releasing, setReleasing] = useState(false);
+  const [creatingShip, setCreatingShip] = useState(false);
   const [psRows, setPsRows] = useState<any[] | null>(null);
   const [psRow, setPsRow] = useState<any | null>(null);
   const [shipOpen, setShipOpen] = useState(false);
@@ -761,6 +765,21 @@ const AutoShipConfirmModal: React.FC<{ orderNo?: string; org?: string; open: boo
       else setPsRows(slips);
     } catch (e: any) { message.error(e.message); }
   };
+  // Staged lines with no Shipment attached → candidates for Create Shipment.
+  const noShipLines = lines.filter(l => !pf(l, ['Shipment', 'ShipmentName']) && pf(l, ['ShipmentLine']) != null
+    && String(pf(l, ['LineStatus']) ?? '').toLowerCase().includes('stage'));
+  const assignBody = { shipmentLineList: noShipLines.map(l => ({ EntityType: 'Line', ShipmentLine: num(pf(l, ['ShipmentLine'])) })) };
+  const createShipment = async () => {
+    if (!noShipLines.length) { message.info('No staged lines without a shipment'); return; }
+    setCreatingShip(true);
+    try {
+      const r = await fetch(SHIPASSIGN_URL, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/vnd.oracle.adf.action+json' }, body: JSON.stringify(assignBody) });
+      const text = await r.text(); let data: any = null; try { data = JSON.parse(text); } catch { /* raw */ }
+      if (r.ok && String(data?.ReturnStatus ?? '').toUpperCase() !== 'E') { message.success(`Shipment assigned to ${noShipLines.length} line(s)`); load(); }
+      else Modal.error({ title: 'Create Shipment Failed', width: 640, content: <div style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>{data?.ReturnMessage ?? (collectOrderErrors(data, text, true).join('\n\n') || `HTTP ${r.status}`)}</div> });
+    } catch (e: any) { message.error(e.message); }
+    finally { setCreatingShip(false); }
+  };
   const cols: ColumnsType<any> = [
     { title: 'Line', dataIndex: 'OrderLine', width: 55, align: 'center', fixed: 'left' as const, render: v => <Tag color="blue">{v ?? '—'}</Tag> },
     { title: 'Item', dataIndex: 'Item', width: 150, fixed: 'left' as const, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v ?? '—'}</Text> },
@@ -785,6 +804,14 @@ const AutoShipConfirmModal: React.FC<{ orderNo?: string; org?: string; open: boo
         <Button type="primary" icon={<ThunderboltOutlined />} loading={releasing} disabled={stage >= 1 || !lines.length} onClick={pickRelease}
           style={stage >= 1 || !lines.length ? undefined : { background: REDWOOD.success, borderColor: REDWOOD.success }}>Pick Release</Button>
         <Button icon={<InboxOutlined />} disabled={stage < 1} onClick={openPickConfirm}>Pick Confirm — assign lots / serials</Button>
+        <Tooltip title={noShipLines.length
+          ? <span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>POST</b> {SHIPASSIGN_URL}<br />{JSON.stringify(assignBody)}</span>
+          : 'No staged lines without a shipment'}>
+          <Button icon={<InboxOutlined />} loading={creatingShip} disabled={!noShipLines.length} onClick={createShipment}
+            style={noShipLines.length ? { borderColor: REDWOOD.primary, color: REDWOOD.primary } : undefined}>
+            Create Shipment{noShipLines.length ? ` (${noShipLines.length})` : ''}
+          </Button>
+        </Tooltip>
         <Button icon={<CarOutlined />} disabled={stage < 2} onClick={() => setShipOpen(true)}>Ship Confirm</Button>
       </Space>
       {loading ? <div style={{ textAlign: 'center', padding: 30 }}><Spin /></div>
