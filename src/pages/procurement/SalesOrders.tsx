@@ -3709,13 +3709,19 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             chargesHref: linkOf('charges'), lotSerialsHref: linkOf('lotSerials'),
             lineLots: Array.isArray(lotSerials) ? lotSerials : [],
             orgCode: pf(l, ['RequestedFulfillmentOrganizationCode', 'FulfillmentOrganizationCode', 'OrganizationCode']),
-            subinventory: pf(l, ['SubinventoryCode', 'Subinventory']),
+            // Subinventory can echo back under several attribute names — scan for any
+            // *subinventory* key with a value rather than guessing one.
+            subinventory: (() => {
+              const k = Object.keys(l).find(k => /subinventory/i.test(k) && l[k] != null && l[k] !== '');
+              return k ? String(l[k]) : (pf(l, ['SubinventoryCode', 'Subinventory']) as string | undefined);
+            })(),
             existing: true,
           };
         }));
-        // Subinventory is stored per line (SubinventoryCode); bring the saved value
-        // into the header field on edit (mirrors what create sent).
-        const savedSub = rows.map((l: any) => pf(l, ['SubinventoryCode'])).find(Boolean);
+        // Subinventory is stored per line; bring the saved value into the header
+        // field on edit (mirrors what create sent). Scan for any *subinventory* key.
+        const subOf = (l: any) => { const k = Object.keys(l).find(k => /subinventory/i.test(k) && l[k] != null && l[k] !== ''); return k ? String(l[k]) : undefined; };
+        const savedSub = rows.map(subOf).find(Boolean);
         if (savedSub) { form.setFieldsValue({ subinventory: savedSub }); setHdr(prev => ({ ...prev, subinventory: String(savedSub) })); }
       } catch (e: any) { message.error(`Failed to load order lines: ${e.message}`); }
       finally { setRefreshing(false); }
