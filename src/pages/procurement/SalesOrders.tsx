@@ -702,9 +702,10 @@ const ReservationsView: React.FC<{ orderNo?: string; items?: string[]; open: boo
 const SHIPLINES_URL = (order: string) => `${FUSION_BASE}/shipmentLines?q=${encodeURIComponent(`Order='${order}'`)}&orderBy=OrderLine:asc`;
 const PICKWAVES_URL = `${FUSION_BASE}/pickWaves`;
 const PICKSLIPS_URL = (order: string) => `${FUSION_BASE}/pickSlipDetails?q=${encodeURIComponent(`Order='${order}'`)}&orderBy=CreationDate:desc`;
-// Assign staged lines (no Shipment yet — e.g. deallocated after a backorder) to a
-// shipment. shipmentLines has no create action; the assign action mints/attaches one.
-const SHIPASSIGN_URL = `${FUSION_BASE}/shipmentLineChangeRequests/action/assign`;
+// Create/assign a shipment for lines with no Shipment yet. shipmentLines has no
+// create action; pickRelease (the real action on shipmentLineChangeRequests, one
+// line per call) is what materialises + assigns the shipment.
+const SHIPASSIGN_URL = `${FUSION_BASE}/shipmentLineChangeRequests/action/pickRelease`;
 // Per-line stage: 0 Open · 1 Pick Released · 2 Pick Confirmed · 3 Ship Confirmed.
 // A line counts as fully shipped when its status is Interfaced / Shipped /
 // Ship Confirmed, OR its Shipped quantity has reached the Requested quantity.
@@ -765,20 +766,25 @@ const AutoShipConfirmModal: React.FC<{ orderNo?: string; org?: string; open: boo
       else setPsRows(slips);
     } catch (e: any) { message.error(e.message); }
   };
-  // Staged lines with no Shipment attached → candidates for Create Shipment.
+  // Lines with no Shipment attached (staged or ready) → candidates for a shipment.
   const noShipLines = lines.filter(l => !pf(l, ['Shipment', 'ShipmentName']) && pf(l, ['ShipmentLine']) != null
-    && String(pf(l, ['LineStatus']) ?? '').toLowerCase().includes('stage'));
-  const assignBody = { shipmentLineList: noShipLines.map(l => ({ EntityType: 'Line', ShipmentLine: num(pf(l, ['ShipmentLine'])) })) };
+    && /stage|ready|release|backorder/i.test(String(pf(l, ['LineStatus']) ?? '')));
+  const assignBody = (l: any) => ({ shipmentLine: num(pf(l, ['ShipmentLine'])) });
   const createShipment = async () => {
-    if (!noShipLines.length) { message.info('No staged lines without a shipment'); return; }
+    if (!noShipLines.length) { message.info('No lines without a shipment'); return; }
     setCreatingShip(true);
-    try {
-      const r = await fetch(SHIPASSIGN_URL, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/vnd.oracle.adf.action+json' }, body: JSON.stringify(assignBody) });
-      const text = await r.text(); let data: any = null; try { data = JSON.parse(text); } catch { /* raw */ }
-      if (r.ok && String(data?.ReturnStatus ?? '').toUpperCase() !== 'E') { message.success(`Shipment assigned to ${noShipLines.length} line(s)`); load(); }
-      else Modal.error({ title: 'Create Shipment Failed', width: 640, content: <div style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>{data?.ReturnMessage ?? (collectOrderErrors(data, text, true).join('\n\n') || `HTTP ${r.status}`)}</div> });
-    } catch (e: any) { message.error(e.message); }
-    finally { setCreatingShip(false); }
+    const fails: string[] = [];
+    for (const l of noShipLines) {
+      try {
+        const r = await fetch(SHIPASSIGN_URL, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/vnd.oracle.adf.action+json' }, body: JSON.stringify(assignBody(l)) });
+        const text = await r.text(); let data: any = null; try { data = JSON.parse(text); } catch { /* raw */ }
+        if (!r.ok || String(data?.ReturnStatus ?? '').toUpperCase() === 'E') fails.push(`${pf(l, ['Item'])} (line ${pf(l, ['OrderLine'])}): ${data?.ReturnMessage ?? (collectOrderErrors(data, text, true)[0] || 'HTTP ' + r.status)}`);
+      } catch (e: any) { fails.push(`${pf(l, ['Item'])}: ${e?.message}`); }
+    }
+    setCreatingShip(false);
+    if (fails.length) Modal.error({ title: 'Create Shipment Failed', width: 660, content: <div style={{ whiteSpace: 'pre-wrap', fontSize: 12.5 }}>{fails.join('\n\n')}</div> });
+    else { message.success(`Shipment created for ${noShipLines.length} line(s)`); }
+    load();
   };
   const cols: ColumnsType<any> = [
     { title: 'Line', dataIndex: 'OrderLine', width: 55, align: 'center', fixed: 'left' as const, render: v => <Tag color="blue">{v ?? '—'}</Tag> },
@@ -805,8 +811,8 @@ const AutoShipConfirmModal: React.FC<{ orderNo?: string; org?: string; open: boo
           style={stage >= 1 || !lines.length ? undefined : { background: REDWOOD.success, borderColor: REDWOOD.success }}>Pick Release</Button>
         <Button icon={<InboxOutlined />} disabled={stage < 1} onClick={openPickConfirm}>Pick Confirm — assign lots / serials</Button>
         <Tooltip title={noShipLines.length
-          ? <span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>POST</b> {SHIPASSIGN_URL}<br />{JSON.stringify(assignBody)}</span>
-          : 'No staged lines without a shipment'}>
+          ? <span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>POST</b> {SHIPASSIGN_URL}<br />{JSON.stringify(assignBody(noShipLines[0]))} · per line</span>
+          : 'No lines without a shipment'}>
           <Button icon={<InboxOutlined />} loading={creatingShip} disabled={!noShipLines.length} onClick={createShipment}
             style={noShipLines.length ? { borderColor: REDWOOD.primary, color: REDWOOD.primary } : undefined}>
             Create Shipment{noShipLines.length ? ` (${noShipLines.length})` : ''}
@@ -980,6 +986,7 @@ const OrderView: React.FC<{ order: any; onCopy?: (order: any, lines: any[]) => v
   const [resvOpen, setResvOpen] = useState(false);
   const [resvCount, setResvCount] = useState<number | null>(null);
   const [arOpen, setArOpen] = useState(false);
+  const [autoShipOpen, setAutoShipOpen] = useState(false);
   const orderNo = String(order.OrderNumber ?? order.SourceTransactionNumber ?? '');
   const sourceNo = String(order.SourceTransactionNumber ?? order.OrderNumber ?? '');  // reservations + AutoInvoice key off the source order number
   const totals = useTotals(order, true);
@@ -1205,6 +1212,11 @@ const OrderView: React.FC<{ order: any; onCopy?: (order: any, lines: any[]) => v
               Reservations{resvCount ? ` (${resvCount})` : ''}
             </Button>
           </Tooltip>
+          {lines.some(l => /awaiting\s*shipping/i.test(`${pf(l, ['DisplayStatus', 'Status', 'FulfillLineStatus']) ?? ''} ${pf(l, ['StatusCode']) ?? ''}`)) &&
+            <Tooltip title="Line(s) awaiting shipping — pick release, pick confirm and ship confirm">
+              <Button size="small" icon={<CarOutlined />} onClick={() => setAutoShipOpen(true)}
+                style={{ color: REDWOOD.success, borderColor: REDWOOD.success, fontWeight: 600 }}>Auto Shipconfirm</Button>
+            </Tooltip>}
           {lines.some(l => /awaiting\s*billing/i.test(`${pf(l, ['DisplayStatus', 'Status', 'FulfillLineStatus']) ?? ''} ${pf(l, ['StatusCode']) ?? ''}`)) &&
             <Tooltip title="Line(s) awaiting billing — run Import AutoInvoice to push to AR">
               <Button size="small" icon={<DollarOutlined />} onClick={() => setArOpen(true)}
@@ -1324,6 +1336,7 @@ const OrderView: React.FC<{ order: any; onCopy?: (order: any, lines: any[]) => v
       <ARInvoiceDialog txn={arTxn} onClose={() => setArTxn(null)} />
       <ReservationsView orderNo={sourceNo} items={lineItems} open={resvOpen} onClose={() => setResvOpen(false)} />
       <AutoInvoiceModal orderNo={sourceNo} buId={order.BusinessUnitId} open={arOpen} onClose={() => setArOpen(false)} />
+      <AutoShipConfirmModal orderNo={sourceNo} open={autoShipOpen} onClose={() => setAutoShipOpen(false)} />
     </div>
   );
 };
