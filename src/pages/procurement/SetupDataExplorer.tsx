@@ -125,10 +125,14 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
     const tr = ms.addRow(['All modules', t.total, t.configured, t.empty, t.total ? t.configured / t.total : 0, t.records]);
     tr.eachCell((c: any) => { c.font = { bold: true }; c.fill = fill('FFF4F4F2'); c.border = bd; }); tr.getCell(5).numFmt = '0%';
 
-    const bm = wb.addWorksheet('BU x Setup', { views: [{ state: 'frozen', xSplit: 3, ySplit: 1 }] });
+    const bm = wb.addWorksheet('BU x Setup', { views: [{ state: 'frozen', xSplit: 3, ySplit: 2 }] });
     bm.columns = [{ header: 'Business Unit', width: 38 }, { header: 'Setups Done', width: 12 }, { header: '% Complete', width: 11 }, ...analysis.scoped.map(tk => ({ header: tk.name, width: 5.5 }))];
     const hr = bm.getRow(1); hr.height = 150; hdr(hr, true);
     [1, 2, 3].forEach(i => { hr.getCell(i).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; });
+    // per-column count row — how many BUs have each setup configured
+    const cr = bm.addRow(['', 'BUs →', '', ...analysis.scoped.map(tk => analysis.colCounts[tk.name])]);
+    cr.eachCell((c: any) => { c.border = bd; c.fill = fill('FF1D7B4D'); c.font = { bold: true, color: { argb: 'FFFFFFFF' } }; c.alignment = { horizontal: 'center' }; });
+    cr.getCell(2).alignment = { horizontal: 'right' };
     analysis.buRows.forEach(row => {
       const r = bm.addRow([row.bu, `${row.doneCount}/${analysis.scoped.length}`, analysis.scoped.length ? row.doneCount / analysis.scoped.length : 0, ...analysis.scoped.map(tk => row.cells[tk.name] ? '✓' : '')]);
       r.eachCell((c: any) => { c.border = bd; });
@@ -230,8 +234,33 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
       didParseCell: (d: any) => { if (d.section === 'body' && d.column.index === 2) d.cell.styles.textColor = d.cell.raw === 'Configured' ? [29, 123, 77] : [150, 150, 150]; },
     });
 
+    // BU × Setup matrix on a landscape page (with per-column BU counts)
+    if (buScoped.length) {
+      doc.addPage('a4', 'landscape');
+      const colCount = (t: SetupTask) => buUniverse.filter(bu => t.businessUnits.includes(bu)).length;
+      const matTasks = [...buScoped].sort((a, b) => colCount(b) - colCount(a));
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(0);
+      doc.text(`Business Unit × Setup coverage — ${buUniverse.length} BUs`, 12, 12);
+      autoTable(doc, {
+        startY: 16,
+        head: [
+          ['Business Unit', 'Done', ...matTasks.map(t => t.name)],
+          ['BUs configured →', '', ...matTasks.map(t => String(colCount(t)))],
+        ],
+        body: buRows.map(r => [r.bu, `${r.done}/${buScoped.length}`, ...matTasks.map(t => t.businessUnits.includes(r.bu) ? 'Y' : '')]),
+        styles: { fontSize: 6, halign: 'center', valign: 'middle', cellPadding: 1, overflow: 'linebreak' },
+        columnStyles: { 0: { halign: 'left', cellWidth: 42 }, 1: { cellWidth: 11 } },
+        headStyles: { fillColor: [199, 70, 52], textColor: [255, 255, 255], fontSize: 5.5, valign: 'middle' },
+        margin: { left: 10, right: 10 },
+        didParseCell: (d: any) => {
+          if (d.section === 'head' && d.row.index === 1) { d.cell.styles.fillColor = [29, 123, 77]; d.cell.styles.textColor = [255, 255, 255]; d.cell.styles.fontStyle = 'bold'; d.cell.styles.fontSize = 6.5; }
+          if (d.section === 'body' && d.column.index >= 2 && d.cell.raw === 'Y') { d.cell.text = ['✓']; d.cell.styles.textColor = [29, 123, 77]; d.cell.styles.fillColor = [234, 246, 238]; d.cell.styles.fontStyle = 'bold'; }
+        },
+      });
+    }
+
     const pc = (doc as any).internal.getNumberOfPages();
-    for (let i = 1; i <= pc; i++) { doc.setPage(i); doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(120); doc.text('Re-ERP · Setup Data', 14, pageH - 8); doc.text(`Page ${i} of ${pc}`, pageW - 14, pageH - 8, { align: 'right' }); }
+    for (let i = 1; i <= pc; i++) { doc.setPage(i); const w = doc.internal.pageSize.getWidth(); const h = doc.internal.pageSize.getHeight(); doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(120); doc.text('Re-ERP · Setup Data', 14, h - 8); doc.text(`Page ${i} of ${pc}`, w - 14, h - 8, { align: 'right' }); }
     doc.save(`setup-data-summary-${base}.pdf`);
     message.success('PDF report generated');
   };
