@@ -7,7 +7,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { Link } from 'react-router-dom';
 import {
   InboxOutlined, DatabaseOutlined, CheckCircleTwoTone, MinusCircleOutlined, EyeOutlined,
-  ReloadOutlined, DownloadOutlined, SearchOutlined, AppstoreOutlined, HomeOutlined,
+  ReloadOutlined, DownloadOutlined, SearchOutlined, AppstoreOutlined, HomeOutlined, FilePdfOutlined,
 } from '@ant-design/icons';
 import {
   parseSetupExport, getSetupCache, setSetupCache, mergeSetupTasks, type SetupTask, type SetupModule,
@@ -160,6 +160,82 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
     message.success('Summary exported');
   };
 
+  // PDF summary report — KPIs, module status, BU coverage, per-task BU counts,
+  // and the full task list. Covers all modules of the uploaded export(s).
+  const exportPdf = async () => {
+    const { default: jsPDF } = await import('jspdf');
+    const autoTable = (await import('jspdf-autotable')).default;
+    const doc = new jsPDF('portrait', 'mm', 'a4');
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const finalY = () => (doc as any).lastAutoTable.finalY as number;
+
+    doc.setFontSize(15); doc.setFont('helvetica', 'bold');
+    doc.text('Fusion Setup Data — Summary Report', pageW / 2, 15, { align: 'center' });
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+    const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    doc.text(`Generated: ${today}`, 14, 23);
+    doc.text(`Exports: ${fileNames.join(', ') || '—'}`, 14, 28);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Total tasks: ${stats.all.total}    Configured: ${stats.all.configured}    Empty: ${stats.all.empty}    Done: ${stats.all.pct}%    Records: ${stats.all.records.toLocaleString()}`, 14, 34);
+
+    autoTable(doc, {
+      startY: 39,
+      head: [['Module', 'Tasks', 'Configured', 'Empty', '% Done', 'Records']],
+      body: MODULES.map(m => { const s = stats.byMod[m]; return [m, s.total, s.configured, s.empty, `${s.pct}%`, s.records.toLocaleString()]; }),
+      styles: { fontSize: 9 }, headStyles: { fillColor: [199, 70, 52] }, margin: { left: 14, right: 14 },
+    });
+
+    // Global BU coverage (all modules)
+    const buScoped = tasks.filter(t => t.businessUnits.length > 0);
+    const buUniverse = Array.from(new Set(buScoped.flatMap(t => t.businessUnits)));
+    const buRows = buUniverse.map(bu => {
+      const hit = buScoped.filter(t => t.businessUnits.includes(bu));
+      const mods = Array.from(new Set(hit.map(t => t.module)));
+      return { bu, done: hit.length, mods: mods.join(', ') };
+    }).sort((a, b) => b.done - a.done || a.bu.localeCompare(b.bu));
+
+    let y = finalY() + 8;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
+    doc.text(`Business Unit setup coverage (${buUniverse.length} BUs)`, 14, y);
+    autoTable(doc, {
+      startY: y + 3,
+      head: [['Business Unit', 'Setups Done', 'Modules']],
+      body: buRows.map(r => [r.bu, `${r.done}/${buScoped.length}`, r.mods]),
+      styles: { fontSize: 8 }, headStyles: { fillColor: [0, 145, 138] }, margin: { left: 14, right: 14 },
+    });
+
+    // Per-task BU counts
+    y = finalY() + 8;
+    if (y > pageH - 40) { doc.addPage(); y = 16; }
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
+    doc.text('Setup tasks — business units configured', 14, y);
+    autoTable(doc, {
+      startY: y + 3,
+      head: [['Setup Task', 'Module', 'BUs Configured']],
+      body: buScoped.map(t => [t.name, t.module, t.businessUnits.length]).sort((a, b) => (b[2] as number) - (a[2] as number)),
+      styles: { fontSize: 8 }, headStyles: { fillColor: [7, 114, 206] }, margin: { left: 14, right: 14 },
+    });
+
+    // Full task list
+    y = finalY() + 8;
+    if (y > pageH - 40) { doc.addPage(); y = 16; }
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
+    doc.text('All setup tasks', 14, y);
+    autoTable(doc, {
+      startY: y + 3,
+      head: [['Setup Task', 'Module', 'Status', 'Records']],
+      body: tasks.map(t => [t.name, t.module, t.hasData ? 'Configured' : 'Not configured', t.recordCount || (t.batch ? 'batch' : 0)]),
+      styles: { fontSize: 7.5 }, headStyles: { fillColor: [58, 58, 58] }, margin: { left: 14, right: 14 },
+      didParseCell: (d: any) => { if (d.section === 'body' && d.column.index === 2) d.cell.styles.textColor = d.cell.raw === 'Configured' ? [29, 123, 77] : [150, 150, 150]; },
+    });
+
+    const pc = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= pc; i++) { doc.setPage(i); doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(120); doc.text('Re-ERP · Setup Data', 14, pageH - 8); doc.text(`Page ${i} of ${pc}`, pageW - 14, pageH - 8, { align: 'right' }); }
+    doc.save(`setup-data-summary-${base}.pdf`);
+    message.success('PDF report generated');
+  };
+
   const cols: ColumnsType<SetupTask> = [
     { title: 'Setup Task', dataIndex: 'name', render: (v, t) => <Space size={6}><Text strong style={{ fontSize: 12.5 }}>{v}</Text>{t.batch && <Tag color="geekblue" style={{ fontSize: 10 }}>batch</Tag>}</Space>, sorter: (a, b) => a.name.localeCompare(b.name) },
     { title: 'Module', dataIndex: 'module', width: 150, filters: MODULES.map(m => ({ text: m, value: m })), onFilter: (v, t) => t.module === v, render: (m: SetupModule) => <Tag style={{ background: MOD_COLOR[m], color: '#fff', border: 'none', fontWeight: 600 }}>{m}</Tag> },
@@ -188,6 +264,7 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
         {hasData && <Segmented value={view} onChange={v => setView(v as any)} options={[{ value: 'explorer', label: 'Explorer' }, { value: 'analysis', label: 'BU & Module Analysis' }]} />}
         <span style={{ marginLeft: 'auto' }} />
         {hasData && <>
+          <Button size="small" icon={<FilePdfOutlined />} onClick={exportPdf}>PDF report</Button>
           <Button size="small" icon={<DownloadOutlined />} onClick={view === 'analysis' ? exportMatrix : exportSummary}>Export {view === 'analysis' ? 'analysis' : 'summary'}</Button>
           <Upload accept=".zip" showUploadList={false} beforeUpload={onFile}><Button size="small" type="primary" icon={<InboxOutlined />} loading={parsing} style={{ background: RW.primary, borderColor: RW.primary }}>Add export…</Button></Upload>
         </>}
