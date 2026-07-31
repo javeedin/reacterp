@@ -30,7 +30,7 @@ export interface SetupTask {
 // checked first (they're specific), then the broad Financials set, else Common.
 export const moduleOf = (name: string): SetupModule => {
   const n = name.toLowerCase();
-  if (/^item\b|item class|item status|item attribute|item lifecycle|inventory organization|unit of measure|supplier number|supplier user|enable new supplier|procurement agent|revenue management item|\bwarehouse\b|shipping|receiving/.test(n)) return 'Supply Chain';
+  if (/^item\b|item class|item status|item attribute|item lifecycle|revenue management item|inventory|subinventory|unit of measure|interorganization|intersubinventory|min-?max|packing|pick\b|picking|pick wave|pick sequence|ship confirm|shipping|receiving|carrier|\broute\b|transportation|transit|warehouse|source organization|landed cost|contract manufacturing|\bcost\b|costing|cost book|cost element|cost component|cost organization|cost profile|cost analysis|cost valuation|default cost|transfer pricing|\babc\b|supply |manufacturing|profit center|financial orchestration|barcode|planning|material|charge reference|supplier number|supplier user|enable new supplier|procurement agent/.test(n)) return 'Supply Chain';
   if (/receivable|payable|payment|\btax\b|subledger|\bledger\b|journal|legal|business unit|fixed asset|expense|collection|revenue management|\bbank\b|intercompany|chart of account|general ledger|conversion rate|aging|autoinvoice|funds capture|credit card|credit case|\bcash\b|distribution|jurisdiction|approval|accounting|financials|internal payer|disbursement|reporting entity|interest rate|\bperiod\b|1099|segment value|data access|balancing|suspense|statistical|reconciliation|remit-to|\bmemo\b|dunning|collector|lockbox|card issuer|corporate card|configuration owner|country tax|customer tax|application tax|revaluation|invoice|scoring|contingency|autocash|automatch|balance forward|late charge|statement|reversal|standard message/.test(n)) return 'Financials';
   return 'Common';
 };
@@ -74,8 +74,12 @@ export const parseSetupExport = async (
   file: File | ArrayBuffer,
   onProgress?: (done: number, total: number) => void,
 ): Promise<SetupTask[]> => {
-  const outer = await JSZip.loadAsync(file);
-  const taskEntries = Object.values(outer.files).filter(f => !f.dir && /\.zip$/i.test(f.name));
+  let zip = await JSZip.loadAsync(file);
+  // Full ASM package? The human-readable per-task report is nested as
+  // SETUP_DATA_REPORT.zip alongside businessObjectData/ — recurse into it.
+  const report = Object.values(zip.files).find(f => !f.dir && /setup_?data_?report\.zip$/i.test(f.name));
+  if (report) zip = await JSZip.loadAsync(await report.async('arraybuffer'));
+  const taskEntries = Object.values(zip.files).filter(f => !f.dir && /\.zip$/i.test(f.name) && !/businessobjectdata\/|tasklistdata\//i.test(f.name));
   const tasks: SetupTask[] = [];
   let done = 0;
   for (const entry of taskEntries) {
@@ -102,9 +106,22 @@ export const parseSetupExport = async (
   return tasks.sort((a, b) => a.name.localeCompare(b.name));
 };
 
-// Simple in-memory cache so switching between the Financials / Supply Chain menu
-// items keeps the last-parsed export without re-uploading.
-let _cache: { fileName: string; tasks: SetupTask[] } | null = null;
+// In-memory cache so switching between the Financials / Supply Chain tabs (and
+// routes) keeps the uploaded export(s) without re-uploading.
+let _cache: { fileNames: string[]; tasks: SetupTask[] } | null = null;
 export const getSetupCache = () => _cache;
-export const setSetupCache = (fileName: string, tasks: SetupTask[]) => { _cache = { fileName, tasks }; };
+export const setSetupCache = (fileNames: string[], tasks: SetupTask[]) => { _cache = { fileNames, tasks }; };
 export const clearSetupCache = () => { _cache = null; };
+
+// Merge a freshly-parsed export into an existing task set. Dedup by task name,
+// keeping the richer copy (more records / configured) and unioning business units.
+export const mergeSetupTasks = (existing: SetupTask[], incoming: SetupTask[]): SetupTask[] => {
+  const byName = new Map(existing.map(t => [t.name, t]));
+  for (const t of incoming) {
+    const cur = byName.get(t.name);
+    if (!cur) { byName.set(t.name, t); continue; }
+    const better = (t.recordCount > cur.recordCount || (t.hasData && !cur.hasData)) ? t : cur;
+    byName.set(t.name, { ...better, businessUnits: Array.from(new Set([...cur.businessUnits, ...t.businessUnits])).sort() });
+  }
+  return Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
+};
