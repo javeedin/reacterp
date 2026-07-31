@@ -30,6 +30,8 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
   const [search, setSearch] = useState('');
   const [configuredOnly, setConfiguredOnly] = useState(false);
   const [detail, setDetail] = useState<SetupTask | null>(null);
+  const [view, setView] = useState<'explorer' | 'analysis'>('explorer');
+  const [buSearch, setBuSearch] = useState('');
 
   useEffect(() => { setModFilter(defaultModule ?? 'All'); }, [defaultModule]);
 
@@ -63,6 +65,41 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
       (!s || t.name.toLowerCase().includes(s)));
   }, [tasks, modFilter, search, configuredOnly]);
 
+  // ── Analysis: Business-Unit × Setup-task matrix ─────────────────────────────
+  const analysis = useMemo(() => {
+    const scoped = tasks.filter(t => t.businessUnits.length > 0).sort((a, b) => b.businessUnits.length - a.businessUnits.length);
+    const buUniverse = Array.from(new Set(scoped.flatMap(t => t.businessUnits))).sort((a, b) => a.localeCompare(b));
+    const has = (bu: string, t: SetupTask) => t.businessUnits.includes(bu);
+    const buRows = buUniverse.map(bu => {
+      const done = scoped.filter(t => has(bu, t));
+      return { bu, doneCount: done.length, doneTasks: done.map(t => t.name), cells: Object.fromEntries(scoped.map(t => [t.name, has(bu, t)])) as Record<string, boolean> };
+    }).sort((a, b) => b.doneCount - a.doneCount || a.bu.localeCompare(b.bu));
+    // module status rollup
+    const modRows = MODULES.map(m => {
+      const t = tasks.filter(x => x.module === m);
+      const configured = t.filter(x => x.hasData).length;
+      return { module: m, total: t.length, configured, empty: t.length - configured, records: t.reduce((s, x) => s + x.recordCount, 0), pct: t.length ? Math.round((configured / t.length) * 100) : 0 };
+    });
+    return { scoped, buUniverse, buRows, modRows };
+  }, [tasks]);
+
+  const buRowsFiltered = useMemo(() => {
+    const s = buSearch.trim().toLowerCase();
+    return s ? analysis.buRows.filter(r => r.bu.toLowerCase().includes(s)) : analysis.buRows;
+  }, [analysis.buRows, buSearch]);
+
+  const exportMatrix = () => {
+    const rows = analysis.buRows.map(r => ({
+      'Business Unit': r.bu, 'Setups Done': r.doneCount, 'Of Tasks': analysis.scoped.length,
+      '% Complete': analysis.scoped.length ? Math.round((r.doneCount / analysis.scoped.length) * 100) : 0,
+      ...Object.fromEntries(analysis.scoped.map(t => [t.name, r.cells[t.name] ? 'Y' : ''])),
+    }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'BU x Setup');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(analysis.modRows.map(m => ({ Module: m.module, Total: m.total, Configured: m.configured, Empty: m.empty, '% Done': m.pct, Records: m.records }))), 'Module Status');
+    XLSX.writeFile(wb, `setup-bu-analysis-${fileName.replace(/\.zip$/i, '') || 'export'}.xlsx`);
+  };
+
   const exportSummary = () => {
     const rows = tasks.map(t => ({ Task: t.name, Module: t.module, Status: t.hasData ? 'Configured' : 'Not configured', Records: t.recordCount, Files: t.files.length, Batch: t.batch ? 'Yes' : '' }));
     const wb = XLSX.utils.book_new();
@@ -89,9 +126,10 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
         <DatabaseOutlined style={{ fontSize: 20, color: RW.primary }} />
         <Title level={4} style={{ margin: 0 }}>Setup Data{defaultModule ? ` — ${defaultModule}` : ''}</Title>
         {fileName && <Tag color="default" style={{ fontSize: 11 }}>{fileName}</Tag>}
+        {hasData && <Segmented value={view} onChange={v => setView(v as any)} options={[{ value: 'explorer', label: 'Explorer' }, { value: 'analysis', label: 'BU & Module Analysis' }]} />}
         <span style={{ marginLeft: 'auto' }} />
         {hasData && <>
-          <Button size="small" icon={<DownloadOutlined />} onClick={exportSummary}>Export summary</Button>
+          <Button size="small" icon={<DownloadOutlined />} onClick={view === 'analysis' ? exportMatrix : exportSummary}>Export {view === 'analysis' ? 'analysis' : 'summary'}</Button>
           <Upload accept=".zip" showUploadList={false} beforeUpload={onFile}><Button size="small" icon={<ReloadOutlined />} loading={parsing}>Re-upload</Button></Upload>
         </>}
       </div>
@@ -105,7 +143,7 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
             {parsing && progress && <div style={{ marginTop: 16, maxWidth: 360, marginInline: 'auto' }}><Progress percent={progress.total ? Math.round((progress.done / progress.total) * 100) : 0} size="small" /><Text type="secondary" style={{ fontSize: 11 }}>Parsing {progress.done}/{progress.total} tasks…</Text></div>}
           </Upload.Dragger>
         </Card>
-      ) : (
+      ) : view === 'explorer' ? (
         <>
           {/* Dashboard */}
           <Row gutter={[12, 12]} style={{ marginBottom: 14 }}>
@@ -147,6 +185,52 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
             </Space>}>
             <Table size="small" rowKey="name" columns={cols} dataSource={filtered} pagination={{ pageSize: 25, showSizeChanger: true }}
               scroll={{ x: 720 }} locale={{ emptyText: 'No tasks match' }} />
+          </Card>
+        </>
+      ) : (
+        <>
+          {/* Module status */}
+          <Card size="small" title={<Space><AppstoreOutlined style={{ color: RW.primary }} />Module-wise setup status</Space>} style={{ borderRadius: 10, marginBottom: 14 }}>
+            <Table size="small" rowKey="module" pagination={false} dataSource={analysis.modRows}
+              columns={[
+                { title: 'Module', dataIndex: 'module', render: (m: SetupModule) => <Tag color={MOD_COLOR[m]} style={{ color: '#fff', border: 'none' }}>{m}</Tag> },
+                { title: 'Tasks', dataIndex: 'total', width: 90, align: 'right' },
+                { title: 'Configured', dataIndex: 'configured', width: 110, align: 'right', render: (v: number) => <Text strong style={{ color: RW.success }}>{v}</Text> },
+                { title: 'Empty', dataIndex: 'empty', width: 90, align: 'right', render: (v: number) => <Text type="secondary">{v}</Text> },
+                { title: '% Done', dataIndex: 'pct', width: 160, render: (p: number) => <Progress percent={p} size="small" strokeColor={RW.success} /> },
+                { title: 'Records', dataIndex: 'records', width: 110, align: 'right', render: (v: number) => <Text strong style={{ color: RW.primary }}>{v.toLocaleString()}</Text> },
+              ] as ColumnsType<any>}
+              summary={() => { const t = analysis.modRows.reduce((a, m) => ({ total: a.total + m.total, configured: a.configured + m.configured, empty: a.empty + m.empty, records: a.records + m.records }), { total: 0, configured: 0, empty: 0, records: 0 }); return (
+                <Table.Summary.Row style={{ background: RW.n100 }}>
+                  <Table.Summary.Cell index={0}><Text strong>All modules</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={1} align="right"><Text strong>{t.total}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={2} align="right"><Text strong style={{ color: RW.success }}>{t.configured}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={3} align="right"><Text strong>{t.empty}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={4}><Text strong>{t.total ? Math.round((t.configured / t.total) * 100) : 0}%</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={5} align="right"><Text strong style={{ color: RW.primary }}>{t.records.toLocaleString()}</Text></Table.Summary.Cell>
+                </Table.Summary.Row>
+              ); }} />
+          </Card>
+
+          {/* Business Unit × Setup matrix */}
+          <Card size="small" style={{ borderRadius: 10 }}
+            title={<Space wrap><DatabaseOutlined style={{ color: RW.teal }} /><Text strong>Business Unit × Setup matrix</Text>
+              <Tag>{analysis.buUniverse.length} BUs</Tag><Tag>{analysis.scoped.length} BU-scoped tasks</Tag>
+              <Input allowClear size="small" prefix={<SearchOutlined />} placeholder="Search BU…" value={buSearch} onChange={e => setBuSearch(e.target.value)} style={{ width: 200 }} /></Space>}>
+            {analysis.scoped.length === 0
+              ? <Empty description="No business-unit-scoped setup tasks found in this export" />
+              : <Table size="small" rowKey="bu" dataSource={buRowsFiltered} pagination={{ pageSize: 30, showSizeChanger: true }}
+                  scroll={{ x: 300 + analysis.scoped.length * 92, y: 520 }}
+                  columns={[
+                    { title: 'Business Unit', dataIndex: 'bu', width: 250, fixed: 'left' as const, render: (v: string) => <Text strong style={{ fontSize: 12 }}>{v}</Text> },
+                    { title: 'Setups Done', dataIndex: 'doneCount', width: 150, fixed: 'left' as const, align: 'left' as const, sorter: (a: any, b: any) => a.doneCount - b.doneCount, defaultSortOrder: 'descend' as const,
+                      render: (n: number) => <Space size={6}><Text strong style={{ color: RW.primary }}>{n}/{analysis.scoped.length}</Text><Progress percent={Math.round((n / analysis.scoped.length) * 100)} size="small" showInfo={false} style={{ width: 70 }} strokeColor={RW.teal} /></Space> },
+                    ...analysis.scoped.map(t => ({
+                      title: <Tooltip title={t.name}><span style={{ fontSize: 10.5 }}>{t.name.length > 16 ? t.name.slice(0, 15) + '…' : t.name}</span></Tooltip>,
+                      dataIndex: ['cells', t.name], width: 92, align: 'center' as const,
+                      render: (_: any, r: any) => r.cells[t.name] ? <CheckCircleTwoTone twoToneColor={RW.success} /> : <span style={{ color: RW.n200 }}>·</span>,
+                    })),
+                  ] as ColumnsType<any>} />}
           </Card>
         </>
       )}

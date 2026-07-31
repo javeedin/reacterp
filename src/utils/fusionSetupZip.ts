@@ -23,6 +23,7 @@ export interface SetupTask {
   recordCount: number;
   hasData: boolean;
   batch: boolean;
+  businessUnits: string[];   // distinct BUs found in this task's data (BU-scoped tasks)
 }
 
 // Keyword-based module classification of a setup-task name. Supply-Chain terms are
@@ -36,30 +37,36 @@ export const moduleOf = (name: string): SetupModule => {
 
 // Parse one HTML-table .xls into headers + data rows (via the DOM — these files
 // are real HTML). Skips the SDO title row and sub-section markers.
-const parseHtmlTable = (html: string, fileName: string): SetupFile => {
+const BU_HEADER = /^(business\s*unit(\s*name)?|bu(\s*name)?)$/i;
+const parseHtmlTable = (html: string, fileName: string): SetupFile & { businessUnits: string[] } => {
   const doc = new DOMParser().parseFromString(html, 'text/html');
-  const trs = Array.from(doc.querySelectorAll('tr'));
   const cellsOf = (tr: Element) => Array.from(tr.querySelectorAll('td,th'));
   const txt = (el: Element) => (el.textContent ?? '').replace(/\s+/g, ' ').trim();
+  const tableEls = Array.from(doc.querySelectorAll('table'));
+  const blocks = tableEls.length ? tableEls.map(t => Array.from(t.querySelectorAll('tr'))) : [Array.from(doc.querySelectorAll('tr'))];
   let sdoTitle: string | undefined;
-  let headerIdx = -1;
-  for (let i = 0; i < trs.length; i++) {
-    const cells = cellsOf(trs[i]);
-    if (cells.length === 1 && !sdoTitle) sdoTitle = txt(cells[0]) || undefined;
-    if (cells.length > 1) { headerIdx = i; break; }
+  let primary: { headers: string[]; rows: string[][] } = { headers: [], rows: [] };
+  const buSet = new Set<string>();
+  for (const trs of blocks) {
+    const hi = trs.findIndex(tr => cellsOf(tr).length > 1);
+    if (hi < 0) { const one = trs[0] && cellsOf(trs[0]); if (one && one.length === 1 && !sdoTitle) sdoTitle = txt(one[0]) || undefined; continue; }
+    const headers = cellsOf(trs[hi]).map(txt);
+    const rows: string[][] = [];
+    for (let i = hi + 1; i < trs.length; i++) {
+      const cells = cellsOf(trs[i]);
+      if (cells.length < 2) continue;
+      const vals = cells.map(txt);
+      if (vals.every(v => !v)) continue;
+      if (vals.join('') === headers.join('')) continue;
+      rows.push(vals);
+    }
+    headers.forEach((h, idx) => {
+      if (!BU_HEADER.test((h || '').trim())) return;
+      for (const r of rows) { const v = (r[idx] || '').trim(); if (v && !/^\d+$/.test(v) && v.length < 80 && !/^business ?unit$/i.test(v)) buSet.add(v); }
+    });
+    if (rows.length > primary.rows.length) primary = { headers, rows };
   }
-  if (headerIdx < 0) return { name: fileName, sdoTitle, headers: [], rows: [] };
-  const headers = cellsOf(trs[headerIdx]).map(txt);
-  const rows: string[][] = [];
-  for (let i = headerIdx + 1; i < trs.length; i++) {
-    const cells = cellsOf(trs[i]);
-    if (cells.length < 2) continue;                 // sub-section marker
-    const vals = cells.map(txt);
-    if (vals.every(v => !v)) continue;              // blank spacer row
-    if (vals.join('') === headers.join('')) continue; // repeated header
-    rows.push(vals);
-  }
-  return { name: fileName, sdoTitle, headers, rows };
+  return { name: fileName, sdoTitle, headers: primary.headers, rows: primary.rows, businessUnits: [...buSet] };
 };
 
 // Parse the whole export. onProgress fires as each task finishes.
@@ -74,6 +81,7 @@ export const parseSetupExport = async (
   for (const entry of taskEntries) {
     const name = entry.name.replace(/\.zip$/i, '').replace(/^.*\//, '');
     const files: SetupFile[] = [];
+    const buSet = new Set<string>();
     let batch = false;
     try {
       const inner = await JSZip.loadAsync(await entry.async('arraybuffer'));
@@ -82,12 +90,13 @@ export const parseSetupExport = async (
         if (/\.zip$/i.test(fn)) { batch = true; continue; }   // nested *_BATCH.zip
         if (/\.xls$/i.test(fn)) {
           const parsed = parseHtmlTable(await (fe as JSZip.JSZipObject).async('string'), fn.replace(/^.*\//, ''));
-          if (parsed.headers.length || parsed.rows.length || parsed.sdoTitle) files.push(parsed);
+          parsed.businessUnits.forEach(b => buSet.add(b));
+          if (parsed.headers.length || parsed.rows.length || parsed.sdoTitle) files.push({ name: parsed.name, sdoTitle: parsed.sdoTitle, headers: parsed.headers, rows: parsed.rows });
         }
       }
     } catch { /* skip unreadable task */ }
     const recordCount = files.reduce((s, f) => s + f.rows.length, 0);
-    tasks.push({ name, module: moduleOf(name), files, recordCount, hasData: recordCount > 0 || batch, batch });
+    tasks.push({ name, module: moduleOf(name), files, recordCount, hasData: recordCount > 0 || batch, batch, businessUnits: [...buSet].sort() });
     done++; onProgress?.(done, taskEntries.length);
   }
   return tasks.sort((a, b) => a.name.localeCompare(b.name));
