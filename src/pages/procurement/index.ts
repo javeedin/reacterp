@@ -20,3 +20,4 @@ export { default as PriceList } from './PriceList';
 export { default as PurchaseOrderLoading } from './PurchaseOrderLoading';
 export { default as FusionArchitecture } from './FusionArchitecture';
 export { default as ParallelRunStrategy } from './ParallelRunStrategy';
+export { default as SetupDataExplorer } from './SetupDataExplorer';

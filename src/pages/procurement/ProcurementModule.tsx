@@ -36,13 +36,14 @@ interface MenuItemType {
 }
 
 // Section order + per-section icon/accent for the home page.
-const GROUP_ORDER = ['Purchasing', 'Order Management', 'Inventory', 'Costing', 'Setups', 'Loading', 'Architecture & Strategy'];
+const GROUP_ORDER = ['Purchasing', 'Order Management', 'Inventory', 'Costing', 'Setup Data', 'Setups', 'Loading', 'Architecture & Strategy'];
 const GROUP_META: Record<string, { icon: React.ReactNode; color: string }> = {
   Purchasing:        { icon: <ShoppingCartOutlined />, color: '#C74634' },
   'Order Management': { icon: <ProfileOutlined />,       color: '#7245A6' },
   Inventory:         { icon: <AppstoreOutlined />,     color: '#0572CE' },
   Costing:           { icon: <DollarOutlined />,        color: '#1D7B4D' },
   Setups:            { icon: <SettingOutlined />,       color: '#B07700' },
+  'Setup Data':      { icon: <DatabaseOutlined />,      color: '#0572CE' },
   Loading:           { icon: <UploadOutlined />,        color: '#00918A' },
   'Architecture & Strategy': { icon: <ApartmentOutlined />, color: '#7245A6' },
 };
@@ -304,6 +305,31 @@ const procurementItems: MenuItemType[] = [
     description: 'Automated parallel run, auto-reconciliation with legacy & phased go-live',
     color: '#7245A6',
     path: '/procurement/parallel-run',
+  },
+  // ── Setup Data (Fusion Setup Data Export explorer) ────────────────
+  {
+    key: 'setup-data', group: 'Setup Data',
+    icon: <DatabaseOutlined />,
+    label: 'Setup Data Overview',
+    description: 'Upload a Fusion Setup Data Export and see every task + a per-module dashboard',
+    color: REDWOOD.info,
+    path: '/procurement/setup-data',
+  },
+  {
+    key: 'setup-data-fin', group: 'Setup Data',
+    icon: <BankOutlined />,
+    label: 'Financials',
+    description: 'Financials setup tasks (GL, AP, AR, Tax, Ledger…) from the export',
+    color: '#0572CE',
+    path: '/procurement/setup-data/financials',
+  },
+  {
+    key: 'setup-data-scm', group: 'Setup Data',
+    icon: <AppstoreOutlined />,
+    label: 'Supply Chain',
+    description: 'Supply Chain / inventory / item setup tasks from the export',
+    color: '#00918A',
+    path: '/procurement/setup-data/supply-chain',
   },
 ];
 

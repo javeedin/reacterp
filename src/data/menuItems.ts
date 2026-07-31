@@ -111,6 +111,11 @@ export const ALL_MENU_ITEMS: MenuSearchItem[] = [
   { key: 'proc-suppliers',        label: 'Manage Suppliers',            module: 'PROC', moduleLabel: 'Procurement',             path: '/procurement/suppliers',          description: 'Supplier master data management', keywords: 'vendor supplier party' },
   { key: 'proc-tb-loading',      label: 'Trial Balance Loading',       module: 'PROC', moduleLabel: 'Procurement',             path: '/procurement/tb-loading',         description: 'Load trial balance from Excel, filter and review data', keywords: 'trial balance tb excel upload load procurement' },
 
+  // ── Setup Data ──────────────────────────────────────────
+  { key: 'setup-data',            label: 'Setup Data Overview',         module: 'SETUP', moduleLabel: 'Setup Data',             path: '/procurement/setup-data',              description: 'Upload a Fusion Setup Data Export and review all setup tasks + a per-module dashboard', keywords: 'setup fsm export configuration dashboard tasks bu' },
+  { key: 'setup-data-fin',        label: 'Financials',                  module: 'SETUP', moduleLabel: 'Setup Data',             path: '/procurement/setup-data/financials',   description: 'Financials setup tasks from a Fusion setup export', keywords: 'setup fsm export financials gl ap ar tax ledger configuration' },
+  { key: 'setup-data-scm',        label: 'Supply Chain',                module: 'SETUP', moduleLabel: 'Setup Data',             path: '/procurement/setup-data/supply-chain', description: 'Supply Chain setup tasks from a Fusion setup export', keywords: 'setup fsm export supply chain scm inventory item configuration' },
+
   // ── Admin ────────────────────────────────────────────────────────────────────
   { key: 'admin',                 label: 'Administration',              module: 'ADMIN', moduleLabel: 'Administration',         path: '/admin',                          description: 'System administration', keywords: 'admin system settings' },
   { key: 'admin-users',           label: 'User Management',             module: 'ADMIN', moduleLabel: 'Administration',         path: '/admin/users',                    description: 'Manage system users and roles', keywords: 'users roles permissions security' },
