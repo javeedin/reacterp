@@ -8,7 +8,7 @@ import { Link } from 'react-router-dom';
 import {
   DatabaseOutlined, ApiOutlined, PlayCircleOutlined, ReloadOutlined, CheckCircleTwoTone,
   CloseCircleTwoTone, MinusCircleOutlined, LoadingOutlined, SearchOutlined, CopyOutlined,
-  HomeOutlined, AppstoreOutlined, ThunderboltOutlined, GlobalOutlined,
+  HomeOutlined, AppstoreOutlined, ThunderboltOutlined, GlobalOutlined, FilePdfOutlined,
 } from '@ant-design/icons';
 import {
   FUSION_SERVICES, SERVICE_MODULES, buValuesOf,
@@ -148,6 +148,61 @@ const BrowseData: React.FC = () => {
 
   const copy = (s: string) => { navigator.clipboard?.writeText(s); message.success('Copied'); };
 
+  // PDF summary report — module summary, service results, and BU coverage.
+  const exportPdf = async () => {
+    if (analysis.ranCount === 0) { message.warning('Run the services first'); return; }
+    const { default: jsPDF } = await import('jspdf');
+    const autoTable = (await import('jspdf-autotable')).default;
+    const doc = new jsPDF('portrait', 'mm', 'a4');
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const finalY = () => (doc as any).lastAutoTable.finalY as number;
+
+    doc.setFontSize(15); doc.setFont('helvetica', 'bold');
+    doc.text('Fusion Data Coverage — Summary Report', pageW / 2, 15, { align: 'center' });
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+    const today = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    doc.text(`Generated: ${today}`, 14, 23);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Business units with data: ${analysis.buUniverse.length}    Services with data: ${analysis.withData.length}    Services run: ${analysis.ranCount}`, 14, 30);
+
+    autoTable(doc, {
+      startY: 35,
+      head: [['Module', 'Services w/ data', 'Ran', 'Total', 'Records', 'BUs']],
+      body: analysis.modSummary.map(m => [m.module, m.withData, m.ran, m.total, m.records.toLocaleString(), m.bus]),
+      styles: { fontSize: 9 }, headStyles: { fillColor: [199, 70, 52] }, margin: { left: 14, right: 14 },
+    });
+
+    let y = finalY() + 8;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text('Service results', 14, y);
+    autoTable(doc, {
+      startY: y + 3,
+      head: [['Service', 'Module', 'Type', 'Status', 'Records', 'BUs']],
+      body: FUSION_SERVICES.filter(s => results[s.key] && results[s.key].status !== 'running').map(s => {
+        const r = results[s.key];
+        return [s.label, s.module, s.kind, r.status === 'success' ? 'Has data' : r.status === 'empty' ? 'No data' : 'Error', r.status === 'error' ? '—' : r.count.toLocaleString(), r.bus.length || '—'];
+      }),
+      styles: { fontSize: 8 }, headStyles: { fillColor: [7, 114, 206] }, margin: { left: 14, right: 14 },
+      didParseCell: (d: any) => { if (d.section === 'body' && d.column.index === 3) d.cell.styles.textColor = d.cell.raw === 'Has data' ? [29, 123, 77] : d.cell.raw === 'Error' ? [199, 70, 52] : [150, 150, 150]; },
+    });
+
+    y = finalY() + 8;
+    if (y > pageH - 40) { doc.addPage(); y = 16; }
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
+    doc.text(`Business Unit data coverage (${analysis.buUniverse.length} BUs)`, 14, y);
+    autoTable(doc, {
+      startY: y + 3,
+      head: [['Business Unit', 'Modules', 'Services with data']],
+      body: analysis.buRows.map(r => [r.bu, r.modules.join(', '), `${r.serviceCount}/${analysis.withData.length}`]),
+      styles: { fontSize: 8 }, headStyles: { fillColor: [0, 145, 138] }, margin: { left: 14, right: 14 },
+    });
+
+    const pc = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= pc; i++) { doc.setPage(i); doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(120); doc.text('Re-ERP · Browse Data', 14, pageH - 8); doc.text(`Page ${i} of ${pc}`, pageW - 14, pageH - 8, { align: 'right' }); }
+    doc.save(`data-coverage-summary-${new Date().toISOString().slice(0, 10)}.pdf`);
+    message.success('PDF report generated');
+  };
+
   // ── Coverage analysis (BU-wise / module-wise) from the run results ──
   const analysis = useMemo(() => {
     const withData = FUSION_SERVICES.filter(s => results[s.key]?.status === 'success');
@@ -236,6 +291,7 @@ const BrowseData: React.FC = () => {
           <Badge count={selected.length} showZero color={RW.info} offset={[6, -2]}>
             <Button type="primary" icon={<PlayCircleOutlined />} loading={running} onClick={runAll} style={{ background: RW.primary, borderColor: RW.primary }}>Run services</Button>
           </Badge>
+          {totalRun > 0 && <Button icon={<FilePdfOutlined />} onClick={exportPdf} disabled={running}>PDF report</Button>}
           {totalRun > 0 && <Button icon={<ReloadOutlined />} onClick={() => setResults({})} disabled={running}>Reset</Button>}
           {progress && <div style={{ minWidth: 220 }}><Progress percent={progress.total ? Math.round((progress.done / progress.total) * 100) : 0} size="small" /><Text type="secondary" style={{ fontSize: 11 }}>Ran {progress.done}/{progress.total} services…</Text></div>}
         </Space>
