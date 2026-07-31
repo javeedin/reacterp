@@ -1740,6 +1740,8 @@ interface NewLine { key: string; itemNumber: string; description?: string; uom?:
   chargesHref?: string; lotSerialsHref?: string;
   // Sum of extra (non-sale) charges on the line — freight/handling/etc.
   chargeAmount?: number;
+  // Fulfillment org + subinventory as stored on the line (shown in Fulfillment tab).
+  orgCode?: string; subinventory?: string;
   // lotSerials rows fetched from Fusion (shown in the Lot Details tab).
   lineLots?: any[];
   // Return (RMA) line: references the original order line being returned.
@@ -3706,6 +3708,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             lineHref: selfHref,
             chargesHref: linkOf('charges'), lotSerialsHref: linkOf('lotSerials'),
             lineLots: Array.isArray(lotSerials) ? lotSerials : [],
+            orgCode: pf(l, ['RequestedFulfillmentOrganizationCode', 'FulfillmentOrganizationCode', 'OrganizationCode']),
+            subinventory: pf(l, ['SubinventoryCode', 'Subinventory']),
             existing: true,
           };
         }));
@@ -4869,6 +4873,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     { title: 'Qty', dataIndex: 'qty', width: 90, align: 'right', render: v => fmtQty(num(v)) },
   ];
 
+  // Fulfillment tab — item + warehouse (org) + subinventory per line.
+  const fulfillCols: ColumnsType<NewLine> = [
+    { title: 'Item', dataIndex: 'itemNumber', width: 160, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text> },
+    { title: 'Description', dataIndex: 'description', width: 300, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Warehouse', width: 170, render: (_, r) => { const o = r.orgCode ?? hdr.warehouse; return o ? <Tag color="geekblue">{o}</Tag> : <Text type="secondary">—</Text>; } },
+    { title: 'Subinventory', width: 150, render: (_, r) => { const s = r.subinventory ?? hdr.subinventory; return s ? <Tag color="cyan">{s}</Tag> : <Text type="secondary">—</Text>; } },
+    { title: 'Lot', width: 160, render: (_, r) => { const lot = r.lot ?? (r.lots && r.lots[0]); return lot ? <Tag color="geekblue">{lot}</Tag> : <Text type="secondary">—</Text>; } },
+    { title: 'Qty', dataIndex: 'qty', width: 80, align: 'right', render: v => fmtQty(num(v)) },
+  ];
+
   // Errors tab — per-line errors + general order-level errors from the last save.
   const errorRows = useMemo(() => {
     const rows: { key: string; scope: string; item?: string; msg: string }[] = [];
@@ -5169,6 +5183,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                 key: 'lots', label: vTab(<TagsOutlined />, 'Lot Details', REDWOOD.info, lotRows.length),
                 children: <Table size="small" columns={lotCols} dataSource={lotRows} rowKey="key" pagination={false} scroll={{ x: 750, y: 360 }}
                   locale={{ emptyText: 'No lot details on the selected items' }} />,
+              },
+              {
+                key: 'fulfillment', label: vTab(<CarOutlined />, 'Fulfillment', REDWOOD.teal ?? '#00918A'),
+                children: <Table size="small" columns={fulfillCols} dataSource={lines} rowKey="key" pagination={false} scroll={{ x: 780, y: 360 }}
+                  locale={{ emptyText: 'No lines' }} />,
               },
               {
                 key: 'errors', label: vTab(<CloseCircleTwoTone twoToneColor={errorRows.length ? REDWOOD.error : '#bbb'} />, 'Errors', REDWOOD.error, errorRows.length, REDWOOD.error),
