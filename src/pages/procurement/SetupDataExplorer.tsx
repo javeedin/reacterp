@@ -290,7 +290,7 @@ const SetupDataExplorer: React.FC<{ defaultModule?: SetupModule }> = ({ defaultM
                       title: <Tooltip title={`${t.name} — ${analysis.colCounts[t.name]} of ${analysis.buUniverse.length} BUs configured`}>
                         <div style={{ textAlign: 'center' as const, lineHeight: 1.2 }}>
                           <div style={{ fontSize: 10.5 }}>{t.name.length > 16 ? t.name.slice(0, 15) + '…' : t.name}</div>
-                          <Tag style={{ marginTop: 3, marginInline: 0, fontSize: 10, lineHeight: '15px', padding: '0 5px', background: RW.success, color: '#fff', border: 'none', fontWeight: 600 }}>{analysis.colCounts[t.name]}</Tag>
+                          <span style={{ display: 'inline-block', marginTop: 3, fontSize: 10.5, fontWeight: 700, color: '#fff', background: RW.success, borderRadius: 8, padding: '0 6px', lineHeight: '16px' }}>✓ {analysis.colCounts[t.name]}</span>
                         </div></Tooltip>,
                       dataIndex: ['cells', t.name], width: 92, align: 'center' as const,
                       render: (_: any, r: any) => r.cells[t.name] ? <CheckCircleTwoTone twoToneColor={RW.success} /> : <span style={{ color: RW.n200 }}>·</span>,

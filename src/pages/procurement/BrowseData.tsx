@@ -296,10 +296,10 @@ const BrowseData: React.FC = () => {
                         { title: 'Services', dataIndex: 'serviceCount', width: 140, fixed: 'left' as const, sorter: (a: any, b: any) => a.serviceCount - b.serviceCount, defaultSortOrder: 'descend' as const,
                           render: (n: number) => <Space size={6}><Text strong style={{ color: RW.primary }}>{n}/{analysis.withData.length}</Text><Progress percent={Math.round((n / analysis.withData.length) * 100)} size="small" showInfo={false} style={{ width: 60 }} strokeColor={RW.teal} /></Space> },
                         ...analysis.withData.map(s => ({
-                          title: <Tooltip title={`${s.label} · ${s.module} — ${results[s.key]?.bus.length ?? 0} of ${analysis.buUniverse.length} BUs`}>
+                          title: <Tooltip title={`${s.label} · ${s.module} — ${results[s.key]?.bus.length ?? 0} of ${analysis.buUniverse.length} BUs have data`}>
                             <div style={{ textAlign: 'center' as const, lineHeight: 1.2 }}>
                               <div style={{ fontSize: 10.5 }}>{s.label.length > 15 ? s.label.slice(0, 14) + '…' : s.label}</div>
-                              <Tag style={{ marginTop: 3, marginInline: 0, fontSize: 10, lineHeight: '15px', padding: '0 5px', background: RW.success, color: '#fff', border: 'none', fontWeight: 600 }}>{results[s.key]?.bus.length ?? 0}</Tag>
+                              <span style={{ display: 'inline-block', marginTop: 3, fontSize: 10.5, fontWeight: 700, color: '#fff', background: RW.success, borderRadius: 8, padding: '0 6px', lineHeight: '16px' }}>✓ {results[s.key]?.bus.length ?? 0}</span>
                             </div></Tooltip>,
                           dataIndex: ['cells', s.key], width: 88, align: 'center' as const,
                           render: (_: any, r: any) => r.cells[s.key] ? <CheckCircleTwoTone twoToneColor={RW.success} /> : <span style={{ color: RW.n200 }}>·</span>,
