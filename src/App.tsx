@@ -146,6 +146,7 @@ const PurchaseOrderLoading    = lazy(() => import('./pages/procurement').then(m 
 const FusionArchitecture      = lazy(() => import('./pages/procurement').then(m => ({ default: m.FusionArchitecture })));
 const ParallelRunStrategy     = lazy(() => import('./pages/procurement').then(m => ({ default: m.ParallelRunStrategy })));
 const SetupDataExplorer       = lazy(() => import('./pages/procurement').then(m => ({ default: m.SetupDataExplorer })));
+const BrowseData              = lazy(() => import('./pages/procurement').then(m => ({ default: m.BrowseData })));
 
 // Placeholder component for modules under development
 const ComingSoon = ({ moduleName }: { moduleName: string }) => (
@@ -298,6 +299,7 @@ function App() {
               <Route path="procurement/setup-data/financials" element={<SetupDataExplorer defaultModule="Financials" />} />
               <Route path="procurement/setup-data/supply-chain" element={<SetupDataExplorer defaultModule="Supply Chain" />} />
               <Route path="procurement/setup-data" element={<SetupDataExplorer />} />
+              <Route path="procurement/browse-data" element={<BrowseData />} />
               <Route path="ap/suppliers" element={<APManageSuppliers />} />
               <Route path="suppliers/manage" element={<ManageSuppliers />} />
               <Route path="suppliers/balance/:supplierNumber" element={<SupplierBalance />} />

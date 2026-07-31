@@ -7,7 +7,7 @@ import {
   DollarOutlined, ReconciliationOutlined, CloudOutlined, HistoryOutlined,
   SwapOutlined, CarOutlined, CheckSquareOutlined, FileSearchOutlined, UploadOutlined,
   RightOutlined, SettingOutlined, ShoppingOutlined, TagsOutlined, ProfileOutlined,
-  SyncOutlined,
+  SyncOutlined, ThunderboltOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -330,6 +330,14 @@ const procurementItems: MenuItemType[] = [
     description: 'Supply Chain / inventory / item setup tasks from the export',
     color: '#00918A',
     path: '/procurement/setup-data/supply-chain',
+  },
+  {
+    key: 'browse-data', group: 'Setup Data',
+    icon: <ThunderboltOutlined />,
+    label: 'Browse Data',
+    description: 'Run read-only GET services & see per-BU / per-module data coverage + an API explorer',
+    color: '#C74634',
+    path: '/procurement/browse-data',
   },
 ];
 
