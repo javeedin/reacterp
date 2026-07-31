@@ -8,7 +8,7 @@ import { Link } from 'react-router-dom';
 import {
   DatabaseOutlined, ApiOutlined, PlayCircleOutlined, ReloadOutlined, CheckCircleTwoTone,
   CloseCircleTwoTone, MinusCircleOutlined, LoadingOutlined, SearchOutlined, CopyOutlined,
-  HomeOutlined, AppstoreOutlined, ThunderboltOutlined, GlobalOutlined, FilePdfOutlined,
+  HomeOutlined, AppstoreOutlined, ThunderboltOutlined, GlobalOutlined, FilePdfOutlined, FileExcelOutlined,
 } from '@ant-design/icons';
 import {
   FUSION_SERVICES, SERVICE_MODULES, buValuesOf,
@@ -31,6 +31,7 @@ const RW = {
   purple: '#6B21A8', teal: '#00918A', n100: '#F4F4F2', n200: '#E4E1DD', n600: '#6B6862', n900: '#1B1A17',
 };
 const MOD_COLOR: Record<FusionModule, string> = { 'Financials': RW.info, 'Supply Chain': RW.teal };
+const MOD_ARGB: Record<FusionModule, string> = { 'Financials': 'FF0572CE', 'Supply Chain': 'FF00918A' };
 
 const PAGE = 500;
 const BU_SCAN_MAX = 1500;   // rows sampled per service to discover business units
@@ -197,10 +198,83 @@ const BrowseData: React.FC = () => {
       styles: { fontSize: 8 }, headStyles: { fillColor: [0, 145, 138] }, margin: { left: 14, right: 14 },
     });
 
+    // BU × Service matrix on a landscape page (with per-column tick counts)
+    const svcs = analysis.withData;
+    if (svcs.length) {
+      doc.addPage('a4', 'landscape');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(0);
+      doc.text(`Business Unit × Service coverage — ${analysis.buUniverse.length} BUs`, 12, 12);
+      autoTable(doc, {
+        startY: 16,
+        head: [
+          ['Business Unit', 'Done', ...svcs.map(s => s.label)],
+          ['BUs with data →', '', ...svcs.map(s => String(results[s.key]?.bus.length ?? 0))],
+        ],
+        body: analysis.buRows.map(r => [r.bu, `${r.serviceCount}/${svcs.length}`, ...svcs.map(s => r.cells[s.key] ? 'Y' : '')]),
+        styles: { fontSize: 6, halign: 'center', valign: 'middle', cellPadding: 1, overflow: 'linebreak' },
+        columnStyles: { 0: { halign: 'left', cellWidth: 40 }, 1: { cellWidth: 11 } },
+        headStyles: { fillColor: [199, 70, 52], textColor: [255, 255, 255], fontSize: 5.5, valign: 'middle' },
+        margin: { left: 10, right: 10 },
+        didParseCell: (d: any) => {
+          if (d.section === 'head' && d.row.index === 1) { d.cell.styles.fillColor = [29, 123, 77]; d.cell.styles.textColor = [255, 255, 255]; d.cell.styles.fontStyle = 'bold'; d.cell.styles.fontSize = 6.5; }
+          if (d.section === 'body' && d.column.index >= 2 && d.cell.raw === 'Y') { d.cell.text = ['✓']; d.cell.styles.textColor = [29, 123, 77]; d.cell.styles.fillColor = [234, 246, 238]; d.cell.styles.fontStyle = 'bold'; }
+        },
+      });
+    }
+
     const pc = (doc as any).internal.getNumberOfPages();
-    for (let i = 1; i <= pc; i++) { doc.setPage(i); doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(120); doc.text('Re-ERP · Browse Data', 14, pageH - 8); doc.text(`Page ${i} of ${pc}`, pageW - 14, pageH - 8, { align: 'right' }); }
+    for (let i = 1; i <= pc; i++) { doc.setPage(i); const w = doc.internal.pageSize.getWidth(); const h = doc.internal.pageSize.getHeight(); doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(120); doc.text('Re-ERP · Browse Data', 14, h - 8); doc.text(`Page ${i} of ${pc}`, w - 14, h - 8, { align: 'right' }); }
     doc.save(`data-coverage-summary-${new Date().toISOString().slice(0, 10)}.pdf`);
     message.success('PDF report generated');
+  };
+
+  // Styled Excel — Module Summary + Service Results + BU × Service matrix (with
+  // a per-column tick-count row), mirroring the on-screen coverage matrix.
+  const exportExcel = async () => {
+    if (analysis.ranCount === 0) { message.warning('Run the services first'); return; }
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    const thin = { style: 'thin' as const, color: { argb: 'FFE4E1DD' } };
+    const bd = { top: thin, bottom: thin, left: thin, right: thin };
+    const fill = (argb: string) => ({ type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb } });
+
+    const ms = wb.addWorksheet('Module Summary', { views: [{ state: 'frozen', ySplit: 1 }] });
+    ms.columns = [{ header: 'Module', width: 18 }, { header: 'Services with data', width: 18 }, { header: 'Ran', width: 8 }, { header: 'Total', width: 8 }, { header: 'Records', width: 12 }, { header: 'BUs', width: 8 }];
+    ms.getRow(1).eachCell((c: any) => { c.fill = fill('FFC74634'); c.font = { bold: true, color: { argb: 'FFFFFFFF' } }; c.alignment = { horizontal: 'center' }; c.border = bd; });
+    analysis.modSummary.forEach(m => { const r = ms.addRow([m.module, m.withData, m.ran, m.total, m.records, m.bus]); r.eachCell((c: any) => { c.border = bd; }); r.getCell(1).fill = fill(MOD_ARGB[m.module]); r.getCell(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
+
+    const sr = wb.addWorksheet('Service Results', { views: [{ state: 'frozen', ySplit: 1 }] });
+    sr.columns = [{ header: 'Service', width: 30 }, { header: 'Module', width: 16 }, { header: 'Type', width: 12 }, { header: 'Status', width: 14 }, { header: 'Records', width: 12 }, { header: 'Business Units', width: 14 }];
+    sr.getRow(1).eachCell((c: any) => { c.fill = fill('FFC74634'); c.font = { bold: true, color: { argb: 'FFFFFFFF' } }; c.alignment = { horizontal: 'center' }; c.border = bd; });
+    FUSION_SERVICES.filter(s => results[s.key] && results[s.key].status !== 'running').forEach(s => {
+      const r0 = results[s.key]; const st = r0.status === 'success' ? 'Has data' : r0.status === 'empty' ? 'No data' : 'Error';
+      const row = sr.addRow([s.label, s.module, s.kind, st, r0.status === 'error' ? '' : r0.count, r0.bus.length]);
+      row.eachCell((c: any) => { c.border = bd; });
+      row.getCell(2).fill = fill(MOD_ARGB[s.module]); row.getCell(2).font = { bold: true, color: { argb: 'FFFFFFFF' } }; row.getCell(2).alignment = { horizontal: 'center' };
+      row.getCell(4).font = { bold: true, color: { argb: st === 'Has data' ? 'FF1D7B4D' : st === 'Error' ? 'FFC74634' : 'FF9A9691' } };
+    });
+
+    const svcs = analysis.withData;
+    const bm = wb.addWorksheet('BU x Service', { views: [{ state: 'frozen', xSplit: 3, ySplit: 2 }] });
+    bm.columns = [{ header: 'Business Unit', width: 34 }, { header: 'Modules', width: 12 }, { header: 'Services Done', width: 13 }, ...svcs.map(s => ({ header: s.label, width: 5.5 }))];
+    const hr = bm.getRow(1); hr.height = 150;
+    hr.eachCell((c: any) => { c.fill = fill('FFC74634'); c.font = { bold: true, color: { argb: 'FFFFFFFF' } }; c.alignment = { horizontal: 'center', vertical: 'bottom', textRotation: 90, wrapText: true }; c.border = bd; });
+    [1, 2, 3].forEach(i => { hr.getCell(i).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; });
+    const cr = bm.addRow(['', 'BUs →', '', ...svcs.map(s => results[s.key]?.bus.length ?? 0)]);
+    cr.eachCell((c: any) => { c.border = bd; c.fill = fill('FF1D7B4D'); c.font = { bold: true, color: { argb: 'FFFFFFFF' } }; c.alignment = { horizontal: 'center' }; });
+    cr.getCell(2).alignment = { horizontal: 'right' };
+    analysis.buRows.forEach(row => {
+      const r = bm.addRow([row.bu, row.modules.map(m => m === 'Supply Chain' ? 'SCM' : 'FIN').join(' '), `${row.serviceCount}/${svcs.length}`, ...svcs.map(s => row.cells[s.key] ? '✓' : '')]);
+      r.eachCell((c: any) => { c.border = bd; });
+      r.getCell(1).font = { bold: true };
+      r.getCell(3).font = { bold: true, color: { argb: 'FF00918A' } }; r.getCell(3).alignment = { horizontal: 'center' };
+      svcs.forEach((s, i) => { const c = r.getCell(4 + i); c.alignment = { horizontal: 'center' }; if (row.cells[s.key]) { c.font = { bold: true, color: { argb: 'FF1D7B4D' } }; c.fill = fill('FFEAF6EE'); } });
+    });
+
+    const buf = await wb.xlsx.writeBuffer() as ArrayBuffer;
+    const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    const a = document.createElement('a'); a.href = url; a.download = `data-coverage-${new Date().toISOString().slice(0, 10)}.xlsx`; a.click(); URL.revokeObjectURL(url);
+    message.success('Excel exported');
   };
 
   // ── Coverage analysis (BU-wise / module-wise) from the run results ──
@@ -291,6 +365,7 @@ const BrowseData: React.FC = () => {
           <Badge count={selected.length} showZero color={RW.info} offset={[6, -2]}>
             <Button type="primary" icon={<PlayCircleOutlined />} loading={running} onClick={runAll} style={{ background: RW.primary, borderColor: RW.primary }}>Run services</Button>
           </Badge>
+          {totalRun > 0 && <Button icon={<FileExcelOutlined />} onClick={exportExcel} disabled={running} style={{ borderColor: RW.success, color: RW.success }}>Excel</Button>}
           {totalRun > 0 && <Button icon={<FilePdfOutlined />} onClick={exportPdf} disabled={running}>PDF report</Button>}
           {totalRun > 0 && <Button icon={<ReloadOutlined />} onClick={() => setResults({})} disabled={running}>Reset</Button>}
           {progress && <div style={{ minWidth: 220 }}><Progress percent={progress.total ? Math.round((progress.done / progress.total) * 100) : 0} size="small" /><Text type="secondary" style={{ fontSize: 11 }}>Ran {progress.done}/{progress.total} services…</Text></div>}
