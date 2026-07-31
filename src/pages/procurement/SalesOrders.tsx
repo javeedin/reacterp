@@ -1695,6 +1695,8 @@ interface NewLine { key: string; itemNumber: string; description?: string; uom?:
   loadedExt?: number; loadedTax?: number;
   // Child-collection hrefs captured on load → drill into charges / lot-serials.
   chargesHref?: string; lotSerialsHref?: string;
+  // Sum of extra (non-sale) charges on the line — freight/handling/etc.
+  chargeAmount?: number;
   // lotSerials rows fetched from Fusion (shown in the Lot Details tab).
   lineLots?: any[];
   // Return (RMA) line: references the original order line being returned.
@@ -3297,10 +3299,11 @@ const CHARGE_PRESETS: { key: string; label: string; def: string; sub: string; ap
   { key: 'Restocking', label: 'Restocking', def: 'QP_RESTOCKING_CHARGE', sub: 'Price', applyTo: 'RETURN',   typeCode: 'ORA_RESTOCKING' },
   { key: 'Custom',     label: 'Custom',     def: '',                     sub: 'Price', applyTo: 'PRICE',    typeCode: '' },
 ];
-const ChargesModal: React.FC<{ open: boolean; onClose: () => void; orderKey: string; lines: NewLine[]; ccy?: string }> = ({ open, onClose, orderKey, lines, ccy }) => {
+const ChargesModal: React.FC<{ open: boolean; onClose: () => void; orderKey: string; lines: NewLine[]; ccy?: string; onChanged?: () => void }> = ({ open, onClose, orderKey, lines, ccy, onChanged }) => {
   const eligible = lines.filter(l => !l.canceled && (l.fulfillLineId != null || l.lineHref));
   const [lineKey, setLineKey] = useState<string | undefined>();
   const line = eligible.find(l => l.key === lineKey) ?? eligible[0];
+  const [scope, setScope] = useState<'line' | 'all'>('line');
   const [preset, setPreset] = useState('Freight');
   const [def, setDef] = useState('QP_SHIP_FREIGHT');
   const [sub, setSub] = useState('Price');
@@ -3325,69 +3328,95 @@ const ChargesModal: React.FC<{ open: boolean; onClose: () => void; orderKey: str
   useEffect(() => { if (open && line) loadExisting(); }, [open, line?.key, loadExisting]);
 
   const applyPreset = (k: string) => { const p = CHARGE_PRESETS.find(x => x.key === k)!; setPreset(k); if (k !== 'Custom') { setDef(p.def); setSub(p.sub); setApplyTo(p.applyTo); setChTypeCode(p.typeCode); } };
-  // Source ids are REQUIRED (Fusion errors "required attribute SourceChargeId /
-  // SourceChargeComponentId"); keep them stable per line + charge position.
-  const srcChargeId = `MC-${line?.fulfillLineId ?? line?.srcLineId ?? 'x'}-${(existing.length || 0) + 1}`;
-  // Primary within its ApplyTo context — true only if no existing primary charge
-  // already applies to the same target (so freight/shipping can be primary while
-  // the item's Sale price stays primary for PRICE).
-  const primary = !existing.some(c => String(pf(c, ['ApplyToCode', 'ApplyTo']) ?? '').toUpperCase() === applyTo.toUpperCase() && String(c.PrimaryFlag) === 'true');
-  const body = {
-    SourceChargeId: srcChargeId,
-    ApplyToCode: applyTo,
-    PriceType: 'One time',
-    ...(chTypeCode ? { ChargeTypeCode: chTypeCode } : {}),
-    ChargeSubType: sub,
-    ...(ccy ? { ChargeCurrencyCode: ccy } : {}),
-    SequenceNumber: (existing.length || 0) + 1,
-    ChargeDefinitionCode: def,
-    PrimaryFlag: primary,
-    RollupFlag: false,
-    chargeComponents: [
-      { SourceChargeComponentId: `${srcChargeId}-SCC1`, PriceElementCode: 'QP_LIST_PRICE', PriceElementUsageCode: 'LIST_PRICE', HeaderCurrencyUnitPrice: num(amount), HeaderCurrencyExtendedAmount: num(amount), RollupFlag: false, SequenceNumber: 1 },
-      { SourceChargeComponentId: `${srcChargeId}-SCC2`, PriceElementCode: 'QP_NET_PRICE', PriceElementUsageCode: 'NET_PRICE', HeaderCurrencyUnitPrice: num(amount), HeaderCurrencyExtendedAmount: num(amount), RollupFlag: false, SequenceNumber: 2 },
-    ],
+  // Build a charge body for a line + amount. SourceChargeId/SourceChargeComponentId
+  // are REQUIRED. PrimaryFlag is true unless the charge applies to PRICE (so it
+  // never collides with the item's Sale price charge).
+  const makeBody = (l: NewLine | undefined, amt: number, seq: number) => {
+    const src = `MC-${l?.fulfillLineId ?? l?.srcLineId ?? 'x'}-${seq}`;
+    const a = round2(amt);
+    return {
+      SourceChargeId: src, ApplyToCode: applyTo, PriceType: 'One time',
+      ...(chTypeCode ? { ChargeTypeCode: chTypeCode } : {}), ChargeSubType: sub,
+      ...(ccy ? { ChargeCurrencyCode: ccy } : {}), SequenceNumber: seq,
+      ChargeDefinitionCode: def, PrimaryFlag: applyTo.toUpperCase() !== 'PRICE', RollupFlag: false,
+      chargeComponents: [
+        { SourceChargeComponentId: `${src}-SCC1`, PriceElementCode: 'QP_LIST_PRICE', PriceElementUsageCode: 'LIST_PRICE', HeaderCurrencyUnitPrice: a, HeaderCurrencyExtendedAmount: a, RollupFlag: false, SequenceNumber: 1 },
+        { SourceChargeComponentId: `${src}-SCC2`, PriceElementCode: 'QP_NET_PRICE', PriceElementUsageCode: 'NET_PRICE', HeaderCurrencyUnitPrice: a, HeaderCurrencyExtendedAmount: a, RollupFlag: false, SequenceNumber: 2 },
+      ],
+    };
   };
+  // Split a global charge across every line, prorated by line value (last line
+  // absorbs the rounding remainder).
+  const lineBase = (l: NewLine) => l.loadedExt != null ? l.loadedExt : round2(num(l.qty) * num(l.unitPrice));
+  const totalBase = eligible.reduce((s, l) => s + lineBase(l), 0);
+  const splitShares = () => { let alloc = 0; return eligible.map((l, i) => {
+    const share = i === eligible.length - 1 ? round2(num(amount) - alloc) : round2(num(amount) * (totalBase > 0 ? lineBase(l) / totalBase : 1 / eligible.length));
+    if (i < eligible.length - 1) alloc = round2(alloc + share);
+    return { line: l, share };
+  }); };
+  const body = makeBody(line, num(amount), (existing.length || 0) + 1);
   const url = chargesUrl(line);
   const add = async () => {
-    if (!url) { message.error('No line selected'); return; }
     setBusy(true); setErr('');
     try {
-      const r = await fetch(url, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const t = await r.text();
-      if (!r.ok) throw new Error([`POST ${url}`, `HTTP ${r.status}`, ...collectOrderErrors(null, t, true)].join('\n'));
-      message.success(`Charge of ${fmtAmount(num(amount), ccy)} added`); setAmount(0); loadExisting();
+      if (scope === 'all') {
+        const shares = splitShares().filter(s => s.share > 0);
+        if (!shares.length) throw new Error('Enter an amount to split across the lines');
+        const fails: string[] = [];
+        for (const { line: l, share } of shares) {
+          const u = chargesUrl(l); const b = makeBody(l, share, 1);
+          try { const r = await fetch(u, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(b) }); if (!r.ok) { const t = await r.text(); fails.push(`${l.itemNumber}: ${collectOrderErrors(null, t, true)[0] || 'HTTP ' + r.status}`); } }
+          catch (e: any) { fails.push(`${l.itemNumber}: ${e?.message}`); }
+        }
+        if (fails.length) { setErr(fails.join('\n')); message.error(`${fails.length} of ${shares.length} charges failed`); }
+        else { message.success(`Charge of ${fmtAmount(num(amount), ccy)} split across ${shares.length} line(s)`); setAmount(0); loadExisting(); onChanged?.(); }
+      } else {
+        if (!url) { message.error('No line selected'); return; }
+        const r = await fetch(url, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const t = await r.text();
+        if (!r.ok) throw new Error([`POST ${url}`, `HTTP ${r.status}`, ...collectOrderErrors(null, t, true)].join('\n'));
+        message.success(`Charge of ${fmtAmount(num(amount), ccy)} added`); setAmount(0); loadExisting(); onChanged?.();
+      }
     } catch (e: any) { setErr(e?.message || 'Add failed'); message.error('Charge add failed'); } finally { setBusy(false); }
   };
   const delCharge = (row: any) => Modal.confirm({
     title: 'Delete this charge?', okText: 'Delete', okButtonProps: { danger: true },
     content: <div style={{ fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all' }}>DELETE {selfHref(row)}</div>,
-    onOk: async () => { try { const r = await fetch(selfHref(row), { method: 'DELETE', headers: FUSION_HDRS }); if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`); message.success('Charge deleted'); loadExisting(); } catch (e: any) { message.error(e?.message || 'Delete failed'); } },
+    onOk: async () => { try { const r = await fetch(selfHref(row), { method: 'DELETE', headers: FUSION_HDRS }); if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`); message.success('Charge deleted'); loadExisting(); onChanged?.(); } catch (e: any) { message.error(e?.message || 'Delete failed'); } },
   });
   const chargeAmt = (c: any) => { const comps = c.chargeComponents?.items ?? c.chargeComponents ?? []; const net = comps.find((x: any) => x.PriceElementCode === 'QP_NET_PRICE') ?? comps.find((x: any) => x.PriceElementCode === 'QP_LIST_PRICE'); return num(pf(net ?? {}, ['HeaderCurrencyExtendedAmount', 'HeaderCurrencyUnitPrice'])) || num(pf(c, ['GSAUnitPrice'])); };
 
   return (
     <Modal open={open} onCancel={() => !busy && onClose()} width={720} style={{ top: 20 }}
       title={<Space><DollarOutlined style={{ color: REDWOOD.primary }} />Charges</Space>}
-      footer={<Space><Button onClick={onClose} disabled={busy}>Close</Button><Button type="primary" loading={busy} icon={<PlusOutlined />} onClick={add} disabled={!url || !def || !num(amount)}>Add Charge</Button></Space>}>
-      <div style={{ marginBottom: 6, fontSize: 12, color: REDWOOD.neutral600 }}>Line</div>
-      <Select style={{ width: '100%', marginBottom: 14 }} value={line?.key} onChange={setLineKey}
-        options={eligible.map((l, i) => ({ value: l.key, label: `${l.srcLineNumber ?? i + 1} · ${l.itemNumber}${l.description ? ` — ${l.description}` : ''}` }))} />
+      footer={<Space><Button onClick={onClose} disabled={busy}>Close</Button><Button type="primary" loading={busy} icon={<PlusOutlined />} onClick={add} disabled={!def || !num(amount) || (scope === 'line' && !url)}>{scope === 'all' ? 'Split Charge Across Lines' : 'Add Charge'}</Button></Space>}>
+      {/* Scope — a single line, or a global charge split across all lines */}
+      <Segmented block value={scope} onChange={(v: any) => setScope(v)} style={{ marginBottom: 14 }}
+        options={[{ value: 'line', label: 'Specific line' }, { value: 'all', label: `Global — split across ${eligible.length} lines` }]} />
 
-      {/* Existing charges on the line */}
-      <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>Existing charges {exLoading && <Spin size="small" />}</div>
-      <Table size="small" rowKey={(_, i) => String(i)} pagination={false} dataSource={existing} style={{ marginBottom: 16 }}
-        locale={{ emptyText: 'No charges' }}
-        columns={[
-          { title: 'Charge', render: (_: any, c: any) => <Text style={{ fontSize: 12 }}>{pf(c, ['ChargeType', 'ChargeDefinitionCode']) ?? '—'}{String(c.PrimaryFlag) === 'true' ? ' (Sale)' : ''}</Text> },
-          { title: 'Definition', width: 160, render: (_: any, c: any) => <Text type="secondary" style={{ fontSize: 11 }}>{pf(c, ['ChargeDefinitionCode'])}</Text> },
-          { title: 'Amount', width: 120, align: 'right', render: (_: any, c: any) => <Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(chargeAmt(c), ccy)}</Text> },
-          { title: '', width: 44, align: 'center', render: (_: any, c: any) => String(c.PrimaryFlag) === 'true' ? <Text type="secondary">—</Text> : <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => delCharge(c)} /> },
-        ] as any} />
+      {scope === 'line' ? <>
+        <div style={{ marginBottom: 6, fontSize: 12, color: REDWOOD.neutral600 }}>Line</div>
+        <Select style={{ width: '100%', marginBottom: 14 }} value={line?.key} onChange={setLineKey}
+          options={eligible.map((l, i) => ({ value: l.key, label: `${l.srcLineNumber ?? i + 1} · ${l.itemNumber}${l.description ? ` — ${l.description}` : ''}` }))} />
+        {/* Existing charges on the line */}
+        <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>Existing charges {exLoading && <Spin size="small" />}</div>
+        <Table size="small" rowKey={(_, i) => String(i)} pagination={false} dataSource={existing} style={{ marginBottom: 16 }}
+          locale={{ emptyText: 'No charges' }}
+          columns={[
+            { title: 'Charge', render: (_: any, c: any) => <Text style={{ fontSize: 12 }}>{pf(c, ['ChargeType', 'ChargeTypeCode', 'ChargeDefinitionCode']) ?? '—'}{String(c.PrimaryFlag) === 'true' ? ' (Sale)' : ''}</Text> },
+            { title: 'Definition', width: 160, render: (_: any, c: any) => <Text type="secondary" style={{ fontSize: 11 }}>{pf(c, ['ChargeDefinitionCode'])}</Text> },
+            { title: 'Amount', width: 120, align: 'right', render: (_: any, c: any) => <Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(chargeAmt(c), ccy)}</Text> },
+            { title: '', width: 44, align: 'center', render: (_: any, c: any) => String(c.PrimaryFlag) === 'true' ? <Text type="secondary">—</Text> : <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => delCharge(c)} /> },
+          ] as any} />
+      </> : (
+        <div style={{ marginBottom: 14, fontSize: 12, color: REDWOOD.neutral600 }}>
+          The total amount is prorated across all {eligible.length} line(s) by line value, and one charge is POSTed per line.
+        </div>
+      )}
 
       {/* Add a charge */}
       <div style={{ border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 8, padding: 12 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Add charge</div>
+        <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>{scope === 'all' ? 'Global charge' : 'Add charge'}</div>
         <Segmented block value={preset} onChange={(v: any) => applyPreset(v)} options={CHARGE_PRESETS.map(p => ({ value: p.key, label: p.label }))} style={{ marginBottom: 12 }} />
         <Row gutter={10}>
           <Col span={8}><div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Charge Definition Code</div><Input value={def} onChange={e => setDef(e.target.value)} placeholder="QP_SHIP_FREIGHT" /></Col>
@@ -3395,13 +3424,24 @@ const ChargesModal: React.FC<{ open: boolean; onClose: () => void; orderKey: str
           <Col span={8}><div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Sub Type</div><Input value={sub} onChange={e => setSub(e.target.value)} placeholder="Price" /></Col>
           <Col span={8} style={{ marginTop: 10 }}><div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Apply To Code</div>
             <Select style={{ width: '100%' }} value={applyTo} onChange={setApplyTo} options={['PRICE', 'SHIPPING', 'RETURN'].map(v => ({ value: v, label: v }))} /></Col>
-          <Col span={8} style={{ marginTop: 10 }}><div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Amount</div>
+          <Col span={8} style={{ marginTop: 10 }}><div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>{scope === 'all' ? 'Total amount' : 'Amount'}</div>
             <InputNumber min={0} style={{ width: '100%' }} value={amount} onChange={v => setAmount(Number(v) || 0)} addonAfter={ccy} /></Col>
         </Row>
+        {scope === 'all' && num(amount) > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>Split preview</div>
+            <Table size="small" rowKey={(_, i) => String(i)} pagination={false} dataSource={splitShares()}
+              columns={[
+                { title: 'Line', render: (_: any, s: any) => <Text style={{ fontSize: 12 }}>{s.line.itemNumber}</Text> },
+                { title: 'Line value', width: 120, align: 'right', render: (_: any, s: any) => <Text type="secondary" style={{ fontSize: 11.5 }}>{fmtAmount(lineBase(s.line), ccy)}</Text> },
+                { title: 'Charge share', width: 130, align: 'right', render: (_: any, s: any) => <Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(s.share, ccy)}</Text> },
+              ] as any} />
+          </div>
+        )}
         <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}><ApiOutlined style={{ marginRight: 4 }} />REST request</div>
+          <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}><ApiOutlined style={{ marginRight: 4 }} />REST request{scope === 'all' ? ' (per line)' : ''}</div>
           <div style={{ fontSize: 10.5, fontFamily: 'monospace', wordBreak: 'break-all', background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, borderRadius: 6, padding: '8px 10px', maxHeight: 160, overflow: 'auto' }}>
-            <div><b style={{ color: REDWOOD.primary }}>POST</b> {url || '(no line)'}</div>
+            <div><b style={{ color: REDWOOD.primary }}>POST</b> {scope === 'all' ? '…/lines/{id}/child/charges' : (url || '(no line)')}</div>
             <div style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}>{JSON.stringify(body, null, 2)}</div>
           </div>
         </div>
@@ -3579,10 +3619,15 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           const price = num(pf(l, ['UnitSellingPrice', 'UnitListPrice']));
           const linkOf = (name: string) => { const h = (l.links ?? []).find((x: any) => x.name === name && x.rel === 'child')?.href; return h ? fusionHref(h) : undefined; };
           const selfHref = (l.links ?? []).find((x: any) => x.rel === 'self')?.href;
-          // Frozen tax lives in the primary charge's QP_EXCLUSIVE_TAX component.
+          // The item's price + frozen tax live in the SALE charge (QP_SALE_PRICE /
+          // ApplyTo PRICE). Freight/handling are separate charges rolled up as chargeAmount.
           const charges = l.charges?.items ?? l.charges ?? [];
-          const primaryCharge = charges.find((c: any) => String(c.PrimaryFlag) === 'true') ?? charges[0];
-          const comps = primaryCharge ? (primaryCharge.chargeComponents?.items ?? primaryCharge.chargeComponents ?? []) : [];
+          const compsOf = (c: any) => c ? (c.chargeComponents?.items ?? c.chargeComponents ?? []) : [];
+          const netExtOf = (c: any) => { const cc = compsOf(c); const nc = cc.find((x: any) => x.PriceElementCode === 'QP_NET_PRICE') ?? cc.find((x: any) => x.PriceElementCode === 'QP_LIST_PRICE'); return num(pf(nc ?? {}, ['HeaderCurrencyExtendedAmount', 'ChargeCurrencyExtendedAmount'])) || num(pf(c, ['GSAUnitPrice'])); };
+          const saleCharge = charges.find((c: any) => String(pf(c, ['ChargeDefinitionCode'])) === 'QP_SALE_PRICE')
+            ?? charges.find((c: any) => String(pf(c, ['ApplyToCode', 'ApplyTo']) ?? '').toUpperCase() === 'PRICE')
+            ?? charges.find((c: any) => String(c.PrimaryFlag) === 'true') ?? charges[0];
+          const comps = compsOf(saleCharge);
           const taxComp = comps.find((c: any) => c.PriceElementCode === 'QP_EXCLUSIVE_TAX');
           const taxAmt = round2(taxComp ? num(pf(taxComp, ['HeaderCurrencyExtendedAmount', 'ChargeCurrencyExtendedAmount'])) : num(pf(l, ['TaxAmount', 'TotalTax'])));
           // Loaded net line amount AS STORED (QP_NET_PRICE ext → else line ExtendedAmount).
@@ -3590,6 +3635,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           const loadedExtRaw = netComp ? num(pf(netComp, ['HeaderCurrencyExtendedAmount', 'ChargeCurrencyExtendedAmount'])) : num(pf(l, ['ExtendedAmount']));
           const loadedExt = loadedExtRaw ? round2(loadedExtRaw) : undefined;
           const basis = loadedExt ?? round2(price * q);          // derive tax % off the stored net
+          // Sum of extra (non-sale) charges = freight/handling/etc.
+          const chargeAmt = round2(charges.filter((c: any) => c !== saleCharge).reduce((s: number, c: any) => s + netExtOf(c), 0));
           // Tax classification code (often null even when tax applies) → fall back to
           // the tax rate name carried on the QP_EXCLUSIVE_TAX component.
           const taxCode = pf(l, ['TaxClassificationCode', 'TaxClassification', 'TaxCode'])
@@ -3603,7 +3650,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             uom: pf(l, ['OrderedUOMCode', 'OrderedUOM']),
             qty: q, unitPrice: price, origQty: q, origUnitPrice: price,
             taxCode, taxPct, taxAmount: taxAmt || undefined,
-            loadedExt, loadedTax: taxAmt || undefined,
+            loadedExt, loadedTax: taxAmt || undefined, chargeAmount: chargeAmt || undefined,
             status: pf(l, ['DisplayStatus', 'Status']),
             statusCode: pf(l, ['StatusCode']),
             srcLineId: pf(l, ['SourceTransactionLineId']) != null ? String(pf(l, ['SourceTransactionLineId'])) : undefined,
@@ -3790,6 +3837,26 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
 
   // Order key for order-level children (sales credits, notes, attachments, header PATCH).
   const childOrderKey = String((editMode ? (editOrder?.OrderKey ?? editOrder?.HeaderId) : createdOrderKey) ?? '');
+  // Re-fetch each existing line's charges and recompute its non-sale charge total
+  // (used after adding/deleting charges so the grid + totals reflect them).
+  const refreshLineCharges = async () => {
+    const netExtOf = (c: any) => { const cc = c.chargeComponents?.items ?? c.chargeComponents ?? []; const nc = cc.find((x: any) => x.PriceElementCode === 'QP_NET_PRICE') ?? cc.find((x: any) => x.PriceElementCode === 'QP_LIST_PRICE'); return num(pf(nc ?? {}, ['HeaderCurrencyExtendedAmount', 'HeaderCurrencyUnitPrice'])) || num(pf(c, ['GSAUnitPrice'])); };
+    const updated = await Promise.all(lines.map(async (l) => {
+      if (!l.existing) return null;
+      const url = l.chargesHref ?? (l.lineHref ? `${fusionHref(l.lineHref)}/child/charges` : (l.fulfillLineId != null ? `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(childOrderKey)}/child/lines/${l.fulfillLineId}/child/charges` : ''));
+      if (!url) return null;
+      try {
+        const r = await fetch(`${url}${url.includes('?') ? '&' : '?'}expand=chargeComponents&limit=50`, { headers: FUSION_HDRS });
+        const d = await r.json().catch(() => ({} as any));
+        const charges = d.items ?? [];
+        const saleCharge = charges.find((c: any) => String(pf(c, ['ChargeDefinitionCode'])) === 'QP_SALE_PRICE')
+          ?? charges.find((c: any) => String(pf(c, ['ApplyToCode', 'ApplyTo']) ?? '').toUpperCase() === 'PRICE')
+          ?? charges.find((c: any) => String(c.PrimaryFlag) === 'true') ?? charges[0];
+        return { key: l.key, chargeAmount: round2(charges.filter((c: any) => c !== saleCharge).reduce((s: number, c: any) => s + netExtOf(c), 0)) || undefined };
+      } catch { return null; }
+    }));
+    setLines(prev => prev.map(l => { const u = updated.find(x => x && x.key === l.key); return u ? { ...l, chargeAmount: u.chargeAmount } : l; }));
+  };
   const openOrderTotals = async () => {
     if (!childOrderKey) { message.warning('Save the order first to see Fusion totals'); return; }
     const url = `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(childOrderKey)}/child/totals?limit=200`;
@@ -4616,6 +4683,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const totQty = lines.reduce((s, l) => s + num(l.qty), 0);
   const totAmt = lines.reduce((s, l) => s + num(l.qty) * num(l.unitPrice), 0);
   const lineTax = lines.reduce((s, l) => s + num(l.taxAmount), 0);
+  const totCharge = lines.reduce((s, l) => s + num(l.chargeAmount), 0);
 
   const cols: ColumnsType<NewLine> = [
     { title: 'Line', width: 50, align: 'center', fixed: 'left', render: (_, __, i) => <Tag color="blue">{i + 1}</Tag> },
@@ -4666,7 +4734,18 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         notFoundContent={taxOptions.length ? undefined : (hdr.businessUnit ? 'No tax codes' : 'Select a business unit')}
         onChange={val => { const opt = taxOptions.find(o => o.value === val); updLine(r.key, { taxCode: val, taxPct: opt ? opt.pct : undefined }); }} /> },
     { title: 'Tax', dataIndex: 'taxAmount', width: 120, align: 'right', render: (v, r) => <Space size={4}>{r.taxPct != null && <Tag color="gold" style={{ margin: 0, fontSize: 10 }}>{r.taxPct}%</Tag>}<Text style={{ fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(num(v), ccy)}</Text></Space> },
-    { title: 'Net', width: 110, align: 'right', fixed: 'right', render: (_, r) => { const base = r.loadedExt != null ? r.loadedExt : round2(num(r.qty) * num(r.unitPrice)); return <Text strong style={{ color: REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(base + num(r.taxAmount), ccy)}</Text>; } },
+    { title: 'Charge', dataIndex: 'chargeAmount', width: 100, align: 'right', render: (v, r) => {
+        const canDrill = !!(r.chargesHref || r.lineHref);
+        const el = <Text style={{ fontSize: 11.5, color: num(v) ? REDWOOD.primary : REDWOOD.neutral600, fontVariantNumeric: 'tabular-nums' }}>{num(v) ? fmtAmount(num(v), ccy) : '—'}</Text>;
+        return canDrill ? <Tooltip title="View charges"><a onClick={() => openChargeDrill(r)}>{el}</a></Tooltip> : el;
+      } },
+    { title: 'Net', width: 116, align: 'right', fixed: 'right', render: (_, r) => {
+        const base = r.loadedExt != null ? r.loadedExt : round2(num(r.qty) * num(r.unitPrice));
+        const net = base + num(r.taxAmount) + num(r.chargeAmount);
+        const canDrill = !!(r.chargesHref || r.lineHref);
+        const el = <Text strong style={{ color: REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtAmount(net, ccy)}</Text>;
+        return canDrill ? <Tooltip title="View charges & price components"><a onClick={() => openChargeDrill(r)} style={{ color: REDWOOD.success, fontWeight: 600 }}>{fmtAmount(net, ccy)}</a></Tooltip> : el;
+      } },
     { title: 'Status', dataIndex: 'status', width: 130, fixed: 'right', render: (v, r, i) => r.error
         ? <Tooltip title="Click to view the error"><Button size="small" type="text" danger style={{ padding: '0 4px' }}
             icon={<CloseCircleTwoTone twoToneColor={REDWOOD.error} />}
@@ -4890,12 +4969,13 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                     </Row>
                     <TotalLine label="Gross" value={fmtAmount(totAmt, ccy)} />
                     <TotalLine label="Tax (from lines)" value={fmtAmount(lineTax, ccy)} />
+                    {totCharge > 0 && <TotalLine label="Charges" color={REDWOOD.primary} onClick={childOrderKey ? openOrderTotals : undefined} value={fmtAmount(totCharge, ccy)} />}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '2px 0', borderBottom: `1px dashed ${REDWOOD.neutral200}` }}>
                       <span style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Discount</span><InputNumber size="small" min={0} value={discAmt} onChange={v => setDiscAmt(Number(v) || 0)} style={{ width: 120 }} /></div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '2px 0', borderBottom: `1px dashed ${REDWOOD.neutral200}` }}>
                       <span style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Expense</span><InputNumber size="small" min={0} value={expAmt} onChange={v => setExpAmt(Number(v) || 0)} style={{ width: 120 }} /></div>
-                    <TotalLine label="Net (Trx Currency)" strong color={REDWOOD.primary} onClick={childOrderKey ? openOrderTotals : undefined} value={fmtAmount(totAmt + lineTax + num(expAmt) - num(discAmt), ccy)} />
-                    <TotalLine label="Net (Base Currency)" strong color={REDWOOD.success} onClick={childOrderKey ? openOrderTotals : undefined} value={fmtAmount((totAmt + lineTax + num(expAmt) - num(discAmt)) * (num(hdr.rate) || 1), hdr.baseCurrency ?? ccy)} />
+                    <TotalLine label="Net (Trx Currency)" strong color={REDWOOD.primary} onClick={childOrderKey ? openOrderTotals : undefined} value={fmtAmount(totAmt + lineTax + totCharge + num(expAmt) - num(discAmt), ccy)} />
+                    <TotalLine label="Net (Base Currency)" strong color={REDWOOD.success} onClick={childOrderKey ? openOrderTotals : undefined} value={fmtAmount((totAmt + lineTax + totCharge + num(expAmt) - num(discAmt)) * (num(hdr.rate) || 1), hdr.baseCurrency ?? ccy)} />
                   </VSection></Col>
                 </Row>
               ),
@@ -4981,10 +5061,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         {<Tabs size="small" tabPosition="left" className="so-lines-vtabs" tabBarStyle={{ minWidth: 60, marginBottom: 0 }} items={[
               {
                 key: 'lines', label: vTab(<UnorderedListOutlined />, 'Lines', REDWOOD.primary, lines.length),
-                children: <Table size="small" columns={cols} dataSource={lines} rowKey="key" pagination={false} scroll={{ x: 1890, y: 360 }}
+                children: <Table size="small" columns={cols} dataSource={lines} rowKey="key" pagination={false} scroll={{ x: 1990, y: 360 }}
                   locale={{ emptyText: 'No lines — use “Add Multiple Lines” or “New Line”' }}
                   summary={() => lines.length === 0 ? null : (() => {
                     const totMargin = lines.reduce((s, l) => s + (num(l.unitPrice) - num(l.costUnit)) * num(l.qty), 0);
+                    const totCharge = lines.reduce((s, l) => s + num(l.chargeAmount), 0);
                     return (
                       <Table.Summary fixed>
                         <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
@@ -4995,9 +5076,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                           <Table.Summary.Cell index={9} align="right"><Text strong style={{ color: totMargin < 0 ? REDWOOD.error : REDWOOD.success }}>{fmtAmount(totMargin, ccy)}</Text></Table.Summary.Cell>
                           <Table.Summary.Cell index={10} />
                           <Table.Summary.Cell index={11} align="right"><Text strong>{fmtAmount(lineTax, ccy)}</Text></Table.Summary.Cell>
-                          <Table.Summary.Cell index={12} align="right"><Text strong style={{ color: REDWOOD.success }}>{fmtAmount(totAmt + lineTax, ccy)}</Text></Table.Summary.Cell>
-                          <Table.Summary.Cell index={13} />
+                          <Table.Summary.Cell index={12} align="right"><Text strong style={{ color: REDWOOD.primary }}>{fmtAmount(totCharge, ccy)}</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell index={13} align="right"><Text strong style={{ color: REDWOOD.success }}>{fmtAmount(totAmt + lineTax + totCharge, ccy)}</Text></Table.Summary.Cell>
                           <Table.Summary.Cell index={14} />
+                          <Table.Summary.Cell index={15} />
                         </Table.Summary.Row>
                       </Table.Summary>
                     );
@@ -5152,7 +5234,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         onClose={() => setScEdit(null)} onSaved={() => { setScEdit(null); salesCredits.reload(); }} />}
 
       {/* Manual charges — add freight/handling/… to a line's charges child */}
-      {childOrderKey && <ChargesModal open={chargesOpen} onClose={() => setChargesOpen(false)} orderKey={childOrderKey} lines={lines} ccy={ccy} />}
+      {childOrderKey && <ChargesModal open={chargesOpen} onClose={() => setChargesOpen(false)} orderKey={childOrderKey} lines={lines} ccy={ccy} onChanged={refreshLineCharges} />}
 
       {/* Order totals — GET {OrderKey}/child/totals */}
       <Modal open={totals.open} onCancel={() => setTotals(t => ({ ...t, open: false }))} width={620}
