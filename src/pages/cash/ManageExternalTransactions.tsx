@@ -938,37 +938,31 @@ const ExternalTxnForm: React.FC<{
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
     doc.text('Transaction Lines', 14, y);
-    y += 4;
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
-    doc.setTextColor(90);
-    doc.text(`Entered in ${txnCcy}; Accounted in AED at conversion rate ${fmtNum(rate)}`, 14, y);
-    doc.setTextColor(0);
-    y += 1;
+    y += 2;
 
+    // Amount cell shows entered amount and, when not AED, the AED-accounted amount
+    // (entered × conversion rate) stacked right below it.
+    const amtStack = (ent: number) => txnCcy === 'AED'
+      ? fmtAmt(ent)
+      : `${fmtAmt(ent)} ${txnCcy}\nAED ${fmtAmt(Math.round(ent * rate * 100) / 100)}`;
     const totalAmt = resolvedLines.reduce((s, l) => s + Math.abs(l.amount ?? 0), 0);
-    const totalAcc = Math.round(totalAmt * rate * 100) / 100;
     autoTable(doc, {
       startY: y,
-      head: [['#', 'Offset Account', 'Account Desc', 'Description', `Amount (${txnCcy})`, 'Rate', 'Accounted (AED)']],
-      body: resolvedLines.map((l, i) => {
-        const ent = Math.abs(l.amount ?? 0);
-        return [
-          i + 1,
-          l.offsetAccount || '—',
-          (l as any).offsetDesc || '—',
-          l.description || '—',
-          fmtAmt(ent),
-          fmtNum(rate),
-          fmtAmt(Math.round(ent * rate * 100) / 100),
-        ];
-      }),
-      foot: [['', '', '', 'Total', fmtAmt(totalAmt), '', fmtAmt(totalAcc)]],
+      head: [['#', 'Offset Account', 'Account Desc', 'Sub-Account Desc', 'Description', 'Amount']],
+      body: resolvedLines.map((l, i) => [
+        i + 1,
+        l.offsetAccount || '—',
+        (l as any).offsetDesc || '—',
+        (l as any).offsetSubDesc || '—',
+        l.description || '—',
+        amtStack(Math.abs(l.amount ?? 0)),
+      ]),
+      foot: [['', '', '', '', 'Total', amtStack(totalAmt)]],
       styles: { fontSize: 8, cellPadding: 2, textColor: [0, 0, 0] },
       headStyles: { fillColor: [58, 58, 58], textColor: [255, 255, 255] },
       footStyles: { fillColor: [255, 255, 255], fontStyle: 'bold', textColor: [0, 0, 0], halign: 'right' },
       alternateRowStyles: { fillColor: [247, 247, 247] },
-      columnStyles: { 0: { cellWidth: 8 }, 1: { cellWidth: 38 }, 4: { halign: 'right', cellWidth: 26 }, 5: { halign: 'right', cellWidth: 18 }, 6: { halign: 'right', cellWidth: 28 } },
+      columnStyles: { 0: { cellWidth: 8 }, 1: { cellWidth: 40 }, 5: { halign: 'right', cellWidth: 30 } },
       margin: { left: 14, right: 14 },
     });
 
@@ -2790,22 +2784,24 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     doc.text(`Printed: ${new Date().toLocaleString()}  |  Records: ${transactions.length}`, pageW - 14, 10, { align: 'right' });
     doc.setTextColor(0, 0, 0);
 
-    const fmtRate = (v: any) => v != null ? Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 }) : '—';
     autoTable(doc, {
       startY: 20,
-      head: [['Txn #', 'Bank Account', 'Business Unit', 'Date', 'Ccy', 'Amount', 'Rate', 'Accounted (AED)', 'Reference', 'Type', 'Status', 'Accounted']],
+      head: [['Txn #', 'Bank Account', 'Business Unit', 'Date', 'Currency', 'Amount', 'Reference', 'Type', 'Status', 'Accounted']],
       body: transactions.map(t => {
         const rate = Number(t.bankConversionRate) || 1;
-        const acc = Math.round((t.amount ?? 0) * rate * 100) / 100;   // keeps the amount's sign
+        const ccy = t.currencyCode || '';
+        // Same layout as the vouchers: entered amount with the AED-accounted amount
+        // (entered × rate) stacked below when the txn is not already in AED.
+        const amtCell = (!ccy || ccy === 'AED')
+          ? fmtAmt(t.amount)
+          : `${fmtAmt(t.amount)} ${ccy}\nAED ${fmtAmt(Math.round((t.amount ?? 0) * rate * 100) / 100)}`;
         return [
           t.transactionId ?? '',
           t.bankAccountName ?? '',
           t.businessUnitName ?? '',
           fmtDt(t.transactionDate),
-          t.currencyCode ?? '',
-          fmtAmt(t.amount),
-          fmtRate(rate),
-          fmtAmt(acc),
+          ccy,
+          amtCell,
           t.referenceText ?? '',
           t.transactionType ?? '',
           statusLabel(t.status),
@@ -2816,14 +2812,12 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       headStyles: { fillColor: [58, 58, 58] },
       alternateRowStyles: { fillColor: [247, 247, 247] },
       columnStyles: {
-        0: { cellWidth: 18 },
-        3: { cellWidth: 22 },
-        4: { cellWidth: 12 },
-        5: { halign: 'right', cellWidth: 24 },
-        6: { halign: 'right', cellWidth: 16 },
-        7: { halign: 'right', cellWidth: 26 },
-        10: { cellWidth: 22 },
-        11: { cellWidth: 16 },
+        0: { cellWidth: 20 },
+        3: { cellWidth: 24 },
+        4: { cellWidth: 16 },
+        5: { halign: 'right', cellWidth: 30 },
+        8: { cellWidth: 24 },
+        9: { cellWidth: 18 },
       },
       margin: { left: 14, right: 14 },
     });
@@ -3785,16 +3779,25 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     doc.text('Transaction Lines', 14, y);
     y += 2;
     const fmtAmt = (v: number) => Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    // Amount cell shows the entered amount and, when the txn is not in AED, the
+    // AED-accounted amount (entered × conversion rate) stacked right below it.
+    const vRate = Number(r.bankConversionRate) || 1;
+    const vCcy = r.currencyCode || 'FCY';
+    const entered = Math.abs(r.amount);
+    const accounted = Math.round(entered * vRate * 100) / 100;
+    const amtCell = vCcy === 'AED'
+      ? fmtAmt(entered)
+      : `${fmtAmt(entered)} ${vCcy}\nAED ${fmtAmt(accounted)}`;
     autoTable(doc, {
       startY: y,
       head: [['#', 'Offset Account', 'Account Desc', 'Sub-Account Desc', 'Description', 'Amount']],
-      body: [[1, r.offsetAccountCombination || '—', offsetAcctDesc || '—', offsetSubDesc || '—', r.description || '—', fmtAmt(Math.abs(r.amount))]],
-      foot: [['', '', '', '', 'Total', fmtAmt(Math.abs(r.amount))]],
+      body: [[1, r.offsetAccountCombination || '—', offsetAcctDesc || '—', offsetSubDesc || '—', r.description || '—', amtCell]],
+      foot: [['', '', '', '', 'Total', amtCell]],
       styles: { fontSize: 8, cellPadding: 2, textColor: [0, 0, 0] },
       headStyles: { fillColor: [58, 58, 58], textColor: [255, 255, 255] },
       footStyles: { fillColor: [255, 255, 255], fontStyle: 'bold', textColor: [0, 0, 0], halign: 'right' },
       alternateRowStyles: { fillColor: [247, 247, 247] },
-      columnStyles: { 0: { cellWidth: 8 }, 1: { cellWidth: 40 }, 5: { halign: 'right', cellWidth: 24 } },
+      columnStyles: { 0: { cellWidth: 8 }, 1: { cellWidth: 40 }, 5: { halign: 'right', cellWidth: 30 } },
       margin: { left: 14, right: 14 },
     });
 
