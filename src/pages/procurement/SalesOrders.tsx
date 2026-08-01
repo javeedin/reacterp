@@ -5193,7 +5193,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     { title: 'UOM', dataIndex: 'uom', width: 70, render: v => v ?? '—' },
     { title: 'Cost', dataIndex: 'costUnit', width: 90, align: 'right', render: v => v == null ? '—' : <Text type="secondary" style={{ fontSize: 11 }}>{fmtAmount(v, ccy)}</Text> },
     { title: 'QoH', dataIndex: 'qoh', width: 80, align: 'right', render: (v, r) => r.ohLoading ? <Spin size="small" /> : (v == null ? <Text type="secondary" style={{ fontSize: 11 }}>—</Text> : <Text style={{ fontSize: 11.5, color: REDWOOD.info, fontVariantNumeric: 'tabular-nums' }}>{fmtQty(num(v))}</Text>) },
-    { title: returnMode ? 'Return Qty' : 'Qty', dataIndex: 'qty', width: returnMode ? 100 : 90, align: 'right', render: (v, r) => <InputNumber size="small" min={0} max={returnMode && r.maxQty != null ? r.maxQty : (r.qoh != null ? r.qoh : undefined)} value={v} disabled={!!r.canceled || (editMode && !!r.existing) || (returnMode && !!r.retLots?.length)}
+    { title: returnMode ? 'Return Qty' : 'Qty', dataIndex: 'qty', width: returnMode ? 100 : 90, align: 'left', render: (v, r) => <InputNumber size="small" min={0} max={returnMode && r.maxQty != null ? r.maxQty : (r.qoh != null ? r.qoh : undefined)} value={v} disabled={!!r.canceled || (editMode && !!r.existing) || (returnMode && !!r.retLots?.length)}
         onChange={n => { let q = Number(n) || 0; if (returnMode && r.maxQty != null && q > r.maxQty) { q = r.maxQty; message.warning(`Cannot return more than ordered (${fmtQty(r.maxQty)})`); } else if (!returnMode && r.qoh != null && q > r.qoh) { q = r.qoh; message.warning(`Cannot order more than on-hand (${fmtQty(r.qoh)})`); } updLine(r.key, { qty: q }); }} style={{ width: returnMode ? 88 : 78 }} /> },
     ...(returnMode ? [{ title: 'Return Reason', dataIndex: 'returnReason', width: 190, render: (v: any, r: NewLine) => <Select size="small" showSearch style={{ width: 178 }} value={v || undefined} placeholder="Reason" popupMatchSelectWidth={false}
         options={returnReasonOpts} optionFilterProp="label" onChange={val => updLine(r.key, { returnReason: val })} /> } as any] : []),
@@ -5207,7 +5207,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             </Button>
           : <Text type="secondary" style={{ fontSize: 11 }}>— none —</Text>;
       } } as any] : []),
-    { title: 'Unit Price', dataIndex: 'unitPrice', width: 100, align: 'right', render: (v, r) => <InputNumber size="small" min={0} value={v} disabled={!!r.canceled || (editMode && !!r.existing) || returnMode} onChange={n => updLine(r.key, { unitPrice: Number(n) || 0 })} style={{ width: 88 }} /> },
+    { title: 'Unit Price', dataIndex: 'unitPrice', width: 100, align: 'left', render: (v, r) => <InputNumber size="small" min={0} value={v} disabled={!!r.canceled || (editMode && !!r.existing) || returnMode} onChange={n => updLine(r.key, { unitPrice: Number(n) || 0 })} style={{ width: 88 }} /> },
     { title: 'Line Total', width: 118, align: 'right', render: (_, r) => {
         const calc = round2(num(r.qty) * num(r.unitPrice));
         // Show the amount AS LOADED from Fusion; flag when it disagrees with qty×price.
