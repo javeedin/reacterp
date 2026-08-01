@@ -5476,9 +5476,6 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             },
             { key: 'additional', label: <span><ProfileOutlined style={{ marginRight: 5 }} />Additional Info</span>,
               children: <>
-                <OrderSection icon={<ProfileOutlined />} title="Additional Information" color={REDWOOD.purple}>
-                  <Col xs={24}><Form.Item label="Remarks" name="remarks" layout="vertical" style={{ marginBottom: 12 }}><Input.TextArea rows={3} placeholder="Optional notes…" /></Form.Item></Col>
-                </OrderSection>
                 {/* Header Extensible Flexfields (additionalInformation) — uploaded with the order */}
                 <OrderSection icon={<ProfileOutlined />} title={<span>Additional Information (EFF) <Button size="small" type="text" icon={<ApiOutlined />} onClick={showEffDescribe} style={{ color: REDWOOD.info }} /></span> as any} color={REDWOOD.warning}>
                   <Col xs={24}>
