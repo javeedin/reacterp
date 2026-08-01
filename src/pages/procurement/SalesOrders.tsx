@@ -3958,7 +3958,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     if (!voName) return null;
     const seg: Record<string, any> = { ContextCode: contextCode };
     if (effMeta?.lotSeg && l.lot) seg[effMeta.lotSeg] = l.lot;
-    if (effMeta?.costSeg && l.costUnit != null) seg[effMeta.costSeg] = l.costUnit;
+    // Cost rounded to 3 decimals to fit the numeric flexfield value set.
+    if (effMeta?.costSeg && l.costUnit != null) seg[effMeta.costSeg] = Math.round(num(l.costUnit) * 1000) / 1000;
     // Auto-map ordered qty → the lot-quantity segment (lotqty) when present.
     const qtySeg = (ctx?.segs ?? effMeta?.segs ?? []).find(s => /lot.?qty|qty/i.test(s.name))?.name;
     if (qtySeg && l.qty != null && seg[qtySeg] == null) seg[qtySeg] = l.qty;
@@ -3985,6 +3986,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           else if (s.name === effMeta?.costSeg) v = l.costUnit;
           else if (/lot.?qty|qty/i.test(s.name)) v = l.qty;
         }
+        // Round the cost segment to 3 decimals to satisfy the numeric value set.
+        if (s.name === effMeta?.costSeg && v != null && v !== '' && !isNaN(Number(v))) v = Math.round(Number(v) * 1000) / 1000;
         if (v != null && v !== '') vals[s.name] = v;
       });
       if (Object.keys(vals).length === 0) continue;
