@@ -155,6 +155,38 @@ const parseEffDescribe = (d: any): EffMeta | null => {
   } catch { return null; }
 };
 
+// General EFF context discovery — returns every EffB<Context>privateVO node in a
+// describe response with all of its editable segments (used for header + line
+// "Additional Information" upload). category is the CategoryCode to send back.
+interface EffCtx { category: string; voName: string; contextCode: string; segs: { name: string; label: string; type?: string }[] }
+const parseEffContexts = (d: any, category: string): EffCtx[] => {
+  const out: EffCtx[] = [];
+  const seen = new Set<string>();
+  const visit = (o: any) => {
+    if (!o || typeof o !== 'object') return;
+    for (const k of Object.keys(o)) {
+      if (/EffB.+privateVO$/i.test(k) && !seen.has(k)) {
+        seen.add(k);
+        const node: any = (o as any)[k];
+        const attrObjs: any[] = node?.attributes ?? node?.Attributes ?? (Array.isArray(node) ? node : []);
+        const segs: { name: string; label: string; type?: string }[] = [];
+        for (const a of attrObjs) {
+          const name = a?.name ?? a?.Name;
+          const label = a?.title ?? a?.label ?? a?.Title ?? name;
+          const type = a?.type ?? a?.Type;
+          // Skip system/id columns — keep only user-facing flexfield segments.
+          if (name && !/^(ContextCode|.*EffId|.*Id|CategoryCode|_.*)$/i.test(String(name))) segs.push({ name: String(name), label: String(label), type });
+        }
+        const ctxMatch = k.match(/EffB(.+)privateVO$/i);
+        const contextCode = node?.contextCode ?? node?.ContextCode ?? (ctxMatch ? ctxMatch[1].replace(/_+/g, ' ').trim() : '');
+        if (segs.length) out.push({ category, voName: k, contextCode, segs });
+      } else visit((o as any)[k]);
+    }
+  };
+  visit(d);
+  return out;
+};
+
 const statusTag = (s?: string, code?: string) => {
   if (!s && !code) return <Tag>—</Tag>;
   const up = String(code || s).toUpperCase();
@@ -970,6 +1002,84 @@ const AutoInvoiceModal: React.FC<{ orderNo?: string; buId?: string | number; ope
   );
 };
 
+// Self href of an order (proxy-rewritten), or a key-based fallback.
+const orderSelfHref = (o: any) => {
+  const h = (o?.links ?? []).find((x: any) => x.rel === 'self' || x.name === 'self')?.href;
+  if (h) return fusionHref(h);
+  return o?.OrderKey ? `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(o.OrderKey)}` : '';
+};
+
+// Header Additional Information (Extensible Flexfields) for the view page —
+// retrieves the order's additionalInformation child and, for each row, the
+// nested HeaderEffB<Context>privateVO segment values.
+const HeaderEffView: React.FC<{ order: any }> = ({ order }) => {
+  const base = orderSelfHref(order);
+  const aiUrl = base ? `${base}/child/additionalInformation` : '';
+  const [rows, setRows] = useState<{ context: string; segs: { k: string; v: any }[]; href: string }[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const load = useCallback(async () => {
+    if (!aiUrl) { setErr('No order self link available'); return; }
+    setLoading(true); setErr('');
+    try {
+      const r = await fetch(`${aiUrl}?onlyData=false&limit=200`, { headers: FUSION_HDRS });
+      if (!r.ok) throw new Error(`HTTP ${r.status} on additionalInformation`);
+      const d = await r.json();
+      const items: any[] = Array.isArray(d) ? d : (d.items ?? []);
+      const out: { context: string; segs: { k: string; v: any }[]; href: string }[] = [];
+      for (const it of items) {
+        const link = (it.links ?? []).find((x: any) => /EffB.+privateVO$/i.test(x.name || x.rel || ''));
+        if (!link?.href) continue;
+        const cr = await fetch(`${fusionHref(link.href)}?onlyData=true&limit=200`, { headers: FUSION_HDRS });
+        if (!cr.ok) continue;
+        const cd = await cr.json();
+        const segRows: any[] = Array.isArray(cd) ? cd : (cd.items ?? []);
+        for (const seg of segRows) {
+          const segs = Object.entries(seg)
+            .filter(([k, v]) => !/^links$|Id$|^ContextCode$|^_|^CategoryCode$/i.test(k) && v != null && v !== '')
+            .map(([k, v]) => ({ k, v }));
+          const ctxName = seg.ContextCode ?? (link.name || '').replace(/^.*EffB/i, '').replace(/privateVO$/i, '').replace(/_+/g, ' ').trim();
+          out.push({ context: ctxName || 'Additional Information', segs, href: fusionHref(link.href) });
+        }
+      }
+      setRows(out);
+    } catch (e: any) { setErr(e?.message ?? String(e)); } finally { setLoading(false); }
+  }, [aiUrl]);
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 6 }}>
+        <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {aiUrl || '(no self link)'}</span>}>
+          <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} />
+        </Tooltip>
+        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>Reload</Button>
+      </div>
+      {loading ? <div style={{ textAlign: 'center', padding: 30 }}><Spin /></div>
+        : err ? <div style={{ color: REDWOOD.error, fontSize: 12, padding: 10 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{err}</div>
+        : !rows || rows.length === 0 ? <Empty description="No additional information on this order" style={{ padding: 20 }} />
+        : <Row gutter={[12, 12]}>
+            {rows.map((r, i) => (
+              <Col xs={24} md={12} key={i}>
+                <Card size="small" title={<Space><ProfileOutlined style={{ color: REDWOOD.purple }} /><Text strong style={{ fontSize: 12.5 }}>{r.context}</Text></Space>}
+                  style={{ borderRadius: 8 }} styles={{ body: { padding: 10 } }}>
+                  {r.segs.length === 0 ? <Text type="secondary" style={{ fontSize: 12 }}>No values</Text>
+                    : <Row gutter={[8, 6]}>
+                        {r.segs.map(s => (
+                          <React.Fragment key={s.k}>
+                            <Col span={11}><Text type="secondary" style={{ fontSize: 12 }}>{humanize(s.k)}</Text></Col>
+                            <Col span={13}><Text style={{ fontSize: 12.5 }}>{typeof s.v === 'object' ? JSON.stringify(s.v) : String(s.v)}</Text></Col>
+                          </React.Fragment>
+                        ))}
+                      </Row>}
+                </Card>
+              </Col>
+            ))}
+          </Row>}
+    </div>
+  );
+};
+
 // ── Order view (header + lines) shown in its own tab ─────────────────────────
 const OrderView: React.FC<{ order: any; onCopy?: (order: any, lines: any[]) => void; onReturn?: (order: any, lines: any[]) => void }> = ({ order, onCopy, onReturn }) => {
   const linesHref = order?.links?.find((l: any) => l.name === 'lines')?.href
@@ -1228,28 +1338,39 @@ const OrderView: React.FC<{ order: any; onCopy?: (order: any, lines: any[]) => v
           </Tooltip>
         </Space>}>
         <Row gutter={[16, 12]}>
-          {/* Info fields */}
+          {/* Info fields — Current info + Additional info (header EFF) tabs */}
           <Col xs={24} lg={17}>
-            <Row gutter={[12, 0]}>
-              <HInfo label="Order Number" value={<Text strong>{order.OrderNumber}</Text>} />
-              <HInfo label="Source Transaction #" value={<span>{order.SourceTransactionNumber ?? '—'}{order.SourceTransactionSystem ? <Tag style={{ marginLeft: 6, fontSize: 10 }}>{order.SourceTransactionSystem}</Tag> : null}</span>} />
-              <HInfo label="Order Key" value={order.OrderKey} />
-              <HInfo label="Transaction Type" value={order.TransactionType ? <Tag color="purple">{order.TransactionType}</Tag> : (order.TransactionTypeCode ?? '—')} />
-              <HInfo label="Business Unit" value={order.BusinessUnitName} />
-              <HInfo label="Customer" value={order.BuyingPartyName} />
-              <HInfo label="Customer #" value={order.BuyingPartyNumber} />
-              <HInfo label="Customer PO" value={order.CustomerPONumber} />
-              <HInfo label="Currency" value={order.TransactionalCurrencyCode ?? order.TransactionalCurrencyName ?? order.AppliedCurrencyCode} />
-              <HInfo label="Payment Terms" value={order.PaymentTerms ?? order.PaymentTermsCode} />
-              <HInfo label="Transaction On" value={fmtDateTime(order.TransactionOn)} />
-              <HInfo label="Requested Ship" value={fmtDate(order.RequestedShipDate)} />
-              <HInfo label="Requested Arrival" value={fmtDate(order.RequestedArrivalDate)} />
-              <HInfo label="Requesting BU" value={order.RequestingBusinessUnitName} />
-              <HInfo label="Legal Entity" value={order.RequestingLegalEntity} />
-              <HInfo label="Organization" value={orgList.length ? <Space size={4} wrap>{orgList.map(o => <Tooltip key={o} title={orgNameOf(o)}><Tag style={{ margin: 0 }}>{o}</Tag></Tooltip>)}</Space> : '—'} />
-              <HInfo label="Subinventory" value={subList.length ? <Space size={4} wrap>{subList.map(s => <Tag key={s} style={{ margin: 0 }}>{s}</Tag>)}</Space> : '—'} />
-              <HInfo label="Created" value={fmtDateTime(order.CreationDate)} />
-            </Row>
+            <Tabs size="small" items={[
+              {
+                key: 'cur', label: <span><InfoCircleOutlined style={{ marginRight: 5 }} />Current Info</span>,
+                children: (
+                  <Row gutter={[12, 0]}>
+                    <HInfo label="Order Number" value={<Text strong>{order.OrderNumber}</Text>} />
+                    <HInfo label="Source Transaction #" value={<span>{order.SourceTransactionNumber ?? '—'}{order.SourceTransactionSystem ? <Tag style={{ marginLeft: 6, fontSize: 10 }}>{order.SourceTransactionSystem}</Tag> : null}</span>} />
+                    <HInfo label="Order Key" value={order.OrderKey} />
+                    <HInfo label="Transaction Type" value={order.TransactionType ? <Tag color="purple">{order.TransactionType}</Tag> : (order.TransactionTypeCode ?? '—')} />
+                    <HInfo label="Business Unit" value={order.BusinessUnitName} />
+                    <HInfo label="Customer" value={order.BuyingPartyName} />
+                    <HInfo label="Customer #" value={order.BuyingPartyNumber} />
+                    <HInfo label="Customer PO" value={order.CustomerPONumber} />
+                    <HInfo label="Currency" value={order.TransactionalCurrencyCode ?? order.TransactionalCurrencyName ?? order.AppliedCurrencyCode} />
+                    <HInfo label="Payment Terms" value={order.PaymentTerms ?? order.PaymentTermsCode} />
+                    <HInfo label="Transaction On" value={fmtDateTime(order.TransactionOn)} />
+                    <HInfo label="Requested Ship" value={fmtDate(order.RequestedShipDate)} />
+                    <HInfo label="Requested Arrival" value={fmtDate(order.RequestedArrivalDate)} />
+                    <HInfo label="Requesting BU" value={order.RequestingBusinessUnitName} />
+                    <HInfo label="Legal Entity" value={order.RequestingLegalEntity} />
+                    <HInfo label="Organization" value={orgList.length ? <Space size={4} wrap>{orgList.map(o => <Tooltip key={o} title={orgNameOf(o)}><Tag style={{ margin: 0 }}>{o}</Tag></Tooltip>)}</Space> : '—'} />
+                    <HInfo label="Subinventory" value={subList.length ? <Space size={4} wrap>{subList.map(s => <Tag key={s} style={{ margin: 0 }}>{s}</Tag>)}</Space> : '—'} />
+                    <HInfo label="Created" value={fmtDateTime(order.CreationDate)} />
+                  </Row>
+                ),
+              },
+              {
+                key: 'addl', label: <span><ProfileOutlined style={{ marginRight: 5 }} />Additional Info</span>,
+                children: <HeaderEffView order={order} />,
+              },
+            ]} />
           </Col>
           {/* Order total — inside the header */}
           <Col xs={24} lg={7}>
@@ -1726,6 +1847,8 @@ interface OrderHeader {
   billToSite?: string; shipToSite?: string; billToAddress?: string; shipToAddress?: string;
   paymentTerms?: string; salesRep?: string; warehouse?: string; subinventory?: string; remarks?: string;
   custAccountId?: string; partyId?: string;
+  // Header EFF (Additional Information) segment values, keyed by segment API name.
+  effVals?: Record<string, string>;
 }
 interface NewLine { key: string; itemNumber: string; description?: string; uom?: string; qty: number; unitPrice: number; costUnit?: number; taxCode?: string; taxPct?: number; taxAmount?: number; lot?: string; lots?: string[]; qoh?: number; ohLoading?: boolean; status?: string; statusCode?: string;
   // Edit mode: original DOO source line keys (preserved so a change order maps
@@ -1751,6 +1874,9 @@ interface NewLine { key: string; itemNumber: string; description?: string; uom?:
   // Original shipped lot/serial pulled from completed inventory transactions —
   // sent back on the return line's lotSerials child (one serial per entry).
   retLots?: { lot?: string; serial?: string; qty: number }[];
+  // User-entered line EFF (Additional Information) segment values → uploaded as
+  // the line's additionalInformation child. Keyed by segment API name.
+  effVals?: Record<string, string>;
   error?: string }
 
 const INV_ORGS_URL = `${FUSION_BASE}/inventoryOrganizations?onlyData=true&limit=500`;
@@ -3607,24 +3733,66 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       })
       .catch(() => { /* keep fallback list */ });
   }, [returnMode]);
-  // Discovered line EFF (for saving lot number + item cost as additional info).
+  // ── Extensible Flexfields (Additional Information) ────────────────────────
+  // Discovered line EFF for the lot/cost auto-map (kept for backward compat),
+  // plus the general header + line EFF contexts (all segments) so the user can
+  // fill and upload additional information for the header and each line.
   const [effMeta, setEffMeta] = useState<EffMeta | null>(null);
+  const [hdrEffCtxs, setHdrEffCtxs] = useState<EffCtx[]>([]);
+  const [lineEffCtxs, setLineEffCtxs] = useState<EffCtx[]>([]);
+  const [effDescribe, setEffDescribe] = useState<{ header?: any; line?: any }>({});
+  // Selected header context (voName) + its segment values.
+  const [hdrEffCtxSel, setHdrEffCtxSel] = useState<string | undefined>();
+  const [hdrEffVals, setHdrEffVals] = useState<Record<string, string>>(initialDraft?.header?.effVals ?? {});
   useEffect(() => {
-    const url = `${FUSION_BASE}/salesOrdersForOrderHub/describe?polymorphicType=${encodeURIComponent('salesOrdersForOrderHub.lines.additionalInformation:DOO_FULFILL_LINES_ADD_INFO')}`;
-    fetch(url, { headers: FUSION_HDRS })
+    const desc = (poly: string) => `${FUSION_BASE}/salesOrdersForOrderHub/describe?polymorphicType=${encodeURIComponent(poly)}`;
+    fetch(desc('salesOrdersForOrderHub.lines.additionalInformation:DOO_FULFILL_LINES_ADD_INFO'), { headers: FUSION_HDRS })
       .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
-      .then(d => setEffMeta(parseEffDescribe(d)))
-      .catch(() => setEffMeta(null));
+      .then(d => { setEffDescribe(p => ({ ...p, line: d })); setEffMeta(parseEffDescribe(d)); setLineEffCtxs(parseEffContexts(d, 'DOO_FULFILL_LINES_ADD_INFO')); })
+      .catch(() => { setEffMeta(null); setLineEffCtxs([]); });
+    fetch(desc('salesOrdersForOrderHub.additionalInformation:DOO_HEADERS_ADD_INFO'), { headers: FUSION_HDRS })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(d => { setEffDescribe(p => ({ ...p, header: d })); const ctx = parseEffContexts(d, 'DOO_HEADERS_ADD_INFO'); setHdrEffCtxs(ctx); setHdrEffCtxSel(prev => prev ?? ctx[0]?.voName); })
+      .catch(() => setHdrEffCtxs([]));
   }, []);
-  // Build one additionalInformation EFF entry for a line, populating the
-  // discovered lot/cost segments. null when no line EFF context is configured.
+  const hdrEffActive = hdrEffCtxs.find(c => c.voName === hdrEffCtxSel);
+  // Build the header additionalInformation child from the filled segments.
+  const effHeaderChild = () => {
+    if (!hdrEffActive) return null;
+    const seg: Record<string, any> = { ContextCode: hdrEffActive.contextCode };
+    hdrEffActive.segs.forEach(s => { const v = hdrEffVals[s.name]; if (v != null && v !== '') seg[s.name] = v; });
+    if (Object.keys(seg).length <= 1) return null;
+    return { CategoryCode: hdrEffActive.category, [hdrEffActive.voName]: [seg] };
+  };
+  // Build one additionalInformation EFF entry for a line: auto lot/cost segments
+  // plus any user-entered segment values (l.effVals). null when nothing to send.
   const effLineChild = (l: NewLine) => {
-    if (!effMeta) return null;
-    const seg: Record<string, any> = { ContextCode: effMeta.contextCode };
-    if (effMeta.lotSeg && l.lot) seg[effMeta.lotSeg] = l.lot;
-    if (effMeta.costSeg && l.costUnit != null) seg[effMeta.costSeg] = l.costUnit;
+    const ctx = lineEffCtxs.find(c => c.voName === effMeta?.voName) ?? lineEffCtxs[0];
+    const voName = effMeta?.voName ?? ctx?.voName;
+    const category = effMeta?.category ?? ctx?.category ?? 'DOO_FULFILL_LINES_ADD_INFO';
+    const contextCode = effMeta?.contextCode ?? ctx?.contextCode ?? '';
+    if (!voName) return null;
+    const seg: Record<string, any> = { ContextCode: contextCode };
+    if (effMeta?.lotSeg && l.lot) seg[effMeta.lotSeg] = l.lot;
+    if (effMeta?.costSeg && l.costUnit != null) seg[effMeta.costSeg] = l.costUnit;
+    if (l.effVals) for (const [k, v] of Object.entries(l.effVals)) { if (v != null && v !== '') seg[k] = v; }
     if (Object.keys(seg).length <= 1) return null; // only ContextCode → nothing to send
-    return { CategoryCode: effMeta.category, [effMeta.voName]: [seg] };
+    return { CategoryCode: category, [voName]: [seg] };
+  };
+  // Inspector — show the EFF describe URLs and raw metadata (the "check").
+  const showEffDescribe = () => {
+    const key = editMode ? (editOrder?.OrderKey ?? `${editOrder?.SourceTransactionSystem ?? 'OPS'}:${editOrder?.SourceTransactionId ?? ''}`) : '{OrderKey}';
+    Modal.info({
+      title: 'Additional Information (EFF) — web services', width: 760,
+      content: <div style={{ fontSize: 12 }}>
+        <div style={{ marginBottom: 8 }}><b>Header EFF rows (GET):</b><br /><code style={{ wordBreak: 'break-all' }}>{`${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(key)}/child/additionalInformation`}</code></div>
+        <div style={{ marginBottom: 8 }}><b>Header EFF segments (GET):</b><br /><code style={{ wordBreak: 'break-all' }}>{`${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(key)}/child/additionalInformation/{rowId}/child/${hdrEffActive?.voName ?? 'HeaderEffB<Context>privateVO'}`}</code></div>
+        <div style={{ marginBottom: 8 }}><b>Header describe:</b> {hdrEffCtxs.length ? `${hdrEffCtxs.length} context(s): ${hdrEffCtxs.map(c => c.voName).join(', ')}` : 'none detected'}</div>
+        <div style={{ marginBottom: 8 }}><b>Line describe:</b> {lineEffCtxs.length ? `${lineEffCtxs.length} context(s): ${lineEffCtxs.map(c => c.voName).join(', ')}` : 'none detected'}</div>
+        <details><summary style={{ cursor: 'pointer' }}>Raw describe JSON</summary>
+          <pre style={{ maxHeight: 320, overflow: 'auto', background: REDWOOD.neutral100, padding: 8, borderRadius: 6, fontSize: 10.5 }}>{JSON.stringify(effDescribe, null, 2).slice(0, 20000)}</pre></details>
+      </div>,
+    });
   };
   const [discAmt, setDiscAmt] = useState(initialDraft?.discAmt ?? 0);
   const [expAmt, setExpAmt] = useState(initialDraft?.expAmt ?? 0);
@@ -3646,6 +3814,40 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   }, [hdr.orderType, hdr.orderDate, orderSeq, editMode, editOrder]);
 
   useEffect(() => { const h = initialDraft?.header ?? header; form.setFieldsValue(h as any); setHdr(h); /* init once */ }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // On edit: retrieve the saved header Additional Information (EFF) and prefill
+  // the segment inputs so the change order re-sends / updates them.
+  useEffect(() => {
+    if (!editOrder) return;
+    const base = orderSelfHref(editOrder);
+    if (!base) return;
+    (async () => {
+      try {
+        const r = await fetch(`${base}/child/additionalInformation?onlyData=false&limit=200`, { headers: FUSION_HDRS });
+        if (!r.ok) return;
+        const d = await r.json();
+        const items: any[] = Array.isArray(d) ? d : (d.items ?? []);
+        for (const it of items) {
+          const link = (it.links ?? []).find((x: any) => /EffB.+privateVO$/i.test(x.name || x.rel || ''));
+          if (!link?.href) continue;
+          const cr = await fetch(`${fusionHref(link.href)}?onlyData=true&limit=200`, { headers: FUSION_HDRS });
+          if (!cr.ok) continue;
+          const cd = await cr.json();
+          const seg = (Array.isArray(cd) ? cd : (cd.items ?? []))[0];
+          if (!seg) continue;
+          const voName = (link.name || '').match(/EffB.+privateVO$/i)?.[0];
+          const vals: Record<string, string> = {};
+          for (const [k, v] of Object.entries(seg)) {
+            if (/^links$|Id$|^ContextCode$|^_|^CategoryCode$/i.test(k) || v == null || v === '') continue;
+            vals[k] = String(v);
+          }
+          setHdrEffVals(prev => ({ ...vals, ...prev }));
+          if (voName) setHdrEffCtxSel(prev => prev ?? voName);
+          break; // first EFF row is the header context
+        }
+      } catch { /* no header EFF or not accessible */ }
+    })();
+  }, [editOrder]);
 
   // Edit mode: pull the existing order's lines and map them into the grid,
   // preserving each line's DOO source keys (for the change-order re-POST).
@@ -4275,6 +4477,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         SalesCreditTypeId: 1,
         Percent: 100,
       }] } : {}),
+      // Header Additional Information (Extensible Flexfield) — uploaded when filled.
+      ...(effHeaderChild() ? { additionalInformation: [effHeaderChild()] } : {}),
       lines: lines.map((l, i) => (editMode && l.canceled) ? buildCancelLine(l, i) : buildFullLine(l, i)),
     };
   };
@@ -5082,6 +5286,29 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               children: <>
                 <OrderSection icon={<ProfileOutlined />} title="Additional Information" color={REDWOOD.purple}>
                   <Col xs={24}><Form.Item label="Remarks" name="remarks" layout="vertical" style={{ marginBottom: 12 }}><Input.TextArea rows={3} placeholder="Optional notes…" /></Form.Item></Col>
+                </OrderSection>
+                {/* Header Extensible Flexfields (additionalInformation) — uploaded with the order */}
+                <OrderSection icon={<ProfileOutlined />} title={<span>Additional Information (EFF) <Button size="small" type="text" icon={<ApiOutlined />} onClick={showEffDescribe} style={{ color: REDWOOD.info }} /></span> as any} color={REDWOOD.warning}>
+                  <Col xs={24}>
+                    {hdrEffCtxs.length === 0
+                      ? <Text type="secondary" style={{ fontSize: 12 }}>No header extensible flexfield context was detected from Fusion. Enable/configure it in Setup, then re-open. <Button size="small" type="link" onClick={showEffDescribe}>Inspect describe</Button></Text>
+                      : <>
+                          {hdrEffCtxs.length > 1 && <div style={{ marginBottom: 12, maxWidth: 340 }}>
+                            <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>Context</div>
+                            <Select style={{ width: '100%' }} value={hdrEffCtxSel} onChange={setHdrEffCtxSel}
+                              options={hdrEffCtxs.map(c => ({ value: c.voName, label: c.contextCode || c.voName }))} />
+                          </div>}
+                          <Row gutter={12}>
+                            {hdrEffActive?.segs.map(s => (
+                              <Col xs={24} md={8} key={s.name}>
+                                <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>{s.label}</div>
+                                <Input value={hdrEffVals[s.name] ?? ''} onChange={e => setHdrEffVals(v => ({ ...v, [s.name]: e.target.value }))} placeholder={s.name} style={{ marginBottom: 12 }} />
+                              </Col>
+                            ))}
+                          </Row>
+                          <Text type="secondary" style={{ fontSize: 11 }}>Uploaded with the order as <code>additionalInformation</code> · context <b>{hdrEffActive?.contextCode || hdrEffActive?.voName}</b> ({hdrEffActive?.category}).</Text>
+                        </>}
+                  </Col>
                 </OrderSection>
                 {/* Shipping & Packing — PATCHed onto the order header */}
                 <OrderSection icon={<CarOutlined />} title="Shipping & Packing Instructions" color={REDWOOD.teal}>
