@@ -933,29 +933,42 @@ const ExternalTxnForm: React.FC<{
     }
 
     // Section 4: Transaction Lines
+    const rate = Number(values.bankConversionRate) || 1;
+    const txnCcy = values.currencyCode || 'FCY';
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
     doc.text('Transaction Lines', 14, y);
-    y += 2;
+    y += 4;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(90);
+    doc.text(`Entered in ${txnCcy}; Accounted in AED at conversion rate ${fmtNum(rate)}`, 14, y);
+    doc.setTextColor(0);
+    y += 1;
 
     const totalAmt = resolvedLines.reduce((s, l) => s + Math.abs(l.amount ?? 0), 0);
+    const totalAcc = Math.round(totalAmt * rate * 100) / 100;
     autoTable(doc, {
       startY: y,
-      head: [['#', 'Offset Account', 'Account Desc', 'Sub-Account Desc', 'Description', 'Amount']],
-      body: resolvedLines.map((l, i) => [
-        i + 1,
-        l.offsetAccount || '—',
-        (l as any).offsetDesc || '—',
-        (l as any).offsetSubDesc || '—',
-        l.description || '—',
-        fmtAmt(Math.abs(l.amount ?? 0)),
-      ]),
-      foot: [['', '', '', '', 'Total', fmtAmt(totalAmt)]],
+      head: [['#', 'Offset Account', 'Account Desc', 'Description', `Amount (${txnCcy})`, 'Rate', 'Accounted (AED)']],
+      body: resolvedLines.map((l, i) => {
+        const ent = Math.abs(l.amount ?? 0);
+        return [
+          i + 1,
+          l.offsetAccount || '—',
+          (l as any).offsetDesc || '—',
+          l.description || '—',
+          fmtAmt(ent),
+          fmtNum(rate),
+          fmtAmt(Math.round(ent * rate * 100) / 100),
+        ];
+      }),
+      foot: [['', '', '', 'Total', fmtAmt(totalAmt), '', fmtAmt(totalAcc)]],
       styles: { fontSize: 8, cellPadding: 2, textColor: [0, 0, 0] },
       headStyles: { fillColor: [58, 58, 58], textColor: [255, 255, 255] },
       footStyles: { fillColor: [255, 255, 255], fontStyle: 'bold', textColor: [0, 0, 0], halign: 'right' },
       alternateRowStyles: { fillColor: [247, 247, 247] },
-      columnStyles: { 0: { cellWidth: 8 }, 1: { cellWidth: 40 }, 5: { halign: 'right', cellWidth: 24 } },
+      columnStyles: { 0: { cellWidth: 8 }, 1: { cellWidth: 38 }, 4: { halign: 'right', cellWidth: 26 }, 5: { halign: 'right', cellWidth: 18 }, 6: { halign: 'right', cellWidth: 28 } },
       margin: { left: 14, right: 14 },
     });
 
@@ -2777,31 +2790,40 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     doc.text(`Printed: ${new Date().toLocaleString()}  |  Records: ${transactions.length}`, pageW - 14, 10, { align: 'right' });
     doc.setTextColor(0, 0, 0);
 
+    const fmtRate = (v: any) => v != null ? Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 }) : '—';
     autoTable(doc, {
       startY: 20,
-      head: [['Txn #', 'Bank Account', 'Business Unit', 'Date', 'Currency', 'Amount', 'Reference', 'Type', 'Status', 'Accounted']],
-      body: transactions.map(t => [
-        t.transactionId ?? '',
-        t.bankAccountName ?? '',
-        t.businessUnitName ?? '',
-        fmtDt(t.transactionDate),
-        t.currencyCode ?? '',
-        fmtAmt(t.amount),
-        t.referenceText ?? '',
-        t.transactionType ?? '',
-        statusLabel(t.status),
-        t.accountingFlag === 'Y' ? 'Posted' : 'No',
-      ]),
+      head: [['Txn #', 'Bank Account', 'Business Unit', 'Date', 'Ccy', 'Amount', 'Rate', 'Accounted (AED)', 'Reference', 'Type', 'Status', 'Accounted']],
+      body: transactions.map(t => {
+        const rate = Number(t.bankConversionRate) || 1;
+        const acc = Math.round((t.amount ?? 0) * rate * 100) / 100;   // keeps the amount's sign
+        return [
+          t.transactionId ?? '',
+          t.bankAccountName ?? '',
+          t.businessUnitName ?? '',
+          fmtDt(t.transactionDate),
+          t.currencyCode ?? '',
+          fmtAmt(t.amount),
+          fmtRate(rate),
+          fmtAmt(acc),
+          t.referenceText ?? '',
+          t.transactionType ?? '',
+          statusLabel(t.status),
+          t.accountingFlag === 'Y' ? 'Posted' : 'No',
+        ];
+      }),
       styles: { fontSize: 7.5, cellPadding: 2 },
       headStyles: { fillColor: [58, 58, 58] },
       alternateRowStyles: { fillColor: [247, 247, 247] },
       columnStyles: {
-        0: { cellWidth: 20 },
-        3: { cellWidth: 24 },
-        4: { cellWidth: 16 },
-        5: { halign: 'right', cellWidth: 26 },
-        8: { cellWidth: 24 },
-        9: { cellWidth: 18 },
+        0: { cellWidth: 18 },
+        3: { cellWidth: 22 },
+        4: { cellWidth: 12 },
+        5: { halign: 'right', cellWidth: 24 },
+        6: { halign: 'right', cellWidth: 16 },
+        7: { halign: 'right', cellWidth: 26 },
+        10: { cellWidth: 22 },
+        11: { cellWidth: 16 },
       },
       margin: { left: 14, right: 14 },
     });
