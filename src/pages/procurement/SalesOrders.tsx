@@ -3946,26 +3946,31 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   // Active line EFF context (segments shown/edited per line).
   const lineEffActive = lineEffCtxs.find(c => c.voName === effMeta?.voName) ?? lineEffCtxs[0];
   const [lineEffSaving, setLineEffSaving] = useState<string>('');   // line key currently saving
-  // Save one line's EFF directly to Fusion (edit mode / saved line).
-  const saveLineEff = async (l: NewLine) => {
+  // Save every saved line's EFF in one action.
+  const saveAllLineEff = async () => {
     if (!lineEffActive) { message.warning('No line EFF context'); return; }
-    const base = l.lineHref ? fusionHref(l.lineHref) : '';
-    if (!base) { message.warning('Save the order first, then update line additional info'); return; }
-    const vals: Record<string, any> = {};
-    lineEffActive.segs.forEach(s => {
-      let v: any = l.effVals?.[s.name];
-      if (v == null || v === '') { // fall back to the auto-mapped lot/cost/qty
-        if (s.name === effMeta?.lotSeg) v = l.lot;
-        else if (s.name === effMeta?.costSeg) v = l.costUnit;
-        else if (/lot.?qty|qty/i.test(s.name)) v = l.qty;
-      }
-      if (v != null && v !== '') vals[s.name] = v;
-    });
-    if (Object.keys(vals).length === 0) { message.warning('Enter at least one value'); return; }
-    setLineEffSaving(l.key);
-    try { await writeEffToRecord(base, lineEffActive, vals); message.success(`Line ${l.itemNumber} additional info saved`); }
-    catch (e: any) { message.error(`Save failed: ${e?.message ?? e}`); }
-    finally { setLineEffSaving(''); }
+    const targets = lines.filter(l => l.lineHref && !l.canceled);
+    if (!targets.length) { message.warning('Save the order first, then update line additional info'); return; }
+    setLineEffSaving('__all__');
+    let ok = 0; const fails: string[] = [];
+    for (const l of targets) {
+      const vals: Record<string, any> = {};
+      lineEffActive.segs.forEach(s => {
+        let v: any = l.effVals?.[s.name];
+        if (v == null || v === '') {
+          if (s.name === effMeta?.lotSeg) v = l.lot;
+          else if (s.name === effMeta?.costSeg) v = l.costUnit;
+          else if (/lot.?qty|qty/i.test(s.name)) v = l.qty;
+        }
+        if (v != null && v !== '') vals[s.name] = v;
+      });
+      if (Object.keys(vals).length === 0) continue;
+      try { await writeEffToRecord(fusionHref(l.lineHref!), lineEffActive, vals); ok++; }
+      catch (e: any) { fails.push(`${l.itemNumber}: ${e?.message ?? e}`); }
+    }
+    setLineEffSaving('');
+    if (fails.length) message.error(`Saved ${ok}, ${fails.length} failed — ${fails[0]}`);
+    else message.success(`Additional info saved for ${ok} line(s)`);
   };
   // Inspector — show the EFF describe URLs and raw metadata (the "check").
   const showEffDescribe = () => {
@@ -5645,10 +5650,15 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                 children: !lineEffActive
                   ? <div style={{ padding: 12 }}><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No line EFF context detected." /></div>
                   : <div>
-                      <div style={{ padding: '6px 8px', fontSize: 11.5, color: REDWOOD.neutral600 }}>
-                        Context <b>{lineEffActive.contextCode || lineEffActive.voName}</b> ({lineEffActive.category}). Uploaded with each line on create; use Save to update a saved line.
+                      <div style={{ padding: '6px 8px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 11.5, color: REDWOOD.neutral600 }}>
+                          Context <b>{lineEffActive.contextCode || lineEffActive.voName}</b> ({lineEffActive.category}). Uploaded with each line on create; use Save to update saved lines.
+                        </span>
+                        <Button size="small" type="primary" icon={<SaveOutlined />} loading={lineEffSaving === '__all__'}
+                          disabled={!lines.some(l => l.lineHref)} onClick={saveAllLineEff}
+                          style={{ marginLeft: 'auto', background: REDWOOD.warning, borderColor: REDWOOD.warning }}>Save Additional Info</Button>
                       </div>
-                      <Table size="small" dataSource={lines} rowKey="key" pagination={false} scroll={{ x: 900, y: 340 }}
+                      <Table size="small" dataSource={lines} rowKey="key" pagination={false} scroll={{ x: 760, y: 340 }}
                         locale={{ emptyText: 'No lines' }}
                         columns={[
                           { title: 'Item', dataIndex: 'itemNumber', width: 150, fixed: 'left', render: (v: string) => <Text strong style={{ fontSize: 12 }}>{v || '—'}</Text> },
@@ -5660,10 +5670,6 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                                 onChange={e => upd(l.key, { effVals: { ...l.effVals, [s.name]: e.target.value } })} />;
                             },
                           })),
-                          { title: '', key: 'save', width: 90, fixed: 'right', render: (_: any, l: NewLine) => (
-                            <Button size="small" type="link" icon={<SaveOutlined />} loading={lineEffSaving === l.key} disabled={!l.lineHref}
-                              onClick={() => saveLineEff(l)}>Save</Button>
-                          ) },
                         ]} />
                     </div>,
               },
