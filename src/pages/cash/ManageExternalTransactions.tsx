@@ -3279,10 +3279,10 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
             accountCombination: l.accountCombination,
             chartOfAccountsName: 'Chart of Accounts',
             reference1: String(txn.externalTransactionId),
-            reference2: txn.referenceText || '',
+            reference2: String(txn.externalTransactionId),
             reference3: l.accountingClass || null,
             reference4: txn.businessUnitName || null,
-            reference5: null, createdBy: currentUser,
+            reference5: 'BANK_EXTERNAL_TRANSACTIONS', createdBy: currentUser,
           })),
         };
 
@@ -3497,10 +3497,10 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
             accountCombination: l.accountCombination,
             chartOfAccountsName: 'Chart of Accounts',
             reference1: String(txn.externalTransactionId),
-            reference2: txn.referenceText || '',
+            reference2: String(txn.externalTransactionId),
             reference3: l.accountingClass || null,
             reference4: txn.businessUnitName || null,
-            reference5: null, createdBy: currentUser,
+            reference5: 'BANK_EXTERNAL_TRANSACTIONS', createdBy: currentUser,
           })),
         };
         // GL pre-flight validation + session logging
