@@ -4024,7 +4024,19 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [discAmt, setDiscAmt] = useState(initialDraft?.discAmt ?? 0);
   const [expAmt, setExpAmt] = useState(initialDraft?.expAmt ?? 0);
   const [lineSearch, setLineSearch] = useState<Record<string, { loading?: boolean; tooShort?: boolean; opts: any[] }>>({});
-  const [lotPick, setLotPick] = useState<{ key: string; item: string; rows: any[]; onh: Record<string, { loading?: boolean; qty?: number }> } | null>(null);
+  const [lotPick, setLotPick] = useState<{ key: string; item: string; rows: any[]; onh: Record<string, { loading?: boolean; qty?: number }>; qtyLoading?: boolean } | null>(null);
+  // Open the lot picker and fetch on-hand quantity per lot (shown in a Qty column).
+  const openLotPick = (key: string, item: string, rows: any[]) => {
+    setLotPick({ key, item, rows, onh: {}, qtyLoading: true });
+    (async () => {
+      try {
+        const opt = await fetchReserveOptions(item, hdr.warehouse ?? '', undefined);
+        const map: Record<string, { qty?: number }> = {};
+        opt.options.forEach(o => { if (o.lot) map[o.lot] = { qty: (map[o.lot]?.qty ?? 0) + (o.qty || 0) }; });
+        setLotPick(prev => (prev && prev.key === key && prev.item === item) ? { ...prev, onh: map, qtyLoading: false } : prev);
+      } catch { setLotPick(prev => (prev && prev.key === key && prev.item === item) ? { ...prev, qtyLoading: false } : prev); }
+    })();
+  };
   const [itemModal, setItemModal] = useState<{ key: string; term: string; rows: any[] } | null>(null);
   const [itemFilter, setItemFilter] = useState('');
   const [ohLoading, setOhLoading] = useState(false);
@@ -4545,7 +4557,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     let costRows: any[] = [];
     try { costRows = await fetchItemCostRows(itemNumber, hdr.warehouse); } catch { /* none */ }
     const lots = Array.from(new Set(costRows.map(c => parseVU(c.ValuationUnit).lot).filter(Boolean))) as string[];
-    if (lots.length > 1) { upd(key, { ohLoading: false }); setLotPick({ key, item: itemNumber, rows: costRows, onh: {} }); }
+    if (lots.length > 1) { upd(key, { ohLoading: false }); openLotPick(key, itemNumber, costRows); }
     else { await applyItemToLine(key, item, costRows, lots[0]); }
   };
 
@@ -4558,7 +4570,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     upd(l.key, { ohLoading: false });
     const lots = Array.from(new Set(costRows.map(c => parseVU(c.ValuationUnit).lot).filter(Boolean)));
     if (!lots.length) { message.info(`No lots found for ${l.itemNumber}`); return; }
-    setLotPick({ key: l.key, item: l.itemNumber, rows: costRows, onh: {} });
+    openLotPick(l.key, l.itemNumber, costRows);
   };
 
   // An existing line can be updated unless it's already Awaiting Billing / Closed
@@ -6042,6 +6054,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             { title: 'Lot', dataIndex: 'lot', render: v => <Tag color="geekblue">{v}</Tag> },
             { title: 'Inv Org', dataIndex: 'invOrg', render: v => v || '—' },
             { title: 'Subinv', dataIndex: 'subinv', render: v => v ? <Tag color="cyan">{v}</Tag> : '—' },
+            { title: 'On-Hand Qty', dataIndex: 'lot', align: 'right', render: (lot: string) => {
+                const q = lotPick?.onh?.[lot]?.qty;
+                if (q != null) return <Text strong style={{ color: q > 0 ? REDWOOD.success : REDWOOD.neutral600, fontVariantNumeric: 'tabular-nums' }}>{fmtQty(q)}</Text>;
+                return lotPick?.qtyLoading ? <Spin size="small" /> : <Text type="secondary">—</Text>;
+              } },
             { title: 'Cost', dataIndex: 'cost', align: 'right', render: v => v == null ? '—' : fmtAmount(num(v), ccy) },
             { title: '', align: 'right', render: (_, r: any) => <Button size="small" type="primary" style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
                 onClick={() => { const lp = lotPick!; setLotPick(null); applyItemToLine(lp.key, { ItemNumber: lp.item }, lp.rows, r.lot); }}>Select</Button> },
