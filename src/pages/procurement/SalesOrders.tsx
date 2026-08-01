@@ -98,7 +98,7 @@ const humanize = (k: string) => k.replace(/([A-Z])/g, ' $1').replace(/^ /, '').r
 
 // EFF plumbing / row-audit columns that Fusion returns alongside the real user
 // segments — never shown or uploaded. Everything else on an EffB VO is a segment.
-const EFF_SYS_ATTR = /^(links|ContextCode|CategoryCode|ObjectVersionNumber|CreatedBy|CreationDate|LastUpdateDate|LastUpdatedBy|LastUpdateLogin|ParentEntity|CorpCurrencyCode|CurcyConvRateType|CurrencyCode|SetId|.*Id|_.*)$/i;
+const EFF_SYS_ATTR = /^(links|ContextCode|Category|CategoryCode|CategoryName|ObjectVersionNumber|CreatedBy|CreationDate|LastUpdateDate|LastUpdatedBy|LastUpdateLogin|ParentEntity|CorpCurrencyCode|CurcyConvRateType|CurrencyCode|SetId|.*Id|_.*)$/i;
 const isEffSegment = (name?: string) => !!name && !EFF_SYS_ATTR.test(name);
 
 const renderVal = (k: string, v: any): React.ReactNode => {
@@ -1067,12 +1067,13 @@ const fetchEffRows = async (baseHref: string): Promise<EffRow[]> => {
     const segRows: any[] = Array.isArray(cd) ? cd : (cd.items ?? []);
     for (const seg of segRows) {
       // Learn the real discriminator values from this live record.
-      learnEff(flexOfVo(voName), it.CategoryCode, seg.ContextCode);
+      const catVal = it.Category ?? it.CategoryCode;
+      learnEff(flexOfVo(voName), catVal, seg.ContextCode);
       const segs = Object.entries(seg)
         .filter(([k, v]) => isEffSegment(k) && v != null && v !== '')
         .map(([k, v]) => ({ k, v }));
       const ctxName = seg.ContextCode ?? (link.name || '').replace(/^.*EffB/i, '').replace(/privateVO$/i, '').replace(/_+/g, ' ').trim();
-      out.push({ context: ctxName || 'Additional Information', category: it.CategoryCode, segs, href: fusionHref(link.href) });
+      out.push({ context: ctxName || 'Additional Information', category: catVal, segs, href: fusionHref(link.href) });
     }
   }
   return out;
@@ -1100,7 +1101,7 @@ const writeEffToRecord = async (baseHref: string, ctx: EffCtx, vals: Record<stri
   let resp: Response;
   if (voHref) resp = await fetch(voHref, { method: 'PATCH', headers: EFF_JSON_HDRS, body: JSON.stringify(vals) });
   else if (aiHref) resp = await fetch(`${aiHref}/child/${ctx.voName}`, { method: 'POST', headers: EFF_JSON_HDRS, body: JSON.stringify({ ContextCode: ctxCode, ...vals }) });
-  else resp = await fetch(`${baseHref}/child/additionalInformation`, { method: 'POST', headers: EFF_JSON_HDRS, body: JSON.stringify({ CategoryCode: catCode, [ctx.voName]: [{ ContextCode: ctxCode, ...vals }] }) });
+  else resp = await fetch(`${baseHref}/child/additionalInformation`, { method: 'POST', headers: EFF_JSON_HDRS, body: JSON.stringify({ Category: catCode, [ctx.voName]: [{ ContextCode: ctxCode, ...vals }] }) });
   const txt = await resp.text();
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${txt.slice(0, 300)}`);
 };
@@ -3911,7 +3912,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     const seg: Record<string, any> = { ContextCode: effContextFor(hdrEffActive) };
     hdrEffActive.segs.forEach(s => { const v = hdrEffVals[s.name]; if (v != null && v !== '') seg[s.name] = v; });
     if (Object.keys(seg).length <= 1) return null;
-    return { CategoryCode: effCategoryFor(hdrEffActive), [hdrEffActive.voName]: [seg] };
+    return { Category: effCategoryFor(hdrEffActive), [hdrEffActive.voName]: [seg] };
   };
   // Save the header EFF against an existing order (edit mode) — PATCH the saved
   // segment row in place, else create the additionalInformation + nested VO.
@@ -3932,7 +3933,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         r = await fetch(`${hdrEffAiHref}/child/${hdrEffActive.voName}`, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/vnd.oracle.adf.resourceitem+json' }, body: JSON.stringify({ ContextCode: effContextFor(hdrEffActive), ...segVals }) });
       } else if (base) {
         // Nothing yet — create the category row with the nested segment row inline.
-        r = await fetch(`${base}/child/additionalInformation`, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/vnd.oracle.adf.resourceitem+json' }, body: JSON.stringify({ CategoryCode: effCategoryFor(hdrEffActive), [hdrEffActive.voName]: [{ ContextCode: effContextFor(hdrEffActive), ...segVals }] }) });
+        r = await fetch(`${base}/child/additionalInformation`, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/vnd.oracle.adf.resourceitem+json' }, body: JSON.stringify({ Category: effCategoryFor(hdrEffActive), [hdrEffActive.voName]: [{ ContextCode: effContextFor(hdrEffActive), ...segVals }] }) });
       } else { message.error('No order reference to save against'); setHdrEffSaving(false); return; }
       const txt = await r.text();
       if (!r.ok) throw new Error(`HTTP ${r.status}: ${txt.slice(0, 300)}`);
@@ -3963,7 +3964,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     if (qtySeg && l.qty != null && seg[qtySeg] == null) seg[qtySeg] = l.qty;
     if (l.effVals) for (const [k, v] of Object.entries(l.effVals)) { if (v != null && v !== '') seg[k] = v; }
     if (Object.keys(seg).length <= 1) return null; // only ContextCode → nothing to send
-    return { CategoryCode: category, [voName]: [seg] };
+    return { Category: category, [voName]: [seg] };
   };
   // Active line EFF context (segments shown/edited per line).
   const lineEffActive = lineEffCtxs.find(c => c.voName === effMeta?.voName) ?? lineEffCtxs[0];
@@ -4058,7 +4059,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           if (!link?.href) continue;
           const aiSelf = (it.links ?? []).find((x: any) => x.rel === 'self')?.href;
           if (aiSelf) setHdrEffAiHref(fusionHref(aiSelf));
-          learnEff('DOO_HEADERS_ADD_INFO', it.CategoryCode);   // real discriminator for writes
+          learnEff('DOO_HEADERS_ADD_INFO', it.Category ?? it.CategoryCode);   // real discriminator for writes
           const cr = await fetch(`${fusionHref(link.href)}?onlyData=false&limit=200`, { headers: FUSION_HDRS });
           if (!cr.ok) continue;
           const cd = await cr.json();
@@ -4066,7 +4067,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           if (!seg) continue;
           const voSelf = (seg.links ?? []).find((x: any) => x.rel === 'self')?.href;
           if (voSelf) setHdrEffVoHref(fusionHref(voSelf));
-          learnEff('DOO_HEADERS_ADD_INFO', it.CategoryCode, seg.ContextCode);
+          learnEff('DOO_HEADERS_ADD_INFO', it.Category ?? it.CategoryCode, seg.ContextCode);
           const voName = (link.name || '').match(/EffB.+privateVO$/i)?.[0];
           const vals: Record<string, string> = {};
           for (const [k, v] of Object.entries(seg)) {
