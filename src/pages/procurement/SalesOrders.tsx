@@ -4261,7 +4261,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       const add = items.filter(it => !existing.has(it.ItemNumber)).map((it, i) => ({
         key: `${it.ItemNumber}-${prev.length + i}`, itemNumber: it.ItemNumber,
         description: it.ItemDescription, uom: pf(it, ['PrimaryUOMValue', 'PrimaryUOMCode', 'UOMCode']),
-        qty: num(it._qty), unitPrice: it._price != null ? num(it._price) : num(it._cost),
+        // Unit price only from a price-list price (_price) — never defaulted to cost.
+        qty: num(it._qty), unitPrice: it._price != null ? num(it._price) : 0,
         costUnit: num(it._cost),
         // Prefer the item's own tax; fall back to the header default tax code.
         taxCode: it._taxCode ?? defaultTaxCode,
@@ -4541,7 +4542,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     const vu = parseVU(row?.ValuationUnit);
     const cost = row ? num(pf(row, COST_FIELDS)) : undefined;
     const uom = pf(item, ['PrimaryUOMValue', 'PrimaryUOMCode', 'UOMCode']);
-    upd(key, { itemNumber: item.ItemNumber, ...(item.ItemDescription ? { description: item.ItemDescription } : {}), ...(uom ? { uom } : {}), costUnit: cost, unitPrice: cost ?? 0, lot, ohLoading: true });
+    // Bring the cost only — leave Unit Price alone (user-entered or from a price list).
+    upd(key, { itemNumber: item.ItemNumber, ...(item.ItemDescription ? { description: item.ItemDescription } : {}), ...(uom ? { uom } : {}), costUnit: cost, lot, ohLoading: true });
     try {
       const oh = await fetchOnhand(item.ItemNumber, hdr.warehouse || vu.invOrg || '', hdr.subinventory || vu.subinv, lot);
       upd(key, { qoh: oh.qty, lots: oh.lots.length ? oh.lots : (lot ? [lot] : []), ohLoading: false });
