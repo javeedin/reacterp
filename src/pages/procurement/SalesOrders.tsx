@@ -96,6 +96,11 @@ const isIdKey = (k: string) => /Id$/.test(k) || /Id[0-9]+$/.test(k) || k === 'li
 const isEmpty = (v: any) => v == null || v === '' || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v ?? {}).length === 0);
 const humanize = (k: string) => k.replace(/([A-Z])/g, ' $1').replace(/^ /, '').replace(/\bU O M\b/, 'UOM').replace(/\bP O\b/, 'PO');
 
+// EFF plumbing / row-audit columns that Fusion returns alongside the real user
+// segments — never shown or uploaded. Everything else on an EffB VO is a segment.
+const EFF_SYS_ATTR = /^(links|ContextCode|CategoryCode|ObjectVersionNumber|CreatedBy|CreationDate|LastUpdateDate|LastUpdatedBy|LastUpdateLogin|ParentEntity|CorpCurrencyCode|CurcyConvRateType|CurrencyCode|SetId|.*Id|_.*)$/i;
+const isEffSegment = (name?: string) => !!name && !EFF_SYS_ATTR.test(name);
+
 const renderVal = (k: string, v: any): React.ReactNode => {
   if (isEmpty(v)) return '—';
   if (typeof v === 'boolean') return v ? 'Yes' : 'No';
@@ -144,7 +149,7 @@ const parseEffDescribe = (d: any): EffMeta | null => {
     for (const a of attrObjs) {
       const name = a?.name ?? a?.Name;
       const label = a?.title ?? a?.label ?? a?.Title ?? name;
-      if (name && !/^(ContextCode|EffLineId|.*Id)$/i.test(String(name))) segs.push({ name: String(name), label: String(label) });
+      if (isEffSegment(name)) segs.push({ name: String(name), label: String(label) });
     }
     const ctxMatch = found.voName.match(/EffB(.+)privateVO$/i);
     const contextCode = node?.contextCode ?? node?.ContextCode ?? (ctxMatch ? ctxMatch[1].replace(/_+/g, ' ').trim() : '');
@@ -175,7 +180,7 @@ const parseEffContexts = (d: any, category: string): EffCtx[] => {
           const label = a?.title ?? a?.label ?? a?.Title ?? name;
           const type = a?.type ?? a?.Type;
           // Skip system/id columns — keep only user-facing flexfield segments.
-          if (name && !/^(ContextCode|.*EffId|.*Id|CategoryCode|_.*)$/i.test(String(name))) segs.push({ name: String(name), label: String(label), type });
+          if (isEffSegment(name)) segs.push({ name: String(name), label: String(label), type });
         }
         const ctxMatch = k.match(/EffB(.+)privateVO$/i);
         const contextCode = node?.contextCode ?? node?.ContextCode ?? (ctxMatch ? ctxMatch[1].replace(/_+/g, ' ').trim() : '');
@@ -1044,13 +1049,39 @@ const fetchEffRows = async (baseHref: string): Promise<EffRow[]> => {
     const segRows: any[] = Array.isArray(cd) ? cd : (cd.items ?? []);
     for (const seg of segRows) {
       const segs = Object.entries(seg)
-        .filter(([k, v]) => !/^links$|Id$|^ContextCode$|^_|^CategoryCode$/i.test(k) && v != null && v !== '')
+        .filter(([k, v]) => isEffSegment(k) && v != null && v !== '')
         .map(([k, v]) => ({ k, v }));
       const ctxName = seg.ContextCode ?? (link.name || '').replace(/^.*EffB/i, '').replace(/privateVO$/i, '').replace(/_+/g, ' ').trim();
       out.push({ context: ctxName || 'Additional Information', segs, href: fusionHref(link.href) });
     }
   }
   return out;
+};
+
+// Write EFF segment values onto a record (order header or a line) — PATCH the
+// existing nested VO row in place, else create the additionalInformation row +
+// nested segment row. baseHref is the record self href.
+const EFF_JSON_HDRS = { ...FUSION_HDRS, 'Content-Type': 'application/vnd.oracle.adf.resourceitem+json' };
+const writeEffToRecord = async (baseHref: string, ctx: EffCtx, vals: Record<string, any>): Promise<void> => {
+  let aiHref = '', voHref = '';
+  const r = await fetch(`${baseHref}/child/additionalInformation?onlyData=false&limit=200`, { headers: FUSION_HDRS });
+  if (r.ok) {
+    const d = await r.json();
+    for (const it of (d.items ?? [])) {
+      const link = (it.links ?? []).find((x: any) => /EffB.+privateVO$/i.test(x.name || x.rel || ''));
+      if (!link?.href) continue;
+      aiHref = fusionHref((it.links ?? []).find((x: any) => x.rel === 'self')?.href ?? '');
+      const cr = await fetch(`${fusionHref(link.href)}?onlyData=false&limit=200`, { headers: FUSION_HDRS });
+      if (cr.ok) { const seg = ((await cr.json()).items ?? [])[0]; if (seg) voHref = fusionHref((seg.links ?? []).find((x: any) => x.rel === 'self')?.href ?? ''); }
+      break;
+    }
+  }
+  let resp: Response;
+  if (voHref) resp = await fetch(voHref, { method: 'PATCH', headers: EFF_JSON_HDRS, body: JSON.stringify(vals) });
+  else if (aiHref) resp = await fetch(`${aiHref}/child/${ctx.voName}`, { method: 'POST', headers: EFF_JSON_HDRS, body: JSON.stringify({ ContextCode: ctx.contextCode, ...vals }) });
+  else resp = await fetch(`${baseHref}/child/additionalInformation`, { method: 'POST', headers: EFF_JSON_HDRS, body: JSON.stringify({ CategoryCode: ctx.category, [ctx.voName]: [{ ContextCode: ctx.contextCode, ...vals }] }) });
+  const txt = await resp.text();
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${txt.slice(0, 300)}`);
 };
 
 // Header Additional Information (EFF) for the view page.
@@ -1068,13 +1099,23 @@ const HeaderEffView: React.FC<{ order: any }> = ({ order }) => {
   }, [base]);
   useEffect(() => { load(); }, [load]);
 
+  const showApi = () => Modal.info({
+    title: 'Additional Information (EFF) — web service', width: 760,
+    content: <div style={{ fontSize: 12 }}>
+      <div style={{ marginBottom: 8 }}><b>1) Header EFF rows (GET):</b><br /><code style={{ wordBreak: 'break-all' }}>{aiUrl || '(no self link)'}</code></div>
+      <div style={{ marginBottom: 8 }}><b>2) For each row, the segment values (GET):</b><br /><code style={{ wordBreak: 'break-all' }}>{`${aiUrl}/{rowId}/child/HeaderEffB<Context>privateVO`}</code></div>
+      {rows && rows.length > 0 && <div style={{ marginTop: 8 }}><b>Resolved segment rows:</b>
+        <pre style={{ maxHeight: 260, overflow: 'auto', background: REDWOOD.neutral100, padding: 8, borderRadius: 6, fontSize: 10.5 }}>{JSON.stringify(rows, null, 2).slice(0, 10000)}</pre></div>}
+    </div>,
+  });
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 6 }}>
         <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {aiUrl || '(no self link)'}</span>}>
-          <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} />
+          <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} onClick={showApi} />
         </Tooltip>
-        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>Reload</Button>
+        <Button size="small" type="primary" icon={<ReloadOutlined />} loading={loading} onClick={load}
+          style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}>Run</Button>
       </div>
       {loading ? <div style={{ textAlign: 'center', padding: 30 }}><Spin /></div>
         : err ? <div style={{ color: REDWOOD.error, fontSize: 12, padding: 10 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{err}</div>
@@ -1127,10 +1168,19 @@ const LineEffView: React.FC<{ lines: any[] }> = ({ lines }) => {
   }, [lines]);
   useEffect(() => { load(); }, [load]);
 
+  const showApi = () => Modal.info({
+    title: 'Line Additional Information (EFF) — web service', width: 760,
+    content: <div style={{ fontSize: 12 }}>
+      <div style={{ marginBottom: 8 }}><b>Per line (GET):</b><br /><code style={{ wordBreak: 'break-all' }}>{`${FUSION_BASE}/salesOrdersForOrderHub/{OrderKey}/child/lines/{lineId}/child/additionalInformation/{rowId}/child/FulfillLineEffBaddinfoprivateVO`}</code></div>
+      {rows && rows.length > 0 && <div><b>Resolved:</b><pre style={{ maxHeight: 260, overflow: 'auto', background: REDWOOD.neutral100, padding: 8, borderRadius: 6, fontSize: 10.5 }}>{JSON.stringify(rows, null, 2).slice(0, 10000)}</pre></div>}
+    </div>,
+  });
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
-        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>Reload</Button>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 6 }}>
+        <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} onClick={showApi} />
+        <Button size="small" type="primary" icon={<ReloadOutlined />} loading={loading} onClick={load}
+          style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}>Run</Button>
       </div>
       {loading ? <div style={{ textAlign: 'center', padding: 30 }}><Spin /></div>
         : err ? <div style={{ color: REDWOOD.error, fontSize: 12, padding: 10 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{err}</div>
@@ -3818,6 +3868,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   // Selected header context (voName) + its segment values.
   const [hdrEffCtxSel, setHdrEffCtxSel] = useState<string | undefined>();
   const [hdrEffVals, setHdrEffVals] = useState<Record<string, string>>(initialDraft?.header?.effVals ?? {});
+  // Existing EFF row hrefs captured on edit → used to PATCH the saved EFF in place.
+  const [hdrEffVoHref, setHdrEffVoHref] = useState('');   // nested EffB VO row (PATCH target)
+  const [hdrEffAiHref, setHdrEffAiHref] = useState('');   // parent additionalInformation row
+  const [hdrEffSaving, setHdrEffSaving] = useState(false);
   useEffect(() => {
     const desc = (poly: string) => `${FUSION_BASE}/salesOrdersForOrderHub/describe?polymorphicType=${encodeURIComponent(poly)}`;
     fetch(desc('salesOrdersForOrderHub.lines.additionalInformation:DOO_FULFILL_LINES_ADD_INFO'), { headers: FUSION_HDRS })
@@ -3838,6 +3892,39 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     if (Object.keys(seg).length <= 1) return null;
     return { CategoryCode: hdrEffActive.category, [hdrEffActive.voName]: [seg] };
   };
+  // Save the header EFF against an existing order (edit mode) — PATCH the saved
+  // segment row in place, else create the additionalInformation + nested VO.
+  const saveHeaderEff = async () => {
+    if (!hdrEffActive) { message.warning('No EFF context'); return; }
+    const base = orderSelfHref(editOrder);
+    const segVals: Record<string, any> = {};
+    hdrEffActive.segs.forEach(s => { const v = hdrEffVals[s.name]; if (v != null && v !== '') segVals[s.name] = v; });
+    if (Object.keys(segVals).length === 0) { message.warning('Enter at least one value'); return; }
+    setHdrEffSaving(true);
+    try {
+      let r: Response;
+      if (hdrEffVoHref) {
+        // Update the existing segment row in place.
+        r = await fetch(hdrEffVoHref, { method: 'PATCH', headers: { ...FUSION_HDRS, 'Content-Type': 'application/vnd.oracle.adf.resourceitem+json' }, body: JSON.stringify(segVals) });
+      } else if (hdrEffAiHref) {
+        // Category row exists but no segment row yet — create the nested VO row.
+        r = await fetch(`${hdrEffAiHref}/child/${hdrEffActive.voName}`, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/vnd.oracle.adf.resourceitem+json' }, body: JSON.stringify({ ContextCode: hdrEffActive.contextCode, ...segVals }) });
+      } else if (base) {
+        // Nothing yet — create the category row with the nested segment row inline.
+        r = await fetch(`${base}/child/additionalInformation`, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/vnd.oracle.adf.resourceitem+json' }, body: JSON.stringify({ CategoryCode: hdrEffActive.category, [hdrEffActive.voName]: [{ ContextCode: hdrEffActive.contextCode, ...segVals }] }) });
+      } else { message.error('No order reference to save against'); setHdrEffSaving(false); return; }
+      const txt = await r.text();
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${txt.slice(0, 300)}`);
+      // Capture hrefs from the response so a subsequent save PATCHes in place.
+      try {
+        const rd = JSON.parse(txt);
+        const voSelf = (rd.links ?? []).find((x: any) => x.rel === 'self')?.href;
+        if (voSelf && !hdrEffVoHref) setHdrEffVoHref(fusionHref(voSelf));
+      } catch { /* non-JSON ok */ }
+      message.success('Additional information saved');
+    } catch (e: any) { message.error(`Save failed: ${e?.message ?? e}`); }
+    finally { setHdrEffSaving(false); }
+  };
   // Build one additionalInformation EFF entry for a line: auto lot/cost segments
   // plus any user-entered segment values (l.effVals). null when nothing to send.
   const effLineChild = (l: NewLine) => {
@@ -3855,6 +3942,30 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     if (l.effVals) for (const [k, v] of Object.entries(l.effVals)) { if (v != null && v !== '') seg[k] = v; }
     if (Object.keys(seg).length <= 1) return null; // only ContextCode → nothing to send
     return { CategoryCode: category, [voName]: [seg] };
+  };
+  // Active line EFF context (segments shown/edited per line).
+  const lineEffActive = lineEffCtxs.find(c => c.voName === effMeta?.voName) ?? lineEffCtxs[0];
+  const [lineEffSaving, setLineEffSaving] = useState<string>('');   // line key currently saving
+  // Save one line's EFF directly to Fusion (edit mode / saved line).
+  const saveLineEff = async (l: NewLine) => {
+    if (!lineEffActive) { message.warning('No line EFF context'); return; }
+    const base = l.lineHref;
+    if (!base) { message.warning('Save the order first, then update line additional info'); return; }
+    const vals: Record<string, any> = {};
+    lineEffActive.segs.forEach(s => {
+      let v: any = l.effVals?.[s.name];
+      if (v == null || v === '') { // fall back to the auto-mapped lot/cost/qty
+        if (s.name === effMeta?.lotSeg) v = l.lot;
+        else if (s.name === effMeta?.costSeg) v = l.costUnit;
+        else if (/lot.?qty|qty/i.test(s.name)) v = l.qty;
+      }
+      if (v != null && v !== '') vals[s.name] = v;
+    });
+    if (Object.keys(vals).length === 0) { message.warning('Enter at least one value'); return; }
+    setLineEffSaving(l.key);
+    try { await writeEffToRecord(base, lineEffActive, vals); message.success(`Line ${l.itemNumber} additional info saved`); }
+    catch (e: any) { message.error(`Save failed: ${e?.message ?? e}`); }
+    finally { setLineEffSaving(''); }
   };
   // Inspector — show the EFF describe URLs and raw metadata (the "check").
   const showEffDescribe = () => {
@@ -3907,15 +4018,19 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         for (const it of items) {
           const link = (it.links ?? []).find((x: any) => /EffB.+privateVO$/i.test(x.name || x.rel || ''));
           if (!link?.href) continue;
-          const cr = await fetch(`${fusionHref(link.href)}?onlyData=true&limit=200`, { headers: FUSION_HDRS });
+          const aiSelf = (it.links ?? []).find((x: any) => x.rel === 'self')?.href;
+          if (aiSelf) setHdrEffAiHref(fusionHref(aiSelf));
+          const cr = await fetch(`${fusionHref(link.href)}?onlyData=false&limit=200`, { headers: FUSION_HDRS });
           if (!cr.ok) continue;
           const cd = await cr.json();
           const seg = (Array.isArray(cd) ? cd : (cd.items ?? []))[0];
           if (!seg) continue;
+          const voSelf = (seg.links ?? []).find((x: any) => x.rel === 'self')?.href;
+          if (voSelf) setHdrEffVoHref(fusionHref(voSelf));
           const voName = (link.name || '').match(/EffB.+privateVO$/i)?.[0];
           const vals: Record<string, string> = {};
           for (const [k, v] of Object.entries(seg)) {
-            if (/^links$|Id$|^ContextCode$|^_|^CategoryCode$/i.test(k) || v == null || v === '') continue;
+            if (!isEffSegment(k) || v == null || v === '') continue;
             vals[k] = String(v);
           }
           setHdrEffVals(prev => ({ ...vals, ...prev }));
@@ -5383,7 +5498,15 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                               </Col>
                             ))}
                           </Row>
-                          <Text type="secondary" style={{ fontSize: 11 }}>Uploaded with the order as <code>additionalInformation</code> · context <b>{hdrEffActive?.contextCode || hdrEffActive?.voName}</b> ({hdrEffActive?.category}).</Text>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                            {editMode && <Button type="primary" icon={<SaveOutlined />} loading={hdrEffSaving} onClick={saveHeaderEff}
+                              style={{ background: REDWOOD.warning, borderColor: REDWOOD.warning }}>
+                              {hdrEffVoHref ? 'Update Additional Info' : 'Save Additional Info'}
+                            </Button>}
+                            <Text type="secondary" style={{ fontSize: 11 }}>
+                              {editMode ? 'Saved directly to the order' : 'Uploaded with the order on create'} as <code>additionalInformation</code> · context <b>{hdrEffActive?.contextCode || hdrEffActive?.voName}</b> ({hdrEffActive?.category}).
+                            </Text>
+                          </div>
                         </>}
                   </Col>
                 </OrderSection>
@@ -5498,6 +5621,33 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                 key: 'fulfillment', label: vTab(<CarOutlined />, 'Fulfillment', REDWOOD.teal ?? '#00918A'),
                 children: <Table size="small" columns={fulfillCols} dataSource={lines} rowKey="key" pagination={false} scroll={{ x: 780, y: 360 }}
                   locale={{ emptyText: 'No lines' }} />,
+              },
+              {
+                key: 'lineAddl', label: vTab(<ProfileOutlined />, 'Additional Info', REDWOOD.warning),
+                children: !lineEffActive
+                  ? <div style={{ padding: 12 }}><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No line EFF context detected." /></div>
+                  : <div>
+                      <div style={{ padding: '6px 8px', fontSize: 11.5, color: REDWOOD.neutral600 }}>
+                        Context <b>{lineEffActive.contextCode || lineEffActive.voName}</b> ({lineEffActive.category}). Uploaded with each line on create; use Save to update a saved line.
+                      </div>
+                      <Table size="small" dataSource={lines} rowKey="key" pagination={false} scroll={{ x: 900, y: 340 }}
+                        locale={{ emptyText: 'No lines' }}
+                        columns={[
+                          { title: 'Item', dataIndex: 'itemNumber', width: 150, fixed: 'left', render: (v: string) => <Text strong style={{ fontSize: 12 }}>{v || '—'}</Text> },
+                          ...lineEffActive.segs.map(s => ({
+                            title: s.label, dataIndex: ['effVals', s.name], width: 150,
+                            render: (_: any, l: NewLine) => {
+                              const auto = s.name === effMeta?.lotSeg ? l.lot : s.name === effMeta?.costSeg ? (l.costUnit != null ? String(l.costUnit) : '') : /lot.?qty|qty/i.test(s.name) ? (l.qty != null ? String(l.qty) : '') : '';
+                              return <Input size="small" value={l.effVals?.[s.name] ?? ''} placeholder={auto ? `auto: ${auto}` : s.name}
+                                onChange={e => upd(l.key, { effVals: { ...l.effVals, [s.name]: e.target.value } })} />;
+                            },
+                          })),
+                          { title: '', key: 'save', width: 90, fixed: 'right', render: (_: any, l: NewLine) => (
+                            <Button size="small" type="link" icon={<SaveOutlined />} loading={lineEffSaving === l.key} disabled={!l.lineHref}
+                              onClick={() => saveLineEff(l)}>Save</Button>
+                          ) },
+                        ]} />
+                    </div>,
               },
               {
                 key: 'errors', label: vTab(<CloseCircleTwoTone twoToneColor={errorRows.length ? REDWOOD.error : '#bbb'} />, 'Errors', REDWOOD.error, errorRows.length, REDWOOD.error),
