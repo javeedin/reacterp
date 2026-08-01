@@ -780,18 +780,28 @@ const RevenueRecognition: React.FC = () => {
 
   const exportMatrix = () => {
     if (matrix.rows.length === 0) { message.warning('No schedules to export'); return; }
-    const data = matrix.rows.map((r: any) => {
+    // Mirror the on-screen matrix exactly: same column order, month cells show the
+    // accounted amount only (0 when not posted), single Periods column, Grand Total row.
+    const buildRow = (r: any): Record<string, any> => {
       const row: Record<string, any> = { 'Trx #': r.trxNumber, 'Unit': r.unit, 'Tenant': r.tenant };
-      matrix.months.forEach(m => { row[m.name] = Number(r.cells[m.name]?.amount) || 0; });
+      matrix.months.forEach(m => { const c = r.cells[m.name]; row[m.name] = (c && isAccounted(c)) ? (Number(c.amount) || 0) : 0; });
       row['Total Amount'] = r.contractTotal;   // contract amount (RENT_TOTAL)
       row['Scheduled'] = r.scheduledAmount;     // sum of generated/invoiced schedule lines
       row['Accounted'] = r.accountedAmount;
       row['Remaining'] = r.remainingAmount;
-      row['Accounted Periods'] = r.accountedPeriods;
-      row['Remaining Periods'] = r.remainingPeriods;
-      row['Total Periods'] = r.totalPeriods;
+      row['Periods (acct / rem / total)'] = `${r.accountedPeriods} / ${r.remainingPeriods} / ${r.totalPeriods}`;
       return row;
-    });
+    };
+    const data = matrix.rows.map(buildRow);
+    // Grand Total row — matches the table summary.
+    const grand: Record<string, any> = { 'Trx #': `Grand Total (${matrix.rows.length})`, 'Unit': '', 'Tenant': '' };
+    matrix.months.forEach(m => { grand[m.name] = matrix.rows.reduce((s: number, r: any) => { const c = r.cells[m.name]; return s + (c && isAccounted(c) ? (Number(c.amount) || 0) : 0); }, 0); });
+    grand['Total Amount'] = matrix.totals.contractTotal;
+    grand['Scheduled'] = matrix.totals.scheduledAmount;
+    grand['Accounted'] = matrix.totals.accountedAmount;
+    grand['Remaining'] = matrix.totals.remainingAmount;
+    grand['Periods (acct / rem / total)'] = `${matrix.totals.accountedPeriods} / ${matrix.totals.remainingPeriods} / ${matrix.totals.totalPeriods}`;
+    data.push(grand);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Schedule Matrix');
     saveWb(wb, 'revenue_matrix');
