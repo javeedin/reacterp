@@ -187,6 +187,22 @@ const parseEffContexts = (d: any, category: string): EffCtx[] => {
   return out;
 };
 
+// Known EFF contexts for this Fusion instance (from the flexfield setup) — used
+// as a fallback when the live `describe` metadata can't be parsed, so the create/
+// edit form still shows the fields and uploads with the correct VO/context.
+const FALLBACK_HDR_EFF: EffCtx[] = [
+  { category: 'DOO_HEADERS_ADD_INFO', voName: 'HeaderEffBTransaction__CodeprivateVO', contextCode: 'Transaction Code',
+    segs: [{ name: 'transactionCode', label: 'Transaction Code' }, { name: 'customer', label: 'customer' }] },
+];
+const FALLBACK_LINE_EFF: EffCtx[] = [
+  { category: 'DOO_FULFILL_LINES_ADD_INFO', voName: 'FulfillLineEffBaddinfoprivateVO', contextCode: 'addinfo',
+    segs: [{ name: 'itemcost', label: 'Item Cost' }, { name: 'itemlot', label: 'Item Lot' }, { name: 'lotqty', label: 'Lot Qty' }] },
+];
+const FALLBACK_LINE_EFF_META: EffMeta = {
+  category: 'DOO_FULFILL_LINES_ADD_INFO', voName: 'FulfillLineEffBaddinfoprivateVO', contextCode: 'addinfo',
+  lotSeg: 'itemlot', costSeg: 'itemcost', segs: FALLBACK_LINE_EFF[0].segs,
+};
+
 const statusTag = (s?: string, code?: string) => {
   if (!s && !code) return <Tag>—</Tag>;
   const up = String(code || s).toUpperCase();
@@ -1009,42 +1025,47 @@ const orderSelfHref = (o: any) => {
   return o?.OrderKey ? `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(o.OrderKey)}` : '';
 };
 
-// Header Additional Information (Extensible Flexfields) for the view page —
-// retrieves the order's additionalInformation child and, for each row, the
-// nested HeaderEffB<Context>privateVO segment values.
+// Read a record's additionalInformation child and, for each row, the nested
+// EffB<Context>privateVO segment values. Works for both order headers and lines.
+interface EffRow { context: string; segs: { k: string; v: any }[]; href: string }
+const fetchEffRows = async (baseHref: string): Promise<EffRow[]> => {
+  const aiUrl = `${baseHref}/child/additionalInformation`;
+  const r = await fetch(`${aiUrl}?onlyData=false&limit=200`, { headers: FUSION_HDRS });
+  if (!r.ok) throw new Error(`HTTP ${r.status} on additionalInformation`);
+  const d = await r.json();
+  const items: any[] = Array.isArray(d) ? d : (d.items ?? []);
+  const out: EffRow[] = [];
+  for (const it of items) {
+    const link = (it.links ?? []).find((x: any) => /EffB.+privateVO$/i.test(x.name || x.rel || ''));
+    if (!link?.href) continue;
+    const cr = await fetch(`${fusionHref(link.href)}?onlyData=true&limit=200`, { headers: FUSION_HDRS });
+    if (!cr.ok) continue;
+    const cd = await cr.json();
+    const segRows: any[] = Array.isArray(cd) ? cd : (cd.items ?? []);
+    for (const seg of segRows) {
+      const segs = Object.entries(seg)
+        .filter(([k, v]) => !/^links$|Id$|^ContextCode$|^_|^CategoryCode$/i.test(k) && v != null && v !== '')
+        .map(([k, v]) => ({ k, v }));
+      const ctxName = seg.ContextCode ?? (link.name || '').replace(/^.*EffB/i, '').replace(/privateVO$/i, '').replace(/_+/g, ' ').trim();
+      out.push({ context: ctxName || 'Additional Information', segs, href: fusionHref(link.href) });
+    }
+  }
+  return out;
+};
+
+// Header Additional Information (EFF) for the view page.
 const HeaderEffView: React.FC<{ order: any }> = ({ order }) => {
   const base = orderSelfHref(order);
   const aiUrl = base ? `${base}/child/additionalInformation` : '';
-  const [rows, setRows] = useState<{ context: string; segs: { k: string; v: any }[]; href: string }[] | null>(null);
+  const [rows, setRows] = useState<EffRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
   const load = useCallback(async () => {
-    if (!aiUrl) { setErr('No order self link available'); return; }
+    if (!base) { setErr('No order self link available'); return; }
     setLoading(true); setErr('');
-    try {
-      const r = await fetch(`${aiUrl}?onlyData=false&limit=200`, { headers: FUSION_HDRS });
-      if (!r.ok) throw new Error(`HTTP ${r.status} on additionalInformation`);
-      const d = await r.json();
-      const items: any[] = Array.isArray(d) ? d : (d.items ?? []);
-      const out: { context: string; segs: { k: string; v: any }[]; href: string }[] = [];
-      for (const it of items) {
-        const link = (it.links ?? []).find((x: any) => /EffB.+privateVO$/i.test(x.name || x.rel || ''));
-        if (!link?.href) continue;
-        const cr = await fetch(`${fusionHref(link.href)}?onlyData=true&limit=200`, { headers: FUSION_HDRS });
-        if (!cr.ok) continue;
-        const cd = await cr.json();
-        const segRows: any[] = Array.isArray(cd) ? cd : (cd.items ?? []);
-        for (const seg of segRows) {
-          const segs = Object.entries(seg)
-            .filter(([k, v]) => !/^links$|Id$|^ContextCode$|^_|^CategoryCode$/i.test(k) && v != null && v !== '')
-            .map(([k, v]) => ({ k, v }));
-          const ctxName = seg.ContextCode ?? (link.name || '').replace(/^.*EffB/i, '').replace(/privateVO$/i, '').replace(/_+/g, ' ').trim();
-          out.push({ context: ctxName || 'Additional Information', segs, href: fusionHref(link.href) });
-        }
-      }
-      setRows(out);
-    } catch (e: any) { setErr(e?.message ?? String(e)); } finally { setLoading(false); }
-  }, [aiUrl]);
+    try { setRows(await fetchEffRows(base)); }
+    catch (e: any) { setErr(e?.message ?? String(e)); } finally { setLoading(false); }
+  }, [base]);
   useEffect(() => { load(); }, [load]);
 
   return (
@@ -1076,6 +1097,54 @@ const HeaderEffView: React.FC<{ order: any }> = ({ order }) => {
               </Col>
             ))}
           </Row>}
+    </div>
+  );
+};
+
+// Line-level Additional Information (EFF) — reads each line's additionalInformation
+// child + nested FulfillLineEffB<Context>privateVO segments (itemcost/itemlot/lotqty…).
+const LineEffView: React.FC<{ lines: any[] }> = ({ lines }) => {
+  const [rows, setRows] = useState<{ line: string; item: string; context: string; segs: { k: string; v: any }[] }[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const load = useCallback(async () => {
+    setLoading(true); setErr('');
+    try {
+      const out: { line: string; item: string; context: string; segs: { k: string; v: any }[] }[] = [];
+      for (const l of lines) {
+        const self = (l.links ?? []).find((x: any) => x.rel === 'self')?.href;
+        if (!self) continue;
+        let effRows: EffRow[] = [];
+        try { effRows = await fetchEffRows(fusionHref(self)); } catch { /* line has no EFF */ }
+        for (const er of effRows) out.push({
+          line: String(pf(l, ['LineNumber', 'SourceTransactionLineNumber']) ?? ''),
+          item: String(pf(l, ['ProductNumber', 'Item', 'ItemNumber']) ?? ''),
+          context: er.context, segs: er.segs,
+        });
+      }
+      setRows(out);
+    } catch (e: any) { setErr(e?.message ?? String(e)); } finally { setLoading(false); }
+  }, [lines]);
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
+        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>Reload</Button>
+      </div>
+      {loading ? <div style={{ textAlign: 'center', padding: 30 }}><Spin /></div>
+        : err ? <div style={{ color: REDWOOD.error, fontSize: 12, padding: 10 }}><InfoCircleOutlined style={{ marginRight: 6 }} />{err}</div>
+        : !rows || rows.length === 0 ? <Empty description="No line additional information" style={{ padding: 20 }} />
+        : <Table size="small" pagination={false} rowKey={(_, i) => String(i)}
+            dataSource={rows}
+            columns={[
+              { title: 'Line', dataIndex: 'line', width: 70 },
+              { title: 'Item', dataIndex: 'item', width: 160, ellipsis: true },
+              { title: 'Context', dataIndex: 'context', width: 150, render: (v: string) => <Tag color="purple">{v}</Tag> },
+              { title: 'Segments', dataIndex: 'segs', render: (segs: { k: string; v: any }[]) => (
+                <Space size={[8, 4]} wrap>{segs.map(s => <Tag key={s.k} style={{ margin: 0 }}><b>{humanize(s.k)}:</b> {typeof s.v === 'object' ? JSON.stringify(s.v) : String(s.v)}</Tag>)}</Space>
+              ) },
+            ]} scroll={{ x: 'max-content' }} />}
     </div>
   );
 };
@@ -1440,6 +1509,11 @@ const OrderView: React.FC<{ order: any; onCopy?: (order: any, lines: any[]) => v
             children: lines.length === 0
               ? <Empty description="No lines" style={{ padding: 30 }} />
               : <ActualCostingTab lines={lines} currency={order.TransactionalCurrencyCode ?? order.AppliedCurrencyCode ?? order.TransactionalCurrencyName} />,
+          },
+          {
+            key: 'lineAddl',
+            label: <span><ProfileOutlined style={{ marginRight: 5 }} />Additional Info</span>,
+            children: lines.length === 0 ? <Empty description="No lines" style={{ padding: 30 }} /> : <LineEffView lines={lines} />,
           },
           ...childTabItems,
         ]} />
@@ -3748,12 +3822,12 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     const desc = (poly: string) => `${FUSION_BASE}/salesOrdersForOrderHub/describe?polymorphicType=${encodeURIComponent(poly)}`;
     fetch(desc('salesOrdersForOrderHub.lines.additionalInformation:DOO_FULFILL_LINES_ADD_INFO'), { headers: FUSION_HDRS })
       .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
-      .then(d => { setEffDescribe(p => ({ ...p, line: d })); setEffMeta(parseEffDescribe(d)); setLineEffCtxs(parseEffContexts(d, 'DOO_FULFILL_LINES_ADD_INFO')); })
-      .catch(() => { setEffMeta(null); setLineEffCtxs([]); });
+      .then(d => { setEffDescribe(p => ({ ...p, line: d })); const ctx = parseEffContexts(d, 'DOO_FULFILL_LINES_ADD_INFO'); setEffMeta(parseEffDescribe(d) ?? FALLBACK_LINE_EFF_META); setLineEffCtxs(ctx.length ? ctx : FALLBACK_LINE_EFF); })
+      .catch(() => { setEffMeta(FALLBACK_LINE_EFF_META); setLineEffCtxs(FALLBACK_LINE_EFF); });
     fetch(desc('salesOrdersForOrderHub.additionalInformation:DOO_HEADERS_ADD_INFO'), { headers: FUSION_HDRS })
       .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
-      .then(d => { setEffDescribe(p => ({ ...p, header: d })); const ctx = parseEffContexts(d, 'DOO_HEADERS_ADD_INFO'); setHdrEffCtxs(ctx); setHdrEffCtxSel(prev => prev ?? ctx[0]?.voName); })
-      .catch(() => setHdrEffCtxs([]));
+      .then(d => { setEffDescribe(p => ({ ...p, header: d })); const ctx = parseEffContexts(d, 'DOO_HEADERS_ADD_INFO'); const use = ctx.length ? ctx : FALLBACK_HDR_EFF; setHdrEffCtxs(use); setHdrEffCtxSel(prev => prev ?? use[0]?.voName); })
+      .catch(() => { setHdrEffCtxs(FALLBACK_HDR_EFF); setHdrEffCtxSel(prev => prev ?? FALLBACK_HDR_EFF[0]?.voName); });
   }, []);
   const hdrEffActive = hdrEffCtxs.find(c => c.voName === hdrEffCtxSel);
   // Build the header additionalInformation child from the filled segments.
@@ -3775,6 +3849,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     const seg: Record<string, any> = { ContextCode: contextCode };
     if (effMeta?.lotSeg && l.lot) seg[effMeta.lotSeg] = l.lot;
     if (effMeta?.costSeg && l.costUnit != null) seg[effMeta.costSeg] = l.costUnit;
+    // Auto-map ordered qty → the lot-quantity segment (lotqty) when present.
+    const qtySeg = (ctx?.segs ?? effMeta?.segs ?? []).find(s => /lot.?qty|qty/i.test(s.name))?.name;
+    if (qtySeg && l.qty != null && seg[qtySeg] == null) seg[qtySeg] = l.qty;
     if (l.effVals) for (const [k, v] of Object.entries(l.effVals)) { if (v != null && v !== '') seg[k] = v; }
     if (Object.keys(seg).length <= 1) return null; // only ContextCode → nothing to send
     return { CategoryCode: category, [voName]: [seg] };
