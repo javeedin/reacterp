@@ -6062,7 +6062,18 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             { title: 'Cost', dataIndex: 'cost', align: 'right', render: v => v == null ? '—' : fmtAmount(num(v), ccy) },
             { title: '', align: 'right', render: (_, r: any) => <Button size="small" type="primary" style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
                 onClick={() => { const lp = lotPick!; setLotPick(null); applyItemToLine(lp.key, { ItemNumber: lp.item }, lp.rows, r.lot); }}>Select</Button> },
-          ]} />
+          ]}
+          summary={(rows) => {
+            const total = rows.reduce((s: number, r: any) => s + (lotPick?.onh?.[r.lot]?.qty ?? 0), 0);
+            return (
+              <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+                <Table.Summary.Cell index={0} colSpan={3}><Text strong>Total on-hand ({rows.length} lot{rows.length !== 1 ? 's' : ''})</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={3} align="right"><Text strong style={{ color: REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{lotPick?.qtyLoading ? <Spin size="small" /> : fmtQty(total)}</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={4} />
+                <Table.Summary.Cell index={5} />
+              </Table.Summary.Row>
+            );
+          }} />
       </Modal>
 
       <Modal open={preview} onCancel={() => setPreview(false)} maskClosable={false} width={760}
