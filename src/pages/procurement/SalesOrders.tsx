@@ -3949,7 +3949,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   // Save one line's EFF directly to Fusion (edit mode / saved line).
   const saveLineEff = async (l: NewLine) => {
     if (!lineEffActive) { message.warning('No line EFF context'); return; }
-    const base = l.lineHref;
+    const base = l.lineHref ? fusionHref(l.lineHref) : '';
     if (!base) { message.warning('Save the order first, then update line additional info'); return; }
     const vals: Record<string, any> = {};
     lineEffActive.segs.forEach(s => {
@@ -4121,6 +4121,27 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       finally { setRefreshing(false); }
     })();
   }, [editOrder, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // On edit: retrieve each saved line's Additional Information (EFF) and prefill
+  // the per-line segment inputs (lines → additionalInformation → FulfillLineEffB VO).
+  // Guarded on effVals == null so it runs once per (re)load, not on every keystroke.
+  useEffect(() => {
+    if (!editMode) return;
+    const todo = lines.filter(l => l.lineHref && l.existing && l.effVals == null);
+    if (!todo.length) return;
+    (async () => {
+      for (const l of todo) {
+        const vals: Record<string, string> = {};
+        try {
+          const effRows = await fetchEffRows(fusionHref(l.lineHref!));
+          const first = effRows.find(r => r.segs.length);
+          if (first) first.segs.forEach(s => { vals[s.k] = typeof s.v === 'object' ? JSON.stringify(s.v) : String(s.v); });
+        } catch { /* line has no EFF */ }
+        // Mark effVals (even if empty {}) so this line isn't re-fetched next render.
+        setLines(prev => prev.map(x => x.key === l.key && x.effVals == null ? { ...x, effVals: vals } : x));
+      }
+    })();
+  }, [lines, editMode]);
 
   // Tax code often comes back null on the line even when tax applies. Once the BU's
   // tax codes load, back-fill any line that has a derived tax % but no recognised
