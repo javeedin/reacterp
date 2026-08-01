@@ -1030,9 +1030,26 @@ const orderSelfHref = (o: any) => {
   return o?.OrderKey ? `${FUSION_BASE}/salesOrdersForOrderHub/${encodeURIComponent(o.OrderKey)}` : '';
 };
 
+// Real CategoryCode / ContextCode discovered from live records, keyed by the
+// flexfield code (DOO_HEADERS_ADD_INFO / DOO_FULFILL_LINES_ADD_INFO). Used when
+// writing EFF so we send the exact discriminator Fusion actually stored — the
+// hardcoded guesses were what triggered the "invalid Category" save error.
+const EFF_CAT_CACHE: Record<string, { category?: string; context?: string }> = {};
+const flexOfVo = (voName?: string) => /^Fulfill/i.test(voName || '') ? 'DOO_FULFILL_LINES_ADD_INFO' : /^Header/i.test(voName || '') ? 'DOO_HEADERS_ADD_INFO' : '';
+const learnEff = (flex: string, category?: string, context?: string) => {
+  if (!flex) return;
+  const e = EFF_CAT_CACHE[flex] ?? (EFF_CAT_CACHE[flex] = {});
+  if (category) e.category = String(category);
+  if (context) e.context = String(context);
+};
+// The CategoryCode/ContextCode to send for a context — the real learned value
+// when we've seen it on a live record, else the configured (guessed) value.
+const effCategoryFor = (ctx: { category: string }) => EFF_CAT_CACHE[ctx.category]?.category ?? ctx.category;
+const effContextFor = (ctx: { category: string; contextCode: string }) => EFF_CAT_CACHE[ctx.category]?.context ?? ctx.contextCode;
+
 // Read a record's additionalInformation child and, for each row, the nested
 // EffB<Context>privateVO segment values. Works for both order headers and lines.
-interface EffRow { context: string; segs: { k: string; v: any }[]; href: string }
+interface EffRow { context: string; category?: string; segs: { k: string; v: any }[]; href: string }
 const fetchEffRows = async (baseHref: string): Promise<EffRow[]> => {
   const aiUrl = `${baseHref}/child/additionalInformation`;
   const r = await fetch(`${aiUrl}?onlyData=false&limit=200`, { headers: FUSION_HDRS });
@@ -1043,16 +1060,19 @@ const fetchEffRows = async (baseHref: string): Promise<EffRow[]> => {
   for (const it of items) {
     const link = (it.links ?? []).find((x: any) => /EffB.+privateVO$/i.test(x.name || x.rel || ''));
     if (!link?.href) continue;
+    const voName = (link.name || '').match(/EffB.+privateVO$/i)?.[0] ?? link.name;
     const cr = await fetch(`${fusionHref(link.href)}?onlyData=true&limit=200`, { headers: FUSION_HDRS });
     if (!cr.ok) continue;
     const cd = await cr.json();
     const segRows: any[] = Array.isArray(cd) ? cd : (cd.items ?? []);
     for (const seg of segRows) {
+      // Learn the real discriminator values from this live record.
+      learnEff(flexOfVo(voName), it.CategoryCode, seg.ContextCode);
       const segs = Object.entries(seg)
         .filter(([k, v]) => isEffSegment(k) && v != null && v !== '')
         .map(([k, v]) => ({ k, v }));
       const ctxName = seg.ContextCode ?? (link.name || '').replace(/^.*EffB/i, '').replace(/privateVO$/i, '').replace(/_+/g, ' ').trim();
-      out.push({ context: ctxName || 'Additional Information', segs, href: fusionHref(link.href) });
+      out.push({ context: ctxName || 'Additional Information', category: it.CategoryCode, segs, href: fusionHref(link.href) });
     }
   }
   return out;
@@ -1076,10 +1096,11 @@ const writeEffToRecord = async (baseHref: string, ctx: EffCtx, vals: Record<stri
       break;
     }
   }
+  const ctxCode = effContextFor(ctx), catCode = effCategoryFor(ctx);
   let resp: Response;
   if (voHref) resp = await fetch(voHref, { method: 'PATCH', headers: EFF_JSON_HDRS, body: JSON.stringify(vals) });
-  else if (aiHref) resp = await fetch(`${aiHref}/child/${ctx.voName}`, { method: 'POST', headers: EFF_JSON_HDRS, body: JSON.stringify({ ContextCode: ctx.contextCode, ...vals }) });
-  else resp = await fetch(`${baseHref}/child/additionalInformation`, { method: 'POST', headers: EFF_JSON_HDRS, body: JSON.stringify({ CategoryCode: ctx.category, [ctx.voName]: [{ ContextCode: ctx.contextCode, ...vals }] }) });
+  else if (aiHref) resp = await fetch(`${aiHref}/child/${ctx.voName}`, { method: 'POST', headers: EFF_JSON_HDRS, body: JSON.stringify({ ContextCode: ctxCode, ...vals }) });
+  else resp = await fetch(`${baseHref}/child/additionalInformation`, { method: 'POST', headers: EFF_JSON_HDRS, body: JSON.stringify({ CategoryCode: catCode, [ctx.voName]: [{ ContextCode: ctxCode, ...vals }] }) });
   const txt = await resp.text();
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${txt.slice(0, 300)}`);
 };
@@ -3148,7 +3169,7 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
 // tax) so a draft round-trips exactly. Tolerant loader accepts a bare
 // { header, lines } too.
 const SO_DRAFT_TYPE = 'reacterp.salesOrderDraft';
-interface SoDraft { header: OrderHeader; lines: NewLine[]; discAmt?: number; expAmt?: number }
+interface SoDraft { header: OrderHeader; lines: NewLine[]; discAmt?: number; expAmt?: number; defaultTaxCode?: string }
 const downloadJson = (obj: any, filename: string) => {
   const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -3887,10 +3908,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   // Build the header additionalInformation child from the filled segments.
   const effHeaderChild = () => {
     if (!hdrEffActive) return null;
-    const seg: Record<string, any> = { ContextCode: hdrEffActive.contextCode };
+    const seg: Record<string, any> = { ContextCode: effContextFor(hdrEffActive) };
     hdrEffActive.segs.forEach(s => { const v = hdrEffVals[s.name]; if (v != null && v !== '') seg[s.name] = v; });
     if (Object.keys(seg).length <= 1) return null;
-    return { CategoryCode: hdrEffActive.category, [hdrEffActive.voName]: [seg] };
+    return { CategoryCode: effCategoryFor(hdrEffActive), [hdrEffActive.voName]: [seg] };
   };
   // Save the header EFF against an existing order (edit mode) — PATCH the saved
   // segment row in place, else create the additionalInformation + nested VO.
@@ -3908,10 +3929,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         r = await fetch(hdrEffVoHref, { method: 'PATCH', headers: { ...FUSION_HDRS, 'Content-Type': 'application/vnd.oracle.adf.resourceitem+json' }, body: JSON.stringify(segVals) });
       } else if (hdrEffAiHref) {
         // Category row exists but no segment row yet — create the nested VO row.
-        r = await fetch(`${hdrEffAiHref}/child/${hdrEffActive.voName}`, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/vnd.oracle.adf.resourceitem+json' }, body: JSON.stringify({ ContextCode: hdrEffActive.contextCode, ...segVals }) });
+        r = await fetch(`${hdrEffAiHref}/child/${hdrEffActive.voName}`, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/vnd.oracle.adf.resourceitem+json' }, body: JSON.stringify({ ContextCode: effContextFor(hdrEffActive), ...segVals }) });
       } else if (base) {
         // Nothing yet — create the category row with the nested segment row inline.
-        r = await fetch(`${base}/child/additionalInformation`, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/vnd.oracle.adf.resourceitem+json' }, body: JSON.stringify({ CategoryCode: hdrEffActive.category, [hdrEffActive.voName]: [{ ContextCode: hdrEffActive.contextCode, ...segVals }] }) });
+        r = await fetch(`${base}/child/additionalInformation`, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/vnd.oracle.adf.resourceitem+json' }, body: JSON.stringify({ CategoryCode: effCategoryFor(hdrEffActive), [hdrEffActive.voName]: [{ ContextCode: effContextFor(hdrEffActive), ...segVals }] }) });
       } else { message.error('No order reference to save against'); setHdrEffSaving(false); return; }
       const txt = await r.text();
       if (!r.ok) throw new Error(`HTTP ${r.status}: ${txt.slice(0, 300)}`);
@@ -3930,8 +3951,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const effLineChild = (l: NewLine) => {
     const ctx = lineEffCtxs.find(c => c.voName === effMeta?.voName) ?? lineEffCtxs[0];
     const voName = effMeta?.voName ?? ctx?.voName;
-    const category = effMeta?.category ?? ctx?.category ?? 'DOO_FULFILL_LINES_ADD_INFO';
-    const contextCode = effMeta?.contextCode ?? ctx?.contextCode ?? '';
+    const flexCat = effMeta?.category ?? ctx?.category ?? 'DOO_FULFILL_LINES_ADD_INFO';
+    const category = effCategoryFor({ category: flexCat });
+    const contextCode = effContextFor({ category: flexCat, contextCode: effMeta?.contextCode ?? ctx?.contextCode ?? '' });
     if (!voName) return null;
     const seg: Record<string, any> = { ContextCode: contextCode };
     if (effMeta?.lotSeg && l.lot) seg[effMeta.lotSeg] = l.lot;
@@ -3987,6 +4009,17 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       </div>,
     });
   };
+  // Header-level default tax code — applied to every line when picked, and
+  // inherited by new lines. New lines also default to it automatically.
+  const [defaultTaxCode, setDefaultTaxCode] = useState<string | undefined>(initialDraft?.defaultTaxCode);
+  const applyDefaultTax = (code?: string) => {
+    setDefaultTaxCode(code);
+    const opt = taxOptions.find(o => o.value === code);
+    setLines(prev => prev.map(l => l.canceled ? l : {
+      ...l, taxCode: code || undefined, taxPct: opt ? opt.pct : undefined,
+      taxAmount: opt ? round2(num(l.qty) * num(l.unitPrice) * opt.pct / 100) : 0,
+    }));
+  };
   const [discAmt, setDiscAmt] = useState(initialDraft?.discAmt ?? 0);
   const [expAmt, setExpAmt] = useState(initialDraft?.expAmt ?? 0);
   const [lineSearch, setLineSearch] = useState<Record<string, { loading?: boolean; tooShort?: boolean; opts: any[] }>>({});
@@ -4025,6 +4058,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           if (!link?.href) continue;
           const aiSelf = (it.links ?? []).find((x: any) => x.rel === 'self')?.href;
           if (aiSelf) setHdrEffAiHref(fusionHref(aiSelf));
+          learnEff('DOO_HEADERS_ADD_INFO', it.CategoryCode);   // real discriminator for writes
           const cr = await fetch(`${fusionHref(link.href)}?onlyData=false&limit=200`, { headers: FUSION_HDRS });
           if (!cr.ok) continue;
           const cd = await cr.json();
@@ -4032,6 +4066,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           if (!seg) continue;
           const voSelf = (seg.links ?? []).find((x: any) => x.rel === 'self')?.href;
           if (voSelf) setHdrEffVoHref(fusionHref(voSelf));
+          learnEff('DOO_HEADERS_ADD_INFO', it.CategoryCode, seg.ContextCode);
           const voName = (link.name || '').match(/EffB.+privateVO$/i)?.[0];
           const vals: Record<string, string> = {};
           for (const [k, v] of Object.entries(seg)) {
@@ -4214,7 +4249,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         key: `${it.ItemNumber}-${prev.length + i}`, itemNumber: it.ItemNumber,
         description: it.ItemDescription, uom: pf(it, ['PrimaryUOMValue', 'PrimaryUOMCode', 'UOMCode']),
         qty: num(it._qty), unitPrice: it._price != null ? num(it._price) : num(it._cost),
-        costUnit: num(it._cost), taxCode: it._taxCode, taxPct: it._taxPct != null ? num(it._taxPct) : undefined, taxAmount: num(it._tax),
+        costUnit: num(it._cost),
+        // Prefer the item's own tax; fall back to the header default tax code.
+        taxCode: it._taxCode ?? defaultTaxCode,
+        taxPct: it._taxPct != null ? num(it._taxPct) : (it._taxCode ? undefined : taxOptions.find(o => o.value === defaultTaxCode)?.pct),
+        taxAmount: num(it._tax),
         lot: it._lot, lots: (it._lots && it._lots.length) ? it._lots : (it._lot ? [it._lot] : []),
         qoh: it._qoh != null ? num(it._qoh) : undefined,
       }));
@@ -4462,7 +4501,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   };
 
   // "New Line" — append a blank, editable line the user fills via inline search.
-  const addBlankLine = () => setLines(prev => [...prev, { key: `new-${Date.now()}-${prev.length}`, itemNumber: '', qty: 0, unitPrice: 0 }]);
+  const addBlankLine = () => { const opt = taxOptions.find(o => o.value === defaultTaxCode); setLines(prev => [...prev, { key: `new-${Date.now()}-${prev.length}`, itemNumber: '', qty: 0, unitPrice: 0, ...(defaultTaxCode ? { taxCode: defaultTaxCode, taxPct: opt?.pct } : {}) }]); };
 
   // Debounced type-ahead for a blank line's item cell (by code or description).
   // Query only after 3 chars; when many rows come back, open a filter popup.
@@ -4851,6 +4890,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     finally { setStatusLoading(false); }
   };
 
+  // Strip all EFF additionalInformation from a payload — used to retry a save when
+  // Fusion rejects the flexfield category, so the order itself still goes through.
+  const stripEff = (p: any) => { const c = JSON.parse(JSON.stringify(p)); delete c.additionalInformation; (c.lines ?? []).forEach((l: any) => { delete l.additionalInformation; }); return c; };
+  const isEffCategoryError = (t: string) => /category\s*code|invalid\s*category|additionalinformation|is\s*category/i.test(t || '');
+
   const save = async () => {
     if (lines.length === 0) { message.warning('Add at least one line'); return; }
     setPosting(true); setSaveError(null); setOrderErrors([]);
@@ -4863,10 +4907,21 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       setLines(prev => prev.map(l => ({ ...l, error: byKey[l.key]?.join('\n\n') })));
       setOrderErrors(msgs);
     };
+    let effSkipped = false;
     try {
-      const r = await fetch(SO_CREATE_URL, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: payloadStr });
-      const text = await r.text(); let data: any = null, pretty = text;
-      try { data = JSON.parse(text); pretty = JSON.stringify(data, null, 2); } catch { /* raw */ }
+      const doPost = async (body: string) => {
+        const rr = await fetch(SO_CREATE_URL, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body });
+        const t = await rr.text(); let dd: any = null, pp = t;
+        try { dd = JSON.parse(t); pp = JSON.stringify(dd, null, 2); } catch { /* raw */ }
+        return { r: rr, text: t, data: dd, pretty: pp };
+      };
+      let res = await doPost(payloadStr);
+      // If the flexfield category was rejected, retry once without EFF so the order saves.
+      if ((!res.r.ok || !res.data?.OrderNumber) && isEffCategoryError(res.text) && /additionalInformation/.test(payloadStr)) {
+        const retry = await doPost(JSON.stringify(stripEff(buildPayload())));
+        if (retry.r.ok && retry.data?.OrderNumber) { res = retry; effSkipped = true; }
+      }
+      const { r, text, data, pretty } = res;
       setLastResponse(`HTTP ${r.status}\n\n${pretty}`);
 
       if (r.ok && data?.OrderNumber) {
@@ -4888,6 +4943,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         setOrderStatus(String(data.StatusCode ?? 'DOO_DRAFT'));
         setConfirmed(String(data.StatusCode ?? '').toUpperCase() !== 'DOO_DRAFT' && String(data.SubmittedFlag) === 'true');
         message.success(`Sales order ${data.OrderNumber} saved as draft`);
+        if (effSkipped) message.warning('Additional Information (EFF) was skipped — Fusion rejected the flexfield category. Open an existing order\'s Additional Info once (so the correct category code is learned), then use “Save Additional Info” to add it.', 8);
         if (orderKey != null) refreshLineStatuses(String(orderKey));
       } else {
         // Failure — map errors onto lines + Errors tab, write the log, show the dialog.
@@ -5463,6 +5519,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                     <Form.Item label="Sub Inventory" name="subinventory" style={{ marginBottom: 10 }}>
                       <Select showSearch notFoundContent="Pick a warehouse" options={subs.map(s => ({ value: s, label: s }))} /></Form.Item>
                     <Form.Item label="Base Currency" name="baseCurrency" style={{ marginBottom: 10 }}><Input readOnly placeholder="—" /></Form.Item>
+                    <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 2 }}>Default Tax Code</div>
+                    <Select size="small" showSearch allowClear style={{ width: '100%' }} value={defaultTaxCode} placeholder={taxOptions.length ? 'Apply to all lines' : 'Select a BU first'}
+                      options={taxOptions} optionFilterProp="value" popupMatchSelectWidth={false} onChange={applyDefaultTax}
+                      notFoundContent={taxOptions.length ? undefined : 'No tax codes'} />
                   </VSection></Col>
 
                   {/* S4 — Totals */}
