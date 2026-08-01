@@ -239,6 +239,11 @@ interface BankAcctProgressRow {
   drAccountDesc?: string;
   crAccountDesc?: string;
   bu:            string;
+  // Rate + currencies so the preview can show entered (txn currency) vs accounted
+  // (ledger currency = entered × rate) amounts on each journal line.
+  rate?:         number;
+  enteredCurrency?: string;
+  ledgerCurrency?:  string;
   status:        'pending' | 'running' | 'success' | 'error' | 'skipped';
   message?:      string;
 }
@@ -743,7 +748,7 @@ const ExternalTxnForm: React.FC<{
       // Fetch existing attachments for edit mode — moved to dedicated effect below
     } else {
       form.resetFields();
-      form.setFieldsValue({ transactionDate: dayjs(), valueDate: dayjs(), bankConversionDate: dayjs(), transactionDirection: 'CR', transactionType: 'External Transaction' });
+      form.setFieldsValue({ transactionDate: dayjs(), valueDate: dayjs(), clearedDate: dayjs(), bankConversionDate: dayjs(), transactionDirection: 'CR', transactionType: 'External Transaction' });
       setTxnDirection('CR');
       setAssetAcctDesc('');
       setOffsetAcctDesc('');
@@ -1577,8 +1582,8 @@ const ExternalTxnForm: React.FC<{
                   <DatePicker format="D-MMM-YYYY" variant="borderless" disabled={(isEdit && !editingEnabled) || !bankSelected || (saved && !editingEnabled)} style={{ width: '100%' }}
                     onChange={(date: Dayjs | null) => {
                       if (!date || (isEdit && !editingEnabled) || saved) return;
-                      // Always copy transaction date → conversion date
-                      form.setFieldValue('bankConversionDate', date);
+                      // Default the transaction date into conversion, value and cleared dates.
+                      form.setFieldsValue({ bankConversionDate: date, valueDate: date, clearedDate: date });
                     }}
                   />
                 </Form.Item>
@@ -3105,6 +3110,9 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
         crAccount,
         crAccountDesc: acctDesc(crAccount),
         bu:            t.businessUnitName || '',
+        rate:          t.bankConversionRate || 1,
+        enteredCurrency: t.currencyCode || 'AED',
+        ledgerCurrency:  'AED',
         status:        alreadyAccounted ? 'skipped' : missingAccounts ? 'error' : 'pending',
         message:       alreadyAccounted ? 'Already accounted — skipped' : missingAccounts ? 'Missing asset/offset account' : undefined,
       };
@@ -3122,6 +3130,54 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
         r.extTxnId === row.extTxnId ? { ...r, drAccountDesc: drDesc, crAccountDesc: crDesc } : r
       ));
     });
+  };
+
+  // Full journal preview for a transaction row — the two balanced lines (DR/CR)
+  // with entered (txn currency) and accounted (ledger currency = entered × rate).
+  const renderAcctJournal = (r: BankAcctProgressRow) => {
+    const rate = r.rate ?? 1;
+    const entCcy = r.enteredCurrency ?? r.currency;
+    const ledCcy = r.ledgerCurrency ?? 'AED';
+    const acc = Math.round(r.amount * rate * 100) / 100;
+    const cell: React.CSSProperties = { border: '1px solid #e5e7eb', padding: '3px 8px', fontSize: 11, fontFamily: 'monospace' };
+    const hd: React.CSSProperties = { border: '1px solid #e5e7eb', padding: '3px 8px', fontSize: 10, fontWeight: 600 };
+    const lines = [
+      { dc: 'DR', account: r.drAccount, desc: r.drAccountDesc, entDr: r.amount, entCr: 0, accDr: acc, accCr: 0 },
+      { dc: 'CR', account: r.crAccount, desc: r.crAccountDesc, entDr: 0, entCr: r.amount, accDr: 0, accCr: acc },
+    ];
+    return (
+      <table style={{ width: '100%', borderCollapse: 'collapse', margin: '2px 0' }}>
+        <thead>
+          <tr style={{ background: '#f9fafb' }}>
+            <th style={{ ...hd, textAlign: 'left', width: 44 }}>Dr/Cr</th>
+            <th style={{ ...hd, textAlign: 'left' }}>Account</th>
+            <th style={{ ...hd, textAlign: 'right', background: '#e6f4ff', color: '#0572CE' }}>Entered DR ({entCcy})</th>
+            <th style={{ ...hd, textAlign: 'right', background: '#e6f4ff', color: '#389e0d' }}>Entered CR ({entCcy})</th>
+            <th style={{ ...hd, textAlign: 'right', background: '#f6ffed', color: '#0572CE' }}>Accounted DR ({ledCcy})</th>
+            <th style={{ ...hd, textAlign: 'right', background: '#f6ffed', color: '#389e0d' }}>Accounted CR ({ledCcy})</th>
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map((ln, i) => (
+            <tr key={i}>
+              <td style={{ ...cell, color: ln.dc === 'DR' ? '#c74634' : '#1d7b4d', fontWeight: 600 }}>{ln.dc}</td>
+              <td style={cell}><div>{ln.account || '—'}</div>{ln.desc && <div style={{ fontSize: 9, color: REDWOOD.neutral600 }}>{ln.desc}</div>}</td>
+              <td style={{ ...cell, textAlign: 'right' }}>{ln.entDr ? fmtAmount(ln.entDr, entCcy) : '—'}</td>
+              <td style={{ ...cell, textAlign: 'right' }}>{ln.entCr ? fmtAmount(ln.entCr, entCcy) : '—'}</td>
+              <td style={{ ...cell, textAlign: 'right' }}>{ln.accDr ? fmtAmount(ln.accDr, ledCcy) : '—'}</td>
+              <td style={{ ...cell, textAlign: 'right' }}>{ln.accCr ? fmtAmount(ln.accCr, ledCcy) : '—'}</td>
+            </tr>
+          ))}
+          <tr style={{ background: '#fafafa', fontWeight: 700 }}>
+            <td style={cell} colSpan={2}>Totals · rate {rate}{ledCcy !== entCcy ? ` · period ${r.periodName}` : ''}</td>
+            <td style={{ ...cell, textAlign: 'right' }}>{fmtAmount(r.amount, entCcy)}</td>
+            <td style={{ ...cell, textAlign: 'right' }}>{fmtAmount(r.amount, entCcy)}</td>
+            <td style={{ ...cell, textAlign: 'right' }}>{fmtAmount(acc, ledCcy)}</td>
+            <td style={{ ...cell, textAlign: 'right' }}>{fmtAmount(acc, ledCcy)}</td>
+          </tr>
+        </tbody>
+      </table>
+    );
   };
 
   const runCreateAccounting = async () => {
@@ -3331,6 +3387,9 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
         crAccount,
         crAccountDesc: acctDesc(crAccount),
         bu:            txn.businessUnitName || '',
+        rate:          txn.bankConversionRate || 1,
+        enteredCurrency: txn.currencyCode || 'AED',
+        ledgerCurrency:  'AED',
         status:        'pending' as const,
       };
     });
@@ -4379,6 +4438,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
             rowKey="extTxnId"
             size="small"
             pagination={false}
+            expandable={{ expandedRowRender: renderAcctJournal, defaultExpandAllRows: true, rowExpandable: (r) => !!(r.drAccount && r.crAccount) }}
             columns={[
               { title: 'Ext Txn ID', dataIndex: 'extTxnId', width: 90,
                 render: v => <Text style={{ fontSize: 12 }}>{v}</Text> },
@@ -4451,6 +4511,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
             rowKey="extTxnId"
             size="small"
             pagination={false}
+            expandable={{ expandedRowRender: renderAcctJournal, defaultExpandAllRows: true, rowExpandable: (r) => !!(r.drAccount && r.crAccount) }}
             columns={[
               { title: 'Ext Txn ID', dataIndex: 'extTxnId', width: 90,
                 render: v => <Text style={{ fontSize: 12 }}>{v}</Text> },
