@@ -3768,7 +3768,7 @@ const ChargesModal: React.FC<{ open: boolean; onClose: () => void; orderKey: str
   );
 };
 
-const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editOrder?: any; returnMode?: boolean }> = ({ header, initialDraft, editOrder, returnMode }) => {
+const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editOrder?: any; returnMode?: boolean; onCopy?: (order: any, lines: any[]) => void }> = ({ header, initialDraft, editOrder, returnMode, onCopy }) => {
   const editMode = !!editOrder;
   const [form] = Form.useForm();
   const [hdr, setHdr] = useState<OrderHeader>(initialDraft?.header ?? header);
@@ -5440,10 +5440,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           </Button>
           {/* Draft workflow — enabled once the order exists (saved or being edited) */}
           {(!!createdOrderKey || editMode) && <Space>
-            <Button icon={<SendOutlined />} loading={workBusy === 'confirm'} disabled={confirmed} onClick={confirmOrder}
+            {/* Confirm only while the order is still a draft — hidden once submitted (OPEN/processing). */}
+            {isDraftStatus && <Button icon={<SendOutlined />} loading={workBusy === 'confirm'} disabled={confirmed} onClick={confirmOrder}
               style={confirmed ? undefined : { background: REDWOOD.primary, borderColor: REDWOOD.primary, color: '#fff' }}>
               {confirmed ? 'Confirmed' : 'Confirm Order'}
-            </Button>
+            </Button>}
             {!returnMode && <Button icon={<SafetyCertificateOutlined />} loading={workBusy === 'reserve' || workBusy === 'unreserve'} onClick={openReservationsHub}
               style={resvCount ? { color: REDWOOD.success, borderColor: REDWOOD.success, fontWeight: 600 } : undefined}>
               Reservations{resvCount ? ` (${resvCount})` : ''}
@@ -5455,6 +5456,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             {/* Order Actions — Discard Draft (draft only) / Cancel Order (processing) */}
             {(editMode || !!createdOrderKey) && (
               <Dropdown trigger={['click']} disabled={orderActionBusy} menu={{ items: [
+                ...(editMode && onCopy && rawLines.length ? [{ key: 'copy', icon: <CopyOutlined />, label: 'Copy to New Order', onClick: () => onCopy(editOrder, rawLines) }] : []),
                 ...(isDraftStatus ? [{ key: 'discard', danger: true, icon: <DeleteOutlined />, label: 'Discard Draft', onClick: discardDraft }] : []),
                 ...(!isDraftStatus ? [{ key: 'cancel', danger: true, icon: <StopOutlined />, label: 'Cancel Order', onClick: cancelOrder }] : []),
                 ...(isDraftStatus ? [{ key: 'cancelDraft', danger: true, icon: <StopOutlined />, label: 'Cancel Order (cancel all lines)', onClick: cancelOrder }] : []),
@@ -6395,7 +6397,7 @@ const SalesOrders: React.FC = () => {
         ? <span><CopyOutlined style={{ marginRight: 5, color: REDWOOD.info }} />Copy Order</span>
         : <span><PlusOutlined style={{ marginRight: 5 }} />New Order{newTabs.filter(x => !x.editOrder && !x.returnMode && !x.key.startsWith('copy-')).length > 1 ? ` ${i + 1}` : ''}</span>,
       closable: true,
-      children: <NewOrderTab header={t.header} initialDraft={t.draft} editOrder={t.editOrder} returnMode={t.returnMode} />,
+      children: <NewOrderTab header={t.header} initialDraft={t.draft} editOrder={t.editOrder} returnMode={t.returnMode} onCopy={openCopy} />,
     })),
     ...openTabs.map(t => ({
       key: t.key,
