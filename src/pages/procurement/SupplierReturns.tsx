@@ -123,7 +123,6 @@ const SupplierReturns: React.FC = () => {
       SourceDocumentCode: 'PO',
       DocumentNumber: l.po,
       DocumentLineNumber: l.lineNum != null ? String(l.lineNum) : undefined,
-      DocumentScheduleNumber: l.schedNum != null ? String(l.schedNum) : undefined,
       ItemNumber: l.item,
       OrganizationCode: l.org,
       Quantity: num(l.returnQty),
