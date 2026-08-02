@@ -99,17 +99,17 @@ const EDIT_SKIP = /^(ItemId|OrganizationId|MasterOrganizationId|links|CategoryCo
 const ENUM_OPTIONS: Record<string, { value: string; label: string }[]> = {
   lotcontrolvalue: [{ value: 'No lot control', label: 'No lot control' }, { value: 'Full lot control', label: 'Full lot control' }],
   lotcontrolcode: [{ value: '1', label: '1 — No lot control' }, { value: '2', label: '2 — Full lot control' }],
-  serialnumbercontrolvalue: [
+  serialgenerationvalue: [
     { value: 'No serial number control', label: 'No serial number control' },
     { value: 'Predefined serial numbers', label: 'Predefined serial numbers' },
-    { value: 'At organization receipt', label: 'At organization receipt' },
-    { value: 'At sales order issue', label: 'At sales order issue' },
+    { value: 'Dynamic entry at inventory receipt', label: 'Dynamic entry at inventory receipt' },
+    { value: 'Dynamic entry at sales order issue', label: 'Dynamic entry at sales order issue' },
   ],
-  serialnumbercontrolcode: [
+  serialgenerationcode: [
     { value: '1', label: '1 — No serial number control' },
     { value: '2', label: '2 — Predefined serial numbers' },
-    { value: '5', label: '5 — At organization receipt' },
-    { value: '6', label: '6 — At sales order issue' },
+    { value: '5', label: '5 — Dynamic entry at inventory receipt' },
+    { value: '6', label: '6 — Dynamic entry at sales order issue' },
   ],
 };
 
@@ -255,7 +255,9 @@ const EditItemModal: React.FC<{ item: any | null; onClose: () => void; onSaved: 
 // ─────────────────────────────────────────────────────────────────────────────
 // Lot / serial control enabled? Code 1 (or a "No … control" value) means disabled.
 const isLotEnabled = (r: any) => { const c = pfv(r, ['LotControlCode']); const v = pfv(r, ['LotControlValue']); if (c != null && c !== '') return Number(c) !== 1; if (v) return !/no\s*lot/i.test(String(v)); return false; };
-const isSerialEnabled = (r: any) => { const c = pfv(r, ['SerialNumberControlCode']); const v = pfv(r, ['SerialNumberControlValue']); if (c != null && c !== '') return Number(c) !== 1; if (v) return !/no\s*serial/i.test(String(v)); return false; };
+// Serial control lives under SerialGeneration* in itemsV2 (code 1 / "No serial
+// number control" = off; anything else — predefined, dynamic entry — = on).
+const isSerialEnabled = (r: any) => { const c = pfv(r, ['SerialGenerationCode', 'SerialNumberControlCode']); const v = pfv(r, ['SerialGenerationValue', 'SerialNumberControlValue', 'SerialGeneration', 'SerialNumberControl']); if (c != null && c !== '') return Number(c) !== 1; if (v) return !/no\s*serial/i.test(String(v)); return false; };
 const yesNoIcon = (on: boolean) => on
   ? <CheckCircleTwoTone twoToneColor={REDWOOD.success} style={{ fontSize: 16 }} />
   : <CloseCircleTwoTone twoToneColor={REDWOOD.error} style={{ fontSize: 16 }} />;
@@ -316,7 +318,7 @@ const SearchTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
     { title: <Tooltip title="Lot control enabled">Lot</Tooltip>, key: 'lot', width: 55, align: 'center',
       render: (_: any, r: any) => <Tooltip title={pfv(r, ['LotControlValue']) ?? (isLotEnabled(r) ? 'Lot controlled' : 'No lot control')}>{yesNoIcon(isLotEnabled(r))}</Tooltip> },
     { title: <Tooltip title="Serial number control enabled">Serial</Tooltip>, key: 'serial', width: 60, align: 'center',
-      render: (_: any, r: any) => <Tooltip title={pfv(r, ['SerialNumberControlValue']) ?? (isSerialEnabled(r) ? 'Serial controlled' : 'No serial control')}>{yesNoIcon(isSerialEnabled(r))}</Tooltip> },
+      render: (_: any, r: any) => <Tooltip title={pfv(r, ['SerialGenerationValue', 'SerialNumberControlValue']) ?? (isSerialEnabled(r) ? 'Serial controlled' : 'No serial control')}>{yesNoIcon(isSerialEnabled(r))}</Tooltip> },
     { title: 'Status', dataIndex: 'ItemStatusValue', width: 110, render: v => v ? <Tag color="blue">{v}</Tag> : '—' },
     { title: '', key: 'edit', width: 80, fixed: 'right', render: (_: any, r: any) => (
         <Button size="small" icon={<EditOutlined />} onClick={() => setEditItem(r)}
