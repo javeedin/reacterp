@@ -349,9 +349,13 @@ const PODetailTab: React.FC<{ poNumber: string; asn?: string; initialLines: Rece
             if (r.ok) {
               const it = ((await r.json()).items ?? [])[0];
               if (it) {
-                const lc = it.LotControlCode, sc = it.SerialNumberControlCode;
+                // Serial control is under SerialGeneration* in itemsV2; code 1 /
+                // "No serial number control" = off, anything else = on.
+                const lc = it.LotControlCode;
+                const sc = it.SerialGenerationCode ?? it.SerialNumberControlCode;
+                const sv = it.SerialGenerationValue ?? it.SerialNumberControlValue ?? it.SerialGeneration;
                 const lot = lc != null ? Number(lc) !== 1 : /full lot/i.test(String(it.LotControlValue ?? ''));
-                const serial = sc != null ? Number(sc) !== 1 : (!!it.SerialNumberControlValue && !/no\s*serial/i.test(String(it.SerialNumberControlValue)));
+                const serial = sc != null ? Number(sc) !== 1 : (!!sv && !/no\s*serial/i.test(String(sv)));
                 map[n.toUpperCase()] = { lot, serial };
               }
             }
