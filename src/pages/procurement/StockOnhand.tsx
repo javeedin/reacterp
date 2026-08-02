@@ -35,6 +35,8 @@ const REDWOOD = {
 
 const pf = (o: any, keys: string[]) => { for (const k of keys) { if (o?.[k] != null && o[k] !== '') return o[k]; } return undefined; };
 const num = (v: any) => { const n = Number(v); return isNaN(n) ? 0 : n; };
+// Unique-enough stamp to tag a post batch so we can poll its interface rows back.
+const txnStamp = () => Date.now();
 const fmtQty = (v: any) => v == null || isNaN(Number(v)) ? '—' : new Intl.NumberFormat('en-US').format(Number(v));
 const onhQtyOf = (b: any) => num(pf(b, ['PrimaryQuantity', 'PrimaryTransactionQuantity', 'PrimaryOnhandQuantity', 'OnhandQuantity', 'TransactionPrimaryQuantity', 'Quantity']));
 const errOf = (data: any, text: string) =>
@@ -50,16 +52,38 @@ const fetchJson = async (url: string) => { const r = await fetch(url, { headers:
 const getItemMeta = async (item: string, org: string) =>
   (await fetchJson(`${ITEMS_URL}?q=OrganizationCode=${org};ItemNumber=${encodeURIComponent(item)}&limit=1&onlyData=true`))?.items?.[0] ?? null;
 
-// Poll a staged transaction after posting: the interface row is consumed once the
-// Inventory Transaction Manager processes it (404 = processed OK), or it stays
-// with an ErrorExplanation if it failed. Returns processed / error / pending.
-const pollStaged = async (id: any, attempts = 8, delayMs = 3000): Promise<{ state: 'processed' | 'error' | 'pending'; message?: string }> => {
+// Extract a processing error off an interface row, if any.
+const rowError = (row: any): string | null => {
+  const e = row?.ErrorExplanation ?? row?.ErrorCode ?? row?.error ?? null;
+  return e != null && String(e).trim() ? String(e).trim() : null;
+};
+
+// Poll a staged transaction after posting. inventoryStagedTransactions does not echo
+// a usable key on POST, so we track the row by the unique SourceCode/SourceLineNumber
+// we sent. The Inventory Transaction Manager deletes the row once it processes it
+// successfully (query returns 0 rows), or leaves it with an ErrorExplanation if it
+// failed. Returns processed / error / pending.
+const pollStagedBySource = async (sln: string, attempts = 10, delayMs = 3000): Promise<{ state: 'processed' | 'error' | 'pending'; message?: string }> => {
+  const url = `${STAGED_TXN_URL}?q=SourceCode=ReactERP;SourceLineNumber=${encodeURIComponent(sln)}&onlyData=true&limit=1`;
+  let everSeen = false;
   for (let i = 0; i < attempts; i++) {
     await new Promise(res => setTimeout(res, delayMs));
     try {
-      const r = await fetch(`${STAGED_TXN_URL}/${id}`, { headers: FUSION_HDRS });
-      if (r.status === 404) return { state: 'processed' };
-      if (r.ok) { const d = await r.json(); const err = d?.ErrorExplanation ?? d?.ErrorCode ?? d?.TransactionStatus; if (err && !/pending|new|ready/i.test(String(err))) return { state: 'error', message: String(err) }; }
+      const r = await fetch(url, { headers: FUSION_HDRS });
+      if (!r.ok) continue;
+      const d = await r.json();
+      const row = (d?.items ?? [])[0];
+      if (!row) {
+        // Row gone from the interface — only "processed" if we had confirmed it landed there.
+        if (everSeen) return { state: 'processed' };
+        continue;
+      }
+      everSeen = true;
+      const err = rowError(row);
+      if (err) return { state: 'error', message: err };
+      const flag = String(row.ProcessFlag ?? row.TransactionStatus ?? '');
+      if (/error|fail/i.test(flag)) return { state: 'error', message: flag };
+      if (/processed|complete|success/i.test(flag)) return { state: 'processed' };
     } catch { /* retry */ }
   }
   return { state: 'pending' };
@@ -74,7 +98,7 @@ const ALL_ORGS = '__ALL__';
 type TxnKind = 'issue' | 'receipt' | 'transfer';
 const TX_TYPE_NAME: Record<TxnKind, string> = { issue: 'Miscellaneous issue', receipt: 'Miscellaneous receipt', transfer: 'Subinventory transfer' };
 const TX_LABEL: Record<TxnKind, string> = { issue: 'Issue Out', receipt: 'Receive', transfer: 'Subinventory Transfer' };
-interface TxnLine { key: string; item: string; org: string; fromSub: string; toSub: string; lot: string; uom?: string; avail: number; qty: number; status?: 'pending' | 'ok' | 'processed' | 'error'; message?: string; }
+interface TxnLine { key: string; item: string; org: string; fromSub: string; toSub: string; lot: string; uom?: string; avail: number; qty: number; sln?: string; status?: 'pending' | 'ok' | 'processed' | 'error'; message?: string; }
 
 const TxnModal: React.FC<{ kind: TxnKind | null; rows: any[]; onClose: () => void; onDone: () => void }> = ({ kind, rows, onClose, onDone }) => {
   const [date, setDate] = useState<Dayjs>(dayjs());
@@ -108,7 +132,7 @@ const TxnModal: React.FC<{ kind: TxnKind | null; rows: any[]; onClose: () => voi
   const buildBody = (l: TxnLine): Record<string, any> => {
     const body: Record<string, any> = {
       TransactionTypeName: TX_TYPE_NAME[kind!],
-      SourceCode: 'ReactERP', SourceLineNumber: l.key,
+      SourceCode: 'ReactERP', SourceLineNumber: l.sln || l.key,
       OrganizationCode: l.org, ItemNumber: l.item,
       SubinventoryCode: l.fromSub,
       TransactionQuantity: num(l.qty),
@@ -126,25 +150,27 @@ const TxnModal: React.FC<{ kind: TxnKind | null; rows: any[]; onClose: () => voi
     const targets = lines.filter(l => num(l.qty) > 0 && !l.status);
     if (!targets.length) { message.warning('Nothing to post'); return; }
     setPosting(true);
-    const staged: { key: string; id: any }[] = [];
+    const stamp = String(txnStamp());
+    const staged: { key: string; sln: string }[] = [];
     for (const l of targets) {
-      upd(l.key, { status: 'pending' });
+      const sln = `${l.key}-${stamp}`;
+      l.sln = sln; upd(l.key, { status: 'pending', sln });
       try {
         const r = await fetch(STAGED_TXN_URL, { method: 'POST', headers: JSON_HDRS, body: JSON.stringify(buildBody(l)) });
         const txt = await r.text(); let d: any = null; try { d = JSON.parse(txt); } catch { /* raw */ }
-        if (r.ok) { const id = d?.TransactionInterfaceId; upd(l.key, { status: 'ok', message: `Staged #${id ?? ''} — processing…` }); if (id != null) staged.push({ key: l.key, id }); }
+        if (r.ok) { upd(l.key, { status: 'ok', message: 'Submitted to interface — processing…' }); staged.push({ key: l.key, sln }); }
         else upd(l.key, { status: 'error', message: errOf(d, txt) });
       } catch (e: any) { upd(l.key, { status: 'error', message: e?.message ?? String(e) }); }
     }
     setPosting(false);
     // Watch the transaction manager process each staged row.
     if (staged.length) {
-      message.info('Posted to the interface — checking processing status…');
+      message.info('Submitted to the interface — checking processing status…');
       await Promise.all(staged.map(async s => {
-        const res = await pollStaged(s.id);
-        upd(s.key, res.state === 'processed' ? { status: 'processed', message: 'Processed' }
+        const res = await pollStagedBySource(s.sln);
+        upd(s.key, res.state === 'processed' ? { status: 'processed', message: 'Processed into inventory' }
           : res.state === 'error' ? { status: 'error', message: res.message }
-          : { status: 'ok', message: 'Still processing — check Manage Pending Transactions' });
+          : { status: 'ok', message: 'Submitted — still pending in interface (transaction manager not run yet)' });
       }));
       onDone();
     } else message.success('Done — see per-line status');
@@ -288,7 +314,7 @@ const SearchOnhand: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Load / Issue — miscellaneous receipt / issue via inventoryStagedTransactions
 // ─────────────────────────────────────────────────────────────────────────────
-interface TxnRow { key: string; itemNumber: string; qty?: number; subinventory: string; locator?: string; lot?: string; uom?: string; status?: 'pending' | 'ok' | 'processed' | 'error'; message?: string; }
+interface TxnRow { key: string; itemNumber: string; qty?: number; subinventory: string; locator?: string; lot?: string; uom?: string; sln?: string; status?: 'pending' | 'ok' | 'processed' | 'error'; message?: string; }
 const LoadTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
   const [org, setOrg] = useState<string | undefined>();
   const [txnType, setTxnType] = useState<'receipt' | 'issue'>('receipt');
@@ -322,7 +348,7 @@ const LoadTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
   const buildBody = (l: TxnRow) => {
     const body: Record<string, any> = {
       TransactionTypeName: txnType === 'receipt' ? 'Miscellaneous receipt' : 'Miscellaneous issue',
-      SourceCode: 'ReactERP', SourceLineNumber: l.key,
+      SourceCode: 'ReactERP', SourceLineNumber: l.sln || l.key,
       OrganizationCode: org,
       ItemNumber: l.itemNumber,
       SubinventoryCode: l.subinventory,
@@ -345,24 +371,26 @@ const LoadTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
     await mapLimit(targets, 6, async (l) => {
       if (!l.uom) { const m = await getItemMeta(l.itemNumber, org); const u = m?.PrimaryUOMValue ?? m?.PrimaryUnitOfMeasure ?? m?.PrimaryUOMCode; if (u) { l.uom = u; upd(l.key, { uom: u }); } }
     });
-    const staged: { key: string; id: any }[] = [];
+    const stamp = String(txnStamp());
+    const staged: { key: string; sln: string }[] = [];
     for (const l of targets) {
-      upd(l.key, { status: 'pending' });
+      const sln = `${l.key}-${stamp}`;
+      l.sln = sln; upd(l.key, { status: 'pending', sln });
       try {
         const r = await fetch(STAGED_TXN_URL, { method: 'POST', headers: JSON_HDRS, body: JSON.stringify(buildBody(l)) });
         const txt = await r.text(); let d: any = null; try { d = JSON.parse(txt); } catch { /* raw */ }
-        if (r.ok) { const id = d?.TransactionInterfaceId; upd(l.key, { status: 'ok', message: `Staged #${id ?? ''} — processing…` }); if (id != null) staged.push({ key: l.key, id }); }
+        if (r.ok) { upd(l.key, { status: 'ok', message: 'Submitted to interface — processing…' }); staged.push({ key: l.key, sln }); }
         else upd(l.key, { status: 'error', message: errOf(d, txt) });
       } catch (e: any) { upd(l.key, { status: 'error', message: e?.message ?? String(e) }); }
     }
     setPosting(false);
     if (staged.length) {
-      message.info('Posted to the interface — checking processing status…');
+      message.info('Submitted to the interface — checking processing status…');
       await Promise.all(staged.map(async s => {
-        const res = await pollStaged(s.id);
-        upd(s.key, res.state === 'processed' ? { status: 'processed', message: 'Processed' }
+        const res = await pollStagedBySource(s.sln);
+        upd(s.key, res.state === 'processed' ? { status: 'processed', message: 'Processed into inventory' }
           : res.state === 'error' ? { status: 'error', message: res.message }
-          : { status: 'ok', message: 'Still processing — check Manage Pending Transactions' });
+          : { status: 'ok', message: 'Submitted — still pending in interface (transaction manager not run yet)' });
       }));
     } else message.success('Done — see per-line status');
   };
