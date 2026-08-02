@@ -36,7 +36,7 @@ const REDWOOD = {
 const pf = (o: any, keys: string[]) => { for (const k of keys) { if (o?.[k] != null && o[k] !== '') return o[k]; } return undefined; };
 const num = (v: any) => { const n = Number(v); return isNaN(n) ? 0 : n; };
 const fmtQty = (v: any) => v == null || isNaN(Number(v)) ? '—' : new Intl.NumberFormat('en-US').format(Number(v));
-const onhQtyOf = (b: any) => num(pf(b, ['PrimaryTransactionQuantity', 'PrimaryOnhandQuantity', 'OnhandQuantity', 'TransactionPrimaryQuantity', 'Quantity']));
+const onhQtyOf = (b: any) => num(pf(b, ['PrimaryQuantity', 'PrimaryTransactionQuantity', 'PrimaryOnhandQuantity', 'OnhandQuantity', 'TransactionPrimaryQuantity', 'Quantity']));
 const errOf = (data: any, text: string) =>
   data?.['o:errorDetails']?.[0]?.detail ?? data?.detail ?? data?.message ?? (text || '').slice(0, 300);
 
@@ -93,6 +93,8 @@ const SearchOnhand: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
     { title: 'Lot', width: 150, render: (_, r) => { const l = pf(r, ['LotNumber']); return l ? <Tag color="geekblue">{l}</Tag> : '—'; } },
     { title: 'On-Hand', width: 110, align: 'right', render: (_, r) => <Text strong style={{ color: REDWOOD.success, fontVariantNumeric: 'tabular-nums' }}>{fmtQty(onhQtyOf(r))}</Text> },
     { title: 'UOM', width: 70, render: (_, r) => pf(r, ['PrimaryUOMCode', 'ItemPrimaryUOMCode', 'UOMCode']) ?? '—' },
+    { title: 'Consigned', width: 90, align: 'right', render: (_, r) => { const c = num(pf(r, ['ConsignedQuantity'])); return c ? <Text style={{ fontSize: 12 }}>{fmtQty(c)}</Text> : '—'; } },
+    { title: 'Status', width: 100, render: (_, r) => { const s = pf(r, ['MaterialStatus']); return s ? <Tag color={/active/i.test(String(s)) ? 'green' : 'default'}>{s}</Tag> : '—'; } },
   ];
 
   return (
@@ -111,13 +113,13 @@ const SearchOnhand: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
       </Row>
       {err && <Alert type="error" showIcon message={err} style={{ marginBottom: 12 }} />}
       <Table size="small" rowKey={(_, i) => String(i)} columns={cols} dataSource={rows} loading={loading}
-        pagination={{ pageSize: 25, showSizeChanger: true }} scroll={{ x: 1080 }}
+        pagination={{ pageSize: 25, showSizeChanger: true }} scroll={{ x: 1260 }}
         locale={{ emptyText: 'No on-hand — paste items and search' }}
         summary={() => rows.length === 0 ? null : (
           <Table.Summary fixed><Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
             <Table.Summary.Cell index={0} colSpan={6}><Text strong>Total on-hand ({rows.length} row(s))</Text></Table.Summary.Cell>
             <Table.Summary.Cell index={6} align="right"><Text strong style={{ color: REDWOOD.success }}>{fmtQty(total)}</Text></Table.Summary.Cell>
-            <Table.Summary.Cell index={7} />
+            <Table.Summary.Cell index={7} colSpan={3} />
           </Table.Summary.Row></Table.Summary>
         )} />
     </div>
