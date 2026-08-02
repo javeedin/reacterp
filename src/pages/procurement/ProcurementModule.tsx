@@ -285,9 +285,9 @@ const procurementItems: MenuItemType[] = [
     key: 'items-load', group: 'Loading',
     icon: <UploadOutlined />,
     label: 'Items Load',
-    description: 'Bulk-load items (coming soon)',
+    description: 'Search items, or bulk-load new items into the master org from a reference item',
     color: REDWOOD.warning,
-    // path intentionally omitted until the loader is specified
+    path: '/procurement/item-loading',
   },
   // ── Architecture & Strategy ─────────────────────────────────────────────
   {
