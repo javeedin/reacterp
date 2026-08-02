@@ -320,6 +320,16 @@ const PODetailTab: React.FC<{ poNumber: string; asn?: string; initialLines: Rece
       .catch(() => setSubinvs([]));
   }, [initialLines]);
 
+  // Options for the subinventory pickers — the org's fetched subinventories plus
+  // any value already present on the lines/receiving data, so the picker works
+  // even when the subinventories fetch returns nothing.
+  const subinvOptions = useMemo(() => {
+    const set = new Set<string>(subinvs);
+    lines.forEach(l => { const s = String((l as Record<string, unknown>).Subinventory ?? ''); if (s) set.add(s); });
+    Object.values(rcvLineData).forEach(d => { if (d?.subinventory) set.add(d.subinventory); });
+    return Array.from(set).sort();
+  }, [subinvs, lines, rcvLineData]);
+
   const handleRefresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -565,8 +575,8 @@ const PODetailTab: React.FC<{ poNumber: string; asn?: string; initialLines: Rece
               status={!disabled && !val ? 'error' : undefined}
               value={val}
               onChange={v => rcvUpdateField(k, 'subinventory', v || '')}
-              options={subinvs.map(s => ({ label: s, value: s }))}
-              notFoundContent={subinvs.length === 0 ? 'No subinventories' : undefined} />
+              options={subinvOptions.map(s => ({ label: s, value: s }))}
+              notFoundContent={subinvOptions.length === 0 ? 'No subinventories' : undefined} />
             <Tooltip title="Copy this subinventory to all lines">
               <Button size="small" type="text" icon={<CopyOutlined />} disabled={!val}
                 onClick={() => setRcvLineData(prev => {
@@ -695,13 +705,13 @@ const PODetailTab: React.FC<{ poNumber: string; asn?: string; initialLines: Rece
                     <Select
                       size="small" showSearch allowClear style={{ width: 190 }}
                       placeholder="Apply to all lines"
-                      options={subinvs.map(s => ({ label: s, value: s }))}
-                      onChange={v => setRcvLineData(prev => {
+                      options={subinvOptions.map(s => ({ label: s, value: s }))}
+                      onChange={v => { setRcvLineData(prev => {
                         const next = { ...prev };
                         Object.keys(next).forEach(k => { next[k] = { ...next[k], subinventory: (v as string) || '' }; });
                         return next;
-                      })}
-                      notFoundContent={subinvs.length === 0 ? 'No subinventories' : undefined}
+                      }); if (v) message.success(`Subinventory "${v}" applied to all ${lines.length} line(s)`); }}
+                      notFoundContent={subinvOptions.length === 0 ? 'No subinventories' : undefined}
                     />
                     <Button
                       type="primary"
