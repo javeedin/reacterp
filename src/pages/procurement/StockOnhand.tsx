@@ -6,7 +6,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, DatabaseOutlined, SearchOutlined, ApiOutlined, ReloadOutlined,
-  LoginOutlined, LogoutOutlined, CheckCircleTwoTone, CloseCircleTwoTone, ThunderboltOutlined,
+  LoginOutlined, LogoutOutlined, CheckCircleTwoTone, CloseCircleTwoTone, ThunderboltOutlined, SyncOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs, { Dayjs } from 'dayjs';
@@ -50,6 +50,21 @@ const fetchJson = async (url: string) => { const r = await fetch(url, { headers:
 const getItemMeta = async (item: string, org: string) =>
   (await fetchJson(`${ITEMS_URL}?q=OrganizationCode=${org};ItemNumber=${encodeURIComponent(item)}&limit=1&onlyData=true`))?.items?.[0] ?? null;
 
+// Poll a staged transaction after posting: the interface row is consumed once the
+// Inventory Transaction Manager processes it (404 = processed OK), or it stays
+// with an ErrorExplanation if it failed. Returns processed / error / pending.
+const pollStaged = async (id: any, attempts = 8, delayMs = 3000): Promise<{ state: 'processed' | 'error' | 'pending'; message?: string }> => {
+  for (let i = 0; i < attempts; i++) {
+    await new Promise(res => setTimeout(res, delayMs));
+    try {
+      const r = await fetch(`${STAGED_TXN_URL}/${id}`, { headers: FUSION_HDRS });
+      if (r.status === 404) return { state: 'processed' };
+      if (r.ok) { const d = await r.json(); const err = d?.ErrorExplanation ?? d?.ErrorCode ?? d?.TransactionStatus; if (err && !/pending|new|ready/i.test(String(err))) return { state: 'error', message: String(err) }; }
+    } catch { /* retry */ }
+  }
+  return { state: 'pending' };
+};
+
 interface OrgOpt { code: string; name: string; }
 const ALL_ORGS = '__ALL__';
 
@@ -59,7 +74,7 @@ const ALL_ORGS = '__ALL__';
 type TxnKind = 'issue' | 'receipt' | 'transfer';
 const TX_TYPE_NAME: Record<TxnKind, string> = { issue: 'Miscellaneous issue', receipt: 'Miscellaneous receipt', transfer: 'Subinventory transfer' };
 const TX_LABEL: Record<TxnKind, string> = { issue: 'Issue Out', receipt: 'Receive', transfer: 'Subinventory Transfer' };
-interface TxnLine { key: string; item: string; org: string; fromSub: string; toSub: string; lot: string; uom?: string; avail: number; qty: number; status?: 'pending' | 'ok' | 'error'; message?: string; }
+interface TxnLine { key: string; item: string; org: string; fromSub: string; toSub: string; lot: string; uom?: string; avail: number; qty: number; status?: 'pending' | 'ok' | 'processed' | 'error'; message?: string; }
 
 const TxnModal: React.FC<{ kind: TxnKind | null; rows: any[]; onClose: () => void; onDone: () => void }> = ({ kind, rows, onClose, onDone }) => {
   const [date, setDate] = useState<Dayjs>(dayjs());
@@ -111,16 +126,28 @@ const TxnModal: React.FC<{ kind: TxnKind | null; rows: any[]; onClose: () => voi
     const targets = lines.filter(l => num(l.qty) > 0 && !l.status);
     if (!targets.length) { message.warning('Nothing to post'); return; }
     setPosting(true);
+    const staged: { key: string; id: any }[] = [];
     for (const l of targets) {
       upd(l.key, { status: 'pending' });
       try {
         const r = await fetch(STAGED_TXN_URL, { method: 'POST', headers: JSON_HDRS, body: JSON.stringify(buildBody(l)) });
         const txt = await r.text(); let d: any = null; try { d = JSON.parse(txt); } catch { /* raw */ }
-        upd(l.key, r.ok ? { status: 'ok', message: `Staged #${d?.TransactionInterfaceId ?? ''}` } : { status: 'error', message: errOf(d, txt) });
+        if (r.ok) { const id = d?.TransactionInterfaceId; upd(l.key, { status: 'ok', message: `Staged #${id ?? ''} — processing…` }); if (id != null) staged.push({ key: l.key, id }); }
+        else upd(l.key, { status: 'error', message: errOf(d, txt) });
       } catch (e: any) { upd(l.key, { status: 'error', message: e?.message ?? String(e) }); }
     }
-    setPosting(false); onDone();
-    message.success('Done — see per-line status');
+    setPosting(false);
+    // Watch the transaction manager process each staged row.
+    if (staged.length) {
+      message.info('Posted to the interface — checking processing status…');
+      await Promise.all(staged.map(async s => {
+        const res = await pollStaged(s.id);
+        upd(s.key, res.state === 'processed' ? { status: 'processed', message: 'Processed' }
+          : res.state === 'error' ? { status: 'error', message: res.message }
+          : { status: 'ok', message: 'Still processing — check Manage Pending Transactions' });
+      }));
+      onDone();
+    } else message.success('Done — see per-line status');
   };
 
   const cols: ColumnsType<TxnLine> = [
@@ -135,9 +162,10 @@ const TxnModal: React.FC<{ kind: TxnKind | null; rows: any[]; onClose: () => voi
     { title: 'Avail', dataIndex: 'avail', width: 80, align: 'right' as const, render: v => fmtQty(v) },
     { title: 'Qty', dataIndex: 'qty', width: 100, align: 'right' as const, render: (v, l) => <InputNumber size="small" min={0} max={kind === 'receipt' ? undefined : l.avail} value={v} onChange={n => upd(l.key, { qty: Number(n) || 0 })} style={{ width: 90 }} /> },
     { title: 'UOM', dataIndex: 'uom', width: 60, render: v => v ?? '—' },
-    { title: 'Status', width: 150, render: (_, l) => l.status === 'pending' ? <Spin size="small" />
-      : l.status === 'ok' ? <Tooltip title={l.message}><Tag color="green" icon={<CheckCircleTwoTone twoToneColor={REDWOOD.success} />}>Staged</Tag></Tooltip>
-      : l.status === 'error' ? <Tooltip title={l.message}><Tag color="red" icon={<CloseCircleTwoTone twoToneColor={REDWOOD.error} />} style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.message}</Tag></Tooltip>
+    { title: 'Status', width: 180, render: (_, l) => l.status === 'pending' ? <Spin size="small" />
+      : l.status === 'processed' ? <Tooltip title={l.message}><Tag color="green" icon={<CheckCircleTwoTone twoToneColor={REDWOOD.success} />}>Processed</Tag></Tooltip>
+      : l.status === 'ok' ? <Tooltip title={l.message}><Tag color="processing" icon={<SyncOutlined spin />}>Processing…</Tag></Tooltip>
+      : l.status === 'error' ? <Tooltip title={l.message}><Tag color="red" icon={<CloseCircleTwoTone twoToneColor={REDWOOD.error} />} style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.message}</Tag></Tooltip>
       : <Text type="secondary">—</Text> },
   ];
 
@@ -260,7 +288,7 @@ const SearchOnhand: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Load / Issue — miscellaneous receipt / issue via inventoryStagedTransactions
 // ─────────────────────────────────────────────────────────────────────────────
-interface TxnRow { key: string; itemNumber: string; qty?: number; subinventory: string; locator?: string; lot?: string; uom?: string; status?: 'pending' | 'ok' | 'error'; message?: string; }
+interface TxnRow { key: string; itemNumber: string; qty?: number; subinventory: string; locator?: string; lot?: string; uom?: string; status?: 'pending' | 'ok' | 'processed' | 'error'; message?: string; }
 const LoadTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
   const [org, setOrg] = useState<string | undefined>();
   const [txnType, setTxnType] = useState<'receipt' | 'issue'>('receipt');
@@ -317,16 +345,26 @@ const LoadTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
     await mapLimit(targets, 6, async (l) => {
       if (!l.uom) { const m = await getItemMeta(l.itemNumber, org); const u = m?.PrimaryUOMValue ?? m?.PrimaryUnitOfMeasure ?? m?.PrimaryUOMCode; if (u) { l.uom = u; upd(l.key, { uom: u }); } }
     });
+    const staged: { key: string; id: any }[] = [];
     for (const l of targets) {
       upd(l.key, { status: 'pending' });
       try {
         const r = await fetch(STAGED_TXN_URL, { method: 'POST', headers: JSON_HDRS, body: JSON.stringify(buildBody(l)) });
         const txt = await r.text(); let d: any = null; try { d = JSON.parse(txt); } catch { /* raw */ }
-        upd(l.key, r.ok ? { status: 'ok', message: `Staged #${d?.TransactionInterfaceId ?? ''}` } : { status: 'error', message: errOf(d, txt) });
+        if (r.ok) { const id = d?.TransactionInterfaceId; upd(l.key, { status: 'ok', message: `Staged #${id ?? ''} — processing…` }); if (id != null) staged.push({ key: l.key, id }); }
+        else upd(l.key, { status: 'error', message: errOf(d, txt) });
       } catch (e: any) { upd(l.key, { status: 'error', message: e?.message ?? String(e) }); }
     }
     setPosting(false);
-    message.success('Done — see per-line status');
+    if (staged.length) {
+      message.info('Posted to the interface — checking processing status…');
+      await Promise.all(staged.map(async s => {
+        const res = await pollStaged(s.id);
+        upd(s.key, res.state === 'processed' ? { status: 'processed', message: 'Processed' }
+          : res.state === 'error' ? { status: 'error', message: res.message }
+          : { status: 'ok', message: 'Still processing — check Manage Pending Transactions' });
+      }));
+    } else message.success('Done — see per-line status');
   };
 
   const cols: ColumnsType<TxnRow> = [
@@ -340,7 +378,8 @@ const LoadTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
     { title: 'Lot', dataIndex: 'lot', width: 150, render: (v, r) => <Input size="small" value={v} placeholder="(optional)" onChange={e => upd(r.key, { lot: e.target.value })} /> },
     { title: 'Status', width: 160, render: (_, r) => {
         if (r.status === 'pending') return <Spin size="small" />;
-        if (r.status === 'ok') return <Tooltip title={r.message}><Tag color="green" icon={<CheckCircleTwoTone twoToneColor={REDWOOD.success} />}>Staged</Tag></Tooltip>;
+        if (r.status === 'processed') return <Tooltip title={r.message}><Tag color="green" icon={<CheckCircleTwoTone twoToneColor={REDWOOD.success} />}>Processed</Tag></Tooltip>;
+        if (r.status === 'ok') return <Tooltip title={r.message}><Tag color="processing" icon={<SyncOutlined spin />}>Processing…</Tag></Tooltip>;
         if (r.status === 'error') return <Tooltip title={r.message}><Tag color="red" icon={<CloseCircleTwoTone twoToneColor={REDWOOD.error} />} style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.message}</Tag></Tooltip>;
         return <Text type="secondary">—</Text>;
       } },
