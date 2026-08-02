@@ -18,6 +18,7 @@ export { default as ReviewInventoryTransactions } from './ReviewInventoryTransac
 export { default as SalesOrders } from './SalesOrders';
 export { default as PriceList } from './PriceList';
 export { default as PurchaseOrderLoading } from './PurchaseOrderLoading';
+export { default as ItemLoading } from './ItemLoading';
 export { default as FusionArchitecture } from './FusionArchitecture';
 export { default as ParallelRunStrategy } from './ParallelRunStrategy';
 export { default as SetupDataExplorer } from './SetupDataExplorer';
